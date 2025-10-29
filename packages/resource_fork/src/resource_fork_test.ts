@@ -1,7 +1,10 @@
-import { isRez, readResourceFork, readRez, ResourceMap } from "resource_fork";
+import { isRez, readResourceFork, readRez, ResourceMap } from "./index";
 import * as fs from 'fs';
+import * as path from 'path';
 
-const runfiles = require(process.env['BAZEL_NODE_RUNFILES_HELPER'] as string) as typeof require;
+const testdata = path.resolve(__dirname, '../testdata');
+const rezPath = path.resolve(testdata, 'test.rez');
+const ndatPath = path.resolve(testdata, 'test.ndat');
 
 
 function testResourceFork(getResources: () => Promise<ResourceMap>) {
@@ -31,29 +34,25 @@ describe("resourceFork", function() {
         describe("reading .ndat", () => {
             testResourceFork(() => {
                 // pretend data fork is resource fork for compatability with other OSes
-                const dataPath = runfiles.resolve('novajs/resource_fork/test.ndat');
-                return readResourceFork(dataPath, false);
+                return readResourceFork(ndatPath, false);
             });
         })
         describe("reading .rez", () => {
             testResourceFork(() => {
-                const dataPath = runfiles.resolve('novajs/resource_fork/test.rez');
-                return readResourceFork(dataPath, false);
+                return readResourceFork(ndatPath, false);
             });
         });
     });
 
     describe("isRez", () => {
         it("returns true for rez files", async () => {
-            const rezPath = runfiles.resolve('novajs/resource_fork/test.rez');
             const rezFile = await fs.promises.readFile(rezPath);
             const rezView = new DataView(rezFile.buffer);
             expect(isRez(rezView)).toBeTrue();
         });
 
         it("returns false for other files", async () => {
-            const filePath = runfiles.resolve('novajs/resource_fork/test.ndat');
-            const file = await fs.promises.readFile(filePath);
+            const file = await fs.promises.readFile(ndatPath);
             const dataView = new DataView(file.buffer);
             expect(isRez(dataView)).toBeFalse();
         });
@@ -61,7 +60,6 @@ describe("resourceFork", function() {
 
     describe('readRez', () => {
         testResourceFork(async () => {
-            const rezPath = runfiles.resolve('novajs/resource_fork/test.rez');
             const rezFile = await fs.promises.readFile(rezPath);
             const rezView = new DataView(rezFile.buffer);
             return readRez(rezView);

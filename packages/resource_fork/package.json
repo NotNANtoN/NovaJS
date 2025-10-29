@@ -1,0 +1,17 @@
+{
+  "name": "resource_fork",
+  "version": "0.1.0",
+  "description": "Parse mac resourcefork data",
+  "repository": "https://github.com/mattsoulanille/NovaJS",
+  "author": "Matthew Soulanille",
+  "license": "MIT",
+  "type": "commonjs",
+  "scripts": {
+    "build": "tsc",
+    "test": "jasmine --config=jasmine.json"
+  },
+  "devDependencies": {
+    "@types/node": "^18.11.17",
+    "jasmine": "^5.12.0"
+  }
+}

@@ -21,6 +21,7 @@
     "noFallthroughCasesInSwitch": true,
     "noImplicitOverride": true,
     "esModuleInterop": true,
-    "incremental": true
+    "incremental": true,
+    "skipLibCheck": true
   }
 }
