@@ -52,23 +52,23 @@ export class MutableImmutableMapHandle<K, V> implements Map<K, V> {
         return this.callWithDraftedMap(map => map.size);
     }
 
-    [Symbol.iterator](): IterableIterator<[K, V]> {
+    [Symbol.iterator](): MapIterator<[K, V]> {
         return this.entries();
     }
 
-    *entries(): IterableIterator<[K, V]> {
+    *entries(): MapIterator<[K, V]> {
         for (const key of this.keys()) {
             yield [key, this.get(key)!];
         }
     }
 
-    *keys(): IterableIterator<K> {
+    *keys(): MapIterator<K> {
         yield* this.callWithDraftedMap(map => {
             return [...map.keys()];
         });
     }
 
-    *values(): IterableIterator<V> {
+    *values(): MapIterator<V> {
         for (const key of this.keys()) {
             yield this.get(key)!;
         }

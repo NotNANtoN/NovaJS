@@ -24,7 +24,7 @@ export const PositionType = new t.Type<Position, VectorLike>(
 );
 
 export class Position extends Vector {
-    [immerable] = true;
+    override [immerable] = true;
     static override fromVectorLike(v: VectorLike) {
         return new Position(v.x, v.y);
     }

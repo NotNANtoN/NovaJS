@@ -1,5 +1,5 @@
 import { isLeft } from 'fp-ts/Either';
-import produce from 'immer';
+import {produce} from 'immer';
 import * as t from 'io-ts';
 import { BehaviorSubject, Observable, Subject } from 'rxjs';
 import { Emit, Entities, GetEntity, UUID } from '../arg_types';
