@@ -3,6 +3,12 @@
   "version": "0.1.6",
   "description": "An interface for game data for NovaJS",
   "license": "MIT",
+  "exports": {
+    "./*": {
+      "types": "./dist/*.d.ts",
+      "default": "./dist/*.js"
+    }
+  },
   "scripts": {
     "build-defaults": "ts-node scripts/pack_png.ts defaults/default_pict.png src/default_pict.ts && ts-node scripts/pack_png.ts defaults/default_rled.png src/default_rled.ts",
     "build": "npm run build-defaults && tsc",

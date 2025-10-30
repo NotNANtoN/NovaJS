@@ -6,6 +6,7 @@
   "author": "Matthew Soulanille",
   "license": "MIT",
   "type": "commonjs",
+  "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
     "test": "jasmine --config=jasmine.json"

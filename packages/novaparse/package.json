@@ -1,0 +1,17 @@
+{
+  "name": "novaparse",
+  "version": "0.1.0",
+  "description": "Parser for EV Nova files",
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc",
+    "test": "jasmine --config=jasmine.json"
+  },
+  "dependencies": {
+    "novadatainterface": "^0.1.6",
+    "resource_fork": "^0.1.0"
+  },
+  "devDependencies": {
+    "@evn/tsconfig": "0.1.0"
+  }
+}
