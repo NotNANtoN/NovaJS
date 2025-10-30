@@ -1,4 +1,4 @@
-import defaultPict from 'novadatainterface/default_pict';
+import defaultPict from './default_pict';
 
 export type PictImageData = ArrayBuffer;
 

@@ -1,4 +1,4 @@
-import defaultCicn from 'novadatainterface/default_rled';
+import defaultCicn from './default_rled';
 
 export type CicnImageData = ArrayBuffer;
 
