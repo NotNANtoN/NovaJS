@@ -1,13 +1,13 @@
 import 'jasmine';
 import { v4 } from 'uuid';
-import { Angle } from '../datatypes/angle';
-import { Position } from '../datatypes/position';
-import { Vector, VectorLike } from '../datatypes/vector';
-import { Entity } from '../entity';
-import { System } from '../system';
-import { World } from '../world';
-import { approachVec, MovementPhysicsComponent, MovementPlugin, MovementStateComponent, MovementSystem, MovementType } from './movement_plugin';
-import { TimePlugin } from './time_plugin';
+import { Angle } from '../datatypes/angle.js';
+import { Position } from '../datatypes/position.js';
+import { Vector, VectorLike } from '../datatypes/vector.js';
+import { Entity } from '../entity.js';
+import { System } from '../system.js';
+import { World } from '../world.js';
+import { approachVec, MovementPhysicsComponent, MovementPlugin, MovementStateComponent, MovementSystem, MovementType } from './movement_plugin.js';
+import { TimePlugin } from './time_plugin.js';
 
 describe('Movement Plugin', () => {
     let world: World;

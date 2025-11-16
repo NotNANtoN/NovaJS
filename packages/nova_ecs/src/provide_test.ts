@@ -1,10 +1,10 @@
 import 'jasmine';
-import { Component } from './component';
-import { Entity } from './entity';
-import { EventMap } from './event_map';
-import { Provide } from './provide';
-import { System } from './system';
-import { World } from './world';
+import { Component } from './component.js';
+import { Entity } from './entity.js';
+import { EventMap } from './event_map.js';
+import { Provide } from './provide.js';
+import { System } from './system.js';
+import { World } from './world.js';
 
 
 const FOO_COMPONENT = new Component<{ x: number }>('foo');

@@ -5,14 +5,14 @@
   "repository": "https://github.com/mattsoulanille/NovaJS",
   "author": "Matthew Soulanille",
   "license": "MIT",
-  "type": "commonjs",
+  "type": "module",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
     "test": "jasmine --config=jasmine.json"
   },
   "devDependencies": {
-    "@types/node": "^18.11.17",
+    "@types/node": "^24.9.2",
     "jasmine": "^5.12.0"
   }
 }

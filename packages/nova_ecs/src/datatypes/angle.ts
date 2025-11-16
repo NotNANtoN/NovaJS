@@ -1,1 +1,1 @@
-export {Angle, AngleLike, AngleType} from './vector';
+export {Angle, AngleLike, AngleType} from './vector.js';

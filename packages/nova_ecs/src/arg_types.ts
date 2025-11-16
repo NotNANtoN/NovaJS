@@ -1,12 +1,12 @@
-import { Either } from "fp-ts/Either";
-import { Component, ComponentData, UnknownComponent } from "./component";
-import { Entity } from "./entity";
-import { EntityMap } from "./entity_map";
-import { EcsEvent, EventData } from "./events";
-import { ArgModifier, ArgModifierResult } from "./arg_modifier";
-import { Query } from "./query";
-import { Resource, ResourceData } from "./resource";
-import { World } from "./world";
+import { Either } from "fp-ts/lib/Either.js";
+import { Component, ComponentData, UnknownComponent } from "./component.js";
+import { Entity } from "./entity.js";
+import { EntityMap } from "./entity_map.js";
+import { EcsEvent, EventData } from "./events.js";
+import { ArgModifier, ArgModifierResult } from "./arg_modifier.js";
+import { Query } from "./query.js";
+import { Resource, ResourceData } from "./resource.js";
+import { World } from "./world.js";
 
 export const Entities = new Resource<EntityMap>('Entities');
 

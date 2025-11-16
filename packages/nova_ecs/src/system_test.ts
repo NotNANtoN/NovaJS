@@ -1,8 +1,8 @@
 import 'jasmine';
-import { Component } from './component';
-import { Query } from './query';
-import { Resource } from './resource';
-import { Marker, Phase, System, SystemSet } from './system';
+import { Component } from './component.js';
+import { Query } from './query.js';
+import { Resource } from './resource.js';
+import { Marker, Phase, System, SystemSet } from './system.js';
 
 const FOO_COMPONENT = new Component<{ x: number }>('foo');
 const BAR_COMPONENT = new Component<{ y: string }>('bar');

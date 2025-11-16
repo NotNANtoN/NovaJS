@@ -1,8 +1,8 @@
-import { left, right } from "fp-ts/Either";
-import { ArgTypes } from "./arg_types";
-import { ArgModifier } from "./arg_modifier";
-import { Optional } from "./optional";
-import { Query } from "./query";
+import { left, right } from "fp-ts/lib/Either.js";
+import { ArgTypes } from "./arg_types.js";
+import { ArgModifier } from "./arg_modifier.js";
+import { Optional } from "./optional.js";
+import { Query } from "./query.js";
 
 
 export function Without<V extends ArgTypes>(value: V) {

@@ -1,5 +1,5 @@
-import { UnknownComponent } from "./component";
-import { Sortable } from "./system";
+import { UnknownComponent } from "./component.js";
+import { Sortable } from "./system.js";
 
 export interface WithComponents {
     components: ReadonlyMap<UnknownComponent, unknown>;

@@ -1,8 +1,8 @@
-import { isLeft, right } from 'fp-ts/Either';
+import { isLeft, right } from 'fp-ts/lib/Either.js';
 import { immerable } from 'immer';
 import * as t from 'io-ts';
-import { mod } from './mod';
-import { Vector, VectorLike } from './vector';
+import { mod } from './mod.js';
+import { Vector, VectorLike } from './vector.js';
 
 export const BOUNDARY = 10000;
 

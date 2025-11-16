@@ -1,7 +1,7 @@
-import { isRight, Right, right } from "fp-ts/Either";
-import { ArgModifier } from "./arg_modifier";
-import { ArgData, ArgTypes, GetArg } from "./arg_types";
-import { Query } from "./query";
+import { isRight, Right, right } from "fp-ts/lib/Either.js";
+import { ArgModifier } from "./arg_modifier.js";
+import { ArgData, ArgTypes, GetArg } from "./arg_types.js";
+import { Query } from "./query.js";
 
 export function Optional<V extends ArgTypes>(value: V):
     ArgModifier<readonly [typeof GetArg], V | undefined> {

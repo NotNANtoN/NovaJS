@@ -1,4 +1,4 @@
-import { DefaultMap } from "./utils";
+import { DefaultMap } from "./utils.js";
 
 export class BinSet<T> {
     bits: number[] = [];

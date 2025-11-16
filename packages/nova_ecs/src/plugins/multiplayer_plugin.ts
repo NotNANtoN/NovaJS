@@ -1,20 +1,20 @@
-import { isLeft } from 'fp-ts/Either';
+import { isLeft } from 'fp-ts/lib/Either.js';
 import {produce} from 'immer';
 import * as t from 'io-ts';
 import { BehaviorSubject, Observable, Subject } from 'rxjs';
-import { Emit, Entities, GetEntity, UUID } from '../arg_types';
-import { Component } from '../component';
-import { map } from '../datatypes/map';
-import { set } from '../datatypes/set';
-import { EcsEvent } from '../events';
-import { Plugin } from '../plugin';
-import { Query } from '../query';
-import { Resource } from '../resource';
-import { Phase, System } from '../system';
-import { DefaultMap, setDifference } from '../utils';
-import { World } from '../world';
-import { DeltaPlugin, DeltaResource, EntityDelta } from './delta_plugin';
-import { EncodedEntity, SerializerResource } from './serializer_plugin';
+import { Emit, Entities, GetEntity, UUID } from '../arg_types.js';
+import { Component } from '../component.js';
+import { map } from '../datatypes/map.js';
+import { set } from '../datatypes/set.js';
+import { EcsEvent } from '../events.js';
+import { Plugin } from '../plugin.js';
+import { Query } from '../query.js';
+import { Resource } from '../resource.js';
+import { Phase, System } from '../system.js';
+import { DefaultMap, setDifference } from '../utils.js';
+import { World } from '../world.js';
+import { DeltaPlugin, DeltaResource, EntityDelta } from './delta_plugin.js';
+import { EncodedEntity, SerializerResource } from './serializer_plugin.js';
 
 export class Peers {
     readonly current: BehaviorSubject<Set<string>>;

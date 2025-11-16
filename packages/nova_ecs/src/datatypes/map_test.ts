@@ -1,7 +1,7 @@
-import { isLeft } from 'fp-ts/Either';
+import { isLeft } from 'fp-ts/lib/Either.js';
 import * as t from 'io-ts';
 import 'jasmine';
-import { map } from './map';
+import { map } from './map.js';
 
 
 describe('Map', () => {

@@ -3,6 +3,7 @@
   "version": "0.1.6",
   "description": "An interface for game data for NovaJS",
   "license": "MIT",
+  "type": "module",
   "exports": {
     "./*": {
       "types": "./dist/*.d.ts",

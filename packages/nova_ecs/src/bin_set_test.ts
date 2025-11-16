@@ -1,5 +1,5 @@
-import { BinSetCollection } from './bin_set';
-import { subset } from './utils';
+import { BinSetCollection } from './bin_set.js';
+import { subset } from './utils.js';
 
 const ALPHABET = 'abcdefghijklmnopqrstuvwxyz';
 

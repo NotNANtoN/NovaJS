@@ -1,9 +1,9 @@
-import { right } from 'fp-ts/Either';
+import { right } from 'fp-ts/lib/Either.js';
 import 'jasmine';
-import { Component } from './component';
-import { ArgModifier } from './arg_modifier';
-import { Query } from './query';
-import { Resource } from './resource';
+import { Component } from './component.js';
+import { ArgModifier } from './arg_modifier.js';
+import { Query } from './query.js';
+import { Resource } from './resource.js';
 
 
 const FOO_COMPONENT = new Component<{ x: number }>('foo');

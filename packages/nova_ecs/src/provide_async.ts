@@ -1,13 +1,13 @@
 import { isDraft, original } from "immer";
-import { ArgsToData, ArgTypes, GetEntity, UUID } from "./arg_types";
-import { AsyncSystem } from "./async_system";
-import { Component } from "./component";
-import { DeleteEvent, StepEvent } from "./events";
-import { Optional } from "./optional";
-import { ChangeEvents, ProvidePlugin, Without } from "./provide";
-import { Resource } from "./resource";
-import { System, SystemArgs } from "./system";
-import { Plugin } from "./plugin";
+import { ArgsToData, ArgTypes, GetEntity, UUID } from "./arg_types.js";
+import { AsyncSystem } from "./async_system.js";
+import { Component } from "./component.js";
+import { DeleteEvent, StepEvent } from "./events.js";
+import { Optional } from "./optional.js";
+import { ChangeEvents, ProvidePlugin, Without } from "./provide.js";
+import { Resource } from "./resource.js";
+import { System, SystemArgs } from "./system.js";
+import { Plugin } from "./plugin.js";
 
 type AsyncProviderData =
     Map<string /* provider system name */,

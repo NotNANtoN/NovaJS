@@ -1,6 +1,6 @@
 import 'jasmine';
-import { Marker, Sortable } from './system';
-import { setEqual, subset, topologicalSort, topologicalSortList } from './utils';
+import { Marker, Sortable } from './system.js';
+import { setEqual, subset, topologicalSort, topologicalSortList } from './utils.js';
 
 describe('utils', () => {
     describe('topologicalSort', () => {

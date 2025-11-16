@@ -1,4 +1,4 @@
-import { unpack } from './struct';
+import { unpack } from './struct.js';
 
 describe('unpack', () => {
     it('unpacks a dataview', () => {

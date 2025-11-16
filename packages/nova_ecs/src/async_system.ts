@@ -1,11 +1,11 @@
 import { applyPatches, createDraft, enableMapSet, enablePatches, finishDraft, isDraft, isDraftable, Patch, setAutoFreeze } from "immer";
-import { ArgsToData, ArgTypes, UUID } from "./arg_types";
-import { DeleteEvent, StepEvent } from "./events";
-import { Optional } from "./optional";
-import { Plugin } from "./plugin";
-import { Resource } from "./resource";
-import { BaseSystemArgs, System } from "./system";
-import { DefaultMap } from "./utils";
+import { ArgsToData, ArgTypes, UUID } from "./arg_types.js";
+import { DeleteEvent, StepEvent } from "./events.js";
+import { Optional } from "./optional.js";
+import { Plugin } from "./plugin.js";
+import { Resource } from "./resource.js";
+import { BaseSystemArgs, System } from "./system.js";
+import { DefaultMap } from "./utils.js";
 
 
 class AsyncSystemData {

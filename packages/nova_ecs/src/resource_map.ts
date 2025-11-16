@@ -1,5 +1,5 @@
-import { EventMap } from "./event_map";
-import { Resource, UnknownResource } from "./resource";
+import { EventMap } from "./event_map.js";
+import { Resource, UnknownResource } from "./resource.js";
 
 export interface ReadonlyResourceMap extends ReadonlyMap<UnknownResource, unknown> {
     get<Data>(resource: Resource<Data>): Data | undefined;

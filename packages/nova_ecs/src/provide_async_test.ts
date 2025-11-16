@@ -1,11 +1,11 @@
-import { AsyncSystemResource } from './async_system';
-import { ProvideAsync } from "./provide_async";
+import { AsyncSystemResource } from './async_system.js';
+import { ProvideAsync } from "./provide_async.js";
 import { createDraft, finishDraft } from 'immer';
-import { World } from './world';
-import { Component } from './component';
-import { System } from './system';
-import { Entity } from './entity';
-import { EventMap } from './event_map';
+import { World } from './world.js';
+import { Component } from './component.js';
+import { System } from './system.js';
+import { Entity } from './entity.js';
+import { EventMap } from './event_map.js';
 
 function sleep(ms: number) {
     return new Promise(resolve => {

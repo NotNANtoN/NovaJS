@@ -1,21 +1,21 @@
-import { Either, isLeft, left, Right, right } from "fp-ts/Either";
-import { ArgModifier, UnknownArgModifier } from "./arg_modifier";
-import { ArgData, ArgTypes, Components, Emit, EmitFunction, EmitNow, Entities, GetArg, GetEntity, GetWorld, RunQuery, RunQueryFunction, UUID } from "./arg_types";
-import { ProvideAsyncPlugin } from "./provide_async";
-import { AsyncSystemPlugin } from "./async_system";
-import { Component, UnknownComponent } from "./component";
-import { Entity } from "./entity";
-import { EntityMapWithEvents } from "./entity_map";
-import { AddEvent, DeleteEvent, EcsEvent, StepEvent, UnknownEvent } from "./events";
-import { SyncSubject } from "./event_map";
-import { Plugin } from './plugin';
-import { ProvidePlugin } from "./provide";
-import { Query } from "./query";
-import { QueryCache } from "./query_cache";
-import { Resource, UnknownResource } from "./resource";
-import { ResourceMapWrapped } from "./resource_map";
-import { Marker, Phase, Sortable, System, SystemSet } from "./system";
-import { DefaultMap, isPromise, topologicalSort, topologicalSortList } from './utils';
+import { Either, isLeft, left, Right, right } from "fp-ts/lib/Either.js";
+import { ArgModifier, UnknownArgModifier } from "./arg_modifier.js";
+import { ArgData, ArgTypes, Components, Emit, EmitFunction, EmitNow, Entities, GetArg, GetEntity, GetWorld, RunQuery, RunQueryFunction, UUID } from "./arg_types.js";
+import { ProvideAsyncPlugin } from "./provide_async.js";
+import { AsyncSystemPlugin } from "./async_system.js";
+import { Component, UnknownComponent } from "./component.js";
+import { Entity } from "./entity.js";
+import { EntityMapWithEvents } from "./entity_map.js";
+import { AddEvent, DeleteEvent, EcsEvent, StepEvent, UnknownEvent } from "./events.js";
+import { SyncSubject } from "./event_map.js";
+import { Plugin } from './plugin.js';
+import { ProvidePlugin } from "./provide.js";
+import { Query } from "./query.js";
+import { QueryCache } from "./query_cache.js";
+import { Resource, UnknownResource } from "./resource.js";
+import { ResourceMapWrapped } from "./resource_map.js";
+import { Marker, Phase, Sortable, System, SystemSet } from "./system.js";
+import { DefaultMap, isPromise, topologicalSort, topologicalSortList } from './utils.js';
 
 // Idea: Run other nova systems in webworkers and pass the state to the main
 // thread when you jump between systems.

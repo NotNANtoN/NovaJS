@@ -1,6 +1,6 @@
-import { isLeft } from 'fp-ts/Either';
+import { isLeft } from 'fp-ts/lib/Either.js';
 import 'jasmine';
-import { Position, PositionType } from './position';
+import { Position, PositionType } from './position.js';
 
 describe('Position', () => {
     it('adds positions', () => {

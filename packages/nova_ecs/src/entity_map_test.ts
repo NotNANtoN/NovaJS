@@ -1,7 +1,7 @@
 import "jasmine";
-import { Component, UnknownComponent } from "./component";
-import { Entity } from "./entity";
-import { EntityMapWithEvents } from './entity_map';
+import { Component, UnknownComponent } from "./component.js";
+import { Entity } from "./entity.js";
+import { EntityMapWithEvents } from './entity_map.js';
 
 const FooComponent = new Component<{ x: number }>('foo');
 const BarComponent = new Component<{ y: string }>('bar');

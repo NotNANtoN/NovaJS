@@ -1,13 +1,13 @@
-import { Either, isLeft, isRight, left, Right, right } from "fp-ts/Either";
-import { ArgsToData, ArgTypes, QueryResults } from "./arg_types";
-import { Entity } from "./entity";
-import { EntityMapWithEvents } from "./entity_map";
-import { DeleteEvent, EcsEvent, StepEvent } from "./events";
-import { Query } from "./query";
-import { UnknownResource } from "./resource";
-import { ResourceMapWrapped } from "./resource_map";
-import { DefaultMap } from "./utils";
-import { World } from "./world";
+import { Either, isLeft, isRight, left, Right, right } from "fp-ts/lib/Either.js";
+import { ArgsToData, ArgTypes, QueryResults } from "./arg_types.js";
+import { Entity } from "./entity.js";
+import { EntityMapWithEvents } from "./entity_map.js";
+import { DeleteEvent, EcsEvent, StepEvent } from "./events.js";
+import { Query } from "./query.js";
+import { UnknownResource } from "./resource.js";
+import { ResourceMapWrapped } from "./resource_map.js";
+import { DefaultMap } from "./utils.js";
+import { World } from "./world.js";
 
 
 interface QueryCacheEntry<Args extends readonly ArgTypes[] = readonly ArgTypes[]> {

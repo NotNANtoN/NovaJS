@@ -1,4 +1,4 @@
-import { Component } from './component';
+import { Component } from './component.js';
 
 export type ResourceData<C> = C extends Resource<infer Data> ? Data : never;
 export type UnknownResource = Resource<unknown>;

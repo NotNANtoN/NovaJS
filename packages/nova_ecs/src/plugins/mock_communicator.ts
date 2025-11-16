@@ -1,5 +1,5 @@
 import { BehaviorSubject, Subject } from 'rxjs';
-import { Communicator, Message, Peers } from './multiplayer_plugin';
+import { Communicator, Message, Peers } from './multiplayer_plugin.js';
 
 
 

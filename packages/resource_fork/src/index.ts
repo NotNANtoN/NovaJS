@@ -1,6 +1,6 @@
 import * as path from "path";
 import * as fs from "fs";
-import { unpack } from "./struct";
+import { unpack } from "./struct.js";
 
 // see https://developer.apple.com/legacy/library/documentation/mac/pdf/MoreMacintoshToolbox.pdf#page=151
 // for info on resource fork

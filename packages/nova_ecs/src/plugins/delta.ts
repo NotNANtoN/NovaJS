@@ -1,4 +1,4 @@
-import { setIntersection } from "../utils";
+import { setIntersection } from "../utils.js";
 
 
 export function getObjectDelta<T extends Object>(a: T, b: T): Partial<T> | undefined {

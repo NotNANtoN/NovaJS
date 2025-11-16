@@ -1,9 +1,9 @@
-import { ArgModifier, UnknownArgModifier } from "./arg_modifier";
-import { ArgTypes } from "./arg_types";
-import { BinSet, BinSetC } from "./bin_set";
-import { Component, UnknownComponent } from "./component";
-import { Entity } from "./entity";
-import { Resource, UnknownResource } from "./resource";
+import { ArgModifier, UnknownArgModifier } from "./arg_modifier.js";
+import { ArgTypes } from "./arg_types.js";
+import { BinSet, BinSetC } from "./bin_set.js";
+import { Component, UnknownComponent } from "./component.js";
+import { Entity } from "./entity.js";
+import { Resource, UnknownResource } from "./resource.js";
 
 const querySymbol = Symbol('Query');
 

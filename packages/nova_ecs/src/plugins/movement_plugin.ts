@@ -1,15 +1,15 @@
 import * as t from 'io-ts';
-import { Entities } from '../arg_types';
-import { EntityMap } from '../entity_map';
-import { Component } from '../component';
-import { Angle, AngleType } from '../datatypes/angle';
-import { Position, PositionType } from '../datatypes/position';
-import { Vector, VectorLike, VectorType } from '../datatypes/vector';
-import { Plugin } from '../plugin';
-import { System } from '../system';
-import { applyObjectDelta } from './delta';
-import { DeltaPlugin, DeltaResource } from './delta_plugin';
-import { Time, TimeResource, TimeSystem } from './time_plugin';
+import { Entities } from '../arg_types.js';
+import { EntityMap } from '../entity_map.js';
+import { Component } from '../component.js';
+import { Angle, AngleType } from '../datatypes/angle.js';
+import { Position, PositionType } from '../datatypes/position.js';
+import { Vector, VectorLike, VectorType } from '../datatypes/vector.js';
+import { Plugin } from '../plugin.js';
+import { System } from '../system.js';
+import { applyObjectDelta } from './delta.js';
+import { DeltaPlugin, DeltaResource } from './delta_plugin.js';
+import { Time, TimeResource, TimeSystem } from './time_plugin.js';
 
 
 export enum MovementType {

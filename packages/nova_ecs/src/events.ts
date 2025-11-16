@@ -1,5 +1,5 @@
 import * as t from 'io-ts';
-import { Entity } from './entity';
+import { Entity } from './entity.js';
 
 
 const eventSymbol = Symbol('Event');

@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Parser for EV Nova files",
   "license": "MIT",
+  "type": "module",
   "scripts": {
     "build": "tsc",
     "test": "jasmine --config=jasmine.json"

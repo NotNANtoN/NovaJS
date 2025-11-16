@@ -1,7 +1,7 @@
-import { isLeft } from 'fp-ts/Either';
+import { isLeft } from 'fp-ts/lib/Either.js';
 import { produce, applyPatches, enablePatches, produceWithPatches } from 'immer';
 import 'jasmine';
-import { Vector, VectorType } from './vector';
+import { Vector, VectorType } from './vector.js';
 
 describe('Vector', () => {
     it('adds vectors', () => {

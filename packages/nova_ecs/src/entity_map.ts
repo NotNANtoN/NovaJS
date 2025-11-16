@@ -1,6 +1,6 @@
-import { UnknownComponent } from "./component";
-import { Entity } from "./entity";
-import { EventMap, SyncSubject } from "./event_map";
+import { UnknownComponent } from "./component.js";
+import { Entity } from "./entity.js";
+import { EventMap, SyncSubject } from "./event_map.js";
 
 
 export interface EntityMap extends Map<string, Entity> { }

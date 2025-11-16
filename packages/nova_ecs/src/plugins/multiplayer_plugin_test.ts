@@ -1,14 +1,14 @@
 import { isDraft } from 'immer';
 import * as t from 'io-ts';
 import 'jasmine';
-import { Entities, UUID } from '../arg_types';
-import { Component } from '../component';
-import { Entity } from '../entity';
-import { System } from '../system';
-import { World } from '../world';
-import { DeltaResource } from './delta_plugin';
-import { MockCommunicator } from './mock_communicator';
-import { multiplayer, MultiplayerData, MultiplayerPhase } from './multiplayer_plugin';
+import { Entities, UUID } from '../arg_types.js';
+import { Component } from '../component.js';
+import { Entity } from '../entity.js';
+import { System } from '../system.js';
+import { World } from '../world.js';
+import { DeltaResource } from './delta_plugin.js';
+import { MockCommunicator } from './mock_communicator.js';
+import { multiplayer, MultiplayerData, MultiplayerPhase } from './multiplayer_plugin.js';
 
 const BarComponent = new Component<{ y: string }>("Bar");
 const NonMultiplayer = new Component<{ z: string }>('NonMultiplayer');

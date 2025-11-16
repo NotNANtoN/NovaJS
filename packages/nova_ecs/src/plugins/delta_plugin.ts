@@ -1,16 +1,16 @@
 import { applyPatches, createDraft, Draft, enablePatches, finishDraft, isDraft, original, setAutoFreeze } from 'immer';
-import { Objectish, Patch } from 'immer/dist/internal';
+import { Objectish, Patch } from 'immer/dist/internal.js';
 import * as t from 'io-ts';
-import { set } from '../datatypes/set';
-import { Component, UnknownComponent } from '../component';
-import { map } from '../datatypes/map';
-import { Entity } from '../entity';
-import { Plugin } from '../plugin';
-import { Resource } from '../resource';
-import { isLeft } from 'fp-ts/Either';
-import { Serializer, SerializerPlugin, SerializerResource } from './serializer_plugin';
-import { setDifference } from '../utils';
-import { EventMap } from '../event_map';
+import { set } from '../datatypes/set.js';
+import { Component, UnknownComponent } from '../component.js';
+import { map } from '../datatypes/map.js';
+import { Entity } from '../entity.js';
+import { Plugin } from '../plugin.js';
+import { Resource } from '../resource.js';
+import { isLeft } from 'fp-ts/lib/Either.js';
+import { Serializer, SerializerPlugin, SerializerResource } from './serializer_plugin.js';
+import { setDifference } from '../utils.js';
+import { EventMap } from '../event_map.js';
 
 
 export interface OptionalComponentDelta<Data, Delta> {

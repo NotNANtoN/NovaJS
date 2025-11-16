@@ -1,8 +1,8 @@
-import { isRez, readResourceFork, readRez, ResourceMap } from "./index";
+import { isRez, readResourceFork, readRez, ResourceMap } from "./index.js";
 import * as fs from 'fs';
 import * as path from 'path';
 
-const testdata = path.resolve(__dirname, '../testdata');
+const testdata = path.resolve(import.meta.dirname, '../testdata');
 const rezPath = path.resolve(testdata, 'test.rez');
 const ndatPath = path.resolve(testdata, 'test.ndat');
 

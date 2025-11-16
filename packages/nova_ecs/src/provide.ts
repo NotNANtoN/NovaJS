@@ -1,12 +1,12 @@
-import { ArgsToData, ArgTypes, GetEntity } from "./arg_types";
-import { Component } from "./component";
-import { EcsEvent, StepEvent } from "./events";
-import { SyncSubscription } from "./event_map";
-import { Optional } from "./optional";
-import { Plugin } from "./plugin";
-import { Resource } from "./resource";
-import { System, SystemArgs } from "./system";
-import { DefaultMap } from "./utils";
+import { ArgsToData, ArgTypes, GetEntity } from "./arg_types.js";
+import { Component } from "./component.js";
+import { EcsEvent, StepEvent } from "./events.js";
+import { SyncSubscription } from "./event_map.js";
+import { Optional } from "./optional.js";
+import { Plugin } from "./plugin.js";
+import { Resource } from "./resource.js";
+import { System, SystemArgs } from "./system.js";
+import { DefaultMap } from "./utils.js";
 
 export const ChangeEvents = new DefaultMap<Component<any>, EcsEvent<true>>(
     component => new EcsEvent(`${component.name} changed`));

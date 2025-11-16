@@ -1,15 +1,15 @@
 import 'jasmine';
 import { v4 } from 'uuid';
-import { Emit, EmitNow, Entities, GetEntity, GetWorld, QueryResults, RunQuery, UUID } from './arg_types';
-import { Component } from './component';
-import { Entity } from './entity';
-import { AddEvent, DeleteEvent, EcsEvent } from './events';
-import { Optional } from './optional';
-import { Plugin } from './plugin';
-import { Query } from './query';
-import { Resource } from './resource';
-import { System } from './system';
-import { SingletonComponent, World } from './world';
+import { Emit, EmitNow, Entities, GetEntity, GetWorld, QueryResults, RunQuery, UUID } from './arg_types.js';
+import { Component } from './component.js';
+import { Entity } from './entity.js';
+import { AddEvent, DeleteEvent, EcsEvent } from './events.js';
+import { Optional } from './optional.js';
+import { Plugin } from './plugin.js';
+import { Query } from './query.js';
+import { Resource } from './resource.js';
+import { System } from './system.js';
+import { SingletonComponent, World } from './world.js';
 
 const FOO_COMPONENT = new Component<{ x: number }>('foo');
 const BAR_COMPONENT = new Component<{ y: string }>('bar');

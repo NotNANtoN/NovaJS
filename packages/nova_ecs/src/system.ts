@@ -1,7 +1,7 @@
-import { ArgsToData, ArgTypes } from "./arg_types";
-import { EcsEvent, StepEvent, UnknownEvent } from "./events";
-import { Query } from "./query";
-import { setIntersection } from "./utils";
+import { ArgsToData, ArgTypes } from "./arg_types.js";
+import { EcsEvent, StepEvent, UnknownEvent } from "./events.js";
+import { Query } from "./query.js";
+import { setIntersection } from "./utils.js";
 
 
 export interface BaseSystemArgs<StepArgTypes extends readonly ArgTypes[]> extends SortableArgs {

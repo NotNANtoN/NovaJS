@@ -1,6 +1,6 @@
-import { Either } from "fp-ts/Either";
-import { ArgData, ArgsToData, ArgTypes } from "./arg_types";
-import { Query } from "./query";
+import { Either } from "fp-ts/lib/Either.js";
+import { ArgData, ArgsToData, ArgTypes } from "./arg_types.js";
+import { Query } from "./query.js";
 
 
 type Transform<Args extends readonly any[], Result> =

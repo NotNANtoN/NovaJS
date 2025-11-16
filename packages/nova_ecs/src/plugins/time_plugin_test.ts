@@ -1,7 +1,7 @@
 import 'jasmine';
-import { System } from '../system';
-import { World } from '../world';
-import { Time, TimePlugin, TimeResource, TimeSystem } from './time_plugin';
+import { System } from '../system.js';
+import { World } from '../world.js';
+import { Time, TimePlugin, TimeResource, TimeSystem } from './time_plugin.js';
 
 describe('time plugin', () => {
     let clock: jasmine.Clock;

@@ -1,13 +1,13 @@
 import { Patch } from 'immer';
 import * as t from 'io-ts';
 import 'jasmine';
-import { GetEntity } from '../arg_types';
-import { Component } from '../component';
-import { set } from '../datatypes/set';
-import { Entity } from '../entity';
-import { System } from '../system';
-import { World } from '../world';
-import { DeltaMaker, DeltaPlugin, DeltaResource, OptionalComponentDelta } from './delta_plugin';
+import { GetEntity } from '../arg_types.js';
+import { Component } from '../component.js';
+import { set } from '../datatypes/set.js';
+import { Entity } from '../entity.js';
+import { System } from '../system.js';
+import { World } from '../world.js';
+import { DeltaMaker, DeltaPlugin, DeltaResource, OptionalComponentDelta } from './delta_plugin.js';
 
 const FooComponent = new Component<{ x: number }>('Foo');
 const FooType = t.type({ x: t.number });

@@ -1,11 +1,11 @@
-import { Either, isLeft, right } from 'fp-ts/Either';
+import { Either, isLeft, right } from 'fp-ts/lib/Either.js';
 import * as t from 'io-ts';
 import { Errors } from 'io-ts';
-import { Component, ComponentData, UnknownComponent } from '../component';
-import { map } from '../datatypes/map';
-import { Entity } from '../entity';
-import { Plugin } from '../plugin';
-import { Resource } from '../resource';
+import { Component, ComponentData, UnknownComponent } from '../component.js';
+import { map } from '../datatypes/map.js';
+import { Entity } from '../entity.js';
+import { Plugin } from '../plugin.js';
+import { Resource } from '../resource.js';
 
 interface ComponentTypeMap<K extends Component<any>>
     extends Map<K, t.Type<ComponentData<K>, unknown, unknown>> {

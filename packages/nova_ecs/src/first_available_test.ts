@@ -1,9 +1,9 @@
 import 'jasmine';
-import { Component } from './component';
-import { Entity } from './entity';
-import { FirstAvailable } from './first_available';
-import { System } from './system';
-import { World } from './world';
+import { Component } from './component.js';
+import { Entity } from './entity.js';
+import { FirstAvailable } from './first_available.js';
+import { System } from './system.js';
+import { World } from './world.js';
 
 
 const FooComponent = new Component<{ x: number }>('foo');

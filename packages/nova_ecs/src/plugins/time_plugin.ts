@@ -1,7 +1,7 @@
-import { Resource } from '../resource';
-import { System } from '../system';
-import { Plugin } from '../plugin';
-import { SingletonComponent } from '../world';
+import { Resource } from '../resource.js';
+import { System } from '../system.js';
+import { Plugin } from '../plugin.js';
+import { SingletonComponent } from '../world.js';
 
 
 export interface Time {

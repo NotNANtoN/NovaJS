@@ -1,13 +1,13 @@
-import { right } from 'fp-ts/Either';
+import { right } from 'fp-ts/lib/Either.js';
 import 'jasmine';
-import { Component } from './component';
-import { Entity } from './entity';
-import { EntityMapWithEvents } from './entity_map';
-import { Query } from './query';
-import { QueryCache } from './query_cache';
-import { Resource } from './resource';
-import { ResourceMapWrapped } from './resource_map';
-import { World } from './world';
+import { Component } from './component.js';
+import { Entity } from './entity.js';
+import { EntityMapWithEvents } from './entity_map.js';
+import { Query } from './query.js';
+import { QueryCache } from './query_cache.js';
+import { Resource } from './resource.js';
+import { ResourceMapWrapped } from './resource_map.js';
+import { World } from './world.js';
 
 const FooComponent = new Component<{ x: number }>('FooComponent');
 const BarComponent = new Component<{ y: string }>('BarComponent');

@@ -1,6 +1,6 @@
-import { Resource } from '../resource';
-import { EcsEvent } from '../events';
-import { Plugin } from '../plugin';
+import { Resource } from '../resource.js';
+import { EcsEvent } from '../events.js';
+import { Plugin } from '../plugin.js';
 
 
 const KeyboardResource = new Resource<undefined>('KeyboardResource');

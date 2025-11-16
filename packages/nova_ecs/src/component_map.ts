@@ -1,5 +1,5 @@
-import { Component, UnknownComponent } from "./component";
-import { EventMap } from "./event_map";
+import { Component, UnknownComponent } from "./component.js";
+import { EventMap } from "./event_map.js";
 
 export interface ReadonlyComponentMap extends ReadonlyMap<UnknownComponent, unknown> {
     get<Data>(component: Component<Data>): Data | undefined;

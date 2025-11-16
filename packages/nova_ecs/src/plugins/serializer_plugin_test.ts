@@ -1,11 +1,11 @@
-import { isLeft } from 'fp-ts/Either';
+import { isLeft } from 'fp-ts/lib/Either.js';
 import * as t from 'io-ts';
 import 'jasmine';
-import { Entity } from '../entity';
-import { Component } from '../component';
-import { set } from '../datatypes/set';
-import { World } from '../world';
-import { Serializer, SerializerPlugin, SerializerResource } from './serializer_plugin';
+import { Entity } from '../entity.js';
+import { Component } from '../component.js';
+import { set } from '../datatypes/set.js';
+import { World } from '../world.js';
+import { Serializer, SerializerPlugin, SerializerResource } from './serializer_plugin.js';
 
 
 const FooComponent = new Component<{ x: number }>('Foo');

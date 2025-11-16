@@ -1,17 +1,17 @@
 import { createDraft, finishDraft } from 'immer';
 import 'jasmine';
 import { v4 } from 'uuid';
-import { Entities, UUID } from './arg_types';
-import { AsyncSystem, AsyncSystemResource } from './async_system';
-import { Component, ComponentData } from './component';
-import { Angle } from './datatypes/angle';
-import { Vector } from './datatypes/vector';
-import { Entity } from './entity';
-import { EcsEvent, StepEvent } from './events';
-import { Optional } from './optional';
-import { Query } from './query';
-import { System } from './system';
-import { World } from './world';
+import { Entities, UUID } from './arg_types.js';
+import { AsyncSystem, AsyncSystemResource } from './async_system.js';
+import { Component, ComponentData } from './component.js';
+import { Angle } from './datatypes/angle.js';
+import { Vector } from './datatypes/vector.js';
+import { Entity } from './entity.js';
+import { EcsEvent, StepEvent } from './events.js';
+import { Optional } from './optional.js';
+import { Query } from './query.js';
+import { System } from './system.js';
+import { World } from './world.js';
 
 
 async function sleep(ms: number) {

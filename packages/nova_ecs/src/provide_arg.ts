@@ -1,9 +1,9 @@
-import { right } from "fp-ts/Either";
-import { ArgModifier } from "./arg_modifier";
-import { ArgData, ArgsToData, ArgTypes, GetEntity } from "./arg_types";
-import { Component, ComponentData } from "./component";
-import { Optional } from "./optional";
-import { Query } from "./query";
+import { right } from "fp-ts/lib/Either.js";
+import { ArgModifier } from "./arg_modifier.js";
+import { ArgData, ArgsToData, ArgTypes, GetEntity } from "./arg_types.js";
+import { Component, ComponentData } from "./component.js";
+import { Optional } from "./optional.js";
+import { Query } from "./query.js";
 
 export function ProvideArg<Provided extends Component<any>, Args extends readonly ArgTypes[]>({ provided, factory, args }: {
     provided: Provided,
