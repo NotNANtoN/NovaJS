@@ -1,10 +1,10 @@
 import "jasmine";
 import { PNG } from "pngjs";
 import { readResourceFork, ResourceMap } from "resource_fork";
-import { NovaResources } from "../../src/resource_parsers/ResourceHolderBase";
-import { PictResource } from "../../src/resource_parsers/PictResource";
-import { getPNG, PNGCustomMatchers } from "./PNGCompare";
-import { defaultIDSpace } from "./DefaultIDSpace";
+import { NovaResources } from "../../src/resource_parsers/ResourceHolderBase.js";
+import { PictResource } from "../../src/resource_parsers/PictResource.js";
+import { getPNG, PNGCustomMatchers } from "./PNGCompare.js";
+import { defaultIDSpace } from "./DefaultIDSpace.js";
 
 
 declare global {

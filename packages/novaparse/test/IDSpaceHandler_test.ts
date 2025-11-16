@@ -1,7 +1,7 @@
 import "jasmine";
 import path from "path";
-import { IDSpaceHandler } from "../src/IDSpaceHandler";
-import { NovaResources } from "../src/resource_parsers/ResourceHolderBase";
+import { IDSpaceHandler } from "../src/IDSpaceHandler.js";
+import { NovaResources } from "../src/resource_parsers/ResourceHolderBase.js";
 
 
 describe("IDSpaceHandler", function() {

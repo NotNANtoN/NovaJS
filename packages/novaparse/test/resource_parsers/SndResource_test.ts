@@ -1,8 +1,8 @@
 import "jasmine";
 import { readResourceFork, ResourceMap } from "resource_fork";
-import { SndResource } from "../../src/resource_parsers/SndResource";
-import { defaultIDSpace } from "./DefaultIDSpace";
-import { ima4, pcm8 } from "./expected_sounds";
+import { SndResource } from "../../src/resource_parsers/SndResource.js";
+import { defaultIDSpace } from "./DefaultIDSpace.js";
+import { ima4, pcm8 } from "./expected_sounds.js";
 
 const runfiles = require(process.env['BAZEL_NODE_RUNFILES_HELPER'] as string) as typeof require;
 

@@ -1,7 +1,7 @@
 import "jasmine";
 import { readResourceFork, ResourceMap } from "resource_fork";
-import { WeapResource } from "../../src/resource_parsers/WeapResource";
-import { defaultIDSpace } from "./DefaultIDSpace";
+import { WeapResource } from "../../src/resource_parsers/WeapResource.js";
+import { defaultIDSpace } from "./DefaultIDSpace.js";
 
 // Bazel no longer patches require.
 const runfiles = require(process.env['BAZEL_NODE_RUNFILES_HELPER'] as string) as typeof require;

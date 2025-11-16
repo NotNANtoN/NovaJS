@@ -1,8 +1,8 @@
 import "jasmine";
 import { readResourceFork, ResourceMap } from "resource_fork";
-import { OutfResource } from "../../src/resource_parsers/OutfResource";
-import { NovaResources } from "../../src/resource_parsers/ResourceHolderBase";
-import { defaultIDSpace } from "./DefaultIDSpace";
+import { OutfResource } from "../../src/resource_parsers/OutfResource.js";
+import { NovaResources } from "../../src/resource_parsers/ResourceHolderBase.js";
+import { defaultIDSpace } from "./DefaultIDSpace.js";
 
 // Bazel no longer patches require.
 const runfiles = require(process.env['BAZEL_NODE_RUNFILES_HELPER'] as string) as typeof require;

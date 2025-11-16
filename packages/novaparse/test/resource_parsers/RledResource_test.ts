@@ -1,9 +1,9 @@
 import "jasmine";
 import { readResourceFork, ResourceMap } from "resource_fork";
-import { RledResource } from "../../src/resource_parsers/RledResource";
+import { RledResource } from "../../src/resource_parsers/RledResource.js";
 import { PNG } from "pngjs";
-import { getPNG, getFrames, applyMask, PNGCustomMatchers } from "./PNGCompare"
-import { defaultIDSpace } from "./DefaultIDSpace";
+import { getPNG, getFrames, applyMask, PNGCustomMatchers } from "./PNGCompare.js"
+import { defaultIDSpace } from "./DefaultIDSpace.js";
 
 declare global {
     namespace jasmine {

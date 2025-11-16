@@ -4,6 +4,7 @@
   "description": "Parser for EV Nova files",
   "license": "MIT",
   "type": "module",
+  "main": "dist/NovaParse.js",
   "scripts": {
     "build": "tsc",
     "test": "jasmine --config=jasmine.json"

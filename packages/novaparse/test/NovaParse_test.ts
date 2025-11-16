@@ -1,22 +1,22 @@
 import * as fs from "fs";
 import "jasmine";
 import { BLEND_MODES } from "novadatainterface/BlendModes";
-import { WEAP_SPEED_FACTOR } from "novaparse/src/parsers/WeaponParse";
+import { WEAP_SPEED_FACTOR } from "../src/parsers/WeaponParse.js";
 import * as path from "path";
 import { PNG } from "pngjs";
-import { getDefaultExitPoints } from "../../novadatainterface/Animation";
-import { ExplosionData } from "../../novadatainterface/ExplosionData";
-import { NovaDataType } from "../../novadatainterface/NovaDataInterface";
-import { OutfitData } from "../../novadatainterface/OutiftData";
-import { PictImageData } from "../../novadatainterface/PictImage";
-import { PlanetData } from "../../novadatainterface/PlanetData";
-import { ShipData } from "../../novadatainterface/ShipData";
-import { SpriteSheetData, SpriteSheetFramesData, SpriteSheetImageData } from "../../novadatainterface/SpriteSheetData";
-import { getDefaultStatusBarColors, getDefaultStatusBarDataAreas } from "../../novadatainterface/StatusBarData";
-import { WeaponData } from "../../novadatainterface/WeaponData";
-import { NovaParse } from "../NovaParse";
-import { FPS, ShipTurnRateConversionFactor } from "../src/parsers/Constants";
-import { getPNG } from "./resource_parsers/PNGCompare";
+import { getDefaultExitPoints } from "novadatainterface/Animation";
+import { ExplosionData } from "novadatainterface/ExplosionData";
+import { NovaDataType } from "novadatainterface/NovaDataInterface";
+import { OutfitData } from "novadatainterface/OutiftData";
+import { PictImageData } from "novadatainterface/PictImage";
+import { PlanetData } from "novadatainterface/PlanetData";
+import { ShipData } from "novadatainterface/ShipData";
+import { SpriteSheetData, SpriteSheetFramesData, SpriteSheetImageData } from "novadatainterface/SpriteSheetData";
+import { getDefaultStatusBarColors, getDefaultStatusBarDataAreas } from "novadatainterface/StatusBarData";
+import { WeaponData } from "novadatainterface/WeaponData";
+import { NovaParse } from "../src/NovaParse.js";
+import { FPS, ShipTurnRateConversionFactor } from "../src/parsers/Constants.js";
+import { getPNG } from "./resource_parsers/PNGCompare.js";
 
 // Bazel no longer patches require.
 const runfiles = require(process.env['BAZEL_NODE_RUNFILES_HELPER'] as string) as typeof require;

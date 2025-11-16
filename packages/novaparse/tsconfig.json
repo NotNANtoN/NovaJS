@@ -1,6 +1,9 @@
 {
   "extends": "@evn/tsconfig/tsconfig.json",
-  "include": ["src/**/*.ts"],
+  "include": [
+    "src",
+    "test"
+  ],
   "compilerOptions": {
     "outDir": "dist"
   }
