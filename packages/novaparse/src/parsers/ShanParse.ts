@@ -3,8 +3,8 @@ import { BaseData } from "novadatainterface/BaseData";
 import { NovaDataType } from "novadatainterface/NovaDataInterface";
 import { NovaIDNotFoundError } from "novadatainterface/NovaDataInterface";
 import { BLEND_MODES } from "novadatainterface/BlendModes";
-import { ShanResource } from "../resource_parsers/ShanResource";
-import { BaseParse } from "./BaseParse";
+import { ShanResource } from "../resource_parsers/ShanResource.js";
+import { BaseParse } from "./BaseParse.js";
 
 
 export async function ShanParse(shan: ShanResource, notFoundFunction: (message: string) => void): Promise<Animation> {

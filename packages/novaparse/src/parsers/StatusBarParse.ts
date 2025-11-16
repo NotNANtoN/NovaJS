@@ -1,6 +1,6 @@
-import { BaseResource } from "../resource_parsers/NovaResourceBase";
+import { BaseResource } from "../resource_parsers/NovaResourceBase.js";
 import { StatusBarData, getDefaultStatusBarColors, getDefaultStatusBarDataAreas } from "novadatainterface/StatusBarData";
-import { BaseParse } from "./BaseParse";
+import { BaseParse } from "./BaseParse.js";
 import { BaseData } from "novadatainterface/BaseData";
 
 

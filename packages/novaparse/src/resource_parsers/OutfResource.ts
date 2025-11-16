@@ -1,5 +1,5 @@
-import { BaseResource } from "./NovaResourceBase";
-import { NovaResources } from "./ResourceHolderBase";
+import { BaseResource } from "./NovaResourceBase.js";
+import { NovaResources } from "./ResourceHolderBase.js";
 import { Resource } from "resource_fork";
 
 type OutfitFunctions = Array<[string, number | boolean]>;

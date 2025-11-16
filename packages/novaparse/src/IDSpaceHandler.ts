@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
-import { readNovaFile } from "./readNovaFile";
-import { NovaResources, NovaResourceType, getEmptyNovaResources } from "./resource_parsers/ResourceHolderBase";
+import { readNovaFile } from "./readNovaFile.js";
+import { NovaResources, NovaResourceType, getEmptyNovaResources } from "./resource_parsers/ResourceHolderBase.js";
 
 class BadDirectoryStructureError extends Error { };
 

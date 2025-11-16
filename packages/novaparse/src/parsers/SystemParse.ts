@@ -1,6 +1,6 @@
-import { SystResource } from "../resource_parsers/SystResource";
+import { SystResource } from "../resource_parsers/SystResource.js";
 import { SystemData } from "novadatainterface/SystemData";
-import { BaseParse } from "./BaseParse";
+import { BaseParse } from "./BaseParse.js";
 import { BaseData } from "novadatainterface/BaseData";
 
 

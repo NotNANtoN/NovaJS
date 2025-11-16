@@ -1,5 +1,5 @@
 import { BaseData } from "novadatainterface/BaseData";
-import { BaseResource } from "../resource_parsers/NovaResourceBase";
+import { BaseResource } from "../resource_parsers/NovaResourceBase.js";
 
 
 export async function BaseParse(resource: BaseResource, _notFoundFunction: (message: string) => void): Promise<BaseData> {

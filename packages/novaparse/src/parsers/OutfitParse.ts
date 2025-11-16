@@ -1,9 +1,9 @@
-import { OutfResource } from "../resource_parsers/OutfResource";
+import { OutfResource } from "../resource_parsers/OutfResource.js";
 import { BaseData } from "novadatainterface/BaseData";
-import { BaseParse } from "./BaseParse";
+import { BaseParse } from "./BaseParse.js";
 import { OutfitData, OutfitPhysics } from "novadatainterface/OutiftData";
 import { getDefaultPictData } from "novadatainterface/PictData";
-import { FPS, OutfitTurnRateConversionFactor, ShipTurnRateConversionFactor } from "./Constants";
+import { FPS, OutfitTurnRateConversionFactor, ShipTurnRateConversionFactor } from "./Constants.js";
 
 
 // This should not be necessary!

@@ -1,4 +1,4 @@
-import { SndResource } from '../resource_parsers/SndResource';
+import { SndResource } from '../resource_parsers/SndResource.js';
 import { Mp3Encoder } from 'lamejs';
 
 

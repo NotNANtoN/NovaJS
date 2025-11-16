@@ -1,18 +1,18 @@
 import { readResourceFork } from "resource_fork";
-import { NovaResources, NovaResourceType } from "./resource_parsers/ResourceHolderBase";
-import { BoomResource } from "./resource_parsers/BoomResource";
-import { DescResource } from "./resource_parsers/DescResource";
-import { BaseResource } from "./resource_parsers/NovaResourceBase";
-import { OutfResource } from "./resource_parsers/OutfResource";
-import { PictResource } from "./resource_parsers/PictResource";
-import { RledResource } from "./resource_parsers/RledResource";
-import { ShanResource } from "./resource_parsers/ShanResource";
-import { ShipResource } from "./resource_parsers/ShipResource";
-import { SpinResource } from "./resource_parsers/SpinResource";
-import { SpobResource } from "./resource_parsers/SpobResource";
-import { SystResource } from "./resource_parsers/SystResource";
-import { WeapResource } from "./resource_parsers/WeapResource";
-import { SndResource } from "./resource_parsers/SndResource";
+import { NovaResources, NovaResourceType } from "./resource_parsers/ResourceHolderBase.js";
+import { BoomResource } from "./resource_parsers/BoomResource.js";
+import { DescResource } from "./resource_parsers/DescResource.js";
+import { BaseResource } from "./resource_parsers/NovaResourceBase.js";
+import { OutfResource } from "./resource_parsers/OutfResource.js";
+import { PictResource } from "./resource_parsers/PictResource.js";
+import { RledResource } from "./resource_parsers/RledResource.js";
+import { ShanResource } from "./resource_parsers/ShanResource.js";
+import { ShipResource } from "./resource_parsers/ShipResource.js";
+import { SpinResource } from "./resource_parsers/SpinResource.js";
+import { SpobResource } from "./resource_parsers/SpobResource.js";
+import { SystResource } from "./resource_parsers/SystResource.js";
+import { WeapResource } from "./resource_parsers/WeapResource.js";
+import { SndResource } from "./resource_parsers/SndResource.js";
 import { $enum } from "ts-enum-util";
 
 

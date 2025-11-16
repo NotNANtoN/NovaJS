@@ -3,8 +3,8 @@ import { BLEND_MODES } from "novadatainterface/BlendModes";
 import { Animation, AnimationImage, getDefaultAnimationImage, getDefaultExitPoints } from "novadatainterface/Animation";
 import { BaseData } from "novadatainterface/BaseData";
 import { ExplosionData } from "novadatainterface/ExplosionData";
-import { BoomResource } from "../resource_parsers/BoomResource";
-import { BaseParse } from "./BaseParse";
+import { BoomResource } from "../resource_parsers/BoomResource.js";
+import { BaseParse } from "./BaseParse.js";
 
 
 export async function ExplosionParse(boom: BoomResource, notFoundFunction: (m: string) => void): Promise<ExplosionData> {

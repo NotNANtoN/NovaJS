@@ -1,11 +1,11 @@
 import { BaseData } from "novadatainterface/BaseData";
-import { BaseParse } from "./BaseParse";
+import { BaseParse } from "./BaseParse.js";
 import { SpriteSheetData, SpriteSheetFramesData, SpriteSheetImageData, Hull, FrameInfo, ConvexHull, DefaultImageLocation, getDefaultConvexHull } from "novadatainterface/SpriteSheetData";
-import { RledResource } from "../resource_parsers/RledResource";
+import { RledResource } from "../resource_parsers/RledResource.js";
 import { PNG } from "pngjs";
 import * as path from "path";
 import hull from 'hull.js';
-import { bufferToArrayBuffer } from "./buffer_to_array_buffer";
+import { bufferToArrayBuffer } from "./buffer_to_array_buffer.js";
 
 
 export interface SpriteSheetMulti {

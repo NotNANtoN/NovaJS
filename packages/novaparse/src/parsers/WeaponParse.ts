@@ -4,9 +4,9 @@ import { NovaDataType } from "novadatainterface/NovaDataInterface";
 import { getDefaultShipData } from "novadatainterface/ShipData";
 import { BaseWeaponData, BayGuidanceSet, BayWeaponData, BeamGuidanceSet, BeamGuidanceType, BeamWeaponData, DamageType, NotBayWeaponData, ProjectileGuidanceSet, ProjectileGuidanceType, ProjectileWeaponData, SubmunitionType, WeaponDamage, WeaponData } from "novadatainterface/WeaponData";
 import { BLEND_MODES } from "novadatainterface/BlendModes";
-import { WeapResource } from "../resource_parsers/WeapResource";
-import { BaseParse } from "./BaseParse";
-import { FPS, ShipTurnRateConversionFactor } from "./Constants";
+import { WeapResource } from "../resource_parsers/WeapResource.js";
+import { BaseParse } from "./BaseParse.js";
+import { FPS, ShipTurnRateConversionFactor } from "./Constants.js";
 
 export const WEAP_SPEED_FACTOR = 3 / 10;
 

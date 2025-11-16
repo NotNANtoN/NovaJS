@@ -1,9 +1,9 @@
 import { PictData } from "novadatainterface/PictData";
 import { BaseData } from "novadatainterface/BaseData";
-import { BaseParse } from "./BaseParse";
-import { PictResource, PNGError } from "../resource_parsers/PictResource";
+import { BaseParse } from "./BaseParse.js";
+import { PictResource, PNGError } from "../resource_parsers/PictResource.js";
 import { PNG } from "pngjs";
-import { bufferToArrayBuffer } from "./buffer_to_array_buffer";
+import { bufferToArrayBuffer } from "./buffer_to_array_buffer.js";
 
 export interface PictImageMulti {
     pict: PictData;

@@ -1,5 +1,5 @@
-import { BaseResource } from "./NovaResourceBase";
-import { NovaResources, NovaResourceType } from "./ResourceHolderBase";
+import { BaseResource } from "./NovaResourceBase.js";
+import { NovaResources, NovaResourceType } from "./ResourceHolderBase.js";
 import { Resource } from "resource_fork";
 
 

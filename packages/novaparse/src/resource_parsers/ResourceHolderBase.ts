@@ -1,15 +1,15 @@
-import { BaseResource } from "./NovaResourceBase";
-import { BoomResource } from "./BoomResource";
-import { DescResource } from "./DescResource";
-import { OutfResource } from "./OutfResource";
-import { RledResource } from "./RledResource";
-import { PictResource } from "./PictResource";
-import { ShanResource } from "./ShanResource";
-import { ShipResource } from "./ShipResource";
-import { SpinResource } from "./SpinResource";
-import { SpobResource } from "./SpobResource";
-import { SystResource } from "./SystResource";
-import { WeapResource } from "./WeapResource";
+import { BaseResource } from "./NovaResourceBase.js";
+import { BoomResource } from "./BoomResource.js";
+import { DescResource } from "./DescResource.js";
+import { OutfResource } from "./OutfResource.js";
+import { RledResource } from "./RledResource.js";
+import { PictResource } from "./PictResource.js";
+import { ShanResource } from "./ShanResource.js";
+import { ShipResource } from "./ShipResource.js";
+import { SpinResource } from "./SpinResource.js";
+import { SpobResource } from "./SpobResource.js";
+import { SystResource } from "./SystResource.js";
+import { WeapResource } from "./WeapResource.js";
 
 
 

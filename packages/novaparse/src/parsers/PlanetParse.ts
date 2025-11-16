@@ -5,8 +5,8 @@ import { getDefaultPictData } from "novadatainterface/PictData";
 import { PlanetData } from "novadatainterface/PlanetData";
 import { DamageType } from "novadatainterface/WeaponData";
 import { BLEND_MODES } from "novadatainterface/BlendModes";
-import { SpobResource } from "../resource_parsers/SpobResource";
-import { BaseParse } from "./BaseParse";
+import { SpobResource } from "../resource_parsers/SpobResource.js";
+import { BaseParse } from "./BaseParse.js";
 
 
 export async function PlanetParse(spob: SpobResource, notFoundFunction: (m: string) => void): Promise<PlanetData> {

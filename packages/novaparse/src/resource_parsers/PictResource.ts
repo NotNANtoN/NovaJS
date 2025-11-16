@@ -1,7 +1,7 @@
-import { BaseResource } from "./NovaResourceBase";
-import { NovaResources } from "./ResourceHolderBase";
+import { BaseResource } from "./NovaResourceBase.js";
+import { NovaResources } from "./ResourceHolderBase.js";
 import { Resource } from "resource_fork";
-import { PICTParse } from "./PICTParse";
+import { PICTParse } from "./PICTParse.js";
 import { PNG } from "pngjs";
 
 class PNGError extends Error { };

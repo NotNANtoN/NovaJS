@@ -2,11 +2,11 @@ import { Animation, getDefaultAnimation } from "novadatainterface/Animation";
 import { BaseData } from "novadatainterface/BaseData";
 import { getDefaultPictData } from "novadatainterface/PictData";
 import { ShipData, ShipPhysics } from "novadatainterface/ShipData";
-import { NovaResources } from "../resource_parsers/ResourceHolderBase";
-import { ShipResource } from "../resource_parsers/ShipResource";
-import { BaseParse } from "./BaseParse";
-import { FPS, ShipTurnRateConversionFactor } from "./Constants";
-import { ShanParse } from "./ShanParse";
+import { NovaResources } from "../resource_parsers/ResourceHolderBase.js";
+import { ShipResource } from "../resource_parsers/ShipResource.js";
+import { BaseParse } from "./BaseParse.js";
+import { FPS, ShipTurnRateConversionFactor } from "./Constants.js";
+import { ShanParse } from "./ShanParse.js";
 
 
 export type ShipPictMap = Promise<{ [index: string]: string }>;

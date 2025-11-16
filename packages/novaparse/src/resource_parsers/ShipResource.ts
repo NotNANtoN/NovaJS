@@ -1,6 +1,6 @@
 import { Resource } from "resource_fork";
-import { NovaResources } from "./ResourceHolderBase";
-import { BaseResource } from "./NovaResourceBase";
+import { NovaResources } from "./ResourceHolderBase.js";
+import { BaseResource } from "./NovaResourceBase.js";
 
 type ShipWeap = {
     id: number,
