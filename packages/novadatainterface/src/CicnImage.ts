@@ -1,4 +1,4 @@
-import defaultCicn from './default_rled';
+import defaultCicn from './default_rled.js';
 
 export type CicnImageData = ArrayBuffer;
 

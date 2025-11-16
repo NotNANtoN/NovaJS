@@ -1,4 +1,4 @@
-import { BaseData, getDefaultBaseData } from "./BaseData";
+import { BaseData, getDefaultBaseData } from "./BaseData.js";
 
 export type ConvexHull = Array<[number, number]>;
 

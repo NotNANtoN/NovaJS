@@ -1,5 +1,5 @@
 import 'jasmine';
-import { getDefaultPictImageData } from './PictImage';
+import { getDefaultPictImageData } from './PictImage.js';
 
 describe('PictImage', () => {
     it('gets the default pict data', () => {

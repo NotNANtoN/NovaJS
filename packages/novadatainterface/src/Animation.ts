@@ -1,6 +1,6 @@
-import { BLEND_MODES } from "./BlendModes";
-import { BaseData, getDefaultBaseData } from "./BaseData";
-import { NovaDataType } from "./NovaDataInterface";
+import { BLEND_MODES } from "./BlendModes.js";
+import { BaseData, getDefaultBaseData } from "./BaseData.js";
+import { NovaDataType } from "./NovaDataInterface.js";
 
 
 export interface AnimationImageIndex {

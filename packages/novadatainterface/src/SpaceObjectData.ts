@@ -1,6 +1,6 @@
-import { BaseData, getDefaultBaseData } from "./BaseData";
-import { Animation, getDefaultAnimation } from "./Animation";
-import { DamageType } from "./WeaponData";
+import { BaseData, getDefaultBaseData } from "./BaseData.js";
+import { Animation, getDefaultAnimation } from "./Animation.js";
+import { DamageType } from "./WeaponData.js";
 
 
 export interface SpaceObjectPhysics {

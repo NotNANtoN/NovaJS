@@ -1,5 +1,5 @@
-import { Animation, getDefaultAnimation } from "./Animation";
-import { BaseData, getDefaultBaseData } from "./BaseData";
+import { Animation, getDefaultAnimation } from "./Animation.js";
+import { BaseData, getDefaultBaseData } from "./BaseData.js";
 
 
 export interface ExplosionData extends BaseData {

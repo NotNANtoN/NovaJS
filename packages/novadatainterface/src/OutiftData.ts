@@ -1,5 +1,5 @@
-import { BaseData, getDefaultBaseData } from "./BaseData";
-import { ShipPhysics } from "./ShipData";
+import { BaseData, getDefaultBaseData } from "./BaseData.js";
+import { ShipPhysics } from "./ShipData.js";
 
 
 export type OutfitPhysics = Partial<ShipPhysics> & { freeMass: number };

@@ -1,5 +1,5 @@
-import { SpaceObjectData, getDefaultSpaceObjectData } from "./SpaceObjectData";
-import { DamageType } from "./WeaponData";
+import { SpaceObjectData, getDefaultSpaceObjectData } from "./SpaceObjectData.js";
+import { DamageType } from "./WeaponData.js";
 
 export interface PlanetData extends SpaceObjectData {
     landingPict: string;

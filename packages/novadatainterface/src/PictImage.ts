@@ -1,4 +1,4 @@
-import defaultPict from './default_pict';
+import defaultPict from './default_pict.js';
 
 export type PictImageData = ArrayBuffer;
 

@@ -1,18 +1,18 @@
-import { CicnData } from "./CicnData";
-import { CicnImageData } from "./CicnImage";
-import { ExplosionData } from "./ExplosionData";
-import { Gettable } from "./Gettable";
-import { OutfitData } from "./OutiftData";
-import { PictData } from "./PictData";
-import { PictImageData } from "./PictImage";
-import { PlanetData } from "./PlanetData";
-import { ShipData } from "./ShipData";
-import { SoundFile } from "./SoundFile";
-import { SpriteSheetData, SpriteSheetFramesData, SpriteSheetImageData } from "./SpriteSheetData";
-import { StatusBarData } from "./StatusBarData";
-import { SystemData } from "./SystemData";
-import { TargetCornersData } from "./TargetCornersData";
-import { WeaponData } from "./WeaponData";
+import { CicnData } from "./CicnData.js";
+import { CicnImageData } from "./CicnImage.js";
+import { ExplosionData } from "./ExplosionData.js";
+import { Gettable } from "./Gettable.js";
+import { OutfitData } from "./OutiftData.js";
+import { PictData } from "./PictData.js";
+import { PictImageData } from "./PictImage.js";
+import { PlanetData } from "./PlanetData.js";
+import { ShipData } from "./ShipData.js";
+import { SoundFile } from "./SoundFile.js";
+import { SpriteSheetData, SpriteSheetFramesData, SpriteSheetImageData } from "./SpriteSheetData.js";
+import { StatusBarData } from "./StatusBarData.js";
+import { SystemData } from "./SystemData.js";
+import { TargetCornersData } from "./TargetCornersData.js";
+import { WeaponData } from "./WeaponData.js";
 
 
 enum NovaDataType {

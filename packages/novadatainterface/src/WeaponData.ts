@@ -1,6 +1,6 @@
-import { BaseData, getDefaultBaseData } from "./BaseData";
-import { getDefaultShipData } from "./ShipData";
-import { getDefaultSpaceObjectData, SpaceObjectData } from "./SpaceObjectData";
+import { BaseData, getDefaultBaseData } from "./BaseData.js";
+import { getDefaultShipData } from "./ShipData.js";
+import { getDefaultSpaceObjectData, SpaceObjectData } from "./SpaceObjectData.js";
 
 export type DamageType = "normal" | "pointDefense" | "planetBuster";
 

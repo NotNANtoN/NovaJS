@@ -1,4 +1,4 @@
-import { NovaDataType } from "./NovaDataInterface";
+import { NovaDataType } from "./NovaDataInterface.js";
 
 export type NovaIDs = {
     [index in NovaDataType]: Array<string>

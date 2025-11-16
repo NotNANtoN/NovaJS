@@ -1,6 +1,6 @@
-import { GettableData } from "./Gettable";
-import { NovaDataInterface } from "./NovaDataInterface";
-import { NovaIDs } from "./NovaIDs";
+import { GettableData } from "./Gettable.js";
+import { NovaDataInterface } from "./NovaDataInterface.js";
+import { NovaIDs } from "./NovaIDs.js";
 
 
 export type PreloadData = {

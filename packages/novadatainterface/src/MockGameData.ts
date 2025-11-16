@@ -1,19 +1,19 @@
-import { getDefaultCicnData } from "./CicnData";
-import { getDefaultExplosionData } from "./ExplosionData";
-import { GameDataInterface } from "./GameDataInterface";
-import { Gettable } from "./Gettable";
-import { NovaDataInterface } from "./NovaDataInterface";
-import { NovaIDs } from "./NovaIDs";
-import { getDefaultOutfitData } from "./OutiftData";
-import { getDefaultPictData } from "./PictData";
-import { getDefaultPlanetData } from "./PlanetData";
-import { getDefaultShipData } from "./ShipData";
-import { getDefaultSoundFile } from "./SoundFile";
-import { getDefaultSpriteSheetData, getDefaultSpriteSheetFrames } from "./SpriteSheetData";
-import { getDefaultStatusBarData } from "./StatusBarData";
-import { getDefaultSystemData } from "./SystemData";
-import { getDefaultTargetCornersData } from "./TargetCornersData";
-import { getDefaultProjectileWeaponData } from "./WeaponData";
+import { getDefaultCicnData } from "./CicnData.js";
+import { getDefaultExplosionData } from "./ExplosionData.js";
+import { GameDataInterface } from "./GameDataInterface.js";
+import { Gettable } from "./Gettable.js";
+import { NovaDataInterface } from "./NovaDataInterface.js";
+import { NovaIDs } from "./NovaIDs.js";
+import { getDefaultOutfitData } from "./OutiftData.js";
+import { getDefaultPictData } from "./PictData.js";
+import { getDefaultPlanetData } from "./PlanetData.js";
+import { getDefaultShipData } from "./ShipData.js";
+import { getDefaultSoundFile } from "./SoundFile.js";
+import { getDefaultSpriteSheetData, getDefaultSpriteSheetFrames } from "./SpriteSheetData.js";
+import { getDefaultStatusBarData } from "./StatusBarData.js";
+import { getDefaultSystemData } from "./SystemData.js";
+import { getDefaultTargetCornersData } from "./TargetCornersData.js";
+import { getDefaultProjectileWeaponData } from "./WeaponData.js";
 
 // TODO: Make gettable an interface so you
 // don't have to do this awkward extension

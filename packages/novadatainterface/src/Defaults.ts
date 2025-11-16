@@ -1,18 +1,18 @@
-import { getDefaultCicnData } from "./CicnData";
-import { getDefaultCicnImageData } from "./CicnImage";
-import { getDefaultSpriteSheetImage } from "./DefaultSpriteSheetImage";
-import { getDefaultExplosionData } from "./ExplosionData";
-import { getDefaultOutfitData } from "./OutiftData";
-import { getDefaultPictData } from "./PictData";
-import { getDefaultPictImageData } from "./PictImage";
-import { getDefaultPlanetData } from "./PlanetData";
-import { getDefaultShipData } from "./ShipData";
-import { getDefaultSoundFile } from "./SoundFile";
-import { getDefaultSpriteSheetData, getDefaultSpriteSheetFrames } from "./SpriteSheetData";
-import { getDefaultStatusBarData } from "./StatusBarData";
-import { getDefaultSystemData } from "./SystemData";
-import { getDefaultTargetCornersData } from "./TargetCornersData";
-import { getDefaultProjectileWeaponData } from "./WeaponData";
+import { getDefaultCicnData } from "./CicnData.js";
+import { getDefaultCicnImageData } from "./CicnImage.js";
+import { getDefaultSpriteSheetImage } from "./DefaultSpriteSheetImage.js";
+import { getDefaultExplosionData } from "./ExplosionData.js";
+import { getDefaultOutfitData } from "./OutiftData.js";
+import { getDefaultPictData } from "./PictData.js";
+import { getDefaultPictImageData } from "./PictImage.js";
+import { getDefaultPlanetData } from "./PlanetData.js";
+import { getDefaultShipData } from "./ShipData.js";
+import { getDefaultSoundFile } from "./SoundFile.js";
+import { getDefaultSpriteSheetData, getDefaultSpriteSheetFrames } from "./SpriteSheetData.js";
+import { getDefaultStatusBarData } from "./StatusBarData.js";
+import { getDefaultSystemData } from "./SystemData.js";
+import { getDefaultTargetCornersData } from "./TargetCornersData.js";
+import { getDefaultProjectileWeaponData } from "./WeaponData.js";
 
 // Should have one for every NovaDataType
 export const Defaults = {
