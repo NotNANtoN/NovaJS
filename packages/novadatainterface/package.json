@@ -11,7 +11,7 @@
     }
   },
   "scripts": {
-    "build-defaults": "ts-node scripts/pack_png.ts defaults/default_pict.png src/default_pict.ts && ts-node scripts/pack_png.ts defaults/default_rled.png src/default_rled.ts",
+    "build-defaults": "ts-node --esm scripts/pack_png.ts defaults/default_pict.png src/default_pict.ts && ts-node --esm scripts/pack_png.ts defaults/default_rled.png src/default_rled.ts",
     "build": "npm run build-defaults && tsc",
     "test": "jasmine --config=jasmine.json"
   },
