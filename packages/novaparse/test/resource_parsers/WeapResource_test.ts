@@ -3,8 +3,7 @@ import { readResourceFork, ResourceMap } from "resource_fork";
 import { WeapResource } from "../../src/resource_parsers/WeapResource.js";
 import { defaultIDSpace } from "./DefaultIDSpace.js";
 
-// Bazel no longer patches require.
-const runfiles = require(process.env['BAZEL_NODE_RUNFILES_HELPER'] as string) as typeof require;
+import { resolveFixture } from "../../test/fixtures.js";
 
 describe("WeapResource", function() {
     // Weaps don't depend on other resources.
@@ -19,7 +18,7 @@ describe("WeapResource", function() {
     let nosubs: WeapResource;
 
     beforeEach(async function() {
-        const dataPath = runfiles.resolve("novajs/novaparse/test/resource_parsers/files/weap.ndat");
+        const dataPath = resolveFixture("resource_examples/weap.ndat");
         rf = await readResourceFork(dataPath, false);
 
         const weaps = rf.wëap;

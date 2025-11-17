@@ -4,8 +4,7 @@ import { OutfResource } from "../../src/resource_parsers/OutfResource.js";
 import { NovaResources } from "../../src/resource_parsers/ResourceHolderBase.js";
 import { defaultIDSpace } from "./DefaultIDSpace.js";
 
-// Bazel no longer patches require.
-const runfiles = require(process.env['BAZEL_NODE_RUNFILES_HELPER'] as string) as typeof require;
+import { resolveFixture } from "../../test/fixtures.js";
 
 describe("OutfResource", function() {
     let rf: ResourceMap;
@@ -27,7 +26,7 @@ describe("OutfResource", function() {
     let anotherFour: OutfResource;
 
     beforeEach(async function() {
-        const dataPath = runfiles.resolve("novajs/novaparse/test/resource_parsers/files/outf.ndat");
+        const dataPath = resolveFixture("resource_examples/outf.ndat");
         rf = await readResourceFork(dataPath, false);
 
         var outfs = rf.oütf;

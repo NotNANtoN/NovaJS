@@ -4,7 +4,7 @@ import { SndResource } from "../../src/resource_parsers/SndResource.js";
 import { defaultIDSpace } from "./DefaultIDSpace.js";
 import { ima4, pcm8 } from "./expected_sounds.js";
 
-const runfiles = require(process.env['BAZEL_NODE_RUNFILES_HELPER'] as string) as typeof require;
+import { resolveFixture } from "../../test/fixtures.js";
 
 describe("SndResource", function() {
     let s1: SndResource;
@@ -15,7 +15,7 @@ describe("SndResource", function() {
     const idSpace = defaultIDSpace;
 
     beforeEach(async function() {
-        const dataPath = runfiles.resolve("novajs/novaparse/test/resource_parsers/files/snd.ndat");
+        const dataPath = resolveFixture("resource_examples/snd.ndat");
         rf = await readResourceFork(dataPath, false);
 
         const snds = rf['snd '];
