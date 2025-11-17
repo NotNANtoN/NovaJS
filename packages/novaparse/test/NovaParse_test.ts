@@ -17,19 +17,17 @@ import { WeaponData } from "novadatainterface/WeaponData";
 import { NovaParse } from "../src/NovaParse.js";
 import { FPS, ShipTurnRateConversionFactor } from "../src/parsers/Constants.js";
 import { getPNG } from "./resource_parsers/PNGCompare.js";
-
-// Bazel no longer patches require.
-const runfiles = require(process.env['BAZEL_NODE_RUNFILES_HELPER'] as string) as typeof require;
+import {resolveFixture} from './fixtures.js';
 
 // TODO: Factor all the resource-specific tests out of
-// this file and test them separately. Use mocks instead. 
+// this file and test them separately.
 describe("NovaParse", function() {
     let np: NovaParse;
     let s128: ShipData;
     let s129: ShipData;
 
     beforeEach(async function() {
-        const dataPath = path.join(__dirname, "novaParseTestFilesystem");
+        const dataPath = resolveFixture("novaParseTestFilesystem");
         np = new NovaParse(dataPath);
         s128 = await np.data[NovaDataType.Ship].get("nova:128");
         s129 = await np.data[NovaDataType.Ship].get("nova:129");
@@ -228,7 +226,7 @@ describe("NovaParse", function() {
 
     it("Should parse PictImage", async function() {
         const p700: PictImageData = await np.data.PictImage.get("nova:700");
-        const statusBarPath = runfiles.resolve("novajs/novaparse/test/resource_parsers/files/picts/statusBar.png");
+        const statusBarPath = resolveFixture("resource_examples/picts/statusBar.png");
         const statusBar = await getPNG(statusBarPath);
 
         expect(p700).toEqual(PNG.sync.write(statusBar).buffer);
@@ -242,7 +240,7 @@ describe("NovaParse", function() {
 
     it("Should parse SpriteSheetImage", async function() {
         const ri1000: SpriteSheetImageData = await np.data.SpriteSheetImage.get("nova:1000");
-        const shuttlePath = runfiles.resolve("novajs/novaparse/test/testSpriteSheetImage.png");
+        const shuttlePath = resolveFixture("testSpriteSheetImage.png");
         const shuttle = fs.readFileSync(shuttlePath);
         expect(ri1000).toEqual(shuttle.buffer);
     });
@@ -251,7 +249,7 @@ describe("NovaParse", function() {
         const rf1116: SpriteSheetFramesData =
             await np.data.SpriteSheetFrames.get("nova:1116");
 
-        const frames1116Path = runfiles.resolve("novajs/novaparse/test/zephyrFrames.json");
+        const frames1116Path = resolveFixture("zephyrFrames.json");
         const shouldEqual1116 = JSON.parse(fs.readFileSync(
             frames1116Path, "utf8")) as SpriteSheetFramesData;
         expect(rf1116).toEqual(shouldEqual1116);
@@ -260,7 +258,7 @@ describe("NovaParse", function() {
             await np.data.SpriteSheetFrames.get("nova:1000");
 
         const frames1000Path =
-            runfiles.resolve("novajs/novaparse/test/testSpriteSheetFrames.json");
+            resolveFixture("testSpriteSheetFrames.json");
         const shouldEqual1000 = JSON.parse(fs.readFileSync(
             frames1000Path, "utf8")) as SpriteSheetFramesData;
         expect(rf1000).toEqual(shouldEqual1000);
@@ -269,7 +267,7 @@ describe("NovaParse", function() {
     it("Should parse SpriteSheet", async function() {
         const rs1000: SpriteSheetData = await np.data.SpriteSheet.get("nova:1000");
         const sheet1000Path =
-            runfiles.resolve("novajs/novaparse/test/testSpriteSheet.json");
+            resolveFixture("testSpriteSheet.json");
         const expectedSpriteSheet = JSON.parse(fs.readFileSync(
             sheet1000Path, "utf8")) as SpriteSheetData;
 

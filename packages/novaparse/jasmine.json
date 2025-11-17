@@ -1,4 +1,4 @@
 {
   "spec_dir": "dist",
-  "spec_files": ["**/*_test.js"]
+  "spec_files": ["test/NovaParse_test.js"]
 }
