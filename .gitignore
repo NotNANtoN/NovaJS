@@ -75,3 +75,6 @@ node_modules
 
 # Bazel
 .bazelrc.user
+
+# Turborepo
+.turbo
