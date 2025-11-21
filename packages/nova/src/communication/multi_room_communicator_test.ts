@@ -1,5 +1,5 @@
 import { MockCommunicator } from 'nova_ecs/plugins/mock_communicator';
-import { MultiRoom } from './multi_room_communicator';
+import { MultiRoom } from './multi_room_communicator.js';
 
 
 describe('MultiRoomCommunicator', () => {

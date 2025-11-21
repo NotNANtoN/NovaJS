@@ -4,8 +4,8 @@ import { Resource } from 'nova_ecs/resource';
 import { System } from 'nova_ecs/system';
 import { SingletonComponent } from "nova_ecs/world";
 import * as PIXI from "pixi.js";
-import { BeamDataComponent, BeamSystem } from "../nova_plugin/beam_plugin";
-import { Space } from "./space_resource";
+import { BeamDataComponent, BeamSystem } from "../nova_plugin/beam_plugin.js";
+import { Space } from "./space_resource.js";
 
 
 const BeamGraphicsResource = new Resource<PIXI.Graphics>('BeamGraphics');

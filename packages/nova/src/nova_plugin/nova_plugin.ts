@@ -3,7 +3,7 @@ import { Plugin } from "nova_ecs/plugin";
 import { Resource } from "nova_ecs/resource";
 import { System } from "nova_ecs/system";
 import { World } from "nova_ecs/world";
-import { MultiRoom } from "../communication/multi_room_communicator";
+import { MultiRoom } from "../communication/multi_room_communicator.js";
 
 
 export const SystemComponent = new Component<World>('SystemComponent');

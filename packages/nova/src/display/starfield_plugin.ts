@@ -10,11 +10,11 @@ import { System } from "nova_ecs/system";
 import * as PIXI from "pixi.js";
 import RBush, { BBox } from "rbush";
 import { alea } from 'seedrandom';
-import { GameDataResource } from "../nova_plugin/game_data_resource";
-import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin";
-import { ResizeEvent } from "./screen_size_plugin";
-import { Stage } from "./stage_resource";
-import { texturesFromFrames } from "./textures_from_frames";
+import { GameDataResource } from "../nova_plugin/game_data_resource.js";
+import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
+import { ResizeEvent } from "./screen_size_plugin.js";
+import { Stage } from "./stage_resource.js";
+import { texturesFromFrames } from "./textures_from_frames.js";
 
 const STAR_ID = "nova:700";
 

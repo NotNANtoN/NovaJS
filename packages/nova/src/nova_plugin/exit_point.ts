@@ -1,7 +1,7 @@
 import { WeaponData } from "novadatainterface/WeaponData";
 import { Angle } from "nova_ecs/datatypes/angle";
 import { Vector } from "nova_ecs/datatypes/vector";
-import { WeaponLocalState } from "./fire_weapon_plugin";
+import { WeaponLocalState } from "./fire_weapon_plugin.js";
 import { Animation, getDefaultExitPoints } from 'novadatainterface/Animation';
 
 

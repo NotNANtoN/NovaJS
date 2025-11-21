@@ -2,12 +2,12 @@ import { isLeft } from "fp-ts/Either";
 import * as https from "https";
 import * as http from "http";
 import "jasmine";
-import { SocketChannelServer } from "./SocketChannelServer";
-import { SocketMessage } from "./SocketMessage";
+import { SocketChannelServer } from "./SocketChannelServer.js";
+import { SocketMessage } from "./SocketMessage.js";
 import { firstValueFrom, Subject } from "rxjs";
 import { take } from "rxjs/operators";
 import * as WebSocket from "ws";
-import { Callbacks, On, trackOn } from "./test_utils";
+import { Callbacks, On, trackOn } from "./test_utils.js";
 
 describe("SocketChannelServer", function() {
 

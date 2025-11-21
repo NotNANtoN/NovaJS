@@ -4,8 +4,8 @@ import http from "http";
 import { BehaviorSubject, Subject } from "rxjs";
 import { v4 } from "uuid";
 import WebSocket from "ws";
-import { ChannelServer, MessageWithSourceType } from "./Channel";
-import { SocketMessage } from "./SocketMessage";
+import { ChannelServer, MessageWithSourceType } from "./Channel.js";
+import { SocketMessage } from "./SocketMessage.js";
 
 interface Client {
     socket: WebSocket;

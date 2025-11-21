@@ -1,7 +1,7 @@
 import * as chai from "chai";
 import * as chaiAsPromised from "chai-as-promised";
 import "mocha";
-import { FilesystemData } from "../../../src/server/parsing/FilesystemData";
+import { FilesystemData } from "../../../src/server/parsing/FilesystemData.js";
 
 
 before(function() {

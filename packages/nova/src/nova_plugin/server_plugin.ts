@@ -10,9 +10,9 @@ import { Resource } from 'nova_ecs/resource';
 import { System } from 'nova_ecs/system';
 import { SingletonComponent } from 'nova_ecs/world';
 import { Subscription } from 'rxjs';
-import { GameDataResource } from "./game_data_resource";
-import { makeSystem } from './make_system';
-import { MultiRoomResource, SystemComponent } from "./nova_plugin";
+import { GameDataResource } from "./game_data_resource.js";
+import { makeSystem } from './make_system.js';
+import { MultiRoomResource, SystemComponent } from "./nova_plugin.js";
 
 export const PlayerData = t.intersection([
     t.type({

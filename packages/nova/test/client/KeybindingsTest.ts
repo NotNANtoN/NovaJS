@@ -2,8 +2,8 @@ import { fail } from "assert";
 import * as chai from "chai";
 import * as chaiAsPromised from "chai-as-promised";
 import "mocha";
-import { Keybindings } from "../../src/client/KeyboardController";
-import { ControlEvent } from "../../src/common/Controller";
+import { Keybindings } from "../../src/client/KeyboardController.js";
+import { ControlEvent } from "../../src/common/Controller.js";
 import { PathReporter } from "io-ts/lib/PathReporter";
 import { isRight } from "fp-ts/Either";
 

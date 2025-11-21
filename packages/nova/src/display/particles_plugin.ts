@@ -11,10 +11,10 @@ import { System } from "nova_ecs/system";
 import { SingletonComponent } from "nova_ecs/world";
 import * as particles from "@pixi/particle-emitter";
 import * as PIXI from "pixi.js";
-import { ProjectileDataComponent } from "../nova_plugin/projectile_data";
-import { ProjectileCollisionEvent } from "../nova_plugin/projectile_plugin";
-import { PixiAppResource } from "./pixi_app_resource";
-import { Space } from "./space_resource";
+import { ProjectileDataComponent } from "../nova_plugin/projectile_data.js";
+import { ProjectileCollisionEvent } from "../nova_plugin/projectile_plugin.js";
+import { PixiAppResource } from "./pixi_app_resource.js";
+import { Space } from "./space_resource.js";
 
 
 const ParticleContainerResource = new Resource<PIXI.Container>('ParticleContainerResource');

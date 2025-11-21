@@ -1,7 +1,7 @@
 import { isRight } from "fp-ts/Either";
 import { BehaviorSubject, Subject } from "rxjs";
-import { ChannelClient } from "./Channel";
-import { SocketMessage } from "./SocketMessage";
+import { ChannelClient } from "./Channel.js";
+import { SocketMessage } from "./SocketMessage.js";
 
 export class SocketChannelClient implements ChannelClient {
     readonly message = new Subject<unknown>();

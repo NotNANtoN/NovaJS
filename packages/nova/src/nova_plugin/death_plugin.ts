@@ -9,11 +9,11 @@ import { MovementPhysicsComponent, MovementState, MovementStateComponent, Moveme
 import { Time, TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
-import { BlastDamageComponent } from './blast_plugin';
-import { ArmorComponent, IonizationColorComponent, IonizationComponent, ShieldComponent } from './health_plugin';
-import { ProjectileComponent } from './projectile_data';
-import { ShipComponent, ShipDataComponent, ShipPhysicsComponent } from './ship_plugin';
-import { PlayerShipSelector } from './player_ship_plugin';
+import { BlastDamageComponent } from './blast_plugin.js';
+import { ArmorComponent, IonizationColorComponent, IonizationComponent, ShieldComponent } from './health_plugin.js';
+import { ProjectileComponent } from './projectile_data.js';
+import { ShipComponent, ShipDataComponent, ShipPhysicsComponent } from './ship_plugin.js';
+import { PlayerShipSelector } from './player_ship_plugin.js';
 import { Position } from 'nova_ecs/datatypes/position';
 import { Component } from 'nova_ecs/component';
 import { GetEntity } from 'nova_ecs/arg_types';

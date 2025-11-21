@@ -10,15 +10,15 @@ import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
 import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { System } from "nova_ecs/system";
 import { v4 } from "uuid";
-import { ExplosionDataComponent } from "../nova_plugin/animation_plugin";
-import { GameDataResource } from "../nova_plugin/game_data_resource";
-import { ProjectileDataComponent } from "../nova_plugin/projectile_data";
-import { ProjectileExplodeEvent } from "../nova_plugin/projectile_plugin";
-import { SoundEvent } from "../nova_plugin/sound_event";
-import { AnimationGraphicComponent } from "./animation_graphic_plugin";
-import { DeathEvent, PlayerDeathSystem, ZeroArmorEvent } from "../nova_plugin/death_plugin";
-import { ShipComponent, ShipDataComponent } from "../nova_plugin/ship_plugin";
-import { DeathAISystem } from "../nova_plugin/npc_plugin";
+import { ExplosionDataComponent } from "../nova_plugin/animation_plugin.js";
+import { GameDataResource } from "../nova_plugin/game_data_resource.js";
+import { ProjectileDataComponent } from "../nova_plugin/projectile_data.js";
+import { ProjectileExplodeEvent } from "../nova_plugin/projectile_plugin.js";
+import { SoundEvent } from "../nova_plugin/sound_event.js";
+import { AnimationGraphicComponent } from "./animation_graphic_plugin.js";
+import { DeathEvent, PlayerDeathSystem, ZeroArmorEvent } from "../nova_plugin/death_plugin.js";
+import { ShipComponent, ShipDataComponent } from "../nova_plugin/ship_plugin.js";
+import { DeathAISystem } from "../nova_plugin/npc_plugin.js";
 
 
 const ExplosionState = new Component<{

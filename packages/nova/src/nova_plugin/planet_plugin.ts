@@ -10,12 +10,12 @@ import { Provide } from 'nova_ecs/provide';
 import { ProvideAsync } from "nova_ecs/provide_async";
 import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
-import { AnimationComponent } from './animation_plugin';
-import { ControlStateEvent } from './control_state_event';
-import { GameDataResource } from './game_data_resource';
-import { PlayerShipSelector } from './player_ship_plugin';
-import { ShipComponent } from './ship_plugin';
-import { Target } from './target_component';
+import { AnimationComponent } from './animation_plugin.js';
+import { ControlStateEvent } from './control_state_event.js';
+import { GameDataResource } from './game_data_resource.js';
+import { PlayerShipSelector } from './player_ship_plugin.js';
+import { ShipComponent } from './ship_plugin.js';
+import { Target } from './target_component.js';
 
 export const PlanetType = t.type({
     id: t.string // Not a UUID. A nova id.

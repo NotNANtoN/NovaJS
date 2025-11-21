@@ -1,6 +1,6 @@
 import { ProjectileWeaponData } from 'novadatainterface/WeaponData';
 import { Component } from 'nova_ecs/component';
-import { Hull } from './collisions_plugin';
+import { Hull } from './collisions_plugin.js';
 
 
 export interface ProjectileType {

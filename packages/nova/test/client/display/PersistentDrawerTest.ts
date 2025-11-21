@@ -2,9 +2,9 @@ import { fail } from "assert";
 import * as chai from "chai";
 import * as chaiAsPromised from "chai-as-promised";
 import "mocha";
-import { PersistentDrawer } from "../../../src/client/display/PersistentDrawer";
-import { Drawable } from "../../../src/client/display/Drawable";
-import { Position } from "../../../src/engine/Position";
+import { PersistentDrawer } from "../../../src/client/display/PersistentDrawer.js";
+import { Drawable } from "../../../src/client/display/Drawable.js";
+import { Position } from "../../../src/engine/Position.js";
 
 before(function() {
     chai.should();

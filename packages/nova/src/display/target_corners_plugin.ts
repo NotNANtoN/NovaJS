@@ -4,13 +4,13 @@ import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { Resource } from "nova_ecs/resource";
 import { System } from "nova_ecs/system";
 import * as PIXI from "pixi.js";
-import { GameData } from "../client/gamedata/GameData";
-import { GameDataResource } from "../nova_plugin/game_data_resource";
-import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin";
-import { TargetComponent } from "../nova_plugin/target_component";
-import { mod } from "../util/mod";
-import { AnimationGraphicComponent, ObjectDrawSystem } from "./animation_graphic_plugin";
-import { Space } from "./space_resource";
+import { GameData } from "../client/gamedata/GameData.js";
+import { GameDataResource } from "../nova_plugin/game_data_resource.js";
+import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
+import { TargetComponent } from "../nova_plugin/target_component.js";
+import { mod } from "../util/mod.js";
+import { AnimationGraphicComponent, ObjectDrawSystem } from "./animation_graphic_plugin.js";
+import { Space } from "./space_resource.js";
 
 
 const NUM_CORNERS = 4;

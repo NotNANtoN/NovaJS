@@ -14,10 +14,10 @@ import { System } from "nova_ecs/system";
 import { SingletonComponent } from "nova_ecs/world";
 import RBush, { BBox } from "rbush";
 import * as SAT from "sat";
-import { getFrameFromMovement } from "../util/get_frame_and_angle";
-import { AnimationComponent } from "./animation_plugin";
-import { CollisionEvent, CollisionHitter, CollisionHitterComponent, CollisionVulnerability, CollisionVulnerabilityComponent } from "./collision_interaction";
-import { GameDataResource } from "./game_data_resource";
+import { getFrameFromMovement } from "../util/get_frame_and_angle.js";
+import { AnimationComponent } from "./animation_plugin.js";
+import { CollisionEvent, CollisionHitter, CollisionHitterComponent, CollisionVulnerability, CollisionVulnerabilityComponent } from "./collision_interaction.js";
+import { GameDataResource } from "./game_data_resource.js";
 
 type Shape = SAT.Polygon | SAT.Circle;
 export abstract class Hull {

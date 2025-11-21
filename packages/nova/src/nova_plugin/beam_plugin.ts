@@ -13,16 +13,16 @@ import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
 import * as SAT from "sat";
 import { v4 } from 'uuid';
-import { CompositeHull, HurtboxHullComponent, UpdateHitboxHullSystem } from './collisions_plugin';
-import { CollisionEvent, CollisionHitterComponent } from './collision_interaction';
-import { CreateTime, CreateTimeArgProvider } from './create_time';
-import { DamagedEvent } from './death_plugin';
-import { applyExitPoint, ExitPointData } from './exit_point';
-import { FireSubs, OwnerComponent, sampleInaccuracy, SourceComponent, WeaponConstructors, WeaponEntry } from './fire_weapon_plugin';
-import { zeroOrderGuidance } from './guidance';
-import { SoundEvent } from './sound_event';
-import { TargetComponent } from './target_component';
-import { WeaponsSystem } from './weapon_plugin';
+import { CompositeHull, HurtboxHullComponent, UpdateHitboxHullSystem } from './collisions_plugin.js';
+import { CollisionEvent, CollisionHitterComponent } from './collision_interaction.js';
+import { CreateTime, CreateTimeArgProvider } from './create_time.js';
+import { DamagedEvent } from './death_plugin.js';
+import { applyExitPoint, ExitPointData } from './exit_point.js';
+import { FireSubs, OwnerComponent, sampleInaccuracy, SourceComponent, WeaponConstructors, WeaponEntry } from './fire_weapon_plugin.js';
+import { zeroOrderGuidance } from './guidance.js';
+import { SoundEvent } from './sound_event.js';
+import { TargetComponent } from './target_component.js';
+import { WeaponsSystem } from './weapon_plugin.js';
 
 
 interface BeamState {

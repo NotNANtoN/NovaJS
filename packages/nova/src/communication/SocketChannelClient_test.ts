@@ -1,8 +1,8 @@
 import { isLeft } from "fp-ts/Either";
-import { SocketChannelClient } from "./SocketChannelClient";
-import { SocketMessage } from "./SocketMessage";
+import { SocketChannelClient } from "./SocketChannelClient.js";
+import { SocketMessage } from "./SocketMessage.js";
 import { take } from "rxjs/operators";
-import { Callbacks, On, trackOn } from "./test_utils";
+import { Callbacks, On, trackOn } from "./test_utils.js";
 
 describe("SocketChannelClient", function() {
     let webSocket: jasmine.SpyObj<WebSocket>;

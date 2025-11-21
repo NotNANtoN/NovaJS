@@ -3,7 +3,7 @@ import { Plugin } from 'nova_ecs/plugin';
 import { DeltaResource } from "nova_ecs/plugins/delta_plugin";
 import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { System } from "nova_ecs/system";
-import { applyStatDelta, getStatDelta, PartialStat, stat, Stat } from "./stat";
+import { applyStatDelta, getStatDelta, PartialStat, stat, Stat } from "./stat.js";
 
 
 export const ShieldComponent = new Component<Stat>('Shield');

@@ -1,5 +1,5 @@
 import { EcsEvent } from "nova_ecs/events";
-import { ControlAction } from "./controls";
+import { ControlAction } from "./controls.js";
 
 
 export type ControlState = Map<ControlAction, false | 'start' | 'repeat' | true>;

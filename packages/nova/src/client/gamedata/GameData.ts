@@ -20,7 +20,7 @@ import { WeaponData } from 'novadatainterface/WeaponData';
 import * as PIXI from 'pixi.js';
 import * as sound from '@pixi/sound';
 import urlJoin from 'url-join';
-import { dataPath, idsPath } from '../../common/GameDataPaths';
+import { dataPath, idsPath } from '../../common/GameDataPaths.js';
 import PQueue from 'p-queue';
 
 class WeaponGettable extends Gettable<WeaponData> {

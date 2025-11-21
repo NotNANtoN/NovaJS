@@ -1,5 +1,5 @@
 import 'jasmine';
-import { FactoryQueue } from './factory_queue';
+import { FactoryQueue } from './factory_queue.js';
 
 class NumberHolder {
     constructor(public value: number) { }

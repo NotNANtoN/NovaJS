@@ -7,10 +7,10 @@ import { Resource } from 'nova_ecs/resource';
 import { System } from 'nova_ecs/system';
 import { SingletonComponent } from 'nova_ecs/world';
 import { Subject } from 'rxjs';
-import { GameData } from '../client/gamedata/GameData';
-import { ControlAction, Controls, getActions, SavedControls } from './controls';
-import { GameDataResource } from './game_data_resource';
-import { PlatformResource } from './platform_plugin';
+import { GameData } from '../client/gamedata/GameData.js';
+import { ControlAction, Controls, getActions, SavedControls } from './controls.js';
+import { GameDataResource } from './game_data_resource.js';
+import { PlatformResource } from './platform_plugin.js';
 
 
 export interface ControlEvent {

@@ -13,22 +13,22 @@ import { ProvideAsync } from "nova_ecs/provide_async";
 import { System } from 'nova_ecs/system';
 import * as SAT from "sat";
 import { v4 } from 'uuid';
-import { FactoryQueue } from '../common/factory_queue';
-import { AnimationComponent } from './animation_plugin';
-import { BlastDamageComponent, BlastIgnoreComponent } from './blast_plugin';
-import { CompositeHull, hullFromAnimation, HurtboxHullComponent } from './collisions_plugin';
-import { CollisionEvent, CollisionHitterComponent, CollisionVulnerabilityComponent } from './collision_interaction';
-import { CreateTime } from './create_time';
-import { DamagedEvent, ZeroArmorEvent } from './death_plugin';
-import { FireSubs, OwnerComponent, SourceComponent, SubCounts, VulnerableToPD, WeaponConstructors, WeaponEntry } from './fire_weapon_plugin';
-import { GameDataResource } from './game_data_resource';
-import { firstOrderWithFallback, Guidance, GuidanceComponent } from './guidance';
-import { ArmorComponent, ShieldComponent } from './health_plugin';
-import { ProjectileBlastHull, ProjectileComponent, ProjectileDataComponent } from './projectile_data';
-import { ReturnToQueueComponent } from './return_to_queue_plugin';
-import { SoundEvent } from './sound_event';
-import { Stat } from './stat';
-import { TargetComponent } from './target_component';
+import { FactoryQueue } from '../common/factory_queue.js';
+import { AnimationComponent } from './animation_plugin.js';
+import { BlastDamageComponent, BlastIgnoreComponent } from './blast_plugin.js';
+import { CompositeHull, hullFromAnimation, HurtboxHullComponent } from './collisions_plugin.js';
+import { CollisionEvent, CollisionHitterComponent, CollisionVulnerabilityComponent } from './collision_interaction.js';
+import { CreateTime } from './create_time.js';
+import { DamagedEvent, ZeroArmorEvent } from './death_plugin.js';
+import { FireSubs, OwnerComponent, SourceComponent, SubCounts, VulnerableToPD, WeaponConstructors, WeaponEntry } from './fire_weapon_plugin.js';
+import { GameDataResource } from './game_data_resource.js';
+import { firstOrderWithFallback, Guidance, GuidanceComponent } from './guidance.js';
+import { ArmorComponent, ShieldComponent } from './health_plugin.js';
+import { ProjectileBlastHull, ProjectileComponent, ProjectileDataComponent } from './projectile_data.js';
+import { ReturnToQueueComponent } from './return_to_queue_plugin.js';
+import { SoundEvent } from './sound_event.js';
+import { Stat } from './stat.js';
+import { TargetComponent } from './target_component.js';
 
 
 class ProjectileWeaponEntry extends WeaponEntry {

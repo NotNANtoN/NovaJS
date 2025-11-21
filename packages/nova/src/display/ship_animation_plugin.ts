@@ -1,12 +1,12 @@
 import { Plugin } from "nova_ecs/plugin";
 import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { System } from "nova_ecs/system";
-import { GameDataResource } from "../nova_plugin/game_data_resource";
-import { IonizationColorComponent } from "../nova_plugin/health_plugin";
-import { IsIonizedComponent } from "../nova_plugin/ionization_plugin";
-import { ShipComponent } from "../nova_plugin/ship_plugin";
-import { WeaponsStateComponent } from "../nova_plugin/weapons_state";
-import { AnimationGraphicComponent } from "./animation_graphic_plugin";
+import { GameDataResource } from "../nova_plugin/game_data_resource.js";
+import { IonizationColorComponent } from "../nova_plugin/health_plugin.js";
+import { IsIonizedComponent } from "../nova_plugin/ionization_plugin.js";
+import { ShipComponent } from "../nova_plugin/ship_plugin.js";
+import { WeaponsStateComponent } from "../nova_plugin/weapons_state.js";
+import { AnimationGraphicComponent } from "./animation_graphic_plugin.js";
 
 
 export const ShipAnimationSystem = new System({

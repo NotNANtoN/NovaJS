@@ -1,8 +1,8 @@
 import { Plugin } from 'nova_ecs/plugin';
 import { System } from 'nova_ecs/system';
 import { SingletonComponent } from 'nova_ecs/world';
-import { ControlStateEvent } from '../nova_plugin/control_state_event';
-import { PixiAppResource } from './pixi_app_resource';
+import { ControlStateEvent } from '../nova_plugin/control_state_event.js';
+import { PixiAppResource } from './pixi_app_resource.js';
 
 
 const FullscreenSystem = new System({

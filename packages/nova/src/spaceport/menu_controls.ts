@@ -1,6 +1,6 @@
 import { Observable, Subscription } from "rxjs";
-import { ControlAction } from "../nova_plugin/controls";
-import { ControlEvent } from "../nova_plugin/controls_plugin";
+import { ControlAction } from "../nova_plugin/controls.js";
+import { ControlEvent } from "../nova_plugin/controls_plugin.js";
 
 export class MenuControls {
     private controlsSubscription: Subscription | undefined;

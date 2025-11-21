@@ -9,10 +9,10 @@ import { Plugin } from 'nova_ecs/plugin';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
 import { MovementPhysics, MovementType } from 'nova_ecs/plugins/movement_plugin';
 import { ProvideAsync } from "nova_ecs/provide_async";
-import { DefaultMap } from '../common/DefaultMap';
-import { GameDataResource } from './game_data_resource';
-import { Stat } from './stat';
-import { WeaponsStateComponent, WeaponState } from './weapons_state';
+import { DefaultMap } from '../common/DefaultMap.js';
+import { GameDataResource } from './game_data_resource.js';
+import { Stat } from './stat.js';
+import { WeaponsStateComponent, WeaponState } from './weapons_state.js';
 
 const OutfitState = t.type({
     count: t.number,

@@ -6,8 +6,8 @@ import io_server_precursor from "socket.io";
 import * as io from "socket.io-client";
 import { Subject } from "rxjs";
 import { first } from "rxjs/operators";
-import { SocketChannelClient } from "../../src/communication/SocketChannelClient";
-import { SocketChannelServer } from "../../src/communication/SocketChannelServer";
+import { SocketChannelClient } from "../../src/communication/SocketChannelClient.js";
+import { SocketChannelServer } from "../../src/communication/SocketChannelServer.js";
 
 
 before(function() {

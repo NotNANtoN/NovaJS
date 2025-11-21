@@ -1,4 +1,4 @@
-import { FactoryQueue } from "./factory_queue";
+import { FactoryQueue } from "./factory_queue.js";
 
 
 export class FactoryQueueMap<Item> {

@@ -5,11 +5,11 @@ import { MovementPhysicsComponent, MovementStateComponent, MovementSystem, Movem
 import { Resource } from 'nova_ecs/resource';
 import { System } from 'nova_ecs/system';
 import { SingletonComponent } from 'nova_ecs/world';
-import { EcsControlEvent } from './controls_plugin';
-import { ControlState, ControlStateEvent } from './control_state_event';
-import { PlatformResource } from './platform_plugin';
-import { PlayerShipPlugin, PlayerShipSelector } from './player_ship_plugin';
-import { TargetComponent } from './target_component';
+import { EcsControlEvent } from './controls_plugin.js';
+import { ControlState, ControlStateEvent } from './control_state_event.js';
+import { PlatformResource } from './platform_plugin.js';
+import { PlayerShipPlugin, PlayerShipSelector } from './player_ship_plugin.js';
+import { TargetComponent } from './target_component.js';
 
 
 // A resource because the ship may change.

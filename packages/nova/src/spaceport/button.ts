@@ -1,6 +1,6 @@
 import * as PIXI from 'pixi.js';
 import { Subject } from 'rxjs';
-import { GameData } from '../client/gamedata/GameData';
+import { GameData } from '../client/gamedata/GameData.js';
 
 const BUTTON_IDS = new Map([
     ['normal', {

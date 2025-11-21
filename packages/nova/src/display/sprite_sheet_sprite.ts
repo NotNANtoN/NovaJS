@@ -2,9 +2,9 @@ import { AnimationImage } from "novadatainterface/Animation";
 import { GameDataInterface } from "novadatainterface/GameDataInterface";
 import * as PIXI from "pixi.js";
 import { AnimationImageIndex } from "novadatainterface/Animation";
-import { texturesFromFrames } from "./textures_from_frames";
-import { mod } from "../util/mod";
-import { getFrameAndAngle } from "../util/get_frame_and_angle";
+import { texturesFromFrames } from "./textures_from_frames.js";
+import { mod } from "../util/mod.js";
+import { getFrameAndAngle } from "../util/get_frame_and_angle.js";
 
 
 const TWO_PI = 2 * Math.PI;

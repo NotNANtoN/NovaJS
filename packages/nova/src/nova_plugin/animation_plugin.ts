@@ -3,7 +3,7 @@ import { ExplosionData } from "novadatainterface/ExplosionData";
 import { Component } from "nova_ecs/component";
 import { Plugin } from "nova_ecs/plugin";
 import { Provide } from "nova_ecs/provide";
-import { ProjectileDataComponent } from "./projectile_data";
+import { ProjectileDataComponent } from "./projectile_data.js";
 
 export const AnimationComponent = new Component<Animation>('AnimationComponent');
 

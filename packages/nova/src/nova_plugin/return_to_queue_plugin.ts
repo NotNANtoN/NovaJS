@@ -4,7 +4,7 @@ import { Entity } from 'nova_ecs/entity';
 import { DeleteEvent } from 'nova_ecs/events';
 import { Plugin } from 'nova_ecs/plugin';
 import { System } from 'nova_ecs/system';
-import { FactoryQueue } from '../common/factory_queue';
+import { FactoryQueue } from '../common/factory_queue.js';
 
 
 export const ReturnToQueueComponent = new Component<{

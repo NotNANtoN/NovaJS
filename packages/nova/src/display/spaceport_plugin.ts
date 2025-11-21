@@ -6,15 +6,15 @@ import { CommunicatorResource, MultiplayerData } from 'nova_ecs/plugins/multipla
 import { Provide } from 'nova_ecs/provide';
 import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
-import { GameData } from '../client/gamedata/GameData';
-import { ControlsSubject } from '../nova_plugin/controls_plugin';
-import { GameDataResource } from '../nova_plugin/game_data_resource';
-import { LandEvent, PlanetComponent } from '../nova_plugin/planet_plugin';
-import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin';
-import { Spaceport } from '../spaceport/spaceport';
-import { deImmerify } from '../util/deimmerify';
-import { ResizeEvent, ScreenSize } from './screen_size_plugin';
-import { Stage } from './stage_resource';
+import { GameData } from '../client/gamedata/GameData.js';
+import { ControlsSubject } from '../nova_plugin/controls_plugin.js';
+import { GameDataResource } from '../nova_plugin/game_data_resource.js';
+import { LandEvent, PlanetComponent } from '../nova_plugin/planet_plugin.js';
+import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin.js';
+import { Spaceport } from '../spaceport/spaceport.js';
+import { deImmerify } from '../util/deimmerify.js';
+import { ResizeEvent, ScreenSize } from './screen_size_plugin.js';
+import { Stage } from './stage_resource.js';
 
 
 const SpaceportComponent = new Component<Spaceport>("Spaceport");

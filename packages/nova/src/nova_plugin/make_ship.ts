@@ -4,7 +4,7 @@ import { Position } from "nova_ecs/datatypes/position";
 import { Vector } from "nova_ecs/datatypes/vector";
 import { Entity } from "nova_ecs/entity";
 import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
-import { ShipComponent } from "./ship_plugin";
+import { ShipComponent } from "./ship_plugin.js";
 
 export function makeShip(shipData: ShipData): Entity {
     const ship = new Entity(shipData.name);

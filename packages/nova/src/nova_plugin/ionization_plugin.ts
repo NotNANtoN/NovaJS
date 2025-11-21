@@ -5,8 +5,8 @@ import { Optional } from "nova_ecs/optional";
 import { Plugin } from "nova_ecs/plugin";
 import { MovementPhysicsComponent } from "nova_ecs/plugins/movement_plugin";
 import { System } from "nova_ecs/system";
-import { IonizationComponent } from "./health_plugin";
-import { getShipMovementPhysics, ShipPhysicsComponent } from "./ship_plugin";
+import { IonizationComponent } from "./health_plugin.js";
+import { getShipMovementPhysics, ShipPhysicsComponent } from "./ship_plugin.js";
 
 
 const ION_FACTOR = 0.6

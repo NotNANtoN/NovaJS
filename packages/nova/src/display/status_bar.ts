@@ -16,22 +16,22 @@ import { System } from "nova_ecs/system";
 import * as PIXI from "pixi.js";
 import { Subject } from "rxjs";
 import { v4 } from "uuid";
-import { GameData } from "../client/gamedata/GameData";
-import { GameDataResource } from "../nova_plugin/game_data_resource";
-import { ArmorComponent, ShieldComponent } from "../nova_plugin/health_plugin";
-import { makeNpc } from "../nova_plugin/npc_plugin";
-import { PlanetDataComponent } from "../nova_plugin/planet_plugin";
-import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin";
-import { ShipDataComponent } from "../nova_plugin/ship_plugin";
-import { Stat } from "../nova_plugin/stat";
-import { TargetComponent } from "../nova_plugin/target_component";
-import { ChangeSecondaryEvent } from "../nova_plugin/weapon_plugin";
-import { Button } from "../spaceport/button";
-import { AnimationGraphic } from "./animation_graphic";
-import { AnimationGraphicComponent } from "./animation_graphic_plugin";
-import { PixiAppResource } from "./pixi_app_resource";
-import { ResizeEvent } from "./screen_size_plugin";
-import { Stage } from "./stage_resource";
+import { GameData } from "../client/gamedata/GameData.js";
+import { GameDataResource } from "../nova_plugin/game_data_resource.js";
+import { ArmorComponent, ShieldComponent } from "../nova_plugin/health_plugin.js";
+import { makeNpc } from "../nova_plugin/npc_plugin.js";
+import { PlanetDataComponent } from "../nova_plugin/planet_plugin.js";
+import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
+import { ShipDataComponent } from "../nova_plugin/ship_plugin.js";
+import { Stat } from "../nova_plugin/stat.js";
+import { TargetComponent } from "../nova_plugin/target_component.js";
+import { ChangeSecondaryEvent } from "../nova_plugin/weapon_plugin.js";
+import { Button } from "../spaceport/button.js";
+import { AnimationGraphic } from "./animation_graphic.js";
+import { AnimationGraphicComponent } from "./animation_graphic_plugin.js";
+import { PixiAppResource } from "./pixi_app_resource.js";
+import { ResizeEvent } from "./screen_size_plugin.js";
+import { Stage } from "./stage_resource.js";
 
 
 class StatusBar {

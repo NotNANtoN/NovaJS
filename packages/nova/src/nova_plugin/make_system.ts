@@ -4,10 +4,10 @@ import { AsyncSystem } from "nova_ecs/async_system";
 import { MultiplayerData } from "nova_ecs/plugins/multiplayer_plugin";
 import { Resource } from "nova_ecs/resource";
 import { SingletonComponent, World } from "nova_ecs/world";
-import { GameDataResource } from "./game_data_resource";
-import { makePlanet } from "./make_planet";
-import { SystemIdResource } from "./system_id_resource";
-import { SystemPlugin } from "./system_plugin";
+import { GameDataResource } from "./game_data_resource.js";
+import { makePlanet } from "./make_planet.js";
+import { SystemIdResource } from "./system_id_resource.js";
+import { SystemPlugin } from "./system_plugin.js";
 
 
 const AddedPlanetsResource = new Resource<{ val: boolean }>('AddedPlanetsResource');

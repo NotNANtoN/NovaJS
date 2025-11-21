@@ -1,4 +1,4 @@
-import { Queue, QueueImpl } from "./queue";
+import { Queue, QueueImpl } from "./queue.js";
 
 
 export class FactoryQueue<Item> implements Queue<Item> {

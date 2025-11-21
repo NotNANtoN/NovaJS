@@ -5,10 +5,10 @@ import { EcsEvent } from "nova_ecs/events";
 import { Plugin } from "nova_ecs/plugin";
 import { Provide } from "nova_ecs/provide";
 import { System } from "nova_ecs/system";
-import { deImmerify } from "../util/deimmerify";
-import { ControlStateEvent } from "./control_state_event";
-import { PlayerShipSelector } from "./player_ship_plugin";
-import { SystemIdResource } from "./system_id_resource";
+import { deImmerify } from "../util/deimmerify.js";
+import { ControlStateEvent } from "./control_state_event.js";
+import { PlayerShipSelector } from "./player_ship_plugin.js";
+import { SystemIdResource } from "./system_id_resource.js";
 
 export interface InitiateJump {
     to: string /* system uuid */,

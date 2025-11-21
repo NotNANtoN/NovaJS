@@ -18,12 +18,12 @@ import { Query } from 'nova_ecs/query';
 import { Resource } from 'nova_ecs/resource';
 import { DefaultMap } from 'nova_ecs/utils';
 import { SingletonComponent } from 'nova_ecs/world';
-import { AnimationComponent } from './animation_plugin';
-import { applyExitPoint, ExitPointData, getExitPointData } from './exit_point';
-import { GameDataResource } from './game_data_resource';
-import { firstOrderWithFallback } from './guidance';
-import { TargetComponent } from './target_component';
-import { WeaponsStateComponent } from './weapons_state';
+import { AnimationComponent } from './animation_plugin.js';
+import { applyExitPoint, ExitPointData, getExitPointData } from './exit_point.js';
+import { GameDataResource } from './game_data_resource.js';
+import { firstOrderWithFallback } from './guidance.js';
+import { TargetComponent } from './target_component.js';
+import { WeaponsStateComponent } from './weapons_state.js';
 
 export const WeaponConstructors = new Resource<Map<WeaponData['type'],
     { new(data: WeaponData, runQuery: RunQueryFunction): WeaponEntry }>>('WeaponConstructors');

@@ -1,6 +1,6 @@
 import { isLeft } from 'fp-ts/Either';
 import 'jasmine';
-import { Controls, SavedControls } from './controls';
+import { Controls, SavedControls } from './controls.js';
 
 describe('SavedControls', () => {
     it('parses single keys', () => {

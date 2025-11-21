@@ -1,15 +1,15 @@
 import { AsyncSystem } from 'nova_ecs/async_system';
 import { Plugin } from 'nova_ecs/plugin';
 import { Resource } from 'nova_ecs/resource';
-import { GameData } from '../client/gamedata/GameData';
-import { ControlsSubject, EcsControlEvent } from '../nova_plugin/controls_plugin';
-import { GameDataResource } from '../nova_plugin/game_data_resource';
-import { JumpRouteComponent } from '../nova_plugin/jump_plugin';
-import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin';
-import { SystemIdResource } from '../nova_plugin/system_id_resource';
-import { Starmap } from '../spaceport/starmap';
-import { ScreenSize } from './screen_size_plugin';
-import { Stage } from './stage_resource';
+import { GameData } from '../client/gamedata/GameData.js';
+import { ControlsSubject, EcsControlEvent } from '../nova_plugin/controls_plugin.js';
+import { GameDataResource } from '../nova_plugin/game_data_resource.js';
+import { JumpRouteComponent } from '../nova_plugin/jump_plugin.js';
+import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin.js';
+import { SystemIdResource } from '../nova_plugin/system_id_resource.js';
+import { Starmap } from '../spaceport/starmap.js';
+import { ScreenSize } from './screen_size_plugin.js';
+import { Stage } from './stage_resource.js';
 
 const StarmapResource = new Resource<Starmap>("Starmap");
 

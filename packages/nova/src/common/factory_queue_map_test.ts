@@ -1,5 +1,5 @@
 import "jasmine";
-import { FactoryQueueMap } from "./factory_queue_map";
+import { FactoryQueueMap } from "./factory_queue_map.js";
 class NumberStringHolder {
     constructor(public num: number, public id: string) { }
 }

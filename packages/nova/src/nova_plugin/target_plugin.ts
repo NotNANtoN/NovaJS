@@ -8,11 +8,11 @@ import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
 import { Provide } from "nova_ecs/provide";
 import { Query } from "nova_ecs/query";
 import { System } from "nova_ecs/system";
-import { ControlStateEvent } from "./control_state_event";
-import { OwnerComponent } from "./fire_weapon_plugin";
-import { PlayerShipSelector } from "./player_ship_plugin";
-import { ShipComponent } from "./ship_plugin";
-import { Target, TargetComponent } from "./target_component";
+import { ControlStateEvent } from "./control_state_event.js";
+import { OwnerComponent } from "./fire_weapon_plugin.js";
+import { PlayerShipSelector } from "./player_ship_plugin.js";
+import { ShipComponent } from "./ship_plugin.js";
+import { Target, TargetComponent } from "./target_component.js";
 
 
 const TargetIndexComponent = new Component<{ index: number }>('TargetIndexComponent');

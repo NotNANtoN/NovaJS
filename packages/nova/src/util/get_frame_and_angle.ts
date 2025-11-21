@@ -1,6 +1,6 @@
 import { Animation } from "novadatainterface/Animation";
 import { MovementState } from "nova_ecs/plugins/movement_plugin";
-import { mod } from "./mod";
+import { mod } from "./mod.js";
 
 
 const TWO_PI = 2 * Math.PI;

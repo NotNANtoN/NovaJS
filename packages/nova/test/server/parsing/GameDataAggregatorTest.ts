@@ -1,16 +1,16 @@
 import * as chai from "chai";
 import * as chaiAsPromised from "chai-as-promised";
 import "mocha";
-import { GameDataInterface } from "../../../../novadatainterface/GameDataInterface";
-import { NovaDataInterface } from "../../../../novadatainterface/NovaDataInterface";
-import { Gettable } from "../../../../novadatainterface/Gettable";
-import { BaseData } from "../../../../novadatainterface/BaseData";
-import { GameDataAggregator } from "../../../src/server/parsing/GameDataAggregator";
+import { GameDataInterface } from "novadatainterface/GameDataInterface";
+import { NovaDataInterface } from "novadatainterface/NovaDataInterface";
+import { Gettable } from "novadatainterface/Gettable";
+import { BaseData } from "novadatainterface/BaseData";
+import { GameDataAggregator } from "../../../src/server/parsing/GameDataAggregator.js";
 
-import { NovaIDs, DefaultNovaIDs } from "../../../../novadatainterface/NovaIDs";
+import { NovaIDs } from "novadatainterface/NovaIDs";
 
 
-before(function() {
+before(function () {
     chai.should();
     chai.use(chaiAsPromised);
 
@@ -26,7 +26,7 @@ class TestGameData implements GameDataInterface {
         this.ids = Promise.resolve(DefaultNovaIDs);
         this.data = {
 
-		};
+        };
         this.data[dataType] = new Gettable<BaseData>(async function(id: string) {
             return {
                 name: "Got the " + dataType + " of id " + id,

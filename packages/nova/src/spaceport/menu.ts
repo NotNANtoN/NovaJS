@@ -1,9 +1,9 @@
 import * as PIXI from 'pixi.js';
 import { firstValueFrom, Observable, Subject } from 'rxjs';
-import { GameData } from '../client/gamedata/GameData';
-import { ControlEvent } from '../nova_plugin/controls_plugin';
-import { Button } from './button';
-import { MenuControls } from './menu_controls';
+import { GameData } from '../client/gamedata/GameData.js';
+import { ControlEvent } from '../nova_plugin/controls_plugin.js';
+import { Button } from './button.js';
+import { MenuControls } from './menu_controls.js';
 
 type Buttons = {
     [index: string]: Button,

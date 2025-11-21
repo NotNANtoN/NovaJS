@@ -11,19 +11,19 @@ import { World } from "nova_ecs/world";
 import path from "path";
 import { v4 } from "uuid";
 import { Worker } from "worker_threads";
-import { CommunicatorServer } from "./src/communication/CommunicatorServer";
-import { MultiRoom } from './src/communication/multi_room_communicator';
-import { SocketChannelServer } from "./src/communication/SocketChannelServer";
-import { GameDataResource } from './src/nova_plugin/game_data_resource';
-import { makeShip } from "./src/nova_plugin/make_ship";
-import { MultiRoomResource, NovaPlugin } from './src/nova_plugin/nova_plugin';
-import { ServerPlugin } from "./src/nova_plugin/server_plugin";
-import { NovaRepl } from "./src/server/nova_repl";
-import { FilesystemData } from "./src/server/parsing/FilesystemData";
-import { GameDataAggregator } from "./src/server/parsing/GameDataAggregator";
-import { NovaParseWorkerApi } from "./src/server/parsing/nova_parse_worker";
-import { setupRoutes } from "./src/server/setupRoutes";
-//import { NovaRepl } from "./src/server/NovaRepl";
+import { CommunicatorServer } from "./src/communication/CommunicatorServer.js";
+import { MultiRoom } from './src/communication/multi_room_communicator.js';
+import { SocketChannelServer } from "./src/communication/SocketChannelServer.js";
+import { GameDataResource } from './src/nova_plugin/game_data_resource.js';
+import { makeShip } from "./src/nova_plugin/make_ship.js";
+import { MultiRoomResource, NovaPlugin } from './src/nova_plugin/nova_plugin.js';
+import { ServerPlugin } from "./src/nova_plugin/server_plugin.js";
+import { NovaRepl } from "./src/server/nova_repl.js";
+import { FilesystemData } from "./src/server/parsing/FilesystemData.js";
+import { GameDataAggregator } from "./src/server/parsing/GameDataAggregator.js";
+import { NovaParseWorkerApi } from "./src/server/parsing/nova_parse_worker.js";
+import { setupRoutes } from "./src/server/setupRoutes.js";
+//import { NovaRepl } from "./src/server/NovaRepl.js";
 
 
 const Settings = t.partial({

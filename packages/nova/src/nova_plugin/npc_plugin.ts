@@ -6,12 +6,12 @@ import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
 import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { Query } from "nova_ecs/query";
 import { System } from "nova_ecs/system";
-import { DeathEvent } from "./death_plugin";
-import { makeShip } from "./make_ship";
-import { ShipComponent } from "./ship_plugin";
-import { TargetComponent } from "./target_component";
-import { WeaponsStateComponent } from "./weapons_state";
-import { GameDataResource } from "./game_data_resource";
+import { DeathEvent } from "./death_plugin.js";
+import { makeShip } from "./make_ship.js";
+import { ShipComponent } from "./ship_plugin.js";
+import { TargetComponent } from "./target_component.js";
+import { WeaponsStateComponent } from "./weapons_state.js";
+import { GameDataResource } from "./game_data_resource.js";
 
 const TargetsQuery = new Query([UUID, ShipComponent] as const);
 function getValidTargets(targets: Array<readonly [string, any]>, selfUuid: string): string[] {

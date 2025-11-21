@@ -10,13 +10,13 @@ import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
 import { MovementPhysics, MovementPhysicsComponent, MovementStateComponent, MovementType } from 'nova_ecs/plugins/movement_plugin';
 import { Provide } from 'nova_ecs/provide';
 import { ProvideAsync } from "nova_ecs/provide_async";
-import { AnimationComponent } from './animation_plugin';
-import { CollisionVulnerabilityComponent } from './collision_interaction';
-import { GameDataResource } from './game_data_resource';
-import { ArmorComponent, IonizationColorComponent, IonizationComponent, ShieldComponent } from './health_plugin';
-import { applyOutfitPhysics, OutfitsStateComponent } from './outfit_plugin';
-import { Stat } from './stat';
-import { TargetComponent } from './target_component';
+import { AnimationComponent } from './animation_plugin.js';
+import { CollisionVulnerabilityComponent } from './collision_interaction.js';
+import { GameDataResource } from './game_data_resource.js';
+import { ArmorComponent, IonizationColorComponent, IonizationComponent, ShieldComponent } from './health_plugin.js';
+import { applyOutfitPhysics, OutfitsStateComponent } from './outfit_plugin.js';
+import { Stat } from './stat.js';
+import { TargetComponent } from './target_component.js';
 
 export const ShipType = t.type({
     id: t.string // Not a UUID. A nova id.

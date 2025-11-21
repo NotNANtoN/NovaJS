@@ -5,9 +5,9 @@ import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
 import { ProvideArg } from 'nova_ecs/provide_arg';
 import { System } from 'nova_ecs/system';
-import { CollisionSystem } from './collisions_plugin';
-import { CollisionEvent } from './collision_interaction';
-import { DamagedEvent } from './death_plugin';
+import { CollisionSystem } from './collisions_plugin.js';
+import { CollisionEvent } from './collision_interaction.js';
+import { DamagedEvent } from './death_plugin.js';
 
 
 // Damage done by a blast.

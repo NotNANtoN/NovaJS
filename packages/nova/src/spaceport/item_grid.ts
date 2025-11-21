@@ -1,6 +1,6 @@
 import * as PIXI from 'pixi.js';
 import { BehaviorSubject } from 'rxjs';
-import { GameData } from '../client/gamedata/GameData';
+import { GameData } from '../client/gamedata/GameData.js';
 
 
 const TILE_SIZE = [83, 54];

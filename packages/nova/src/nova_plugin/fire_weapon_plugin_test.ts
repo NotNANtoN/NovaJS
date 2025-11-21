@@ -1,5 +1,5 @@
 import { Angle } from 'nova_ecs/datatypes/angle';
-import { getEvenlySpacedAngles } from './fire_weapon_plugin';
+import { getEvenlySpacedAngles } from './fire_weapon_plugin.js';
 
 describe('getEvenlySpacedAngles', () => {
     it('gets an even number of evenly spaced angles', () => {

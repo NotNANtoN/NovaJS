@@ -1,5 +1,5 @@
 import { World } from "nova_ecs/world";
-import { ConvexHullDisplayPlugin } from "./display/convex_hull_display_plugin";
+import { ConvexHullDisplayPlugin } from "./display/convex_hull_display_plugin.js";
 
 
 export class DebugSettings {

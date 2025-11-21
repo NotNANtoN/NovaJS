@@ -1,11 +1,11 @@
 import { SystemData } from "novadatainterface/SystemData";
 import * as PIXI from 'pixi.js';
 import { Observable } from "rxjs";
-import { GameData } from "../client/gamedata/GameData";
-import { ControlEvent } from "../nova_plugin/controls_plugin";
-import { Button } from "./button";
-import { Menu } from "./menu";
-import { MenuControls } from "./menu_controls";
+import { GameData } from "../client/gamedata/GameData.js";
+import { ControlEvent } from "../nova_plugin/controls_plugin.js";
+import { Button } from "./button.js";
+import { Menu } from "./menu.js";
+import { MenuControls } from "./menu_controls.js";
 
 
 const GREY = 0x666666;

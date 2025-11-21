@@ -1,7 +1,7 @@
 import { GameDataInterface } from "novadatainterface/GameDataInterface";
 import * as PIXI from "pixi.js";
 import { Animation } from "novadatainterface/Animation";
-import { SpriteSheetSprite } from "./sprite_sheet_sprite";
+import { SpriteSheetSprite } from "./sprite_sheet_sprite.js";
 
 /**
  * An AnimationGraphic is responsible for managing all the PIXI Sprites

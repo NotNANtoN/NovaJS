@@ -1,8 +1,8 @@
 import { isLeft } from "fp-ts/Either";
 import { Communicator, Peers } from "nova_ecs/plugins/multiplayer_plugin";
 import { BehaviorSubject, Subject } from "rxjs";
-import { ChannelServer } from "./Channel";
-import { CommunicatorMessage, MessageType } from "./CommunicatorMessage";
+import { ChannelServer } from "./Channel.js";
+import { CommunicatorMessage, MessageType } from "./CommunicatorMessage.js";
 
 
 export class CommunicatorServer implements Communicator {

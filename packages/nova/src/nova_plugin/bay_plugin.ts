@@ -11,15 +11,15 @@ import { CommunicatorResource, MultiplayerData } from 'nova_ecs/plugins/multipla
 import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
 import { v4 } from 'uuid';
-import { HitboxHullComponent, HurtboxHullComponent } from './collisions_plugin';
-import { CollisionEvent, CollisionHitterComponent, CollisionVulnerabilityComponent } from './collision_interaction';
-import { ExitPointData } from './exit_point';
-import { OwnerComponent, SourceComponent, WeaponConstructors, WeaponEntry } from './fire_weapon_plugin';
-import { DeathAIComponent, FollowComponent, ShootAllWeaponsComponent } from './npc_plugin';
-import { ShipComponent } from './ship_plugin';
-import { TargetComponent } from './target_component';
-import { TargetRemovedEvent } from './target_plugin';
-import { WeaponsStateComponent } from './weapons_state';
+import { HitboxHullComponent, HurtboxHullComponent } from './collisions_plugin.js';
+import { CollisionEvent, CollisionHitterComponent, CollisionVulnerabilityComponent } from './collision_interaction.js';
+import { ExitPointData } from './exit_point.js';
+import { OwnerComponent, SourceComponent, WeaponConstructors, WeaponEntry } from './fire_weapon_plugin.js';
+import { DeathAIComponent, FollowComponent, ShootAllWeaponsComponent } from './npc_plugin.js';
+import { ShipComponent } from './ship_plugin.js';
+import { TargetComponent } from './target_component.js';
+import { TargetRemovedEvent } from './target_plugin.js';
+import { WeaponsStateComponent } from './weapons_state.js';
 
 const CollectableEscortComponent = new Component<undefined>('CollectableEscort');
 const ReturnComponent = new Component<undefined>('ReturnComponent');

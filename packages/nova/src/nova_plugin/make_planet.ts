@@ -4,7 +4,7 @@ import { Position } from "nova_ecs/datatypes/position";
 import { Vector } from "nova_ecs/datatypes/vector";
 import { Entity } from "nova_ecs/entity";
 import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
-import { PlanetComponent } from "./planet_plugin";
+import { PlanetComponent } from "./planet_plugin.js";
 
 export function makePlanet(planetData: PlanetData): Entity {
     const planet = new Entity(planetData.name);

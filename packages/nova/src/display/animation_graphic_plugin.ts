@@ -6,15 +6,15 @@ import { MovementStateComponent, MovementSystem } from "nova_ecs/plugins/movemen
 import { Provide } from "nova_ecs/provide";
 import { ProvideAsync } from "nova_ecs/provide_async";
 import { System } from "nova_ecs/system";
-import { currentIfDraft } from "../util/deimmerify";
-import { AnimationComponent } from "../nova_plugin/animation_plugin";
-import { GameDataResource } from "../nova_plugin/game_data_resource";
-import { PlanetComponent } from "../nova_plugin/planet_plugin";
-import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin";
-import { ProjectileComponent } from "../nova_plugin/projectile_data";
-import { ShipComponent } from "../nova_plugin/ship_plugin";
-import { AnimationGraphic } from "./animation_graphic";
-import { Space } from "./space_resource";
+import { currentIfDraft } from "../util/deimmerify.js";
+import { AnimationComponent } from "../nova_plugin/animation_plugin.js";
+import { GameDataResource } from "../nova_plugin/game_data_resource.js";
+import { PlanetComponent } from "../nova_plugin/planet_plugin.js";
+import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
+import { ProjectileComponent } from "../nova_plugin/projectile_data.js";
+import { ShipComponent } from "../nova_plugin/ship_plugin.js";
+import { AnimationGraphic } from "./animation_graphic.js";
+import { Space } from "./space_resource.js";
 
 export const AnimationGraphicComponent = new Component<AnimationGraphic>('AnimationGraphic');
 const AnimationGraphicLoadedComponent = new Component<AnimationGraphic>('AnimationGraphicLoaded');

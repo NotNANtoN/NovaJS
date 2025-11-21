@@ -3,14 +3,14 @@ import { Entity } from 'nova_ecs/entity';
 import { MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
 import * as PIXI from 'pixi.js';
 import { Observable } from 'rxjs';
-import { GameData } from '../client/gamedata/GameData';
-import { ControlEvent } from '../nova_plugin/controls_plugin';
-import { makeShip } from '../nova_plugin/make_ship';
-import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin';
-import { Button } from './button';
-import { ItemGrid, ItemTile } from './item_grid';
-import { Menu } from './menu';
-import { FONT } from './outfitter';
+import { GameData } from '../client/gamedata/GameData.js';
+import { ControlEvent } from '../nova_plugin/controls_plugin.js';
+import { makeShip } from '../nova_plugin/make_ship.js';
+import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin.js';
+import { Button } from './button.js';
+import { ItemGrid, ItemTile } from './item_grid.js';
+import { Menu } from './menu.js';
+import { FONT } from './outfitter.js';
 
 
 export class Shipyard extends Menu<Entity> {
