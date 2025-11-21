@@ -1,0 +1,31 @@
+{
+    "extends": "../../packages/tsconfig/tsconfig.json",
+    "compilerOptions": {
+        "outDir": "./dist",
+        "rootDir": ".",
+        "baseUrl": ".",
+        "paths": {
+            "*": [
+                "node_modules/*"
+            ]
+        },
+        "moduleResolution": "node16",
+        "module": "node16",
+        "target": "es2022",
+        "lib": [
+            "es2022",
+            "dom"
+        ],
+        "allowSyntheticDefaultImports": true,
+        "esModuleInterop": true
+    },
+    "include": [
+        "src/**/*",
+        "test/**/*",
+        "server.ts"
+    ],
+    "exclude": [
+        "node_modules",
+        "dist"
+    ]
+}
