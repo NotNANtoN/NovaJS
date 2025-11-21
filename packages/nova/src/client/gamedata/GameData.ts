@@ -112,7 +112,7 @@ export class GameData implements GameDataInterface {
     private addTextureGettable<T extends BaseData | SpriteSheetFramesData>(dataType: NovaDataType): Gettable<T> {
         const dataPrefix = this.getDataPrefix(dataType);
         return new Gettable<T>(async (id: string, priority: number): Promise<T> => {
-            return (await this.getUrl(urlJoin(dataPrefix, id + ".json"), priority) as {data: any}).data as any;
+            return (await this.getUrl(urlJoin(dataPrefix, id + ".json"), priority) as { data: any }).data as any;
         });
     }
 
@@ -127,7 +127,7 @@ export class GameData implements GameDataInterface {
     private addPictGettable<T extends PictImageData | SpriteSheetImageData>(dataType: NovaDataType): Gettable<T> {
         var dataPrefix = this.getDataPrefix(dataType);
         return new Gettable<T>(async (id: string, priority: number): Promise<T> => {
-            return <T>((await this.getUrl(urlJoin(dataPrefix, id) + ".png", priority)) as Buffer).buffer;
+            return <T>((await this.getUrl(urlJoin(dataPrefix, id) + ".png", priority)) as unknown as { buffer: ArrayBuffer }).buffer;
         });
     }
 
@@ -135,7 +135,7 @@ export class GameData implements GameDataInterface {
         const dataPrefix = this.getDataPrefix(NovaDataType.SoundFile);
         return new Gettable<SoundFile>(async (id: string, priority: number) => {
             //return await (await fetch(urlJoin(dataPrefix, id))).arrayBuffer();
-            return ((await this.getUrl(urlJoin(dataPrefix, id) + '.mp3', priority)) as Buffer);
+            return ((await this.getUrl(urlJoin(dataPrefix, id) + '.mp3', priority)) as unknown as { buffer: ArrayBuffer }).buffer;
         });
     }
 

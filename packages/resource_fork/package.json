@@ -7,6 +7,16 @@
   "license": "MIT",
   "type": "module",
   "main": "dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./*": {
+      "types": "./dist/*.d.ts",
+      "default": "./dist/*.js"
+    }
+  },
   "scripts": {
     "build": "tsc",
     "test": "jasmine --config=jasmine.json"

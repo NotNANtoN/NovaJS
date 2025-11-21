@@ -1,6 +1,8 @@
 import * as Comlink from 'comlink';
 //import nodeEndpoint from "comlink/dist/esm/node-adapter";
-import nodeEndpoint from "comlink/dist/umd/node-adapter";
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const nodeEndpoint = require("comlink/dist/umd/node-adapter.js");
 import express from "express";
 import { isLeft } from "fp-ts/Either";
 import fs from "fs";
@@ -33,9 +35,9 @@ const Settings = t.partial({
 });
 type Settings = t.TypeOf<typeof Settings>;
 
-const runfiles = require(process.env.BAZEL_NODE_RUNFILES_HELPER!) as { resolve: (path: string) => string };
+//const runfiles = require(process.env.BAZEL_NODE_RUNFILES_HELPER!) as { resolve: (path: string) => string };
 
-const serverSettingsPath = runfiles.resolve("novajs/nova/settings/server.json");
+const serverSettingsPath = path.join(__dirname, "../settings/server.json");
 const maybeSettings = Settings.decode(
     JSON.parse(fs.readFileSync(serverSettingsPath, "utf8")) as unknown);
 
@@ -45,7 +47,7 @@ if (isLeft(maybeSettings)) {
 
 const settings = maybeSettings.right;
 const port = settings.port ?? 8000;
-const novaDataPath = path.join(__dirname, settings.relativeDataPath ?? "Nova_Data");
+const novaDataPath = path.join(__dirname, settings.relativeDataPath ?? "../Nova_Data");
 
 const app = express();
 const httpServer = http.createServer(app);
@@ -53,15 +55,14 @@ const httpServer = http.createServer(app);
 const filesystemDataPath = path.join(__dirname, "objects");
 const filesystemData = new FilesystemData(filesystemDataPath);
 
-const htmlPath = runfiles.resolve("novajs/nova/src/index.html");
-const bundlePath = runfiles.resolve("novajs/nova/src/browser_bundle.js");
-const bundleMapPath = runfiles.resolve("novajs/nova/src/browser_bundle.js.map");
-const clientSettingsPath = runfiles.resolve("novajs/nova/settings/controls.json");
+const htmlPath = path.join(__dirname, "../src/index.html");
+const bundlePath = path.join(__dirname, "src/browser_bundle.js");
+const bundleMapPath = path.join(__dirname, "src/browser_bundle.js.map");
+const clientSettingsPath = path.join(__dirname, "../settings/controls.json");
 
 
 const channel = new SocketChannelServer({ server: httpServer });
-const novaParseWorkerPath = runfiles.resolve(
-    "novajs/nova/src/server/parsing/nova_parse_worker_bundle.js");
+const novaParseWorkerPath = path.join(__dirname, "src/server/parsing/nova_parse_worker_bundle.js");
 
 let world: World;
 let systemWorld: World;
@@ -86,7 +87,7 @@ async function startGame() {
 
     setupRoutes(gameData, app, htmlPath, bundlePath, bundleMapPath, clientSettingsPath);
 
-    httpServer.listen(port, function() {
+    httpServer.listen(port, function () {
         console.log("listening at port " + port);
     });
 
@@ -111,7 +112,8 @@ async function startGame() {
         ship.components.set(MultiplayerData, {
             owner: 'server',
         });
-        systemWorld.entities.set(v4(), ship);
+        //systemWorld.entities.set(v4(), ship);
+        world.entities.set(v4(), ship);
     }
 
     stepper();

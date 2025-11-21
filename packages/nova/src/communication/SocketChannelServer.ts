@@ -3,12 +3,12 @@ import https from "https";
 import http from "http";
 import { BehaviorSubject, Subject } from "rxjs";
 import { v4 } from "uuid";
-import WebSocket from "ws";
+import { WebSocketServer, WebSocket as NodeWebSocket } from "ws";
 import { ChannelServer, MessageWithSourceType } from "./Channel.js";
 import { SocketMessage } from "./SocketMessage.js";
 
 interface Client {
-    socket: WebSocket;
+    socket: NodeWebSocket;
     keepaliveTimeout?: NodeJS.Timeout;
 }
 
@@ -19,7 +19,7 @@ export class SocketChannelServer implements ChannelServer {
     readonly connected = new BehaviorSubject(true); // Server is always connected
 
     private clientMap = new Map<string, Client>();
-    readonly wss: WebSocket.Server;
+    readonly wss: WebSocketServer;
     private warn: (m: string) => void = console.warn;
 
     // Send a ping if a packet hasn't been received in this long
@@ -29,7 +29,7 @@ export class SocketChannelServer implements ChannelServer {
     constructor({ server, warn, wss, timeout }: {
         server?: http.Server | https.Server,
         warn?: ((m: string) => void),
-        wss?: WebSocket.Server, timeout?: number
+        wss?: WebSocketServer, timeout?: number
     }) {
 
         if (warn) {
@@ -40,7 +40,7 @@ export class SocketChannelServer implements ChannelServer {
             this.wss = wss;
         }
         else if (server) {
-            this.wss = new WebSocket.Server({ server: server });
+            this.wss = new WebSocketServer({ server: server });
         }
         else {
             throw new Error("httpsServer or wss must be defined");
@@ -98,7 +98,7 @@ export class SocketChannelServer implements ChannelServer {
     }
 
     /** Handles when a client first connects */
-    private onConnect(webSocket: WebSocket) {
+    private onConnect(webSocket: NodeWebSocket) {
         const clientUUID = v4();
         // This uuid is used only for communication and
         // has nothing to do with the game engine's uuids

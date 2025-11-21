@@ -5,6 +5,16 @@
   "license": "MIT",
   "type": "module",
   "main": "dist/NovaParse.js",
+  "exports": {
+    ".": {
+      "types": "./dist/src/NovaParse.d.ts",
+      "default": "./dist/src/NovaParse.js"
+    },
+    "./*": {
+      "types": "./dist/src/*.d.ts",
+      "default": "./dist/src/*.js"
+    }
+  },
   "scripts": {
     "build": "tsc",
     "test": "jasmine --config=jasmine.json"

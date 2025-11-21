@@ -75,7 +75,7 @@ class GameDataServer {
         if (dataGettable) {
             let data = await dataGettable.get(item);
             if (data instanceof ArrayBuffer) {
-                data = Buffer.from(data);
+                data = Buffer.from(data) as unknown as ArrayBuffer;
             }
             res.send(data);
         }

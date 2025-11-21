@@ -1,4 +1,4 @@
-import produce from 'immer';
+import { produce } from 'immer';
 import * as t from 'io-ts';
 import { GameDataInterface } from 'novadatainterface/GameDataInterface';
 import { OutfitData, OutfitPhysics } from 'novadatainterface/OutiftData';
