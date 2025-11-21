@@ -17,7 +17,7 @@ jasmine.DEFAULT_TIMEOUT_INTERVAL = 30000; // 30 seconds
 
 import { resolveFixture } from "../../test/fixtures.js";
 
-describe("RledResource", function() {
+describe("RledResource", () => {
     let rf: ResourceMap;
     let starbridge: RledResource;
     let leviathan: RledResource;
@@ -29,7 +29,7 @@ describe("RledResource", function() {
     // Rleds don't depend on other resources.
     const idSpace = defaultIDSpace;
 
-    beforeEach(async function() {
+    beforeEach(async () => {
         jasmine.addMatchers(PNGCustomMatchers);
 
         starbridgePNG = await getPNG(resolveFixture(
@@ -51,7 +51,7 @@ describe("RledResource", function() {
         expect(leviathan).toBeDefined();
     });
 
-    it("should produce an ordered array of frames", function() {
+    it("should produce an ordered array of frames", () => {
         const starbridgeApplied = applyMask(starbridgePNG, starbridgeMask);
         const leviathanApplied = applyMask(leviathanPNG, leviathanMask);
 

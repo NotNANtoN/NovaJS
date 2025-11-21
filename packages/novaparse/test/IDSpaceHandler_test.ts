@@ -4,15 +4,15 @@ import { NovaResources } from "../src/resource_parsers/ResourceHolderBase.js";
 import { resolveFixture } from "./fixtures.js";
 
 
-describe("IDSpaceHandler", function() {
+describe("IDSpaceHandler", () => {
     let idSpace: NovaResources;
-    beforeEach(async function() {
+    beforeEach(async () => {
         const dataPath = resolveFixture("IDSpaceHandlerTestFilesystem");
         const handler = new IDSpaceHandler(dataPath);
         idSpace = await handler.getIDSpace();
     });
 
-    it("should properly handle overwriting of data by plug-ins", function() {
+    it("should properly handle overwriting of data by plug-ins", () => {
         //debugger;
         //console.log(idSpace);
         expect(idSpace.wëap['nova:128'].name).toEqual("Overwrites nova files");
@@ -23,7 +23,7 @@ describe("IDSpaceHandler", function() {
         expect(idSpace.wëap['A first plug:150'].name).toEqual("this one also not overwritten");
     });
 
-    it("should assign the right global id to each resource", function() {
+    it("should assign the right global id to each resource", () => {
         expect(idSpace.wëap['nova:128'].globalID).toEqual("nova:128");
         expect(idSpace.wëap['nova:129'].globalID).toEqual("nova:129");
         expect(idSpace.wëap['A first plug:150'].globalID).toEqual("A first plug:150");
@@ -32,14 +32,14 @@ describe("IDSpaceHandler", function() {
     });
 
     /*
-    it("Should assign the same pictID to ships with the same baseImage", function() {
+    it("Should assign the same pictID to ships with the same baseImage", () => {
         expect(idSpace.resources.shïp["nova:128"].pictID).toEqual(5000);
         expect(idSpace.resources.shïp["nova:129"].pictID).toEqual(5000);
         expect(idSpace.resources.shïp["nova:130"].pictID).toEqual(5002);
     });
     */
 
-    it("should defer errors to when a specific idSpace is requested", async function() {
+    it("should defer errors to when a specific idSpace is requested", async () => {
         const broken = new IDSpaceHandler("./not/a/real/path/");
         const brokenSpace = broken.getIDSpace("nova");
         await expectAsync(brokenSpace).toBeRejected();

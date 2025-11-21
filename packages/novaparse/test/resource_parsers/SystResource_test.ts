@@ -5,7 +5,7 @@ import { defaultIDSpace } from "./DefaultIDSpace.js";
 
 import { resolveFixture } from "../../test/fixtures.js";
 
-describe("SystResource", function() {
+describe("SystResource", () => {
     // Systs don't depend on other resources.
     const idSpace = defaultIDSpace;
 
@@ -13,7 +13,7 @@ describe("SystResource", function() {
     let s1: SystResource;
     let s2: SystResource;
 
-    beforeEach(async function() {
+    beforeEach(async () => {
         const dataPath = resolveFixture("resource_examples/syst.ndat");
         rf = await readResourceFork(dataPath, false);
         const systs = rf.sÿst;
@@ -21,17 +21,17 @@ describe("SystResource", function() {
         s2 = new SystResource(systs[129], idSpace);
     });
 
-    it("should parse position", function() {
+    it("should parse position", () => {
         expect(s1.position).toEqual([42, 84]);
         expect(s2.position).toEqual([-28, -96]);
     });
 
-    it("should parse links", function() {
+    it("should parse links", () => {
         expect(s1.links).toEqual(new Set([129, 163]));
         expect(s2.links).toEqual(new Set([128, 163]));
     });
 
-    it("should parse spobs", function() {
+    it("should parse spobs", () => {
         expect(s1.spobs).toEqual([128, 189, 194]);
     });
 });

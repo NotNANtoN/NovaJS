@@ -13,20 +13,20 @@ function getFunc(id: string) {
     });
 }
 
-describe("Gettable", function() {
+describe("Gettable", () => {
     let g: Gettable<string>;
     let warn: (message: unknown) => void;
-    beforeEach(function() {
+    beforeEach(() => {
         warn = jasmine.createSpy('warn');
         g = new Gettable<string>(getFunc, warn);
     });
 
-    it("Should get values", async function() {
+    it("Should get values", async () => {
         await expectAsync(g.get("hello")).toBeResolvedTo("hellocats");
         await expectAsync(g.get("goodbye")).toBeResolvedTo("goodbyecats");
     });
 
-    it("Should pass along rejections", async function() {
+    it("Should pass along rejections", async () => {
         await expectAsync(g.get("foo")).toBeRejectedWith(new Error("got foo!"));
     });
 

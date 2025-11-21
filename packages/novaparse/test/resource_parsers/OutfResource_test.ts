@@ -6,7 +6,7 @@ import { defaultIDSpace } from "./DefaultIDSpace.js";
 
 import { resolveFixture } from "../../test/fixtures.js";
 
-describe("OutfResource", function() {
+describe("OutfResource", () => {
     let rf: ResourceMap;
 
     // Outfits don't depend on othe resources.
@@ -25,7 +25,7 @@ describe("OutfResource", function() {
     let four: OutfResource;
     let anotherFour: OutfResource;
 
-    beforeEach(async function() {
+    beforeEach(async () => {
         const dataPath = resolveFixture("resource_examples/outf.ndat");
         rf = await readResourceFork(dataPath, false);
 
@@ -44,7 +44,7 @@ describe("OutfResource", function() {
         anotherFour = new OutfResource(outfs[139], idSpace);
     });
 
-    it("should parse outfit functions", function() {
+    it("should parse outfit functions", () => {
         expect(w1.functions).toEqual([
             ["weapon", 142]
         ]);
@@ -98,7 +98,7 @@ describe("OutfResource", function() {
         ]);
     });
 
-    it("should parse maximum allowed", function() {
+    it("should parse maximum allowed", () => {
         expect(w1.max).toEqual(12);
         expect(blank.max).toEqual(999);
         expect(armor.max).toEqual(124);
@@ -106,18 +106,18 @@ describe("OutfResource", function() {
         expect(armorRecharge.max).toEqual(32767);
     });
 
-    it("should calculate pictID", function() {
+    it("should calculate pictID", () => {
         expect(w1.pictID).toEqual(6000);
         expect(anotherFour.pictID).toEqual(6011);
     });
 
-    it("should parse mass", function() {
+    it("should parse mass", () => {
         expect(w1.mass).toEqual(12);
         expect(armor.mass).toEqual(5);
         expect(shields.mass).toEqual(1221);
     });
 
-    it("should parse cost", function() {
+    it("should parse cost", () => {
         expect(w1.cost).toEqual(1312);
         expect(blank.cost).toEqual(0);
         expect(armor.cost).toEqual(9404);
@@ -126,7 +126,7 @@ describe("OutfResource", function() {
         expect(shieldRecharge.cost).toEqual(-534);
     });
 
-    it("should parse displayWeight", function() {
+    it("should parse displayWeight", () => {
         expect(w1.displayWeight).toEqual(14);
         expect(blank.displayWeight).toEqual(0);
         expect(armor.displayWeight).toEqual(423);

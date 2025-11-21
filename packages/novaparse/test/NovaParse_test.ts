@@ -17,23 +17,23 @@ import { WeaponData } from "novadatainterface/WeaponData";
 import { NovaParse } from "../src/NovaParse.js";
 import { FPS, ShipTurnRateConversionFactor } from "../src/parsers/Constants.js";
 import { getPNG } from "./resource_parsers/PNGCompare.js";
-import {resolveFixture} from './fixtures.js';
+import { resolveFixture } from './fixtures.js';
 
 // TODO: Factor all the resource-specific tests out of
 // this file and test them separately.
-describe("NovaParse", function() {
+describe("NovaParse", () => {
     let np: NovaParse;
     let s128: ShipData;
     let s129: ShipData;
 
-    beforeEach(async function() {
+    beforeEach(async () => {
         const dataPath = resolveFixture("novaParseTestFilesystem");
         np = new NovaParse(dataPath);
         s128 = await np.data[NovaDataType.Ship].get("nova:128");
         s129 = await np.data[NovaDataType.Ship].get("nova:129");
     });
 
-    it("rejects with NovaIDNotFoundError when the ID is not available", async function() {
+    it("rejects with NovaIDNotFoundError when the ID is not available", async () => {
         const noShip = np.data[NovaDataType.Ship].get("totally unavailable id");
         await expectAsync(noShip).toBeRejected();
         try {
@@ -45,12 +45,12 @@ describe("NovaParse", function() {
     });
 
 
-    // it("Ship should error on missing graphics", async function() {
+    // it("Ship should error on missing graphics", async () => {
     //     np.data[NovaDataType.Ship].get("nova:131")
     //         .should.be.rejectedWith(NovaIDNotFoundError);
     // });
 
-    it("Should parse Ship", async function() {
+    it("Should parse Ship", async () => {
         // Should parse the right Pict for ships that don't have a pict but share their baseImage with another ship
         expect(s129.pict).toEqual(s128.pict);
         const noDesc = np.data[NovaDataType.Ship].get("nova:130");
@@ -84,7 +84,7 @@ describe("NovaParse", function() {
         expect(s128.largeExplosion).toEqual(true);
     });
 
-    it("Should parse the right pict ID for ships with the same baseImage", async function() {
+    it("Should parse the right pict ID for ships with the same baseImage", async () => {
         // Ships with the same baseImage as a previous ship that don't have a pictID defined for them get
         // the same pictID as the previous ship's
 
@@ -93,7 +93,7 @@ describe("NovaParse", function() {
         expect(s200.pict).toEqual("nova:5072");
     });
 
-    it("Should parse animations for ships", async function() {
+    it("Should parse animations for ships", async () => {
         const anim = s128.animation;
         expect(anim.exitPoints).toEqual({
             gun: [[3, 10, 1], [-3, 10, -2], [3, 10, 3], [-3, 10, -4]],
@@ -121,14 +121,14 @@ describe("NovaParse", function() {
         expect(anim.images.altImage).not.toBeDefined();
     });
 
-    it("Should parse which explosion a ship has", async function() {
+    it("Should parse which explosion a ship has", async () => {
         expect(s128.initialExplosion!).toEqual("nova:168");
         expect(s128.finalExplosion!).toEqual("nova:169");
         expect(s129.initialExplosion!).toEqual("nova:132");
         expect(s129.finalExplosion!).toEqual("nova:133");
     });
 
-    it("Should parse explosions", async function() {
+    it("Should parse explosions", async () => {
         const e132: ExplosionData = await np.data.Explosion.get("nova:132");
         expect(e132.animation.images).toEqual({
             baseImage: {
@@ -144,7 +144,7 @@ describe("NovaParse", function() {
         expect(e132.rate).toEqual(0.83);
     });
 
-    it("Should parse ship outfits including weapons", async function() {
+    it("Should parse ship outfits including weapons", async () => {
         expect(s128.outfits).toEqual({
             "nova:150": 26,
             "nova:151": 38,
@@ -153,7 +153,7 @@ describe("NovaParse", function() {
         });
     });
 
-    it("Should parse outfit physics", async function() {
+    it("Should parse outfit physics", async () => {
         const o131: OutfitData = await np.data.Outfit.get("nova:131");
         expect(o131.physics).toEqual({
             freeMass: 73,
@@ -164,7 +164,7 @@ describe("NovaParse", function() {
         });
     });
 
-    it("Should parse projectileWeapon", async function() {
+    it("Should parse projectileWeapon", async () => {
         const w132: WeaponData = await np.data.Weapon.get("nova:132");
 
         if (w132.type !== "ProjectileWeaponData") {
@@ -206,7 +206,7 @@ describe("NovaParse", function() {
         }
     });
 
-    it("Should parse beamWeapon", async function() {
+    it("Should parse beamWeapon", async () => {
         const w133: WeaponData = await np.data.Weapon.get("nova:133");
         if (w133.type !== "BeamWeaponData") {
             fail("Expected w133 to be a beam weapon");
@@ -224,28 +224,28 @@ describe("NovaParse", function() {
         }
     });
 
-    it("Should parse PictImage", async function() {
+    it("Should parse PictImage", async () => {
         const p700: PictImageData = await np.data.PictImage.get("nova:700");
         const statusBarPath = resolveFixture("resource_examples/picts/statusBar.png");
         const statusBar = await getPNG(statusBarPath);
 
-        expect(p700).toEqual(PNG.sync.write(statusBar).buffer);
+        expect(p700).toEqual(PNG.sync.write(statusBar).buffer as ArrayBuffer);
     });
 
-    it("Should parse Planet", async function() {
+    it("Should parse Planet", async () => {
         const p128: PlanetData = await np.data.Planet.get("nova:128");
         expect(p128.landingDesc).toEqual("Hello. I'm a planet!");
         expect(p128.landingPict).toEqual("nova:10003");
     });
 
-    it("Should parse SpriteSheetImage", async function() {
+    it("Should parse SpriteSheetImage", async () => {
         const ri1000: SpriteSheetImageData = await np.data.SpriteSheetImage.get("nova:1000");
         const shuttlePath = resolveFixture("testSpriteSheetImage.png");
         const shuttle = fs.readFileSync(shuttlePath);
         expect(ri1000).toEqual(shuttle.buffer);
     });
 
-    it("Should parse SpriteSheetFrames", async function() {
+    it("Should parse SpriteSheetFrames", async () => {
         const rf1116: SpriteSheetFramesData =
             await np.data.SpriteSheetFrames.get("nova:1116");
 
@@ -264,7 +264,7 @@ describe("NovaParse", function() {
         expect(rf1000).toEqual(shouldEqual1000);
     });
 
-    it("Should parse SpriteSheet", async function() {
+    it("Should parse SpriteSheet", async () => {
         const rs1000: SpriteSheetData = await np.data.SpriteSheet.get("nova:1000");
         const sheet1000Path =
             resolveFixture("testSpriteSheet.json");
@@ -275,14 +275,14 @@ describe("NovaParse", function() {
         expect(noNegativeZeroes).toEqual(expectedSpriteSheet);
     });
 
-    it("Should produce the default StatusBar", async function() {
+    it("Should produce the default StatusBar", async () => {
         const sb128 = await np.data.StatusBar.get("nova:128");
         expect(sb128.colors).toEqual(getDefaultStatusBarColors());
         expect(sb128.dataAreas).toEqual(getDefaultStatusBarDataAreas());
         expect(sb128.image).toEqual("nova:700");
     });
 
-    it("Should parse ids", async function() {
+    it("Should parse ids", async () => {
         const ids = await np.ids;
         expect(ids.Weapon).toEqual([
             'nova:128',
@@ -295,22 +295,22 @@ describe("NovaParse", function() {
         );
     });
 
-    it("Should parse system planets", async function() {
+    it("Should parse system planets", async () => {
         const s128 = await np.data.System.get("nova:128");
         expect(s128.planets).toEqual(['nova:128', 'nova:189', 'nova:194']);
     });
 
-    it("Should parse planet position", async function() {
+    it("Should parse planet position", async () => {
         const p194 = await np.data.Planet.get("nova:194");
         expect(p194.position).toEqual([22, -56]);
     });
 
-    it("Should load Plug-ins in reverse alphabetical order", async function() {
+    it("Should load Plug-ins in reverse alphabetical order", async () => {
         const s201 = await np.data.Ship.get("nova:202");
         expect(s201.desc).toEqual("This should overwrite the Loaded Before plug-in");
     });
 
-    it("Should defer throwing of errors to when specific resources are requested", async function() {
+    it("Should defer throwing of errors to when specific resources are requested", async () => {
         const brokenNovaParse = new NovaParse("./not/a/real/path/");
         const data = brokenNovaParse.data;
 

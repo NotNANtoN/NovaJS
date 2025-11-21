@@ -17,7 +17,7 @@ declare global {
 
 import { resolveFixture } from "../../test/fixtures.js";
 
-describe("PictResource", function() {
+describe("PictResource", () => {
     let ship: PictResource;
     let landed: PictResource;
     let statusBar: PictResource;
@@ -32,7 +32,7 @@ describe("PictResource", function() {
     // Picts don't depend on other resources.
     const idSpace: NovaResources = defaultIDSpace;
 
-    beforeEach(async function() {
+    beforeEach(async () => {
         jasmine.addMatchers(PNGCustomMatchers);
 
         shipPNG = await getPNG(resolveFixture(
@@ -54,7 +54,7 @@ describe("PictResource", function() {
         targetImage = new PictResource(picts[3000], idSpace);
     });
 
-    it("should parse pict into a png", function() {
+    it("should parse pict into a png", () => {
         expect(ship.png).toEqualPNG(shipPNG);
         expect(landed.png).toEqualPNG(landedPNG);
         expect(statusBar.png).toEqualPNG(statusBarPNG);

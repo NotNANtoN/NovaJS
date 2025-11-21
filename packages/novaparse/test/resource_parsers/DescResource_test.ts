@@ -4,7 +4,7 @@ import { DescResource } from "../../src/resource_parsers/DescResource.js";
 import { defaultIDSpace } from "./DefaultIDSpace.js";
 import { resolveFixture } from "../../test/fixtures.js";
 
-describe("DescResource", function() {
+describe("DescResource", () => {
     let d1: DescResource;
     let d2: DescResource;
     let rf: ResourceMap;
@@ -12,7 +12,7 @@ describe("DescResource", function() {
     // Descs don't depend on other resources.
     const idSpace = defaultIDSpace;
 
-    beforeEach(async function() {
+    beforeEach(async () => {
         const dataPath = resolveFixture("resource_examples/desc.ndat");
         rf = await readResourceFork(dataPath, false);
 
@@ -22,11 +22,11 @@ describe("DescResource", function() {
 
     });
 
-    it("Should parse the string in the desc", function() {
+    it("Should parse the string in the desc", () => {
         expect(d1.text).toEqual("The first description has one line of text that you can read.");
         expect(d2.text).toEqual("This one has a graphic.");
     });
-    // it("Should parse graphic", function() {
+    // it("Should parse graphic", () => {
     //     expect(d2.graphic).to.equal(4214);
     // });
 });

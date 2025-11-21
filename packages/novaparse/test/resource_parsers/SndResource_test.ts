@@ -6,7 +6,7 @@ import { ima4, pcm8 } from "./expected_sounds.js";
 
 import { resolveFixture } from "../../test/fixtures.js";
 
-describe("SndResource", function() {
+describe("SndResource", () => {
     let s1: SndResource;
     let s2: SndResource;
     let rf: ResourceMap;
@@ -14,7 +14,7 @@ describe("SndResource", function() {
     // Snds don't depend on other resources.
     const idSpace = defaultIDSpace;
 
-    beforeEach(async function() {
+    beforeEach(async () => {
         const dataPath = resolveFixture("resource_examples/snd.ndat");
         rf = await readResourceFork(dataPath, false);
 
@@ -23,14 +23,14 @@ describe("SndResource", function() {
         s2 = new SndResource(snds[129], idSpace);
 
     });
-    it("Should parse the 8 bit pcm sound", function() {
+    it("Should parse the 8 bit pcm sound", () => {
         expect(s1.sound.rate).toEqual(48000);
         expect(s1.sound.samples.length).toEqual(8192);
         expect(s1.sound.samples).toEqual(
             pcm8
                 .map((v) => (v - 127.5) / 127.5));
     });
-    it("Should parse the ima4 compressed sound", function() {
+    it("Should parse the ima4 compressed sound", () => {
         expect(s2.sound.rate).toEqual(48000);
         expect(s2.sound.samples.length).toEqual(8192);
         expect(s2.sound.samples.map((v) => v * (1 << 18))).toEqual(

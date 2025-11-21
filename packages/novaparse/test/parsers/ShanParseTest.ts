@@ -11,7 +11,7 @@
 // import { ShanParse } from "../../src/parsers/ShanParse";
 
 
-// before(function() {
+// before(() => {
 //     chai.should();
 //     chai.use(chaiAsPromised);
 // });
@@ -19,7 +19,7 @@
 // const expect = chai.expect;
 
 
-// describe("ShanParse", function() {
+// describe("ShanParse", () => {
 
 //     var idSpace = defaultIDSpace;
 
@@ -32,7 +32,7 @@
 //     var thunderforge: Animation;
 //     var shuttle: Animation;
 
-//     before(async function() {
+//     before(async () => {
 //         rf = await readResourceFork("./test/resource_parsers/files/shan.ndat", false);
 //         var shans = rf.shän;
 //         shuttleResource = new ShanResource(shans[128], idSpace);
@@ -48,7 +48,7 @@
 
 //     });
 
-//     it("Should parse ShanResources into Animations ", function() {
+//     it("Should parse ShanResources into Animations ", () => {
 //         console.log(miner);
 //         //	expect(miner).to.deep.equal(}
 

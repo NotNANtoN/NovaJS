@@ -61,7 +61,7 @@
     "seedrandom": "^3.0.5",
     "stats.js": "^0.17.0",
     "turbo": "^2.6.1",
-    "typescript": "~5.0.4",
+    "typescript": "5.9.3",
     "url-join": "^5.0.0"
   },
   "scripts": {

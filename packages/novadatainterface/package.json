@@ -15,9 +15,10 @@
     "build": "npm run build-defaults && tsc",
     "test": "jasmine --config=jasmine.json"
   },
-  "dependencies": {
-  },
+  "dependencies": {},
   "devDependencies": {
-    "@evn/tsconfig": "0.1.0"
+    "@evn/tsconfig": "0.1.0",
+    "ts-node": "^10.9.2",
+    "typescript": "5.9.3"
   }
 }

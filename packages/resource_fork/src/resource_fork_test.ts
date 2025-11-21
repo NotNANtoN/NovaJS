@@ -29,7 +29,7 @@ function testResourceFork(getResources: () => Promise<ResourceMap>) {
     });
 }
 
-describe("resourceFork", function() {
+describe("resourceFork", () => {
     describe("readResourceFork", () => {
         describe("reading .ndat", () => {
             testResourceFork(() => {
