@@ -13,7 +13,7 @@ import { Resource } from "nova_ecs/resource";
 import { System } from "nova_ecs/system";
 import { SingletonComponent } from "nova_ecs/world";
 import RBush, { BBox } from "rbush";
-import * as SAT from "sat";
+import SAT from "sat";
 import { getFrameFromMovement } from "../util/get_frame_and_angle.js";
 import { AnimationComponent } from "./animation_plugin.js";
 import { CollisionEvent, CollisionHitter, CollisionHitterComponent, CollisionVulnerability, CollisionVulnerabilityComponent } from "./collision_interaction.js";

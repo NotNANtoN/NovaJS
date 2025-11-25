@@ -1,16 +1,15 @@
 import * as Comlink from 'comlink';
-//import nodeEndpoint from "comlink/dist/esm/node-adapter";
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
-const nodeEndpoint = require("comlink/dist/umd/node-adapter.js");
+import nodeEndpointImport from 'comlink/dist/umd/node-adapter.js';
+const nodeEndpoint = nodeEndpointImport as unknown as typeof nodeEndpointImport.default;
 import express from "express";
-import { isLeft } from "fp-ts/Either";
+import { isLeft } from "fp-ts/lib/Either.js";
 import fs from "fs";
 import http from "http";
 import * as t from 'io-ts';
 import { multiplayer, MultiplayerData } from "nova_ecs/plugins/multiplayer_plugin";
 import { World } from "nova_ecs/world";
 import path from "path";
+import { fileURLToPath } from 'url';
 import { v4 } from "uuid";
 import { Worker } from "worker_threads";
 import { CommunicatorServer } from "./src/communication/CommunicatorServer.js";
@@ -25,8 +24,6 @@ import { FilesystemData } from "./src/server/parsing/FilesystemData.js";
 import { GameDataAggregator } from "./src/server/parsing/GameDataAggregator.js";
 import { NovaParseWorkerApi } from "./src/server/parsing/nova_parse_worker.js";
 import { setupRoutes } from "./src/server/setupRoutes.js";
-//import { NovaRepl } from "./src/server/NovaRepl.js";
-
 
 const Settings = t.partial({
     port: t.number,
@@ -35,7 +32,8 @@ const Settings = t.partial({
 });
 type Settings = t.TypeOf<typeof Settings>;
 
-//const runfiles = require(process.env.BAZEL_NODE_RUNFILES_HELPER!) as { resolve: (path: string) => string };
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const serverSettingsPath = path.join(__dirname, "../settings/server.json");
 const maybeSettings = Settings.decode(
@@ -48,11 +46,12 @@ if (isLeft(maybeSettings)) {
 const settings = maybeSettings.right;
 const port = settings.port ?? 8000;
 const novaDataPath = path.join(__dirname, settings.relativeDataPath ?? "../Nova_Data");
+console.log(novaDataPath);
 
 const app = express();
 const httpServer = http.createServer(app);
 
-const filesystemDataPath = path.join(__dirname, "objects");
+const filesystemDataPath = path.join(__dirname, "../objects");
 const filesystemData = new FilesystemData(filesystemDataPath);
 
 const htmlPath = path.join(__dirname, "../src/index.html");
@@ -62,7 +61,7 @@ const clientSettingsPath = path.join(__dirname, "../settings/controls.json");
 
 
 const channel = new SocketChannelServer({ server: httpServer });
-const novaParseWorkerPath = path.join(__dirname, "src/server/parsing/nova_parse_worker_bundle.js");
+const novaParseWorkerPath = path.join(__dirname, "src/server/parsing/nova_parse_worker_bundle.cjs");
 
 let world: World;
 let systemWorld: World;

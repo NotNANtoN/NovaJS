@@ -11,7 +11,7 @@ import { MovementState, MovementStateComponent, MovementSystem } from 'nova_ecs/
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
-import * as SAT from "sat";
+import SAT from "sat";
 import { v4 } from 'uuid';
 import { CompositeHull, HurtboxHullComponent, UpdateHitboxHullSystem } from './collisions_plugin.js';
 import { CollisionEvent, CollisionHitterComponent } from './collision_interaction.js';

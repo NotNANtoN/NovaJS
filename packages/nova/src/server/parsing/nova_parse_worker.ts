@@ -1,7 +1,6 @@
-import * as Comlink from "comlink";
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
-const nodeEndpoint = require("comlink/dist/esm/node-adapter.js");
+import * as Comlink from 'comlink';
+import nodeEndpointImport from 'comlink/dist/umd/node-adapter.js';
+const nodeEndpoint = nodeEndpointImport as unknown as typeof nodeEndpointImport.default;
 import { NovaParse } from "novaparse";
 import { parentPort } from "worker_threads";
 

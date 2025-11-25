@@ -22,9 +22,12 @@ await esbuild.build({
 // Nova Parse Worker bundle
 await esbuild.build({
     entryPoints: [path.join(__dirname, 'src/server/parsing/nova_parse_worker.ts')],
-    outfile: path.join(__dirname, 'dist/src/server/parsing/nova_parse_worker_bundle.js'),
+    outfile: path.join(__dirname, 'dist/src/server/parsing/nova_parse_worker_bundle.cjs'),
     bundle: true,
     sourcemap: true,
     platform: 'node',
-    format: 'esm',
+    format: 'cjs',
+    banner: {
+        js: "var Lame;",
+    },
 });

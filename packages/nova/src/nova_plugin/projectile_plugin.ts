@@ -11,7 +11,7 @@ import { MovementPhysicsComponent, MovementStateComponent, MovementType } from '
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { ProvideAsync } from "nova_ecs/provide_async";
 import { System } from 'nova_ecs/system';
-import * as SAT from "sat";
+import SAT from "sat";
 import { v4 } from 'uuid';
 import { FactoryQueue } from '../common/factory_queue.js';
 import { AnimationComponent } from './animation_plugin.js';

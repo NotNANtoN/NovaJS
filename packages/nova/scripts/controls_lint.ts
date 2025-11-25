@@ -1,5 +1,5 @@
 import { ArgumentParser } from 'argparse';
-import { isLeft } from 'fp-ts/Either';
+import { isLeft } from 'fp-ts/lib/Either.js';
 import * as fs from 'fs';
 import { Controls, SavedControls } from '../src/nova_plugin/controls.js';
 
