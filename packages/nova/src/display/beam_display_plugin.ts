@@ -18,6 +18,15 @@ const ClearBeams = new System({
     }
 });
 
+function setLineStyle(graphics: PIXI.Graphics, width: number, color: number, alpha: number = 1) {
+    if (color > 0xFFFFFF) {
+        const alphaComponent = ((color >> 24) & 0xFF) / 255;
+        color = color & 0xFFFFFF;
+        alpha = alpha * alphaComponent;
+    }
+    graphics.lineStyle(width, color, alpha);
+}
+
 const BeamDisplaySystem = new System({
     name: 'BeamDisplay',
     args: [BeamDataComponent, MovementStateComponent,
@@ -32,7 +41,7 @@ const BeamDisplaySystem = new System({
         const lightningAmplitudeScale = 2;
         if (lightningDensity > 0) {
             beamGraphics.moveTo(movement.position.x, movement.position.y);
-            beamGraphics.lineStyle(width, beamColor);
+            setLineStyle(beamGraphics, width, beamColor);
             const direction = destination.subtract(movement.position);
             for (let i = 1; i <= lightningDensity; i++) {
                 const center = movement.position.add(direction.scale(i / (lightningDensity + 2)));
@@ -53,17 +62,17 @@ const BeamDisplaySystem = new System({
             const coronaSteps = coronaWidth / 2;
             if (coronaFalloff >= 2) {
                 for (let i = 0; i < coronaSteps; i++) {
-                    beamGraphics.lineStyle(width + 2 + i * coronaWidth / coronaSteps, coronaColor, 1 / coronaSteps);
+                    setLineStyle(beamGraphics, width + 2 + i * coronaWidth / coronaSteps, coronaColor, 1 / coronaSteps);
                     beamGraphics.moveTo(movement.position.x, movement.position.y);
                     beamGraphics.lineTo(destination.x, destination.y);
                 }
             } else {
-                beamGraphics.lineStyle(width + 2, coronaColor);
+                setLineStyle(beamGraphics, width + 2, coronaColor);
                 beamGraphics.moveTo(movement.position.x, movement.position.y);
                 beamGraphics.lineTo(destination.x, destination.y);
             }
             beamGraphics.moveTo(movement.position.x, movement.position.y);
-            beamGraphics.lineStyle(width, beamColor);
+            setLineStyle(beamGraphics, width, beamColor);
             beamGraphics.lineTo(destination.x, destination.y);
         }
     },
