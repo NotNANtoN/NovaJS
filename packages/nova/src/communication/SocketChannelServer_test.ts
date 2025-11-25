@@ -1,4 +1,4 @@
-import { isLeft } from "fp-ts/Either";
+import { isLeft } from "fp-ts/lib/Either.js";
 import * as https from "https";
 import * as http from "http";
 import "jasmine";
@@ -6,16 +6,16 @@ import { SocketChannelServer } from "./SocketChannelServer.js";
 import { SocketMessage } from "./SocketMessage.js";
 import { firstValueFrom, Subject } from "rxjs";
 import { take } from "rxjs/operators";
-import * as WebSocket from "ws";
+import { WebSocket, WebSocketServer } from "ws";
 import { Callbacks, On, trackOn } from "./test_utils.js";
 
-describe("SocketChannelServer", function() {
+describe("SocketChannelServer", function () {
 
-    let wss: jasmine.SpyObj<WebSocket.Server>;
+    let wss: jasmine.SpyObj<WebSocketServer>;
     let wssCallbacks: Callbacks;
 
     beforeEach(() => {
-        wss = jasmine.createSpyObj<WebSocket.Server>("WebSocket.Server Spy", ["on"]);
+        wss = jasmine.createSpyObj<WebSocketServer>("WebSocket.Server Spy", ["on"]);
         let on: On;
         [wssCallbacks, on] = trackOn();
         wss.on.and.callFake(on);
@@ -52,17 +52,17 @@ describe("SocketChannelServer", function() {
 
     it("binds listeners to a client's socket", () => {
         new SocketChannelServer({
-            wss, timeout:10,
+            wss, timeout: 10,
         });
 
         const webSocket = jasmine.createSpyObj<WebSocket>("WebSocket Spy",
-                                                          ["on", "removeAllListeners"]);
+            ["on", "removeAllListeners"]);
         const [webSocketCallbacks, on] = trackOn();
         webSocket.on.and.callFake(on);
         (webSocket as any).readyState = WebSocket.CONNECTING;
 
         expect(wssCallbacks["connection"][0]).toBeDefined();
-        wssCallbacks["connection"][0](webSocket);
+        wssCallbacks["connection"][0](webSocket as unknown as WebSocket);
 
         expect(webSocketCallbacks["open"].length).toBe(1);
         expect(webSocketCallbacks["message"].length).toBe(1);
@@ -71,14 +71,14 @@ describe("SocketChannelServer", function() {
 
     it("creates an entry for a new client in the clients set", () => {
         const server = new SocketChannelServer({
-            wss, timeout:10,
+            wss, timeout: 10,
         });
         const webSocket = jasmine.createSpyObj<WebSocket>("WebSocket Spy",
-                                                          ["on", "removeAllListeners"]);
+            ["on", "removeAllListeners"]);
         const [webSocketCallbacks, on] = trackOn();
         webSocket.on.and.callFake(on);
         (webSocket as any).readyState = WebSocket.CONNECTING;
-        wssCallbacks["connection"][0](webSocket);
+        wssCallbacks["connection"][0](webSocket as unknown as WebSocket);
 
         const uuids = [...server.clients];
         expect(uuids.length).toBe(1);
@@ -86,16 +86,15 @@ describe("SocketChannelServer", function() {
 
     it("emits when a client connects", async () => {
         const server = new SocketChannelServer({
-            wss, timeout:10,
+            wss, timeout: 10,
         });
 
         // Connect client 1
         const client1 = new ClientHarness(server);
-        wssCallbacks["connection"][0](client1.websocket);
+        wssCallbacks["connection"][0](client1.websocket as unknown as WebSocket);
         const client1Uuid = [...server.clients][0];
 
-        const peerConnectPromise = server.clientConnect
-            .pipe(take(1)).toPromise();
+        const peerConnectPromise = firstValueFrom(server.clientConnect.pipe(take(1)));
 
         client1.open();
 
@@ -105,17 +104,16 @@ describe("SocketChannelServer", function() {
 
     it("emits when a client disconnects", async () => {
         const server = new SocketChannelServer({
-            wss, timeout:10,
+            wss, timeout: 10,
         });
 
         // Connect client 1
         const client1 = new ClientHarness(server);
-        wssCallbacks["connection"][0](client1.websocket);
+        wssCallbacks["connection"][0](client1.websocket as unknown as WebSocket);
         const client1Uuid = [...server.clients][0];
         client1.open();
 
-        const peerDisconnectPromise = server.clientDisconnect
-            .pipe(take(1)).toPromise();
+        const peerDisconnectPromise = firstValueFrom(server.clientDisconnect.pipe(take(1)));
 
         client1.close();
 
@@ -125,7 +123,7 @@ describe("SocketChannelServer", function() {
 
     it("send() sends a message to a peer", () => {
         const server = new SocketChannelServer({
-            wss, timeout:10,
+            wss, timeout: 10,
         });
 
         const testMessage = {
@@ -135,7 +133,7 @@ describe("SocketChannelServer", function() {
 
         // Connect client 1
         const client1 = new ClientHarness(server);
-        wssCallbacks["connection"][0](client1.websocket);
+        wssCallbacks["connection"][0](client1.websocket as unknown as WebSocket);
         const client1UUID = [...server.clients][0];
         client1.open();
 
@@ -147,12 +145,12 @@ describe("SocketChannelServer", function() {
 
     it("emits messages sent by clients", async () => {
         const server = new SocketChannelServer({
-            wss, timeout:10,
+            wss, timeout: 10,
         });
 
         // Connect client 1
         const client1 = new ClientHarness(server);
-        wssCallbacks["connection"][0](client1.websocket);
+        wssCallbacks["connection"][0](client1.websocket as unknown as WebSocket);
         const client1Uuid = [...server.clients][0];
         client1.open();
 
@@ -182,7 +180,7 @@ describe("SocketChannelServer", function() {
 
         // Connect client 1
         const client1 = new ClientHarness(server);
-        wssCallbacks["connection"][0](client1.websocket);
+        wssCallbacks["connection"][0](client1.websocket as unknown as WebSocket);
 
         client1.open();
 
@@ -204,7 +202,7 @@ describe("SocketChannelServer", function() {
 
         // Connect client 1
         const client1 = new ClientHarness(server);
-        wssCallbacks["connection"][0](client1.websocket);
+        wssCallbacks["connection"][0](client1.websocket as unknown as WebSocket);
         const client1Uuid = [...server.clients][0];
         client1.open();
 
@@ -230,12 +228,11 @@ describe("SocketChannelServer", function() {
 
         // Connect client 1
         const client1 = new ClientHarness(server);
-        wssCallbacks["connection"][0](client1.websocket);
+        wssCallbacks["connection"][0](client1.websocket as unknown as WebSocket);
         const client1Uuid = [...server.clients][0];
         client1.open();
 
-        const peerDisconnectPromise = server.clientDisconnect
-            .pipe(take(1)).toPromise();
+        const peerDisconnectPromise = firstValueFrom(server.clientDisconnect.pipe(take(1)));
 
         jasmine.clock().tick(25);
 
@@ -246,12 +243,12 @@ describe("SocketChannelServer", function() {
 
     it("replies to pings", async () => {
         const server = new SocketChannelServer({
-            wss, timeout:10,
+            wss, timeout: 10,
         });
 
         // Connect client 1
         const client1 = new ClientHarness(server);
-        wssCallbacks["connection"][0](client1.websocket);
+        wssCallbacks["connection"][0](client1.websocket as unknown as WebSocket);
         client1.open();
 
         client1.sendMessage({ ping: true });

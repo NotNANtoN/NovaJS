@@ -1,10 +1,11 @@
-import { isLeft } from "fp-ts/Either";
+import { isLeft } from "fp-ts/lib/Either.js";
 import { SocketChannelClient } from "./SocketChannelClient.js";
 import { SocketMessage } from "./SocketMessage.js";
 import { take } from "rxjs/operators";
 import { Callbacks, On, trackOn } from "./test_utils.js";
+import { firstValueFrom } from "rxjs";
 
-describe("SocketChannelClient", function() {
+describe("SocketChannelClient", function () {
     let webSocket: jasmine.SpyObj<WebSocket>;
     let warn: jasmine.Spy<(m: string) => void>;
     let callbacks: Callbacks;
@@ -54,8 +55,8 @@ describe("SocketChannelClient", function() {
             data: JSON.stringify(badMessage)
         } as MessageEvent<string>;
 
-        let warnPromise = new Promise((resolve) => {
-            warn.and.callFake(resolve);
+        let warnPromise = new Promise<void>((resolve) => {
+            warn.and.callFake(() => resolve());
         });
         sendMessage(messageEvent);
         await warnPromise;
@@ -76,8 +77,8 @@ describe("SocketChannelClient", function() {
             data: JSON.stringify(badMessage)
         } as MessageEvent<string>;
 
-        let warnPromise = new Promise((resolve) => {
-            warn.and.callFake(resolve);
+        let warnPromise = new Promise<void>((resolve) => {
+            warn.and.callFake(() => resolve());
         });
         sendMessage(messageEvent);
         await warnPromise;
@@ -104,7 +105,7 @@ describe("SocketChannelClient", function() {
             data: JSON.stringify(message)
         } as MessageEvent<string>;
 
-        const messagePromise = client.message.pipe(take(1)).toPromise();
+        const messagePromise = firstValueFrom(client.message.pipe(take(1)));
         sendMessage(messageEvent);
 
         const messageReceived = await messagePromise;

@@ -1,4 +1,4 @@
-import { isLeft } from "fp-ts/Either";
+import { isLeft } from "fp-ts/lib/Either.js";
 import https from "https";
 import http from "http";
 import { BehaviorSubject, Subject } from "rxjs";

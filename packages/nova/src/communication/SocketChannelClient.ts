@@ -1,4 +1,4 @@
-import { isRight } from "fp-ts/Either";
+import { isRight } from "fp-ts/lib/Either.js";
 import { BehaviorSubject, Subject } from "rxjs";
 import { ChannelClient } from "./Channel.js";
 import { SocketMessage } from "./SocketMessage.js";

@@ -1,5 +1,5 @@
 import * as t from 'io-ts';
-import { isLeft, right } from "fp-ts/Either";
+import { isLeft, right } from "fp-ts/lib/Either.js";
 import { immerable } from 'immer';
 
 

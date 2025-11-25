@@ -1,4 +1,4 @@
-import { isLeft } from 'fp-ts/Either';
+import { isLeft } from 'fp-ts/lib/Either.js';
 import { Emit } from 'nova_ecs/arg_types';
 import { EcsEvent } from 'nova_ecs/events';
 import { Plugin } from 'nova_ecs/plugin';

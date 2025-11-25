@@ -1,4 +1,4 @@
-import { isLeft } from "fp-ts/Either";
+import { isLeft } from "fp-ts/lib/Either.js";
 import * as t from 'io-ts';
 import { set } from "nova_ecs/datatypes/set";
 import { Communicator, MessageWithSource, Peers } from "nova_ecs/plugins/multiplayer_plugin";

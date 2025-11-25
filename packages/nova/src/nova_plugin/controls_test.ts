@@ -1,4 +1,4 @@
-import { isLeft } from 'fp-ts/Either';
+import { isLeft } from 'fp-ts/lib/Either.js';
 import 'jasmine';
 import { Controls, SavedControls } from './controls.js';
 
