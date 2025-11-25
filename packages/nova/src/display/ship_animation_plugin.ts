@@ -38,10 +38,10 @@ export const ShipAnimationSystem = new System({
             runningLights.pixiSprite.visible = time.time % 2000 < 1000;
         }
 
-        const sprite =animation.sprites.get('baseImage')?.pixiSprite;
+        const sprite = animation.sprites.get('baseImage')?.pixiSprite;
         if (sprite) {
             if (ionized) {
-                sprite.tint = ionizationColor.color;
+                sprite.tint = ionizationColor.color & 0xFFFFFF;
             } else {
                 sprite.tint = 0xffffff;
             }
