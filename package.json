@@ -58,7 +58,8 @@
   },
   "scripts": {
     "build": "turbo run build",
-    "test": "turbo run test"
+    "test": "turbo run test",
+    "start": "turbo run start"
   },
   "dependencies": {
     "@types/uuid": "^9.0.1",
