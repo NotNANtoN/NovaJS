@@ -1,0 +1,12 @@
+version: '3.8'
+services:
+  nova-server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../packages/nova/Nova_Data:/app/packages/nova/Nova_Data
+      - ../packages/nova/objects:/app/packages/nova/objects
+    restart: unless-stopped
