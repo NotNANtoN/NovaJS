@@ -3,4 +3,3 @@ dist
 .git
 .turbo
 packages/nova/Nova_Data
-packages/nova/objects

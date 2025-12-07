@@ -45,7 +45,9 @@ if (isLeft(maybeSettings)) {
 
 const settings = maybeSettings.right;
 const port = settings.port ?? 8000;
-const novaDataPath = path.join(__dirname, settings.relativeDataPath ?? "../Nova_Data");
+const novaDataPath = process.env.NOVA_DATA_PATH
+    ? process.env.NOVA_DATA_PATH
+    : path.join(__dirname, settings.relativeDataPath ?? "../Nova_Data");
 console.log(novaDataPath);
 
 const app = express();
