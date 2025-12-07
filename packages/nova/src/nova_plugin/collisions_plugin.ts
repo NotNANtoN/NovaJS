@@ -1,6 +1,6 @@
 import { Animation } from "novadatainterface/Animation";
 import { GameDataInterface } from "novadatainterface/GameDataInterface";
-import { Emit, UUID } from "nova_ecs/arg_types";
+import { Emit, EmitNow, UUID } from "nova_ecs/arg_types";
 import { Component } from "nova_ecs/component";
 import { Angle } from "nova_ecs/datatypes/angle";
 import { Vector } from "nova_ecs/datatypes/vector";
@@ -261,7 +261,7 @@ export const CollisionSystem = new System({
     args: [RBushResource,
         new Query([HitboxHullComponent, UUID, CollisionVulnerabilityComponent] as const),
         new Query([HurtboxHullComponent, UUID, CollisionHitterComponent] as const),
-        Emit, SingletonComponent] as const,
+        EmitNow, SingletonComponent] as const,
     step(rbush, hitboxColliders, hurtboxColliders, emit) {
         rbush.clear();
 

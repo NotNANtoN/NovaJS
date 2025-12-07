@@ -4,7 +4,8 @@ import { Resource } from 'nova_ecs/resource';
 import { System } from 'nova_ecs/system';
 import { SingletonComponent } from "nova_ecs/world";
 import * as PIXI from "pixi.js";
-import { BeamDataComponent, BeamSystem } from "../nova_plugin/beam_plugin.js";
+import { BeamDataComponent, BeamStateComponent, BeamSystem } from "../nova_plugin/beam_plugin.js";
+import { CollisionSystem } from "../nova_plugin/collisions_plugin.js";
 import { Space } from "./space_resource.js";
 
 
@@ -29,11 +30,12 @@ function setLineStyle(graphics: PIXI.Graphics, width: number, color: number, alp
 
 const BeamDisplaySystem = new System({
     name: 'BeamDisplay',
-    args: [BeamDataComponent, MovementStateComponent,
+    args: [BeamDataComponent, BeamStateComponent, MovementStateComponent,
         BeamGraphicsResource, /*UUID*/] as const,
-    step(beamData, movement, beamGraphics, /*uuid*/) {
-        const { width, beamColor, coronaColor, coronaFalloff, length, lightningAmplitude, lightningDensity }
+    step(beamData, beamState, movement, beamGraphics, /*uuid*/) {
+        const { width, beamColor, coronaColor, coronaFalloff, length: dataLength, lightningAmplitude, lightningDensity }
             = beamData.beamAnimation;
+        const length = Math.min(dataLength, beamState.hitDist ?? Infinity);
         const destination = movement.rotation.getUnitVector()
             .scale(length).add(movement.position);
         //const rng = seedrandom.alea(uuid);  //for if not randomized every frame
@@ -76,7 +78,7 @@ const BeamDisplaySystem = new System({
             beamGraphics.lineTo(destination.x, destination.y);
         }
     },
-    after: [ClearBeams, BeamSystem],
+    after: [ClearBeams, BeamSystem, CollisionSystem],
     before: []
 });
 

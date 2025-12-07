@@ -13,7 +13,7 @@ import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
 import SAT from "sat";
 import { v4 } from 'uuid';
-import { CompositeHull, HurtboxHullComponent, UpdateHitboxHullSystem } from './collisions_plugin.js';
+import { CollisionSystem, CompositeHull, HitboxHullComponent, HurtboxHullComponent, UpdateHitboxHullSystem } from './collisions_plugin.js';
 import { CollisionEvent, CollisionHitterComponent } from './collision_interaction.js';
 import { CreateTime, CreateTimeArgProvider } from './create_time.js';
 import { DamagedEvent } from './death_plugin.js';
@@ -28,6 +28,8 @@ import { WeaponsSystem } from './weapon_plugin.js';
 interface BeamState {
     pointToTarget?: boolean,
     exitPointData?: ExitPointData,
+    hitDist?: number;
+    targetHit?: string;
 }
 
 export const BeamStateComponent = new Component<BeamState>('BeamState');
@@ -91,7 +93,7 @@ class BeamWeaponEntry extends WeaponEntry {
         }
 
         if (owner) {
-            beam.addComponent(OwnerComponent, {owner});
+            beam.addComponent(OwnerComponent, { owner });
         }
         if (source) {
             beam.addComponent(SourceComponent, source);
@@ -160,20 +162,121 @@ export const BeamSystem = new System({
     }
 });
 
+export const BeamResetSystem = new System({
+    name: "BeamResetSystem",
+    args: [BeamStateComponent] as const,
+    step: (state) => {
+        state.hitDist = undefined;
+        state.targetHit = undefined;
+    },
+    before: [CollisionSystem], // Before collisions so we clear previous frame's hits
+});
+
+// Based on: https://stackoverflow.com/questions/563198/how-do-you-detect-where-two-line-segments-intersect
+function getIntersection(r0: Vector, r1: Vector, a0: Vector, a1: Vector): number {
+    const s1 = r1.subtract(r0);
+    const s2 = a1.subtract(a0);
+
+    const s = (-s1.y * (r0.x - a0.x) + s1.x * (r0.y - a0.y)) / (-s2.x * s1.y + s1.x * s2.y);
+    const t = (s2.x * (r0.y - a0.y) - s2.y * (r0.x - a0.x)) / (-s2.x * s1.y + s1.x * s2.y);
+
+    if (s >= 0 && s <= 1 && t >= 0 && t <= 1) {
+        // Collision detected
+        return t; // t is the distance along the ray (fraction of beam length if ray is beam segment)
+    }
+
+    return Infinity; // No collision
+}
+
 const BeamCollisionSystem = new System({
     name: 'BeamCollisionSystem',
     events: [CollisionEvent],
     args: [CollisionEvent, Entities, Optional(OwnerComponent),
-        BeamDataComponent, CreateTime, EmitNow, TimeResource, UUID] as const,
-    step(collision, entities, owner, beamData, fireTime, emitNow,
-        { time, delta_ms }, uuid) {
+        BeamDataComponent, BeamStateComponent, MovementStateComponent,
+        Optional(SourceComponent)] as const,
+    step(collision, entities, owner, beamData, beamState, movement, source) {
 
         const other = entities.get(collision.other);
         if (!other) {
             return;
         }
+
         const otherOwner = other.components.get(OwnerComponent);
         if (collision.other === owner?.owner || otherOwner?.owner === owner?.owner) {
+            return;
+        }
+
+        const otherHull = other.components.get(HitboxHullComponent);
+        if (!otherHull) {
+            return;
+        }
+
+        // Raycast against the hull
+        const start = movement.position;
+        const beamVector = movement.rotation.getUnitVector().scale(beamData.beamAnimation.length);
+        const end = start.add(beamVector);
+
+        let minT = Infinity;
+        for (const shape of otherHull.shapes) {
+            // Check each edge of the polygon
+            if (shape instanceof SAT.Polygon) {
+                const points = shape.points.map(
+                    v => Vector.fromVectorLike(v)
+                        .rotate(shape.angle)
+                        .add(shape.pos));
+
+                for (let i = 0; i < points.length; i++) {
+                    const p1 = points[i];
+                    const p2 = points[(i + 1) % points.length];
+                    const t = getIntersection(start, end, p1, p2);
+                    if (t < minT) {
+                        minT = t;
+                    }
+                }
+            } else if (shape instanceof SAT.Circle) {
+                // Ray circle intersection
+                // Math based on: https://math.stackexchange.com/questions/311921/get-location-of-vector-circle-intersection
+                const r = shape.r;
+                const c = new Vector(shape.pos.x, shape.pos.y);
+                const d = beamVector; // Direction vector (full length)
+                const f = start.subtract(c);
+
+                const a = d.dot(d);
+                const b = 2 * f.dot(d);
+                const q = f.dot(f) - r * r;
+
+                const discriminant = b * b - 4 * a * q;
+                if (discriminant >= 0) {
+                    const sqrtDisc = Math.sqrt(discriminant);
+                    const t1 = (-b - sqrtDisc) / (2 * a);
+                    const t2 = (-b + sqrtDisc) / (2 * a);
+
+                    if (t1 >= 0 && t1 <= 1) {
+                        if (t1 < minT) minT = t1;
+                    }
+                    if (t2 >= 0 && t2 <= 1) {
+                        if (t2 < minT) minT = t2;
+                    }
+                }
+            }
+        }
+
+        if (minT !== Infinity) {
+            // We found a hit.
+            const distance = minT * beamData.beamAnimation.length;
+            if (beamState.hitDist === undefined || distance < beamState.hitDist) {
+                beamState.hitDist = distance;
+                beamState.targetHit = collision.other;
+            }
+        }
+    }
+});
+
+const BeamDamageSystem = new System({
+    name: 'BeamDamageSystem',
+    args: [BeamDataComponent, BeamStateComponent, CreateTimeArgProvider, EmitNow, TimeResource, UUID] as const,
+    step(beamData, beamState, fireTime, emitNow, { time, delta_ms }, uuid) {
+        if (!beamState.targetHit) {
             return;
         }
 
@@ -182,8 +285,9 @@ const BeamCollisionSystem = new System({
         const damageTime = Math.min(delta_ms, beamData.shotDuration - lastTimeSinceFire);
         const scale = damageTime * 30 / 1000;
 
-        emitNow(DamagedEvent, { damage: beamData.damage, damager: uuid, scale }, [collision.other]);
-    }
+        emitNow(DamagedEvent, { damage: beamData.damage, damager: uuid, scale }, [beamState.targetHit]);
+    },
+    after: [CollisionSystem],
 });
 
 export const BeamPlugin: Plugin = {
@@ -195,7 +299,9 @@ export const BeamPlugin: Plugin = {
         }
         weaponConstructors.set('BeamWeaponData', BeamWeaponEntry);
 
+        world.addSystem(BeamResetSystem);
         world.addSystem(BeamSystem);
         world.addSystem(BeamCollisionSystem);
+        world.addSystem(BeamDamageSystem);
     }
 };
