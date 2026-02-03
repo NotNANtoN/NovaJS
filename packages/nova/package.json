@@ -7,7 +7,8 @@
         "build": "tsc && node esbuild.config.js",
         "test": "jasmine --config=jasmine.json",
         "start": "node dist/server.js",
-        "clean": "rimraf dist"
+        "clean": "rimraf dist",
+        "dev": "npm run start"
     },
     "dependencies": {
         "@pixi/sound": "^5.2.2",
