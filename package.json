@@ -58,6 +58,7 @@
   },
   "scripts": {
     "build": "turbo run build",
+    "clean": "rimraf .turbo && npm run clean --workspaces --if-present",
     "test": "turbo run test",
     "start": "turbo run start",
     "dev": "turbo watch dev"
