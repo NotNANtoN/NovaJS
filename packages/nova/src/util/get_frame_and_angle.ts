@@ -1,4 +1,4 @@
-import { Animation } from "novadatainterface/Animation";
+import { Animation } from "novadatainterface/animation";
 import { MovementState } from "nova_ecs/plugins/movement_plugin";
 import { mod } from "./mod.js";
 

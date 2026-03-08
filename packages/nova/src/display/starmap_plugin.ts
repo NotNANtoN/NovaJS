@@ -1,7 +1,7 @@
 import { AsyncSystem } from 'nova_ecs/async_system';
 import { Plugin } from 'nova_ecs/plugin';
 import { Resource } from 'nova_ecs/resource';
-import { GameData } from '../client/gamedata/GameData.js';
+import { GameData } from '../client/gamedata/game_data.js';
 import { ControlsSubject, EcsControlEvent } from '../nova_plugin/controls_plugin.js';
 import { GameDataResource } from '../nova_plugin/game_data_resource.js';
 import { JumpRouteComponent } from '../nova_plugin/jump_plugin.js';

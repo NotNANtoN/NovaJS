@@ -4,11 +4,11 @@
   "description": "Parser for EV Nova files",
   "license": "MIT",
   "type": "module",
-  "main": "dist/NovaParse.js",
+  "main": "dist/src/nova_parse.js",
   "exports": {
     ".": {
-      "types": "./dist/src/NovaParse.d.ts",
-      "default": "./dist/src/NovaParse.js"
+      "types": "./dist/src/nova_parse.d.ts",
+      "default": "./dist/src/nova_parse.js"
     },
     "./*": {
       "types": "./dist/src/*.d.ts",

@@ -1,4 +1,4 @@
-import { GameDataInterface } from "novadatainterface/GameDataInterface";
+import { GameDataInterface } from "novadatainterface/game_data_interface";
 import { Entities, GetWorld } from "nova_ecs/arg_types";
 import { AsyncSystem } from "nova_ecs/async_system";
 import { MultiplayerData } from "nova_ecs/plugins/multiplayer_plugin";

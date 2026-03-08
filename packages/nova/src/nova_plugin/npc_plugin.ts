@@ -1,4 +1,4 @@
-import { ShipData } from "novadatainterface/ShipData";
+import { ShipData } from "novadatainterface/ship_data";
 import { Entities, UUID } from "nova_ecs/arg_types";
 import { Component } from "nova_ecs/component";
 import { Plugin } from "nova_ecs/plugin";

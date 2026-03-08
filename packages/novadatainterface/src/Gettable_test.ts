@@ -1,5 +1,5 @@
 import "jasmine";
-import { Gettable } from "./Gettable.js";
+import { Gettable } from "./gettable.js";
 
 
 function getFunc(id: string) {

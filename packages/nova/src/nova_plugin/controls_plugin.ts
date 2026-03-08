@@ -7,7 +7,7 @@ import { Resource } from 'nova_ecs/resource';
 import { System } from 'nova_ecs/system';
 import { SingletonComponent } from 'nova_ecs/world';
 import { Subject } from 'rxjs';
-import { GameData } from '../client/gamedata/GameData.js';
+import { GameData } from '../client/gamedata/game_data.js';
 import { ControlAction, Controls, getActions, SavedControls } from './controls.js';
 import { GameDataResource } from './game_data_resource.js';
 import { PlatformResource } from './platform_plugin.js';

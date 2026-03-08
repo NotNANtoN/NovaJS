@@ -1,8 +1,7 @@
 {
     "spec_dir": "dist/src",
     "spec_files": [
-        "**/*_test.js",
-        "**/*Test.js"
+        "**/*_test.js"
     ],
     "helpers": [],
     "stopSpecOnExpectationFailure": false,

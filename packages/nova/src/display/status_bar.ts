@@ -1,6 +1,6 @@
-import { PlanetData } from "novadatainterface/PlanetData";
-import { ShipData } from "novadatainterface/ShipData";
-import { StatusBarData, StatusBarDataArea } from "novadatainterface/StatusBarData";
+import { PlanetData } from "novadatainterface/planet_data";
+import { ShipData } from "novadatainterface/ship_data";
+import { StatusBarData, StatusBarDataArea } from "novadatainterface/status_bar_data";
 import { GetEntity, RunQuery, UUID } from "nova_ecs/arg_types";
 import { Component } from "nova_ecs/component";
 import { Position } from "nova_ecs/datatypes/position";
@@ -16,7 +16,7 @@ import { System } from "nova_ecs/system";
 import * as PIXI from "pixi.js";
 import { Subject } from "rxjs";
 import { v4 } from "uuid";
-import { GameData } from "../client/gamedata/GameData.js";
+import { GameData } from "../client/gamedata/game_data.js";
 import { GameDataResource } from "../nova_plugin/game_data_resource.js";
 import { ArmorComponent, ShieldComponent } from "../nova_plugin/health_plugin.js";
 import { makeNpc } from "../nova_plugin/npc_plugin.js";

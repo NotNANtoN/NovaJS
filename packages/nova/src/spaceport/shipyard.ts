@@ -1,9 +1,9 @@
-import { ShipData } from 'novadatainterface/ShipData';
+import { ShipData } from 'novadatainterface/ship_data';
 import { Entity } from 'nova_ecs/entity';
 import { MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
 import * as PIXI from 'pixi.js';
 import { Observable } from 'rxjs';
-import { GameData } from '../client/gamedata/GameData.js';
+import { GameData } from '../client/gamedata/game_data.js';
 import { ControlEvent } from '../nova_plugin/controls_plugin.js';
 import { makeShip } from '../nova_plugin/make_ship.js';
 import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin.js';

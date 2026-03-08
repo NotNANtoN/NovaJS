@@ -1,4 +1,4 @@
-import { GameDataInterface } from "novadatainterface/GameDataInterface";
+import { GameDataInterface } from "novadatainterface/game_data_interface";
 import { Resource } from "nova_ecs/resource";
 
 

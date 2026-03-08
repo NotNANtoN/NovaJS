@@ -1,5 +1,5 @@
 import * as t from 'io-ts';
-import { PlanetData } from "novadatainterface/PlanetData";
+import { PlanetData } from "novadatainterface/planet_data";
 import { Emit, UUID } from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
 import { EcsEvent } from 'nova_ecs/events';

@@ -1,4 +1,4 @@
-import { ExplosionData } from "novadatainterface/ExplosionData";
+import { ExplosionData } from "novadatainterface/explosion_data";
 import { Emit, Entities, GetEntity, UUID } from "nova_ecs/arg_types";
 import { Component } from "nova_ecs/component";
 import { Angle } from "nova_ecs/datatypes/angle";

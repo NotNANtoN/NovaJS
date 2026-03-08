@@ -1,4 +1,4 @@
-import { ProjectileWeaponData, WeaponData } from 'novadatainterface/WeaponData';
+import { ProjectileWeaponData, WeaponData } from 'novadatainterface/weapon_data';
 import { Emit, EmitNow, Entities, GetEntity, RunQueryFunction, UUID } from 'nova_ecs/arg_types';
 import { Angle } from 'nova_ecs/datatypes/angle';
 import { Position } from 'nova_ecs/datatypes/position';

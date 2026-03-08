@@ -3,7 +3,7 @@ import { Plugin } from 'nova_ecs/plugin';
 import { Resource } from 'nova_ecs/resource';
 import { System } from 'nova_ecs/system';
 import { SingletonComponent } from 'nova_ecs/world';
-import { GameData } from '../client/gamedata/GameData.js';
+import { GameData } from '../client/gamedata/game_data.js';
 import { GameDataResource } from '../nova_plugin/game_data_resource.js';
 import { SoundEvent } from '../nova_plugin/sound_event.js';
 

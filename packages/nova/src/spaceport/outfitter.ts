@@ -1,8 +1,8 @@
-import { OutfitData } from "novadatainterface/OutiftData";
+import { OutfitData } from "novadatainterface/outfit_data";
 import { DefaultMap } from "nova_ecs/utils";
 import * as PIXI from 'pixi.js';
 import { Observable } from "rxjs";
-import { GameData } from "../client/gamedata/GameData.js";
+import { GameData } from "../client/gamedata/game_data.js";
 import { ControlEvent } from "../nova_plugin/controls_plugin.js";
 import { OutfitsState } from "../nova_plugin/outfit_plugin.js";
 import { Button } from "./button.js";

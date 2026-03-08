@@ -12,18 +12,18 @@ import path from "path";
 import { fileURLToPath } from 'url';
 import { v4 } from "uuid";
 import { Worker } from "worker_threads";
-import { CommunicatorServer } from "./src/communication/CommunicatorServer.js";
+import { CommunicatorServer } from "./src/communication/communicator_server.js";
 import { MultiRoom } from './src/communication/multi_room_communicator.js';
-import { SocketChannelServer } from "./src/communication/SocketChannelServer.js";
+import { SocketChannelServer } from "./src/communication/socket_channel_server.js";
 import { GameDataResource } from './src/nova_plugin/game_data_resource.js';
 import { makeShip } from "./src/nova_plugin/make_ship.js";
 import { MultiRoomResource, NovaPlugin } from './src/nova_plugin/nova_plugin.js';
 import { ServerPlugin } from "./src/nova_plugin/server_plugin.js";
 import { NovaRepl } from "./src/server/nova_repl.js";
-import { FilesystemData } from "./src/server/parsing/FilesystemData.js";
-import { GameDataAggregator } from "./src/server/parsing/GameDataAggregator.js";
+import { FilesystemData } from "./src/server/parsing/filesystem_data.js";
+import { GameDataAggregator } from "./src/server/parsing/game_data_aggregator.js";
 import { NovaParseWorkerApi } from "./src/server/parsing/nova_parse_worker.js";
-import { setupRoutes } from "./src/server/setupRoutes.js";
+import { setupRoutes } from "./src/server/setup_routes.js";
 
 const Settings = t.partial({
     port: t.number,

@@ -1,4 +1,4 @@
-import { PlanetData } from 'novadatainterface/PlanetData';
+import { PlanetData } from 'novadatainterface/planet_data';
 import { AsyncSystemResource } from 'nova_ecs/async_system';
 import { Position } from 'nova_ecs/datatypes/position';
 import { Vector } from 'nova_ecs/datatypes/vector';
@@ -7,7 +7,7 @@ import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import { World } from 'nova_ecs/world';
 import * as PIXI from 'pixi.js';
 import { Observable } from 'rxjs';
-import { GameData } from '../client/gamedata/GameData.js';
+import { GameData } from '../client/gamedata/game_data.js';
 import { ControlEvent } from '../nova_plugin/controls_plugin.js';
 import { GameDataResource } from '../nova_plugin/game_data_resource.js';
 import { ArmorComponent, IonizationComponent, ShieldComponent } from '../nova_plugin/health_plugin.js';

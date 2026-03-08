@@ -1,6 +1,6 @@
-import { GameDataInterface } from "novadatainterface/GameDataInterface";
+import { GameDataInterface } from "novadatainterface/game_data_interface";
 import * as PIXI from "pixi.js";
-import { Animation } from "novadatainterface/Animation";
+import { Animation } from "novadatainterface/animation";
 import { SpriteSheetSprite } from "./sprite_sheet_sprite.js";
 
 /**

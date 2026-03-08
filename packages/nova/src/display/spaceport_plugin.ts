@@ -6,7 +6,7 @@ import { CommunicatorResource, MultiplayerData } from 'nova_ecs/plugins/multipla
 import { Provide } from 'nova_ecs/provide';
 import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
-import { GameData } from '../client/gamedata/GameData.js';
+import { GameData } from '../client/gamedata/game_data.js';
 import { ControlsSubject } from '../nova_plugin/controls_plugin.js';
 import { GameDataResource } from '../nova_plugin/game_data_resource.js';
 import { LandEvent, PlanetComponent } from '../nova_plugin/planet_plugin.js';

@@ -1,5 +1,5 @@
-import { Animation } from "novadatainterface/Animation";
-import { GameDataInterface } from "novadatainterface/GameDataInterface";
+import { Animation } from "novadatainterface/animation";
+import { GameDataInterface } from "novadatainterface/game_data_interface";
 import { Emit, EmitNow, UUID } from "nova_ecs/arg_types";
 import { Component } from "nova_ecs/component";
 import { Angle } from "nova_ecs/datatypes/angle";

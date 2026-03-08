@@ -1,4 +1,4 @@
-import { ParticleConfig } from "novadatainterface/WeaponData";
+import { ParticleConfig } from "novadatainterface/weapon_data";
 import { GetEntity } from "nova_ecs/arg_types";
 import { Component } from "nova_ecs/component";
 import { DeleteEvent } from "nova_ecs/events";

@@ -1,4 +1,4 @@
-import { WeaponDamage } from 'novadatainterface/WeaponData';
+import { WeaponDamage } from 'novadatainterface/weapon_data';
 import { Components, Emit, RunQuery, UUID } from 'nova_ecs/arg_types';
 import { Vector } from 'nova_ecs/datatypes/vector';
 import { Entity } from 'nova_ecs/entity';

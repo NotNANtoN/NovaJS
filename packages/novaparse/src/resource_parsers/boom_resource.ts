@@ -1,0 +1,33 @@
+import { Resource } from "resource_fork";
+import { NovaResources } from "./resource_holder_base.js";
+import { BaseResource } from "./nova_resource_base.js";
+
+class BoomResource extends BaseResource {
+    animationRate: number;
+    sound: number | null;
+    graphic: number;
+    constructor(resource: Resource, idSpace: NovaResources) {
+        super(resource, idSpace);
+
+        var d = this.data;
+        this.animationRate = d.getInt16(0);
+        this.sound = d.getInt16(2);
+        if (this.sound != -1) {
+            this.sound += 300;
+        }
+        else {
+            this.sound = null;
+        }
+
+        this.graphic = d.getInt16(4);
+        if (this.graphic != -1) {
+            this.graphic += 400;
+        }
+        else {
+            throw new Error("Boom id " + this.id + " had no graphic");
+        }
+
+    }
+}
+
+export { BoomResource }
