@@ -1,6 +1,7 @@
 import * as PIXI from 'pixi.js';
 import { firstValueFrom, Observable, Subject } from 'rxjs';
-import { GameData } from '../client/gamedata/game_data.js';
+import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data.js';
+import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { ControlEvent } from '../nova_plugin/controls_plugin.js';
 import { Button } from './button.js';
 import { MenuControls } from './menu_controls.js';
@@ -17,12 +18,13 @@ export abstract class Menu<T> {
     private results = new Subject<T>();
     protected input!: T;
 
-    constructor(protected gameData: GameData,
+    constructor(protected displayAssets: DisplayAssetDataInterface,
+        protected simulationData: SimulationGameDataInterface,
         private background: string,
         controlEvents: Observable<ControlEvent>) {
         this.controls = new MenuControls(controlEvents);
 
-        const backgroundSprite = this.gameData.spriteFromPict(this.background);
+        const backgroundSprite = this.displayAssets.spriteFromPict(this.background);
         // So you can't press things behind this menu:
         backgroundSprite.interactive = true;
         backgroundSprite.anchor.x = 0.5;

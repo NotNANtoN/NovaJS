@@ -1,6 +1,6 @@
 import * as PIXI from 'pixi.js';
 import { BehaviorSubject } from 'rxjs';
-import { GameData } from '../client/gamedata/game_data.js';
+import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data.js';
 
 
 const TILE_SIZE = [83, 54];
@@ -37,7 +37,7 @@ export class ItemTile<I extends Item> {
     public built = false;
     public largePict = new PIXI.Container();
 
-    constructor(private gameData: GameData, readonly item: I) {
+    constructor(private displayAssets: DisplayAssetDataInterface, readonly item: I) {
         const nameText = new PIXI.Text(item.name, this.font.normal);
         nameText.anchor.x = 0.5;
         nameText.position.x = TILE_SIZE[0] / 2;
@@ -62,8 +62,8 @@ export class ItemTile<I extends Item> {
         }
 
         if (this.item.pict) {
-            const smallPict = this.gameData.spriteFromPict(this.item.pict);
-            const largePict = this.gameData.spriteFromPict(this.item.pict);
+            const smallPict = this.displayAssets.spriteFromPict(this.item.pict);
+            const largePict = this.displayAssets.spriteFromPict(this.item.pict);
             this.largePict.addChild(largePict);
             smallPict.anchor.x = 0.5;
             smallPict.position.x = TILE_SIZE[0] / 2;
@@ -147,9 +147,9 @@ export class ItemGrid<I extends Item> {
     private tilesDict = new Map<string, ItemTile<I>>();
     private tiles: ItemTile<I>[];
 
-    constructor(gameData: GameData, private items: I[]) {
+    constructor(displayAssets: DisplayAssetDataInterface, private items: I[]) {
         this.tiles = items.map(item => {
-            const tile = new ItemTile(gameData, item);
+            const tile = new ItemTile(displayAssets, item);
             this.container.addChild(tile.container);
             tile.container.on('pointerdown', () => this.tileClicked(tile));
             this.tilesDict.set(item.id, tile);

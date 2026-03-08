@@ -3,8 +3,7 @@ import { Plugin } from 'nova_ecs/plugin';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { Resource } from "nova_ecs/resource";
 import { System } from 'nova_ecs/system';
-import { GameData } from '../client/gamedata/game_data.js';
-import { GameDataResource } from '../nova_plugin/game_data_resource.js';
+import { DisplayAssetDataResource } from '../nova_plugin/game_data_resource.js';
 import { PlanetTargetComponent } from '../nova_plugin/planet_plugin.js';
 import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin.js';
 import { AnimationGraphicComponent, ObjectDrawSystem } from './animation_graphic_plugin.js';
@@ -43,9 +42,9 @@ const DrawPlanetCornersSystem = new System({
 export const PlanetCornersPlugin: Plugin = {
     name: 'PlanetCornersPlugin',
     build(world) {
-        const gameData = world.resources.get(GameDataResource);
-        if (!gameData) {
-            throw new Error('Expected world to have gameData');
+        const displayAssets = world.resources.get(DisplayAssetDataResource);
+        if (!displayAssets) {
+            throw new Error('Expected world to have display assets');
         }
 
         const space = world.resources.get(Space);
@@ -53,7 +52,7 @@ export const PlanetCornersPlugin: Plugin = {
             throw new Error('Expected world to have Space resource');
         }
 
-        const targetCorners = new TargetCorners(gameData as GameData, 'planetCorners');
+        const targetCorners = new TargetCorners(displayAssets, 'planetCorners');
         space.addChild(targetCorners.container);
         world.resources.set(PlanetCornersResource, targetCorners);
         world.addSystem(DrawPlanetCornersSystem);
@@ -68,4 +67,3 @@ export const PlanetCornersPlugin: Plugin = {
         world.resources.delete(PlanetCornersResource);
     }
 }
-

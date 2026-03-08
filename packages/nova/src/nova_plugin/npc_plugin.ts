@@ -11,7 +11,7 @@ import { makeShip } from "./make_ship.js";
 import { ShipComponent } from "./ship_plugin.js";
 import { TargetComponent } from "./target_component.js";
 import { WeaponsStateComponent } from "./weapons_state.js";
-import { GameDataResource } from "./game_data_resource.js";
+import { SimulationGameDataResource } from "./game_data_resource.js";
 
 const TargetsQuery = new Query([UUID, ShipComponent] as const);
 function getValidTargets(targets: Array<readonly [string, any]>, selfUuid: string): string[] {
@@ -60,7 +60,7 @@ const FollowAI = new System({
 export const ShootAllWeaponsComponent = new Component<undefined>('ShootAllWeaponsComponent');
 const ShootAllWeaponsAI = new System({
     name: 'ShootAllWeaponsAI',
-    args: [WeaponsStateComponent, GameDataResource, TargetComponent, ShootAllWeaponsComponent] as const,
+    args: [WeaponsStateComponent, SimulationGameDataResource, TargetComponent, ShootAllWeaponsComponent] as const,
     step(weapons, gameData, { target }) {
         for (const [id, weapon] of weapons) {
             const weaponType = gameData.data.Weapon.getCached(id)?.type;

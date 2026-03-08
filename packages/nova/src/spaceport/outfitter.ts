@@ -2,7 +2,8 @@ import { OutfitData } from "novadatainterface/outfit_data";
 import { DefaultMap } from "nova_ecs/utils";
 import * as PIXI from 'pixi.js';
 import { Observable } from "rxjs";
-import { GameData } from "../client/gamedata/game_data.js";
+import { DisplayAssetDataInterface } from "../client/gamedata/display_asset_data.js";
+import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
 import { ControlEvent } from "../nova_plugin/controls_plugin.js";
 import { OutfitsState } from "../nova_plugin/outfit_plugin.js";
 import { Button } from "./button.js";
@@ -43,15 +44,16 @@ export class Outfitter extends Menu<OutfitsState> {
         freeMass: new PIXI.Text("", FONT.normal),
     }
 
-    constructor(gameData: GameData,
+    constructor(displayAssets: DisplayAssetDataInterface,
+        simulationData: SimulationGameDataInterface,
         controlEvents: Observable<ControlEvent>) {
-        super(gameData, "nova:8502", controlEvents);
+        super(displayAssets, simulationData, "nova:8502", controlEvents);
 
         this.outfits = new DefaultMap(() => 0);
         const buttons = {
-            buy: new Button(gameData, "Buy", 60, { x: -100, y: 126 }),
-            sell: new Button(gameData, "Sell", 60, { x: 0, y: 126 }),
-            done: new Button(gameData, "Done", 60, { x: 100, y: 126 })
+            buy: new Button(displayAssets, "Buy", 60, { x: -100, y: 126 }),
+            sell: new Button(displayAssets, "Sell", 60, { x: 0, y: 126 }),
+            done: new Button(displayAssets, "Done", 60, { x: 100, y: 126 })
         };
 
         buttons.buy.click.subscribe(this.buyOutfit.bind(this));
@@ -119,11 +121,11 @@ export class Outfitter extends Menu<OutfitsState> {
     }
 
     private async makeOutfitsGrid() {
-        const ids = (await this.gameData.ids).Outfit;
+        const ids = (await this.simulationData.ids).Outfit;
         const outfits = await Promise.all(ids.map(id =>
-            this.gameData.data.Outfit.get(id, 100)));
+            this.simulationData.data.Outfit.get(id, 100)));
         outfits.sort((a, b) => b.displayWeight - a.displayWeight);
-        const itemGrid = new ItemGrid(this.gameData, outfits);
+        const itemGrid = new ItemGrid(this.displayAssets, outfits);
         itemGrid.setCounts(this.outfits);
         return itemGrid;
     }

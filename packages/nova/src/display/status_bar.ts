@@ -16,8 +16,8 @@ import { System } from "nova_ecs/system";
 import * as PIXI from "pixi.js";
 import { Subject } from "rxjs";
 import { v4 } from "uuid";
-import { GameData } from "../client/gamedata/game_data.js";
-import { GameDataResource } from "../nova_plugin/game_data_resource.js";
+import { DisplayAssetDataInterface } from "../client/gamedata/display_asset_data.js";
+import { DisplayAssetDataResource, SimulationGameDataResource } from "../nova_plugin/game_data_resource.js";
 import { ArmorComponent, ShieldComponent } from "../nova_plugin/health_plugin.js";
 import { makeNpc } from "../nova_plugin/npc_plugin.js";
 import { PlanetDataComponent } from "../nova_plugin/planet_plugin.js";
@@ -52,18 +52,18 @@ class StatusBar {
     private addEnemyButton: Button;
     readonly addEnemy: Subject<undefined>;
 
-    constructor(private statusBarData: StatusBarData, private gameData: GameData,
+    constructor(private statusBarData: StatusBarData, private displayAssets: DisplayAssetDataInterface,
                 private renderer: PIXI.Renderer | PIXI.IRenderer) {
         this.buildPromise = this.build();
         this.container.name = 'StatusBar';
-        this.addEnemyButton = new Button(gameData, 'Add Enemy', 60);
+        this.addEnemyButton = new Button(displayAssets, 'Add Enemy', 60);
         this.addEnemyButton.container.position.x = 65;
         this.addEnemyButton.container.position.y = 530;
         this.addEnemy = this.addEnemyButton.click;
     }
 
     private async build() {
-        const background = await this.gameData.spriteFromPictAsync(this.statusBarData.image);
+        const background = await this.displayAssets.spriteFromPictAsync(this.statusBarData.image);
         this.container.addChild(background);
         this.width = background.width;
         const dataAreas = this.statusBarData.dataAreas;
@@ -337,7 +337,7 @@ const DrawStatusBarStats = new System({
 const DrawStatusBarSecondaryWeapon = new System({
     name: 'DrawStatusBarSecondaryWeapon',
     events: [ChangeSecondaryEvent],
-    args: [StatusBarResource, ChangeSecondaryEvent, GameDataResource,
+    args: [StatusBarResource, ChangeSecondaryEvent, SimulationGameDataResource,
         PlayerShipSelector] as const,
     step(statusBar, activeSecondary, gameData) {
         if (activeSecondary.secondary) {
@@ -371,9 +371,13 @@ const DrawStatusBarTarget = new System({
 export const StatusBarPlugin: Plugin = {
     name: 'StatusBar',
     async build(world) {
-        const gameData = world.resources.get(GameDataResource);
-        if (!gameData) {
-            throw new Error('Expected gameData resource to exist');
+        const simulationData = world.resources.get(SimulationGameDataResource);
+        if (!simulationData) {
+            throw new Error('Expected simulation game data resource to exist');
+        }
+        const displayAssets = world.resources.get(DisplayAssetDataResource);
+        if (!displayAssets) {
+            throw new Error('Expected display asset data resource to exist');
         }
 
         const stage = world.resources.get(Stage);
@@ -386,16 +390,16 @@ export const StatusBarPlugin: Plugin = {
             throw new Error('Expected PIXI App resource to exist');
         }
 
-        const statusBar = new StatusBar(await gameData.data.StatusBar.get("nova:128"),
-            gameData as GameData, app.renderer);
+        const statusBar = new StatusBar(await displayAssets.data.StatusBar.get("nova:128"),
+            displayAssets, app.renderer);
         await statusBar.buildPromise;
         stage.addChild(statusBar.container);
         statusBar.container.position.x = window.innerWidth - statusBar.container.width;
         statusBar.container.position.y = 0;
         statusBar.addEnemy.subscribe(async () => {
-            const randomIndex = Math.floor(Math.random() * (await gameData.ids).Ship.length);
-            const randomShipId = (await gameData.ids).Ship[randomIndex];
-            const shipData = await gameData.data.Ship.get(randomShipId);
+            const randomIndex = Math.floor(Math.random() * (await simulationData.ids).Ship.length);
+            const randomShipId = (await simulationData.ids).Ship[randomIndex];
+            const shipData = await simulationData.data.Ship.get(randomShipId);
 
             const npc = makeNpc(shipData);
             const uuid = world.resources.get(CommunicatorResource)?.uuid;

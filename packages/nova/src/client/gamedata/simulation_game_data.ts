@@ -29,7 +29,15 @@ class WeaponGettable extends Gettable<WeaponData> {
 export type SimulationGameDataResources = Pick<GameDataInterface['data'],
     'Ship' | 'Outfit' | 'Weapon' | 'Planet' | 'System' | 'SpriteSheet'>;
 
-export class SimulationGameData {
+export interface SimulationGameDataInterface {
+    readonly data: SimulationGameDataResources;
+    readonly ids: Promise<NovaIDs>;
+    readonly preloadData?: Promise<PreloadData>;
+    readonly loaded?: Promise<void>;
+    getSettings?(file: string): Promise<unknown>;
+}
+
+export class SimulationGameData implements SimulationGameDataInterface {
     public readonly data: SimulationGameDataResources;
     public readonly ids: Promise<NovaIDs>;
     readonly preloadData: Promise<PreloadData>;

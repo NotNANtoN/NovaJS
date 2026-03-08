@@ -6,9 +6,8 @@ import { CommunicatorResource, MultiplayerData } from 'nova_ecs/plugins/multipla
 import { Provide } from 'nova_ecs/provide';
 import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
-import { GameData } from '../client/gamedata/game_data.js';
 import { ControlsSubject } from '../nova_plugin/controls_plugin.js';
-import { GameDataResource } from '../nova_plugin/game_data_resource.js';
+import { DisplayAssetDataResource, SimulationGameDataResource } from '../nova_plugin/game_data_resource.js';
 import { LandEvent, PlanetComponent } from '../nova_plugin/planet_plugin.js';
 import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin.js';
 import { Spaceport } from '../spaceport/spaceport.js';
@@ -22,9 +21,9 @@ const SpaceportComponent = new Component<Spaceport>("Spaceport");
 const SpaceportProvider = Provide({
     name: "SpaceportProvider",
     provided: SpaceportComponent,
-    args: [GameDataResource, ControlsSubject, Stage, PlanetComponent] as const,
-    factory(gameData, controls, stage, { id }) {
-        const spaceport = new Spaceport(gameData as GameData, id, controls);
+    args: [DisplayAssetDataResource, SimulationGameDataResource, ControlsSubject, Stage, PlanetComponent] as const,
+    factory(displayAssets, simulationData, controls, stage, { id }) {
+        const spaceport = new Spaceport(displayAssets, simulationData, id, controls);
         stage.addChild(spaceport.container);
         return spaceport;
     }

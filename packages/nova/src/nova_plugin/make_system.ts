@@ -1,10 +1,10 @@
-import { GameDataInterface } from "novadatainterface/game_data_interface";
 import { Entities, GetWorld } from "nova_ecs/arg_types";
 import { AsyncSystem } from "nova_ecs/async_system";
 import { MultiplayerData } from "nova_ecs/plugins/multiplayer_plugin";
 import { Resource } from "nova_ecs/resource";
 import { SingletonComponent, World } from "nova_ecs/world";
-import { GameDataResource } from "./game_data_resource.js";
+import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
+import { SimulationGameDataResource } from "./game_data_resource.js";
 import { makePlanet } from "./make_planet.js";
 import { SystemIdResource } from "./system_id_resource.js";
 import { SystemPlugin } from "./system_plugin.js";
@@ -14,7 +14,7 @@ const AddedPlanetsResource = new Resource<{ val: boolean }>('AddedPlanetsResourc
 
 const MakePlanetsSystem = new AsyncSystem({
     name: 'MakePlanetsSystem',
-    args: [GameDataResource, SystemIdResource, Entities, GetWorld,
+    args: [SimulationGameDataResource, SystemIdResource, Entities, GetWorld,
         AddedPlanetsResource, SingletonComponent] as const,
     exclusive: true,
     async step(gameData, systemId, entities, world, addedPlanets) {
@@ -33,12 +33,12 @@ const MakePlanetsSystem = new AsyncSystem({
     }
 });
 
-export function makeSystem(systemId: string, gameData: GameDataInterface) {
+export function makeSystem(systemId: string, gameData: SimulationGameDataInterface) {
     //const system = await gameData.data.System.get(systemId);
     const world = new World(systemId);
 
     world.resources.set(AddedPlanetsResource, { val: false });
-    world.resources.set(GameDataResource, gameData);
+    world.resources.set(SimulationGameDataResource, gameData);
     world.resources.set(SystemIdResource, systemId);
     world.addSystem(MakePlanetsSystem);
     world.addPlugin(SystemPlugin);

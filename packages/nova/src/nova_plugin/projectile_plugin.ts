@@ -21,7 +21,7 @@ import { CollisionEvent, CollisionHitterComponent, CollisionVulnerabilityCompone
 import { CreateTime } from './create_time.js';
 import { DamagedEvent, ZeroArmorEvent } from './death_plugin.js';
 import { FireSubs, OwnerComponent, SourceComponent, SubCounts, VulnerableToPD, WeaponConstructors, WeaponEntry } from './fire_weapon_plugin.js';
-import { GameDataResource } from './game_data_resource.js';
+import { SimulationGameDataResource } from './game_data_resource.js';
 import { firstOrderWithFallback, Guidance, GuidanceComponent } from './guidance.js';
 import { ArmorComponent, ShieldComponent } from './health_plugin.js';
 import { ProjectileBlastHull, ProjectileComponent, ProjectileDataComponent } from './projectile_data.js';
@@ -229,7 +229,7 @@ export const ProjectileCollisionEvent
 const ProjectileHurtboxProvider = ProvideAsync({
     name: "ProjectileHurtboxProvider",
     provided: HurtboxHullComponent,
-    args: [AnimationComponent, GameDataResource, CollisionHitterComponent, ProjectileComponent] as const,
+    args: [AnimationComponent, SimulationGameDataResource, CollisionHitterComponent, ProjectileComponent] as const,
     factory: hullFromAnimation,
 });
 

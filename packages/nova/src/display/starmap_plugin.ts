@@ -1,9 +1,8 @@
 import { AsyncSystem } from 'nova_ecs/async_system';
 import { Plugin } from 'nova_ecs/plugin';
 import { Resource } from 'nova_ecs/resource';
-import { GameData } from '../client/gamedata/game_data.js';
+import { DisplayAssetDataResource, SimulationGameDataResource } from '../nova_plugin/game_data_resource.js';
 import { ControlsSubject, EcsControlEvent } from '../nova_plugin/controls_plugin.js';
-import { GameDataResource } from '../nova_plugin/game_data_resource.js';
 import { JumpRouteComponent } from '../nova_plugin/jump_plugin.js';
 import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin.js';
 import { SystemIdResource } from '../nova_plugin/system_id_resource.js';
@@ -35,9 +34,13 @@ const MapSystem = new AsyncSystem({
 export const StarmapPlugin: Plugin = {
     name: 'StarmapPlugin',
     build(world) {
-        const gameData = world.resources.get(GameDataResource);
-        if (!gameData) {
-            throw new Error('Expected GameDataResource to exist');
+        const simulationData = world.resources.get(SimulationGameDataResource);
+        if (!simulationData) {
+            throw new Error('Expected SimulationGameDataResource to exist');
+        }
+        const displayAssets = world.resources.get(DisplayAssetDataResource);
+        if (!displayAssets) {
+            throw new Error('Expected DisplayAssetDataResource to exist');
         }
         const controls = world.resources.get(ControlsSubject);
         if (!controls) {
@@ -52,7 +55,7 @@ export const StarmapPlugin: Plugin = {
             throw new Error('Expected SystemIdResource to exist');
         }
 
-        const starmap = new Starmap(gameData as GameData, systemId, controls);
+        const starmap = new Starmap(displayAssets, simulationData, systemId, controls);
         stage.addChild(starmap.container);
         world.resources.set(StarmapResource, starmap);
 

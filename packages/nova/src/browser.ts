@@ -7,7 +7,8 @@ import * as PIXI from "pixi.js";
 import { firstValueFrom, take, filter } from "rxjs";
 import Stats from 'stats.js';
 import { v4 } from "uuid";
-import { GameData } from "./client/gamedata/game_data.js";
+import { DisplayAssetData } from "./client/gamedata/display_asset_data.js";
+import { SimulationGameData } from "./client/gamedata/simulation_game_data.js";
 import { CommunicatorClient } from "./communication/communicator_client.js";
 import { MultiRoom } from "./communication/multi_room_communicator.js";
 import { SocketChannelClient } from "./communication/socket_channel_client.js";
@@ -16,7 +17,7 @@ import { Display } from "./display/display_plugin.js";
 import { PixiAppResource } from "./display/pixi_app_resource.js";
 import { ResizeEvent } from "./display/screen_size_plugin.js";
 import { Stage } from "./display/stage_resource.js";
-import { GameDataResource } from "./nova_plugin/game_data_resource.js";
+import { DisplayAssetDataResource, SimulationGameDataResource } from "./nova_plugin/game_data_resource.js";
 import { FinishJumpEvent } from "./nova_plugin/jump_plugin.js";
 import { makeShip } from "./nova_plugin/make_ship.js";
 import { makeSystem } from "./nova_plugin/make_system.js";
@@ -25,8 +26,10 @@ import { PlayerShipSelector } from "./nova_plugin/player_ship_plugin.js";
 import { SystemIdResource } from "./nova_plugin/system_id_resource.js";
 
 
-const gameData = new GameData();
-(window as any).gameData = gameData;
+const simulationGameData = new SimulationGameData();
+const displayAssetData = new DisplayAssetData();
+(window as any).simulationGameData = simulationGameData;
+(window as any).displayAssetData = displayAssetData;
 (window as any).PIXI = PIXI;
 
 const pixelRatio = window.devicePixelRatio || 1;
@@ -70,10 +73,11 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
         await system.removePlugin(Display);
     }
 
-    const newSystem = makeSystem(to, gameData);
+    const newSystem = makeSystem(to, simulationGameData);
     (window as any).novaDebug = new DebugSettings(newSystem, (window as any).novaDebug);
 
     (window as any).system = newSystem;
+    newSystem.resources.set(DisplayAssetDataResource, displayAssetData);
     newSystem.resources.set(PixiAppResource, app);
     await newSystem.addPlugin(Display);
 
@@ -102,15 +106,16 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
 
 async function startGame() {
     world = new World();
-    world.resources.set(GameDataResource, gameData);
+    world.resources.set(SimulationGameDataResource, simulationGameData);
+    world.resources.set(DisplayAssetDataResource, displayAssetData);
     await world.addPlugin(multiplayer(multiRoom.join('main room')));
     world.resources.set(MultiRoomResource, multiRoom);
     await world.addPlugin(NovaPlugin);
 
     // Make the player's ship
-    const ids = await gameData.ids;
+    const ids = await simulationGameData.ids;
     let randomShip = ids.Ship[Math.floor(Math.random() * ids.Ship.length)];
-    const shipData = await gameData.data.Ship.get(randomShip);
+    const shipData = await simulationGameData.data.Ship.get(randomShip);
     const shipEntity = makeShip(shipData);
     shipEntity.components.set(MultiplayerData, {
         owner: communicator.uuid!
@@ -193,7 +198,6 @@ async function startGame() {
 }
 
 startGame()
-
 
 
 

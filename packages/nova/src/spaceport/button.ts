@@ -1,6 +1,6 @@
 import * as PIXI from 'pixi.js';
 import { Subject } from 'rxjs';
-import { GameData } from '../client/gamedata/game_data.js';
+import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data.js';
 
 const BUTTON_IDS = new Map([
     ['normal', {
@@ -38,7 +38,7 @@ export class Button {
     ]);
 
 
-    constructor(private gameData: GameData, text: string,
+    constructor(private displayAssets: DisplayAssetDataInterface, text: string,
         width?: number, position?: { x: number, y: number },
         private buttonIds = BUTTON_IDS) {
         this.container.position.x = position?.x ?? 0;
@@ -82,17 +82,17 @@ export class Button {
             if (!stateContainer) {
                 throw new Error('Button missing state container');
             }
-            const leftSprite = this.gameData.spriteFromPict(left);
+            const leftSprite = this.displayAssets.spriteFromPict(left);
             leftSprite.anchor.x = 1;
             leftSprite.position.x = LEFT_POS;
             stateContainer.addChild(leftSprite);
 
             const middleSprite = new PIXI.TilingSprite(
-                this.gameData.textureFromPict(middle), this.width, 25);
+                this.displayAssets.textureFromPict(middle), this.width, 25);
             middleSprite.position.x = LEFT_POS;
             stateContainer.addChild(middleSprite);
 
-            const rightSprite = this.gameData.spriteFromPict(right);
+            const rightSprite = this.displayAssets.spriteFromPict(right);
             rightSprite.position.x = LEFT_POS + this.width;
             stateContainer.addChild(rightSprite);
 

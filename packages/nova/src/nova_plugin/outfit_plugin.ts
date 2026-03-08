@@ -1,6 +1,5 @@
 import { produce } from 'immer';
 import * as t from 'io-ts';
-import { GameDataInterface } from 'novadatainterface/game_data_interface';
 import { OutfitData, OutfitPhysics } from 'novadatainterface/outfit_data';
 import { ShipPhysics } from 'novadatainterface/ship_data';
 import { Component } from 'nova_ecs/component';
@@ -10,7 +9,7 @@ import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
 import { MovementPhysics, MovementType } from 'nova_ecs/plugins/movement_plugin';
 import { ProvideAsync } from "nova_ecs/provide_async";
 import { DefaultMap } from '../common/default_map.js';
-import { GameDataResource } from './game_data_resource.js';
+import { SimulationGameDataResource } from './game_data_resource.js';
 import { Stat } from './stat.js';
 import { WeaponsStateComponent, WeaponState } from './weapons_state.js';
 
@@ -45,7 +44,7 @@ const OutfitWeaponProvider = ProvideAsync({
     name: "OutfitWeaponProvider",
     provided: WeaponsStateComponent,
     update: [OutfitsStateComponent],
-    args: [OutfitsStateComponent, GameDataResource] as const,
+    args: [OutfitsStateComponent, SimulationGameDataResource] as const,
     async factory(outfits, gameData) {
         const weaponsState = new DefaultMap<string, WeaponState>(() => ({
             count: 0,
@@ -89,4 +88,3 @@ export const OutfitPlugin: Plugin = {
         world.addSystem(OutfitWeaponProvider);
     }
 };
-

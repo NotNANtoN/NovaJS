@@ -1,6 +1,6 @@
-import { GameDataInterface } from "novadatainterface/game_data_interface";
 import * as PIXI from "pixi.js";
 import { Animation } from "novadatainterface/animation";
+import { DisplayAssetDataInterface } from "../client/gamedata/display_asset_data.js";
 import { SpriteSheetSprite } from "./sprite_sheet_sprite.js";
 
 /**
@@ -11,7 +11,7 @@ import { SpriteSheetSprite } from "./sprite_sheet_sprite.js";
 export class AnimationGraphic {
     // AnimationGraphic is not a Drawable since it doesn't draw a state.
     readonly container = new PIXI.Container();
-    protected readonly gameData: GameDataInterface;
+    protected readonly displayAssets: DisplayAssetDataInterface;
     readonly sprites = new Map<string, SpriteSheetSprite>();
     private wrappedProgress = 0;
     private wrappedRotation = 0;
@@ -20,9 +20,9 @@ export class AnimationGraphic {
     built = false;
     size = { x: 0, y: 0 }
 
-    constructor({ gameData, animation }: { gameData: GameDataInterface, animation: Animation | Promise<Animation> }) {
+    constructor({ displayAssets, animation }: { displayAssets: DisplayAssetDataInterface, animation: Animation | Promise<Animation> }) {
         this.animation = animation;
-        this.gameData = gameData;
+        this.displayAssets = displayAssets;
         this.rotation = 0;
         this.buildPromise = this.build();
     }
@@ -33,7 +33,7 @@ export class AnimationGraphic {
             const image = (await this.animation).images[imageName];
             const sprite = new SpriteSheetSprite({
                 image,
-                gameData: this.gameData
+                displayAssets: this.displayAssets
             });
 
             this.sprites.set(imageName, sprite);

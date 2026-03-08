@@ -11,7 +11,7 @@ import { System } from 'nova_ecs/system';
 import { mod } from '../util/mod.js';
 import { ControlStateEvent } from './control_state_event.js';
 import { WeaponEntries, WeaponLocalState, WeaponsComponent } from './fire_weapon_plugin.js';
-import { GameDataResource } from './game_data_resource.js';
+import { SimulationGameDataResource } from './game_data_resource.js';
 import { PlatformResource } from './platform_plugin.js';
 import { PlayerShipSelector } from './player_ship_plugin.js';
 import { WeaponsState, WeaponsStateComponent, WeaponState } from './weapons_state.js';
@@ -101,7 +101,7 @@ const ControlPlayerWeapons = new System({
     name: 'ControlPlayerWeapons',
     events: [ControlStateEvent],
     args: [ControlStateEvent, WeaponsStateComponent, WeaponsComponent,
-        ActiveSecondaryWeapon, Emit, GameDataResource, PlayerShipSelector] as const,
+        ActiveSecondaryWeapon, Emit, SimulationGameDataResource, PlayerShipSelector] as const,
     step(controlState, weaponsState, weaponsData, activeSecondary, emit, gameData) {
         for (const [, weaponState] of weaponsState) {
             weaponState.firing = false;
@@ -162,7 +162,7 @@ const ControlPlayerWeapons = new System({
 export const WeaponPlugin: Plugin = {
     name: 'WeaponPlugin',
     build(world) {
-        const gameData = world.resources.get(GameDataResource);
+        const gameData = world.resources.get(SimulationGameDataResource);
         if (!gameData) {
             throw new Error('missing gameData');
         }

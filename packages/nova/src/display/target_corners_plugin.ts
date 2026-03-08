@@ -4,8 +4,8 @@ import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { Resource } from "nova_ecs/resource";
 import { System } from "nova_ecs/system";
 import * as PIXI from "pixi.js";
-import { GameData } from "../client/gamedata/game_data.js";
-import { GameDataResource } from "../nova_plugin/game_data_resource.js";
+import { DisplayAssetDataInterface } from "../client/gamedata/display_asset_data.js";
+import { DisplayAssetDataResource } from "../nova_plugin/game_data_resource.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 import { TargetComponent } from "../nova_plugin/target_component.js";
 import { mod } from "../util/mod.js";
@@ -24,10 +24,10 @@ export class TargetCorners {
     private textures = new Map<string, PIXI.Texture>();
     built: Promise<void>;
 
-    constructor(gameData: GameData, id = 'targetCorners') {
+    constructor(displayAssets: DisplayAssetDataInterface, id = 'targetCorners') {
         this.visible = false;
         this.container.zIndex = 1000;
-        this.built = this.build(gameData, id);
+        this.built = this.build(displayAssets, id);
 
         for (let i = 0; i < NUM_CORNERS; i++) {
             const sprite = new PIXI.Sprite();
@@ -43,11 +43,11 @@ export class TargetCorners {
         }
     }
 
-    private async build(gameData: GameData, id: string) {
-        const targetCornersData = await gameData.data.TargetCorners.get(id);
+    private async build(displayAssets: DisplayAssetDataInterface, id: string) {
+        const targetCornersData = await displayAssets.data.TargetCorners.get(id);
 
         for (const [cornerName, imageId] of Object.entries(targetCornersData.images)) {
-            const texture = await gameData.textureFromCicn(imageId);
+            const texture = await displayAssets.textureFromCicn(imageId);
             this.textures.set(cornerName, texture);
         }
         this.setStyle("neutral");
@@ -128,9 +128,9 @@ const DrawTargetCornersSystem = new System({
 export const TargetCornersPlugin: Plugin = {
     name: 'TargetCornersPlugin',
     build(world) {
-        const gameData = world.resources.get(GameDataResource);
-        if (!gameData) {
-            throw new Error('Expected world to have gameData');
+        const displayAssets = world.resources.get(DisplayAssetDataResource);
+        if (!displayAssets) {
+            throw new Error('Expected world to have display assets');
         }
 
         const space = world.resources.get(Space);
@@ -138,7 +138,7 @@ export const TargetCornersPlugin: Plugin = {
             throw new Error('Expected world to have Space resource');
         }
 
-        const targetCorners = new TargetCorners(gameData as GameData);
+        const targetCorners = new TargetCorners(displayAssets);
         space.addChild(targetCorners.container);
         world.resources.set(TargetCornersResource, targetCorners);
         world.addSystem(DrawTargetCornersSystem);

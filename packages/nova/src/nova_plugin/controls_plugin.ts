@@ -7,9 +7,9 @@ import { Resource } from 'nova_ecs/resource';
 import { System } from 'nova_ecs/system';
 import { SingletonComponent } from 'nova_ecs/world';
 import { Subject } from 'rxjs';
-import { GameData } from '../client/gamedata/game_data.js';
+import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { ControlAction, Controls, getActions, SavedControls } from './controls.js';
-import { GameDataResource } from './game_data_resource.js';
+import { SimulationGameDataResource } from './game_data_resource.js';
 import { PlatformResource } from './platform_plugin.js';
 
 
@@ -54,9 +54,12 @@ export const ControlsPlugin: Plugin = {
 
         const platform = world.resources.get(PlatformResource);
         if (platform === 'browser') {
-            const gameData = world.resources.get(GameDataResource) as GameData;
+            const gameData = world.resources.get(SimulationGameDataResource) as SimulationGameDataInterface;
             if (!gameData) {
                 throw new Error('Expected world to have gameData');
+            }
+            if (!gameData.getSettings) {
+                throw new Error('Expected simulation game data to provide getSettings');
             }
             const controlsJson = await gameData.getSettings('controls.json');
             const decoded = SavedControls.pipe(Controls).decode(controlsJson);

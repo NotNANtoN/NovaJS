@@ -12,7 +12,7 @@ import { Provide } from 'nova_ecs/provide';
 import { ProvideAsync } from "nova_ecs/provide_async";
 import { AnimationComponent } from './animation_plugin.js';
 import { CollisionVulnerabilityComponent } from './collision_interaction.js';
-import { GameDataResource } from './game_data_resource.js';
+import { SimulationGameDataResource } from './game_data_resource.js';
 import { ArmorComponent, IonizationColorComponent, IonizationComponent, ShieldComponent } from './health_plugin.js';
 import { applyOutfitPhysics, OutfitsStateComponent } from './outfit_plugin.js';
 import { Stat } from './stat.js';
@@ -30,7 +30,7 @@ export const ShipDataComponent = new Component<ShipData>('ShipData');
 export const ShipDataProvider = ProvideAsync({
     name: "ShipDataProvider",
     provided: ShipDataComponent,
-    args: [GameDataResource, ShipComponent] as const,
+    args: [SimulationGameDataResource, ShipComponent] as const,
     update: [ShipComponent],
     factory: async (gameData, ship) => {
         return await gameData.data.Ship.get(ship.id);
@@ -55,7 +55,7 @@ export const ShipPhysicsComponent = new Component<ShipPhysics>('ShipPhysicsCompo
 export const ShipPhysicsProvider = ProvideAsync({
     name: "ShipPhysicsProvider",
     provided: ShipPhysicsComponent,
-    args: [ShipDataComponent, GameDataResource, OutfitsStateComponent] as const,
+    args: [ShipDataComponent, SimulationGameDataResource, OutfitsStateComponent] as const,
     update: [ShipDataComponent, OutfitsStateComponent],
     async factory(shipData, gameData, outfitsState) {
         const outfits = await Promise.all(

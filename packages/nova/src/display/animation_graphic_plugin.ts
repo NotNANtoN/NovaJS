@@ -6,9 +6,9 @@ import { MovementStateComponent, MovementSystem } from "nova_ecs/plugins/movemen
 import { Provide } from "nova_ecs/provide";
 import { ProvideAsync } from "nova_ecs/provide_async";
 import { System } from "nova_ecs/system";
+import { DisplayAssetDataResource } from "../nova_plugin/game_data_resource.js";
 import { currentIfDraft } from "../util/deimmerify.js";
 import { AnimationComponent } from "../nova_plugin/animation_plugin.js";
-import { GameDataResource } from "../nova_plugin/game_data_resource.js";
 import { PlanetComponent } from "../nova_plugin/planet_plugin.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 import { ProjectileComponent } from "../nova_plugin/projectile_data.js";
@@ -21,10 +21,10 @@ const AnimationGraphicLoadedComponent = new Component<AnimationGraphic>('Animati
 const AnimationGraphicLoader = ProvideAsync({
     name: "AnimationGraphicLoader",
     provided: AnimationGraphicLoadedComponent,
-    args: [AnimationComponent, GameDataResource, GetEntity] as const,
-    async factory(animation, gameData, entity) {
+    args: [AnimationComponent, DisplayAssetDataResource, GetEntity] as const,
+    async factory(animation, displayAssets, entity) {
         const graphic = new AnimationGraphic({
-            gameData: currentIfDraft(gameData)!,
+            displayAssets: currentIfDraft(displayAssets)!,
             animation: currentIfDraft(animation)!,
         });
         await graphic.buildPromise;

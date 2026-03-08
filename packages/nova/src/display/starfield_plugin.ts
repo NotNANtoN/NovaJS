@@ -11,7 +11,7 @@ import * as PIXI from "pixi.js";
 import RBush, { BBox } from "rbush";
 import seedrandom from 'seedrandom';
 const { alea } = seedrandom;
-import { GameDataResource } from "../nova_plugin/game_data_resource.js";
+import { DisplayAssetDataResource } from "../nova_plugin/game_data_resource.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 import { ResizeEvent } from "./screen_size_plugin.js";
 import { Stage } from "./stage_resource.js";
@@ -192,9 +192,9 @@ export function starfield({ density = 0.00002,
     return {
         name: 'Starfield',
         async build(world) {
-            const gameData = world.resources.get(GameDataResource);
-            if (!gameData) {
-                throw new Error('Expected GameData resource to exist');
+            const displayAssets = world.resources.get(DisplayAssetDataResource);
+            if (!displayAssets) {
+                throw new Error('Expected DisplayAssetData resource to exist');
             }
             // const app = world.resources.get(PixiAppResource);
             // if (!app) {
@@ -205,7 +205,7 @@ export function starfield({ density = 0.00002,
                 throw new Error('Expected Stage resource to exist');
             }
 
-            const { frames } = await gameData.data.SpriteSheetFrames.get(STAR_ID);
+            const { frames } = await displayAssets.data.SpriteSheetFrames.get(STAR_ID);
             const textures = texturesFromFrames(frames);
             const starfield = new Starfield({
                 textures,

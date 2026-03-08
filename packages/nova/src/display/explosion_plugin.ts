@@ -11,7 +11,7 @@ import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { System } from "nova_ecs/system";
 import { v4 } from "uuid";
 import { ExplosionDataComponent } from "../nova_plugin/animation_plugin.js";
-import { GameDataResource } from "../nova_plugin/game_data_resource.js";
+import { DisplayAssetDataResource } from "../nova_plugin/game_data_resource.js";
 import { ProjectileDataComponent } from "../nova_plugin/projectile_data.js";
 import { ProjectileExplodeEvent } from "../nova_plugin/projectile_plugin.js";
 import { SoundEvent } from "../nova_plugin/sound_event.js";
@@ -99,7 +99,7 @@ const SecondaryExplosionSystem = new System({
 const ProjectileExplosionSystem = new System({
     name: 'ProjectileExplosionSystem',
     events: [ProjectileExplodeEvent],
-    args: [ProjectileDataComponent, MovementStateComponent, GameDataResource,
+    args: [ProjectileDataComponent, MovementStateComponent, DisplayAssetDataResource,
         Entities] as const,
     step(projectileData, movement, gameData, entities) {
         const primary = projectileData.primaryExplosion;
@@ -128,7 +128,7 @@ const ShipFinalExplosionSystem = new System({
     name: 'ShipFinalExplosionSystem',
     events: [DeathEvent],
     before: [PlayerDeathSystem, DeathAISystem],
-    args: [ShipDataComponent, GameDataResource, MovementStateComponent, Entities] as const,
+    args: [ShipDataComponent, DisplayAssetDataResource, MovementStateComponent, Entities] as const,
     step(ship, gameData, movement, entities) {
         if (!ship.finalExplosion) {
             return;
@@ -155,7 +155,7 @@ const ShipFinalExplosionSystem = new System({
 const ShipSecondaryExposionSystem = new System({
     name: 'ShipSecondaryExplosionSystem',
     events: [ZeroArmorEvent],
-    args: [ShipDataComponent, GetEntity, GameDataResource] as const,
+    args: [ShipDataComponent, GetEntity, DisplayAssetDataResource] as const,
     step(ship, {components}, gameData) {
         if (ship.initialExplosion == null) {
             return;

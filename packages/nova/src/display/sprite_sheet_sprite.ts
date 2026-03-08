@@ -1,7 +1,7 @@
 import { AnimationImage } from "novadatainterface/animation";
-import { GameDataInterface } from "novadatainterface/game_data_interface";
 import * as PIXI from "pixi.js";
 import { AnimationImageIndex } from "novadatainterface/animation";
+import { DisplayAssetDataInterface } from "../client/gamedata/display_asset_data.js";
 import { texturesFromFrames } from "./textures_from_frames.js";
 import { mod } from "../util/mod.js";
 import { getFrameAndAngle } from "../util/get_frame_and_angle.js";
@@ -11,7 +11,7 @@ const TWO_PI = 2 * Math.PI;
 
 export class SpriteSheetSprite {
     readonly pixiSprite = new PIXI.Sprite();
-    private readonly gameData: GameDataInterface;
+    private readonly displayAssets: DisplayAssetDataInterface;
     private readonly image: AnimationImage;
     private textures?: PIXI.Texture[];
     frames: number = 0;
@@ -21,15 +21,15 @@ export class SpriteSheetSprite {
     private wrappedFrame: number = 0;
     size = { x: 0, y: 0 };
 
-    constructor({ gameData, image }: { gameData: GameDataInterface, image: AnimationImage }) {
-        this.gameData = gameData;
+    constructor({ displayAssets, image }: { displayAssets: DisplayAssetDataInterface, image: AnimationImage }) {
+        this.displayAssets = displayAssets;
         this.image = image;
         this.textureSet = this.image.frames.normal;
         this.wrappedRotation = 0;
         this.pixiSprite.blendMode = image.blendMode;
 
         const loadTextures = async () => {
-            const framesData = await this.gameData.data
+            const framesData = await this.displayAssets.data
                 .SpriteSheetFrames.get(this.image.id);
             this.textures = texturesFromFrames(framesData.frames);
             this.size.x = Math.max(0, ...this.textures.map(t => t.width));
@@ -91,9 +91,9 @@ export class SpriteSheetSprite {
         return this.wrappedRotation;
     }
 
-    static getFactory(gameData: GameDataInterface) {
+    static getFactory(displayAssets: DisplayAssetDataInterface) {
         return (image: AnimationImage) => {
-            return new SpriteSheetSprite({ gameData, image }).buildPromise;
+            return new SpriteSheetSprite({ displayAssets, image }).buildPromise;
         }
     }
 }

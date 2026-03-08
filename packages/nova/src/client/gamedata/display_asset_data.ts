@@ -22,7 +22,16 @@ export type DisplayAssetDataResources = Pick<NovaDataInterface,
     Sound: Gettable<sound.Sound>,
 };
 
-export class DisplayAssetData {
+export interface DisplayAssetDataInterface {
+    readonly data: DisplayAssetDataResources;
+    textureFromPict(id: string): PIXI.Texture;
+    spriteFromPict(id: string): PIXI.Sprite;
+    textureFromPictAsync(id: string, priority?: number): Promise<PIXI.Texture>;
+    spriteFromPictAsync(id: string, priority?: number): Promise<PIXI.Sprite>;
+    textureFromCicn(id: string): Promise<PIXI.Texture>;
+}
+
+export class DisplayAssetData implements DisplayAssetDataInterface {
     public readonly data: DisplayAssetDataResources;
 
     constructor() {

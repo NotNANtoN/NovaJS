@@ -3,7 +3,8 @@ import { Entity } from 'nova_ecs/entity';
 import { MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
 import * as PIXI from 'pixi.js';
 import { Observable } from 'rxjs';
-import { GameData } from '../client/gamedata/game_data.js';
+import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data.js';
+import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { ControlEvent } from '../nova_plugin/controls_plugin.js';
 import { makeShip } from '../nova_plugin/make_ship.js';
 import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin.js';
@@ -20,12 +21,13 @@ export class Shipyard extends Menu<Entity> {
         description: new PIXI.Text("", FONT.normal),
     }
 
-    constructor(gameData: GameData,
+    constructor(displayAssets: DisplayAssetDataInterface,
+        simulationData: SimulationGameDataInterface,
         controlEvents: Observable<ControlEvent>) {
-        super(gameData, "nova:8502", controlEvents);
+        super(displayAssets, simulationData, "nova:8502", controlEvents);
         const buttons = {
-            buy: new Button(gameData, "Buy", 60, { x: -20, y: 126 }),
-            done: new Button(gameData, "Done", 60, { x: 100, y: 126 }),
+            buy: new Button(displayAssets, "Buy", 60, { x: -20, y: 126 }),
+            done: new Button(displayAssets, "Done", 60, { x: 100, y: 126 }),
         };
         this.addButtons(buttons);
 
@@ -63,11 +65,11 @@ export class Shipyard extends Menu<Entity> {
     }
 
     private async makeShipsGrid() {
-        const ids = (await this.gameData.ids).Ship;
+        const ids = (await this.simulationData.ids).Ship;
         const ships = await Promise.all(ids.map(id =>
-            this.gameData.data.Ship.get(id, 100)));
+            this.simulationData.data.Ship.get(id, 100)));
         ships.sort((a, b) => b.displayWeight - a.displayWeight);
-        const itemGrid = new ItemGrid(this.gameData, ships);
+        const itemGrid = new ItemGrid(this.displayAssets, ships);
         return itemGrid;
     }
 

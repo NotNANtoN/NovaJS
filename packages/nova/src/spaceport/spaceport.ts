@@ -7,9 +7,10 @@ import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import { World } from 'nova_ecs/world';
 import * as PIXI from 'pixi.js';
 import { Observable } from 'rxjs';
-import { GameData } from '../client/gamedata/game_data.js';
+import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data.js';
+import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { ControlEvent } from '../nova_plugin/controls_plugin.js';
-import { GameDataResource } from '../nova_plugin/game_data_resource.js';
+import { DisplayAssetDataResource, SimulationGameDataResource } from '../nova_plugin/game_data_resource.js';
 import { ArmorComponent, IonizationComponent, ShieldComponent } from '../nova_plugin/health_plugin.js';
 import { OutfitsStateComponent } from '../nova_plugin/outfit_plugin.js';
 import { ShipPhysicsComponent } from '../nova_plugin/ship_plugin.js';
@@ -38,20 +39,21 @@ export class Spaceport extends Menu<Entity> {
         } as const,
     };
 
-    constructor(gameData: GameData, private id: string,
+    constructor(displayAssets: DisplayAssetDataInterface,
+        simulationData: SimulationGameDataInterface, private id: string,
         controlEvents: Observable<ControlEvent>) {
-        super(gameData, "nova:8500", controlEvents);
+        super(displayAssets, simulationData, "nova:8500", controlEvents);
         this.container.name = 'Spaceport';
 
         const buttons = {
-            outfitter: new Button(gameData, "Outfitter", 120, { x: 160, y: 116 }),
-            shipyard: new Button(gameData, "Shipyard", 120, { x: 160, y: 74 }),
-            leave: new Button(gameData, "Leave", 120, { x: 160, y: 200 })
+            outfitter: new Button(displayAssets, "Outfitter", 120, { x: 160, y: 116 }),
+            shipyard: new Button(displayAssets, "Shipyard", 120, { x: 160, y: 74 }),
+            leave: new Button(displayAssets, "Leave", 120, { x: 160, y: 200 })
         };
 
         buttons.leave.click.subscribe(this.done.bind(this));
 
-        this.outfitter = new Outfitter(gameData, controlEvents);
+        this.outfitter = new Outfitter(displayAssets, simulationData, controlEvents);
         const showOutfitter = async () => {
             this.controls.unbind();
             const outfits = this.input.components.get(OutfitsStateComponent) ?? new Map();
@@ -65,7 +67,7 @@ export class Spaceport extends Menu<Entity> {
         };
         buttons.outfitter.click.subscribe(showOutfitter);
 
-        this.shipyard = new Shipyard(gameData, controlEvents);
+        this.shipyard = new Shipyard(displayAssets, simulationData, controlEvents);
 
         const showShipyard = async () => {
             this.controls.unbind();
@@ -74,7 +76,8 @@ export class Spaceport extends Menu<Entity> {
                 // Construct a fake system and run providers so that outfits of the new
                 // ship are provided.
                 const shipBuildWorld = new World('outfit builder');
-                shipBuildWorld.resources.set(GameDataResource, gameData);
+                shipBuildWorld.resources.set(SimulationGameDataResource, simulationData);
+                shipBuildWorld.resources.set(DisplayAssetDataResource, displayAssets);
                 shipBuildWorld.resources.set(SystemIdResource, 'nova:128');
                 await shipBuildWorld.addPlugin(SystemPlugin);
                 shipBuildWorld.entities.set('ship', newInput);
@@ -99,7 +102,7 @@ export class Spaceport extends Menu<Entity> {
 
     override async build() {
         await super.build();
-        const data = await this.gameData.data.Planet.get(this.id);
+        const data = await this.simulationData.data.Planet.get(this.id);
         this.data = data;
         const title = new PIXI.Text(data.name, this.font.title);
         title.position.x = -24;
@@ -111,7 +114,7 @@ export class Spaceport extends Menu<Entity> {
         desc.position.y = 70;
         this.container.addChild(desc);
 
-        const spaceportPict = this.gameData.spriteFromPict(data.landingPict)
+        const spaceportPict = this.displayAssets.spriteFromPict(data.landingPict)
         spaceportPict.position.x = -306;
         spaceportPict.position.y = -256;
         this.container.addChild(spaceportPict)

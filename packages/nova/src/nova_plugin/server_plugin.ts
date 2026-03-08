@@ -10,7 +10,7 @@ import { Resource } from 'nova_ecs/resource';
 import { System } from 'nova_ecs/system';
 import { SingletonComponent } from 'nova_ecs/world';
 import { Subscription } from 'rxjs';
-import { GameDataResource } from "./game_data_resource.js";
+import { SimulationGameDataResource } from "./game_data_resource.js";
 import { makeSystem } from './make_system.js';
 import { MultiRoomResource, SystemComponent } from "./nova_plugin.js";
 
@@ -67,9 +67,9 @@ const ServerSystemPlugin: Plugin = {
 export const ServerPlugin: Plugin = {
     name: 'Server',
     async build(world) {
-        const gameData = world.resources.get(GameDataResource);
+        const gameData = world.resources.get(SimulationGameDataResource);
         if (!gameData) {
-            throw new Error('GameDataResource must exist');
+            throw new Error('SimulationGameDataResource must exist');
         }
         const multiRoom = world.resources.get(MultiRoomResource);
         if (!multiRoom) {

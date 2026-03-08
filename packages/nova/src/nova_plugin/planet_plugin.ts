@@ -12,7 +12,7 @@ import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
 import { AnimationComponent } from './animation_plugin.js';
 import { ControlStateEvent } from './control_state_event.js';
-import { GameDataResource } from './game_data_resource.js';
+import { SimulationGameDataResource } from './game_data_resource.js';
 import { PlayerShipSelector } from './player_ship_plugin.js';
 import { ShipComponent } from './ship_plugin.js';
 import { Target } from './target_component.js';
@@ -29,7 +29,7 @@ export const PlanetDataComponent = new Component<PlanetData>('PlanetData');
 export const PlanetDataProvider = ProvideAsync({
     name: "PlanetDataProvider",
     provided: PlanetDataComponent,
-    args: [GameDataResource, PlanetComponent] as const,
+    args: [SimulationGameDataResource, PlanetComponent] as const,
     factory: async (gameData, planet) => {
         return await gameData.data.Planet.get(planet.id);
     }

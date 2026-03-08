@@ -3,8 +3,7 @@ import { Plugin } from 'nova_ecs/plugin';
 import { Resource } from 'nova_ecs/resource';
 import { System } from 'nova_ecs/system';
 import { SingletonComponent } from 'nova_ecs/world';
-import { GameData } from '../client/gamedata/game_data.js';
-import { GameDataResource } from '../nova_plugin/game_data_resource.js';
+import { DisplayAssetDataResource } from '../nova_plugin/game_data_resource.js';
 import { SoundEvent } from '../nova_plugin/sound_event.js';
 
 const LoopingSounds = new Resource<Map<string, Sound>>('LoopingSounds');
@@ -13,14 +12,14 @@ const VolumeResource = new Resource<{volume: number}>('VolumeResource');
 const SoundSystem = new System({
     name: 'SoundSystem',
     events: [SoundEvent],
-    args: [SoundEvent, GameDataResource, LoopingSounds, VolumeResource,
+    args: [SoundEvent, DisplayAssetDataResource, LoopingSounds, VolumeResource,
            SingletonComponent] as const,
-    step({ id, loop }, gameData, loopingSounds, {volume}) {
+    step({ id, loop }, displayAssets, loopingSounds, {volume}) {
         if (loop && loopingSounds.has(id)) {
             return;
         }
 
-        const maybeSound = (gameData as GameData).data.Sound.getCached(id);
+        const maybeSound = displayAssets.data.Sound.getCached(id);
         if (maybeSound) {
             maybeSound.volume = volume;
             if (loop) {

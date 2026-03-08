@@ -1,5 +1,4 @@
 import { Animation } from "novadatainterface/animation";
-import { GameDataInterface } from "novadatainterface/game_data_interface";
 import { Emit, EmitNow, UUID } from "nova_ecs/arg_types";
 import { Component } from "nova_ecs/component";
 import { Angle } from "nova_ecs/datatypes/angle";
@@ -14,10 +13,11 @@ import { System } from "nova_ecs/system";
 import { SingletonComponent } from "nova_ecs/world";
 import RBush, { BBox } from "rbush";
 import SAT from "sat";
+import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
 import { getFrameFromMovement } from "../util/get_frame_and_angle.js";
 import { AnimationComponent } from "./animation_plugin.js";
 import { CollisionEvent, CollisionHitter, CollisionHitterComponent, CollisionVulnerability, CollisionVulnerabilityComponent } from "./collision_interaction.js";
-import { GameDataResource } from "./game_data_resource.js";
+import { SimulationGameDataResource } from "./game_data_resource.js";
 
 type Shape = SAT.Polygon | SAT.Circle;
 export abstract class Hull {
@@ -137,7 +137,7 @@ class MultiFrameHull extends Hull {
 export const HitboxHullComponent = new Component<Hull>('HitboxHullComponent');
 export const HurtboxHullComponent = new Component<Hull>('HurtboxHullComponent');
 
-export async function hullFromAnimation(animation: Animation, gameData: GameDataInterface) {
+export async function hullFromAnimation(animation: Animation, gameData: SimulationGameDataInterface) {
     const spriteSheet = await gameData.data.SpriteSheet
         .get(animation.images.baseImage.id);
 
@@ -152,7 +152,7 @@ export async function hullFromAnimation(animation: Animation, gameData: GameData
 const HitboxHullProvider = ProvideAsync({
     name: "HitboxProvider",
     provided: HitboxHullComponent,
-    args: [AnimationComponent, GameDataResource, CollisionVulnerabilityComponent] as const,
+    args: [AnimationComponent, SimulationGameDataResource, CollisionVulnerabilityComponent] as const,
     factory: hullFromAnimation,
 });
 

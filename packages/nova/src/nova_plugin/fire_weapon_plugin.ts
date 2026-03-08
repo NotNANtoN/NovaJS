@@ -20,7 +20,7 @@ import { DefaultMap } from 'nova_ecs/utils';
 import { SingletonComponent } from 'nova_ecs/world';
 import { AnimationComponent } from './animation_plugin.js';
 import { applyExitPoint, ExitPointData, getExitPointData } from './exit_point.js';
-import { GameDataResource } from './game_data_resource.js';
+import { SimulationGameDataResource } from './game_data_resource.js';
 import { firstOrderWithFallback } from './guidance.js';
 import { TargetComponent } from './target_component.js';
 import { WeaponsStateComponent } from './weapons_state.js';
@@ -328,9 +328,9 @@ export abstract class WeaponEntry {
 export const FireWeaponPlugin: Plugin = {
     name: 'FireWeaponPlugin',
     build(world) {
-        const gameData = world.resources.get(GameDataResource);
+        const gameData = world.resources.get(SimulationGameDataResource);
         if (!gameData) {
-            throw new Error('Expected GameDataResource to exist');
+            throw new Error('Expected SimulationGameDataResource to exist');
         }
 
         const runQuery = world.resources.get(RunQuery);

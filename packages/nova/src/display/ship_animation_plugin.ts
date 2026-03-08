@@ -1,7 +1,7 @@
 import { Plugin } from "nova_ecs/plugin";
 import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { System } from "nova_ecs/system";
-import { GameDataResource } from "../nova_plugin/game_data_resource.js";
+import { SimulationGameDataResource } from "../nova_plugin/game_data_resource.js";
 import { IonizationColorComponent } from "../nova_plugin/health_plugin.js";
 import { IsIonizedComponent } from "../nova_plugin/ionization_plugin.js";
 import { ShipComponent } from "../nova_plugin/ship_plugin.js";
@@ -11,7 +11,7 @@ import { AnimationGraphicComponent } from "./animation_graphic_plugin.js";
 
 export const ShipAnimationSystem = new System({
     name: "ShipAnimationSystem",
-    args: [ShipComponent, WeaponsStateComponent, GameDataResource, AnimationGraphicComponent, TimeResource, IsIonizedComponent, IonizationColorComponent] as const,
+    args: [ShipComponent, WeaponsStateComponent, SimulationGameDataResource, AnimationGraphicComponent, TimeResource, IsIonizedComponent, IonizationColorComponent] as const,
     step(ship, weaponStates, gameData, animation, time, ionized, ionizationColor) {
         // For now, always hide the ship's shield.
         // TODO: Blink this when hit.

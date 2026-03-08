@@ -15,7 +15,7 @@ import { Worker } from "worker_threads";
 import { CommunicatorServer } from "./src/communication/communicator_server.js";
 import { MultiRoom } from './src/communication/multi_room_communicator.js';
 import { SocketChannelServer } from "./src/communication/socket_channel_server.js";
-import { GameDataResource } from './src/nova_plugin/game_data_resource.js';
+import { SimulationGameDataResource } from './src/nova_plugin/game_data_resource.js';
 import { makeShip } from "./src/nova_plugin/make_ship.js";
 import { MultiRoomResource, NovaPlugin } from './src/nova_plugin/nova_plugin.js';
 import { ServerPlugin } from "./src/nova_plugin/server_plugin.js";
@@ -97,7 +97,7 @@ async function startGame() {
     // TODO: Don't just give the server the 'server' uuid
 
     world = new World();
-    world.resources.set(GameDataResource, gameData);
+    world.resources.set(SimulationGameDataResource, gameData);
     await world.addPlugin(multiplayer(multiRoom.join('main room')));
     world.resources.set(MultiRoomResource, multiRoom);
     await world.addPlugin(NovaPlugin);

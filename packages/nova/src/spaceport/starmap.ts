@@ -1,7 +1,8 @@
 import { SystemData } from "novadatainterface/system_data";
 import * as PIXI from 'pixi.js';
 import { Observable } from "rxjs";
-import { GameData } from "../client/gamedata/game_data.js";
+import { DisplayAssetDataInterface } from "../client/gamedata/display_asset_data.js";
+import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
 import { ControlEvent } from "../nova_plugin/controls_plugin.js";
 import { Button } from "./button.js";
 import { Menu } from "./menu.js";
@@ -270,12 +271,14 @@ class SystemGraph {
 export class Starmap extends Menu<string[] /* route list of systems */> {
     private systemGraph?: SystemGraph;
 
-    constructor(gameData: GameData, private systemId: string, controlEvents: Observable<ControlEvent>) {
-        super(gameData, "nova:8509", controlEvents);
+    constructor(displayAssets: DisplayAssetDataInterface,
+        simulationData: SimulationGameDataInterface,
+        private systemId: string, controlEvents: Observable<ControlEvent>) {
+        super(displayAssets, simulationData, "nova:8509", controlEvents);
         this.container.name = "StarMap";
         //this.container.alpha = 0.5;
         const buttons = {
-            done: new Button(gameData, "Done", 120, { x: 150, y: 220 }),
+            done: new Button(displayAssets, "Done", 120, { x: 150, y: 220 }),
         };
         this.addButtons(buttons);
 
@@ -290,9 +293,9 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
     }
     override async build() {
         await super.build();
-        const systemIds = (await this.gameData.ids).System;
+        const systemIds = (await this.simulationData.ids).System;
         const systems = await Promise.all(
-            systemIds.map(s => this.gameData.data.System.get(s)));
+            systemIds.map(s => this.simulationData.data.System.get(s)));
         this.systemGraph = new SystemGraph(systems, this.systemId);
         this.systemGraph.container.position.set(-290, -248);
         this.container.addChild(this.systemGraph.container);
