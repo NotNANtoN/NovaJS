@@ -1,8 +1,10 @@
+import * as t from 'io-ts';
 import { Emit, Entities, GetEntity, UUID } from "nova_ecs/arg_types";
 import { Component } from "nova_ecs/component";
 import { Entity } from "nova_ecs/entity";
 import { EcsEvent } from "nova_ecs/events";
 import { Plugin } from "nova_ecs/plugin";
+import { SerializerResource } from "nova_ecs/plugins/serializer_plugin";
 import { Provide } from "nova_ecs/provide";
 import { System } from "nova_ecs/system";
 import { deImmerify } from "../util/deimmerify.js";
@@ -67,6 +69,9 @@ const PlayerJumpControl = new System({
 export const JumpPlugin: Plugin = {
     name: 'JumpPlugin',
     build(world) {
+        world.resources.get(SerializerResource)?.addComponent(JumpRouteComponent, t.type({
+            route: t.array(t.string),
+        }));
         world.addSystem(JumpFromSystem);
         world.addSystem(PlayerJumpControl);
         world.addSystem(JumpRouteProvider);

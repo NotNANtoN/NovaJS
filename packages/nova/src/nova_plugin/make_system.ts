@@ -33,7 +33,7 @@ const MakePlanetsSystem = new AsyncSystem({
     }
 });
 
-export function makeSystem(systemId: string, gameData: SimulationGameDataInterface) {
+export async function makeSystem(systemId: string, gameData: SimulationGameDataInterface) {
     //const system = await gameData.data.System.get(systemId);
     const world = new World(systemId);
 
@@ -41,7 +41,7 @@ export function makeSystem(systemId: string, gameData: SimulationGameDataInterfa
     world.resources.set(SimulationGameDataResource, gameData);
     world.resources.set(SystemIdResource, systemId);
     world.addSystem(MakePlanetsSystem);
-    world.addPlugin(SystemPlugin);
+    await world.addPlugin(SystemPlugin);
 
     return world;
 }

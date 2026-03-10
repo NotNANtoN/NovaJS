@@ -93,7 +93,7 @@ export const ServerPlugin: Plugin = {
                 } else {
                     // Create the system if it doesn't exist yet.
                     if (!world.entities.has(systemId)) {
-                        const system = makeSystem(systemId, gameData);
+                        const system = await makeSystem(systemId, gameData);
                         world.entities.set(systemId, new Entity()
                             .addComponent(SystemComponent, system));
 

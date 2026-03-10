@@ -1,3 +1,4 @@
+import * as t from 'io-ts';
 import { ProjectileWeaponData, WeaponData } from 'novadatainterface/weapon_data';
 import { Emit, EmitNow, Entities, GetEntity, RunQueryFunction, UUID } from 'nova_ecs/arg_types';
 import { Angle } from 'nova_ecs/datatypes/angle';
@@ -8,6 +9,7 @@ import { EcsEvent } from 'nova_ecs/events';
 import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
 import { MovementPhysicsComponent, MovementStateComponent, MovementType } from 'nova_ecs/plugins/movement_plugin';
+import { passthroughType, SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { ProvideAsync } from "nova_ecs/provide_async";
 import { System } from 'nova_ecs/system';
@@ -347,6 +349,12 @@ export const ProjectilePlugin: Plugin = {
         if (!weaponConstructors) {
             throw new Error('Expected WeaponConstructors to exist');
         }
+        world.resources.get(SerializerResource)?.addComponent(
+            ProjectileDataComponent, passthroughType<ProjectileWeaponData>('ProjectileDataComponentType'));
+        world.resources.get(SerializerResource)?.addComponent(ProjectileComponent, t.intersection([
+            t.type({ id: t.string }),
+            t.partial({ source: t.string }),
+        ]));
         weaponConstructors.set('ProjectileWeaponData', ProjectileWeaponEntry);
 
         world.addSystem(ProjectileGuidanceSystem);

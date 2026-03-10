@@ -8,6 +8,7 @@ import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
 import { MovementPhysics, MovementPhysicsComponent, MovementStateComponent, MovementType } from 'nova_ecs/plugins/movement_plugin';
+import { passthroughType, SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
 import { Provide } from 'nova_ecs/provide';
 import { ProvideAsync } from "nova_ecs/provide_async";
 import { AnimationComponent } from './animation_plugin.js';
@@ -190,6 +191,8 @@ export const ShipPlugin: Plugin = {
         }
         world.addComponent(ShipComponent);
         world.addComponent(ShipDataComponent);
+        world.resources.get(SerializerResource)?.addComponent(
+            ShipDataComponent, passthroughType<ShipData>('ShipDataComponentType'));
 
         world.addSystem(ShipCollisionInteractionProvider);
         world.addSystem(ShipDataProvider);

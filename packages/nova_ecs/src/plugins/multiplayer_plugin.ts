@@ -239,7 +239,10 @@ export function multiplayer(communicator: Communicator,
                 for (const [uuid, encodedEntity] of message.state ?? []) {
                     const maybeEntity = serializer.decode(encodedEntity);
                     if (isLeft(maybeEntity)) {
-                        warn(`Failed to decode entity: ${maybeEntity.left}`);
+                        warn(
+                            `Failed to decode entity ${uuid}: `
+                            + serializer.describeDecodeFailure(encodedEntity, maybeEntity.left)
+                        );
                         continue;
                     }
                     const entity = maybeEntity.right;
@@ -422,4 +425,3 @@ export function multiplayer(communicator: Communicator,
         build
     }
 }
-

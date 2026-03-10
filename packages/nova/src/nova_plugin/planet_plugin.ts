@@ -6,6 +6,7 @@ import { EcsEvent } from 'nova_ecs/events';
 import { Plugin } from 'nova_ecs/plugin';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
 import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
+import { passthroughType, SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
 import { Provide } from 'nova_ecs/provide';
 import { ProvideAsync } from "nova_ecs/provide_async";
 import { Query } from 'nova_ecs/query';
@@ -98,6 +99,8 @@ export const PlanetPlugin: Plugin = {
 
         world.addComponent(PlanetComponent);
         world.addComponent(PlanetDataComponent);
+        world.resources.get(SerializerResource)?.addComponent(
+            PlanetDataComponent, passthroughType<PlanetData>('PlanetDataComponentType'));
         deltaMaker.addComponent(PlanetComponent, {
             componentType: PlanetType,
         });

@@ -1,9 +1,11 @@
+import * as t from 'io-ts';
 import { Emit, GetEntity, UUID } from "nova_ecs/arg_types";
 import { Component } from "nova_ecs/component";
 import { EcsEvent } from "nova_ecs/events";
 import { Optional } from "nova_ecs/optional";
 import { Plugin } from "nova_ecs/plugin";
 import { MovementPhysicsComponent } from "nova_ecs/plugins/movement_plugin";
+import { SerializerResource } from "nova_ecs/plugins/serializer_plugin";
 import { System } from "nova_ecs/system";
 import { IonizationComponent } from "./health_plugin.js";
 import { getShipMovementPhysics, ShipPhysicsComponent } from "./ship_plugin.js";
@@ -46,6 +48,7 @@ const IonizationSlownessSystem = new System({
 export const IonizedPlugin: Plugin = {
     name: 'IonizedPlugin',
     build(world) {
+        world.resources.get(SerializerResource)?.addComponent(IsIonizedComponent, t.boolean);
         world.addSystem(IonizedSystem)
             .addSystem(IonizationSlownessSystem);
     },

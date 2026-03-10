@@ -24,6 +24,37 @@ export const EntityState = t.intersection([
 
 export type EntityState = t.TypeOf<typeof EntityState>;
 
+function summarizeValue(value: unknown): string {
+    if (value === undefined) {
+        return 'undefined';
+    }
+    if (typeof value === 'string') {
+        return JSON.stringify(value);
+    }
+    try {
+        const json = JSON.stringify(value);
+        if (json !== undefined) {
+            return json.length > 200 ? `${json.slice(0, 200)}...` : json;
+        }
+    } catch {
+        // Fall through to String(value).
+    }
+    return String(value);
+}
+
+export function formatIoTsErrors(errors: Errors): string[] {
+    return errors.map(error => {
+        const path = error.context
+            .map(entry => entry.key)
+            .filter(Boolean)
+            .join('.');
+        const expected = error.context[error.context.length - 1]?.type.name ?? 'unknown';
+        const actual = summarizeValue((error as { value?: unknown; actual?: unknown }).value
+            ?? (error as { value?: unknown; actual?: unknown }).actual);
+        return `${path || '<root>'}: expected ${expected}, got ${actual}`;
+    });
+}
+
 export class Serializer {
     readonly componentTypes: ComponentTypeMap<UnknownComponent> = new Map();
     readonly componentsByName = new Map<string, UnknownComponent>();
@@ -99,6 +130,43 @@ export class Serializer {
     decode(state: unknown) {
         return this.Entity.decode(state);
     }
+
+    describeDecodeFailure(state: unknown, errors: Errors): string {
+        const maybeState = EntityState.decode(state);
+        if (isLeft(maybeState)) {
+            return formatIoTsErrors(errors).join('; ');
+        }
+
+        const componentFailures: string[] = [];
+        for (const [componentName, encodedData] of maybeState.right.components) {
+            const component = this.componentsByName.get(componentName);
+            const componentType = component && this.componentTypes.get(component);
+            if (!componentType) {
+                continue;
+            }
+
+            const maybeData = componentType.decode(encodedData);
+            if (isLeft(maybeData)) {
+                for (const message of formatIoTsErrors(maybeData.left)) {
+                    componentFailures.push(`component ${componentName}: ${message}`);
+                }
+            }
+        }
+
+        if (componentFailures.length > 0) {
+            return componentFailures.join('; ');
+        }
+        return formatIoTsErrors(errors).join('; ');
+    }
+}
+
+export function passthroughType<Data>(name: string): t.Type<Data, unknown, unknown> {
+    return new t.Type<Data, unknown, unknown>(
+        name,
+        (_u): _u is Data => true,
+        (input) => right(input as Data),
+        (data) => data,
+    );
 }
 
 export type EncodedEntity = ReturnType<Serializer['Entity']['encode']>;

@@ -8,6 +8,7 @@ import { Entity } from 'nova_ecs/entity';
 import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
 import { MovementState, MovementStateComponent, MovementSystem } from 'nova_ecs/plugins/movement_plugin';
+import { passthroughType, SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
@@ -297,6 +298,10 @@ export const BeamPlugin: Plugin = {
         if (!weaponConstructors) {
             throw new Error('Expected WeaponConstructors to exist');
         }
+        world.resources.get(SerializerResource)?.addComponent(
+            BeamDataComponent, passthroughType<BeamWeaponData>('BeamDataComponentType'));
+        world.resources.get(SerializerResource)?.addComponent(
+            BeamStateComponent, passthroughType<BeamState>('BeamStateComponentType'));
         weaponConstructors.set('BeamWeaponData', BeamWeaponEntry);
 
         world.addSystem(BeamResetSystem);

@@ -1,6 +1,8 @@
+import * as t from 'io-ts';
 import { Component } from "nova_ecs/component";
 import { Plugin } from 'nova_ecs/plugin';
 import { DeltaResource } from "nova_ecs/plugins/delta_plugin";
+import { SerializerResource } from "nova_ecs/plugins/serializer_plugin";
 import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { System } from "nova_ecs/system";
 import { applyStatDelta, getStatDelta, PartialStat, stat, Stat } from "./stat.js";
@@ -40,6 +42,8 @@ export const HealthPlugin: Plugin = {
 
             world.addSystem(healthRecharge);
         }
+        world.resources.get(SerializerResource)?.addComponent(IonizationColorComponent, t.type({
+            color: t.number,
+        }));
     }
 }
-

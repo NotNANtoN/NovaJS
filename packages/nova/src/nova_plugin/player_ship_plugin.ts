@@ -1,5 +1,7 @@
+import * as t from 'io-ts';
 import { Plugin } from 'nova_ecs/plugin';
 import { Component } from "nova_ecs/component";
+import { SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
 import { System } from 'nova_ecs/system';
 import { NewOwnedEntityEvent } from 'nova_ecs/plugins/multiplayer_plugin';
 import { Entities } from 'nova_ecs/arg_types';
@@ -30,6 +32,7 @@ const SetControlledShip = new System({
 export const PlayerShipPlugin: Plugin = {
     name: 'PlayerShipPlugin',
     build(world) {
+        world.resources.get(SerializerResource)?.addComponent(PlayerShipSelector, t.undefined);
         world.addSystem(SetControlledShip);
     }
 };
