@@ -5,7 +5,7 @@ import { Entity } from '../entity.js';
 import { Component } from '../component.js';
 import { set } from '../datatypes/set.js';
 import { World } from '../world.js';
-import { Serializer, SerializerPlugin, SerializerResource } from './serializer_plugin.js';
+import { markerType, Serializer, SerializerPlugin, SerializerResource } from './serializer_plugin.js';
 
 
 const FooComponent = new Component<{ x: number }>('Foo');
@@ -15,6 +15,7 @@ const BarType = t.type({ y: t.string });
 
 const SetComponent = new Component<{ s: Set<string> }>('Set');
 const SetType = t.type({ s: set(t.string) });
+const MarkerComponent = new Component<undefined>('Marker');
 
 
 describe('Serializer Plugin', () => {
@@ -33,6 +34,7 @@ describe('Serializer Plugin', () => {
         serializer.addComponent(FooComponent, FooType);
         serializer.addComponent(BarComponent, BarType);
         serializer.addComponent(SetComponent, SetType);
+        serializer.addComponent(MarkerComponent, markerType);
     });
 
     it('serializes and deserializes entities', () => {
@@ -103,5 +105,22 @@ describe('Serializer Plugin', () => {
             return;
         }
         expect(decoded.right).toEqual({ x: 123 });
+    });
+
+    it('round-trips marker components through JSON', () => {
+        const entity = new Entity()
+            .setName('Marker Entity')
+            .addComponent(MarkerComponent, undefined);
+
+        const encoded = serializer.encode(entity);
+        const jsonRoundTripped = JSON.parse(JSON.stringify(encoded));
+        const decoded = serializer.decode(jsonRoundTripped);
+        if (isLeft(decoded)) {
+            fail('Expected marker component to decode successfully');
+            return;
+        }
+
+        expect(decoded.right.components.has(MarkerComponent)).toBeTrue();
+        expect(decoded.right.components.get(MarkerComponent)).toBeUndefined();
     });
 });

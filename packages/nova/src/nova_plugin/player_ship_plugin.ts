@@ -1,11 +1,9 @@
-import * as t from 'io-ts';
 import { Plugin } from 'nova_ecs/plugin';
 import { Component } from "nova_ecs/component";
-import { SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
+import { markerType, SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
 import { System } from 'nova_ecs/system';
-import { NewOwnedEntityEvent } from 'nova_ecs/plugins/multiplayer_plugin';
+import { ExcludedMultiplayerComponentsResource, NewOwnedEntityEvent } from 'nova_ecs/plugins/multiplayer_plugin';
 import { Entities } from 'nova_ecs/arg_types';
-import { OwnerComponent } from './fire_weapon_plugin.js';
 
 
 // Used to mark the single ship that's under control.
@@ -32,7 +30,10 @@ const SetControlledShip = new System({
 export const PlayerShipPlugin: Plugin = {
     name: 'PlayerShipPlugin',
     build(world) {
-        world.resources.get(SerializerResource)?.addComponent(PlayerShipSelector, t.undefined);
+        world.resources.get(SerializerResource)?.addComponent(PlayerShipSelector, markerType);
+        const excluded = world.resources.get(ExcludedMultiplayerComponentsResource) ?? new Set<string>();
+        excluded.add(PlayerShipSelector.name);
+        world.resources.set(ExcludedMultiplayerComponentsResource, excluded);
         world.addSystem(SetControlledShip);
     }
 };

@@ -169,6 +169,13 @@ export function passthroughType<Data>(name: string): t.Type<Data, unknown, unkno
     );
 }
 
+export const markerType = new t.Type<undefined, null, unknown>(
+    'marker',
+    (u): u is undefined => u === undefined,
+    (input, context) => input == null ? right(undefined) : t.undefined.validate(input, context),
+    () => null,
+);
+
 export type EncodedEntity = ReturnType<Serializer['Entity']['encode']>;
 export const EncodedEntity: t.Type<EncodedEntity> = t.intersection([
     t.type({

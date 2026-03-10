@@ -123,8 +123,20 @@ const MessageSystem = new System({
 });
 
 export const CommunicatorResource = new Resource<Communicator>('CommunicatorResource');
+export const ExcludedMultiplayerComponentsResource =
+    new Resource<Set<string>>('ExcludedMultiplayerComponentsResource');
 
 export const MultiplayerPhase = new Phase({name: 'MultiplayerPhase'});
+
+function excludeEntityComponents(entity: EncodedEntity, excludedNames: Set<string>): EncodedEntity {
+    if (excludedNames.size === 0) {
+        return entity;
+    }
+    return {
+        ...entity,
+        components: entity.components.filter(([componentName]) => !excludedNames.has(componentName)),
+    };
+}
 
 export function multiplayer(communicator: Communicator,
     warn: (message: string) => void = console.warn): Plugin {
@@ -133,9 +145,9 @@ export function multiplayer(communicator: Communicator,
     const multiplayerSystem = new System({
         name: 'Multiplayer',
         args: [MultiplayerQuery, Entities, Comms,
-               DeltaResource, SerializerResource, Emit] as const,
+               DeltaResource, SerializerResource, Emit, ExcludedMultiplayerComponentsResource] as const,
         during: [MultiplayerPhase],
-        step: (query, entities, comms, deltaMaker, serializer, emit) => {
+        step: (query, entities, comms, deltaMaker, serializer, emit, excludedMultiplayerComponents) => {
             if (comms.uuid && communicator.uuid && comms.uuid !== communicator.uuid) {
                 // Change the owner of all entities owned by our previous uuid
                 // to our current uuid.
@@ -172,7 +184,7 @@ export function multiplayer(communicator: Communicator,
                 }
             }
 
-            function sendMessage(message: Message, destination?: string) {
+            function sendMessage(message: Message, destination?: string | Set<string>) {
                 communicator.sendMessage(Message.encode(message), destination);
             }
 
@@ -183,6 +195,7 @@ export function multiplayer(communicator: Communicator,
             // Entities to request the full state of
             // keyed by who to ask for them.
             const fullStateRequests = new DefaultMap<string, Set<string>>(() => new Set());
+            const relayedStates = new DefaultMap<string, Map<string, EncodedEntity>>(() => new Map());
 
             // Track entities added and removed
             const added = new Map<string, string>();
@@ -215,7 +228,10 @@ export function multiplayer(communicator: Communicator,
                             throw new Error(`Expected entity ${entityUuid} to exist`);
                         }
                         const { entity } = entry;
-                        return [entityUuid, serializer.encode(entity)]
+                        return [entityUuid, excludeEntityComponents(
+                            serializer.encode(entity),
+                            excludedMultiplayerComponents
+                        )]
                     }));
 
                     sendMessage({ state }, source);
@@ -268,6 +284,10 @@ export function multiplayer(communicator: Communicator,
                     const handle = entities.get(uuid)!;
                     entityMap.set(uuid, { entity: handle, data: multiplayerData });
 
+                    if (isAdmin) {
+                        relayedStates.get(source).set(uuid, encodedEntity);
+                    }
+
                     // If the new entity is owned by us, emit that fact.
                     if (multiplayerData.owner === comms.uuid) {
                         emit(NewOwnedEntityEvent, uuid);
@@ -312,6 +332,18 @@ export function multiplayer(communicator: Communicator,
                     }, source);
                 }
             }
+
+            if (isAdmin) {
+                for (const [source, state] of relayedStates) {
+                    const destinations = new Set(communicator.peers.current.value);
+                    destinations.delete(source);
+                    destinations.delete(comms.uuid);
+                    if (destinations.size > 0) {
+                        sendMessage({ state }, destinations);
+                    }
+                }
+            }
+
             const currentOwners = new Map([...entityMap].map(([uuid, val]) =>
                 [uuid, val.data.owner]));
             const entityOwners = new Map([
@@ -346,7 +378,10 @@ export function multiplayer(communicator: Communicator,
                 }
                 const { entity } = val;
 
-                state.set(uuid, serializer.encode(entity));
+                state.set(uuid, excludeEntityComponents(
+                    serializer.encode(entity),
+                    excludedMultiplayerComponents
+                ));
             }
 
             // Get deltas and create drafts 
@@ -391,6 +426,9 @@ export function multiplayer(communicator: Communicator,
         world.addPlugin(DeltaPlugin);
         world.addPhase(MultiplayerPhase);
         world.resources.set(CommunicatorResource, communicator);
+        if (!world.resources.has(ExcludedMultiplayerComponentsResource)) {
+            world.resources.set(ExcludedMultiplayerComponentsResource, new Set());
+        }
         const deltaMaker = world.resources.get(DeltaResource);
         if (!deltaMaker) {
             throw new Error('Expected delta maker resource to exist');

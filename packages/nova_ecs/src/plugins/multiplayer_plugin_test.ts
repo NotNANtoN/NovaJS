@@ -8,10 +8,17 @@ import { System } from '../system.js';
 import { World } from '../world.js';
 import { DeltaResource } from './delta_plugin.js';
 import { MockCommunicator } from './mock_communicator.js';
-import { multiplayer, MultiplayerData, MultiplayerPhase } from './multiplayer_plugin.js';
+import { markerType, SerializerResource } from './serializer_plugin.js';
+import {
+    ExcludedMultiplayerComponentsResource,
+    multiplayer,
+    MultiplayerData,
+    MultiplayerPhase
+} from './multiplayer_plugin.js';
 
 const BarComponent = new Component<{ y: string }>("Bar");
 const NonMultiplayer = new Component<{ z: string }>('NonMultiplayer');
+const MarkerComponent = new Component<undefined>('ShipControl');
 
 describe('Multiplayer Plugin', () => {
     let world1: World;
@@ -139,6 +146,92 @@ describe('Multiplayer Plugin', () => {
             'a test component stepped',
             'a test component stepped stepped',
         ]);
+    });
+
+    it('relays new client-owned entities through the server to existing clients', () => {
+        const serverCommunicator = new MockCommunicator('server');
+        const client1Communicator = new MockCommunicator('client1 uuid');
+        const client2Communicator = new MockCommunicator('client2 uuid');
+
+        const mockPeers = new Map([
+            [serverCommunicator.uuid as string, serverCommunicator],
+            [client1Communicator.uuid as string, client1Communicator],
+            [client2Communicator.uuid as string, client2Communicator],
+        ]);
+        serverCommunicator.mockPeers = mockPeers;
+        client1Communicator.mockPeers = mockPeers;
+        client2Communicator.mockPeers = mockPeers;
+
+        const server = new World('server');
+        const client1 = new World('client1');
+        const client2 = new World('client2');
+
+        function error(message: string) {
+            throw new Error(message);
+        }
+
+        server.addPlugin(multiplayer(serverCommunicator, error));
+        client1.addPlugin(multiplayer(client1Communicator, error));
+        client2.addPlugin(multiplayer(client2Communicator, error));
+
+        for (const world of [server, client1, client2]) {
+            world.addComponent(BarComponent);
+            world.resources.get(DeltaResource)!.addComponent(BarComponent, {
+                componentType: t.type({ y: t.string }),
+            });
+        }
+
+        serverCommunicator.peers.current.next(new Set(['client1 uuid', 'client2 uuid']));
+        client1Communicator.peers.current.next(new Set(['server']));
+        client2Communicator.peers.current.next(new Set(['server']));
+
+        client2.entities.set('client2 entity uuid', new Entity()
+            .addComponent(MultiplayerData, {
+                owner: 'client2 uuid',
+            })
+            .addComponent(BarComponent, {
+                y: 'from client2',
+            }));
+
+        client2.step();
+        server.step();
+        client1.step();
+
+        expect(client1.entities.get('client2 entity uuid')?.components.get(BarComponent))
+            .toEqual({ y: 'from client2' });
+    });
+
+    it('does not send excluded components in entity state', () => {
+        const reports: boolean[] = [];
+
+        world1.resources.set(ExcludedMultiplayerComponentsResource, new Set(['ShipControl']));
+        world2.resources.set(ExcludedMultiplayerComponentsResource, new Set(['ShipControl']));
+        world1.resources.get(SerializerResource)!.addComponent(MarkerComponent, markerType);
+        world2.resources.get(SerializerResource)!.addComponent(MarkerComponent, markerType);
+
+        const reportSystem = new System({
+            name: 'ReportExcludedComponentSystem',
+            args: [UUID] as const,
+            after: [MultiplayerPhase],
+            step: (uuid) => {
+                reports.push(world2.entities.get(uuid)?.components.has(MarkerComponent) ?? false);
+            },
+        });
+        world2.addSystem(reportSystem);
+
+        world1.entities.set('test entity uuid', new Entity()
+            .addComponent(MultiplayerData, {
+                owner: 'world1 uuid',
+            })
+            .addComponent(BarComponent, {
+                y: 'a test component',
+            })
+            .addComponent(MarkerComponent, undefined));
+
+        world1.step();
+        world2.step();
+
+        expect(reports.every(report => report === false)).toBeTrue();
     });
 
     it('sends nothing if nothing has changed', () => {

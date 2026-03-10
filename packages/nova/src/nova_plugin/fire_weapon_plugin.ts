@@ -13,6 +13,7 @@ import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
 import { MovementState, MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
+import { markerType } from 'nova_ecs/plugins/serializer_plugin';
 import { Provide } from 'nova_ecs/provide';
 import { Query } from 'nova_ecs/query';
 import { Resource } from 'nova_ecs/resource';
@@ -343,7 +344,7 @@ export const FireWeaponPlugin: Plugin = {
             throw new Error('Expected DeltaMaker to exist');
         }
         deltaMaker.addComponent(VulnerableToPD, {
-            componentType: t.undefined,
+            componentType: markerType,
         });
 
         deltaMaker.addComponent(OwnerComponent, {
