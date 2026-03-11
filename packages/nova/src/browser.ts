@@ -22,6 +22,7 @@ import { DebugSettings } from "./debug_settings.js";
 import { Display } from "./display/display_plugin.js";
 import { PixiAppResource } from "./display/pixi_app_resource.js";
 import { ResizeEvent } from "./display/screen_size_plugin.js";
+import { LeaveSpaceportEvent, OpenSpaceportEvent } from "./display/spaceport_plugin.js";
 import { Stage } from "./display/stage_resource.js";
 import { ControlStateEvent } from "./nova_plugin/control_state_event.js";
 import { ControlsSubject, EcsControlEvent } from "./nova_plugin/controls_plugin.js";
@@ -37,6 +38,7 @@ import { PlayerShipSelector } from "./nova_plugin/player_ship_plugin.js";
 import { SoundEvent } from "./nova_plugin/sound_event.js";
 import { SystemIdResource } from "./nova_plugin/system_id_resource.js";
 import { ChangeSecondaryEvent } from "./nova_plugin/weapon_plugin.js";
+import { deImmerify } from "./util/deimmerify.js";
 
 
 const simulationGameData = new SimulationGameData();
@@ -70,8 +72,20 @@ const multiRoom = new MultiRoom(communicator);
 let world: World;
 let simulationWorld: World | undefined;
 let displayWorld: World | undefined;
+let pendingDockedShip: { uuid: string, entity: Entity, planetId: string } | undefined;
+let dockedShip: { uuid: string, entity: Entity, planetId: string } | undefined;
+let pendingLaunchedShip: Entity | undefined;
 const syncedComponents = new Map<string, Set<UnknownComponent>>();
 const warnedUnsyncableEntities = new Set<string>();
+
+function getPlayerShip(world: World) {
+    for (const [uuid, entity] of world.entities) {
+        if (entity.components.has(PlayerShipSelector)) {
+            return { uuid, entity };
+        }
+    }
+    return undefined;
+}
 
 function bridgeEvent<Data>(simulationWorld: World, displayWorld: World, event: EcsEvent<Data>) {
     simulationWorld.events.get(event).subscribe(data => {
@@ -167,7 +181,6 @@ async function makeDisplayWorld(systemId: string, simulationWorld: World) {
     bridgeEvent(simulationWorld, displayWorld, ControlStateEvent);
     bridgeEvent(simulationWorld, displayWorld, EcsControlEvent);
     bridgeEvent(simulationWorld, displayWorld, DeathEvent);
-    bridgeEvent(simulationWorld, displayWorld, LandEvent);
     bridgeEvent(simulationWorld, displayWorld, ProjectileCollisionEvent);
     bridgeEvent(simulationWorld, displayWorld, ProjectileExplodeEvent);
     bridgeEvent(simulationWorld, displayWorld, SoundEvent);
@@ -176,6 +189,9 @@ async function makeDisplayWorld(systemId: string, simulationWorld: World) {
 }
 
 async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: string }) {
+    pendingDockedShip = undefined;
+    dockedShip = undefined;
+    pendingLaunchedShip = undefined;
     if (simulationWorld) {
         simulationWorld.entities.delete(uuid);
         simulationWorld.step(); // Let peers know the entity was removed
@@ -215,6 +231,25 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
     newStage.visible = true;
 
     newSimulationWorld.events.get(FinishJumpEvent).subscribe(jumpTo);
+    newSimulationWorld.events.get(LandEvent).subscribe(({ id }) => {
+        if (pendingDockedShip || dockedShip) {
+            return;
+        }
+        const playerShip = getPlayerShip(newSimulationWorld);
+        if (!playerShip) {
+            console.warn('Expected player ship to exist when landing');
+            return;
+        }
+        deImmerify(playerShip.entity);
+        pendingDockedShip = {
+            uuid: playerShip.uuid,
+            entity: playerShip.entity,
+            planetId: id,
+        };
+    });
+    newDisplayWorld.events.get(LeaveSpaceportEvent).subscribe(ship => {
+        pendingLaunchedShip = ship;
+    });
 
     world.entities.set(to, new Entity()
         .addComponent(SystemComponent, newSimulationWorld));
@@ -323,6 +358,25 @@ async function startGame() {
         stats.begin();
         world.step();
         if (simulationWorld && displayWorld) {
+            if (pendingDockedShip && !dockedShip) {
+                simulationWorld.entities.delete(pendingDockedShip.uuid);
+                simulationWorld.step();
+                displayWorld.emit(OpenSpaceportEvent, {
+                    planetId: pendingDockedShip.planetId,
+                    ship: pendingDockedShip.entity,
+                });
+                dockedShip = pendingDockedShip;
+                pendingDockedShip = undefined;
+            }
+            if (pendingLaunchedShip && dockedShip) {
+                simulationWorld.entities.set(dockedShip.uuid, pendingLaunchedShip);
+                simulationWorld.step();
+                if (pendingLaunchedShip.components.has(PlayerShipSelector)) {
+                    (window as any).myShip = pendingLaunchedShip;
+                }
+                dockedShip = undefined;
+                pendingLaunchedShip = undefined;
+            }
             syncSimulationToDisplay(simulationWorld, displayWorld);
         }
         displayWorld?.step();

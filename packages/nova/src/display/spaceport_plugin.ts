@@ -1,17 +1,16 @@
-import { Emit, Entities, GetEntity, RunQuery, UUID } from 'nova_ecs/arg_types';
+import { Emit, RunQuery } from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
-import { Optional } from 'nova_ecs/optional';
+import { Entity } from 'nova_ecs/entity';
 import { Plugin } from 'nova_ecs/plugin';
-import { CommunicatorResource, MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
 import { Provide } from 'nova_ecs/provide';
 import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
+import { EcsEvent } from 'nova_ecs/events';
+import { SingletonComponent } from 'nova_ecs/world';
 import { ControlsSubject } from '../nova_plugin/controls_plugin.js';
 import { DisplayAssetDataResource, SimulationGameDataResource } from '../nova_plugin/game_data_resource.js';
-import { LandEvent, PlanetComponent } from '../nova_plugin/planet_plugin.js';
-import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin.js';
+import { PlanetComponent } from '../nova_plugin/planet_plugin.js';
 import { Spaceport } from '../spaceport/spaceport.js';
-import { deImmerify } from '../util/deimmerify.js';
 import { ResizeEvent, ScreenSize } from './screen_size_plugin.js';
 import { Stage } from './stage_resource.js';
 
@@ -29,31 +28,25 @@ const SpaceportProvider = Provide({
     }
 });
 
-const SpaceportQuery = new Query([SpaceportComponent] as const);
+const SpaceportQuery = new Query([SpaceportComponent, PlanetComponent] as const);
 
-const LandSystem = new System({
-    name: 'LandSystem',
-    events: [LandEvent],
-    args: [LandEvent, UUID, Entities, RunQuery, ScreenSize, GetEntity, Optional(CommunicatorResource), PlayerShipSelector] as const,
-    step({ uuid }, shipUuid, entities, runQuery, { x, y }, playerShip, communicator) {
-        const spaceport = runQuery(SpaceportQuery, uuid)[0]?.[0];
+export const OpenSpaceportEvent = new EcsEvent<{ planetId: string, ship: Entity }>('OpenSpaceportEvent');
+export const LeaveSpaceportEvent = new EcsEvent<Entity>('LeaveSpaceportEvent');
+
+const OpenSpaceportSystem = new System({
+    name: 'OpenSpaceportSystem',
+    events: [OpenSpaceportEvent],
+    args: [OpenSpaceportEvent, RunQuery, ScreenSize, Emit, SingletonComponent] as const,
+    step({ planetId, ship }, runQuery, { x, y }, emit) {
+        const spaceport = runQuery(SpaceportQuery)
+            .find(([, { id }]) => id === planetId)?.[0];
         if (!spaceport) {
             return;
         }
 
-        entities.delete(shipUuid);
-        deImmerify(playerShip);
-
         spaceport.container.position.x = x / 2;
         spaceport.container.position.y = y / 2;
-        spaceport.show(playerShip).then(newShip => {
-            if (communicator?.uuid) {
-                newShip.components.set(MultiplayerData, {
-                    owner: communicator.uuid,
-                });
-            }
-            entities.set(shipUuid, newShip);
-        });
+        spaceport.show(ship).then(newShip => emit(LeaveSpaceportEvent, newShip));
     }
 });
 
@@ -71,12 +64,12 @@ export const SpaceportPlugin: Plugin = {
     name: 'SpaceportPlugin',
     build(world) {
         world.addSystem(SpaceportProvider);
-        world.addSystem(LandSystem);
+        world.addSystem(OpenSpaceportSystem);
         world.addSystem(SpaceportResizeSystem);
     },
     remove(world) {
         world.removeSystem(SpaceportProvider);
-        world.removeSystem(LandSystem);
+        world.removeSystem(OpenSpaceportSystem);
         world.removeSystem(SpaceportResizeSystem);
     }
 }
