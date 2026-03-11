@@ -24,12 +24,14 @@ import { PixiAppResource } from "./display/pixi_app_resource.js";
 import { ResizeEvent } from "./display/screen_size_plugin.js";
 import { LeaveSpaceportEvent, OpenSpaceportEvent } from "./display/spaceport_plugin.js";
 import { Stage } from "./display/stage_resource.js";
+import { AddEnemyEvent } from "./display/status_bar.js";
 import { ControlStateEvent } from "./nova_plugin/control_state_event.js";
 import { ControlsSubject, EcsControlEvent } from "./nova_plugin/controls_plugin.js";
 import { DisplayAssetDataResource, SimulationGameDataResource } from "./nova_plugin/game_data_resource.js";
 import { DeathEvent, ZeroArmorEvent } from "./nova_plugin/death_plugin.js";
 import { FinishJumpEvent } from "./nova_plugin/jump_plugin.js";
 import { makeShip } from "./nova_plugin/make_ship.js";
+import { makeNpc } from "./nova_plugin/npc_plugin.js";
 import { makeSystem } from "./nova_plugin/make_system.js";
 import { LandEvent } from "./nova_plugin/planet_plugin.js";
 import { ProjectileCollisionEvent, ProjectileExplodeEvent } from "./nova_plugin/projectile_plugin.js";
@@ -249,6 +251,14 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
     });
     newDisplayWorld.events.get(LeaveSpaceportEvent).subscribe(ship => {
         pendingLaunchedShip = ship;
+    });
+    newDisplayWorld.events.get(AddEnemyEvent).subscribe(async ({ shipId }) => {
+        const shipData = await simulationGameData.data.Ship.get(shipId);
+        const npc = makeNpc(shipData);
+        if (communicator.uuid) {
+            npc.components.set(MultiplayerData, { owner: communicator.uuid });
+            newSimulationWorld.entities.set(v4(), npc);
+        }
     });
 
     world.entities.set(to, new Entity()

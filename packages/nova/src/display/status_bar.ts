@@ -5,21 +5,19 @@ import { GetEntity, RunQuery, UUID } from "nova_ecs/arg_types";
 import { Component } from "nova_ecs/component";
 import { Position } from "nova_ecs/datatypes/position";
 import { Vector } from "nova_ecs/datatypes/vector";
+import { EcsEvent } from "nova_ecs/events";
 import { Optional } from "nova_ecs/optional";
 import { Plugin } from "nova_ecs/plugin";
 import { MovementState, MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
-import { CommunicatorResource, MultiplayerData } from "nova_ecs/plugins/multiplayer_plugin";
 import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { Query } from "nova_ecs/query";
 import { Resource } from "nova_ecs/resource";
 import { System } from "nova_ecs/system";
 import * as PIXI from "pixi.js";
 import { Subject } from "rxjs";
-import { v4 } from "uuid";
 import { DisplayAssetDataInterface } from "../client/gamedata/display_asset_data.js";
 import { DisplayAssetDataResource, SimulationGameDataResource } from "../nova_plugin/game_data_resource.js";
 import { ArmorComponent, ShieldComponent } from "../nova_plugin/health_plugin.js";
-import { makeNpc } from "../nova_plugin/npc_plugin.js";
 import { PlanetDataComponent } from "../nova_plugin/planet_plugin.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 import { ShipDataComponent } from "../nova_plugin/ship_plugin.js";
@@ -296,6 +294,7 @@ class StatusBar {
 }
 
 export const StatusBarResource = new Resource<StatusBar>('StatusBar');
+export const AddEnemyEvent = new EcsEvent<{ shipId: string }>('AddEnemyEvent');
 
 const StatusBarResize = new System({
     name: 'StatusBarResize',
@@ -399,14 +398,7 @@ export const StatusBarPlugin: Plugin = {
         statusBar.addEnemy.subscribe(async () => {
             const randomIndex = Math.floor(Math.random() * (await simulationData.ids).Ship.length);
             const randomShipId = (await simulationData.ids).Ship[randomIndex];
-            const shipData = await simulationData.data.Ship.get(randomShipId);
-
-            const npc = makeNpc(shipData);
-            const uuid = world.resources.get(CommunicatorResource)?.uuid;
-            if (uuid) {
-                npc.components.set(MultiplayerData, { owner: uuid });
-                world.entities.set(v4(), npc);
-            }
+            world.emit(AddEnemyEvent, { shipId: randomShipId });
         });
 
         world.resources.set(StatusBarResource, statusBar);
