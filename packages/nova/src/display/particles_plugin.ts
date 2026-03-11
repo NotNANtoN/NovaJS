@@ -155,11 +155,11 @@ const TrailEmitterSystem = new System({
 const HitEmitterSystem = new System({
     name: "HitEmitterSystem",
     events: [ProjectileCollisionEvent],
-    args: [ProjectileDataComponent, MovementStateComponent, Space, ParticleTextureResource,
-        OrphanParticleEmitters, TimeResource] as const,
-    step(projectileData, movementState, space, texture, orphanEmitters, time) {
-        const particleConfig = projectileData?.hitParticles;
-        const position = movementState.position;
+    args: [ProjectileCollisionEvent, Space, ParticleTextureResource,
+        OrphanParticleEmitters, TimeResource, SingletonComponent] as const,
+    step(collision, space, texture, orphanEmitters, time) {
+        const particleConfig = collision.projectileData.hitParticles;
+        const position = collision.position;
         if (!particleConfig || !position) {
             return;
         }

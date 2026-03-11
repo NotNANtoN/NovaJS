@@ -9,10 +9,10 @@ import { Plugin } from "nova_ecs/plugin";
 import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
 import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { System } from "nova_ecs/system";
+import { SingletonComponent } from "nova_ecs/world";
 import { v4 } from "uuid";
 import { ExplosionDataComponent } from "../nova_plugin/animation_plugin.js";
 import { DisplayAssetDataResource } from "../nova_plugin/game_data_resource.js";
-import { ProjectileDataComponent } from "../nova_plugin/projectile_data.js";
 import { ProjectileExplodeEvent } from "../nova_plugin/projectile_plugin.js";
 import { SoundEvent } from "../nova_plugin/sound_event.js";
 import { AnimationGraphicComponent } from "./animation_graphic_plugin.js";
@@ -99,10 +99,9 @@ const SecondaryExplosionSystem = new System({
 const ProjectileExplosionSystem = new System({
     name: 'ProjectileExplosionSystem',
     events: [ProjectileExplodeEvent],
-    args: [ProjectileDataComponent, MovementStateComponent, DisplayAssetDataResource,
-        Entities] as const,
-    step(projectileData, movement, gameData, entities) {
-        const primary = projectileData.primaryExplosion;
+    args: [ProjectileExplodeEvent, DisplayAssetDataResource, Entities, SingletonComponent] as const,
+    step(explosion, gameData, entities) {
+        const primary = explosion.projectileData.primaryExplosion;
         if (!primary) {
             return;
         }
@@ -112,7 +111,7 @@ const ProjectileExplosionSystem = new System({
             return;
         }
 
-        const secondary = projectileData.secondaryExplosion;
+        const secondary = explosion.projectileData.secondaryExplosion;
         let secondaryExplosionData: ExplosionData | undefined;
         if (secondary) {
             secondaryExplosionData =
@@ -120,7 +119,7 @@ const ProjectileExplosionSystem = new System({
         }
 
         entities.set(v4(), makeExplosion(primaryExplosionData,
-            movement.position, secondaryExplosionData));
+            explosion.position, secondaryExplosionData));
     }
 });
 

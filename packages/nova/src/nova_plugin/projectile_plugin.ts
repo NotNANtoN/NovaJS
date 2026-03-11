@@ -226,7 +226,11 @@ const ProjectileGuidanceSystem = new System({
 });
 
 export const ProjectileCollisionEvent
-    = new EcsEvent<Entity>('ProjectileCollision');
+    = new EcsEvent<{
+        other: Entity,
+        position: Position,
+        projectileData: ProjectileWeaponData,
+    }>('ProjectileCollision');
 
 const ProjectileHurtboxProvider = ProvideAsync({
     name: "ProjectileHurtboxProvider",
@@ -270,24 +274,42 @@ const ProjectileCollisionSystem = new System({
 
         fireSubs(projectileData.id, uuid, false);
         entities.delete(uuid);
-        emitNow(ProjectileCollisionEvent, other, [self]);
+        emitNow(ProjectileCollisionEvent, {
+            other,
+            position: Position.fromVectorLike(
+                self.components.get(MovementStateComponent)?.position ?? new Position(0, 0)
+            ),
+            projectileData,
+        }, [self]);
     }
 });
 
-export const ProjectileExplodeEvent = new EcsEvent<Entity | undefined>('ProjectileExplodeEvent');
+export const ProjectileExplodeEvent = new EcsEvent<{
+    other?: Entity,
+    position: Position,
+    projectileData: ProjectileWeaponData,
+}>('ProjectileExplodeEvent');
 
 const ProjectileExplodeSystem = new System({
     name: 'ProjectileExplodeSystem',
     events: [ProjectileExpireEvent, ProjectileCollisionEvent],
-    args: [ProjectileDataComponent, Optional(ProjectileCollisionEvent),
+    args: [ProjectileDataComponent, MovementStateComponent, Optional(ProjectileCollisionEvent),
         GetEntity, Emit] as const,
-    step(projectileData, other, self, emit) {
-        if (other) {
-            emit(ProjectileExplodeEvent, other, [self]);
+    step(projectileData, movement, collision, self, emit) {
+        const position = Position.fromVectorLike(movement.position);
+        if (collision) {
+            emit(ProjectileExplodeEvent, {
+                other: collision.other,
+                position,
+                projectileData,
+            }, [self]);
             return;
         }
         if (projectileData.detonateWhenShotExpires) {
-            emit(ProjectileExplodeEvent, undefined, [self]);
+            emit(ProjectileExplodeEvent, {
+                position,
+                projectileData,
+            }, [self]);
         }
     }
 });
@@ -298,7 +320,7 @@ const ProjectileBlastSystem = new System({
     args: [ProjectileDataComponent, ProjectileBlastHull, CollisionHitterComponent,
         MovementStateComponent, Optional(OwnerComponent), Entities,
         ProjectileExplodeEvent] as const,
-    step(projectileData, blastHull, hitter, movement, owner, entities, other) {
+    step(projectileData, blastHull, hitter, movement, owner, entities, explosion) {
         const blastIgnore = new Set<string>();
         // TODO: Tag ship that was hit as immune to explosion, since it's already hit.
         if (!projectileData.blastHurtsFiringShip && owner) {
@@ -309,10 +331,10 @@ const ProjectileBlastSystem = new System({
             //                      new Set([projectile.]));
         }
 
-        if (other) {
+        if (explosion.other) {
             // The projectile already damaged this entity, so
             // the blast should ignore it.
-            blastIgnore.add(other.uuid);
+            blastIgnore.add(explosion.other.uuid);
         }
 
         const damage = projectileData.damage;
