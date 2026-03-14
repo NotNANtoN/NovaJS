@@ -9,6 +9,7 @@ import { MovementPhysicsComponent, MovementState, MovementStateComponent, Moveme
 import { Time, TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
+import { registerSimulationBridgeEvent } from '../communication/simulation_bridge_events.js';
 import { BlastDamageComponent } from './blast_plugin.js';
 import { ArmorComponent, IonizationColorComponent, IonizationComponent, ShieldComponent } from './health_plugin.js';
 import { ProjectileComponent } from './projectile_data.js';
@@ -26,6 +27,9 @@ export const DeathEvent = new EcsEvent<Time>('DeathEvent');
 export const ZeroArmorEvent = new EcsEvent<Time>('ZeroArmorEvent');
 
 export const DamagedEvent = new EcsEvent<{ damage: WeaponDamage, damager: string, scale?: number }>('DamagedEvent');
+
+registerSimulationBridgeEvent({ event: DeathEvent });
+registerSimulationBridgeEvent({ event: ZeroArmorEvent });
 
 const DamageSystem = new System({
     name: 'DamageSystem',

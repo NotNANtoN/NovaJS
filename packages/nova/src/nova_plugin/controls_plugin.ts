@@ -8,6 +8,7 @@ import { System } from 'nova_ecs/system';
 import { SingletonComponent } from 'nova_ecs/world';
 import { Subject } from 'rxjs';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
+import { registerSimulationBridgeEvent } from '../communication/simulation_bridge_events.js';
 import { ControlAction, Controls, getActions, SavedControls } from './controls.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { PlatformResource } from './platform_plugin.js';
@@ -21,6 +22,8 @@ export interface ControlEvent {
 export const ControlsResource = new Resource<Controls>('ControlsResource');
 export const EcsControlEvent = new EcsEvent<ControlEvent[]>('ControlEvent');
 export const ControlsSubject = new Resource<Subject<ControlEvent>>('ControlsObservable');
+
+registerSimulationBridgeEvent({ event: EcsControlEvent });
 
 const ControlEventSystem = new System({
     name: 'ControlEventSystem',

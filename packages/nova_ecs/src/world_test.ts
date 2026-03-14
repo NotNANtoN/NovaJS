@@ -1494,7 +1494,11 @@ describe('world', () => {
         world.emit(TestEvent, 'world');
 
         const calls = testEventCallback.calls.all().map(c => c.args);
-        expect(calls).toEqual([['Hello'], ['world']]);
+        expect(calls).toEqual([[
+            { event: TestEvent, data: 'Hello', entities: undefined }
+        ], [
+            { event: TestEvent, data: 'world', entities: undefined }
+        ]]);
     });
 
     it('events can be emitted to a mix of uuids and entities', () => {

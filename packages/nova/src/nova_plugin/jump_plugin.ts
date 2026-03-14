@@ -4,9 +4,11 @@ import { Component } from "nova_ecs/component";
 import { Entity } from "nova_ecs/entity";
 import { EcsEvent } from "nova_ecs/events";
 import { Plugin } from "nova_ecs/plugin";
-import { SerializerResource } from "nova_ecs/plugins/serializer_plugin";
+import { EncodedEntity, SerializerResource } from "nova_ecs/plugins/serializer_plugin";
 import { Provide } from "nova_ecs/provide";
 import { System } from "nova_ecs/system";
+import { isLeft } from "fp-ts/lib/Either.js";
+import { registerSimulationBridgeEvent } from "../communication/simulation_bridge_events.js";
 import { deImmerify } from "../util/deimmerify.js";
 import { ControlStateEvent } from "./control_state_event.js";
 import { PlayerShipSelector } from "./player_ship_plugin.js";
@@ -37,6 +39,29 @@ export interface FinishJump {
 }
 export const FinishJumpEvent = new EcsEvent<FinishJump>('FinishJumpEvent');
 
+registerSimulationBridgeEvent({
+    event: FinishJumpEvent,
+    encode(data, serializer) {
+        return {
+            entity: serializer.encode(data.entity),
+            uuid: data.uuid,
+            to: data.to,
+        };
+    },
+    decode(data, serializer) {
+        const encoded = data as { entity: EncodedEntity, uuid: string, to: string };
+        const decoded = serializer.decode(encoded.entity);
+        if (isLeft(decoded)) {
+            throw new Error(`Failed to decode entity: ${serializer.describeDecodeFailure(encoded.entity, decoded.left)}`);
+        }
+        return {
+            entity: decoded.right,
+            uuid: encoded.uuid,
+            to: encoded.to,
+        };
+    },
+});
+
 const JumpFromSystem = new System({
     name: 'JumpFromSystem',
     events: [InitiateJumpEvent],
@@ -45,7 +70,7 @@ const JumpFromSystem = new System({
         entities.delete(uuid);
         // TODO: Animation etc.
         deImmerify(entity);
-        emit(FinishJumpEvent, { entity, uuid, to });
+        emit(FinishJumpEvent, { entity, uuid, to }, [uuid]);
     }
 });
 

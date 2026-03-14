@@ -1,0 +1,220 @@
+import { isLeft } from "fp-ts/lib/Either.js";
+import { Entity } from "nova_ecs/entity";
+import { CommunicatorResource, MultiplayerData } from "nova_ecs/plugins/multiplayer_plugin";
+import { EncodedEntity, Serializer, SerializerResource } from "nova_ecs/plugins/serializer_plugin";
+import { Time, TimeResource } from "nova_ecs/plugins/time_plugin";
+import { World } from "nova_ecs/world";
+import { v4 } from "uuid";
+import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
+import { makeNpc } from "../nova_plugin/npc_plugin.js";
+import { EncodedSimulationBridgeEvent, getRegisteredSimulationBridgeEvents } from "./simulation_bridge_events.js";
+
+export type SimulationBridgeCommand =
+    | { type: "snapshot" }
+    | { type: "addEntity", uuid: string, entity: EncodedEntity }
+    | { type: "removeEntity", uuid: string }
+    | { type: "spawnNpc", shipId: string };
+
+export interface SimulationFrame {
+    entities: [string, EncodedEntity][];
+    time?: Time;
+    events: EncodedSimulationBridgeEvent[];
+}
+
+export type SimulationBridgeResponse =
+    | { type: "snapshotResult", frame: SimulationFrame }
+    | { type: "ok" };
+
+type SimulationBridgeRequestMessage = {
+    id: number,
+    command: SimulationBridgeCommand,
+};
+
+type SimulationBridgeResponseMessage =
+    | { id: number, ok: true, response: SimulationBridgeResponse }
+    | { id: number, ok: false, error: string };
+
+type MessageHandler<Message> = (message: Message) => void;
+
+class LocalBridgeEndpoint<Send, Receive> {
+    private handler?: MessageHandler<Receive>;
+    peer?: LocalBridgeEndpoint<Receive, Send>;
+
+    setHandler(handler: MessageHandler<Receive>) {
+        this.handler = handler;
+    }
+
+    send(message: Send) {
+        const cloned = structuredClone(message) as Send;
+        this.peer?.handler?.(cloned as never);
+    }
+}
+
+export function makeSimulationBridgeEndpoints() {
+    const browser = new LocalBridgeEndpoint<SimulationBridgeRequestMessage, SimulationBridgeResponseMessage>();
+    const simulation = new LocalBridgeEndpoint<SimulationBridgeResponseMessage, SimulationBridgeRequestMessage>();
+    browser.peer = simulation;
+    simulation.peer = browser;
+    return { browser, simulation };
+}
+
+function makeSnapshot(world: World, serializer: Serializer, events: EncodedSimulationBridgeEvent[]): SimulationFrame {
+    return {
+        entities: [...world.entities]
+            .filter(([uuid]) => uuid !== "singleton")
+            .map(([uuid, entity]) => [uuid, serializer.encode(entity)]),
+        time: world.resources.get(TimeResource),
+        events,
+    };
+}
+
+export class SimulationBridgeHost {
+    private queuedEvents: EncodedSimulationBridgeEvent[] = [];
+
+    constructor(
+        private endpoint: LocalBridgeEndpoint<SimulationBridgeResponseMessage, SimulationBridgeRequestMessage>,
+        private world: World,
+        private simulationGameData: SimulationGameDataInterface,
+    ) {
+        endpoint.setHandler(this.onRequest);
+        for (const registration of getRegisteredSimulationBridgeEvents()) {
+            world.events.get(registration.event).subscribe(({ data, entities }) => {
+                const entityUuids = entities?.map(entity => typeof entity === "string" ? entity : entity.uuid);
+                this.queuedEvents.push({
+                    name: registration.name,
+                    data: registration.encode(data, this.serializer),
+                    ...(entityUuids ? { entityUuids } : {}),
+                });
+            });
+        }
+    }
+
+    private get serializer() {
+        const serializer = this.world.resources.get(SerializerResource);
+        if (!serializer) {
+            throw new Error("Expected serializer resource to exist");
+        }
+        return serializer;
+    }
+
+    private onRequest = (message: SimulationBridgeRequestMessage) => {
+        try {
+            const response = this.handle(message.command);
+            this.endpoint.send({
+                id: message.id,
+                ok: true,
+                response,
+            });
+        } catch (error) {
+            const messageText = error instanceof Error ? error.message : String(error);
+            this.endpoint.send({
+                id: message.id,
+                ok: false,
+                error: messageText,
+            });
+        }
+    };
+
+    private handle(command: SimulationBridgeCommand): SimulationBridgeResponse {
+        switch (command.type) {
+            case "snapshot": {
+                const events = this.queuedEvents;
+                this.queuedEvents = [];
+                return {
+                    type: "snapshotResult",
+                    frame: makeSnapshot(this.world, this.serializer, events),
+                };
+            }
+            case "addEntity": {
+                const decoded = this.serializer.decode(command.entity);
+                if (isLeft(decoded)) {
+                    throw new Error(`Failed to decode entity: ${this.serializer.describeDecodeFailure(command.entity, decoded.left)}`);
+                }
+                this.world.entities.set(command.uuid, decoded.right);
+                return { type: "ok" };
+            }
+            case "removeEntity": {
+                this.world.entities.delete(command.uuid);
+                return { type: "ok" };
+            }
+            case "spawnNpc": {
+                const shipData = this.simulationGameData.data.Ship.getCached(command.shipId);
+                if (!shipData) {
+                    throw new Error(`Expected ship ${command.shipId} to be cached before spawning NPC`);
+                }
+                const npc = makeNpc(shipData);
+                const communicator = this.world.resources.get(CommunicatorResource);
+                if (!communicator?.uuid) {
+                    throw new Error("Expected communicator uuid to exist before spawning NPC");
+                }
+                npc.components.set(MultiplayerData, { owner: communicator.uuid });
+                this.world.entities.set(v4(), npc);
+                return { type: "ok" };
+            }
+        }
+    }
+}
+
+export class SimulationBridgeClient {
+    private nextId = 1;
+    private responses = new Map<number, SimulationBridgeResponseMessage>();
+
+    constructor(
+        private endpoint: LocalBridgeEndpoint<SimulationBridgeRequestMessage, SimulationBridgeResponseMessage>,
+        private serializer: Serializer,
+    ) {
+        endpoint.setHandler(message => {
+            this.responses.set(message.id, message);
+        });
+    }
+
+    send(command: SimulationBridgeCommand): SimulationBridgeResponse {
+        const id = this.nextId++;
+        this.endpoint.send({ id, command });
+        const response = this.responses.get(id);
+        if (!response) {
+            throw new Error(`Missing bridge response for ${command.type}`);
+        }
+        this.responses.delete(id);
+        if (!response.ok) {
+            throw new Error(response.error);
+        }
+        return response.response;
+    }
+
+    snapshot(): SimulationFrame {
+        const response = this.send({ type: "snapshot" });
+        if (response.type !== "snapshotResult") {
+            throw new Error(`Expected snapshotResult, got ${response.type}`);
+        }
+        return response.frame;
+    }
+
+    addEntity(uuid: string, entity: Entity) {
+        this.send({
+            type: "addEntity",
+            uuid,
+            entity: this.serializer.encode(entity),
+        });
+    }
+
+    removeEntity(uuid: string) {
+        this.send({ type: "removeEntity", uuid });
+    }
+
+    spawnNpc(shipId: string) {
+        this.send({ type: "spawnNpc", shipId });
+    }
+
+    getSerializer() {
+        return this.serializer;
+    }
+
+    decodeEntity(entity: EncodedEntity) {
+        const decoded = this.serializer.decode(entity);
+        if (isLeft(decoded)) {
+            throw new Error(`Failed to decode entity: ${this.serializer.describeDecodeFailure(entity, decoded.left)}`);
+        }
+        return decoded.right;
+    }
+}

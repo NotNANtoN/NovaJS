@@ -16,6 +16,7 @@ import { System } from 'nova_ecs/system';
 import SAT from "sat";
 import { v4 } from 'uuid';
 import { FactoryQueue } from '../common/factory_queue.js';
+import { registerSimulationBridgeEvent } from '../communication/simulation_bridge_events.js';
 import { AnimationComponent } from './animation_plugin.js';
 import { BlastDamageComponent, BlastIgnoreComponent } from './blast_plugin.js';
 import { CompositeHull, hullFromAnimation, HurtboxHullComponent } from './collisions_plugin.js';
@@ -227,10 +228,12 @@ const ProjectileGuidanceSystem = new System({
 
 export const ProjectileCollisionEvent
     = new EcsEvent<{
-        other: Entity,
+        otherUuid: string,
         position: Position,
         projectileData: ProjectileWeaponData,
     }>('ProjectileCollision');
+
+registerSimulationBridgeEvent({ event: ProjectileCollisionEvent });
 
 const ProjectileHurtboxProvider = ProvideAsync({
     name: "ProjectileHurtboxProvider",
@@ -275,7 +278,7 @@ const ProjectileCollisionSystem = new System({
         fireSubs(projectileData.id, uuid, false);
         entities.delete(uuid);
         emitNow(ProjectileCollisionEvent, {
-            other,
+            otherUuid: other.uuid,
             position: Position.fromVectorLike(
                 self.components.get(MovementStateComponent)?.position ?? new Position(0, 0)
             ),
@@ -285,10 +288,12 @@ const ProjectileCollisionSystem = new System({
 });
 
 export const ProjectileExplodeEvent = new EcsEvent<{
-    other?: Entity,
+    otherUuid?: string,
     position: Position,
     projectileData: ProjectileWeaponData,
 }>('ProjectileExplodeEvent');
+
+registerSimulationBridgeEvent({ event: ProjectileExplodeEvent });
 
 const ProjectileExplodeSystem = new System({
     name: 'ProjectileExplodeSystem',
@@ -299,7 +304,7 @@ const ProjectileExplodeSystem = new System({
         const position = Position.fromVectorLike(movement.position);
         if (collision) {
             emit(ProjectileExplodeEvent, {
-                other: collision.other,
+                otherUuid: collision.otherUuid,
                 position,
                 projectileData,
             }, [self]);
@@ -331,10 +336,10 @@ const ProjectileBlastSystem = new System({
             //                      new Set([projectile.]));
         }
 
-        if (explosion.other) {
+        if (explosion.otherUuid) {
             // The projectile already damaged this entity, so
             // the blast should ignore it.
-            blastIgnore.add(explosion.other.uuid);
+            blastIgnore.add(explosion.otherUuid);
         }
 
         const damage = projectileData.damage;

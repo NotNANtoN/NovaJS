@@ -11,6 +11,7 @@ import { Provide } from 'nova_ecs/provide';
 import { ProvideAsync } from "nova_ecs/provide_async";
 import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
+import { registerSimulationBridgeEvent } from '../communication/simulation_bridge_events.js';
 import { AnimationComponent } from './animation_plugin.js';
 import { ControlStateEvent } from './control_state_event.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
@@ -47,13 +48,15 @@ const PlanetTargetProvider = Provide({
 
 export const LandEvent = new EcsEvent<{ id: string, uuid: string }>('LandEvent');
 
+registerSimulationBridgeEvent({ event: LandEvent });
+
 const AttemptLandingSystem = new System({
     name: 'AttemptLandingSystem',
     events: [ControlStateEvent] as const,
-    args: [new Query([UUID, MovementStateComponent, PlanetComponent] as const),
+    args: [new Query([UUID, MovementStateComponent, PlanetComponent] as const), UUID,
         MovementStateComponent, PlanetTargetComponent,
         ControlStateEvent, Emit, PlayerShipSelector] as const,
-    step(planets, { position, velocity }, planetTarget, controls, emit) {
+    step(planets, playerUuid, { position, velocity }, planetTarget, controls, emit) {
         if (controls.get('land') === 'start') {
             let minSquared = Infinity;
             let closestUuid: string | undefined = undefined;
@@ -71,7 +74,7 @@ const AttemptLandingSystem = new System({
                 // Try to land
                 if (minSquared < 10_000 && velocity.lengthSquared < 3000
                     && planetId && closestUuid) {
-                    emit(LandEvent, { id: planetId, uuid: closestUuid });
+                    emit(LandEvent, { id: planetId, uuid: closestUuid }, [playerUuid]);
                 }
             }
 

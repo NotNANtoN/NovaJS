@@ -19,7 +19,12 @@ export const StepEvent = new EcsEvent<true>('step');
 export const DeleteEvent = new EcsEvent<Set<[string /* uuid */, Entity]>>('delete');
 export const AddEvent = new EcsEvent<[string /* uuid */, Entity]>('add');
 
+export interface EcsEventWithEntities<Data, DataSerialized = Data> {
+    event: EcsEvent<Data, DataSerialized>;
+    data: Data;
+    entities?: Array<string | Entity>;
+}
+
 export type EventData<E> = E extends EcsEvent<infer Data, any> ? Data : never;
-
 export type UnknownEvent = EcsEvent<unknown, unknown>;
-
+export type UnknownEventWithEntities = EcsEventWithEntities<unknown, unknown>;

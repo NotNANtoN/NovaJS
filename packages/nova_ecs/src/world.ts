@@ -6,7 +6,7 @@ import { AsyncSystemPlugin } from "./async_system.js";
 import { Component, UnknownComponent } from "./component.js";
 import { Entity } from "./entity.js";
 import { EntityMapWithEvents } from "./entity_map.js";
-import { AddEvent, DeleteEvent, EcsEvent, StepEvent, UnknownEvent } from "./events.js";
+import { AddEvent, DeleteEvent, EcsEvent, EcsEventWithEntities, StepEvent, UnknownEvent, UnknownEventWithEntities } from "./events.js";
 import { SyncSubject } from "./event_map.js";
 import { Plugin } from './plugin.js';
 import { ProvidePlugin } from "./provide.js";
@@ -25,15 +25,15 @@ import { DefaultMap, isPromise, topologicalSort, topologicalSortList } from './u
 
 export const SingletonComponent = new Component<undefined>('SingletonComponent');
 
-interface EcsEventWithEntities<Data> {
-    event: EcsEvent<Data, any>;
-    data: Data;
-    entities?: Array<string | Entity>;
+interface WorldEventsMap extends ReadonlyMap<UnknownEvent, SyncSubject<UnknownEventWithEntities>> {
+    get<Data, DataSerialized = Data>(event: EcsEvent<Data, DataSerialized>): SyncSubject<EcsEventWithEntities<Data, DataSerialized>>
+    has<Data, DataSerialized = Data>(event: EcsEvent<Data, DataSerialized>): true;
 }
 
-interface WorldEventsMap extends ReadonlyMap<UnknownEvent, SyncSubject<unknown>> {
-    get<Data>(event: EcsEvent<Data>): SyncSubject<Data>
-    has<Data>(event: EcsEvent<Data>): true;
+function eraseEventWithEntities<Data, DataSerialized = Data>(
+    eventWithEntities: EcsEventWithEntities<Data, DataSerialized>,
+): UnknownEventWithEntities {
+    return eventWithEntities as unknown as UnknownEventWithEntities;
 }
 
 function filterSystems(sortables: Sortable[]): System[] {
@@ -66,7 +66,7 @@ export class World {
     private eventQueue: EcsEventWithEntities<unknown>[] = [];
 
     private queries = new QueryCache(this.entities, this.resources, this.getArg.bind(this));
-    readonly events = new DefaultMap<UnknownEvent, SyncSubject<unknown>>(
+    readonly events = new DefaultMap<UnknownEvent, SyncSubject<UnknownEventWithEntities>>(
         () => new SyncSubject()) as WorldEventsMap;
     private pluginPromises = new Map<Plugin, Promise<void>>();
     readonly plugins = new Set<Plugin>();
@@ -103,28 +103,30 @@ export class World {
      * immediately, interrupting the current event, and does not sit in the
      * event queue.
      */
-    emitNow<Data>(event: EcsEvent<Data, any>, data: Data,
+    emitNow<Data, DataSerialized = Data>(event: EcsEvent<Data, DataSerialized>, data: Data,
         entities?: (string | Entity)[]) {
-        this.runEvent({
-            event: event as UnknownEvent,
+        const eventWithEntities: EcsEventWithEntities<Data, DataSerialized> = {
+            event,
             data,
             entities,
-        });
-        this.events.get(event).next(data);
+        };
+        this.runEvent(eraseEventWithEntities(eventWithEntities));
+        this.events.get(event).next(eventWithEntities);
     }
     /**
      * Emit an event to systems that listen for it. This event enters the event
      * queue and is resolved after all prior events in the queue.
      */
-    emit<Data>(event: EcsEvent<Data, any>, data: Data,
+    emit<Data, DataSerialized = Data>(event: EcsEvent<Data, DataSerialized>, data: Data,
         entities?: (string | Entity)[]) {
-        this.eventQueue.push({
-            event: event as UnknownEvent,
+        const eventWithEntities: EcsEventWithEntities<Data, DataSerialized> = {
+            event,
             data,
             entities,
-        });
+        };
+        this.eventQueue.push(eraseEventWithEntities(eventWithEntities));
         // TODO: Should this emit now, or once the event runs?
-        this.events.get(event).next(data);
+        this.events.get(event).next(eventWithEntities);
     }
 
     

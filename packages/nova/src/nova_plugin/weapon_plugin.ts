@@ -8,6 +8,7 @@ import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
 import { Time, TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { Provide } from 'nova_ecs/provide';
 import { System } from 'nova_ecs/system';
+import { registerSimulationBridgeEvent } from '../communication/simulation_bridge_events.js';
 import { mod } from '../util/mod.js';
 import { ControlStateEvent } from './control_state_event.js';
 import { WeaponEntries, WeaponLocalState, WeaponsComponent } from './fire_weapon_plugin.js';
@@ -96,6 +97,8 @@ const ActiveSecondaryProvider = Provide({
 });
 
 export const ChangeSecondaryEvent = new EcsEvent<ActiveSecondary>('ChangeSecondaryEvent');
+
+registerSimulationBridgeEvent({ event: ChangeSecondaryEvent });
 
 const ControlPlayerWeapons = new System({
     name: 'ControlPlayerWeapons',
