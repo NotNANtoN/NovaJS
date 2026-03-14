@@ -37,7 +37,11 @@ export interface FinishJump {
     uuid: string,
     to: string,
 }
-export const FinishJumpEvent = new EcsEvent<FinishJump>('FinishJumpEvent');
+export const FinishJumpEvent = new EcsEvent<FinishJump, {
+    entity: EncodedEntity,
+    uuid: string,
+    to: string,
+}>('FinishJumpEvent');
 
 registerSimulationBridgeEvent({
     event: FinishJumpEvent,

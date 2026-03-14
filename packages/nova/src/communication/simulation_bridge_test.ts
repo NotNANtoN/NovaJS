@@ -1,17 +1,21 @@
 import 'jasmine';
 import * as t from 'io-ts';
+import { SingletonComponent, World } from 'nova_ecs/world';
 import { Component } from 'nova_ecs/component';
 import { Entity } from 'nova_ecs/entity';
 import { EncodedEntity, SerializerPlugin, SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
-import { World } from 'nova_ecs/world';
+import { System } from 'nova_ecs/system';
+import { Position } from 'nova_ecs/datatypes/position';
 import { FinishJumpEvent } from '../nova_plugin/jump_plugin.js';
 import { LandEvent } from '../nova_plugin/planet_plugin.js';
+import { ProjectileCollisionEvent } from '../nova_plugin/projectile_plugin.js';
 import { SoundEvent } from '../nova_plugin/sound_event.js';
 import {
     makeSimulationBridgeEndpoints,
     SimulationBridgeClient,
     SimulationBridgeHost,
 } from './simulation_bridge.js';
+import { emitSimulationBridgeEvent } from './simulation_bridge_events.js';
 
 const FooComponent = new Component<{ x: number }>('Foo');
 
@@ -113,5 +117,49 @@ describe('SimulationBridge', () => {
         expect(decoded.components.get(FooComponent)).toEqual({ x: 7 });
         expect(eventData.uuid).toBe('ship-uuid');
         expect(eventData.to).toBe('nova:200');
+    });
+
+    it('does not preserve entity targets for bridged projectile collision events', () => {
+        const displayWorld = new World('display test world');
+        let hitCount = 0;
+        let lastCollision: unknown;
+        displayWorld.addSystem(new System({
+            name: 'ProjectileCollisionListener',
+            events: [ProjectileCollisionEvent],
+            args: [ProjectileCollisionEvent, SingletonComponent] as const,
+            step(collision) {
+                hitCount++;
+                lastCollision = collision;
+            },
+        }));
+
+        const collision = {
+            otherUuid: 'target-uuid',
+            position: new Position(12, 34),
+            projectileData: { id: 'weapon-id' } as never,
+        };
+        world.emit(ProjectileCollisionEvent, collision, ['missing-projectile-uuid']);
+
+        const frame = client.snapshot();
+        expect(frame.events).toEqual([
+            {
+                name: 'ProjectileCollision',
+                data: {
+                    ...collision,
+                    position: { x: 12, y: 34 },
+                },
+            },
+        ]);
+
+        emitSimulationBridgeEvent(frame.events[0]!, client.getSerializer(), displayWorld);
+        displayWorld.step();
+
+        expect(hitCount).toBe(1);
+        expect(lastCollision).toEqual(jasmine.objectContaining({
+            ...collision,
+            position: jasmine.any(Position),
+        }));
+        expect((lastCollision as { position: Position }).position.x).toBe(12);
+        expect((lastCollision as { position: Position }).position.y).toBe(34);
     });
 });

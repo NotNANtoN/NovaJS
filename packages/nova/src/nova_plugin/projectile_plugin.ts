@@ -2,7 +2,7 @@ import * as t from 'io-ts';
 import { ProjectileWeaponData, WeaponData } from 'novadatainterface/weapon_data';
 import { Emit, EmitNow, Entities, GetEntity, RunQueryFunction, UUID } from 'nova_ecs/arg_types';
 import { Angle } from 'nova_ecs/datatypes/angle';
-import { Position } from 'nova_ecs/datatypes/position';
+import { Position, PositionType } from 'nova_ecs/datatypes/position';
 import { Vector } from 'nova_ecs/datatypes/vector';
 import { Entity } from 'nova_ecs/entity';
 import { EcsEvent } from 'nova_ecs/events';
@@ -227,13 +227,33 @@ const ProjectileGuidanceSystem = new System({
 });
 
 export const ProjectileCollisionEvent
+    : EcsEvent<{
+        otherUuid: string,
+        position: Position,
+        projectileData: ProjectileWeaponData,
+    }, {
+        otherUuid: string,
+        position: { x: number, y: number },
+        projectileData: unknown,
+    }>
     = new EcsEvent<{
         otherUuid: string,
         position: Position,
         projectileData: ProjectileWeaponData,
-    }>('ProjectileCollision');
+    }, {
+        otherUuid: string,
+        position: { x: number, y: number },
+        projectileData: unknown,
+    }>('ProjectileCollision', t.type({
+        otherUuid: t.string,
+        position: PositionType,
+        projectileData: passthroughType<ProjectileWeaponData>('ProjectileCollisionProjectileData'),
+    }));
 
-registerSimulationBridgeEvent({ event: ProjectileCollisionEvent });
+registerSimulationBridgeEvent({
+    event: ProjectileCollisionEvent,
+    includeEntityUuids: false,
+});
 
 const ProjectileHurtboxProvider = ProvideAsync({
     name: "ProjectileHurtboxProvider",
@@ -291,9 +311,24 @@ export const ProjectileExplodeEvent = new EcsEvent<{
     otherUuid?: string,
     position: Position,
     projectileData: ProjectileWeaponData,
-}>('ProjectileExplodeEvent');
+}, {
+    otherUuid?: string,
+    position: { x: number, y: number },
+    projectileData: unknown,
+}>('ProjectileExplodeEvent', t.intersection([
+    t.type({
+        position: PositionType,
+        projectileData: passthroughType<ProjectileWeaponData>('ProjectileExplodeProjectileData'),
+    }),
+    t.partial({
+        otherUuid: t.string,
+    }),
+]));
 
-registerSimulationBridgeEvent({ event: ProjectileExplodeEvent });
+registerSimulationBridgeEvent({
+    event: ProjectileExplodeEvent,
+    includeEntityUuids: false,
+});
 
 const ProjectileExplodeSystem = new System({
     name: 'ProjectileExplodeSystem',

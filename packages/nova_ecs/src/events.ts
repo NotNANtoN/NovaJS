@@ -10,8 +10,9 @@ export class EcsEvent<Data, DataSerialized = Data> {
     readonly name?: string;
     readonly type?: t.Type<Data, DataSerialized>;
 
-    constructor(name?: string) {
+    constructor(name?: string, type?: t.Type<Data, DataSerialized>) {
         this.name = name;
+        this.type = type;
     }
 }
 

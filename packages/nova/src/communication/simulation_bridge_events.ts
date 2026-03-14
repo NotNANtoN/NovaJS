@@ -1,6 +1,7 @@
 import { EcsEvent } from "nova_ecs/events";
 import { Serializer } from "nova_ecs/plugins/serializer_plugin";
 import { World } from "nova_ecs/world";
+import { isLeft } from "fp-ts/lib/Either.js";
 
 export interface EncodedSimulationBridgeEvent {
     name: string;
@@ -9,17 +10,19 @@ export interface EncodedSimulationBridgeEvent {
 }
 
 interface SimulationBridgeEventRegistration<Data, Encoded = Data> {
-    event: EcsEvent<Data>;
+    event: EcsEvent<Data, Encoded>;
     name: string;
     encode(data: Data, serializer: Serializer): Encoded;
     decode(data: Encoded, serializer: Serializer): Data;
+    includeEntityUuids: boolean;
 }
 
 type SimulationBridgeEventOptions<Data, Encoded = Data> = {
-    event: EcsEvent<Data>;
+    event: EcsEvent<Data, Encoded>;
     name?: string;
     encode?: (data: Data, serializer: Serializer) => Encoded;
     decode?: (data: Encoded, serializer: Serializer) => Data;
+    includeEntityUuids?: boolean;
 };
 
 const eventRegistrationsByEvent = new Map<EcsEvent<unknown>, SimulationBridgeEventRegistration<unknown, unknown>>();
@@ -30,6 +33,7 @@ export function registerSimulationBridgeEvent<Data, Encoded = Data>({
     name,
     encode,
     decode,
+    includeEntityUuids,
 }: SimulationBridgeEventOptions<Data, Encoded>) {
     const eventName = name ?? event.name;
     if (!eventName) {
@@ -50,8 +54,23 @@ export function registerSimulationBridgeEvent<Data, Encoded = Data>({
     const registration: SimulationBridgeEventRegistration<Data, Encoded> = {
         event,
         name: eventName,
-        encode: encode ?? ((data: Data) => data as unknown as Encoded),
-        decode: decode ?? ((data: Encoded) => data as unknown as Data),
+        encode: encode ?? ((data: Data) => {
+            if (event.type) {
+                return event.type.encode(data) as unknown as Encoded;
+            }
+            return data as unknown as Encoded;
+        }),
+        decode: decode ?? ((data: Encoded) => {
+            if (event.type) {
+                const decoded = event.type.decode(data);
+                if (isLeft(decoded)) {
+                    throw new Error(`Failed to decode simulation bridge event ${eventName}`);
+                }
+                return decoded.right;
+            }
+            return data as unknown as Data;
+        }),
+        includeEntityUuids: includeEntityUuids ?? true,
     };
     eventRegistrationsByEvent.set(event as EcsEvent<unknown>, registration as SimulationBridgeEventRegistration<unknown, unknown>);
     eventRegistrationsByName.set(eventName, registration as SimulationBridgeEventRegistration<unknown, unknown>);

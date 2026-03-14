@@ -1,4 +1,5 @@
 import { isLeft } from 'fp-ts/lib/Either.js';
+import { createDraft } from 'immer';
 import * as t from 'io-ts';
 import 'jasmine';
 import { Entity } from '../entity.js';
@@ -122,5 +123,22 @@ describe('Serializer Plugin', () => {
 
         expect(decoded.right.components.has(MarkerComponent)).toBeTrue();
         expect(decoded.right.components.get(MarkerComponent)).toBeUndefined();
+    });
+
+    it('serializes immer drafts to structured-cloneable data', () => {
+        const entity = new Entity()
+            .setName('Draft Entity')
+            .addComponent(FooComponent, createDraft({ x: 123 }));
+
+        const encoded = serializer.encode(entity);
+
+        expect(() => structuredClone(encoded)).not.toThrow();
+        const decoded = serializer.decode(encoded);
+        if (isLeft(decoded)) {
+            fail('Expected draft-backed component to decode successfully');
+            return;
+        }
+
+        expect(decoded.right.components.get(FooComponent)).toEqual({ x: 123 });
     });
 });

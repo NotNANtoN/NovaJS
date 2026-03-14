@@ -3,6 +3,7 @@ import { Plugin } from "nova_ecs/plugin";
 import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
 import { System } from "nova_ecs/system";
 import * as PIXI from "pixi.js";
+import { AnimationPlugin } from "../nova_plugin/animation_plugin.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 import { AnimationGraphicPlugin } from "./animation_graphic_plugin.js";
 import { BeamDisplayPlugin } from "./beam_display_plugin.js";
@@ -49,6 +50,7 @@ export const Display: Plugin = {
         await world.addPlugin(ScreenSizePlugin);
         await world.addPlugin(starfieldPlugin);
         await world.addPlugin(StatusBarPlugin);
+        await world.addPlugin(AnimationPlugin);
         await world.addPlugin(AnimationGraphicPlugin);
         world.addSystem(CenterShipSystem);
         await world.addPlugin(TargetCornersPlugin);
@@ -77,6 +79,7 @@ export const Display: Plugin = {
         world.removeSystem(CenterShipSystem);
 
         await world.removePlugin(AnimationGraphicPlugin);
+        await world.removePlugin(AnimationPlugin);
         await world.removePlugin(StatusBarPlugin);
         await world.removePlugin(starfieldPlugin);
         await world.removePlugin(ScreenSizePlugin);

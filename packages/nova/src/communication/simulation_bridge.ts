@@ -79,7 +79,9 @@ export class SimulationBridgeHost {
         endpoint.setHandler(this.onRequest);
         for (const registration of getRegisteredSimulationBridgeEvents()) {
             world.events.get(registration.event).subscribe(({ data, entities }) => {
-                const entityUuids = entities?.map(entity => typeof entity === "string" ? entity : entity.uuid);
+                const entityUuids = registration.includeEntityUuids
+                    ? entities?.map(entity => typeof entity === "string" ? entity : entity.uuid)
+                    : undefined;
                 this.queuedEvents.push({
                     name: registration.name,
                     data: registration.encode(data, this.serializer),
