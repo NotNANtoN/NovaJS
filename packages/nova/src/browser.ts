@@ -16,7 +16,6 @@ import { CommunicatorClient } from "./communication/communicator_client.js";
 import { MultiRoom } from "./communication/multi_room_communicator.js";
 import { emitSimulationBridgeEvent } from "./communication/simulation_bridge_events.js";
 import {
-    makeSimulationBridgeEndpoints,
     SimulationBridgeClient,
     SimulationBridgeHost,
     SimulationFrame,
@@ -188,9 +187,10 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
     if (!serializer) {
         throw new Error('Expected simulation serializer resource to exist');
     }
-    const endpoints = makeSimulationBridgeEndpoints();
-    new SimulationBridgeHost(endpoints.simulation, newSimulationWorld, simulationGameData);
-    const newSimulationBridge = new SimulationBridgeClient(endpoints.browser, serializer);
+    const newSimulationBridge = new SimulationBridgeClient(
+        new SimulationBridgeHost(newSimulationWorld, simulationGameData),
+        serializer,
+    );
 
     const newDisplayWorld = await makeDisplayWorld(to, newSimulationWorld);
     (window as any).simulationWorld = newSimulationWorld;

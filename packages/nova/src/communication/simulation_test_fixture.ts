@@ -9,7 +9,6 @@ import { makeShip } from "../nova_plugin/make_ship.js";
 import { makeSystem } from "../nova_plugin/make_system.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 import {
-    makeSimulationBridgeEndpoints,
     SimulationBridgeClient,
     SimulationBridgeHost,
 } from "./simulation_bridge.js";
@@ -64,9 +63,8 @@ export async function makeSimulationBridgeHarness() {
         throw new Error("Expected simulation serializer resource");
     }
 
-    const endpoints = makeSimulationBridgeEndpoints();
-    new SimulationBridgeHost(endpoints.simulation, world, gameData);
-    const client = new SimulationBridgeClient(endpoints.browser, serializer);
+    const host = new SimulationBridgeHost(world, gameData);
+    const client = new SimulationBridgeClient(host, serializer);
 
     return {
         client,

@@ -9,12 +9,6 @@ import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_
 import { makeNpc } from "../nova_plugin/npc_plugin.js";
 import { EncodedSimulationBridgeEvent, getRegisteredSimulationBridgeEvents } from "./simulation_bridge_events.js";
 
-export type SimulationBridgeCommand =
-    | { type: "step", count?: number }
-    | { type: "snapshot" }
-    | { type: "addEntity", uuid: string, entity: EncodedEntity }
-    | { type: "removeEntity", uuid: string }
-    | { type: "spawnNpc", shipId: string };
 
 export interface SimulationFrame {
     entities: [string, EncodedEntity][];
@@ -22,47 +16,20 @@ export interface SimulationFrame {
     events: EncodedSimulationBridgeEvent[];
 }
 
-export type SimulationBridgeResponse =
-    | { type: "snapshotResult", frame: SimulationFrame }
-    | { type: "ok" };
-
-export type SimulationBridgeRequestMessage = {
-    id: number,
-    command: SimulationBridgeCommand,
-};
-
-export type SimulationBridgeResponseMessage =
-    | { id: number, ok: true, response: SimulationBridgeResponse }
-    | { id: number, ok: false, error: string };
-
-export type MessageHandler<Message> = (message: Message) => void;
-
-export interface BridgeEndpoint<Send, Receive> {
-    setHandler(handler: MessageHandler<Receive>): void;
-    send(message: Send): void;
-    close?(): void | Promise<void>;
+export interface SimulationBridgeHostApi {
+    step(count?: number): void;
+    snapshot(): SimulationFrame;
+    addEntity(uuid: string, entity: EncodedEntity): void;
+    removeEntity(uuid: string): void;
+    spawnNpc(shipId: string): void;
 }
 
-class LocalBridgeEndpoint<Send, Receive> implements BridgeEndpoint<Send, Receive> {
-    private handler?: MessageHandler<Receive>;
-    peer?: LocalBridgeEndpoint<Receive, Send>;
-
-    setHandler(handler: MessageHandler<Receive>) {
-        this.handler = handler;
-    }
-
-    send(message: Send) {
-        const cloned = structuredClone(message) as Send;
-        this.peer?.handler?.(cloned as never);
-    }
-}
-
-export function makeSimulationBridgeEndpoints() {
-    const browser = new LocalBridgeEndpoint<SimulationBridgeRequestMessage, SimulationBridgeResponseMessage>();
-    const simulation = new LocalBridgeEndpoint<SimulationBridgeResponseMessage, SimulationBridgeRequestMessage>();
-    browser.peer = simulation;
-    simulation.peer = browser;
-    return { browser, simulation };
+export interface AsyncSimulationBridgeHostApi {
+    step(count?: number): Promise<void>;
+    snapshot(): Promise<SimulationFrame>;
+    addEntity(uuid: string, entity: EncodedEntity): Promise<void>;
+    removeEntity(uuid: string): Promise<void>;
+    spawnNpc(shipId: string): Promise<void>;
 }
 
 function makeSnapshot(world: World, serializer: Serializer, events: EncodedSimulationBridgeEvent[]): SimulationFrame {
@@ -75,15 +42,13 @@ function makeSnapshot(world: World, serializer: Serializer, events: EncodedSimul
     };
 }
 
-export class SimulationBridgeHost {
+export class SimulationBridgeHost implements SimulationBridgeHostApi {
     private queuedEvents: EncodedSimulationBridgeEvent[] = [];
 
     constructor(
-        private endpoint: BridgeEndpoint<SimulationBridgeResponseMessage, SimulationBridgeRequestMessage>,
         private world: World,
         private simulationGameData: SimulationGameDataInterface,
     ) {
-        endpoint.setHandler(this.onRequest);
         for (const registration of getRegisteredSimulationBridgeEvents()) {
             world.events.get(registration.event).subscribe(({ data, entities }) => {
                 const entityUuids = registration.includeEntityUuids
@@ -106,124 +71,69 @@ export class SimulationBridgeHost {
         return serializer;
     }
 
-    private onRequest = (message: SimulationBridgeRequestMessage) => {
-        try {
-            const response = this.handle(message.command);
-            this.endpoint.send({
-                id: message.id,
-                ok: true,
-                response,
-            });
-        } catch (error) {
-            const messageText = error instanceof Error ? error.message : String(error);
-            this.endpoint.send({
-                id: message.id,
-                ok: false,
-                error: messageText,
-            });
+    step(count = 1) {
+        for (let i = 0; i < count; i++) {
+            this.world.step();
         }
-    };
+    }
 
-    private handle(command: SimulationBridgeCommand): SimulationBridgeResponse {
-        switch (command.type) {
-            case "step": {
-                const count = command.count ?? 1;
-                for (let i = 0; i < count; i++) {
-                    this.world.step();
-                }
-                return { type: "ok" };
-            }
-            case "snapshot": {
-                const events = this.queuedEvents;
-                this.queuedEvents = [];
-                return {
-                    type: "snapshotResult",
-                    frame: makeSnapshot(this.world, this.serializer, events),
-                };
-            }
-            case "addEntity": {
-                const decoded = this.serializer.decode(command.entity);
-                if (isLeft(decoded)) {
-                    throw new Error(`Failed to decode entity: ${this.serializer.describeDecodeFailure(command.entity, decoded.left)}`);
-                }
-                this.world.entities.set(command.uuid, decoded.right);
-                return { type: "ok" };
-            }
-            case "removeEntity": {
-                this.world.entities.delete(command.uuid);
-                return { type: "ok" };
-            }
-            case "spawnNpc": {
-                const shipData = this.simulationGameData.data.Ship.getCached(command.shipId);
-                if (!shipData) {
-                    throw new Error(`Expected ship ${command.shipId} to be cached before spawning NPC`);
-                }
-                const npc = makeNpc(shipData);
-                const communicator = this.world.resources.get(CommunicatorResource);
-                if (!communicator?.uuid) {
-                    throw new Error("Expected communicator uuid to exist before spawning NPC");
-                }
-                npc.components.set(MultiplayerData, { owner: communicator.uuid });
-                this.world.entities.set(v4(), npc);
-                return { type: "ok" };
-            }
+    snapshot(): SimulationFrame {
+        const events = this.queuedEvents;
+        this.queuedEvents = [];
+        return makeSnapshot(this.world, this.serializer, events);
+    }
+
+    addEntity(uuid: string, entity: EncodedEntity) {
+        const decoded = this.serializer.decode(entity);
+        if (isLeft(decoded)) {
+            throw new Error(`Failed to decode entity: ${this.serializer.describeDecodeFailure(entity, decoded.left)}`);
         }
+        this.world.entities.set(uuid, decoded.right);
+    }
+
+    removeEntity(uuid: string) {
+        this.world.entities.delete(uuid);
+    }
+
+    spawnNpc(shipId: string) {
+        const shipData = this.simulationGameData.data.Ship.getCached(shipId);
+        if (!shipData) {
+            throw new Error(`Expected ship ${shipId} to be cached before spawning NPC`);
+        }
+        const npc = makeNpc(shipData);
+        const communicator = this.world.resources.get(CommunicatorResource);
+        if (!communicator?.uuid) {
+            throw new Error("Expected communicator uuid to exist before spawning NPC");
+        }
+        npc.components.set(MultiplayerData, { owner: communicator.uuid });
+        this.world.entities.set(v4(), npc);
     }
 }
 
 export class SimulationBridgeClient {
-    private nextId = 1;
-    private responses = new Map<number, SimulationBridgeResponseMessage>();
-
     constructor(
-        private endpoint: BridgeEndpoint<SimulationBridgeRequestMessage, SimulationBridgeResponseMessage>,
+        private host: SimulationBridgeHostApi,
         private serializer: Serializer,
-    ) {
-        endpoint.setHandler(message => {
-            this.responses.set(message.id, message);
-        });
-    }
-
-    send(command: SimulationBridgeCommand): SimulationBridgeResponse {
-        const id = this.nextId++;
-        this.endpoint.send({ id, command });
-        const response = this.responses.get(id);
-        if (!response) {
-            throw new Error(`Missing bridge response for ${command.type}`);
-        }
-        this.responses.delete(id);
-        if (!response.ok) {
-            throw new Error(response.error);
-        }
-        return response.response;
-    }
+    ) { }
 
     snapshot(): SimulationFrame {
-        const response = this.send({ type: "snapshot" });
-        if (response.type !== "snapshotResult") {
-            throw new Error(`Expected snapshotResult, got ${response.type}`);
-        }
-        return response.frame;
+        return structuredClone(this.host.snapshot()) as SimulationFrame;
     }
 
     step(count = 1) {
-        this.send({ type: "step", count });
+        this.host.step(count);
     }
 
     addEntity(uuid: string, entity: Entity) {
-        this.send({
-            type: "addEntity",
-            uuid,
-            entity: this.serializer.encode(entity),
-        });
+        this.host.addEntity(uuid, structuredClone(this.serializer.encode(entity)) as EncodedEntity);
     }
 
     removeEntity(uuid: string) {
-        this.send({ type: "removeEntity", uuid });
+        this.host.removeEntity(uuid);
     }
 
     spawnNpc(shipId: string) {
-        this.send({ type: "spawnNpc", shipId });
+        this.host.spawnNpc(shipId);
     }
 
     getSerializer() {
@@ -240,65 +150,30 @@ export class SimulationBridgeClient {
 }
 
 export class AsyncSimulationBridgeClient {
-    private nextId = 1;
-    private responses = new Map<number, {
-        resolve: (response: SimulationBridgeResponse) => void,
-        reject: (error: Error) => void,
-    }>();
-
     constructor(
-        private endpoint: BridgeEndpoint<SimulationBridgeRequestMessage, SimulationBridgeResponseMessage>,
+        private host: AsyncSimulationBridgeHostApi,
         private serializer: Serializer,
-    ) {
-        endpoint.setHandler(message => {
-            const pending = this.responses.get(message.id);
-            if (!pending) {
-                return;
-            }
-            this.responses.delete(message.id);
-            if (!message.ok) {
-                pending.reject(new Error(message.error));
-                return;
-            }
-            pending.resolve(message.response);
-        });
-    }
-
-    send(command: SimulationBridgeCommand): Promise<SimulationBridgeResponse> {
-        const id = this.nextId++;
-        const response = new Promise<SimulationBridgeResponse>((resolve, reject) => {
-            this.responses.set(id, { resolve, reject });
-        });
-        this.endpoint.send({ id, command });
-        return response;
-    }
+        private closeImpl?: () => void | Promise<void>,
+    ) { }
 
     async snapshot(): Promise<SimulationFrame> {
-        const response = await this.send({ type: "snapshot" });
-        if (response.type !== "snapshotResult") {
-            throw new Error(`Expected snapshotResult, got ${response.type}`);
-        }
-        return response.frame;
+        return await this.host.snapshot();
     }
 
     async step(count = 1) {
-        await this.send({ type: "step", count });
+        await this.host.step(count);
     }
 
     async addEntity(uuid: string, entity: Entity) {
-        await this.send({
-            type: "addEntity",
-            uuid,
-            entity: this.serializer.encode(entity),
-        });
+        await this.host.addEntity(uuid, this.serializer.encode(entity));
     }
 
     async removeEntity(uuid: string) {
-        await this.send({ type: "removeEntity", uuid });
+        await this.host.removeEntity(uuid);
     }
 
     async spawnNpc(shipId: string) {
-        await this.send({ type: "spawnNpc", shipId });
+        await this.host.spawnNpc(shipId);
     }
 
     getSerializer() {
@@ -314,6 +189,6 @@ export class AsyncSimulationBridgeClient {
     }
 
     async close() {
-        await this.endpoint.close?.();
+        await this.closeImpl?.();
     }
 }

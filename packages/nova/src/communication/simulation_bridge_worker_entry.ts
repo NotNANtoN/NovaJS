@@ -1,11 +1,13 @@
+import * as Comlink from "comlink";
+import nodeEndpointImport from "comlink/dist/umd/node-adapter.js";
 import { multiplayer } from "nova_ecs/plugins/multiplayer_plugin";
 import { MockCommunicator } from "nova_ecs/plugins/mock_communicator";
 import { parentPort, workerData } from "worker_threads";
 import { makeSystem } from "../nova_plugin/make_system.js";
-import { NodeMessageEndpoint } from "./simulation_bridge_worker_threads.js";
-import { SimulationBridgeHost, SimulationBridgeRequestMessage, SimulationBridgeResponseMessage } from "./simulation_bridge.js";
+import { SimulationBridgeHost } from "./simulation_bridge.js";
 import { getIntegrationGameData } from "./simulation_test_fixture.js";
 
+const nodeEndpoint = nodeEndpointImport as unknown as typeof nodeEndpointImport.default;
 
 export interface SimulationBridgeWorkerData {
     systemId: string;
@@ -22,11 +24,7 @@ async function main() {
     const world = await makeSystem(systemId, gameData);
     await world.addPlugin(multiplayer(new MockCommunicator(communicatorId)));
 
-    new SimulationBridgeHost(
-        new NodeMessageEndpoint<SimulationBridgeResponseMessage, SimulationBridgeRequestMessage>(parentPort),
-        world,
-        gameData,
-    );
+    Comlink.expose(new SimulationBridgeHost(world, gameData), nodeEndpoint(parentPort));
 }
 
 await main();

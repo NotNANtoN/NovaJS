@@ -12,7 +12,6 @@ import { LandEvent, LandEventType } from '../nova_plugin/planet_plugin.js';
 import { ProjectileCollisionEvent, ProjectileCollisionEventType } from '../nova_plugin/projectile_plugin.js';
 import { SoundEvent, SoundEventType } from '../nova_plugin/sound_plugin.js';
 import {
-    makeSimulationBridgeEndpoints,
     SimulationBridgeClient,
     SimulationBridgeHost,
 } from './simulation_bridge.js';
@@ -50,9 +49,8 @@ describe('SimulationBridge', () => {
         serializer.addEvent(FinishJumpEvent, FinishJumpEventType(serializer));
         serializer.addEvent(ProjectileCollisionEvent, ProjectileCollisionEventType);
 
-        const endpoints = makeSimulationBridgeEndpoints();
-        new SimulationBridgeHost(endpoints.simulation, world, makeFakeSimulationData());
-        client = new SimulationBridgeClient(endpoints.browser, serializer);
+        const host = new SimulationBridgeHost(world, makeFakeSimulationData());
+        client = new SimulationBridgeClient(host, serializer);
     });
 
     it('adds and removes entities through bridge commands', () => {
