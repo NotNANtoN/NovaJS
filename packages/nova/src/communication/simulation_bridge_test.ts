@@ -4,6 +4,7 @@ import { SingletonComponent, World } from 'nova_ecs/world';
 import { Component } from 'nova_ecs/component';
 import { Entity } from 'nova_ecs/entity';
 import { EncodedEntity, SerializerPlugin, SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
+import { TimePlugin } from 'nova_ecs/plugins/time_plugin';
 import { System } from 'nova_ecs/system';
 import { Position } from 'nova_ecs/datatypes/position';
 import { FinishJumpEvent, FinishJumpEventType } from '../nova_plugin/jump_plugin.js';
@@ -37,6 +38,7 @@ describe('SimulationBridge', () => {
     beforeEach(() => {
         world = new World('bridge test world');
         world.addPlugin(SerializerPlugin);
+        world.addPlugin(TimePlugin);
 
         const serializer = world.resources.get(SerializerResource);
         if (!serializer) {
@@ -68,6 +70,15 @@ describe('SimulationBridge', () => {
         client.removeEntity('foo-uuid');
         const removedFrame = client.snapshot();
         expect(removedFrame.entities).toEqual([]);
+    });
+
+    it('steps the world through bridge commands', () => {
+        const initialFrame = client.snapshot();
+
+        client.step();
+
+        const steppedFrame = client.snapshot();
+        expect(steppedFrame.time?.frame).toBe((initialFrame.time?.frame ?? 0) + 1);
     });
 
     it('forwards cloneable events and clears them after snapshot', () => {

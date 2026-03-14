@@ -10,6 +10,7 @@ import { makeNpc } from "../nova_plugin/npc_plugin.js";
 import { EncodedSimulationBridgeEvent, getRegisteredSimulationBridgeEvents } from "./simulation_bridge_events.js";
 
 export type SimulationBridgeCommand =
+    | { type: "step", count?: number }
     | { type: "snapshot" }
     | { type: "addEntity", uuid: string, entity: EncodedEntity }
     | { type: "removeEntity", uuid: string }
@@ -25,18 +26,24 @@ export type SimulationBridgeResponse =
     | { type: "snapshotResult", frame: SimulationFrame }
     | { type: "ok" };
 
-type SimulationBridgeRequestMessage = {
+export type SimulationBridgeRequestMessage = {
     id: number,
     command: SimulationBridgeCommand,
 };
 
-type SimulationBridgeResponseMessage =
+export type SimulationBridgeResponseMessage =
     | { id: number, ok: true, response: SimulationBridgeResponse }
     | { id: number, ok: false, error: string };
 
-type MessageHandler<Message> = (message: Message) => void;
+export type MessageHandler<Message> = (message: Message) => void;
 
-class LocalBridgeEndpoint<Send, Receive> {
+export interface BridgeEndpoint<Send, Receive> {
+    setHandler(handler: MessageHandler<Receive>): void;
+    send(message: Send): void;
+    close?(): void | Promise<void>;
+}
+
+class LocalBridgeEndpoint<Send, Receive> implements BridgeEndpoint<Send, Receive> {
     private handler?: MessageHandler<Receive>;
     peer?: LocalBridgeEndpoint<Receive, Send>;
 
@@ -72,7 +79,7 @@ export class SimulationBridgeHost {
     private queuedEvents: EncodedSimulationBridgeEvent[] = [];
 
     constructor(
-        private endpoint: LocalBridgeEndpoint<SimulationBridgeResponseMessage, SimulationBridgeRequestMessage>,
+        private endpoint: BridgeEndpoint<SimulationBridgeResponseMessage, SimulationBridgeRequestMessage>,
         private world: World,
         private simulationGameData: SimulationGameDataInterface,
     ) {
@@ -119,6 +126,13 @@ export class SimulationBridgeHost {
 
     private handle(command: SimulationBridgeCommand): SimulationBridgeResponse {
         switch (command.type) {
+            case "step": {
+                const count = command.count ?? 1;
+                for (let i = 0; i < count; i++) {
+                    this.world.step();
+                }
+                return { type: "ok" };
+            }
             case "snapshot": {
                 const events = this.queuedEvents;
                 this.queuedEvents = [];
@@ -162,7 +176,7 @@ export class SimulationBridgeClient {
     private responses = new Map<number, SimulationBridgeResponseMessage>();
 
     constructor(
-        private endpoint: LocalBridgeEndpoint<SimulationBridgeRequestMessage, SimulationBridgeResponseMessage>,
+        private endpoint: BridgeEndpoint<SimulationBridgeRequestMessage, SimulationBridgeResponseMessage>,
         private serializer: Serializer,
     ) {
         endpoint.setHandler(message => {
@@ -192,6 +206,10 @@ export class SimulationBridgeClient {
         return response.frame;
     }
 
+    step(count = 1) {
+        this.send({ type: "step", count });
+    }
+
     addEntity(uuid: string, entity: Entity) {
         this.send({
             type: "addEntity",
@@ -218,5 +236,84 @@ export class SimulationBridgeClient {
             throw new Error(`Failed to decode entity: ${this.serializer.describeDecodeFailure(entity, decoded.left)}`);
         }
         return decoded.right;
+    }
+}
+
+export class AsyncSimulationBridgeClient {
+    private nextId = 1;
+    private responses = new Map<number, {
+        resolve: (response: SimulationBridgeResponse) => void,
+        reject: (error: Error) => void,
+    }>();
+
+    constructor(
+        private endpoint: BridgeEndpoint<SimulationBridgeRequestMessage, SimulationBridgeResponseMessage>,
+        private serializer: Serializer,
+    ) {
+        endpoint.setHandler(message => {
+            const pending = this.responses.get(message.id);
+            if (!pending) {
+                return;
+            }
+            this.responses.delete(message.id);
+            if (!message.ok) {
+                pending.reject(new Error(message.error));
+                return;
+            }
+            pending.resolve(message.response);
+        });
+    }
+
+    send(command: SimulationBridgeCommand): Promise<SimulationBridgeResponse> {
+        const id = this.nextId++;
+        const response = new Promise<SimulationBridgeResponse>((resolve, reject) => {
+            this.responses.set(id, { resolve, reject });
+        });
+        this.endpoint.send({ id, command });
+        return response;
+    }
+
+    async snapshot(): Promise<SimulationFrame> {
+        const response = await this.send({ type: "snapshot" });
+        if (response.type !== "snapshotResult") {
+            throw new Error(`Expected snapshotResult, got ${response.type}`);
+        }
+        return response.frame;
+    }
+
+    async step(count = 1) {
+        await this.send({ type: "step", count });
+    }
+
+    async addEntity(uuid: string, entity: Entity) {
+        await this.send({
+            type: "addEntity",
+            uuid,
+            entity: this.serializer.encode(entity),
+        });
+    }
+
+    async removeEntity(uuid: string) {
+        await this.send({ type: "removeEntity", uuid });
+    }
+
+    async spawnNpc(shipId: string) {
+        await this.send({ type: "spawnNpc", shipId });
+    }
+
+    getSerializer() {
+        return this.serializer;
+    }
+
+    decodeEntity(entity: EncodedEntity) {
+        const decoded = this.serializer.decode(entity);
+        if (isLeft(decoded)) {
+            throw new Error(`Failed to decode entity: ${this.serializer.describeDecodeFailure(entity, decoded.left)}`);
+        }
+        return decoded.right;
+    }
+
+    async close() {
+        await this.endpoint.close?.();
     }
 }
