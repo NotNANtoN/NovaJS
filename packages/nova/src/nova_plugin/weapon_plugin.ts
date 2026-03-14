@@ -1,3 +1,4 @@
+import * as t from 'io-ts';
 import { WeaponData } from 'novadatainterface/weapon_data';
 import { Emit, UUID } from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
@@ -5,6 +6,7 @@ import { Entity } from 'nova_ecs/entity';
 import { EcsEvent } from 'nova_ecs/events';
 import { Plugin } from 'nova_ecs/plugin';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
+import { SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
 import { Time, TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { Provide } from 'nova_ecs/provide';
 import { System } from 'nova_ecs/system';
@@ -97,6 +99,9 @@ const ActiveSecondaryProvider = Provide({
 });
 
 export const ChangeSecondaryEvent = new EcsEvent<ActiveSecondary>('ChangeSecondaryEvent');
+export const ActiveSecondaryType = t.type({
+    secondary: t.union([t.string, t.null]),
+});
 
 registerSimulationBridgeEvent({ event: ChangeSecondaryEvent });
 
@@ -176,6 +181,7 @@ export const WeaponPlugin: Plugin = {
         }
 
         world.addComponent(WeaponsStateComponent);
+        world.resources.get(SerializerResource)?.addEvent(ChangeSecondaryEvent, ActiveSecondaryType);
         world.addSystem(WeaponsSystem);
         const platform = world.resources.get(PlatformResource);
         if (platform === 'browser') {

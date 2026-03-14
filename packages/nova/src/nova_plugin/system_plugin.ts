@@ -22,6 +22,7 @@ import { ProjectilePlugin } from "./projectile_plugin.js";
 import { ReturnToQueuePlugin } from "./return_to_queue_plugin.js";
 import { ShipController } from "./ship_controller_plugin.js";
 import { ShipPlugin } from "./ship_plugin.js";
+import { SoundEventPlugin } from "./sound_plugin.js";
 import { TargetPlugin } from "./target_plugin.js";
 import { WeaponPlugin } from "./weapon_plugin.js";
 
@@ -49,6 +50,7 @@ export const SystemPlugin: Plugin = {
         world.addPlugin(CollisionsPlugin);
         world.addPlugin(HealthPlugin);
         world.addPlugin(TargetPlugin);
+        world.addPlugin(SoundEventPlugin);
         world.addPlugin(BeamPlugin);
         world.addPlugin(BayPlugin);
         world.addPlugin(JumpPlugin);
@@ -57,4 +59,3 @@ export const SystemPlugin: Plugin = {
         world.addPlugin(BlastPlugin);
     }
 };
-

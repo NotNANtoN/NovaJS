@@ -84,7 +84,7 @@ export class SimulationBridgeHost {
                     : undefined;
                 this.queuedEvents.push({
                     name: registration.name,
-                    data: registration.encode(data, this.serializer),
+                    data: this.serializer.encodeEvent(registration.event, data),
                     ...(entityUuids ? { entityUuids } : {}),
                 });
             });

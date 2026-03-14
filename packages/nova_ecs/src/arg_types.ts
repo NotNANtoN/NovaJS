@@ -27,7 +27,7 @@ export type GetArgSelector<T> = T extends typeof GetArg ? GetArgFunction : never
 
 export const Emit = new Resource<EmitFunction>('Emit');
 export const EmitNow = new Resource<EmitFunction>('EmitNow');
-export type EmitFunction = <Data>(event: EcsEvent<Data, any>, data: Data,
+export type EmitFunction = <Data>(event: EcsEvent<Data>, data: Data,
     entities?: (string | Entity)[]) => void;
 
 export const GetWorld = new Resource<World>('GetWorld');
@@ -39,7 +39,7 @@ export type RunQueryFunction = <T extends readonly ArgTypes[] = ArgTypes[]>(quer
 export type ArgTypes = Component<any>
     | Query
     | Resource<any>
-    | EcsEvent<any, any>
+    | EcsEvent<any>
     | typeof Components
     | typeof UUID
     | typeof GetEntity

@@ -2,6 +2,7 @@ import { Emit } from 'nova_ecs/arg_types';
 import { Plugin } from 'nova_ecs/plugin';
 import { KeyboardPlugin } from 'nova_ecs/plugins/keyboard_plugin';
 import { MovementPhysicsComponent, MovementStateComponent, MovementSystem, MovementType } from 'nova_ecs/plugins/movement_plugin';
+import { passthroughType, SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
 import { Resource } from 'nova_ecs/resource';
 import { System } from 'nova_ecs/system';
 import { SingletonComponent } from 'nova_ecs/world';
@@ -72,6 +73,10 @@ export const ShipController: Plugin = {
         if (platform === 'browser') {
             await world.addPlugin(KeyboardPlugin);
             await world.addPlugin(PlayerShipPlugin);
+            world.resources.get(SerializerResource)?.addEvent(
+                ControlStateEvent,
+                passthroughType<ControlState>('ControlStateEventType'),
+            );
             world.resources.set(ControlStateResource, new Map());
             world.addSystem(ControlPlayerShip);
             world.addSystem(UpdateControlState);

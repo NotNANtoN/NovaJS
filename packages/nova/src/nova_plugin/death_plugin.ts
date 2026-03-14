@@ -6,6 +6,7 @@ import { EcsEvent } from 'nova_ecs/events';
 import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
 import { MovementPhysicsComponent, MovementState, MovementStateComponent, MovementType } from 'nova_ecs/plugins/movement_plugin';
+import { passthroughType, SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
 import { Time, TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
@@ -150,6 +151,8 @@ export const PlayerDeathSystem = new System({
 export const DeathPlugin: Plugin = {
     name: 'DeathPlugin',
     build(world) {
+        world.resources.get(SerializerResource)?.addEvent(DeathEvent, passthroughType<Time>('DeathEventType'));
+        world.resources.get(SerializerResource)?.addEvent(ZeroArmorEvent, passthroughType<Time>('ZeroArmorEventType'));
         //const runQuery = world.resources.get(RunQuery)!;
         //const emit = world.resources.get(Emit)!;
         world.addSystem(DamageSystem);

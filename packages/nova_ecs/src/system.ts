@@ -7,7 +7,7 @@ import { setIntersection } from "./utils.js";
 export interface BaseSystemArgs<StepArgTypes extends readonly ArgTypes[]> extends SortableArgs {
     readonly name: string;
     readonly args: StepArgTypes;
-    readonly events?: Iterable<EcsEvent<any, any>>; // Events that can trigger this system
+    readonly events?: Iterable<EcsEvent<any>>; // Events that can trigger this system
 }
 export interface SystemArgs<StepArgTypes extends readonly ArgTypes[]> extends BaseSystemArgs<StepArgTypes> {
     step: (...args: ArgsToData<StepArgTypes>) => void;

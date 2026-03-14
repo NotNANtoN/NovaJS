@@ -29,7 +29,7 @@ import { firstOrderWithFallback, Guidance, GuidanceComponent } from './guidance.
 import { ArmorComponent, ShieldComponent } from './health_plugin.js';
 import { ProjectileBlastHull, ProjectileComponent, ProjectileDataComponent } from './projectile_data.js';
 import { ReturnToQueueComponent } from './return_to_queue_plugin.js';
-import { SoundEvent } from './sound_event.js';
+import { SoundEvent } from './sound_plugin.js';
 import { Stat } from './stat.js';
 import { TargetComponent } from './target_component.js';
 
@@ -226,29 +226,16 @@ const ProjectileGuidanceSystem = new System({
     }
 });
 
-export const ProjectileCollisionEvent
-    : EcsEvent<{
-        otherUuid: string,
-        position: Position,
-        projectileData: ProjectileWeaponData,
-    }, {
-        otherUuid: string,
-        position: { x: number, y: number },
-        projectileData: unknown,
-    }>
-    = new EcsEvent<{
-        otherUuid: string,
-        position: Position,
-        projectileData: ProjectileWeaponData,
-    }, {
-        otherUuid: string,
-        position: { x: number, y: number },
-        projectileData: unknown,
-    }>('ProjectileCollision', t.type({
-        otherUuid: t.string,
-        position: PositionType,
-        projectileData: passthroughType<ProjectileWeaponData>('ProjectileCollisionProjectileData'),
-    }));
+export const ProjectileCollisionEventType = t.type({
+    otherUuid: t.string,
+    position: PositionType,
+    projectileData: passthroughType<ProjectileWeaponData>('ProjectileCollisionProjectileData'),
+});
+export const ProjectileCollisionEvent = new EcsEvent<{
+    otherUuid: string,
+    position: Position,
+    projectileData: ProjectileWeaponData,
+}>('ProjectileCollision');
 
 registerSimulationBridgeEvent({
     event: ProjectileCollisionEvent,
@@ -307,15 +294,7 @@ const ProjectileCollisionSystem = new System({
     }
 });
 
-export const ProjectileExplodeEvent = new EcsEvent<{
-    otherUuid?: string,
-    position: Position,
-    projectileData: ProjectileWeaponData,
-}, {
-    otherUuid?: string,
-    position: { x: number, y: number },
-    projectileData: unknown,
-}>('ProjectileExplodeEvent', t.intersection([
+export const ProjectileExplodeEventType = t.intersection([
     t.type({
         position: PositionType,
         projectileData: passthroughType<ProjectileWeaponData>('ProjectileExplodeProjectileData'),
@@ -323,7 +302,12 @@ export const ProjectileExplodeEvent = new EcsEvent<{
     t.partial({
         otherUuid: t.string,
     }),
-]));
+]);
+export const ProjectileExplodeEvent = new EcsEvent<{
+    otherUuid?: string,
+    position: Position,
+    projectileData: ProjectileWeaponData,
+}>('ProjectileExplodeEvent');
 
 registerSimulationBridgeEvent({
     event: ProjectileExplodeEvent,
@@ -417,6 +401,8 @@ export const ProjectilePlugin: Plugin = {
             t.type({ id: t.string }),
             t.partial({ source: t.string }),
         ]));
+        world.resources.get(SerializerResource)?.addEvent(ProjectileCollisionEvent, ProjectileCollisionEventType);
+        world.resources.get(SerializerResource)?.addEvent(ProjectileExplodeEvent, ProjectileExplodeEventType);
         weaponConstructors.set('ProjectileWeaponData', ProjectileWeaponEntry);
 
         world.addSystem(ProjectileGuidanceSystem);

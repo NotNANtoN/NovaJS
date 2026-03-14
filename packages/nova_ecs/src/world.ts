@@ -26,12 +26,12 @@ import { DefaultMap, isPromise, topologicalSort, topologicalSortList } from './u
 export const SingletonComponent = new Component<undefined>('SingletonComponent');
 
 interface WorldEventsMap extends ReadonlyMap<UnknownEvent, SyncSubject<UnknownEventWithEntities>> {
-    get<Data, DataSerialized = Data>(event: EcsEvent<Data, DataSerialized>): SyncSubject<EcsEventWithEntities<Data, DataSerialized>>
-    has<Data, DataSerialized = Data>(event: EcsEvent<Data, DataSerialized>): true;
+    get<Data>(event: EcsEvent<Data>): SyncSubject<EcsEventWithEntities<Data>>
+    has<Data>(event: EcsEvent<Data>): true;
 }
 
-function eraseEventWithEntities<Data, DataSerialized = Data>(
-    eventWithEntities: EcsEventWithEntities<Data, DataSerialized>,
+function eraseEventWithEntities<Data>(
+    eventWithEntities: EcsEventWithEntities<Data>,
 ): UnknownEventWithEntities {
     return eventWithEntities as unknown as UnknownEventWithEntities;
 }
@@ -103,9 +103,9 @@ export class World {
      * immediately, interrupting the current event, and does not sit in the
      * event queue.
      */
-    emitNow<Data, DataSerialized = Data>(event: EcsEvent<Data, DataSerialized>, data: Data,
+    emitNow<Data>(event: EcsEvent<Data>, data: Data,
         entities?: (string | Entity)[]) {
-        const eventWithEntities: EcsEventWithEntities<Data, DataSerialized> = {
+        const eventWithEntities: EcsEventWithEntities<Data> = {
             event,
             data,
             entities,
@@ -117,9 +117,9 @@ export class World {
      * Emit an event to systems that listen for it. This event enters the event
      * queue and is resolved after all prior events in the queue.
      */
-    emit<Data, DataSerialized = Data>(event: EcsEvent<Data, DataSerialized>, data: Data,
+    emit<Data>(event: EcsEvent<Data>, data: Data,
         entities?: (string | Entity)[]) {
-        const eventWithEntities: EcsEventWithEntities<Data, DataSerialized> = {
+        const eventWithEntities: EcsEventWithEntities<Data> = {
             event,
             data,
             entities,

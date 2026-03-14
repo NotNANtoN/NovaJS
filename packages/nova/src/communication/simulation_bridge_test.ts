@@ -6,10 +6,10 @@ import { Entity } from 'nova_ecs/entity';
 import { EncodedEntity, SerializerPlugin, SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
 import { System } from 'nova_ecs/system';
 import { Position } from 'nova_ecs/datatypes/position';
-import { FinishJumpEvent } from '../nova_plugin/jump_plugin.js';
-import { LandEvent } from '../nova_plugin/planet_plugin.js';
-import { ProjectileCollisionEvent } from '../nova_plugin/projectile_plugin.js';
-import { SoundEvent } from '../nova_plugin/sound_event.js';
+import { FinishJumpEvent, FinishJumpEventType } from '../nova_plugin/jump_plugin.js';
+import { LandEvent, LandEventType } from '../nova_plugin/planet_plugin.js';
+import { ProjectileCollisionEvent, ProjectileCollisionEventType } from '../nova_plugin/projectile_plugin.js';
+import { SoundEvent, SoundEventType } from '../nova_plugin/sound_plugin.js';
 import {
     makeSimulationBridgeEndpoints,
     SimulationBridgeClient,
@@ -43,6 +43,10 @@ describe('SimulationBridge', () => {
             throw new Error('Expected serializer resource');
         }
         serializer.addComponent(FooComponent, t.type({ x: t.number }));
+        serializer.addEvent(SoundEvent, SoundEventType);
+        serializer.addEvent(LandEvent, LandEventType);
+        serializer.addEvent(FinishJumpEvent, FinishJumpEventType(serializer));
+        serializer.addEvent(ProjectileCollisionEvent, ProjectileCollisionEventType);
 
         const endpoints = makeSimulationBridgeEndpoints();
         new SimulationBridgeHost(endpoints.simulation, world, makeFakeSimulationData());
@@ -72,7 +76,7 @@ describe('SimulationBridge', () => {
 
         const firstFrame = client.snapshot();
         expect(firstFrame.events).toEqual([
-            { name: 'WeaponFire', data: { id: 'nova:weapon' } },
+            { name: 'SoundEvent', data: { id: 'nova:weapon' } },
             { name: 'LandEvent', data: { id: 'planet-id', uuid: 'planet-uuid' } },
         ]);
 

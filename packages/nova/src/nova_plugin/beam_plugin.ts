@@ -21,7 +21,7 @@ import { DamagedEvent } from './death_plugin.js';
 import { applyExitPoint, ExitPointData } from './exit_point.js';
 import { FireSubs, OwnerComponent, sampleInaccuracy, SourceComponent, WeaponConstructors, WeaponEntry } from './fire_weapon_plugin.js';
 import { zeroOrderGuidance } from './guidance.js';
-import { SoundEvent } from './sound_event.js';
+import { SoundEvent } from './sound_plugin.js';
 import { TargetComponent } from './target_component.js';
 import { WeaponsSystem } from './weapon_plugin.js';
 

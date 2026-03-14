@@ -78,8 +78,7 @@ export class Query<QueryArgs extends readonly ArgTypes[]
 
 
         this.components = new Set([...(this.args.filter(
-            a => (a instanceof Component)
-                && !(a instanceof Resource)) as UnknownComponent[]),
+            a => a instanceof Component) as UnknownComponent[]),
         ...modifierComponents]);
 
         this.resources = new Set([...(this.args.filter(

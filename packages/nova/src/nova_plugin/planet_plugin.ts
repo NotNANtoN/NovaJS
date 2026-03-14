@@ -47,6 +47,10 @@ const PlanetTargetProvider = Provide({
 });
 
 export const LandEvent = new EcsEvent<{ id: string, uuid: string }>('LandEvent');
+export const LandEventType = t.type({
+    id: t.string,
+    uuid: t.string,
+});
 
 registerSimulationBridgeEvent({ event: LandEvent });
 
@@ -104,6 +108,7 @@ export const PlanetPlugin: Plugin = {
         world.addComponent(PlanetDataComponent);
         world.resources.get(SerializerResource)?.addComponent(
             PlanetDataComponent, passthroughType<PlanetData>('PlanetDataComponentType'));
+        world.resources.get(SerializerResource)?.addEvent(LandEvent, LandEventType);
         deltaMaker.addComponent(PlanetComponent, {
             componentType: PlanetType,
         });

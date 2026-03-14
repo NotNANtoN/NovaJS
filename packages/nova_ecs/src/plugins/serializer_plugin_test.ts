@@ -4,6 +4,7 @@ import * as t from 'io-ts';
 import 'jasmine';
 import { Entity } from '../entity.js';
 import { Component } from '../component.js';
+import { EcsEvent } from '../events.js';
 import { set } from '../datatypes/set.js';
 import { World } from '../world.js';
 import { markerType, Serializer, SerializerPlugin, SerializerResource } from './serializer_plugin.js';
@@ -17,6 +18,8 @@ const BarType = t.type({ y: t.string });
 const SetComponent = new Component<{ s: Set<string> }>('Set');
 const SetType = t.type({ s: set(t.string) });
 const MarkerComponent = new Component<undefined>('Marker');
+const FooEvent = new EcsEvent<{ s: Set<string> }>('FooEvent');
+const FooEventType = t.type({ s: set(t.string) });
 
 
 describe('Serializer Plugin', () => {
@@ -36,6 +39,7 @@ describe('Serializer Plugin', () => {
         serializer.addComponent(BarComponent, BarType);
         serializer.addComponent(SetComponent, SetType);
         serializer.addComponent(MarkerComponent, markerType);
+        serializer.addEvent(FooEvent, FooEventType);
     });
 
     it('serializes and deserializes entities', () => {
@@ -140,5 +144,16 @@ describe('Serializer Plugin', () => {
         }
 
         expect(decoded.right.components.get(FooComponent)).toEqual({ x: 123 });
+    });
+
+    it('serializes and deserializes events with custom types', () => {
+        const encoded = serializer.encodeEvent(FooEvent, { s: new Set(['foo', 'bar']) });
+        const decoded = serializer.decodeEvent(FooEvent, encoded);
+        if (isLeft(decoded)) {
+            fail('Expected event to decode successfully');
+            return;
+        }
+
+        expect(decoded.right).toEqual({ s: new Set(['foo', 'bar']) });
     });
 });

@@ -14,7 +14,7 @@ import { v4 } from "uuid";
 import { ExplosionDataComponent } from "../nova_plugin/animation_plugin.js";
 import { DisplayAssetDataResource } from "../nova_plugin/game_data_resource.js";
 import { ProjectileExplodeEvent } from "../nova_plugin/projectile_plugin.js";
-import { SoundEvent } from "../nova_plugin/sound_event.js";
+import { SoundEvent } from "../nova_plugin/sound_plugin.js";
 import { AnimationGraphicComponent } from "./animation_graphic_plugin.js";
 import { DeathEvent, PlayerDeathSystem, ZeroArmorEvent } from "../nova_plugin/death_plugin.js";
 import { ShipComponent, ShipDataComponent } from "../nova_plugin/ship_plugin.js";

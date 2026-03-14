@@ -63,7 +63,7 @@ const SavedControlsPartialObject = t.partial({
     'fullscreen': ControlInputs,
 });
 
-const ControlAction = t.keyof(SavedControlsPartialObject.props);
+export const ControlAction = t.keyof(SavedControlsPartialObject.props);
 
 const SavedControlsObject = t.exact(SavedControlsPartialObject);
 type SavedControlsObject = t.TypeOf<typeof SavedControlsObject>;

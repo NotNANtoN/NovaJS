@@ -4,7 +4,7 @@ import { Component } from "nova_ecs/component";
 import { Entity } from "nova_ecs/entity";
 import { EcsEvent } from "nova_ecs/events";
 import { Plugin } from "nova_ecs/plugin";
-import { EncodedEntity, SerializerResource } from "nova_ecs/plugins/serializer_plugin";
+import { EncodedEntity, Serializer, SerializerResource } from "nova_ecs/plugins/serializer_plugin";
 import { Provide } from "nova_ecs/provide";
 import { System } from "nova_ecs/system";
 import { isLeft } from "fp-ts/lib/Either.js";
@@ -37,33 +37,51 @@ export interface FinishJump {
     uuid: string,
     to: string,
 }
-export const FinishJumpEvent = new EcsEvent<FinishJump, {
+export const FinishJumpEvent = new EcsEvent<FinishJump>('FinishJumpEvent');
+
+const EncodedFinishJumpEvent = t.type({
+    entity: EncodedEntity,
+    uuid: t.string,
+    to: t.string,
+});
+
+export function FinishJumpEventType(serializer: Serializer) {
+    return new t.Type<FinishJump, {
     entity: EncodedEntity,
     uuid: string,
     to: string,
-}>('FinishJumpEvent');
-
-registerSimulationBridgeEvent({
-    event: FinishJumpEvent,
-    encode(data, serializer) {
-        return {
+    }>(
+        'FinishJumpEventType',
+        (_u): _u is FinishJump => true,
+        (input, context) => {
+            const encoded = EncodedFinishJumpEvent.validate(input, context);
+            if (isLeft(encoded)) {
+                return encoded;
+            }
+            const decoded = serializer.decode(encoded.right.entity);
+            if (isLeft(decoded)) {
+                return t.failure(
+                    encoded.right.entity,
+                    context,
+                    serializer.describeDecodeFailure(encoded.right.entity, decoded.left),
+                );
+            }
+            return t.success({
+                entity: decoded.right,
+                uuid: encoded.right.uuid,
+                to: encoded.right.to,
+            });
+        },
+        (data) => ({
             entity: serializer.encode(data.entity),
             uuid: data.uuid,
             to: data.to,
-        };
-    },
-    decode(data, serializer) {
-        const encoded = data as { entity: EncodedEntity, uuid: string, to: string };
-        const decoded = serializer.decode(encoded.entity);
-        if (isLeft(decoded)) {
-            throw new Error(`Failed to decode entity: ${serializer.describeDecodeFailure(encoded.entity, decoded.left)}`);
-        }
-        return {
-            entity: decoded.right,
-            uuid: encoded.uuid,
-            to: encoded.to,
-        };
-    },
+        }),
+    );
+}
+
+registerSimulationBridgeEvent({
+    event: FinishJumpEvent,
 });
 
 const JumpFromSystem = new System({
@@ -98,9 +116,13 @@ const PlayerJumpControl = new System({
 export const JumpPlugin: Plugin = {
     name: 'JumpPlugin',
     build(world) {
-        world.resources.get(SerializerResource)?.addComponent(JumpRouteComponent, t.type({
+        const serializer = world.resources.get(SerializerResource);
+        serializer?.addComponent(JumpRouteComponent, t.type({
             route: t.array(t.string),
         }));
+        if (serializer) {
+            serializer.addEvent(FinishJumpEvent, FinishJumpEventType(serializer));
+        }
         world.addSystem(JumpFromSystem);
         world.addSystem(PlayerJumpControl);
         world.addSystem(JumpRouteProvider);

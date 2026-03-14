@@ -1,8 +1,10 @@
+import * as t from 'io-ts';
 import { isLeft } from 'fp-ts/lib/Either.js';
 import { Emit } from 'nova_ecs/arg_types';
 import { EcsEvent } from 'nova_ecs/events';
 import { Plugin } from 'nova_ecs/plugin';
 import { EcsKeyboardEvent } from 'nova_ecs/plugins/keyboard_plugin';
+import { SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
 import { Resource } from 'nova_ecs/resource';
 import { System } from 'nova_ecs/system';
 import { SingletonComponent } from 'nova_ecs/world';
@@ -22,6 +24,11 @@ export interface ControlEvent {
 export const ControlsResource = new Resource<Controls>('ControlsResource');
 export const EcsControlEvent = new EcsEvent<ControlEvent[]>('ControlEvent');
 export const ControlsSubject = new Resource<Subject<ControlEvent>>('ControlsObservable');
+export const ControlEventType = t.type({
+    action: ControlAction,
+    state: t.union([t.literal(false), t.literal('start'), t.literal('repeat')]),
+});
+export const EcsControlEventType = t.array(ControlEventType);
 
 registerSimulationBridgeEvent({ event: EcsControlEvent });
 
@@ -54,6 +61,7 @@ export const ControlsPlugin: Plugin = {
     name: 'ControlsPlugin',
     async build(world) {
         world.resources.set(ControlsSubject, new Subject());
+        world.resources.get(SerializerResource)?.addEvent(EcsControlEvent, EcsControlEventType);
 
         const platform = world.resources.get(PlatformResource);
         if (platform === 'browser') {

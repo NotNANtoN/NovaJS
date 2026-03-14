@@ -5,6 +5,7 @@ import { Errors } from 'io-ts';
 import { Component, ComponentData, UnknownComponent } from '../component.js';
 import { map } from '../datatypes/map.js';
 import { Entity } from '../entity.js';
+import { EcsEvent, EventData, UnknownEvent } from '../events.js';
 import { Plugin } from '../plugin.js';
 import { Resource } from '../resource.js';
 
@@ -12,6 +13,12 @@ interface ComponentTypeMap<K extends Component<any>>
     extends Map<K, t.Type<ComponentData<K>, unknown, unknown>> {
     get<Data>(key: Component<Data>): t.Type<Data, unknown, unknown> | undefined;
     set<Data>(key: Component<Data>, val: t.Type<Data, unknown, unknown>): this;
+}
+
+interface EventTypeMap<K extends EcsEvent<any>>
+    extends Map<K, t.Type<EventData<K>, unknown, unknown>> {
+    get<Data>(key: EcsEvent<Data>): t.Type<Data, unknown, unknown> | undefined;
+    set<Data>(key: EcsEvent<Data>, val: t.Type<Data, unknown, unknown>): this;
 }
 
 export const EntityState = t.intersection([
@@ -59,6 +66,8 @@ export function formatIoTsErrors(errors: Errors): string[] {
 export class Serializer {
     readonly componentTypes: ComponentTypeMap<UnknownComponent> = new Map();
     readonly componentsByName = new Map<string, UnknownComponent>();
+    readonly eventTypes: EventTypeMap<UnknownEvent> = new Map();
+    readonly eventsByName = new Map<string, UnknownEvent>();
 
     // Capitalized because it's a runtime type.
     readonly Entity = new t.Type(
@@ -126,6 +135,19 @@ export class Serializer {
         this.componentTypes.set(component, componentType);
     }
 
+    addEvent<Data>(event: EcsEvent<Data>,
+        eventType: t.Type<Data, unknown, unknown>) {
+        if (!event.name) {
+            throw new Error('Serialized events need a stable name');
+        }
+        const existingEvent = this.eventsByName.get(event.name);
+        if (existingEvent && existingEvent !== event) {
+            throw new Error(`An event with name ${event.name} is already registered`);
+        }
+        this.eventsByName.set(event.name, event as UnknownEvent);
+        this.eventTypes.set(event, eventType);
+    }
+
     encode(entity: Entity) {
         return this.Entity.encode(entity);
     }
@@ -158,6 +180,35 @@ export class Serializer {
 
         if (componentFailures.length > 0) {
             return componentFailures.join('; ');
+        }
+        return formatIoTsErrors(errors).join('; ');
+    }
+
+    encodeEvent<Data>(event: EcsEvent<Data>, data: Data): unknown {
+        const eventType = this.eventTypes.get(event);
+        if (!eventType) {
+            throw new Error(`No serializer type registered for event ${event.name ?? '<unnamed>'}`);
+        }
+        return eventType.encode(isDraft(data) ? current(data) : data);
+    }
+
+    decodeEvent<Data>(event: EcsEvent<Data>, state: unknown): Either<Errors, Data> {
+        const eventType = this.eventTypes.get(event);
+        if (!eventType) {
+            throw new Error(`No serializer type registered for event ${event.name ?? '<unnamed>'}`);
+        }
+        return eventType.decode(state);
+    }
+
+    describeEventDecodeFailure<Data>(event: EcsEvent<Data>, state: unknown, errors: Errors): string {
+        const eventType = this.eventTypes.get(event);
+        if (!eventType) {
+            return formatIoTsErrors(errors).join('; ');
+        }
+
+        const maybeData = eventType.decode(state);
+        if (isLeft(maybeData)) {
+            return formatIoTsErrors(maybeData.left).join('; ');
         }
         return formatIoTsErrors(errors).join('; ');
     }

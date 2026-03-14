@@ -10,31 +10,25 @@ export interface EncodedSimulationBridgeEvent {
 }
 
 interface SimulationBridgeEventRegistration<Data, Encoded = Data> {
-    event: EcsEvent<Data, Encoded>;
+    event: EcsEvent<Data>;
     name: string;
-    encode(data: Data, serializer: Serializer): Encoded;
-    decode(data: Encoded, serializer: Serializer): Data;
     includeEntityUuids: boolean;
 }
 
-type SimulationBridgeEventOptions<Data, Encoded = Data> = {
-    event: EcsEvent<Data, Encoded>;
+type SimulationBridgeEventOptions<Data> = {
+    event: EcsEvent<Data>;
     name?: string;
-    encode?: (data: Data, serializer: Serializer) => Encoded;
-    decode?: (data: Encoded, serializer: Serializer) => Data;
     includeEntityUuids?: boolean;
 };
 
 const eventRegistrationsByEvent = new Map<EcsEvent<unknown>, SimulationBridgeEventRegistration<unknown, unknown>>();
 const eventRegistrationsByName = new Map<string, SimulationBridgeEventRegistration<unknown, unknown>>();
 
-export function registerSimulationBridgeEvent<Data, Encoded = Data>({
+export function registerSimulationBridgeEvent<Data>({
     event,
     name,
-    encode,
-    decode,
     includeEntityUuids,
-}: SimulationBridgeEventOptions<Data, Encoded>) {
+}: SimulationBridgeEventOptions<Data>) {
     const eventName = name ?? event.name;
     if (!eventName) {
         throw new Error("Simulation bridge events need a stable name");
@@ -51,25 +45,9 @@ export function registerSimulationBridgeEvent<Data, Encoded = Data>({
         throw new Error(`Simulation bridge event name ${eventName} is already registered`);
     }
 
-    const registration: SimulationBridgeEventRegistration<Data, Encoded> = {
+    const registration: SimulationBridgeEventRegistration<Data> = {
         event,
         name: eventName,
-        encode: encode ?? ((data: Data) => {
-            if (event.type) {
-                return event.type.encode(data) as unknown as Encoded;
-            }
-            return data as unknown as Encoded;
-        }),
-        decode: decode ?? ((data: Encoded) => {
-            if (event.type) {
-                const decoded = event.type.decode(data);
-                if (isLeft(decoded)) {
-                    throw new Error(`Failed to decode simulation bridge event ${eventName}`);
-                }
-                return decoded.right;
-            }
-            return data as unknown as Data;
-        }),
         includeEntityUuids: includeEntityUuids ?? true,
     };
     eventRegistrationsByEvent.set(event as EcsEvent<unknown>, registration as SimulationBridgeEventRegistration<unknown, unknown>);
@@ -88,9 +66,16 @@ function decodeSimulationBridgeEvent(
     if (!registration) {
         throw new Error(`Unknown simulation bridge event ${event.name}`);
     }
+    const decoded = serializer.decodeEvent(registration.event, event.data);
+    if (isLeft(decoded)) {
+        throw new Error(
+            `Failed to decode simulation bridge event ${event.name}: `
+            + serializer.describeEventDecodeFailure(registration.event, event.data, decoded.left)
+        );
+    }
     return {
         event: registration.event,
-        data: registration.decode(event.data, serializer),
+        data: decoded.right,
         entityUuids: event.entityUuids,
     };
 }

@@ -27,7 +27,7 @@ describe('first available', () => {
         const fooBarSystem = new System({
             name: 'fooBarSystem',
             args: [FirstAvailable([FooComponent, BarComponent])],
-            step(fooOrBar) {
+            step(fooOrBar: { x: number } | { y: string }) {
                 if ('x' in fooOrBar) {
                     values.add(fooOrBar.x);
                 } else {
