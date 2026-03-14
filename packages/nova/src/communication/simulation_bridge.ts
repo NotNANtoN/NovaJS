@@ -7,6 +7,7 @@ import { World } from "nova_ecs/world";
 import { v4 } from "uuid";
 import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
 import { makeNpc } from "../nova_plugin/npc_plugin.js";
+import { ControlEvent, ControlsSubject, EcsControlEvent } from "../nova_plugin/controls_plugin.js";
 import { EncodedSimulationBridgeEvent, getRegisteredSimulationBridgeEvents } from "./simulation_bridge_events.js";
 
 
@@ -17,6 +18,7 @@ export interface SimulationFrame {
 }
 
 export interface SimulationBridgeHostApi {
+    controlEvents(events: ControlEvent[]): void;
     step(count?: number): void;
     snapshot(): SimulationFrame;
     addEntity(uuid: string, entity: EncodedEntity): void;
@@ -25,6 +27,7 @@ export interface SimulationBridgeHostApi {
 }
 
 export interface AsyncSimulationBridgeHostApi {
+    controlEvents(events: ControlEvent[]): Promise<void>;
     step(count?: number): Promise<void>;
     snapshot(): Promise<SimulationFrame>;
     addEntity(uuid: string, entity: EncodedEntity): Promise<void>;
@@ -77,6 +80,16 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
         }
     }
 
+    controlEvents(events: ControlEvent[]) {
+        this.world.emit(EcsControlEvent, events);
+        const controlsSubject = this.world.resources.get(ControlsSubject);
+        if (controlsSubject) {
+            for (const event of events) {
+                controlsSubject.next(event);
+            }
+        }
+    }
+
     snapshot(): SimulationFrame {
         const events = this.queuedEvents;
         this.queuedEvents = [];
@@ -124,6 +137,10 @@ export class SimulationBridgeClient {
         this.host.step(count);
     }
 
+    controlEvents(events: ControlEvent[]) {
+        this.host.controlEvents(structuredClone(events));
+    }
+
     addEntity(uuid: string, entity: Entity) {
         this.host.addEntity(uuid, structuredClone(this.serializer.encode(entity)) as EncodedEntity);
     }
@@ -162,6 +179,10 @@ export class AsyncSimulationBridgeClient {
 
     async step(count = 1) {
         await this.host.step(count);
+    }
+
+    async controlEvents(events: ControlEvent[]) {
+        await this.host.controlEvents(events);
     }
 
     async addEntity(uuid: string, entity: Entity) {

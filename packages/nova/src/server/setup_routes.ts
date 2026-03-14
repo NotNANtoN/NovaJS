@@ -10,8 +10,26 @@ import { NovaDataType } from "novadatainterface/nova_data_interface";
  * Serves GameData to the client
  * Maybe consider https://github.com/RioloGiuseppe/byte-serializer in the future?
  */
-export function setupRoutes(gameData: GameDataInterface, app: Express, htmlPath: string, bundlePath: string, bundleMapPath: string, settingsPath: string) {
-    return new GameDataServer(gameData, app, htmlPath, bundlePath, bundleMapPath, settingsPath);
+export function setupRoutes(
+    gameData: GameDataInterface,
+    app: Express,
+    htmlPath: string,
+    bundlePath: string,
+    bundleMapPath: string,
+    simulationWorkerBundlePath: string,
+    simulationWorkerBundleMapPath: string,
+    settingsPath: string,
+) {
+    return new GameDataServer(
+        gameData,
+        app,
+        htmlPath,
+        bundlePath,
+        bundleMapPath,
+        simulationWorkerBundlePath,
+        simulationWorkerBundleMapPath,
+        settingsPath,
+    );
 }
 
 // This is a helper class used by `setupRoutes`
@@ -22,6 +40,8 @@ class GameDataServer {
         private readonly htmlPath: string,
         private readonly bundlePath: string,
         private readonly bundleMapPath: string,
+        private readonly simulationWorkerBundlePath: string,
+        private readonly simulationWorkerBundleMapPath: string,
         private readonly settingsPath: string) {
         this.setupRoutes();
     }
@@ -58,6 +78,14 @@ class GameDataServer {
 
         this.app.use("/browser_bundle.js.map", (_req: express.Request, res: express.Response) => {
             res.sendFile(this.bundleMapPath);
+        });
+
+        this.app.use("/simulation_bridge_browser_worker_bundle.js", (_req: express.Request, res: express.Response) => {
+            res.sendFile(this.simulationWorkerBundlePath);
+        });
+
+        this.app.use("/simulation_bridge_browser_worker_bundle.js.map", (_req: express.Request, res: express.Response) => {
+            res.sendFile(this.simulationWorkerBundleMapPath);
         });
 
         this.app.use("/", (_req: express.Request, res: express.Response) => {

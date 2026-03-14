@@ -64,7 +64,7 @@ export const ControlsPlugin: Plugin = {
         world.resources.get(SerializerResource)?.addEvent(EcsControlEvent, EcsControlEventType);
 
         const platform = world.resources.get(PlatformResource);
-        if (platform === 'browser') {
+        if (platform === 'browser' || platform === 'worker') {
             const gameData = world.resources.get(SimulationGameDataResource) as SimulationGameDataInterface;
             if (!gameData) {
                 throw new Error('Expected world to have gameData');
@@ -79,7 +79,10 @@ export const ControlsPlugin: Plugin = {
                 throw new Error('Failed to parse controls');
             }
             world.resources.set(ControlsResource, decoded.right);
-            world.addSystem(ControlEventSystem);
+            if (platform === 'browser') {
+                world.addSystem(ControlEventSystem);
+            }
+            return;
         }
     }
 }

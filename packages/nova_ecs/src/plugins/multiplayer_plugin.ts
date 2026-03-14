@@ -87,6 +87,9 @@ export const Message = t.partial({
 export type Message = t.TypeOf<typeof Message>;
 
 export const MultiplayerData = new Component<{ owner: string }>('MultiplayerData');
+export const MultiplayerDataType = t.type({
+    owner: t.string,
+});
 
 export interface MessageWithSource<M> {
     message: M,
@@ -435,10 +438,9 @@ export function multiplayer(communicator: Communicator,
         }
 
         deltaMaker.addComponent(MultiplayerData, {
-            componentType: t.type({
-                owner: t.string,
-            })
+            componentType: MultiplayerDataType
         });
+        world.resources.get(SerializerResource)?.addComponent(MultiplayerData, MultiplayerDataType);
 
         world.addSystem(multiplayerSystem);
         world.addSystem(MessageSystem);

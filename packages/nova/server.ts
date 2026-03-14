@@ -59,6 +59,8 @@ const filesystemData = new FilesystemData(filesystemDataPath);
 const htmlPath = path.join(__dirname, "../src/index.html");
 const bundlePath = path.join(__dirname, "src/browser_bundle.js");
 const bundleMapPath = path.join(__dirname, "src/browser_bundle.js.map");
+const simulationWorkerBundlePath = path.join(__dirname, "src/communication/simulation_bridge_browser_worker_bundle.js");
+const simulationWorkerBundleMapPath = path.join(__dirname, "src/communication/simulation_bridge_browser_worker_bundle.js.map");
 const clientSettingsPath = path.join(__dirname, "../settings/controls.json");
 
 
@@ -86,7 +88,16 @@ async function startGame() {
     repl.repl.context.gameData = gameData;
     repl.repl.context.makeShip = makeShip;
 
-    setupRoutes(gameData, app, htmlPath, bundlePath, bundleMapPath, clientSettingsPath);
+    setupRoutes(
+        gameData,
+        app,
+        htmlPath,
+        bundlePath,
+        bundleMapPath,
+        simulationWorkerBundlePath,
+        simulationWorkerBundleMapPath,
+        clientSettingsPath,
+    );
 
     httpServer.listen(port, function () {
         console.log("listening at port " + port);
@@ -127,4 +138,3 @@ function stepper() {
 }
 
 startGame();
-

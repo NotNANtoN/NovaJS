@@ -70,16 +70,19 @@ export const ShipController: Plugin = {
     name: 'ShipController',
     async build(world) {
         const platform = world.resources.get(PlatformResource);
+        if (platform === 'node') {
+            return;
+        }
         if (platform === 'browser') {
             await world.addPlugin(KeyboardPlugin);
-            await world.addPlugin(PlayerShipPlugin);
-            world.resources.get(SerializerResource)?.addEvent(
-                ControlStateEvent,
-                passthroughType<ControlState>('ControlStateEventType'),
-            );
-            world.resources.set(ControlStateResource, new Map());
-            world.addSystem(ControlPlayerShip);
-            world.addSystem(UpdateControlState);
         }
+        await world.addPlugin(PlayerShipPlugin);
+        world.resources.get(SerializerResource)?.addEvent(
+            ControlStateEvent,
+            passthroughType<ControlState>('ControlStateEventType'),
+        );
+        world.resources.set(ControlStateResource, new Map());
+        world.addSystem(ControlPlayerShip);
+        world.addSystem(UpdateControlState);
     }
 };

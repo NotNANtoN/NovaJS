@@ -1,11 +1,13 @@
 import { Entities, GetWorld } from "nova_ecs/arg_types";
 import { AsyncSystem } from "nova_ecs/async_system";
-import { MultiplayerData } from "nova_ecs/plugins/multiplayer_plugin";
+import { MultiplayerData, MultiplayerDataType } from "nova_ecs/plugins/multiplayer_plugin";
+import { SerializerResource } from "nova_ecs/plugins/serializer_plugin";
 import { Resource } from "nova_ecs/resource";
 import { SingletonComponent, World } from "nova_ecs/world";
 import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
 import { SimulationGameDataResource } from "./game_data_resource.js";
 import { makePlanet } from "./make_planet.js";
+import { Platform, PlatformResource } from "./platform_plugin.js";
 import { SystemIdResource } from "./system_id_resource.js";
 import { SystemPlugin } from "./system_plugin.js";
 
@@ -33,15 +35,20 @@ const MakePlanetsSystem = new AsyncSystem({
     }
 });
 
-export async function makeSystem(systemId: string, gameData: SimulationGameDataInterface) {
+export async function makeSystem(systemId: string, gameData: SimulationGameDataInterface,
+    platformOverride?: Platform) {
     //const system = await gameData.data.System.get(systemId);
     const world = new World(systemId);
 
     world.resources.set(AddedPlanetsResource, { val: false });
     world.resources.set(SimulationGameDataResource, gameData);
     world.resources.set(SystemIdResource, systemId);
+    if (platformOverride) {
+        world.resources.set(PlatformResource, platformOverride);
+    }
     world.addSystem(MakePlanetsSystem);
     await world.addPlugin(SystemPlugin);
+    world.resources.get(SerializerResource)?.addComponent(MultiplayerData, MultiplayerDataType);
 
     return world;
 }

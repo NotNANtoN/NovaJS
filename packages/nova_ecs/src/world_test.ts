@@ -34,7 +34,7 @@ const MUTABLE_COMPONENT = new Component<MutableObject>('MutableComponent');
 describe('world', () => {
     let world: World;
     beforeEach(() => {
-        world = new World();
+        world = new World('test');
     });
 
     it('can step an empty world', () => {
@@ -43,7 +43,7 @@ describe('world', () => {
 
     it('throws an error if a system is added before its resources', () => {
         expect(() => world.addSystem(FOO_BAR_SYSTEM))
-            .toThrowError('World is missing Resource(baz) needed for System(foobar)');
+          .toThrowError('World(test) is missing Resource(baz) needed for System(foobar)');
     });
 
     it('passes components to a system', () => {

@@ -184,7 +184,7 @@ export const WeaponPlugin: Plugin = {
         world.resources.get(SerializerResource)?.addEvent(ChangeSecondaryEvent, ActiveSecondaryType);
         world.addSystem(WeaponsSystem);
         const platform = world.resources.get(PlatformResource);
-        if (platform === 'browser') {
+        if (platform === 'browser' || platform === 'worker') {
             world.addSystem(ActiveSecondaryProvider);
             world.addSystem(ControlPlayerWeapons);
         }

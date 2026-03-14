@@ -254,7 +254,7 @@ export class World {
         for (const resource of system.query.resources) {
             if (!this.state.resources.has(resource)) {
                 throw new Error(
-                    `World is missing ${resource} needed for ${system}`);
+                  `${this} is missing ${resource} needed for ${system}`);
             }
         }
 
