@@ -383,15 +383,34 @@ async function startGame() {
         await new Promise(resolve => setTimeout(resolve, 10));
     }
     const ids = await simulationGameData.ids;
-    let randomShip = ids.Ship[Math.floor(Math.random() * ids.Ship.length)];
-    const shipData = await simulationGameData.data.Ship.get(randomShip);
+    // ?ship=nova:164 picks the player's ship; otherwise it's random.
+    const query = new URLSearchParams(window.location.search);
+    const requestedShip = query.get('ship');
+    let shipId = ids.Ship[Math.floor(Math.random() * ids.Ship.length)];
+    if (requestedShip) {
+        if (ids.Ship.includes(requestedShip)) {
+            shipId = requestedShip;
+        } else {
+            console.warn(`Unknown ship id '${requestedShip}'. Using random ship ${shipId}.`);
+        }
+    }
+    const shipData = await simulationGameData.data.Ship.get(shipId);
     const shipEntity = makeShip(shipData);
     shipEntity.components.set(MultiplayerData, {
         owner: communicator.uuid
     });
     shipEntity.components.set(PlayerShipSelector, undefined);
     (window as any).myShip = shipEntity;
-    const systemId = 'nova:130';
+    // ?system=nova:131 picks the starting system.
+    const requestedSystem = query.get('system');
+    let systemId = 'nova:130';
+    if (requestedSystem) {
+        if (ids.System.includes(requestedSystem)) {
+            systemId = requestedSystem;
+        } else {
+            console.warn(`Unknown system id '${requestedSystem}'. Using ${systemId}.`);
+        }
+    }
 
     await jumpTo({
         entity: shipEntity,
