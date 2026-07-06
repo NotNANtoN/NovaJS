@@ -90,8 +90,12 @@ async function main() {
     const cloneTimes: number[] = [];
     const decodeTimes: number[] = [];
     const totalTimes: number[] = [];
-    const entityCounts: number[] = [];
-    let frameBytes = 0;
+    const frameSizes: number[] = [];
+    const changedCounts: number[] = [];
+
+    // Prime the delta tracker so measurements reflect steady-state deltas,
+    // not the initial full snapshot.
+    host.snapshot();
 
     for (let i = 0; i < iterations; i++) {
         const t0 = performance.now();
@@ -101,10 +105,18 @@ async function main() {
         const t2 = performance.now();
         const cloned = structuredClone(frame);
         const t3 = performance.now();
-        for (const [, encoded] of cloned.entities) {
+        for (const [, encoded] of cloned.added) {
             const decoded = serializer.decode(encoded);
             if (isLeft(decoded)) {
                 throw new Error("Failed to decode entity in benchmark");
+            }
+        }
+        for (const [, delta] of cloned.changed) {
+            for (const [componentName, encoded] of delta.changed) {
+                const decoded = serializer.decodeComponent(componentName, encoded);
+                if (decoded && isLeft(decoded)) {
+                    throw new Error("Failed to decode component in benchmark");
+                }
             }
         }
         const t4 = performance.now();
@@ -114,24 +126,24 @@ async function main() {
         cloneTimes.push(t3 - t2);
         decodeTimes.push(t4 - t3);
         totalTimes.push(t4 - t0);
-        entityCounts.push(frame.entities.length);
-        if (i === iterations - 1) {
-            frameBytes = JSON.stringify(frame).length;
-        }
+        frameSizes.push(JSON.stringify(frame).length);
+        changedCounts.push(frame.added.length + frame.changed.length);
         // Keep async providers alive so entity population stays realistic.
         if (i % 10 === 0) {
             await new Promise(resolve => setImmediate(resolve));
         }
     }
 
-    const counts = stats(entityCounts);
-    console.log(`\nentities/frame: mean ${counts.mean.toFixed(1)}  max ${counts.max}`);
-    console.log(`frame JSON size: ${(frameBytes / 1024).toFixed(1)} KiB\n`);
+    const sizes = stats(frameSizes);
+    const changes = stats(changedCounts);
+    console.log(`\nentities in world: ${world.entities.size}`);
+    console.log(`added+changed entities/frame: mean ${changes.mean.toFixed(1)}  max ${changes.max}`);
+    console.log(`frame JSON size: mean ${(sizes.mean / 1024).toFixed(1)} KiB  p95 ${(sizes.p95 / 1024).toFixed(1)} KiB\n`);
     console.log('per-frame times (ms):');
     row('world.step', stepTimes);
     row('snapshot encode', encodeTimes);
     row('structuredClone', cloneTimes);
-    row('decode entities', decodeTimes);
+    row('decode delta', decodeTimes);
     row('TOTAL pipeline', totalTimes);
     console.log('\n(16.67ms budget per frame at 60Hz; display step + PIXI render not included)');
     process.exit(0);

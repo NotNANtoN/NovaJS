@@ -20,6 +20,7 @@ import { makeBrowserSimulationBridgeClient } from "./communication/simulation_br
 import { emitSimulationBridgeEvent } from "./communication/simulation_bridge_events.js";
 import {
     AsyncSimulationBridgeClient,
+    EntityDelta,
     SimulationFrame,
 } from "./communication/simulation_bridge.js";
 import { SocketChannelClient } from "./communication/socket_channel_client.js";
@@ -126,17 +127,57 @@ function syncEntityToDisplay(uuid: string, encodedEntity: unknown, serializer: S
     syncedComponents.set(uuid, nextComponents);
 }
 
-function applySimulationFrame(frame: SimulationFrame, serializer: Serializer, displayWorld: World) {
-    const nextUuids = new Set<string>();
-    for (const [uuid, entity] of frame.entities) {
-        nextUuids.add(uuid);
-        syncEntityToDisplay(uuid, entity, serializer, displayWorld);
+function applyEntityDelta(uuid: string, delta: EntityDelta, serializer: Serializer, displayWorld: World) {
+    const displayEntity = displayWorld.entities.get(uuid);
+    if (!displayEntity) {
+        if (!warnedUnsyncableEntities.has(uuid)) {
+            warnedUnsyncableEntities.add(uuid);
+            console.warn(`Received a delta for entity ${uuid}, which is not in the display world`);
+        }
+        return;
     }
 
-    for (const uuid of [...syncedComponents.keys()]) {
-        if (nextUuids.has(uuid)) {
+    if (delta.name !== undefined) {
+        displayEntity.name = delta.name;
+    }
+
+    const synced = syncedComponents.get(uuid) ?? new Set<UnknownComponent>();
+    syncedComponents.set(uuid, synced);
+    for (const [componentName, encoded] of delta.changed) {
+        const decoded = serializer.decodeComponent(componentName, encoded);
+        if (!decoded) {
             continue;
         }
+        if (isLeft(decoded)) {
+            const warnKey = `${uuid} ${componentName}`;
+            if (!warnedUnsyncableEntities.has(warnKey)) {
+                warnedUnsyncableEntities.add(warnKey);
+                console.warn(`Skipping component ${componentName} of entity ${uuid} because decode failed`);
+            }
+            continue;
+        }
+        const [component, data] = decoded.right;
+        displayEntity.components.set(component, data);
+        synced.add(component);
+    }
+    for (const componentName of delta.removed) {
+        const component = serializer.componentsByName.get(componentName);
+        if (!component) {
+            continue;
+        }
+        displayEntity.components.delete(component);
+        synced.delete(component);
+    }
+}
+
+function applySimulationFrame(frame: SimulationFrame, serializer: Serializer, displayWorld: World) {
+    for (const [uuid, entity] of frame.added) {
+        syncEntityToDisplay(uuid, entity, serializer, displayWorld);
+    }
+    for (const [uuid, delta] of frame.changed) {
+        applyEntityDelta(uuid, delta, serializer, displayWorld);
+    }
+    for (const uuid of frame.removed) {
         syncedComponents.delete(uuid);
         displayWorld.entities.delete(uuid);
     }
@@ -310,6 +351,10 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
     if (entity.components.has(PlayerShipSelector)) {
         (window as any).myShip = entity;
     }
+    // The new bridge starts from a fresh delta stream, so drop any
+    // bookkeeping from the previous system's sync.
+    syncedComponents.clear();
+    warnedUnsyncableEntities.clear();
     applySimulationFrame(initialFrame, serializer, newDisplayWorld);
     syncedPlayerJumpRoute = getDisplayPlayerJumpRoute(newDisplayWorld)?.slice();
     simulationBridge = newSimulationBridge;

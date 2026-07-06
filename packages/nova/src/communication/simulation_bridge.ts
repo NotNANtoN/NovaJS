@@ -13,8 +13,23 @@ import { EncodedSimulationBridgeEvent, getRegisteredSimulationBridgeEvents } fro
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 
 
+export interface EntityDelta {
+    /** Present only when the entity's name changed. */
+    name?: string;
+    /** Components whose encoded form changed since the last snapshot. */
+    changed: [string, unknown][];
+    /** Names of components removed since the last snapshot. */
+    removed: string[];
+}
+
+/**
+ * A delta frame. Entities absent from `added`, `changed`, and `removed`
+ * are unchanged since the previous snapshot from the same host.
+ */
 export interface SimulationFrame {
-    entities: [string, EncodedEntity][];
+    added: [string, EncodedEntity][];
+    changed: [string, EntityDelta][];
+    removed: string[];
     time?: Time;
     events: EncodedSimulationBridgeEvent[];
 }
@@ -39,18 +54,15 @@ export interface AsyncSimulationBridgeHostApi {
     spawnNpc(shipId: string): Promise<void>;
 }
 
-function makeSnapshot(world: World, serializer: Serializer, events: EncodedSimulationBridgeEvent[]): SimulationFrame {
-    return {
-        entities: [...world.entities]
-            .filter(([uuid]) => uuid !== "singleton")
-            .map(([uuid, entity]) => [uuid, serializer.encode(entity)]),
-        time: world.resources.get(TimeResource),
-        events,
-    };
+interface SentEntityRecord {
+    name: string | undefined;
+    /** Component name -> JSON of the component's encoded form as last sent. */
+    components: Map<string, string>;
 }
 
 export class SimulationBridgeHost implements SimulationBridgeHostApi {
     private queuedEvents: EncodedSimulationBridgeEvent[] = [];
+    private lastSent = new Map<string, SentEntityRecord>();
 
     constructor(
         private world: World,
@@ -97,7 +109,86 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
     snapshot(): SimulationFrame {
         const events = this.queuedEvents;
         this.queuedEvents = [];
-        return makeSnapshot(this.world, this.serializer, events);
+        const serializer = this.serializer;
+
+        const added: [string, EncodedEntity][] = [];
+        const changed: [string, EntityDelta][] = [];
+        const seen = new Set<string>();
+
+        for (const [uuid, entity] of this.world.entities) {
+            if (uuid === "singleton") {
+                continue;
+            }
+            seen.add(uuid);
+            const previous = this.lastSent.get(uuid);
+
+            const encodedComponents: [string, unknown][] = [];
+            const record: SentEntityRecord = {
+                name: entity.name,
+                components: new Map(),
+            };
+            for (const [component, data] of entity.components) {
+                if (!serializer.hasComponent(component)) {
+                    continue;
+                }
+                const encoded = serializer.encodeComponent(component, data);
+                encodedComponents.push([component.name, encoded]);
+                record.components.set(component.name,
+                    JSON.stringify(encoded) ?? 'undefined');
+            }
+
+            if (!previous) {
+                added.push([uuid, {
+                    name: entity.name,
+                    components: encodedComponents,
+                } as EncodedEntity]);
+            } else {
+                const delta: EntityDelta = { changed: [], removed: [] };
+                if (previous.name !== entity.name) {
+                    delta.name = entity.name;
+                }
+                for (const [componentName, encoded] of encodedComponents) {
+                    if (previous.components.get(componentName)
+                        !== record.components.get(componentName)) {
+                        delta.changed.push([componentName, encoded]);
+                    }
+                }
+                for (const componentName of previous.components.keys()) {
+                    if (!record.components.has(componentName)) {
+                        delta.removed.push(componentName);
+                    }
+                }
+                if (delta.name !== undefined || delta.changed.length > 0
+                    || delta.removed.length > 0) {
+                    changed.push([uuid, delta]);
+                }
+            }
+            this.lastSent.set(uuid, record);
+        }
+
+        const removed: string[] = [];
+        for (const uuid of this.lastSent.keys()) {
+            if (!seen.has(uuid)) {
+                removed.push(uuid);
+                this.lastSent.delete(uuid);
+            }
+        }
+
+        return {
+            added,
+            changed,
+            removed,
+            time: this.world.resources.get(TimeResource),
+            events,
+        };
+    }
+
+    /**
+     * Forgets all previously sent state so the next snapshot resends
+     * every entity in full.
+     */
+    resetSync() {
+        this.lastSent.clear();
     }
 
     addEntity(uuid: string, entity: EncodedEntity) {

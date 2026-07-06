@@ -156,6 +156,39 @@ export class Serializer {
         return this.Entity.decode(state);
     }
 
+    hasComponent(component: UnknownComponent) {
+        return this.componentTypes.has(component);
+    }
+
+    encodeComponent<Data>(component: Component<Data>, data: Data): unknown {
+        const componentType = this.componentTypes.get(component);
+        if (!componentType) {
+            throw new Error(`No serializer type registered for component ${component.name}`);
+        }
+        return componentType.encode(isDraft(data) ? current(data) : data);
+    }
+
+    /**
+     * Decodes a single component's data by component name. Returns undefined
+     * if the component is not registered with this serializer.
+     */
+    decodeComponent(componentName: string, encoded: unknown):
+        Either<Errors, [UnknownComponent, unknown]> | undefined {
+        const component = this.componentsByName.get(componentName);
+        if (!component) {
+            return undefined;
+        }
+        const componentType = this.componentTypes.get(component);
+        if (!componentType) {
+            return undefined;
+        }
+        const maybeData = componentType.decode(encoded);
+        if (isLeft(maybeData)) {
+            return maybeData;
+        }
+        return right([component, maybeData.right]);
+    }
+
     describeDecodeFailure(state: unknown, errors: Errors): string {
         const maybeState = EntityState.decode(state);
         if (isLeft(maybeState)) {

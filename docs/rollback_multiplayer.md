@@ -49,7 +49,7 @@ Do not abandon `worker` (branched off `turborepo`). The sim/display split's shap
 Known lingering issues to resolve or explicitly defer:
 
 1. Desync when a ship dies.
-2. Per-frame sync performance: profiling shows significant cost, much of it serializing/deserializing the full snapshot every frame. This deserves a **timeboxed investigation now** rather than open-ended deferral, because it is a viability gate for the whole project: if sim→display sync can't be made cheap, rollback (which adds snapshot + resim on top) isn't worth building. Likely levers, in order: delta sync instead of full snapshot (already planned in the worker doc), cheaper encoding than io-ts JSON, and only then exotic options like `SharedArrayBuffer`.
+2. ~~Per-frame sync performance~~ **Investigated and largely fixed.** Benchmarking (`snapshot_benchmark.ts`) plus a Chrome trace showed the worker was ~82% idle and the cost was on the main thread: full-frame apply re-setting every component of every entity each frame, which fanned out through the ECS query-cache invalidation, plus Immer overhead in the multiplayer DeltaMaker. The bridge now sends delta frames (host string-compares each component's encoded form against the last frame — no Immer), cutting frame size ~5x and main-thread clone+decode ~3x. Remaining known main-thread costs, deferred: PIXI `removeChild`/`removeItems` churn from transient entities and particle emitter update/upload (display-layer, unrelated to sync), and ECS query-cache invalidation cost in general (matters again for rollback resimulation; see Phase 1).
 
 ### Phase 1: Determinism foundation (single-player, no networking)
 

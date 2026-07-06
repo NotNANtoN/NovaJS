@@ -28,13 +28,13 @@ describe("SimulationBridge worker integration", () => {
         const client = makeWorkerThreadSimulationBridgeClient(worker, serializer);
         try {
             const initialFrame = await client.snapshot();
-            expect(initialFrame.entities).toEqual([]);
+            expect(initialFrame.added).toEqual([]);
 
             await client.addEntity(harness.shipUuid, ship);
             const addedFrame = await client.snapshot();
-            expect(addedFrame.entities.length).toBe(1);
-            expect(addedFrame.entities[0]?.[0]).toBe(harness.shipUuid);
-            const decoded = client.decodeEntity(addedFrame.entities[0]![1]);
+            expect(addedFrame.added.length).toBe(1);
+            expect(addedFrame.added[0]?.[0]).toBe(harness.shipUuid);
+            const decoded = client.decodeEntity(addedFrame.added[0]![1]);
             expect(decoded.name).toBe(ship.name);
 
             await client.step();
@@ -43,7 +43,8 @@ describe("SimulationBridge worker integration", () => {
 
             await client.removeEntity(harness.shipUuid);
             const removedFrame = await client.snapshot();
-            expect(removedFrame.entities).toEqual([]);
+            expect(removedFrame.added).toEqual([]);
+            expect(removedFrame.removed).toContain(harness.shipUuid);
         } finally {
             await client.close();
         }

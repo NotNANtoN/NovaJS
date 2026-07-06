@@ -61,16 +61,43 @@ describe('SimulationBridge', () => {
 
         client.addEntity('foo-uuid', entity);
         const addedFrame = client.snapshot();
-        expect(addedFrame.entities.length).toBe(1);
-        expect(addedFrame.entities[0]?.[0]).toBe('foo-uuid');
+        expect(addedFrame.added.length).toBe(1);
+        expect(addedFrame.added[0]?.[0]).toBe('foo-uuid');
 
-        const decoded = client.decodeEntity(addedFrame.entities[0]![1]);
+        const decoded = client.decodeEntity(addedFrame.added[0]![1]);
         expect(decoded.name).toBe('foo');
         expect(decoded.components.get(FooComponent)).toEqual({ x: 3 });
 
         client.removeEntity('foo-uuid');
         const removedFrame = client.snapshot();
-        expect(removedFrame.entities).toEqual([]);
+        expect(removedFrame.added).toEqual([]);
+        expect(removedFrame.changed).toEqual([]);
+        expect(removedFrame.removed).toEqual(['foo-uuid']);
+    });
+
+    it('only includes changed components in subsequent snapshots', () => {
+        const entity = new Entity('foo').addComponent(FooComponent, { x: 3 });
+        client.addEntity('foo-uuid', entity);
+        expect(client.snapshot().added.length).toBe(1);
+
+        const unchangedFrame = client.snapshot();
+        expect(unchangedFrame.added).toEqual([]);
+        expect(unchangedFrame.changed).toEqual([]);
+        expect(unchangedFrame.removed).toEqual([]);
+
+        const worldEntity = world.entities.get('foo-uuid');
+        worldEntity?.components.set(FooComponent, { x: 4 });
+        const changedFrame = client.snapshot();
+        expect(changedFrame.added).toEqual([]);
+        expect(changedFrame.changed).toEqual([
+            ['foo-uuid', { changed: [['Foo', { x: 4 }]], removed: [] }],
+        ]);
+
+        worldEntity?.components.delete(FooComponent);
+        const deletedComponentFrame = client.snapshot();
+        expect(deletedComponentFrame.changed).toEqual([
+            ['foo-uuid', { changed: [], removed: ['Foo'] }],
+        ]);
     });
 
     it('steps the world through bridge commands', () => {
@@ -92,10 +119,19 @@ describe('SimulationBridge', () => {
         client.setPlayerJumpRoute(['nova:131', 'nova:132']);
 
         const frame = client.snapshot();
-        const decoded = client.decodeEntity(frame.entities[0]![1]);
+        const decoded = client.decodeEntity(frame.added[0]![1]);
         expect(decoded.components.get(JumpRouteComponent)).toEqual({
             route: ['nova:131', 'nova:132'],
         });
+
+        client.setPlayerJumpRoute(['nova:133']);
+        const deltaFrame = client.snapshot();
+        expect(deltaFrame.changed).toEqual([
+            ['player-uuid', {
+                changed: [['JumpRouteComponent', { route: ['nova:133'] }]],
+                removed: [],
+            }],
+        ]);
     });
 
     it('forwards cloneable events and clears them after snapshot', () => {
