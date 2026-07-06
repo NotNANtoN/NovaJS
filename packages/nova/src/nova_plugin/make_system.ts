@@ -3,8 +3,11 @@ import { AsyncSystem } from "nova_ecs/async_system";
 import { MultiplayerData, MultiplayerDataType } from "nova_ecs/plugins/multiplayer_plugin";
 import { SerializerResource } from "nova_ecs/plugins/serializer_plugin";
 import { Resource } from "nova_ecs/resource";
+import { Random, RandomResource } from "nova_ecs/plugins/random_plugin";
 import { useFixedTimestep } from "nova_ecs/plugins/time_plugin";
+import { fnv1a } from "nova_ecs/plugins/world_hash";
 import { SingletonComponent, World } from "nova_ecs/world";
+import { IdFactory, IdFactoryResource } from "./id_factory.js";
 import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
 import { SimulationGameDataResource } from "./game_data_resource.js";
 import { makePlanet } from "./make_planet.js";
@@ -47,6 +50,11 @@ export async function makeSystem(systemId: string, gameData: SimulationGameDataI
     world.resources.set(AddedPlanetsResource, { val: false });
     world.resources.set(SimulationGameDataResource, gameData);
     world.resources.set(SystemIdResource, systemId);
+    // Deterministic randomness and entity id allocation for simulation
+    // code. Seeded per system so different systems behave differently
+    // while identical runs stay identical.
+    world.resources.set(RandomResource, new Random(fnv1a(systemId)));
+    world.resources.set(IdFactoryResource, new IdFactory());
     if (platformOverride) {
         world.resources.set(PlatformResource, platformOverride);
     }

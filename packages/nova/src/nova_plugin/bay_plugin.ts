@@ -10,7 +10,6 @@ import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import { CommunicatorResource, MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
 import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
-import { v4 } from 'uuid';
 import { HitboxHullComponent, HurtboxHullComponent } from './collisions_plugin.js';
 import { CollisionEvent, CollisionHitterComponent, CollisionVulnerabilityComponent } from './collision_interaction.js';
 import { ExitPointData } from './exit_point.js';
@@ -115,7 +114,7 @@ class BayWeaponEntry extends WeaponEntry {
             return undefined;
         }
 
-        this.entities.set(v4(), ship);
+        this.entities.set(this.ids.next(`bay:${multiplayerOwner}`), ship);
         const ownerVuln = this.entities.get(source)?.components
             .get(CollisionVulnerabilityComponent);
         ownerVuln?.vulnerableTo.add(`return_escorts`);

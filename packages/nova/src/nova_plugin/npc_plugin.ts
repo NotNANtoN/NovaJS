@@ -4,6 +4,7 @@ import { Component } from "nova_ecs/component";
 import { Plugin } from "nova_ecs/plugin";
 import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
 import { CommunicatorResource, MultiplayerData } from "nova_ecs/plugins/multiplayer_plugin";
+import { RandomResource } from "nova_ecs/plugins/random_plugin";
 import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { Optional } from "nova_ecs/optional";
 import { Query } from "nova_ecs/query";
@@ -29,8 +30,8 @@ const ChooseRandomTargetComponent = new Component<{
 const ChooseRandomTargetAI = new System({
     name: 'ChooseRandomTarget',
     args: [TargetComponent, TargetsQuery, ChooseRandomTargetComponent,
-        TimeResource, UUID, Entities] as const,
-    step(target, targets, randomTargetData, time, uuid, entities) {
+        TimeResource, UUID, Entities, RandomResource] as const,
+    step(target, targets, randomTargetData, time, uuid, entities, random) {
         if ((randomTargetData.nextTime ?? 0) > time.time &&
             target.target && entities.has(target.target)) {
             return;
@@ -44,8 +45,7 @@ const ChooseRandomTargetAI = new System({
             return;
         }
 
-        const index = Math.floor(Math.random() * validTargets.length);
-        target.target = validTargets[index];
+        target.target = validTargets[random.below(validTargets.length)];
     }
 });
 

@@ -9,11 +9,11 @@ import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
 import { MovementState, MovementStateComponent, MovementSystem } from 'nova_ecs/plugins/movement_plugin';
 import { passthroughType, SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
+import { RandomResource } from 'nova_ecs/plugins/random_plugin';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
 import SAT from "sat";
-import { v4 } from 'uuid';
 import { CollisionSystem, CompositeHull, HitboxHullComponent, HurtboxHullComponent, UpdateHitboxHullSystem } from './collisions_plugin.js';
 import { CollisionEvent, CollisionHitterComponent } from './collision_interaction.js';
 import { CreateTime, CreateTimeArgProvider } from './create_time.js';
@@ -106,7 +106,7 @@ class BeamWeaponEntry extends WeaponEntry {
                 loop: this.data.loopSound,
             });
         }
-        this.entities.set(v4(), beam);
+        this.entities.set(this.ids.next('beam'), beam);
         return beam;
     }
 
@@ -124,9 +124,9 @@ export const BeamSystem = new System({
     after: [MovementSystem, WeaponsSystem],
     args: [BeamDataComponent, BeamStateComponent, MovementStateComponent, FireSubs,
         CreateTimeArgProvider, TimeResource, UUID, Entities, Optional(SourceComponent),
-        Optional(TargetComponent)] as const,
+        Optional(TargetComponent), RandomResource] as const,
     step(beamData, beamState, movement, fireSubs, fireTime, { time }, uuid,
-        entities, source, target) {
+        entities, source, target, random) {
         const timeSinceFire = time - fireTime;
         if (timeSinceFire > beamData.shotDuration) {
             fireSubs(beamData.id, uuid, true);
@@ -159,7 +159,7 @@ export const BeamSystem = new System({
                 movement.rotation = zeroOrderGuidance(movement.position, otherPos);
             }
         }
-        movement.rotation = movement.rotation.add(sampleInaccuracy(beamData.accuracy));
+        movement.rotation = movement.rotation.add(sampleInaccuracy(beamData.accuracy, random));
     }
 });
 

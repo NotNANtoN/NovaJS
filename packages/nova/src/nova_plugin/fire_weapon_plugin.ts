@@ -5,9 +5,11 @@ import { WeaponData } from 'novadatainterface/weapon_data';
 import { Emit, EmitFunction, Entities, GetEntity, RunQuery, RunQueryFunction, UUID } from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
 import { Angle } from 'nova_ecs/datatypes/angle';
+import { Random, RandomResource } from 'nova_ecs/plugins/random_plugin';
 import { Position } from 'nova_ecs/datatypes/position';
 import { Vector } from 'nova_ecs/datatypes/vector';
 import { Entity } from 'nova_ecs/entity';
+import { IdFactory, IdFactoryResource } from './id_factory.js';
 import { EntityMap } from 'nova_ecs/entity_map';
 import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
@@ -97,8 +99,8 @@ function getQuadrant(source: Position, angle: Angle, target: Position): Quadrant
     return 'sidesQuadrant';
 }
 
-export function sampleInaccuracy(accuracy: number) {
-    return 2 * (Math.random() - 0.5) * accuracy * (2 * Math.PI / 360);
+export function sampleInaccuracy(accuracy: number, random: Random) {
+    return 2 * (random.next() - 0.5) * accuracy * (2 * Math.PI / 360);
 }
 
 /**
@@ -124,10 +126,10 @@ export function getEvenlySpacedAngles(spacing: number, count: number) {
     return angles;
 }
 
-function getRandomInCone(angle: number, count: number) {
+function getRandomInCone(angle: number, count: number, random: Random) {
     const angles: Angle[] = [];
     for (let i = 0; i < count; i++) {
-        angles[i] = new Angle((2 * Math.random() - 1) * angle);
+        angles[i] = new Angle((2 * random.next() - 1) * angle);
     }
     return angles;
 }
@@ -146,7 +148,7 @@ const SubsQuery = new Query([WeaponEntries, MovementStateComponent, Optional(Sub
     Optional(OwnerComponent), Optional(TargetComponent), GetEntity] as const);
 
 const ConstructorQuery = new Query([Entities, Emit, WeaponEntries,
-    SingletonComponent] as const);
+    RandomResource, IdFactoryResource, SingletonComponent] as const);
 
 export const VulnerableToPD = new Component<undefined>('VulnerableToPD');
 const PointDefenseQuery = new Query([MovementStateComponent, Optional(OwnerComponent),
@@ -155,10 +157,13 @@ const PointDefenseQuery = new Query([MovementStateComponent, Optional(OwnerCompo
 export abstract class WeaponEntry {
     protected entities: EntityMap;
     protected emit: EmitFunction;
+    protected random: Random;
+    protected ids: IdFactory;
     protected abstract pointDefenseRangeSquared: number;
     constructor(public data: WeaponData, protected runQuery: RunQueryFunction) {
         let weaponEntries: Gettable<WeaponEntry | undefined>;
-        [this.entities, this.emit, weaponEntries] = runQuery(ConstructorQuery)[0];
+        [this.entities, this.emit, weaponEntries, this.random, this.ids] =
+            runQuery(ConstructorQuery)[0];
         if ('submunitions' in this.data) {
             for (const sub of this.data.submunitions) {
                 weaponEntries.get(sub.id);
@@ -267,7 +272,7 @@ export abstract class WeaponEntry {
         }
 
         if (inaccuracy) {
-            angle = angle.add(sampleInaccuracy(this.data.accuracy));
+            angle = angle.add(sampleInaccuracy(this.data.accuracy, this.random));
         }
 
         return this.fire(exitPoint, angle, owner.owner ?? source, target,
@@ -299,7 +304,7 @@ export abstract class WeaponEntry {
 
             const angles = sub.theta < 0
                 ? getEvenlySpacedAngles(Math.abs(sub.theta), sub.count)
-                : getRandomInCone(sub.theta, sub.count);
+                : getRandomInCone(sub.theta, sub.count, this.random);
 
             const subWeapon = weaponEntries.getCached(sub.id);
             if (!subWeapon) {

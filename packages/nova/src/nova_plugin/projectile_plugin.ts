@@ -14,10 +14,10 @@ import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { ProvideAsync } from "nova_ecs/provide_async";
 import { System } from 'nova_ecs/system';
 import SAT from "sat";
-import { v4 } from 'uuid';
 import { FactoryQueue } from '../common/factory_queue.js';
 import { registerSimulationBridgeEvent } from '../communication/simulation_bridge_events.js';
 import { AnimationComponent } from './animation_plugin.js';
+import { IdFactoryResource } from './id_factory.js';
 import { BlastDamageComponent, BlastIgnoreComponent } from './blast_plugin.js';
 import { CompositeHull, hullFromAnimation, HurtboxHullComponent } from './collisions_plugin.js';
 import { CollisionEvent, CollisionHitterComponent, CollisionVulnerabilityComponent } from './collision_interaction.js';
@@ -174,7 +174,7 @@ class ProjectileWeaponEntry extends WeaponEntry {
             shield.current = shield.max;
         }
 
-        this.entities.set(v4(), projectile);
+        this.entities.set(this.ids.next('projectile'), projectile);
         if (this.data.sound) {
             this.emit(SoundEvent, {
                 id: this.data.sound,
@@ -343,8 +343,8 @@ const ProjectileBlastSystem = new System({
     events: [ProjectileExplodeEvent],
     args: [ProjectileDataComponent, ProjectileBlastHull, CollisionHitterComponent,
         MovementStateComponent, Optional(OwnerComponent), Entities,
-        ProjectileExplodeEvent] as const,
-    step(projectileData, blastHull, hitter, movement, owner, entities, explosion) {
+        IdFactoryResource, ProjectileExplodeEvent] as const,
+    step(projectileData, blastHull, hitter, movement, owner, entities, ids, explosion) {
         const blastIgnore = new Set<string>();
         // TODO: Tag ship that was hit as immune to explosion, since it's already hit.
         if (!projectileData.blastHurtsFiringShip && owner) {
@@ -375,7 +375,7 @@ const ProjectileBlastSystem = new System({
                 turnBack: false,
                 velocity: new Vector(0, 0),
             });
-        entities.set(v4(), blast);
+        entities.set(ids.next('blast'), blast);
     }
 });
 

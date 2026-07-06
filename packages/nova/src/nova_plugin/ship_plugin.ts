@@ -10,6 +10,7 @@ import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
 import { MovementPhysics, MovementPhysicsComponent, MovementStateComponent, MovementType } from 'nova_ecs/plugins/movement_plugin';
 import { passthroughType, SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
 import { Provide } from 'nova_ecs/provide';
+import { RandomResource } from 'nova_ecs/plugins/random_plugin';
 import { ProvideAsync } from "nova_ecs/provide_async";
 import { AnimationComponent } from './animation_plugin.js';
 import { CollisionVulnerabilityComponent } from './collision_interaction.js';
@@ -159,13 +160,13 @@ const ShipIonizationColorProvider = Provide({
 const ShipMovementStateProvider = Provide({
     name: "ShipMovementStateProvider",
     provided: MovementStateComponent,
-    args: [ShipComponent],
-    factory() {
+    args: [ShipComponent, RandomResource] as const,
+    factory(_ship, random) {
         return {
             accelerating: 0,
-            position: new Position(600 * (Math.random() - 0.5),
-                (600 * (Math.random() - 0.5))),
-            rotation: new Angle(Math.random() * 2 * Math.PI),
+            position: new Position(600 * (random.next() - 0.5),
+                (600 * (random.next() - 0.5))),
+            rotation: new Angle(random.next() * 2 * Math.PI),
             turnBack: false,
             turning: 0,
             velocity: new Vector(0, 0),
