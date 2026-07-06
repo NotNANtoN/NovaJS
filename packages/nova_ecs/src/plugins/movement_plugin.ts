@@ -41,8 +41,25 @@ export const MovementState = t.intersection([t.type({
 }), t.partial({
     turnTo: t.union([AngleType, t.string /* target UUID */, t.null]),
     targetSpeed: t.number,
+    // Incremented on discontinuous moves (respawn, teleport) so they get
+    // sent to peers, which otherwise only hear about input changes.
+    teleportCount: t.number,
 })]);
 export type MovementState = t.TypeOf<typeof MovementState>;
+
+/**
+ * Move an entity discontinuously. Position normally evolves predictably
+ * from inputs, so multiplayer only sends MovementState when an input
+ * changes. A teleport is unpredictable, so it bumps `teleportCount` to
+ * force the full state (including position) to be sent.
+ */
+export function teleport(state: MovementState, position: Position, velocity?: Vector) {
+    state.position = position;
+    if (velocity) {
+        state.velocity = velocity;
+    }
+    state.teleportCount = (state.teleportCount ?? 0) + 1;
+}
 
 // Don't split this into separate position and velocity components
 // because we don't want to send predictable deltas, such as when
@@ -179,7 +196,9 @@ export const MovementPlugin: Plugin = {
                 // Send everything if a delta is detected.
                 const same = a.turning === b.turning &&
                     a.accelerating === b.accelerating &&
-                    a.turnTo === b.turnTo;
+                    a.turnTo === b.turnTo &&
+                    a.turnBack === b.turnBack &&
+                    a.teleportCount === b.teleportCount;
 
                 if (same) {
                     return;

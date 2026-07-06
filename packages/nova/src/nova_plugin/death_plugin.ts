@@ -5,7 +5,7 @@ import { Entity } from 'nova_ecs/entity';
 import { EcsEvent } from 'nova_ecs/events';
 import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
-import { MovementPhysicsComponent, MovementState, MovementStateComponent, MovementType } from 'nova_ecs/plugins/movement_plugin';
+import { MovementPhysicsComponent, MovementState, MovementStateComponent, MovementType, teleport } from 'nova_ecs/plugins/movement_plugin';
 import { passthroughType, SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
 import { Time, TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { Query } from 'nova_ecs/query';
@@ -144,7 +144,9 @@ export const PlayerDeathSystem = new System({
         if (ionization) {
             ionization.current = 0;
         }
-        movement.position = new Position(0, 0);
+        // Teleport (rather than set position) so the respawn is sent to
+        // other players, who otherwise only hear about input changes.
+        teleport(movement, new Position(0, 0));
     }
 });
 

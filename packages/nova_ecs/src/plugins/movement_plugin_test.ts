@@ -6,7 +6,8 @@ import { Vector, VectorLike } from '../datatypes/vector.js';
 import { Entity } from '../entity.js';
 import { System } from '../system.js';
 import { World } from '../world.js';
-import { approachVec, MovementPhysicsComponent, MovementPlugin, MovementStateComponent, MovementSystem, MovementType } from './movement_plugin.js';
+import { approachVec, MovementPhysicsComponent, MovementPlugin, MovementStateComponent, MovementSystem, MovementType, teleport } from './movement_plugin.js';
+import { DeltaResource } from './delta_plugin.js';
 import { TimePlugin } from './time_plugin.js';
 
 describe('Movement Plugin', () => {
@@ -149,6 +150,45 @@ describe('Movement Plugin', () => {
             0,
             new Angle(50).angle,
         ]);
+    });
+
+    it('sends a movement delta when an entity teleports', () => {
+        const deltaMaker = world.resources.get(DeltaResource);
+        if (!deltaMaker) {
+            throw new Error('Expected delta maker resource');
+        }
+
+        const entity = new Entity()
+            .addComponent(MovementStateComponent, {
+                position: new Position(0, 0),
+                accelerating: 0,
+                rotation: new Angle(0),
+                turnBack: false,
+                turning: 0,
+                velocity: new Vector(10, 0),
+            });
+
+        // First delta establishes the baseline state.
+        expect(deltaMaker.getDelta(entity)?.componentStates
+            ?.has(MovementStateComponent.name)).toBe(true);
+
+        // getDelta redrafts components, so re-get the state each time.
+        const state = () => entity.components.get(MovementStateComponent)!;
+
+        // Predictable drift does not produce a delta.
+        state().position = new Position(10, 0);
+        expect(deltaMaker.getDelta(entity)).toBeUndefined();
+
+        // A teleport does.
+        teleport(state(), new Position(-500, 300));
+        const delta = deltaMaker.getDelta(entity);
+        const sent = delta?.componentDeltas?.get(MovementStateComponent.name) as
+            { position: { x: number, y: number } } | undefined;
+        expect(sent?.position).toEqual(jasmine.objectContaining({ x: -500, y: 300 }));
+
+        // And the next unchanged frame is quiet again.
+        state().position = new Position(-490, 300);
+        expect(deltaMaker.getDelta(entity)).toBeUndefined();
     });
 
     it('approachVec approaches a target vector', () => {
