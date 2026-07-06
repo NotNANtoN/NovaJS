@@ -238,7 +238,7 @@ function readFile(filePath: string): Promise<ArrayBuffer> {
 }
 
 // see https://gist.github.com/jrus/3113240
-function decode_macroman(mac_roman_bytearray: Array<number>): string {
+export function decode_macroman(mac_roman_bytearray: Array<number>): string {
     let byte, char_array, idx;
     const high_chars_unicode = 'ÄÅÇÉÑÖÜáàâäãåçéèêëíìîïñóòôöõúùûü\n†°¢£§•¶ß®©™´¨≠ÆØ∞±≤≥¥µ∂∑∏π∫ªºΩæø\n¿¡¬√ƒ≈∆«»… ÀÃÕŒœ–—“”‘’÷◊ÿŸ⁄€‹›ﬁﬂ\n‡·‚„‰ÂÊÁËÈÍÎÏÌÓÔÒÚÛÙıˆ˜¯˘˙˚¸˝˛ˇ'.replace(/\n/g, '');
 
