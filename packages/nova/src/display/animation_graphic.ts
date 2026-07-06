@@ -48,6 +48,22 @@ export class AnimationGraphic {
         return this;
     }
 
+    /**
+     * Resets mutable display state so a pooled graphic looks like a freshly
+     * built one when it is reused for a new entity. Visibility of the
+     * container itself is managed by whoever attaches the graphic.
+     */
+    reset() {
+        this.setFramesToUse('normal');
+        for (const sprite of this.sprites.values()) {
+            sprite.pixiSprite.visible = true;
+            sprite.pixiSprite.tint = 0xFFFFFF;
+            sprite.pixiSprite.alpha = 1;
+        }
+        this.wrappedProgress = 0;
+        this.rotation = 0;
+    }
+
     set glowAlpha(alpha: number) {
         const glowImage = this.sprites.get('glowImage');
         if (glowImage) {
