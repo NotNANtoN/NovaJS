@@ -170,7 +170,12 @@ class WeapResource extends BaseResource {
                 this.guidance = 'bay';
                 break;
             default:
-                throw new Error("Unknown guidance type " + this.guidanceN);
+                // Some community plug-ins use guidance values the EVN Bible
+                // leaves undefined (e.g. 2). Don't let one weapon prevent the
+                // whole plug-in from loading.
+                console.warn(`wëap ${this.id} "${this.name}" has unknown `
+                    + `guidance type ${this.guidanceN}; treating as unguided`);
+                this.guidance = 'unguided';
         }
 
 
