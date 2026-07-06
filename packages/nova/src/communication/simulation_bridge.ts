@@ -41,7 +41,7 @@ export interface SimulationBridgeHostApi {
     addEntity(uuid: string, entity: EncodedEntity): void;
     removeEntity(uuid: string): void;
     setPlayerJumpRoute(route: string[]): void;
-    spawnNpc(shipId: string): void;
+    spawnNpc(shipId: string): void | Promise<void>;
 }
 
 export interface AsyncSimulationBridgeHostApi {
@@ -218,10 +218,12 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
         throw new Error("Expected player ship jump route to exist");
     }
 
-    spawnNpc(shipId: string) {
-        const shipData = this.simulationGameData.data.Ship.getCached(shipId);
+    async spawnNpc(shipId: string) {
+        // Load through this world's own game data: the display side warming
+        // its cache does not warm the worker's cache.
+        const shipData = await this.simulationGameData.data.Ship.get(shipId);
         if (!shipData) {
-            throw new Error(`Expected ship ${shipId} to be cached before spawning NPC`);
+            throw new Error(`Failed to load ship ${shipId} for NPC spawn`);
         }
         const npc = makeNpc(shipData);
         const communicator = this.world.resources.get(CommunicatorResource);
@@ -264,7 +266,7 @@ export class SimulationBridgeClient {
     }
 
     spawnNpc(shipId: string) {
-        this.host.spawnNpc(shipId);
+        return this.host.spawnNpc(shipId);
     }
 
     getSerializer() {

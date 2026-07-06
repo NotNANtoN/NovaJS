@@ -101,7 +101,7 @@ class BrowserSimulationBridgeHost implements BrowserSimulationBridgeWorkerApi {
     }
 
     async spawnNpc(shipId: string) {
-        this.requireBridge().spawnNpc(shipId);
+        await this.requireBridge().spawnNpc(shipId);
     }
 
     private requireBridge() {
