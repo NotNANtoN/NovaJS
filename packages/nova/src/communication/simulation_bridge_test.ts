@@ -3,12 +3,13 @@ import * as t from 'io-ts';
 import { SingletonComponent, World } from 'nova_ecs/world';
 import { Component } from 'nova_ecs/component';
 import { Entity } from 'nova_ecs/entity';
-import { EncodedEntity, SerializerPlugin, SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
+import { EncodedEntity, SerializerPlugin, SerializerResource, markerType } from 'nova_ecs/plugins/serializer_plugin';
 import { TimePlugin } from 'nova_ecs/plugins/time_plugin';
 import { System } from 'nova_ecs/system';
 import { Position } from 'nova_ecs/datatypes/position';
-import { FinishJumpEvent, FinishJumpEventType } from '../nova_plugin/jump_plugin.js';
+import { FinishJumpEvent, FinishJumpEventType, JumpRouteComponent } from '../nova_plugin/jump_plugin.js';
 import { LandEvent, LandEventType } from '../nova_plugin/planet_plugin.js';
+import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin.js';
 import { ProjectileCollisionEvent, ProjectileCollisionEventType } from '../nova_plugin/projectile_plugin.js';
 import { SoundEvent, SoundEventType } from '../nova_plugin/sound_plugin.js';
 import {
@@ -44,6 +45,8 @@ describe('SimulationBridge', () => {
             throw new Error('Expected serializer resource');
         }
         serializer.addComponent(FooComponent, t.type({ x: t.number }));
+        serializer.addComponent(JumpRouteComponent, t.type({ route: t.array(t.string) }));
+        serializer.addComponent(PlayerShipSelector, markerType);
         serializer.addEvent(SoundEvent, SoundEventType);
         serializer.addEvent(LandEvent, LandEventType);
         serializer.addEvent(FinishJumpEvent, FinishJumpEventType(serializer));
@@ -77,6 +80,22 @@ describe('SimulationBridge', () => {
 
         const steppedFrame = client.snapshot();
         expect(steppedFrame.time?.frame).toBe((initialFrame.time?.frame ?? 0) + 1);
+    });
+
+    it('updates the player jump route through bridge commands', () => {
+        const entity = new Entity('player')
+            .addComponent(FooComponent, { x: 3 })
+            .addComponent(JumpRouteComponent, { route: [] });
+        entity.components.set(PlayerShipSelector, undefined);
+
+        client.addEntity('player-uuid', entity);
+        client.setPlayerJumpRoute(['nova:131', 'nova:132']);
+
+        const frame = client.snapshot();
+        const decoded = client.decodeEntity(frame.entities[0]![1]);
+        expect(decoded.components.get(JumpRouteComponent)).toEqual({
+            route: ['nova:131', 'nova:132'],
+        });
     });
 
     it('forwards cloneable events and clears them after snapshot', () => {

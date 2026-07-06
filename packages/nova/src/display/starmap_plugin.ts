@@ -1,8 +1,10 @@
-import { AsyncSystem } from 'nova_ecs/async_system';
 import { Plugin } from 'nova_ecs/plugin';
 import { Resource } from 'nova_ecs/resource';
+import { World } from 'nova_ecs/world';
+import { EcsEvent } from 'nova_ecs/events';
+import { Subscription } from 'rxjs';
 import { DisplayAssetDataResource, SimulationGameDataResource } from '../nova_plugin/game_data_resource.js';
-import { ControlsSubject, EcsControlEvent } from '../nova_plugin/controls_plugin.js';
+import { ControlsSubject } from '../nova_plugin/controls_plugin.js';
 import { JumpRouteComponent } from '../nova_plugin/jump_plugin.js';
 import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin.js';
 import { SystemIdResource } from '../nova_plugin/system_id_resource.js';
@@ -11,25 +13,21 @@ import { ScreenSize } from './screen_size_plugin.js';
 import { Stage } from './stage_resource.js';
 
 const StarmapResource = new Resource<Starmap>("Starmap");
+const StarmapControlsSubscription = new Resource<Subscription>('StarmapControlsSubscription');
+export const SetJumpRouteEvent = new EcsEvent<{ route: string[] }>('SetJumpRouteEvent');
 
-const MapSystem = new AsyncSystem({
-    name: 'MapSystem',
-    events: [EcsControlEvent] as const,
-    exclusive: true,
-    alwaysRunOnEvents: false,
-    skipIfApplyingPatches: true,
-    args: [EcsControlEvent, StarmapResource, JumpRouteComponent,
-        ScreenSize, PlayerShipSelector] as const,
-    async step(controlEvent, starmap, jumpRoute, { x, y }) {
-        starmap.container.position.set(x / 2, y / 2);
-        for (const {action, state} of controlEvent) {
-            if (action === 'map' && state === 'start' &&
-                !starmap.container.visible) {
-                jumpRoute.route = await starmap.show(jumpRoute.route);
-            }
+function getPlayerJumpRoute(world: World) {
+    for (const entity of world.entities.values()) {
+        if (!entity.components.has(PlayerShipSelector)) {
+            continue;
+        }
+        const jumpRoute = entity.components.get(JumpRouteComponent);
+        if (jumpRoute) {
+            return jumpRoute;
         }
     }
-});
+    return undefined;
+}
 
 export const StarmapPlugin: Plugin = {
     name: 'StarmapPlugin',
@@ -54,20 +52,41 @@ export const StarmapPlugin: Plugin = {
         if (!systemId) {
             throw new Error('Expected SystemIdResource to exist');
         }
+        const screenSize = world.resources.get(ScreenSize);
+        if (!screenSize) {
+            throw new Error('Expected ScreenSize to exist');
+        }
 
         const starmap = new Starmap(displayAssets, simulationData, systemId, controls);
+        let opening = false;
         stage.addChild(starmap.container);
         world.resources.set(StarmapResource, starmap);
-
-        world.addSystem(MapSystem);
+        world.resources.set(StarmapControlsSubscription, controls.subscribe(async ({ action, state }) => {
+            if (action !== 'map' || state !== 'start' || starmap.container.visible || opening) {
+                return;
+            }
+            opening = true;
+            try {
+                starmap.container.position.set(screenSize.x / 2, screenSize.y / 2);
+                const jumpRoute = getPlayerJumpRoute(world);
+                const route = await starmap.show(jumpRoute?.route ?? []);
+                if (jumpRoute) {
+                    jumpRoute.route = route;
+                }
+                world.emit(SetJumpRouteEvent, { route });
+            } finally {
+                opening = false;
+            }
+        }));
     },
     remove(world) {
-        world.removeSystem(MapSystem);
+        world.resources.get(StarmapControlsSubscription)?.unsubscribe();
         const stage = world.resources.get(Stage);
         const starmap = world.resources.get(StarmapResource);
         if (stage && starmap) {
             stage.removeChild(starmap.container);
         }
+        world.resources.delete(StarmapControlsSubscription);
         world.resources.delete(StarmapResource);
     }
 }

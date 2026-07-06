@@ -27,13 +27,14 @@ import { DebugSettings } from "./debug_settings.js";
 import { Display } from "./display/display_plugin.js";
 import { PixiAppResource } from "./display/pixi_app_resource.js";
 import { ResizeEvent } from "./display/screen_size_plugin.js";
+import { SetJumpRouteEvent } from "./display/starmap_plugin.js";
 import { LeaveSpaceportEvent, OpenSpaceportEvent } from "./display/spaceport_plugin.js";
 import { Stage } from "./display/stage_resource.js";
 import { AddEnemyEvent } from "./display/status_bar.js";
 import { ControlEvent, ControlsSubject, EcsControlEvent } from "./nova_plugin/controls_plugin.js";
 import { Controls, getActions, SavedControls } from "./nova_plugin/controls.js";
 import { DisplayAssetDataResource, SimulationGameDataResource } from "./nova_plugin/game_data_resource.js";
-import { FinishJumpEvent } from "./nova_plugin/jump_plugin.js";
+import { FinishJumpEvent, JumpRouteComponent } from "./nova_plugin/jump_plugin.js";
 import { makeShip } from "./nova_plugin/make_ship.js";
 import { makeSystem } from "./nova_plugin/make_system.js";
 import { MultiRoomResource, NovaPlugin } from "./nova_plugin/nova_plugin.js";
@@ -83,6 +84,7 @@ let pendingLaunchedShip: Entity | undefined;
 let controls: Controls | undefined;
 const controlsSubject = new Subject<ControlEvent>();
 let simulationTickInFlight = false;
+let syncedPlayerJumpRoute: string[] | undefined;
 const syncedComponents = new Map<string, Set<UnknownComponent>>();
 const warnedUnsyncableEntities = new Set<string>();
 
@@ -144,6 +146,27 @@ function applySimulationFrame(frame: SimulationFrame, serializer: Serializer, di
     }
 }
 
+function getDisplayPlayerJumpRoute(displayWorld: World) {
+    for (const entity of displayWorld.entities.values()) {
+        if (!entity.components.has(PlayerShipSelector)) {
+            continue;
+        }
+        const jumpRoute = entity.components.get(JumpRouteComponent);
+        return jumpRoute?.route;
+    }
+    return undefined;
+}
+
+function routesEqual(a?: string[], b?: string[]) {
+    if (a === b) {
+        return true;
+    }
+    if (!a || !b || a.length !== b.length) {
+        return false;
+    }
+    return a.every((entry, index) => entry === b[index]);
+}
+
 async function makeDisplayWorld(systemId: string, time?: Time) {
     const displayWorld = new World(`${systemId} display`);
     displayWorld.resources.set(SimulationGameDataResource, simulationGameData);
@@ -163,6 +186,7 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
     pendingDockedShip = undefined;
     dockedShip = undefined;
     pendingLaunchedShip = undefined;
+    syncedPlayerJumpRoute = undefined;
     if (simulationBridge) {
         if (uuid) {
             await simulationBridge.removeEntity(uuid);
@@ -255,6 +279,10 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
         await simulationGameData.data.Ship.get(shipId);
         await newSimulationBridge.spawnNpc(shipId);
     });
+    newDisplayWorld.events.get(SetJumpRouteEvent).subscribe(({ data }) => {
+        syncedPlayerJumpRoute = data.route.slice();
+        void newSimulationBridge.setPlayerJumpRoute(data.route);
+    });
     newDisplayWorld.events.get(LandEvent).subscribe(({ data, entities }) => {
         if (pendingDockedShip || dockedShip) {
             return;
@@ -283,6 +311,7 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
         (window as any).myShip = entity;
     }
     applySimulationFrame(initialFrame, serializer, newDisplayWorld);
+    syncedPlayerJumpRoute = getDisplayPlayerJumpRoute(newDisplayWorld)?.slice();
     simulationBridge = newSimulationBridge;
     displayWorld = newDisplayWorld;
 }
@@ -446,10 +475,16 @@ async function startGame() {
                 return;
             }
             applySimulationFrame(frame, currentSerializer, currentDisplayWorld);
+            syncedPlayerJumpRoute = getDisplayPlayerJumpRoute(currentDisplayWorld)?.slice();
             for (const event of frame.events) {
                 emitSimulationBridgeEvent(event, currentSerializer, currentDisplayWorld);
             }
             currentDisplayWorld.step();
+            const displayedJumpRoute = getDisplayPlayerJumpRoute(currentDisplayWorld);
+            if (!routesEqual(displayedJumpRoute, syncedPlayerJumpRoute)) {
+                await currentBridge.setPlayerJumpRoute(displayedJumpRoute ?? []);
+                syncedPlayerJumpRoute = displayedJumpRoute?.slice() ?? [];
+            }
         } finally {
             simulationTickInFlight = false;
             stats.end();

@@ -8,7 +8,9 @@ import { v4 } from "uuid";
 import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
 import { makeNpc } from "../nova_plugin/npc_plugin.js";
 import { ControlEvent, ControlsSubject, EcsControlEvent } from "../nova_plugin/controls_plugin.js";
+import { JumpRouteComponent } from "../nova_plugin/jump_plugin.js";
 import { EncodedSimulationBridgeEvent, getRegisteredSimulationBridgeEvents } from "./simulation_bridge_events.js";
+import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 
 
 export interface SimulationFrame {
@@ -23,6 +25,7 @@ export interface SimulationBridgeHostApi {
     snapshot(): SimulationFrame;
     addEntity(uuid: string, entity: EncodedEntity): void;
     removeEntity(uuid: string): void;
+    setPlayerJumpRoute(route: string[]): void;
     spawnNpc(shipId: string): void;
 }
 
@@ -32,6 +35,7 @@ export interface AsyncSimulationBridgeHostApi {
     snapshot(): Promise<SimulationFrame>;
     addEntity(uuid: string, entity: EncodedEntity): Promise<void>;
     removeEntity(uuid: string): Promise<void>;
+    setPlayerJumpRoute(route: string[]): Promise<void>;
     spawnNpc(shipId: string): Promise<void>;
 }
 
@@ -108,6 +112,21 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
         this.world.entities.delete(uuid);
     }
 
+    setPlayerJumpRoute(route: string[]) {
+        for (const entity of this.world.entities.values()) {
+            if (!entity.components.has(PlayerShipSelector)) {
+                continue;
+            }
+            const jumpRoute = entity.components.get(JumpRouteComponent);
+            if (!jumpRoute) {
+                continue;
+            }
+            jumpRoute.route = [...route];
+            return;
+        }
+        throw new Error("Expected player ship jump route to exist");
+    }
+
     spawnNpc(shipId: string) {
         const shipData = this.simulationGameData.data.Ship.getCached(shipId);
         if (!shipData) {
@@ -147,6 +166,10 @@ export class SimulationBridgeClient {
 
     removeEntity(uuid: string) {
         this.host.removeEntity(uuid);
+    }
+
+    setPlayerJumpRoute(route: string[]) {
+        this.host.setPlayerJumpRoute(structuredClone(route));
     }
 
     spawnNpc(shipId: string) {
@@ -191,6 +214,10 @@ export class AsyncSimulationBridgeClient {
 
     async removeEntity(uuid: string) {
         await this.host.removeEntity(uuid);
+    }
+
+    async setPlayerJumpRoute(route: string[]) {
+        await this.host.setPlayerJumpRoute(route);
     }
 
     async spawnNpc(shipId: string) {
