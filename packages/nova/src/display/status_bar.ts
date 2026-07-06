@@ -23,13 +23,14 @@ import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 import { ShipDataComponent } from "../nova_plugin/ship_plugin.js";
 import { Stat } from "../nova_plugin/stat.js";
 import { TargetComponent } from "../nova_plugin/target_component.js";
-import { ChangeSecondaryEvent } from "../nova_plugin/weapon_plugin.js";
+import { ActiveSecondaryWeapon, ChangeSecondaryEvent } from "../nova_plugin/weapon_plugin.js";
 import { Button } from "../spaceport/button.js";
 import { AnimationGraphic } from "./animation_graphic.js";
 import { AnimationGraphicComponent } from "./animation_graphic_plugin.js";
 import { PixiAppResource } from "./pixi_app_resource.js";
 import { ResizeEvent } from "./screen_size_plugin.js";
 import { Stage } from "./stage_resource.js";
+import { AsyncSystem } from "nova_ecs/async_system";
 
 
 class StatusBar {
@@ -333,15 +334,15 @@ const DrawStatusBarStats = new System({
     }
 })
 
-const DrawStatusBarSecondaryWeapon = new System({
+const DrawStatusBarSecondaryWeapon = new AsyncSystem({
     name: 'DrawStatusBarSecondaryWeapon',
     events: [ChangeSecondaryEvent],
     args: [StatusBarResource, ChangeSecondaryEvent, SimulationGameDataResource,
         PlayerShipSelector] as const,
-    step(statusBar, activeSecondary, gameData) {
+    async step(statusBar, activeSecondary, gameData) {
         if (activeSecondary.secondary) {
-            const secondaryName = gameData.data.Weapon
-                .getCached(activeSecondary.secondary);
+            const secondaryName = await gameData.data.Weapon
+                .get(activeSecondary.secondary);
             statusBar.drawSecondary(secondaryName?.name);
         } else {
             statusBar.drawSecondary(null);

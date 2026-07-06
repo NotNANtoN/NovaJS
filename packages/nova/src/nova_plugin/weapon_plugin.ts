@@ -181,6 +181,7 @@ export const WeaponPlugin: Plugin = {
         }
 
         world.addComponent(WeaponsStateComponent);
+        world.resources.get(SerializerResource)?.addComponent(ActiveSecondaryWeapon, ActiveSecondaryType);
         world.resources.get(SerializerResource)?.addEvent(ChangeSecondaryEvent, ActiveSecondaryType);
         world.addSystem(WeaponsSystem);
         const platform = world.resources.get(PlatformResource);
