@@ -17,6 +17,7 @@ import { MultiRoom } from './src/communication/multi_room_communicator.js';
 import { SocketChannelServer } from "./src/communication/socket_channel_server.js";
 import { SimulationGameDataResource } from './src/nova_plugin/game_data_resource.js';
 import { makeShip } from "./src/nova_plugin/make_ship.js";
+import { SIMULATION_STEP_MS } from "./src/nova_plugin/make_system.js";
 import { MultiRoomResource, NovaPlugin } from './src/nova_plugin/nova_plugin.js';
 import { ServerPlugin } from "./src/nova_plugin/server_plugin.js";
 import { NovaRepl } from "./src/server/nova_repl.js";
@@ -131,10 +132,30 @@ async function startGame() {
     stepper();
 }
 
-const STEP_TIME = 1000 / 60;
+// The simulation worlds run on a fixed timestep, so convert real
+// elapsed time into a whole number of world steps and carry the
+// remainder. Catch-up is bounded both in total debt and per timer
+// callback so stepping never starves the server's event loop (it also
+// serves HTTP requests for game assets).
+const MAX_CATCHUP_STEPS = 4;
+const MAX_STEPS_PER_CALLBACK = 2;
+let stepTimeDebt = 0;
+let lastStepTime: number | undefined;
 function stepper() {
-    world.step();
-    setTimeout(stepper, STEP_TIME);
+    const now = performance.now();
+    if (lastStepTime !== undefined) {
+        stepTimeDebt += now - lastStepTime;
+    }
+    lastStepTime = now;
+    stepTimeDebt = Math.min(stepTimeDebt, SIMULATION_STEP_MS * MAX_CATCHUP_STEPS);
+    let steps = Math.min(Math.floor(stepTimeDebt / SIMULATION_STEP_MS),
+        MAX_STEPS_PER_CALLBACK);
+    stepTimeDebt -= steps * SIMULATION_STEP_MS;
+    while (steps > 0) {
+        world.step();
+        steps--;
+    }
+    setTimeout(stepper, SIMULATION_STEP_MS);
 }
 
 startGame();

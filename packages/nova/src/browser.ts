@@ -6,7 +6,7 @@ import { multiplayer } from "nova_ecs/plugins/multiplayer_plugin";
 import { CommunicatorResource } from "nova_ecs/plugins/multiplayer_plugin";
 import { MultiplayerData } from "nova_ecs/plugins/multiplayer_plugin";
 import { Serializer, SerializerResource } from "nova_ecs/plugins/serializer_plugin";
-import { Time, TimeResource } from "nova_ecs/plugins/time_plugin";
+import { TimePlugin, TimeResource } from "nova_ecs/plugins/time_plugin";
 import { World } from "nova_ecs/world";
 import * as PIXI from "pixi.js";
 import { firstValueFrom, filter, Subject, Subscription } from "rxjs";
@@ -37,7 +37,7 @@ import { Controls, getActions, SavedControls } from "./nova_plugin/controls.js";
 import { DisplayAssetDataResource, SimulationGameDataResource } from "./nova_plugin/game_data_resource.js";
 import { FinishJumpEvent, JumpRouteComponent } from "./nova_plugin/jump_plugin.js";
 import { makeShip } from "./nova_plugin/make_ship.js";
-import { makeSystem } from "./nova_plugin/make_system.js";
+import { makeSystem, SIMULATION_STEP_MS } from "./nova_plugin/make_system.js";
 import { MultiRoomResource, NovaPlugin } from "./nova_plugin/nova_plugin.js";
 import { LandEvent } from "./nova_plugin/planet_plugin.js";
 import { PlayerShipSelector } from "./nova_plugin/player_ship_plugin.js";
@@ -86,6 +86,21 @@ let controls: Controls | undefined;
 const controlsSubject = new Subject<ControlEvent>();
 let simulationTickInFlight = false;
 let syncedPlayerJumpRoute: string[] | undefined;
+
+// Fixed-timestep bookkeeping: real elapsed ms not yet simulated.
+const MAX_CATCHUP_STEPS = 6;
+let simulationTimeDebt = 0;
+let lastPumpTime: number | undefined;
+/** Debug control over simulation stepping: `window.novaSim`. */
+const simulationControl = {
+    paused: false,
+    pendingSteps: 0,
+    pause() { this.paused = true; },
+    resume() { this.paused = false; },
+    /** While paused, runs `count` simulation steps on the next frame. */
+    step(count = 1) { this.pendingSteps += count; },
+};
+(window as any).novaSim = simulationControl;
 const syncedComponents = new Map<string, Set<UnknownComponent>>();
 const warnedUnsyncableEntities = new Set<string>();
 
@@ -182,9 +197,9 @@ function applySimulationFrame(frame: SimulationFrame, serializer: Serializer, di
         displayWorld.entities.delete(uuid);
     }
 
-    if (frame.time) {
-        displayWorld.resources.set(TimeResource, frame.time);
-    }
+    // Note: the simulation's time (frame.time) is NOT copied into the
+    // display world. The simulation runs on fixed, 0-based logical time,
+    // while the display world keeps wall-clock time for smooth rendering.
 }
 
 function getDisplayPlayerJumpRoute(displayWorld: World) {
@@ -208,17 +223,18 @@ function routesEqual(a?: string[], b?: string[]) {
     return a.every((entry, index) => entry === b[index]);
 }
 
-async function makeDisplayWorld(systemId: string, time?: Time) {
+async function makeDisplayWorld(systemId: string) {
     const displayWorld = new World(`${systemId} display`);
     displayWorld.resources.set(SimulationGameDataResource, simulationGameData);
     displayWorld.resources.set(DisplayAssetDataResource, displayAssetData);
     displayWorld.resources.set(PixiAppResource, app);
     displayWorld.resources.set(SystemIdResource, systemId);
-    if (time) {
-        displayWorld.resources.set(TimeResource, time);
-    }
     displayWorld.resources.set(ControlsSubject, controlsSubject);
     displayWorld.resources.set(CommunicatorResource, communicator);
+    // The display world keeps its own wall-clock time for smooth
+    // rendering. (The simulation runs on fixed, 0-based logical time,
+    // which is no longer copied into the display world.)
+    await displayWorld.addPlugin(TimePlugin);
     await displayWorld.addPlugin(Display);
     return displayWorld;
 }
@@ -301,7 +317,7 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
     ];
 
     const initialFrame = await newSimulationBridge.snapshot();
-    const newDisplayWorld = await makeDisplayWorld(to, initialFrame.time);
+    const newDisplayWorld = await makeDisplayWorld(to);
     (window as any).simulationWorker = worker;
     (window as any).displayWorld = newDisplayWorld;
 
@@ -533,15 +549,38 @@ async function startGame() {
                 dockedShip = undefined;
                 pendingLaunchedShip = undefined;
             }
-            await currentBridge.step();
-            const frame = await currentBridge.snapshot();
-            if (currentBridge !== simulationBridge || currentDisplayWorld !== displayWorld) {
-                return;
+            // The simulation runs on a fixed timestep, so convert real
+            // elapsed time into a whole number of simulation steps and
+            // carry the remainder. Render rate and simulation rate are
+            // independent.
+            const now = performance.now();
+            if (lastPumpTime !== undefined && !simulationControl.paused) {
+                simulationTimeDebt += now - lastPumpTime;
             }
-            applySimulationFrame(frame, currentSerializer, currentDisplayWorld);
-            syncedPlayerJumpRoute = getDisplayPlayerJumpRoute(currentDisplayWorld)?.slice();
-            for (const event of frame.events) {
-                emitSimulationBridgeEvent(event, currentSerializer, currentDisplayWorld);
+            lastPumpTime = now;
+            // If we fall behind (heavy load, background tab), run at most
+            // a few catch-up steps rather than spiraling.
+            simulationTimeDebt = Math.min(
+                simulationTimeDebt, SIMULATION_STEP_MS * MAX_CATCHUP_STEPS);
+            let steps = Math.floor(simulationTimeDebt / SIMULATION_STEP_MS);
+            simulationTimeDebt -= steps * SIMULATION_STEP_MS;
+            if (simulationControl.paused) {
+                steps = simulationControl.pendingSteps;
+                simulationControl.pendingSteps = 0;
+                simulationTimeDebt = 0;
+            }
+
+            if (steps > 0) {
+                await currentBridge.step(steps);
+                const frame = await currentBridge.snapshot();
+                if (currentBridge !== simulationBridge || currentDisplayWorld !== displayWorld) {
+                    return;
+                }
+                applySimulationFrame(frame, currentSerializer, currentDisplayWorld);
+                syncedPlayerJumpRoute = getDisplayPlayerJumpRoute(currentDisplayWorld)?.slice();
+                for (const event of frame.events) {
+                    emitSimulationBridgeEvent(event, currentSerializer, currentDisplayWorld);
+                }
             }
             currentDisplayWorld.step();
             const displayedJumpRoute = getDisplayPlayerJumpRoute(currentDisplayWorld);
