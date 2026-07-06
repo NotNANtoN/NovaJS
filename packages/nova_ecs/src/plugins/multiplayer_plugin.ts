@@ -216,11 +216,17 @@ export function multiplayer(communicator: Communicator,
                 // Send requested states
                 if (message.requestState) {
                     let uuidsToSend: string[];
+                    // Requested entities that we don't have. Reported back
+                    // as removed so the requester doesn't keep a zombie
+                    // copy of an entity that no longer exists.
+                    let unknownUuids: string[] = [];
                     if (message.requestState.invert) {
                         uuidsToSend = [...setDifference(entityUuids, message.requestState.uuids)];
                     } else {
                         uuidsToSend = [...message.requestState.uuids].filter(
                             uuid => entityUuids.has(uuid));
+                        unknownUuids = [...message.requestState.uuids].filter(
+                            uuid => !entityUuids.has(uuid));
                     }
 
                     const state = new Map(uuidsToSend.map(entityUuid => {
@@ -237,7 +243,11 @@ export function multiplayer(communicator: Communicator,
                         )]
                     }));
 
-                    sendMessage({ state }, source);
+                    const response: Message = { state };
+                    if (unknownUuids.length > 0) {
+                        response.remove = unknownUuids;
+                    }
+                    sendMessage(response, source);
                 }
 
                 // Remove entities

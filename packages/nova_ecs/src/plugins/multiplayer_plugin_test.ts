@@ -285,6 +285,37 @@ describe('Multiplayer Plugin', () => {
         expect(world2.entities.get(testUuid)).toBeUndefined();
     });
 
+    it('reports requested entities that do not exist as removed', () => {
+        const testUuid = 'test entity uuid';
+        world1.entities.set(testUuid, new Entity()
+            .addComponent(MultiplayerData, {
+                owner: 'world1 uuid',
+            })
+            .addComponent(BarComponent, {
+                y: 'a test component',
+            }));
+        world1.step();
+        world2.step();
+
+        world2Communicator.allMessages.length = 0;
+        world1Communicator.messages.next({
+            source: 'world2 uuid',
+            message: {
+                requestState: {
+                    uuids: [testUuid, 'missing uuid'],
+                    invert: false,
+                },
+            },
+        });
+        world1.step();
+
+        const removes = world2Communicator.allMessages
+            .map(m => (m as { message: { remove?: string[] } }).message)
+            .filter(m => m?.remove);
+        expect(removes.length).toBe(1);
+        expect(removes[0]!.remove).toEqual(['missing uuid']);
+    });
+
 
     it('drafts components of entities it owns', () => {
         const testUuid = 'test entity uuid';

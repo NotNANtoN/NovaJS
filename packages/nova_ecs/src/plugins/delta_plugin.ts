@@ -141,10 +141,13 @@ export class DeltaMaker {
 
         const entityComponents = new Set(entity.components.keys());
 
-        // Mark removed components as removed
+        // Mark removed components as removed. Components that were never
+        // registered with the serializer were never sent, so their removal
+        // is not reported either.
         const deltaComponentSet = new Set([...deltaComponent.components.keys()])
         const removedComponents = new Set(
             [...setDifference(deltaComponentSet, entityComponents)]
+                .filter(component => this.serializer.componentsByName.has(component.name))
                 .map(component => component.name));
         // Update the components list
         deltaComponent.components = new Map(entity.components);
@@ -235,7 +238,7 @@ export class DeltaMaker {
         for (const componentName of delta.removeComponents ?? []) {
             const component = this.serializer.componentsByName.get(componentName);
             if (!component) {
-                console.warn(`Missing component ${component}`);
+                console.warn(`Missing component ${componentName}`);
                 continue;
             }
             entity.components.delete(component);
