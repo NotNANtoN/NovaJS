@@ -80,3 +80,8 @@ node_modules
 
 # Turborepo
 .turbo
+# Chrome performance traces
+traces/
+
+# Claude Code local settings
+.claude/settings.local.json
