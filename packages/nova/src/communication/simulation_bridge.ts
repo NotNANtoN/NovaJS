@@ -166,6 +166,55 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
         }
     }
 
+    /**
+     * Joins the room's shared timeline: requests the input log from the
+     * relay and replays it over the deterministic genesis world. If no
+     * relay responds (offline play), continues from tick 0.
+     */
+    async joinRoom(timeoutMs = 5000): Promise<boolean> {
+        const communicator = this.world.resources.get(CommunicatorResource);
+        if (!communicator?.uuid) {
+            return false;
+        }
+        const catchUp = await new Promise<
+            { tick: number, records: InputRecord[] } | undefined
+        >(resolve => {
+            const subscription = communicator.messages.subscribe(({ message }) => {
+                const rollbackMessage = unwrapRollbackMessage(message);
+                if (rollbackMessage?.kind === 'catchUp') {
+                    clearInterval(retry);
+                    clearTimeout(timeout);
+                    subscription.unsubscribe();
+                    resolve(rollbackMessage);
+                }
+            });
+            const request = () => {
+                const server = [...communicator.servers.value][0];
+                if (server) {
+                    communicator.sendMessage(
+                        wrapRollbackMessage({ kind: 'joinRequest' }), server);
+                }
+            };
+            // The relay may not exist yet when the first peer joins.
+            const retry = setInterval(request, 1000);
+            const timeout = setTimeout(() => {
+                clearInterval(retry);
+                subscription.unsubscribe();
+                resolve(undefined);
+            }, timeoutMs);
+            request();
+        });
+        if (!catchUp) {
+            console.warn('No rollback relay responded; starting at tick 0');
+            return false;
+        }
+        for (const record of catchUp.records) {
+            this.addRecord(record.tick, record);
+        }
+        this.rollback.fastForward(catchUp.tick);
+        return true;
+    }
+
     /** Merges a record into the tick's record list. */
     private addRecord(tick: number, record: InputRecord) {
         const existing = this.rollback.getInputs(tick) ?? [];
@@ -200,16 +249,24 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
         }
     }
 
-    /** Publishes this peer's inputs to the room (via the server relay). */
+    /**
+     * Publishes this peer's inputs to the server relay only: the relay
+     * is the single fan-out, so peers never receive a record twice
+     * (once directly, once relayed).
+     */
     private publishInputs(record: InputRecord) {
         const communicator = this.world.resources.get(CommunicatorResource);
         if (!communicator?.uuid) {
             return;
         }
+        const server = [...communicator.servers.value][0];
+        if (!server) {
+            return;
+        }
         communicator.sendMessage(wrapRollbackMessage({
             kind: 'inputs',
             record,
-        }));
+        }), server);
     }
 
     rewind(ticks: number): boolean {

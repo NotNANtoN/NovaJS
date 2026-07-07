@@ -24,11 +24,26 @@ export class RollbackRelay {
     private lastClockTime?: number;
     private clockDebt = 0;
 
+    private leaveSubscription: Subscription;
+
     constructor(private room: Communicator,
         { autoClock = true, stepMs = SIMULATION_STEP_MS }:
             { autoClock?: boolean, stepMs?: number } = {}) {
         this.subscription = room.messages.subscribe(({ source, message }) => {
             this.handleMessage(source, message);
+        });
+        // A disconnect is an input: the server authors a removePeer
+        // record so every peer (and the log) deterministically removes
+        // the ship.
+        this.leaveSubscription = room.peers.leave.subscribe(peerId => {
+            const record: InputRecord = {
+                peerId: this.room.uuid,
+                tick: this.tick + 1,
+                inputs: [{ kind: 'removePeer', peerId }],
+            };
+            this.log.push(record);
+            this.room.sendMessage(
+                wrapRollbackMessage({ kind: 'inputs', record }));
         });
 
         if (autoClock) {
@@ -88,6 +103,14 @@ export class RollbackRelay {
                 }
                 break;
             }
+            case 'joinRequest': {
+                this.room.sendMessage(wrapRollbackMessage({
+                    kind: 'catchUp',
+                    tick: this.tick,
+                    records: [...this.log],
+                }), source);
+                break;
+            }
             case 'inputLogRequest': {
                 this.room.sendMessage(wrapRollbackMessage({
                     kind: 'inputLog',
@@ -101,6 +124,7 @@ export class RollbackRelay {
 
     close() {
         this.subscription.unsubscribe();
+        this.leaveSubscription.unsubscribe();
         if (this.clockInterval !== undefined) {
             clearInterval(this.clockInterval);
         }

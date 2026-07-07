@@ -24,7 +24,9 @@ export type SimulationInput =
     | { kind: 'control', events: ControlEvent[] }
     | { kind: 'addEntity', uuid: string, entity: EncodedEntity }
     | { kind: 'removeEntity', uuid: string }
-    | { kind: 'setJumpRoute', route: string[] };
+    | { kind: 'setJumpRoute', route: string[] }
+    /** Server-authored when a peer disconnects. */
+    | { kind: 'removePeer', peerId: string };
 
 /**
  * A peer's inputs for one simulation tick. The steady-state wire
@@ -90,6 +92,15 @@ export function applySimulationInputs(world: World, inputs: SimulationInput[],
             }
             case 'removeEntity': {
                 world.entities.delete(input.uuid);
+                break;
+            }
+            case 'removePeer': {
+                for (const [uuid, entity] of [...world.entities]) {
+                    if (entity.components.get(ControlledByComponent)?.peerId
+                        === input.peerId) {
+                        world.entities.delete(uuid);
+                    }
+                }
                 break;
             }
             case 'setJumpRoute': {

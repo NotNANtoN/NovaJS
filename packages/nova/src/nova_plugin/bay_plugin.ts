@@ -76,18 +76,10 @@ class BayWeaponEntry extends WeaponEntry {
     }
 
     fire(position: Position, angle: Angle, owner: string, target = undefined, source: string, sourceVelocity?: Vector, exitPointData?: ExitPointData): Entity | undefined {
-        const q = this.runQuery(new Query([MultiplayerData, CommunicatorResource] as const), source);
-
-        // Do not fire if the owner is a multiplayer object not owned by us.
-        if (q.length > 0 && q[0][0].owner !== q[0][1].uuid) {
-            return;
-        }
-
-        const multiplayerOwner = q[0][1].uuid;
-        // Do not fire if we don't have a uuid yet.
-        if (! multiplayerOwner) {
-            return;
-        }
+        // In input-driven multiplayer every peer simulates every bay
+        // deterministically; ownership tags along for identity only.
+        const q = this.runQuery(new Query([MultiplayerData] as const), source);
+        const multiplayerOwner = q[0]?.[0]?.owner ?? 'sim';
 
         let velocity = new Vector(0, 0);
         if (sourceVelocity) {

@@ -15,7 +15,11 @@ export type RollbackProtocolMessage =
     | { kind: 'tickSync', tick: number }
     /** Ask the server for the input log from a tick (late join). */
     | { kind: 'inputLogRequest', fromTick: number }
-    | { kind: 'inputLog', records: InputRecord[] };
+    | { kind: 'inputLog', records: InputRecord[] }
+    /** Join: the full input log up to the server's current tick. The
+     * joiner replays it over the deterministic genesis world. */
+    | { kind: 'joinRequest' }
+    | { kind: 'catchUp', tick: number, records: InputRecord[] };
 
 export function wrapRollbackMessage(message: RollbackProtocolMessage): unknown {
     return { rollback: message };

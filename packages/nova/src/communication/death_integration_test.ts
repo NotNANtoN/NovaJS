@@ -66,13 +66,13 @@ describe("Ship death", () => {
         expect(world.entities.has(npcUuid)).toBe(false);
     }, 30_000);
 
-    it("keeps a ship owned by another peer when it dies locally", async () => {
+    it("removes ships owned by other peers just the same", async () => {
         const { world, npcUuid, deathDelay } = await makeWorldWithNpc("some other peer");
         const deathEventFired = await stepThroughDeath(world, npcUuid, deathDelay);
 
-        // Death effects still run locally, but only the owner removes the
-        // entity. This peer waits for the owner's remove message.
+        // Input-driven multiplayer: every peer simulates the same death
+        // at the same tick, so removal is deterministic and unowned.
         expect(deathEventFired).toBe(true);
-        expect(world.entities.has(npcUuid)).toBe(true);
+        expect(world.entities.has(npcUuid)).toBe(false);
     }, 30_000);
 });

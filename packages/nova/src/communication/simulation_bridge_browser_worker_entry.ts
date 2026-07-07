@@ -1,6 +1,6 @@
 import * as Comlink from "comlink";
 import { BehaviorSubject, Subject } from "rxjs";
-import { multiplayer, Communicator, Peers } from "nova_ecs/plugins/multiplayer_plugin";
+import { Communicator, CommunicatorResource, Peers } from "nova_ecs/plugins/multiplayer_plugin";
 import { SimulationGameData } from "../client/gamedata/simulation_game_data.js";
 import { ControlEvent } from "../nova_plugin/controls_plugin.js";
 import { makeSystem } from "../nova_plugin/make_system.js";
@@ -61,11 +61,16 @@ class BrowserSimulationBridgeHost implements BrowserSimulationBridgeWorkerApi {
         const simulationGameData = new SimulationGameData();
         const world = await makeSystem(args.systemId, simulationGameData, 'worker');
         const communicator = new WorkerRoomCommunicator(sendMessage, args.roomState);
-        await world.addPlugin(multiplayer(communicator));
+        // Pure input-driven multiplayer: no delta-sync plugin. The world
+        // evolves only from the deterministic genesis plus the room's
+        // tick-stamped input records.
+        world.resources.set(CommunicatorResource, communicator);
 
         this.world = world;
         this.communicator = communicator;
         this.bridge = new SimulationBridgeHost(world, simulationGameData);
+        // Join the room's shared timeline by replaying its input log.
+        await this.bridge.joinRoom();
     }
 
     async updateRoomState(state: BrowserWorkerRoomState) {

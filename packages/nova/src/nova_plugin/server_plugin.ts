@@ -77,40 +77,24 @@ export const ServerPlugin: Plugin = {
             throw new Error('MultiRoomResource must exist');
         }
 
+        // Rooms are pure input exchanges: the server runs no simulation
+        // for them. Each active room gets a RollbackRelay (input relay,
+        // tick clock, input archive); joiners reconstruct the world from
+        // the deterministic genesis plus the relay's log.
         const relays = new Map<string, RollbackRelay>();
         for (const systemId of (await gameData.ids).System) {
             const systemRoom = multiRoom.join(systemId);
-            systemRoom.peers.current.subscribe(async peers => {
-                // Delete systems that have no (non-server) peers.
+            systemRoom.peers.current.subscribe(peers => {
                 const empty = [...peers].every(v => systemRoom.servers.value.has(v));
                 if (empty) {
-                    relays.get(systemId)?.close();
-                    relays.delete(systemId);
-                    let cleanupPromise: Promise<void> | undefined;
-                    if (world.entities.has(systemId)) {
-                        console.log(`Deleting empty system ${systemId}`);
-                        cleanupPromise = world.entities.get(systemId)!
-                            .components.get(SystemComponent)?.removeAllPlugins();
+                    if (relays.has(systemId)) {
+                        console.log(`Closing rollback room ${systemId}`);
+                        relays.get(systemId)?.close();
+                        relays.delete(systemId);
                     }
-                    world.entities.delete(systemId);
-                    await cleanupPromise;
-                } else {
-                    // Create the system if it doesn't exist yet.
-                    if (!world.entities.has(systemId)) {
-                        // The rollback relay: input relay, tick clock,
-                        // and input archive for the room. Coexists with
-                        // the legacy delta-sync world (below) until the
-                        // input protocol replaces it.
-                        relays.set(systemId, new RollbackRelay(systemRoom));
-                        const system = await makeSystem(systemId, gameData);
-                        world.entities.set(systemId, new Entity()
-                            .addComponent(SystemComponent, system));
-
-                        console.log(`Created system ${systemId}`);
-                        await system.addPlugin(multiplayer(systemRoom,
-                            message => `System ${systemId}: ${message}`));
-                        await system.addPlugin(ServerSystemPlugin);
-                    }
+                } else if (!relays.has(systemId)) {
+                    console.log(`Starting rollback room ${systemId}`);
+                    relays.set(systemId, new RollbackRelay(systemRoom));
                 }
             });
         }

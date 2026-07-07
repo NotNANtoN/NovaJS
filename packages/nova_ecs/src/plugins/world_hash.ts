@@ -27,7 +27,8 @@ export interface WorldHash {
  * Resources are not yet included; they will need to be once rollback
  * snapshots carry resources (RNG state, id counters).
  */
-export function hashWorld(world: World): WorldHash {
+export function hashWorld(world: World,
+    excludeComponents?: ReadonlySet<string>): WorldHash {
     const serializer = world.resources.get(SerializerResource);
     if (!serializer) {
         throw new Error('Expected a serializer resource to hash the world');
@@ -40,6 +41,7 @@ export function hashWorld(world: World): WorldHash {
         const entity = world.entities.get(uuid)!;
         const encoded = serializer.encode(entity) as EncodedEntity;
         const components = [...encoded.components]
+            .filter(([name]) => !excludeComponents?.has(name))
             .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
         const json = JSON.stringify({ name: encoded.name, components }) ?? '';
         const entityHash = fnv1a(json).toString(16).padStart(8, '0');

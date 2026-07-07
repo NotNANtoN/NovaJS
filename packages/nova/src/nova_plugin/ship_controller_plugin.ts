@@ -7,7 +7,7 @@ import { Resource } from 'nova_ecs/resource';
 import { System } from 'nova_ecs/system';
 import { SingletonComponent } from 'nova_ecs/world';
 import { EcsControlEvent } from './controls_plugin.js';
-import { ControlledByComponent, ControlledByType, ShipControlStateComponent } from './ship_control.js';
+import { ControlledByComponent, ControlledByType, SetControlledShipSystem, ShipControlStateComponent } from './ship_control.js';
 import { PlatformResource } from './platform_plugin.js';
 import { PlayerShipPlugin, PlayerShipSelector } from './player_ship_plugin.js';
 import { TargetComponent } from './target_component.js';
@@ -58,5 +58,6 @@ export const ShipController: Plugin = {
         world.resources.get(SerializerResource)?.addComponent(
             ControlledByComponent, ControlledByType);
         world.addSystem(ControlShipSystem);
+        world.addSystem(SetControlledShipSystem);
     }
 };

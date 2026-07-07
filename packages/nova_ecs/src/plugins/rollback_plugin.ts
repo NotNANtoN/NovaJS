@@ -122,6 +122,25 @@ export class RollbackSimulation<Inputs> {
         return true;
     }
 
+    /**
+     * Advances to `tick` as fast as possible, applying recorded inputs
+     * but only snapshotting the final `capacity` ticks. Used to catch
+     * up from an input log when joining a room: genesis plus the log
+     * deterministically reconstructs the present.
+     */
+    fastForward(tick: number) {
+        while (this.tick < tick) {
+            const inputs = this.inputs.get(this.tick + 1);
+            if (inputs !== undefined) {
+                this.options.applyInputs(this.world, inputs);
+            }
+            this.world.step();
+            if (tick - this.tick < this.capacity) {
+                this.takeSnapshot();
+            }
+        }
+    }
+
     private takeSnapshot() {
         this.snapshots.push({ tick: this.tick, snapshot: snapshotWorld(this.world) });
         while (this.snapshots.length > this.capacity) {

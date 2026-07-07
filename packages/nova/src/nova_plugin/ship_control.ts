@@ -1,6 +1,9 @@
 import * as t from 'io-ts';
+import { GetEntity, GetWorld } from "nova_ecs/arg_types";
 import { Component } from "nova_ecs/component";
 import { EcsEvent } from "nova_ecs/events";
+import { CommunicatorResource } from "nova_ecs/plugins/multiplayer_plugin";
+import { System } from "nova_ecs/system";
 import { World } from "nova_ecs/world";
 import { ControlState } from "./control_state_event.js";
 import { ControlEvent } from "./controls_plugin.js";
@@ -72,3 +75,31 @@ export function applyControlEvents(world: World, peerId: string | undefined,
     }
     world.emit(ShipControlEvent, undefined, [targetUuid]);
 }
+
+/**
+ * Marks the local peer's ship with PlayerShipSelector, derived from
+ * ControlledBy. Peer-local: not part of the shared deterministic state
+ * (see PEER_LOCAL_COMPONENTS).
+ */
+export const SetControlledShipSystem = new System({
+    name: 'SetControlledShipSystem',
+    args: [ControlledByComponent, GetEntity, GetWorld] as const,
+    step(controlledBy, entity, world) {
+        const localPeer = world.resources.get(CommunicatorResource)?.uuid;
+        if (!localPeer) {
+            return;
+        }
+        const isLocal = controlledBy.peerId === localPeer;
+        if (isLocal && !entity.components.has(PlayerShipSelector)) {
+            entity.components.set(PlayerShipSelector, undefined);
+        } else if (!isLocal && entity.components.has(PlayerShipSelector)) {
+            entity.components.delete(PlayerShipSelector);
+        }
+    }
+});
+
+/**
+ * Components that legitimately differ between peers (local UI markers).
+ * Excluded when comparing worlds across peers.
+ */
+export const PEER_LOCAL_COMPONENTS = new Set([PlayerShipSelector.name]);

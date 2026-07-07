@@ -10,7 +10,7 @@ import { System } from "nova_ecs/system";
 import { isLeft } from "fp-ts/lib/Either.js";
 import { registerSimulationBridgeEvent } from "../communication/simulation_bridge_events.js";
 import { deImmerify } from "../util/deimmerify.js";
-import { ShipControlEvent, ShipControlStateComponent } from "./ship_control.js";
+import { ControlledByComponent, ShipControlEvent, ShipControlStateComponent } from "./ship_control.js";
 import { PlayerShipSelector } from "./player_ship_plugin.js";
 import { SystemIdResource } from "./system_id_resource.js";
 
@@ -25,7 +25,9 @@ export type JumpRoute = {
 export const JumpRouteComponent = new Component<JumpRoute>('JumpRouteComponent');
 const JumpRouteProvider = Provide({
     name: 'JumpRouteProvider',
-    args: [PlayerShipSelector] as const,
+    // Every controlled ship (any peer's), not just the local player:
+    // this is shared simulation state.
+    args: [ControlledByComponent] as const,
     provided: JumpRouteComponent,
     factory() {
         return { route: [] };

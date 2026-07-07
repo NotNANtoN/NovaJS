@@ -83,20 +83,11 @@ export const DeathAIComponent = new Component<undefined>('DeathAIComponent');
 export const DeathAISystem = new System({
     name: 'DeathAISystem',
     events: [DeathEvent],
-    args: [Entities, UUID, DeathAIComponent,
-        Optional(MultiplayerData), GetWorld] as const,
-    step(entities, uuid, _deathAI, multiplayerData, world) {
-        // Entity existence has a single authority: the owner. Other peers
-        // still run the death effects locally, but the entity is only
-        // removed when the owner's remove message arrives. Removing it
-        // locally would race the owner's deltas and resurrect the ship.
-        // (Optional() does not support missing resources, so the
-        // communicator is read through the world.)
-        const communicator = world.resources.get(CommunicatorResource);
-        if (multiplayerData && communicator?.uuid
-            && multiplayerData.owner !== communicator.uuid) {
-            return;
-        }
+    args: [Entities, UUID, DeathAIComponent] as const,
+    step(entities, uuid) {
+        // In input-driven multiplayer every peer simulates the same
+        // deaths at the same ticks, so removal needs no authority or
+        // message: it is deterministic.
         entities.delete(uuid);
     }
 })

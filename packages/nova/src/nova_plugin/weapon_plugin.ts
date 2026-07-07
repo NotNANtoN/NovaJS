@@ -12,7 +12,7 @@ import { Provide } from 'nova_ecs/provide';
 import { System } from 'nova_ecs/system';
 import { registerSimulationBridgeEvent } from '../communication/simulation_bridge_events.js';
 import { mod } from '../util/mod.js';
-import { ShipControlEvent, ShipControlStateComponent } from './ship_control.js';
+import { ControlledByComponent, ShipControlEvent, ShipControlStateComponent } from './ship_control.js';
 import { WeaponEntries, WeaponLocalState, WeaponsComponent } from './fire_weapon_plugin.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { PlatformResource } from './platform_plugin.js';
@@ -94,7 +94,9 @@ export const ActiveSecondaryWeapon =
 const ActiveSecondaryProvider = Provide({
     name: "ActiveSecondaryProvider",
     provided: ActiveSecondaryWeapon,
-    args: [PlayerShipSelector] as const,
+    // Every controlled ship (any peer's), not just the local player:
+    // this is shared simulation state.
+    args: [ControlledByComponent] as const,
     factory: () => ({ secondary: null }),
 });
 
