@@ -100,6 +100,17 @@ export interface SimulationBridgeHostApi {
     rewind(ticks: number): boolean;
     /** Desync recovery: rebuild from genesis plus the room's input log. */
     resync(): Promise<boolean>;
+    /** Diagnostics: sim tick, desyncs seen, last join result. */
+    status(): SimulationStatus;
+}
+
+export interface SimulationStatus {
+    tick: number;
+    desyncCount: number;
+    /** Result of the most recent joinRoom, if one ran. */
+    joined?: boolean;
+    /** Recent worker-side log lines, newest last (worker entry only). */
+    logs?: string[];
 }
 
 export interface AsyncSimulationBridgeHostApi {
@@ -112,6 +123,7 @@ export interface AsyncSimulationBridgeHostApi {
     spawnNpc(shipId: string): Promise<void>;
     rewind(ticks: number): Promise<boolean>;
     resync(): Promise<boolean>;
+    status(): Promise<SimulationStatus>;
 }
 
 interface SentEntityRecord {
@@ -152,6 +164,7 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
     private checkpointHashes = new Map<number, string>();
     /** Desync notifications received (own divergence or another peer's). */
     desyncCount = 0;
+    private lastJoinSucceeded?: boolean;
     private resyncing = false;
     private lastResyncTime = -Infinity;
 
@@ -328,6 +341,7 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
         });
         if (!catchUp) {
             console.warn('No rollback relay responded; starting at tick 0');
+            this.lastJoinSucceeded = false;
             return false;
         }
         // Stage everything the reconstruction inserts — baseline
@@ -356,6 +370,7 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
         // The local tick just jumped; stale smoothed drift would slew
         // against the new position.
         this.smoothedDrift = undefined;
+        this.lastJoinSucceeded = true;
         return true;
     }
 
@@ -505,6 +520,14 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
         } finally {
             this.resyncing = false;
         }
+    }
+
+    status(): SimulationStatus {
+        return {
+            tick: this.rollback.tick,
+            desyncCount: this.desyncCount,
+            joined: this.lastJoinSucceeded,
+        };
     }
 
     rewind(ticks: number): boolean {
@@ -740,6 +763,10 @@ export class SimulationBridgeClient {
         return this.host.resync();
     }
 
+    status() {
+        return this.host.status();
+    }
+
     spawnNpc(shipId: string) {
         return this.host.spawnNpc(shipId);
     }
@@ -798,6 +825,10 @@ export class AsyncSimulationBridgeClient {
 
     async resync() {
         return this.host.resync();
+    }
+
+    async status() {
+        return this.host.status();
     }
 
     getSerializer() {

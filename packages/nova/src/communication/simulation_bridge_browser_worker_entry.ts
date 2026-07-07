@@ -1,5 +1,20 @@
 import * as Comlink from "comlink";
 import { BehaviorSubject, Subject } from "rxjs";
+
+// The worker's console is invisible to most tooling; keep a ring of
+// recent lines and serve it through status() for diagnostics.
+const workerLogs: string[] = [];
+for (const level of ['log', 'warn', 'error'] as const) {
+    const original = console[level].bind(console);
+    console[level] = (...args: unknown[]) => {
+        original(...args);
+        workerLogs.push(`[${level}] ` + args.map(arg =>
+            typeof arg === 'string' ? arg : JSON.stringify(arg)).join(' '));
+        if (workerLogs.length > 100) {
+            workerLogs.shift();
+        }
+    };
+}
 import { Communicator, CommunicatorResource, Peers } from "nova_ecs/plugins/multiplayer_plugin";
 import { SimulationGameData } from "../client/gamedata/simulation_game_data.js";
 import { ControlEvent } from "../nova_plugin/controls_plugin.js";
@@ -51,6 +66,11 @@ class BrowserSimulationBridgeHost implements BrowserSimulationBridgeWorkerApi {
     private bridge?: SimulationBridgeHost;
     private world?: Awaited<ReturnType<typeof makeSystem>>;
     private communicator?: WorkerRoomCommunicator;
+    // Room traffic forwarded before init finishes (the main thread
+    // subscribes before calling init, so joinRoom's catch-up reply is
+    // not dropped). Replayed once the communicator and bridge exist.
+    private pendingRoomState: BrowserWorkerRoomState[] = [];
+    private pendingRoomMessages: [string, unknown][] = [];
 
     async init(args: {
         systemId: string;
@@ -69,16 +89,34 @@ class BrowserSimulationBridgeHost implements BrowserSimulationBridgeWorkerApi {
         this.world = world;
         this.communicator = communicator;
         this.bridge = new SimulationBridgeHost(world, simulationGameData);
+        // Replay buffered traffic now that the bridge is subscribed —
+        // the catch-up reply joinRoom waits for may already be here.
+        for (const state of this.pendingRoomState) {
+            communicator.updateRoomState(state);
+        }
+        this.pendingRoomState = [];
+        for (const [source, message] of this.pendingRoomMessages) {
+            communicator.receiveMessage(source, message);
+        }
+        this.pendingRoomMessages = [];
         // Join the room's shared timeline by replaying its input log.
         await this.bridge.joinRoom();
     }
 
     async updateRoomState(state: BrowserWorkerRoomState) {
-        this.requireCommunicator().updateRoomState(state);
+        if (!this.communicator) {
+            this.pendingRoomState.push(state);
+            return;
+        }
+        this.communicator.updateRoomState(state);
     }
 
     async receiveRoomMessage(source: string, message: unknown) {
-        this.requireCommunicator().receiveMessage(source, message);
+        if (!this.communicator) {
+            this.pendingRoomMessages.push([source, message]);
+            return;
+        }
+        this.communicator.receiveMessage(source, message);
     }
 
     async controlEvents(events: ControlEvent[]) {
@@ -115,6 +153,13 @@ class BrowserSimulationBridgeHost implements BrowserSimulationBridgeWorkerApi {
 
     async resync() {
         return this.requireBridge().resync();
+    }
+
+    async status() {
+        return {
+            ...this.requireBridge().status(),
+            logs: [...workerLogs],
+        };
     }
 
     private requireBridge() {

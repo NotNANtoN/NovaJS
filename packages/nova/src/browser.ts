@@ -120,6 +120,10 @@ const simulationControl = {
     },
     /** The current clock slew against the room's tick, if any. */
     get pacing() { return simulationPacing; },
+    /** Worker diagnostics: tick, desyncs, join result, recent logs. */
+    async status() {
+        return await simulationBridge?.status() ?? null;
+    },
 };
 (window as any).novaSim = simulationControl;
 const syncedComponents = new Map<string, Set<UnknownComponent>>();
@@ -311,6 +315,24 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
     );
     simulationWorker = worker;
 
+    // Forward room traffic to the worker BEFORE init: init awaits
+    // joinRoom, whose catch-up reply arrives on this channel. With the
+    // subscription after init, every join's reply was dropped and the
+    // world silently started at tick 0 in a room with real history
+    // (the first desync's resync then papered over it). The worker
+    // buffers anything that arrives before its communicator exists.
+    roomSubscriptions = [
+        room.messages.subscribe(({ source, message }) => {
+            void host.receiveRoomMessage(source, message);
+        }),
+        room.peers.current.subscribe(peers => {
+            void host.updateRoomState({ peers });
+        }),
+        room.connected.subscribe(connected => {
+            void host.updateRoomState({ connected });
+        }),
+    ];
+
     await host.init(
         {
             systemId: to,
@@ -325,18 +347,6 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
             room.sendMessage(message, destination);
         }),
     );
-
-    roomSubscriptions = [
-        room.messages.subscribe(({ source, message }) => {
-            void host.receiveRoomMessage(source, message);
-        }),
-        room.peers.current.subscribe(peers => {
-            void host.updateRoomState({ peers });
-        }),
-        room.connected.subscribe(connected => {
-            void host.updateRoomState({ connected });
-        }),
-    ];
 
     const initialFrame = await newSimulationBridge.snapshot();
     const newDisplayWorld = await makeDisplayWorld(to);
