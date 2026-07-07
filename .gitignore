@@ -59,6 +59,8 @@ Nova_Data
 Plug-ins
 Nova Plug*
 Nova Ship*
+!packages/novaparse/test/fixtures/**/Nova Files
+!packages/novaparse/test/fixtures/**/Plug-ins
 build/
 
 dist
@@ -75,3 +77,11 @@ node_modules
 
 # Bazel
 .bazelrc.user
+
+# Turborepo
+.turbo
+# Chrome performance traces
+traces/
+
+# Claude Code local settings
+.claude/settings.local.json
