@@ -1,0 +1,59 @@
+import { CicnData } from "./cicn_data.js";
+import { CicnImageData } from "./cicn_image.js";
+import { ExplosionData } from "./explosion_data.js";
+import { Gettable } from "./gettable.js";
+import { OutfitData } from "./outfit_data.js";
+import { PictData } from "./pict_data.js";
+import { PictImageData } from "./pict_image.js";
+import { PlanetData } from "./planet_data.js";
+import { ShipData } from "./ship_data.js";
+import { SoundFile } from "./sound_file.js";
+import { SpriteSheetData, SpriteSheetFramesData, SpriteSheetImageData } from "./sprite_sheet_data.js";
+import { StatusBarData } from "./status_bar_data.js";
+import { SystemData } from "./system_data.js";
+import { TargetCornersData } from "./target_corners_data.js";
+import { WeaponData } from "./weapon_data.js";
+
+
+enum NovaDataType {
+    Ship = "Ship",
+    Outfit = "Outfit",
+    Weapon = "Weapon",
+    Pict = "Pict",
+    PictImage = "PictImage",
+    Cicn = "Cicn",
+    CicnImage = "CicnImage",
+    Planet = "Planet",
+    System = "System",
+    TargetCorners = "TargetCorners",
+    SpriteSheet = "SpriteSheet",
+    SpriteSheetImage = "SpriteSheetImage",
+    SpriteSheetFrames = "SpriteSheetFrames",
+    StatusBar = "StatusBar",
+    Explosion = "Explosion",
+    SoundFile = "SoundFile",
+};
+
+// index: NovaDataType
+type NovaDataInterface = {
+    Ship: Gettable<ShipData>,
+    Outfit: Gettable<OutfitData>,
+    Weapon: Gettable<WeaponData>,
+    Pict: Gettable<PictData>,
+    PictImage: Gettable<PictImageData>,
+    Cicn: Gettable<CicnData>,
+    CicnImage: Gettable<CicnImageData>,
+    Planet: Gettable<PlanetData>,
+    System: Gettable<SystemData>,
+    TargetCorners: Gettable<TargetCornersData>,
+    SpriteSheet: Gettable<SpriteSheetData>,
+    SpriteSheetImage: Gettable<SpriteSheetImageData>,
+    SpriteSheetFrames: Gettable<SpriteSheetFramesData>,
+    StatusBar: Gettable<StatusBarData>,
+    Explosion: Gettable<ExplosionData>,
+    SoundFile: Gettable<SoundFile>,
+}
+
+class NovaIDNotFoundError extends Error { };
+
+export { NovaDataInterface, NovaDataType, NovaIDNotFoundError };
