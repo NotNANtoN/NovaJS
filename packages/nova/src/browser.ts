@@ -389,6 +389,14 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
         };
     });
     newDisplayWorld.events.get(FinishJumpEvent).subscribe(({ data }) => {
+        // Every peer simulates every ship's jump; only follow it to
+        // the new system if the jumping ship is the local player's.
+        // (The event carries the ship, which the sim already removed
+        // this frame, so the display entity cannot be consulted.)
+        // Remote jumpers' departures need nothing from the display.
+        if (!data.entity.components.has(PlayerShipSelector)) {
+            return;
+        }
         void jumpTo(data);
     });
 
