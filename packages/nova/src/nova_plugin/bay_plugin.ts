@@ -8,6 +8,7 @@ import { Entity } from 'nova_ecs/entity';
 import { Plugin } from 'nova_ecs/plugin';
 import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import { CommunicatorResource, MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
+import { markerType, SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
 import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
 import { HitboxHullComponent, HurtboxHullComponent } from './collisions_plugin.js';
@@ -166,6 +167,15 @@ export const BayPlugin: Plugin = {
             throw new Error('Expected WeaponConstructors to exist');
         }
         weaponConstructors.set('BayWeaponData', BayWeaponEntry);
+        // Escort state is simulation state: unregistered, it is
+        // invisible to desync hashes, silently dropped by rollback
+        // snapshots (each peer's rollbacks then disagree about which
+        // escorts can return), and lost from resync baselines
+        // (escorts that can never return home).
+        const serializer = world.resources.get(SerializerResource);
+        serializer?.addComponent(ReturnComponent, markerType);
+        serializer?.addComponent(CollectableEscortComponent, markerType);
+        serializer?.addComponent(ReturnWhenTargetRemovedComponent, markerType);
         world.addSystem(ReturnAI);
         world.addSystem(ReturnWhenTargetRemovedAI);
         world.addSystem(CollectableEscortAI);

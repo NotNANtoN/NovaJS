@@ -415,18 +415,73 @@ describe('Input-driven rooms', () => {
 
         const bays = (world: World) =>
             [...world.entities.keys()].filter(key => key.startsWith('bay:')).length;
-        expect(bays(peerA.world)).toBeGreaterThan(0);
+        const launched = bays(peerA.world);
+        expect(launched).toBeGreaterThan(0);
+        expect(bays(peerB.world)).toBe(launched);
+        expect(bays(archive.archiveWorld!)).toBe(launched);
+
+        const compareAll = async (label: string) => {
+            const hashA = hashWorld(peerA.world, PEER_LOCAL_COMPONENTS);
+            const hashB = hashWorld(peerB.world, PEER_LOCAL_COMPONENTS);
+            const hashArchive = hashWorld(
+                archive!.archiveWorld!, PEER_LOCAL_COMPONENTS);
+            expect(hashB.hash).toEqual(hashA.hash);
+            if (hashArchive.hash !== hashA.hash) {
+                const { diffWorldHashes } =
+                    await import('nova_ecs/plugins/world_hash');
+                fail(`Archive diverged (${label}): `
+                    + diffWorldHashes(hashArchive, hashA).slice(0, 10).join('; '));
+            }
+        };
+        await compareAll('after launch');
+
+        // Remove the escorts' target: they turn home and fly back to
+        // the carrier — the return path whose (formerly unregistered)
+        // escort-state components were lost in rollbacks and resync
+        // baselines live.
+        peerA.client.removeEntity('raven');
+        await step(300);
+        await archive.update();
         expect(bays(peerB.world)).toBe(bays(peerA.world));
         expect(bays(archive.archiveWorld!)).toBe(bays(peerA.world));
+        const returning = (world: World) => [...world.entities]
+            .filter(([uuid]) => uuid.startsWith('bay:'))
+            .filter(([, entity]) => [...entity.components.keys()]
+                .some(component => component.name === 'ReturnComponent'))
+            .length;
+        expect(returning(peerA.world)).toBeGreaterThan(0);
+        await compareAll('during the return flight');
 
-        const hashA = hashWorld(peerA.world, PEER_LOCAL_COMPONENTS);
-        const hashB = hashWorld(peerB.world, PEER_LOCAL_COMPONENTS);
-        const hashArchive = hashWorld(archive.archiveWorld!, PEER_LOCAL_COMPONENTS);
-        expect(hashB.hash).toEqual(hashA.hash);
-        if (hashArchive.hash !== hashA.hash) {
-            const { diffWorldHashes } = await import('nova_ecs/plugins/world_hash');
-            fail('Archive diverged: '
-                + diffWorldHashes(hashArchive, hashA).slice(0, 10).join('; '));
+        // A fresh peer reconstructing from a baseline captured
+        // mid-return must see escorts that can still return home:
+        // exactly the state resyncs lost live.
+        const commC = new MockCommunicator('c');
+        commC.mockPeers = comms;
+        comms.set('c', commC);
+        for (const comm of comms.values()) {
+            comm.peers.current.next(new Set(comms.keys()));
+        }
+        const peerC = await makePeer('c');
+        expect(await peerC.host.joinRoom()).toBeTrue();
+        const { TimeResource } = await import('nova_ecs/plugins/time_plugin');
+        while (peerC.world.resources.get(TimeResource)!.frame
+            < peerA.world.resources.get(TimeResource)!.frame) {
+            peerC.host.step();
+        }
+        expect(returning(peerC.world)).toBe(returning(peerA.world));
+        const hashC = hashWorld(peerC.world, PEER_LOCAL_COMPONENTS);
+        expect(hashC.hash)
+            .toEqual(hashWorld(peerA.world, PEER_LOCAL_COMPONENTS).hash);
+
+        // Every piece of simulation state must have an explicit
+        // snapshot and wire strategy: a silently skipped component is
+        // exactly how the escort desync got out of CI.
+        const { SnapshotPoliciesResource } =
+            await import('nova_ecs/plugins/snapshot_plugin');
+        for (const world of [peerA.world, peerB.world, archive.archiveWorld!]) {
+            const policies = world.resources.get(SnapshotPoliciesResource)!;
+            expect([...policies.unhandled]).toEqual([]);
+            expect([...policies.unhandledWire]).toEqual([]);
         }
     }, 240_000);
 
