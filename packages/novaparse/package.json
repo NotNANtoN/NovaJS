@@ -1,0 +1,32 @@
+{
+  "name": "novaparse",
+  "version": "0.1.0",
+  "description": "Parser for EV Nova files",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/src/nova_parse.js",
+  "exports": {
+    ".": {
+      "types": "./dist/src/nova_parse.d.ts",
+      "default": "./dist/src/nova_parse.js"
+    },
+    "./*": {
+      "types": "./dist/src/*.d.ts",
+      "default": "./dist/src/*.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rimraf dist",
+    "test": "jasmine --config=jasmine.json"
+  },
+  "dependencies": {
+    "novadatainterface": "^0.1.6",
+    "resource_fork": "^0.1.0"
+  },
+  "devDependencies": {
+    "@evn/tsconfig": "0.1.0",
+    "rimraf": "^5.0.5",
+    "typescript": "5.9.3"
+  }
+}
