@@ -1,7 +1,9 @@
 import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { wireSnapshotWorld } from "nova_ecs/plugins/snapshot_plugin";
+import { hashWorld } from "nova_ecs/plugins/world_hash";
 import { World } from "nova_ecs/world";
-import { ArchiveBaseline } from "./rollback_protocol.js";
+import { PEER_LOCAL_COMPONENTS } from "../nova_plugin/ship_control.js";
+import { ArchiveBaseline, STATE_HASH_INTERVAL } from "./rollback_protocol.js";
 import { RollbackRelay } from "./rollback_relay.js";
 import { applyInputRecords, InputRecord, loadInputRecordsGameData } from "./simulation_input.js";
 
@@ -30,6 +32,13 @@ export class RoomArchive {
     private world?: World;
     private lastBaselineTick = 0;
     private updating = false;
+    /**
+     * The archive's world hashes at recent checkpoint ticks. The
+     * archive is the log's true simulation, so these break desync
+     * votes: with two disagreeing peers, majority alone cannot tell
+     * which one diverged.
+     */
+    private recentHashes = new Map<number, string>();
     private updateInterval?: ReturnType<typeof setInterval>;
 
     constructor(
@@ -54,6 +63,11 @@ export class RoomArchive {
 
     get tick(): number {
         return this.world?.resources.get(TimeResource)?.frame ?? 0;
+    }
+
+    /** The archive's hash at a checkpoint tick, if still retained. */
+    hashAt(tick: number): string | undefined {
+        return this.recentHashes.get(tick);
     }
 
     /**
@@ -90,6 +104,15 @@ export class RoomArchive {
                         applyInputRecords(world, records);
                     }
                     world.step();
+                    if (this.tick % STATE_HASH_INTERVAL === 0) {
+                        this.recentHashes.set(this.tick, hashWorld(
+                            world, PEER_LOCAL_COMPONENTS).hash);
+                        for (const tick of this.recentHashes.keys()) {
+                            if (tick < this.tick - STATE_HASH_INTERVAL * 20) {
+                                this.recentHashes.delete(tick);
+                            }
+                        }
+                    }
                 }
             }
             if (this.tick - this.lastBaselineTick >= this.intervalTicks) {

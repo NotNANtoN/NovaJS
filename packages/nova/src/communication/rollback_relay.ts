@@ -27,6 +27,7 @@ export class RollbackRelay {
     /** Peers' state-hash reports awaiting comparison, by tick. */
     private stateHashes = new Map<number, Map<string, string>>();
     private getBaseline?: () => ArchiveBaseline | undefined;
+    private getReferenceHash?: (tick: number) => string | undefined;
     private readonly subscription: Subscription;
     private clockInterval?: ReturnType<typeof setInterval>;
     private syncInterval?: ReturnType<typeof setInterval>;
@@ -36,12 +37,17 @@ export class RollbackRelay {
     private leaveSubscription: Subscription;
 
     constructor(private room: Communicator,
-        { autoClock = true, stepMs = SIMULATION_STEP_MS, baseline }: {
-            autoClock?: boolean, stepMs?: number,
-            /** The newest archived baseline, when an archive runs. */
-            baseline?: () => ArchiveBaseline | undefined,
-        } = {}) {
+        { autoClock = true, stepMs = SIMULATION_STEP_MS, baseline,
+            referenceHash }: {
+                autoClock?: boolean, stepMs?: number,
+                /** The newest archived baseline, when an archive runs. */
+                baseline?: () => ArchiveBaseline | undefined,
+                /** The archive sim's hash at a checkpoint tick: the
+                 * true simulation's vote in desync comparisons. */
+                referenceHash?: (tick: number) => string | undefined,
+            } = {}) {
         this.getBaseline = baseline;
+        this.getReferenceHash = referenceHash;
         this.subscription = room.messages.subscribe(({ source, message }) => {
             this.handleMessage(source, message);
         });
@@ -135,7 +141,18 @@ export class RollbackRelay {
             }
         }
         this.stateHashes.delete(tick);
+        // The archive's hash joins every comparison as a standing
+        // witness: it breaks two-peer ties (a tie-break alone can
+        // crown the diverged peer canonical, making the divergence
+        // permanent), and it convicts a lone diverged peer whose
+        // roommates are throttled and reporting nothing.
+        const reference = this.getReferenceHash?.(tick);
+        if (reference !== undefined && this.room.uuid) {
+            reports.set(this.room.uuid, reference);
+        }
         if (new Set(reports.values()).size > 1) {
+            console.log(`Desync at tick ${tick}:`,
+                Object.fromEntries(reports));
             this.room.sendMessage(wrapRollbackMessage({
                 kind: 'desync', tick, hashes: [...reports],
             }));

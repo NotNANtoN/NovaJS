@@ -12,7 +12,7 @@ import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_
 import { loadEntityGameData, loadWireSnapshotGameData } from "../nova_plugin/entity_data_loader.js";
 import { deriveEntityComponents } from "../nova_plugin/entity_factory.js";
 import { applyInputRecords, InputRecord, loadInputRecordsGameData, SimulationInput } from "./simulation_input.js";
-import { ArchiveBaseline, canonicalDesyncHash, unwrapRollbackMessage, wrapRollbackMessage } from "./rollback_protocol.js";
+import { ArchiveBaseline, canonicalDesyncHash, STATE_HASH_INTERVAL, unwrapRollbackMessage, wrapRollbackMessage } from "./rollback_protocol.js";
 import { makeNpc } from "../nova_plugin/npc_plugin.js";
 import { SIMULATION_STEP_MS } from "../nova_plugin/make_system.js";
 import { PEER_LOCAL_COMPONENTS } from "../nova_plugin/ship_control.js";
@@ -20,10 +20,6 @@ import { ControlEvent, ControlsSubject, EcsControlEvent } from "../nova_plugin/c
 import { EncodedSimulationBridgeEvent, getRegisteredSimulationBridgeEvents } from "./simulation_bridge_events.js";
 
 
-/**
- * Peers hash their world every this many ticks (desync detection)...
- */
-const STATE_HASH_INTERVAL = 60;
 /**
  * ...and publish a checkpoint's hash once it is this many ticks old:
  * past any realistic rollback depth, so the hashed state is settled.
@@ -135,6 +131,9 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
      * here until per-peer input application lands (Phase 3 step 3).
      */
     private remoteInputs: InputRecord[] = [];
+    /** Bumped whenever remoteInputs is cleared, so in-flight staged
+     * records from before the clear discard themselves. */
+    private remoteInputsGeneration = 0;
     /**
      * The room's clock: the server's canonical tick from its periodic
      * tickSync, and when it arrived — extrapolated between syncs.
@@ -175,7 +174,7 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
             }
             switch (rollbackMessage.kind) {
                 case 'inputs':
-                    this.remoteInputs.push(rollbackMessage.record);
+                    this.integrateStaged(rollbackMessage.record);
                     break;
                 case 'tickSync':
                     this.lastTickSync = {
@@ -184,7 +183,9 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
                     };
                     break;
                 case 'inputLog':
-                    this.remoteInputs.push(...rollbackMessage.records);
+                    for (const record of rollbackMessage.records) {
+                        this.integrateStaged(record);
+                    }
                     break;
                 case 'desync':
                     this.handleDesync(rollbackMessage.tick, rollbackMessage.hashes);
@@ -296,6 +297,7 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
                     // (messages are ordered), so they are already in
                     // the catch-up log: drop them or they apply twice.
                     this.remoteInputs = [];
+                    this.remoteInputsGeneration++;
                     resolve(rollbackMessage);
                 }
             });
@@ -341,6 +343,31 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
         // against the new position.
         this.smoothedDrift = undefined;
         return true;
+    }
+
+    /**
+     * Queues a relayed record for integration — after loading the game
+     * data for any entity it inserts. The originating peer staged
+     * before scheduling; every *other* world must stage from the
+     * record itself, or the insertion derives against unloaded data
+     * and silently diverges. Integration is tick-keyed, so a record
+     * that finishes staging late simply integrates as a deeper
+     * rollback correction.
+     */
+    private integrateStaged(record: InputRecord) {
+        if (record.inputs.some(input => input.kind === 'addEntity')) {
+            // If the buffer is cleared while staging (a catch-up log
+            // arrived, which contains this record), drop it: pushing
+            // after the clear would apply it twice.
+            const generation = this.remoteInputsGeneration;
+            void loadInputRecordsGameData(this.world, [record]).then(() => {
+                if (generation === this.remoteInputsGeneration) {
+                    this.remoteInputs.push(record);
+                }
+            });
+        } else {
+            this.remoteInputs.push(record);
+        }
     }
 
     /** Merges a record into the tick's record list. */
@@ -427,7 +454,10 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
         const communicator = this.world.resources.get(CommunicatorResource);
         const mine = hashes.find(
             ([peerId]) => peerId === communicator?.uuid)?.[1];
-        const canonical = canonicalDesyncHash(hashes);
+        // Prefer the server's archive hash on tie votes: it is the
+        // input log's true simulation.
+        const canonical = canonicalDesyncHash(
+            hashes, communicator?.servers.value);
         // A peer that never reported this tick (it joined afterwards)
         // has no evidence it diverged.
         const diverged = mine !== undefined && mine !== canonical;
@@ -455,6 +485,7 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
             restoreWorld(this.world, this.genesis, deriveEntityComponents);
             this.rollback = this.makeRollback();
             this.remoteInputs = [];
+            this.remoteInputsGeneration++;
             this.checkpointHashes.clear();
             return await this.joinRoom();
         } finally {
@@ -593,6 +624,19 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
     }
 
     async addEntity(uuid: string, entity: EncodedEntity) {
+        // Peer-local markers (PlayerShipSelector) must not cross the
+        // wire: every peer derives its own from ControlledBy, and a
+        // marker arriving in a record would briefly crown this ship
+        // "the local player" on every other peer. Solo play (no room)
+        // keeps them: they are the no-peer fallback.
+        const communicator = this.world.resources.get(CommunicatorResource);
+        if (communicator?.uuid) {
+            entity = {
+                ...entity,
+                components: [...entity.components].filter(
+                    ([name]) => !PEER_LOCAL_COMPONENTS.has(name)),
+            } as unknown as EncodedEntity;
+        }
         const decoded = this.serializer.decode(entity);
         if (isLeft(decoded)) {
             throw new Error(`Failed to decode entity: ${this.serializer.describeDecodeFailure(entity, decoded.left)}`);

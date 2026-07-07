@@ -88,11 +88,15 @@ describe('Input-driven rooms', () => {
             }
             peerA.host.step();
             peerB.host.step();
+            // Insertion records integrate after async staging; real
+            // clients await every step, so yield like they do.
+            await new Promise(resolve => setImmediate(resolve));
         }
         // A few quiet ticks so the final records cross over.
         for (let i = 0; i < 5; i++) {
             peerA.host.step();
             peerB.host.step();
+            await new Promise(resolve => setImmediate(resolve));
         }
 
         const hashA = hashWorld(peerA.world, PEER_LOCAL_COMPONENTS);
@@ -215,6 +219,8 @@ describe('Input-driven rooms', () => {
             }
             peerA.host.step();
             peerB.host.step();
+            // Yield so async-staged insertion records integrate.
+            await new Promise(resolve => setImmediate(resolve));
         }
         // Corrupt peer B outside the input timeline: from here its
         // simulation diverges from the log's true simulation.
@@ -227,6 +233,7 @@ describe('Input-driven rooms', () => {
         for (let tick = 51; tick <= 150 && desyncTicks.length === 0; tick++) {
             peerA.host.step();
             peerB.host.step();
+            await new Promise(resolve => setImmediate(resolve));
         }
         expect(desyncTicks).toEqual([60]);
         expect(peerB.host.desyncCount).toBe(1);

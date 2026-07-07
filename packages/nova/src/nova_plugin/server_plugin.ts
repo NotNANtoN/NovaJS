@@ -103,6 +103,8 @@ export const ServerPlugin: Plugin = {
                     console.log(`Starting rollback room ${systemId}`);
                     const relay = new RollbackRelay(systemRoom, {
                         baseline: () => archives.get(systemId)?.latest,
+                        referenceHash: tick =>
+                            archives.get(systemId)?.hashAt(tick),
                     });
                     relays.set(systemId, relay);
                     archives.set(systemId, new RoomArchive(relay,

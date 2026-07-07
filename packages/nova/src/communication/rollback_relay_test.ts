@@ -110,6 +110,59 @@ describe('RollbackRelay', () => {
         expect(received(peerB)).toEqual([expected]);
     });
 
+    it('adds the archive reference hash to desync votes', () => {
+        relay.close();
+        relay = new RollbackRelay(server, {
+            autoClock: false,
+            referenceHash: () => '11111111',
+        });
+        peerA.sendMessage(wrapRollbackMessage({
+            kind: 'stateHash', tick: 60, hash: '11111111',
+        }) as never, 'server');
+        peerB.sendMessage(wrapRollbackMessage({
+            kind: 'stateHash', tick: 60, hash: '22222222',
+        }) as never, 'server');
+        const desyncs = received(peerB).filter(m => m.kind === 'desync');
+        expect(desyncs).toEqual([{
+            kind: 'desync',
+            tick: 60,
+            hashes: [
+                ['a', '11111111'],
+                ['b', '22222222'],
+                // The archive's vote, under the server's identity:
+                // peer a is provably the canonical one, so peer b
+                // resyncs even though peers alone would be a tie.
+                ['server', '11111111'],
+            ],
+        }]);
+        expect(canonicalDesyncHash(desyncs[0]!.kind === 'desync'
+            ? desyncs[0].hashes : [])).toBe('11111111');
+    });
+
+    it('convicts a lone peer that disagrees with the archive', () => {
+        relay.close();
+        relay = new RollbackRelay(server, {
+            autoClock: false,
+            referenceHash: () => '11111111',
+        });
+        // Only peer a reports (b is throttled or gone). The set never
+        // completes, so nothing fires until the stale sweep forces
+        // the comparison — where the archive is the second witness.
+        peerA.sendMessage(wrapRollbackMessage({
+            kind: 'stateHash', tick: 60, hash: '22222222',
+        }) as never, 'server');
+        expect(received(peerA).length).toBe(0);
+        (relay as unknown as {
+            compareStateHashes(tick: number, force: boolean): void,
+        }).compareStateHashes(60, true);
+        const desyncs = received(peerA).filter(m => m.kind === 'desync');
+        expect(desyncs).toEqual([{
+            kind: 'desync',
+            tick: 60,
+            hashes: [['a', '22222222'], ['server', '11111111']],
+        }]);
+    });
+
     it('stays quiet when state hashes agree', () => {
         for (const peer of [peerA, peerB]) {
             peer.sendMessage(wrapRollbackMessage({
@@ -139,5 +192,16 @@ describe('canonicalDesyncHash', () => {
     it('breaks ties toward the lowest peerId', () => {
         expect(canonicalDesyncHash([['b', 'y'], ['a', 'x']])).toBe('x');
         expect(canonicalDesyncHash([['a', 'x'], ['b', 'y']])).toBe('x');
+    });
+
+    it('prefers the server witness on ties', () => {
+        const preferred = new Set(['server']);
+        // 'a' sorts below 'server', but the archive is the log's true
+        // simulation: the lone diverged peer must resync.
+        expect(canonicalDesyncHash(
+            [['a', 'x'], ['server', 'y']], preferred)).toBe('y');
+        // Majority still beats preference.
+        expect(canonicalDesyncHash(
+            [['a', 'x'], ['b', 'x'], ['server', 'y']], preferred)).toBe('x');
     });
 });

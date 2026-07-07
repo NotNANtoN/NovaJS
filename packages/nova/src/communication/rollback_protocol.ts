@@ -11,6 +11,12 @@ export interface ArchiveBaseline {
 }
 
 /**
+ * Peers hash their world every this many ticks for desync detection.
+ * The server's archive sim hashes the same ticks, so it can vote.
+ */
+export const STATE_HASH_INTERVAL = 60;
+
+/**
  * Rollback protocol messages travel on the same room channel as the
  * legacy multiplayer messages, wrapped in a `rollback` envelope. The
  * legacy Message codec is a t.partial, so it decodes these as empty
@@ -50,23 +56,38 @@ export function unwrapRollbackMessage(raw: unknown): RollbackProtocolMessage | u
 
 /**
  * Which hash in a desync report is the true state: the input log
- * deterministically defines it, but nobody simulated the log twice, so
- * the peers vote. The most common hash wins; ties break toward the
- * hash reported by the lowest peerId. Every peer computes the same
- * answer from the same report, so exactly the minority resyncs.
+ * deterministically defines it, but nobody simulated the log twice
+ * client-side, so the report votes. The most common hash wins; ties
+ * break first toward a `preferred` reporter (the server, whose archive
+ * sim *is* the log's true simulation), then toward the lowest peerId.
+ * Every peer computes the same answer from the same report, so exactly
+ * the diverged minority resyncs.
  */
-export function canonicalDesyncHash(
-    hashes: [string, string][]): string | undefined {
+export function canonicalDesyncHash(hashes: [string, string][],
+    preferred?: ReadonlySet<string>): string | undefined {
     const groups = new Map<string, string[]>();
     for (const [peerId, hash] of hashes) {
         groups.set(hash, [...(groups.get(hash) ?? []), peerId]);
     }
-    let best: { hash: string, count: number, lowestPeer: string } | undefined;
+    let best: {
+        hash: string, count: number,
+        preferred: boolean, lowestPeer: string,
+    } | undefined;
     for (const [hash, peers] of groups) {
-        const lowestPeer = [...peers].sort()[0]!;
-        if (!best || peers.length > best.count
-            || (peers.length === best.count && lowestPeer < best.lowestPeer)) {
-            best = { hash, count: peers.length, lowestPeer };
+        const candidate = {
+            hash,
+            count: peers.length,
+            preferred: peers.some(peer => preferred?.has(peer) ?? false),
+            lowestPeer: [...peers].sort()[0]!,
+        };
+        const wins = !best
+            || candidate.count > best.count
+            || (candidate.count === best.count && (
+                (candidate.preferred && !best.preferred)
+                || (candidate.preferred === best.preferred
+                    && candidate.lowestPeer < best.lowestPeer)));
+        if (wins) {
+            best = candidate;
         }
     }
     return best?.hash;
