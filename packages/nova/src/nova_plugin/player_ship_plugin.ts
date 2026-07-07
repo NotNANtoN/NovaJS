@@ -21,8 +21,11 @@ const SetControlledShip = new System({
             const entity = entities.get(newEntity);
             entity?.components.set(PlayerShipSelector, undefined);
 
-            // For convenience
-            (window as any).myShip = entity;
+            // For convenience when debugging in the browser. Also
+            // runs in workers and on the server, which have no window.
+            if (typeof window !== 'undefined') {
+                (window as any).myShip = entity;
+            }
         }
     }
 });

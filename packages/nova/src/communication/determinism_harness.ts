@@ -15,6 +15,7 @@ import { makeNpc } from "../nova_plugin/npc_plugin.js";
 import { makeShip } from "../nova_plugin/make_ship.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 import { makeSystem } from "../nova_plugin/make_system.js";
+import { Platform } from "../nova_plugin/platform_plugin.js";
 import { getIntegrationGameData } from "./simulation_test_fixture.js";
 
 export interface DeterminismCheckResult {
@@ -38,15 +39,16 @@ async function settle(world: World, steps: number) {
  * nonzero adds fighting NPCs, which currently exercise the known
  * nondeterminism (Math.random weapon spread, random targeting, v4 uuids).
  */
-export async function makeDeterminismWorld(npcCount: number): Promise<World> {
+export async function makeDeterminismWorld(npcCount: number,
+    platform: Platform | undefined = 'worker'): Promise<World> {
     const gameData = await getIntegrationGameData();
     const ids = await gameData.ids;
     const systemId = [...ids.System].sort()[0]!;
     const shipIds = [...ids.Ship].sort();
 
-    // 'worker' platform: the same system set as the real client
-    // simulation, including the ship control systems.
-    const world = await makeSystem(systemId, gameData, 'worker');
+    // 'worker' platform by default: the same system set as the real
+    // client simulation, including the ship control systems.
+    const world = await makeSystem(systemId, gameData, platform);
 
     const shipData = await gameData.data.Ship.get(shipIds[0]!);
     const ship = makeShip(shipData);

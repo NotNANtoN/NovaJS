@@ -27,3 +27,26 @@ describe("Simulation determinism", () => {
         expect(result.stepsRun).toBe(240);
     }, 120_000);
 });
+
+describe("Cross-platform determinism", () => {
+    // A server world (node platform) and a client world (worker
+    // platform) must run the same simulation systems and produce
+    // identical state, or peers diverge by construction.
+    it("simulates identically on node and worker platforms", async () => {
+        const { compareWorlds, makeDeterminismWorld } =
+            await import("./determinism_harness.js");
+        const { EcsControlEvent } =
+            await import("../nova_plugin/controls_plugin.js");
+        const nodeWorld = await makeDeterminismWorld(2, undefined);
+        const workerWorld = await makeDeterminismWorld(2, 'worker');
+        for (const world of [nodeWorld, workerWorld]) {
+            world.emit(EcsControlEvent, [{ action: 'accelerate', state: 'start' }]);
+        }
+        const messages: string[] = [];
+        const result = await compareWorlds(nodeWorld, workerWorld, 240,
+            message => messages.push(message));
+        expect(result.divergedAtStep)
+            .withContext(messages.join("\n"))
+            .toBeUndefined();
+    }, 120_000);
+});

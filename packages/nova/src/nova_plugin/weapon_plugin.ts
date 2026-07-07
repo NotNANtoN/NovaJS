@@ -184,11 +184,10 @@ export const WeaponPlugin: Plugin = {
         world.resources.get(SerializerResource)?.addComponent(ActiveSecondaryWeapon, ActiveSecondaryType);
         world.resources.get(SerializerResource)?.addEvent(ChangeSecondaryEvent, ActiveSecondaryType);
         world.addSystem(WeaponsSystem);
-        const platform = world.resources.get(PlatformResource);
-        if (platform === 'browser' || platform === 'worker') {
-            world.addSystem(ActiveSecondaryProvider);
-            world.addSystem(ControlPlayerWeapons);
-        }
+        // Every simulation runs the same systems regardless of
+        // platform, or simulations of the same ships diverge.
+        world.addSystem(ActiveSecondaryProvider);
+        world.addSystem(ControlPlayerWeapons);
         deltaMaker.addComponent(WeaponsStateComponent, {
             componentType: WeaponsState
         });

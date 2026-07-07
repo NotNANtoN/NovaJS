@@ -69,10 +69,11 @@ const ControlPlayerShip = new System({
 export const ShipController: Plugin = {
     name: 'ShipController',
     async build(world) {
+        // Every simulation runs the same control systems regardless of
+        // platform: a server world stepping a ship must apply control
+        // state exactly like a client's worker does, or the
+        // simulations diverge. Only keyboard capture is browser-only.
         const platform = world.resources.get(PlatformResource);
-        if (platform === 'node') {
-            return;
-        }
         if (platform === 'browser') {
             await world.addPlugin(KeyboardPlugin);
         }
