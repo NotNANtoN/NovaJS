@@ -10,6 +10,7 @@ import { Resource } from 'nova_ecs/resource';
 import { System } from 'nova_ecs/system';
 import { SingletonComponent } from 'nova_ecs/world';
 import { Subscription } from 'rxjs';
+import { RollbackRelay } from "../communication/rollback_relay.js";
 import { SimulationGameDataResource } from "./game_data_resource.js";
 import { makeSystem } from './make_system.js';
 import { MultiRoomResource, SystemComponent } from "./nova_plugin.js";
@@ -76,12 +77,15 @@ export const ServerPlugin: Plugin = {
             throw new Error('MultiRoomResource must exist');
         }
 
+        const relays = new Map<string, RollbackRelay>();
         for (const systemId of (await gameData.ids).System) {
             const systemRoom = multiRoom.join(systemId);
             systemRoom.peers.current.subscribe(async peers => {
                 // Delete systems that have no (non-server) peers.
                 const empty = [...peers].every(v => systemRoom.servers.value.has(v));
                 if (empty) {
+                    relays.get(systemId)?.close();
+                    relays.delete(systemId);
                     let cleanupPromise: Promise<void> | undefined;
                     if (world.entities.has(systemId)) {
                         console.log(`Deleting empty system ${systemId}`);
@@ -93,6 +97,11 @@ export const ServerPlugin: Plugin = {
                 } else {
                     // Create the system if it doesn't exist yet.
                     if (!world.entities.has(systemId)) {
+                        // The rollback relay: input relay, tick clock,
+                        // and input archive for the room. Coexists with
+                        // the legacy delta-sync world (below) until the
+                        // input protocol replaces it.
+                        relays.set(systemId, new RollbackRelay(systemRoom));
                         const system = await makeSystem(systemId, gameData);
                         world.entities.set(systemId, new Entity()
                             .addComponent(SystemComponent, system));

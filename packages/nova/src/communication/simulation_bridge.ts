@@ -11,6 +11,7 @@ import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_
 import { loadEntityGameData } from "../nova_plugin/entity_data_loader.js";
 import { deriveEntityComponents } from "../nova_plugin/entity_factory.js";
 import { applySimulationInputs, SimulationInput } from "./simulation_input.js";
+import { InputRecord, unwrapRollbackMessage, wrapRollbackMessage } from "./rollback_protocol.js";
 import { makeNpc } from "../nova_plugin/npc_plugin.js";
 import { ControlEvent, ControlsSubject, EcsControlEvent } from "../nova_plugin/controls_plugin.js";
 import { EncodedSimulationBridgeEvent, getRegisteredSimulationBridgeEvents } from "./simulation_bridge_events.js";
@@ -72,6 +73,13 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
     private rollback: RollbackSimulation<SimulationInput[]>;
     /** Inputs that apply at the next stepped tick. */
     private pendingInputs: SimulationInput[] = [];
+    /**
+     * Remote peers' input records, relayed by the server. Buffered
+     * here until per-peer input application lands (Phase 3 step 3).
+     */
+    private remoteInputs: InputRecord[] = [];
+    /** The server's canonical tick, from its periodic tickSync. */
+    serverTick?: number;
 
     constructor(
         private world: World,
@@ -84,10 +92,28 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
         this.rollback = new RollbackSimulation<SimulationInput[]>(world, {
             applyInputs: applySimulationInputs,
             complete: deriveEntityComponents,
-            // Generous for novaSim.rewind time travel (~17s at 60Hz).
-            // Netcode itself only needs a second or two; tune when
-            // snapshot memory matters.
-            capacity: 1000,
+            // Two seconds of history: enough for netcode rollback
+            // margins and short novaSim.rewind time travel.
+            capacity: 120,
+        });
+        // Receive relayed rollback-protocol messages from the room.
+        const communicator = world.resources.get(CommunicatorResource);
+        communicator?.messages.subscribe(({ message }) => {
+            const rollbackMessage = unwrapRollbackMessage(message);
+            if (!rollbackMessage) {
+                return;
+            }
+            switch (rollbackMessage.kind) {
+                case 'inputs':
+                    this.remoteInputs.push(rollbackMessage.record);
+                    break;
+                case 'tickSync':
+                    this.serverTick = rollbackMessage.tick;
+                    break;
+                case 'inputLog':
+                    this.remoteInputs.push(...rollbackMessage.records);
+                    break;
+            }
         });
         for (const registration of getRegisteredSimulationBridgeEvents()) {
             world.events.get(registration.event).subscribe(({ data, entities }) => {
@@ -124,11 +150,25 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
     step(count = 1) {
         for (let i = 0; i < count; i++) {
             if (this.pendingInputs.length > 0) {
-                this.rollback.setInputs(this.rollback.tick + 1, this.pendingInputs);
+                const tick = this.rollback.tick + 1;
+                this.rollback.setInputs(tick, this.pendingInputs);
+                this.publishInputs(tick, this.pendingInputs);
                 this.pendingInputs = [];
             }
             this.rollback.step();
         }
+    }
+
+    /** Publishes this peer's inputs to the room (via the server relay). */
+    private publishInputs(tick: number, inputs: SimulationInput[]) {
+        const communicator = this.world.resources.get(CommunicatorResource);
+        if (!communicator?.uuid) {
+            return;
+        }
+        communicator.sendMessage(wrapRollbackMessage({
+            kind: 'inputs',
+            record: { peerId: communicator.uuid, tick, inputs },
+        }));
     }
 
     rewind(ticks: number): boolean {
