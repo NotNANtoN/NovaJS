@@ -91,20 +91,42 @@ describe('RollbackRelay', () => {
         expect(atB[0].records.map(r => r.tick)).toEqual([15, 25]);
     });
 
-    it('broadcasts a desync when peers report mismatched state hashes', () => {
-        peerA.sendMessage(wrapRollbackMessage({
-            kind: 'stateHash', tick: 60, hash: '11111111',
-        }) as never, 'server');
-        // Nothing happens until every peer has reported the tick.
-        expect(received(peerB).length).toBe(0);
+    it('convicts a peer after consecutive mismatched checkpoints', () => {
+        relay.close();
+        relay = new RollbackRelay(server, {
+            autoClock: false,
+            desyncThreshold: 3,
+        });
+        const report = (peer: MockCommunicator, tick: number, hash: string) =>
+            peer.sendMessage(wrapRollbackMessage(
+                { kind: 'stateHash', tick, hash }) as never, 'server');
 
-        peerB.sendMessage(wrapRollbackMessage({
-            kind: 'stateHash', tick: 60, hash: '22222222',
-        }) as never, 'server');
+        // Two mismatched checkpoints: below the threshold, no desync —
+        // a rollback correction deeper than the settle margin briefly
+        // makes honest reports describe an abandoned timeline.
+        report(peerA, 60, '11111111');
+        report(peerB, 60, '22222222');
+        report(peerA, 120, '33333333');
+        report(peerB, 120, '44444444');
+        expect(received(peerA).length).toBe(0);
+
+        // An agreeing checkpoint resets the streak...
+        report(peerA, 180, '55555555');
+        report(peerB, 180, '55555555');
+        // ...so two more mismatches still stay quiet...
+        report(peerA, 240, '66666666');
+        report(peerB, 240, '77777777');
+        report(peerA, 300, '88888888');
+        report(peerB, 300, '99999999');
+        expect(received(peerA).length).toBe(0);
+
+        // ...but the third consecutive mismatch convicts.
+        report(peerA, 360, 'aaaaaaaa');
+        report(peerB, 360, 'bbbbbbbb');
         const expected: RollbackProtocolMessage = {
             kind: 'desync',
-            tick: 60,
-            hashes: [['a', '11111111'], ['b', '22222222']],
+            tick: 360,
+            hashes: [['a', 'aaaaaaaa'], ['b', 'bbbbbbbb']],
         };
         expect(received(peerA)).toEqual([expected]);
         expect(received(peerB)).toEqual([expected]);
@@ -115,6 +137,7 @@ describe('RollbackRelay', () => {
         relay = new RollbackRelay(server, {
             autoClock: false,
             referenceHash: () => '11111111',
+            desyncThreshold: 1,
         });
         peerA.sendMessage(wrapRollbackMessage({
             kind: 'stateHash', tick: 60, hash: '11111111',
@@ -144,6 +167,7 @@ describe('RollbackRelay', () => {
         relay = new RollbackRelay(server, {
             autoClock: false,
             referenceHash: () => '11111111',
+            desyncThreshold: 1,
         });
         // Only peer a reports (b is throttled or gone). The set never
         // completes, so nothing fires until the stale sweep forces

@@ -358,14 +358,15 @@ describe('Input-driven rooms', () => {
         shipB.components.get(MovementStateComponent)!.position =
             new Position(500, 500);
 
-        // The tick-60 checkpoint hashes differ; they settle and reach
-        // the relay at tick 90.
-        for (let tick = 51; tick <= 150 && desyncTicks.length === 0; tick++) {
+        // Checkpoints 60, 120, 180 all mismatch; the third consecutive
+        // mismatch convicts (desyncThreshold), and the tick-180 hashes
+        // settle and reach the relay at tick 210.
+        for (let tick = 51; tick <= 300 && desyncTicks.length === 0; tick++) {
             peerA.host.step();
             peerB.host.step();
             await new Promise(resolve => setImmediate(resolve));
         }
-        expect(desyncTicks).toEqual([60]);
+        expect(desyncTicks).toEqual([180]);
         expect(peerB.host.desyncCount).toBe(1);
 
         // 'a' wins the canonical tie-break, so B is the one resyncing:

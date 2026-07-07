@@ -1,7 +1,7 @@
 import { Communicator } from "nova_ecs/plugins/multiplayer_plugin";
 import { Subscription } from "rxjs";
 import { SIMULATION_STEP_MS } from "../nova_plugin/make_system.js";
-import { ArchiveBaseline, InputRecord, RollbackProtocolMessage, unwrapRollbackMessage, wrapRollbackMessage } from "./rollback_protocol.js";
+import { ArchiveBaseline, canonicalDesyncHash, InputRecord, RollbackProtocolMessage, unwrapRollbackMessage, wrapRollbackMessage } from "./rollback_protocol.js";
 
 /**
  * The server's role in rollback multiplayer: not a simulation
@@ -21,6 +21,15 @@ import { ArchiveBaseline, InputRecord, RollbackProtocolMessage, unwrapRollbackMe
  */
 const STATE_HASH_SWEEP_TICKS = 600;
 
+/**
+ * A peer is convicted of desync only after this many *consecutive*
+ * mismatched checkpoints. A rollback correction that lands deeper
+ * than the settle margin makes every peer's already-sent report
+ * describe the abandoned timeline — a false positive that corrects
+ * itself by the next checkpoint. Real divergence persists.
+ */
+const DEFAULT_DESYNC_THRESHOLD = 3;
+
 export class RollbackRelay {
     tick = 0;
     private log: InputRecord[] = [];
@@ -28,6 +37,9 @@ export class RollbackRelay {
     private stateHashes = new Map<number, Map<string, string>>();
     private getBaseline?: () => ArchiveBaseline | undefined;
     private getReferenceHash?: (tick: number) => string | undefined;
+    private readonly desyncThreshold: number;
+    /** Consecutive mismatched checkpoints per reporter. */
+    private mismatchStreaks = new Map<string, number>();
     private readonly subscription: Subscription;
     private clockInterval?: ReturnType<typeof setInterval>;
     private syncInterval?: ReturnType<typeof setInterval>;
@@ -38,16 +50,21 @@ export class RollbackRelay {
 
     constructor(private room: Communicator,
         { autoClock = true, stepMs = SIMULATION_STEP_MS, baseline,
-            referenceHash }: {
+            referenceHash,
+            desyncThreshold = DEFAULT_DESYNC_THRESHOLD }: {
                 autoClock?: boolean, stepMs?: number,
                 /** The newest archived baseline, when an archive runs. */
                 baseline?: () => ArchiveBaseline | undefined,
                 /** The archive sim's hash at a checkpoint tick: the
                  * true simulation's vote in desync comparisons. */
                 referenceHash?: (tick: number) => string | undefined,
+                /** Consecutive mismatched checkpoints before a desync
+                 * broadcast (1 = convict immediately). */
+                desyncThreshold?: number,
             } = {}) {
         this.getBaseline = baseline;
         this.getReferenceHash = referenceHash;
+        this.desyncThreshold = desyncThreshold;
         this.subscription = room.messages.subscribe(({ source, message }) => {
             this.handleMessage(source, message);
         });
@@ -150,25 +167,52 @@ export class RollbackRelay {
         if (reference !== undefined && this.room.uuid) {
             reports.set(this.room.uuid, reference);
         }
-        if (new Set(reports.values()).size > 1) {
-            console.log(`Desync at tick ${tick}:`,
-                Object.fromEntries(reports));
-            // Unanimous peers against the archive means the *archive*
-            // has diverged — and every baseline it captures from here
-            // on reconstructs the wrong world. Loud, because recovery
-            // (rebuilding the archive) is not automatic yet.
-            const peerHashes = new Set([...reports]
-                .filter(([peerId]) => peerId !== this.room.uuid)
-                .map(([, hash]) => hash));
-            if (reference !== undefined && peerHashes.size === 1
-                && !peerHashes.has(reference)) {
-                console.error(
-                    `Archive diverged from all peers at tick ${tick}`);
+        if (new Set(reports.values()).size <= 1) {
+            for (const peerId of reports.keys()) {
+                this.mismatchStreaks.delete(peerId);
             }
-            this.room.sendMessage(wrapRollbackMessage({
-                kind: 'desync', tick, hashes: [...reports],
-            }));
+            return;
         }
+        // Convict only after `desyncThreshold` consecutive mismatched
+        // checkpoints: a rollback correction landing deeper than the
+        // settle margin makes already-sent reports describe the
+        // abandoned timeline — a false positive gone by the next
+        // checkpoint. Real divergence keeps the streak alive.
+        const canonical = canonicalDesyncHash([...reports],
+            this.room.uuid ? new Set([this.room.uuid]) : undefined);
+        let convict = false;
+        for (const [peerId, hash] of reports) {
+            if (hash === canonical) {
+                this.mismatchStreaks.delete(peerId);
+                continue;
+            }
+            const streak = (this.mismatchStreaks.get(peerId) ?? 0) + 1;
+            this.mismatchStreaks.set(peerId, streak);
+            if (streak >= this.desyncThreshold) {
+                convict = true;
+                this.mismatchStreaks.delete(peerId);
+            }
+        }
+        if (!convict) {
+            return;
+        }
+        console.log(`Desync at tick ${tick}:`,
+            Object.fromEntries(reports));
+        // Unanimous peers against the archive means the *archive*
+        // has diverged — and every baseline it captures from here
+        // on reconstructs the wrong world. Loud, because recovery
+        // (rebuilding the archive) is not automatic yet.
+        const peerHashes = new Set([...reports]
+            .filter(([peerId]) => peerId !== this.room.uuid)
+            .map(([, hash]) => hash));
+        if (reference !== undefined && peerHashes.size === 1
+            && !peerHashes.has(reference)) {
+            console.error(
+                `Archive diverged from all peers at tick ${tick}`);
+        }
+        this.room.sendMessage(wrapRollbackMessage({
+            kind: 'desync', tick, hashes: [...reports],
+        }));
     }
 
     private handleMessage(source: string, raw: unknown) {
