@@ -4,6 +4,7 @@ import { Position } from 'nova_ecs/datatypes/position';
 import { Vector } from 'nova_ecs/datatypes/vector';
 import { Entity } from 'nova_ecs/entity';
 import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
+import { Random, RandomResource } from 'nova_ecs/plugins/random_plugin';
 import { World } from 'nova_ecs/world';
 import * as PIXI from 'pixi.js';
 import { Observable } from 'rxjs';
@@ -12,6 +13,7 @@ import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_
 import { ControlEvent } from '../nova_plugin/controls_plugin.js';
 import { DisplayAssetDataResource, SimulationGameDataResource } from '../nova_plugin/game_data_resource.js';
 import { ArmorComponent, IonizationComponent, ShieldComponent } from '../nova_plugin/health_plugin.js';
+import { IdFactory, IdFactoryResource } from '../nova_plugin/id_factory.js';
 import { OutfitsStateComponent } from '../nova_plugin/outfit_plugin.js';
 import { ShipPhysicsComponent } from '../nova_plugin/ship_plugin.js';
 import { SystemIdResource } from '../nova_plugin/system_id_resource.js';
@@ -79,6 +81,11 @@ export class Spaceport extends Menu<Entity> {
                 shipBuildWorld.resources.set(SimulationGameDataResource, simulationData);
                 shipBuildWorld.resources.set(DisplayAssetDataResource, displayAssets);
                 shipBuildWorld.resources.set(SystemIdResource, 'nova:128');
+                // Sim systems require the determinism resources since
+                // the rollback work; this scratch world only computes
+                // ship stats, so any seed will do.
+                shipBuildWorld.resources.set(RandomResource, new Random(0));
+                shipBuildWorld.resources.set(IdFactoryResource, new IdFactory());
                 await shipBuildWorld.addPlugin(SystemPlugin);
                 shipBuildWorld.entities.set('ship', newInput);
                 shipBuildWorld.step();
