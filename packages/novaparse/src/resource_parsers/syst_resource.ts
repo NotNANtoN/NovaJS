@@ -1,33 +1,91 @@
 import { Resource } from "resource_fork";
-import { NovaResources } from "./resource_holder_base.js";
 import { BaseResource } from "./nova_resource_base.js";
+import { Reader } from "./reader.js";
+import { NovaResources } from "./resource_holder_base.js";
 
+/** A dude or përs spawn entry: resource id and percent chance. */
+type SpawnChance = {
+    id: number,
+    /** Percent chance of appearing (dude) or being in the system (përs). */
+    chance: number,
+};
+
+/**
+ * A star system.
+ *
+ * Field layout follows ResForge's sÿst template (428 bytes, matching Nova's
+ * own data exactly), documented in the EVN Bible pp. 63-64.
+ */
 class SystResource extends BaseResource {
+    /** Position on the galactic map. */
     position: number[];
+    /** sÿst ids reachable by hyperjump. */
     links: Set<number>;
+    /** spöb ids present in the system. */
     spobs: number[];
+    /** AI ship classes spawned here, with percent chances. */
+    dudes: SpawnChance[];
+    /** Average number of AI ships in the system. */
+    avgShips: number;
+    /** Owning gövt id; -1 = independent. */
+    govt: number;
+    /** Nav buoy message: 'STR ' resource (this + 4000); -1 = no buoy. */
+    messageBuoy: number;
+    /** Number of asteroids (0-16). */
+    asteroids: number;
+    /** Sensor interference (0-100%). */
+    interference: number;
+    /** përs ships that may appear here, with percent chances. */
+    persons: SpawnChance[];
+    /** Background colour as 00RRGGBB (black if zero). */
+    backgroundColor: number;
+    /** How murky the system is, 0-100. */
+    murk: number;
+    /** Bitmask of which of the 16 röid types appear (bit 0 = röid 128). */
+    asteroidTypes: number;
+    /** NCB test controlling whether the system is visible. */
+    visibility: string;
+    /** flët id sent to defend the system; -1 = none. */
+    reinforcementFleet: number;
+    /** Frames the reinforcement fleet waits before jumping in. */
+    reinforcementTime: number;
+    /** Days before a destroyed reinforcement fleet is replenished. */
+    reinforcementInterval: number;
+
     constructor(resource: Resource, idSpace: NovaResources) {
         super(resource, idSpace);
-        var d = resource.data;
+        const r = new Reader(this.data);
 
-        this.position = [d.getInt16(0), d.getInt16(2)];
+        this.position = [r.int16(), r.int16()];
 
-        this.links = new Set();
-        for (let i = 0; i < 16; i++) {
-            var link = d.getInt16(4 + i * 2);
-            if (link >= 128) {
-                this.links.add(link);
-            }
-        }
+        this.links = new Set(
+            r.array(16, () => r.int16(-1)).filter(id => id >= 128));
+        this.spobs = r.array(16, () => r.int16(-1)).filter(id => id >= 128);
 
-        this.spobs = [];
-        for (let i = 0; i < 16; i++) {
-            var spob = d.getInt16(36 + i * 2);
-            if (spob >= 128) {
-                this.spobs.push(spob);
-            }
-        }
+        const dudeIds = r.array(8, () => r.int16(-1));
+        const dudeChances = r.array(8, () => r.int16());
+        this.dudes = dudeIds.flatMap((id, i) =>
+            id >= 128 ? [{ id, chance: dudeChances[i] }] : []);
+
+        this.avgShips = r.int16();
+        this.govt = r.int16(-1);
+        this.messageBuoy = r.int16(-1);
+        this.asteroids = r.int16();
+        this.interference = r.int16();
+
+        const persIds = r.array(8, () => r.int16(-1));
+        const persChances = r.array(8, () => r.int16());
+        this.persons = persIds.flatMap((id, i) =>
+            id >= 128 ? [{ id, chance: persChances[i] }] : []);
+
+        this.backgroundColor = r.uint32();
+        this.murk = r.int16();
+        this.asteroidTypes = r.uint16();
+        this.visibility = r.string(0x100);
+        this.reinforcementFleet = r.int16(-1);
+        this.reinforcementTime = r.int16();
+        this.reinforcementInterval = r.int16();
     }
 }
 
-export { SystResource }
+export { SystResource };

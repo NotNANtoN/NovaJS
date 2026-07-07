@@ -518,43 +518,42 @@
         KRID  Images (only one required)
         REPEAT next field x8  =128
         CASE  =*
-        (repeat x8 consumed by 0-byte KEYB)
-        KEYB  128
+        KEYB  128  (alternative @534)
         REPEAT next field x7  =9500
         (repeat x7 consumed by 0-byte RREF)
         RREF  ='PICT' #*
         KEYE  
-        KEYB  129
+        KEYB  129  (alternative @534)
         REPEAT next field x7  =9507
         (repeat x7 consumed by 0-byte RREF)
         RREF  ='PICT' #*
         KEYE  
-        KEYB  130
+        KEYB  130  (alternative @534)
         REPEAT next field x7  =9514
         (repeat x7 consumed by 0-byte RREF)
         RREF  ='PICT' #*
         KEYE  
-        KEYB  131
+        KEYB  131  (alternative @534)
         REPEAT next field x7  =9521
         (repeat x7 consumed by 0-byte RREF)
         RREF  ='PICT' #*
         KEYE  
-        KEYB  132
+        KEYB  132  (alternative @534)
         REPEAT next field x7  =9528
         (repeat x7 consumed by 0-byte RREF)
         RREF  ='PICT' #*
         KEYE  
-        KEYB  133
+        KEYB  133  (alternative @534)
         REPEAT next field x7  =9535
         (repeat x7 consumed by 0-byte RREF)
         RREF  ='PICT' #*
         KEYE  
-        KEYB  134
+        KEYB  134  (alternative @534)
         REPEAT next field x7  =9521
         (repeat x7 consumed by 0-byte RREF)
         RREF  ='PICT' #*
         KEYE  
-        KEYB  135
+        KEYB  135  (alternative @534)
         REPEAT next field x7  =9542
         (repeat x7 consumed by 0-byte RREF)
         RREF  ='PICT' #*
@@ -590,14 +589,15 @@
         CASE  Weapon=1
         CASE  Ammunition=3
         TMPL  otf.ModTypes
-        KEYB  1
+        KEYB  1  (alternative @8)
      8  RSID  Weapon='wap'  (2B)
         KEYE  1 end
-        KEYB  3
-    10  RSID  Weapon Ammo='wap'  (2B)
+        KEYB  3  (alternative @8)
+     8  RSID  Weapon Ammo='wap'  (2B)
         KEYE  3 end
-    12  DWRD  Maximum  (2B)
-    14  WORV  Flags  (2B)
+        (keyed group ends @10)
+    10  DWRD  Maximum  (2B)
+    12  WORV  Flags  (2B)
         CASE  Fixed Gun=0x0001
         CASE  Turret=0x0002
         CASE  Persistent (keep when trading ships)=0x0004
@@ -611,35 +611,35 @@
         CASE  Hide other items of equal display weight=0x1000
         CASE  Show as Rank in player info=0x2000
         CASE  DonÕt show in outfitter if Availability false=0x4000
-    16  DLNG  Cost  (4B)
+    14  DLNG  Cost  (4B)
         !! FCNT list — offsets below are WRONG unless expanded by hand
         FCNT  3
         !! LSTC list — offsets below are WRONG unless expanded by hand
         LSTC  Secondary Function
-    20  KWRD  Secondary Mod Type  (2B)
+    18  KWRD  Secondary Mod Type  (2B)
         CASE  None=-1
         TMPL  otf.ModTypes
         LSTE  end
         PACK  Contribute/Require=contribute,require
-    22+ QB64  contribute=#-100  (64 bits of Q-container)
-    30+ QB64  require=#-100  (64 bits of Q-container)
-    38  n0FF  Availability (NCB Test)  (255B)
-   293  n0FF  OnPurchase (NCB Set)  (255B)
-   548  n0FF  OnSell (NBC Set)  (255B)
-   803  C040  Outfitter Name  (64B)
-   867  C040  Lowercase Name  (64B)
-   931  C041  Lowercase Plural  (65B)
-   996  DWRD  Item Class  (2B)
-   998+ WB16  Scan Mask=#-101  (16 bits of W-container)
-  1000  DWRD  Available Random | %  (2B)
-  1002  DWRD  Require Bits Apply To=-1  (2B)
+    20+ QB64  contribute=#-100  (64 bits of Q-container)
+    28+ QB64  require=#-100  (64 bits of Q-container)
+    36  n0FF  Availability (NCB Test)  (255B)
+   291  n0FF  OnPurchase (NCB Set)  (255B)
+   546  n0FF  OnSell (NBC Set)  (255B)
+   801  C040  Outfitter Name  (64B)
+   865  C040  Lowercase Name  (64B)
+   929  C041  Lowercase Plural  (65B)
+   994  DWRD  Item Class  (2B)
+   996+ WB16  Scan Mask=#-101  (16 bits of W-container)
+   998  DWRD  Available Random | %  (2B)
+  1000  DWRD  Require Bits Apply To=-1  (2B)
         CASR  Every Outfitter=-1
         CASR  Govt+Allies Stellars:=128..383 'gvt'
         CASR  Independent+Govt+Allies:=1128..1383 ~128 'gvt'
         CASR  Not Govt+Allies:=2128..2383 ~128 'gvt'
         CASR  Not Ind.+Govt+Allies:=3128..3383 ~128 'gvt'
-  1004  F010  Unused  (16B)
-   total size: 1020  (WARNINGS above)
+  1002  F010  Unused  (16B)
+   total size: 1018  (WARNINGS above)
 
 === TMPL "përs" ===
      0  DWRD  Link System=-1  (2B)
@@ -811,30 +811,31 @@
         CASE  Square Wave Blinking=1
         CASE  Triangle Wave Blinking=2
         CASE  Random Pulsing=3
-        KEYB  0,*
+        KEYB  0,*  (alternative @56)
     56  F008  Ignored  (8B)
         KEYE  end
-        KEYB  1
-    64  DWRD  Delay Between Blinks  (2B)
-    66  DWRD  Light On-Time  (2B)
-    68  DWRD  Blinks Per Group  (2B)
-    70  DWRD  Delay Between Groups  (2B)
+        KEYB  1  (alternative @56)
+    56  DWRD  Delay Between Blinks  (2B)
+    58  DWRD  Light On-Time  (2B)
+    60  DWRD  Blinks Per Group  (2B)
+    62  DWRD  Delay Between Groups  (2B)
         KEYE  end
-        KEYB  2
-    72  DWRD  Min Intensity (1-32)  (2B)
-    74  DWRD  Increase/Frame * 100  (2B)
-    76  DWRD  Max Intensity (1-32)  (2B)
-    78  DWRD  Decrease/Frame * 100  (2B)
+        KEYB  2  (alternative @56)
+    56  DWRD  Min Intensity (1-32)  (2B)
+    58  DWRD  Increase/Frame * 100  (2B)
+    60  DWRD  Max Intensity (1-32)  (2B)
+    62  DWRD  Decrease/Frame * 100  (2B)
         KEYE  end
-        KEYB  3
-    80  DWRD  Min Intensity (1-32)  (2B)
-    82  DWRD  Max Intensity (1-32)  (2B)
-    84  DWRD  Delay Between Changes  (2B)
-    86  FWRD  Ignored  (2B)
+        KEYB  3  (alternative @56)
+    56  DWRD  Min Intensity (1-32)  (2B)
+    58  DWRD  Max Intensity (1-32)  (2B)
+    60  DWRD  Delay Between Changes  (2B)
+    62  FWRD  Ignored  (2B)
         KEYE  end
-    88  RSID  shieldSprite='rlD'  (2B)
-    90  RSID  shieldMask='PICT'  (2B)
-    92  PNT   shieldFrame  (4B)
+        (keyed group ends @64)
+    64  RSID  shieldSprite='rlD'  (2B)
+    66  RSID  shieldMask='PICT'  (2B)
+    68  PNT   shieldFrame  (4B)
         REPEAT next field x4  Guns
         (repeat x4 consumed by 0-byte PACK)
         PACK  Gun Position X/Y/Z *=gx*,gy*,gz*
@@ -848,35 +849,35 @@
         (repeat x4 consumed by 0-byte PACK)
         PACK  Beam Position X/Y/Z *=bx*,by*,bz*
         REPEAT next field x4  gx
-    96  DWRD x4  gx*  (8B)
+    72  DWRD x4  gx*  (8B)
         REPEAT next field x4  gy
-   104  DWRD x4  gy*  (8B)
+    80  DWRD x4  gy*  (8B)
         REPEAT next field x4  tx
-   112  DWRD x4  tx*  (8B)
+    88  DWRD x4  tx*  (8B)
         REPEAT next field x4  ty
-   120  DWRD x4  ty*  (8B)
+    96  DWRD x4  ty*  (8B)
         REPEAT next field x4  mx
-   128  DWRD x4  mx*  (8B)
+   104  DWRD x4  mx*  (8B)
         REPEAT next field x4  my
-   136  DWRD x4  my*  (8B)
+   112  DWRD x4  my*  (8B)
         REPEAT next field x4  bx
-   144  DWRD x4  bx*  (8B)
+   120  DWRD x4  bx*  (8B)
         REPEAT next field x4  by
-   152  DWRD x4  by*  (8B)
-   160  DWRD  Up X Compression %  (2B)
-   162  DWRD  Up Y Compression %  (2B)
-   164  DWRD  Down X Compression %  (2B)
-   166  DWRD  Down Y Compression %  (2B)
+   128  DWRD x4  by*  (8B)
+   136  DWRD  Up X Compression %  (2B)
+   138  DWRD  Up Y Compression %  (2B)
+   140  DWRD  Down X Compression %  (2B)
+   142  DWRD  Down Y Compression %  (2B)
         REPEAT next field x4  gz
-   168  DWRD x4  gz*  (8B)
+   144  DWRD x4  gz*  (8B)
         REPEAT next field x4  tz
-   176  DWRD x4  tz*  (8B)
+   152  DWRD x4  tz*  (8B)
         REPEAT next field x4  mz
-   184  DWRD x4  mz*  (8B)
+   160  DWRD x4  mz*  (8B)
         REPEAT next field x4  bz
-   192  DWRD x4  bz*  (8B)
-   200  F010  Unused  (16B)
-   total size: 216
+   168  DWRD x4  bz*  (8B)
+   176  F010  Unused  (16B)
+   total size: 192
 
 === TMPL "shïp" ===
         PACK  Graphics=shan,targetPic,yardPic
@@ -1284,7 +1285,7 @@
         CASE  Point Defense Turret=9
         CASE  Point Defense Beam=10
         CASE  Carried Ship=99
-        KEYB  Projectile=-1,4,5,6,7,8,9
+        KEYB  Projectile=-1,4,5,6,7,8,9  (alternative @10)
     10  DWRD  Shot Speed | 100 = 1 pixel per frame  (2B)
     12  DWRD  Ammo Type=-1  (2B)
         CASR  DoesnÕt Use Ammo=-1
@@ -1316,20 +1317,20 @@
     36  FLNG  Lightning  (4B)
     40  LCOL  ionColor  (4B)
         KEYE  
-        KEYB  Homing=1
-    44  DWRD  Shot Speed | 100 = 1 pixel per frame  (2B)
+        KEYB  Homing=1  (alternative @10)
+    10  DWRD  Shot Speed | 100 = 1 pixel per frame  (2B)
         PACK  Turn Rate=guidedTurn | 10 Å 30¡/sec
-    46  DWRD  Ammo Type=-1  (2B)
+    12  DWRD  Ammo Type=-1  (2B)
         CASR  DoesnÕt Use Ammo=-1
         CASR  Ammo From Weapon:=0..255 ~128 'wap'
         CASR  Destroys Ship=-999
         CASR  Consumes Fuel:=-1000.. ~0 | 10 = 1 unit per shot
-    48  RSID  Graphic Type='spn' 3000+255  (2B)
-    50  DWRD  Inaccuracy | ¡  (2B)
+    14  RSID  Graphic Type='spn' 3000+255  (2B)
+    16  DWRD  Inaccuracy | ¡  (2B)
         TMPL  wap.Projectile1
         CASE  Detonates when shot expires (flak)=0x8000
         CASE  AI wonÕt fire at ships with turn rate > 30=0x0008
-    52  WORV  Seeker Flags  (2B)
+    18  WORV  Seeker Flags  (2B)
         CASE  Passes over asteroids=0x0001
         CASE  Decoyed by asteroids=0x0002
         CASE  Confused by interference=0x0008
@@ -1338,40 +1339,40 @@
         CASE  Loses lock if target not directly ahead=0x4000
         CASE  May attack parent ship if jammed=0x8000
         TMPL  wap.Projectile2
-    54  RECT  Jam Vulnerability 1-4 | %  (8B)
-    62  WORV  flags3  (2B)
+    20  RECT  Jam Vulnerability 1-4 | %  (8B)
+    28  WORV  flags3  (2B)
         CASE  Only use ammo at end of burst cycle=0x0001
         CASE  Translucent shots=0x0002
         CASE  Can only fire one shot at a time=0x0004
         CASE  Fires from exit nearest to target=0x0010
         CASE  CanÕt fire other weapons with this one=0x0020
-    64  DWRD  Shot Durability/Armor | Point Defense damage = 100% Mass + 50% Energy.  (2B)
-    66  DWRD  guidedTurn  (2B)
-    68  DWRD  Max Ammo | per launcher  (2B)
-    70  FLNG  Lightning  (4B)
-    74  LCOL  ionColor  (4B)
+    30  DWRD  Shot Durability/Armor | Point Defense damage = 100% Mass + 50% Energy.  (2B)
+    32  DWRD  guidedTurn  (2B)
+    34  DWRD  Max Ammo | per launcher  (2B)
+    36  FLNG  Lightning  (4B)
+    40  LCOL  ionColor  (4B)
         KEYE  
-        KEYB  Beam=0,3,10
-    78  FWRD  Shot Speed (1000= 1 pixel/frame):  (2B)
-    80  DWRD  Ammo Type=-1  (2B)
+        KEYB  Beam=0,3,10  (alternative @10)
+    10  FWRD  Shot Speed (1000= 1 pixel/frame):  (2B)
+    12  DWRD  Ammo Type=-1  (2B)
         CASR  DoesnÕt Use Ammo=-1
         CASR  Ammo From Weapon:=0..255 ~128 'wap'
         CASR  Destroys Ship=-999
         CASR  Consumes Fuel:=-1000.. ~0 | 10 = 1 unit per shot
-    82  FWRD  Graphic Type='spn' 3000+255  (2B)
-    84  DWRD  Inaccuracy | ¡  (2B)
-    86  RSID  Sound Type='snd ' 200+63  (2B)
+    14  FWRD  Graphic Type='spn' 3000+255  (2B)
+    16  DWRD  Inaccuracy | ¡  (2B)
+    18  RSID  Sound Type='snd ' 200+63  (2B)
         CASE  -1
-    88  DWRD  Impact  (2B)
+    20  DWRD  Impact  (2B)
         CASR  Repel:=0..
         CASR  Tractor:=-1.. ~1
         PACK  Recoil=recoil
-    90  DWRD  Explosion=-1  (2B)
+    22  DWRD  Explosion=-1  (2B)
         CASR  None=-1
         CASR  Single Explosion:=0..63 ~128 'bm'
         CASR  Explosion + Sparks:=1000..1063 ~128 'bm'
-    92  FLNG  Radius  (4B)
-    96  WORV  Flags 1  (2B)
+    24  FLNG  Radius  (4B)
+    28  WORV  Flags 1  (2B)
         CASE  Secondary weapon=0x0002
         CASE  Sound loops instead of repeating per shot=0x0010
         CASE  Penetrates shields=0x0020
@@ -1379,23 +1380,23 @@
         CASE  Turret has front blind spot=0x1000
         CASE  Turret has side blind spots=0x2000
         CASE  Turret has read blind spots=0x4000
-    98  WORV  Seeker Flags  (2B)
+    30  WORV  Seeker Flags  (2B)
         CASE  Passes over asteroids=0x0001
         CASE  CanÕt fire if ship ionized=0x0020
         PACK  Flags 2=flags2
         PACK  Flags 3=flags3
-   100  FWRD  Smoke Set  (2B)
-   102  WFLG  Decay=Shrink before disappearing (duration += 16-falloff)  (2B)
-   104  F00C  Particle Count  (12B)
-   116  DWRD  Beam Length | pixels  (2B)
-   118  DWRD  Beam Width | pixel gap between left and right corona  (2B)
-   120  DWRD  Corona Falloff | 1-16 (lower values = larger corona)  (2B)
-   122  LCOL  Beam Color  (4B)
-   126  LCOL  Corona Color  (4B)
+    32  FWRD  Smoke Set  (2B)
+    34  WFLG  Decay=Shrink before disappearing (duration += 16-falloff)  (2B)
+    36  F00C  Particle Count  (12B)
+    48  DWRD  Beam Length | pixels  (2B)
+    50  DWRD  Beam Width | pixel gap between left and right corona  (2B)
+    52  DWRD  Corona Falloff | 1-16 (lower values = larger corona)  (2B)
+    54  LCOL  Beam Color  (4B)
+    58  LCOL  Corona Color  (4B)
         PACK  Lightning Density=liDensity
         PACK  Lightning Amplitude=liAmplitude
-   130  F00A  Subs  (10B)
-   140  WORV  flags2  (2B)
+    62  F00A  Subs  (10B)
+    72  WORV  flags2  (2B)
         CASE  DonÕt show ammo quantity in status display=0x0040
         CASE  Can only fire if Key Carried on board=0x0080
         CASE  AI wonÕt use=0x0100
@@ -1406,73 +1407,74 @@
         CASE  Display beam below ship graphic=0x2000
         CASE  Can fire while cloaked=0x4000
         CASE  Deals 10x Mass Damage to asteroids=0x8000
-   142  DWRD  Ionization Charge  (2B)
+    74  DWRD  Ionization Charge  (2B)
         PACK  Ionization Color=ionColor | Pure black defaults to a bluish color.
-   144  DWRD  Hit Particle Count  (2B)
-   146  DWRD  Hit Particle Duration  (2B)
-   148  DWRD  Hit Particle Velocity  (2B)
-   150  LCOL  Hit Particle Color  (4B)
-   154  DWRD  recoil  (2B)
-   156  DWRD  Exit Type  (2B)
+    76  DWRD  Hit Particle Count  (2B)
+    78  DWRD  Hit Particle Duration  (2B)
+    80  DWRD  Hit Particle Velocity  (2B)
+    82  LCOL  Hit Particle Color  (4B)
+    86  DWRD  recoil  (2B)
+    88  DWRD  Exit Type  (2B)
         CASR  Ship Center=-1
         CASR  Gun Positions=0
         CASR  Turret Positions=1
         CASR  Guided Positions=2
         CASR  Beam Positions=3
-   158  DWRD  Shots per Burst  (2B)
-   160  DWRD  Burst Reload | frames  (2B)
-   162  F008  Jam Vulnerability 1-4  (8B)
-   170  WORV  flags3  (2B)
+    90  DWRD  Shots per Burst  (2B)
+    92  DWRD  Burst Reload | frames  (2B)
+    94  F008  Jam Vulnerability 1-4  (8B)
+   102  WORV  flags3  (2B)
         CASE  Only use ammo at end of burst cycle=0x0001
         CASE  Can only fire one shot at a time=0x0004
         CASE  Fires from exit nearest to target=0x0010
         CASE  CanÕt fire other weapons with this one=0x0020
-   172  FLNG  Durability  (4B)
-   176  DWRD  Max Ammo | per launcher  (2B)
-   178  DWRD  liDensity  (2B)
-   180  DWRD  liAmplitude  (2B)
-   182  LCOL  ionColor  (4B)
+   104  FLNG  Durability  (4B)
+   108  DWRD  Max Ammo | per launcher  (2B)
+   110  DWRD  liDensity  (2B)
+   112  DWRD  liAmplitude  (2B)
+   114  LCOL  ionColor  (4B)
         KEYE  
-        KEYB  Carried Ship=99
-   186  DWRD  Launch Speed  (2B)
-   188  RSID  Ship Type='shp'  (2B)
-   190  FWRD  Graphic Type='spn' 3000+255  (2B)
-   192  DWRD  Inaccuracy | ¡  (2B)
-   194  RSID  Sound Type='snd ' 200+63  (2B)
+        KEYB  Carried Ship=99  (alternative @10)
+    10  DWRD  Launch Speed  (2B)
+    12  RSID  Ship Type='shp'  (2B)
+    14  FWRD  Graphic Type='spn' 3000+255  (2B)
+    16  DWRD  Inaccuracy | ¡  (2B)
+    18  RSID  Sound Type='snd ' 200+63  (2B)
         CASE  -1
-   196  F008  Impact  (8B)
+    20  F008  Impact  (8B)
         PACK  Recoil=recoil
-   204  WORV  Flags 1  (2B)
+    28  WORV  Flags 1  (2B)
         CASE  Secondary weapon=0x0002
         CASE  Sound loops instead of repeating per shot=0x0010
         CASE  Multiple launchers fire simultaneously=0x0040
-   206  WORV  Seeker Flags  (2B)
+    30  WORV  Seeker Flags  (2B)
         CASE  CanÕt fire if ship ionized=0x0020
         PACK  Flags 2=flags2
         PACK  Flags 3=flags3
-   208  F028  Smoke Set  (40B)
-   248  WORV  flags2  (2B)
+    32  F028  Smoke Set  (40B)
+    72  WORV  flags2  (2B)
         CASE  Don't show ammo quantity in status display=0x0040
         CASE  Can only fire if Key Carried on board=0x0080
         CASE  AI wonÕt use=0x0100
         CASE  Triggers shipÕs weapon glow=0x0200
         CASE  Hide in status bar if out of ammo=0x0800
         CASE  Can fire while cloaked=0x4000
-   250  F00C  Ionization Charge  (12B)
-   262  DWRD  recoil  (2B)
-   264  FWRD  Exit Type  (2B)
-   266  DWRD  Shots per Burst  (2B)
-   268  DWRD  Burst Reload | frames  (2B)
-   270  F008  Jam Vulnerability 1-4  (8B)
-   278  WORV  flags3  (2B)
+    74  F00C  Ionization Charge  (12B)
+    86  DWRD  recoil  (2B)
+    88  FWRD  Exit Type  (2B)
+    90  DWRD  Shots per Burst  (2B)
+    92  DWRD  Burst Reload | frames  (2B)
+    94  F008  Jam Vulnerability 1-4  (8B)
+   102  WORV  flags3  (2B)
         CASE  Only use ammo at end of burst cycle (!)=0x0001
         CASE  CanÕt fire other weapons with this one=0x0020
-   280  FLNG  Shot Durability/Armor  (4B)
-   284  DWRD  Max Ammo | per launcher  (2B)
-   286  F008  Lightning  (8B)
+   104  FLNG  Shot Durability/Armor  (4B)
+   108  DWRD  Max Ammo | per launcher  (2B)
+   110  F008  Lightning  (8B)
         KEYE  
-   294  F010  Unused  (16B)
-   total size: 310
+        (keyed group ends @118)
+   118  F010  Unused  (16B)
+   total size: 134
 
 === TMPL "oütf.ModTypes" ===
         CASE  Cargo Space=2
@@ -1521,127 +1523,127 @@
         CASE  IFF Scrambler=48
         CASE  Lethal Bomb=47
         CASE  Nonlethal Bomb=50
-        KEYB  -1,11,13,14,19,20,31,37,38,41,42,49,*
+        KEYB  -1,11,13,14,19,20,31,37,38,41,42,49,*  (alternative @0)
      0  FWRD  Ignored  (2B)
         KEYE  -1 end
-        KEYB  2
-     2  DWRD  Cargo Space | tons  (2B)
+        KEYB  2  (alternative @0)
+     0  DWRD  Cargo Space | tons  (2B)
         KEYE  2 end
-        KEYB  4
-     4  DWRD  Shield Points  (2B)
+        KEYB  4  (alternative @0)
+     0  DWRD  Shield Points  (2B)
         KEYE  4 end
-        KEYB  5
-     6  DWRD  Shield Recharge Rate | 1000 = 1 point per frame  (2B)
+        KEYB  5  (alternative @0)
+     0  DWRD  Shield Recharge Rate | 1000 = 1 point per frame  (2B)
         KEYE  5 end
-        KEYB  6
-     8  DWRD  Armour Points  (2B)
+        KEYB  6  (alternative @0)
+     0  DWRD  Armour Points  (2B)
         KEYE  6 end
-        KEYB  7
-    10  DWRD  Acceleration Amount  (2B)
+        KEYB  7  (alternative @0)
+     0  DWRD  Acceleration Amount  (2B)
         KEYE  7 end
-        KEYB  8
-    12  DWRD  Speed Amount  (2B)
+        KEYB  8  (alternative @0)
+     0  DWRD  Speed Amount  (2B)
         KEYE  8 end
-        KEYB  9
-    14  DWRD  Turn Amount | 100 Å 30¡/sec  (2B)
+        KEYB  9  (alternative @0)
+     0  DWRD  Turn Amount | 100 Å 30¡/sec  (2B)
         KEYE  9 end
-        KEYB  12
-    16  DWRD  Fuel Units  (2B)
+        KEYB  12  (alternative @0)
+     0  DWRD  Fuel Units  (2B)
         KEYE  12 end
-        KEYB  15
-    18  DWRD  Fuel Drain | units per second  (2B)
+        KEYB  15  (alternative @0)
+     0  DWRD  Fuel Drain | units per second  (2B)
         KEYE  15 end
-        KEYB  16
-    20  DWRD  Explore  (2B)
+        KEYB  16  (alternative @0)
+     0  DWRD  Explore  (2B)
         CASR  Number of Jumps:=0..
         CASR  Independent Systems=-1
         CASR  Govt Class Systems:=-1000.. ~0
         KEYE  16 end
-        KEYB  17
+        KEYB  17  (alternative @0)
         PACK  Shield Drain=cShield1 | points per second
         PACK  Fuel Drain=cFuel1 | units per second
-    22+ WF03  Unused  (3 bits of W-container)
-    22+ WBIT  Cloak Flags=Area cloak  (1 bits of W-container)
-    22+ WB04  cShield1  (4 bits of W-container)
-    22+ WB04  cFuel1  (4 bits of W-container)
-    22+ WBIT  =Deactivates when hit  (1 bits of W-container)
-    22+ WBIT  =Drops shields on activation  (1 bits of W-container)
-    22+ WBIT  =Visible on radar  (1 bits of W-container)
-    22+ WBIT  =Faster fading  (1 bits of W-container)
+     0+ WF03  Unused  (3 bits of W-container)
+     0+ WBIT  Cloak Flags=Area cloak  (1 bits of W-container)
+     0+ WB04  cShield1  (4 bits of W-container)
+     0+ WB04  cFuel1  (4 bits of W-container)
+     0+ WBIT  =Deactivates when hit  (1 bits of W-container)
+     0+ WBIT  =Drops shields on activation  (1 bits of W-container)
+     0+ WBIT  =Visible on radar  (1 bits of W-container)
+     0+ WBIT  =Faster fading  (1 bits of W-container)
         KEYE  17 end
-        KEYB  18
-    24  DWRD  Fuel Regen Rate | frames per unit  (2B)
+        KEYB  18  (alternative @0)
+     0  DWRD  Fuel Regen Rate | frames per unit  (2B)
         KEYE  18 end
-        KEYB  21
-    26  RSID  Clean Govt Record='gvt'  (2B)
+        KEYB  21  (alternative @0)
+     0  RSID  Clean Govt Record='gvt'  (2B)
         CASE  All=-1
         KEYE  21 end
-        KEYB  22
-    28  DWRD  Hyperspace Days  (2B)
+        KEYB  22  (alternative @0)
+     0  DWRD  Hyperspace Days  (2B)
         KEYE  22 end
-        KEYB  23
-    30  DWRD  Jump Radius Change | pixels  (2B)
+        KEYB  23  (alternative @0)
+     0  DWRD  Jump Radius Change | pixels  (2B)
         KEYE  23 end
-        KEYB  24
-    32  DWRD  Subtract Amount  (2B)
+        KEYB  24  (alternative @0)
+     0  DWRD  Subtract Amount  (2B)
         KEYE  24 end
-        KEYB  25
-    34  DWRD  Capture Odds  (2B)
+        KEYB  25  (alternative @0)
+     0  DWRD  Capture Odds  (2B)
         CASR  Add Crew:=0..
         CASR  Increase Percent:=-1.. ~1 | %
         KEYE  25 end
-        KEYB  27
-    36  RSID  Outfit='otf'  (2B)
+        KEYB  27  (alternative @0)
+     0  RSID  Outfit='otf'  (2B)
         KEYE  27 end
-        KEYB  28
-    38  DWRD  Murk Amount  (2B)
+        KEYB  28  (alternative @0)
+     0  DWRD  Murk Amount  (2B)
         KEYE  28 end
-        KEYB  29
-    40  DWRD  Armor Regen Rate | 1000 = 1 point per frame  (2B)
+        KEYB  29  (alternative @0)
+     0  DWRD  Armor Regen Rate | 1000 = 1 point per frame  (2B)
         KEYE  29 end
-        KEYB  30
-    42  WORV  Scanner Flags  (2B)
+        KEYB  30  (alternative @0)
+     0  WORV  Scanner Flags  (2B)
         CASE  Reveal cloaked ships on radar=0x0001
         CASE  Reveal cloaked ships on screen=0x0002
         CASE  Allow targeting untargetable ships=0x0004
         CASE  Allow targeting cloaked ships=0x0008
         KEYE  30 end
-        KEYB  32
-    44  DWRD  Number of Extra Jumps  (2B)
+        KEYB  32  (alternative @0)
+     0  DWRD  Number of Extra Jumps  (2B)
         KEYE  32 end
-        KEYB  33,34,35,36
-    46  DWRD  Jamming Amount | %  (2B)
+        KEYB  33,34,35,36  (alternative @0)
+     0  DWRD  Jamming Amount | %  (2B)
         KEYE  33 end
-        KEYB  39
-    48  DWRD  Deionization Rate | 100 = 1 point per frame  (2B)
+        KEYB  39  (alternative @0)
+     0  DWRD  Deionization Rate | 100 = 1 point per frame  (2B)
         KEYE  39 end
-        KEYB  40
-    50  DWRD  Ionization Capacity  (2B)
+        KEYB  40  (alternative @0)
+     0  DWRD  Ionization Capacity  (2B)
         KEYE  40 end
-        KEYB  43
-    52  WCOL  Colour  (2B)
+        KEYB  43  (alternative @0)
+     0  WCOL  Colour  (2B)
         KEYE  43 end
-        KEYB  44
-    54  DWRD  Govt Class  (2B)
+        KEYB  44  (alternative @0)
+     0  DWRD  Govt Class  (2B)
         CASE  All=-1
         KEYE  44 end
-        KEYB  45
-    56  DWRD  Gun Slots  (2B)
+        KEYB  45  (alternative @0)
+     0  DWRD  Gun Slots  (2B)
         KEYE  45 end
-        KEYB  46
-    58  DWRD  Turret Slots  (2B)
+        KEYB  46  (alternative @0)
+     0  DWRD  Turret Slots  (2B)
         KEYE  46 end
-        KEYB  47
-    60  RSID  Detonation Text='dsc'  (2B)
+        KEYB  47  (alternative @0)
+     0  RSID  Detonation Text='dsc'  (2B)
         CASE  None=-1
         KEYE  47 end
-        KEYB  48
-    62  DWRD  Govt Class  (2B)
+        KEYB  48  (alternative @0)
+     0  DWRD  Govt Class  (2B)
         KEYE  48 end
-        KEYB  50
-    64  RSID  Explosion='bm'  (2B)
+        KEYB  50  (alternative @0)
+     0  RSID  Explosion='bm'  (2B)
         KEYE  50 end
-   total size: 66
+   total size: 2
 
 === TMPL "wëap.Projectile1" ===
      0  RSID  Sound Type='snd ' 200+63  (2B)
@@ -1728,7 +1730,7 @@
         KRID  Resource Type
         CASE  Player Data=128
         CASE  Universe Data=129
-        KEYB  128
+        KEYB  128  (alternative @0)
         TMPL  NpL.128-1
         TMPL  NpL.MissionData1
      0  FWRD  Padding  (2B)
@@ -1738,10 +1740,10 @@
      3  F003  Padding  (3B)
         TMPL  NpL.128-2
         KEYE  *****
-        KEYB  129
+        KEYB  129  (alternative @0)
         TMPL  NpL.129
         KEYE  *****
-   total size: 6
+   total size: 0
 
 === TMPL "NpïL.128-1" ===
      0  DWRD  Last Stellar  (2B)

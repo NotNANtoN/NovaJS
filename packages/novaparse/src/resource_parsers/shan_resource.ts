@@ -1,9 +1,8 @@
 import { Resource } from "resource_fork";
-import { NovaResources } from "./resource_holder_base.js";
-import { BaseResource } from "./nova_resource_base.js";
 import { ExitPoint, ExitPoints } from "novadatainterface/animation";
-
-
+import { BaseResource } from "./nova_resource_base.js";
+import { Reader } from "./reader.js";
+import { NovaResources } from "./resource_holder_base.js";
 
 type ImageInfo = {
     ID: number,
@@ -12,52 +11,6 @@ type ImageInfo = {
     size: Array<number>,
     transparency: number;
 };
-function doImage(d: DataView, p: number, simple: boolean): ImageInfo | null {//10
-    var id = d.getInt16(p);
-
-    if (id <= 0) {
-        return null;
-    }
-
-    var o: ImageInfo = {
-        ID: id,
-        maskID: d.getInt16(p + 2),
-        setCount: 0,
-        size: [],
-        transparency: 0
-    };
-
-    if (!simple) {
-        o.setCount = d.getInt16(p + 4);
-        p += 2;
-    }
-
-    o.size = [d.getInt16(p + 4), d.getInt16(p + 6)];
-
-    return o;
-};
-
-// Can not return null
-function doImageRequired(d: DataView, p: number, simple: boolean): ImageInfo {
-    var result = doImage(d, p, simple);
-    if (result == null) {
-        throw new Error("Required image was null");
-    }
-    else {
-        return result;
-    }
-};
-
-
-function doPos(d: DataView, px: number, py: number, pz: number): ExitPoint {
-    var o: ExitPoint = [];
-    for (var i = 0; i < 4; i++) {
-        o[i] = [d.getInt16(2 * i + px), d.getInt16(2 * i + py), d.getInt16(2 * i + pz)];
-    }
-    return o;
-}
-
-
 
 type Flags = {
     extraFramePurpose: string,
@@ -67,7 +20,7 @@ type Flags = {
     hideLightsWhenDisabled: boolean,
     unfoldWhenFiring: boolean,
     adjustForOffset: boolean
-}
+};
 
 type Blink = {
     mode: string,
@@ -75,7 +28,7 @@ type Blink = {
     b: number,
     c: number,
     d: number
-}
+};
 
 type ShanImages = {
     [index: string]: ImageInfo | null,
@@ -85,36 +38,59 @@ type ShanImages = {
     lightImage: ImageInfo | null,
     weapImage: ImageInfo | null,
     shieldImage: ImageInfo | null
-}
+};
 
+/**
+ * A ship animation: which rlëD sprites make up a ship (base, engine glow,
+ * running lights, etc.), how they animate, and where weapons exit the ship.
+ *
+ * Field layout follows ResForge's shän template (192 bytes, matching Nova's
+ * own data exactly), documented in the EVN Bible pp. 14-16.
+ */
 class ShanResource extends BaseResource {
     images: ShanImages;
     flags: Flags;
+    /** Frames between animation frames (30ths of a second). */
     animDelay: number;
+    /** Frames for the weapon glow to fade out. */
     weapDecay: number;
+    /** Sprite frames per rotation. */
     framesPer: number;
     blink: Blink | null;
     exitPoints: ExitPoints;
 
     constructor(resource: Resource, idSpace: NovaResources) {
         super(resource, idSpace);
-        var d = this.data;
+        const r = new Reader(this.data);
 
-        this.images = {
-            baseImage: doImageRequired(d, 0, false),
-            altImage: doImage(d, 12, false),
-            glowImage: doImage(d, 22, true),
-            lightImage: doImage(d, 30, true),
-            weapImage: doImage(d, 38, true),
-            shieldImage: doImage(d, 64, true)
+        // Sprite id, mask id, and frame size; setCount only for base/alt.
+        const image = (hasSetCount: boolean): ImageInfo | null => {
+            const info: ImageInfo = {
+                ID: r.int16(-1),
+                maskID: r.int16(-1),
+                setCount: hasSetCount ? r.int16() : 0,
+                size: [r.int16(), r.int16()],
+                transparency: 0,
+            };
+            return info.ID <= 0 ? null : info;
         };
 
-        if (this.images.baseImage) {
-            this.images.baseImage.transparency = d.getInt16(10);
+        const baseImage = image(true);
+        if (!baseImage) {
+            throw new Error("Required image was null");
         }
+        baseImage.transparency = r.int16();
 
+        this.images = {
+            baseImage,
+            altImage: image(true),
+            glowImage: image(false),
+            lightImage: image(false),
+            weapImage: image(false),
+            shieldImage: null,  // Stored later in the resource, at offset 64.
+        };
 
-        var flagN = d.getInt16(46);
+        const flagN = r.uint16();
         this.flags = {
             extraFramePurpose: "unknown",
             displayEngineGlowWhenTurning: false,
@@ -122,9 +98,8 @@ class ShanResource extends BaseResource {
             hideAltSpritesWhenDisabled: (flagN & 0x20) > 0,
             hideLightsWhenDisabled: (flagN & 0x40) > 0,
             unfoldWhenFiring: (flagN & 0x80) > 0,
-            adjustForOffset: (flagN & 0x100) > 0
+            adjustForOffset: (flagN & 0x100) > 0,
         };
-
         if (flagN & 0x1)
             this.flags.extraFramePurpose = "banking";
         if (flagN & 0x2)
@@ -133,51 +108,67 @@ class ShanResource extends BaseResource {
             this.flags.extraFramePurpose = "keyCarried";
         if (flagN & 0x8)
             this.flags.extraFramePurpose = "animation";
-
         if ((flagN & 0x3) == 3) {
             this.flags.extraFramePurpose = "banking";
             this.flags.displayEngineGlowWhenTurning = true;
         }
 
-        this.animDelay = d.getInt16(48);
-        this.weapDecay = d.getInt16(50);
-        this.framesPer = d.getInt16(52);
+        this.animDelay = r.int16();
+        this.weapDecay = r.int16();
+        this.framesPer = r.int16();
 
+        // The meaning of the four params depends on the blink mode.
+        const blinkMode = r.int16();
+        const blinkParams = r.array(4, () => r.int16());
         this.blink = null;
-        var modeN = d.getInt16(54);
-        if (modeN !== -1 && modeN !== 0) {
-            this.blink = {
-                mode: "unknown",
-                a: d.getInt16(56),
-                b: d.getInt16(58),
-                c: d.getInt16(60),
-                d: d.getInt16(62)
+        if (blinkMode !== -1 && blinkMode !== 0) {
+            const modes: { [index: number]: string } = {
+                1: "square", 2: "triangle", 3: "random",
             };
-            switch (modeN) {
-                case 1:
-                    this.blink.mode = "square";
-                    break;
-                case 2:
-                    this.blink.mode = "triangle";
-                    break;
-                case 3:
-                    this.blink.mode = "random";
-                    break;
-            }
+            this.blink = {
+                mode: modes[blinkMode] ?? "unknown",
+                a: blinkParams[0],
+                b: blinkParams[1],
+                c: blinkParams[2],
+                d: blinkParams[3],
+            };
         }
 
+        this.images.shieldImage = image(false);
 
-        // upCompress and downCompress values are assumed to be 100 if they are 0
+        // Weapon exit points: parallel 4-element x and y arrays per type,
+        // with the z arrays all the way at the end of the resource.
+        const xy: { [index: string]: { x: number[], y: number[] } } = {};
+        for (const type of ["gun", "turret", "guided", "beam"]) {
+            xy[type] = {
+                x: r.array(4, () => r.int16()),
+                y: r.array(4, () => r.int16()),
+            };
+        }
+
+        // upCompress and downCompress values are assumed to be 100 if 0.
+        const upCompress: [number, number] =
+            [r.int16() || 100, r.int16() || 100];
+        const downCompress: [number, number] =
+            [r.int16() || 100, r.int16() || 100];
+
+        const exitPoint = (type: string): ExitPoint => {
+            const z = r.array(4, () => r.int16());
+            const points: ExitPoint = [];
+            for (let i = 0; i < 4; i++) {
+                points.push([xy[type].x[i], xy[type].y[i], z[i]]);
+            }
+            return points;
+        };
         this.exitPoints = {
-            gun: doPos(d, 72, 80, 144),
-            turret: doPos(d, 88, 96, 152),
-            guided: doPos(d, 104, 112, 160),
-            beam: doPos(d, 120, 128, 168),
-            upCompress: [d.getInt16(136) || 100, d.getInt16(138) || 100],
-            downCompress: [d.getInt16(140) || 100, d.getInt16(142) || 100]
+            gun: exitPoint("gun"),
+            turret: exitPoint("turret"),
+            guided: exitPoint("guided"),
+            beam: exitPoint("beam"),
+            upCompress,
+            downCompress,
         };
     }
 }
-
 
 export { ShanResource };

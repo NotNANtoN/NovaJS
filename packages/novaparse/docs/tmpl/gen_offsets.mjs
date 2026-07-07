@@ -20,6 +20,10 @@ let out = '';
 for (const [name, tm] of Object.entries(t)) {
     out += `=== TMPL "${name}" ===\n`;
     let off = 0, repeat = 1, bitContainer = 0, bitsUsed = 0, ok = true;
+    // KEYB..KEYE sections are keyed ALTERNATIVES of the same bytes: each
+    // KEYB rewinds to the group start, and the group ends (KEYE not followed
+    // by KEYB) at start + the largest alternative's size.
+    let keyStart = null, keyMaxEnd = null, inKey = false, afterKeyE = false;
     const flushWarn = () => {
         if (bitsUsed > 0) { out += `        !! ${bitsUsed} stray bits not aligned to container\n`; ok = false; }
         bitContainer = 0; bitsUsed = 0;
@@ -27,6 +31,32 @@ for (const [name, tm] of Object.entries(t)) {
     for (const f of tm.fields) {
         const label = f.label.replace(/[\r\n]+/g, ' | ');
         const type = f.type;
+        // A KEYE followed by anything other than another KEYB ends the keyed
+        // group; the group occupies the largest alternative's size.
+        if (afterKeyE && type !== 'KEYB') {
+            off = keyMaxEnd;
+            inKey = false;
+            afterKeyE = false;
+            out += `        (keyed group ends @${off})\n`;
+        }
+        if (type === 'KEYB') {
+            if (inKey) {
+                off = keyStart;         // another alternative: rewind
+            } else {
+                inKey = true;           // first alternative: open the group
+                keyStart = off;
+                keyMaxEnd = off;
+            }
+            afterKeyE = false;
+            out += `        KEYB  ${label}  (alternative @${off})\n`;
+            continue;
+        }
+        if (type === 'KEYE') {
+            keyMaxEnd = Math.max(keyMaxEnd, off);
+            afterKeyE = true;
+            out += `        KEYE  ${label}\n`;
+            continue;
+        }
         if (META.has(type)) {
             // Rnnn applies to the single immediately following element, even a
             // zero-byte one like PACK — the repeat must NOT fall through to the
