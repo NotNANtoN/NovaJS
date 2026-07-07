@@ -131,4 +131,25 @@ describe("OutfResource", () => {
         expect(blank.displayWeight).toEqual(0);
         expect(armor.displayWeight).toEqual(423);
     });
+
+    it("should parse the outfitter name and related string fields", () => {
+        expect(w1.outfitterName).toEqual("Weapon Test Name");
+        expect(blank.outfitterName).toEqual("");
+    });
+
+    it("should parse newly-exposed trailing fields", () => {
+        // These are the same for every fixture resource, but they exercise the
+        // offsets of the fields past the NCB strings (Item Class @1004,
+        // Available Random @1008, Require Bits Apply To @1010).
+        expect(w1.itemClass).toEqual(-1);
+        expect(w1.availableRandom).toEqual(100);
+        expect(w1.requireBitsApplyTo).toEqual(-1);
+        expect(w1.flags).toEqual(0);
+        expect(w1.contribute).toEqual(0n);
+        expect(w1.require).toEqual(0n);
+    });
+
+    it("should parse techLevel", () => {
+        expect(w1.techLevel).toEqual(1);
+    });
 });

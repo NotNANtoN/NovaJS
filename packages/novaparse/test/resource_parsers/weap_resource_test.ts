@@ -1,7 +1,8 @@
 import "jasmine";
-import { readResourceFork, ResourceMap } from "resource_fork";
+import { readResourceFork, Resource, ResourceMap } from "resource_fork";
 import { WeapResource } from "../../src/resource_parsers/weap_resource.js";
 import { defaultIDSpace } from "./default_id_space.js";
+import { ResourceBuilder } from "./resource_builder.js";
 
 import { resolveFixture } from "../../test/fixtures.js";
 
@@ -659,5 +660,112 @@ describe("WeapResource", () => {
         expect(missile.ionizeColor).toEqual(0xFF151617);
         expect(turret.ionizeColor).toEqual(0xFFFFFFFF);
         expect(beamTurret.ionizeColor).toEqual(0xFFA55AA5);
+    });
+});
+
+describe("WeapResource builder-based", () => {
+    const idSpace = defaultIDSpace;
+
+    /** A wëap with distinct, recognizable values in every field. */
+    function buildWeap(): ResourceBuilder {
+        const b = new ResourceBuilder();
+        b.int16(16)                 // 0 reload
+            .int16(18)              // 2 duration ("Count" in the Bible)
+            .int16(12)              // 4 armorDamage
+            .int16(11)              // 6 shieldDamage
+            .int16(1)               // 8 guidance = guided
+            .int16(17)              // 10 speed
+            .int16(2)               // 12 ammoType
+            .int16(255)             // 14 graphic -> 3255
+            .int16(-19)             // 16 accuracy (negative => fixed angle)
+            .int16(12)              // 18 sound -> 212
+            .int16(13)              // 20 impact
+            .int16(1010)            // 22 explosion -> sparks, base 138
+            .int16(40)              // 24 proxRadius
+            .int16(39)              // 26 blastRadius
+            .uint16(0x0001)         // 28 flags: spinShots
+            .int16(0x0002)          // 30 guidedFlags: decoyedByAsteroids
+            .int16(1)               // 32 smoke set -> cicns 1008..1015
+            .int16(5)               // 34 decay
+            .int16(25)              // 36 trail count
+            .int16(26)              // 38 trail velocity
+            .int16(27)              // 40 trail lifeMin
+            .int16(31)              // 42 trail lifeMax
+            .uint32(0x00010203)     // 44 trail color
+            .int16(19)              // 48 beamLength
+            .int16(123)             // 50 beamWidth / spinRate
+            .int16(24)              // 52 coronaFalloff
+            .uint32(0x00151617)     // 54 beamColor
+            .uint32(0x00191A1B)     // 58 coronaColor
+            .int16(16)              // 62 subCount
+            .int16(217)             // 64 subID
+            .int16(-18)             // 66 subTheta
+            .int16(19)              // 68 subLimit
+            .int16(41)              // 70 proxSafety
+            .uint16(0x0000)         // 72 flags2
+            .int16(20)              // 74 ionization
+            .int16(32)              // 76 hit count
+            .int16(34)              // 78 hit life
+            .int16(33)              // 80 hit velocity
+            .uint32(0x00232425)     // 82 hit color
+            .int16(4)               // 86 recoil
+            .int16(1)               // 88 exitType -> turret
+            .int16(14)              // 90 burstCount
+            .int16(15)              // 92 burstReload
+            .int16(43)              // 94 jam infrared
+            .int16(44)              // 96 jam radar
+            .int16(45)              // 98 jam ethericWake
+            .int16(46)              // 100 jam gravametric
+            .uint16(0x0002)         // 102 flags3: translucent
+            .int16(42)              // 104 durability
+            .int16(9)               // 106 turnRate (guidedTurn)
+            .int16(13)              // 108 maxAmmo
+            .int16(28)              // 110 lightningDensity
+            .int16(29)              // 112 lightningAmplitude
+            .uint32(0x00151617)     // 114 ionizeColor
+            .skip(16);              // 118 unused
+        return b;
+    }
+
+    it("builds a full-size resource matching Nova's data", () => {
+        // Every wëap in Nova's own data (and every plug-in checked) is 134 bytes.
+        expect(buildWeap().byteLength).toBe(134);
+    });
+
+    it("parses the extended trailing fields at the correct offsets", () => {
+        const w = new WeapResource(buildWeap().resource("wëap", 128), idSpace);
+        // These live past offset 100, well into the post-header region.
+        expect(w.durability).toEqual(42);
+        expect(w.turnRate).toEqual(9);
+        expect(w.maxAmmo).toEqual(13);
+        expect(w.lightningDensity).toEqual(28);
+        expect(w.lightningAmplitude).toEqual(29);
+        expect(w.ionizeColor).toEqual(0xFF151617);
+    });
+
+    it("treats an unknown guidance type as unguided with a warning", () => {
+        // Guidance 2 is marked "(unused)" in the Bible but appears in some
+        // community plug-ins.
+        const dv = buildWeap().dataView();
+        dv.setInt16(8, 2);
+        const resource = new Resource("wëap", 200, "Weird", dv);
+        const warnSpy = spyOn(console, "warn");
+        const w = new WeapResource(resource, idSpace);
+        expect(w.guidance).toEqual("unguided");
+        expect(warnSpy).toHaveBeenCalled();
+    });
+
+    it("defaults gracefully when the resource is truncated", () => {
+        // A resource cut off at offset 40 must not throw; missing trailing
+        // fields fall back to their defaults.
+        const resource = buildWeap().truncate(40).resource("wëap", 128);
+        const w = new WeapResource(resource, idSpace);
+        expect(w.reload).toEqual(16);
+        expect(w.guidance).toEqual("guided");
+        // Fields past the cut default to 0 / null.
+        expect(w.beamLength).toEqual(0);
+        expect(w.maxAmmo).toEqual(0);
+        expect(w.submunition).toBeNull();
+        expect(w.recoil).toEqual(0);
     });
 });

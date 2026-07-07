@@ -3,6 +3,7 @@ import { readResourceFork, ResourceMap } from "resource_fork";
 import { SpinResource } from "../../src/resource_parsers/spin_resource.js";
 import { defaultIDSpace } from "./default_id_space.js";
 import { NovaResourceType } from "../../src/resource_parsers/resource_holder_base.js";
+import { ResourceBuilder } from "./resource_builder.js";
 
 import { resolveFixture } from "../../test/fixtures.js";
 
@@ -30,6 +31,24 @@ describe("SpinResource", () => {
     it("should parse spriteID", () => {
         expect(explosion.spriteID).toEqual(4024);
         expect(blaster.spriteID).toEqual(200);
+    });
+
+    it("should parse maskID", () => {
+        expect(explosion.maskID).toEqual(4025);
+        expect(blaster.maskID).toEqual(201);
+    });
+
+    it("classifies a sprite by its reserved spriteID range", () => {
+        // The heuristic keys off the spriteID field (the rlëD/PICT id), not
+        // the spïn resource id; ids outside the reserved ranges are "Unknown".
+        const b = new ResourceBuilder()
+            .int16(450)     // spriteID in the explosion range (400-463)
+            .int16(-1)      // maskID
+            .int16(64).int16(64)    // spriteSize
+            .int16(6).int16(6);     // spriteTiles
+        const s = new SpinResource(b.resource("spïn", 200), idSpace);
+        expect(s.usedFor).toEqual("Explosion");
+        expect(explosion.usedFor).toEqual("Unknown");
     });
 
     it("should parse spriteSize", () => {

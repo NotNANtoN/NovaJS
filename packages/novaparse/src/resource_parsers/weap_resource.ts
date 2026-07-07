@@ -1,6 +1,7 @@
 import { Resource } from "resource_fork";
 import { NovaResources } from "./resource_holder_base.js";
 import { BaseResource } from "./nova_resource_base.js";
+import { Reader } from "./reader.js";
 import { ParticleConfig, ExitType, FireGroup, GuidanceType } from "novadatainterface/weapon_data";
 
 type BlindSpots = {
@@ -25,20 +26,44 @@ type Jam = {
     gravametric: number
 }
 
+/**
+ * A weapon.
+ *
+ * Field layout follows ResForge's wëap template. The record is 134 bytes;
+ * everything Nova's own data uses fits within that. The template is a keyed
+ * union (KEYB on Weapon Type at offset 8): beam, projectile, homing and
+ * carried-ship weapons reinterpret the bytes from offset 10 onwards. This
+ * parser reads the superset of those layouts by absolute meaning, matching the
+ * Beam/Projectile keyed variants, which together cover every field. Documented
+ * in the EVN Bible pp. 65-70.
+ *
+ * The final 16 bytes (offsets 118-133) are Unused in the template; some
+ * community plug-ins carry longer records, but no field lives past 118.
+ */
 class WeapResource extends BaseResource {
+    /** Frames to reload; 30 = one shot/sec. */
     reload: number;
+    /**
+     * Frames a shot lives before petering out (EVN Bible "Count"); for beams,
+     * frames the beam stays onscreen.
+     */
     duration: number;
     armorDamage: number;
     shieldDamage: number;
     guidanceN: number;
     guidance: GuidanceType;
+    /** Shot speed; 100 = 1 pixel per frame. */
     speed: number;
     ammoType: number;
+    /** spïn id (3000+), or null if none. */
     graphic: number | null;
+    /** Inaccuracy in degrees (always >= 0; negatives mean fixed-angle). */
     accuracy: number;
     firesAtFixedAngle: boolean;
+    /** snd id (200+), or null if silent. */
     sound: number | null;
     impact: number;
+    /** bööm id (128+), or null; sparks (raw 1000+) are folded out. */
     explosion: number | null;
     explosion128sparks: boolean;
     proxRadius: number;
@@ -66,11 +91,16 @@ class WeapResource extends BaseResource {
     cantFireWhileIonized: boolean;
     loseLockIfNotAhead: boolean;
     attackParentIfJammed: boolean;
+    /** The eight cicn ids of the smoke set, or null if none. */
     cicnSmoke: number[] | null;
     decay: number;
     trailParticles: ParticleConfig;
     beamLength: number;
     beamWidth: number;
+    /**
+     * For spinning sprite weapons, frames between animation frames. Shares the
+     * offset with beamWidth (the template's dual-purpose field).
+     */
     spinRate: number;
     coronaFalloff: number;
     beamColor: number;
@@ -110,23 +140,37 @@ class WeapResource extends BaseResource {
     firesFromClosestToTarget: boolean;
     exclusive: boolean;
     durability: number;
+    /** Guided-weapon turn rate (guidedTurn); ignored for other types. */
     turnRate: number;
     maxAmmo: number;
     ionizeColor: number;
-    count: number;
 
     constructor(resource: Resource, idSpace: NovaResources) {
         super(resource, idSpace);
-        var d = this.data;
+        const r = new Reader(this.data);
 
-        this.reload = d.getInt16(0);
-        this.duration = d.getInt16(2);
-        this.armorDamage = d.getInt16(4);
-        this.shieldDamage = d.getInt16(6);
+        // Nova stores colours as 0xAARRGGBB but with the alpha byte inverted
+        // (0 = opaque). This undoes that so the top byte reads as normal alpha.
+        const color32 = (raw: number): number => {
+            const invertedAlpha = (raw >>> 24) & 0xff;
+            // newAlpha = 0xff - invertedAlpha; delta = (newAlpha - invertedAlpha)
+            // = 0xff - 2*invertedAlpha, applied to the top byte.
+            const aCorrection = 0xff000000 - invertedAlpha * 0x02000000;
+            return raw + aCorrection;
+        };
 
-        var fireGroup: FireGroup | null = null;
+        const maybeNull = (n: number, add: number): number | null =>
+            n === -1 ? null : n + add;
 
-        this.guidanceN = d.getInt16(8);
+        this.reload = r.int16();          // 0
+        this.duration = r.int16();        // 2
+        this.armorDamage = r.int16();     // 4
+        this.shieldDamage = r.int16();    // 6
+
+        // Guidance / weapon type (offset 8). Point-defense variants also force
+        // the fire group.
+        let fireGroup: FireGroup | null = null;
+        this.guidanceN = r.int16();
         switch (this.guidanceN) {
             case -1:
                 this.guidance = 'unguided';
@@ -178,79 +222,58 @@ class WeapResource extends BaseResource {
                 this.guidance = 'unguided';
         }
 
+        this.speed = r.int16();           // 10
+        this.ammoType = r.int16();        // 12
+        this.graphic = maybeNull(r.int16(), 3000); // 14
 
-        var maybeNull = function(n: number, a: number): number | null {
-            if (n == -1)
-                return null;
-            return n + a;
-        };
-
-        this.speed = d.getInt16(10);
-
-        this.ammoType = d.getInt16(12);
-
-
-        this.graphic = maybeNull(d.getInt16(14), 3000);
-
-        this.accuracy = d.getInt16(16);
+        this.accuracy = r.int16();        // 16
         this.firesAtFixedAngle = this.accuracy < 0;
         this.accuracy = Math.abs(this.accuracy);
 
-        this.sound = maybeNull(d.getInt16(18), 200);
+        this.sound = maybeNull(r.int16(), 200); // 18
+        this.impact = r.int16();          // 20
 
-        this.impact = d.getInt16(20);
-
-        this.explosion = maybeNull(d.getInt16(22), 128);
+        // Explosion (offset 22). Raw 1000-1063 means "explosion + sparks":
+        // maybeNull adds 128, so raw sparks land at 1128+, which we detect and
+        // fold back down to the base bööm id.
+        this.explosion = maybeNull(r.int16(), 128);
         if (this.explosion !== null) {
             this.explosion128sparks = this.explosion >= 1128;
             if (this.explosion >= 1128) {
                 this.explosion -= 1000;
             }
-        }
-        else {
+        } else {
             this.explosion128sparks = false;
         }
 
-        this.proxRadius = d.getInt16(24);
+        this.proxRadius = r.int16();      // 24
+        this.blastRadius = r.int16();     // 26
 
-        this.blastRadius = d.getInt16(26);
-
-        this.flags = d.getUint16(28);
-        //flags
+        this.flags = r.uint16();          // 28
         this.spinShots = (this.flags & 0x1) > 0;
-
-        // May have already been set by GuidanceType
+        // fireGroup may already be set by a point-defense guidance type.
         if (!fireGroup) {
-            if (this.flags & 0x2) {
-                fireGroup = "secondary";
-            } else {
-                fireGroup = "primary";
-            }
+            fireGroup = (this.flags & 0x2) ? "secondary" : "primary";
         }
         this.fireGroup = fireGroup;
-
         this.startSpinningOnFirstFrame = (this.flags & 0x4) > 0;
         this.dontFireAtFastShips = (this.flags & 0x8) > 0;
         this.loopSound = (this.flags & 0x10) > 0;
         this.passThroughShields = (this.flags & 0x20) > 0;
         this.fireSimultaneously = (this.flags & 0x40) > 0;
-        this.vulnerableToPD = (this.flags & 0x80) == 0;//NB: inverted
-        this.hitsFiringShip = (this.flags & 0x100) == 0;//NB: inverted
+        this.vulnerableToPD = (this.flags & 0x80) == 0; // NB: inverted
+        this.hitsFiringShip = (this.flags & 0x100) == 0; // NB: inverted
         this.smallCicnSmoke = (this.flags & 0x200) > 0;
         this.bigCicnSmoke = (this.flags & 0x400) > 0;
         this.persistentCicnSmoke = (this.flags & 0x800) > 0;
-
         this.turretBlindSpots = {
             front: (this.flags & 0x1000) > 0,
             side: (this.flags & 0x2000) > 0,
             back: (this.flags & 0x4000) > 0
         };
-
         this.flak = (this.flags & 0x8000) > 0;
-        //endflags
 
-        this.guidedFlags = d.getInt16(30);
-        //seeker
+        this.guidedFlags = r.int16();     // 30
         this.passOverAsteroids = (this.guidedFlags & 0x1) > 0;
         this.decoyedByAsteroids = (this.guidedFlags & 0x2) > 0;
         this.confusedByInterference = (this.guidedFlags & 0x8) > 0;
@@ -258,79 +281,64 @@ class WeapResource extends BaseResource {
         this.cantFireWhileIonized = (this.guidedFlags & 0x20) > 0;
         this.loseLockIfNotAhead = (this.guidedFlags & 0x4000) > 0;
         this.attackParentIfJammed = (this.guidedFlags & 0x8000) > 0;
-        //endseeker
 
-
-        var doCicnSmoke = maybeNull(d.getInt16(32) * 8, 1000);
-        if (doCicnSmoke !== null) {
-            var tmp: Array<number> = [];
-            for (var i = doCicnSmoke; i < doCicnSmoke + 8; i++) {
-                tmp.push(i);
+        // Smoke set (offset 32): a cicn index; each set is 8 consecutive cicns
+        // starting at 1000. -1 means none.
+        const smokeBase = maybeNull(r.int16() * 8, 1000);
+        if (smokeBase !== null) {
+            this.cicnSmoke = [];
+            for (let i = smokeBase; i < smokeBase + 8; i++) {
+                this.cicnSmoke.push(i);
             }
-            this.cicnSmoke = tmp;
-        }
-        else {
+        } else {
             this.cicnSmoke = null;
         }
 
+        this.decay = r.int16();           // 34
 
-        this.decay = d.getInt16(34);
-
-        var getColor32 = function(n: number) {
-            /*	c =+ (255-d.getInt8(n))<<24;//a inverted 'cause nova has it as 0
-            c =+ d.getInt8(n+1)<<16;//r
-            c =+ d.getInt8(n+2)<<8;//g
-            c =+ d.getInt8(n+3);//b*/
-            //times 2 bc newa - a = max - 2a when newa = max - a
-            var aCorrection = 0xff000000 - d.getInt8(n) * 0x02000000;
-            return d.getUint32(n) + aCorrection; // fix alpha
-        }
-
+        // Trail particles (offsets 36-47).
         this.trailParticles = {
-            count: d.getInt16(36),
-            velocity: d.getInt16(38),
-            lifeMin: d.getInt16(40),
-            lifeMax: d.getInt16(42),
-            color: getColor32(44) % 0xff000000,
+            count: r.int16(),             // 36
+            velocity: r.int16(),          // 38
+            lifeMin: r.int16(),           // 40
+            lifeMax: r.int16(),           // 42
+            color: color32(r.uint32()) % 0xff000000, // 44
         };
 
-        this.beamLength = d.getInt16(48);
-        this.beamWidth = d.getInt16(50);
-        this.spinRate = d.getInt16(50);
-        this.coronaFalloff = d.getInt16(52);
-        this.beamColor = getColor32(54);
-        this.coronaColor = getColor32(58);
-        this.lightningDensity = d.getInt16(110);
-        this.lightningAmplitude = d.getInt16(112);
+        this.beamLength = r.int16();      // 48
+        // Offset 50 is Beam Width for beams and Animation Delay (frame time)
+        // for spinning sprite weapons; both read the same two bytes.
+        this.beamWidth = this.spinRate = r.int16(); // 50
+        this.coronaFalloff = r.int16();   // 52
+        this.beamColor = color32(r.uint32());  // 54
+        this.coronaColor = color32(r.uint32()); // 58
 
+        // Submunition (offsets 62-71).
+        const subCount = r.int16();       // 62
+        const subID = r.int16();          // 64
+        const subTheta = r.int16();       // 66
+        const subLimit = r.int16();       // 68
+        this.proxSafety = r.int16();      // 70
 
-        this.proxSafety = d.getInt16(70);
-
-        this.flags2 = d.getInt16(72);
-        //flags2
-        this.spinBeforeProxSafety = (this.flags2 & 0x1) == 0;// NB: inverted
+        this.flags2 = r.int16();          // 72
+        this.spinBeforeProxSafety = (this.flags2 & 0x1) == 0; // NB: inverted
         this.spinStopOnLastFrame = (this.flags2 & 0x2) > 0;
         this.proxIgnoreAsteroids = (this.flags2 & 0x4) > 0;
         this.proxHitAll = (this.flags2 & 0x8) > 0 || (this.guidance != "guided");
 
         this.submunition = null;
-        let subID = d.getInt16(64);
-        let subCount = d.getInt16(62);
         if (subID >= 128 && subCount > 0) {
             this.submunition = {
                 count: subCount,
                 id: subID,
-                theta: d.getInt16(66),
-                limit: d.getInt16(68),
+                theta: subTheta,
+                limit: subLimit,
                 fireAtNearest: (this.flags2 & 0x10) > 0,
-                subIfExpire: (this.flags2 & 0x20) == 0// NB: inverted
+                subIfExpire: (this.flags2 & 0x20) == 0 // NB: inverted
             };
         }
 
-
-
-
-        this.showAmmo = (this.flags2 & 0x40) == 0;// NB: inverted
+        this.showAmmo = (this.flags2 & 0x40) == 0; // NB: inverted
         this.fireOnlyIfKeyCarried = (this.flags2 & 0x80) > 0;
         this.npcCantUse = (this.flags2 & 0x100) > 0;
         this.useFiringAnimation = (this.flags2 & 0x200) > 0;
@@ -340,30 +348,30 @@ class WeapResource extends BaseResource {
         this.beamUnderShip = (this.flags2 & 0x2000) > 0;
         this.fireWhileCloaked = (this.flags2 & 0x4000) > 0;
         this.asteroidMiner = (this.flags2 & 0x8000) > 0;
-        //endflags2
 
-        this.ionization = d.getInt16(74);
+        this.ionization = r.int16();      // 74
 
-        var hitParticleLife = d.getInt16(78);
+        // Hit particles (offsets 76-85). A single "duration" fills both min
+        // and max life.
+        const hitPartCount = r.int16();   // 76
+        const hitPartLife = r.int16();    // 78
+        const hitPartVel = r.int16();     // 80
+        const hitPartColor = color32(r.uint32()) % 0xff000000; // 82
         this.hitParticles = {
-            count: d.getInt16(76),
-            lifeMin: hitParticleLife,
-            lifeMax: hitParticleLife,
-            velocity: d.getInt16(80),
-            color: getColor32(82) % 0xff000000,
-
+            count: hitPartCount,
+            lifeMin: hitPartLife,
+            lifeMax: hitPartLife,
+            velocity: hitPartVel,
+            color: hitPartColor,
         };
 
-        this.recoil = d.getInt16(86);
-        if (this.recoil == -1)
+        this.recoil = r.int16();          // 86
+        if (this.recoil == -1) {
             this.recoil = 0;
+        }
 
-        this.exitTypeN = d.getInt16(88);
-
+        this.exitTypeN = r.int16();       // 88
         switch (this.exitTypeN) {
-            case -1:
-                this.exitType = "center";
-                break;
             case 0:
                 this.exitType = "gun";
                 break;
@@ -376,48 +384,43 @@ class WeapResource extends BaseResource {
             case 3:
                 this.exitType = "beam";
                 break;
+            case -1:
             default:
-                this.exitType = "center"
+                this.exitType = "center";
                 break;
         }
 
-
-        this.burstCount = d.getInt16(90);
-
-        this.burstReload = d.getInt16(92);
+        this.burstCount = r.int16();      // 90
+        this.burstReload = r.int16();     // 92
 
         this.jam = {
-            infrared: d.getInt16(94),
-            radar: d.getInt16(96),
-            ethericWake: d.getInt16(98),
-            gravametric: d.getInt16(100)
+            infrared: r.int16(),          // 94
+            radar: r.int16(),             // 96
+            ethericWake: r.int16(),       // 98
+            gravametric: r.int16()        // 100
         };
-        this.jamVuln = [this.jam.infrared, this.jam.radar, this.jam.ethericWake, this.jam.gravametric];
+        this.jamVuln = [this.jam.infrared, this.jam.radar,
+                        this.jam.ethericWake, this.jam.gravametric];
 
-
-        this.flags3 = d.getInt16(102);
-        //flags3
+        this.flags3 = r.int16();          // 102
         this.oneAmmoPerBurst = (this.flags3 & 0x1) > 0;
         this.translucent = (this.flags3 & 0x2) > 0;
         this.cantFireUntilShotExpires = (this.flags3 & 0x4) > 0;
         this.firesFromClosestToTarget = (this.flags3 & 0x10) > 0;
         this.exclusive = (this.flags3 & 0x20) > 0;
-        //endflags3
 
-        this.durability = d.getInt16(104);
+        // Offsets 104-107 are a 4-byte "Durability" field in the template,
+        // stored as two int16s: durability then guidedTurn (turnRate).
+        this.durability = r.int16();      // 104
+        this.turnRate = r.int16();        // 106
 
-        this.turnRate = d.getInt16(106);
+        this.maxAmmo = r.int16();         // 108
+        this.lightningDensity = r.int16();   // 110
+        this.lightningAmplitude = r.int16(); // 112
+        this.ionizeColor = color32(r.uint32()); // 114
 
-        this.maxAmmo = d.getInt16(108);
-
-        //lightning density and amplitude take 110 and 112
-
-        this.ionizeColor = getColor32(114);
-
-        this.count = d.getInt16(118);
-
+        // Offsets 118-133 are Unused in the template.
     }
 }
 
 export { WeapResource }
-

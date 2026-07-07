@@ -1,204 +1,209 @@
-import { BaseResource } from "./nova_resource_base.js";
-import { NovaResources } from "./resource_holder_base.js";
 import { Resource } from "resource_fork";
+import { BaseResource } from "./nova_resource_base.js";
+import { Reader } from "./reader.js";
+import { NovaResources } from "./resource_holder_base.js";
 
-type OutfitFunctions = Array<[string, number | boolean]>;
+/** A single [name, value] modification an outfit performs. */
+type OutfitFunction = [string, number | boolean];
+type OutfitFunctions = Array<OutfitFunction>;
+
+/**
+ * Maps a ModType to its `[name, value]` function tuple, or null if the type
+ * is unused/ignored (ModTypes 10 and 26) or unknown. Types documented in the
+ * EVN Bible pp. 43-46 as the ModType/ModVal pairs. Types marked with a
+ * boolean value ignore ModVal; the rest carry the ModVal as their value.
+ */
+function modFunction(modType: number, modVal: number): OutfitFunction | null {
+    switch (modType) {
+        case 1: return ["weapon", modVal];
+        case 2: return ["freeCargo", modVal];
+        case 3: return ["ammunition", modVal];
+        case 4: return ["shield", modVal];
+        case 5: return ["shieldRecharge", modVal];
+        case 6: return ["armor", modVal];
+        case 7: return ["acceleration", modVal];
+        case 8: return ["speed", modVal];
+        case 9: return ["turnRate", modVal];
+        case 10: return null; // unused
+        case 11: return ["escape pod", true];
+        case 12: return ["energy", modVal];
+        case 13: return ["density scanner", true];
+        case 14: return ["IFF", true];
+        case 15: return ["afterburner", modVal];
+        case 16: return ["map", modVal];
+        // Cloaking device. TODO: decode the cloak flags (see the "oütf.ModTypes"
+        // sub-template) into the various cloaking device types.
+        case 17: return ["cloak", modVal];
+        case 18: return ["energyRecharge", modVal];
+        case 19: return ["auto refuel", true];
+        case 20: return ["auto eject", true];
+        case 21: return ["clean legal record", modVal];
+        case 22: return ["hyperspace speed mod", modVal];
+        case 23: return ["hyperspace dist mod", modVal];
+        case 24: return ["interference mod", modVal];
+        case 25: return ["marines", modVal];
+        case 26: return null; // unused
+        case 27: return ["increase maximum", modVal];
+        case 28: return ["murk modifier", modVal];
+        case 29: return ["armorRecharge", modVal];
+        case 30: return ["cloak scanner", modVal];
+        case 31: return ["mining scoop", true];
+        case 32: return ["multi-jump", modVal];
+        case 33: return ["jam 1", modVal];
+        case 34: return ["jam 2", modVal];
+        case 35: return ["jam 3", modVal];
+        case 36: return ["jam 4", modVal];
+        case 37: return ["fast jump", true];
+        case 38: return ["inertial damper", true];
+        case 39: return ["deionize", modVal];
+        case 40: return ["ionization", modVal];
+        case 41: return ["gravity resistance", true];
+        case 42: return ["deadly stellar resistance", true];
+        case 43: return ["paint", modVal];
+        case 44: return ["reinforcement inhibitor", modVal];
+        case 45: return ["maxGuns", modVal];
+        case 46: return ["maxTurrets", modVal];
+        case 47: return ["bomb", modVal];
+        case 48: return ["iff scrambler", true];
+        case 49: return ["repair system", true];
+        case 50: return ["nonlethal bomb", true];
+        default: return null;
+    }
+}
+
+/**
+ * An outfit item (something you can buy from the "Outfit Ship" dialog).
+ *
+ * Inline byte layout (1028 bytes, matching Nova's own oütf data exactly),
+ * documented in the EVN Bible pp. 43-46.
+ *
+ * The ResForge oütf template reports a total of only 1018 bytes because it
+ * wraps the three secondary ModType/ModVal pairs in an FCNT/LSTC list that the
+ * offset generator does not expand. In the real data the list is stored
+ * INLINE: an outfit has four ModType/ModVal pairs (a primary plus three
+ * secondaries), each a ModType word followed by a single ModVal word. The
+ * "oütf.ModTypes" sub-template is only ResForge's UI for editing one pair; each
+ * of its keyed groups is a single 2-byte word, so every pair is exactly 4
+ * bytes. The resolved layout is:
+ *
+ *     0    DispWeight        (2B)
+ *     2    Mass              (2B)
+ *     4    TechLevel         (2B)
+ *     6    ModType 1         (2B)   primary function
+ *     8    ModVal  1         (2B)
+ *     10   Max               (2B)
+ *     12   Flags             (2B)
+ *     14   Cost              (4B, int32)
+ *     18   ModType 2         (2B)   secondary function
+ *     20   ModVal  2         (2B)
+ *     22   ModType 3         (2B)   secondary function
+ *     24   ModVal  3         (2B)
+ *     26   ModType 4         (2B)   secondary function
+ *     28   ModVal  4         (2B)
+ *     30   Contribute        (8B, 64-bit flag set)
+ *     38   Require           (8B, 64-bit flag set)
+ *     46   Availability NCB  (255B)
+ *     301  OnPurchase NCB    (255B)
+ *     556  OnSell NCB        (255B)
+ *     811  Outfitter Name    (64B)
+ *     875  LCName            (64B)
+ *     939  LCPlural          (65B)
+ *     1004 Item Class        (2B)
+ *     1006 Scan Mask         (2B)
+ *     1008 Available Random  (2B)
+ *     1010 Require Bits ...  (2B)
+ *     1012 Unused            (16B)
+ *     = 1028 total
+ */
 class OutfResource extends BaseResource {
+    /** Higher weights are shown closer to the top of the outfit dialog. */
+    displayWeight: number;
+    /** Mass in tons (0 = no appreciable mass). */
+    mass: number;
+    techLevel: number;
+    max: number;
+    flags: number;
+    cost: number;
+    /**
+     * The four ModType/ModVal pairs decoded into `[name, value]` tuples, in
+     * order, with unused/ignored/empty (ModType < 1) pairs dropped. See the
+     * ModType table in the EVN Bible pp. 43-46.
+     */
+    functions: OutfitFunctions;
+    /** 64-bit flag set contributed while owning this outfit. */
+    contribute: bigint;
+    /** 64-bit flags and'ed against the player's Contribute bits to buy. */
+    require: bigint;
+    /** NCB test gating outfitter availability. */
+    availability: string;
+    /** NCB set evaluated on purchase. */
+    onPurchase: string;
+    /** NCB set evaluated on sale. */
+    onSell: string;
+    /** Name shown in the outfit dialog menu. */
+    outfitterName: string;
+    /** Lower-case singular name. */
+    lcName: string;
+    /** Lower-case plural name. */
+    lcPlural: string;
+    /** Classification used by përs ships; 0/-1 = unused. */
+    itemClass: number;
+    /** Illegal-outfit mask matched against a gövt's ScanMask; 0 = unused. */
+    scanMask: number;
+    /** Percent chance (1-100) the outfit is on sale on a given day. */
+    availableRandom: number;
+    /** Which stellars the Require bits apply to; -1 = all outfit shops. */
+    requireBitsApplyTo: number;
+
     constructor(resource: Resource, idSpace: NovaResources) {
         super(resource, idSpace);
+        const r = new Reader(this.data);
+
+        this.displayWeight = r.int16();
+        this.mass = r.int16();
+        this.techLevel = r.int16();
+
+        // Primary ModType/ModVal pair.
+        const modTypes = [r.int16(-1)];
+        const modVals = [r.int16()];
+
+        this.max = r.int16();
+        this.flags = r.uint16();
+        this.cost = r.int32();
+
+        // Three secondary ModType/ModVal pairs, stored inline after Cost.
+        for (let i = 0; i < 3; i++) {
+            modTypes.push(r.int16(-1));
+            modVals.push(r.int16());
+        }
+        this.functions = modTypes.flatMap((modType, i) => {
+            const fn = modFunction(modType, modVals[i]);
+            return fn === null ? [] : [fn];
+        });
+
+        this.contribute = r.uint64();
+        this.require = r.uint64();
+
+        this.availability = r.string(0xff);
+        this.onPurchase = r.string(0xff);
+        this.onSell = r.string(0xff);
+
+        this.outfitterName = r.string(0x40);
+        this.lcName = r.string(0x40);
+        this.lcPlural = r.string(0x41);
+
+        this.itemClass = r.int16();
+        this.scanMask = r.uint16();
+        this.availableRandom = r.int16();
+        this.requireBitsApplyTo = r.int16(-1);
     }
-    get displayWeight(): number {
-        return this.data.getInt16(0);
-    }
-    get mass(): number {
-        return this.data.getInt16(2);
-    }
-    get techLevel(): number {
-        return this.data.getInt16(4);
-    }
-    get max(): number {
-        return this.data.getInt16(10);
-    }
+
     get pictID(): number {
         return this.id - 128 + 6000;
     }
     get descID(): number {
         return this.id - 128 + 3000;
     }
-    get cost(): number {
-        return this.data.getInt32(14);
-    }
-    get functions(): OutfitFunctions {
-        var functions: OutfitFunctions = [];
-        var modPositions = [6, 18, 22, 26];
-
-        for (var i in modPositions) {
-            let pos = modPositions[i];
-            let modType = this.data.getInt16(pos);
-            let modVal = this.data.getInt16(pos + 2);
-
-            switch (modType) {
-                case 1:
-                    functions.push(["weapon", modVal]);
-                    break;
-                case 2:
-                    functions.push(["freeCargo", modVal]);
-                    break;
-                case 3:
-                    functions.push(["ammunition", modVal]);
-                    break;
-                case 4:
-                    functions.push(["shield", modVal]);
-                    break;
-                case 5:
-                    functions.push(["shieldRecharge", modVal]);
-                    break;
-                case 6:
-                    functions.push(["armor", modVal]);
-                    break;
-                case 7:
-                    functions.push(["acceleration", modVal]);
-                    break;
-                case 8:
-                    functions.push(["speed", modVal]);
-                    break;
-                case 9:
-                    functions.push(["turnRate", modVal]);
-                    break;
-                case 10:
-                    // unused
-                    break;
-                case 11:
-                    functions.push(["escape pod", true]);
-                    break;
-                case 12:
-                    functions.push(["energy", modVal]);
-                    break;
-                case 13:
-                    functions.push(["density scanner", true]);
-                    break;
-                case 14:
-                    functions.push(["IFF", true]);
-                    break;
-                case 15:
-                    functions.push(["afterburner", modVal]);
-                    break;
-                case 16:
-                    functions.push(["map", modVal]);
-                    break;
-                case 17:
-                    // This will need perhaps some more parsing. There are many different cloaking device types
-                    functions.push(["cloak", modVal]);
-                    break;
-                case 18:
-                    functions.push(["energyRecharge", modVal]);
-                    break;
-                case 19:
-                    functions.push(["auto refuel", true]);
-                    break;
-                case 20:
-                    functions.push(["auto eject", true]);
-                    break;
-                case 21:
-                    functions.push(["clean legal record", modVal]);
-                    break;
-                case 22:
-                    functions.push(["hyperspace speed mod", modVal]);
-                    break;
-                case 23:
-                    // distance from system center
-                    functions.push(["hyperspace dist mod", modVal]);
-                    break;
-                case 24:
-                    functions.push(["interference mod", modVal]);
-                    break;
-                case 25:
-                    functions.push(["marines", modVal]);
-                    break;
-                case 26:
-                    // unused
-                    break;
-                case 27:
-                    functions.push(["increase maximum", modVal]);
-                    break;
-                case 28:
-                    functions.push(["murk modifier", modVal]);
-                    break;
-                case 29:
-                    functions.push(["armorRecharge", modVal]);
-                    break;
-                case 30:
-                    functions.push(["cloak scanner", modVal]);
-                    break;
-                case 31:
-                    functions.push(["mining scoop", true]);
-                    break;
-                case 32:
-                    functions.push(["multi-jump", modVal]);
-                    break;
-                case 33:
-                    functions.push(["jam 1", modVal]);
-                    break;
-                case 34:
-                    functions.push(["jam 2", modVal]);
-                    break;
-                case 35:
-                    functions.push(["jam 3", modVal]);
-                    break;
-                case 36:
-                    functions.push(["jam 4", modVal]);
-                    break;
-                case 37:
-                    functions.push(["fast jump", true]);
-                    break;
-                case 38:
-                    functions.push(["inertial damper", true]);
-                    break;
-                case 39:
-                    functions.push(["deionize", modVal]);
-                    break;
-                case 40:
-                    // increase ionization capacity
-                    functions.push(["ionization", modVal]);
-                    break;
-                case 41:
-                    functions.push(["gravity resistance", true]);
-                    break;
-                case 42:
-                    functions.push(["deadly stellar resistance", true]);
-                    break;
-                case 43:
-                    functions.push(["paint", modVal]);
-                    break;
-                case 44:
-                    functions.push(["reinforcement inhibitor", modVal]);
-                    break;
-                case 45:
-                    functions.push(["maxGuns", modVal]);
-                    break;
-                case 46:
-                    functions.push(["maxTurrets", modVal]);
-                    break;
-                case 47:
-                    functions.push(["bomb", modVal]);
-                    break;
-                case 48:
-                    functions.push(["iff scrambler", true]);
-                    break;
-                case 49:
-                    functions.push(["repair system", true]);
-                    break;
-                case 50:
-                    functions.push(["nonlethal bomb", true]);
-                    break;
-                default:
-                    break;
-            }
-        }
-        return functions;
-    }
-
-
 }
 
 export { OutfResource };
