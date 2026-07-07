@@ -89,7 +89,7 @@ class BrowserSimulationBridgeHost implements BrowserSimulationBridgeWorkerApi {
     }
 
     async addEntity(uuid: string, entity: EncodedEntity) {
-        this.requireBridge().addEntity(uuid, entity);
+        await this.requireBridge().addEntity(uuid, entity);
     }
 
     async removeEntity(uuid: string) {

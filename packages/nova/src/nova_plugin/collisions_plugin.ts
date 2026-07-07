@@ -6,7 +6,7 @@ import { Vector } from "nova_ecs/datatypes/vector";
 import { Optional } from "nova_ecs/optional";
 import { Plugin } from "nova_ecs/plugin";
 import { MovementStateComponent, MovementSystem } from "nova_ecs/plugins/movement_plugin";
-import { ProvideAsync } from "nova_ecs/provide_async";
+import { ProvideFromCache } from './provide_from_cache.js';
 import { Query } from "nova_ecs/query";
 import { Resource } from "nova_ecs/resource";
 import { System } from "nova_ecs/system";
@@ -137,9 +137,15 @@ class MultiFrameHull extends Hull {
 export const HitboxHullComponent = new Component<Hull>('HitboxHullComponent');
 export const HurtboxHullComponent = new Component<Hull>('HurtboxHullComponent');
 
-export async function hullFromAnimation(animation: Animation, gameData: SimulationGameDataInterface) {
-    const spriteSheet = await gameData.data.SpriteSheet
-        .get(animation.images.baseImage.id);
+export function hullFromAnimation(animation: Animation, gameData: SimulationGameDataInterface) {
+    // Reads the pre-warmed cache (see entity_data_loader.ts). Returns
+    // undefined when the sprite sheet has not loaded yet, in which case
+    // getCached kicks off a background load and the provider retries.
+    const spriteSheet = gameData.data.SpriteSheet
+        .getCached(animation.images.baseImage.id);
+    if (!spriteSheet) {
+        return undefined;
+    }
 
     const hulls = spriteSheet.hulls.map(hull =>
         hull.map(convexHull => new SAT.Polygon(new SAT.Vector(),
@@ -149,7 +155,7 @@ export async function hullFromAnimation(animation: Animation, gameData: Simulati
     return new MultiFrameHull(hulls);
 }
 
-const HitboxHullProvider = ProvideAsync({
+const HitboxHullProvider = ProvideFromCache({
     name: "HitboxProvider",
     provided: HitboxHullComponent,
     args: [AnimationComponent, SimulationGameDataResource, CollisionVulnerabilityComponent] as const,

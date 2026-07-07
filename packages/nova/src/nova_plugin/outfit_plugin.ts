@@ -7,7 +7,7 @@ import { map } from 'nova_ecs/datatypes/map';
 import { Plugin } from 'nova_ecs/plugin';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
 import { MovementPhysics, MovementType } from 'nova_ecs/plugins/movement_plugin';
-import { ProvideAsync } from "nova_ecs/provide_async";
+import { ProvideFromCache } from './provide_from_cache.js';
 import { DefaultMap } from '../common/default_map.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { Stat } from './stat.js';
@@ -40,21 +40,22 @@ export function applyOutfitPhysics(basePhysics: ShipPhysics,
     });
 }
 
-const OutfitWeaponProvider = ProvideAsync({
+const OutfitWeaponProvider = ProvideFromCache({
     name: "OutfitWeaponProvider",
     provided: WeaponsStateComponent,
     update: [OutfitsStateComponent],
     args: [OutfitsStateComponent, SimulationGameDataResource] as const,
-    async factory(outfits, gameData) {
+    factory(outfits, gameData) {
         const weaponsState = new DefaultMap<string, WeaponState>(() => ({
             count: 0,
             firing: false,
         }));
 
         for (const [id, state] of outfits) {
-            const outfit = await gameData.data.Outfit.get(id);
+            const outfit = gameData.data.Outfit.getCached(id);
             if (!outfit) {
-                continue;
+                // Not loaded yet; retry next step.
+                return undefined;
             }
 
             if (outfit.weapons) {

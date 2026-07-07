@@ -4,11 +4,11 @@
  * diverge, and which entities differ.
  *
  * Run from packages/nova after `npm run build`:
- *   node dist/src/communication/determinism_check.js [npcCount] [steps]
+ *   node dist/src/communication/determinism_check.js [npcCount] [steps] [warmupSteps]
  *
- * With npcCount=0 (quiet world) this should report no divergence. With
- * NPCs, divergence is expected until seeded RNG and deterministic ids
- * land (rollback plan, Phase 1 items 4-5).
+ * Both quiet worlds and NPC combat should report no divergence: the
+ * sim runs on a fixed timestep with seeded randomness, deterministic
+ * entity ids, and no async data loading mid-simulation.
  */
 import { runDeterminismCheck } from "./determinism_harness.js";
 
@@ -17,7 +17,7 @@ const steps = Number(process.argv[3] ?? 240);
 
 async function main() {
     console.log(`npcs=${npcCount} steps=${steps}`);
-    const result = await runDeterminismCheck(npcCount, steps, 240, console.log);
+    const result = await runDeterminismCheck(npcCount, steps, Number(process.argv[4] ?? 0), console.log);
     if (result.divergedAtStep === undefined) {
         console.log(`DETERMINISTIC over ${result.stepsRun} steps`);
         process.exit(0);

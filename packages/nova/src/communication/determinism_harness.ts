@@ -10,6 +10,7 @@ import { Vector } from "nova_ecs/datatypes/vector";
 import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
 import { diffWorldHashes, hashWorld } from "nova_ecs/plugins/world_hash";
 import { World } from "nova_ecs/world";
+import { loadEntityGameData } from "../nova_plugin/entity_data_loader.js";
 import { makeNpc } from "../nova_plugin/npc_plugin.js";
 import { makeShip } from "../nova_plugin/make_ship.js";
 import { makeSystem } from "../nova_plugin/make_system.js";
@@ -26,7 +27,7 @@ export interface DeterminismCheckResult {
 async function settle(world: World, steps: number) {
     for (let i = 0; i < steps; i++) {
         world.step();
-        // Let AsyncSystem / ProvideAsync promises resolve between steps.
+        // Yield between batches of steps (mirrors real stepping).
         await new Promise(resolve => setImmediate(resolve));
     }
 }
@@ -47,12 +48,15 @@ export async function makeDeterminismWorld(npcCount: number): Promise<World> {
     const shipData = await gameData.data.Ship.get(shipIds[0]!);
     const ship = makeShip(shipData);
     setDeterministicMovement(world, ship, 0);
+    // Stage, load, then insert, like the simulation bridge does.
+    await loadEntityGameData(world, ship);
     world.entities.set('determinism ship', ship);
 
     for (let i = 0; i < npcCount; i++) {
         const npcData = await gameData.data.Ship.get(shipIds[i % shipIds.length]!);
         const npc = makeNpc(npcData);
         setDeterministicMovement(world, npc, i + 1);
+        await loadEntityGameData(world, npc);
         world.entities.set(`determinism npc ${i}`, npc);
     }
     return world;
@@ -102,13 +106,13 @@ export async function compareWorlds(worldA: World, worldB: World, steps: number,
     return { differences: [], stepsRun: steps };
 }
 
-/** Builds, warms up, and compares two identical worlds. */
+/**
+ * Builds and compares two identical worlds. Since entities are staged
+ * (fully loaded before insertion), worlds are deterministic from tick 0
+ * and no warmup is needed; warmupSteps remains for stress variations.
+ */
 export async function runDeterminismCheck(npcCount: number, steps: number,
-    warmupSteps = 240, log?: (message: string) => void): Promise<DeterminismCheckResult> {
-    // Warm the shared game data caches before building either world so
-    // async data loading resolves on the same schedule in both.
-    const throwaway = await makeDeterminismWorld(npcCount);
-    await settle(throwaway, warmupSteps);
+    warmupSteps = 0, log?: (message: string) => void): Promise<DeterminismCheckResult> {
 
     const worldA = await makeDeterminismWorld(npcCount);
     await settle(worldA, warmupSteps);

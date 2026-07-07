@@ -8,7 +8,7 @@ import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
 import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import { passthroughType, SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
 import { Provide } from 'nova_ecs/provide';
-import { ProvideAsync } from "nova_ecs/provide_async";
+import { ProvideFromCache } from './provide_from_cache.js';
 import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
 import { registerSimulationBridgeEvent } from '../communication/simulation_bridge_events.js';
@@ -28,12 +28,12 @@ export const PlanetComponent = new Component<PlanetType>('Planet');
 
 export const PlanetDataComponent = new Component<PlanetData>('PlanetData');
 
-export const PlanetDataProvider = ProvideAsync({
+export const PlanetDataProvider = ProvideFromCache({
     name: "PlanetDataProvider",
     provided: PlanetDataComponent,
     args: [SimulationGameDataResource, PlanetComponent] as const,
-    factory: async (gameData, planet) => {
-        return await gameData.data.Planet.get(planet.id);
+    factory: (gameData, planet) => {
+        return gameData.data.Planet.getCached(planet.id);
     }
 });
 

@@ -1,4 +1,5 @@
 import * as t from 'io-ts';
+import { OutfitData } from "novadatainterface/outfit_data";
 import { ShipData, ShipPhysics } from "novadatainterface/ship_data";
 import { Component } from 'nova_ecs/component';
 import { Angle } from 'nova_ecs/datatypes/angle';
@@ -11,7 +12,7 @@ import { MovementPhysics, MovementPhysicsComponent, MovementStateComponent, Move
 import { passthroughType, SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
 import { Provide } from 'nova_ecs/provide';
 import { RandomResource } from 'nova_ecs/plugins/random_plugin';
-import { ProvideAsync } from "nova_ecs/provide_async";
+import { ProvideFromCache } from './provide_from_cache.js';
 import { AnimationComponent } from './animation_plugin.js';
 import { CollisionVulnerabilityComponent } from './collision_interaction.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
@@ -29,13 +30,13 @@ export const ShipComponent = new Component<ShipType>('Ship');
 
 export const ShipDataComponent = new Component<ShipData>('ShipData');
 
-export const ShipDataProvider = ProvideAsync({
+export const ShipDataProvider = ProvideFromCache({
     name: "ShipDataProvider",
     provided: ShipDataComponent,
     args: [SimulationGameDataResource, ShipComponent] as const,
     update: [ShipComponent],
-    factory: async (gameData, ship) => {
-        return await gameData.data.Ship.get(ship.id);
+    factory: (gameData, ship) => {
+        return gameData.data.Ship.getCached(ship.id);
     }
 });
 
@@ -54,16 +55,21 @@ export const ShipOutfitsProvider = Provide({
 
 export const ShipPhysicsComponent = new Component<ShipPhysics>('ShipPhysicsComponent');
 
-export const ShipPhysicsProvider = ProvideAsync({
+export const ShipPhysicsProvider = ProvideFromCache({
     name: "ShipPhysicsProvider",
     provided: ShipPhysicsComponent,
     args: [ShipDataComponent, SimulationGameDataResource, OutfitsStateComponent] as const,
     update: [ShipDataComponent, OutfitsStateComponent],
-    async factory(shipData, gameData, outfitsState) {
-        const outfits = await Promise.all(
-            [...outfitsState].map(async ([id, { count }]) =>
-                [await gameData.data.Outfit.get(id), count] as const
-            ));
+    factory(shipData, gameData, outfitsState) {
+        const outfits: (readonly [OutfitData, number])[] = [];
+        for (const [id, { count }] of outfitsState) {
+            const outfit = gameData.data.Outfit.getCached(id);
+            if (!outfit) {
+                // Not loaded yet; retry next step.
+                return undefined;
+            }
+            outfits.push([outfit, count] as const);
+        }
         return applyOutfitPhysics(shipData.physics, outfits);
     }
 });

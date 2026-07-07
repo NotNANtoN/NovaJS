@@ -56,10 +56,10 @@ describe('SimulationBridge', () => {
         client = new SimulationBridgeClient(host, serializer);
     });
 
-    it('adds and removes entities through bridge commands', () => {
+    it('adds and removes entities through bridge commands', async () => {
         const entity = new Entity('foo').addComponent(FooComponent, { x: 3 });
 
-        client.addEntity('foo-uuid', entity);
+        await client.addEntity('foo-uuid', entity);
         const addedFrame = client.snapshot();
         expect(addedFrame.added.length).toBe(1);
         expect(addedFrame.added[0]?.[0]).toBe('foo-uuid');
@@ -75,9 +75,9 @@ describe('SimulationBridge', () => {
         expect(removedFrame.removed).toEqual(['foo-uuid']);
     });
 
-    it('only includes changed components in subsequent snapshots', () => {
+    it('only includes changed components in subsequent snapshots', async () => {
         const entity = new Entity('foo').addComponent(FooComponent, { x: 3 });
-        client.addEntity('foo-uuid', entity);
+        await client.addEntity('foo-uuid', entity);
         expect(client.snapshot().added.length).toBe(1);
 
         const unchangedFrame = client.snapshot();
@@ -109,13 +109,13 @@ describe('SimulationBridge', () => {
         expect(steppedFrame.time?.frame).toBe((initialFrame.time?.frame ?? 0) + 1);
     });
 
-    it('updates the player jump route through bridge commands', () => {
+    it('updates the player jump route through bridge commands', async () => {
         const entity = new Entity('player')
             .addComponent(FooComponent, { x: 3 })
             .addComponent(JumpRouteComponent, { route: [] });
         entity.components.set(PlayerShipSelector, undefined);
 
-        client.addEntity('player-uuid', entity);
+        await client.addEntity('player-uuid', entity);
         client.setPlayerJumpRoute(['nova:131', 'nova:132']);
 
         const frame = client.snapshot();

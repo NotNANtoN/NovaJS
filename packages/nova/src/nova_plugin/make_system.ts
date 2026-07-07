@@ -1,12 +1,9 @@
-import { Entities, GetWorld } from "nova_ecs/arg_types";
-import { AsyncSystem } from "nova_ecs/async_system";
 import { MultiplayerData, MultiplayerDataType } from "nova_ecs/plugins/multiplayer_plugin";
 import { SerializerResource } from "nova_ecs/plugins/serializer_plugin";
-import { Resource } from "nova_ecs/resource";
 import { Random, RandomResource } from "nova_ecs/plugins/random_plugin";
 import { useFixedTimestep } from "nova_ecs/plugins/time_plugin";
 import { fnv1a } from "nova_ecs/plugins/world_hash";
-import { SingletonComponent, World } from "nova_ecs/world";
+import { World } from "nova_ecs/world";
 import { IdFactory, IdFactoryResource } from "./id_factory.js";
 import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
 import { SimulationGameDataResource } from "./game_data_resource.js";
@@ -19,35 +16,10 @@ import { SystemPlugin } from "./system_plugin.js";
 /** The simulation runs at a fixed 60Hz. */
 export const SIMULATION_STEP_MS = 1000 / 60;
 
-const AddedPlanetsResource = new Resource<{ val: boolean }>('AddedPlanetsResource');
-
-const MakePlanetsSystem = new AsyncSystem({
-    name: 'MakePlanetsSystem',
-    args: [SimulationGameDataResource, SystemIdResource, Entities, GetWorld,
-        AddedPlanetsResource, SingletonComponent] as const,
-    exclusive: true,
-    async step(gameData, systemId, entities, world, addedPlanets) {
-        if (addedPlanets.val) {
-            world.removeSystem(MakePlanetsSystem);
-            return;
-        }
-        const systemData = await gameData.data.System.get(systemId);
-        for (const planetId of systemData.planets) {
-            const planetData = await gameData.data.Planet.get(planetId);
-            const planet = makePlanet(planetData);
-            planet.components.set(MultiplayerData, { owner: 'server' });
-            entities.set(`planet ${planetId}`, planet);
-        }
-        addedPlanets.val = true;
-    }
-});
-
 export async function makeSystem(systemId: string, gameData: SimulationGameDataInterface,
     platformOverride?: Platform) {
-    //const system = await gameData.data.System.get(systemId);
     const world = new World(systemId);
 
-    world.resources.set(AddedPlanetsResource, { val: false });
     world.resources.set(SimulationGameDataResource, gameData);
     world.resources.set(SystemIdResource, systemId);
     // Deterministic randomness and entity id allocation for simulation
@@ -58,13 +30,23 @@ export async function makeSystem(systemId: string, gameData: SimulationGameDataI
     if (platformOverride) {
         world.resources.set(PlatformResource, platformOverride);
     }
-    world.addSystem(MakePlanetsSystem);
     await world.addPlugin(SystemPlugin);
     world.resources.get(SerializerResource)?.addComponent(MultiplayerData, MultiplayerDataType);
     // Simulation worlds run on a fixed timestep with deterministic,
     // 0-based time. Whoever steps the world converts real elapsed time
     // into a number of steps.
     useFixedTimestep(world, SIMULATION_STEP_MS);
+
+    // Load the system's planets before the world ever steps: the
+    // simulation must not resolve data asynchronously mid-simulation,
+    // so all entities are fully loaded before they are inserted.
+    const systemData = await gameData.data.System.get(systemId);
+    for (const planetId of systemData.planets) {
+        const planetData = await gameData.data.Planet.get(planetId);
+        const planet = makePlanet(planetData);
+        planet.components.set(MultiplayerData, { owner: 'server' });
+        world.entities.set(`planet ${planetId}`, planet);
+    }
 
     return world;
 }

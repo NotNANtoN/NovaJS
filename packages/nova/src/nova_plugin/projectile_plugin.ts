@@ -11,13 +11,13 @@ import { Plugin } from 'nova_ecs/plugin';
 import { MovementPhysicsComponent, MovementStateComponent, MovementType } from 'nova_ecs/plugins/movement_plugin';
 import { passthroughType, SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
-import { ProvideAsync } from "nova_ecs/provide_async";
 import { System } from 'nova_ecs/system';
 import SAT from "sat";
 import { FactoryQueue } from '../common/factory_queue.js';
 import { registerSimulationBridgeEvent } from '../communication/simulation_bridge_events.js';
 import { AnimationComponent } from './animation_plugin.js';
 import { IdFactoryResource } from './id_factory.js';
+import { ProvideFromCache } from './provide_from_cache.js';
 import { BlastDamageComponent, BlastIgnoreComponent } from './blast_plugin.js';
 import { CompositeHull, hullFromAnimation, HurtboxHullComponent } from './collisions_plugin.js';
 import { CollisionEvent, CollisionHitterComponent, CollisionVulnerabilityComponent } from './collision_interaction.js';
@@ -242,7 +242,7 @@ registerSimulationBridgeEvent({
     includeEntityUuids: false,
 });
 
-const ProjectileHurtboxProvider = ProvideAsync({
+const ProjectileHurtboxProvider = ProvideFromCache({
     name: "ProjectileHurtboxProvider",
     provided: HurtboxHullComponent,
     args: [AnimationComponent, SimulationGameDataResource, CollisionHitterComponent, ProjectileComponent] as const,

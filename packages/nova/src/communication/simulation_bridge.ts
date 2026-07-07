@@ -6,6 +6,7 @@ import { Time, TimeResource } from "nova_ecs/plugins/time_plugin";
 import { World } from "nova_ecs/world";
 import { v4 } from "uuid";
 import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
+import { loadEntityGameData } from "../nova_plugin/entity_data_loader.js";
 import { makeNpc } from "../nova_plugin/npc_plugin.js";
 import { ControlEvent, ControlsSubject, EcsControlEvent } from "../nova_plugin/controls_plugin.js";
 import { JumpRouteComponent } from "../nova_plugin/jump_plugin.js";
@@ -38,7 +39,7 @@ export interface SimulationBridgeHostApi {
     controlEvents(events: ControlEvent[]): void;
     step(count?: number): void;
     snapshot(): SimulationFrame;
-    addEntity(uuid: string, entity: EncodedEntity): void;
+    addEntity(uuid: string, entity: EncodedEntity): void | Promise<void>;
     removeEntity(uuid: string): void;
     setPlayerJumpRoute(route: string[]): void;
     spawnNpc(shipId: string): void | Promise<void>;
@@ -191,11 +192,17 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
         this.lastSent.clear();
     }
 
-    addEntity(uuid: string, entity: EncodedEntity) {
+    async addEntity(uuid: string, entity: EncodedEntity) {
         const decoded = this.serializer.decode(entity);
         if (isLeft(decoded)) {
             throw new Error(`Failed to decode entity: ${this.serializer.describeDecodeFailure(entity, decoded.left)}`);
         }
+        // Stage, load, then insert: the entity only enters the
+        // simulation once the transitive closure of game data it (and
+        // anything it can spawn) needs is loaded, so the simulation
+        // never waits for data mid-step. The insertion tick is an
+        // input, so it is allowed to vary.
+        await loadEntityGameData(this.world, decoded.right);
         this.world.entities.set(uuid, decoded.right);
     }
 
@@ -226,6 +233,7 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
             throw new Error(`Failed to load ship ${shipId} for NPC spawn`);
         }
         const npc = makeNpc(shipData);
+        await loadEntityGameData(this.world, npc);
         const communicator = this.world.resources.get(CommunicatorResource);
         if (!communicator?.uuid) {
             throw new Error("Expected communicator uuid to exist before spawning NPC");
@@ -254,7 +262,7 @@ export class SimulationBridgeClient {
     }
 
     addEntity(uuid: string, entity: Entity) {
-        this.host.addEntity(uuid, structuredClone(this.serializer.encode(entity)) as EncodedEntity);
+        return this.host.addEntity(uuid, structuredClone(this.serializer.encode(entity)) as EncodedEntity);
     }
 
     removeEntity(uuid: string) {
