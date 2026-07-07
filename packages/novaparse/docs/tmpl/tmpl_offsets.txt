@@ -1,0 +1,1952 @@
+=== TMPL "bööm" ===
+     0  DWRD  Animation Speed | 100 = 30 frames per second  (2B)
+     2  RSID  Sound Index='snd ' 300+63  (2B)
+        CASE  -1
+     4  RSID  Graphic Index='spn' 400+63  (2B)
+   total size: 6
+
+=== TMPL "chär" ===
+     0  DLNG  Starting Credits  (4B)
+     4  RSID  Starting Ship='shp'  (2B)
+        !! FCNT list — offsets below are WRONG unless expanded by hand
+        FCNT  4
+        !! LSTC list — offsets below are WRONG unless expanded by hand
+        LSTC  Starting Systems
+     6  RSID  Starting System='sØst'  (2B)
+        CASE  -1
+        LSTE  
+        DVDR  Initial legal statuses for govts (and allies). Applies negative value to govtÕs enemies.
+        REPEAT next field x4  Initial Statuses
+        (repeat x4 consumed by 0-byte PACK)
+        PACK  *) Initial Govt Status='gvt',status
+        REPEAT next field x4  Govts
+     8  RSID x4  'gvt'=-1  (8B)
+        REPEAT next field x4  Statuses
+    16  DWRD x4  status  (8B)
+    24  DWRD  Combat Rating  (2B)
+        REPEAT next field x4  Intros
+        (repeat x4 consumed by 0-byte PACK)
+        PACK  *) Intro Picture, Time='PICT',delay | seconds
+        REPEAT next field x4  Picts
+    26  RSID x4  'PICT'=-1  (8B)
+        REPEAT next field x4  Delays
+    34  DWRD x4  delay  (8B)
+    42  RSID  Intro Text='dsc'  (2B)
+        CASE  -1
+    44  n100  OnStart (NCB Set)  (256B)
+   300  WORV  Flags  (2B)
+        CASE  Default character=0x0001
+   302  DWRD  Starting Day | 1-31  (2B)
+   304  DWRD  Starting Month | 1-12  (2B)
+   306  DWRD  Starting Year  (2B)
+   308  C010  Date Prefix  (16B)
+   324  C010  Date Suffix  (16B)
+   340  F010  Unused  (16B)
+   total size: 356  (WARNINGS above)
+
+=== TMPL "cölr" ===
+     0  LCOL  Button Up  (4B)
+     4  LCOL  Button Down  (4B)
+     8  LCOL  Button Disabled  (4B)
+    12  C040  Menu Font  (64B)
+    76  DWRD  Menu Font Size  (2B)
+    78  LCOL  Menu Bright Color  (4B)
+    82  LCOL  Menu Dim Color  (4B)
+    86  LCOL  Ship/Outfit Grid Bright  (4B)
+    90  LCOL  Ship/Outfit Grid Dim  (4B)
+    94  RECT  Progress Bar Position  (8B)
+   102  LCOL  Progress Bar Bright  (4B)
+   106  LCOL  Progress Bar Dim  (4B)
+   110  LCOL  Progess Bar Outline  (4B)
+        REPEAT next field x6  Buttons
+   114  PNT  x6  Menu Button *  (24B)
+   138  LCOL  Floating Map Border  (4B)
+   142  LCOL  List Text  (4B)
+   146  LCOL  List Background  (4B)
+   150  LCOL  List Highlight  (4B)
+   154  LCOL  Escort Highlight  (4B)
+   158  C040  Button Font  (64B)
+   222  DWRD  Button Font Size  (2B)
+   224  PNT   Logo Position  (4B)
+   228  PNT   Rollover Position  (4B)
+   232  PNT   Slide 1  (4B)
+   236  PNT   Slide 2  (4B)
+   240  PNT   Slide 3  (4B)
+   total size: 244
+
+=== TMPL "crön" ===
+        PACK  First Available D/M/Y=firstDay,firstMonth,firstYear | 0 = any
+     0  DWRD  firstDay  (2B)
+     2  DWRD  firstMonth  (2B)
+     4  DWRD  firstYear  (2B)
+        PACK  Last Available D/M/Y=lastDay,lastMonth,lastYear | 0 = any
+     6  DWRD  lastDay  (2B)
+     8  DWRD  lastMonth  (2B)
+    10  DWRD  lastYear  (2B)
+    12  DWRD  Available Random | %  (2B)
+    14  DWRD  Duration | days  (2B)
+    16  DWRD  Pre-Holdoff | days  (2B)
+    18  DWRD  Post-Holdoff | days  (2B)
+    20  RSID  Independent News STR#='STR#'  (2B)
+        CASE  -1
+        REPEAT next field x4  Govt News
+        (repeat x4 consumed by 0-byte PACK)
+        PACK  *) Govt News STR#='gvt','STR#'
+    22  WORV  Flags  (2B)
+        CASE  Loop OnStart until conditions are false=0x0001
+        CASE  Loop OnEnd until conditions are false=0x0002
+    24  n0FF  EnableOn (NCB Test)  (255B)
+   279  n0FF  OnStart (NCB Set)  (255B)
+   534  n100  OnEnd (NCB Set)  (256B)
+        PACK  Contribute/Require=contribute,require
+   790+ QB64  contribute=#-100  (64 bits of Q-container)
+   798+ QB64  require=#-100  (64 bits of Q-container)
+        REPEAT next field x4  Govts
+   806  RSID x4  'gvt'=-1  (8B)
+        REPEAT next field x4  News
+   814  RSID x4  'STR#'=-1  (8B)
+   total size: 822
+
+=== TMPL "dësc" ===
+     0? CSTR  Description  (UNKNOWN/VARIABLE — offsets below unreliable)
+     0  RSID  Graphic='PICT'  (2B)
+        CASE  -1
+     2  C020  Movie Filename  (32B)
+    34  WORV  Flags  (2B)
+        CASE  Show movie after description instead of before=0x0001
+        CASE  Show movie in double size=0x0002
+        CASE  Cinematic - blank background and fade screen=0x0004
+   total size: 36  (WARNINGS above)
+
+=== TMPL "düde" ===
+     0  DWRD  AI Type  (2B)
+        CASR  Wimpy Trader=1
+        CASR  Brave Trader=2
+        CASR  Warship=3
+        CASR  Interceptor=4
+     2  RSID  Obedience Govt='gvt'  (2B)
+        CASE  Independent=-1
+     4  WORV  Flags  (2B)
+        CASE  Carries Food=0x0001
+        CASE  Carries Industrial Goods=0x0002
+        CASE  Carries Medical Supplies=0x0004
+        CASE  Carries Luxury Goods=0x0008
+        CASE  Carries Metal=0x0010
+        CASE  Carries Equipment=0x0020
+        CASE  Carries money=0x0040
+        CASE  CanÕt hit or be hit by player=0x0100
+     6+ WBIT  InfoTypes=Generic govt hail messages  (1 bits of W-container)
+     6+ WBIT  =Specific Advice (see below)  (1 bits of W-container)
+     6+ WBIT  =Disaster info  (1 bits of W-container)
+     6+ WBIT  =Good prices  (1 bits of W-container)
+     6+ WB12  Specific Advice STR#  (12 bits of W-container)
+        CASR  =0..499 ~7500 'STR#'
+        REPEAT next field x16  Ships Probabilities
+        (repeat x16 consumed by 0-byte PACK)
+        PACK  *) Ship Probability='shp',prob | %
+        REPEAT next field x16  Ships
+     8  RSID x16  'shp'=-1  (32B)
+        REPEAT next field x16  Probs
+    40  DWRD x16  prob  (32B)
+    72  F010  Unused  (16B)
+   total size: 88
+
+=== TMPL "flët" ===
+     0  RSID  Lead Ship='shp'  (2B)
+        REPEAT next field x4  Escorts
+        (repeat x4 consumed by 0-byte PACK)
+        PACK  *) Escort, Min, Max='shp',min,max
+        REPEAT next field x4  Ships
+     2  RSID x4  'shp'=-1  (8B)
+        REPEAT next field x4  Mins
+    10  DWRD x4  min  (8B)
+        REPEAT next field x4  Maxes
+    18  DWRD x4  max  (8B)
+    26  RSID  Affiliation Govt='gvt'  (2B)
+        CASE  Independent=-1
+    28  DWRD  Link System=-1  (2B)
+        CASR  Any System=-1
+        CASR  Specific System:=128..2175 'sØst'
+        CASR  Govt Systems:=10000..10255 ~128 'gvt'
+        CASR  Govt Allies Systems:=15000..15255 ~128 'gvt'
+        CASR  Not Govt Systems:=20000..20255 ~128 'gvt'
+        CASR  Govt Enemies Systems:=25000..25255 ~128 'gvt'
+    30  n100  AppearOn (NCB Test)  (256B)
+   286  RSID  Hail Quote='STR#'  (2B)
+   288  WORV  Flags  (2B)
+        CASE  Freighters have random cargo=0x0001
+   290  F010  Unused  (16B)
+   total size: 306
+
+=== TMPL "gövt" ===
+        RREF  ='STR#' 6872 Ship Greetings
+     0  DWRD  Voice Type  (2B)
+        CASR  None=-1
+        CASR  All sounds in set:=0..7
+        CASR  Odd sounds in set:=1000..1007 ~0
+        CASR  Even sounds in set:=2000..2007 ~0
+     2  WORV  Flags 1  (2B)
+        CASE  Xenophobic - attacks everyone except allies=0x0001
+        CASE  Nosy - attacks player anywhere heÕs a criminal=0x0002
+        CASE  Always attacks player=0x0004
+        CASE  Immune to playerÕs shots=0x0008
+        CASE  Warships retreat when shields below 25%=0x0010
+        CASE  Other nosy govts are not nosy with this govt=0x0020
+        CASE  Never attacks player & immune to player=0x0040
+        CASE  Freighters have 50% jamming=0x0080
+        CASE  Pers ships don't stay dead (immortal)=0x0100
+        CASE  Warships take bribes=0x0200
+        CASE  Can't be hailed=0x0400
+        CASE  Ships start disabled (derelicts)=0x0800
+        CASE  Plunders/captures ships before destroying=0x1000
+        CASE  Freighters take bribes=0x2000
+        CASE  Planets take bribes=0x4000
+        CASE  Greedy ships, planets take bribes=0x8000
+     4  WORV  Flags 2  (2B)
+        CASE  CanÕt Request Assist/Mercy, non-talkative=0x0001
+        CASE  Minor map boundaries=0x0002
+        CASE  No map boundaries=0x0004
+        CASE  DoesnÕt send distress messages=0x0008
+        CASE  Repairs/refuels player for free=0x0010
+        CASE  DoesnÕt use hypergates=0x0020
+        CASE  Prefers hypergates=0x0040
+        CASE  Prefers wormholes=0x0080
+     6  DWRD  Scan Fine  (2B)
+        CASR  Warning Only=0
+        CASR  Fixed Amount:=1.. | credits
+        CASR  Percentage:=-1.. ~1 | %
+     8  DWRD  Crime Tolerance | factor to dilute playerÕs legal record by  (2B)
+    10  DWRD  Smuggle Penalty  (2B)
+    12  DWRD  Disable Penalty  (2B)
+    14  DWRD  Board Penalty  (2B)
+    16  DWRD  Kill Penalty  (2B)
+    18  DWRD  Shoot Penalty | currently ignored  (2B)
+    20  DWRD  Initial Legal Record  (2B)
+    22  DWRD  Maximum Combat Odds | 100 = 1 to 1  (2B)
+        PACK  Classes=c,c,c,c
+        REPEAT next field x4  Classes
+    24  DWRD x4  c=-1  (8B)
+        PACK  Allies=a,a,a,a
+        REPEAT next field x4  Allies
+    32  DWRD x4  a=-1  (8B)
+        PACK  Enemies=e,e,e,e
+        REPEAT next field x4  Enemies
+    40  DWRD x4  e=-1  (8B)
+    48  DWRD  Ship Speed Factor | %  (2B)
+    50+ WB16  Scan Mask=#-101  (16 bits of W-container)
+    52  C010  Comms Name  (16B)
+    68  C010  Target Code  (16B)
+        PACK  Medium Name=medName
+    84+ QB64  Require (to land)=#-100  (64 bits of Q-container)
+    92  RECT  Jamming Type 1-4 | %  (8B)
+   100  C040  medName  (64B)
+   164  LCOL  Map Color  (4B)
+   168  LCOL  Ship Paint  (4B)
+   172  RSID  Interface='ntf'  (2B)
+   174  RSID  News Picture='PICT'  (2B)
+        CASE  Generic=-1
+   176  F010  Unused  (16B)
+   total size: 192
+
+=== TMPL "ïntf" ===
+     0  LCOL  Bright Text Color  (4B)
+     4  LCOL  Dim Text Color  (4B)
+     8  RECT  Radar Area  (8B)
+    16  LCOL  Bright Radar Color  (4B)
+    20  LCOL  Dim Radar Color  (4B)
+    24  RECT  Shield Area  (8B)
+    32  LCOL  Shield Color  (4B)
+    36  RECT  Armor Area  (8B)
+    44  LCOL  Armor Color  (4B)
+    48  RECT  Fuel Area  (8B)
+    56  LCOL  Fuel Full Color  (4B)
+    60  LCOL  Fuel Partial Color  (4B)
+    64  RECT  Navigation Area  (8B)
+    72  RECT  Weapon Area  (8B)
+    80  RECT  Target Area  (8B)
+    88  RECT  Cargo Area  (8B)
+    96  C040  Status Font  (64B)
+   160  DWRD  Status Font Size  (2B)
+   162  DWRD  Subtitle Size  (2B)
+   164  RSID  Status Bar Background='PICT'  (2B)
+   total size: 166
+
+=== TMPL "jünk" ===
+        PACK  Sold At (Low)=L'spb',L'spb'
+        REPEAT next field x3  
+        (repeat x3 consumed by 0-byte PACK)
+        PACK  =L'spb',L'spb'
+        PACK  Bought At (High)=H'spb',H'spb'
+        REPEAT next field x3  
+        (repeat x3 consumed by 0-byte PACK)
+        PACK  =H'spb',H'spb'
+        REPEAT next field x8  Lows
+     0  RSID x8  L'spb'=-1  (16B)
+        REPEAT next field x8  Highs
+    16  RSID x8  H'spb'=-1  (16B)
+    32  DWRD  Base Price  (2B)
+    34  WORV  Flags  (2B)
+        CASE  Multiplies in cargo hold=0x0001
+        CASE  Decays in cargo hold=0x0002
+    36+ WB16  Scan Mask=#-101  (16 bits of W-container)
+    38  C040  Lowercase Name  (64B)
+   102  C040  Status Bar Abbreviation  (64B)
+   166  n0FF  BuyOn (NCB Test)  (255B)
+   421  n0FF  SellOn (NCB Test)  (255B)
+   total size: 676
+
+=== TMPL "mïsn" ===
+     0  DWRD  Available At=-1  (2B)
+        CASR  Any Inhabited Stellar=-1
+        CASR  Specific Stellar:=128..2175 'spb'
+        CASR  Adjacent to System:=5000..7047 ~128 'sØst'
+        CASR  Independent Stellars=9999
+        CASR  Govt Stellars:=10000..10255 ~128 'gvt'
+        CASR  Govt Allies Stellars:=15000..15255 ~128 'gvt'
+        CASR  Not Govt Stellars:=20000..20255 ~128 'gvt'
+        CASR  Govt Enemies Stellars:=25000..25255 ~128 'gvt'
+        CASR  Govt+Class Stellars:=30000..30255 ~128 'gvt'
+        CASR  Not Govt+Class Stellars:=31000..31255 ~128 'gvt'
+     2  FWRD  Unused  (2B)
+     4  DWRD  Offered From  (2B)
+        CASR  Mission Computer=0
+        CASR  Bar=1
+        CASR  Prs ship=2
+        CASR  Main Spaceport=3
+        CASR  Trade Center=4
+        CASR  Shipyard=5
+        CASR  Outfitter=6
+     6  DWRD  Min Legal Record  (2B)
+     8  DWRD  Min Combat Rating  (2B)
+    10  DWRD  Available Random | %  (2B)
+        PACK  Display Weight=dispWeight
+        PACK  Required Ship Type=availShip
+    12  DWRD  Travel To=-1  (2B)
+        CASR  None=-1
+        CASR  Inhabited Stellar=-2
+        CASR  Uninhabited Stellar=-3
+        CASR  Specific Stellar:=128..2175 'spb'
+        CASR  Independent Stellar=9999
+        CASR  Govt Stellar:=10000..10255 ~128 'gvt'
+        CASR  Govt Allies Stellar:=15000..15255 ~128 'gvt'
+        CASR  Not Govt Stellar:=20000..20255 ~128 'gvt'
+        CASR  Govt Enemies Stellar:=25000..25255 ~128 'gvt'
+        CASR  Govt+Class Stellar:=30000..30255 ~128 'gvt'
+        CASR  Not Govt+Class Stellar:=31000..31255 ~128 'gvt'
+    14  DWRD  Return To=-1  (2B)
+        CASR  None=-1
+        CASR  Inhabited Stellar=-2
+        CASR  Uninhabited Stellar=-3
+        CASR  Initial Stellar=-4
+        CASR  Specific Stellar:=128..2175 'spb'
+        CASR  Independent Stellar=9999
+        CASR  Govt Stellar:=10000..10255 ~128 'gvt'
+        CASR  Govt Allies Stellar:=15000..15255 ~128 'gvt'
+        CASR  Not Govt Stellar:=20000..20255 ~128 'gvt'
+        CASR  Govt Enemies Stellar:=25000..25255 ~128 'gvt'
+        CASR  Govt+Class Stellar:=30000..30255 ~128 'gvt'
+        CASR  Not Govt+Class Stellar:=31000..31255 ~128 'gvt'
+        PACK  Cargo Type=cargo,cargoRef
+    16  RSID  cargo='STR ' 9100+99  (2B)
+        CASE  None=-1
+        CASE  Food=0
+        CASE  Industrial=1
+        CASE  Medical Supplies=2
+        CASE  Luxury Goods=3
+        CASE  Metal=4
+        CASE  Equipment=5
+        CASE  Random basic type=1000
+        RREF  cargoRef='STR#' #4001 Cargo Types
+    18  DWRD  Cargo Quantity  (2B)
+        CASR  None=-1
+        CASR  Fixed Amount:=0..
+        CASR  Approximate:=-2.. ~2 | ±50%
+    20  DWRD  Cargo Pickup=-1  (2B)
+        CASR  No Cargo Pickup=-1
+        CASR  At Mission Start=0
+        CASR  At Travel Stellar=1
+        CASR  On Board Special Ship=2
+    22  DWRD  Cargo Dropoff=-1  (2B)
+        CASR  No Cargo Dropoff=-1
+        CASR  At Travel Stellar=0
+        CASR  At Return Stellar=1
+    24+ WB16  Scan Mask=#-101  (16 bits of W-container)
+    26  FWRD  Unused  (2B)
+    28  DLNG  Pay Value  (4B)
+        CASR  No Pay=-1
+        CASR  Credits:=0..
+        CASR  Clean Govt Record:=-10128..-10383 ~128 'gvt'
+        CASR  Clean Govt+Allies:=-20128..-20383 ~128 'gvt'
+        CASR  Clean Govt+Class:=-30128..-30383 ~128 'gvt'
+        CASR  Lose % Credits:=-40000..-40100 ~0
+        CASR  Lose Credits at Start:=-50000.. ~0
+    32  DWRD  Special Ship Count  (2B)
+    34  DWRD  Special Ship System=-1  (2B)
+        CASR  Initial System=-1
+        CASR  Any System=-2
+        CASR  Travel System=-3
+        CASR  Return System=-4
+        CASR  Adjacent to Initial=-5
+        CASR  Follow Player=-6
+        CASR  Specific System:=128..2175 'sØst'
+        CASR  Independent System=9999
+        CASR  Govt System:=10000..10255 ~128 'gvt'
+        CASR  Govt Allies System:=15000..15255 ~128 'gvt'
+        CASR  Not Govt System:=20000..20255 ~128 'gvt'
+        CASR  Govt Enemies System:=25000..25255 ~128 'gvt'
+        CASR  Govt+Class System:=30000..30255 ~128 'gvt'
+        CASR  Not Govt+Class System:=31000..31255 ~128 'gvt'
+    36  RSID  Special Ship Dude='dde'  (2B)
+        CASE  -1
+    38  DWRD  Special Ship Goal=-1  (2B)
+        CASR  None=-1
+        CASR  Destroy=0
+        CASR  Disable (don't destroy)=1
+        CASR  Board=2
+        CASR  Escort=3
+        CASR  Observe=4
+        CASR  Rescue (starts disabled)=5
+        CASR  Chase Off=6
+    40  DWRD  Special Ship Behavior=-1  (2B)
+        CASR  Normal=-1
+        CASR  Attack Player=0
+        CASR  Protect Player=1
+        CASR  Destroy Enemy Stellars=2
+    42  RSID  Ship Name STR#='STR#'  (2B)
+        CASE  -1
+        PACK  Ship Subtitle STR#=shipSub
+    44  DWRD  Special Ship Start  (2B)
+        CASR  Randomly=0
+        CASR  Jump In=1
+        CASR  Randomly, Cloaked=2
+        CASR  On Nav Default:=-1..-16 ~1
+    46  RSID  Comp Reward Govt='gvt'  (2B)
+        CASE  -1
+    48  DWRD  Comp Legal Reward  (2B)
+    50  RSID  shipSub='STR#'  (2B)
+        CASE  -1
+        RREF  Offer Text='dsc' 3872
+    52  RSID  Briefing Text='dsc'  (2B)
+        CASE  -1
+    54  RSID  Quick Brief Text='dsc'  (2B)
+        CASE  -1
+    56  RSID  Load Cargo Text='dsc'  (2B)
+        CASE  -1
+    58  RSID  Drop Cargo Text='dsc'  (2B)
+        CASE  -1
+    60  RSID  Completion Text='dsc'  (2B)
+        CASE  -1
+    62  RSID  Failure Text='dsc'  (2B)
+        CASE  -1
+        PACK  Ship Done Text=shipText
+        PACK  Refuse Text=refuseText
+    64  DWRD  Time Limit | days  (2B)
+    66  WORV  Can Abort=1  (2B)
+        CASE  Can be aborted (disables failure text)=1
+    68  RSID  shipText='dsc'  (2B)
+        CASE  -1
+    70  FWRD  Unused  (2B)
+    72  DWRD  Auxiliary Ship Count  (2B)
+    74  RSID  Auxiliary Ship Dude='dde'  (2B)
+        CASE  -1
+    76  DWRD  Auxiliary Ship System=-1  (2B)
+        CASR  Follow Player=-1
+        CASR  Travel System=-2
+        CASR  Return System=-3
+        CASR  Specific System:=128..2175 'sØst'
+        CASR  Adjacent System:=5000..7047 ~128 'sØst'
+        CASR  Independent System=9999
+        CASR  Govt System:=10000..10255 ~128 'gvt'
+        CASR  Govt Allies System:=15000..15255 ~128 'gvt'
+        CASR  Not Govt System:=20000..20255 ~128 'gvt'
+        CASR  Govt Enemies System:=25000..25255 ~128 'gvt'
+        CASR  Govt+Class System:=30000..30255 ~128 'gvt'
+        CASR  Not Govt+Class System:=31000..31255 ~128 'gvt'
+    78  FWRD  Unused  (2B)
+    80  WORV  Flags 1  (2B)
+        CASE  Auto-abort when started=0x0001
+        CASE  DonÕt show red map arrow=0x0002
+        CASE  CanÕt be refused=0x0004
+        CASE  Remove 100 fuel on auto-abort=0x0008
+        CASE  Auxiliary ships regenerate=0x0010
+        CASE  Fails if scanned=0x0020
+        CASE  Lose 5x Comp Reward on abort=0x0040
+        CASE  Show green map arrow during briefing=0x0100
+        CASE  Red map arrow for Special Ship System=0x0200
+        CASE  Invisible (not shown in info dialog)=0x0400
+        CASE  Freeze special ship types at start=0x0800
+        CASE  Not available for cargo ships=0x2000
+        CASE  Not available for warships=0x4000
+        CASE  Fails if player boarded by pirates=0x8000
+    82  WORV  Flags 2  (2B)
+        CASE  Not offered if insufficient cargo space=0x0001
+        CASE  Apply Pay on auto-abort=0x0002
+        CASE  Fails if player disabled or destroyed=0x0004
+    84  FWRD  Unused  (2B)
+    86  FWRD  Unused  (2B)
+    88  RSID  refuseText='dsc'  (2B)
+        CASE  -1
+    90  DWRD  availShip=-1  (2B)
+        CASR  Any=-1
+        CASR  Specific Ship:=128..895 'shp'
+        CASR  Not Ship:=1128..1895 ~128 'shp'
+        CASR  Ship of Govt:=2128..2383 ~128 'gvt'
+        CASR  Ship not of Govt:=3128..3383 ~128 'gvt'
+    92  n0FF  AvailableOn (NCB Test)  (255B)
+   347  n0FF  OnAccept (NCB Set)  (255B)
+   602  n0FF  OnRefuse (NCB Set)  (255B)
+   857  n0FF  OnSuccess (NCB Set)  (255B)
+  1112  n0FF  OnFailure (NCB Set)  (255B)
+  1367  n0FF  OnAbort (NCB Set)  (255B)
+        PACK  OnShipDone (NCB Set)=onShipDone
+  1622+ QB64  Require=#-100  (64 bits of Q-container)
+  1630  DWRD  Date Post Increment | days  (2B)
+  1632  n0FF  onShipDone  (255B)
+  1887  C020  Accept Button Text  (32B)
+  1919  C021  Refuse Button Text  (33B)
+  1952  DWRD  dispWeight  (2B)
+  1954  F010  Unused  (16B)
+   total size: 1970
+
+=== TMPL "nëbu" ===
+        RREF  ='glxØ' #0 Galaxy Map
+     0  PNT   Position  (4B)
+     4  PNT   Size  (4B)
+     8  n0FF  ActiveOn (NCB Test)  (255B)
+   263  n0FF  OnExplore (NCB Set)  (255B)
+   518  F010  Unused  (16B)
+        KRID  Images (only one required)
+        REPEAT next field x8  =128
+        CASE  =*
+        KEYB  128  (alternative @534)
+        REPEAT next field x7  =9500
+        (repeat x7 consumed by 0-byte RREF)
+        RREF  ='PICT' #*
+        KEYE  
+        KEYB  129  (alternative @534)
+        REPEAT next field x7  =9507
+        (repeat x7 consumed by 0-byte RREF)
+        RREF  ='PICT' #*
+        KEYE  
+        KEYB  130  (alternative @534)
+        REPEAT next field x7  =9514
+        (repeat x7 consumed by 0-byte RREF)
+        RREF  ='PICT' #*
+        KEYE  
+        KEYB  131  (alternative @534)
+        REPEAT next field x7  =9521
+        (repeat x7 consumed by 0-byte RREF)
+        RREF  ='PICT' #*
+        KEYE  
+        KEYB  132  (alternative @534)
+        REPEAT next field x7  =9528
+        (repeat x7 consumed by 0-byte RREF)
+        RREF  ='PICT' #*
+        KEYE  
+        KEYB  133  (alternative @534)
+        REPEAT next field x7  =9535
+        (repeat x7 consumed by 0-byte RREF)
+        RREF  ='PICT' #*
+        KEYE  
+        KEYB  134  (alternative @534)
+        REPEAT next field x7  =9521
+        (repeat x7 consumed by 0-byte RREF)
+        RREF  ='PICT' #*
+        KEYE  
+        KEYB  135  (alternative @534)
+        REPEAT next field x7  =9542
+        (repeat x7 consumed by 0-byte RREF)
+        RREF  ='PICT' #*
+        KEYE  
+   total size: 534
+
+=== TMPL "öops" ===
+     0  RSID  Affected Stellar='spb'  (2B)
+        CASE  Any=-1
+     2  DWRD  Affected Commodity  (2B)
+        CASR  Food=0
+        CASR  Industrial=1
+        CASR  Medical Supplies=2
+        CASR  Luxury Goods=3
+        CASR  Metal=4
+        CASR  Equipment=5
+     4  DWRD  Price Change  (2B)
+     6  DWRD  Duration | days  (2B)
+     8  DWRD  Frequency | %  (2B)
+    10  n100  ActivateOn (NCB Test)  (256B)
+   266  F010  Unused  (16B)
+   total size: 282
+
+=== TMPL "oütf" ===
+        PACK  =pic,desc
+        RREF  pic='PICT' 5872 Outfitter Pict
+        RREF  desc='dsc' 2872 Outfitter Desc
+     0  DWRD  Display Weight  (2B)
+     2  DWRD  Mass | tons  (2B)
+     4  DWRD  Tech Level  (2B)
+     6  KWRD  Primary Mod Type  (2B)
+        CASE  None=-1
+        CASE  Weapon=1
+        CASE  Ammunition=3
+        TMPL  otf.ModTypes
+        KEYB  1  (alternative @8)
+     8  RSID  Weapon='wap'  (2B)
+        KEYE  1 end
+        KEYB  3  (alternative @8)
+     8  RSID  Weapon Ammo='wap'  (2B)
+        KEYE  3 end
+        (keyed group ends @10)
+    10  DWRD  Maximum  (2B)
+    12  WORV  Flags  (2B)
+        CASE  Fixed Gun=0x0001
+        CASE  Turret=0x0002
+        CASE  Persistent (keep when trading ships)=0x0004
+        CASE  CanÕt be sold=0x0008
+        CASE  Remove after purchase=0x0010
+        CASE  Persistent by Hxxx=0x0020
+        CASE  DonÕt show in outfitter if Require not met=0x0100
+        CASE  Price proportional to ship price=0x0200
+        CASE  Mass proportional to ship mass=0x0400
+        CASE  Can be sold anywhere=0x0800
+        CASE  Hide other items of equal display weight=0x1000
+        CASE  Show as Rank in player info=0x2000
+        CASE  DonÕt show in outfitter if Availability false=0x4000
+    14  DLNG  Cost  (4B)
+        !! FCNT list — offsets below are WRONG unless expanded by hand
+        FCNT  3
+        !! LSTC list — offsets below are WRONG unless expanded by hand
+        LSTC  Secondary Function
+    18  KWRD  Secondary Mod Type  (2B)
+        CASE  None=-1
+        TMPL  otf.ModTypes
+        LSTE  end
+        PACK  Contribute/Require=contribute,require
+    20+ QB64  contribute=#-100  (64 bits of Q-container)
+    28+ QB64  require=#-100  (64 bits of Q-container)
+    36  n0FF  Availability (NCB Test)  (255B)
+   291  n0FF  OnPurchase (NCB Set)  (255B)
+   546  n0FF  OnSell (NBC Set)  (255B)
+   801  C040  Outfitter Name  (64B)
+   865  C040  Lowercase Name  (64B)
+   929  C041  Lowercase Plural  (65B)
+   994  DWRD  Item Class  (2B)
+   996+ WB16  Scan Mask=#-101  (16 bits of W-container)
+   998  DWRD  Available Random | %  (2B)
+  1000  DWRD  Require Bits Apply To=-1  (2B)
+        CASR  Every Outfitter=-1
+        CASR  Govt+Allies Stellars:=128..383 'gvt'
+        CASR  Independent+Govt+Allies:=1128..1383 ~128 'gvt'
+        CASR  Not Govt+Allies:=2128..2383 ~128 'gvt'
+        CASR  Not Ind.+Govt+Allies:=3128..3383 ~128 'gvt'
+  1002  F010  Unused  (16B)
+   total size: 1018  (WARNINGS above)
+
+=== TMPL "përs" ===
+     0  DWRD  Link System=-1  (2B)
+        CASR  Any System=-1
+        CASR  Specific System:=128..2175 'sØst'
+        CASR  Independent Systems=9999
+        CASR  Govt Systems:=10000..10255 ~128 'gvt'
+        CASR  Govt Allies Systems:=15000..15255 ~128 'gvt'
+        CASR  Not Govt Systems:=20000..20255 ~128 'gvt'
+        CASR  Govt Enemies Systems:=25000..25255 ~128 'gvt'
+     2  RSID  Government Affiliation='gvt'  (2B)
+        CASE  Independent=-1
+     4  DWRD  AI Type  (2B)
+        CASR  Wimpy Trader=1
+        CASR  Brave Trader=2
+        CASR  Warship=3
+        CASR  Interceptor=4
+     6  DWRD  Aggression (attack at)  (2B)
+        CASR  Close Range=1
+        CASR  Medium=2
+        CASR  Far=3
+     8  DWRD  Retreat Shield Level | %  (2B)
+    10  RSID  Ship Type='shp'  (2B)
+        DVDR  Modify stock weapon loadout (add/remove)
+        REPEAT next field x4  Weapons, Ammo
+        (repeat x4 consumed by 0-byte PACK)
+        PACK  *) Weapon, Ammo='wap',count,ammo
+        REPEAT next field x4  Weapons
+    12  RSID x4  'wap'=-1  (8B)
+        REPEAT next field x4  Counts
+    20  DWRD x4  count  (8B)
+        REPEAT next field x4  Ammo
+    28  DWRD x4  ammo  (8B)
+    36  DLNG  Credits Carried | ±25%  (4B)
+    40  DWRD  Shield Modifier | %  (2B)
+        CASE  Standard=100
+        CASE  Invincible=-1
+    42  RSID  Custom Hail Picture='PICT'  (2B)
+        CASE  -1
+        PACK  Comm Quote=comm,commRef
+    44  RSID  comm='STR ' 15000+2000  (2B)
+        CASE  -1
+        RREF  commRef='STR#' #7100 Comm Quotes
+        PACK  Hail Quote=hail,hailRef
+    46  RSID  hail='STR ' 4999+2000  (2B)
+        CASE  -1
+        RREF  hailRef='STR#' #7101 Hail Quotes
+    48  RSID  Link Mission='msn'  (2B)
+        CASE  -1
+    50  WORV  Flags 1  (2B)
+        CASE  Keeps a grudge if attacked=0x0001
+        CASE  Uses escape pod and has afterburner=0x0002
+        CASE  Only show hail quote when carrying grudge=0x0004
+        CASE  Only show hail quote when prs likes player=0x0008
+        CASE  Only show hail quote when attacking=0x0010
+        CASE  Only show hail quote when disabled=0x0020
+        CASE  Replace prs with missionÕs Special Ship=0x0040
+        CASE  Only show hail quote once=0x0080
+        CASE  Deactivate prs after accepting mission=0x0100
+        CASE  Offer mission when boarding instead of hailing=0x0200
+        CASE  Only show hail quote when mission available=0x0400
+        CASE  Leaves after mission is accepted=0x0800
+        CASE  Don't offer mission if player is Wimpy Trader=0x1000
+        CASE  Don't offer mission if player is Beefy Trader=0x2000
+        CASE  Don't offer mission if player is Warship=0x4000
+        CASE  Show disaster info when hailing=0x8000
+        PACK  Flags 2=flags2
+    52  n100  ActiveOn (NCB Test)  (256B)
+   308  DWRD  Outfit Grant Class  (2B)
+   310  DWRD  Outfit Grant Count  (2B)
+   312  DWRD  Outfit Grant Chance | %  (2B)
+   314  C040  Subtitle  (64B)
+   378  LCOL  Paint Color  (4B)
+   382  WORV  flags2  (2B)
+        CASE  Starts with no fuel=0x0001
+   384  F010  Unused  (16B)
+   total size: 400
+
+=== TMPL "ränk" ===
+     0  DWRD  Weight  (2B)
+     2  RSID  Govt Affiliation='gvt'  (2B)
+     4  DWRD  Price Modifier | %  (2B)
+     6  DLNG  Salary | credits  (4B)
+    10  DLNG  Salary Cap | credits  (4B)
+        CASE  Uncapped=0
+    14+ QB64  Contribute=#-100  (64 bits of Q-container)
+    22  WORV  Flags  (2B)
+        CASE  Drop other ranks of same govt when activated=0x0001
+        CASE  Drop other ranks of same govt when deactivated=0x0002
+        CASE  Drop if player disables/destroys a govt/allied ship=0x0004
+        CASE  Permanent, only removed by NCB statement=0x0008
+        CASE  Drop lower ranks of same govt when activated=0x0010
+        CASE  Drop lower ranks of same govt when deactivated=0x0020
+        CASE  Drop if player commits crime against govt=0x0040
+        CASE  Govt ships wonÕt attack player=0x0100
+        CASE  Player can always land on govtÕs stellars=0x0200
+        CASE  Player can ask govt ships for battle assistance=0x0400
+        CASE  Govt and allies will always refuel/repair for free=0x0800
+    24  C040  Conversation Name  (64B)
+    88  C040  Conv. Short Name  (64B)
+   total size: 152
+
+=== TMPL "röid" ===
+     0  DWRD  Strength  (2B)
+     2  DWRD  Spin Rate | 100 = 30 frames per second  (2B)
+     4  DWRD  Cargo Yield Type=-1  (2B)
+        CASR  None=-1
+        CASR  Food=0
+        CASR  Industrial=1
+        CASR  Medical Supplies=2
+        CASR  Luxury Goods=3
+        CASR  Metal=4
+        CASR  Equipment=5
+        CASR  Junk:=1000.. ~128 'jnk'
+     6  DWRD  Yield Quantity | ±50%  (2B)
+     8  DWRD  Destroy Particle Count  (2B)
+    10  LCOL  Destroy Particle Color  (4B)
+    14  RSID  1) Fragment Type='rid'  (2B)
+        CASE  -1
+    16  RSID  2) Fragment Type='rid'  (2B)
+        CASE  -1
+    18  DWRD  Fragment Count | ±50%  (2B)
+    20  DWRD  Explosion Type=-1  (2B)
+        CASR  None=-1
+        CASR  Single Explosion:=0..63 ~128 'bm'
+        CASR  Explosion + Sparks:=1000..1063 ~128 'bm'
+    22  DWRD  Mass  (2B)
+    24  F010  Unused  (16B)
+   total size: 40
+
+=== TMPL "shän" ===
+        DVDR  Note: Mask and Frame Size fields are only applicable to PICT-based sprites.
+     0  RSID  Base Sprite='rlD'  (2B)
+     2  RSID  Bask Mask='PICT'  (2B)
+     4  DWRD  Base Set Count  (2B)
+     6  PNT   Base Frame Size  (4B)
+    10  DWRD  Transparency (0-32)  (2B)
+    12  RSID  Alternating Sprite='rlD'  (2B)
+    14  RSID  Alternating Mask='PICT'  (2B)
+    16  DWRD  Alt Set Count  (2B)
+    18  PNT   Alt Frame Size  (4B)
+    22  RSID  Engine Glow Sprite='rlD'  (2B)
+    24  RSID  Engine Glow Mask='PICT'  (2B)
+    26  PNT   Engine Frame Size  (4B)
+    30  RSID  Running Lights Sprite='rlD'  (2B)
+    32  RSID  Running Lights Mask='PICT'  (2B)
+    34  PNT   Lights Frame Size  (4B)
+    38  RSID  Weapon Glow Sprite='rlD'  (2B)
+    40  RSID  Weapon Glow Mask='PICT'  (2B)
+    42  PNT   Weapon Frame Size  (4B)
+        PACK  Shield Bubble Sprite=shieldSprite
+        PACK  Shield Bubble Mask=shieldMask
+        PACK  Shield Frame Size=shieldFrame
+    46  WORV  Flags  (2B)
+        CASE  Extra frames are banking=0x0001
+        CASE  Extra frames are folding=0x0002
+        CASE  Second set is KeyCarried onboard=0x0004
+        CASE  Extra frames are animation=0x0008
+        CASE  Stop animation when disabled=0x0010
+        CASE  Hide alternate sprite when disabled=0x0020
+        CASE  Hide running lights when disabled=0x0040
+        CASE  Ship unfolds to fire=0x0080
+        CASE  Use Compression for pointing correction=0x0100
+    48  DWRD  Animation Delay  (2B)
+    50  DWRD  Weapon Glow Decay  (2B)
+    52  DWRD  Frames Per Rotation  (2B)
+    54  KWRD  Lights Blink Mode  (2B)
+        CASE  No Blinking=0
+        CASE  Square Wave Blinking=1
+        CASE  Triangle Wave Blinking=2
+        CASE  Random Pulsing=3
+        KEYB  0,*  (alternative @56)
+    56  F008  Ignored  (8B)
+        KEYE  end
+        KEYB  1  (alternative @56)
+    56  DWRD  Delay Between Blinks  (2B)
+    58  DWRD  Light On-Time  (2B)
+    60  DWRD  Blinks Per Group  (2B)
+    62  DWRD  Delay Between Groups  (2B)
+        KEYE  end
+        KEYB  2  (alternative @56)
+    56  DWRD  Min Intensity (1-32)  (2B)
+    58  DWRD  Increase/Frame * 100  (2B)
+    60  DWRD  Max Intensity (1-32)  (2B)
+    62  DWRD  Decrease/Frame * 100  (2B)
+        KEYE  end
+        KEYB  3  (alternative @56)
+    56  DWRD  Min Intensity (1-32)  (2B)
+    58  DWRD  Max Intensity (1-32)  (2B)
+    60  DWRD  Delay Between Changes  (2B)
+    62  FWRD  Ignored  (2B)
+        KEYE  end
+        (keyed group ends @64)
+    64  RSID  shieldSprite='rlD'  (2B)
+    66  RSID  shieldMask='PICT'  (2B)
+    68  PNT   shieldFrame  (4B)
+        REPEAT next field x4  Guns
+        (repeat x4 consumed by 0-byte PACK)
+        PACK  Gun Position X/Y/Z *=gx*,gy*,gz*
+        REPEAT next field x4  Turrets
+        (repeat x4 consumed by 0-byte PACK)
+        PACK  Turret Position X/Y/Z *=tx*,ty*,tz*
+        REPEAT next field x4  Guided
+        (repeat x4 consumed by 0-byte PACK)
+        PACK  Guided Position X/Y/Z *=mx*,my*,mz*
+        REPEAT next field x4  Beams
+        (repeat x4 consumed by 0-byte PACK)
+        PACK  Beam Position X/Y/Z *=bx*,by*,bz*
+        REPEAT next field x4  gx
+    72  DWRD x4  gx*  (8B)
+        REPEAT next field x4  gy
+    80  DWRD x4  gy*  (8B)
+        REPEAT next field x4  tx
+    88  DWRD x4  tx*  (8B)
+        REPEAT next field x4  ty
+    96  DWRD x4  ty*  (8B)
+        REPEAT next field x4  mx
+   104  DWRD x4  mx*  (8B)
+        REPEAT next field x4  my
+   112  DWRD x4  my*  (8B)
+        REPEAT next field x4  bx
+   120  DWRD x4  bx*  (8B)
+        REPEAT next field x4  by
+   128  DWRD x4  by*  (8B)
+   136  DWRD  Up X Compression %  (2B)
+   138  DWRD  Up Y Compression %  (2B)
+   140  DWRD  Down X Compression %  (2B)
+   142  DWRD  Down Y Compression %  (2B)
+        REPEAT next field x4  gz
+   144  DWRD x4  gz*  (8B)
+        REPEAT next field x4  tz
+   152  DWRD x4  tz*  (8B)
+        REPEAT next field x4  mz
+   160  DWRD x4  mz*  (8B)
+        REPEAT next field x4  bz
+   168  DWRD x4  bz*  (8B)
+   176  F010  Unused  (16B)
+   total size: 192
+
+=== TMPL "shïp" ===
+        PACK  Graphics=shan,targetPic,yardPic
+        RREF  shan='shn' Shan
+        RREF  targetPic='PICT' 2872 Target Pict
+        RREF  yardPic='PICT' 4872 Shipyard Pict
+        PACK  Descriptions=yardDesc,hireDesc
+        RREF  yardDesc='dsc' 12872 Shipyard Desc
+        RREF  hireDesc='dsc' 13872 Hire Desc
+     0  DWRD  Cargo Capacity | tons  (2B)
+        CASR  Allow Mass Expansions:=0..
+        CASR  No Mass Expansions:=-1.. ~1
+     2  DWRD  Shield Strength  (2B)
+        CASR  Normal Shields:=0..
+        CASR  Super Shields (x5):=-1.. ~1
+        PACK  Shield Recharge Rate=shieldRecharge | 1000 = 1 point per frame
+     4  DWRD  Acceleration | 300 = average  (2B)
+     6  DWRD  Top Speed | 300 = average  (2B)
+     8  DWRD  Turn Rate | 10 Å 30¡/sec  (2B)
+    10  DWRD  Fuel Capacity | 100 = 1 jump  (2B)
+        PACK  AI Fuel Regeneration=fuelRegen | frames per unit generated
+    12  DWRD  Available Space | tons  (2B)
+    14  DWRD  Armor Strength | Ships with no armor will die on spawn.  (2B)
+        PACK  Armor Regeneration=armorRegen | 1000 = 1 point per frame
+    16  DWRD  shieldRecharge  (2B)
+        DVDR  Equipment (type, count)
+        REPEAT next field x8  Weapons, Ammo
+        (repeat x8 consumed by 0-byte PACK)
+        PACK  *) Weapon, Ammo='wap',c,a
+        REPEAT next field x8  Outfits
+        (repeat x8 consumed by 0-byte PACK)
+        PACK  *) Outfit='otf',oc
+        REPEAT next field x4  Weapons
+    18  RSID x4  'wap'=-1  (8B)
+        REPEAT next field x4  Counts
+    26  DWRD x4  c  (8B)
+        REPEAT next field x4  Ammo
+    34  DWRD x4  a  (8B)
+    42  DWRD  Maximum Guns  (2B)
+    44  DWRD  Maximum Turrets  (2B)
+    46  DWRD  Tech Level  (2B)
+    48  DLNG  Cost  (4B)
+    52  DWRD  Death Delay | frames (should be at least 2 to avoid glitching)  (2B)
+    54  DWRD  armorRegen  (2B)
+    56  DWRD  Breakup Explosion  (2B)
+        CASR  None=-1
+        CASR  Multiple Explosions:=0..63 ~128 'bm'
+    58  DWRD  Final Explosion  (2B)
+        CASR  None=-1
+        CASR  Single Explosion:=0..63 ~128 'bm'
+        CASR  Explosion + Sparks:=1000..1063 ~128 'bm'
+    60  DWRD  Display Weight  (2B)
+    62  DWRD  Mass | tons  (2B)
+    64  DWRD  Length | meters  (2B)
+    66  DWRD  Inherent AI  (2B)
+        CASR  Wimpy Trader=1
+        CASR  Brave Trader=2
+        CASR  Warship=3
+        CASR  Interceptor=4
+    68  DWRD  Crew Count  (2B)
+        CASE  CanÕt be boarded=0
+    70  DWRD  Relative Strength | for combat rating and AI combat odds  (2B)
+    72  DWRD  Inherent Govt=-1  (2B)
+        CASR  None=-1
+        CASR  Attributes & Combat:=128..383 'gvt'
+        CASR  Attributes Only:=1128..1383 ~128 'gvt'
+        CASR  Combat Only:=2128..2383 ~128 'gvt'
+    74  WORV  Flags  (2B)
+        CASE  Slow jump speed (75% normal)=0x0001
+        CASE  Semi-fast jump speed (125% normal)=0x0002
+        CASE  Fast jump speed (150% normal)=0x0004
+        CASE  Fuel regen also applies to player=0x0008
+        CASE  Disabled at 10% armor instead of 33%=0x0010
+        CASE  AI has afterburner at Advanced combat rating=0x0020
+        CASE  AI always has afterburner=0x0040
+        CASE  Show armor percentage in target display=0x0100
+        CASE  DonÕt show shield/armor in target display=0x0200
+        CASE  Planet-type ship=0x0400
+        CASE  Turrets have front blind spot=0x1000
+        CASE  Turrets have side blind spots=0x2000
+        CASE  Turrets have rear blind spot=0x4000
+        CASE  Can be used as an escape ship=0x8000
+        PACK  Flags 2=flags2
+        PACK  Flags 3=flags3
+    76  DWRD  Decorative Escape Pods  (2B)
+        REPEAT next field x4  Outfits
+    78  RSID x4  'otf'=-1  (8B)
+        REPEAT next field x4  Counts
+    86  DWRD x4  oc  (8B)
+    94  DWRD  fuelRegen  (2B)
+    96  DWRD  AI Speed Variance | %  (2B)
+    98  WORV  flags2  (2B)
+        CASE  AI exhibits swarming behavior=0x0001
+        CASE  AI prefers standoff attacks=0x0002
+        CASE  CanÕt be targeted=0x0004
+        CASE  Can be targeted by Point Defense weapons=0x0008
+        CASE  DonÕt use fighter voices=0x0010
+        CASE  Can jump without slowing down=0x0020
+        CASE  Inertialess=0x0040
+        CASE  AI retreats when out of ammo=0x0080
+        CASE  AI cloaks during burst reload=0x0100
+        CASE  AI cloaks when retreating=0x0200
+        CASE  AI cloaks when jumping=0x0400
+        CASE  AI cloaks when just flying around=0x0800
+        CASE  AI remains cloaked until close to target=0x1000
+        CASE  AI cloaks when docking=0x2000
+        CASE  AI cloaks when pre-emptively attacked=0x4000
+        PACK  Contribute/Require=contribute,require
+   100+ QB64  contribute=#-100  (64 bits of Q-container)
+   108  n0FF  Availability (NCB Test)  (255B)
+   363  n0FF  AppearOn (NCB Test)  (255B)
+   618  n100  OnPurchase (NCB Set)  (256B)
+        PACK  OnCapture (NCB Set)=onCapture
+        PACK  OnRetire (NCB Set)=onRetire
+   874  DWRD  Deionization Rate | 100 = 1 point per frame  (2B)
+   876  DWRD  Max Ionization  (2B)
+   878  RSID  Key Carried Ship='shp'  (2B)
+        CASE  -1
+        REPEAT next field x4  Outfits=5
+   880  RSID x4  'otf'=-1  (8B)
+        REPEAT next field x4  Counts=5
+   888  DWRD x4  oc  (8B)
+   896+ QB64  require=#-100  (64 bits of Q-container)
+   904  DWRD  Buy Random | %  (2B)
+   906  DWRD  Hire Random | %  (2B)
+   908  F044  Unused  (68B)
+   976  n0FF  onCapture  (255B)
+  1231  n0FF  onRetire  (255B)
+  1486  C040  Shipyard Name  (64B)
+  1550  C020  Comms Name  (32B)
+  1582  C080  Long Name  (128B)
+  1710  C020  Shipyard Movie File  (32B)
+        REPEAT next field x4  Weapons=5
+  1742  RSID x4  'wap'=-1  (8B)
+        REPEAT next field x4  Counts=5
+  1750  DWRD x4  c  (8B)
+        REPEAT next field x4  Ammo=5
+  1758  DWRD x4  a  (8B)
+  1766  C040  Target Display Subtitle  (64B)
+  1830  WORV  flags3  (2B)
+        CASE  AI destroys asteroids=0x0001
+        CASE  AI scoops asteroid debris (economy-at-work if no scoop)=0x0002
+        CASE  Immune to gravity (doesnÕt work!)=0x0010
+        CASE  Immune to deadly stellars (& gravity)=0x0020
+        CASE  Turreted shots appear above ship, not below=0x0040
+        CASE  DonÕt show in shipyard if Availability false=0x0100
+        CASE  DonÕt show in shipyard if Require not met=0x0200
+        CASE  Hide other ships of equal display weight=0x4000
+  1832  RSID  Escort Upgrades To='shp'  (2B)
+        CASE  Not Upgradable=-1
+  1834  DLNG  Escort Upgrade Cost  (4B)
+  1838  DLNG  Escort Sell Value  (4B)
+  1842  DWRD  Escort Category=-1  (2B)
+        CASR  Automatic=-1
+        CASR  Fighter=0
+        CASR  Medium Ship=1
+        CASR  Warship=2
+        CASR  Freighter=3
+  1844  F010  Unused  (16B)
+   total size: 1860
+
+=== TMPL "spïn" ===
+     0  RSID  Sprite='rlD'  (2B)
+        DVDR  The Mask and Frame Size fields only apply to PICT sprites
+     2  RSID  Mask='PICT'  (2B)
+     4  PNT   Frame Size  (4B)
+        DVDR  For rlD sprites, the Grid Size should reflect the frame count
+     8  PNT   Grid Size  (4B)
+   total size: 12
+
+=== TMPL "spöb" ===
+        PACK  Descriptions=spaceport,bar
+        RREF  spaceport='dsc' Spaceport Desc
+        RREF  bar='dsc' 9872 Bar Desc
+     0  PNT   Position in System  (4B)
+        PACK  Type=type,typeRef
+     4  RSID  type='spn' 1000+63  (2B)
+        RREF  typeRef='STR#' #1100 Stellar Types
+     6+ BB04  Food Prices  (4 bits of B-container)
+        CASR  Not Traded=0
+        CASR  Low=1
+        CASR  Medium=2
+        CASR  High=4
+     6+ BB04  Industrial Prices  (4 bits of B-container)
+        CASR  Not Traded=0
+        CASR  Low=1
+        CASR  Medium=2
+        CASR  High=4
+     7+ BB04  Medical Prices  (4 bits of B-container)
+        CASR  Not Traded=0
+        CASR  Low=1
+        CASR  Medium=2
+        CASR  High=4
+     7+ BB04  Luxury Goods Prices  (4 bits of B-container)
+        CASR  Not Traded=0
+        CASR  Low=1
+        CASR  Medium=2
+        CASR  High=4
+     8+ BB04  Metal Prices  (4 bits of B-container)
+        CASR  Not Traded=0
+        CASR  Low=1
+        CASR  Medium=2
+        CASR  High=4
+     8+ BB04  Equipment Prices  (4 bits of B-container)
+        CASR  Not Traded=0
+        CASR  Low=1
+        CASR  Medium=2
+        CASR  High=4
+     9  BORV  Flags 1  (1B)
+        CASE  Can land/dock=0x01
+        CASE  Has Commodity Exchange=0x02
+        CASE  Has Outfitter=0x04
+        CASE  Has Shipyard=0x08
+        CASE  Is a station=0x10
+        CASE  Uninhabited=0x20
+        CASE  Has Bar=0x40
+        CASE  Can only land when destroyed=0x80
+        PACK  Flags 2=flags2
+    10  DWRD  Daily Tribute | credits  (2B)
+        CASE  Default (1000 x Tech Level)=0
+    12  DWRD  Tech Level  (2B)
+        PACK  Special Techs=tech,tech,tech,tech
+        PACK  =tech,tech,tech,tech
+    14  DWRD  tech  (2B)
+    16  DWRD  tech  (2B)
+    18  DWRD  tech  (2B)
+    20  RSID  Government='gvt'  (2B)
+        CASE  Independent=-1
+    22  DWRD  Minimum Legal Status=0  (2B)
+        CASE  Can always land=-32767
+        CASE  Can never land=32767
+        DVDR  For hypergates, the landscape value is the index of the first ÒopenÓ frame. 0 = middle.
+    24  RSID  Custom Landscape='PICT'  (2B)
+        CASE  -1
+        DVDR  For hypergates/wormholes, the sound value is the ship exit angle. -1 = random.
+    26  RSID  Custom Ambient Sound='snd '  (2B)
+        CASE  -1
+    28  RSID  Defense Fleet Dude='dde'  (2B)
+        CASE  -1
+    30+ WB12  Defense Ship Count | max 2276 (1000+ must use wave size)  (12 bits of W-container)
+        CASR  =0..2276
+    30+ WB04  Defense Wave Size | max 9 (0 = unlimited)  (4 bits of W-container)
+        CASR  =0..9
+    32  WORV  flags2  (2B)
+        CASE  Show first frame between every other=0x0001
+        CASE  Pick frames randomly=0x0002
+        CASE  Loop ambient sound=0x0010
+        CASE  Always dominated=0x0020
+        CASE  Starts destroyed=0x0040
+        CASE  Animate only when destroyed=0x0080
+        CASE  Deadly - destroys ships on contact=0x0100
+        CASE  Fires weapon only when provoked=0x0200
+        CASE  Player can sell any outfits here=0x0400
+        CASE  Is a hypergate - choose destination from links=0x1000
+        CASE  Is a wormhole - random destination from links=0x2000
+    34  DWRD  Animation Delay | time between frames, in 30ths of a second  (2B)
+    36  DWRD  First Frame Bias | delay multiplier for first frame  (2B)
+        DVDR  Hypergate/wormhole links. Wormholes with no defined links will all link to each other.
+        PACK  Hyperlinks='spb','spb'
+        REPEAT next field x3  
+        (repeat x3 consumed by 0-byte PACK)
+        PACK  ='spb','spb'
+        REPEAT next field x8  
+    38  RSID x8  'spb'=-1  (16B)
+    54  n0FF  OnDominate (NCB Set)  (255B)
+   309  n0FF  OnRelease (NCB Set)  (255B)
+   564  DLNG  Landing Fee (credits)  (4B)
+   568  DWRD  Gravity | Confuses AI, not recommended.  (2B)
+   570  RSID  Weapon='wap'  (2B)
+        CASE  -1
+   572  DLNG  Strength=0  (4B)
+        CASE  Invulnerable=0
+   576  RSID  Destroyed Graphic Type='spn' 1000+63  (2B)
+        CASE  -1
+   578  DWRD  Regenerate Time (days)  (2B)
+        CASE  Never Regenerates=-1
+   580  DWRD  Explosion=-1  (2B)
+        CASR  None=-1
+        CASR  Single Explosion:=0..63 ~128 'bm'
+        CASR  Explosion + Sparks:=1000..1063 ~128 'bm'
+   582  n0FF  OnDestroy (NCB Set)  (255B)
+   837  n0FF  OnRegen (NCB Set)  (255B)
+        REPEAT next field x5  Techs=4
+  1092  DWRD x5  tech  (10B)
+  1102  F010  Unused  (16B)
+   total size: 1118
+
+=== TMPL "sÿst" ===
+        PACK  Maps=galaxyMap,systemMap
+        RREF  galaxyMap='glxØ' #0 Galaxy
+        RREF  systemMap='sØsm' 0 System
+     0  PNT   Position on Map  (4B)
+        PACK  Hyperlinks='sØst','sØst'
+        REPEAT next field x7  
+        (repeat x7 consumed by 0-byte PACK)
+        PACK  ='sØst','sØst'
+        REPEAT next field x16  
+     4  RSID x16  'sØst'=-1  (32B)
+        PACK  Nav Defaults='spb','spb'
+        REPEAT next field x7  
+        (repeat x7 consumed by 0-byte PACK)
+        PACK  ='spb','spb'
+        REPEAT next field x16  
+    36  RSID x16  'spb'=-1  (32B)
+        REPEAT next field x8  Dude Probabilities
+        (repeat x8 consumed by 0-byte PACK)
+        PACK  *) Dude Probability='dde',prob | %
+    68  DWRD  'dde'=-1  (2B)
+        CASR  None=-1
+        CASR  Dude:=128..639 'dde'
+        CASR  Fleet:=-128..-383 ~128 'flt'
+    70  DWRD  'dde'=-1  (2B)
+        CASR  None=-1
+        CASR  Dude:=128..639 'dde'
+        CASR  Fleet:=-128..-383 ~128 'flt'
+    72  DWRD  'dde'=-1  (2B)
+        CASR  None=-1
+        CASR  Dude:=128..639 'dde'
+        CASR  Fleet:=-128..-383 ~128 'flt'
+    74  DWRD  'dde'=-1  (2B)
+        CASR  None=-1
+        CASR  Dude:=128..639 'dde'
+        CASR  Fleet:=-128..-383 ~128 'flt'
+    76  DWRD  'dde'=-1  (2B)
+        CASR  None=-1
+        CASR  Dude:=128..639 'dde'
+        CASR  Fleet:=-128..-383 ~128 'flt'
+    78  DWRD  'dde'=-1  (2B)
+        CASR  None=-1
+        CASR  Dude:=128..639 'dde'
+        CASR  Fleet:=-128..-383 ~128 'flt'
+    80  DWRD  'dde'=-1  (2B)
+        CASR  None=-1
+        CASR  Dude:=128..639 'dde'
+        CASR  Fleet:=-128..-383 ~128 'flt'
+    82  DWRD  'dde'=-1  (2B)
+        CASR  None=-1
+        CASR  Dude:=128..639 'dde'
+        CASR  Fleet:=-128..-383 ~128 'flt'
+        REPEAT next field x8  Probs
+    84  DWRD x8  prob  (16B)
+   100  DWRD  Average Ship Count  (2B)
+   102  RSID  Government='gvt'  (2B)
+        CASE  Independent=-1
+        PACK  Message Buoy=buoy,buoyRef
+   104  RSID  buoy='STR ' 999+4000  (2B)
+        CASE  -1
+        RREF  buoyRef='STR#' #1000 Message Buoys
+   106  DWRD  Asteroids | 0-16  (2B)
+        PACK  Asteroid Types=roidTypes2,roidTypes1
+   108  DWRD  Interference | %  (2B)
+        PACK  Murk=murk | %
+        PACK  Background Color=background
+        REPEAT next field x8  Pers Probs
+        (repeat x8 consumed by 0-byte PACK)
+        PACK  *) Pers Probability='prs',prob | %
+        REPEAT next field x8  Pers
+   110  RSID x8  'prs'=-1  (16B)
+        REPEAT next field x8  Probs
+   126  DWRD x8  prob  (16B)
+   142  LCOL  background  (4B)
+   146  DWRD  murk=0 | %  (2B)
+        CASE  Hide Starfield=-1
+   148  BORV  roidTypes1  (1B)
+        CASE  136 Small Dust=0x01
+        CASE  137 Medium Dust=0x02
+        CASE  138 Large Dust=0x04
+        CASE  139 Huge Dust=0x08
+        CASE  140 Small Crystal=0x10
+        CASE  141 Med. Crystal=0x20
+        CASE  142 Large Crystal=0x40
+        CASE  143 Huge Crystal=0x80
+   149  BORV  roidTypes2  (1B)
+        CASE  128 Small Metal=0x01
+        CASE  129 Med. Metal=0x02
+        CASE  130 Large Metal=0x04
+        CASE  131 Huge Metal=0x08
+        CASE  132 Small Ice=0x10
+        CASE  133 Medium Ice=0x20
+        CASE  134 Large Ice=0x40
+        CASE  135 Huge Ice=0x80
+   150  n100  Visiblility (NCB Test)  (256B)
+   406  RSID  Reinforcement Fleet='flt'  (2B)
+        CASE  -1
+   408  DWRD  Reinforcement Delay | frames  (2B)
+   410  DWRD  Reinforcement Regen | days  (2B)
+   412  F010  Unused  (16B)
+   total size: 428
+
+=== TMPL "wëap" ===
+     0  DWRD  Reload | frames  (2B)
+     2  DWRD  Duration | frames  (2B)
+     4  DWRD  Mass (Armor) Damage  (2B)
+     6  DWRD  Energy (Shield) Damage  (2B)
+     8  KWRD  Weapon Type  (2B)
+        CASE  Unguided Projectile=-1
+        CASE  Unguided Projectile Turret=4
+        CASE  Homing Weapon=1
+        CASE  Beam=0
+        CASE  Beam Turret=3
+        CASE  Freefall Bomb=5
+        CASE  Freeflight Rocket=6
+        CASE  Front-Quadrant Turret=7
+        CASE  Rear-Quadrant Turret=8
+        CASE  Point Defense Turret=9
+        CASE  Point Defense Beam=10
+        CASE  Carried Ship=99
+        KEYB  Projectile=-1,4,5,6,7,8,9  (alternative @10)
+    10  DWRD  Shot Speed | 100 = 1 pixel per frame  (2B)
+    12  DWRD  Ammo Type=-1  (2B)
+        CASR  DoesnÕt Use Ammo=-1
+        CASR  Ammo From Weapon:=0..255 ~128 'wap'
+        CASR  Destroys Ship=-999
+        CASR  Consumes Fuel:=-1000.. ~0 | 10 = 1 unit per shot
+    14  RSID  Graphic Type='spn' 3000+255  (2B)
+    16  DWRD  Inaccuracy | ¡  (2B)
+        CASR  Error Margin:=0..
+        CASR  Fixed (unguided only):=-2.. ~2 | Needs off-axis exits.
+        TMPL  wap.Projectile1
+        CASE  Turret has front blind spot=0x1000
+        CASE  Turret has side blind spots=0x2000
+        CASE  Turret has rear blind spot=0x4000
+        CASE  Detonates when shot expires (flak)=0x8000
+    18  WORV  Seeker Flags  (2B)
+        CASE  Passes over asteroids=0x0001
+        CASE  CanÕt fire if ship ionized=0x0020
+        TMPL  wap.Projectile2
+    20  F008  Jam Vulnerability 1-4  (8B)
+    28  WORV  flags3  (2B)
+        CASE  Only use ammo at end of burst cycle=0x0001
+        CASE  Translucent shots=0x0002
+        CASE  Can only fire one shot at a time=0x0004
+        CASE  Fires from exit nearest to target=0x0010
+        CASE  CanÕt fire other weapons with this one=0x0020
+    30  FLNG  Shot Durability/Armor  (4B)
+    34  DWRD  Max Ammo | per launcher  (2B)
+    36  FLNG  Lightning  (4B)
+    40  LCOL  ionColor  (4B)
+        KEYE  
+        KEYB  Homing=1  (alternative @10)
+    10  DWRD  Shot Speed | 100 = 1 pixel per frame  (2B)
+        PACK  Turn Rate=guidedTurn | 10 Å 30¡/sec
+    12  DWRD  Ammo Type=-1  (2B)
+        CASR  DoesnÕt Use Ammo=-1
+        CASR  Ammo From Weapon:=0..255 ~128 'wap'
+        CASR  Destroys Ship=-999
+        CASR  Consumes Fuel:=-1000.. ~0 | 10 = 1 unit per shot
+    14  RSID  Graphic Type='spn' 3000+255  (2B)
+    16  DWRD  Inaccuracy | ¡  (2B)
+        TMPL  wap.Projectile1
+        CASE  Detonates when shot expires (flak)=0x8000
+        CASE  AI wonÕt fire at ships with turn rate > 30=0x0008
+    18  WORV  Seeker Flags  (2B)
+        CASE  Passes over asteroids=0x0001
+        CASE  Decoyed by asteroids=0x0002
+        CASE  Confused by interference=0x0008
+        CASE  Turns away if jammed=0x0010
+        CASE  CanÕt fire if ship ionized=0x0020
+        CASE  Loses lock if target not directly ahead=0x4000
+        CASE  May attack parent ship if jammed=0x8000
+        TMPL  wap.Projectile2
+    20  RECT  Jam Vulnerability 1-4 | %  (8B)
+    28  WORV  flags3  (2B)
+        CASE  Only use ammo at end of burst cycle=0x0001
+        CASE  Translucent shots=0x0002
+        CASE  Can only fire one shot at a time=0x0004
+        CASE  Fires from exit nearest to target=0x0010
+        CASE  CanÕt fire other weapons with this one=0x0020
+    30  DWRD  Shot Durability/Armor | Point Defense damage = 100% Mass + 50% Energy.  (2B)
+    32  DWRD  guidedTurn  (2B)
+    34  DWRD  Max Ammo | per launcher  (2B)
+    36  FLNG  Lightning  (4B)
+    40  LCOL  ionColor  (4B)
+        KEYE  
+        KEYB  Beam=0,3,10  (alternative @10)
+    10  FWRD  Shot Speed (1000= 1 pixel/frame):  (2B)
+    12  DWRD  Ammo Type=-1  (2B)
+        CASR  DoesnÕt Use Ammo=-1
+        CASR  Ammo From Weapon:=0..255 ~128 'wap'
+        CASR  Destroys Ship=-999
+        CASR  Consumes Fuel:=-1000.. ~0 | 10 = 1 unit per shot
+    14  FWRD  Graphic Type='spn' 3000+255  (2B)
+    16  DWRD  Inaccuracy | ¡  (2B)
+    18  RSID  Sound Type='snd ' 200+63  (2B)
+        CASE  -1
+    20  DWRD  Impact  (2B)
+        CASR  Repel:=0..
+        CASR  Tractor:=-1.. ~1
+        PACK  Recoil=recoil
+    22  DWRD  Explosion=-1  (2B)
+        CASR  None=-1
+        CASR  Single Explosion:=0..63 ~128 'bm'
+        CASR  Explosion + Sparks:=1000..1063 ~128 'bm'
+    24  FLNG  Radius  (4B)
+    28  WORV  Flags 1  (2B)
+        CASE  Secondary weapon=0x0002
+        CASE  Sound loops instead of repeating per shot=0x0010
+        CASE  Penetrates shields=0x0020
+        CASE  Multiple launchers fire simultaneously=0x0040
+        CASE  Turret has front blind spot=0x1000
+        CASE  Turret has side blind spots=0x2000
+        CASE  Turret has read blind spots=0x4000
+    30  WORV  Seeker Flags  (2B)
+        CASE  Passes over asteroids=0x0001
+        CASE  CanÕt fire if ship ionized=0x0020
+        PACK  Flags 2=flags2
+        PACK  Flags 3=flags3
+    32  FWRD  Smoke Set  (2B)
+    34  WFLG  Decay=Shrink before disappearing (duration += 16-falloff)  (2B)
+    36  F00C  Particle Count  (12B)
+    48  DWRD  Beam Length | pixels  (2B)
+    50  DWRD  Beam Width | pixel gap between left and right corona  (2B)
+    52  DWRD  Corona Falloff | 1-16 (lower values = larger corona)  (2B)
+    54  LCOL  Beam Color  (4B)
+    58  LCOL  Corona Color  (4B)
+        PACK  Lightning Density=liDensity
+        PACK  Lightning Amplitude=liAmplitude
+    62  F00A  Subs  (10B)
+    72  WORV  flags2  (2B)
+        CASE  DonÕt show ammo quantity in status display=0x0040
+        CASE  Can only fire if Key Carried on board=0x0080
+        CASE  AI wonÕt use=0x0100
+        CASE  Triggers shipÕs weapon glow=0x0200
+        CASE  Planet-type weapon=0x0400
+        CASE  Hide in status bar if out of ammo=0x0800
+        CASE  Will only disable ships, not destroy=0x1000
+        CASE  Display beam below ship graphic=0x2000
+        CASE  Can fire while cloaked=0x4000
+        CASE  Deals 10x Mass Damage to asteroids=0x8000
+    74  DWRD  Ionization Charge  (2B)
+        PACK  Ionization Color=ionColor | Pure black defaults to a bluish color.
+    76  DWRD  Hit Particle Count  (2B)
+    78  DWRD  Hit Particle Duration  (2B)
+    80  DWRD  Hit Particle Velocity  (2B)
+    82  LCOL  Hit Particle Color  (4B)
+    86  DWRD  recoil  (2B)
+    88  DWRD  Exit Type  (2B)
+        CASR  Ship Center=-1
+        CASR  Gun Positions=0
+        CASR  Turret Positions=1
+        CASR  Guided Positions=2
+        CASR  Beam Positions=3
+    90  DWRD  Shots per Burst  (2B)
+    92  DWRD  Burst Reload | frames  (2B)
+    94  F008  Jam Vulnerability 1-4  (8B)
+   102  WORV  flags3  (2B)
+        CASE  Only use ammo at end of burst cycle=0x0001
+        CASE  Can only fire one shot at a time=0x0004
+        CASE  Fires from exit nearest to target=0x0010
+        CASE  CanÕt fire other weapons with this one=0x0020
+   104  FLNG  Durability  (4B)
+   108  DWRD  Max Ammo | per launcher  (2B)
+   110  DWRD  liDensity  (2B)
+   112  DWRD  liAmplitude  (2B)
+   114  LCOL  ionColor  (4B)
+        KEYE  
+        KEYB  Carried Ship=99  (alternative @10)
+    10  DWRD  Launch Speed  (2B)
+    12  RSID  Ship Type='shp'  (2B)
+    14  FWRD  Graphic Type='spn' 3000+255  (2B)
+    16  DWRD  Inaccuracy | ¡  (2B)
+    18  RSID  Sound Type='snd ' 200+63  (2B)
+        CASE  -1
+    20  F008  Impact  (8B)
+        PACK  Recoil=recoil
+    28  WORV  Flags 1  (2B)
+        CASE  Secondary weapon=0x0002
+        CASE  Sound loops instead of repeating per shot=0x0010
+        CASE  Multiple launchers fire simultaneously=0x0040
+    30  WORV  Seeker Flags  (2B)
+        CASE  CanÕt fire if ship ionized=0x0020
+        PACK  Flags 2=flags2
+        PACK  Flags 3=flags3
+    32  F028  Smoke Set  (40B)
+    72  WORV  flags2  (2B)
+        CASE  Don't show ammo quantity in status display=0x0040
+        CASE  Can only fire if Key Carried on board=0x0080
+        CASE  AI wonÕt use=0x0100
+        CASE  Triggers shipÕs weapon glow=0x0200
+        CASE  Hide in status bar if out of ammo=0x0800
+        CASE  Can fire while cloaked=0x4000
+    74  F00C  Ionization Charge  (12B)
+    86  DWRD  recoil  (2B)
+    88  FWRD  Exit Type  (2B)
+    90  DWRD  Shots per Burst  (2B)
+    92  DWRD  Burst Reload | frames  (2B)
+    94  F008  Jam Vulnerability 1-4  (8B)
+   102  WORV  flags3  (2B)
+        CASE  Only use ammo at end of burst cycle (!)=0x0001
+        CASE  CanÕt fire other weapons with this one=0x0020
+   104  FLNG  Shot Durability/Armor  (4B)
+   108  DWRD  Max Ammo | per launcher  (2B)
+   110  F008  Lightning  (8B)
+        KEYE  
+        (keyed group ends @118)
+   118  F010  Unused  (16B)
+   total size: 134
+
+=== TMPL "oütf.ModTypes" ===
+        CASE  Cargo Space=2
+        CASE  Shield Capacity=4
+        CASE  Shield Recharge=5
+        CASE  Armour=6
+        CASE  Armour Regeneration=29
+        CASE  Repair System=49
+        CASE  Fuel Tank=12
+        CASE  Fuel Regeneration=18
+        CASE  Auto-Refueller=19
+        CASE  Ion Capacity=40
+        CASE  Ion Dissipation=39
+        CASE  Acceleration=7
+        CASE  Speed=8
+        CASE  Turn Rate=9
+        CASE  Afterburner=15
+        CASE  Inertial Dampener=38
+        CASE  Escape Pod=11
+        CASE  Auto-Eject=20
+        CASE  Map=16
+        CASE  Density Scanner=13
+        CASE  IFF (color radar)=14
+        CASE  Radar Interference=24
+        CASE  System Murk=28
+        CASE  Cloaking Device=17
+        CASE  Cloak Scanner=30
+        CASE  Clean Legal Record=21
+        CASE  Hyperspace Speed=22
+        CASE  Hyperspace Jump Distance=23
+        CASE  Multi-Jump=32
+        CASE  Fast Jumping=37
+        CASE  Marines (capture odds)=25
+        CASE  Mining Scoop=31
+        CASE  Jamming Type 1=33
+        CASE  Jamming Type 2=34
+        CASE  Jamming Type 3=35
+        CASE  Jamming Type 4=36
+        CASE  Gravity Resistance=41
+        CASE  Deadly Stellar Resistance=42
+        CASE  Ship Paint=43
+        CASE  Increase Outfit Max=27
+        CASE  Max Guns=45
+        CASE  Max Turrets=46
+        CASE  Reinforcment Inhibitor=44
+        CASE  IFF Scrambler=48
+        CASE  Lethal Bomb=47
+        CASE  Nonlethal Bomb=50
+        KEYB  -1,11,13,14,19,20,31,37,38,41,42,49,*  (alternative @0)
+     0  FWRD  Ignored  (2B)
+        KEYE  -1 end
+        KEYB  2  (alternative @0)
+     0  DWRD  Cargo Space | tons  (2B)
+        KEYE  2 end
+        KEYB  4  (alternative @0)
+     0  DWRD  Shield Points  (2B)
+        KEYE  4 end
+        KEYB  5  (alternative @0)
+     0  DWRD  Shield Recharge Rate | 1000 = 1 point per frame  (2B)
+        KEYE  5 end
+        KEYB  6  (alternative @0)
+     0  DWRD  Armour Points  (2B)
+        KEYE  6 end
+        KEYB  7  (alternative @0)
+     0  DWRD  Acceleration Amount  (2B)
+        KEYE  7 end
+        KEYB  8  (alternative @0)
+     0  DWRD  Speed Amount  (2B)
+        KEYE  8 end
+        KEYB  9  (alternative @0)
+     0  DWRD  Turn Amount | 100 Å 30¡/sec  (2B)
+        KEYE  9 end
+        KEYB  12  (alternative @0)
+     0  DWRD  Fuel Units  (2B)
+        KEYE  12 end
+        KEYB  15  (alternative @0)
+     0  DWRD  Fuel Drain | units per second  (2B)
+        KEYE  15 end
+        KEYB  16  (alternative @0)
+     0  DWRD  Explore  (2B)
+        CASR  Number of Jumps:=0..
+        CASR  Independent Systems=-1
+        CASR  Govt Class Systems:=-1000.. ~0
+        KEYE  16 end
+        KEYB  17  (alternative @0)
+        PACK  Shield Drain=cShield1 | points per second
+        PACK  Fuel Drain=cFuel1 | units per second
+     0+ WF03  Unused  (3 bits of W-container)
+     0+ WBIT  Cloak Flags=Area cloak  (1 bits of W-container)
+     0+ WB04  cShield1  (4 bits of W-container)
+     0+ WB04  cFuel1  (4 bits of W-container)
+     0+ WBIT  =Deactivates when hit  (1 bits of W-container)
+     0+ WBIT  =Drops shields on activation  (1 bits of W-container)
+     0+ WBIT  =Visible on radar  (1 bits of W-container)
+     0+ WBIT  =Faster fading  (1 bits of W-container)
+        KEYE  17 end
+        KEYB  18  (alternative @0)
+     0  DWRD  Fuel Regen Rate | frames per unit  (2B)
+        KEYE  18 end
+        KEYB  21  (alternative @0)
+     0  RSID  Clean Govt Record='gvt'  (2B)
+        CASE  All=-1
+        KEYE  21 end
+        KEYB  22  (alternative @0)
+     0  DWRD  Hyperspace Days  (2B)
+        KEYE  22 end
+        KEYB  23  (alternative @0)
+     0  DWRD  Jump Radius Change | pixels  (2B)
+        KEYE  23 end
+        KEYB  24  (alternative @0)
+     0  DWRD  Subtract Amount  (2B)
+        KEYE  24 end
+        KEYB  25  (alternative @0)
+     0  DWRD  Capture Odds  (2B)
+        CASR  Add Crew:=0..
+        CASR  Increase Percent:=-1.. ~1 | %
+        KEYE  25 end
+        KEYB  27  (alternative @0)
+     0  RSID  Outfit='otf'  (2B)
+        KEYE  27 end
+        KEYB  28  (alternative @0)
+     0  DWRD  Murk Amount  (2B)
+        KEYE  28 end
+        KEYB  29  (alternative @0)
+     0  DWRD  Armor Regen Rate | 1000 = 1 point per frame  (2B)
+        KEYE  29 end
+        KEYB  30  (alternative @0)
+     0  WORV  Scanner Flags  (2B)
+        CASE  Reveal cloaked ships on radar=0x0001
+        CASE  Reveal cloaked ships on screen=0x0002
+        CASE  Allow targeting untargetable ships=0x0004
+        CASE  Allow targeting cloaked ships=0x0008
+        KEYE  30 end
+        KEYB  32  (alternative @0)
+     0  DWRD  Number of Extra Jumps  (2B)
+        KEYE  32 end
+        KEYB  33,34,35,36  (alternative @0)
+     0  DWRD  Jamming Amount | %  (2B)
+        KEYE  33 end
+        KEYB  39  (alternative @0)
+     0  DWRD  Deionization Rate | 100 = 1 point per frame  (2B)
+        KEYE  39 end
+        KEYB  40  (alternative @0)
+     0  DWRD  Ionization Capacity  (2B)
+        KEYE  40 end
+        KEYB  43  (alternative @0)
+     0  WCOL  Colour  (2B)
+        KEYE  43 end
+        KEYB  44  (alternative @0)
+     0  DWRD  Govt Class  (2B)
+        CASE  All=-1
+        KEYE  44 end
+        KEYB  45  (alternative @0)
+     0  DWRD  Gun Slots  (2B)
+        KEYE  45 end
+        KEYB  46  (alternative @0)
+     0  DWRD  Turret Slots  (2B)
+        KEYE  46 end
+        KEYB  47  (alternative @0)
+     0  RSID  Detonation Text='dsc'  (2B)
+        CASE  None=-1
+        KEYE  47 end
+        KEYB  48  (alternative @0)
+     0  DWRD  Govt Class  (2B)
+        KEYE  48 end
+        KEYB  50  (alternative @0)
+     0  RSID  Explosion='bm'  (2B)
+        KEYE  50 end
+   total size: 2
+
+=== TMPL "wëap.Projectile1" ===
+     0  RSID  Sound Type='snd ' 200+63  (2B)
+        CASE  -1
+     2  DWRD  Impact  (2B)
+        PACK  Recoil=recoil
+     4  DWRD  Explosion=-1  (2B)
+        CASR  None=-1
+        CASR  Single Explosion:=0..63 ~128 'bm'
+        CASR  Explosion + Sparks:=1000..1063 ~128 'bm'
+     6  DWRD  Proximity Radius  (2B)
+        PACK  Proximity Arm Delay=proxSafety | frames
+     8  DWRD  Blast Radius  (2B)
+    10  WORV  Flags 1  (2B)
+        CASE  Spin weaponÕs graphic continuously=0x0001
+        CASE  Secondary weapon=0x0002
+        CASE  Start animation on first frame=0x0004
+        CASE  Sound loops instead of repeating per shot=0x0010
+        CASE  Penetrates shields=0x0020
+        CASE  Multiple launchers fire simultaneously=0x0040
+        CASE  CanÕt be targeted by point defense=0x0080
+        CASE  Blast doesnÕt hurt player=0x0100
+        CASE  Generates small smoke trail=0x0200
+        CASE  Generates big smoke trail=0x0400
+        CASE  More persistent smoke trail=0x0800
+   total size: 12
+
+=== TMPL "wëap.Projectile2" ===
+        PACK  Flags 2=flags2
+        PACK  Flags 3=flags3
+     0  DWRD  Smoke Set  (2B)
+     2  DWRD  Decay | frames per damage point lost  (2B)
+     4  DWRD  Particle Count  (2B)
+     6  DWRD  Particle Velocity  (2B)
+     8  DWRD  Particle Duration Min  (2B)
+    10  DWRD  Particle Duration Max  (2B)
+    12  LCOL  Particle Color  (4B)
+    16  FWRD  Beam Length (pixels)  (2B)
+    18  DWRD  Animation Delay | time between frames, in 30ths of a second  (2B)
+    20  DWRD  Fade Out | rate of fade over last 32 frames of life  (2B)
+    22  F008  Beam colors  (8B)
+    30  DWRD  Submunition Count  (2B)
+    32  RSID  Sub Type='wap'  (2B)
+        CASE  -1
+    34  DWRD  Sub Inaccuracy | ¡  (2B)
+        CASR  Error Margin:=0..
+        CASR  Between Shots:=-2.. ~2
+    36  DWRD  Sub Recursion Limit  (2B)
+    38  DWRD  proxSafety  (2B)
+    40  WORV  flags2  (2B)
+        CASE  Stay on first frame until proximity armed=0x0001
+        CASE  Stop graphic rotation on last frame=0x0002
+        CASE  Proximity ignores asteroids=0x0004
+        CASE  Proximity trigger by any ship=0x0008
+        CASE  Submunitions fire toward nearest target=0x0010
+        CASE  DonÕt launch submunitions when shot expires=0x0020
+        CASE  DonÕt show ammo quantity in status display=0x0040
+        CASE  Can only fire if Key Carried on board=0x0080
+        CASE  AI wonÕt use=0x0100
+        CASE  Triggers shipÕs weapon glow=0x0200
+        CASE  Planet-type weapon=0x0400
+        CASE  Hide in status bar if out of ammo=0x0800
+        CASE  Will only disable ships, not destroy=0x1000
+        CASE  Can fire while cloaked=0x4000
+        CASE  Deals 10x Mass Damage to asteroids=0x8000
+    42  DWRD  Ionization Charge  (2B)
+        PACK  Ionization Color=ionColor | Pure black defaults to a bluish color.
+    44  DWRD  Hit Particle Count  (2B)
+    46  DWRD  Hit Particle Duration  (2B)
+    48  DWRD  Hit Particle Velocity  (2B)
+    50  LCOL  Hit Particle Color  (4B)
+    54  DWRD  recoil  (2B)
+    56  DWRD  Exit Type  (2B)
+        CASR  Ship Center=-1
+        CASR  Gun Positions=0
+        CASR  Turret Positions=1
+        CASR  Guided Positions=2
+        CASR  Beam Positions=3
+    58  DWRD  Shots per Burst  (2B)
+    60  DWRD  Burst Reload | frames  (2B)
+   total size: 62
+
+=== TMPL "NpïL" ===
+        KRID  Resource Type
+        CASE  Player Data=128
+        CASE  Universe Data=129
+        KEYB  128  (alternative @0)
+        TMPL  NpL.128-1
+        TMPL  NpL.MissionData1
+     0  FWRD  Padding  (2B)
+        TMPL  NpL.MissionData2
+     2  FBYT  Padding  (1B)
+        TMPL  NpL.MissionData3
+     3  F003  Padding  (3B)
+        TMPL  NpL.128-2
+        KEYE  *****
+        KEYB  129  (alternative @0)
+        TMPL  NpL.129
+        KEYE  *****
+   total size: 0
+
+=== TMPL "NpïL.128-1" ===
+     0  DWRD  Last Stellar  (2B)
+     2  DWRD  Ship Type  (2B)
+     4  DWRD  Cargo Food  (2B)
+     6  DWRD  Cargo Industrial  (2B)
+     8  DWRD  Cargo Medical  (2B)
+    10  DWRD  Cargo Lux Goods  (2B)
+    12  DWRD  Cargo Metal  (2B)
+    14  DWRD  Cargo Equipment  (2B)
+    16  FWRD  Unused  (2B)
+    18  DWRD  Fuel  (2B)
+    20  DWRD  Current Month  (2B)
+    22  DWRD  Current Day  (2B)
+    24  DWRD  Current Year  (2B)
+        REPEAT next field x2048  Exploration=128
+    26  DWRD x2048  *) Explored  (4096B)
+        REPEAT next field x512  Items=128
+  4122  DWRD x512  *) Item Count  (1024B)
+        REPEAT next field x2048  Legal Statuses=128
+  5146  DWRD x2048  *) Legal Status  (4096B)
+        REPEAT next field x256  Weapons/Ammo=128
+        (repeat x256 consumed by 0-byte PACK)
+        PACK  *) Weapons/Ammo=wCount*,aCount*
+        REPEAT next field x256  Weapons=128
+  9242  DWRD x256  wCount*  (512B)
+        REPEAT next field x256  Ammo=128
+  9754  DWRD x256  aCount*  (512B)
+ 10266  DLNG  Credits  (4B)
+        !! FCNT list — offsets below are WRONG unless expanded by hand
+        FCNT  16
+        !! LSTC list — offsets below are WRONG unless expanded by hand
+        LSTC  Mission Status
+ 10270  BFLG  Active  (1B)
+ 10271  BFLG  Travel Complete  (1B)
+ 10272  BFLG  Ship Complete  (1B)
+ 10273  BFLG  Failed  (1B)
+ 10274  FWRD  Flags  (2B)
+ 10276  DWRD  Deadline Year  (2B)
+ 10278  DWRD  Deadline Month  (2B)
+ 10280  DWRD  Deadline Day  (2B)
+ 10282  F008  Unused  (8B)
+        LSTE  *****
+        !! FCNT list — offsets below are WRONG unless expanded by hand
+        FCNT  16
+        !! LSTC list — offsets below are WRONG unless expanded by hand
+        LSTC  Mission Data
+   total size: 10290  (WARNINGS above)
+
+=== TMPL "NpïL.128-2" ===
+        LSTE  *****
+        REPEAT next field x10  NCBs
+     0  H3E8 x10  *) NCBs (x1000)  (10000B)
+        REPEAT next field x2048  Domination=128
+ 10000  BFLG x2048  *) Stel Dominated  (2048B)
+        REPEAT next field x64  Escorts
+        (repeat x64 consumed by 0-byte PACK)
+        PACK  *) Escort Class=*escortClass,*escortUpgrade,*escortSale
+        REPEAT next field x64  Escorts
+ 12048  DWRD x64  *escortClass  (128B)
+        REPEAT next field x64  Fighters
+ 12176  DWRD x64  *) Fighter Class  (128B)
+        REPEAT next field x64  Escort Upgrades
+ 12304  WFLG x64  *escortUpgrade=Upgrade  (128B)
+        REPEAT next field x64  Escort Sales
+ 12432  WFLG x64  *escortSale=Sell  (128B)
+        REPEAT next field x64  Escort Voice Modes
+ 12560  DWRD x64  *) Escort Voice Mode  (128B)
+ 12688  DLNG  Combat Rating  (4B)
+   total size: 12692
+
+=== TMPL "NpïL.MissionData1" ===
+     0  DWRD  Travel Stellar  (2B)
+     2  FWRD  Travel System (unused)  (2B)
+     4  DWRD  Return Stellar  (2B)
+     6  DWRD  Ships Remaining  (2B)
+     8  DWRD  Ship Dude  (2B)
+    10  DWRD  Ship Goal  (2B)
+    12  DWRD  Ship Behavior  (2B)
+    14  DWRD  Ship Start  (2B)
+    16  DWRD  Ship System  (2B)
+    18  DWRD  Cargo Type  (2B)
+    20  DWRD  Cargo Quantity  (2B)
+    22  DWRD  Pickup Mode  (2B)
+    24  DWRD  Dropoff Mode  (2B)
+    26  HWRD  Scan Mask  (2B)
+    28  DWRD  Comp Govt  (2B)
+    30  DWRD  Comp Reward  (2B)
+    32  DWRD  Date Post Inc  (2B)
+   total size: 34
+
+=== TMPL "NpïL.MissionData2" ===
+     0  DLNG  Pay  (4B)
+     4  DWRD  Ships Killed  (2B)
+     6  DWRD  Ships Boarded  (2B)
+     8  DWRD  Ships Disabled  (2B)
+    10  DWRD  Ships Jumped In  (2B)
+    12  DWRD  Ships Jumped Out  (2B)
+    14  DWRD  Initial Ship Count  (2B)
+    16  BFLG  Can Abort  (1B)
+    17  BFLG  Cargo Loaded  (1B)
+    18  FBYT  Available (unused)  (1B)
+   total size: 19
+
+=== TMPL "NpïL.MissionData3" ===
+     0  DWRD  Brief Desc  (2B)
+     2  DWRD  Quick Desc  (2B)
+     4  DWRD  Load Desc  (2B)
+     6  DWRD  Dropoff Desc  (2B)
+     8  DWRD  Comp Desc  (2B)
+    10  DWRD  Fail Desc  (2B)
+    12  DWRD  Refuse Desc  (2B)
+    14  DWRD  Ship Done Desc  (2B)
+    16  DWRD  Time Left  (2B)
+    18  DWRD  Ship Name ID  (2B)
+    20  DWRD  Ship Name Index  (2B)
+    22  FWRD  Unknown  (2B)
+    24  DWRD  Mission ID  (2B)
+    26  DWRD  Ship Subtitle ID  (2B)
+    28  DWRD  Ship Subtitle Index  (2B)
+    30  DWRD  Ship Preselect Type  (2B)
+    32  HWRD  Flags  (2B)
+    34  HWRD  Flags 2  (2B)
+    36  F008  Require Bits (unused)  (8B)
+    44  DWRD  Initial Aux Count  (2B)
+    46  DWRD  Aux Dude  (2B)
+    48  DWRD  Aux Syst  (2B)
+    50  DWRD  Aux Jumped In  (2B)
+    52  DWRD  Aux Delay  (2B)
+    54  DWRD  Aux Remaining  (2B)
+    56  P040  Ship Name  (64B)
+   120  P040  Ship Subtitle  (64B)
+   184  F0FF  Availability (unused)  (255B)
+   439  C0FF  On Accept  (255B)
+   694  C0FF  On Refuse  (255B)
+   949  C0FF  On Success  (255B)
+  1204  C0FF  On Failure  (255B)
+  1459  C0FF  On Abort  (255B)
+  1714  C0FF  On Ship Done  (255B)
+  1969  P080  Mission Name  (128B)
+  2097  F080  Unknown  (128B)
+   total size: 2225
+
+=== TMPL "NpïL.129" ===
+     0  DWRD  Version  (2B)
+     2  WFLG  Strict Play  (2B)
+     4  WFLG  Gender (Male)  (2B)
+        REPEAT next field x2048  Defense Fleets=128
+     6  DWRD x2048  *) Defense Ships  (4096B)
+        REPEAT next field x1024  Persons=128
+  4102  WFLG x1024  *) Person Alive  (2048B)
+        REPEAT next field x1024  Person Grudges=128
+  6150  WFLG x1024  *) Person Grudge  (2048B)
+  8198  F080  Unused  (128B)
+        REPEAT next field x2048  Annoyance
+  8326  DWRD x2048  *) Stel Annoyance  (4096B)
+ 12422  BFLG  Seen Intro Screen  (1B)
+ 12423  FBYT  Unknown  (1B)
+        REPEAT next field x256  Disasters=128
+        (repeat x256 consumed by 0-byte PACK)
+        PACK  *) Disaster Time/Stel=dTime*,dStel*
+        REPEAT next field x256  Disaster Times=128
+ 12424  DWRD x256  dTime*  (512B)
+        REPEAT next field x256  Disasters=128
+ 12936  DWRD x256  dStel*  (512B)
+        REPEAT next field x128  Junks=128
+ 13448  DWRD x128  *) Junk Quantity  (256B)
+ 13704  RECT  Price Flux  (8B)
+        REPEAT next field x512  Crons=128
+        (repeat x512 consumed by 0-byte PACK)
+        PACK  *) Cron Dur./Hold.=cDuration*,cHoldoff*
+        REPEAT next field x512  Cron Durations=128
+ 13712  DWRD x512  cDuration*  (1024B)
+        REPEAT next field x512  Cron Holdoffs=128
+ 14736  DWRD x512  cHoldoff*  (1024B)
+        REPEAT next field x2048  Reinforcements=128
+ 15760  DWRD x2048  *) Reinforcements  (4096B)
+        REPEAT next field x2048  Destruction=128
+ 19856  DWRD x2048  *) Stellar Destroyed  (4096B)
+ 23952  F008  Unknown  (8B)
+ 23960  P040  Player Nickname  (64B)
+ 24024  DWRD  Ship Color Red  (2B)
+ 24026  DWRD  Ship Color Green  (2B)
+ 24028  DWRD  Ship Color Blue  (2B)
+        REPEAT next field x128  Ranks=128
+ 24030  WFLG x128  *) Rank Active  (256B)
+ 24286  C010  Date Prefix  (16B)
+ 24302  C010  Date Suffix  (16B)
+ 24318  F800  Unknown  (2048B)
+   total size: 26366
+
+=== TMPL ".plt" ===
+        LNDN  
+     0? LSIZ  Player Data  (UNKNOWN/VARIABLE — offsets below unreliable)
+        TMPL  NpL.128-1
+        TMPL  NpL.MissionData1
+        TMPL  NpL.MissionData2
+        TMPL  NpL.MissionData3
+        TMPL  NpL.128-2
+        SKPE  *****
+     0? LSIZ  Universe Data  (UNKNOWN/VARIABLE — offsets below unreliable)
+        TMPL  NpL.129
+        SKPE  *****
+     0? CSTR  Ship Name  (UNKNOWN/VARIABLE — offsets below unreliable)
+   total size: 0  (WARNINGS above)
+
