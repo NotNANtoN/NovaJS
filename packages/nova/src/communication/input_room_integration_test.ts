@@ -473,6 +473,43 @@ describe('Input-driven rooms', () => {
         expect(hashC.hash)
             .toEqual(hashWorld(peerA.world, PEER_LOCAL_COMPONENTS).hash);
 
+        // Now the other live desync recipe: with escorts still in
+        // flight, another player's ship arrives and takes weapon hits
+        // (guided missiles home in, detonate, and blast it).
+        const victim = await makePeerShip('b', peerB.world);
+        await peerB.client.addEntity('ship b', victim);
+        await step(10);
+        peerA.host.controlEvents([{ action: 'nearestTarget', state: 'start' }]);
+        await step(3);
+        // Cycle from the bay back to the guided missile (the first
+        // secondary), then hold fire.
+        peerA.host.controlEvents([{ action: 'resetSecondary', state: 'start' }]);
+        await step(3);
+        peerA.host.controlEvents([{ action: 'nextSecondary', state: 'start' }]);
+        await step(3);
+        peerA.host.controlEvents([{ action: 'fireSecondary', state: 'start' }]);
+        await step(400);
+        peerA.host.controlEvents([{ action: 'fireSecondary', state: false }]);
+        await step(120);
+        await archive.update();
+
+        // The victim must actually have been hit for this to prove
+        // anything.
+        const { ShieldComponent } =
+            await import('../nova_plugin/health_plugin.js');
+        const victimShield = peerA.world.entities.get('ship b')
+            ?.components.get(ShieldComponent);
+        expect(victimShield).toBeDefined();
+        expect(victimShield!.current).toBeLessThan(victimShield!.max);
+        await compareAll('after missile hits on a player ship');
+        for (const world of [peerA.world, peerB.world]) {
+            const policies = world.resources.get(
+                (await import('nova_ecs/plugins/snapshot_plugin'))
+                    .SnapshotPoliciesResource)!;
+            expect([...policies.unhandled]).toEqual([]);
+            expect([...policies.unhandledWire]).toEqual([]);
+        }
+
         // Every piece of simulation state must have an explicit
         // snapshot and wire strategy: a silently skipped component is
         // exactly how the escort desync got out of CI.
