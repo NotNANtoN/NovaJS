@@ -1,3 +1,4 @@
+import fs from "fs";
 import path from "path";
 import { v4 } from "uuid";
 import { multiplayer, MultiplayerData } from "nova_ecs/plugins/multiplayer_plugin";
@@ -23,10 +24,17 @@ export async function getIntegrationGameData() {
     if (!gameDataPromise) {
         const novaParse = new NovaParse(path.join(packageRoot, "Nova_Data"), false);
         novaParse.resourceNotFoundFunction = () => { };
-        gameDataPromise = Promise.resolve(new GameDataAggregator([
+        const aggregator = new GameDataAggregator([
             new FilesystemData(path.join(packageRoot, "objects")),
             novaParse,
-        ], () => { }));
+        ], () => { });
+        // The browser fetches settings over HTTP; in node, read them
+        // from disk so worlds can build with the 'worker' platform
+        // (which includes the control systems).
+        (aggregator as { getSettings?(file: string): Promise<unknown> }).getSettings =
+            async (file: string) => JSON.parse(await fs.promises.readFile(
+                path.join(packageRoot, 'settings', file), 'utf8'));
+        gameDataPromise = Promise.resolve(aggregator);
     }
     return gameDataPromise;
 }
