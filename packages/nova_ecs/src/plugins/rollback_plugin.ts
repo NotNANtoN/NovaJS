@@ -101,6 +101,27 @@ export class RollbackSimulation<Inputs> {
         return true;
     }
 
+    /**
+     * Restores the state at `tick` and abandons the timeline after it:
+     * no replay, and the inputs after `tick` are discarded. The
+     * time-travel variant of rollbackTo, for debugging (and perhaps,
+     * someday, gameplay).
+     */
+    rewindTo(tick: number): boolean {
+        const entry = this.snapshots.find(s => s.tick === tick);
+        if (!entry) {
+            return false;
+        }
+        restoreWorld(this.world, entry.snapshot, this.options.complete);
+        this.snapshots = this.snapshots.filter(s => s.tick <= tick);
+        for (const inputTick of this.inputs.keys()) {
+            if (inputTick > tick) {
+                this.inputs.delete(inputTick);
+            }
+        }
+        return true;
+    }
+
     private takeSnapshot() {
         this.snapshots.push({ tick: this.tick, snapshot: snapshotWorld(this.world) });
         while (this.snapshots.length > this.capacity) {

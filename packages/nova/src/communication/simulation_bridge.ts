@@ -84,6 +84,10 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
         this.rollback = new RollbackSimulation<SimulationInput[]>(world, {
             applyInputs: applySimulationInputs,
             complete: deriveEntityComponents,
+            // Generous for novaSim.rewind time travel (~17s at 60Hz).
+            // Netcode itself only needs a second or two; tune when
+            // snapshot memory matters.
+            capacity: 1000,
         });
         for (const registration of getRegisteredSimulationBridgeEvents()) {
             world.events.get(registration.event).subscribe(({ data, entities }) => {
@@ -128,7 +132,11 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
     }
 
     rewind(ticks: number): boolean {
-        return this.rollback.rollbackTo(this.rollback.tick - ticks);
+        // True time travel: restore the past and continue from there,
+        // discarding the abandoned future. (rollbackTo, by contrast,
+        // replays the inputs back to the present - the netcode
+        // primitive - which is a visual no-op.)
+        return this.rollback.rewindTo(this.rollback.tick - ticks);
     }
 
     controlEvents(events: ControlEvent[]) {
