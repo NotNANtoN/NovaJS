@@ -1,0 +1,79 @@
+import 'jasmine';
+import { Angle } from 'nova_ecs/datatypes/angle';
+import { Position } from 'nova_ecs/datatypes/position';
+import { Vector } from 'nova_ecs/datatypes/vector';
+import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
+import { restoreWireWorldSnapshot, SnapshotPoliciesResource, wireSnapshotWorld, WireWorldSnapshot } from 'nova_ecs/plugins/snapshot_plugin';
+import { hashWorld } from 'nova_ecs/plugins/world_hash';
+import { World } from 'nova_ecs/world';
+import { completeEntity, loadWireSnapshotGameData } from '../nova_plugin/entity_data_loader.js';
+import { deriveEntityComponents } from '../nova_plugin/entity_factory.js';
+import { makeNpc } from '../nova_plugin/npc_plugin.js';
+import { compareWorlds, makeDeterminismWorld } from './determinism_harness.js';
+import { applyInputRecords } from './simulation_input.js';
+import { getIntegrationGameData } from './simulation_test_fixture.js';
+
+/** Two Fed Carriers at close range: guided missiles, turret bolts,
+ * damage, and bay fighters within a few hundred ticks. */
+async function addFightingCarriers(world: World) {
+    const gameData = await getIntegrationGameData();
+    for (const [i, x] of [-150, 150].entries()) {
+        const data = await gameData.data.Ship.get('nova:143');
+        const npc = makeNpc(data!);
+        const movement = npc.components.get(MovementStateComponent)!;
+        movement.position = new Position(x, 0);
+        movement.rotation = new Angle(i === 0 ? Math.PI / 2 : -Math.PI / 2);
+        movement.velocity = new Vector(0, 0);
+        await completeEntity(world, npc);
+        world.entities.set(`carrier ${i}`, npc);
+    }
+}
+
+/**
+ * The completeness gate for wire snapshots: capture a mid-combat world
+ * as JSON, restore it into a *different* world instance, and require
+ * lockstep bit-identical simulation afterwards. Any simulation state a
+ * wire snapshot fails to carry (or carries inexactly) diverges here.
+ */
+describe('Wire snapshots', () => {
+    it('a wire-restored world continues in lockstep with the original', async () => {
+        const source = await makeDeterminismWorld(0);
+        await addFightingCarriers(source);
+        // Held-control state on the player ship crosses the wire too.
+        applyInputRecords(source, [{
+            peerId: 'test peer',
+            tick: 1,
+            inputs: [{
+                kind: 'control',
+                events: [
+                    { action: 'firePrimary', state: 'start' },
+                    { action: 'accelerate', state: 'start' },
+                ],
+            }],
+        }]);
+        for (let i = 0; i < 240; i++) {
+            source.step();
+        }
+        // The capture must contain transient combat entities
+        // (missiles, bolts), or this test proves nothing about them.
+        expect(source.entities.size).toBeGreaterThan(8);
+
+        const snapshot = wireSnapshotWorld(source);
+        const policies = source.resources.get(SnapshotPoliciesResource)!;
+        // An unhandled component is silently lost state.
+        expect([...policies.unhandledWire]).toEqual([]);
+
+        // The wire carries JSON, nothing richer.
+        const onTheWire = JSON.parse(
+            JSON.stringify(snapshot)) as WireWorldSnapshot;
+
+        const target = await makeDeterminismWorld(0);
+        await loadWireSnapshotGameData(target, onTheWire);
+        restoreWireWorldSnapshot(target, onTheWire, deriveEntityComponents);
+
+        expect(hashWorld(target).hash).toEqual(hashWorld(source).hash);
+        const result = await compareWorlds(source, target, 240, console.error);
+        expect(result.divergedAtStep).toBeUndefined();
+        expect(result.differences).toEqual([]);
+    }, 120_000);
+});

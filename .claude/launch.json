@@ -1,0 +1,11 @@
+{
+    "version": "0.0.1",
+    "configurations": [
+        {
+            "name": "nova-server",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": ["start", "--prefix", "packages/nova"],
+            "port": 8000
+        }
+    ]
+}
