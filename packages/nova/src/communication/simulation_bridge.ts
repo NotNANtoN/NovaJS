@@ -1,7 +1,8 @@
 import { isLeft } from "fp-ts/lib/Either.js";
 import { Entity } from "nova_ecs/entity";
 import { RollbackSimulation } from "nova_ecs/plugins/rollback_plugin";
-import { SnapshotPolicies, SnapshotPoliciesResource } from "nova_ecs/plugins/snapshot_plugin";
+import { restoreWorld, snapshotWorld, SnapshotPolicies, SnapshotPoliciesResource, WorldSnapshot } from "nova_ecs/plugins/snapshot_plugin";
+import { hashWorld } from "nova_ecs/plugins/world_hash";
 import { CommunicatorResource, MultiplayerData } from "nova_ecs/plugins/multiplayer_plugin";
 import { EncodedEntity, Serializer, SerializerResource } from "nova_ecs/plugins/serializer_plugin";
 import { Time, TimeResource } from "nova_ecs/plugins/time_plugin";
@@ -11,11 +12,26 @@ import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_
 import { loadEntityGameData } from "../nova_plugin/entity_data_loader.js";
 import { deriveEntityComponents } from "../nova_plugin/entity_factory.js";
 import { applyInputRecords, InputRecord, SimulationInput } from "./simulation_input.js";
-import { unwrapRollbackMessage, wrapRollbackMessage } from "./rollback_protocol.js";
+import { canonicalDesyncHash, unwrapRollbackMessage, wrapRollbackMessage } from "./rollback_protocol.js";
 import { makeNpc } from "../nova_plugin/npc_plugin.js";
+import { PEER_LOCAL_COMPONENTS } from "../nova_plugin/ship_control.js";
 import { ControlEvent, ControlsSubject, EcsControlEvent } from "../nova_plugin/controls_plugin.js";
 import { EncodedSimulationBridgeEvent, getRegisteredSimulationBridgeEvents } from "./simulation_bridge_events.js";
 
+
+/**
+ * Peers hash their world every this many ticks (desync detection)...
+ */
+const STATE_HASH_INTERVAL = 60;
+/**
+ * ...and publish a checkpoint's hash once it is this many ticks old:
+ * past any realistic rollback depth, so the hashed state is settled.
+ * (Rollbacks that do cross a pending checkpoint recompute its hash
+ * during resimulation.)
+ */
+const STATE_HASH_SETTLE_TICKS = 30;
+/** Minimum time between automatic desync recoveries. */
+const RESYNC_COOLDOWN_MS = 10_000;
 
 export interface EntityDelta {
     /** Present only when the entity's name changed. */
@@ -48,6 +64,8 @@ export interface SimulationBridgeHostApi {
     spawnNpc(shipId: string): void | Promise<void>;
     /** Debug/netcode: roll back `ticks` and resimulate. */
     rewind(ticks: number): boolean;
+    /** Desync recovery: rebuild from genesis plus the room's input log. */
+    resync(): Promise<boolean>;
 }
 
 export interface AsyncSimulationBridgeHostApi {
@@ -59,6 +77,7 @@ export interface AsyncSimulationBridgeHostApi {
     setPlayerJumpRoute(route: string[]): Promise<void>;
     spawnNpc(shipId: string): Promise<void>;
     rewind(ticks: number): Promise<boolean>;
+    resync(): Promise<boolean>;
 }
 
 interface SentEntityRecord {
@@ -80,6 +99,18 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
     private remoteInputs: InputRecord[] = [];
     /** The server's canonical tick, from its periodic tickSync. */
     serverTick?: number;
+    /**
+     * The pre-join genesis state. Desync recovery restores it and
+     * resimulates the relay's input log — the late-join reconstruction,
+     * repurposed.
+     */
+    private genesis: WorldSnapshot;
+    /** World hashes at checkpoint ticks, awaiting settling. */
+    private checkpointHashes = new Map<number, string>();
+    /** Desync notifications received (own divergence or another peer's). */
+    desyncCount = 0;
+    private resyncing = false;
+    private lastResyncTime = -Infinity;
 
     constructor(
         private world: World,
@@ -89,13 +120,8 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
         if (!world.resources.has(SnapshotPoliciesResource)) {
             world.resources.set(SnapshotPoliciesResource, new SnapshotPolicies());
         }
-        this.rollback = new RollbackSimulation<InputRecord[]>(world, {
-            applyInputs: applyInputRecords,
-            complete: deriveEntityComponents,
-            // Two seconds of history: enough for netcode rollback
-            // margins and short novaSim.rewind time travel.
-            capacity: 120,
-        });
+        this.genesis = snapshotWorld(world);
+        this.rollback = this.makeRollback();
         // Receive relayed rollback-protocol messages from the room.
         const communicator = world.resources.get(CommunicatorResource);
         communicator?.messages.subscribe(({ message }) => {
@@ -113,6 +139,9 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
                 case 'inputLog':
                     this.remoteInputs.push(...rollbackMessage.records);
                     break;
+                case 'desync':
+                    this.handleDesync(rollbackMessage.tick, rollbackMessage.hashes);
+                    break;
             }
         });
         for (const registration of getRegisteredSimulationBridgeEvents()) {
@@ -127,6 +156,25 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
                 });
             });
         }
+    }
+
+    private makeRollback(): RollbackSimulation<InputRecord[]> {
+        return new RollbackSimulation<InputRecord[]>(this.world, {
+            applyInputs: applyInputRecords,
+            complete: deriveEntityComponents,
+            // Two seconds of history: enough for netcode rollback
+            // margins and short novaSim.rewind time travel.
+            capacity: 120,
+            // Fires on resimulated ticks too, so a rollback across a
+            // pending checkpoint recomputes its hash from the
+            // corrected state.
+            onStep: tick => {
+                if (tick > 0 && tick % STATE_HASH_INTERVAL === 0) {
+                    this.checkpointHashes.set(tick,
+                        hashWorld(this.world, PEER_LOCAL_COMPONENTS).hash);
+                }
+            },
+        });
     }
 
     private get serializer() {
@@ -148,6 +196,11 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
     }
 
     step(count = 1) {
+        if (this.resyncing) {
+            // Mid-recovery the world is being rebuilt from the input
+            // log; stepping it would fork a fresh timeline.
+            return;
+        }
         this.integrateRemoteInputs();
         for (let i = 0; i < count; i++) {
             if (this.pendingInputs.length > 0) {
@@ -164,6 +217,7 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
             }
             this.rollback.step();
         }
+        this.publishStateHashes();
     }
 
     /**
@@ -185,6 +239,11 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
                     clearInterval(retry);
                     clearTimeout(timeout);
                     subscription.unsubscribe();
+                    // Records relayed to us before this reply were
+                    // logged by the relay before it built the reply
+                    // (messages are ordered), so they are already in
+                    // the catch-up log: drop them or they apply twice.
+                    this.remoteInputs = [];
                     resolve(rollbackMessage);
                 }
             });
@@ -269,12 +328,87 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
         }), server);
     }
 
+    /**
+     * Publishes checkpoint hashes that have settled: old enough that
+     * no further rollback will cross them, so every honest peer hashed
+     * the same timeline. The relay compares them across peers.
+     */
+    private publishStateHashes() {
+        const communicator = this.world.resources.get(CommunicatorResource);
+        const server = communicator?.uuid
+            ? [...communicator.servers.value][0] : undefined;
+        for (const [tick, hash] of this.checkpointHashes) {
+            if (tick <= this.rollback.tick - STATE_HASH_SETTLE_TICKS) {
+                this.checkpointHashes.delete(tick);
+                if (communicator && server) {
+                    communicator.sendMessage(wrapRollbackMessage(
+                        { kind: 'stateHash', tick, hash }), server);
+                }
+            }
+        }
+    }
+
+    /**
+     * The relay saw peers disagree about the state at a tick. If this
+     * peer's hash is not the canonical one, its timeline has diverged
+     * from the input log's true simulation: recover with a full resync.
+     */
+    private handleDesync(tick: number, hashes: [string, string][]) {
+        this.desyncCount++;
+        const communicator = this.world.resources.get(CommunicatorResource);
+        const mine = hashes.find(
+            ([peerId]) => peerId === communicator?.uuid)?.[1];
+        const canonical = canonicalDesyncHash(hashes);
+        // A peer that never reported this tick (it joined afterwards)
+        // has no evidence it diverged.
+        const diverged = mine !== undefined && mine !== canonical;
+        console.error(`Desync at tick ${tick}:`, Object.fromEntries(hashes),
+            diverged ? '- this peer diverged; resyncing'
+                : '- this peer matches the canonical state');
+        if (diverged) {
+            void this.resync();
+        }
+    }
+
+    /**
+     * Full desync recovery: restore the deterministic genesis world
+     * and rejoin the room, resimulating the relay's input log — the
+     * same reconstruction a late joiner performs.
+     */
+    async resync(): Promise<boolean> {
+        if (this.resyncing
+            || Date.now() - this.lastResyncTime < RESYNC_COOLDOWN_MS) {
+            return false;
+        }
+        this.lastResyncTime = Date.now();
+        this.resyncing = true;
+        try {
+            restoreWorld(this.world, this.genesis, deriveEntityComponents);
+            this.rollback = this.makeRollback();
+            this.remoteInputs = [];
+            this.checkpointHashes.clear();
+            return await this.joinRoom();
+        } finally {
+            this.resyncing = false;
+        }
+    }
+
     rewind(ticks: number): boolean {
         // True time travel: restore the past and continue from there,
         // discarding the abandoned future. (rollbackTo, by contrast,
         // replays the inputs back to the present - the netcode
         // primitive - which is a visual no-op.)
-        return this.rollback.rewindTo(this.rollback.tick - ticks);
+        const rewound = this.rollback.rewindTo(this.rollback.tick - ticks);
+        if (rewound) {
+            // Checkpoint hashes from the discarded future would report
+            // a timeline that no longer exists.
+            for (const tick of this.checkpointHashes.keys()) {
+                if (tick > this.rollback.tick) {
+                    this.checkpointHashes.delete(tick);
+                }
+            }
+        }
+        return rewound;
     }
 
     controlEvents(events: ControlEvent[]) {
@@ -445,6 +579,10 @@ export class SimulationBridgeClient {
         return this.host.rewind(ticks);
     }
 
+    resync() {
+        return this.host.resync();
+    }
+
     spawnNpc(shipId: string) {
         return this.host.spawnNpc(shipId);
     }
@@ -499,6 +637,10 @@ export class AsyncSimulationBridgeClient {
 
     async rewind(ticks: number) {
         return this.host.rewind(ticks);
+    }
+
+    async resync() {
+        return this.host.resync();
     }
 
     getSerializer() {

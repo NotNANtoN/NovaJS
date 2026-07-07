@@ -113,6 +113,10 @@ class BrowserSimulationBridgeHost implements BrowserSimulationBridgeWorkerApi {
         return this.requireBridge().rewind(ticks);
     }
 
+    async resync() {
+        return this.requireBridge().resync();
+    }
+
     private requireBridge() {
         if (!this.bridge) {
             throw new Error("Simulation worker has not been initialized");

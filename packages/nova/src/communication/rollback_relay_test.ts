@@ -1,7 +1,7 @@
 import 'jasmine';
 import { MockCommunicator } from 'nova_ecs/plugins/mock_communicator';
 import { RollbackRelay } from './rollback_relay.js';
-import { RollbackProtocolMessage, unwrapRollbackMessage, wrapRollbackMessage } from './rollback_protocol.js';
+import { canonicalDesyncHash, RollbackProtocolMessage, unwrapRollbackMessage, wrapRollbackMessage } from './rollback_protocol.js';
 import { SimulationInput } from './simulation_input.js';
 
 const CONTROL: SimulationInput[] = [
@@ -91,11 +91,53 @@ describe('RollbackRelay', () => {
         expect(atB[0].records.map(r => r.tick)).toEqual([15, 25]);
     });
 
+    it('broadcasts a desync when peers report mismatched state hashes', () => {
+        peerA.sendMessage(wrapRollbackMessage({
+            kind: 'stateHash', tick: 60, hash: '11111111',
+        }) as never, 'server');
+        // Nothing happens until every peer has reported the tick.
+        expect(received(peerB).length).toBe(0);
+
+        peerB.sendMessage(wrapRollbackMessage({
+            kind: 'stateHash', tick: 60, hash: '22222222',
+        }) as never, 'server');
+        const expected: RollbackProtocolMessage = {
+            kind: 'desync',
+            tick: 60,
+            hashes: [['a', '11111111'], ['b', '22222222']],
+        };
+        expect(received(peerA)).toEqual([expected]);
+        expect(received(peerB)).toEqual([expected]);
+    });
+
+    it('stays quiet when state hashes agree', () => {
+        for (const peer of [peerA, peerB]) {
+            peer.sendMessage(wrapRollbackMessage({
+                kind: 'stateHash', tick: 60, hash: '33333333',
+            }) as never, 'server');
+        }
+        expect(received(peerA).length).toBe(0);
+        expect(received(peerB).length).toBe(0);
+    });
+
     it('broadcasts its clock', () => {
         relay.advanceTicks(42);
         // Simulate the periodic sync manually (autoClock is off).
         server.sendMessage(wrapRollbackMessage({ kind: 'tickSync', tick: relay.tick }) as never);
         const atA = received(peerA);
         expect(atA).toEqual([{ kind: 'tickSync', tick: 42 }]);
+    });
+});
+
+describe('canonicalDesyncHash', () => {
+    it('picks the majority hash', () => {
+        expect(canonicalDesyncHash([
+            ['a', 'x'], ['b', 'y'], ['c', 'x'],
+        ])).toBe('x');
+    });
+
+    it('breaks ties toward the lowest peerId', () => {
+        expect(canonicalDesyncHash([['b', 'y'], ['a', 'x']])).toBe('x');
+        expect(canonicalDesyncHash([['a', 'x'], ['b', 'y']])).toBe('x');
     });
 });

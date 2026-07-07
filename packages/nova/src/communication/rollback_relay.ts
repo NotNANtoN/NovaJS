@@ -15,9 +15,17 @@ import { InputRecord, RollbackProtocolMessage, unwrapRollbackMessage, wrapRollba
  *   and broadcasts it periodically so peers can pace themselves.
  * - Archive: retains the input log and serves it to late joiners.
  */
+/**
+ * How long (in ticks) an incomplete set of state-hash reports waits
+ * for stragglers before being compared as-is and dropped.
+ */
+const STATE_HASH_SWEEP_TICKS = 600;
+
 export class RollbackRelay {
     tick = 0;
     private log: InputRecord[] = [];
+    /** Peers' state-hash reports awaiting comparison, by tick. */
+    private stateHashes = new Map<number, Map<string, string>>();
     private readonly subscription: Subscription;
     private clockInterval?: ReturnType<typeof setInterval>;
     private syncInterval?: ReturnType<typeof setInterval>;
@@ -60,6 +68,13 @@ export class RollbackRelay {
             this.syncInterval = setInterval(() => {
                 this.room.sendMessage(
                     wrapRollbackMessage({ kind: 'tickSync', tick: this.tick }));
+                // Hash reports that will never complete (a peer left or
+                // joined mid-window) still get compared, then dropped.
+                for (const tick of [...this.stateHashes.keys()]) {
+                    if (tick < this.tick - STATE_HASH_SWEEP_TICKS) {
+                        this.compareStateHashes(tick, true);
+                    }
+                }
             }, 1000);
         }
     }
@@ -72,13 +87,45 @@ export class RollbackRelay {
         return this.log;
     }
 
-    private otherPeers(exclude: string): Set<string> {
+    /** The room's peers, excluding the relay itself. */
+    private roomPeers(): Set<string> {
         const peers = new Set(this.room.peers.current.value);
-        peers.delete(exclude);
         if (this.room.uuid) {
             peers.delete(this.room.uuid);
         }
         return peers;
+    }
+
+    private otherPeers(exclude: string): Set<string> {
+        const peers = this.roomPeers();
+        peers.delete(exclude);
+        return peers;
+    }
+
+    /**
+     * Compares a tick's state-hash reports once every current peer has
+     * reported (or immediately, when forced by the stale sweep). On
+     * mismatch, broadcasts a desync notification; the diverged peers
+     * recover by resimulating the input log.
+     */
+    private compareStateHashes(tick: number, force = false) {
+        const reports = this.stateHashes.get(tick);
+        if (!reports) {
+            return;
+        }
+        if (!force) {
+            for (const peer of this.roomPeers()) {
+                if (!reports.has(peer)) {
+                    return;
+                }
+            }
+        }
+        this.stateHashes.delete(tick);
+        if (new Set(reports.values()).size > 1) {
+            this.room.sendMessage(wrapRollbackMessage({
+                kind: 'desync', tick, hashes: [...reports],
+            }));
+        }
     }
 
     private handleMessage(source: string, raw: unknown) {
@@ -109,6 +156,16 @@ export class RollbackRelay {
                     tick: this.tick,
                     records: [...this.log],
                 }), source);
+                break;
+            }
+            case 'stateHash': {
+                let reports = this.stateHashes.get(message.tick);
+                if (!reports) {
+                    reports = new Map();
+                    this.stateHashes.set(message.tick, reports);
+                }
+                reports.set(source, message.hash);
+                this.compareStateHashes(message.tick);
                 break;
             }
             case 'inputLogRequest': {

@@ -12,6 +12,7 @@ import { Position } from 'nova_ecs/datatypes/position';
 import { Angle } from 'nova_ecs/datatypes/angle';
 import { Vector } from 'nova_ecs/datatypes/vector';
 import { RollbackRelay } from './rollback_relay.js';
+import { unwrapRollbackMessage } from './rollback_protocol.js';
 import { SimulationBridgeClient, SimulationBridgeHost } from './simulation_bridge.js';
 import { getIntegrationGameData } from './simulation_test_fixture.js';
 
@@ -131,4 +132,57 @@ describe('Input-driven rooms', () => {
         expect(hashB.hash).toEqual(hashA.hash);
         expect(peerB.world.entities.has('ship a')).toBeTrue();
     }, 120_000);
+
+    it('detects a desync and the diverged peer resyncs from the log', async () => {
+        const peerA = await makePeer('a');
+        const peerB = await makePeer('b');
+        await peerA.client.addEntity('ship a', await makePeerShip('a', peerA.world));
+        await peerB.client.addEntity('ship b', await makePeerShip('b', peerB.world));
+
+        const desyncTicks: number[] = [];
+        comms.get('a')!.messages.subscribe(({ message }) => {
+            const rollbackMessage = unwrapRollbackMessage(message);
+            if (rollbackMessage?.kind === 'desync') {
+                desyncTicks.push(rollbackMessage.tick);
+            }
+        });
+
+        for (let tick = 1; tick <= 50; tick++) {
+            if (tick === 10) {
+                peerA.host.controlEvents([{ action: 'accelerate', state: 'start' }]);
+            }
+            peerA.host.step();
+            peerB.host.step();
+        }
+        // Corrupt peer B outside the input timeline: from here its
+        // simulation diverges from the log's true simulation.
+        const shipB = peerB.world.entities.get('ship b')!;
+        shipB.components.get(MovementStateComponent)!.position =
+            new Position(500, 500);
+
+        // The tick-60 checkpoint hashes differ; they settle and reach
+        // the relay at tick 90.
+        for (let tick = 51; tick <= 150 && desyncTicks.length === 0; tick++) {
+            peerA.host.step();
+            peerB.host.step();
+        }
+        expect(desyncTicks).toEqual([60]);
+        expect(peerB.host.desyncCount).toBe(1);
+
+        // 'a' wins the canonical tie-break, so B is the one resyncing:
+        // genesis plus the relay's log. Let the async join finish, then
+        // step B back up to A's tick.
+        await new Promise(resolve => setTimeout(resolve));
+        const { TimeResource } = await import('nova_ecs/plugins/time_plugin');
+        const target = peerA.world.resources.get(TimeResource)!.frame;
+        while (peerB.world.resources.get(TimeResource)!.frame < target) {
+            peerB.host.step();
+        }
+
+        const hashA = hashWorld(peerA.world, PEER_LOCAL_COMPONENTS);
+        const hashB = hashWorld(peerB.world, PEER_LOCAL_COMPONENTS);
+        expect(hashB.hash).toEqual(hashA.hash);
+        expect(peerB.world.entities.has('ship a')).toBeTrue();
+        expect(peerB.world.entities.has('ship b')).toBeTrue();
+    }, 240_000);
 });

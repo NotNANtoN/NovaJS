@@ -14,6 +14,14 @@ export interface RollbackOptions<Inputs> {
     applyInputs: (world: World, inputs: Inputs) => void;
     /** Completes restored entities (e.g. reattaches derived components). */
     complete?: (world: World, entity: Entity) => void;
+    /**
+     * Called after every stepped tick — including ticks re-stepped
+     * during rollback resimulation, whose state supersedes the
+     * abandoned timeline's. Lets the owner observe the settled state
+     * per tick (e.g. periodic state hashes for desync detection).
+     * Not called during fastForward, which replays a bulk history.
+     */
+    onStep?: (tick: number) => void;
 }
 
 /**
@@ -73,6 +81,7 @@ export class RollbackSimulation<Inputs> {
         }
         this.world.step();
         this.takeSnapshot();
+        this.options.onStep?.(this.tick);
     }
 
     /**

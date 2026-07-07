@@ -104,6 +104,10 @@ const simulationControl = {
     async rewind(ticks = 60) {
         return await simulationBridge?.rewind(ticks) ?? false;
     },
+    /** Desync recovery: rebuild from genesis plus the room's input log. */
+    async resync() {
+        return await simulationBridge?.resync() ?? false;
+    },
 };
 (window as any).novaSim = simulationControl;
 const syncedComponents = new Map<string, Set<UnknownComponent>>();
