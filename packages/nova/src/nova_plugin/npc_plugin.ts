@@ -22,7 +22,7 @@ function getValidTargets(targets: Array<readonly [string, any]>, selfUuid: strin
         .map(([uuid]) => uuid);
 }
 
-const ChooseRandomTargetComponent = new Component<{
+export const ChooseRandomTargetComponent = new Component<{
     interval: number,
     nextTime?: number,
 }>('ChooseRandomTargetComponent');

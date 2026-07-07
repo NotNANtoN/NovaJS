@@ -15,7 +15,7 @@ import { ShipComponent } from "./ship_plugin.js";
 import { Target, TargetComponent } from "./target_component.js";
 
 
-const TargetIndexComponent = new Component<{ index: number }>('TargetIndexComponent');
+export const TargetIndexComponent = new Component<{ index: number }>('TargetIndexComponent');
 
 const TargetIndexProvider = Provide({
     name: "TargetIndexProvider",

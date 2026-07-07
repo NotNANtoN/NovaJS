@@ -342,6 +342,17 @@ export class World {
     /**
      * Flush the event queue.
      */
+    /**
+     * Discards all queued events. Used when restoring a snapshot:
+     * entity removal/re-insertion during the restore queues Add/Delete
+     * events that did not happen in the timeline being restored.
+     * Snapshots are taken between steps, when the queue is empty, so
+     * clearing it restores that invariant.
+     */
+    clearEventQueue() {
+        this.eventQueue.length = 0;
+    }
+
     private flush() {
         // Not a for loop because more events may be added as prior
         // ones are resolved.

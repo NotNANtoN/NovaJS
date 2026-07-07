@@ -5,6 +5,7 @@ import { useFixedTimestep } from "nova_ecs/plugins/time_plugin";
 import { fnv1a } from "nova_ecs/plugins/world_hash";
 import { World } from "nova_ecs/world";
 import { completeEntity } from "./entity_data_loader.js";
+import { configureSnapshotPolicies } from "./snapshot_policies.js";
 import { IdFactory, IdFactoryResource } from "./id_factory.js";
 import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
 import { SimulationGameDataResource } from "./game_data_resource.js";
@@ -37,6 +38,8 @@ export async function makeSystem(systemId: string, gameData: SimulationGameDataI
     // 0-based time. Whoever steps the world converts real elapsed time
     // into a number of steps.
     useFixedTimestep(world, SIMULATION_STEP_MS);
+
+    configureSnapshotPolicies(world);
 
     // Load the system's planets before the world ever steps: the
     // simulation must not resolve data asynchronously mid-simulation,

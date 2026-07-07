@@ -22,7 +22,7 @@ import { WeaponsStateComponent } from './weapons_state.js';
 
 const CollectableEscortComponent = new Component<undefined>('CollectableEscort');
 const ReturnComponent = new Component<undefined>('ReturnComponent');
-const ReturnWhenTargetRemovedComponent = new Component<undefined>('ReturnWhenTargetRemoved');
+export const ReturnWhenTargetRemovedComponent = new Component<undefined>('ReturnWhenTargetRemoved');
 
 class BayWeaponEntry extends WeaponEntry {
     declare data: BayWeaponData;

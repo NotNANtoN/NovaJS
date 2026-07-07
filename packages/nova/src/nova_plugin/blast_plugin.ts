@@ -5,17 +5,13 @@ import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
 import { ProvideArg } from 'nova_ecs/provide_arg';
 import { System } from 'nova_ecs/system';
+import { BlastDamageComponent, BlastIgnoreComponent } from './blast_data.js';
 import { CollisionSystem } from './collisions_plugin.js';
 import { CollisionEvent } from './collision_interaction.js';
 import { DamagedEvent } from './death_plugin.js';
 
 
-// Damage done by a blast.
-export const BlastDamageComponent = new Component<WeaponDamage>('BlastComponent');
-
-// A set of entities not to interact with. Usually just the entity that
-// the projectile already hit so damage is not applied twice.
-export const BlastIgnoreComponent = new Component<Set<string>>('BlastIgnoreComponent');
+export { BlastDamageComponent, BlastIgnoreComponent } from './blast_data.js';
 
 const BlastCollisionSystem = new System({
     name: 'BlastCollisionSystem',
@@ -30,7 +26,7 @@ const BlastCollisionSystem = new System({
     }
 });
 
-const BlastDoneComponent = new Component<{ done: boolean }>('BlastDone');
+export const BlastDoneComponent = new Component<{ done: boolean }>('BlastDone');
 const BlastDoneProvider = ProvideArg({
     provided: BlastDoneComponent,
     args: [] as const,

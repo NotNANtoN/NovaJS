@@ -15,6 +15,14 @@ export class IdFactory {
         const instance = this.instance ? `${this.instance}:` : '';
         return `${instance}${kind}:${this.count++}`;
     }
+
+    getState(): number {
+        return this.count;
+    }
+
+    setState(count: number) {
+        this.count = count;
+    }
 }
 
 export const IdFactoryResource = new Resource<IdFactory>('IdFactory');

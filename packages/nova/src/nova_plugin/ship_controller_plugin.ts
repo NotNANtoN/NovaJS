@@ -14,7 +14,7 @@ import { TargetComponent } from './target_component.js';
 
 
 // A resource because the ship may change.
-const ControlStateResource = new Resource<ControlState>('ControlStateResource');
+export const ControlStateResource = new Resource<ControlState>('ControlStateResource');
 
 const UpdateControlState = new System({
     name: 'UpdateControlState',

@@ -11,7 +11,7 @@ import { Time, TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
 import { registerSimulationBridgeEvent } from '../communication/simulation_bridge_events.js';
-import { BlastDamageComponent } from './blast_plugin.js';
+import { BlastDamageComponent } from './blast_data.js';
 import { ArmorComponent, IonizationColorComponent, IonizationComponent, ShieldComponent } from './health_plugin.js';
 import { ProjectileComponent } from './projectile_data.js';
 import { ShipComponent, ShipDataComponent, ShipPhysicsComponent } from './ship_plugin.js';
@@ -71,7 +71,7 @@ const DamageSystem = new System({
     }
 });
 
-const ExplodingComponent = new Component<number>('ShipExplodingComponent');
+export const ExplodingComponent = new Component<number>('ShipExplodingComponent');
 const ShipZeroArmorSystem = new System({
     name: 'ShipZeroArmorSystem',
     args: [ShipDataComponent, ZeroArmorEvent, GetEntity] as const,

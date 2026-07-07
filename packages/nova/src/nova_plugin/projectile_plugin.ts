@@ -13,7 +13,6 @@ import { passthroughType, SerializerResource } from 'nova_ecs/plugins/serializer
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { System } from 'nova_ecs/system';
 import SAT from "sat";
-import { FactoryQueue } from '../common/factory_queue.js';
 import { registerSimulationBridgeEvent } from '../communication/simulation_bridge_events.js';
 import { AnimationComponent } from './animation_plugin.js';
 import { IdFactoryResource } from './id_factory.js';
@@ -28,7 +27,6 @@ import { SimulationGameDataResource } from './game_data_resource.js';
 import { firstOrderWithFallback, Guidance, GuidanceComponent } from './guidance.js';
 import { ArmorComponent, ShieldComponent } from './health_plugin.js';
 import { ProjectileBlastHull, ProjectileComponent, ProjectileDataComponent } from './projectile_data.js';
-import { ReturnToQueueComponent } from './return_to_queue_plugin.js';
 import { SoundEvent } from './sound_plugin.js';
 import { Stat } from './stat.js';
 import { TargetComponent } from './target_component.js';
@@ -36,7 +34,7 @@ import { TargetComponent } from './target_component.js';
 
 class ProjectileWeaponEntry extends WeaponEntry {
     declare data: ProjectileWeaponData;
-    private factoryQueue: FactoryQueue<Entity>;
+    private buildProjectile: () => Entity;
     protected pointDefenseRangeSquared: number;
 
     constructor(data: WeaponData, runQuery: RunQueryFunction) {
@@ -47,14 +45,16 @@ class ProjectileWeaponEntry extends WeaponEntry {
 
         this.pointDefenseRangeSquared = (data.physics.speed * data.shotDuration / 1000) ** 2;
 
-        const queueHolder = {} as { queue: FactoryQueue<Entity> };
-
         let hitTypes = new Set(['normal']);
         if (data.guidance === 'pointDefense') {
             hitTypes = new Set(['pointDefense']);
         }
 
-        this.factoryQueue = new FactoryQueue(() => {
+        // Projectiles are built fresh for every shot. Pooling entity
+        // objects would leak state between timelines: the pool is not
+        // part of a snapshot, so resimulation would dequeue different
+        // objects than the original run did.
+        this.buildProjectile = () => {
             const projectile = new Entity(this.data.name)
                 .addComponent(ProjectileDataComponent, this.data)
                 .addComponent(ProjectileComponent, { id: this.data.id })
@@ -73,8 +73,8 @@ class ProjectileWeaponEntry extends WeaponEntry {
                     movementType: this.data.guidance === 'guided'
                         ? MovementType.INERTIALESS : MovementType.INERTIAL,
                 }).addComponent(CollisionHitterComponent, {
-                    hitTypes,
-                }).addComponent(ReturnToQueueComponent, queueHolder);
+                    hitTypes: new Set(hitTypes),
+                });
 
             if (this.data.vulnerableTo.length) {
                 projectile.addComponent(CollisionVulnerabilityComponent, {
@@ -115,8 +115,7 @@ class ProjectileWeaponEntry extends WeaponEntry {
             }
 
             return projectile;
-        }, 1);
-        queueHolder.queue = this.factoryQueue;
+        };
     }
 
     fire(position: Position, angle: Angle, owner?: string, target?: string,
@@ -131,10 +130,7 @@ class ProjectileWeaponEntry extends WeaponEntry {
                 .scale(this.data.physics.speed));
         }
 
-        const projectile = this.factoryQueue.dequeue();
-        if (!projectile) {
-            return undefined;
-        }
+        const projectile = this.buildProjectile();
 
         const movementState = projectile.components.get(MovementStateComponent)!;
         movementState.position = position;
