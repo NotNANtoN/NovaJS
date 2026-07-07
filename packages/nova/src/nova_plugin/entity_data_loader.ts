@@ -1,4 +1,5 @@
 import { Entity } from "nova_ecs/entity";
+import { deriveEntityComponents } from "./entity_factory.js";
 import { World } from "nova_ecs/world";
 import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
 import { WeaponEntries } from "./fire_weapon_plugin.js";
@@ -109,4 +110,14 @@ export async function loadEntityGameData(world: World, entity: Entity) {
     if (weaponEntries) {
         await Promise.all([...weaponIds].map(id => weaponEntries.get(id)));
     }
+}
+
+/**
+ * Stage, load, then complete: loads the transitive closure of game data
+ * the entity (and anything it can spawn) needs, then attaches derived
+ * components so the entity enters the simulation fully formed.
+ */
+export async function completeEntity(world: World, entity: Entity) {
+    await loadEntityGameData(world, entity);
+    deriveEntityComponents(world, entity);
 }

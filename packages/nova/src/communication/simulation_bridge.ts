@@ -6,7 +6,7 @@ import { Time, TimeResource } from "nova_ecs/plugins/time_plugin";
 import { World } from "nova_ecs/world";
 import { v4 } from "uuid";
 import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
-import { loadEntityGameData } from "../nova_plugin/entity_data_loader.js";
+import { completeEntity } from "../nova_plugin/entity_data_loader.js";
 import { makeNpc } from "../nova_plugin/npc_plugin.js";
 import { ControlEvent, ControlsSubject, EcsControlEvent } from "../nova_plugin/controls_plugin.js";
 import { JumpRouteComponent } from "../nova_plugin/jump_plugin.js";
@@ -202,7 +202,7 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
         // anything it can spawn) needs is loaded, so the simulation
         // never waits for data mid-step. The insertion tick is an
         // input, so it is allowed to vary.
-        await loadEntityGameData(this.world, decoded.right);
+        await completeEntity(this.world, decoded.right);
         this.world.entities.set(uuid, decoded.right);
     }
 
@@ -233,7 +233,7 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
             throw new Error(`Failed to load ship ${shipId} for NPC spawn`);
         }
         const npc = makeNpc(shipData);
-        await loadEntityGameData(this.world, npc);
+        await completeEntity(this.world, npc);
         const communicator = this.world.resources.get(CommunicatorResource);
         if (!communicator?.uuid) {
             throw new Error("Expected communicator uuid to exist before spawning NPC");

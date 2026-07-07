@@ -17,7 +17,9 @@ import { AnimationComponent } from './animation_plugin.js';
 import { CollisionVulnerabilityComponent } from './collision_interaction.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { ArmorComponent, IonizationColorComponent, IonizationComponent, ShieldComponent } from './health_plugin.js';
-import { applyOutfitPhysics, OutfitsStateComponent } from './outfit_plugin.js';
+import { applyOutfitPhysics, OutfitsState, OutfitsStateComponent } from './outfit_plugin.js';
+import { registerEntityDeriver } from './entity_factory.js';
+import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { Stat } from './stat.js';
 import { TargetComponent } from './target_component.js';
 
@@ -30,15 +32,22 @@ export const ShipComponent = new Component<ShipType>('Ship');
 
 export const ShipDataComponent = new Component<ShipData>('ShipData');
 
+function deriveShipData(gameData: SimulationGameDataInterface, ship: { id: string }) {
+    return gameData.data.Ship.getCached(ship.id);
+}
+
 export const ShipDataProvider = ProvideFromCache({
     name: "ShipDataProvider",
     provided: ShipDataComponent,
     args: [SimulationGameDataResource, ShipComponent] as const,
     update: [ShipComponent],
-    factory: (gameData, ship) => {
-        return gameData.data.Ship.getCached(ship.id);
-    }
+    factory: deriveShipData,
 });
+
+function deriveShipOutfits(shipData: ShipData): OutfitsState {
+    return new Map(Object.entries(shipData.outfits)
+        .map(([id, count]) => [id, { count }]));
+}
 
 export const ShipOutfitsProvider = Provide({
     name: "ShipOutfitsProvider",
@@ -47,31 +56,31 @@ export const ShipOutfitsProvider = Provide({
     // Not ShipDataComponent because then this would always be provided
     // since ShipDataComponent is always provided since it's not multiplayer.
     update: [ShipComponent],
-    factory(shipData) {
-        return new Map(Object.entries(shipData.outfits)
-            .map(([id, count]) => [id, { count }]));
-    }
+    factory: deriveShipOutfits,
 });
 
 export const ShipPhysicsComponent = new Component<ShipPhysics>('ShipPhysicsComponent');
+
+function deriveShipPhysics(shipData: ShipData,
+    gameData: SimulationGameDataInterface, outfitsState: OutfitsState) {
+    const outfits: (readonly [OutfitData, number])[] = [];
+    for (const [id, { count }] of outfitsState) {
+        const outfit = gameData.data.Outfit.getCached(id);
+        if (!outfit) {
+            // Not loaded yet; retry next step.
+            return undefined;
+        }
+        outfits.push([outfit, count] as const);
+    }
+    return applyOutfitPhysics(shipData.physics, outfits);
+}
 
 export const ShipPhysicsProvider = ProvideFromCache({
     name: "ShipPhysicsProvider",
     provided: ShipPhysicsComponent,
     args: [ShipDataComponent, SimulationGameDataResource, OutfitsStateComponent] as const,
     update: [ShipDataComponent, OutfitsStateComponent],
-    factory(shipData, gameData, outfitsState) {
-        const outfits: (readonly [OutfitData, number])[] = [];
-        for (const [id, { count }] of outfitsState) {
-            const outfit = gameData.data.Outfit.getCached(id);
-            if (!outfit) {
-                // Not loaded yet; retry next step.
-                return undefined;
-            }
-            outfits.push([outfit, count] as const);
-        }
-        return applyOutfitPhysics(shipData.physics, outfits);
-    }
+    factory: deriveShipPhysics,
 });
 
 export function getShipMovementPhysics(physics: ShipPhysics): MovementPhysics {
@@ -200,6 +209,34 @@ export const ShipPlugin: Plugin = {
         world.addComponent(ShipDataComponent);
         world.resources.get(SerializerResource)?.addComponent(
             ShipDataComponent, passthroughType<ShipData>('ShipDataComponentType'));
+
+        // Derivers attach these components synchronously when an
+        // entity is completed (staged insertion, snapshot restore).
+        // The provider systems below remain as the fallback for
+        // entities that bypass staging.
+        registerEntityDeriver(world, {
+            name: 'ShipDataDeriver',
+            provided: ShipDataComponent,
+            requires: [ShipComponent],
+            derive: (entity, gameData) =>
+                deriveShipData(gameData, entity.components.get(ShipComponent)!),
+        });
+        registerEntityDeriver(world, {
+            name: 'ShipOutfitsDeriver',
+            provided: OutfitsStateComponent,
+            requires: [ShipDataComponent],
+            derive: (entity) =>
+                deriveShipOutfits(entity.components.get(ShipDataComponent)!),
+        });
+        registerEntityDeriver(world, {
+            name: 'ShipPhysicsDeriver',
+            provided: ShipPhysicsComponent,
+            requires: [ShipDataComponent, OutfitsStateComponent],
+            derive: (entity, gameData) => deriveShipPhysics(
+                entity.components.get(ShipDataComponent)!,
+                gameData,
+                entity.components.get(OutfitsStateComponent)!),
+        });
 
         world.addSystem(ShipCollisionInteractionProvider);
         world.addSystem(ShipDataProvider);

@@ -9,6 +9,8 @@ import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import { passthroughType, SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
 import { Provide } from 'nova_ecs/provide';
 import { ProvideFromCache } from './provide_from_cache.js';
+import { registerEntityDeriver } from './entity_factory.js';
+import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
 import { registerSimulationBridgeEvent } from '../communication/simulation_bridge_events.js';
@@ -28,13 +30,15 @@ export const PlanetComponent = new Component<PlanetType>('Planet');
 
 export const PlanetDataComponent = new Component<PlanetData>('PlanetData');
 
+function derivePlanetData(gameData: SimulationGameDataInterface, planet: { id: string }) {
+    return gameData.data.Planet.getCached(planet.id);
+}
+
 export const PlanetDataProvider = ProvideFromCache({
     name: "PlanetDataProvider",
     provided: PlanetDataComponent,
     args: [SimulationGameDataResource, PlanetComponent] as const,
-    factory: (gameData, planet) => {
-        return gameData.data.Planet.getCached(planet.id);
-    }
+    factory: derivePlanetData,
 });
 
 export const PlanetTargetComponent = new Component<Target>('PlanetTargetComponent');
@@ -106,6 +110,13 @@ export const PlanetPlugin: Plugin = {
 
         world.addComponent(PlanetComponent);
         world.addComponent(PlanetDataComponent);
+        registerEntityDeriver(world, {
+            name: 'PlanetDataDeriver',
+            provided: PlanetDataComponent,
+            requires: [PlanetComponent],
+            derive: (entity, gameData) =>
+                derivePlanetData(gameData, entity.components.get(PlanetComponent)!),
+        });
         world.resources.get(SerializerResource)?.addComponent(
             PlanetDataComponent, passthroughType<PlanetData>('PlanetDataComponentType'));
         world.resources.get(SerializerResource)?.addEvent(LandEvent, LandEventType);

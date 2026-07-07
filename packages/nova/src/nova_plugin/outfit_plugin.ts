@@ -8,6 +8,8 @@ import { Plugin } from 'nova_ecs/plugin';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
 import { MovementPhysics, MovementType } from 'nova_ecs/plugins/movement_plugin';
 import { ProvideFromCache } from './provide_from_cache.js';
+import { registerEntityDeriver } from './entity_factory.js';
+import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { DefaultMap } from '../common/default_map.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { Stat } from './stat.js';
@@ -40,12 +42,8 @@ export function applyOutfitPhysics(basePhysics: ShipPhysics,
     });
 }
 
-const OutfitWeaponProvider = ProvideFromCache({
-    name: "OutfitWeaponProvider",
-    provided: WeaponsStateComponent,
-    update: [OutfitsStateComponent],
-    args: [OutfitsStateComponent, SimulationGameDataResource] as const,
-    factory(outfits, gameData) {
+function deriveWeaponsState(outfits: OutfitsState,
+    gameData: SimulationGameDataInterface) {
         const weaponsState = new DefaultMap<string, WeaponState>(() => ({
             count: 0,
             firing: false,
@@ -65,7 +63,14 @@ const OutfitWeaponProvider = ProvideFromCache({
             }
         }
         return weaponsState;
-    }
+}
+
+const OutfitWeaponProvider = ProvideFromCache({
+    name: "OutfitWeaponProvider",
+    provided: WeaponsStateComponent,
+    update: [OutfitsStateComponent],
+    args: [OutfitsStateComponent, SimulationGameDataResource] as const,
+    factory: deriveWeaponsState,
 });
 
 export const OutfitPlugin: Plugin = {
@@ -86,6 +91,13 @@ export const OutfitPlugin: Plugin = {
             componentType: t.type({}),
         });
 
+        registerEntityDeriver(world, {
+            name: 'WeaponsStateDeriver',
+            provided: WeaponsStateComponent,
+            requires: [OutfitsStateComponent],
+            derive: (entity, gameData) => deriveWeaponsState(
+                entity.components.get(OutfitsStateComponent)!, gameData),
+        });
         world.addSystem(OutfitWeaponProvider);
     }
 };

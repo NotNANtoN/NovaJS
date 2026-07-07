@@ -4,6 +4,7 @@ import { Random, RandomResource } from "nova_ecs/plugins/random_plugin";
 import { useFixedTimestep } from "nova_ecs/plugins/time_plugin";
 import { fnv1a } from "nova_ecs/plugins/world_hash";
 import { World } from "nova_ecs/world";
+import { completeEntity } from "./entity_data_loader.js";
 import { IdFactory, IdFactoryResource } from "./id_factory.js";
 import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
 import { SimulationGameDataResource } from "./game_data_resource.js";
@@ -45,6 +46,7 @@ export async function makeSystem(systemId: string, gameData: SimulationGameDataI
         const planetData = await gameData.data.Planet.get(planetId);
         const planet = makePlanet(planetData);
         planet.components.set(MultiplayerData, { owner: 'server' });
+        await completeEntity(world, planet);
         world.entities.set(`planet ${planetId}`, planet);
     }
 

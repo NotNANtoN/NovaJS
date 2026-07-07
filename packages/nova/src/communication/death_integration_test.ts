@@ -2,7 +2,7 @@ import "jasmine";
 import { MultiplayerData } from "nova_ecs/plugins/multiplayer_plugin";
 import { v4 } from "uuid";
 import { DamagedEvent, DeathEvent } from "../nova_plugin/death_plugin.js";
-import { loadEntityGameData } from "../nova_plugin/entity_data_loader.js";
+import { completeEntity } from "../nova_plugin/entity_data_loader.js";
 import { makeNpc } from "../nova_plugin/npc_plugin.js";
 import { makeSimulationBridgeHarness, getIntegrationGameData } from "./simulation_test_fixture.js";
 
@@ -23,7 +23,7 @@ describe("Ship death", () => {
         const npc = makeNpc(shipData);
         npc.components.set(MultiplayerData, { owner });
         const npcUuid = v4();
-        await loadEntityGameData(world, npc);
+        await completeEntity(world, npc);
         world.entities.set(npcUuid, npc);
 
         // Let async providers resolve so the NPC has armor etc.

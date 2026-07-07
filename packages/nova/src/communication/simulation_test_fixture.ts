@@ -5,7 +5,7 @@ import { MockCommunicator } from "nova_ecs/plugins/mock_communicator";
 import { GameDataAggregator } from "../server/parsing/game_data_aggregator.js";
 import { FilesystemData } from "../server/parsing/filesystem_data.js";
 import { NovaParse } from "novaparse";
-import { loadEntityGameData } from "../nova_plugin/entity_data_loader.js";
+import { completeEntity } from "../nova_plugin/entity_data_loader.js";
 import { makeShip } from "../nova_plugin/make_ship.js";
 import { makeSystem } from "../nova_plugin/make_system.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
@@ -53,7 +53,7 @@ export async function makeSimulationBridgeHarness() {
     const shipUuid = v4();
     ship.components.set(MultiplayerData, { owner: "server" });
     ship.components.set(PlayerShipSelector, undefined);
-    await loadEntityGameData(world, ship);
+    await completeEntity(world, ship);
     world.entities.set(shipUuid, ship);
 
     for (let i = 0; i < 10; i++) {

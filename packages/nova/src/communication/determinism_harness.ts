@@ -10,7 +10,7 @@ import { Vector } from "nova_ecs/datatypes/vector";
 import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
 import { diffWorldHashes, hashWorld } from "nova_ecs/plugins/world_hash";
 import { World } from "nova_ecs/world";
-import { loadEntityGameData } from "../nova_plugin/entity_data_loader.js";
+import { completeEntity } from "../nova_plugin/entity_data_loader.js";
 import { makeNpc } from "../nova_plugin/npc_plugin.js";
 import { makeShip } from "../nova_plugin/make_ship.js";
 import { makeSystem } from "../nova_plugin/make_system.js";
@@ -49,14 +49,14 @@ export async function makeDeterminismWorld(npcCount: number): Promise<World> {
     const ship = makeShip(shipData);
     setDeterministicMovement(world, ship, 0);
     // Stage, load, then insert, like the simulation bridge does.
-    await loadEntityGameData(world, ship);
+    await completeEntity(world, ship);
     world.entities.set('determinism ship', ship);
 
     for (let i = 0; i < npcCount; i++) {
         const npcData = await gameData.data.Ship.get(shipIds[i % shipIds.length]!);
         const npc = makeNpc(npcData);
         setDeterministicMovement(world, npc, i + 1);
-        await loadEntityGameData(world, npc);
+        await completeEntity(world, npc);
         world.entities.set(`determinism npc ${i}`, npc);
     }
     return world;
