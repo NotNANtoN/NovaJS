@@ -1,0 +1,155 @@
+import "jasmine";
+import { readResourceFork, ResourceMap } from "resource_fork";
+import { OutfResource } from "../../src/resource_parsers/outf_resource.js";
+import { NovaResources } from "../../src/resource_parsers/resource_holder_base.js";
+import { defaultIDSpace } from "./default_id_space.js";
+
+import { resolveFixture } from "../../test/fixtures.js";
+
+describe("OutfResource", () => {
+    let rf: ResourceMap;
+
+    // Outfits don't depend on othe resources.
+    const idSpace: NovaResources = defaultIDSpace;
+
+    let w1: OutfResource;
+    let blank: OutfResource;
+    let armor: OutfResource;
+    let shields: OutfResource;
+    let armorRecharge: OutfResource;
+    let shieldRecharge: OutfResource;
+    let speedIncrease: OutfResource;
+    let accelBoost: OutfResource;
+    let turnRate: OutfResource;
+    let afterburner: OutfResource;
+    let four: OutfResource;
+    let anotherFour: OutfResource;
+
+    beforeEach(async () => {
+        const dataPath = resolveFixture("resource_examples/outf.ndat");
+        rf = await readResourceFork(dataPath, false);
+
+        var outfs = rf.oütf;
+        w1 = new OutfResource(outfs[128], idSpace);
+        blank = new OutfResource(outfs[129], idSpace);
+        armor = new OutfResource(outfs[130], idSpace);
+        shields = new OutfResource(outfs[131], idSpace);
+        armorRecharge = new OutfResource(outfs[132], idSpace);
+        shieldRecharge = new OutfResource(outfs[133], idSpace);
+        speedIncrease = new OutfResource(outfs[134], idSpace);
+        accelBoost = new OutfResource(outfs[135], idSpace);
+        turnRate = new OutfResource(outfs[136], idSpace);
+        afterburner = new OutfResource(outfs[137], idSpace);
+        four = new OutfResource(outfs[138], idSpace);
+        anotherFour = new OutfResource(outfs[139], idSpace);
+    });
+
+    it("should parse outfit functions", () => {
+        expect(w1.functions).toEqual([
+            ["weapon", 142]
+        ]);
+
+        expect(blank.functions).toEqual([]);
+
+        expect(armor.functions).toEqual([
+            ["armor", 42]
+        ]);
+
+        expect(shields.functions).toEqual([
+            ["shield", 424]
+        ]);
+
+        expect(armorRecharge.functions).toEqual([
+            ["armorRecharge", 123]
+        ]);
+
+        expect(shieldRecharge.functions).toEqual([
+            ["shieldRecharge", 234]
+        ]);
+
+        expect(speedIncrease.functions).toEqual([
+            ["speed", 19]
+        ]);
+
+        expect(accelBoost.functions).toEqual([
+            ["acceleration", 81]
+        ]);
+
+        expect(turnRate.functions).toEqual([
+            ["turnRate", 53]
+        ]);
+
+        expect(afterburner.functions).toEqual([
+            ["afterburner", 144]
+        ]);
+
+        expect(four.functions).toEqual([
+            ["weapon", 153],
+            ["acceleration", 14],
+            ["armor", 92],
+            ["shield", 525]
+        ]);
+
+        expect(anotherFour.functions).toEqual([
+            ["shieldRecharge", 99],
+            ["jam 3", 23],
+            ["IFF", true],
+            ["energy", 1454]
+        ]);
+    });
+
+    it("should parse maximum allowed", () => {
+        expect(w1.max).toEqual(12);
+        expect(blank.max).toEqual(999);
+        expect(armor.max).toEqual(124);
+        expect(shields.max).toEqual(337);
+        expect(armorRecharge.max).toEqual(32767);
+    });
+
+    it("should calculate pictID", () => {
+        expect(w1.pictID).toEqual(6000);
+        expect(anotherFour.pictID).toEqual(6011);
+    });
+
+    it("should parse mass", () => {
+        expect(w1.mass).toEqual(12);
+        expect(armor.mass).toEqual(5);
+        expect(shields.mass).toEqual(1221);
+    });
+
+    it("should parse cost", () => {
+        expect(w1.cost).toEqual(1312);
+        expect(blank.cost).toEqual(0);
+        expect(armor.cost).toEqual(9404);
+        expect(shields.cost).toEqual(12345);
+        expect(armorRecharge.cost).toEqual(1234567);
+        expect(shieldRecharge.cost).toEqual(-534);
+    });
+
+    it("should parse displayWeight", () => {
+        expect(w1.displayWeight).toEqual(14);
+        expect(blank.displayWeight).toEqual(0);
+        expect(armor.displayWeight).toEqual(423);
+    });
+
+    it("should parse the outfitter name and related string fields", () => {
+        expect(w1.outfitterName).toEqual("Weapon Test Name");
+        expect(blank.outfitterName).toEqual("");
+    });
+
+    it("should parse newly-exposed trailing fields", () => {
+        // These are the same for every fixture resource, but they exercise the
+        // offsets of the fields past the NCB strings (Item Class @1004,
+        // Available Random @1008, Require Bits Apply To @1010).
+        expect(w1.itemClass).toEqual(-1);
+        expect(w1.availableRandom).toEqual(100);
+        expect(w1.requireBitsApplyTo).toEqual(-1);
+        expect(w1.flags).toEqual(0);
+        expect(w1.contribute).toEqual(0n);
+        expect(w1.require).toEqual(0n);
+    });
+
+    it("should parse techLevel", () => {
+        expect(w1.techLevel).toEqual(1);
+    });
+});

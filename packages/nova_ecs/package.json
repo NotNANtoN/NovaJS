@@ -1,0 +1,38 @@
+{
+  "name": "nova_ecs",
+  "version": "0.3.2",
+  "description": "The Entity Component System for NovaJS",
+  "repository": "https://github.com/mattsoulanille/NovaJS",
+  "author": "Matthew Soulanille",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./*": {
+      "types": "./dist/*.d.ts",
+      "default": "./dist/*.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rimraf dist",
+    "test": "jasmine --config=jasmine.json"
+  },
+  "dependencies": {
+    "fp-ts": "^2.16.11",
+    "immer": "^10.2.0",
+    "io-ts": "^2.2.22",
+    "rxjs": "^7.8.2",
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "@evn/tsconfig": "0.1.0",
+    "@types/jasmine": "^5.1.12",
+    "jasmine": "^5.12.0",
+    "rimraf": "^5.0.5",
+    "typescript": "5.9.3"
+  }
+}
