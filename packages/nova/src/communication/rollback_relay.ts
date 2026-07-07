@@ -153,6 +153,18 @@ export class RollbackRelay {
         if (new Set(reports.values()).size > 1) {
             console.log(`Desync at tick ${tick}:`,
                 Object.fromEntries(reports));
+            // Unanimous peers against the archive means the *archive*
+            // has diverged — and every baseline it captures from here
+            // on reconstructs the wrong world. Loud, because recovery
+            // (rebuilding the archive) is not automatic yet.
+            const peerHashes = new Set([...reports]
+                .filter(([peerId]) => peerId !== this.room.uuid)
+                .map(([, hash]) => hash));
+            if (reference !== undefined && peerHashes.size === 1
+                && !peerHashes.has(reference)) {
+                console.error(
+                    `Archive diverged from all peers at tick ${tick}`);
+            }
             this.room.sendMessage(wrapRollbackMessage({
                 kind: 'desync', tick, hashes: [...reports],
             }));

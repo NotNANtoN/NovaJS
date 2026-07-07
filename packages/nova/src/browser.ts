@@ -565,6 +565,15 @@ async function startGame() {
                 pendingDockedShip = undefined;
             }
             if (pendingLaunchedShip && dockedShip) {
+                // A ship bought at the shipyard is a fresh entity: it
+                // must carry the multiplayer identity or no peer's
+                // inputs steer it (and removePeer never cleans it up).
+                if (communicator.uuid) {
+                    pendingLaunchedShip.components.set(ControlledByComponent,
+                        { peerId: communicator.uuid });
+                    pendingLaunchedShip.components.set(MultiplayerData,
+                        { owner: communicator.uuid });
+                }
                 await currentBridge.addEntity(dockedShip.uuid, pendingLaunchedShip);
                 if (pendingLaunchedShip.components.has(PlayerShipSelector)) {
                     (window as any).myShip = pendingLaunchedShip;

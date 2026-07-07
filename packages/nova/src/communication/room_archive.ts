@@ -70,6 +70,11 @@ export class RoomArchive {
         return this.recentHashes.get(tick);
     }
 
+    /** The trailing sim itself, for tests and diagnostics. */
+    get archiveWorld(): World | undefined {
+        return this.world;
+    }
+
     /**
      * Steps the archive sim up to the relay's current tick, applying
      * the logged inputs, and captures a baseline when the interval has

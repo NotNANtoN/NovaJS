@@ -199,6 +199,64 @@ describe('Input-driven rooms', () => {
         expect(peerB.world.entities.has('ship a')).toBeTrue();
     }, 240_000);
 
+    it('the archive tracks a land, ship purchase, and relaunch', async () => {
+        // The spaceport flow as the room sees it: removeEntity at
+        // landing, then addEntity of a *different* ship on the same
+        // uuid at departure. The archive must simulate it identically
+        // to the peers (live, the archive diverged around this
+        // sequence).
+        relay.close();
+        let archive: RoomArchive | undefined;
+        relay = new RollbackRelay(comms.get('server')!, {
+            autoClock: false,
+            baseline: () => archive?.latest,
+            referenceHash: tick => archive?.hashAt(tick),
+        });
+        const makeArchiveWorld = async () => {
+            const gameData = await getIntegrationGameData();
+            const ids = await gameData.ids;
+            return makeSystem([...ids.System].sort()[0]!, gameData, 'node');
+        };
+        archive = new RoomArchive(relay, makeArchiveWorld,
+            { intervalTicks: 30, autoUpdate: false });
+
+        const peerA = await makePeer('a');
+        const peerB = await makePeer('b');
+        await peerA.client.addEntity('ship a', await makePeerShip('a', peerA.world));
+
+        const step = async (ticks: number) => {
+            for (let i = 0; i < ticks; i++) {
+                peerA.host.step();
+                peerB.host.step();
+                relay.advanceTicks(1);
+                await new Promise(resolve => setImmediate(resolve));
+            }
+            await archive!.update();
+        };
+
+        await step(35);
+        // Land: the ship leaves the simulation.
+        peerA.client.removeEntity('ship a');
+        await step(35);
+        // Depart with a purchased ship: a fresh entity, same uuid.
+        const gameData = await getIntegrationGameData();
+        const carrierData = await gameData.data.Ship.get('nova:143');
+        const carrier = makeShip(carrierData!);
+        carrier.components.set(ControlledByComponent, { peerId: 'a' });
+        await peerA.client.addEntity('ship a', carrier);
+        await step(90);
+
+        const hashArchive = hashWorld(archive.archiveWorld!, PEER_LOCAL_COMPONENTS);
+        const hashA = hashWorld(peerA.world, PEER_LOCAL_COMPONENTS);
+        const hashB = hashWorld(peerB.world, PEER_LOCAL_COMPONENTS);
+        expect(hashB.hash).toEqual(hashA.hash);
+        if (hashArchive.hash !== hashA.hash) {
+            const { diffWorldHashes } = await import('nova_ecs/plugins/world_hash');
+            fail('Archive diverged: '
+                + diffWorldHashes(hashArchive, hashA).slice(0, 10).join('; '));
+        }
+    }, 240_000);
+
     it('detects a desync and the diverged peer resyncs from the log', async () => {
         const peerA = await makePeer('a');
         const peerB = await makePeer('b');

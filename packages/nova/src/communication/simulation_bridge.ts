@@ -252,7 +252,16 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
         this.integrateRemoteInputs();
         for (let i = 0; i < count; i++) {
             if (this.pendingInputs.length > 0) {
-                const tick = this.rollback.tick + 1;
+                // Never stamp inputs behind the room's clock: the
+                // relay would retime them for everyone but us — a
+                // guaranteed divergence. While catching up (join,
+                // resync, a stall), inputs land at the clock's next
+                // tick and apply when the catch-up reaches it; in
+                // steady state the local tick leads the clock and
+                // this is a no-op.
+                const estimated = this.estimatedServerTick();
+                const tick = Math.max(this.rollback.tick + 1,
+                    estimated === undefined ? 0 : Math.ceil(estimated) + 1);
                 const communicator = this.world.resources.get(CommunicatorResource);
                 const record: InputRecord = {
                     peerId: communicator?.uuid,
@@ -338,7 +347,12 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
         for (const record of catchUp.records) {
             this.addRecord(record.tick, record);
         }
-        this.rollback.fastForward(catchUp.tick);
+        // catchUp.tick is stale by however long staging took (seconds
+        // of asset loading on a cold cache); fast-forward to the
+        // room's clock *now*, or play begins far behind and the pump
+        // snaps through the gap at a visible fast-forward.
+        this.rollback.fastForward(Math.max(catchUp.tick,
+            Math.ceil(this.estimatedServerTick() ?? 0)));
         // The local tick just jumped; stale smoothed drift would slew
         // against the new position.
         this.smoothedDrift = undefined;
@@ -521,13 +535,20 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
      * extrapolated server tick plus a small send-ahead lead, clamped
      * so correction is a gradual speed change rather than a skip.
      */
-    private pacing(): SimulationPacing | undefined {
+    /** The room's clock now, extrapolated from the last tickSync. */
+    private estimatedServerTick(): number | undefined {
         if (!this.lastTickSync) {
             return undefined;
         }
         const elapsed = performance.now() - this.lastTickSync.at;
-        const estimatedServerTick =
-            this.lastTickSync.tick + elapsed / SIMULATION_STEP_MS;
+        return this.lastTickSync.tick + elapsed / SIMULATION_STEP_MS;
+    }
+
+    private pacing(): SimulationPacing | undefined {
+        const estimatedServerTick = this.estimatedServerTick();
+        if (estimatedServerTick === undefined) {
+            return undefined;
+        }
         const behindTicks =
             estimatedServerTick + PACING_LEAD_TICKS - this.rollback.tick;
         this.smoothedDrift = this.smoothedDrift === undefined ? behindTicks
