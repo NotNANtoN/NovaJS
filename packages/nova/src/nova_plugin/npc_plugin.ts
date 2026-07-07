@@ -3,7 +3,9 @@ import { Entities, GetWorld, UUID } from "nova_ecs/arg_types";
 import { Component } from "nova_ecs/component";
 import { Plugin } from "nova_ecs/plugin";
 import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
-import { CommunicatorResource, MultiplayerData } from "nova_ecs/plugins/multiplayer_plugin";
+import * as t from 'io-ts';
+import { CommunicatorResource, ExcludedMultiplayerComponentsResource, MultiplayerData } from "nova_ecs/plugins/multiplayer_plugin";
+import { markerType, SerializerResource } from "nova_ecs/plugins/serializer_plugin";
 import { RandomResource } from "nova_ecs/plugins/random_plugin";
 import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { Optional } from "nova_ecs/optional";
@@ -113,6 +115,25 @@ export function makeNpc(shipData: ShipData) {
 export const NpcPlugin: Plugin = {
     name: 'NpcPlugin',
     build(world) {
+        // NPC AI components must survive the serializer roundtrip that
+        // entity-insertion inputs go through, but they are excluded
+        // from multiplayer state: only the owner's sim runs the AI.
+        const serializer = world.resources.get(SerializerResource);
+        serializer?.addComponent(ChooseRandomTargetComponent, t.intersection([
+            t.type({ interval: t.number }),
+            t.partial({ nextTime: t.number }),
+        ]));
+        serializer?.addComponent(FollowComponent, markerType);
+        serializer?.addComponent(ShootAllWeaponsComponent, markerType);
+        serializer?.addComponent(DeathAIComponent, markerType);
+        const excluded = world.resources.get(ExcludedMultiplayerComponentsResource)
+            ?? new Set<string>();
+        for (const component of [ChooseRandomTargetComponent, FollowComponent,
+            ShootAllWeaponsComponent, DeathAIComponent]) {
+            excluded.add(component.name);
+        }
+        world.resources.set(ExcludedMultiplayerComponentsResource, excluded);
+
         world.addSystem(ChooseRandomTargetAI);
         world.addSystem(FollowAI);
         world.addSystem(ShootAllWeaponsAI);

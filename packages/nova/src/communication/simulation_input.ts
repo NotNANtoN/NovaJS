@@ -1,0 +1,80 @@
+import { isLeft } from "fp-ts/lib/Either.js";
+import { EncodedEntity, SerializerResource } from "nova_ecs/plugins/serializer_plugin";
+import { World } from "nova_ecs/world";
+import { ControlEvent, ControlsSubject, EcsControlEvent } from "../nova_plugin/controls_plugin.js";
+import { deriveEntityComponents } from "../nova_plugin/entity_factory.js";
+import { JumpRouteComponent } from "../nova_plugin/jump_plugin.js";
+import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
+
+/**
+ * Everything that changes the simulation from outside is an input,
+ * recorded against the tick it applies to. Inputs are the only wire
+ * format rollback multiplayer needs in steady state: they are
+ * structured-cloneable, and applying the same inputs at the same tick
+ * to the same state is deterministic.
+ *
+ * Entity insertion is an input too: the entity is staged (its game
+ * data loaded) *before* the input is scheduled, so applying the input
+ * is synchronous. The insertion tick may vary between runs — inputs
+ * are external by definition — but resimulating a recorded history
+ * replays it exactly.
+ */
+export type SimulationInput =
+    | { kind: 'control', events: ControlEvent[] }
+    | { kind: 'addEntity', uuid: string, entity: EncodedEntity }
+    | { kind: 'removeEntity', uuid: string }
+    | { kind: 'setJumpRoute', route: string[] };
+
+/**
+ * Applies a tick's inputs, in order. Called by the rollback driver
+ * immediately before stepping that tick — both live and during
+ * resimulation — so it must be deterministic and synchronous.
+ */
+export function applySimulationInputs(world: World, inputs: SimulationInput[]) {
+    for (const input of inputs) {
+        switch (input.kind) {
+            case 'control': {
+                world.emit(EcsControlEvent, input.events);
+                const subject = world.resources.get(ControlsSubject);
+                if (subject) {
+                    for (const event of input.events) {
+                        subject.next(event);
+                    }
+                }
+                break;
+            }
+            case 'addEntity': {
+                const serializer = world.resources.get(SerializerResource);
+                if (!serializer) {
+                    throw new Error('Expected serializer resource to exist');
+                }
+                const decoded = serializer.decode(input.entity);
+                if (isLeft(decoded)) {
+                    console.warn(`Dropping addEntity input for ${input.uuid}: `
+                        + serializer.describeDecodeFailure(input.entity, decoded.left));
+                    break;
+                }
+                deriveEntityComponents(world, decoded.right);
+                world.entities.set(input.uuid, decoded.right);
+                break;
+            }
+            case 'removeEntity': {
+                world.entities.delete(input.uuid);
+                break;
+            }
+            case 'setJumpRoute': {
+                for (const entity of world.entities.values()) {
+                    if (!entity.components.has(PlayerShipSelector)) {
+                        continue;
+                    }
+                    const jumpRoute = entity.components.get(JumpRouteComponent);
+                    if (jumpRoute) {
+                        jumpRoute.route = [...input.route];
+                    }
+                    break;
+                }
+                break;
+            }
+        }
+    }
+}

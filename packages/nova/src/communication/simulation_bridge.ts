@@ -1,17 +1,19 @@
 import { isLeft } from "fp-ts/lib/Either.js";
 import { Entity } from "nova_ecs/entity";
+import { RollbackSimulation } from "nova_ecs/plugins/rollback_plugin";
+import { SnapshotPolicies, SnapshotPoliciesResource } from "nova_ecs/plugins/snapshot_plugin";
 import { CommunicatorResource, MultiplayerData } from "nova_ecs/plugins/multiplayer_plugin";
 import { EncodedEntity, Serializer, SerializerResource } from "nova_ecs/plugins/serializer_plugin";
 import { Time, TimeResource } from "nova_ecs/plugins/time_plugin";
 import { World } from "nova_ecs/world";
 import { v4 } from "uuid";
 import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
-import { completeEntity } from "../nova_plugin/entity_data_loader.js";
+import { loadEntityGameData } from "../nova_plugin/entity_data_loader.js";
+import { deriveEntityComponents } from "../nova_plugin/entity_factory.js";
+import { applySimulationInputs, SimulationInput } from "./simulation_input.js";
 import { makeNpc } from "../nova_plugin/npc_plugin.js";
 import { ControlEvent, ControlsSubject, EcsControlEvent } from "../nova_plugin/controls_plugin.js";
-import { JumpRouteComponent } from "../nova_plugin/jump_plugin.js";
 import { EncodedSimulationBridgeEvent, getRegisteredSimulationBridgeEvents } from "./simulation_bridge_events.js";
-import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 
 
 export interface EntityDelta {
@@ -43,6 +45,8 @@ export interface SimulationBridgeHostApi {
     removeEntity(uuid: string): void;
     setPlayerJumpRoute(route: string[]): void;
     spawnNpc(shipId: string): void | Promise<void>;
+    /** Debug/netcode: roll back `ticks` and resimulate. */
+    rewind(ticks: number): boolean;
 }
 
 export interface AsyncSimulationBridgeHostApi {
@@ -53,6 +57,7 @@ export interface AsyncSimulationBridgeHostApi {
     removeEntity(uuid: string): Promise<void>;
     setPlayerJumpRoute(route: string[]): Promise<void>;
     spawnNpc(shipId: string): Promise<void>;
+    rewind(ticks: number): Promise<boolean>;
 }
 
 interface SentEntityRecord {
@@ -64,11 +69,22 @@ interface SentEntityRecord {
 export class SimulationBridgeHost implements SimulationBridgeHostApi {
     private queuedEvents: EncodedSimulationBridgeEvent[] = [];
     private lastSent = new Map<string, SentEntityRecord>();
+    private rollback: RollbackSimulation<SimulationInput[]>;
+    /** Inputs that apply at the next stepped tick. */
+    private pendingInputs: SimulationInput[] = [];
 
     constructor(
         private world: World,
         private simulationGameData: SimulationGameDataInterface,
     ) {
+        // Bare test worlds may not have snapshot policies configured.
+        if (!world.resources.has(SnapshotPoliciesResource)) {
+            world.resources.set(SnapshotPoliciesResource, new SnapshotPolicies());
+        }
+        this.rollback = new RollbackSimulation<SimulationInput[]>(world, {
+            applyInputs: applySimulationInputs,
+            complete: deriveEntityComponents,
+        });
         for (const registration of getRegisteredSimulationBridgeEvents()) {
             world.events.get(registration.event).subscribe(({ data, entities }) => {
                 const entityUuids = registration.includeEntityUuids
@@ -91,20 +107,32 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
         return serializer;
     }
 
+    /**
+     * Everything that changes the simulation goes through tick-stamped
+     * input records: schedule() queues an input for the next stepped
+     * tick, where the rollback driver records and applies it. This is
+     * the same path resimulation replays.
+     */
+    private schedule(input: SimulationInput) {
+        this.pendingInputs.push(input);
+    }
+
     step(count = 1) {
         for (let i = 0; i < count; i++) {
-            this.world.step();
+            if (this.pendingInputs.length > 0) {
+                this.rollback.setInputs(this.rollback.tick + 1, this.pendingInputs);
+                this.pendingInputs = [];
+            }
+            this.rollback.step();
         }
     }
 
+    rewind(ticks: number): boolean {
+        return this.rollback.rollbackTo(this.rollback.tick - ticks);
+    }
+
     controlEvents(events: ControlEvent[]) {
-        this.world.emit(EcsControlEvent, events);
-        const controlsSubject = this.world.resources.get(ControlsSubject);
-        if (controlsSubject) {
-            for (const event of events) {
-                controlsSubject.next(event);
-            }
-        }
+        this.schedule({ kind: 'control', events });
     }
 
     snapshot(): SimulationFrame {
@@ -197,32 +225,20 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
         if (isLeft(decoded)) {
             throw new Error(`Failed to decode entity: ${this.serializer.describeDecodeFailure(entity, decoded.left)}`);
         }
-        // Stage, load, then insert: the entity only enters the
-        // simulation once the transitive closure of game data it (and
-        // anything it can spawn) needs is loaded, so the simulation
-        // never waits for data mid-step. The insertion tick is an
-        // input, so it is allowed to vary.
-        await completeEntity(this.world, decoded.right);
-        this.world.entities.set(uuid, decoded.right);
+        // Stage, load, then schedule: the entity's transitive game
+        // data closure is loaded before the insertion input is
+        // recorded, so applying (and replaying) the input is
+        // synchronous.
+        await loadEntityGameData(this.world, decoded.right);
+        this.schedule({ kind: 'addEntity', uuid, entity });
     }
 
     removeEntity(uuid: string) {
-        this.world.entities.delete(uuid);
+        this.schedule({ kind: 'removeEntity', uuid });
     }
 
     setPlayerJumpRoute(route: string[]) {
-        for (const entity of this.world.entities.values()) {
-            if (!entity.components.has(PlayerShipSelector)) {
-                continue;
-            }
-            const jumpRoute = entity.components.get(JumpRouteComponent);
-            if (!jumpRoute) {
-                continue;
-            }
-            jumpRoute.route = [...route];
-            return;
-        }
-        throw new Error("Expected player ship jump route to exist");
+        this.schedule({ kind: 'setJumpRoute', route });
     }
 
     async spawnNpc(shipId: string) {
@@ -233,13 +249,19 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
             throw new Error(`Failed to load ship ${shipId} for NPC spawn`);
         }
         const npc = makeNpc(shipData);
-        await completeEntity(this.world, npc);
+        await loadEntityGameData(this.world, npc);
         const communicator = this.world.resources.get(CommunicatorResource);
         if (!communicator?.uuid) {
             throw new Error("Expected communicator uuid to exist before spawning NPC");
         }
         npc.components.set(MultiplayerData, { owner: communicator.uuid });
-        this.world.entities.set(v4(), npc);
+        // The spawn becomes an insertion input: staged host-side, then
+        // scheduled, so replaying it is deterministic.
+        this.schedule({
+            kind: 'addEntity',
+            uuid: v4(),
+            entity: structuredClone(this.serializer.encode(npc)) as EncodedEntity,
+        });
     }
 }
 
@@ -271,6 +293,10 @@ export class SimulationBridgeClient {
 
     setPlayerJumpRoute(route: string[]) {
         this.host.setPlayerJumpRoute(structuredClone(route));
+    }
+
+    rewind(ticks: number) {
+        return this.host.rewind(ticks);
     }
 
     spawnNpc(shipId: string) {
@@ -323,6 +349,10 @@ export class AsyncSimulationBridgeClient {
 
     async spawnNpc(shipId: string) {
         await this.host.spawnNpc(shipId);
+    }
+
+    async rewind(ticks: number) {
+        return this.host.rewind(ticks);
     }
 
     getSerializer() {

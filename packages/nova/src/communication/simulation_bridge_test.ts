@@ -59,7 +59,10 @@ describe('SimulationBridge', () => {
     it('adds and removes entities through bridge commands', async () => {
         const entity = new Entity('foo').addComponent(FooComponent, { x: 3 });
 
+        // Entity insertion and removal are tick-stamped inputs: they
+        // apply when the simulation steps.
         await client.addEntity('foo-uuid', entity);
+        client.step();
         const addedFrame = client.snapshot();
         expect(addedFrame.added.length).toBe(1);
         expect(addedFrame.added[0]?.[0]).toBe('foo-uuid');
@@ -69,6 +72,7 @@ describe('SimulationBridge', () => {
         expect(decoded.components.get(FooComponent)).toEqual({ x: 3 });
 
         client.removeEntity('foo-uuid');
+        client.step();
         const removedFrame = client.snapshot();
         expect(removedFrame.added).toEqual([]);
         expect(removedFrame.changed).toEqual([]);
@@ -78,6 +82,7 @@ describe('SimulationBridge', () => {
     it('only includes changed components in subsequent snapshots', async () => {
         const entity = new Entity('foo').addComponent(FooComponent, { x: 3 });
         await client.addEntity('foo-uuid', entity);
+        client.step();
         expect(client.snapshot().added.length).toBe(1);
 
         const unchangedFrame = client.snapshot();
@@ -117,6 +122,7 @@ describe('SimulationBridge', () => {
 
         await client.addEntity('player-uuid', entity);
         client.setPlayerJumpRoute(['nova:131', 'nova:132']);
+        client.step();
 
         const frame = client.snapshot();
         const decoded = client.decodeEntity(frame.added[0]![1]);
@@ -125,6 +131,7 @@ describe('SimulationBridge', () => {
         });
 
         client.setPlayerJumpRoute(['nova:133']);
+        client.step();
         const deltaFrame = client.snapshot();
         expect(deltaFrame.changed).toEqual([
             ['player-uuid', {

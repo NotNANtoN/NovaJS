@@ -99,6 +99,10 @@ const simulationControl = {
     resume() { this.paused = false; },
     /** While paused, runs `count` simulation steps on the next frame. */
     step(count = 1) { this.pendingSteps += count; },
+    /** Rolls the simulation back `ticks` (~60/s) and resimulates. */
+    async rewind(ticks = 60) {
+        return await simulationBridge?.rewind(ticks) ?? false;
+    },
 };
 (window as any).novaSim = simulationControl;
 const syncedComponents = new Map<string, Set<UnknownComponent>>();

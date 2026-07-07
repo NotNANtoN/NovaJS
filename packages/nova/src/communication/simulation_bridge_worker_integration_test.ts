@@ -35,6 +35,7 @@ describe("SimulationBridge worker integration", () => {
             }
 
             await client.addEntity(harness.shipUuid, ship);
+            await client.step();
             const addedFrame = await client.snapshot();
             const addedShips = addedFrame.added.filter(([uuid]) => !uuid.includes('planet'));
             expect(addedShips.length).toBe(1);
@@ -47,6 +48,7 @@ describe("SimulationBridge worker integration", () => {
             expect(steppedFrame.time?.frame).toBe((addedFrame.time?.frame ?? 0) + 1);
 
             await client.removeEntity(harness.shipUuid);
+            await client.step();
             const removedFrame = await client.snapshot();
             expect(removedFrame.added).toEqual([]);
             expect(removedFrame.removed).toContain(harness.shipUuid);
