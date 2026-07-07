@@ -1,6 +1,7 @@
 import { Resource } from "resource_fork";
-import { NovaResources } from "./resource_holder_base.js";
 import { BaseResource } from "./nova_resource_base.js";
+import { Reader } from "./reader.js";
+import { NovaResources } from "./resource_holder_base.js";
 
 type ShipWeap = {
     id: number,
@@ -11,10 +12,20 @@ type ShipWeap = {
 type Outfit = {
     id: number,
     count: number,
-}
+};
 
+/**
+ * A ship class.
+ *
+ * Field layout follows ResForge's shïp template (1860 bytes, matching Nova's
+ * own data exactly), documented in the EVN Bible pp. 53-58.
+ */
 class ShipResource extends BaseResource {
+    /** PICT shown in the shipyard; always the ship's id mapped to 5000+. */
     pictID: number;
+    /** dësc shown in the shipyard; always the ship's id mapped to 13000+. */
+    descID: number;
+
     cargoSpace: number;
     shield: number;
     acceleration: number;
@@ -24,16 +35,20 @@ class ShipResource extends BaseResource {
     freeSpace: number;
     armor: number;
     shieldRecharge: number;
-    descID: number;
+    /** Stock weapons: the four slots at offset 18 plus four more at 1742. */
     weapons: Array<ShipWeap>;
     maxGuns: number;
     maxTurrets: number;
     techLevel: number;
     cost: number;
+    /** Frames between death and the final explosion. */
     deathDelay: number;
     armorRecharge: number;
+    /** bööm id of the explosions shown during the death delay; null = none. */
     initialExplosion: number | null;
+    /** bööm id of the final explosion; null = none. */
     finalExplosion: number | null;
+    /** Whether the final explosion propagates sparks (stored as +1000). */
     finalExplosionSparks: boolean;
     displayOrder: number;
     mass: number;
@@ -43,162 +58,160 @@ class ShipResource extends BaseResource {
     strength: number;
     inherentGovt: number;
     flagsN: number;
+    /** Decorative escape pods. */
     podCount: number;
+    /** Default outfits: the four slots at offset 78 plus four more at 880. */
     outfits: Array<Outfit>;
+    /** Frames per unit of energy regained. */
     energyRecharge: number;
+    /** AI skill variance in percent. */
     skillVariation: number;
     flags2N: number;
+    /** NCB test gating shipyard availability. */
     availabilityNCB: string;
+    /** NCB test gating which ships appear for AIs. */
     appearOn: string;
+    /** NCB set evaluated on purchase. */
     onPurchase: string;
+    /** Deionization rate; 100 = 1 point per frame. */
     deionize: number;
+    /** Maximum ionization. */
     ionization: number;
+    /** shïp id of the ship type this one unlocks when boarded; -1 = none. */
     keyCarried: number;
-    contribute: number[];
-    require: number[];
+    /** 64-bit flag set contributed while flying this ship. */
+    contribute: bigint;
+    /** 64-bit flags and'ed against the player's Contribute bits to buy. */
+    require: bigint;
     buyRandom: number;
     hireRandom: number;
+    /** NCB set evaluated when the player captures this ship. */
     onCapture: string;
+    /** NCB set evaluated when this escort retires. */
     onRetire: string;
-    subtitle: string;
     shortName: string;
     commName: string;
     longName: string;
+    /** Movie file shown in the shipyard. */
+    movieFile: string;
+    subtitle: string;
+    flags3N: number;
+    /** shïp id this escort can upgrade to; -1 = none. */
+    escortUpgradeShip: number;
+    escortUpgradeCost: number;
+    escortSellValue: number;
+    /** Escort category override (fighter/light/heavy...); -1 = by strength. */
     escortType: number;
 
     constructor(resource: Resource, idSpace: NovaResources) {
         super(resource, idSpace);
+        const r = new Reader(this.data);
 
-        var d = this.data;
         this.pictID = this.id - 128 + 5000;
-
-        this.cargoSpace = d.getInt16(0);
-        this.shield = d.getInt16(2);
-        this.acceleration = d.getInt16(4);
-        this.speed = d.getInt16(6);
-        this.turnRate = d.getInt16(8);
-        this.energy = d.getInt16(10);
-        this.freeSpace = d.getInt16(12);
-        this.armor = d.getInt16(14);
-        this.shieldRecharge = d.getInt16(16);
-
         this.descID = this.id - 128 + 13000;
 
-        //stock weapons
-        this.weapons = [];
-        for (var i = 0; i < 4; i++) {
-            let id = d.getInt16(18 + 2 * i);
-            if (id >= 128) {
-                this.weapons.push({
-                    id,
-                    count: d.getInt16(26 + 2 * i),
-                    ammo: d.getInt16(34 + 2 * i)
-                });
-            }
+        this.cargoSpace = r.int16();
+        this.shield = r.int16();
+        this.acceleration = r.int16();
+        this.speed = r.int16();
+        this.turnRate = r.int16();
+        this.energy = r.int16();
+        this.freeSpace = r.int16();
+        this.armor = r.int16();
+        this.shieldRecharge = r.int16();
+
+        // Stock weapons: parallel arrays of 4 ids, 4 counts, 4 ammo counts.
+        // Four more slots are stored the same way at offset 1742, read below.
+        const weaponIds = r.array(4, () => r.int16(-1));
+        const weaponCounts = r.array(4, () => r.int16());
+        const weaponAmmo = r.array(4, () => r.int16());
+
+        this.maxGuns = r.int16();
+        this.maxTurrets = r.int16();
+        this.techLevel = r.int16();
+        this.cost = r.int32();
+        this.deathDelay = r.int16();
+        this.armorRecharge = r.int16();
+
+        // bööm ids are stored 0-63; -1 means none.
+        const maybeBoom = (n: number): number | null =>
+            n === -1 ? null : n + 128;
+        this.initialExplosion = maybeBoom(r.int16(-1));
+        let finalExplosion = r.int16(-1);
+        this.finalExplosionSparks = finalExplosion >= 1000;
+        if (this.finalExplosionSparks) {
+            finalExplosion -= 1000;
         }
-        // Additional weapons are stored way down the resource
-        for (var i = 4; i < 8; i++) {
-            let id = d.getInt16(1742 + 2 * i - 8);
-            if (id >= 128) {
-                this.weapons.push({
-                    id,
-                    count: d.getInt16(1750 + 2 * i - 8),
-                    ammo: d.getInt16(1758 + 2 * i - 8)
-                });
-            }
-        }
+        this.finalExplosion = maybeBoom(finalExplosion);
 
-        this.maxGuns = d.getInt16(42);
-        this.maxTurrets = d.getInt16(44);
-        this.techLevel = d.getInt16(46);
-        this.cost = d.getInt16(50);
-        this.deathDelay = d.getInt16(52);
-        this.armorRecharge = d.getInt16(54);
+        this.displayOrder = r.int16();
+        this.mass = r.int16();
+        this.length = r.int16();
+        this.inherentAI = r.int16();
+        this.crew = r.int16();
+        this.strength = r.int16();
+        this.inherentGovt = r.int16(-1);
+        this.flagsN = r.uint16();
+        this.podCount = r.int16();
 
-        var maybeNull = function(n: number, a: number): number | null {
-            if (n == -1)
-                return null;
-            return n + a;
-        };
+        // Default outfits: 4 ids then 4 counts; four more slots at 880.
+        const outfitIds = r.array(4, () => r.int16(-1));
+        const outfitCounts = r.array(4, () => r.int16());
 
-        this.initialExplosion = maybeNull(d.getInt16(56), 128);
-        this.finalExplosion = maybeNull(d.getInt16(58), 128);
-        this.finalExplosionSparks = false;
-        if (this.finalExplosion && this.finalExplosion >= 1000) {
-            this.finalExplosion -= 1000;
-            this.finalExplosionSparks = true;
-        }
+        this.energyRecharge = r.int16();
+        this.skillVariation = r.int16();
+        this.flags2N = r.uint16();
+        this.contribute = r.uint64();
 
-        this.displayOrder = d.getInt16(60);
+        this.availabilityNCB = r.string(0xff);
+        this.appearOn = r.string(0xff);
+        this.onPurchase = r.string(0x100);
 
-        this.mass = d.getInt16(62);
-        this.length = d.getInt16(64);
-        this.inherentAI = d.getInt16(66);
-        this.crew = d.getInt16(68);
-        this.strength = d.getInt16(70);
+        this.deionize = r.int16();
+        this.ionization = r.int16();
+        this.keyCarried = r.int16(-1);
 
-        this.inherentGovt = d.getInt16(72);
-        this.flagsN = d.getInt16(74);
-
-        this.podCount = d.getInt16(76);
+        outfitIds.push(...r.array(4, () => r.int16(-1)));
+        outfitCounts.push(...r.array(4, () => r.int16()));
         this.outfits = [];
-        for (var i = 0; i < 4; i++) {
-            let id = d.getInt16(78 + 2 * i);
-            if (id >= 128) {
-                this.outfits.push({
-                    id,
-                    count: d.getInt16(86 + 2 * i)
-                });
-            }
-        }
-        // More outfits
-        for (var i = 0; i < 4; i++) {
-            let id = d.getInt16(880 + 2 * i);
-            if (id >= 128) {
-                this.outfits.push({
-                    id,
-                    count: d.getInt16(888 + 2 * i)
-                });
+        for (let i = 0; i < outfitIds.length; i++) {
+            if (outfitIds[i] >= 128) {
+                this.outfits.push({ id: outfitIds[i], count: outfitCounts[i] });
             }
         }
 
+        this.require = r.uint64();
+        this.buyRandom = r.int16();
+        this.hireRandom = r.int16();
+        r.skip(0x44);                       // unused
+        this.onCapture = r.string(0xff);
+        this.onRetire = r.string(0xff);
+        this.shortName = r.string(0x40);
+        this.commName = r.string(0x20);
+        this.longName = r.string(0x80);
+        this.movieFile = r.string(0x20);
 
-        this.energyRecharge = d.getInt16(94);
-        this.skillVariation = d.getInt16(96);
-        this.flags2N = d.getUint16(98);
-
-        var getString = function(start: number, length: number): string {
-            var s = "";
-            for (var i = start; i < start + length; i++) {
-                if (0 != d.getUint8(i))
-                    s += String.fromCharCode(d.getUint8(i));
+        weaponIds.push(...r.array(4, () => r.int16(-1)));
+        weaponCounts.push(...r.array(4, () => r.int16()));
+        weaponAmmo.push(...r.array(4, () => r.int16()));
+        this.weapons = [];
+        for (let i = 0; i < weaponIds.length; i++) {
+            if (weaponIds[i] >= 128) {
+                this.weapons.push({
+                    id: weaponIds[i],
+                    count: weaponCounts[i],
+                    ammo: weaponAmmo[i],
+                });
             }
-            return s;
-        };
+        }
 
-        this.availabilityNCB = getString(108, 255);
-
-        this.appearOn = getString(363, 255);
-        this.onPurchase = getString(618, 255);
-        this.deionize = d.getInt16(874);
-        this.ionization = d.getInt16(876);
-        this.keyCarried = d.getInt16(878);
-
-        this.contribute = [d.getUint32(896), d.getUint32(900)];
-        this.require = [d.getUint32(896), d.getUint32(900)];
-        this.buyRandom = d.getInt16(904);
-        this.hireRandom = d.getInt16(906);
-
-        this.onCapture = getString(908, 255);
-        this.onRetire = getString(1163, 255);
-        this.subtitle = getString(1766, 64);
-        this.shortName = getString(1486, 64);
-        this.commName = getString(1550, 32);
-        this.longName = getString(1582, 132);
-
-        this.escortType = d.getInt16(1829);
+        this.subtitle = r.string(0x40);
+        this.flags3N = r.uint16();
+        this.escortUpgradeShip = r.int16(-1);
+        this.escortUpgradeCost = r.int32();
+        this.escortSellValue = r.int32();
+        this.escortType = r.int16(-1);
     }
 }
 
-
-export { ShipResource }
+export { ShipResource };
