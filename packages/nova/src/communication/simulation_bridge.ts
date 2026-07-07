@@ -1,7 +1,7 @@
 import { isLeft } from "fp-ts/lib/Either.js";
 import { Entity } from "nova_ecs/entity";
 import { RollbackSimulation } from "nova_ecs/plugins/rollback_plugin";
-import { restoreWorld, snapshotWorld, SnapshotPolicies, SnapshotPoliciesResource, WorldSnapshot } from "nova_ecs/plugins/snapshot_plugin";
+import { restoreWireWorldSnapshot, restoreWorld, snapshotWorld, SnapshotPolicies, SnapshotPoliciesResource, WorldSnapshot } from "nova_ecs/plugins/snapshot_plugin";
 import { hashWorld } from "nova_ecs/plugins/world_hash";
 import { CommunicatorResource, MultiplayerData } from "nova_ecs/plugins/multiplayer_plugin";
 import { EncodedEntity, Serializer, SerializerResource } from "nova_ecs/plugins/serializer_plugin";
@@ -9,10 +9,10 @@ import { Time, TimeResource } from "nova_ecs/plugins/time_plugin";
 import { World } from "nova_ecs/world";
 import { v4 } from "uuid";
 import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
-import { loadEntityGameData } from "../nova_plugin/entity_data_loader.js";
+import { loadEntityGameData, loadWireSnapshotGameData } from "../nova_plugin/entity_data_loader.js";
 import { deriveEntityComponents } from "../nova_plugin/entity_factory.js";
-import { applyInputRecords, InputRecord, SimulationInput } from "./simulation_input.js";
-import { canonicalDesyncHash, unwrapRollbackMessage, wrapRollbackMessage } from "./rollback_protocol.js";
+import { applyInputRecords, InputRecord, loadInputRecordsGameData, SimulationInput } from "./simulation_input.js";
+import { ArchiveBaseline, canonicalDesyncHash, unwrapRollbackMessage, wrapRollbackMessage } from "./rollback_protocol.js";
 import { makeNpc } from "../nova_plugin/npc_plugin.js";
 import { SIMULATION_STEP_MS } from "../nova_plugin/make_system.js";
 import { PEER_LOCAL_COMPONENTS } from "../nova_plugin/ship_control.js";
@@ -268,9 +268,11 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
     }
 
     /**
-     * Joins the room's shared timeline: requests the input log from the
-     * relay and replays it over the deterministic genesis world. If no
-     * relay responds (offline play), continues from tick 0.
+     * Joins the room's shared timeline: requests a catch-up from the
+     * relay and replays its input log — over the archived baseline
+     * when the server has one, else over the deterministic genesis
+     * world. If no relay responds (offline play), continues from
+     * tick 0.
      */
     async joinRoom(timeoutMs = 5000): Promise<boolean> {
         const communicator = this.world.resources.get(CommunicatorResource);
@@ -278,7 +280,10 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
             return false;
         }
         const catchUp = await new Promise<
-            { tick: number, records: InputRecord[] } | undefined
+            {
+                tick: number, records: InputRecord[],
+                baseline?: ArchiveBaseline,
+            } | undefined
         >(resolve => {
             const subscription = communicator.messages.subscribe(({ message }) => {
                 const rollbackMessage = unwrapRollbackMessage(message);
@@ -313,6 +318,20 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
         if (!catchUp) {
             console.warn('No rollback relay responded; starting at tick 0');
             return false;
+        }
+        // Stage everything the reconstruction inserts — baseline
+        // entities and replayed insertion records were loaded by other
+        // worlds, not this one — so applying them is synchronous.
+        if (catchUp.baseline) {
+            await loadWireSnapshotGameData(this.world, catchUp.baseline.snapshot);
+        }
+        await loadInputRecordsGameData(this.world, catchUp.records);
+        if (catchUp.baseline) {
+            restoreWireWorldSnapshot(this.world, catchUp.baseline.snapshot,
+                deriveEntityComponents);
+            // The rollback driver's history belongs to the pre-restore
+            // timeline; start fresh from the baseline.
+            this.rollback = this.makeRollback();
         }
         for (const record of catchUp.records) {
             this.addRecord(record.tick, record);

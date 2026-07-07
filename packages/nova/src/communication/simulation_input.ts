@@ -2,6 +2,7 @@ import { isLeft } from "fp-ts/lib/Either.js";
 import { EncodedEntity, SerializerResource } from "nova_ecs/plugins/serializer_plugin";
 import { World } from "nova_ecs/world";
 import { ControlEvent, ControlsSubject, EcsControlEvent } from "../nova_plugin/controls_plugin.js";
+import { loadEntityGameData } from "../nova_plugin/entity_data_loader.js";
 import { deriveEntityComponents } from "../nova_plugin/entity_factory.js";
 import { JumpRouteComponent } from "../nova_plugin/jump_plugin.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
@@ -53,6 +54,32 @@ export function applyInputRecords(world: World, records: InputRecord[]) {
     });
     for (const record of sorted) {
         applySimulationInputs(world, record.inputs, record.peerId);
+    }
+}
+
+/**
+ * Loads the game data for every entity inserted by these records, so
+ * applying (or replaying) them is synchronous. The originating peer
+ * stages before scheduling; every *other* world applying the record —
+ * a late joiner replaying the log, the server's archive — must stage
+ * from the record itself before applying it.
+ */
+export async function loadInputRecordsGameData(
+    world: World, records: InputRecord[]) {
+    const serializer = world.resources.get(SerializerResource);
+    if (!serializer) {
+        return;
+    }
+    for (const record of records) {
+        for (const input of record.inputs) {
+            if (input.kind !== 'addEntity') {
+                continue;
+            }
+            const decoded = serializer.decode(input.entity);
+            if (!isLeft(decoded)) {
+                await loadEntityGameData(world, decoded.right);
+            }
+        }
     }
 }
 

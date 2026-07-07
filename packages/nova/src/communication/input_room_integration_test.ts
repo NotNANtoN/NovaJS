@@ -12,6 +12,7 @@ import { Position } from 'nova_ecs/datatypes/position';
 import { Angle } from 'nova_ecs/datatypes/angle';
 import { Vector } from 'nova_ecs/datatypes/vector';
 import { RollbackRelay } from './rollback_relay.js';
+import { RoomArchive } from './room_archive.js';
 import { unwrapRollbackMessage } from './rollback_protocol.js';
 import { SimulationBridgeClient, SimulationBridgeHost } from './simulation_bridge.js';
 import { getIntegrationGameData } from './simulation_test_fixture.js';
@@ -132,6 +133,67 @@ describe('Input-driven rooms', () => {
         expect(hashB.hash).toEqual(hashA.hash);
         expect(peerB.world.entities.has('ship a')).toBeTrue();
     }, 120_000);
+
+    it('a late joiner reconstructs from an archived baseline plus the log tail', async () => {
+        // Replace the plain relay with one wired to a trailing archive
+        // (short interval so the test stays quick).
+        relay.close();
+        let archive: RoomArchive | undefined;
+        relay = new RollbackRelay(comms.get('server')!, {
+            autoClock: false,
+            baseline: () => archive?.latest,
+        });
+        const makeArchiveWorld = async () => {
+            const gameData = await getIntegrationGameData();
+            const ids = await gameData.ids;
+            return makeSystem([...ids.System].sort()[0]!, gameData, 'node');
+        };
+        archive = new RoomArchive(relay, makeArchiveWorld,
+            { intervalTicks: 30, autoUpdate: false });
+
+        const peerA = await makePeer('a');
+        await peerA.client.addEntity('ship a', await makePeerShip('a', peerA.world));
+        for (let tick = 1; tick <= 90; tick++) {
+            if (tick === 5) {
+                peerA.host.controlEvents(
+                    [{ action: 'accelerate', state: 'start' }]);
+            }
+            peerA.host.step();
+            relay.advanceTicks(1);
+            if (tick % 10 === 0) {
+                await archive.update();
+            }
+        }
+        await archive.update();
+        expect(archive.latest).toBeDefined();
+        expect(archive.latest!.tick).toBeGreaterThanOrEqual(60);
+        // The log before the baseline is gone: reconstruction can no
+        // longer start from genesis, only from the baseline.
+        expect(relay.inputLog.every(
+            record => record.tick > archive!.latest!.tick)).toBeTrue();
+
+        const peerB = await makePeer('b');
+        let baselineTick: number | undefined;
+        comms.get('b')!.messages.subscribe(({ message }) => {
+            const rollbackMessage = unwrapRollbackMessage(message);
+            if (rollbackMessage?.kind === 'catchUp') {
+                baselineTick = rollbackMessage.baseline?.tick;
+            }
+        });
+        const joined = await peerB.host.joinRoom();
+        expect(joined).toBeTrue();
+        expect(baselineTick).toBe(archive.latest!.tick);
+
+        const { TimeResource } = await import('nova_ecs/plugins/time_plugin');
+        const target = peerA.world.resources.get(TimeResource)!.frame;
+        while (peerB.world.resources.get(TimeResource)!.frame < target) {
+            peerB.host.step();
+        }
+        const hashA = hashWorld(peerA.world, PEER_LOCAL_COMPONENTS);
+        const hashB = hashWorld(peerB.world, PEER_LOCAL_COMPONENTS);
+        expect(hashB.hash).toEqual(hashA.hash);
+        expect(peerB.world.entities.has('ship a')).toBeTrue();
+    }, 240_000);
 
     it('detects a desync and the diverged peer resyncs from the log', async () => {
         const peerA = await makePeer('a');

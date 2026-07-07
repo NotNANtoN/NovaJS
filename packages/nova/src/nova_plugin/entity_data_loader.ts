@@ -1,4 +1,5 @@
 import { Entity } from "nova_ecs/entity";
+import { decodeWireEntity, WireWorldSnapshot } from "nova_ecs/plugins/snapshot_plugin";
 import { deriveEntityComponents } from "./entity_factory.js";
 import { World } from "nova_ecs/world";
 import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
@@ -120,4 +121,15 @@ export async function loadEntityGameData(world: World, entity: Entity) {
 export async function completeEntity(world: World, entity: Entity) {
     await loadEntityGameData(world, entity);
     deriveEntityComponents(world, entity);
+}
+
+/**
+ * Loads the game data every entity in a wire snapshot needs, so
+ * restoring it (and deriving the omitted components) is synchronous.
+ */
+export async function loadWireSnapshotGameData(
+    world: World, snapshot: WireWorldSnapshot) {
+    for (const wireEntity of snapshot.entities) {
+        await loadEntityGameData(world, decodeWireEntity(world, wireEntity));
+    }
 }

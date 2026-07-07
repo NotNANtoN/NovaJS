@@ -1,6 +1,14 @@
+import { WireWorldSnapshot } from "nova_ecs/plugins/snapshot_plugin";
 import { InputRecord } from "./simulation_input.js";
 
 export { InputRecord } from "./simulation_input.js";
+
+/** A wire snapshot of the room's state at a tick: the starting point
+ * for reconstruction, in place of replaying from genesis. */
+export interface ArchiveBaseline {
+    tick: number;
+    snapshot: WireWorldSnapshot;
+}
 
 /**
  * Rollback protocol messages travel on the same room channel as the
@@ -16,10 +24,15 @@ export type RollbackProtocolMessage =
     /** Ask the server for the input log from a tick (late join). */
     | { kind: 'inputLogRequest', fromTick: number }
     | { kind: 'inputLog', records: InputRecord[] }
-    /** Join: the full input log up to the server's current tick. The
-     * joiner replays it over the deterministic genesis world. */
+    /** Join: the input log up to the server's current tick, plus the
+     * newest archived baseline when the server has one. The joiner
+     * replays the log over the baseline (or the deterministic genesis
+     * world when there is none). */
     | { kind: 'joinRequest' }
-    | { kind: 'catchUp', tick: number, records: InputRecord[] }
+    | {
+        kind: 'catchUp', tick: number, records: InputRecord[],
+        baseline?: ArchiveBaseline,
+    }
     /** A peer's world hash for a settled tick (peer -> server). */
     | { kind: 'stateHash', tick: number, hash: string }
     /** The relay saw peers disagree about a tick's state

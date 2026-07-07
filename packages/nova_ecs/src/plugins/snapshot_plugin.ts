@@ -23,8 +23,20 @@ export type ComponentSnapshotPolicy<Data = unknown> =
 
 export interface ResourceSnapshotPolicy {
     name: string;
+    /** Must return JSON-safe data for wire snapshots. */
     save: () => unknown;
     restore: (saved: unknown) => void;
+}
+
+/**
+ * How a component crosses the wire in a wire snapshot (see
+ * wireSnapshotWorld). Both directions must be exact: a restored world
+ * must continue in lockstep with worlds that never left memory.
+ */
+export interface WireComponentCodec<Data = unknown> {
+    /** Must return JSON-safe data. */
+    encode: (data: Data) => unknown;
+    decode: (encoded: unknown) => Data;
 }
 
 export class SnapshotPolicies {
@@ -33,9 +45,29 @@ export class SnapshotPolicies {
     /** Component names that were skipped without an explicit policy. */
     readonly unhandled = new Set<string>();
 
+    /** Wire codecs for components the serializer does not cover. */
+    readonly wireCodecs = new Map<UnknownComponent, WireComponentCodec>();
+    /**
+     * Components omitted from wire snapshots because the restoring
+     * world rebuilds them itself (derived data, per-step scratch
+     * recomputed before use, local machinery references).
+     */
+    readonly wireDerived = new Set<UnknownComponent>();
+    /** Component names wire-skipped without an explicit decision. */
+    readonly unhandledWire = new Set<string>();
+
     set<Data>(component: Component<Data>, policy: ComponentSnapshotPolicy<Data>) {
         this.components.set(component as UnknownComponent,
             policy as ComponentSnapshotPolicy);
+    }
+
+    setWire<Data>(component: Component<Data>, codec: WireComponentCodec<Data>) {
+        this.wireCodecs.set(component as UnknownComponent,
+            codec as WireComponentCodec);
+    }
+
+    setWireDerived(component: Component<unknown>) {
+        this.wireDerived.add(component as UnknownComponent);
     }
 
     addResource(policy: ResourceSnapshotPolicy) {
@@ -102,7 +134,12 @@ function restoreComponents(world: World, entity: Entity,
     const serializer = world.resources.get(SerializerResource);
     for (const [component, data, kind] of stored) {
         if (kind === 'encoded') {
-            const decoded = serializer!.decodeComponent(component.name, data);
+            // Clone before decoding: identity codecs return their
+            // input, so without this the entity would hold (and
+            // mutate) the snapshot's stored data, corrupting it for a
+            // second restore of the same snapshot.
+            const decoded = serializer!.decodeComponent(
+                component.name, structuredClone(data));
             if (!decoded || isLeft(decoded)) {
                 throw new Error(`Failed to restore component ${component.name}`);
             }
@@ -190,5 +227,227 @@ export function restoreWorld(world: World, snapshot: WorldSnapshot,
     // Entity removal/re-insertion above queued Add/Delete events that
     // did not happen in the restored timeline. Snapshots are taken
     // between steps (empty queue), so restore that invariant.
+    world.clearEventQueue();
+}
+
+/**
+ * JSON cannot represent Infinity, NaN, or undefined — but encoded game
+ * state legitimately contains them (inertialess ships have infinite
+ * max velocity; marker components encode to undefined). Sentinel-wrap
+ * them on capture and unwrap on restore, so a JSON roundtrip of a wire
+ * snapshot is exact. The walk also detaches the data from live state.
+ */
+function toJsonSafe(value: unknown): unknown {
+    if (value === undefined) {
+        return { $undefined: true };
+    }
+    if (typeof value === 'number' && !Number.isFinite(value)) {
+        return { $nonfinite: value > 0 ? '+' : value < 0 ? '-' : 'nan' };
+    }
+    if (Array.isArray(value)) {
+        return value.map(toJsonSafe);
+    }
+    if (value && typeof value === 'object') {
+        const safe: Record<string, unknown> = {};
+        for (const [key, inner] of Object.entries(value)) {
+            safe[key] = toJsonSafe(inner);
+        }
+        return safe;
+    }
+    return value;
+}
+
+function fromJsonSafe(value: unknown): unknown {
+    if (value && typeof value === 'object') {
+        if ('$undefined' in value) {
+            return undefined;
+        }
+        if ('$nonfinite' in value) {
+            const kind = (value as { $nonfinite: string }).$nonfinite;
+            return kind === '+' ? Infinity : kind === '-' ? -Infinity : NaN;
+        }
+        if (Array.isArray(value)) {
+            return value.map(fromJsonSafe);
+        }
+        const restored: Record<string, unknown> = {};
+        for (const [key, inner] of Object.entries(value)) {
+            restored[key] = fromJsonSafe(inner);
+        }
+        return restored;
+    }
+    return value;
+}
+
+/** [componentName, data, how the data was encoded] */
+type WireComponent = [string, unknown, 'serializer' | 'wire'];
+
+export interface WireEntity {
+    uuid: string;
+    name?: string;
+    components: WireComponent[];
+}
+
+/**
+ * A world snapshot that can cross the wire: entirely JSON-safe, unlike
+ * WorldSnapshot, which holds live references (shared static data,
+ * cloned Maps and Sets). Used wherever a world must be reconstructed
+ * remotely from non-genesis state: the server's periodic archive for
+ * late joins, desync recovery, and (someday) persistence.
+ */
+export interface WireWorldSnapshot {
+    entities: WireEntity[];
+    singleton: WireComponent[];
+    resources: unknown[];
+}
+
+function wireSnapshotComponents(world: World, entity: Entity,
+    policies: SnapshotPolicies): WireComponent[] {
+    const serializer = world.resources.get(SerializerResource);
+    const stored: WireComponent[] = [];
+    for (const [component, data] of entity.components) {
+        if (policies.wireDerived.has(component)) {
+            continue;
+        }
+        // toJsonSafe also detaches the stored data: io-ts identity
+        // codecs (and passthrough wire codecs) return live objects,
+        // and this snapshot outlives the tick.
+        const codec = policies.wireCodecs.get(component);
+        if (codec) {
+            stored.push([component.name,
+                toJsonSafe(codec.encode(data)), 'wire']);
+            continue;
+        }
+        if (serializer?.hasComponent(component)) {
+            stored.push([component.name, toJsonSafe(
+                serializer.encodeComponent(component, data)), 'serializer']);
+            continue;
+        }
+        if (policies.components.get(component)?.policy === 'skip') {
+            // Explicitly not simulation state.
+            continue;
+        }
+        policies.unhandledWire.add(component.name);
+    }
+    return stored;
+}
+
+/**
+ * Captures a world's simulation state in JSON-safe form. Components
+ * are encoded by an explicit wire codec, by the serializer, or omitted
+ * when marked wire-derived (the restoring world rebuilds them).
+ * Components with none of these are skipped and recorded in
+ * `unhandledWire` — assert it empty in CI: an unhandled component is
+ * silently lost state, which desyncs a world restored from this.
+ */
+export function wireSnapshotWorld(world: World): WireWorldSnapshot {
+    const policies = world.resources.get(SnapshotPoliciesResource);
+    if (!policies) {
+        throw new Error('Expected SnapshotPoliciesResource to exist');
+    }
+
+    const entities: WireEntity[] = [];
+    let singleton: WireComponent[] = [];
+    for (const [uuid, entity] of world.entities) {
+        if (uuid === 'singleton') {
+            singleton = wireSnapshotComponents(world, entity, policies);
+            continue;
+        }
+        entities.push({
+            uuid,
+            name: entity.name,
+            components: wireSnapshotComponents(world, entity, policies),
+        });
+    }
+
+    return {
+        entities,
+        singleton,
+        resources: policies.resources.map(
+            resource => toJsonSafe(resource.save())),
+    };
+}
+
+function wireCodecsByName(policies: SnapshotPolicies) {
+    const byName = new Map<string, [UnknownComponent, WireComponentCodec]>();
+    for (const [component, codec] of policies.wireCodecs) {
+        byName.set(component.name, [component, codec]);
+    }
+    return byName;
+}
+
+function restoreWireComponents(world: World, entity: Entity,
+    stored: WireComponent[], policies: SnapshotPolicies) {
+    const serializer = world.resources.get(SerializerResource);
+    const byName = wireCodecsByName(policies);
+    for (const [name, data, encoding] of stored) {
+        // fromJsonSafe rebuilds fresh objects, so the same baseline
+        // can be restored more than once (a retried join, a repeated
+        // resync) even though passthrough/identity decoders hand
+        // their input to the entity.
+        if (encoding === 'wire') {
+            const wireCodec = byName.get(name);
+            if (!wireCodec) {
+                throw new Error(`No wire codec registered for ${name}`);
+            }
+            const [component, codec] = wireCodec;
+            entity.components.set(component, codec.decode(fromJsonSafe(data)));
+            continue;
+        }
+        const decoded = serializer?.decodeComponent(name, fromJsonSafe(data));
+        if (!decoded || isLeft(decoded)) {
+            throw new Error(`Failed to restore wire component ${name}`);
+        }
+        entity.components.set(decoded.right[0], decoded.right[1]);
+    }
+}
+
+/** Decodes one wire entity without inserting it into the world. */
+export function decodeWireEntity(world: World, wireEntity: WireEntity): Entity {
+    const policies = world.resources.get(SnapshotPoliciesResource);
+    if (!policies) {
+        throw new Error('Expected SnapshotPoliciesResource to exist');
+    }
+    const entity = new Entity(wireEntity.name);
+    restoreWireComponents(world, entity, wireEntity.components, policies);
+    return entity;
+}
+
+/**
+ * Restores a world to a wire snapshot's state, replacing its entities.
+ * The entities' game data must already be loaded (see the staging
+ * helpers in the game layer): `complete` derives the omitted
+ * components synchronously from warm caches.
+ */
+export function restoreWireWorldSnapshot(world: World,
+    snapshot: WireWorldSnapshot,
+    complete?: (world: World, entity: Entity) => void) {
+    const policies = world.resources.get(SnapshotPoliciesResource);
+    if (!policies) {
+        throw new Error('Expected SnapshotPoliciesResource to exist');
+    }
+
+    for (const uuid of [...world.entities.keys()]) {
+        if (uuid !== 'singleton') {
+            world.entities.delete(uuid);
+        }
+    }
+
+    for (const wireEntity of snapshot.entities) {
+        const entity = decodeWireEntity(world, wireEntity);
+        complete?.(world, entity);
+        world.entities.set(wireEntity.uuid, entity);
+    }
+
+    const singleton = world.entities.get('singleton');
+    if (singleton) {
+        restoreWireComponents(world, singleton, snapshot.singleton, policies);
+    }
+
+    policies.resources.forEach((resource, i) => {
+        resource.restore(fromJsonSafe(snapshot.resources[i]));
+    });
+
+    // Same invariant as restoreWorld: snapshots are taken between
+    // steps, when the event queue is empty.
     world.clearEventQueue();
 }

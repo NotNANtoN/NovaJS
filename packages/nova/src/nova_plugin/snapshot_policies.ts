@@ -8,10 +8,11 @@ import { AnimationComponent, ExplosionDataComponent } from "./animation_plugin.j
 import { BlastDamageComponent, BlastIgnoreComponent } from "./blast_data.js";
 import { BlastDoneComponent } from "./blast_plugin.js";
 import { CollisionHitterComponent, CollisionVulnerabilityComponent } from "./collision_interaction.js";
-import { HitboxHullComponent, HurtboxHullComponent } from "./collisions_plugin.js";
+import { decodeHull, encodeHull, HitboxHullComponent, HurtboxHullComponent } from "./collisions_plugin.js";
 import { CreateTime } from "./create_time.js";
 import { ShipControlStateComponent } from "./ship_control.js";
-import { SourceComponent, SubCounts, WeaponsComponent } from "./fire_weapon_plugin.js";
+import { ControlState } from "./control_state_event.js";
+import { defaultWeaponLocalState, SourceComponent, SubCounts, WeaponsComponent } from "./fire_weapon_plugin.js";
 import { IdFactoryResource } from "./id_factory.js";
 import { PlanetDataComponent } from "./planet_plugin.js";
 import { ProjectileBlastHull, ProjectileDataComponent } from "./projectile_data.js";
@@ -24,6 +25,17 @@ import { GuidanceComponent } from "./guidance.js";
 import { TargetIndexComponent } from "./target_plugin.js";
 import { ShipPhysicsComponent } from "./ship_plugin.js";
 import { SingletonComponent } from "nova_ecs/world";
+
+/**
+ * A wire codec for data that is already JSON-safe. (The snapshot layer
+ * clones around encode and decode, so sharing is fine here.)
+ */
+function passthroughWire<Data = unknown>() {
+    return {
+        encode: (data: Data) => data as unknown,
+        decode: (encoded: unknown) => encoded as Data,
+    };
+}
 
 /**
  * Clones a DefaultMap, preserving its default factory.
@@ -126,6 +138,80 @@ export function configureSnapshotPolicies(world: World) {
 
     // Multiplayer machinery is not simulation state.
     policies.set(Comms, { policy: 'skip' });
+
+    // --- Wire snapshots (server archive, late join, desync resync) ---
+    // Serializer-registered components cross the wire through their
+    // codecs automatically. The rest either get an explicit JSON-safe
+    // wire codec here, or are marked wire-derived: the restoring world
+    // rebuilds them (per-step scratch recomputed before use, local
+    // machinery, or completeEntity-derived data).
+    // Hulls cross the wire as resting geometry (see encodeHull).
+    const hullWire = {
+        encode: encodeHull,
+        decode: (encoded: unknown) =>
+            decodeHull(encoded as Parameters<typeof decodeHull>[0]),
+    };
+    policies.setWire(HitboxHullComponent, hullWire);
+    policies.setWire(HurtboxHullComponent, hullWire);
+    policies.setWire(ProjectileBlastHull, hullWire);
+    // The queue is this world's own pool machinery.
+    policies.setWireDerived(ReturnToQueueComponent);
+    // The restoring world's singleton already carries its marker.
+    policies.setWireDerived(SingletonComponent);
+
+    // Plain JSON-safe values.
+    policies.setWire(CreateTime, passthroughWire<number>());
+    policies.setWire(SourceComponent, passthroughWire<string>());
+    policies.setWire(BlastDamageComponent, passthroughWire());
+    policies.setWire(GuidanceComponent, passthroughWire());
+    policies.setWire(ExplodingComponent, passthroughWire<number>());
+    policies.setWire(TargetIndexComponent, passthroughWire());
+    policies.setWire(BlastDoneComponent, passthroughWire());
+    policies.setWire(ReturnWhenTargetRemovedComponent, {
+        encode: () => null,
+        decode: () => undefined,
+    });
+
+    policies.setWire(CollisionHitterComponent, {
+        encode: hitter => [...hitter.hitTypes],
+        decode: encoded => ({ hitTypes: new Set(encoded as unknown[]) }),
+    });
+    policies.setWire(CollisionVulnerabilityComponent, {
+        encode: vulnerability => [...vulnerability.vulnerableTo],
+        decode: encoded => ({ vulnerableTo: new Set(encoded as unknown[]) }),
+    });
+    policies.setWire(BlastIgnoreComponent, {
+        encode: ignore => [...ignore],
+        decode: encoded => new Set(encoded as string[]),
+    });
+
+    policies.setWire(WeaponsComponent, {
+        encode: map => [...map],
+        decode: encoded => {
+            const map = new DefaultMap<string,
+                ReturnType<typeof defaultWeaponLocalState>>(
+                    defaultWeaponLocalState);
+            for (const [id, state] of encoded as [
+                string, ReturnType<typeof defaultWeaponLocalState>][]) {
+                map.set(id, state);
+            }
+            return map;
+        },
+    });
+    policies.setWire(SubCounts, {
+        encode: map => [...map],
+        decode: encoded => {
+            const map = new DefaultMap<string, number>(() => 0);
+            for (const [id, count] of encoded as [string, number][]) {
+                map.set(id, count);
+            }
+            return map;
+        },
+    });
+    policies.setWire(ShipControlStateComponent, {
+        encode: state => [...state],
+        decode: encoded => new Map(encoded as never) as ControlState,
+    });
 
     // Simulation-state resources.
     const time = world.resources.get(TimeResource);

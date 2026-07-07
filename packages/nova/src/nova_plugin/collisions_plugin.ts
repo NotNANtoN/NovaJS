@@ -97,7 +97,7 @@ export class CompositeHull extends Hull {
     }
 }
 
-class MultiFrameHull extends Hull {
+export class MultiFrameHull extends Hull {
     private activeHull: Hull;
     public pos = new SAT.Vector(0, 0);
     private wrappedAngle = 0;
@@ -136,6 +136,53 @@ class MultiFrameHull extends Hull {
 
 export const HitboxHullComponent = new Component<Hull>('HitboxHullComponent');
 export const HurtboxHullComponent = new Component<Hull>('HurtboxHullComponent');
+
+/**
+ * Wire form of a hull: its resting geometry only. Position, angle, and
+ * the active animation frame are per-step scratch, recomputed from
+ * movement and animation state before every collision check.
+ *
+ * Hulls need a wire codec (rather than rebuilding on restore) because
+ * they are created along four different paths — sprite-sheet hulls via
+ * providers, proximity/blast circles at fire time, beam polygons,
+ * escort hurtbox aliasing — and the wire snapshot must not care which.
+ */
+type WireShape =
+    | { circle: { r: number } }
+    | { polygon: { points: [number, number][] } };
+export type WireHull = { frames: WireShape[][] } | { shapes: WireShape[] };
+
+function encodeShape(shape: Shape): WireShape {
+    if (shape instanceof SAT.Circle) {
+        return { circle: { r: shape.r } };
+    }
+    // Base points: SAT rotates calcPoints, leaving these unmodified.
+    return { polygon: { points: shape.points.map(p => [p.x, p.y]) } };
+}
+
+function decodeShape(wire: WireShape): Shape {
+    if ('circle' in wire) {
+        return new SAT.Circle(new SAT.Vector(0, 0), wire.circle.r);
+    }
+    return new SAT.Polygon(new SAT.Vector(),
+        wire.polygon.points.map(([x, y]) => new SAT.Vector(x, y)));
+}
+
+export function encodeHull(hull: Hull): WireHull {
+    if (hull instanceof MultiFrameHull) {
+        const frames = (hull as unknown as { hulls: Hull[] }).hulls;
+        return { frames: frames.map(frame => frame.shapes.map(encodeShape)) };
+    }
+    return { shapes: hull.shapes.map(encodeShape) };
+}
+
+export function decodeHull(wire: WireHull): Hull {
+    if ('frames' in wire) {
+        return new MultiFrameHull(wire.frames.map(
+            frame => new CompositeHull(frame.map(decodeShape))));
+    }
+    return new CompositeHull(wire.shapes.map(decodeShape));
+}
 
 export function hullFromAnimation(animation: Animation, gameData: SimulationGameDataInterface) {
     // Reads the pre-warmed cache (see entity_data_loader.ts). Returns

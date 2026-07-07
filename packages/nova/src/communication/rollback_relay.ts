@@ -1,7 +1,7 @@
 import { Communicator } from "nova_ecs/plugins/multiplayer_plugin";
 import { Subscription } from "rxjs";
 import { SIMULATION_STEP_MS } from "../nova_plugin/make_system.js";
-import { InputRecord, RollbackProtocolMessage, unwrapRollbackMessage, wrapRollbackMessage } from "./rollback_protocol.js";
+import { ArchiveBaseline, InputRecord, RollbackProtocolMessage, unwrapRollbackMessage, wrapRollbackMessage } from "./rollback_protocol.js";
 
 /**
  * The server's role in rollback multiplayer: not a simulation
@@ -26,6 +26,7 @@ export class RollbackRelay {
     private log: InputRecord[] = [];
     /** Peers' state-hash reports awaiting comparison, by tick. */
     private stateHashes = new Map<number, Map<string, string>>();
+    private getBaseline?: () => ArchiveBaseline | undefined;
     private readonly subscription: Subscription;
     private clockInterval?: ReturnType<typeof setInterval>;
     private syncInterval?: ReturnType<typeof setInterval>;
@@ -35,8 +36,12 @@ export class RollbackRelay {
     private leaveSubscription: Subscription;
 
     constructor(private room: Communicator,
-        { autoClock = true, stepMs = SIMULATION_STEP_MS }:
-            { autoClock?: boolean, stepMs?: number } = {}) {
+        { autoClock = true, stepMs = SIMULATION_STEP_MS, baseline }: {
+            autoClock?: boolean, stepMs?: number,
+            /** The newest archived baseline, when an archive runs. */
+            baseline?: () => ArchiveBaseline | undefined,
+        } = {}) {
+        this.getBaseline = baseline;
         this.subscription = room.messages.subscribe(({ source, message }) => {
             this.handleMessage(source, message);
         });
@@ -85,6 +90,15 @@ export class RollbackRelay {
 
     get inputLog(): readonly InputRecord[] {
         return this.log;
+    }
+
+    /**
+     * Drops records at or before `uptoTick` — safe once an archived
+     * baseline at that tick exists, since reconstruction starts there.
+     * Bounds the log's memory for long-lived rooms.
+     */
+    trimLog(uptoTick: number) {
+        this.log = this.log.filter(record => record.tick > uptoTick);
     }
 
     /** The room's peers, excluding the relay itself. */
@@ -151,10 +165,16 @@ export class RollbackRelay {
                 break;
             }
             case 'joinRequest': {
+                // With an archived baseline, reconstruction starts
+                // there: only the log tail after it is needed.
+                const baseline = this.getBaseline?.();
                 this.room.sendMessage(wrapRollbackMessage({
                     kind: 'catchUp',
                     tick: this.tick,
-                    records: [...this.log],
+                    records: baseline
+                        ? this.log.filter(record => record.tick > baseline.tick)
+                        : [...this.log],
+                    ...(baseline ? { baseline } : {}),
                 }), source);
                 break;
             }

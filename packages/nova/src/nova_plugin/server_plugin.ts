@@ -11,6 +11,7 @@ import { System } from 'nova_ecs/system';
 import { SingletonComponent } from 'nova_ecs/world';
 import { Subscription } from 'rxjs';
 import { RollbackRelay } from "../communication/rollback_relay.js";
+import { RoomArchive } from "../communication/room_archive.js";
 import { SimulationGameDataResource } from "./game_data_resource.js";
 import { makeSystem } from './make_system.js';
 import { MultiRoomResource, SystemComponent } from "./nova_plugin.js";
@@ -77,11 +78,15 @@ export const ServerPlugin: Plugin = {
             throw new Error('MultiRoomResource must exist');
         }
 
-        // Rooms are pure input exchanges: the server runs no simulation
-        // for them. Each active room gets a RollbackRelay (input relay,
-        // tick clock, input archive); joiners reconstruct the world from
-        // the deterministic genesis plus the relay's log.
+        // Rooms are pure input exchanges: the server is not a
+        // simulation *authority* for them. Each active room gets a
+        // RollbackRelay (input relay, tick clock, input archive) plus a
+        // RoomArchive: a trailing sim of the room's deterministic
+        // world, wire-snapshotted periodically so joiners reconstruct
+        // from a recent baseline plus the log tail rather than
+        // replaying from genesis.
         const relays = new Map<string, RollbackRelay>();
+        const archives = new Map<string, RoomArchive>();
         for (const systemId of (await gameData.ids).System) {
             const systemRoom = multiRoom.join(systemId);
             systemRoom.peers.current.subscribe(peers => {
@@ -89,12 +94,20 @@ export const ServerPlugin: Plugin = {
                 if (empty) {
                     if (relays.has(systemId)) {
                         console.log(`Closing rollback room ${systemId}`);
+                        archives.get(systemId)?.close();
+                        archives.delete(systemId);
                         relays.get(systemId)?.close();
                         relays.delete(systemId);
                     }
                 } else if (!relays.has(systemId)) {
                     console.log(`Starting rollback room ${systemId}`);
-                    relays.set(systemId, new RollbackRelay(systemRoom));
+                    const relay = new RollbackRelay(systemRoom, {
+                        baseline: () => archives.get(systemId)?.latest,
+                    });
+                    relays.set(systemId, relay);
+                    archives.set(systemId, new RoomArchive(relay,
+                        () => makeSystem(systemId, gameData, 'node'),
+                        { name: systemId }));
                 }
             });
         }

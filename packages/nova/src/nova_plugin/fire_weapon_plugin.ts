@@ -47,6 +47,15 @@ export interface WeaponLocalState {
 }
 type WeaponsLocalState = DefaultMap<string, WeaponLocalState>;
 export const WeaponsComponent = new Component<WeaponsLocalState>('WeaponsComponent')
+export function defaultWeaponLocalState(): WeaponLocalState {
+    return {
+        lastFired: 0,
+        burstCount: 0,
+        reloadingBurst: false,
+        wasFiring: false,
+        exitIndex: 0,
+    };
+}
 // TODO: This doesn't update if the set or count of weapons changes.
 export const WeaponsComponentProvider = Provide({
     name: "WeaponsComponentProvider",
@@ -54,13 +63,7 @@ export const WeaponsComponentProvider = Provide({
     update: [WeaponsStateComponent],
     args: [WeaponsStateComponent] as const,
     factory() {
-        return new DefaultMap(() => ({
-            lastFired: 0,
-            burstCount: 0,
-            reloadingBurst: false,
-            wasFiring: false,
-            exitIndex: 0,
-        }));
+        return new DefaultMap(defaultWeaponLocalState);
     }
 });
 
