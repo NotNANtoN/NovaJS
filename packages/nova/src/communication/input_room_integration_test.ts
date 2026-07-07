@@ -4,6 +4,7 @@ import { MockCommunicator } from 'nova_ecs/plugins/mock_communicator';
 import { hashWorld } from 'nova_ecs/plugins/world_hash';
 import { World } from 'nova_ecs/world';
 import { makeShip } from '../nova_plugin/make_ship.js';
+import { makeNpc } from '../nova_plugin/npc_plugin.js';
 import { makeSystem } from '../nova_plugin/make_system.js';
 import { completeEntity } from '../nova_plugin/entity_data_loader.js';
 import { ControlledByComponent, PEER_LOCAL_COMPONENTS } from '../nova_plugin/ship_control.js';
@@ -255,6 +256,77 @@ describe('Input-driven rooms', () => {
             fail('Archive diverged: '
                 + diffWorldHashes(hashArchive, hashA).slice(0, 10).join('; '));
         }
+    }, 240_000);
+
+    it('combat and a player death stay in lockstep across peers and the archive', async () => {
+        relay.close();
+        let archive: RoomArchive | undefined;
+        relay = new RollbackRelay(comms.get('server')!, {
+            autoClock: false,
+            baseline: () => archive?.latest,
+            referenceHash: tick => archive?.hashAt(tick),
+        });
+        const makeArchiveWorld = async () => {
+            const gameData = await getIntegrationGameData();
+            const ids = await gameData.ids;
+            return makeSystem([...ids.System].sort()[0]!, gameData, 'node');
+        };
+        archive = new RoomArchive(relay, makeArchiveWorld,
+            { intervalTicks: 60, autoUpdate: false });
+
+        const peerA = await makePeer('a');
+        const peerB = await makePeer('b');
+        // A's controlled shuttle between two hostile carriers: it will
+        // die (exercising the respawn path) amid full combat
+        // (missiles, turret bolts, blasts) that every world — worker
+        // peers and the node archive — must simulate identically.
+        const ship = await makePeerShip('a', peerA.world);
+        await peerA.client.addEntity('ship a', ship);
+        const gameData = await getIntegrationGameData();
+        // A Fed Carrier (missiles, turrets, bays) and a Raven (beams,
+        // point defense — the live-session loadout that coincided with
+        // an archive divergence) both in weapons range.
+        for (const [i, [shipId, x]] of ([
+            ['nova:143', -120], ['nova:164', 320],
+        ] as const).entries()) {
+            const npcData = await gameData.data.Ship.get(shipId);
+            const npc = makeNpc(npcData!);
+            const movement = npc.components.get(MovementStateComponent)!;
+            movement.position = new Position(x, 50);
+            movement.rotation = new Angle(i === 0 ? Math.PI / 2 : -Math.PI / 2);
+            movement.velocity = new Vector(0, 0);
+            await completeEntity(peerA.world, npc);
+            await peerA.client.addEntity(`npc ${i}`, npc);
+        }
+
+        for (let tick = 1; tick <= 900; tick++) {
+            peerA.host.step();
+            peerB.host.step();
+            relay.advanceTicks(1);
+            if (tick % 30 === 0) {
+                await archive.update();
+            }
+            await new Promise(resolve => setImmediate(resolve));
+        }
+        await archive.update();
+
+        const hashA = hashWorld(peerA.world, PEER_LOCAL_COMPONENTS);
+        const hashB = hashWorld(peerB.world, PEER_LOCAL_COMPONENTS);
+        const hashArchive = hashWorld(archive.archiveWorld!, PEER_LOCAL_COMPONENTS);
+        expect(hashB.hash).toEqual(hashA.hash);
+        if (hashArchive.hash !== hashA.hash) {
+            const { diffWorldHashes } = await import('nova_ecs/plugins/world_hash');
+            fail('Archive diverged: '
+                + diffWorldHashes(hashArchive, hashA).slice(0, 10).join('; '));
+        }
+        // The player ship died and respawned (teleport bumps the
+        // counter) — on every world, not just its owner's.
+        const shipA = peerA.world.entities.get('ship a');
+        expect(shipA).toBeDefined();
+        expect(shipA!.components.get(MovementStateComponent)!.teleportCount ?? 0)
+            .toBeGreaterThan(0);
+        expect(peerB.world.entities.has('ship a')).toBeTrue();
+        expect(archive.archiveWorld!.entities.has('ship a')).toBeTrue();
     }, 240_000);
 
     it('detects a desync and the diverged peer resyncs from the log', async () => {

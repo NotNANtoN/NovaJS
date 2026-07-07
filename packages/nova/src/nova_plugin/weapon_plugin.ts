@@ -111,8 +111,8 @@ const ControlPlayerWeapons = new System({
     name: 'ControlPlayerWeapons',
     events: [ShipControlEvent],
     args: [ShipControlStateComponent, WeaponsStateComponent, WeaponsComponent,
-        ActiveSecondaryWeapon, Emit, SimulationGameDataResource] as const,
-    step(controlState, weaponsState, weaponsData, activeSecondary, emit, gameData) {
+        ActiveSecondaryWeapon, Emit, SimulationGameDataResource, UUID] as const,
+    step(controlState, weaponsState, weaponsData, activeSecondary, emit, gameData, uuid) {
         for (const [, weaponState] of weaponsState) {
             weaponState.firing = false;
         }
@@ -149,7 +149,11 @@ const ControlPlayerWeapons = new System({
         activeSecondary.secondary = secondaryWeapons[secondaryIndex] ?? null;
 
         if (changedSecondary) {
-            emit(ChangeSecondaryEvent, activeSecondary);
+            // Targeted at this ship: every peer simulates every
+            // ship's weapon selection, and an untargeted event would
+            // redraw every player's status bar with this ship's
+            // choice.
+            emit(ChangeSecondaryEvent, activeSecondary, [uuid]);
         }
 
         if (activeSecondary.secondary) {

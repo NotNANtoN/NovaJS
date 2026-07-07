@@ -15,7 +15,7 @@ import { BlastDamageComponent } from './blast_data.js';
 import { ArmorComponent, IonizationColorComponent, IonizationComponent, ShieldComponent } from './health_plugin.js';
 import { ProjectileComponent } from './projectile_data.js';
 import { ShipComponent, ShipDataComponent, ShipPhysicsComponent } from './ship_plugin.js';
-import { PlayerShipSelector } from './player_ship_plugin.js';
+import { ControlledByComponent } from './ship_control.js';
 import { Position } from 'nova_ecs/datatypes/position';
 import { Component } from 'nova_ecs/component';
 import { GetEntity } from 'nova_ecs/arg_types';
@@ -130,9 +130,14 @@ const KnockbackSystem = new System({
 // easy to reset?
 export const PlayerDeathSystem = new System({
     name: 'PlayerDeathSystem',
+    // Gated on ControlledBy (synced), NOT PlayerShipSelector
+    // (peer-local): every world must respawn a dead player ship
+    // identically, or the owner's world revives it at the origin
+    // while everyone else's leaves a zero-armor wreck re-exploding
+    // in place — a guaranteed desync on every player death.
     args: [Optional(ShieldComponent), Optional(ArmorComponent),
            Optional(IonizationComponent), MovementStateComponent,
-           PlayerShipSelector] as const,
+           ControlledByComponent] as const,
     events: [DeathEvent],
     step(shield, armor, ionization, movement) {
         if (shield) {
