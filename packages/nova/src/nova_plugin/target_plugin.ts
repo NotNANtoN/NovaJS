@@ -8,7 +8,7 @@ import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
 import { Provide } from "nova_ecs/provide";
 import { Query } from "nova_ecs/query";
 import { System } from "nova_ecs/system";
-import { ControlStateEvent } from "./control_state_event.js";
+import { ShipControlEvent, ShipControlStateComponent } from "./ship_control.js";
 import { OwnerComponent } from "./fire_weapon_plugin.js";
 import { PlayerShipSelector } from "./player_ship_plugin.js";
 import { ShipComponent } from "./ship_plugin.js";
@@ -29,9 +29,9 @@ export const CycleTargetEvent = new EcsEvent<Target>('CycleTargetEvent');
 const TargetsQuery = new Query([UUID, MovementStateComponent, Optional(OwnerComponent), ShipComponent] as const);
 const ChooseTargetSystem = new System({
     name: 'ChooseTarget',
-    events: [ControlStateEvent],
-    args: [ControlStateEvent, TargetComponent, TargetIndexComponent, UUID,
-        TargetsQuery, Emit, MovementStateComponent, PlayerShipSelector] as const,
+    events: [ShipControlEvent],
+    args: [ShipControlStateComponent, TargetComponent, TargetIndexComponent, UUID,
+        TargetsQuery, Emit, MovementStateComponent] as const,
     step(controlState, target, index, uuid, ships, emit, movementState) {
         if (controlState.get('nearestTarget') === 'start') {
             const [closestUuid, _distance, newIndex] = ships

@@ -12,7 +12,7 @@ import { Provide } from 'nova_ecs/provide';
 import { System } from 'nova_ecs/system';
 import { registerSimulationBridgeEvent } from '../communication/simulation_bridge_events.js';
 import { mod } from '../util/mod.js';
-import { ControlStateEvent } from './control_state_event.js';
+import { ShipControlEvent, ShipControlStateComponent } from './ship_control.js';
 import { WeaponEntries, WeaponLocalState, WeaponsComponent } from './fire_weapon_plugin.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { PlatformResource } from './platform_plugin.js';
@@ -107,9 +107,9 @@ registerSimulationBridgeEvent({ event: ChangeSecondaryEvent });
 
 const ControlPlayerWeapons = new System({
     name: 'ControlPlayerWeapons',
-    events: [ControlStateEvent],
-    args: [ControlStateEvent, WeaponsStateComponent, WeaponsComponent,
-        ActiveSecondaryWeapon, Emit, SimulationGameDataResource, PlayerShipSelector] as const,
+    events: [ShipControlEvent],
+    args: [ShipControlStateComponent, WeaponsStateComponent, WeaponsComponent,
+        ActiveSecondaryWeapon, Emit, SimulationGameDataResource] as const,
     step(controlState, weaponsState, weaponsData, activeSecondary, emit, gameData) {
         for (const [, weaponState] of weaponsState) {
             weaponState.firing = false;

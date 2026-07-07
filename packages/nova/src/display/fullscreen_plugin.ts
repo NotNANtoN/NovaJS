@@ -1,17 +1,19 @@
 import { Plugin } from 'nova_ecs/plugin';
 import { System } from 'nova_ecs/system';
 import { SingletonComponent } from 'nova_ecs/world';
-import { ControlStateEvent } from '../nova_plugin/control_state_event.js';
+import { EcsControlEvent } from '../nova_plugin/controls_plugin.js';
 import { PixiAppResource } from './pixi_app_resource.js';
 
 
 const FullscreenSystem = new System({
     name: "FullscreenSystem",
-    events: [ControlStateEvent],
-    args: [ControlStateEvent, PixiAppResource, SingletonComponent] as const,
-    step(event, app) {
-        if (event.get("fullscreen") === "start") {
-            (app.view as unknown as HTMLElement).requestFullscreen();
+    events: [EcsControlEvent],
+    args: [EcsControlEvent, PixiAppResource, SingletonComponent] as const,
+    step(events, app) {
+        for (const { action, state } of events) {
+            if (action === "fullscreen" && state === "start") {
+                (app.view as unknown as HTMLElement).requestFullscreen();
+            }
         }
     }
 });

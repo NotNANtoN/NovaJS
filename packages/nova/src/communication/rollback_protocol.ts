@@ -1,15 +1,6 @@
-import { SimulationInput } from "./simulation_input.js";
+import { InputRecord } from "./simulation_input.js";
 
-/**
- * A peer's inputs for one simulation tick. The steady-state wire
- * format of rollback multiplayer: peers exchange these (via the server
- * relay) instead of state deltas.
- */
-export interface InputRecord {
-    peerId: string;
-    tick: number;
-    inputs: SimulationInput[];
-}
+export { InputRecord } from "./simulation_input.js";
 
 /**
  * Rollback protocol messages travel on the same room channel as the

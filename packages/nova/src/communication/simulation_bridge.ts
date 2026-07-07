@@ -10,8 +10,8 @@ import { v4 } from "uuid";
 import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
 import { loadEntityGameData } from "../nova_plugin/entity_data_loader.js";
 import { deriveEntityComponents } from "../nova_plugin/entity_factory.js";
-import { applySimulationInputs, SimulationInput } from "./simulation_input.js";
-import { InputRecord, unwrapRollbackMessage, wrapRollbackMessage } from "./rollback_protocol.js";
+import { applyInputRecords, InputRecord, SimulationInput } from "./simulation_input.js";
+import { unwrapRollbackMessage, wrapRollbackMessage } from "./rollback_protocol.js";
 import { makeNpc } from "../nova_plugin/npc_plugin.js";
 import { ControlEvent, ControlsSubject, EcsControlEvent } from "../nova_plugin/controls_plugin.js";
 import { EncodedSimulationBridgeEvent, getRegisteredSimulationBridgeEvents } from "./simulation_bridge_events.js";
@@ -70,7 +70,7 @@ interface SentEntityRecord {
 export class SimulationBridgeHost implements SimulationBridgeHostApi {
     private queuedEvents: EncodedSimulationBridgeEvent[] = [];
     private lastSent = new Map<string, SentEntityRecord>();
-    private rollback: RollbackSimulation<SimulationInput[]>;
+    private rollback: RollbackSimulation<InputRecord[]>;
     /** Inputs that apply at the next stepped tick. */
     private pendingInputs: SimulationInput[] = [];
     /**
@@ -89,8 +89,8 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
         if (!world.resources.has(SnapshotPoliciesResource)) {
             world.resources.set(SnapshotPoliciesResource, new SnapshotPolicies());
         }
-        this.rollback = new RollbackSimulation<SimulationInput[]>(world, {
-            applyInputs: applySimulationInputs,
+        this.rollback = new RollbackSimulation<InputRecord[]>(world, {
+            applyInputs: applyInputRecords,
             complete: deriveEntityComponents,
             // Two seconds of history: enough for netcode rollback
             // margins and short novaSim.rewind time travel.
@@ -148,26 +148,67 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
     }
 
     step(count = 1) {
+        this.integrateRemoteInputs();
         for (let i = 0; i < count; i++) {
             if (this.pendingInputs.length > 0) {
                 const tick = this.rollback.tick + 1;
-                this.rollback.setInputs(tick, this.pendingInputs);
-                this.publishInputs(tick, this.pendingInputs);
+                const communicator = this.world.resources.get(CommunicatorResource);
+                const record: InputRecord = {
+                    peerId: communicator?.uuid,
+                    tick,
+                    inputs: this.pendingInputs,
+                };
+                this.addRecord(tick, record);
+                this.publishInputs(record);
                 this.pendingInputs = [];
             }
             this.rollback.step();
         }
     }
 
+    /** Merges a record into the tick's record list. */
+    private addRecord(tick: number, record: InputRecord) {
+        const existing = this.rollback.getInputs(tick) ?? [];
+        this.rollback.setInputs(tick, [...existing, record]);
+    }
+
+    /**
+     * Folds relayed remote input records into the timeline. Records
+     * for past ticks trigger a rollback: restore before the earliest
+     * correction and resimulate with the true inputs — the core of
+     * rollback netcode.
+     */
+    private integrateRemoteInputs() {
+        if (this.remoteInputs.length === 0) {
+            return;
+        }
+        const records = this.remoteInputs;
+        this.remoteInputs = [];
+        let earliestCorrection: number | undefined;
+        for (const record of records) {
+            // Too old to roll back to: apply as soon as possible
+            // instead of dropping the input entirely. (Desync detection
+            // will catch any resulting divergence.)
+            const tick = Math.max(record.tick, this.rollback.earliestTick + 1);
+            this.addRecord(tick, { ...record, tick });
+            if (tick <= this.rollback.tick) {
+                earliestCorrection = Math.min(earliestCorrection ?? Infinity, tick);
+            }
+        }
+        if (earliestCorrection !== undefined) {
+            this.rollback.rollbackTo(earliestCorrection - 1);
+        }
+    }
+
     /** Publishes this peer's inputs to the room (via the server relay). */
-    private publishInputs(tick: number, inputs: SimulationInput[]) {
+    private publishInputs(record: InputRecord) {
         const communicator = this.world.resources.get(CommunicatorResource);
         if (!communicator?.uuid) {
             return;
         }
         communicator.sendMessage(wrapRollbackMessage({
             kind: 'inputs',
-            record: { peerId: communicator.uuid, tick, inputs },
+            record,
         }));
     }
 

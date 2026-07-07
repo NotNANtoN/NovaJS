@@ -7,42 +7,19 @@ import { Resource } from 'nova_ecs/resource';
 import { System } from 'nova_ecs/system';
 import { SingletonComponent } from 'nova_ecs/world';
 import { EcsControlEvent } from './controls_plugin.js';
-import { ControlState, ControlStateEvent } from './control_state_event.js';
+import { ControlledByComponent, ControlledByType, ShipControlStateComponent } from './ship_control.js';
 import { PlatformResource } from './platform_plugin.js';
 import { PlayerShipPlugin, PlayerShipSelector } from './player_ship_plugin.js';
 import { TargetComponent } from './target_component.js';
 
 
-// A resource because the ship may change.
-export const ControlStateResource = new Resource<ControlState>('ControlStateResource');
-
-const UpdateControlState = new System({
-    name: 'UpdateControlState',
-    events: [EcsControlEvent],
-    args: [EcsControlEvent, ControlStateResource,
-        Emit, SingletonComponent] as const,
-    step(event, controlState, emit) {
-        // Avoid accidentally sending a 'start' or 'repeat' event that's
-        // not actually happening.
-        for (const [key, val] of controlState) {
-            if (val) {
-                controlState.set(key, true);
-            }
-        }
-
-        for (let {action, state} of event) {
-            controlState.set(action, state);
-        }
-        emit(ControlStateEvent, controlState);
-    }
-});
-
-
-// TODO: Move this to ship plugin?
-const ControlPlayerShip = new System({
+// Applies a ship's held-control state to its movement. Runs for every
+// controlled ship, local or remote: per-peer input application updates
+// each ship's ShipControlStateComponent from that peer's input records.
+const ControlShipSystem = new System({
     name: 'ControlPlayerShip',
-    args: [ControlStateResource, MovementStateComponent,
-        MovementPhysicsComponent, TargetComponent, PlayerShipSelector] as const,
+    args: [ShipControlStateComponent, MovementStateComponent,
+        MovementPhysicsComponent, TargetComponent] as const,
     step(controlState, movementState, movementPhysics, { target }) {
         movementState.accelerating = controlState.get('accelerate') ? 1 : 0;
         movementState.turning =
@@ -78,12 +55,8 @@ export const ShipController: Plugin = {
             await world.addPlugin(KeyboardPlugin);
         }
         await world.addPlugin(PlayerShipPlugin);
-        world.resources.get(SerializerResource)?.addEvent(
-            ControlStateEvent,
-            passthroughType<ControlState>('ControlStateEventType'),
-        );
-        world.resources.set(ControlStateResource, new Map());
-        world.addSystem(ControlPlayerShip);
-        world.addSystem(UpdateControlState);
+        world.resources.get(SerializerResource)?.addComponent(
+            ControlledByComponent, ControlledByType);
+        world.addSystem(ControlShipSystem);
     }
 };

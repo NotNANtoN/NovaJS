@@ -35,12 +35,15 @@ describe("Cross-platform determinism", () => {
     it("simulates identically on node and worker platforms", async () => {
         const { compareWorlds, makeDeterminismWorld } =
             await import("./determinism_harness.js");
-        const { EcsControlEvent } =
-            await import("../nova_plugin/controls_plugin.js");
+        const { applySimulationInputs } =
+            await import("./simulation_input.js");
         const nodeWorld = await makeDeterminismWorld(2, undefined);
         const workerWorld = await makeDeterminismWorld(2, 'worker');
         for (const world of [nodeWorld, workerWorld]) {
-            world.emit(EcsControlEvent, [{ action: 'accelerate', state: 'start' }]);
+            applySimulationInputs(world, [{
+                kind: 'control',
+                events: [{ action: 'accelerate', state: 'start' }],
+            }], 'test peer');
         }
         const messages: string[] = [];
         const result = await compareWorlds(nodeWorld, workerWorld, 240,

@@ -15,7 +15,7 @@ import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
 import { registerSimulationBridgeEvent } from '../communication/simulation_bridge_events.js';
 import { AnimationComponent } from './animation_plugin.js';
-import { ControlStateEvent } from './control_state_event.js';
+import { ShipControlEvent, ShipControlStateComponent } from './ship_control.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { PlayerShipSelector } from './player_ship_plugin.js';
 import { ShipComponent } from './ship_plugin.js';
@@ -60,10 +60,10 @@ registerSimulationBridgeEvent({ event: LandEvent });
 
 const AttemptLandingSystem = new System({
     name: 'AttemptLandingSystem',
-    events: [ControlStateEvent] as const,
+    events: [ShipControlEvent] as const,
     args: [new Query([UUID, MovementStateComponent, PlanetComponent] as const), UUID,
         MovementStateComponent, PlanetTargetComponent,
-        ControlStateEvent, Emit, PlayerShipSelector] as const,
+        ShipControlStateComponent, Emit] as const,
     step(planets, playerUuid, { position, velocity }, planetTarget, controls, emit) {
         if (controls.get('land') === 'start') {
             let minSquared = Infinity;

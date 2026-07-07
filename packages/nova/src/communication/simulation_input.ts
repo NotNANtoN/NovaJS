@@ -5,6 +5,7 @@ import { ControlEvent, ControlsSubject, EcsControlEvent } from "../nova_plugin/c
 import { deriveEntityComponents } from "../nova_plugin/entity_factory.js";
 import { JumpRouteComponent } from "../nova_plugin/jump_plugin.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
+import { applyControlEvents, ControlledByComponent } from "../nova_plugin/ship_control.js";
 
 /**
  * Everything that changes the simulation from outside is an input,
@@ -26,15 +27,44 @@ export type SimulationInput =
     | { kind: 'setJumpRoute', route: string[] };
 
 /**
+ * A peer's inputs for one simulation tick. The steady-state wire
+ * format of rollback multiplayer, and the unit the rollback driver
+ * records per tick.
+ */
+export interface InputRecord {
+    /** Undefined only for local play before a connection exists. */
+    peerId?: string;
+    tick: number;
+    inputs: SimulationInput[];
+}
+
+/**
+ * Applies a tick's input records. Records sort by peerId so every
+ * peer applies the same tick's inputs in the same order regardless of
+ * arrival order.
+ */
+export function applyInputRecords(world: World, records: InputRecord[]) {
+    const sorted = [...records].sort((a, b) => {
+        const peerA = a.peerId ?? '';
+        const peerB = b.peerId ?? '';
+        return peerA < peerB ? -1 : peerA > peerB ? 1 : 0;
+    });
+    for (const record of sorted) {
+        applySimulationInputs(world, record.inputs, record.peerId);
+    }
+}
+
+/**
  * Applies a tick's inputs, in order. Called by the rollback driver
  * immediately before stepping that tick — both live and during
  * resimulation — so it must be deterministic and synchronous.
  */
-export function applySimulationInputs(world: World, inputs: SimulationInput[]) {
+export function applySimulationInputs(world: World, inputs: SimulationInput[],
+    peerId?: string) {
     for (const input of inputs) {
         switch (input.kind) {
             case 'control': {
-                world.emit(EcsControlEvent, input.events);
+                applyControlEvents(world, peerId, input.events);
                 const subject = world.resources.get(ControlsSubject);
                 if (subject) {
                     for (const event of input.events) {
@@ -64,7 +94,10 @@ export function applySimulationInputs(world: World, inputs: SimulationInput[]) {
             }
             case 'setJumpRoute': {
                 for (const entity of world.entities.values()) {
-                    if (!entity.components.has(PlayerShipSelector)) {
+                    const controlled = peerId !== undefined
+                        ? entity.components.get(ControlledByComponent)?.peerId === peerId
+                        : entity.components.has(PlayerShipSelector);
+                    if (!controlled) {
                         continue;
                     }
                     const jumpRoute = entity.components.get(JumpRouteComponent);

@@ -14,6 +14,7 @@ import { completeEntity } from "../nova_plugin/entity_data_loader.js";
 import { makeNpc } from "../nova_plugin/npc_plugin.js";
 import { makeShip } from "../nova_plugin/make_ship.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
+import { ControlledByComponent } from "../nova_plugin/ship_control.js";
 import { makeSystem } from "../nova_plugin/make_system.js";
 import { Platform } from "../nova_plugin/platform_plugin.js";
 import { getIntegrationGameData } from "./simulation_test_fixture.js";
@@ -52,9 +53,10 @@ export async function makeDeterminismWorld(npcCount: number,
 
     const shipData = await gameData.data.Ship.get(shipIds[0]!);
     const ship = makeShip(shipData);
-    // Controlled by ControlPlayerShip, so tests can feed control
-    // events as rollback inputs.
+    // Controlled by 'test peer', so tests can feed control events as
+    // per-peer rollback input records.
     ship.components.set(PlayerShipSelector, undefined);
+    ship.components.set(ControlledByComponent, { peerId: 'test peer' });
     setDeterministicMovement(world, ship, 0);
     // Stage, load, then insert, like the simulation bridge does.
     await completeEntity(world, ship);

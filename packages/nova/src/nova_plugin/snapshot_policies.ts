@@ -10,7 +10,7 @@ import { BlastDoneComponent } from "./blast_plugin.js";
 import { CollisionHitterComponent, CollisionVulnerabilityComponent } from "./collision_interaction.js";
 import { HitboxHullComponent, HurtboxHullComponent } from "./collisions_plugin.js";
 import { CreateTime } from "./create_time.js";
-import { ControlStateResource } from "./ship_controller_plugin.js";
+import { ShipControlStateComponent } from "./ship_control.js";
 import { SourceComponent, SubCounts, WeaponsComponent } from "./fire_weapon_plugin.js";
 import { IdFactoryResource } from "./id_factory.js";
 import { PlanetDataComponent } from "./planet_plugin.js";
@@ -119,6 +119,10 @@ export function configureSnapshotPolicies(world: World) {
         policy: 'clone',
         clone: data => ({ ...data }),
     });
+    policies.set(ShipControlStateComponent, {
+        policy: 'clone',
+        clone: state => new Map(state),
+    });
 
     // Multiplayer machinery is not simulation state.
     policies.set(Comms, { policy: 'skip' });
@@ -146,19 +150,6 @@ export function configureSnapshotPolicies(world: World) {
             name: 'idFactory',
             save: () => idFactory.getState(),
             restore: saved => idFactory.setState(saved as number),
-        });
-    }
-    const controlState = world.resources.get(ControlStateResource);
-    if (controlState) {
-        policies.addResource({
-            name: 'controlState',
-            save: () => [...controlState],
-            restore: saved => {
-                controlState.clear();
-                for (const [key, value] of saved as [never, never][]) {
-                    controlState.set(key, value);
-                }
-            },
         });
     }
 }

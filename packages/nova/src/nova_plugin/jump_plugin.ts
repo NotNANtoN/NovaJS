@@ -10,7 +10,7 @@ import { System } from "nova_ecs/system";
 import { isLeft } from "fp-ts/lib/Either.js";
 import { registerSimulationBridgeEvent } from "../communication/simulation_bridge_events.js";
 import { deImmerify } from "../util/deimmerify.js";
-import { ControlStateEvent } from "./control_state_event.js";
+import { ShipControlEvent, ShipControlStateComponent } from "./ship_control.js";
 import { PlayerShipSelector } from "./player_ship_plugin.js";
 import { SystemIdResource } from "./system_id_resource.js";
 
@@ -98,9 +98,9 @@ const JumpFromSystem = new System({
 
 const PlayerJumpControl = new System({
     name: 'PlayerJumpControl',
-    events: [ControlStateEvent],
-    args: [ControlStateEvent, Emit, UUID, SystemIdResource, JumpRouteComponent,
-        PlayerShipSelector] as const,
+    events: [ShipControlEvent],
+    args: [ShipControlStateComponent, Emit, UUID, SystemIdResource,
+        JumpRouteComponent] as const,
     step(controlState, emit, uuid, systemId, jumpRoute) {
         if (controlState.get('hyperjump') === 'start') {
             // TODO: Prevent this from being called twice before a jump.

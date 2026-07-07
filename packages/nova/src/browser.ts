@@ -41,6 +41,7 @@ import { makeSystem, SIMULATION_STEP_MS } from "./nova_plugin/make_system.js";
 import { MultiRoomResource, NovaPlugin } from "./nova_plugin/nova_plugin.js";
 import { LandEvent } from "./nova_plugin/planet_plugin.js";
 import { PlayerShipSelector } from "./nova_plugin/player_ship_plugin.js";
+import { ControlledByComponent } from "./nova_plugin/ship_control.js";
 import { SystemIdResource } from "./nova_plugin/system_id_resource.js";
 
 
@@ -420,6 +421,7 @@ async function startGame() {
         owner: communicator.uuid
     });
     shipEntity.components.set(PlayerShipSelector, undefined);
+    shipEntity.components.set(ControlledByComponent, { peerId: communicator.uuid });
     (window as any).myShip = shipEntity;
     // ?system=nova:131 picks the starting system.
     const requestedSystem = query.get('system');
