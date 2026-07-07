@@ -38,6 +38,7 @@ export class RollbackRelay {
     private getBaseline?: () => ArchiveBaseline | undefined;
     private getReferenceHash?: (tick: number) => string | undefined;
     private readonly desyncThreshold: number;
+    private onArchiveOutvoted?: (tick: number) => void;
     /** Consecutive mismatched checkpoints per reporter. */
     private mismatchStreaks = new Map<string, number>();
     private readonly subscription: Subscription;
@@ -50,7 +51,7 @@ export class RollbackRelay {
 
     constructor(private room: Communicator,
         { autoClock = true, stepMs = SIMULATION_STEP_MS, baseline,
-            referenceHash,
+            referenceHash, onArchiveOutvoted,
             desyncThreshold = DEFAULT_DESYNC_THRESHOLD }: {
                 autoClock?: boolean, stepMs?: number,
                 /** The newest archived baseline, when an archive runs. */
@@ -61,10 +62,14 @@ export class RollbackRelay {
                 /** Consecutive mismatched checkpoints before a desync
                  * broadcast (1 = convict immediately). */
                 desyncThreshold?: number,
+                /** Called when unanimous peers outvote the archive:
+                 * the hook for dumping archive-side diagnostics. */
+                onArchiveOutvoted?: (tick: number) => void,
             } = {}) {
         this.getBaseline = baseline;
         this.getReferenceHash = referenceHash;
         this.desyncThreshold = desyncThreshold;
+        this.onArchiveOutvoted = onArchiveOutvoted;
         this.subscription = room.messages.subscribe(({ source, message }) => {
             this.handleMessage(source, message);
         });
@@ -209,6 +214,7 @@ export class RollbackRelay {
             && !peerHashes.has(reference)) {
             console.error(
                 `Archive diverged from all peers at tick ${tick}`);
+            this.onArchiveOutvoted?.(tick);
         }
         this.room.sendMessage(wrapRollbackMessage({
             kind: 'desync', tick, hashes: [...reports],

@@ -10,8 +10,11 @@ import { Resource } from 'nova_ecs/resource';
 import { System } from 'nova_ecs/system';
 import { SingletonComponent } from 'nova_ecs/world';
 import { Subscription } from 'rxjs';
+import { hashWorld } from "nova_ecs/plugins/world_hash";
+import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { RollbackRelay } from "../communication/rollback_relay.js";
 import { RoomArchive } from "../communication/room_archive.js";
+import { PEER_LOCAL_COMPONENTS } from "./ship_control.js";
 import { SimulationGameDataResource } from "./game_data_resource.js";
 import { makeSystem } from './make_system.js';
 import { MultiRoomResource, SystemComponent } from "./nova_plugin.js";
@@ -105,6 +108,20 @@ export const ServerPlugin: Plugin = {
                         baseline: () => archives.get(systemId)?.latest,
                         referenceHash: tick =>
                             archives.get(systemId)?.hashAt(tick),
+                        // Diagnostics for the unresolved archive-vs-
+                        // everyone divergence: dump the archive's view
+                        // so it can be diffed against novaSim.hashes()
+                        // from a client.
+                        onArchiveOutvoted: () => {
+                            const world = archives.get(systemId)?.archiveWorld;
+                            if (!world) {
+                                return;
+                            }
+                            const hashes = hashWorld(world, PEER_LOCAL_COMPONENTS);
+                            console.error(`Archive world (tick ${world.resources
+                                .get(TimeResource)?.frame}):`,
+                                Object.fromEntries(hashes.entities));
+                        },
                     });
                     relays.set(systemId, relay);
                     archives.set(systemId, new RoomArchive(relay,

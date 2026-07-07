@@ -102,6 +102,9 @@ export interface SimulationBridgeHostApi {
     resync(): Promise<boolean>;
     /** Diagnostics: sim tick, desyncs seen, last join result. */
     status(): SimulationStatus;
+    /** Diagnostics: per-entity world hashes (peer-local excluded),
+     * for diffing against another world's view. */
+    entityHashes(): { tick: number, entities: [string, string][] };
 }
 
 export interface SimulationStatus {
@@ -124,6 +127,7 @@ export interface AsyncSimulationBridgeHostApi {
     rewind(ticks: number): Promise<boolean>;
     resync(): Promise<boolean>;
     status(): Promise<SimulationStatus>;
+    entityHashes(): Promise<{ tick: number, entities: [string, string][] }>;
 }
 
 interface SentEntityRecord {
@@ -530,6 +534,13 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
         };
     }
 
+    entityHashes(): { tick: number, entities: [string, string][] } {
+        return {
+            tick: this.rollback.tick,
+            entities: [...hashWorld(this.world, PEER_LOCAL_COMPONENTS).entities],
+        };
+    }
+
     rewind(ticks: number): boolean {
         // True time travel: restore the past and continue from there,
         // discarding the abandoned future. (rollbackTo, by contrast,
@@ -767,6 +778,10 @@ export class SimulationBridgeClient {
         return this.host.status();
     }
 
+    entityHashes() {
+        return this.host.entityHashes();
+    }
+
     spawnNpc(shipId: string) {
         return this.host.spawnNpc(shipId);
     }
@@ -829,6 +844,10 @@ export class AsyncSimulationBridgeClient {
 
     async status() {
         return this.host.status();
+    }
+
+    async entityHashes() {
+        return this.host.entityHashes();
     }
 
     getSerializer() {

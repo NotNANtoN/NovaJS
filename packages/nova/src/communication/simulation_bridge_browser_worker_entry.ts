@@ -162,6 +162,10 @@ class BrowserSimulationBridgeHost implements BrowserSimulationBridgeWorkerApi {
         };
     }
 
+    async entityHashes() {
+        return this.requireBridge().entityHashes();
+    }
+
     private requireBridge() {
         if (!this.bridge) {
             throw new Error("Simulation worker has not been initialized");

@@ -329,6 +329,107 @@ describe('Input-driven rooms', () => {
         expect(archive.archiveWorld!.entities.has('ship a')).toBeTrue();
     }, 240_000);
 
+    it('bay escorts stay in lockstep across peers and the archive', async () => {
+        // The live trigger for a persistent peers-vs-archive
+        // divergence: a player cycling to their bay weapon and
+        // launching escorts. Reproduce it through the real control
+        // path with the archive stepping in its batched cadence.
+        relay.close();
+        let archive: RoomArchive | undefined;
+        relay = new RollbackRelay(comms.get('server')!, {
+            autoClock: false,
+            baseline: () => archive?.latest,
+            referenceHash: tick => archive?.hashAt(tick),
+        });
+        const makeArchiveWorld = async () => {
+            const gameData = await getIntegrationGameData();
+            const ids = await gameData.ids;
+            return makeSystem([...ids.System].sort()[0]!, gameData, 'node');
+        };
+        archive = new RoomArchive(relay, makeArchiveWorld,
+            { intervalTicks: 60, autoUpdate: false });
+
+        const peerA = await makePeer('a');
+        const peerB = await makePeer('b');
+        const gameData = await getIntegrationGameData();
+        // A pilots a Fed Carrier (it has a fighter bay).
+        const carrierData = await gameData.data.Ship.get('nova:143');
+        const carrier = makeShip(carrierData!);
+        carrier.components.set(ControlledByComponent, { peerId: 'a' });
+        const carrierMovement = carrier.components.get(MovementStateComponent)!;
+        carrierMovement.position = new Position(0, 300);
+        carrierMovement.rotation = new Angle(0);
+        carrierMovement.velocity = new Vector(0, 0);
+        await completeEntity(peerA.world, carrier);
+        await peerA.client.addEntity('ship a', carrier);
+        // A target for the bay (fighters need one to launch).
+        const ravenData = await gameData.data.Ship.get('nova:164');
+        const raven = makeNpc(ravenData!);
+        const ravenMovement = raven.components.get(MovementStateComponent)!;
+        ravenMovement.position = new Position(0, 500);
+        ravenMovement.rotation = new Angle(Math.PI);
+        ravenMovement.velocity = new Vector(0, 0);
+        await completeEntity(peerA.world, raven);
+        await peerA.client.addEntity('raven', raven);
+
+        const step = async (ticks: number) => {
+            for (let i = 0; i < ticks; i++) {
+                peerA.host.step();
+                peerB.host.step();
+                relay.advanceTicks(1);
+                if ((relay.tick % 30) === 0) {
+                    await archive!.update();
+                }
+                await new Promise(resolve => setImmediate(resolve));
+            }
+        };
+
+        // Populate the weapons map, acquire a target, cycle to the bay.
+        peerA.host.controlEvents([{ action: 'firePrimary', state: 'start' }]);
+        await step(10);
+        peerA.host.controlEvents([
+            { action: 'firePrimary', state: false },
+            { action: 'nearestTarget', state: 'start' },
+        ]);
+        await step(5);
+        const shipA = () => peerA.world.entities.get('ship a')!;
+        const { ActiveSecondaryWeapon } =
+            await import('../nova_plugin/weapon_plugin.js');
+        let foundBay = false;
+        for (let cycle = 0; cycle < 8 && !foundBay; cycle++) {
+            peerA.host.controlEvents([{ action: 'nextSecondary', state: 'start' }]);
+            await step(3);
+            const active = shipA().components.get(ActiveSecondaryWeapon);
+            if (active?.secondary) {
+                const weapon = await gameData.data.Weapon.get(active.secondary);
+                foundBay = weapon?.type === 'BayWeaponData';
+            }
+        }
+        expect(foundBay).toBeTrue();
+        // Launch escorts, then let everything settle.
+        peerA.host.controlEvents([{ action: 'fireSecondary', state: 'start' }]);
+        await step(400);
+        peerA.host.controlEvents([{ action: 'fireSecondary', state: false }]);
+        await step(200);
+        await archive.update();
+
+        const bays = (world: World) =>
+            [...world.entities.keys()].filter(key => key.startsWith('bay:')).length;
+        expect(bays(peerA.world)).toBeGreaterThan(0);
+        expect(bays(peerB.world)).toBe(bays(peerA.world));
+        expect(bays(archive.archiveWorld!)).toBe(bays(peerA.world));
+
+        const hashA = hashWorld(peerA.world, PEER_LOCAL_COMPONENTS);
+        const hashB = hashWorld(peerB.world, PEER_LOCAL_COMPONENTS);
+        const hashArchive = hashWorld(archive.archiveWorld!, PEER_LOCAL_COMPONENTS);
+        expect(hashB.hash).toEqual(hashA.hash);
+        if (hashArchive.hash !== hashA.hash) {
+            const { diffWorldHashes } = await import('nova_ecs/plugins/world_hash');
+            fail('Archive diverged: '
+                + diffWorldHashes(hashArchive, hashA).slice(0, 10).join('; '));
+        }
+    }, 240_000);
+
     it('detects a desync and the diverged peer resyncs from the log', async () => {
         const peerA = await makePeer('a');
         const peerB = await makePeer('b');

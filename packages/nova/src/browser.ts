@@ -124,6 +124,11 @@ const simulationControl = {
     async status() {
         return await simulationBridge?.status() ?? null;
     },
+    /** Per-entity world hashes, for diffing against another client's
+     * (or the server's archive dump on desync). */
+    async hashes() {
+        return await simulationBridge?.entityHashes() ?? null;
+    },
 };
 (window as any).novaSim = simulationControl;
 const syncedComponents = new Map<string, Set<UnknownComponent>>();
