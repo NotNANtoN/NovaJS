@@ -22,6 +22,7 @@ import {
     AsyncSimulationBridgeClient,
     EntityDelta,
     SimulationFrame,
+    SimulationPacing,
 } from "./communication/simulation_bridge.js";
 import { SocketChannelClient } from "./communication/socket_channel_client.js";
 import { DebugSettings } from "./debug_settings.js";
@@ -92,6 +93,15 @@ let syncedPlayerJumpRoute: string[] | undefined;
 const MAX_CATCHUP_STEPS = 6;
 let simulationTimeDebt = 0;
 let lastPumpTime: number | undefined;
+/**
+ * Tick pacing against the room's clock (from the last frame). Small
+ * drift is corrected by the rate factor — time runs imperceptibly
+ * fast or slow. Only drift beyond SNAP_BEHIND_TICKS (a hidden tab, a
+ * long stall) is snapped, bounded per frame by HARD_CATCHUP_STEPS.
+ */
+let simulationPacing: SimulationPacing | undefined;
+const SNAP_BEHIND_TICKS = 30;
+const HARD_CATCHUP_STEPS = 60;
 /** Debug control over simulation stepping: `window.novaSim`. */
 const simulationControl = {
     paused: false,
@@ -108,6 +118,8 @@ const simulationControl = {
     async resync() {
         return await simulationBridge?.resync() ?? false;
     },
+    /** The current clock slew against the room's tick, if any. */
+    get pacing() { return simulationPacing; },
 };
 (window as any).novaSim = simulationControl;
 const syncedComponents = new Map<string, Set<UnknownComponent>>();
@@ -259,6 +271,7 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
         }
         await simulationBridge.close();
         simulationBridge = undefined;
+        simulationPacing = undefined;
     }
     simulationWorker = undefined;
     for (const subscription of roomSubscriptions) {
@@ -565,7 +578,11 @@ async function startGame() {
             // independent.
             const now = performance.now();
             if (lastPumpTime !== undefined && !simulationControl.paused) {
-                simulationTimeDebt += now - lastPumpTime;
+                // Slew toward the room's clock: elapsed time counts
+                // slightly fast or slow rather than ticks being
+                // skipped or doubled.
+                simulationTimeDebt +=
+                    (now - lastPumpTime) * (simulationPacing?.rate ?? 1);
             }
             lastPumpTime = now;
             // If we fall behind (heavy load, background tab), run at most
@@ -578,6 +595,12 @@ async function startGame() {
                 steps = simulationControl.pendingSteps;
                 simulationControl.pendingSteps = 0;
                 simulationTimeDebt = 0;
+            } else if (simulationPacing
+                && simulationPacing.behindTicks > SNAP_BEHIND_TICKS) {
+                // Too far behind the room to slew: snap by stepping
+                // the backlog, bounded per frame.
+                steps += Math.min(Math.floor(simulationPacing.behindTicks),
+                    HARD_CATCHUP_STEPS);
             }
 
             if (steps > 0) {
@@ -587,6 +610,7 @@ async function startGame() {
                     return;
                 }
                 applySimulationFrame(frame, currentSerializer, currentDisplayWorld);
+                simulationPacing = frame.pacing;
                 syncedPlayerJumpRoute = getDisplayPlayerJumpRoute(currentDisplayWorld)?.slice();
                 for (const event of frame.events) {
                     emitSimulationBridgeEvent(event, currentSerializer, currentDisplayWorld);

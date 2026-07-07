@@ -1,5 +1,7 @@
 import 'jasmine';
 import * as t from 'io-ts';
+import { MockCommunicator } from 'nova_ecs/plugins/mock_communicator';
+import { CommunicatorResource } from 'nova_ecs/plugins/multiplayer_plugin';
 import { SingletonComponent, World } from 'nova_ecs/world';
 import { Component } from 'nova_ecs/component';
 import { Entity } from 'nova_ecs/entity';
@@ -17,6 +19,7 @@ import {
     SimulationBridgeHost,
 } from './simulation_bridge.js';
 import { emitSimulationBridgeEvent } from './simulation_bridge_events.js';
+import { wrapRollbackMessage } from './rollback_protocol.js';
 
 const FooComponent = new Component<{ x: number }>('Foo');
 
@@ -236,5 +239,53 @@ describe('SimulationBridge', () => {
         }));
         expect((lastCollision as { position: Position }).position.x).toBe(12);
         expect((lastCollision as { position: Position }).position.y).toBe(34);
+    });
+
+    describe('tick pacing', () => {
+        function makePacedHost() {
+            const communicator = new MockCommunicator('client');
+            world.resources.set(CommunicatorResource, communicator);
+            const host = new SimulationBridgeHost(
+                world, makeFakeSimulationData());
+            const sync = (tick: number) => communicator.messages.next({
+                source: 'server',
+                message: wrapRollbackMessage({ kind: 'tickSync', tick }),
+            });
+            return { host, sync };
+        }
+
+        it('reports no pacing before any tickSync', () => {
+            const { host } = makePacedHost();
+            expect(host.snapshot().pacing).toBeUndefined();
+        });
+
+        it('speeds up when behind, clamped to the slew limit', () => {
+            const { host, sync } = makePacedHost();
+            sync(500);
+            const pacing = host.snapshot().pacing!;
+            expect(pacing.behindTicks).toBeGreaterThan(400);
+            expect(pacing.rate).toBeCloseTo(1.05, 5);
+        });
+
+        it('corrects small drift proportionally, not by clamping', () => {
+            const { host, sync } = makePacedHost();
+            // Local tick 0, server tick 0: the drift is just the
+            // send-ahead lead (4 ticks) -> a gentle speedup.
+            sync(0);
+            const pacing = host.snapshot().pacing!;
+            expect(pacing.behindTicks).toBeGreaterThan(3.5);
+            expect(pacing.behindTicks).toBeLessThan(6);
+            expect(pacing.rate).toBeGreaterThan(1.03);
+            expect(pacing.rate).toBeLessThan(1.05);
+        });
+
+        it('slows down when ahead, clamped to the slew limit', () => {
+            const { host, sync } = makePacedHost();
+            host.step(60);
+            sync(0);
+            const pacing = host.snapshot().pacing!;
+            expect(pacing.behindTicks).toBeLessThan(-40);
+            expect(pacing.rate).toBeCloseTo(0.95, 5);
+        });
     });
 });

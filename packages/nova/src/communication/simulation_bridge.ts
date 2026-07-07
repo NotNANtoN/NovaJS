@@ -14,6 +14,7 @@ import { deriveEntityComponents } from "../nova_plugin/entity_factory.js";
 import { applyInputRecords, InputRecord, SimulationInput } from "./simulation_input.js";
 import { canonicalDesyncHash, unwrapRollbackMessage, wrapRollbackMessage } from "./rollback_protocol.js";
 import { makeNpc } from "../nova_plugin/npc_plugin.js";
+import { SIMULATION_STEP_MS } from "../nova_plugin/make_system.js";
 import { PEER_LOCAL_COMPONENTS } from "../nova_plugin/ship_control.js";
 import { ControlEvent, ControlsSubject, EcsControlEvent } from "../nova_plugin/controls_plugin.js";
 import { EncodedSimulationBridgeEvent, getRegisteredSimulationBridgeEvents } from "./simulation_bridge_events.js";
@@ -33,6 +34,24 @@ const STATE_HASH_SETTLE_TICKS = 30;
 /** Minimum time between automatic desync recoveries. */
 const RESYNC_COOLDOWN_MS = 10_000;
 
+/**
+ * Tick pacing: the peer aims to run this many ticks ahead of the
+ * extrapolated server clock, so its input records reach the relay
+ * before the relay's clock passes their tick. (A record behind the
+ * relay clock gets retimed for the room but not for its sender —
+ * a divergence desync detection then has to clean up.)
+ */
+const PACING_LEAD_TICKS = 4;
+/** Clock slew per tick of drift: 1% rate change per tick. */
+const PACING_GAIN = 0.01;
+/**
+ * The pacing rate stays within ±5% of real time: drift is corrected
+ * by running time imperceptibly fast or slow, never by visibly
+ * skipping or doubling ticks. (Gross divergence is snapped instead;
+ * see the pump.)
+ */
+const PACING_MAX_SLEW = 0.05;
+
 export interface EntityDelta {
     /** Present only when the entity's name changed. */
     name?: string;
@@ -40,6 +59,24 @@ export interface EntityDelta {
     changed: [string, unknown][];
     /** Names of components removed since the last snapshot. */
     removed: string[];
+}
+
+/**
+ * How the sim's clock should track the room's. Present only once a
+ * tickSync has arrived (i.e. in a live multiplayer room).
+ */
+export interface SimulationPacing {
+    /**
+     * Multiply real elapsed time by this before accumulating
+     * simulation steps: a smooth slew toward the room's clock.
+     */
+    rate: number;
+    /**
+     * Raw drift: how far the sim trails its target tick (negative
+     * when ahead). Small values are corrected by `rate`; the pump
+     * snaps only when this is beyond slewing (e.g. a hidden tab).
+     */
+    behindTicks: number;
 }
 
 /**
@@ -52,6 +89,7 @@ export interface SimulationFrame {
     removed: string[];
     time?: Time;
     events: EncodedSimulationBridgeEvent[];
+    pacing?: SimulationPacing;
 }
 
 export interface SimulationBridgeHostApi {
@@ -97,8 +135,14 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
      * here until per-peer input application lands (Phase 3 step 3).
      */
     private remoteInputs: InputRecord[] = [];
-    /** The server's canonical tick, from its periodic tickSync. */
-    serverTick?: number;
+    /**
+     * The room's clock: the server's canonical tick from its periodic
+     * tickSync, and when it arrived — extrapolated between syncs.
+     */
+    private lastTickSync?: { tick: number, at: number };
+    /** Lightly smoothed pacing drift; tickSync arrival jitter shifts
+     * the raw estimate by a tick or two frame to frame. */
+    private smoothedDrift?: number;
     /**
      * The pre-join genesis state. Desync recovery restores it and
      * resimulates the relay's input log — the late-join reconstruction,
@@ -134,7 +178,10 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
                     this.remoteInputs.push(rollbackMessage.record);
                     break;
                 case 'tickSync':
-                    this.serverTick = rollbackMessage.tick;
+                    this.lastTickSync = {
+                        tick: rollbackMessage.tick,
+                        at: performance.now(),
+                    };
                     break;
                 case 'inputLog':
                     this.remoteInputs.push(...rollbackMessage.records);
@@ -271,6 +318,9 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
             this.addRecord(record.tick, record);
         }
         this.rollback.fastForward(catchUp.tick);
+        // The local tick just jumped; stale smoothed drift would slew
+        // against the new position.
+        this.smoothedDrift = undefined;
         return true;
     }
 
@@ -415,6 +465,28 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
         this.schedule({ kind: 'control', events });
     }
 
+    /**
+     * How this peer's clock should slew to track the room's: a rate
+     * factor proportional to the drift between the local tick and the
+     * extrapolated server tick plus a small send-ahead lead, clamped
+     * so correction is a gradual speed change rather than a skip.
+     */
+    private pacing(): SimulationPacing | undefined {
+        if (!this.lastTickSync) {
+            return undefined;
+        }
+        const elapsed = performance.now() - this.lastTickSync.at;
+        const estimatedServerTick =
+            this.lastTickSync.tick + elapsed / SIMULATION_STEP_MS;
+        const behindTicks =
+            estimatedServerTick + PACING_LEAD_TICKS - this.rollback.tick;
+        this.smoothedDrift = this.smoothedDrift === undefined ? behindTicks
+            : this.smoothedDrift * 0.9 + behindTicks * 0.1;
+        const rate = 1 + Math.max(-PACING_MAX_SLEW, Math.min(
+            PACING_MAX_SLEW, this.smoothedDrift * PACING_GAIN));
+        return { rate, behindTicks };
+    }
+
     snapshot(): SimulationFrame {
         const events = this.queuedEvents;
         this.queuedEvents = [];
@@ -489,6 +561,7 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
             removed,
             time: this.world.resources.get(TimeResource),
             events,
+            pacing: this.pacing(),
         };
     }
 
