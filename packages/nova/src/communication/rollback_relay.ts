@@ -30,11 +30,21 @@ const STATE_HASH_SWEEP_TICKS = 600;
  */
 const DEFAULT_DESYNC_THRESHOLD = 3;
 
+/**
+ * A checkpoint report arriving more than this many ticks after its
+ * checkpoint comes from a client running well behind the room's
+ * clock (a throttled tab, an overloaded machine). Such reports are
+ * still compared — a stale client can be convicted — but they get no
+ * vote in what the canonical state is.
+ */
+const TIMELY_REPORT_TICKS = 240;
+
 export class RollbackRelay {
     tick = 0;
     private log: InputRecord[] = [];
     /** Peers' state-hash reports awaiting comparison, by tick. */
-    private stateHashes = new Map<number, Map<string, string>>();
+    private stateHashes =
+        new Map<number, Map<string, { hash: string, arrivedAt: number }>>();
     private getBaseline?: () => ArchiveBaseline | undefined;
     private getReferenceHash?: (tick: number) => string | undefined;
     private readonly desyncThreshold: number;
@@ -163,19 +173,37 @@ export class RollbackRelay {
             }
         }
         this.stateHashes.delete(tick);
-        // The archive's hash joins every comparison as a standing
-        // witness: it breaks two-peer ties (a tie-break alone can
-        // crown the diverged peer canonical, making the divergence
-        // permanent), and it convicts a lone diverged peer whose
-        // roommates are throttled and reporting nothing.
         const reference = this.getReferenceHash?.(tick);
+
+        // Only timely reports vote on the canonical state: a report
+        // this far behind the room's clock comes from a throttled or
+        // overloaded client, whose word shouldn't decide who resyncs.
+        // (Stale reporters are still compared, and convicted, below.)
+        // The archive's hash always joins as a standing witness: it
+        // breaks two-peer ties (a tie-break alone can crown the
+        // diverged peer canonical, making the divergence permanent),
+        // and it convicts a lone diverged peer whose roommates report
+        // nothing at all.
+        const voters: [string, string][] = [...reports]
+            .filter(([, report]) => report.arrivedAt - tick <= TIMELY_REPORT_TICKS)
+            .map(([peerId, report]) => [peerId, report.hash]);
+        const allHashes: [string, string][] = [...reports]
+            .map(([peerId, report]) => [peerId, report.hash]);
         if (reference !== undefined && this.room.uuid) {
-            reports.set(this.room.uuid, reference);
+            voters.push([this.room.uuid, reference]);
+            allHashes.push([this.room.uuid, reference]);
         }
-        if (new Set(reports.values()).size <= 1) {
-            for (const peerId of reports.keys()) {
+        if (new Set(allHashes.map(([, hash]) => hash)).size <= 1) {
+            for (const [peerId] of allHashes) {
                 this.mismatchStreaks.delete(peerId);
             }
+            return;
+        }
+        const canonical = canonicalDesyncHash(voters,
+            this.room.uuid ? new Set([this.room.uuid]) : undefined);
+        if (canonical === undefined) {
+            // Nothing but stale reports and no archive: no one to
+            // trust, so no verdict.
             return;
         }
         // Convict only after `desyncThreshold` consecutive mismatched
@@ -183,10 +211,8 @@ export class RollbackRelay {
         // settle margin makes already-sent reports describe the
         // abandoned timeline — a false positive gone by the next
         // checkpoint. Real divergence keeps the streak alive.
-        const canonical = canonicalDesyncHash([...reports],
-            this.room.uuid ? new Set([this.room.uuid]) : undefined);
         let convict = false;
-        for (const [peerId, hash] of reports) {
+        for (const [peerId, hash] of allHashes) {
             if (hash === canonical) {
                 this.mismatchStreaks.delete(peerId);
                 continue;
@@ -201,23 +227,19 @@ export class RollbackRelay {
         if (!convict) {
             return;
         }
-        console.log(`Desync at tick ${tick}:`,
-            Object.fromEntries(reports));
-        // Unanimous peers against the archive means the *archive*
-        // has diverged — and every baseline it captures from here
-        // on reconstructs the wrong world. Loud, because recovery
+        console.log(`Desync at tick ${tick} (canonical ${canonical}):`,
+            Object.fromEntries(allHashes));
+        // The timely majority outvoting the archive means the
+        // *archive* has diverged — and every baseline it captures from
+        // here on reconstructs the wrong world. Loud, because recovery
         // (rebuilding the archive) is not automatic yet.
-        const peerHashes = new Set([...reports]
-            .filter(([peerId]) => peerId !== this.room.uuid)
-            .map(([, hash]) => hash));
-        if (reference !== undefined && peerHashes.size === 1
-            && !peerHashes.has(reference)) {
+        if (reference !== undefined && canonical !== reference) {
             console.error(
                 `Archive diverged from all peers at tick ${tick}`);
             this.onArchiveOutvoted?.(tick);
         }
         this.room.sendMessage(wrapRollbackMessage({
-            kind: 'desync', tick, hashes: [...reports],
+            kind: 'desync', tick, hashes: allHashes, canonical,
         }));
     }
 
@@ -263,7 +285,8 @@ export class RollbackRelay {
                     reports = new Map();
                     this.stateHashes.set(message.tick, reports);
                 }
-                reports.set(source, message.hash);
+                reports.set(source,
+                    { hash: message.hash, arrivedAt: this.tick });
                 this.compareStateHashes(message.tick);
                 break;
             }

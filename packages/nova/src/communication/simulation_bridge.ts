@@ -205,7 +205,8 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
                     }
                     break;
                 case 'desync':
-                    this.handleDesync(rollbackMessage.tick, rollbackMessage.hashes);
+                    this.handleDesync(rollbackMessage.tick,
+                        rollbackMessage.hashes, rollbackMessage.canonical);
                     break;
             }
         });
@@ -482,14 +483,17 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
      * peer's hash is not the canonical one, its timeline has diverged
      * from the input log's true simulation: recover with a full resync.
      */
-    private handleDesync(tick: number, hashes: [string, string][]) {
+    private handleDesync(tick: number, hashes: [string, string][],
+        relayCanonical?: string) {
         this.desyncCount++;
         const communicator = this.world.resources.get(CommunicatorResource);
         const mine = hashes.find(
             ([peerId]) => peerId === communicator?.uuid)?.[1];
-        // Prefer the server's archive hash on tie votes: it is the
-        // input log's true simulation.
-        const canonical = canonicalDesyncHash(
+        // The relay's verdict excludes stale reporters from the vote;
+        // recompute locally only for older relays that don't send it
+        // (tie votes prefer the server's archive hash: the input
+        // log's true simulation).
+        const canonical = relayCanonical ?? canonicalDesyncHash(
             hashes, communicator?.servers.value);
         // A peer that never reported this tick (it joined afterwards)
         // has no evidence it diverged.

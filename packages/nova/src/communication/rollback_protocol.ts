@@ -42,8 +42,14 @@ export type RollbackProtocolMessage =
     /** A peer's world hash for a settled tick (peer -> server). */
     | { kind: 'stateHash', tick: number, hash: string }
     /** The relay saw peers disagree about a tick's state
-     * (server -> everyone). Non-canonical peers resync. */
-    | { kind: 'desync', tick: number, hashes: [string, string][] };
+     * (server -> everyone). Non-canonical peers resync. `canonical`
+     * is the relay's verdict, computed from timely voters only —
+     * reports from clients running far behind the room's clock are
+     * compared (and convicted) but get no vote. */
+    | {
+        kind: 'desync', tick: number, hashes: [string, string][],
+        canonical?: string,
+    };
 
 export function wrapRollbackMessage(message: RollbackProtocolMessage): unknown {
     return { rollback: message };

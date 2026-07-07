@@ -127,9 +127,35 @@ describe('RollbackRelay', () => {
             kind: 'desync',
             tick: 360,
             hashes: [['a', 'aaaaaaaa'], ['b', 'bbbbbbbb']],
+            canonical: 'aaaaaaaa',
         };
         expect(received(peerA)).toEqual([expected]);
         expect(received(peerB)).toEqual([expected]);
+    });
+
+    it('a stale reporter cannot vote but can be convicted', () => {
+        relay.close();
+        relay = new RollbackRelay(server, {
+            autoClock: false,
+            desyncThreshold: 1,
+        });
+        // Peer a reports promptly; peer b reports the same checkpoint
+        // 500 ticks late (a throttled tab catching up). Without b's
+        // vote, a's word alone is canonical, and b is convicted.
+        peerA.sendMessage(wrapRollbackMessage({
+            kind: 'stateHash', tick: 60, hash: '11111111',
+        }) as never, 'server');
+        relay.advanceTicks(500);
+        peerB.sendMessage(wrapRollbackMessage({
+            kind: 'stateHash', tick: 60, hash: '22222222',
+        }) as never, 'server');
+        const desyncs = received(peerB).filter(m => m.kind === 'desync');
+        expect(desyncs).toEqual([{
+            kind: 'desync',
+            tick: 60,
+            hashes: [['a', '11111111'], ['b', '22222222']],
+            canonical: '11111111',
+        }]);
     });
 
     it('adds the archive reference hash to desync votes', () => {
@@ -157,6 +183,7 @@ describe('RollbackRelay', () => {
                 // resyncs even though peers alone would be a tie.
                 ['server', '11111111'],
             ],
+            canonical: '11111111',
         }]);
         expect(canonicalDesyncHash(desyncs[0]!.kind === 'desync'
             ? desyncs[0].hashes : [])).toBe('11111111');
@@ -184,6 +211,7 @@ describe('RollbackRelay', () => {
             kind: 'desync',
             tick: 60,
             hashes: [['a', '22222222'], ['server', '11111111']],
+            canonical: '11111111',
         }]);
     });
 
