@@ -45,6 +45,12 @@ export async function makeSystem(systemId: string, gameData: SimulationGameDataI
     // simulation must not resolve data asynchronously mid-simulation,
     // so all entities are fully loaded before they are inserted.
     const systemData = await gameData.data.System.get(systemId);
+    // Stage the linked systems' metadata too: starting a hyperspace
+    // jump reads the destination's map position synchronously
+    // (getCached) to compute the travel heading, and every peer builds
+    // its world through here, so the cache is warm on all of them.
+    await Promise.all(systemData.links.map(link =>
+        gameData.data.System.get(link)));
     for (const planetId of systemData.planets) {
         const planetData = await gameData.data.Planet.get(planetId);
         const planet = makePlanet(planetData);

@@ -36,7 +36,7 @@ import { AddEnemyEvent } from "./display/status_bar.js";
 import { ControlEvent, ControlsSubject, EcsControlEvent } from "./nova_plugin/controls_plugin.js";
 import { Controls, getActions, SavedControls } from "./nova_plugin/controls.js";
 import { DisplayAssetDataResource, SimulationGameDataResource } from "./nova_plugin/game_data_resource.js";
-import { FinishJumpEvent, JumpRouteComponent } from "./nova_plugin/jump_plugin.js";
+import { FinishJumpEvent, JumpComponent, JumpRouteComponent } from "./nova_plugin/jump_plugin.js";
 import { makeShip } from "./nova_plugin/make_ship.js";
 import { makeSystem, SIMULATION_STEP_MS } from "./nova_plugin/make_system.js";
 import { MultiRoomResource, NovaPlugin } from "./nova_plugin/nova_plugin.js";
@@ -241,6 +241,55 @@ function getDisplayPlayerJumpRoute(displayWorld: World) {
         return jumpRoute?.route;
     }
     return undefined;
+}
+
+let prefetchedSystemId: string | undefined;
+/**
+ * Starts loading the destination system's data and sprite assets while
+ * the jump sequence plays. Display-side only: the simulation never
+ * waits on these loads. Arrival is inherently load-gated regardless —
+ * jumpTo() builds the destination world (makeSystem loads its planets
+ * and linked-system metadata) and completes the room join before the
+ * player's ship is inserted, and that insertion is an input record, so
+ * a slow load only delays the arrival tick without desyncing anyone.
+ * Prefetching just shortens the time spent on the white screen.
+ */
+function prefetchJumpDestination(displayWorld: World) {
+    for (const entity of displayWorld.entities.values()) {
+        if (!entity.components.has(PlayerShipSelector)) {
+            continue;
+        }
+        const jump = entity.components.get(JumpComponent);
+        if (!jump || jump.stage === 'arriving'
+            || prefetchedSystemId === jump.to) {
+            return;
+        }
+        prefetchedSystemId = jump.to;
+        void (async () => {
+            try {
+                const system = await simulationGameData.data.System.get(jump.to);
+                await Promise.all([
+                    ...system.links.map(link =>
+                        simulationGameData.data.System.get(link)),
+                    ...system.planets.map(async planetId => {
+                        const planet =
+                            await simulationGameData.data.Planet.get(planetId);
+                        await Promise.all(
+                            Object.values(planet.animation.images).flatMap(
+                                image => [
+                                    displayAssetData.data.SpriteSheetFrames
+                                        .get(image.id),
+                                    displayAssetData.data.SpriteSheetImage
+                                        .get(image.id),
+                                ]));
+                    }),
+                ]);
+            } catch (e) {
+                console.warn(`Failed to prefetch system ${jump.to}`, e);
+            }
+        })();
+        return;
+    }
 }
 
 function routesEqual(a?: string[], b?: string[]) {
@@ -644,6 +693,7 @@ async function startGame() {
                 applySimulationFrame(frame, currentSerializer, currentDisplayWorld);
                 simulationPacing = frame.pacing;
                 syncedPlayerJumpRoute = getDisplayPlayerJumpRoute(currentDisplayWorld)?.slice();
+                prefetchJumpDestination(currentDisplayWorld);
                 for (const event of frame.events) {
                     emitSimulationBridgeEvent(event, currentSerializer, currentDisplayWorld);
                 }

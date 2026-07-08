@@ -121,6 +121,21 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
             }
             physics[fType] = fVal;
         }
+        else if (fType === "hyperspace dist mod") {
+            // Change to the no-jump zone's radius, in pixels.
+            if (typeof fVal !== "number") {
+                throw new Error("Wrong type. Expected number");
+            }
+            physics.jumpDistanceMod = fVal;
+        }
+        else if (fType === "fast jump") {
+            // Grants the carrying ship the ability to enter hyperspace
+            // without slowing down.
+            physics.canJumpWithoutSlowing = true;
+        }
+        else if (fType === "inertial damper") {
+            physics.inertialess = true;
+        }
         else {
             //throw new Error("Unknown outfit function " + fType + " on outfit " + base.id);
         }

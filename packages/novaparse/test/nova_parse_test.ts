@@ -79,6 +79,12 @@ describe("NovaParse", () => {
         expect(s128.physics.mass).toEqual(5678);
         expect(s128.physics.freeMass).toEqual(4234);
         expect(s128.physics.inertialess).toEqual(true);
+        // Flags 0x0004: fast jumping (150% of normal hyperspace speed).
+        expect(s128.physics.jumpSpeedMult).toEqual(1.5);
+        expect(s129.physics.jumpSpeedMult).toEqual(1);
+        // Flags2 0x0020: can jump without slowing down.
+        expect(s128.physics.canJumpWithoutSlowing).toEqual(false);
+        expect(s128.physics.jumpDistanceMod).toEqual(0);
         expect(s128.displayWeight).toEqual(128);
         expect(s128.deathDelay).toEqual(67 / 30);
         expect(s128.largeExplosion).toEqual(true);

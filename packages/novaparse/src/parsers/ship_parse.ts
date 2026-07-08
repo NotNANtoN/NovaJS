@@ -182,6 +182,17 @@ export async function ShipParse(ship: ShipResource,
         freeMass += outfit.mass * outfits[outfitID];
     }
 
+    // EVN Bible shïp Flags: slow (75%), semi-fast (125%), and fast
+    // (150%) hyperspace jump speed. The bits are mutually exclusive.
+    var jumpSpeedMult = 1;
+    if (ship.flagsN & 0x0001) {
+        jumpSpeedMult = 0.75;
+    } else if (ship.flagsN & 0x0002) {
+        jumpSpeedMult = 1.25;
+    } else if (ship.flagsN & 0x0004) {
+        jumpSpeedMult = 1.5;
+    }
+
     var physics: ShipPhysics = {
         shield: ship.shield,
         shieldRecharge: ship.shieldRecharge * FPS / 1000, // Recharge per second
@@ -201,6 +212,9 @@ export async function ShipParse(ship: ShipResource,
         freeCargo: ship.cargoSpace,
         maxGuns: ship.maxGuns,
         maxTurrets: ship.maxTurrets,
+        jumpSpeedMult,
+        canJumpWithoutSlowing: Boolean(ship.flags2N & 0x20),
+        jumpDistanceMod: 0,
         // Afterburners come from outfits (ModType 15), not ship data.
         afterburner: 0,
     }
