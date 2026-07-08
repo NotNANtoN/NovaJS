@@ -24,7 +24,7 @@ import { CreateTime } from './create_time.js';
 import { DamagedEvent, ZeroArmorEvent } from './death_plugin.js';
 import { FireSubs, OwnerComponent, SourceComponent, SubCounts, VulnerableToPD, WeaponConstructors, WeaponEntry } from './fire_weapon_plugin.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
-import { firstOrderWithFallback, Guidance, GuidanceComponent } from './guidance.js';
+import { guidanceAngle, Guidance, GuidanceComponent, MissileGuidanceResource } from './guidance.js';
 import { ArmorComponent, ShieldComponent } from './health_plugin.js';
 import { ProjectileBlastHull, ProjectileComponent, ProjectileDataComponent } from './projectile_data.js';
 import { SoundEvent } from './sound_plugin.js';
@@ -205,8 +205,8 @@ const ProjectileLifespanSystem = new System({
 const ProjectileGuidanceSystem = new System({
     name: 'ProjectileGuidanceSystem',
     args: [MovementStateComponent, TargetComponent,
-        Entities, ProjectileDataComponent] as const,
-    step(movementState, { target }, entities, projectileData) {
+        Entities, ProjectileDataComponent, MissileGuidanceResource] as const,
+    step(movementState, { target }, entities, projectileData, guidanceMode) {
         if (!target) {
             return;
         }
@@ -217,8 +217,13 @@ const ProjectileGuidanceSystem = new System({
             return;
         }
 
-        movementState.turnTo = firstOrderWithFallback(movementState.position, movementState.velocity,
-            targetMovement.position, targetMovement.velocity, projectileData.shotSpeed)
+        // 'smart' leads the target (hard to dodge); 'simple' just points at
+        // the target's current position (dodgeable by circling). The mode is
+        // a room-wide deterministic resource; see guidance.ts.
+        movementState.turnTo = guidanceAngle(guidanceMode.mode,
+            movementState.position, movementState.velocity,
+            targetMovement.position, targetMovement.velocity,
+            projectileData.shotSpeed);
     }
 });
 

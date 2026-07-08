@@ -2,11 +2,52 @@ import { Component } from 'nova_ecs/component';
 import { Angle } from 'nova_ecs/datatypes/angle';
 import { Position } from 'nova_ecs/datatypes/position';
 import { Vector } from 'nova_ecs/datatypes/vector';
+import { Resource } from 'nova_ecs/resource';
 
 export enum Guidance {
     zeroOrder, // Point at the enemy
     firstOrder, // Linear approximation
 };
+
+/**
+ * How guided missiles steer toward their target.
+ *
+ * Both modes are still limited by the projectile's documented turn rate
+ * (applied downstream in the movement plugin); the difference is *where*
+ * the missile aims.
+ *
+ * - `smart`: firstOrder guidance. The missile leads the target, solving
+ *   for the intercept point given both velocities, so it aims at where the
+ *   target *will be*. Very hard to dodge (the original behavior).
+ * - `simple`: zeroOrder guidance. The missile only ever points at the
+ *   target's *current* position, with no leading, so a target that circles
+ *   or strafes can keep sidestepping the missile's aim and dodge it.
+ *
+ * DETERMINISM: this mode must be identical on every client in a room, so it
+ * is stored as a simulation Resource with a hardcoded default set in
+ * make_system.ts (the deterministic World builder every client and the
+ * server's RoomArchive run). It is NOT a client-local setting. To change the
+ * game-wide default, edit DEFAULT_MISSILE_GUIDANCE below.
+ */
+export enum MissileGuidanceMode {
+    smart = 'smart',
+    simple = 'simple',
+};
+
+/**
+ * The game-wide default missile guidance mode. Change this to flip the whole
+ * game between hard-to-dodge (`smart`) and dodgeable (`simple`) missiles.
+ * Set into the World as MissileGuidanceResource by make_system.ts.
+ */
+export const DEFAULT_MISSILE_GUIDANCE = MissileGuidanceMode.simple;
+
+/**
+ * Server-distributed / deterministic simulation config selecting how guided
+ * missiles steer. Set once at world construction (make_system.ts) so it is
+ * identical for every client in a room. Read by ProjectileGuidanceSystem.
+ */
+export const MissileGuidanceResource =
+    new Resource<{ mode: MissileGuidanceMode }>('MissileGuidance');
 
 export function zeroOrderGuidance(position: Position, targetPosition: Position): Angle {
     // Point at the target
@@ -49,6 +90,24 @@ export function firstOrderWithFallback(position: Position, velocity: Vector,
     targetPosition: Position, targetVelocity: Vector, shotSpeed: number): Angle {
     const solutions = firstOrderGuidance(position, velocity, targetPosition, targetVelocity, shotSpeed);
     return solutions[0] ?? zeroOrderGuidance(position, targetPosition);
+}
+
+/**
+ * Pure guidance dispatch used by ProjectileGuidanceSystem. Picks the angle a
+ * guided missile should aim at based on the room's MissileGuidanceMode.
+ *
+ * - `smart`: leads the target (firstOrder, intercept solution).
+ * - `simple`: points straight at the target's current position (zeroOrder),
+ *   no leading, so the missile is dodgeable by circling.
+ */
+export function guidanceAngle(mode: MissileGuidanceMode, position: Position,
+    velocity: Vector, targetPosition: Position, targetVelocity: Vector,
+    shotSpeed: number): Angle {
+    if (mode === MissileGuidanceMode.simple) {
+        return zeroOrderGuidance(position, targetPosition);
+    }
+    return firstOrderWithFallback(position, velocity, targetPosition,
+        targetVelocity, shotSpeed);
 }
 
 export const GuidanceComponent = new Component<{
