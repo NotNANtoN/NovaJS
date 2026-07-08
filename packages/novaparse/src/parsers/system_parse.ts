@@ -64,6 +64,7 @@ export async function SystemParse(syst: SystResource, notFoundFunction: (m: stri
         murk: syst.murk,
         interference: syst.interference,
         backgroundColor: syst.backgroundColor,
+        visibility: syst.visibility,
     }
 
 }

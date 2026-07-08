@@ -4,6 +4,7 @@ import { Observable } from "rxjs";
 import { DisplayAssetDataInterface } from "../client/gamedata/display_asset_data.js";
 import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
 import { ControlEvent } from "../nova_plugin/controls_plugin.js";
+import { evaluateNCBTest } from "../nova_plugin/ncb.js";
 import { Button } from "./button.js";
 import { Menu } from "./menu.js";
 import { MenuControls } from "./menu_controls.js";
@@ -11,12 +12,8 @@ import { MenuControls } from "./menu_controls.js";
 
 const GREY = 0x666666;
 const BLUE = 0x0000BB;
-const SYSTEM_TEXT = new PIXI.TextStyle({
-    fontFamily: 'Geneva',
-    fontSize: 10,
-    align: 'left',
-    fill: 0xffffff,
-});
+const LABEL_FONT_NAME = 'StarmapSystemLabel';
+const LABEL_FONT_SIZE = 10;
 
 // The scale at which system positions are laid out. Zoom is applied on top of
 // this as a transform on the map container, so systems are only drawn once.
@@ -27,8 +24,64 @@ const MAX_ZOOM = 4;
 const ZOOM_STEP = 1.15;
 // How far the arrow keys pan per press, in screen pixels.
 const KEY_PAN_STEP = 40;
+// Radius of a system's outer circle in laid-out coordinates.
+const SYSTEM_RADIUS = 2.7 * BASE_SCALE;
+// How close (in screen pixels) a click must be to a system to select it.
+const CLICK_RADIUS = 12;
 
-function drawSystem(system: SystemData, graphics: PIXI.Graphics) {
+// Rendering every system name as its own PIXI.Text gives each label a
+// distinct texture, which overwhelms the renderer's texture batching (the map
+// dropped to ~4 FPS with 631 labels). A shared bitmap font lets all labels
+// batch into a single draw call, and generating the glyph atlas once up front
+// avoids the multi-hundred-ms rasterization hitch (which stalled the main
+// thread long enough to desync the simulation) the first time the map
+// rendered.
+function installLabelFont(systems: SystemData[]) {
+    const chars = new Set<string>([' ']);
+    for (const system of systems) {
+        for (const char of system.name) {
+            chars.add(char);
+        }
+    }
+    if (PIXI.BitmapFont.available[LABEL_FONT_NAME]) {
+        PIXI.BitmapFont.uninstall(LABEL_FONT_NAME);
+    }
+    PIXI.BitmapFont.from(LABEL_FONT_NAME, {
+        fontFamily: 'Geneva',
+        fontSize: LABEL_FONT_SIZE,
+        fill: 0xffffff,
+    }, {
+        chars: [...chars],
+        // Rasterize at double size so labels stay reasonably crisp when the
+        // map is zoomed in.
+        resolution: 2,
+    });
+}
+
+/**
+ * Whether a system exists for the player according to its visibility NCB
+ * test. Nova swaps between alternate copies of a system (stacked at the same
+ * map position) by giving each a different visibility expression, e.g. the
+ * four Sols at (0,0). The map currently evaluates against an empty control
+ * bit set, which matches a brand-new pilot: the starter chär (nova:128) sets
+ * no bits. Once per-player NCB state exists (with mission support), this
+ * should use the player's actual bits instead.
+ */
+function systemVisible(system: SystemData): boolean {
+    try {
+        return evaluateNCBTest(system.visibility ?? '', {
+            getBit: () => false,
+        });
+    } catch (e) {
+        // Show systems with malformed visibility expressions rather than
+        // hiding parts of the map.
+        console.warn(`Bad visibility NCB test for ${system.id}: ${e}`);
+        return true;
+    }
+}
+
+function drawSystem(system: SystemData, graphics: PIXI.Graphics,
+    x: number, y: number) {
     // Use blue if the system has a planet. Otherwise, grey.
     // TODO: Check if the planet is inhabited.
     const inhabited = system.planets.length > 0;
@@ -36,9 +89,9 @@ function drawSystem(system: SystemData, graphics: PIXI.Graphics) {
     const inColor = inhabited ? 0x000044 : 0x000000;
     graphics.lineStyle(1, outColor);
     graphics.beginFill(outColor)
-    graphics.drawCircle(0, 0, 2.7 * BASE_SCALE);
+    graphics.drawCircle(x, y, SYSTEM_RADIUS);
     graphics.beginFill(inColor);
-    graphics.drawCircle(0, 0, 1.8 * BASE_SCALE);
+    graphics.drawCircle(x, y, 1.8 * BASE_SCALE);
     graphics.endFill();
 }
 
@@ -58,12 +111,16 @@ class SystemGraph {
         // Pointer position (screen space) at the previous move event.
         last: PIXI.Point,
     }
-    // Whether the most recent pointer gesture moved the map, so a system's tap
+    // Whether the most recent pointer gesture moved the map, so the tap
     // handler can tell a click apart from the end of a pan.
     private draggedSinceDown = false;
     private wrappedRoute: string[] = [];
     private routes: Map<string, string[]>;
-    private systemCircles: Map<string, [PIXI.Container, PIXI.Graphics]>;
+    // One representative system per map position, used for drawing circles and
+    // labels and for resolving clicks. Nova swaps between multiple copies of a
+    // system (at the same coordinates) with NCBs, so several systems can be
+    // stacked on one spot; only one of them should respond to the map.
+    private clickTargets: { system: SystemData, x: number, y: number }[];
     private mapContainer: PIXI.Container;
     private maskedContainer: PIXI.Container;
     // Bounding box of all systems in laid-out (BASE_SCALE) coordinates.
@@ -71,8 +128,15 @@ class SystemGraph {
 
     constructor(systems: SystemData[], private currentSystem: string,
         private size = { x: 456, y: 419 }) {
-        this.systems = new Map(systems.map(s => [s.id, s]));
+        // NCB-hidden systems don't exist for the player: they aren't drawn,
+        // clicked, linked, or routed through. The current system is always
+        // kept so the map stays usable even if the player is somewhere the
+        // visibility data says shouldn't exist.
+        const visibleSystems = systems.filter(
+            s => s.id === currentSystem || systemVisible(s));
+        this.systems = new Map(visibleSystems.map(s => [s.id, s]));
         this.routes = this.computeShortestPaths();
+        this.clickTargets = this.pickRepresentativeSystems(visibleSystems);
 
         this.linkGraphics = new PIXI.Graphics();
         this.routeGraphics = new PIXI.Graphics();
@@ -92,10 +156,15 @@ class SystemGraph {
         this.maskedContainer.addChild(this.mapContainer);
         this.container.addChild(this.maskedContainer);
 
-        // Capture pointer and wheel events over the whole map area (including
-        // the gaps between systems) so panning and zooming work anywhere.
+        // Capture pointer and wheel events over the whole map area. Clicks on
+        // systems are resolved manually in onTap by finding the nearest system
+        // to the pointer: with one interactive object instead of hundreds, the
+        // event system stays fast, and a label drawn over a neighboring system
+        // (e.g. Murasaki's label over Fomalhaut) can't swallow that system's
+        // clicks like per-circle hit-testing allowed.
         this.container.eventMode = 'static';
         this.container.hitArea = new PIXI.Rectangle(0, 0, size.x, size.y);
+        this.container.cursor = 'pointer';
         const onDragStart = this.onDragStart.bind(this);
         const onDragMove = this.onDragMove.bind(this);
         const onDragEnd = this.onDragEnd.bind(this);
@@ -104,41 +173,66 @@ class SystemGraph {
             .on('pointerup', onDragEnd)
             .on('pointerupoutside', onDragEnd)
             .on('pointermove', onDragMove)
+            .on('pointertap', this.onTap.bind(this))
             .on('wheel', this.onWheel.bind(this));
 
         this.links = [...this.getUniqueLinks()];
 
-        this.systemCircles = new Map(systems.map(s => {
-            const graphics = new PIXI.Graphics();
-            drawSystem(s, graphics);
-            const container = new PIXI.Container();
-            const circleContainer = new PIXI.Container();
-            container.addChild(circleContainer);
-            circleContainer.eventMode = 'static';
-            circleContainer.cursor = 'pointer';
-            circleContainer.on('pointertap', () => {
-                // Ignore taps that were actually the end of a drag.
-                if (!this.draggedSinceDown) {
-                    this.onClickSystem(s.id);
-                }
+        // All circles are baked into a single Graphics and all labels share
+        // one bitmap font texture, so drawing the whole galaxy takes a couple
+        // of draw calls instead of ~1300 display objects with distinct
+        // textures. Pan and zoom are transforms on mapContainer, so nothing
+        // here is ever redrawn per frame.
+        installLabelFont(this.clickTargets.map(t => t.system));
+        const circleGraphics = new PIXI.Graphics();
+        const labelContainer = new PIXI.Container();
+        for (const { system, x, y } of this.clickTargets) {
+            drawSystem(system, circleGraphics, x, y);
+            const label = new PIXI.BitmapText(system.name, {
+                fontName: LABEL_FONT_NAME,
+                fontSize: LABEL_FONT_SIZE,
             });
-            circleContainer.addChild(graphics);
-
-            const nameText = new PIXI.Text(s.name, SYSTEM_TEXT);
-            nameText.position.x = 10;
-            nameText.anchor.y = 0.5;
-            container.addChild(nameText);
-
-            container.position.set(...this.scalePos(s.position));
-            this.mapContainer.addChild(container);
-            return [s.id, [container, graphics]]
-        }));
+            label.position.set(x + 10, y);
+            label.anchor.set(0, 0.5);
+            labelContainer.addChild(label);
+        }
+        this.mapContainer.addChild(circleGraphics);
+        this.mapContainer.addChild(labelContainer);
 
         this.worldBounds = this.computeWorldBounds();
 
         this.drawLinks();
         this.drawRoute();
         this.applyZoom();
+    }
+
+    /**
+     * Groups systems by map position and picks the one the map should show
+     * and select for each spot. NCB visibility filtering usually collapses a
+     * stack of swapped duplicates to a single system already; this handles
+     * spots where several systems remain (e.g. plugin systems with blank
+     * visibility stacked on stock ones) by preferring a system reachable from
+     * the current system, breaking ties by data order.
+     */
+    private pickRepresentativeSystems(systems: SystemData[]) {
+        const byPosition = new Map<string, SystemData>();
+        for (const system of systems) {
+            const key = `${system.position[0]},${system.position[1]}`;
+            const existing = byPosition.get(key);
+            if (!existing) {
+                byPosition.set(key, system);
+                continue;
+            }
+            // Keep the existing pick unless this one is reachable and the
+            // existing one isn't.
+            if (!this.routes.has(existing.id) && this.routes.has(system.id)) {
+                byPosition.set(key, system);
+            }
+        }
+        return [...byPosition.values()].map(system => {
+            const [x, y] = this.scalePos(system.position);
+            return { system, x, y };
+        });
     }
 
     /** Centers the current system in the viewport at the current zoom. */
@@ -252,6 +346,43 @@ class SystemGraph {
         const local = event.getLocalPosition(this.container);
         const factor = event.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
         this.zoomBy(factor, local.x, local.y);
+    }
+
+    private onTap(event: PIXI.FederatedPointerEvent) {
+        // Ignore taps that were actually the end of a drag.
+        if (this.draggedSinceDown) {
+            return;
+        }
+        const local = event.getLocalPosition(this.container);
+        const system = this.systemAt(local.x, local.y);
+        if (system) {
+            this.onClickSystem(system.id);
+        }
+    }
+
+    /**
+     * Finds the system nearest to a point in viewport coordinates, or
+     * undefined if none is within clicking distance.
+     */
+    private systemAt(viewX: number, viewY: number): SystemData | undefined {
+        const pos = this.mapContainer.position;
+        const worldX = (viewX - pos.x) / this.zoom;
+        const worldY = (viewY - pos.y) / this.zoom;
+        // Accept clicks within CLICK_RADIUS on screen, but never make the
+        // target smaller than the drawn circle.
+        const radius = Math.max(SYSTEM_RADIUS, CLICK_RADIUS / this.zoom);
+        let best: SystemData | undefined;
+        let bestDistSq = radius * radius;
+        for (const { system, x, y } of this.clickTargets) {
+            const dx = x - worldX;
+            const dy = y - worldY;
+            const distSq = dx * dx + dy * dy;
+            if (distSq <= bestDistSq) {
+                best = system;
+                bestDistSq = distSq;
+            }
+        }
+        return best;
     }
 
     private onClickSystem(system: string) {
