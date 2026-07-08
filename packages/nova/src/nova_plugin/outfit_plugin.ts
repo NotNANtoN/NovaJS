@@ -34,7 +34,13 @@ export function applyOutfitPhysics(basePhysics: ShipPhysics,
                 const key = uncast as keyof OutfitPhysics;
                 if (basePhysics.hasOwnProperty(key)) {
                     if (typeof val === 'number') {
-                        (basePhysics[key] as number) += val * count;
+                        if (key === 'freeMass') {
+                            // An outfit's freeMass is the space it
+                            // occupies, so it consumes the ship's.
+                            basePhysics.freeMass -= val * count;
+                        } else {
+                            (basePhysics[key] as number) += val * count;
+                        }
                     }
                 }
             }
