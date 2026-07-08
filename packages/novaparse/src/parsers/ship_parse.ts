@@ -5,7 +5,7 @@ import { ShipData, ShipPhysics } from "novadatainterface/ship_data";
 import { NovaResources } from "../resource_parsers/resource_holder_base.js";
 import { ShipResource } from "../resource_parsers/ship_resource.js";
 import { BaseParse } from "./base_parse.js";
-import { FPS, ShipTurnRateConversionFactor } from "./constants.js";
+import { FPS, ShipAccelerationConversionFactor, ShipSpeedConversionFactor, ShipTurnRateConversionFactor } from "./constants.js";
 import { ShanParse } from "./shan_parse.js";
 
 
@@ -167,8 +167,8 @@ export async function ShipParse(ship: ShipResource,
         energyRecharge: FPS / ship.energyRecharge, // Frames per unit -> units per second
         ionization: ship.ionization,
         deionize: ship.deionize / 100 * FPS, // 100 is 1 point of ion energy per 1/30th of a second (evn bible)
-        speed: ship.speed, // TODO: Figure out the correct scaling factor for these
-        acceleration: ship.acceleration,
+        speed: ship.speed * ShipSpeedConversionFactor,
+        acceleration: ship.acceleration * ShipAccelerationConversionFactor,
         turnRate: ship.turnRate * ShipTurnRateConversionFactor,
         inertialess: Boolean(ship.flags2N & 0x40),
         mass: ship.mass,

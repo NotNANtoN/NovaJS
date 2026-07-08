@@ -3,7 +3,7 @@ import { BaseData } from "novadatainterface/base_data";
 import { BaseParse } from "./base_parse.js";
 import { OutfitData, OutfitPhysics } from "novadatainterface/outfit_data";
 import { getDefaultPictData } from "novadatainterface/pict_data";
-import { FPS, OutfitTurnRateConversionFactor, ShipTurnRateConversionFactor } from "./constants.js";
+import { FPS, OutfitTurnRateConversionFactor, ShipAccelerationConversionFactor, ShipSpeedConversionFactor, ShipTurnRateConversionFactor } from "./constants.js";
 
 
 // This should not be necessary!
@@ -79,12 +79,12 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
             if (typeof fVal !== "number") {
                 throw new Error("Wrong type. Expected number");
             }
-            physics[fType] = fVal;
+            physics[fType] = fVal * ShipSpeedConversionFactor;
         } else if (fType === "acceleration") {
             if (typeof fVal !== "number") {
                 throw new Error("Wrong type. Expected number");
             }
-            physics[fType] = fVal;
+            physics[fType] = fVal * ShipAccelerationConversionFactor;
         }
         else {
             //throw new Error("Unknown outfit function " + fType + " on outfit " + base.id);
