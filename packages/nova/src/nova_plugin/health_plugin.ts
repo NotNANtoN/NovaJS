@@ -11,8 +11,12 @@ import { applyStatDelta, getStatDelta, PartialStat, stat, Stat } from "./stat.js
 export const ShieldComponent = new Component<Stat>('Shield');
 export const ArmorComponent = new Component<Stat>('Armor');
 export const IonizationComponent = new Component<Stat>('Ionization');
+// Fuel isn't health, but it recharges and is serialized exactly like
+// the health stats (100 units = 1 hyperspace jump).
+export const FuelComponent = new Component<Stat>('Fuel');
 
-const healthStats = [ShieldComponent, ArmorComponent, IonizationComponent]
+const healthStats = [ShieldComponent, ArmorComponent, IonizationComponent,
+    FuelComponent]
     .map(statComponent => [statComponent, new System({
         name: `${statComponent.name}Recharge`,
         args: [statComponent, TimeResource] as const,
