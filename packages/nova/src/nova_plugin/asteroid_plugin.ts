@@ -80,8 +80,11 @@ const DEBRIS_MAX_SPEED = 80;
 export const DEBRIS_LIFETIME_MS = 15_000;
 /** Tumble rate of resource-boxes, rad/s. */
 const DEBRIS_SPIN = 2.5;
-/** Hurtbox radius of a resource-box (the sprites are 8x8). */
-const DEBRIS_RADIUS = 6;
+/**
+ * Hurtbox radius of a resource-box. Matches the rendered chunk: the
+ * röid's 50x50 sprite at the display's DEBRIS_SCALE (0.35) is ~17 px.
+ */
+const DEBRIS_RADIUS = 9;
 /** Hitbox radius fallback when an asteroid's sprite hull is unknown. */
 const DEFAULT_ASTEROID_RADIUS = 20;
 
