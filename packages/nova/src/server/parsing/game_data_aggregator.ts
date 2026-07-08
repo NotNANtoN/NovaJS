@@ -1,3 +1,4 @@
+import { AsteroidData } from "novadatainterface/asteroid_data";
 import { GameDataInterface, PreloadData } from "novadatainterface/game_data_interface";
 import { NovaDataInterface, NovaDataType } from "novadatainterface/nova_data_interface";
 import { Gettable, GettableData } from "novadatainterface/gettable";
@@ -37,6 +38,7 @@ class GameDataAggregator implements GameDataInterface {
 
         // Is there a better way?
         this.data = {
+            Asteroid: this.makeAggregator<AsteroidData>(NovaDataType.Asteroid),
             Ship: this.makeAggregator<ShipData>(NovaDataType.Ship),
             Outfit: this.makeAggregator<OutfitData>(NovaDataType.Outfit),
             Weapon: this.makeAggregator<WeaponData>(NovaDataType.Weapon),

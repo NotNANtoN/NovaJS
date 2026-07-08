@@ -27,17 +27,21 @@ describe("SimulationBridge worker integration", () => {
 
         const client = makeWorkerThreadSimulationBridgeClient(worker, serializer);
         try {
-            // Planets are loaded before the world ever steps, so the
-            // initial frame already contains them.
+            // Planets and the asteroid field are loaded before the
+            // world ever steps, so the initial frame already contains
+            // them.
+            const isSystemFurniture = (uuid: string) =>
+                uuid.includes('planet') || uuid.startsWith('asteroid');
             const initialFrame = await client.snapshot();
             for (const [uuid] of initialFrame.added) {
-                expect(uuid).toContain('planet');
+                expect(isSystemFurniture(uuid)).withContext(uuid).toBeTrue();
             }
 
             await client.addEntity(harness.shipUuid, ship);
             await client.step();
             const addedFrame = await client.snapshot();
-            const addedShips = addedFrame.added.filter(([uuid]) => !uuid.includes('planet'));
+            const addedShips = addedFrame.added.filter(
+                ([uuid]) => !isSystemFurniture(uuid));
             expect(addedShips.length).toBe(1);
             expect(addedShips[0]?.[0]).toBe(harness.shipUuid);
             const decoded = client.decodeEntity(addedShips[0]![1]);

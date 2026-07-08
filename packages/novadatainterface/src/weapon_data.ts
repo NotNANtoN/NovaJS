@@ -167,6 +167,8 @@ export interface NotBayWeaponData extends BaseWeaponData {
     blastHurtsFiringShip: boolean,
     detonateWhenShotExpires: boolean,
     damageType: DamageType; // Should this be a set?
+    /** "Asteroid miner" flag: does 10x mass damage to asteroids. */
+    asteroidMiner: boolean;
 }
 
 export function getDefaultNotBayWeaponData(): NotBayWeaponData {
@@ -189,6 +191,7 @@ export function getDefaultNotBayWeaponData(): NotBayWeaponData {
         blastHurtsFiringShip: false,
         detonateWhenShotExpires: false,
         damageType: "normal",
+        asteroidMiner: false,
     }
 }
 

@@ -160,6 +160,14 @@ export class Angle implements AngleLike {
 
     // Returns a number in [-pi, pi)
     private static mod(val: number) {
+        // Fast path, load-bearing for determinism: values already in
+        // range pass through bit-exactly. Without it, re-normalizing
+        // (e.g. when a snapshot codec roundtrip reconstructs an Angle)
+        // can perturb the value by an ulp, so a peer that rolled back
+        // and resimulated drifts from one that ran straight through.
+        if (val >= -Math.PI && val < Math.PI) {
+            return val;
+        }
         val = ((val % TWO_PI) + TWO_PI) % TWO_PI;
         if (val >= Math.PI) {
             val -= TWO_PI;

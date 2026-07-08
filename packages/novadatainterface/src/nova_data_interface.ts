@@ -1,3 +1,4 @@
+import { AsteroidData } from "./asteroid_data.js";
 import { CicnData } from "./cicn_data.js";
 import { CicnImageData } from "./cicn_image.js";
 import { ExplosionData } from "./explosion_data.js";
@@ -17,6 +18,7 @@ import { WeaponData } from "./weapon_data.js";
 
 
 enum NovaDataType {
+    Asteroid = "Asteroid",
     Ship = "Ship",
     Outfit = "Outfit",
     Weapon = "Weapon",
@@ -38,6 +40,7 @@ enum NovaDataType {
 
 // index: NovaDataType
 type NovaDataInterface = {
+    Asteroid: Gettable<AsteroidData>,
     Ship: Gettable<ShipData>,
     Outfit: Gettable<OutfitData>,
     Weapon: Gettable<WeaponData>,

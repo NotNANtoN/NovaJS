@@ -4,7 +4,9 @@ import { MovementPlugin } from "nova_ecs/plugins/movement_plugin";
 import { TimePlugin } from "nova_ecs/plugins/time_plugin";
 import { AfterburnerPlugin } from "./afterburner_plugin.js";
 import { AnimationPlugin } from "./animation_plugin.js";
+import { AsteroidPlugin } from "./asteroid_plugin.js";
 import { BayPlugin } from "./bay_plugin.js";
+import { CargoPlugin } from "./cargo_plugin.js";
 import { BeamPlugin } from "./beam_plugin.js";
 import { BlastPlugin } from "./blast_plugin.js";
 import { CloakPlugin } from "./cloak_plugin.js";
@@ -65,5 +67,7 @@ export const SystemPlugin: Plugin = {
         world.addPlugin(IonizedPlugin);
         world.addPlugin(AfterburnerPlugin);
         world.addPlugin(BlastPlugin);
+        world.addPlugin(CargoPlugin);
+        world.addPlugin(AsteroidPlugin);
     }
 };

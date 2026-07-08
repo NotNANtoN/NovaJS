@@ -5,6 +5,7 @@ import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { DefaultMap } from "nova_ecs/utils";
 import { World } from "nova_ecs/world";
 import { AnimationComponent, ExplosionDataComponent } from "./animation_plugin.js";
+import { AsteroidDataComponent } from "./asteroid_plugin.js";
 import { BlastDamageComponent, BlastIgnoreComponent } from "./blast_data.js";
 import { BlastDoneComponent } from "./blast_plugin.js";
 import { CloakComponent, CloakScannerComponent } from "./cloak_plugin.js";
@@ -23,6 +24,7 @@ import { ExplodingComponent } from "./death_plugin.js";
 import { ChooseRandomTargetComponent, DeathAIComponent, FollowComponent, ShootAllWeaponsComponent } from "./npc_plugin.js";
 import { ReturnToQueueComponent } from "./return_to_queue_plugin.js";
 import { GuidanceComponent } from "./guidance.js";
+import { DecoyTargetComponent } from "./jamming_plugin.js";
 import { TargetIndexComponent } from "./target_plugin.js";
 import { ShipPhysicsComponent } from "./ship_plugin.js";
 import { SingletonComponent } from "nova_ecs/world";
@@ -68,6 +70,7 @@ export function configureSnapshotPolicies(world: World) {
     // ShipData per snapshot would dominate the cost.)
     policies.set(ShipDataComponent, { policy: 'share' });
     policies.set(PlanetDataComponent, { policy: 'share' });
+    policies.set(AsteroidDataComponent, { policy: 'share' });
     policies.set(ProjectileDataComponent, { policy: 'share' });
     policies.set(AnimationComponent, { policy: 'share' });
     policies.set(ExplosionDataComponent, { policy: 'share' });
@@ -95,6 +98,8 @@ export function configureSnapshotPolicies(world: World) {
     // Enum-valued; effectively immutable.
     policies.set(GuidanceComponent, { policy: 'share' });
     policies.set(SingletonComponent, { policy: 'share' });
+    // Static decoy weight (asteroids); never mutated.
+    policies.set(DecoyTargetComponent, { policy: 'share' });
 
     policies.set(TargetIndexComponent, {
         policy: 'clone',
@@ -165,6 +170,9 @@ export function configureSnapshotPolicies(world: World) {
     policies.setWire(ProjectileBlastHull, hullWire);
     // The queue is this world's own pool machinery.
     policies.setWireDerived(ReturnToQueueComponent);
+    // Static shared röid data; the restoring world re-derives it from
+    // AsteroidComponent (see AsteroidDataDeriver).
+    policies.setWireDerived(AsteroidDataComponent);
     // The restoring world's singleton already carries its marker.
     policies.setWireDerived(SingletonComponent);
 
@@ -173,6 +181,7 @@ export function configureSnapshotPolicies(world: World) {
     policies.setWire(SourceComponent, passthroughWire<string>());
     policies.setWire(BlastDamageComponent, passthroughWire());
     policies.setWire(GuidanceComponent, passthroughWire());
+    policies.setWire(DecoyTargetComponent, passthroughWire());
     policies.setWire(ExplodingComponent, passthroughWire<number>());
     policies.setWire(TargetIndexComponent, passthroughWire());
     policies.setWire(BlastDoneComponent, passthroughWire());

@@ -5,6 +5,15 @@ export interface SystemData extends BaseData {
     position: [number, number],
     links: Array<string>,
     planets: Array<string>,
+    /**
+     * How many asteroids to keep near the player at once (0-16). The
+     * original engine treats this as a per-screen density: that many
+     * asteroids always drift within the visible area, wrapping around
+     * its edges.
+     */
+    asteroids: number,
+    /** Global ids of the asteroid types that appear in this system. */
+    asteroidTypes: Array<string>,
 
     /**
      * How murky (hazy) the system is, from 0 to 100. Zero renders normally;
@@ -31,6 +40,8 @@ export function getDefaultSystemData(): SystemData {
         position: [0, 0],
         links: [],
         planets: [],
+        asteroids: 0,
+        asteroidTypes: [],
         murk: 0,
         interference: 0,
         backgroundColor: 0,

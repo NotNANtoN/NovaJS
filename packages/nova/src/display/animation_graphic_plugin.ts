@@ -11,6 +11,7 @@ import * as PIXI from "pixi.js";
 import { DisplayAssetDataResource } from "../nova_plugin/game_data_resource.js";
 import { currentIfDraft } from "../util/deimmerify.js";
 import { AnimationComponent } from "../nova_plugin/animation_plugin.js";
+import { AsteroidComponent, DebrisComponent } from "../nova_plugin/asteroid_plugin.js";
 import { PlanetComponent } from "../nova_plugin/planet_plugin.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 import { ProjectileComponent } from "../nova_plugin/projectile_data.js";
@@ -61,6 +62,10 @@ const AnimationGraphicLoader = ProvideAsync({
             graphic.container.zIndex = 9;
         } else if (entity.components.has(ShipComponent)) {
             graphic.container.zIndex = 8;
+        } else if (entity.components.has(AsteroidComponent)) {
+            graphic.container.zIndex = 7;
+        } else if (entity.components.has(DebrisComponent)) {
+            graphic.container.zIndex = 6;
         } else if (entity.components.has(PlanetComponent)) {
             graphic.container.zIndex = -10;
         }

@@ -6,6 +6,7 @@ export type NovaIDs = {
 
 export function getDefaultNovaIDs(): NovaIDs {
     return {
+        Asteroid: [],
         Explosion: [],
         Outfit: [],
         Pict: [],

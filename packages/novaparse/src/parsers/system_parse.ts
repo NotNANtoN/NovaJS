@@ -36,11 +36,31 @@ export async function SystemParse(syst: SystResource, notFoundFunction: (m: stri
     }
 
 
+    // Resolve the asteroid-type bitmask (bit 0 = röid 128) to global
+    // röid ids. Only meaningful when the system has asteroids.
+    const asteroidTypes: Array<string> = [];
+    if (syst.asteroids > 0) {
+        for (let bit = 0; bit < 16; bit++) {
+            if (!(syst.asteroidTypes & (1 << bit))) {
+                continue;
+            }
+            const roid = syst.idSpace.röid[128 + bit];
+            if (roid) {
+                asteroidTypes.push(roid.globalID);
+            } else {
+                notFoundFunction("Missing röid " + (128 + bit)
+                    + " for sÿst " + base.id);
+            }
+        }
+    }
+
     return {
         ...base,
         links,
         position: [syst.position[0], syst.position[1]],
         planets,
+        asteroids: syst.asteroids,
+        asteroidTypes,
         murk: syst.murk,
         interference: syst.interference,
         backgroundColor: syst.backgroundColor,

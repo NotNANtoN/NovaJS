@@ -24,6 +24,7 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
     var physics: OutfitPhysics = { freeMass: outf.mass };
     let ammoFor: string | null = null;
     let increasesMax: string | null = null;
+    let miningScoop = false;
     // Per-type jamming strength (IR, radar, etheric wake, gravimetric) from
     // ModTypes 33-36. Percentages, summed across the outfit's mod pairs.
     var jamming: [number, number, number, number] = [0, 0, 0, 0];
@@ -105,6 +106,9 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
                 throw new Error("Wrong type. Expected number");
             }
             physics.afterburner = fVal;
+        }
+        else if (fType === "mining scoop") {
+            miningScoop = true;
         }
         else if (noUnitConversion.has(fType)) {
             //else if (fType === "freeCargo") {
@@ -220,5 +224,6 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
         cantSell: (outf.flags & 0x8) > 0,
         ammoFor,
         increasesMax,
+        miningScoop,
     }
 }
