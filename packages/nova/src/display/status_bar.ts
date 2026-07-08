@@ -17,20 +17,20 @@ import * as PIXI from "pixi.js";
 import { Subject } from "rxjs";
 import { DisplayAssetDataInterface } from "../client/gamedata/display_asset_data.js";
 import { DisplayAssetDataResource, SimulationGameDataResource } from "../nova_plugin/game_data_resource.js";
-import { ArmorComponent, ShieldComponent } from "../nova_plugin/health_plugin.js";
+import { ArmorComponent, FuelComponent, FUEL_PER_JUMP, ShieldComponent } from "../nova_plugin/health_plugin.js";
+import { OutfitsStateComponent } from "../nova_plugin/outfit_plugin.js";
 import { PlanetDataComponent } from "../nova_plugin/planet_plugin.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 import { ShipDataComponent } from "../nova_plugin/ship_plugin.js";
 import { Stat } from "../nova_plugin/stat.js";
 import { TargetComponent } from "../nova_plugin/target_component.js";
-import { ActiveSecondaryWeapon, ChangeSecondaryEvent } from "../nova_plugin/weapon_plugin.js";
+import { ActiveSecondaryWeapon, countAmmo } from "../nova_plugin/weapon_plugin.js";
 import { Button } from "../spaceport/button.js";
 import { AnimationGraphic } from "./animation_graphic.js";
 import { AnimationGraphicComponent } from "./animation_graphic_plugin.js";
 import { PixiAppResource } from "./pixi_app_resource.js";
 import { ResizeEvent } from "./screen_size_plugin.js";
 import { Stage } from "./stage_resource.js";
-import { AsyncSystem } from "nova_ecs/async_system";
 
 
 class StatusBar {
@@ -217,7 +217,7 @@ class StatusBar {
         this.statsGraphics.lineTo(pos[0] + size[0] * fullness, pos[1]);
     }
 
-    drawStats(shield: Stat, armor: Stat) {
+    drawStats(shield: Stat, armor: Stat, fuel?: Stat) {
         this.statsGraphics.clear();
 
         const shieldFullness = Math.max(0, shield.current / shield.max);
@@ -227,12 +227,26 @@ class StatusBar {
         const armorFullness = Math.max(0, armor.current / armor.max);
         this.drawLine(this.statusBarData.dataAreas.armor,
             this.statusBarData.colors.armor, armorFullness);
+
+        if (fuel && fuel.max > 0) {
+            // Partial-jump fuel in the dim color, with the whole jumps'
+            // worth (100 units each) drawn over it in the full color.
+            const fuelFullness = Math.max(0, fuel.current / fuel.max);
+            this.drawLine(this.statusBarData.dataAreas.fuel,
+                this.statusBarData.colors.fuelPartial, fuelFullness);
+            const fullJumps = Math.max(0, Math.floor(
+                fuel.current / FUEL_PER_JUMP) * FUEL_PER_JUMP / fuel.max);
+            this.drawLine(this.statusBarData.dataAreas.fuel,
+                this.statusBarData.colors.fuelFull, fullJumps);
+        }
     }
 
+    private lastSecondary: string | null | undefined;
     drawSecondary(name: string | null | undefined) {
-        if (!this.built) {
+        if (!this.built || name === this.lastSecondary) {
             return;
         }
+        this.lastSecondary = name;
         if (name) {
             this.text.weapon.text = name;
             this.text.weapon.visible = true;
@@ -328,24 +342,36 @@ const DrawRadar = new System({
 
 const DrawStatusBarStats = new System({
     name: 'DrawStatusBarStats',
-    args: [StatusBarResource, ShieldComponent, ArmorComponent, PlayerShipSelector] as const,
-    step(statusBar, shield, armor) {
-        statusBar.drawStats(shield, armor);
+    args: [StatusBarResource, ShieldComponent, ArmorComponent,
+        Optional(FuelComponent), PlayerShipSelector] as const,
+    step(statusBar, shield, armor, fuel) {
+        statusBar.drawStats(shield, armor, fuel);
     }
 })
 
-const DrawStatusBarSecondaryWeapon = new AsyncSystem({
+// Runs every step (not just on ChangeSecondaryEvent) so the ammo count
+// updates as the weapon fires. drawSecondary ignores unchanged text.
+const DrawStatusBarSecondaryWeapon = new System({
     name: 'DrawStatusBarSecondaryWeapon',
-    events: [ChangeSecondaryEvent],
-    args: [StatusBarResource, ChangeSecondaryEvent, SimulationGameDataResource,
+    args: [StatusBarResource, ActiveSecondaryWeapon,
+        Optional(OutfitsStateComponent), SimulationGameDataResource,
         PlayerShipSelector] as const,
-    async step(statusBar, activeSecondary, gameData) {
-        if (activeSecondary.secondary) {
-            const secondaryName = await gameData.data.Weapon
-                .get(activeSecondary.secondary);
-            statusBar.drawSecondary(secondaryName?.name);
-        } else {
+    step(statusBar, activeSecondary, outfits, gameData) {
+        if (!activeSecondary.secondary) {
             statusBar.drawSecondary(null);
+            return;
+        }
+        const weapon = gameData.data.Weapon.getCached(activeSecondary.secondary);
+        if (!weapon) {
+            // Not cached yet; getCached kicked off the load.
+            return;
+        }
+        const { ammoType } = weapon;
+        if (outfits && ammoType instanceof Array && ammoType[0] === 'weapon') {
+            statusBar.drawSecondary(
+                `${weapon.name} (${countAmmo(ammoType[1], outfits, gameData)})`);
+        } else {
+            statusBar.drawSecondary(weapon.name);
         }
     }
 });

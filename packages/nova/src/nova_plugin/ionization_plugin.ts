@@ -4,14 +4,16 @@ import { Component } from "nova_ecs/component";
 import { EcsEvent } from "nova_ecs/events";
 import { Optional } from "nova_ecs/optional";
 import { Plugin } from "nova_ecs/plugin";
-import { MovementPhysicsComponent } from "nova_ecs/plugins/movement_plugin";
 import { SerializerResource } from "nova_ecs/plugins/serializer_plugin";
 import { System } from "nova_ecs/system";
 import { IonizationComponent } from "./health_plugin.js";
-import { getShipMovementPhysics, ShipPhysicsComponent } from "./ship_plugin.js";
 
 
-const ION_FACTOR = 0.6
+/**
+ * How much ionization slows a ship. Applied to movement physics by the
+ * EffectiveMovementPhysicsSystem in afterburner_plugin.ts.
+ */
+export const ION_FACTOR = 0.6
 
 export const IonizedEvent = new EcsEvent<boolean>('IonizedEvent');
 export const IsIonizedComponent = new Component<boolean>('IsIonizedComponent');
@@ -30,30 +32,13 @@ const IonizedSystem = new System({
     }
 });
 
-const IonizationSlownessSystem = new System({
-    name: 'IonizationSLownessSystem',
-    events: [IonizedEvent],
-    args: [IonizedEvent, ShipPhysicsComponent, GetEntity] as const,
-    step(ionized, shipPhysics, entity) {
-        const movement = getShipMovementPhysics(shipPhysics);
-        if (ionized) {
-            movement.maxVelocity *= ION_FACTOR;
-            movement.acceleration *= ION_FACTOR;
-            movement.turnRate *= ION_FACTOR;
-        }
-        entity.components.set(MovementPhysicsComponent, movement);
-    }
-});
-
 export const IonizedPlugin: Plugin = {
     name: 'IonizedPlugin',
     build(world) {
         world.resources.get(SerializerResource)?.addComponent(IsIonizedComponent, t.boolean);
-        world.addSystem(IonizedSystem)
-            .addSystem(IonizationSlownessSystem);
+        world.addSystem(IonizedSystem);
     },
     remove(world) {
-        world.removeSystem(IonizedSystem)
-            .removeSystem(IonizationSlownessSystem);
+        world.removeSystem(IonizedSystem);
     },
 }

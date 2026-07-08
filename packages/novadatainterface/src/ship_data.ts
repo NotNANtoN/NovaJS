@@ -14,6 +14,9 @@ export interface ShipPhysics extends SpaceObjectPhysics {
     // Change to the no-jump zone's radius in pixels ("hyperspace dist
     // mod" outfits, ModType 23; the standard radius is 1000).
     jumpDistanceMod: number;
+    // Fuel burned per second while the afterburner is engaged.
+    // 0 means the ship has no afterburner.
+    afterburner: number;
 }
 
 export function getDefaultShipPhysics(): ShipPhysics {
@@ -24,6 +27,7 @@ export function getDefaultShipPhysics(): ShipPhysics {
         jumpSpeedMult: 1,
         canJumpWithoutSlowing: false,
         jumpDistanceMod: 0,
+        afterburner: 0,
     }
 }
 
