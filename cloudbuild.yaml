@@ -1,7 +1,10 @@
 steps:
-  - name: 'gcr.io/cloud-builders/bazel@sha256:771cbcd1d990c1f268bd1a54013252ade4cf6af4ae2bfe1d37fd7e8710e50b08'
-    id: unittest
-    args: ['test', '--config=ci', '--google_default_credentials', '...']
+  - name: node:22
+    entrypoint: npm
+    args: ['ci']
+  - name: node:22
+    entrypoint: npx
+    args: ['turbo', 'run', 'test']
 
 timeout: 900s
 options:

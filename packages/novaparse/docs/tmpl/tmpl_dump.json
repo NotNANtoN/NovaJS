@@ -1,0 +1,7404 @@
+{
+ "bööm": {
+  "id": 500,
+  "fields": [
+   {
+    "label": "Animation Speed\n100 = 30 frames per second",
+    "type": "DWRD"
+   },
+   {
+    "label": "Sound Index='snd ' 300+63",
+    "type": "RSID"
+   },
+   {
+    "label": "-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Graphic Index='spn' 400+63",
+    "type": "RSID"
+   }
+  ]
+ },
+ "chär": {
+  "id": 501,
+  "fields": [
+   {
+    "label": "Starting Credits",
+    "type": "DLNG"
+   },
+   {
+    "label": "Starting Ship='shp'",
+    "type": "RSID"
+   },
+   {
+    "label": "4",
+    "type": "FCNT"
+   },
+   {
+    "label": "Starting Systems",
+    "type": "LSTC"
+   },
+   {
+    "label": "Starting System='sØst'",
+    "type": "RSID"
+   },
+   {
+    "label": "-1",
+    "type": "CASE"
+   },
+   {
+    "label": "",
+    "type": "LSTE"
+   },
+   {
+    "label": "Initial legal statuses for govts (and allies). Applies negative value to govtÕs enemies.",
+    "type": "DVDR"
+   },
+   {
+    "label": "Initial Statuses",
+    "type": "R004"
+   },
+   {
+    "label": "*) Initial Govt Status='gvt',status",
+    "type": "PACK"
+   },
+   {
+    "label": "Govts",
+    "type": "R004"
+   },
+   {
+    "label": "'gvt'=-1",
+    "type": "RSID"
+   },
+   {
+    "label": "Statuses",
+    "type": "R004"
+   },
+   {
+    "label": "status",
+    "type": "DWRD"
+   },
+   {
+    "label": "Combat Rating",
+    "type": "DWRD"
+   },
+   {
+    "label": "Intros",
+    "type": "R004"
+   },
+   {
+    "label": "*) Intro Picture, Time='PICT',delay\nseconds",
+    "type": "PACK"
+   },
+   {
+    "label": "Picts",
+    "type": "R004"
+   },
+   {
+    "label": "'PICT'=-1",
+    "type": "RSID"
+   },
+   {
+    "label": "Delays",
+    "type": "R004"
+   },
+   {
+    "label": "delay",
+    "type": "DWRD"
+   },
+   {
+    "label": "Intro Text='dsc'",
+    "type": "RSID"
+   },
+   {
+    "label": "-1",
+    "type": "CASE"
+   },
+   {
+    "label": "OnStart (NCB Set)",
+    "type": "n100"
+   },
+   {
+    "label": "Flags",
+    "type": "WORV"
+   },
+   {
+    "label": "Default character=0x0001",
+    "type": "CASE"
+   },
+   {
+    "label": "Starting Day\n1-31",
+    "type": "DWRD"
+   },
+   {
+    "label": "Starting Month\n1-12",
+    "type": "DWRD"
+   },
+   {
+    "label": "Starting Year",
+    "type": "DWRD"
+   },
+   {
+    "label": "Date Prefix",
+    "type": "C010"
+   },
+   {
+    "label": "Date Suffix",
+    "type": "C010"
+   },
+   {
+    "label": "Unused",
+    "type": "F010"
+   }
+  ]
+ },
+ "cölr": {
+  "id": 502,
+  "fields": [
+   {
+    "label": "Button Up",
+    "type": "LCOL"
+   },
+   {
+    "label": "Button Down",
+    "type": "LCOL"
+   },
+   {
+    "label": "Button Disabled",
+    "type": "LCOL"
+   },
+   {
+    "label": "Menu Font",
+    "type": "C040"
+   },
+   {
+    "label": "Menu Font Size",
+    "type": "DWRD"
+   },
+   {
+    "label": "Menu Bright Color",
+    "type": "LCOL"
+   },
+   {
+    "label": "Menu Dim Color",
+    "type": "LCOL"
+   },
+   {
+    "label": "Ship/Outfit Grid Bright",
+    "type": "LCOL"
+   },
+   {
+    "label": "Ship/Outfit Grid Dim",
+    "type": "LCOL"
+   },
+   {
+    "label": "Progress Bar Position",
+    "type": "RECT"
+   },
+   {
+    "label": "Progress Bar Bright",
+    "type": "LCOL"
+   },
+   {
+    "label": "Progress Bar Dim",
+    "type": "LCOL"
+   },
+   {
+    "label": "Progess Bar Outline",
+    "type": "LCOL"
+   },
+   {
+    "label": "Buttons",
+    "type": "R006"
+   },
+   {
+    "label": "Menu Button *",
+    "type": "PNT "
+   },
+   {
+    "label": "Floating Map Border",
+    "type": "LCOL"
+   },
+   {
+    "label": "List Text",
+    "type": "LCOL"
+   },
+   {
+    "label": "List Background",
+    "type": "LCOL"
+   },
+   {
+    "label": "List Highlight",
+    "type": "LCOL"
+   },
+   {
+    "label": "Escort Highlight",
+    "type": "LCOL"
+   },
+   {
+    "label": "Button Font",
+    "type": "C040"
+   },
+   {
+    "label": "Button Font Size",
+    "type": "DWRD"
+   },
+   {
+    "label": "Logo Position",
+    "type": "PNT "
+   },
+   {
+    "label": "Rollover Position",
+    "type": "PNT "
+   },
+   {
+    "label": "Slide 1",
+    "type": "PNT "
+   },
+   {
+    "label": "Slide 2",
+    "type": "PNT "
+   },
+   {
+    "label": "Slide 3",
+    "type": "PNT "
+   }
+  ]
+ },
+ "crön": {
+  "id": 503,
+  "fields": [
+   {
+    "label": "First Available D/M/Y=firstDay,firstMonth,firstYear\n0 = any",
+    "type": "PACK"
+   },
+   {
+    "label": "firstDay",
+    "type": "DWRD"
+   },
+   {
+    "label": "firstMonth",
+    "type": "DWRD"
+   },
+   {
+    "label": "firstYear",
+    "type": "DWRD"
+   },
+   {
+    "label": "Last Available D/M/Y=lastDay,lastMonth,lastYear\n0 = any",
+    "type": "PACK"
+   },
+   {
+    "label": "lastDay",
+    "type": "DWRD"
+   },
+   {
+    "label": "lastMonth",
+    "type": "DWRD"
+   },
+   {
+    "label": "lastYear",
+    "type": "DWRD"
+   },
+   {
+    "label": "Available Random\n%",
+    "type": "DWRD"
+   },
+   {
+    "label": "Duration\ndays",
+    "type": "DWRD"
+   },
+   {
+    "label": "Pre-Holdoff\ndays",
+    "type": "DWRD"
+   },
+   {
+    "label": "Post-Holdoff\ndays",
+    "type": "DWRD"
+   },
+   {
+    "label": "Independent News STR#='STR#'",
+    "type": "RSID"
+   },
+   {
+    "label": "-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Govt News",
+    "type": "R004"
+   },
+   {
+    "label": "*) Govt News STR#='gvt','STR#'",
+    "type": "PACK"
+   },
+   {
+    "label": "Flags",
+    "type": "WORV"
+   },
+   {
+    "label": "Loop OnStart until conditions are false=0x0001",
+    "type": "CASE"
+   },
+   {
+    "label": "Loop OnEnd until conditions are false=0x0002",
+    "type": "CASE"
+   },
+   {
+    "label": "EnableOn (NCB Test)",
+    "type": "n0FF"
+   },
+   {
+    "label": "OnStart (NCB Set)",
+    "type": "n0FF"
+   },
+   {
+    "label": "OnEnd (NCB Set)",
+    "type": "n100"
+   },
+   {
+    "label": "Contribute/Require=contribute,require",
+    "type": "PACK"
+   },
+   {
+    "label": "contribute=#-100",
+    "type": "QB64"
+   },
+   {
+    "label": "require=#-100",
+    "type": "QB64"
+   },
+   {
+    "label": "Govts",
+    "type": "R004"
+   },
+   {
+    "label": "'gvt'=-1",
+    "type": "RSID"
+   },
+   {
+    "label": "News",
+    "type": "R004"
+   },
+   {
+    "label": "'STR#'=-1",
+    "type": "RSID"
+   }
+  ]
+ },
+ "dësc": {
+  "id": 504,
+  "fields": [
+   {
+    "label": "Description",
+    "type": "CSTR"
+   },
+   {
+    "label": "Graphic='PICT'",
+    "type": "RSID"
+   },
+   {
+    "label": "-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Movie Filename",
+    "type": "C020"
+   },
+   {
+    "label": "Flags",
+    "type": "WORV"
+   },
+   {
+    "label": "Show movie after description instead of before=0x0001",
+    "type": "CASE"
+   },
+   {
+    "label": "Show movie in double size=0x0002",
+    "type": "CASE"
+   },
+   {
+    "label": "Cinematic - blank background and fade screen=0x0004",
+    "type": "CASE"
+   }
+  ]
+ },
+ "düde": {
+  "id": 505,
+  "fields": [
+   {
+    "label": "AI Type",
+    "type": "DWRD"
+   },
+   {
+    "label": "Wimpy Trader=1",
+    "type": "CASR"
+   },
+   {
+    "label": "Brave Trader=2",
+    "type": "CASR"
+   },
+   {
+    "label": "Warship=3",
+    "type": "CASR"
+   },
+   {
+    "label": "Interceptor=4",
+    "type": "CASR"
+   },
+   {
+    "label": "Obedience Govt='gvt'",
+    "type": "RSID"
+   },
+   {
+    "label": "Independent=-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Flags",
+    "type": "WORV"
+   },
+   {
+    "label": "Carries Food=0x0001",
+    "type": "CASE"
+   },
+   {
+    "label": "Carries Industrial Goods=0x0002",
+    "type": "CASE"
+   },
+   {
+    "label": "Carries Medical Supplies=0x0004",
+    "type": "CASE"
+   },
+   {
+    "label": "Carries Luxury Goods=0x0008",
+    "type": "CASE"
+   },
+   {
+    "label": "Carries Metal=0x0010",
+    "type": "CASE"
+   },
+   {
+    "label": "Carries Equipment=0x0020",
+    "type": "CASE"
+   },
+   {
+    "label": "Carries money=0x0040",
+    "type": "CASE"
+   },
+   {
+    "label": "CanÕt hit or be hit by player=0x0100",
+    "type": "CASE"
+   },
+   {
+    "label": "InfoTypes=Generic govt hail messages",
+    "type": "WBIT"
+   },
+   {
+    "label": "=Specific Advice (see below)",
+    "type": "WBIT"
+   },
+   {
+    "label": "=Disaster info",
+    "type": "WBIT"
+   },
+   {
+    "label": "=Good prices",
+    "type": "WBIT"
+   },
+   {
+    "label": "Specific Advice STR#",
+    "type": "WB12"
+   },
+   {
+    "label": "=0..499 ~7500 'STR#'",
+    "type": "CASR"
+   },
+   {
+    "label": "Ships Probabilities",
+    "type": "R010"
+   },
+   {
+    "label": "*) Ship Probability='shp',prob\n%",
+    "type": "PACK"
+   },
+   {
+    "label": "Ships",
+    "type": "R010"
+   },
+   {
+    "label": "'shp'=-1",
+    "type": "RSID"
+   },
+   {
+    "label": "Probs",
+    "type": "R010"
+   },
+   {
+    "label": "prob",
+    "type": "DWRD"
+   },
+   {
+    "label": "Unused",
+    "type": "F010"
+   }
+  ]
+ },
+ "flët": {
+  "id": 506,
+  "fields": [
+   {
+    "label": "Lead Ship='shp'",
+    "type": "RSID"
+   },
+   {
+    "label": "Escorts",
+    "type": "R004"
+   },
+   {
+    "label": "*) Escort, Min, Max='shp',min,max",
+    "type": "PACK"
+   },
+   {
+    "label": "Ships",
+    "type": "R004"
+   },
+   {
+    "label": "'shp'=-1",
+    "type": "RSID"
+   },
+   {
+    "label": "Mins",
+    "type": "R004"
+   },
+   {
+    "label": "min",
+    "type": "DWRD"
+   },
+   {
+    "label": "Maxes",
+    "type": "R004"
+   },
+   {
+    "label": "max",
+    "type": "DWRD"
+   },
+   {
+    "label": "Affiliation Govt='gvt'",
+    "type": "RSID"
+   },
+   {
+    "label": "Independent=-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Link System=-1",
+    "type": "DWRD"
+   },
+   {
+    "label": "Any System=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "Specific System:=128..2175 'sØst'",
+    "type": "CASR"
+   },
+   {
+    "label": "Govt Systems:=10000..10255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Govt Allies Systems:=15000..15255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Not Govt Systems:=20000..20255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Govt Enemies Systems:=25000..25255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "AppearOn (NCB Test)",
+    "type": "n100"
+   },
+   {
+    "label": "Hail Quote='STR#'",
+    "type": "RSID"
+   },
+   {
+    "label": "Flags",
+    "type": "WORV"
+   },
+   {
+    "label": "Freighters have random cargo=0x0001",
+    "type": "CASE"
+   },
+   {
+    "label": "Unused",
+    "type": "F010"
+   }
+  ]
+ },
+ "gövt": {
+  "id": 507,
+  "fields": [
+   {
+    "label": "='STR#' 6872 Ship Greetings",
+    "type": "RREF"
+   },
+   {
+    "label": "Voice Type",
+    "type": "DWRD"
+   },
+   {
+    "label": "None=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "All sounds in set:=0..7",
+    "type": "CASR"
+   },
+   {
+    "label": "Odd sounds in set:=1000..1007 ~0",
+    "type": "CASR"
+   },
+   {
+    "label": "Even sounds in set:=2000..2007 ~0",
+    "type": "CASR"
+   },
+   {
+    "label": "Flags 1",
+    "type": "WORV"
+   },
+   {
+    "label": "Xenophobic - attacks everyone except allies=0x0001",
+    "type": "CASE"
+   },
+   {
+    "label": "Nosy - attacks player anywhere heÕs a criminal=0x0002",
+    "type": "CASE"
+   },
+   {
+    "label": "Always attacks player=0x0004",
+    "type": "CASE"
+   },
+   {
+    "label": "Immune to playerÕs shots=0x0008",
+    "type": "CASE"
+   },
+   {
+    "label": "Warships retreat when shields below 25%=0x0010",
+    "type": "CASE"
+   },
+   {
+    "label": "Other nosy govts are not nosy with this govt=0x0020",
+    "type": "CASE"
+   },
+   {
+    "label": "Never attacks player & immune to player=0x0040",
+    "type": "CASE"
+   },
+   {
+    "label": "Freighters have 50% jamming=0x0080",
+    "type": "CASE"
+   },
+   {
+    "label": "Pers ships don't stay dead (immortal)=0x0100",
+    "type": "CASE"
+   },
+   {
+    "label": "Warships take bribes=0x0200",
+    "type": "CASE"
+   },
+   {
+    "label": "Can't be hailed=0x0400",
+    "type": "CASE"
+   },
+   {
+    "label": "Ships start disabled (derelicts)=0x0800",
+    "type": "CASE"
+   },
+   {
+    "label": "Plunders/captures ships before destroying=0x1000",
+    "type": "CASE"
+   },
+   {
+    "label": "Freighters take bribes=0x2000",
+    "type": "CASE"
+   },
+   {
+    "label": "Planets take bribes=0x4000",
+    "type": "CASE"
+   },
+   {
+    "label": "Greedy ships, planets take bribes=0x8000",
+    "type": "CASE"
+   },
+   {
+    "label": "Flags 2",
+    "type": "WORV"
+   },
+   {
+    "label": "CanÕt Request Assist/Mercy, non-talkative=0x0001",
+    "type": "CASE"
+   },
+   {
+    "label": "Minor map boundaries=0x0002",
+    "type": "CASE"
+   },
+   {
+    "label": "No map boundaries=0x0004",
+    "type": "CASE"
+   },
+   {
+    "label": "DoesnÕt send distress messages=0x0008",
+    "type": "CASE"
+   },
+   {
+    "label": "Repairs/refuels player for free=0x0010",
+    "type": "CASE"
+   },
+   {
+    "label": "DoesnÕt use hypergates=0x0020",
+    "type": "CASE"
+   },
+   {
+    "label": "Prefers hypergates=0x0040",
+    "type": "CASE"
+   },
+   {
+    "label": "Prefers wormholes=0x0080",
+    "type": "CASE"
+   },
+   {
+    "label": "Scan Fine",
+    "type": "DWRD"
+   },
+   {
+    "label": "Warning Only=0",
+    "type": "CASR"
+   },
+   {
+    "label": "Fixed Amount:=1..\ncredits",
+    "type": "CASR"
+   },
+   {
+    "label": "Percentage:=-1.. ~1\n%",
+    "type": "CASR"
+   },
+   {
+    "label": "Crime Tolerance\nfactor to dilute playerÕs legal record by",
+    "type": "DWRD"
+   },
+   {
+    "label": "Smuggle Penalty",
+    "type": "DWRD"
+   },
+   {
+    "label": "Disable Penalty",
+    "type": "DWRD"
+   },
+   {
+    "label": "Board Penalty",
+    "type": "DWRD"
+   },
+   {
+    "label": "Kill Penalty",
+    "type": "DWRD"
+   },
+   {
+    "label": "Shoot Penalty\ncurrently ignored",
+    "type": "DWRD"
+   },
+   {
+    "label": "Initial Legal Record",
+    "type": "DWRD"
+   },
+   {
+    "label": "Maximum Combat Odds\n100 = 1 to 1",
+    "type": "DWRD"
+   },
+   {
+    "label": "Classes=c,c,c,c",
+    "type": "PACK"
+   },
+   {
+    "label": "Classes",
+    "type": "R004"
+   },
+   {
+    "label": "c=-1",
+    "type": "DWRD"
+   },
+   {
+    "label": "Allies=a,a,a,a",
+    "type": "PACK"
+   },
+   {
+    "label": "Allies",
+    "type": "R004"
+   },
+   {
+    "label": "a=-1",
+    "type": "DWRD"
+   },
+   {
+    "label": "Enemies=e,e,e,e",
+    "type": "PACK"
+   },
+   {
+    "label": "Enemies",
+    "type": "R004"
+   },
+   {
+    "label": "e=-1",
+    "type": "DWRD"
+   },
+   {
+    "label": "Ship Speed Factor\n%",
+    "type": "DWRD"
+   },
+   {
+    "label": "Scan Mask=#-101",
+    "type": "WB16"
+   },
+   {
+    "label": "Comms Name",
+    "type": "C010"
+   },
+   {
+    "label": "Target Code",
+    "type": "C010"
+   },
+   {
+    "label": "Medium Name=medName",
+    "type": "PACK"
+   },
+   {
+    "label": "Require (to land)=#-100",
+    "type": "QB64"
+   },
+   {
+    "label": "Jamming Type 1-4\n%",
+    "type": "RECT"
+   },
+   {
+    "label": "medName",
+    "type": "C040"
+   },
+   {
+    "label": "Map Color",
+    "type": "LCOL"
+   },
+   {
+    "label": "Ship Paint",
+    "type": "LCOL"
+   },
+   {
+    "label": "Interface='ntf'",
+    "type": "RSID"
+   },
+   {
+    "label": "News Picture='PICT'",
+    "type": "RSID"
+   },
+   {
+    "label": "Generic=-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Unused",
+    "type": "F010"
+   }
+  ]
+ },
+ "ïntf": {
+  "id": 508,
+  "fields": [
+   {
+    "label": "Bright Text Color",
+    "type": "LCOL"
+   },
+   {
+    "label": "Dim Text Color",
+    "type": "LCOL"
+   },
+   {
+    "label": "Radar Area",
+    "type": "RECT"
+   },
+   {
+    "label": "Bright Radar Color",
+    "type": "LCOL"
+   },
+   {
+    "label": "Dim Radar Color",
+    "type": "LCOL"
+   },
+   {
+    "label": "Shield Area",
+    "type": "RECT"
+   },
+   {
+    "label": "Shield Color",
+    "type": "LCOL"
+   },
+   {
+    "label": "Armor Area",
+    "type": "RECT"
+   },
+   {
+    "label": "Armor Color",
+    "type": "LCOL"
+   },
+   {
+    "label": "Fuel Area",
+    "type": "RECT"
+   },
+   {
+    "label": "Fuel Full Color",
+    "type": "LCOL"
+   },
+   {
+    "label": "Fuel Partial Color",
+    "type": "LCOL"
+   },
+   {
+    "label": "Navigation Area",
+    "type": "RECT"
+   },
+   {
+    "label": "Weapon Area",
+    "type": "RECT"
+   },
+   {
+    "label": "Target Area",
+    "type": "RECT"
+   },
+   {
+    "label": "Cargo Area",
+    "type": "RECT"
+   },
+   {
+    "label": "Status Font",
+    "type": "C040"
+   },
+   {
+    "label": "Status Font Size",
+    "type": "DWRD"
+   },
+   {
+    "label": "Subtitle Size",
+    "type": "DWRD"
+   },
+   {
+    "label": "Status Bar Background='PICT'",
+    "type": "RSID"
+   }
+  ]
+ },
+ "jünk": {
+  "id": 509,
+  "fields": [
+   {
+    "label": "Sold At (Low)=L'spb',L'spb'",
+    "type": "PACK"
+   },
+   {
+    "label": "",
+    "type": "R003"
+   },
+   {
+    "label": "=L'spb',L'spb'",
+    "type": "PACK"
+   },
+   {
+    "label": "Bought At (High)=H'spb',H'spb'",
+    "type": "PACK"
+   },
+   {
+    "label": "",
+    "type": "R003"
+   },
+   {
+    "label": "=H'spb',H'spb'",
+    "type": "PACK"
+   },
+   {
+    "label": "Lows",
+    "type": "R008"
+   },
+   {
+    "label": "L'spb'=-1",
+    "type": "RSID"
+   },
+   {
+    "label": "Highs",
+    "type": "R008"
+   },
+   {
+    "label": "H'spb'=-1",
+    "type": "RSID"
+   },
+   {
+    "label": "Base Price",
+    "type": "DWRD"
+   },
+   {
+    "label": "Flags",
+    "type": "WORV"
+   },
+   {
+    "label": "Multiplies in cargo hold=0x0001",
+    "type": "CASE"
+   },
+   {
+    "label": "Decays in cargo hold=0x0002",
+    "type": "CASE"
+   },
+   {
+    "label": "Scan Mask=#-101",
+    "type": "WB16"
+   },
+   {
+    "label": "Lowercase Name",
+    "type": "C040"
+   },
+   {
+    "label": "Status Bar Abbreviation",
+    "type": "C040"
+   },
+   {
+    "label": "BuyOn (NCB Test)",
+    "type": "n0FF"
+   },
+   {
+    "label": "SellOn (NCB Test)",
+    "type": "n0FF"
+   }
+  ]
+ },
+ "mïsn": {
+  "id": 510,
+  "fields": [
+   {
+    "label": "Available At=-1",
+    "type": "DWRD"
+   },
+   {
+    "label": "Any Inhabited Stellar=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "Specific Stellar:=128..2175 'spb'",
+    "type": "CASR"
+   },
+   {
+    "label": "Adjacent to System:=5000..7047 ~128 'sØst'",
+    "type": "CASR"
+   },
+   {
+    "label": "Independent Stellars=9999",
+    "type": "CASR"
+   },
+   {
+    "label": "Govt Stellars:=10000..10255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Govt Allies Stellars:=15000..15255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Not Govt Stellars:=20000..20255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Govt Enemies Stellars:=25000..25255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Govt+Class Stellars:=30000..30255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Not Govt+Class Stellars:=31000..31255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Unused",
+    "type": "FWRD"
+   },
+   {
+    "label": "Offered From",
+    "type": "DWRD"
+   },
+   {
+    "label": "Mission Computer=0",
+    "type": "CASR"
+   },
+   {
+    "label": "Bar=1",
+    "type": "CASR"
+   },
+   {
+    "label": "Prs ship=2",
+    "type": "CASR"
+   },
+   {
+    "label": "Main Spaceport=3",
+    "type": "CASR"
+   },
+   {
+    "label": "Trade Center=4",
+    "type": "CASR"
+   },
+   {
+    "label": "Shipyard=5",
+    "type": "CASR"
+   },
+   {
+    "label": "Outfitter=6",
+    "type": "CASR"
+   },
+   {
+    "label": "Min Legal Record",
+    "type": "DWRD"
+   },
+   {
+    "label": "Min Combat Rating",
+    "type": "DWRD"
+   },
+   {
+    "label": "Available Random\n%",
+    "type": "DWRD"
+   },
+   {
+    "label": "Display Weight=dispWeight",
+    "type": "PACK"
+   },
+   {
+    "label": "Required Ship Type=availShip",
+    "type": "PACK"
+   },
+   {
+    "label": "Travel To=-1",
+    "type": "DWRD"
+   },
+   {
+    "label": "None=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "Inhabited Stellar=-2",
+    "type": "CASR"
+   },
+   {
+    "label": "Uninhabited Stellar=-3",
+    "type": "CASR"
+   },
+   {
+    "label": "Specific Stellar:=128..2175 'spb'",
+    "type": "CASR"
+   },
+   {
+    "label": "Independent Stellar=9999",
+    "type": "CASR"
+   },
+   {
+    "label": "Govt Stellar:=10000..10255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Govt Allies Stellar:=15000..15255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Not Govt Stellar:=20000..20255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Govt Enemies Stellar:=25000..25255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Govt+Class Stellar:=30000..30255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Not Govt+Class Stellar:=31000..31255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Return To=-1",
+    "type": "DWRD"
+   },
+   {
+    "label": "None=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "Inhabited Stellar=-2",
+    "type": "CASR"
+   },
+   {
+    "label": "Uninhabited Stellar=-3",
+    "type": "CASR"
+   },
+   {
+    "label": "Initial Stellar=-4",
+    "type": "CASR"
+   },
+   {
+    "label": "Specific Stellar:=128..2175 'spb'",
+    "type": "CASR"
+   },
+   {
+    "label": "Independent Stellar=9999",
+    "type": "CASR"
+   },
+   {
+    "label": "Govt Stellar:=10000..10255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Govt Allies Stellar:=15000..15255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Not Govt Stellar:=20000..20255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Govt Enemies Stellar:=25000..25255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Govt+Class Stellar:=30000..30255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Not Govt+Class Stellar:=31000..31255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Cargo Type=cargo,cargoRef",
+    "type": "PACK"
+   },
+   {
+    "label": "cargo='STR ' 9100+99",
+    "type": "RSID"
+   },
+   {
+    "label": "None=-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Food=0",
+    "type": "CASE"
+   },
+   {
+    "label": "Industrial=1",
+    "type": "CASE"
+   },
+   {
+    "label": "Medical Supplies=2",
+    "type": "CASE"
+   },
+   {
+    "label": "Luxury Goods=3",
+    "type": "CASE"
+   },
+   {
+    "label": "Metal=4",
+    "type": "CASE"
+   },
+   {
+    "label": "Equipment=5",
+    "type": "CASE"
+   },
+   {
+    "label": "Random basic type=1000",
+    "type": "CASE"
+   },
+   {
+    "label": "cargoRef='STR#' #4001 Cargo Types",
+    "type": "RREF"
+   },
+   {
+    "label": "Cargo Quantity",
+    "type": "DWRD"
+   },
+   {
+    "label": "None=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "Fixed Amount:=0..",
+    "type": "CASR"
+   },
+   {
+    "label": "Approximate:=-2.. ~2\n±50%",
+    "type": "CASR"
+   },
+   {
+    "label": "Cargo Pickup=-1",
+    "type": "DWRD"
+   },
+   {
+    "label": "No Cargo Pickup=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "At Mission Start=0",
+    "type": "CASR"
+   },
+   {
+    "label": "At Travel Stellar=1",
+    "type": "CASR"
+   },
+   {
+    "label": "On Board Special Ship=2",
+    "type": "CASR"
+   },
+   {
+    "label": "Cargo Dropoff=-1",
+    "type": "DWRD"
+   },
+   {
+    "label": "No Cargo Dropoff=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "At Travel Stellar=0",
+    "type": "CASR"
+   },
+   {
+    "label": "At Return Stellar=1",
+    "type": "CASR"
+   },
+   {
+    "label": "Scan Mask=#-101",
+    "type": "WB16"
+   },
+   {
+    "label": "Unused",
+    "type": "FWRD"
+   },
+   {
+    "label": "Pay Value",
+    "type": "DLNG"
+   },
+   {
+    "label": "No Pay=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "Credits:=0..",
+    "type": "CASR"
+   },
+   {
+    "label": "Clean Govt Record:=-10128..-10383 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Clean Govt+Allies:=-20128..-20383 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Clean Govt+Class:=-30128..-30383 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Lose % Credits:=-40000..-40100 ~0",
+    "type": "CASR"
+   },
+   {
+    "label": "Lose Credits at Start:=-50000.. ~0",
+    "type": "CASR"
+   },
+   {
+    "label": "Special Ship Count",
+    "type": "DWRD"
+   },
+   {
+    "label": "Special Ship System=-1",
+    "type": "DWRD"
+   },
+   {
+    "label": "Initial System=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "Any System=-2",
+    "type": "CASR"
+   },
+   {
+    "label": "Travel System=-3",
+    "type": "CASR"
+   },
+   {
+    "label": "Return System=-4",
+    "type": "CASR"
+   },
+   {
+    "label": "Adjacent to Initial=-5",
+    "type": "CASR"
+   },
+   {
+    "label": "Follow Player=-6",
+    "type": "CASR"
+   },
+   {
+    "label": "Specific System:=128..2175 'sØst'",
+    "type": "CASR"
+   },
+   {
+    "label": "Independent System=9999",
+    "type": "CASR"
+   },
+   {
+    "label": "Govt System:=10000..10255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Govt Allies System:=15000..15255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Not Govt System:=20000..20255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Govt Enemies System:=25000..25255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Govt+Class System:=30000..30255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Not Govt+Class System:=31000..31255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Special Ship Dude='dde'",
+    "type": "RSID"
+   },
+   {
+    "label": "-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Special Ship Goal=-1",
+    "type": "DWRD"
+   },
+   {
+    "label": "None=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "Destroy=0",
+    "type": "CASR"
+   },
+   {
+    "label": "Disable (don't destroy)=1",
+    "type": "CASR"
+   },
+   {
+    "label": "Board=2",
+    "type": "CASR"
+   },
+   {
+    "label": "Escort=3",
+    "type": "CASR"
+   },
+   {
+    "label": "Observe=4",
+    "type": "CASR"
+   },
+   {
+    "label": "Rescue (starts disabled)=5",
+    "type": "CASR"
+   },
+   {
+    "label": "Chase Off=6",
+    "type": "CASR"
+   },
+   {
+    "label": "Special Ship Behavior=-1",
+    "type": "DWRD"
+   },
+   {
+    "label": "Normal=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "Attack Player=0",
+    "type": "CASR"
+   },
+   {
+    "label": "Protect Player=1",
+    "type": "CASR"
+   },
+   {
+    "label": "Destroy Enemy Stellars=2",
+    "type": "CASR"
+   },
+   {
+    "label": "Ship Name STR#='STR#'",
+    "type": "RSID"
+   },
+   {
+    "label": "-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Ship Subtitle STR#=shipSub",
+    "type": "PACK"
+   },
+   {
+    "label": "Special Ship Start",
+    "type": "DWRD"
+   },
+   {
+    "label": "Randomly=0",
+    "type": "CASR"
+   },
+   {
+    "label": "Jump In=1",
+    "type": "CASR"
+   },
+   {
+    "label": "Randomly, Cloaked=2",
+    "type": "CASR"
+   },
+   {
+    "label": "On Nav Default:=-1..-16 ~1",
+    "type": "CASR"
+   },
+   {
+    "label": "Comp Reward Govt='gvt'",
+    "type": "RSID"
+   },
+   {
+    "label": "-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Comp Legal Reward",
+    "type": "DWRD"
+   },
+   {
+    "label": "shipSub='STR#'",
+    "type": "RSID"
+   },
+   {
+    "label": "-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Offer Text='dsc' 3872",
+    "type": "RREF"
+   },
+   {
+    "label": "Briefing Text='dsc'",
+    "type": "RSID"
+   },
+   {
+    "label": "-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Quick Brief Text='dsc'",
+    "type": "RSID"
+   },
+   {
+    "label": "-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Load Cargo Text='dsc'",
+    "type": "RSID"
+   },
+   {
+    "label": "-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Drop Cargo Text='dsc'",
+    "type": "RSID"
+   },
+   {
+    "label": "-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Completion Text='dsc'",
+    "type": "RSID"
+   },
+   {
+    "label": "-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Failure Text='dsc'",
+    "type": "RSID"
+   },
+   {
+    "label": "-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Ship Done Text=shipText",
+    "type": "PACK"
+   },
+   {
+    "label": "Refuse Text=refuseText",
+    "type": "PACK"
+   },
+   {
+    "label": "Time Limit\ndays",
+    "type": "DWRD"
+   },
+   {
+    "label": "Can Abort=1",
+    "type": "WORV"
+   },
+   {
+    "label": "Can be aborted (disables failure text)=1",
+    "type": "CASE"
+   },
+   {
+    "label": "shipText='dsc'",
+    "type": "RSID"
+   },
+   {
+    "label": "-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Unused",
+    "type": "FWRD"
+   },
+   {
+    "label": "Auxiliary Ship Count",
+    "type": "DWRD"
+   },
+   {
+    "label": "Auxiliary Ship Dude='dde'",
+    "type": "RSID"
+   },
+   {
+    "label": "-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Auxiliary Ship System=-1",
+    "type": "DWRD"
+   },
+   {
+    "label": "Follow Player=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "Travel System=-2",
+    "type": "CASR"
+   },
+   {
+    "label": "Return System=-3",
+    "type": "CASR"
+   },
+   {
+    "label": "Specific System:=128..2175 'sØst'",
+    "type": "CASR"
+   },
+   {
+    "label": "Adjacent System:=5000..7047 ~128 'sØst'",
+    "type": "CASR"
+   },
+   {
+    "label": "Independent System=9999",
+    "type": "CASR"
+   },
+   {
+    "label": "Govt System:=10000..10255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Govt Allies System:=15000..15255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Not Govt System:=20000..20255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Govt Enemies System:=25000..25255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Govt+Class System:=30000..30255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Not Govt+Class System:=31000..31255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Unused",
+    "type": "FWRD"
+   },
+   {
+    "label": "Flags 1",
+    "type": "WORV"
+   },
+   {
+    "label": "Auto-abort when started=0x0001",
+    "type": "CASE"
+   },
+   {
+    "label": "DonÕt show red map arrow=0x0002",
+    "type": "CASE"
+   },
+   {
+    "label": "CanÕt be refused=0x0004",
+    "type": "CASE"
+   },
+   {
+    "label": "Remove 100 fuel on auto-abort=0x0008",
+    "type": "CASE"
+   },
+   {
+    "label": "Auxiliary ships regenerate=0x0010",
+    "type": "CASE"
+   },
+   {
+    "label": "Fails if scanned=0x0020",
+    "type": "CASE"
+   },
+   {
+    "label": "Lose 5x Comp Reward on abort=0x0040",
+    "type": "CASE"
+   },
+   {
+    "label": "Show green map arrow during briefing=0x0100",
+    "type": "CASE"
+   },
+   {
+    "label": "Red map arrow for Special Ship System=0x0200",
+    "type": "CASE"
+   },
+   {
+    "label": "Invisible (not shown in info dialog)=0x0400",
+    "type": "CASE"
+   },
+   {
+    "label": "Freeze special ship types at start=0x0800",
+    "type": "CASE"
+   },
+   {
+    "label": "Not available for cargo ships=0x2000",
+    "type": "CASE"
+   },
+   {
+    "label": "Not available for warships=0x4000",
+    "type": "CASE"
+   },
+   {
+    "label": "Fails if player boarded by pirates=0x8000",
+    "type": "CASE"
+   },
+   {
+    "label": "Flags 2",
+    "type": "WORV"
+   },
+   {
+    "label": "Not offered if insufficient cargo space=0x0001",
+    "type": "CASE"
+   },
+   {
+    "label": "Apply Pay on auto-abort=0x0002",
+    "type": "CASE"
+   },
+   {
+    "label": "Fails if player disabled or destroyed=0x0004",
+    "type": "CASE"
+   },
+   {
+    "label": "Unused",
+    "type": "FWRD"
+   },
+   {
+    "label": "Unused",
+    "type": "FWRD"
+   },
+   {
+    "label": "refuseText='dsc'",
+    "type": "RSID"
+   },
+   {
+    "label": "-1",
+    "type": "CASE"
+   },
+   {
+    "label": "availShip=-1",
+    "type": "DWRD"
+   },
+   {
+    "label": "Any=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "Specific Ship:=128..895 'shp'",
+    "type": "CASR"
+   },
+   {
+    "label": "Not Ship:=1128..1895 ~128 'shp'",
+    "type": "CASR"
+   },
+   {
+    "label": "Ship of Govt:=2128..2383 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Ship not of Govt:=3128..3383 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "AvailableOn (NCB Test)",
+    "type": "n0FF"
+   },
+   {
+    "label": "OnAccept (NCB Set)",
+    "type": "n0FF"
+   },
+   {
+    "label": "OnRefuse (NCB Set)",
+    "type": "n0FF"
+   },
+   {
+    "label": "OnSuccess (NCB Set)",
+    "type": "n0FF"
+   },
+   {
+    "label": "OnFailure (NCB Set)",
+    "type": "n0FF"
+   },
+   {
+    "label": "OnAbort (NCB Set)",
+    "type": "n0FF"
+   },
+   {
+    "label": "OnShipDone (NCB Set)=onShipDone",
+    "type": "PACK"
+   },
+   {
+    "label": "Require=#-100",
+    "type": "QB64"
+   },
+   {
+    "label": "Date Post Increment\ndays",
+    "type": "DWRD"
+   },
+   {
+    "label": "onShipDone",
+    "type": "n0FF"
+   },
+   {
+    "label": "Accept Button Text",
+    "type": "C020"
+   },
+   {
+    "label": "Refuse Button Text",
+    "type": "C021"
+   },
+   {
+    "label": "dispWeight",
+    "type": "DWRD"
+   },
+   {
+    "label": "Unused",
+    "type": "F010"
+   }
+  ]
+ },
+ "nëbu": {
+  "id": 511,
+  "fields": [
+   {
+    "label": "='glxØ' #0 Galaxy Map",
+    "type": "RREF"
+   },
+   {
+    "label": "Position",
+    "type": "PNT "
+   },
+   {
+    "label": "Size",
+    "type": "PNT "
+   },
+   {
+    "label": "ActiveOn (NCB Test)",
+    "type": "n0FF"
+   },
+   {
+    "label": "OnExplore (NCB Set)",
+    "type": "n0FF"
+   },
+   {
+    "label": "Unused",
+    "type": "F010"
+   },
+   {
+    "label": "Images (only one required)",
+    "type": "KRID"
+   },
+   {
+    "label": "=128",
+    "type": "R008"
+   },
+   {
+    "label": "=*",
+    "type": "CASE"
+   },
+   {
+    "label": "128",
+    "type": "KEYB"
+   },
+   {
+    "label": "=9500",
+    "type": "R007"
+   },
+   {
+    "label": "='PICT' #*",
+    "type": "RREF"
+   },
+   {
+    "label": "",
+    "type": "KEYE"
+   },
+   {
+    "label": "129",
+    "type": "KEYB"
+   },
+   {
+    "label": "=9507",
+    "type": "R007"
+   },
+   {
+    "label": "='PICT' #*",
+    "type": "RREF"
+   },
+   {
+    "label": "",
+    "type": "KEYE"
+   },
+   {
+    "label": "130",
+    "type": "KEYB"
+   },
+   {
+    "label": "=9514",
+    "type": "R007"
+   },
+   {
+    "label": "='PICT' #*",
+    "type": "RREF"
+   },
+   {
+    "label": "",
+    "type": "KEYE"
+   },
+   {
+    "label": "131",
+    "type": "KEYB"
+   },
+   {
+    "label": "=9521",
+    "type": "R007"
+   },
+   {
+    "label": "='PICT' #*",
+    "type": "RREF"
+   },
+   {
+    "label": "",
+    "type": "KEYE"
+   },
+   {
+    "label": "132",
+    "type": "KEYB"
+   },
+   {
+    "label": "=9528",
+    "type": "R007"
+   },
+   {
+    "label": "='PICT' #*",
+    "type": "RREF"
+   },
+   {
+    "label": "",
+    "type": "KEYE"
+   },
+   {
+    "label": "133",
+    "type": "KEYB"
+   },
+   {
+    "label": "=9535",
+    "type": "R007"
+   },
+   {
+    "label": "='PICT' #*",
+    "type": "RREF"
+   },
+   {
+    "label": "",
+    "type": "KEYE"
+   },
+   {
+    "label": "134",
+    "type": "KEYB"
+   },
+   {
+    "label": "=9521",
+    "type": "R007"
+   },
+   {
+    "label": "='PICT' #*",
+    "type": "RREF"
+   },
+   {
+    "label": "",
+    "type": "KEYE"
+   },
+   {
+    "label": "135",
+    "type": "KEYB"
+   },
+   {
+    "label": "=9542",
+    "type": "R007"
+   },
+   {
+    "label": "='PICT' #*",
+    "type": "RREF"
+   },
+   {
+    "label": "",
+    "type": "KEYE"
+   }
+  ]
+ },
+ "öops": {
+  "id": 512,
+  "fields": [
+   {
+    "label": "Affected Stellar='spb'",
+    "type": "RSID"
+   },
+   {
+    "label": "Any=-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Affected Commodity",
+    "type": "DWRD"
+   },
+   {
+    "label": "Food=0",
+    "type": "CASR"
+   },
+   {
+    "label": "Industrial=1",
+    "type": "CASR"
+   },
+   {
+    "label": "Medical Supplies=2",
+    "type": "CASR"
+   },
+   {
+    "label": "Luxury Goods=3",
+    "type": "CASR"
+   },
+   {
+    "label": "Metal=4",
+    "type": "CASR"
+   },
+   {
+    "label": "Equipment=5",
+    "type": "CASR"
+   },
+   {
+    "label": "Price Change",
+    "type": "DWRD"
+   },
+   {
+    "label": "Duration\ndays",
+    "type": "DWRD"
+   },
+   {
+    "label": "Frequency\n%",
+    "type": "DWRD"
+   },
+   {
+    "label": "ActivateOn (NCB Test)",
+    "type": "n100"
+   },
+   {
+    "label": "Unused",
+    "type": "F010"
+   }
+  ]
+ },
+ "oütf": {
+  "id": 513,
+  "fields": [
+   {
+    "label": "=pic,desc",
+    "type": "PACK"
+   },
+   {
+    "label": "pic='PICT' 5872 Outfitter Pict",
+    "type": "RREF"
+   },
+   {
+    "label": "desc='dsc' 2872 Outfitter Desc",
+    "type": "RREF"
+   },
+   {
+    "label": "Display Weight",
+    "type": "DWRD"
+   },
+   {
+    "label": "Mass\ntons",
+    "type": "DWRD"
+   },
+   {
+    "label": "Tech Level",
+    "type": "DWRD"
+   },
+   {
+    "label": "Primary Mod Type",
+    "type": "KWRD"
+   },
+   {
+    "label": "None=-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Weapon=1",
+    "type": "CASE"
+   },
+   {
+    "label": "Ammunition=3",
+    "type": "CASE"
+   },
+   {
+    "label": "otf.ModTypes",
+    "type": "TMPL"
+   },
+   {
+    "label": "1",
+    "type": "KEYB"
+   },
+   {
+    "label": "Weapon='wap'",
+    "type": "RSID"
+   },
+   {
+    "label": "1 end",
+    "type": "KEYE"
+   },
+   {
+    "label": "3",
+    "type": "KEYB"
+   },
+   {
+    "label": "Weapon Ammo='wap'",
+    "type": "RSID"
+   },
+   {
+    "label": "3 end",
+    "type": "KEYE"
+   },
+   {
+    "label": "Maximum",
+    "type": "DWRD"
+   },
+   {
+    "label": "Flags",
+    "type": "WORV"
+   },
+   {
+    "label": "Fixed Gun=0x0001",
+    "type": "CASE"
+   },
+   {
+    "label": "Turret=0x0002",
+    "type": "CASE"
+   },
+   {
+    "label": "Persistent (keep when trading ships)=0x0004",
+    "type": "CASE"
+   },
+   {
+    "label": "CanÕt be sold=0x0008",
+    "type": "CASE"
+   },
+   {
+    "label": "Remove after purchase=0x0010",
+    "type": "CASE"
+   },
+   {
+    "label": "Persistent by Hxxx=0x0020",
+    "type": "CASE"
+   },
+   {
+    "label": "DonÕt show in outfitter if Require not met=0x0100",
+    "type": "CASE"
+   },
+   {
+    "label": "Price proportional to ship price=0x0200",
+    "type": "CASE"
+   },
+   {
+    "label": "Mass proportional to ship mass=0x0400",
+    "type": "CASE"
+   },
+   {
+    "label": "Can be sold anywhere=0x0800",
+    "type": "CASE"
+   },
+   {
+    "label": "Hide other items of equal display weight=0x1000",
+    "type": "CASE"
+   },
+   {
+    "label": "Show as Rank in player info=0x2000",
+    "type": "CASE"
+   },
+   {
+    "label": "DonÕt show in outfitter if Availability false=0x4000",
+    "type": "CASE"
+   },
+   {
+    "label": "Cost",
+    "type": "DLNG"
+   },
+   {
+    "label": "3",
+    "type": "FCNT"
+   },
+   {
+    "label": "Secondary Function",
+    "type": "LSTC"
+   },
+   {
+    "label": "Secondary Mod Type",
+    "type": "KWRD"
+   },
+   {
+    "label": "None=-1",
+    "type": "CASE"
+   },
+   {
+    "label": "otf.ModTypes",
+    "type": "TMPL"
+   },
+   {
+    "label": "end",
+    "type": "LSTE"
+   },
+   {
+    "label": "Contribute/Require=contribute,require",
+    "type": "PACK"
+   },
+   {
+    "label": "contribute=#-100",
+    "type": "QB64"
+   },
+   {
+    "label": "require=#-100",
+    "type": "QB64"
+   },
+   {
+    "label": "Availability (NCB Test)",
+    "type": "n0FF"
+   },
+   {
+    "label": "OnPurchase (NCB Set)",
+    "type": "n0FF"
+   },
+   {
+    "label": "OnSell (NBC Set)",
+    "type": "n0FF"
+   },
+   {
+    "label": "Outfitter Name",
+    "type": "C040"
+   },
+   {
+    "label": "Lowercase Name",
+    "type": "C040"
+   },
+   {
+    "label": "Lowercase Plural",
+    "type": "C041"
+   },
+   {
+    "label": "Item Class",
+    "type": "DWRD"
+   },
+   {
+    "label": "Scan Mask=#-101",
+    "type": "WB16"
+   },
+   {
+    "label": "Available Random\n%",
+    "type": "DWRD"
+   },
+   {
+    "label": "Require Bits Apply To=-1",
+    "type": "DWRD"
+   },
+   {
+    "label": "Every Outfitter=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "Govt+Allies Stellars:=128..383 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Independent+Govt+Allies:=1128..1383 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Not Govt+Allies:=2128..2383 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Not Ind.+Govt+Allies:=3128..3383 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Unused",
+    "type": "F010"
+   }
+  ]
+ },
+ "përs": {
+  "id": 514,
+  "fields": [
+   {
+    "label": "Link System=-1",
+    "type": "DWRD"
+   },
+   {
+    "label": "Any System=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "Specific System:=128..2175 'sØst'",
+    "type": "CASR"
+   },
+   {
+    "label": "Independent Systems=9999",
+    "type": "CASR"
+   },
+   {
+    "label": "Govt Systems:=10000..10255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Govt Allies Systems:=15000..15255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Not Govt Systems:=20000..20255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Govt Enemies Systems:=25000..25255 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Government Affiliation='gvt'",
+    "type": "RSID"
+   },
+   {
+    "label": "Independent=-1",
+    "type": "CASE"
+   },
+   {
+    "label": "AI Type",
+    "type": "DWRD"
+   },
+   {
+    "label": "Wimpy Trader=1",
+    "type": "CASR"
+   },
+   {
+    "label": "Brave Trader=2",
+    "type": "CASR"
+   },
+   {
+    "label": "Warship=3",
+    "type": "CASR"
+   },
+   {
+    "label": "Interceptor=4",
+    "type": "CASR"
+   },
+   {
+    "label": "Aggression (attack at)",
+    "type": "DWRD"
+   },
+   {
+    "label": "Close Range=1",
+    "type": "CASR"
+   },
+   {
+    "label": "Medium=2",
+    "type": "CASR"
+   },
+   {
+    "label": "Far=3",
+    "type": "CASR"
+   },
+   {
+    "label": "Retreat Shield Level\n%",
+    "type": "DWRD"
+   },
+   {
+    "label": "Ship Type='shp'",
+    "type": "RSID"
+   },
+   {
+    "label": "Modify stock weapon loadout (add/remove)",
+    "type": "DVDR"
+   },
+   {
+    "label": "Weapons, Ammo",
+    "type": "R004"
+   },
+   {
+    "label": "*) Weapon, Ammo='wap',count,ammo",
+    "type": "PACK"
+   },
+   {
+    "label": "Weapons",
+    "type": "R004"
+   },
+   {
+    "label": "'wap'=-1",
+    "type": "RSID"
+   },
+   {
+    "label": "Counts",
+    "type": "R004"
+   },
+   {
+    "label": "count",
+    "type": "DWRD"
+   },
+   {
+    "label": "Ammo",
+    "type": "R004"
+   },
+   {
+    "label": "ammo",
+    "type": "DWRD"
+   },
+   {
+    "label": "Credits Carried\n±25%",
+    "type": "DLNG"
+   },
+   {
+    "label": "Shield Modifier\n%",
+    "type": "DWRD"
+   },
+   {
+    "label": "Standard=100",
+    "type": "CASE"
+   },
+   {
+    "label": "Invincible=-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Custom Hail Picture='PICT'",
+    "type": "RSID"
+   },
+   {
+    "label": "-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Comm Quote=comm,commRef",
+    "type": "PACK"
+   },
+   {
+    "label": "comm='STR ' 15000+2000",
+    "type": "RSID"
+   },
+   {
+    "label": "-1",
+    "type": "CASE"
+   },
+   {
+    "label": "commRef='STR#' #7100 Comm Quotes",
+    "type": "RREF"
+   },
+   {
+    "label": "Hail Quote=hail,hailRef",
+    "type": "PACK"
+   },
+   {
+    "label": "hail='STR ' 4999+2000",
+    "type": "RSID"
+   },
+   {
+    "label": "-1",
+    "type": "CASE"
+   },
+   {
+    "label": "hailRef='STR#' #7101 Hail Quotes",
+    "type": "RREF"
+   },
+   {
+    "label": "Link Mission='msn'",
+    "type": "RSID"
+   },
+   {
+    "label": "-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Flags 1",
+    "type": "WORV"
+   },
+   {
+    "label": "Keeps a grudge if attacked=0x0001",
+    "type": "CASE"
+   },
+   {
+    "label": "Uses escape pod and has afterburner=0x0002",
+    "type": "CASE"
+   },
+   {
+    "label": "Only show hail quote when carrying grudge=0x0004",
+    "type": "CASE"
+   },
+   {
+    "label": "Only show hail quote when prs likes player=0x0008",
+    "type": "CASE"
+   },
+   {
+    "label": "Only show hail quote when attacking=0x0010",
+    "type": "CASE"
+   },
+   {
+    "label": "Only show hail quote when disabled=0x0020",
+    "type": "CASE"
+   },
+   {
+    "label": "Replace prs with missionÕs Special Ship=0x0040",
+    "type": "CASE"
+   },
+   {
+    "label": "Only show hail quote once=0x0080",
+    "type": "CASE"
+   },
+   {
+    "label": "Deactivate prs after accepting mission=0x0100",
+    "type": "CASE"
+   },
+   {
+    "label": "Offer mission when boarding instead of hailing=0x0200",
+    "type": "CASE"
+   },
+   {
+    "label": "Only show hail quote when mission available=0x0400",
+    "type": "CASE"
+   },
+   {
+    "label": "Leaves after mission is accepted=0x0800",
+    "type": "CASE"
+   },
+   {
+    "label": "Don't offer mission if player is Wimpy Trader=0x1000",
+    "type": "CASE"
+   },
+   {
+    "label": "Don't offer mission if player is Beefy Trader=0x2000",
+    "type": "CASE"
+   },
+   {
+    "label": "Don't offer mission if player is Warship=0x4000",
+    "type": "CASE"
+   },
+   {
+    "label": "Show disaster info when hailing=0x8000",
+    "type": "CASE"
+   },
+   {
+    "label": "Flags 2=flags2",
+    "type": "PACK"
+   },
+   {
+    "label": "ActiveOn (NCB Test)",
+    "type": "n100"
+   },
+   {
+    "label": "Outfit Grant Class",
+    "type": "DWRD"
+   },
+   {
+    "label": "Outfit Grant Count",
+    "type": "DWRD"
+   },
+   {
+    "label": "Outfit Grant Chance\n%",
+    "type": "DWRD"
+   },
+   {
+    "label": "Subtitle",
+    "type": "C040"
+   },
+   {
+    "label": "Paint Color",
+    "type": "LCOL"
+   },
+   {
+    "label": "flags2",
+    "type": "WORV"
+   },
+   {
+    "label": "Starts with no fuel=0x0001",
+    "type": "CASE"
+   },
+   {
+    "label": "Unused",
+    "type": "F010"
+   }
+  ]
+ },
+ "ränk": {
+  "id": 515,
+  "fields": [
+   {
+    "label": "Weight",
+    "type": "DWRD"
+   },
+   {
+    "label": "Govt Affiliation='gvt'",
+    "type": "RSID"
+   },
+   {
+    "label": "Price Modifier\n%",
+    "type": "DWRD"
+   },
+   {
+    "label": "Salary\ncredits",
+    "type": "DLNG"
+   },
+   {
+    "label": "Salary Cap\ncredits",
+    "type": "DLNG"
+   },
+   {
+    "label": "Uncapped=0",
+    "type": "CASE"
+   },
+   {
+    "label": "Contribute=#-100",
+    "type": "QB64"
+   },
+   {
+    "label": "Flags",
+    "type": "WORV"
+   },
+   {
+    "label": "Drop other ranks of same govt when activated=0x0001",
+    "type": "CASE"
+   },
+   {
+    "label": "Drop other ranks of same govt when deactivated=0x0002",
+    "type": "CASE"
+   },
+   {
+    "label": "Drop if player disables/destroys a govt/allied ship=0x0004",
+    "type": "CASE"
+   },
+   {
+    "label": "Permanent, only removed by NCB statement=0x0008",
+    "type": "CASE"
+   },
+   {
+    "label": "Drop lower ranks of same govt when activated=0x0010",
+    "type": "CASE"
+   },
+   {
+    "label": "Drop lower ranks of same govt when deactivated=0x0020",
+    "type": "CASE"
+   },
+   {
+    "label": "Drop if player commits crime against govt=0x0040",
+    "type": "CASE"
+   },
+   {
+    "label": "Govt ships wonÕt attack player=0x0100",
+    "type": "CASE"
+   },
+   {
+    "label": "Player can always land on govtÕs stellars=0x0200",
+    "type": "CASE"
+   },
+   {
+    "label": "Player can ask govt ships for battle assistance=0x0400",
+    "type": "CASE"
+   },
+   {
+    "label": "Govt and allies will always refuel/repair for free=0x0800",
+    "type": "CASE"
+   },
+   {
+    "label": "Conversation Name",
+    "type": "C040"
+   },
+   {
+    "label": "Conv. Short Name",
+    "type": "C040"
+   }
+  ]
+ },
+ "röid": {
+  "id": 516,
+  "fields": [
+   {
+    "label": "Strength",
+    "type": "DWRD"
+   },
+   {
+    "label": "Spin Rate\n100 = 30 frames per second",
+    "type": "DWRD"
+   },
+   {
+    "label": "Cargo Yield Type=-1",
+    "type": "DWRD"
+   },
+   {
+    "label": "None=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "Food=0",
+    "type": "CASR"
+   },
+   {
+    "label": "Industrial=1",
+    "type": "CASR"
+   },
+   {
+    "label": "Medical Supplies=2",
+    "type": "CASR"
+   },
+   {
+    "label": "Luxury Goods=3",
+    "type": "CASR"
+   },
+   {
+    "label": "Metal=4",
+    "type": "CASR"
+   },
+   {
+    "label": "Equipment=5",
+    "type": "CASR"
+   },
+   {
+    "label": "Junk:=1000.. ~128 'jnk'",
+    "type": "CASR"
+   },
+   {
+    "label": "Yield Quantity\n±50%",
+    "type": "DWRD"
+   },
+   {
+    "label": "Destroy Particle Count",
+    "type": "DWRD"
+   },
+   {
+    "label": "Destroy Particle Color",
+    "type": "LCOL"
+   },
+   {
+    "label": "1) Fragment Type='rid'",
+    "type": "RSID"
+   },
+   {
+    "label": "-1",
+    "type": "CASE"
+   },
+   {
+    "label": "2) Fragment Type='rid'",
+    "type": "RSID"
+   },
+   {
+    "label": "-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Fragment Count\n±50%",
+    "type": "DWRD"
+   },
+   {
+    "label": "Explosion Type=-1",
+    "type": "DWRD"
+   },
+   {
+    "label": "None=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "Single Explosion:=0..63 ~128 'bm'",
+    "type": "CASR"
+   },
+   {
+    "label": "Explosion + Sparks:=1000..1063 ~128 'bm'",
+    "type": "CASR"
+   },
+   {
+    "label": "Mass",
+    "type": "DWRD"
+   },
+   {
+    "label": "Unused",
+    "type": "F010"
+   }
+  ]
+ },
+ "shän": {
+  "id": 517,
+  "fields": [
+   {
+    "label": "Note: Mask and Frame Size fields are only applicable to PICT-based sprites.",
+    "type": "DVDR"
+   },
+   {
+    "label": "Base Sprite='rlD'",
+    "type": "RSID"
+   },
+   {
+    "label": "Bask Mask='PICT'",
+    "type": "RSID"
+   },
+   {
+    "label": "Base Set Count",
+    "type": "DWRD"
+   },
+   {
+    "label": "Base Frame Size",
+    "type": "PNT "
+   },
+   {
+    "label": "Transparency (0-32)",
+    "type": "DWRD"
+   },
+   {
+    "label": "Alternating Sprite='rlD'",
+    "type": "RSID"
+   },
+   {
+    "label": "Alternating Mask='PICT'",
+    "type": "RSID"
+   },
+   {
+    "label": "Alt Set Count",
+    "type": "DWRD"
+   },
+   {
+    "label": "Alt Frame Size",
+    "type": "PNT "
+   },
+   {
+    "label": "Engine Glow Sprite='rlD'",
+    "type": "RSID"
+   },
+   {
+    "label": "Engine Glow Mask='PICT'",
+    "type": "RSID"
+   },
+   {
+    "label": "Engine Frame Size",
+    "type": "PNT "
+   },
+   {
+    "label": "Running Lights Sprite='rlD'",
+    "type": "RSID"
+   },
+   {
+    "label": "Running Lights Mask='PICT'",
+    "type": "RSID"
+   },
+   {
+    "label": "Lights Frame Size",
+    "type": "PNT "
+   },
+   {
+    "label": "Weapon Glow Sprite='rlD'",
+    "type": "RSID"
+   },
+   {
+    "label": "Weapon Glow Mask='PICT'",
+    "type": "RSID"
+   },
+   {
+    "label": "Weapon Frame Size",
+    "type": "PNT "
+   },
+   {
+    "label": "Shield Bubble Sprite=shieldSprite",
+    "type": "PACK"
+   },
+   {
+    "label": "Shield Bubble Mask=shieldMask",
+    "type": "PACK"
+   },
+   {
+    "label": "Shield Frame Size=shieldFrame",
+    "type": "PACK"
+   },
+   {
+    "label": "Flags",
+    "type": "WORV"
+   },
+   {
+    "label": "Extra frames are banking=0x0001",
+    "type": "CASE"
+   },
+   {
+    "label": "Extra frames are folding=0x0002",
+    "type": "CASE"
+   },
+   {
+    "label": "Second set is KeyCarried onboard=0x0004",
+    "type": "CASE"
+   },
+   {
+    "label": "Extra frames are animation=0x0008",
+    "type": "CASE"
+   },
+   {
+    "label": "Stop animation when disabled=0x0010",
+    "type": "CASE"
+   },
+   {
+    "label": "Hide alternate sprite when disabled=0x0020",
+    "type": "CASE"
+   },
+   {
+    "label": "Hide running lights when disabled=0x0040",
+    "type": "CASE"
+   },
+   {
+    "label": "Ship unfolds to fire=0x0080",
+    "type": "CASE"
+   },
+   {
+    "label": "Use Compression for pointing correction=0x0100",
+    "type": "CASE"
+   },
+   {
+    "label": "Animation Delay",
+    "type": "DWRD"
+   },
+   {
+    "label": "Weapon Glow Decay",
+    "type": "DWRD"
+   },
+   {
+    "label": "Frames Per Rotation",
+    "type": "DWRD"
+   },
+   {
+    "label": "Lights Blink Mode",
+    "type": "KWRD"
+   },
+   {
+    "label": "No Blinking=0",
+    "type": "CASE"
+   },
+   {
+    "label": "Square Wave Blinking=1",
+    "type": "CASE"
+   },
+   {
+    "label": "Triangle Wave Blinking=2",
+    "type": "CASE"
+   },
+   {
+    "label": "Random Pulsing=3",
+    "type": "CASE"
+   },
+   {
+    "label": "0,*",
+    "type": "KEYB"
+   },
+   {
+    "label": "Ignored",
+    "type": "F008"
+   },
+   {
+    "label": "end",
+    "type": "KEYE"
+   },
+   {
+    "label": "1",
+    "type": "KEYB"
+   },
+   {
+    "label": "Delay Between Blinks",
+    "type": "DWRD"
+   },
+   {
+    "label": "Light On-Time",
+    "type": "DWRD"
+   },
+   {
+    "label": "Blinks Per Group",
+    "type": "DWRD"
+   },
+   {
+    "label": "Delay Between Groups",
+    "type": "DWRD"
+   },
+   {
+    "label": "end",
+    "type": "KEYE"
+   },
+   {
+    "label": "2",
+    "type": "KEYB"
+   },
+   {
+    "label": "Min Intensity (1-32)",
+    "type": "DWRD"
+   },
+   {
+    "label": "Increase/Frame * 100",
+    "type": "DWRD"
+   },
+   {
+    "label": "Max Intensity (1-32)",
+    "type": "DWRD"
+   },
+   {
+    "label": "Decrease/Frame * 100",
+    "type": "DWRD"
+   },
+   {
+    "label": "end",
+    "type": "KEYE"
+   },
+   {
+    "label": "3",
+    "type": "KEYB"
+   },
+   {
+    "label": "Min Intensity (1-32)",
+    "type": "DWRD"
+   },
+   {
+    "label": "Max Intensity (1-32)",
+    "type": "DWRD"
+   },
+   {
+    "label": "Delay Between Changes",
+    "type": "DWRD"
+   },
+   {
+    "label": "Ignored",
+    "type": "FWRD"
+   },
+   {
+    "label": "end",
+    "type": "KEYE"
+   },
+   {
+    "label": "shieldSprite='rlD'",
+    "type": "RSID"
+   },
+   {
+    "label": "shieldMask='PICT'",
+    "type": "RSID"
+   },
+   {
+    "label": "shieldFrame",
+    "type": "PNT "
+   },
+   {
+    "label": "Guns",
+    "type": "R004"
+   },
+   {
+    "label": "Gun Position X/Y/Z *=gx*,gy*,gz*",
+    "type": "PACK"
+   },
+   {
+    "label": "Turrets",
+    "type": "R004"
+   },
+   {
+    "label": "Turret Position X/Y/Z *=tx*,ty*,tz*",
+    "type": "PACK"
+   },
+   {
+    "label": "Guided",
+    "type": "R004"
+   },
+   {
+    "label": "Guided Position X/Y/Z *=mx*,my*,mz*",
+    "type": "PACK"
+   },
+   {
+    "label": "Beams",
+    "type": "R004"
+   },
+   {
+    "label": "Beam Position X/Y/Z *=bx*,by*,bz*",
+    "type": "PACK"
+   },
+   {
+    "label": "gx",
+    "type": "R004"
+   },
+   {
+    "label": "gx*",
+    "type": "DWRD"
+   },
+   {
+    "label": "gy",
+    "type": "R004"
+   },
+   {
+    "label": "gy*",
+    "type": "DWRD"
+   },
+   {
+    "label": "tx",
+    "type": "R004"
+   },
+   {
+    "label": "tx*",
+    "type": "DWRD"
+   },
+   {
+    "label": "ty",
+    "type": "R004"
+   },
+   {
+    "label": "ty*",
+    "type": "DWRD"
+   },
+   {
+    "label": "mx",
+    "type": "R004"
+   },
+   {
+    "label": "mx*",
+    "type": "DWRD"
+   },
+   {
+    "label": "my",
+    "type": "R004"
+   },
+   {
+    "label": "my*",
+    "type": "DWRD"
+   },
+   {
+    "label": "bx",
+    "type": "R004"
+   },
+   {
+    "label": "bx*",
+    "type": "DWRD"
+   },
+   {
+    "label": "by",
+    "type": "R004"
+   },
+   {
+    "label": "by*",
+    "type": "DWRD"
+   },
+   {
+    "label": "Up X Compression %",
+    "type": "DWRD"
+   },
+   {
+    "label": "Up Y Compression %",
+    "type": "DWRD"
+   },
+   {
+    "label": "Down X Compression %",
+    "type": "DWRD"
+   },
+   {
+    "label": "Down Y Compression %",
+    "type": "DWRD"
+   },
+   {
+    "label": "gz",
+    "type": "R004"
+   },
+   {
+    "label": "gz*",
+    "type": "DWRD"
+   },
+   {
+    "label": "tz",
+    "type": "R004"
+   },
+   {
+    "label": "tz*",
+    "type": "DWRD"
+   },
+   {
+    "label": "mz",
+    "type": "R004"
+   },
+   {
+    "label": "mz*",
+    "type": "DWRD"
+   },
+   {
+    "label": "bz",
+    "type": "R004"
+   },
+   {
+    "label": "bz*",
+    "type": "DWRD"
+   },
+   {
+    "label": "Unused",
+    "type": "F010"
+   }
+  ]
+ },
+ "shïp": {
+  "id": 518,
+  "fields": [
+   {
+    "label": "Graphics=shan,targetPic,yardPic",
+    "type": "PACK"
+   },
+   {
+    "label": "shan='shn' Shan",
+    "type": "RREF"
+   },
+   {
+    "label": "targetPic='PICT' 2872 Target Pict",
+    "type": "RREF"
+   },
+   {
+    "label": "yardPic='PICT' 4872 Shipyard Pict",
+    "type": "RREF"
+   },
+   {
+    "label": "Descriptions=yardDesc,hireDesc",
+    "type": "PACK"
+   },
+   {
+    "label": "yardDesc='dsc' 12872 Shipyard Desc",
+    "type": "RREF"
+   },
+   {
+    "label": "hireDesc='dsc' 13872 Hire Desc",
+    "type": "RREF"
+   },
+   {
+    "label": "Cargo Capacity\ntons",
+    "type": "DWRD"
+   },
+   {
+    "label": "Allow Mass Expansions:=0..",
+    "type": "CASR"
+   },
+   {
+    "label": "No Mass Expansions:=-1.. ~1",
+    "type": "CASR"
+   },
+   {
+    "label": "Shield Strength",
+    "type": "DWRD"
+   },
+   {
+    "label": "Normal Shields:=0..",
+    "type": "CASR"
+   },
+   {
+    "label": "Super Shields (x5):=-1.. ~1",
+    "type": "CASR"
+   },
+   {
+    "label": "Shield Recharge Rate=shieldRecharge\n1000 = 1 point per frame",
+    "type": "PACK"
+   },
+   {
+    "label": "Acceleration\n300 = average",
+    "type": "DWRD"
+   },
+   {
+    "label": "Top Speed\n300 = average",
+    "type": "DWRD"
+   },
+   {
+    "label": "Turn Rate\n10 Å 30¡/sec",
+    "type": "DWRD"
+   },
+   {
+    "label": "Fuel Capacity\n100 = 1 jump",
+    "type": "DWRD"
+   },
+   {
+    "label": "AI Fuel Regeneration=fuelRegen\nframes per unit generated",
+    "type": "PACK"
+   },
+   {
+    "label": "Available Space\ntons",
+    "type": "DWRD"
+   },
+   {
+    "label": "Armor Strength\nShips with no armor will die on spawn.",
+    "type": "DWRD"
+   },
+   {
+    "label": "Armor Regeneration=armorRegen\n1000 = 1 point per frame",
+    "type": "PACK"
+   },
+   {
+    "label": "shieldRecharge",
+    "type": "DWRD"
+   },
+   {
+    "label": "Equipment (type, count)",
+    "type": "DVDR"
+   },
+   {
+    "label": "Weapons, Ammo",
+    "type": "R008"
+   },
+   {
+    "label": "*) Weapon, Ammo='wap',c,a",
+    "type": "PACK"
+   },
+   {
+    "label": "Outfits",
+    "type": "R008"
+   },
+   {
+    "label": "*) Outfit='otf',oc",
+    "type": "PACK"
+   },
+   {
+    "label": "Weapons",
+    "type": "R004"
+   },
+   {
+    "label": "'wap'=-1",
+    "type": "RSID"
+   },
+   {
+    "label": "Counts",
+    "type": "R004"
+   },
+   {
+    "label": "c",
+    "type": "DWRD"
+   },
+   {
+    "label": "Ammo",
+    "type": "R004"
+   },
+   {
+    "label": "a",
+    "type": "DWRD"
+   },
+   {
+    "label": "Maximum Guns",
+    "type": "DWRD"
+   },
+   {
+    "label": "Maximum Turrets",
+    "type": "DWRD"
+   },
+   {
+    "label": "Tech Level",
+    "type": "DWRD"
+   },
+   {
+    "label": "Cost",
+    "type": "DLNG"
+   },
+   {
+    "label": "Death Delay\nframes (should be at least 2 to avoid glitching)",
+    "type": "DWRD"
+   },
+   {
+    "label": "armorRegen",
+    "type": "DWRD"
+   },
+   {
+    "label": "Breakup Explosion",
+    "type": "DWRD"
+   },
+   {
+    "label": "None=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "Multiple Explosions:=0..63 ~128 'bm'",
+    "type": "CASR"
+   },
+   {
+    "label": "Final Explosion",
+    "type": "DWRD"
+   },
+   {
+    "label": "None=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "Single Explosion:=0..63 ~128 'bm'",
+    "type": "CASR"
+   },
+   {
+    "label": "Explosion + Sparks:=1000..1063 ~128 'bm'",
+    "type": "CASR"
+   },
+   {
+    "label": "Display Weight",
+    "type": "DWRD"
+   },
+   {
+    "label": "Mass\ntons",
+    "type": "DWRD"
+   },
+   {
+    "label": "Length\nmeters",
+    "type": "DWRD"
+   },
+   {
+    "label": "Inherent AI",
+    "type": "DWRD"
+   },
+   {
+    "label": "Wimpy Trader=1",
+    "type": "CASR"
+   },
+   {
+    "label": "Brave Trader=2",
+    "type": "CASR"
+   },
+   {
+    "label": "Warship=3",
+    "type": "CASR"
+   },
+   {
+    "label": "Interceptor=4",
+    "type": "CASR"
+   },
+   {
+    "label": "Crew Count",
+    "type": "DWRD"
+   },
+   {
+    "label": "CanÕt be boarded=0",
+    "type": "CASE"
+   },
+   {
+    "label": "Relative Strength\nfor combat rating and AI combat odds",
+    "type": "DWRD"
+   },
+   {
+    "label": "Inherent Govt=-1",
+    "type": "DWRD"
+   },
+   {
+    "label": "None=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "Attributes & Combat:=128..383 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Attributes Only:=1128..1383 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Combat Only:=2128..2383 ~128 'gvt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Flags",
+    "type": "WORV"
+   },
+   {
+    "label": "Slow jump speed (75% normal)=0x0001",
+    "type": "CASE"
+   },
+   {
+    "label": "Semi-fast jump speed (125% normal)=0x0002",
+    "type": "CASE"
+   },
+   {
+    "label": "Fast jump speed (150% normal)=0x0004",
+    "type": "CASE"
+   },
+   {
+    "label": "Fuel regen also applies to player=0x0008",
+    "type": "CASE"
+   },
+   {
+    "label": "Disabled at 10% armor instead of 33%=0x0010",
+    "type": "CASE"
+   },
+   {
+    "label": "AI has afterburner at Advanced combat rating=0x0020",
+    "type": "CASE"
+   },
+   {
+    "label": "AI always has afterburner=0x0040",
+    "type": "CASE"
+   },
+   {
+    "label": "Show armor percentage in target display=0x0100",
+    "type": "CASE"
+   },
+   {
+    "label": "DonÕt show shield/armor in target display=0x0200",
+    "type": "CASE"
+   },
+   {
+    "label": "Planet-type ship=0x0400",
+    "type": "CASE"
+   },
+   {
+    "label": "Turrets have front blind spot=0x1000",
+    "type": "CASE"
+   },
+   {
+    "label": "Turrets have side blind spots=0x2000",
+    "type": "CASE"
+   },
+   {
+    "label": "Turrets have rear blind spot=0x4000",
+    "type": "CASE"
+   },
+   {
+    "label": "Can be used as an escape ship=0x8000",
+    "type": "CASE"
+   },
+   {
+    "label": "Flags 2=flags2",
+    "type": "PACK"
+   },
+   {
+    "label": "Flags 3=flags3",
+    "type": "PACK"
+   },
+   {
+    "label": "Decorative Escape Pods",
+    "type": "DWRD"
+   },
+   {
+    "label": "Outfits",
+    "type": "R004"
+   },
+   {
+    "label": "'otf'=-1",
+    "type": "RSID"
+   },
+   {
+    "label": "Counts",
+    "type": "R004"
+   },
+   {
+    "label": "oc",
+    "type": "DWRD"
+   },
+   {
+    "label": "fuelRegen",
+    "type": "DWRD"
+   },
+   {
+    "label": "AI Speed Variance\n%",
+    "type": "DWRD"
+   },
+   {
+    "label": "flags2",
+    "type": "WORV"
+   },
+   {
+    "label": "AI exhibits swarming behavior=0x0001",
+    "type": "CASE"
+   },
+   {
+    "label": "AI prefers standoff attacks=0x0002",
+    "type": "CASE"
+   },
+   {
+    "label": "CanÕt be targeted=0x0004",
+    "type": "CASE"
+   },
+   {
+    "label": "Can be targeted by Point Defense weapons=0x0008",
+    "type": "CASE"
+   },
+   {
+    "label": "DonÕt use fighter voices=0x0010",
+    "type": "CASE"
+   },
+   {
+    "label": "Can jump without slowing down=0x0020",
+    "type": "CASE"
+   },
+   {
+    "label": "Inertialess=0x0040",
+    "type": "CASE"
+   },
+   {
+    "label": "AI retreats when out of ammo=0x0080",
+    "type": "CASE"
+   },
+   {
+    "label": "AI cloaks during burst reload=0x0100",
+    "type": "CASE"
+   },
+   {
+    "label": "AI cloaks when retreating=0x0200",
+    "type": "CASE"
+   },
+   {
+    "label": "AI cloaks when jumping=0x0400",
+    "type": "CASE"
+   },
+   {
+    "label": "AI cloaks when just flying around=0x0800",
+    "type": "CASE"
+   },
+   {
+    "label": "AI remains cloaked until close to target=0x1000",
+    "type": "CASE"
+   },
+   {
+    "label": "AI cloaks when docking=0x2000",
+    "type": "CASE"
+   },
+   {
+    "label": "AI cloaks when pre-emptively attacked=0x4000",
+    "type": "CASE"
+   },
+   {
+    "label": "Contribute/Require=contribute,require",
+    "type": "PACK"
+   },
+   {
+    "label": "contribute=#-100",
+    "type": "QB64"
+   },
+   {
+    "label": "Availability (NCB Test)",
+    "type": "n0FF"
+   },
+   {
+    "label": "AppearOn (NCB Test)",
+    "type": "n0FF"
+   },
+   {
+    "label": "OnPurchase (NCB Set)",
+    "type": "n100"
+   },
+   {
+    "label": "OnCapture (NCB Set)=onCapture",
+    "type": "PACK"
+   },
+   {
+    "label": "OnRetire (NCB Set)=onRetire",
+    "type": "PACK"
+   },
+   {
+    "label": "Deionization Rate\n100 = 1 point per frame",
+    "type": "DWRD"
+   },
+   {
+    "label": "Max Ionization",
+    "type": "DWRD"
+   },
+   {
+    "label": "Key Carried Ship='shp'",
+    "type": "RSID"
+   },
+   {
+    "label": "-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Outfits=5",
+    "type": "R004"
+   },
+   {
+    "label": "'otf'=-1",
+    "type": "RSID"
+   },
+   {
+    "label": "Counts=5",
+    "type": "R004"
+   },
+   {
+    "label": "oc",
+    "type": "DWRD"
+   },
+   {
+    "label": "require=#-100",
+    "type": "QB64"
+   },
+   {
+    "label": "Buy Random\n%",
+    "type": "DWRD"
+   },
+   {
+    "label": "Hire Random\n%",
+    "type": "DWRD"
+   },
+   {
+    "label": "Unused",
+    "type": "F044"
+   },
+   {
+    "label": "onCapture",
+    "type": "n0FF"
+   },
+   {
+    "label": "onRetire",
+    "type": "n0FF"
+   },
+   {
+    "label": "Shipyard Name",
+    "type": "C040"
+   },
+   {
+    "label": "Comms Name",
+    "type": "C020"
+   },
+   {
+    "label": "Long Name",
+    "type": "C080"
+   },
+   {
+    "label": "Shipyard Movie File",
+    "type": "C020"
+   },
+   {
+    "label": "Weapons=5",
+    "type": "R004"
+   },
+   {
+    "label": "'wap'=-1",
+    "type": "RSID"
+   },
+   {
+    "label": "Counts=5",
+    "type": "R004"
+   },
+   {
+    "label": "c",
+    "type": "DWRD"
+   },
+   {
+    "label": "Ammo=5",
+    "type": "R004"
+   },
+   {
+    "label": "a",
+    "type": "DWRD"
+   },
+   {
+    "label": "Target Display Subtitle",
+    "type": "C040"
+   },
+   {
+    "label": "flags3",
+    "type": "WORV"
+   },
+   {
+    "label": "AI destroys asteroids=0x0001",
+    "type": "CASE"
+   },
+   {
+    "label": "AI scoops asteroid debris (economy-at-work if no scoop)=0x0002",
+    "type": "CASE"
+   },
+   {
+    "label": "Immune to gravity (doesnÕt work!)=0x0010",
+    "type": "CASE"
+   },
+   {
+    "label": "Immune to deadly stellars (& gravity)=0x0020",
+    "type": "CASE"
+   },
+   {
+    "label": "Turreted shots appear above ship, not below=0x0040",
+    "type": "CASE"
+   },
+   {
+    "label": "DonÕt show in shipyard if Availability false=0x0100",
+    "type": "CASE"
+   },
+   {
+    "label": "DonÕt show in shipyard if Require not met=0x0200",
+    "type": "CASE"
+   },
+   {
+    "label": "Hide other ships of equal display weight=0x4000",
+    "type": "CASE"
+   },
+   {
+    "label": "Escort Upgrades To='shp'",
+    "type": "RSID"
+   },
+   {
+    "label": "Not Upgradable=-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Escort Upgrade Cost",
+    "type": "DLNG"
+   },
+   {
+    "label": "Escort Sell Value",
+    "type": "DLNG"
+   },
+   {
+    "label": "Escort Category=-1",
+    "type": "DWRD"
+   },
+   {
+    "label": "Automatic=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "Fighter=0",
+    "type": "CASR"
+   },
+   {
+    "label": "Medium Ship=1",
+    "type": "CASR"
+   },
+   {
+    "label": "Warship=2",
+    "type": "CASR"
+   },
+   {
+    "label": "Freighter=3",
+    "type": "CASR"
+   },
+   {
+    "label": "Unused",
+    "type": "F010"
+   }
+  ]
+ },
+ "spïn": {
+  "id": 519,
+  "fields": [
+   {
+    "label": "Sprite='rlD'",
+    "type": "RSID"
+   },
+   {
+    "label": "The Mask and Frame Size fields only apply to PICT sprites",
+    "type": "DVDR"
+   },
+   {
+    "label": "Mask='PICT'",
+    "type": "RSID"
+   },
+   {
+    "label": "Frame Size",
+    "type": "PNT "
+   },
+   {
+    "label": "For rlD sprites, the Grid Size should reflect the frame count",
+    "type": "DVDR"
+   },
+   {
+    "label": "Grid Size",
+    "type": "PNT "
+   }
+  ]
+ },
+ "spöb": {
+  "id": 520,
+  "fields": [
+   {
+    "label": "Descriptions=spaceport,bar",
+    "type": "PACK"
+   },
+   {
+    "label": "spaceport='dsc' Spaceport Desc",
+    "type": "RREF"
+   },
+   {
+    "label": "bar='dsc' 9872 Bar Desc",
+    "type": "RREF"
+   },
+   {
+    "label": "Position in System",
+    "type": "PNT "
+   },
+   {
+    "label": "Type=type,typeRef",
+    "type": "PACK"
+   },
+   {
+    "label": "type='spn' 1000+63",
+    "type": "RSID"
+   },
+   {
+    "label": "typeRef='STR#' #1100 Stellar Types",
+    "type": "RREF"
+   },
+   {
+    "label": "Food Prices",
+    "type": "BB04"
+   },
+   {
+    "label": "Not Traded=0",
+    "type": "CASR"
+   },
+   {
+    "label": "Low=1",
+    "type": "CASR"
+   },
+   {
+    "label": "Medium=2",
+    "type": "CASR"
+   },
+   {
+    "label": "High=4",
+    "type": "CASR"
+   },
+   {
+    "label": "Industrial Prices",
+    "type": "BB04"
+   },
+   {
+    "label": "Not Traded=0",
+    "type": "CASR"
+   },
+   {
+    "label": "Low=1",
+    "type": "CASR"
+   },
+   {
+    "label": "Medium=2",
+    "type": "CASR"
+   },
+   {
+    "label": "High=4",
+    "type": "CASR"
+   },
+   {
+    "label": "Medical Prices",
+    "type": "BB04"
+   },
+   {
+    "label": "Not Traded=0",
+    "type": "CASR"
+   },
+   {
+    "label": "Low=1",
+    "type": "CASR"
+   },
+   {
+    "label": "Medium=2",
+    "type": "CASR"
+   },
+   {
+    "label": "High=4",
+    "type": "CASR"
+   },
+   {
+    "label": "Luxury Goods Prices",
+    "type": "BB04"
+   },
+   {
+    "label": "Not Traded=0",
+    "type": "CASR"
+   },
+   {
+    "label": "Low=1",
+    "type": "CASR"
+   },
+   {
+    "label": "Medium=2",
+    "type": "CASR"
+   },
+   {
+    "label": "High=4",
+    "type": "CASR"
+   },
+   {
+    "label": "Metal Prices",
+    "type": "BB04"
+   },
+   {
+    "label": "Not Traded=0",
+    "type": "CASR"
+   },
+   {
+    "label": "Low=1",
+    "type": "CASR"
+   },
+   {
+    "label": "Medium=2",
+    "type": "CASR"
+   },
+   {
+    "label": "High=4",
+    "type": "CASR"
+   },
+   {
+    "label": "Equipment Prices",
+    "type": "BB04"
+   },
+   {
+    "label": "Not Traded=0",
+    "type": "CASR"
+   },
+   {
+    "label": "Low=1",
+    "type": "CASR"
+   },
+   {
+    "label": "Medium=2",
+    "type": "CASR"
+   },
+   {
+    "label": "High=4",
+    "type": "CASR"
+   },
+   {
+    "label": "Flags 1",
+    "type": "BORV"
+   },
+   {
+    "label": "Can land/dock=0x01",
+    "type": "CASE"
+   },
+   {
+    "label": "Has Commodity Exchange=0x02",
+    "type": "CASE"
+   },
+   {
+    "label": "Has Outfitter=0x04",
+    "type": "CASE"
+   },
+   {
+    "label": "Has Shipyard=0x08",
+    "type": "CASE"
+   },
+   {
+    "label": "Is a station=0x10",
+    "type": "CASE"
+   },
+   {
+    "label": "Uninhabited=0x20",
+    "type": "CASE"
+   },
+   {
+    "label": "Has Bar=0x40",
+    "type": "CASE"
+   },
+   {
+    "label": "Can only land when destroyed=0x80",
+    "type": "CASE"
+   },
+   {
+    "label": "Flags 2=flags2",
+    "type": "PACK"
+   },
+   {
+    "label": "Daily Tribute\ncredits",
+    "type": "DWRD"
+   },
+   {
+    "label": "Default (1000 x Tech Level)=0",
+    "type": "CASE"
+   },
+   {
+    "label": "Tech Level",
+    "type": "DWRD"
+   },
+   {
+    "label": "Special Techs=tech,tech,tech,tech",
+    "type": "PACK"
+   },
+   {
+    "label": "=tech,tech,tech,tech",
+    "type": "PACK"
+   },
+   {
+    "label": "tech",
+    "type": "DWRD"
+   },
+   {
+    "label": "tech",
+    "type": "DWRD"
+   },
+   {
+    "label": "tech",
+    "type": "DWRD"
+   },
+   {
+    "label": "Government='gvt'",
+    "type": "RSID"
+   },
+   {
+    "label": "Independent=-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Minimum Legal Status=0",
+    "type": "DWRD"
+   },
+   {
+    "label": "Can always land=-32767",
+    "type": "CASE"
+   },
+   {
+    "label": "Can never land=32767",
+    "type": "CASE"
+   },
+   {
+    "label": "For hypergates, the landscape value is the index of the first ÒopenÓ frame. 0 = middle.",
+    "type": "DVDR"
+   },
+   {
+    "label": "Custom Landscape='PICT'",
+    "type": "RSID"
+   },
+   {
+    "label": "-1",
+    "type": "CASE"
+   },
+   {
+    "label": "For hypergates/wormholes, the sound value is the ship exit angle. -1 = random.",
+    "type": "DVDR"
+   },
+   {
+    "label": "Custom Ambient Sound='snd '",
+    "type": "RSID"
+   },
+   {
+    "label": "-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Defense Fleet Dude='dde'",
+    "type": "RSID"
+   },
+   {
+    "label": "-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Defense Ship Count\nmax 2276 (1000+ must use wave size)",
+    "type": "WB12"
+   },
+   {
+    "label": "=0..2276",
+    "type": "CASR"
+   },
+   {
+    "label": "Defense Wave Size\nmax 9 (0 = unlimited)",
+    "type": "WB04"
+   },
+   {
+    "label": "=0..9",
+    "type": "CASR"
+   },
+   {
+    "label": "flags2",
+    "type": "WORV"
+   },
+   {
+    "label": "Show first frame between every other=0x0001",
+    "type": "CASE"
+   },
+   {
+    "label": "Pick frames randomly=0x0002",
+    "type": "CASE"
+   },
+   {
+    "label": "Loop ambient sound=0x0010",
+    "type": "CASE"
+   },
+   {
+    "label": "Always dominated=0x0020",
+    "type": "CASE"
+   },
+   {
+    "label": "Starts destroyed=0x0040",
+    "type": "CASE"
+   },
+   {
+    "label": "Animate only when destroyed=0x0080",
+    "type": "CASE"
+   },
+   {
+    "label": "Deadly - destroys ships on contact=0x0100",
+    "type": "CASE"
+   },
+   {
+    "label": "Fires weapon only when provoked=0x0200",
+    "type": "CASE"
+   },
+   {
+    "label": "Player can sell any outfits here=0x0400",
+    "type": "CASE"
+   },
+   {
+    "label": "Is a hypergate - choose destination from links=0x1000",
+    "type": "CASE"
+   },
+   {
+    "label": "Is a wormhole - random destination from links=0x2000",
+    "type": "CASE"
+   },
+   {
+    "label": "Animation Delay\ntime between frames, in 30ths of a second",
+    "type": "DWRD"
+   },
+   {
+    "label": "First Frame Bias\ndelay multiplier for first frame",
+    "type": "DWRD"
+   },
+   {
+    "label": "Hypergate/wormhole links. Wormholes with no defined links will all link to each other.",
+    "type": "DVDR"
+   },
+   {
+    "label": "Hyperlinks='spb','spb'",
+    "type": "PACK"
+   },
+   {
+    "label": "",
+    "type": "R003"
+   },
+   {
+    "label": "='spb','spb'",
+    "type": "PACK"
+   },
+   {
+    "label": "",
+    "type": "R008"
+   },
+   {
+    "label": "'spb'=-1",
+    "type": "RSID"
+   },
+   {
+    "label": "OnDominate (NCB Set)",
+    "type": "n0FF"
+   },
+   {
+    "label": "OnRelease (NCB Set)",
+    "type": "n0FF"
+   },
+   {
+    "label": "Landing Fee (credits)",
+    "type": "DLNG"
+   },
+   {
+    "label": "Gravity\nConfuses AI, not recommended.",
+    "type": "DWRD"
+   },
+   {
+    "label": "Weapon='wap'",
+    "type": "RSID"
+   },
+   {
+    "label": "-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Strength=0",
+    "type": "DLNG"
+   },
+   {
+    "label": "Invulnerable=0",
+    "type": "CASE"
+   },
+   {
+    "label": "Destroyed Graphic Type='spn' 1000+63",
+    "type": "RSID"
+   },
+   {
+    "label": "-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Regenerate Time (days)",
+    "type": "DWRD"
+   },
+   {
+    "label": "Never Regenerates=-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Explosion=-1",
+    "type": "DWRD"
+   },
+   {
+    "label": "None=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "Single Explosion:=0..63 ~128 'bm'",
+    "type": "CASR"
+   },
+   {
+    "label": "Explosion + Sparks:=1000..1063 ~128 'bm'",
+    "type": "CASR"
+   },
+   {
+    "label": "OnDestroy (NCB Set)",
+    "type": "n0FF"
+   },
+   {
+    "label": "OnRegen (NCB Set)",
+    "type": "n0FF"
+   },
+   {
+    "label": "Techs=4",
+    "type": "R005"
+   },
+   {
+    "label": "tech",
+    "type": "DWRD"
+   },
+   {
+    "label": "Unused",
+    "type": "F010"
+   }
+  ]
+ },
+ "sÿst": {
+  "id": 521,
+  "fields": [
+   {
+    "label": "Maps=galaxyMap,systemMap",
+    "type": "PACK"
+   },
+   {
+    "label": "galaxyMap='glxØ' #0 Galaxy",
+    "type": "RREF"
+   },
+   {
+    "label": "systemMap='sØsm' 0 System",
+    "type": "RREF"
+   },
+   {
+    "label": "Position on Map",
+    "type": "PNT "
+   },
+   {
+    "label": "Hyperlinks='sØst','sØst'",
+    "type": "PACK"
+   },
+   {
+    "label": "",
+    "type": "R007"
+   },
+   {
+    "label": "='sØst','sØst'",
+    "type": "PACK"
+   },
+   {
+    "label": "",
+    "type": "R010"
+   },
+   {
+    "label": "'sØst'=-1",
+    "type": "RSID"
+   },
+   {
+    "label": "Nav Defaults='spb','spb'",
+    "type": "PACK"
+   },
+   {
+    "label": "",
+    "type": "R007"
+   },
+   {
+    "label": "='spb','spb'",
+    "type": "PACK"
+   },
+   {
+    "label": "",
+    "type": "R010"
+   },
+   {
+    "label": "'spb'=-1",
+    "type": "RSID"
+   },
+   {
+    "label": "Dude Probabilities",
+    "type": "R008"
+   },
+   {
+    "label": "*) Dude Probability='dde',prob\n%",
+    "type": "PACK"
+   },
+   {
+    "label": "'dde'=-1",
+    "type": "DWRD"
+   },
+   {
+    "label": "None=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "Dude:=128..639 'dde'",
+    "type": "CASR"
+   },
+   {
+    "label": "Fleet:=-128..-383 ~128 'flt'",
+    "type": "CASR"
+   },
+   {
+    "label": "'dde'=-1",
+    "type": "DWRD"
+   },
+   {
+    "label": "None=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "Dude:=128..639 'dde'",
+    "type": "CASR"
+   },
+   {
+    "label": "Fleet:=-128..-383 ~128 'flt'",
+    "type": "CASR"
+   },
+   {
+    "label": "'dde'=-1",
+    "type": "DWRD"
+   },
+   {
+    "label": "None=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "Dude:=128..639 'dde'",
+    "type": "CASR"
+   },
+   {
+    "label": "Fleet:=-128..-383 ~128 'flt'",
+    "type": "CASR"
+   },
+   {
+    "label": "'dde'=-1",
+    "type": "DWRD"
+   },
+   {
+    "label": "None=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "Dude:=128..639 'dde'",
+    "type": "CASR"
+   },
+   {
+    "label": "Fleet:=-128..-383 ~128 'flt'",
+    "type": "CASR"
+   },
+   {
+    "label": "'dde'=-1",
+    "type": "DWRD"
+   },
+   {
+    "label": "None=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "Dude:=128..639 'dde'",
+    "type": "CASR"
+   },
+   {
+    "label": "Fleet:=-128..-383 ~128 'flt'",
+    "type": "CASR"
+   },
+   {
+    "label": "'dde'=-1",
+    "type": "DWRD"
+   },
+   {
+    "label": "None=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "Dude:=128..639 'dde'",
+    "type": "CASR"
+   },
+   {
+    "label": "Fleet:=-128..-383 ~128 'flt'",
+    "type": "CASR"
+   },
+   {
+    "label": "'dde'=-1",
+    "type": "DWRD"
+   },
+   {
+    "label": "None=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "Dude:=128..639 'dde'",
+    "type": "CASR"
+   },
+   {
+    "label": "Fleet:=-128..-383 ~128 'flt'",
+    "type": "CASR"
+   },
+   {
+    "label": "'dde'=-1",
+    "type": "DWRD"
+   },
+   {
+    "label": "None=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "Dude:=128..639 'dde'",
+    "type": "CASR"
+   },
+   {
+    "label": "Fleet:=-128..-383 ~128 'flt'",
+    "type": "CASR"
+   },
+   {
+    "label": "Probs",
+    "type": "R008"
+   },
+   {
+    "label": "prob",
+    "type": "DWRD"
+   },
+   {
+    "label": "Average Ship Count",
+    "type": "DWRD"
+   },
+   {
+    "label": "Government='gvt'",
+    "type": "RSID"
+   },
+   {
+    "label": "Independent=-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Message Buoy=buoy,buoyRef",
+    "type": "PACK"
+   },
+   {
+    "label": "buoy='STR ' 999+4000",
+    "type": "RSID"
+   },
+   {
+    "label": "-1",
+    "type": "CASE"
+   },
+   {
+    "label": "buoyRef='STR#' #1000 Message Buoys",
+    "type": "RREF"
+   },
+   {
+    "label": "Asteroids\n0-16",
+    "type": "DWRD"
+   },
+   {
+    "label": "Asteroid Types=roidTypes2,roidTypes1",
+    "type": "PACK"
+   },
+   {
+    "label": "Interference\n%",
+    "type": "DWRD"
+   },
+   {
+    "label": "Murk=murk\n%",
+    "type": "PACK"
+   },
+   {
+    "label": "Background Color=background",
+    "type": "PACK"
+   },
+   {
+    "label": "Pers Probs",
+    "type": "R008"
+   },
+   {
+    "label": "*) Pers Probability='prs',prob\n%",
+    "type": "PACK"
+   },
+   {
+    "label": "Pers",
+    "type": "R008"
+   },
+   {
+    "label": "'prs'=-1",
+    "type": "RSID"
+   },
+   {
+    "label": "Probs",
+    "type": "R008"
+   },
+   {
+    "label": "prob",
+    "type": "DWRD"
+   },
+   {
+    "label": "background",
+    "type": "LCOL"
+   },
+   {
+    "label": "murk=0\n%",
+    "type": "DWRD"
+   },
+   {
+    "label": "Hide Starfield=-1",
+    "type": "CASE"
+   },
+   {
+    "label": "roidTypes1",
+    "type": "BORV"
+   },
+   {
+    "label": "136 Small Dust=0x01",
+    "type": "CASE"
+   },
+   {
+    "label": "137 Medium Dust=0x02",
+    "type": "CASE"
+   },
+   {
+    "label": "138 Large Dust=0x04",
+    "type": "CASE"
+   },
+   {
+    "label": "139 Huge Dust=0x08",
+    "type": "CASE"
+   },
+   {
+    "label": "140 Small Crystal=0x10",
+    "type": "CASE"
+   },
+   {
+    "label": "141 Med. Crystal=0x20",
+    "type": "CASE"
+   },
+   {
+    "label": "142 Large Crystal=0x40",
+    "type": "CASE"
+   },
+   {
+    "label": "143 Huge Crystal=0x80",
+    "type": "CASE"
+   },
+   {
+    "label": "roidTypes2",
+    "type": "BORV"
+   },
+   {
+    "label": "128 Small Metal=0x01",
+    "type": "CASE"
+   },
+   {
+    "label": "129 Med. Metal=0x02",
+    "type": "CASE"
+   },
+   {
+    "label": "130 Large Metal=0x04",
+    "type": "CASE"
+   },
+   {
+    "label": "131 Huge Metal=0x08",
+    "type": "CASE"
+   },
+   {
+    "label": "132 Small Ice=0x10",
+    "type": "CASE"
+   },
+   {
+    "label": "133 Medium Ice=0x20",
+    "type": "CASE"
+   },
+   {
+    "label": "134 Large Ice=0x40",
+    "type": "CASE"
+   },
+   {
+    "label": "135 Huge Ice=0x80",
+    "type": "CASE"
+   },
+   {
+    "label": "Visiblility (NCB Test)",
+    "type": "n100"
+   },
+   {
+    "label": "Reinforcement Fleet='flt'",
+    "type": "RSID"
+   },
+   {
+    "label": "-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Reinforcement Delay\nframes",
+    "type": "DWRD"
+   },
+   {
+    "label": "Reinforcement Regen\ndays",
+    "type": "DWRD"
+   },
+   {
+    "label": "Unused",
+    "type": "F010"
+   }
+  ]
+ },
+ "wëap": {
+  "id": 522,
+  "fields": [
+   {
+    "label": "Reload\nframes",
+    "type": "DWRD"
+   },
+   {
+    "label": "Duration\nframes",
+    "type": "DWRD"
+   },
+   {
+    "label": "Mass (Armor) Damage",
+    "type": "DWRD"
+   },
+   {
+    "label": "Energy (Shield) Damage",
+    "type": "DWRD"
+   },
+   {
+    "label": "Weapon Type",
+    "type": "KWRD"
+   },
+   {
+    "label": "Unguided Projectile=-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Unguided Projectile Turret=4",
+    "type": "CASE"
+   },
+   {
+    "label": "Homing Weapon=1",
+    "type": "CASE"
+   },
+   {
+    "label": "Beam=0",
+    "type": "CASE"
+   },
+   {
+    "label": "Beam Turret=3",
+    "type": "CASE"
+   },
+   {
+    "label": "Freefall Bomb=5",
+    "type": "CASE"
+   },
+   {
+    "label": "Freeflight Rocket=6",
+    "type": "CASE"
+   },
+   {
+    "label": "Front-Quadrant Turret=7",
+    "type": "CASE"
+   },
+   {
+    "label": "Rear-Quadrant Turret=8",
+    "type": "CASE"
+   },
+   {
+    "label": "Point Defense Turret=9",
+    "type": "CASE"
+   },
+   {
+    "label": "Point Defense Beam=10",
+    "type": "CASE"
+   },
+   {
+    "label": "Carried Ship=99",
+    "type": "CASE"
+   },
+   {
+    "label": "Projectile=-1,4,5,6,7,8,9",
+    "type": "KEYB"
+   },
+   {
+    "label": "Shot Speed\n100 = 1 pixel per frame",
+    "type": "DWRD"
+   },
+   {
+    "label": "Ammo Type=-1",
+    "type": "DWRD"
+   },
+   {
+    "label": "DoesnÕt Use Ammo=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "Ammo From Weapon:=0..255 ~128 'wap'",
+    "type": "CASR"
+   },
+   {
+    "label": "Destroys Ship=-999",
+    "type": "CASR"
+   },
+   {
+    "label": "Consumes Fuel:=-1000.. ~0\n10 = 1 unit per shot",
+    "type": "CASR"
+   },
+   {
+    "label": "Graphic Type='spn' 3000+255",
+    "type": "RSID"
+   },
+   {
+    "label": "Inaccuracy\n¡",
+    "type": "DWRD"
+   },
+   {
+    "label": "Error Margin:=0..",
+    "type": "CASR"
+   },
+   {
+    "label": "Fixed (unguided only):=-2.. ~2\nNeeds off-axis exits.",
+    "type": "CASR"
+   },
+   {
+    "label": "wap.Projectile1",
+    "type": "TMPL"
+   },
+   {
+    "label": "Turret has front blind spot=0x1000",
+    "type": "CASE"
+   },
+   {
+    "label": "Turret has side blind spots=0x2000",
+    "type": "CASE"
+   },
+   {
+    "label": "Turret has rear blind spot=0x4000",
+    "type": "CASE"
+   },
+   {
+    "label": "Detonates when shot expires (flak)=0x8000",
+    "type": "CASE"
+   },
+   {
+    "label": "Seeker Flags",
+    "type": "WORV"
+   },
+   {
+    "label": "Passes over asteroids=0x0001",
+    "type": "CASE"
+   },
+   {
+    "label": "CanÕt fire if ship ionized=0x0020",
+    "type": "CASE"
+   },
+   {
+    "label": "wap.Projectile2",
+    "type": "TMPL"
+   },
+   {
+    "label": "Jam Vulnerability 1-4",
+    "type": "F008"
+   },
+   {
+    "label": "flags3",
+    "type": "WORV"
+   },
+   {
+    "label": "Only use ammo at end of burst cycle=0x0001",
+    "type": "CASE"
+   },
+   {
+    "label": "Translucent shots=0x0002",
+    "type": "CASE"
+   },
+   {
+    "label": "Can only fire one shot at a time=0x0004",
+    "type": "CASE"
+   },
+   {
+    "label": "Fires from exit nearest to target=0x0010",
+    "type": "CASE"
+   },
+   {
+    "label": "CanÕt fire other weapons with this one=0x0020",
+    "type": "CASE"
+   },
+   {
+    "label": "Shot Durability/Armor",
+    "type": "FLNG"
+   },
+   {
+    "label": "Max Ammo\nper launcher",
+    "type": "DWRD"
+   },
+   {
+    "label": "Lightning",
+    "type": "FLNG"
+   },
+   {
+    "label": "ionColor",
+    "type": "LCOL"
+   },
+   {
+    "label": "",
+    "type": "KEYE"
+   },
+   {
+    "label": "Homing=1",
+    "type": "KEYB"
+   },
+   {
+    "label": "Shot Speed\n100 = 1 pixel per frame",
+    "type": "DWRD"
+   },
+   {
+    "label": "Turn Rate=guidedTurn\n10 Å 30¡/sec",
+    "type": "PACK"
+   },
+   {
+    "label": "Ammo Type=-1",
+    "type": "DWRD"
+   },
+   {
+    "label": "DoesnÕt Use Ammo=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "Ammo From Weapon:=0..255 ~128 'wap'",
+    "type": "CASR"
+   },
+   {
+    "label": "Destroys Ship=-999",
+    "type": "CASR"
+   },
+   {
+    "label": "Consumes Fuel:=-1000.. ~0\n10 = 1 unit per shot",
+    "type": "CASR"
+   },
+   {
+    "label": "Graphic Type='spn' 3000+255",
+    "type": "RSID"
+   },
+   {
+    "label": "Inaccuracy\n¡",
+    "type": "DWRD"
+   },
+   {
+    "label": "wap.Projectile1",
+    "type": "TMPL"
+   },
+   {
+    "label": "Detonates when shot expires (flak)=0x8000",
+    "type": "CASE"
+   },
+   {
+    "label": "AI wonÕt fire at ships with turn rate > 30=0x0008",
+    "type": "CASE"
+   },
+   {
+    "label": "Seeker Flags",
+    "type": "WORV"
+   },
+   {
+    "label": "Passes over asteroids=0x0001",
+    "type": "CASE"
+   },
+   {
+    "label": "Decoyed by asteroids=0x0002",
+    "type": "CASE"
+   },
+   {
+    "label": "Confused by interference=0x0008",
+    "type": "CASE"
+   },
+   {
+    "label": "Turns away if jammed=0x0010",
+    "type": "CASE"
+   },
+   {
+    "label": "CanÕt fire if ship ionized=0x0020",
+    "type": "CASE"
+   },
+   {
+    "label": "Loses lock if target not directly ahead=0x4000",
+    "type": "CASE"
+   },
+   {
+    "label": "May attack parent ship if jammed=0x8000",
+    "type": "CASE"
+   },
+   {
+    "label": "wap.Projectile2",
+    "type": "TMPL"
+   },
+   {
+    "label": "Jam Vulnerability 1-4\n%",
+    "type": "RECT"
+   },
+   {
+    "label": "flags3",
+    "type": "WORV"
+   },
+   {
+    "label": "Only use ammo at end of burst cycle=0x0001",
+    "type": "CASE"
+   },
+   {
+    "label": "Translucent shots=0x0002",
+    "type": "CASE"
+   },
+   {
+    "label": "Can only fire one shot at a time=0x0004",
+    "type": "CASE"
+   },
+   {
+    "label": "Fires from exit nearest to target=0x0010",
+    "type": "CASE"
+   },
+   {
+    "label": "CanÕt fire other weapons with this one=0x0020",
+    "type": "CASE"
+   },
+   {
+    "label": "Shot Durability/Armor\nPoint Defense damage = 100% Mass + 50% Energy.",
+    "type": "DWRD"
+   },
+   {
+    "label": "guidedTurn",
+    "type": "DWRD"
+   },
+   {
+    "label": "Max Ammo\nper launcher",
+    "type": "DWRD"
+   },
+   {
+    "label": "Lightning",
+    "type": "FLNG"
+   },
+   {
+    "label": "ionColor",
+    "type": "LCOL"
+   },
+   {
+    "label": "",
+    "type": "KEYE"
+   },
+   {
+    "label": "Beam=0,3,10",
+    "type": "KEYB"
+   },
+   {
+    "label": "Shot Speed (1000= 1 pixel/frame):",
+    "type": "FWRD"
+   },
+   {
+    "label": "Ammo Type=-1",
+    "type": "DWRD"
+   },
+   {
+    "label": "DoesnÕt Use Ammo=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "Ammo From Weapon:=0..255 ~128 'wap'",
+    "type": "CASR"
+   },
+   {
+    "label": "Destroys Ship=-999",
+    "type": "CASR"
+   },
+   {
+    "label": "Consumes Fuel:=-1000.. ~0\n10 = 1 unit per shot",
+    "type": "CASR"
+   },
+   {
+    "label": "Graphic Type='spn' 3000+255",
+    "type": "FWRD"
+   },
+   {
+    "label": "Inaccuracy\n¡",
+    "type": "DWRD"
+   },
+   {
+    "label": "Sound Type='snd ' 200+63",
+    "type": "RSID"
+   },
+   {
+    "label": "-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Impact",
+    "type": "DWRD"
+   },
+   {
+    "label": "Repel:=0..",
+    "type": "CASR"
+   },
+   {
+    "label": "Tractor:=-1.. ~1",
+    "type": "CASR"
+   },
+   {
+    "label": "Recoil=recoil",
+    "type": "PACK"
+   },
+   {
+    "label": "Explosion=-1",
+    "type": "DWRD"
+   },
+   {
+    "label": "None=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "Single Explosion:=0..63 ~128 'bm'",
+    "type": "CASR"
+   },
+   {
+    "label": "Explosion + Sparks:=1000..1063 ~128 'bm'",
+    "type": "CASR"
+   },
+   {
+    "label": "Radius",
+    "type": "FLNG"
+   },
+   {
+    "label": "Flags 1",
+    "type": "WORV"
+   },
+   {
+    "label": "Secondary weapon=0x0002",
+    "type": "CASE"
+   },
+   {
+    "label": "Sound loops instead of repeating per shot=0x0010",
+    "type": "CASE"
+   },
+   {
+    "label": "Penetrates shields=0x0020",
+    "type": "CASE"
+   },
+   {
+    "label": "Multiple launchers fire simultaneously=0x0040",
+    "type": "CASE"
+   },
+   {
+    "label": "Turret has front blind spot=0x1000",
+    "type": "CASE"
+   },
+   {
+    "label": "Turret has side blind spots=0x2000",
+    "type": "CASE"
+   },
+   {
+    "label": "Turret has read blind spots=0x4000",
+    "type": "CASE"
+   },
+   {
+    "label": "Seeker Flags",
+    "type": "WORV"
+   },
+   {
+    "label": "Passes over asteroids=0x0001",
+    "type": "CASE"
+   },
+   {
+    "label": "CanÕt fire if ship ionized=0x0020",
+    "type": "CASE"
+   },
+   {
+    "label": "Flags 2=flags2",
+    "type": "PACK"
+   },
+   {
+    "label": "Flags 3=flags3",
+    "type": "PACK"
+   },
+   {
+    "label": "Smoke Set",
+    "type": "FWRD"
+   },
+   {
+    "label": "Decay=Shrink before disappearing (duration += 16-falloff)",
+    "type": "WFLG"
+   },
+   {
+    "label": "Particle Count",
+    "type": "F00C"
+   },
+   {
+    "label": "Beam Length\npixels",
+    "type": "DWRD"
+   },
+   {
+    "label": "Beam Width\npixel gap between left and right corona",
+    "type": "DWRD"
+   },
+   {
+    "label": "Corona Falloff\n1-16 (lower values = larger corona)",
+    "type": "DWRD"
+   },
+   {
+    "label": "Beam Color",
+    "type": "LCOL"
+   },
+   {
+    "label": "Corona Color",
+    "type": "LCOL"
+   },
+   {
+    "label": "Lightning Density=liDensity",
+    "type": "PACK"
+   },
+   {
+    "label": "Lightning Amplitude=liAmplitude",
+    "type": "PACK"
+   },
+   {
+    "label": "Subs",
+    "type": "F00A"
+   },
+   {
+    "label": "flags2",
+    "type": "WORV"
+   },
+   {
+    "label": "DonÕt show ammo quantity in status display=0x0040",
+    "type": "CASE"
+   },
+   {
+    "label": "Can only fire if Key Carried on board=0x0080",
+    "type": "CASE"
+   },
+   {
+    "label": "AI wonÕt use=0x0100",
+    "type": "CASE"
+   },
+   {
+    "label": "Triggers shipÕs weapon glow=0x0200",
+    "type": "CASE"
+   },
+   {
+    "label": "Planet-type weapon=0x0400",
+    "type": "CASE"
+   },
+   {
+    "label": "Hide in status bar if out of ammo=0x0800",
+    "type": "CASE"
+   },
+   {
+    "label": "Will only disable ships, not destroy=0x1000",
+    "type": "CASE"
+   },
+   {
+    "label": "Display beam below ship graphic=0x2000",
+    "type": "CASE"
+   },
+   {
+    "label": "Can fire while cloaked=0x4000",
+    "type": "CASE"
+   },
+   {
+    "label": "Deals 10x Mass Damage to asteroids=0x8000",
+    "type": "CASE"
+   },
+   {
+    "label": "Ionization Charge",
+    "type": "DWRD"
+   },
+   {
+    "label": "Ionization Color=ionColor\nPure black defaults to a bluish color.",
+    "type": "PACK"
+   },
+   {
+    "label": "Hit Particle Count",
+    "type": "DWRD"
+   },
+   {
+    "label": "Hit Particle Duration",
+    "type": "DWRD"
+   },
+   {
+    "label": "Hit Particle Velocity",
+    "type": "DWRD"
+   },
+   {
+    "label": "Hit Particle Color",
+    "type": "LCOL"
+   },
+   {
+    "label": "recoil",
+    "type": "DWRD"
+   },
+   {
+    "label": "Exit Type",
+    "type": "DWRD"
+   },
+   {
+    "label": "Ship Center=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "Gun Positions=0",
+    "type": "CASR"
+   },
+   {
+    "label": "Turret Positions=1",
+    "type": "CASR"
+   },
+   {
+    "label": "Guided Positions=2",
+    "type": "CASR"
+   },
+   {
+    "label": "Beam Positions=3",
+    "type": "CASR"
+   },
+   {
+    "label": "Shots per Burst",
+    "type": "DWRD"
+   },
+   {
+    "label": "Burst Reload\nframes",
+    "type": "DWRD"
+   },
+   {
+    "label": "Jam Vulnerability 1-4",
+    "type": "F008"
+   },
+   {
+    "label": "flags3",
+    "type": "WORV"
+   },
+   {
+    "label": "Only use ammo at end of burst cycle=0x0001",
+    "type": "CASE"
+   },
+   {
+    "label": "Can only fire one shot at a time=0x0004",
+    "type": "CASE"
+   },
+   {
+    "label": "Fires from exit nearest to target=0x0010",
+    "type": "CASE"
+   },
+   {
+    "label": "CanÕt fire other weapons with this one=0x0020",
+    "type": "CASE"
+   },
+   {
+    "label": "Durability",
+    "type": "FLNG"
+   },
+   {
+    "label": "Max Ammo\nper launcher",
+    "type": "DWRD"
+   },
+   {
+    "label": "liDensity",
+    "type": "DWRD"
+   },
+   {
+    "label": "liAmplitude",
+    "type": "DWRD"
+   },
+   {
+    "label": "ionColor",
+    "type": "LCOL"
+   },
+   {
+    "label": "",
+    "type": "KEYE"
+   },
+   {
+    "label": "Carried Ship=99",
+    "type": "KEYB"
+   },
+   {
+    "label": "Launch Speed",
+    "type": "DWRD"
+   },
+   {
+    "label": "Ship Type='shp'",
+    "type": "RSID"
+   },
+   {
+    "label": "Graphic Type='spn' 3000+255",
+    "type": "FWRD"
+   },
+   {
+    "label": "Inaccuracy\n¡",
+    "type": "DWRD"
+   },
+   {
+    "label": "Sound Type='snd ' 200+63",
+    "type": "RSID"
+   },
+   {
+    "label": "-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Impact",
+    "type": "F008"
+   },
+   {
+    "label": "Recoil=recoil",
+    "type": "PACK"
+   },
+   {
+    "label": "Flags 1",
+    "type": "WORV"
+   },
+   {
+    "label": "Secondary weapon=0x0002",
+    "type": "CASE"
+   },
+   {
+    "label": "Sound loops instead of repeating per shot=0x0010",
+    "type": "CASE"
+   },
+   {
+    "label": "Multiple launchers fire simultaneously=0x0040",
+    "type": "CASE"
+   },
+   {
+    "label": "Seeker Flags",
+    "type": "WORV"
+   },
+   {
+    "label": "CanÕt fire if ship ionized=0x0020",
+    "type": "CASE"
+   },
+   {
+    "label": "Flags 2=flags2",
+    "type": "PACK"
+   },
+   {
+    "label": "Flags 3=flags3",
+    "type": "PACK"
+   },
+   {
+    "label": "Smoke Set",
+    "type": "F028"
+   },
+   {
+    "label": "flags2",
+    "type": "WORV"
+   },
+   {
+    "label": "Don't show ammo quantity in status display=0x0040",
+    "type": "CASE"
+   },
+   {
+    "label": "Can only fire if Key Carried on board=0x0080",
+    "type": "CASE"
+   },
+   {
+    "label": "AI wonÕt use=0x0100",
+    "type": "CASE"
+   },
+   {
+    "label": "Triggers shipÕs weapon glow=0x0200",
+    "type": "CASE"
+   },
+   {
+    "label": "Hide in status bar if out of ammo=0x0800",
+    "type": "CASE"
+   },
+   {
+    "label": "Can fire while cloaked=0x4000",
+    "type": "CASE"
+   },
+   {
+    "label": "Ionization Charge",
+    "type": "F00C"
+   },
+   {
+    "label": "recoil",
+    "type": "DWRD"
+   },
+   {
+    "label": "Exit Type",
+    "type": "FWRD"
+   },
+   {
+    "label": "Shots per Burst",
+    "type": "DWRD"
+   },
+   {
+    "label": "Burst Reload\nframes",
+    "type": "DWRD"
+   },
+   {
+    "label": "Jam Vulnerability 1-4",
+    "type": "F008"
+   },
+   {
+    "label": "flags3",
+    "type": "WORV"
+   },
+   {
+    "label": "Only use ammo at end of burst cycle (!)=0x0001",
+    "type": "CASE"
+   },
+   {
+    "label": "CanÕt fire other weapons with this one=0x0020",
+    "type": "CASE"
+   },
+   {
+    "label": "Shot Durability/Armor",
+    "type": "FLNG"
+   },
+   {
+    "label": "Max Ammo\nper launcher",
+    "type": "DWRD"
+   },
+   {
+    "label": "Lightning",
+    "type": "F008"
+   },
+   {
+    "label": "",
+    "type": "KEYE"
+   },
+   {
+    "label": "Unused",
+    "type": "F010"
+   }
+  ]
+ },
+ "oütf.ModTypes": {
+  "id": 550,
+  "fields": [
+   {
+    "label": "Cargo Space=2",
+    "type": "CASE"
+   },
+   {
+    "label": "Shield Capacity=4",
+    "type": "CASE"
+   },
+   {
+    "label": "Shield Recharge=5",
+    "type": "CASE"
+   },
+   {
+    "label": "Armour=6",
+    "type": "CASE"
+   },
+   {
+    "label": "Armour Regeneration=29",
+    "type": "CASE"
+   },
+   {
+    "label": "Repair System=49",
+    "type": "CASE"
+   },
+   {
+    "label": "Fuel Tank=12",
+    "type": "CASE"
+   },
+   {
+    "label": "Fuel Regeneration=18",
+    "type": "CASE"
+   },
+   {
+    "label": "Auto-Refueller=19",
+    "type": "CASE"
+   },
+   {
+    "label": "Ion Capacity=40",
+    "type": "CASE"
+   },
+   {
+    "label": "Ion Dissipation=39",
+    "type": "CASE"
+   },
+   {
+    "label": "Acceleration=7",
+    "type": "CASE"
+   },
+   {
+    "label": "Speed=8",
+    "type": "CASE"
+   },
+   {
+    "label": "Turn Rate=9",
+    "type": "CASE"
+   },
+   {
+    "label": "Afterburner=15",
+    "type": "CASE"
+   },
+   {
+    "label": "Inertial Dampener=38",
+    "type": "CASE"
+   },
+   {
+    "label": "Escape Pod=11",
+    "type": "CASE"
+   },
+   {
+    "label": "Auto-Eject=20",
+    "type": "CASE"
+   },
+   {
+    "label": "Map=16",
+    "type": "CASE"
+   },
+   {
+    "label": "Density Scanner=13",
+    "type": "CASE"
+   },
+   {
+    "label": "IFF (color radar)=14",
+    "type": "CASE"
+   },
+   {
+    "label": "Radar Interference=24",
+    "type": "CASE"
+   },
+   {
+    "label": "System Murk=28",
+    "type": "CASE"
+   },
+   {
+    "label": "Cloaking Device=17",
+    "type": "CASE"
+   },
+   {
+    "label": "Cloak Scanner=30",
+    "type": "CASE"
+   },
+   {
+    "label": "Clean Legal Record=21",
+    "type": "CASE"
+   },
+   {
+    "label": "Hyperspace Speed=22",
+    "type": "CASE"
+   },
+   {
+    "label": "Hyperspace Jump Distance=23",
+    "type": "CASE"
+   },
+   {
+    "label": "Multi-Jump=32",
+    "type": "CASE"
+   },
+   {
+    "label": "Fast Jumping=37",
+    "type": "CASE"
+   },
+   {
+    "label": "Marines (capture odds)=25",
+    "type": "CASE"
+   },
+   {
+    "label": "Mining Scoop=31",
+    "type": "CASE"
+   },
+   {
+    "label": "Jamming Type 1=33",
+    "type": "CASE"
+   },
+   {
+    "label": "Jamming Type 2=34",
+    "type": "CASE"
+   },
+   {
+    "label": "Jamming Type 3=35",
+    "type": "CASE"
+   },
+   {
+    "label": "Jamming Type 4=36",
+    "type": "CASE"
+   },
+   {
+    "label": "Gravity Resistance=41",
+    "type": "CASE"
+   },
+   {
+    "label": "Deadly Stellar Resistance=42",
+    "type": "CASE"
+   },
+   {
+    "label": "Ship Paint=43",
+    "type": "CASE"
+   },
+   {
+    "label": "Increase Outfit Max=27",
+    "type": "CASE"
+   },
+   {
+    "label": "Max Guns=45",
+    "type": "CASE"
+   },
+   {
+    "label": "Max Turrets=46",
+    "type": "CASE"
+   },
+   {
+    "label": "Reinforcment Inhibitor=44",
+    "type": "CASE"
+   },
+   {
+    "label": "IFF Scrambler=48",
+    "type": "CASE"
+   },
+   {
+    "label": "Lethal Bomb=47",
+    "type": "CASE"
+   },
+   {
+    "label": "Nonlethal Bomb=50",
+    "type": "CASE"
+   },
+   {
+    "label": "-1,11,13,14,19,20,31,37,38,41,42,49,*",
+    "type": "KEYB"
+   },
+   {
+    "label": "Ignored",
+    "type": "FWRD"
+   },
+   {
+    "label": "-1 end",
+    "type": "KEYE"
+   },
+   {
+    "label": "2",
+    "type": "KEYB"
+   },
+   {
+    "label": "Cargo Space\ntons",
+    "type": "DWRD"
+   },
+   {
+    "label": "2 end",
+    "type": "KEYE"
+   },
+   {
+    "label": "4",
+    "type": "KEYB"
+   },
+   {
+    "label": "Shield Points",
+    "type": "DWRD"
+   },
+   {
+    "label": "4 end",
+    "type": "KEYE"
+   },
+   {
+    "label": "5",
+    "type": "KEYB"
+   },
+   {
+    "label": "Shield Recharge Rate\n1000 = 1 point per frame",
+    "type": "DWRD"
+   },
+   {
+    "label": "5 end",
+    "type": "KEYE"
+   },
+   {
+    "label": "6",
+    "type": "KEYB"
+   },
+   {
+    "label": "Armour Points",
+    "type": "DWRD"
+   },
+   {
+    "label": "6 end",
+    "type": "KEYE"
+   },
+   {
+    "label": "7",
+    "type": "KEYB"
+   },
+   {
+    "label": "Acceleration Amount",
+    "type": "DWRD"
+   },
+   {
+    "label": "7 end",
+    "type": "KEYE"
+   },
+   {
+    "label": "8",
+    "type": "KEYB"
+   },
+   {
+    "label": "Speed Amount",
+    "type": "DWRD"
+   },
+   {
+    "label": "8 end",
+    "type": "KEYE"
+   },
+   {
+    "label": "9",
+    "type": "KEYB"
+   },
+   {
+    "label": "Turn Amount\n100 Å 30¡/sec",
+    "type": "DWRD"
+   },
+   {
+    "label": "9 end",
+    "type": "KEYE"
+   },
+   {
+    "label": "12",
+    "type": "KEYB"
+   },
+   {
+    "label": "Fuel Units",
+    "type": "DWRD"
+   },
+   {
+    "label": "12 end",
+    "type": "KEYE"
+   },
+   {
+    "label": "15",
+    "type": "KEYB"
+   },
+   {
+    "label": "Fuel Drain\nunits per second",
+    "type": "DWRD"
+   },
+   {
+    "label": "15 end",
+    "type": "KEYE"
+   },
+   {
+    "label": "16",
+    "type": "KEYB"
+   },
+   {
+    "label": "Explore",
+    "type": "DWRD"
+   },
+   {
+    "label": "Number of Jumps:=0..",
+    "type": "CASR"
+   },
+   {
+    "label": "Independent Systems=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "Govt Class Systems:=-1000.. ~0",
+    "type": "CASR"
+   },
+   {
+    "label": "16 end",
+    "type": "KEYE"
+   },
+   {
+    "label": "17",
+    "type": "KEYB"
+   },
+   {
+    "label": "Shield Drain=cShield1\npoints per second",
+    "type": "PACK"
+   },
+   {
+    "label": "Fuel Drain=cFuel1\nunits per second",
+    "type": "PACK"
+   },
+   {
+    "label": "Unused",
+    "type": "WF03"
+   },
+   {
+    "label": "Cloak Flags=Area cloak",
+    "type": "WBIT"
+   },
+   {
+    "label": "cShield1",
+    "type": "WB04"
+   },
+   {
+    "label": "cFuel1",
+    "type": "WB04"
+   },
+   {
+    "label": "=Deactivates when hit",
+    "type": "WBIT"
+   },
+   {
+    "label": "=Drops shields on activation",
+    "type": "WBIT"
+   },
+   {
+    "label": "=Visible on radar",
+    "type": "WBIT"
+   },
+   {
+    "label": "=Faster fading",
+    "type": "WBIT"
+   },
+   {
+    "label": "17 end",
+    "type": "KEYE"
+   },
+   {
+    "label": "18",
+    "type": "KEYB"
+   },
+   {
+    "label": "Fuel Regen Rate\nframes per unit",
+    "type": "DWRD"
+   },
+   {
+    "label": "18 end",
+    "type": "KEYE"
+   },
+   {
+    "label": "21",
+    "type": "KEYB"
+   },
+   {
+    "label": "Clean Govt Record='gvt'",
+    "type": "RSID"
+   },
+   {
+    "label": "All=-1",
+    "type": "CASE"
+   },
+   {
+    "label": "21 end",
+    "type": "KEYE"
+   },
+   {
+    "label": "22",
+    "type": "KEYB"
+   },
+   {
+    "label": "Hyperspace Days",
+    "type": "DWRD"
+   },
+   {
+    "label": "22 end",
+    "type": "KEYE"
+   },
+   {
+    "label": "23",
+    "type": "KEYB"
+   },
+   {
+    "label": "Jump Radius Change\npixels",
+    "type": "DWRD"
+   },
+   {
+    "label": "23 end",
+    "type": "KEYE"
+   },
+   {
+    "label": "24",
+    "type": "KEYB"
+   },
+   {
+    "label": "Subtract Amount",
+    "type": "DWRD"
+   },
+   {
+    "label": "24 end",
+    "type": "KEYE"
+   },
+   {
+    "label": "25",
+    "type": "KEYB"
+   },
+   {
+    "label": "Capture Odds",
+    "type": "DWRD"
+   },
+   {
+    "label": "Add Crew:=0..",
+    "type": "CASR"
+   },
+   {
+    "label": "Increase Percent:=-1.. ~1\n%",
+    "type": "CASR"
+   },
+   {
+    "label": "25 end",
+    "type": "KEYE"
+   },
+   {
+    "label": "27",
+    "type": "KEYB"
+   },
+   {
+    "label": "Outfit='otf'",
+    "type": "RSID"
+   },
+   {
+    "label": "27 end",
+    "type": "KEYE"
+   },
+   {
+    "label": "28",
+    "type": "KEYB"
+   },
+   {
+    "label": "Murk Amount",
+    "type": "DWRD"
+   },
+   {
+    "label": "28 end",
+    "type": "KEYE"
+   },
+   {
+    "label": "29",
+    "type": "KEYB"
+   },
+   {
+    "label": "Armor Regen Rate\n1000 = 1 point per frame",
+    "type": "DWRD"
+   },
+   {
+    "label": "29 end",
+    "type": "KEYE"
+   },
+   {
+    "label": "30",
+    "type": "KEYB"
+   },
+   {
+    "label": "Scanner Flags",
+    "type": "WORV"
+   },
+   {
+    "label": "Reveal cloaked ships on radar=0x0001",
+    "type": "CASE"
+   },
+   {
+    "label": "Reveal cloaked ships on screen=0x0002",
+    "type": "CASE"
+   },
+   {
+    "label": "Allow targeting untargetable ships=0x0004",
+    "type": "CASE"
+   },
+   {
+    "label": "Allow targeting cloaked ships=0x0008",
+    "type": "CASE"
+   },
+   {
+    "label": "30 end",
+    "type": "KEYE"
+   },
+   {
+    "label": "32",
+    "type": "KEYB"
+   },
+   {
+    "label": "Number of Extra Jumps",
+    "type": "DWRD"
+   },
+   {
+    "label": "32 end",
+    "type": "KEYE"
+   },
+   {
+    "label": "33,34,35,36",
+    "type": "KEYB"
+   },
+   {
+    "label": "Jamming Amount\n%",
+    "type": "DWRD"
+   },
+   {
+    "label": "33 end",
+    "type": "KEYE"
+   },
+   {
+    "label": "39",
+    "type": "KEYB"
+   },
+   {
+    "label": "Deionization Rate\n100 = 1 point per frame",
+    "type": "DWRD"
+   },
+   {
+    "label": "39 end",
+    "type": "KEYE"
+   },
+   {
+    "label": "40",
+    "type": "KEYB"
+   },
+   {
+    "label": "Ionization Capacity",
+    "type": "DWRD"
+   },
+   {
+    "label": "40 end",
+    "type": "KEYE"
+   },
+   {
+    "label": "43",
+    "type": "KEYB"
+   },
+   {
+    "label": "Colour",
+    "type": "WCOL"
+   },
+   {
+    "label": "43 end",
+    "type": "KEYE"
+   },
+   {
+    "label": "44",
+    "type": "KEYB"
+   },
+   {
+    "label": "Govt Class",
+    "type": "DWRD"
+   },
+   {
+    "label": "All=-1",
+    "type": "CASE"
+   },
+   {
+    "label": "44 end",
+    "type": "KEYE"
+   },
+   {
+    "label": "45",
+    "type": "KEYB"
+   },
+   {
+    "label": "Gun Slots",
+    "type": "DWRD"
+   },
+   {
+    "label": "45 end",
+    "type": "KEYE"
+   },
+   {
+    "label": "46",
+    "type": "KEYB"
+   },
+   {
+    "label": "Turret Slots",
+    "type": "DWRD"
+   },
+   {
+    "label": "46 end",
+    "type": "KEYE"
+   },
+   {
+    "label": "47",
+    "type": "KEYB"
+   },
+   {
+    "label": "Detonation Text='dsc'",
+    "type": "RSID"
+   },
+   {
+    "label": "None=-1",
+    "type": "CASE"
+   },
+   {
+    "label": "47 end",
+    "type": "KEYE"
+   },
+   {
+    "label": "48",
+    "type": "KEYB"
+   },
+   {
+    "label": "Govt Class",
+    "type": "DWRD"
+   },
+   {
+    "label": "48 end",
+    "type": "KEYE"
+   },
+   {
+    "label": "50",
+    "type": "KEYB"
+   },
+   {
+    "label": "Explosion='bm'",
+    "type": "RSID"
+   },
+   {
+    "label": "50 end",
+    "type": "KEYE"
+   }
+  ]
+ },
+ "wëap.Projectile1": {
+  "id": 551,
+  "fields": [
+   {
+    "label": "Sound Type='snd ' 200+63",
+    "type": "RSID"
+   },
+   {
+    "label": "-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Impact",
+    "type": "DWRD"
+   },
+   {
+    "label": "Recoil=recoil",
+    "type": "PACK"
+   },
+   {
+    "label": "Explosion=-1",
+    "type": "DWRD"
+   },
+   {
+    "label": "None=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "Single Explosion:=0..63 ~128 'bm'",
+    "type": "CASR"
+   },
+   {
+    "label": "Explosion + Sparks:=1000..1063 ~128 'bm'",
+    "type": "CASR"
+   },
+   {
+    "label": "Proximity Radius",
+    "type": "DWRD"
+   },
+   {
+    "label": "Proximity Arm Delay=proxSafety\nframes",
+    "type": "PACK"
+   },
+   {
+    "label": "Blast Radius",
+    "type": "DWRD"
+   },
+   {
+    "label": "Flags 1",
+    "type": "WORV"
+   },
+   {
+    "label": "Spin weaponÕs graphic continuously=0x0001",
+    "type": "CASE"
+   },
+   {
+    "label": "Secondary weapon=0x0002",
+    "type": "CASE"
+   },
+   {
+    "label": "Start animation on first frame=0x0004",
+    "type": "CASE"
+   },
+   {
+    "label": "Sound loops instead of repeating per shot=0x0010",
+    "type": "CASE"
+   },
+   {
+    "label": "Penetrates shields=0x0020",
+    "type": "CASE"
+   },
+   {
+    "label": "Multiple launchers fire simultaneously=0x0040",
+    "type": "CASE"
+   },
+   {
+    "label": "CanÕt be targeted by point defense=0x0080",
+    "type": "CASE"
+   },
+   {
+    "label": "Blast doesnÕt hurt player=0x0100",
+    "type": "CASE"
+   },
+   {
+    "label": "Generates small smoke trail=0x0200",
+    "type": "CASE"
+   },
+   {
+    "label": "Generates big smoke trail=0x0400",
+    "type": "CASE"
+   },
+   {
+    "label": "More persistent smoke trail=0x0800",
+    "type": "CASE"
+   }
+  ]
+ },
+ "wëap.Projectile2": {
+  "id": 552,
+  "fields": [
+   {
+    "label": "Flags 2=flags2",
+    "type": "PACK"
+   },
+   {
+    "label": "Flags 3=flags3",
+    "type": "PACK"
+   },
+   {
+    "label": "Smoke Set",
+    "type": "DWRD"
+   },
+   {
+    "label": "Decay\nframes per damage point lost",
+    "type": "DWRD"
+   },
+   {
+    "label": "Particle Count",
+    "type": "DWRD"
+   },
+   {
+    "label": "Particle Velocity",
+    "type": "DWRD"
+   },
+   {
+    "label": "Particle Duration Min",
+    "type": "DWRD"
+   },
+   {
+    "label": "Particle Duration Max",
+    "type": "DWRD"
+   },
+   {
+    "label": "Particle Color",
+    "type": "LCOL"
+   },
+   {
+    "label": "Beam Length (pixels)",
+    "type": "FWRD"
+   },
+   {
+    "label": "Animation Delay\ntime between frames, in 30ths of a second",
+    "type": "DWRD"
+   },
+   {
+    "label": "Fade Out\nrate of fade over last 32 frames of life",
+    "type": "DWRD"
+   },
+   {
+    "label": "Beam colors",
+    "type": "F008"
+   },
+   {
+    "label": "Submunition Count",
+    "type": "DWRD"
+   },
+   {
+    "label": "Sub Type='wap'",
+    "type": "RSID"
+   },
+   {
+    "label": "-1",
+    "type": "CASE"
+   },
+   {
+    "label": "Sub Inaccuracy\n¡",
+    "type": "DWRD"
+   },
+   {
+    "label": "Error Margin:=0..",
+    "type": "CASR"
+   },
+   {
+    "label": "Between Shots:=-2.. ~2",
+    "type": "CASR"
+   },
+   {
+    "label": "Sub Recursion Limit",
+    "type": "DWRD"
+   },
+   {
+    "label": "proxSafety",
+    "type": "DWRD"
+   },
+   {
+    "label": "flags2",
+    "type": "WORV"
+   },
+   {
+    "label": "Stay on first frame until proximity armed=0x0001",
+    "type": "CASE"
+   },
+   {
+    "label": "Stop graphic rotation on last frame=0x0002",
+    "type": "CASE"
+   },
+   {
+    "label": "Proximity ignores asteroids=0x0004",
+    "type": "CASE"
+   },
+   {
+    "label": "Proximity trigger by any ship=0x0008",
+    "type": "CASE"
+   },
+   {
+    "label": "Submunitions fire toward nearest target=0x0010",
+    "type": "CASE"
+   },
+   {
+    "label": "DonÕt launch submunitions when shot expires=0x0020",
+    "type": "CASE"
+   },
+   {
+    "label": "DonÕt show ammo quantity in status display=0x0040",
+    "type": "CASE"
+   },
+   {
+    "label": "Can only fire if Key Carried on board=0x0080",
+    "type": "CASE"
+   },
+   {
+    "label": "AI wonÕt use=0x0100",
+    "type": "CASE"
+   },
+   {
+    "label": "Triggers shipÕs weapon glow=0x0200",
+    "type": "CASE"
+   },
+   {
+    "label": "Planet-type weapon=0x0400",
+    "type": "CASE"
+   },
+   {
+    "label": "Hide in status bar if out of ammo=0x0800",
+    "type": "CASE"
+   },
+   {
+    "label": "Will only disable ships, not destroy=0x1000",
+    "type": "CASE"
+   },
+   {
+    "label": "Can fire while cloaked=0x4000",
+    "type": "CASE"
+   },
+   {
+    "label": "Deals 10x Mass Damage to asteroids=0x8000",
+    "type": "CASE"
+   },
+   {
+    "label": "Ionization Charge",
+    "type": "DWRD"
+   },
+   {
+    "label": "Ionization Color=ionColor\nPure black defaults to a bluish color.",
+    "type": "PACK"
+   },
+   {
+    "label": "Hit Particle Count",
+    "type": "DWRD"
+   },
+   {
+    "label": "Hit Particle Duration",
+    "type": "DWRD"
+   },
+   {
+    "label": "Hit Particle Velocity",
+    "type": "DWRD"
+   },
+   {
+    "label": "Hit Particle Color",
+    "type": "LCOL"
+   },
+   {
+    "label": "recoil",
+    "type": "DWRD"
+   },
+   {
+    "label": "Exit Type",
+    "type": "DWRD"
+   },
+   {
+    "label": "Ship Center=-1",
+    "type": "CASR"
+   },
+   {
+    "label": "Gun Positions=0",
+    "type": "CASR"
+   },
+   {
+    "label": "Turret Positions=1",
+    "type": "CASR"
+   },
+   {
+    "label": "Guided Positions=2",
+    "type": "CASR"
+   },
+   {
+    "label": "Beam Positions=3",
+    "type": "CASR"
+   },
+   {
+    "label": "Shots per Burst",
+    "type": "DWRD"
+   },
+   {
+    "label": "Burst Reload\nframes",
+    "type": "DWRD"
+   }
+  ]
+ },
+ "NpïL": {
+  "id": 590,
+  "fields": [
+   {
+    "label": "Resource Type",
+    "type": "KRID"
+   },
+   {
+    "label": "Player Data=128",
+    "type": "CASE"
+   },
+   {
+    "label": "Universe Data=129",
+    "type": "CASE"
+   },
+   {
+    "label": "128",
+    "type": "KEYB"
+   },
+   {
+    "label": "NpL.128-1",
+    "type": "TMPL"
+   },
+   {
+    "label": "NpL.MissionData1",
+    "type": "TMPL"
+   },
+   {
+    "label": "Padding",
+    "type": "FWRD"
+   },
+   {
+    "label": "NpL.MissionData2",
+    "type": "TMPL"
+   },
+   {
+    "label": "Padding",
+    "type": "FBYT"
+   },
+   {
+    "label": "NpL.MissionData3",
+    "type": "TMPL"
+   },
+   {
+    "label": "Padding",
+    "type": "F003"
+   },
+   {
+    "label": "NpL.128-2",
+    "type": "TMPL"
+   },
+   {
+    "label": "*****",
+    "type": "KEYE"
+   },
+   {
+    "label": "129",
+    "type": "KEYB"
+   },
+   {
+    "label": "NpL.129",
+    "type": "TMPL"
+   },
+   {
+    "label": "*****",
+    "type": "KEYE"
+   }
+  ]
+ },
+ "NpïL.128-1": {
+  "id": 591,
+  "fields": [
+   {
+    "label": "Last Stellar",
+    "type": "DWRD"
+   },
+   {
+    "label": "Ship Type",
+    "type": "DWRD"
+   },
+   {
+    "label": "Cargo Food",
+    "type": "DWRD"
+   },
+   {
+    "label": "Cargo Industrial",
+    "type": "DWRD"
+   },
+   {
+    "label": "Cargo Medical",
+    "type": "DWRD"
+   },
+   {
+    "label": "Cargo Lux Goods",
+    "type": "DWRD"
+   },
+   {
+    "label": "Cargo Metal",
+    "type": "DWRD"
+   },
+   {
+    "label": "Cargo Equipment",
+    "type": "DWRD"
+   },
+   {
+    "label": "Unused",
+    "type": "FWRD"
+   },
+   {
+    "label": "Fuel",
+    "type": "DWRD"
+   },
+   {
+    "label": "Current Month",
+    "type": "DWRD"
+   },
+   {
+    "label": "Current Day",
+    "type": "DWRD"
+   },
+   {
+    "label": "Current Year",
+    "type": "DWRD"
+   },
+   {
+    "label": "Exploration=128",
+    "type": "R800"
+   },
+   {
+    "label": "*) Explored",
+    "type": "DWRD"
+   },
+   {
+    "label": "Items=128",
+    "type": "R200"
+   },
+   {
+    "label": "*) Item Count",
+    "type": "DWRD"
+   },
+   {
+    "label": "Legal Statuses=128",
+    "type": "R800"
+   },
+   {
+    "label": "*) Legal Status",
+    "type": "DWRD"
+   },
+   {
+    "label": "Weapons/Ammo=128",
+    "type": "R100"
+   },
+   {
+    "label": "*) Weapons/Ammo=wCount*,aCount*",
+    "type": "PACK"
+   },
+   {
+    "label": "Weapons=128",
+    "type": "R100"
+   },
+   {
+    "label": "wCount*",
+    "type": "DWRD"
+   },
+   {
+    "label": "Ammo=128",
+    "type": "R100"
+   },
+   {
+    "label": "aCount*",
+    "type": "DWRD"
+   },
+   {
+    "label": "Credits",
+    "type": "DLNG"
+   },
+   {
+    "label": "16",
+    "type": "FCNT"
+   },
+   {
+    "label": "Mission Status",
+    "type": "LSTC"
+   },
+   {
+    "label": "Active",
+    "type": "BFLG"
+   },
+   {
+    "label": "Travel Complete",
+    "type": "BFLG"
+   },
+   {
+    "label": "Ship Complete",
+    "type": "BFLG"
+   },
+   {
+    "label": "Failed",
+    "type": "BFLG"
+   },
+   {
+    "label": "Flags",
+    "type": "FWRD"
+   },
+   {
+    "label": "Deadline Year",
+    "type": "DWRD"
+   },
+   {
+    "label": "Deadline Month",
+    "type": "DWRD"
+   },
+   {
+    "label": "Deadline Day",
+    "type": "DWRD"
+   },
+   {
+    "label": "Unused",
+    "type": "F008"
+   },
+   {
+    "label": "*****",
+    "type": "LSTE"
+   },
+   {
+    "label": "16",
+    "type": "FCNT"
+   },
+   {
+    "label": "Mission Data",
+    "type": "LSTC"
+   }
+  ]
+ },
+ "NpïL.128-2": {
+  "id": 592,
+  "fields": [
+   {
+    "label": "*****",
+    "type": "LSTE"
+   },
+   {
+    "label": "NCBs",
+    "type": "R00A"
+   },
+   {
+    "label": "*) NCBs (x1000)",
+    "type": "H3E8"
+   },
+   {
+    "label": "Domination=128",
+    "type": "R800"
+   },
+   {
+    "label": "*) Stel Dominated",
+    "type": "BFLG"
+   },
+   {
+    "label": "Escorts",
+    "type": "R040"
+   },
+   {
+    "label": "*) Escort Class=*escortClass,*escortUpgrade,*escortSale",
+    "type": "PACK"
+   },
+   {
+    "label": "Escorts",
+    "type": "R040"
+   },
+   {
+    "label": "*escortClass",
+    "type": "DWRD"
+   },
+   {
+    "label": "Fighters",
+    "type": "R040"
+   },
+   {
+    "label": "*) Fighter Class",
+    "type": "DWRD"
+   },
+   {
+    "label": "Escort Upgrades",
+    "type": "R040"
+   },
+   {
+    "label": "*escortUpgrade=Upgrade",
+    "type": "WFLG"
+   },
+   {
+    "label": "Escort Sales",
+    "type": "R040"
+   },
+   {
+    "label": "*escortSale=Sell",
+    "type": "WFLG"
+   },
+   {
+    "label": "Escort Voice Modes",
+    "type": "R040"
+   },
+   {
+    "label": "*) Escort Voice Mode",
+    "type": "DWRD"
+   },
+   {
+    "label": "Combat Rating",
+    "type": "DLNG"
+   }
+  ]
+ },
+ "NpïL.MissionData1": {
+  "id": 593,
+  "fields": [
+   {
+    "label": "Travel Stellar",
+    "type": "DWRD"
+   },
+   {
+    "label": "Travel System (unused)",
+    "type": "FWRD"
+   },
+   {
+    "label": "Return Stellar",
+    "type": "DWRD"
+   },
+   {
+    "label": "Ships Remaining",
+    "type": "DWRD"
+   },
+   {
+    "label": "Ship Dude",
+    "type": "DWRD"
+   },
+   {
+    "label": "Ship Goal",
+    "type": "DWRD"
+   },
+   {
+    "label": "Ship Behavior",
+    "type": "DWRD"
+   },
+   {
+    "label": "Ship Start",
+    "type": "DWRD"
+   },
+   {
+    "label": "Ship System",
+    "type": "DWRD"
+   },
+   {
+    "label": "Cargo Type",
+    "type": "DWRD"
+   },
+   {
+    "label": "Cargo Quantity",
+    "type": "DWRD"
+   },
+   {
+    "label": "Pickup Mode",
+    "type": "DWRD"
+   },
+   {
+    "label": "Dropoff Mode",
+    "type": "DWRD"
+   },
+   {
+    "label": "Scan Mask",
+    "type": "HWRD"
+   },
+   {
+    "label": "Comp Govt",
+    "type": "DWRD"
+   },
+   {
+    "label": "Comp Reward",
+    "type": "DWRD"
+   },
+   {
+    "label": "Date Post Inc",
+    "type": "DWRD"
+   }
+  ]
+ },
+ "NpïL.MissionData2": {
+  "id": 594,
+  "fields": [
+   {
+    "label": "Pay",
+    "type": "DLNG"
+   },
+   {
+    "label": "Ships Killed",
+    "type": "DWRD"
+   },
+   {
+    "label": "Ships Boarded",
+    "type": "DWRD"
+   },
+   {
+    "label": "Ships Disabled",
+    "type": "DWRD"
+   },
+   {
+    "label": "Ships Jumped In",
+    "type": "DWRD"
+   },
+   {
+    "label": "Ships Jumped Out",
+    "type": "DWRD"
+   },
+   {
+    "label": "Initial Ship Count",
+    "type": "DWRD"
+   },
+   {
+    "label": "Can Abort",
+    "type": "BFLG"
+   },
+   {
+    "label": "Cargo Loaded",
+    "type": "BFLG"
+   },
+   {
+    "label": "Available (unused)",
+    "type": "FBYT"
+   }
+  ]
+ },
+ "NpïL.MissionData3": {
+  "id": 595,
+  "fields": [
+   {
+    "label": "Brief Desc",
+    "type": "DWRD"
+   },
+   {
+    "label": "Quick Desc",
+    "type": "DWRD"
+   },
+   {
+    "label": "Load Desc",
+    "type": "DWRD"
+   },
+   {
+    "label": "Dropoff Desc",
+    "type": "DWRD"
+   },
+   {
+    "label": "Comp Desc",
+    "type": "DWRD"
+   },
+   {
+    "label": "Fail Desc",
+    "type": "DWRD"
+   },
+   {
+    "label": "Refuse Desc",
+    "type": "DWRD"
+   },
+   {
+    "label": "Ship Done Desc",
+    "type": "DWRD"
+   },
+   {
+    "label": "Time Left",
+    "type": "DWRD"
+   },
+   {
+    "label": "Ship Name ID",
+    "type": "DWRD"
+   },
+   {
+    "label": "Ship Name Index",
+    "type": "DWRD"
+   },
+   {
+    "label": "Unknown",
+    "type": "FWRD"
+   },
+   {
+    "label": "Mission ID",
+    "type": "DWRD"
+   },
+   {
+    "label": "Ship Subtitle ID",
+    "type": "DWRD"
+   },
+   {
+    "label": "Ship Subtitle Index",
+    "type": "DWRD"
+   },
+   {
+    "label": "Ship Preselect Type",
+    "type": "DWRD"
+   },
+   {
+    "label": "Flags",
+    "type": "HWRD"
+   },
+   {
+    "label": "Flags 2",
+    "type": "HWRD"
+   },
+   {
+    "label": "Require Bits (unused)",
+    "type": "F008"
+   },
+   {
+    "label": "Initial Aux Count",
+    "type": "DWRD"
+   },
+   {
+    "label": "Aux Dude",
+    "type": "DWRD"
+   },
+   {
+    "label": "Aux Syst",
+    "type": "DWRD"
+   },
+   {
+    "label": "Aux Jumped In",
+    "type": "DWRD"
+   },
+   {
+    "label": "Aux Delay",
+    "type": "DWRD"
+   },
+   {
+    "label": "Aux Remaining",
+    "type": "DWRD"
+   },
+   {
+    "label": "Ship Name",
+    "type": "P040"
+   },
+   {
+    "label": "Ship Subtitle",
+    "type": "P040"
+   },
+   {
+    "label": "Availability (unused)",
+    "type": "F0FF"
+   },
+   {
+    "label": "On Accept",
+    "type": "C0FF"
+   },
+   {
+    "label": "On Refuse",
+    "type": "C0FF"
+   },
+   {
+    "label": "On Success",
+    "type": "C0FF"
+   },
+   {
+    "label": "On Failure",
+    "type": "C0FF"
+   },
+   {
+    "label": "On Abort",
+    "type": "C0FF"
+   },
+   {
+    "label": "On Ship Done",
+    "type": "C0FF"
+   },
+   {
+    "label": "Mission Name",
+    "type": "P080"
+   },
+   {
+    "label": "Unknown",
+    "type": "F080"
+   }
+  ]
+ },
+ "NpïL.129": {
+  "id": 596,
+  "fields": [
+   {
+    "label": "Version",
+    "type": "DWRD"
+   },
+   {
+    "label": "Strict Play",
+    "type": "WFLG"
+   },
+   {
+    "label": "Gender (Male)",
+    "type": "WFLG"
+   },
+   {
+    "label": "Defense Fleets=128",
+    "type": "R800"
+   },
+   {
+    "label": "*) Defense Ships",
+    "type": "DWRD"
+   },
+   {
+    "label": "Persons=128",
+    "type": "R400"
+   },
+   {
+    "label": "*) Person Alive",
+    "type": "WFLG"
+   },
+   {
+    "label": "Person Grudges=128",
+    "type": "R400"
+   },
+   {
+    "label": "*) Person Grudge",
+    "type": "WFLG"
+   },
+   {
+    "label": "Unused",
+    "type": "F080"
+   },
+   {
+    "label": "Annoyance",
+    "type": "R800"
+   },
+   {
+    "label": "*) Stel Annoyance",
+    "type": "DWRD"
+   },
+   {
+    "label": "Seen Intro Screen",
+    "type": "BFLG"
+   },
+   {
+    "label": "Unknown",
+    "type": "FBYT"
+   },
+   {
+    "label": "Disasters=128",
+    "type": "R100"
+   },
+   {
+    "label": "*) Disaster Time/Stel=dTime*,dStel*",
+    "type": "PACK"
+   },
+   {
+    "label": "Disaster Times=128",
+    "type": "R100"
+   },
+   {
+    "label": "dTime*",
+    "type": "DWRD"
+   },
+   {
+    "label": "Disasters=128",
+    "type": "R100"
+   },
+   {
+    "label": "dStel*",
+    "type": "DWRD"
+   },
+   {
+    "label": "Junks=128",
+    "type": "R080"
+   },
+   {
+    "label": "*) Junk Quantity",
+    "type": "DWRD"
+   },
+   {
+    "label": "Price Flux",
+    "type": "RECT"
+   },
+   {
+    "label": "Crons=128",
+    "type": "R200"
+   },
+   {
+    "label": "*) Cron Dur./Hold.=cDuration*,cHoldoff*",
+    "type": "PACK"
+   },
+   {
+    "label": "Cron Durations=128",
+    "type": "R200"
+   },
+   {
+    "label": "cDuration*",
+    "type": "DWRD"
+   },
+   {
+    "label": "Cron Holdoffs=128",
+    "type": "R200"
+   },
+   {
+    "label": "cHoldoff*",
+    "type": "DWRD"
+   },
+   {
+    "label": "Reinforcements=128",
+    "type": "R800"
+   },
+   {
+    "label": "*) Reinforcements",
+    "type": "DWRD"
+   },
+   {
+    "label": "Destruction=128",
+    "type": "R800"
+   },
+   {
+    "label": "*) Stellar Destroyed",
+    "type": "DWRD"
+   },
+   {
+    "label": "Unknown",
+    "type": "F008"
+   },
+   {
+    "label": "Player Nickname",
+    "type": "P040"
+   },
+   {
+    "label": "Ship Color Red",
+    "type": "DWRD"
+   },
+   {
+    "label": "Ship Color Green",
+    "type": "DWRD"
+   },
+   {
+    "label": "Ship Color Blue",
+    "type": "DWRD"
+   },
+   {
+    "label": "Ranks=128",
+    "type": "R080"
+   },
+   {
+    "label": "*) Rank Active",
+    "type": "WFLG"
+   },
+   {
+    "label": "Date Prefix",
+    "type": "C010"
+   },
+   {
+    "label": "Date Suffix",
+    "type": "C010"
+   },
+   {
+    "label": "Unknown",
+    "type": "F800"
+   }
+  ]
+ },
+ ".plt": {
+  "id": 597,
+  "fields": [
+   {
+    "label": "",
+    "type": "LNDN"
+   },
+   {
+    "label": "Player Data",
+    "type": "LSIZ"
+   },
+   {
+    "label": "NpL.128-1",
+    "type": "TMPL"
+   },
+   {
+    "label": "NpL.MissionData1",
+    "type": "TMPL"
+   },
+   {
+    "label": "NpL.MissionData2",
+    "type": "TMPL"
+   },
+   {
+    "label": "NpL.MissionData3",
+    "type": "TMPL"
+   },
+   {
+    "label": "NpL.128-2",
+    "type": "TMPL"
+   },
+   {
+    "label": "*****",
+    "type": "SKPE"
+   },
+   {
+    "label": "Universe Data",
+    "type": "LSIZ"
+   },
+   {
+    "label": "NpL.129",
+    "type": "TMPL"
+   },
+   {
+    "label": "*****",
+    "type": "SKPE"
+   },
+   {
+    "label": "Ship Name",
+    "type": "CSTR"
+   }
+  ]
+ }
+}

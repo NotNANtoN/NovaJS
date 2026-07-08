@@ -1,0 +1,50 @@
+import "jasmine";
+import { MultiplayerData } from "nova_ecs/plugins/multiplayer_plugin";
+import { completeEntity } from "../nova_plugin/entity_data_loader.js";
+import { makeShip } from "../nova_plugin/make_ship.js";
+import { makeSystem } from "../nova_plugin/make_system.js";
+import { OutfitsStateComponent } from "../nova_plugin/outfit_plugin.js";
+import { PlanetDataComponent } from "../nova_plugin/planet_plugin.js";
+import { ShipDataComponent, ShipPhysicsComponent } from "../nova_plugin/ship_plugin.js";
+import { WeaponsStateComponent } from "../nova_plugin/weapons_state.js";
+import { getIntegrationGameData } from "./simulation_test_fixture.js";
+
+describe("completeEntity", () => {
+    it("attaches derived ship components before the entity enters the world", async () => {
+        const gameData = await getIntegrationGameData();
+        const ids = await gameData.ids;
+        const systemId = [...ids.System].sort()[0]!;
+        const shipId = [...ids.Ship].sort()[0]!;
+        const world = await makeSystem(systemId, gameData);
+
+        const shipData = await gameData.data.Ship.get(shipId);
+        const ship = makeShip(shipData);
+        ship.components.set(MultiplayerData, { owner: "server" });
+
+        await completeEntity(world, ship);
+
+        // Derived components are attached synchronously at completion,
+        // not on the entity's first step. This is what snapshot restore
+        // and resimulation rely on.
+        expect(ship.components.get(ShipDataComponent)).toBeDefined();
+        expect(ship.components.get(OutfitsStateComponent)).toBeDefined();
+        expect(ship.components.get(ShipPhysicsComponent)).toBeDefined();
+        expect(ship.components.get(WeaponsStateComponent)).toBeDefined();
+    }, 30_000);
+
+    it("attaches planet data to planets at system creation", async () => {
+        const gameData = await getIntegrationGameData();
+        const ids = await gameData.ids;
+        const systemId = [...ids.System].sort()[0]!;
+        const world = await makeSystem(systemId, gameData);
+
+        // Planets are completed before insertion in makeSystem, without
+        // ever stepping the world.
+        const planets = [...world.entities.entries()]
+            .filter(([uuid]) => uuid.startsWith('planet '));
+        expect(planets.length).toBeGreaterThan(0);
+        for (const [, planet] of planets) {
+            expect(planet.components.get(PlanetDataComponent)).toBeDefined();
+        }
+    }, 30_000);
+});
