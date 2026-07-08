@@ -1,5 +1,6 @@
 import * as t from 'io-ts';
 import { CloakData, getDefaultCloakData } from 'novadatainterface/cloak_data';
+import { CloakScannerData, getDefaultCloakScannerData } from 'novadatainterface/cloak_scanner_data';
 import { GetEntity } from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
 import { Optional } from 'nova_ecs/optional';
@@ -11,7 +12,7 @@ import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_
 import { registerEntityDeriver } from './entity_factory.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { DamagedEvent } from './death_plugin.js';
-import { ShieldComponent } from './health_plugin.js';
+import { FuelComponent, ShieldComponent } from './health_plugin.js';
 import { OutfitsState, OutfitsStateComponent } from './outfit_plugin.js';
 import { ProvideFromCache } from './provide_from_cache.js';
 import { ShipControlEvent, ShipControlStateComponent } from './ship_control.js';
@@ -33,6 +34,19 @@ export interface CloakCapability extends CloakData {
 }
 
 export const CloakComponent = new Component<CloakCapability>('CloakComponent');
+
+/**
+ * A ship's cloak-SCANNER capability, derived from owned cloak-scanner
+ * outfits (oütf ModType 30). Like CloakComponent it is derived from
+ * outfits and re-derived at restore, so it is skipped from snapshots.
+ * `hasScanner` is true iff at least one scanner outfit is present.
+ */
+export interface CloakScannerCapability extends CloakScannerData {
+    hasScanner: boolean;
+}
+
+export const CloakScannerComponent =
+    new Component<CloakScannerCapability>('CloakScannerComponent');
 
 /**
  * The live cloak toggle. This IS deterministic simulation state: it is
@@ -57,13 +71,55 @@ export function isCloaked(active: CloakActiveState | undefined): boolean {
 }
 
 /**
- * Whether a ship can be seen / targeted by others. Per the EVN Bible a
- * cloaked ship is untargetable unless the observer has a cloak scanner
- * (oütf ModType 30, not yet wired); for now an active cloak makes a ship
- * fully untargetable.
+ * Whether a target ship can be seen / targeted by an observer. Per the
+ * EVN Bible a cloaked ship is untargetable unless the observer has a
+ * cloak scanner with the "allow targeting of cloaked ships" bit (ModVal
+ * 0x0008). Pass the observer's scanner capability (undefined = none).
  */
-export function isTargetable(active: CloakActiveState | undefined): boolean {
-    return !isCloaked(active);
+export function isTargetable(targetActive: CloakActiveState | undefined,
+    observerScanner?: CloakScannerCapability | undefined): boolean {
+    if (!isCloaked(targetActive)) {
+        return true;
+    }
+    return observerScanner?.targetsCloaked === true;
+}
+
+/**
+ * Merges every owned cloak scanner into one capability. Boolean reveal /
+ * targeting bits OR together. Returns undefined only when outfit game
+ * data is not yet cached (retry next step).
+ */
+export function deriveCloakScanner(outfits: OutfitsState,
+    gameData: SimulationGameDataInterface): CloakScannerCapability | undefined {
+    let merged: CloakScannerCapability = {
+        ...getDefaultCloakScannerData(),
+        hasScanner: false,
+    };
+
+    for (const [id, state] of outfits) {
+        if (state.count <= 0) {
+            continue;
+        }
+        const outfit = gameData.data.Outfit.getCached(id);
+        if (!outfit) {
+            return undefined;
+        }
+        const scanner = outfit.cloakScanner;
+        if (!scanner.isCloakScanner) {
+            continue;
+        }
+        merged = {
+            isCloakScanner: true,
+            hasScanner: true,
+            revealsOnRadar: merged.revealsOnRadar || scanner.revealsOnRadar,
+            revealsOnScreen: merged.revealsOnScreen || scanner.revealsOnScreen,
+            targetsUntargetable:
+                merged.targetsUntargetable || scanner.targetsUntargetable,
+            targetsCloaked: merged.targetsCloaked || scanner.targetsCloaked,
+            rawModVal: merged.rawModVal | scanner.rawModVal,
+        };
+    }
+    return merged;
 }
 
 /**
@@ -129,29 +185,21 @@ const CloakProvider = ProvideFromCache({
     factory: deriveCloak,
 });
 
-/**
- * Fuel-drain hook. This branch has no fuel stat yet (a parallel agent is
- * building the fuel system). Cloaks that drain fuel would decloak on fuel
- * exhaustion; until a FuelComponent exists we treat fuel as unlimited and
- * only surface the intent here.
- *
- * TODO(fuel): when a fuel Stat/Component lands, subtract
- * `cloak.fuelPerSecond * delta_s` from it and return true (must decloak)
- * when fuel would go negative. Wire the same way CloakDrainSystem drains
- * shields below.
- */
-export function drainCloakFuel(_cloak: CloakCapability, _delta_s: number): {
-    /** True if fuel is exhausted and the ship must decloak. */
-    mustDecloak: boolean;
-} {
-    return { mustDecloak: false };
-}
+const CloakScannerProvider = ProvideFromCache({
+    name: 'CloakScannerProvider',
+    provided: CloakScannerComponent,
+    update: [OutfitsStateComponent],
+    args: [OutfitsStateComponent, SimulationGameDataResource] as const,
+    factory: deriveCloakScanner,
+});
 
-/** A minimal shield-like value the pure transition helpers operate on. */
-export interface ShieldLike {
+/** A minimal Stat-like value the pure transition helpers operate on. */
+export interface StatLike {
     current: number;
     min: number;
 }
+/** @deprecated Use StatLike. Kept as an alias for existing call sites. */
+export type ShieldLike = StatLike;
 
 /**
  * Pure toggle transition. Given the current active flag and capability,
@@ -175,13 +223,18 @@ export function applyCloakToggle(current: boolean, cloak: CloakCapability): {
 }
 
 /**
- * Pure per-tick drain transition. Mutates the given shield (if present)
- * and returns the next active flag. Draining shields to their floor, or a
- * fuel-exhaustion signal from drainCloakFuel, forces a decloak. Extracted
- * from CloakDrainSystem for testing.
+ * Pure per-tick drain transition. Mutates the given shield and/or fuel
+ * stats (if present) and returns the next active flag. Per the ModVal
+ * bitfield, a cloak can drain shields (bits 0x0100-0x0800) and/or fuel
+ * (bits 0x0010-0x0080) per second. Running either resource to its floor
+ * forces a decloak. Extracted from CloakDrainSystem for testing.
+ *
+ * A cloak whose ModVal requests fuel drain but whose ship carries no fuel
+ * stat (fuel === undefined) is treated as unable to sustain the cloak and
+ * decloaks immediately — draining a resource the ship lacks fails.
  */
 export function applyCloakDrain(active: boolean, cloak: CloakCapability,
-    delta_s: number, shield?: ShieldLike): boolean {
+    delta_s: number, shield?: StatLike, fuel?: StatLike): boolean {
     if (!active) {
         return false;
     }
@@ -195,8 +248,13 @@ export function applyCloakDrain(active: boolean, cloak: CloakCapability,
     }
 
     if (cloak.fuelPerSecond > 0) {
-        const { mustDecloak } = drainCloakFuel(cloak, delta_s);
-        if (mustDecloak) {
+        if (!fuel) {
+            // The cloak needs fuel but the ship has no fuel stat.
+            return false;
+        }
+        fuel.current -= cloak.fuelPerSecond * delta_s;
+        if (fuel.current <= fuel.min) {
+            fuel.current = fuel.min;
             return false;
         }
     }
@@ -251,16 +309,17 @@ export const CloakControlSystem = new System({
 
 /**
  * Per-tick cloak drain and resource-exhaustion decloak. While cloaked,
- * shields drain by `shieldPerSecond`; if they hit the floor the cloak
- * drops. Fuel drain is delegated to drainCloakFuel (a no-op stub until a
- * fuel stat exists).
+ * shields and/or fuel drain per the ModVal bitfield; running either to
+ * its floor drops the cloak. Fuel is the FuelComponent Stat (100 units =
+ * one jump) added by the fuel system.
  */
 export const CloakDrainSystem = new System({
     name: 'CloakDrainSystem',
     args: [CloakActiveComponent, CloakComponent, TimeResource,
-        Optional(ShieldComponent)] as const,
-    step(active, cloak, time, shield) {
-        active.active = applyCloakDrain(active.active, cloak, time.delta_s, shield);
+        Optional(ShieldComponent), Optional(FuelComponent)] as const,
+    step(active, cloak, time, shield, fuel) {
+        active.active = applyCloakDrain(
+            active.active, cloak, time.delta_s, shield, fuel);
     },
 });
 
@@ -286,6 +345,7 @@ export const CloakPlugin: Plugin = {
         }
 
         world.addComponent(CloakComponent);
+        world.addComponent(CloakScannerComponent);
         world.addComponent(CloakActiveComponent);
 
         // The active toggle is deterministic sim state: sync it as a
@@ -295,9 +355,9 @@ export const CloakPlugin: Plugin = {
             componentType: CloakActiveType,
         });
 
-        // Re-derive the capability wherever a full entity is built
-        // (staged insertion, snapshot restore) so it is available on the
-        // same tick, like weapons.
+        // Re-derive the capabilities wherever a full entity is built
+        // (staged insertion, snapshot restore) so they are available on
+        // the same tick, like weapons.
         registerEntityDeriver(world, {
             name: 'CloakDeriver',
             provided: CloakComponent,
@@ -305,8 +365,16 @@ export const CloakPlugin: Plugin = {
             derive: (entity, gameData) => deriveCloak(
                 entity.components.get(OutfitsStateComponent)!, gameData),
         });
+        registerEntityDeriver(world, {
+            name: 'CloakScannerDeriver',
+            provided: CloakScannerComponent,
+            requires: [OutfitsStateComponent],
+            derive: (entity, gameData) => deriveCloakScanner(
+                entity.components.get(OutfitsStateComponent)!, gameData),
+        });
 
         world.addSystem(CloakProvider);
+        world.addSystem(CloakScannerProvider);
         world.addSystem(CloakControlSystem);
         world.addSystem(CloakDrainSystem);
         world.addSystem(CloakDecloakOnHitSystem);

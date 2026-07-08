@@ -1,11 +1,14 @@
 import { decodeCloakModVal, getDefaultCloakData } from 'novadatainterface/cloak_data';
+import { decodeCloakScannerModVal, getDefaultCloakScannerData } from 'novadatainterface/cloak_scanner_data';
 import { getDefaultOutfitData, OutfitData } from 'novadatainterface/outfit_data';
 import {
     applyCloakDrain,
     applyCloakToggle,
     applyDecloakOnHit,
     CloakCapability,
+    CloakScannerCapability,
     deriveCloak,
+    deriveCloakScanner,
     isCloaked,
     isTargetable,
     ShieldLike,
@@ -29,6 +32,23 @@ function cloakOutfit(id: string, modVal: number): OutfitData {
         ...getDefaultOutfitData(),
         id,
         cloak: decodeCloakModVal(modVal),
+    };
+}
+
+function scannerOutfit(id: string, modVal: number): OutfitData {
+    return {
+        ...getDefaultOutfitData(),
+        id,
+        cloakScanner: decodeCloakScannerModVal(modVal),
+    };
+}
+
+function scannerCapability(over: Partial<CloakScannerCapability> = {}): CloakScannerCapability {
+    return {
+        ...getDefaultCloakScannerData(),
+        hasScanner: true,
+        isCloakScanner: true,
+        ...over,
     };
 }
 
@@ -143,11 +163,35 @@ describe('applyCloakDrain', () => {
         expect(shield.current).toBe(100);
     });
 
-    it('does not decloak on fuel drain while the fuel stub is a no-op', () => {
-        // TODO(fuel): once a fuel stat exists this should decloak on
-        // exhaustion. For now fuel is unlimited, so the ship stays cloaked.
+    it('drains fuel per second while cloaked', () => {
+        const fuel: ShieldLike = { current: 100, min: 0 };
+        const cloak = capability({ fuelPerSecond: 2 });
+        const active = applyCloakDrain(true, cloak, 3, undefined, fuel);
+        expect(fuel.current).toBe(94); // 100 - 2 * 3
+        expect(active).toBe(true);
+    });
+
+    it('decloaks and clamps when fuel runs out', () => {
+        const fuel: ShieldLike = { current: 1, min: 0 };
         const cloak = capability({ fuelPerSecond: 8 });
-        expect(applyCloakDrain(true, cloak, 100)).toBe(true);
+        const active = applyCloakDrain(true, cloak, 1, undefined, fuel);
+        expect(active).toBe(false);
+        expect(fuel.current).toBe(0);
+    });
+
+    it('decloaks immediately when a fuel-draining cloak has no fuel stat', () => {
+        const cloak = capability({ fuelPerSecond: 8 });
+        expect(applyCloakDrain(true, cloak, 1, undefined, undefined)).toBe(false);
+    });
+
+    it('drains both shields and fuel when both bits are set', () => {
+        const shield: ShieldLike = { current: 100, min: 0 };
+        const fuel: ShieldLike = { current: 100, min: 0 };
+        const cloak = capability({ shieldPerSecond: 4, fuelPerSecond: 2 });
+        const active = applyCloakDrain(true, cloak, 1, shield, fuel);
+        expect(shield.current).toBe(96);
+        expect(fuel.current).toBe(98);
+        expect(active).toBe(true);
     });
 });
 
@@ -177,6 +221,25 @@ describe('cloak targeting exclusion', () => {
         expect(isTargetable({ active: true })).toBe(false);
     });
 
+    it('a cloaked ship is untargetable by a plain ship', () => {
+        expect(isTargetable({ active: true }, undefined)).toBe(false);
+    });
+
+    it('a cloaked ship is targetable by a scanner that targets cloaked ships', () => {
+        const scanner = scannerCapability({ targetsCloaked: true });
+        expect(isTargetable({ active: true }, scanner)).toBe(true);
+    });
+
+    it('a scanner without the targets-cloaked bit does not help', () => {
+        const scanner = scannerCapability({ targetsCloaked: false, revealsOnRadar: true });
+        expect(isTargetable({ active: true }, scanner)).toBe(false);
+    });
+
+    it('an uncloaked ship is targetable regardless of scanner', () => {
+        expect(isTargetable(undefined, undefined)).toBe(true);
+        expect(isTargetable({ active: false }, scannerCapability())).toBe(true);
+    });
+
     it('getValidTargets drops cloaked ships and yourself', () => {
         const self = 'me';
         const targets: Array<readonly [string, unknown, { active: boolean } | undefined]> = [
@@ -186,5 +249,43 @@ describe('cloak targeting exclusion', () => {
             ['ghost', {}, { active: true }],       // cloaked: excluded
         ];
         expect(getValidTargets(targets, self)).toEqual(['visible', 'also-visible']);
+    });
+});
+
+describe('deriveCloakScanner', () => {
+    it('reports hasScanner false with no scanner outfits', () => {
+        const outfits: OutfitsState = new Map([['nova:1', { count: 1 }]]);
+        const result = deriveCloakScanner(outfits,
+            mockGameData({ 'nova:1': plainOutfit('nova:1') }));
+        expect(result?.hasScanner).toBe(false);
+    });
+
+    it('derives the scanner capability from a scanner outfit', () => {
+        const outfits: OutfitsState = new Map([['s', { count: 1 }]]);
+        const result = deriveCloakScanner(outfits,
+            mockGameData({ s: scannerOutfit('s', 0x0009) })); // radar + targets cloaked
+        expect(result?.hasScanner).toBe(true);
+        expect(result?.revealsOnRadar).toBe(true);
+        expect(result?.targetsCloaked).toBe(true);
+        expect(result?.revealsOnScreen).toBe(false);
+    });
+
+    it('ORs bits across multiple scanners', () => {
+        const outfits: OutfitsState = new Map([
+            ['a', { count: 1 }], // 0x0001 radar
+            ['b', { count: 1 }], // 0x0008 targets cloaked
+        ]);
+        const result = deriveCloakScanner(outfits, mockGameData({
+            a: scannerOutfit('a', 0x0001),
+            b: scannerOutfit('b', 0x0008),
+        }));
+        expect(result?.revealsOnRadar).toBe(true);
+        expect(result?.targetsCloaked).toBe(true);
+    });
+
+    it('returns undefined when outfit data is not cached yet', () => {
+        const outfits: OutfitsState = new Map([['missing', { count: 1 }]]);
+        const result = deriveCloakScanner(outfits, mockGameData({ missing: undefined }));
+        expect(result).toBeUndefined();
     });
 });

@@ -2,6 +2,7 @@ import { OutfResource } from "../resource_parsers/outf_resource.js";
 import { BaseData } from "novadatainterface/base_data";
 import { BaseParse } from "./base_parse.js";
 import { CloakData, decodeCloakModVal, getDefaultCloakData } from "novadatainterface/cloak_data";
+import { CloakScannerData, decodeCloakScannerModVal, getDefaultCloakScannerData } from "novadatainterface/cloak_scanner_data";
 import { OutfitData, OutfitPhysics } from "novadatainterface/outfit_data";
 import { getDefaultPictData } from "novadatainterface/pict_data";
 import { FPS, OutfitTurnRateConversionFactor, ShipTurnRateConversionFactor } from "./constants.js";
@@ -24,6 +25,9 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
     // ModType 17 "cloaking device"; decoded from its ModVal bitfield. The
     // resource parser emits it as a ["cloak", modVal] function tuple.
     var cloak: CloakData = getDefaultCloakData();
+    // ModType 30 "cloak scanner"; decoded from its ModVal bitfield. The
+    // resource parser emits it as a ["cloak scanner", modVal] tuple.
+    var cloakScanner: CloakScannerData = getDefaultCloakScannerData();
     var ammoFor: string | null = null;
 
     for (let i in outf.functions) {
@@ -36,6 +40,14 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
                 throw new Error("Wrong type for cloak val. Expected number");
             }
             cloak = decodeCloakModVal(fVal);
+            continue;
+        }
+
+        if (fType === "cloak scanner") {
+            if (typeof fVal !== "number") {
+                throw new Error("Wrong type for cloak scanner val. Expected number");
+            }
+            cloakScanner = decodeCloakScannerModVal(fVal);
             continue;
         }
 
@@ -151,6 +163,7 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
         weapons,
         physics,
         cloak,
+        cloakScanner,
         ammoFor,
         pict,
         price: outf.cost,

@@ -1,5 +1,6 @@
 import { BaseData, getDefaultBaseData } from "./base_data.js";
 import { CloakData, getDefaultCloakData } from "./cloak_data.js";
+import { CloakScannerData, getDefaultCloakScannerData } from "./cloak_scanner_data.js";
 import { ShipPhysics } from "./ship_data.js";
 
 
@@ -13,6 +14,9 @@ export interface OutfitData extends BaseData {
     // Cloaking-device semantics decoded from ModType 17. isCloak is false
     // for non-cloak outfits. See cloak_data.ts for the bitfield.
     cloak: CloakData,
+    // Cloak-scanner semantics decoded from ModType 30. isCloakScanner is
+    // false for non-scanner outfits. See cloak_scanner_data.ts.
+    cloakScanner: CloakScannerData,
     // The weapon (globalID) this outfit is ammunition for, or null.
     // Each item of the outfit is one round of that weapon's ammo.
     ammoFor: string | null,
@@ -31,6 +35,7 @@ export function getDefaultOutfitData(): OutfitData {
             freeMass: 0
         },
         cloak: getDefaultCloakData(),
+        cloakScanner: getDefaultCloakScannerData(),
         ammoFor: null,
         pict: "default",
         price: 0,

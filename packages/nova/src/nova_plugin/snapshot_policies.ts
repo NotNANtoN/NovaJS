@@ -7,7 +7,7 @@ import { World } from "nova_ecs/world";
 import { AnimationComponent, ExplosionDataComponent } from "./animation_plugin.js";
 import { BlastDamageComponent, BlastIgnoreComponent } from "./blast_data.js";
 import { BlastDoneComponent } from "./blast_plugin.js";
-import { CloakComponent } from "./cloak_plugin.js";
+import { CloakComponent, CloakScannerComponent } from "./cloak_plugin.js";
 import { CollisionHitterComponent, CollisionVulnerabilityComponent } from "./collision_interaction.js";
 import { decodeHull, encodeHull, HitboxHullComponent, HurtboxHullComponent } from "./collisions_plugin.js";
 import { CreateTime } from "./create_time.js";
@@ -89,6 +89,8 @@ export function configureSnapshotPolicies(world: World) {
     // (CloakActiveComponent) is real sim state and is serializer/delta-
     // registered, so it is handled by the default codec path.
     policies.set(CloakComponent, { policy: 'skip' });
+    // The cloak-scanner capability is likewise derived from outfits.
+    policies.set(CloakScannerComponent, { policy: 'skip' });
 
     // Enum-valued; effectively immutable.
     policies.set(GuidanceComponent, { policy: 'share' });

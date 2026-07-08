@@ -16,7 +16,7 @@ import * as PIXI from "pixi.js";
 import { Subject } from "rxjs";
 import { DisplayAssetDataInterface } from "../client/gamedata/display_asset_data.js";
 import { DisplayAssetDataResource, SimulationGameDataResource } from "../nova_plugin/game_data_resource.js";
-import { CloakActiveComponent, CloakComponent } from "../nova_plugin/cloak_plugin.js";
+import { CloakActiveComponent, CloakComponent, CloakScannerComponent } from "../nova_plugin/cloak_plugin.js";
 import { ArmorComponent, FuelComponent, FUEL_PER_JUMP, ShieldComponent } from "../nova_plugin/health_plugin.js";
 import { OutfitsStateComponent } from "../nova_plugin/outfit_plugin.js";
 import { PlanetDataComponent } from "../nova_plugin/planet_plugin.js";
@@ -396,11 +396,16 @@ const DrawRadar = new System({
         }
         if (time - radarTime.lastTime > statusBar.radarPeriod) {
             // Hide ships that are actively cloaked with a radar-hiding
-            // cloak (bit 0x0002 "visible on radar" clear). Builds on the
-            // merged interference/static radar. The player's own ship is
-            // drawn separately from `source`, so it always shows.
-            const visibleShips = ships.filter(([, , , cloakActive, cloak]) =>
-                !(cloakActive?.active && (cloak?.hidesFromRadar ?? true)));
+            // cloak (bit 0x0002 "visible on radar" clear), unless the
+            // player has a cloak scanner that reveals cloaked ships on
+            // radar (ModVal 0x0001). Builds on the merged interference/
+            // static radar. The player's own ship is drawn separately
+            // from `source`, so it always shows.
+            const scanner = entity.components.get(CloakScannerComponent);
+            const revealsCloaked = scanner?.revealsOnRadar === true;
+            const visibleShips = revealsCloaked ? ships : ships.filter(
+                ([, , , cloakActive, cloak]) =>
+                    !(cloakActive?.active && (cloak?.hidesFromRadar ?? true)));
             statusBar.drawRadar(position, visibleShips, planets);
             radarTime.lastTime = time;
         }
