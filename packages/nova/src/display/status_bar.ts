@@ -57,6 +57,14 @@ class StatusBar {
      * interference is clamped so it never drops below zero.
      */
     interferenceReduction = 0;
+    /**
+     * The sensor-static pixel patterns (the ppat resources from Nova
+     * Graphics 1). Each radar tick is replaced wholesale by one of these,
+     * tiled, with probability interference / 100 — matching the original
+     * engine's static, rather than per-blip noise.
+     */
+    staticTextures: PIXI.Texture[] = [];
+    private staticSprite?: PIXI.TilingSprite;
 
     /** The effective interference after outfit reductions, clamped 0-100. */
     private get interference(): number {
@@ -89,6 +97,12 @@ class StatusBar {
         const dataAreas = this.statusBarData.dataAreas;
         [this.radar.position.x, this.radar.position.y] = dataAreas.radar.position;
         this.container.addChild(this.radar);
+        this.staticSprite = new PIXI.TilingSprite(PIXI.Texture.EMPTY,
+            dataAreas.radar.size[0], dataAreas.radar.size[1]);
+        [this.staticSprite.position.x, this.staticSprite.position.y] =
+            dataAreas.radar.position;
+        this.staticSprite.visible = false;
+        this.container.addChild(this.staticSprite);
         this.container.addChild(this.statsGraphics);
         this.targetContainer.addChild(this.targetSprite);
         this.targetSprite.anchor.set(0.5, 0.5);
@@ -200,53 +214,43 @@ class StatusBar {
         planets: Iterable<readonly [string, MovementState, PlanetData]>) {
         this.radar.clear();
 
-        // Interference (0-100) degrades the radar: real blips are dropped with
-        // probability proportional to interference (100 = complete sensor
-        // blackout), and static is sprinkled across the radar.
-        const interference = this.interference;
-        const blipShown = () => Math.random() * 100 >= interference;
+        // Interference (0-100) makes sensors unreliable: on each radar tick,
+        // with probability interference / 100, the whole radar is replaced by
+        // one of the ppat static patterns, tiled — the original engine's
+        // behavior. At 100 the radar is pure static (a complete sensor
+        // blackout); otherwise this tick draws normally.
+        if (this.drawSensorStatic()) {
+            return;
+        }
 
-        // The player's own ship is always shown: it's not a sensor return.
         this.drawDot(source, this.statusBarData.colors.brightRadar, source);
 
         for (const [, { position }] of ships) {
-            if (!blipShown()) {
-                continue;
-            }
             const color = this.statusBarData.colors.dimRadar;
             this.drawDot(position, color, source);
         }
 
         for (const [, { position }] of planets) {
-            if (!blipShown()) {
-                continue;
-            }
             this.drawDot(position, 0xFFFF00, source, 2);
         }
-
-        this.drawStatic(interference);
     }
 
     /**
-     * Sprinkles random sensor static across the radar. The number of static
-     * dots scales with interference, so a clear system (0) shows none and a
-     * blacked-out system (100) is dense noise.
+     * Probabilistically replaces this radar tick with static. Returns whether
+     * it did, in which case no blips should be drawn.
      */
-    private drawStatic(interference: number) {
-        if (interference <= 0) {
-            return;
+    private drawSensorStatic(): boolean {
+        if (!this.staticSprite || this.staticTextures.length === 0 ||
+            Math.random() * 100 >= this.interference) {
+            if (this.staticSprite) {
+                this.staticSprite.visible = false;
+            }
+            return false;
         }
-        const radarSize = new Vector(...this.statusBarData.dataAreas.radar.size);
-        // Up to a full grid of noise at interference 100; sparse below.
-        const maxDots = Math.floor(radarSize.x * radarSize.y / 8);
-        const count = Math.floor(maxDots * interference / 100);
-        for (let i = 0; i < count; i++) {
-            const x = Math.random() * radarSize.x;
-            const y = Math.random() * radarSize.y;
-            this.radar.beginFill(this.statusBarData.colors.dimRadar);
-            this.radar.drawRect(x, y, 1, 1);
-            this.radar.endFill();
-        }
+        this.staticSprite.texture = this.staticTextures[
+            Math.floor(Math.random() * this.staticTextures.length)];
+        this.staticSprite.visible = true;
+        return true;
     }
 
     private drawDot(dotPos: Position, color: number, source = new Position(0, 0), size = 1) {
@@ -440,8 +444,9 @@ const DrawStatusBarSecondaryWeapon = new System({
         }
         const { ammoType } = weapon;
         if (outfits && ammoType instanceof Array && ammoType[0] === 'weapon') {
+            // "Weapon Name - 37"; weapons without ammo show the bare name.
             statusBar.drawSecondary(
-                `${weapon.name} (${countAmmo(ammoType[1], outfits, gameData)})`);
+                `${weapon.name} - ${countAmmo(ammoType[1], outfits, gameData)}`);
         } else {
             statusBar.drawSecondary(weapon.name);
         }
@@ -499,6 +504,13 @@ export const StatusBarPlugin: Plugin = {
         if (systemId) {
             const systemData = await simulationData.data.System.get(systemId);
             statusBar.systemInterference = systemData.interference;
+            if (systemData.interference > 0) {
+                // The ppat pixel patterns the radar shows as sensor static.
+                // Only needed in systems that actually have interference.
+                const ppatIds = (await simulationData.ids).PpatImage;
+                statusBar.staticTextures = await Promise.all(ppatIds.map(
+                    id => displayAssets.textureFromPpat(id)));
+            }
         }
 
         await statusBar.buildPromise;

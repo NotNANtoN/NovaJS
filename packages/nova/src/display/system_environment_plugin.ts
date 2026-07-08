@@ -53,8 +53,9 @@ export function effectiveMurk(murk: MurkState): number {
 /**
  * The distance (in Nova pixels) beyond which objects vanish entirely under
  * full (100) murk. Lower murk scales this range up proportionally.
+ * (Playtesting judged the original 300 too weak by 2-3x.)
  */
-export const FULL_MURK_VANISH_DISTANCE = 300;
+export const FULL_MURK_VANISH_DISTANCE = 120;
 
 /**
  * How much of an object murk leaves visible at a given distance from the
@@ -63,7 +64,7 @@ export const FULL_MURK_VANISH_DISTANCE = 300;
  * Objects vanish completely at
  *     vanish = FULL_MURK_VANISH_DISTANCE * (100 / murk)
  * so the vanishing range is inversely proportional to the effective murk
- * (murk 100 -> 300px, murk 50 -> 600px, murk -> 0 -> unbounded). The nearer
+ * (murk 100 -> 120px, murk 50 -> 240px, murk -> 0 -> unbounded). The nearer
  * half of that range renders fully; alpha then falls linearly to zero across
  * the outer half:
  *     alpha = 1                             for d <= vanish / 2
@@ -92,18 +93,27 @@ export function murkAlpha(distance: number, murk: MurkState): number {
 }
 
 /**
- * How much of a star murk leaves visible, as an alpha in [0, 1]. Stars sit
- * behind every space object, so dust dims the whole field, and stars with a
- * higher parallax factor read as deeper in the background, so they fade
- * more:
- *     alpha = (1 - murk / 100) ^ (1 + factor)
- * Murk 0 leaves the starfield untouched; murk 100 blacks it out entirely.
- * Without this, distant ships fading out while the stars stay crisp reads
- * as cloaking rather than as dust obscuring the view.
+ * How much dimming murk applies to the shallowest stars (parallax factor 0)
+ * at murk 100.
+ */
+const STAR_DIM_SHALLOW = 0.4;
+/** Additional dimming per unit of parallax factor: deeper stars fade more. */
+const STAR_DIM_PER_FACTOR = 0.8;
+
+/**
+ * How much of a star murk leaves visible, as an alpha in [0, 1]. Stars dim
+ * with murk — without that, distant ships fading out while the stars stay
+ * crisp reads as cloaking rather than as dust — and stars with a higher
+ * parallax factor read as deeper in the background, so they fade more:
+ *     alpha = 1 - (murk / 100) * (0.4 + 0.8 * factor)
+ * Unlike ships, the starfield stays visible PAST the murk (the real engine
+ * shows stars through it): even at murk 100 the shallowest stars keep alpha
+ * 0.6 and the deepest (factor 0.5) keep 0.2.
  */
 export function starfieldMurkAlpha(factor: number, murk: MurkState): number {
     const m = effectiveMurk(murk);
-    return Math.pow(1 - m / 100, 1 + factor);
+    return Math.max(0,
+        1 - (m / 100) * (STAR_DIM_SHALLOW + STAR_DIM_PER_FACTOR * factor));
 }
 
 /**

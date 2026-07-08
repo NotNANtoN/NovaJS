@@ -15,6 +15,7 @@ import { OopsResource } from "./oops_resource.js";
 import { OutfResource } from "./outf_resource.js";
 import { PersResource } from "./pers_resource.js";
 import { PictResource } from "./pict_resource.js";
+import { PpatResource } from "./ppat_resource.js";
 import { RankResource } from "./rank_resource.js";
 import { RledResource } from "./rled_resource.js";
 import { RoidResource } from "./roid_resource.js";
@@ -50,6 +51,7 @@ enum NovaResourceType {
     oütf = "oütf",
     përs = "përs",
     PICT = "PICT",
+    ppat = "ppat",
     ränk = "ränk",
     rlë8 = "rlë8",
     rlëD = "rlëD",
@@ -101,6 +103,7 @@ type NovaResources = {
     oütf: ResList<OutfResource>;
     përs: ResList<PersResource>;
     PICT: ResList<PictResource>;
+    ppat: ResList<PpatResource>;
     ränk: ResList<RankResource>;
     rlë8: ResList<BaseResource>;
     rlëD: ResList<RledResource>;
@@ -137,6 +140,7 @@ function getEmptyNovaResources(): NovaResources {
         oütf: {},
         përs: {},
         PICT: {},
+        ppat: {},
         ränk: {},
         rlë8: {},
         rlëD: {},

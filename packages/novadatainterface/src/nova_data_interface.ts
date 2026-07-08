@@ -8,6 +8,7 @@ import { OutfitData } from "./outfit_data.js";
 import { PictData } from "./pict_data.js";
 import { PictImageData } from "./pict_image.js";
 import { PlanetData } from "./planet_data.js";
+import { PpatImageData } from "./ppat_image.js";
 import { ShipData } from "./ship_data.js";
 import { SoundFile } from "./sound_file.js";
 import { SpriteSheetData, SpriteSheetFramesData, SpriteSheetImageData } from "./sprite_sheet_data.js";
@@ -26,6 +27,7 @@ enum NovaDataType {
     PictImage = "PictImage",
     Cicn = "Cicn",
     CicnImage = "CicnImage",
+    PpatImage = "PpatImage",
     Planet = "Planet",
     System = "System",
     Govt = "Govt",
@@ -48,6 +50,7 @@ type NovaDataInterface = {
     PictImage: Gettable<PictImageData>,
     Cicn: Gettable<CicnData>,
     CicnImage: Gettable<CicnImageData>,
+    PpatImage: Gettable<PpatImageData>,
     Planet: Gettable<PlanetData>,
     System: Gettable<SystemData>,
     Govt: Gettable<GovtData>,

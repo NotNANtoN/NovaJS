@@ -5,6 +5,7 @@ import { Gettable } from 'novadatainterface/gettable';
 import { NovaDataType, NovaDataInterface } from 'novadatainterface/nova_data_interface';
 import { PictData } from 'novadatainterface/pict_data';
 import { PictImageData } from 'novadatainterface/pict_image';
+import { PpatImageData } from 'novadatainterface/ppat_image';
 import { SoundFile } from 'novadatainterface/sound_file';
 import { SpriteSheetFramesData, SpriteSheetImageData } from 'novadatainterface/sprite_sheet_data';
 import { StatusBarData } from 'novadatainterface/status_bar_data';
@@ -15,9 +16,9 @@ import urlJoin from 'url-join';
 import { dataPath } from '../../common/game_data_paths.js';
 
 export type DisplayAssetDataResources = Pick<NovaDataInterface,
-    'Pict' | 'PictImage' | 'Cicn' | 'CicnImage' | 'TargetCorners' |
-    'SpriteSheetImage' | 'SpriteSheetFrames' | 'StatusBar' |
-    'Explosion' | 'SoundFile'
+    'Pict' | 'PictImage' | 'Cicn' | 'CicnImage' | 'PpatImage' |
+    'TargetCorners' | 'SpriteSheetImage' | 'SpriteSheetFrames' |
+    'StatusBar' | 'Explosion' | 'SoundFile'
 > & {
     Sound: Gettable<sound.Sound>,
 };
@@ -29,6 +30,7 @@ export interface DisplayAssetDataInterface {
     textureFromPictAsync(id: string, priority?: number): Promise<PIXI.Texture>;
     spriteFromPictAsync(id: string, priority?: number): Promise<PIXI.Sprite>;
     textureFromCicn(id: string): Promise<PIXI.Texture>;
+    textureFromPpat(id: string): Promise<PIXI.Texture>;
 }
 
 export class DisplayAssetData implements DisplayAssetDataInterface {
@@ -40,6 +42,7 @@ export class DisplayAssetData implements DisplayAssetDataInterface {
             PictImage: this.addBinaryGettable<PictImageData>(NovaDataType.PictImage, '.png'),
             Cicn: this.addStructuredGettable<CicnData>(NovaDataType.Cicn),
             CicnImage: this.addBinaryGettable<CicnImageData>(NovaDataType.CicnImage, '.png'),
+            PpatImage: this.addBinaryGettable<PpatImageData>(NovaDataType.PpatImage, '.png'),
             TargetCorners: this.addStructuredGettable<TargetCornersData>(NovaDataType.TargetCorners),
             SpriteSheetImage: this.addBinaryGettable<SpriteSheetImageData>(NovaDataType.SpriteSheetImage, '.png'),
             SpriteSheetFrames: this.addFramesGettable<SpriteSheetFramesData>(NovaDataType.SpriteSheetFrames),
@@ -73,6 +76,12 @@ export class DisplayAssetData implements DisplayAssetDataInterface {
         const cicnPath = urlJoin(dataPath, NovaDataType.CicnImage, id + '.png');
         await this.data.CicnImage.get(id);
         return PIXI.Texture.from(cicnPath);
+    }
+
+    async textureFromPpat(id: string): Promise<PIXI.Texture> {
+        const ppatPath = urlJoin(dataPath, NovaDataType.PpatImage, id + '.png');
+        await this.data.PpatImage.get(id);
+        return PIXI.Texture.from(ppatPath);
     }
 
     private async getUrl(url: string, _priority = 0): Promise<unknown> {
