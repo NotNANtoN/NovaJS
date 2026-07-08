@@ -19,6 +19,7 @@ import { SpaceportPlugin } from "./spaceport_plugin.js";
 import { Space } from "./space_resource.js";
 import { Stage } from "./stage_resource.js";
 import { starfield } from "./starfield_plugin.js";
+import { SystemEnvironmentPlugin } from "./system_environment_plugin.js";
 import { StarmapPlugin } from "./starmap_plugin.js";
 import { StatusBarResource, StatusBarPlugin } from "./status_bar.js";
 import { TargetCornersPlugin } from "./target_corners_plugin.js";
@@ -50,6 +51,8 @@ export const Display: Plugin = {
         world.resources.set(Space, space);
         await world.addPlugin(ScreenSizePlugin);
         await world.addPlugin(starfieldPlugin);
+        // After the starfield so it can hide it on negative murk.
+        await world.addPlugin(SystemEnvironmentPlugin);
         await world.addPlugin(StatusBarPlugin);
         await world.addPlugin(AnimationPlugin);
         await world.addPlugin(AnimationGraphicPlugin);
@@ -70,6 +73,7 @@ export const Display: Plugin = {
         await world.removePlugin(JumpFadePlugin);
         await world.removePlugin(ShipAnimationPlugin);
         await world.removePlugin(SoundPlugin);
+        await world.removePlugin(SystemEnvironmentPlugin);
         await world.removePlugin(StarmapPlugin);
         await world.removePlugin(SpaceportPlugin);
         await world.removePlugin(PlanetCornersPlugin);

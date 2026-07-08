@@ -22,6 +22,7 @@ import { OutfitsStateComponent } from "../nova_plugin/outfit_plugin.js";
 import { PlanetDataComponent } from "../nova_plugin/planet_plugin.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 import { ShipDataComponent } from "../nova_plugin/ship_plugin.js";
+import { SystemIdResource } from "../nova_plugin/system_id_resource.js";
 import { Stat } from "../nova_plugin/stat.js";
 import { TargetComponent } from "../nova_plugin/target_component.js";
 import { ActiveSecondaryWeapon, countAmmo } from "../nova_plugin/weapon_plugin.js";
@@ -42,6 +43,26 @@ class StatusBar {
     private radar = new PIXI.Graphics();
     radarPeriod = 200;
     private statsGraphics = new PIXI.Graphics();
+
+    /**
+     * The system's sensor interference (0-100), from the sÿst resource. Zero
+     * is a clear radar; 100 is a complete sensor blackout. Static per system,
+     * so it is read display-side and never affects the simulation.
+     */
+    systemInterference = 0;
+    /**
+     * Interference removed by outfits (the "Radar Interference" outfit
+     * modifier, EVN Bible / ResForge outf case 24). A radar-interference
+     * outfit hook can raise this to clear up the radar; the effective
+     * interference is clamped so it never drops below zero.
+     */
+    interferenceReduction = 0;
+
+    /** The effective interference after outfit reductions, clamped 0-100. */
+    private get interference(): number {
+        return Math.max(0, Math.min(100,
+            this.systemInterference - this.interferenceReduction));
+    }
 
     private targetContainer = new PIXI.Container();
     private noTargetContainer = new PIXI.Container();
@@ -177,15 +198,53 @@ class StatusBar {
     drawRadar(source: Position, ships: Iterable<readonly [string, MovementState, ShipData]>,
         planets: Iterable<readonly [string, MovementState, PlanetData]>) {
         this.radar.clear();
+
+        // Interference (0-100) degrades the radar: real blips are dropped with
+        // probability proportional to interference (100 = complete sensor
+        // blackout), and static is sprinkled across the radar.
+        const interference = this.interference;
+        const blipShown = () => Math.random() * 100 >= interference;
+
+        // The player's own ship is always shown: it's not a sensor return.
         this.drawDot(source, this.statusBarData.colors.brightRadar, source);
 
         for (const [, { position }] of ships) {
+            if (!blipShown()) {
+                continue;
+            }
             const color = this.statusBarData.colors.dimRadar;
             this.drawDot(position, color, source);
         }
 
         for (const [, { position }] of planets) {
+            if (!blipShown()) {
+                continue;
+            }
             this.drawDot(position, 0xFFFF00, source, 2);
+        }
+
+        this.drawStatic(interference);
+    }
+
+    /**
+     * Sprinkles random sensor static across the radar. The number of static
+     * dots scales with interference, so a clear system (0) shows none and a
+     * blacked-out system (100) is dense noise.
+     */
+    private drawStatic(interference: number) {
+        if (interference <= 0) {
+            return;
+        }
+        const radarSize = new Vector(...this.statusBarData.dataAreas.radar.size);
+        // Up to a full grid of noise at interference 100; sparse below.
+        const maxDots = Math.floor(radarSize.x * radarSize.y / 8);
+        const count = Math.floor(maxDots * interference / 100);
+        for (let i = 0; i < count; i++) {
+            const x = Math.random() * radarSize.x;
+            const y = Math.random() * radarSize.y;
+            this.radar.beginFill(this.statusBarData.colors.dimRadar);
+            this.radar.drawRect(x, y, 1, 1);
+            this.radar.endFill();
         }
     }
 
@@ -418,6 +477,17 @@ export const StatusBarPlugin: Plugin = {
 
         const statusBar = new StatusBar(await displayAssets.data.StatusBar.get("nova:128"),
             displayAssets, app.renderer);
+
+        // Seed the radar's sensor interference from the current system. This is
+        // static per-system data (from the sÿst resource), read display-side so
+        // it never affects the deterministic simulation. Outfits can later clear
+        // it up via statusBar.interferenceReduction.
+        const systemId = world.resources.get(SystemIdResource);
+        if (systemId) {
+            const systemData = await simulationData.data.System.get(systemId);
+            statusBar.systemInterference = systemData.interference;
+        }
+
         await statusBar.buildPromise;
         stage.addChild(statusBar.container);
         statusBar.container.position.x = window.innerWidth - statusBar.container.width;
