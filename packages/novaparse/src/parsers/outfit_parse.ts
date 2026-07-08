@@ -20,6 +20,7 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
     // and objects enforce a "one value per key" requirement.
     var weapons: { [index: string]: number } = {};
     var physics: OutfitPhysics = { freeMass: outf.mass };
+    var ammoFor: string | null = null;
 
     for (let i in outf.functions) {
         let func = outf.functions[i];
@@ -45,6 +46,26 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
                 weapons[weaponGlobalID] = 0;
             }
             weapons[weaponGlobalID] += 1;
+        }
+        else if (fType == "ammunition") {
+            // Each item of this outfit is one round of ammo for the
+            // weapon with the given id.
+            if (typeof fVal !== "number") {
+                throw new Error("Wrong type for ammunition val. Expected number");
+            }
+            let ammoWeap = outf.idSpace.wëap[fVal];
+            if (!ammoWeap) {
+                notFoundFunction("Missing wëap id " + fVal + " for oütf " + base.id);
+                continue;
+            }
+            ammoFor = ammoWeap.globalID;
+        }
+        else if (fType === "afterburner") {
+            // ModVal is fuel units burned per second of afterburner use.
+            if (typeof fVal !== "number") {
+                throw new Error("Wrong type. Expected number");
+            }
+            physics.afterburner = fVal;
         }
         else if (noUnitConversion.has(fType)) {
             //else if (fType === "freeCargo") {
@@ -74,7 +95,9 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
             if (typeof fVal !== "number") {
                 throw new Error("Wrong type. Expected number");
             }
-            physics[fType] = FPS / fVal;
+            // Frames per unit of fuel -> units per second. Negative
+            // values are 'fuel sucking' mode and drain instead.
+            physics[fType] = fVal === 0 ? 0 : FPS / fVal;
         } else if (fType === "speed") {
             if (typeof fVal !== "number") {
                 throw new Error("Wrong type. Expected number");
@@ -115,6 +138,7 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
         ...base,
         weapons,
         physics,
+        ammoFor,
         pict,
         price: outf.cost,
         desc,

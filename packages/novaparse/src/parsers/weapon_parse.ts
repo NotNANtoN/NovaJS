@@ -2,7 +2,7 @@ import { Animation, getDefaultAnimation, getDefaultExitPoints } from "novadatain
 import { BaseData } from "novadatainterface/base_data";
 import { NovaDataType } from "novadatainterface/nova_data_interface";
 import { getDefaultShipData } from "novadatainterface/ship_data";
-import { BaseWeaponData, BayGuidanceSet, BayWeaponData, BeamGuidanceSet, BeamGuidanceType, BeamWeaponData, DamageType, NotBayWeaponData, ProjectileGuidanceSet, ProjectileGuidanceType, ProjectileWeaponData, SubmunitionType, WeaponDamage, WeaponData } from "novadatainterface/weapon_data";
+import { AmmoType, BaseWeaponData, BayGuidanceSet, BayWeaponData, BeamGuidanceSet, BeamGuidanceType, BeamWeaponData, DamageType, NotBayWeaponData, ProjectileGuidanceSet, ProjectileGuidanceType, ProjectileWeaponData, SubmunitionType, WeaponDamage, WeaponData } from "novadatainterface/weapon_data";
 import { BLEND_MODES } from "novadatainterface/blend_modes";
 import { WeapResource } from "../resource_parsers/weap_resource.js";
 import { BaseParse } from "./base_parse.js";
@@ -10,9 +10,34 @@ import { FPS, ShipTurnRateConversionFactor } from "./constants.js";
 
 export const WEAP_SPEED_FACTOR = 3 / 10;
 
-async function BaseWeaponParse(weap: WeapResource, notFoundFunction: (m: string) => void, base: BaseData): Promise<BaseWeaponData> {
-    // TODO: Implement ammo
+function AmmoTypeParse(weap: WeapResource, notFoundFunction: (m: string) => void, base: BaseData): AmmoType {
+    // For bay weapons, the AmmoType field is the carried ship's id
+    // (parsed in BayWeaponParse), not an ammo source.
+    if (BayGuidanceSet.has(weap.guidance)) {
+        return "unlimited";
+    }
+    if (weap.ammoType >= 0 && weap.ammoType <= 255) {
+        // Draws ammo from the supply of wëap id 128 + AmmoType (usually
+        // the weapon itself). Ammo outfits reference the same weapon
+        // via their `ammoFor` field.
+        const ammoWeapon = weap.idSpace.wëap[weap.ammoType + 128];
+        if (!ammoWeapon) {
+            notFoundFunction(`Missing wëap ${weap.ammoType + 128} for`
+                + ` the ammo supply of wëap ${base.id}`);
+            return "unlimited";
+        }
+        return ["weapon", ammoWeapon.globalID];
+    }
+    if (weap.ammoType <= -1000) {
+        // 10 raw units = 1 unit of fuel per shot, e.g. -1005 is 0.5
+        // units per shot.
+        return ["energy", Math.abs(weap.ammoType + 1000) / 10];
+    }
+    // -1 (unlimited) and -999 (destroys ship; see destroyShipWhenFiring).
+    return "unlimited";
+}
 
+async function BaseWeaponParse(weap: WeapResource, notFoundFunction: (m: string) => void, base: BaseData): Promise<BaseWeaponData> {
     // Parse the weapon's sound
     let sound: string | undefined;
     if (weap.sound !== null) {
@@ -25,7 +50,7 @@ async function BaseWeaponParse(weap: WeapResource, notFoundFunction: (m: string)
     return {
         ...base,
         accuracy: weap.accuracy,
-        ammoType: "unlimited",
+        ammoType: AmmoTypeParse(weap, notFoundFunction, base),
         burstCount: Math.max(weap.burstCount, 0),
         burstReload: weap.burstReload / FPS * 1000,
         destroyShipWhenFiring: weap.ammoType === -999,

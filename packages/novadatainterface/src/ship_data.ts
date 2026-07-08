@@ -4,13 +4,17 @@ import { getDefaultSpaceObjectData, getDefaultSpaceObjectPhysics, SpaceObjectDat
 export interface ShipPhysics extends SpaceObjectPhysics {
     freeMass: number;
     freeCargo: number;
+    // Fuel burned per second while the afterburner is engaged.
+    // 0 means the ship has no afterburner.
+    afterburner: number;
 }
 
 export function getDefaultShipPhysics(): ShipPhysics {
     return {
         ...getDefaultSpaceObjectPhysics(),
         freeMass: 0,
-        freeCargo: 0
+        freeCargo: 0,
+        afterburner: 0
     }
 }
 

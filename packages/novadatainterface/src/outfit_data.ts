@@ -9,6 +9,9 @@ export interface OutfitData extends BaseData {
 
     // how it changes the physics of the ship it's attached to. Idea: What if these were allowed to be functions?
     physics: OutfitPhysics,
+    // The weapon (globalID) this outfit is ammunition for, or null.
+    // Each item of the outfit is one round of that weapon's ammo.
+    ammoFor: string | null,
     pict: string, // id of picture
     price: number,
     desc: string,
@@ -23,6 +26,7 @@ export function getDefaultOutfitData(): OutfitData {
         physics: {
             freeMass: 0
         },
+        ammoFor: null,
         pict: "default",
         price: 0,
         desc: "default outfit",
