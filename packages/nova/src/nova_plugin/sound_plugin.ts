@@ -5,13 +5,21 @@ import { SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
 import { registerSimulationBridgeEvent } from '../communication/simulation_bridge_events.js';
 
 
-export const SoundEvent = new EcsEvent<{ id: string, loop?: boolean }>('SoundEvent');
+export interface SoundEventData {
+    id: string,
+    loop?: boolean,
+    /** Stop any current playback of this sound instead of playing it
+     * (e.g. clipping the warp-up at the hyperspace transition). */
+    stop?: boolean,
+}
+export const SoundEvent = new EcsEvent<SoundEventData>('SoundEvent');
 export const SoundEventType = t.intersection([
     t.type({
         id: t.string,
     }),
     t.partial({
         loop: t.boolean,
+        stop: t.boolean,
     }),
 ]);
 
@@ -23,8 +31,7 @@ export const SoundEventType = t.intersection([
  * ship. Untargeted SoundEvent remains the everyone-hears channel
  * (weapon fire, explosions).
  */
-export const PlayerSoundEvent =
-    new EcsEvent<{ id: string, loop?: boolean }>('PlayerSoundEvent');
+export const PlayerSoundEvent = new EcsEvent<SoundEventData>('PlayerSoundEvent');
 
 registerSimulationBridgeEvent({ event: SoundEvent });
 registerSimulationBridgeEvent({ event: PlayerSoundEvent });

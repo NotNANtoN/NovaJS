@@ -13,6 +13,7 @@ const OTHER_UUID = 'other ship';
 async function makeSoundWorld() {
     const world = new World('sound test');
     const played: string[] = [];
+    const stopped: string[] = [];
     const fakeAssets = {
         data: {
             Sound: {
@@ -20,6 +21,7 @@ async function makeSoundWorld() {
                     return {
                         volume: 0,
                         play() { played.push(id); },
+                        stop() { stopped.push(id); },
                     };
                 },
             },
@@ -32,7 +34,7 @@ async function makeSoundWorld() {
     player.components.set(PlayerShipSelector, undefined);
     world.entities.set(PLAYER_UUID, player);
     world.entities.set(OTHER_UUID, new Entity('other'));
-    return { world, played };
+    return { world, played, stopped };
 }
 
 describe('display sound plugin', () => {
@@ -57,5 +59,22 @@ describe('display sound plugin', () => {
         world.emit(PlayerSoundEvent, { id: 'nova:128' }, [OTHER_UUID]);
         world.step();
         expect(played).toEqual([]);
+    });
+
+    it('stops playback instead of playing when asked', async () => {
+        const { world, played, stopped } = await makeSoundWorld();
+        world.emit(PlayerSoundEvent,
+            { id: 'nova:128', stop: true }, [PLAYER_UUID]);
+        world.step();
+        expect(played).toEqual([]);
+        expect(stopped).toEqual(['nova:128']);
+    });
+
+    it("ignores stops targeted at other ships' sounds", async () => {
+        const { world, stopped } = await makeSoundWorld();
+        world.emit(PlayerSoundEvent,
+            { id: 'nova:128', stop: true }, [OTHER_UUID]);
+        world.step();
+        expect(stopped).toEqual([]);
     });
 });

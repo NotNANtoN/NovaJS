@@ -4,16 +4,23 @@ import { Resource } from 'nova_ecs/resource';
 import { System } from 'nova_ecs/system';
 import { SingletonComponent } from 'nova_ecs/world';
 import { DisplayAssetDataResource } from '../nova_plugin/game_data_resource.js';
-import { PlayerSoundEvent, SoundEvent } from '../nova_plugin/sound_plugin.js';
+import { PlayerSoundEvent, SoundEvent, SoundEventData } from '../nova_plugin/sound_plugin.js';
 import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin.js';
 import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data.js';
 
 const LoopingSounds = new Resource<Map<string, Sound>>('LoopingSounds');
 const VolumeResource = new Resource<{volume: number}>('VolumeResource');
 
-function playSound(id: string, loop: boolean | undefined,
+function playSound({ id, loop, stop }: SoundEventData,
     displayAssets: DisplayAssetDataInterface,
     loopingSounds: Map<string, Sound>, volume: number) {
+    if (stop) {
+        // Cut the sound off (e.g. the warp-up must not ring out over
+        // the system the ship just jumped into).
+        displayAssets.data.Sound.getCached(id)?.stop();
+        loopingSounds.delete(id);
+        return;
+    }
     if (loop && loopingSounds.has(id)) {
         return;
     }
@@ -37,8 +44,8 @@ const SoundSystem = new System({
     events: [SoundEvent],
     args: [SoundEvent, DisplayAssetDataResource, LoopingSounds, VolumeResource,
            SingletonComponent] as const,
-    step({ id, loop }, displayAssets, loopingSounds, {volume}) {
-        playSound(id, loop, displayAssets, loopingSounds, volume);
+    step(sound, displayAssets, loopingSounds, {volume}) {
+        playSound(sound, displayAssets, loopingSounds, volume);
     }
 });
 
@@ -55,8 +62,8 @@ export const PlayerSoundSystem = new System({
     events: [PlayerSoundEvent],
     args: [PlayerSoundEvent, DisplayAssetDataResource, LoopingSounds,
         VolumeResource, PlayerShipSelector] as const,
-    step({ id, loop }, displayAssets, loopingSounds, {volume}) {
-        playSound(id, loop, displayAssets, loopingSounds, volume);
+    step(sound, displayAssets, loopingSounds, {volume}) {
+        playSound(sound, displayAssets, loopingSounds, volume);
     }
 });
 

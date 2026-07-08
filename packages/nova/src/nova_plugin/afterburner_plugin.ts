@@ -5,7 +5,7 @@ import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { System } from 'nova_ecs/system';
 import { FuelComponent } from './health_plugin.js';
 import { ION_FACTOR, IsIonizedComponent } from './ionization_plugin.js';
-import { JumpComponent, JumpSequenceSystem, JUMP_ARRIVAL_DELAY_MS, JUMP_BASE_SPEED, JUMP_DEPART_DELAY_MS } from './jump_plugin.js';
+import { JumpComponent, JumpSequenceSystem, JUMP_BASE_SPEED, JUMP_DEPART_DELAY_MS } from './jump_plugin.js';
 import { ShipControlStateComponent } from './ship_control.js';
 import { ControlShipSystem } from './ship_controller_plugin.js';
 import { getShipMovementPhysics, ShipPhysicsComponent } from './ship_plugin.js';
@@ -34,9 +34,8 @@ export const AFTERBURNER_FACTOR = 2;
  *
  * During the jump's departure burn the speed cap and acceleration are
  * replaced outright (not multiplied) so the ship reaches its full jump
- * speed exactly at departure; on arrival the cap ramps back down to
- * normal over the arrival delay. Ionization still slows turning, but
- * the hyperdrive burn itself is not ion-slowed.
+ * speed exactly at departure. Ionization still slows turning, but the
+ * hyperdrive burn itself is not ion-slowed.
  */
 const EffectiveMovementPhysicsSystem = new System({
     name: 'EffectiveMovementPhysics',
@@ -67,20 +66,13 @@ const EffectiveMovementPhysicsSystem = new System({
 
         // Hyperspace physics. JumpSequenceSystem (which runs first this
         // tick) owns the stage machine; this system owns the physics it
-        // implies.
-        const jumpSpeed = JUMP_BASE_SPEED * shipPhysics.jumpSpeedMult;
+        // implies. Only the departure burn boosts physics: arriving
+        // ships jump in already at their regular top speed.
         if (jump?.stage === 'accelerating') {
+            const jumpSpeed = JUMP_BASE_SPEED * shipPhysics.jumpSpeedMult;
             movementPhysics.maxVelocity = jumpSpeed;
             movementPhysics.acceleration =
                 jumpSpeed / (JUMP_DEPART_DELAY_MS / 1000);
-        } else if (jump?.stage === 'arriving') {
-            // stageStart is unset on the departure tick (it is seeded
-            // by the destination world's first step): full jump speed.
-            const progress = jump.stageStart === undefined ? 0 : Math.min(1,
-                (time.time - jump.stageStart) / JUMP_ARRIVAL_DELAY_MS);
-            movementPhysics.maxVelocity = Math.max(
-                jumpSpeed + (base.maxVelocity - jumpSpeed) * progress,
-                movementPhysics.maxVelocity);
         }
     },
     // Overrides the acceleration ControlShipSystem chose (and the jump

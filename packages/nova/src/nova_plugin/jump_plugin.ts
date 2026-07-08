@@ -17,7 +17,7 @@ import { isLeft } from "fp-ts/lib/Either.js";
 import { registerSimulationBridgeEvent } from "../communication/simulation_bridge_events.js";
 import { deImmerify } from "../util/deimmerify.js";
 import { FuelComponent, FUEL_PER_JUMP } from "./health_plugin.js";
-import { ControlledByComponent, ShipControlEvent, ShipControlStateComponent } from "./ship_control.js";
+import { ControlledByComponent, ShipControlStateComponent } from "./ship_control.js";
 import { ControlShipSystem } from "./ship_controller_plugin.js";
 import { getShipMovementPhysics, ShipPhysicsComponent } from "./ship_plugin.js";
 import { PlayerShipSelector } from "./player_ship_plugin.js";
@@ -44,13 +44,15 @@ export const JUMP_SPINUP_DELAY_MS = 1000;
  * hyperspace. Acceleration is scaled so the ship reaches its full jump
  * speed exactly at departure. */
 export const JUMP_DEPART_DELAY_MS = 2000;
-/** How long an arriving ship takes to shed its hyperspace speed. The
- * player gets control back when it expires. */
-export const JUMP_ARRIVAL_DELAY_MS = 1000;
 /** The "normal" hyperspace jump speed, scaled per ship by the shïp
- * resource's jump speed flags (75% / 125% / 150%). An average ship's
- * top speed is 300. */
+ * resource's jump speed flags (75% / 125% / 150%). */
 export const JUMP_BASE_SPEED = 1500;
+/** Ships jump in this many seconds of flight (at their regular top
+ * speed) outside the no-jump radius. They arrive coasting inward at
+ * that speed, so the margin is the time a pilot has to start another
+ * jump before drifting inside the no-jump zone — a held jump key only
+ * needs one tick, and three seconds is comfortable for a human. */
+export const JUMP_ARRIVAL_MARGIN_S = 3;
 
 /** How closely (radians) an inertial ship must face retrograde before
  * it thrusts to kill its velocity. */
@@ -66,6 +68,11 @@ const ALIGNED_TOLERANCE = 1e-9;
 export const WARP_UP_SOUND = 'nova:128';
 export const WARP_UP_FAST_SOUND = 'nova:129';
 export const WARP_OUT_SOUND = 'nova:130';
+
+function warpUpSound(shipPhysics: { jumpSpeedMult: number }) {
+    return shipPhysics.jumpSpeedMult > 1
+        ? WARP_UP_FAST_SOUND : WARP_UP_SOUND;
+}
 
 export interface InitiateJump {
     to: string /* system uuid */,
@@ -109,8 +116,8 @@ export const JumpStateType = t.intersection([t.type({
     direction: t.number,
 }), t.partial({
     /** Logical time (TimeResource ms) when the current timed stage
-     * began. Unset for 'arriving' until the destination world's first
-     * step, since logical time differs between systems. */
+     * (spinup, accelerating) began. Cleared at departure: logical time
+     * differs between systems. */
     stageStart: t.number,
 })]);
 export type JumpState = t.TypeOf<typeof JumpStateType>;
@@ -180,20 +187,26 @@ const JumpFromSystem = new System({
 });
 
 /**
- * Starts the jump sequence when a peer presses hyperjump: checks the
+ * Starts the jump sequence while a peer holds hyperjump: checks the
  * no-jump zone, resolves the travel heading from the systems' map
  * positions (staged at world genesis in makeSystem, so the cache read
  * is deterministic), and attaches the JumpComponent state machine.
+ *
+ * Polled every tick rather than edge-triggered so that *holding* the
+ * jump key departs at the first instant a jump becomes possible —
+ * flying out of the no-jump zone with the key held, or chain-jumping:
+ * ships arrive outside the no-jump radius, so a held key starts the
+ * route's next jump immediately.
  */
 const PlayerJumpControl = new System({
     name: 'PlayerJumpControl',
-    events: [ShipControlEvent],
     args: [ShipControlStateComponent, GetEntity, SystemIdResource,
         JumpRouteComponent, MovementStateComponent, ShipPhysicsComponent,
         FuelComponent, SimulationGameDataResource] as const,
     step(controlState, entity, systemId, jumpRoute, movement, shipPhysics,
         fuel, gameData) {
-        if (controlState.get('hyperjump') !== 'start') {
+        // Truthy while held ('start'/'repeat'/true); false on release.
+        if (!controlState.get('hyperjump')) {
             return;
         }
         if (entity.components.has(JumpComponent)) {
@@ -264,7 +277,6 @@ export const JumpSequenceSystem = new System({
         Emit] as const,
     step(jump, movement, shipPhysics, fuel, time, entity, uuid, emit) {
         overrideControls(movement);
-        const jumpSpeed = JUMP_BASE_SPEED * shipPhysics.jumpSpeedMult;
         const target = new Angle(jump.direction);
 
         switch (jump.stage) {
@@ -304,6 +316,17 @@ export const JumpSequenceSystem = new System({
                     movement.rotation = target;
                     jump.stage = 'spinup';
                     jump.stageStart = time.time;
+                    // The warp-up sound starts the moment the ship is
+                    // ready to jump: stopped (for ships that must
+                    // stop) and pointing at the destination. Sounds
+                    // are display-side; emitting the event does not
+                    // touch simulation state. Warp sounds are only
+                    // heard by the jumping ship's own pilot: targeted
+                    // at the ship, and the display plays them only for
+                    // the local player's ship.
+                    emit(PlayerSoundEvent, {
+                        id: warpUpSound(shipPhysics),
+                    }, [uuid]);
                 }
                 break;
             }
@@ -314,15 +337,6 @@ export const JumpSequenceSystem = new System({
                     >= JUMP_SPINUP_DELAY_MS) {
                     jump.stage = 'accelerating';
                     jump.stageStart = time.time;
-                    // Sounds are display-side; emitting the event does
-                    // not touch simulation state. Warp sounds are only
-                    // heard by the jumping ship's own pilot: targeted
-                    // at the ship, and the display plays them only for
-                    // the local player's ship.
-                    emit(PlayerSoundEvent, {
-                        id: shipPhysics.jumpSpeedMult > 1
-                            ? WARP_UP_FAST_SOUND : WARP_UP_SOUND,
-                    }, [uuid]);
                 }
                 break;
             }
@@ -337,15 +351,22 @@ export const JumpSequenceSystem = new System({
                     >= JUMP_DEPART_DELAY_MS) {
                     // Depart. Set the arrival kinematics the destination
                     // system will see: the ship jumps in on the side of
-                    // the system facing where it came from, at the edge
-                    // of the no-jump zone, inbound at full jump speed.
+                    // the system facing where it came from, coasting
+                    // inward at its regular top speed, far enough
+                    // outside the no-jump zone (JUMP_ARRIVAL_MARGIN_S)
+                    // that another jump can start before it drifts in.
+                    const basePhysics = getShipMovementPhysics(shipPhysics);
+                    const jumpRadius = Math.max(0,
+                        JUMP_DISTANCE + shipPhysics.jumpDistanceMod);
+                    const arrivalDistance = jumpRadius
+                        + basePhysics.maxVelocity * JUMP_ARRIVAL_MARGIN_S;
                     const unit = target.getUnitVector();
                     teleport(movement,
-                        new Position(-unit.x * JUMP_DISTANCE,
-                            -unit.y * JUMP_DISTANCE),
-                        unit.scale(jumpSpeed));
+                        new Position(-unit.x * arrivalDistance,
+                            -unit.y * arrivalDistance),
+                        unit.scale(basePhysics.maxVelocity));
                     movement.rotation = target;
-                    movement.targetSpeed = jumpSpeed;
+                    movement.targetSpeed = basePhysics.maxVelocity;
                     jump.stage = 'arriving';
                     jump.stageStart = undefined;
                     // A jump costs FUEL_PER_JUMP (EVN Bible: fuel
@@ -362,23 +383,17 @@ export const JumpSequenceSystem = new System({
                 break;
             }
             case 'arriving': {
-                // Runs in the destination system: bleed off hyperspace
-                // speed (EffectiveMovementPhysicsSystem ramps the speed
-                // cap down from the jump stage), then hand control back.
-                if (jump.stageStart === undefined) {
-                    jump.stageStart = time.time;
-                    emit(PlayerSoundEvent, { id: WARP_OUT_SOUND }, [uuid]);
-                }
-                const basePhysics = getShipMovementPhysics(shipPhysics);
-                const progress =
-                    (time.time - jump.stageStart) / JUMP_ARRIVAL_DELAY_MS;
-                if (progress >= 1) {
-                    if (movement.targetSpeed !== undefined) {
-                        movement.targetSpeed = Math.min(
-                            movement.targetSpeed, basePhysics.maxVelocity);
-                    }
-                    entity.components.delete(JumpComponent);
-                }
+                // The first tick in the destination system. The ship
+                // arrives already at its regular top speed, so there is
+                // no hyperspace speed to bleed off: clip the warp-up
+                // (it must not ring out over the new system), play the
+                // warp-out, and hand control straight back — a held
+                // jump key can start the route's next jump on the very
+                // next tick.
+                emit(PlayerSoundEvent,
+                    { id: warpUpSound(shipPhysics), stop: true }, [uuid]);
+                emit(PlayerSoundEvent, { id: WARP_OUT_SOUND }, [uuid]);
+                entity.components.delete(JumpComponent);
                 break;
             }
         }

@@ -5,13 +5,14 @@ import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
 import { World } from "nova_ecs/world";
 import { getIntegrationGameData } from "../communication/simulation_test_fixture.js";
 import { completeEntity } from "./entity_data_loader.js";
-import { FinishJump, FinishJumpEvent, JumpComponent, JumpRouteComponent, JUMP_ARRIVAL_DELAY_MS, JUMP_BASE_SPEED, JUMP_DEPART_DELAY_MS, JUMP_DISTANCE, JUMP_SPINUP_DELAY_MS, WARP_OUT_SOUND, WARP_UP_FAST_SOUND, WARP_UP_SOUND } from "./jump_plugin.js";
+import { FinishJump, FinishJumpEvent, JumpComponent, JumpRouteComponent, JUMP_ARRIVAL_MARGIN_S, JUMP_DEPART_DELAY_MS, JUMP_DISTANCE, JUMP_SPINUP_DELAY_MS, WARP_OUT_SOUND, WARP_UP_FAST_SOUND, WARP_UP_SOUND } from "./jump_plugin.js";
 import { makeShip } from "./make_ship.js";
 import { makeSystem, SIMULATION_STEP_MS } from "./make_system.js";
 import { applyControlEvents } from "./ship_control.js";
 import { PlayerShipSelector } from "./player_ship_plugin.js";
 import { ShipPhysicsComponent } from "./ship_plugin.js";
 import { FuelComponent, FUEL_PER_JUMP } from "./health_plugin.js";
+import { LandEvent } from "./planet_plugin.js";
 import { PlayerSoundEvent } from "./sound_plugin.js";
 
 const SHIP_UUID = 'jump test ship';
@@ -111,7 +112,6 @@ describe('jump sequence', () => {
         world.step();
 
         const physics = ship.components.get(ShipPhysicsComponent)!;
-        const jumpSpeed = JUMP_BASE_SPEED * physics.jumpSpeedMult;
 
         let finishJump: FinishJump | undefined;
         world.events.get(FinishJumpEvent).subscribe(({ data }) => {
@@ -161,24 +161,25 @@ describe('jump sequence', () => {
         expect(finishJump!.to).toEqual(destinationId);
         expect(finishJump!.uuid).toEqual(SHIP_UUID);
 
-        // The departing entity carries its arrival state: at the edge
-        // of the no-jump zone on the inbound side, at full jump speed,
-        // heading along the travel direction.
+        // The departing entity carries its arrival state: outside the
+        // no-jump zone (with the reaction margin) on the inbound side,
+        // coasting at its regular top speed along the travel direction.
         const jumpedShip = finishJump!.entity;
         const arrivalJump = jumpedShip.components.get(JumpComponent)!;
         expect(arrivalJump.stage).toEqual('arriving');
-        expect(arrivalJump.stageStart).toBeUndefined();
         const arrivalMovement =
             jumpedShip.components.get(MovementStateComponent)!;
-        // The jump-in point is the edge of the no-jump zone; the ship
-        // may have coasted inward for a tick or two before the event
-        // was published.
+        const arrivalDistance = JUMP_DISTANCE
+            + physics.speed * JUMP_ARRIVAL_MARGIN_S;
+        // The ship may have coasted inward for a tick or two before
+        // the event was published.
         expect(arrivalMovement.position.length)
-            .toBeLessThanOrEqual(JUMP_DISTANCE);
+            .toBeLessThanOrEqual(arrivalDistance);
         expect(arrivalMovement.position.length)
-            .toBeGreaterThan(JUMP_DISTANCE
-                - 2 * jumpSpeed * SIMULATION_STEP_MS / 1000);
-        expect(arrivalMovement.velocity.length).toBeCloseTo(jumpSpeed, 3);
+            .toBeGreaterThan(arrivalDistance
+                - 2 * physics.speed * SIMULATION_STEP_MS / 1000);
+        expect(arrivalMovement.velocity.length)
+            .toBeCloseTo(physics.speed, 3);
         expect(arrivalMovement.velocity.angle.angle)
             .toBeCloseTo(expectedDirection, 6);
         expect(arrivalMovement.rotation.angle)
@@ -266,7 +267,7 @@ describe('jump sequence', () => {
             .toEqual(initialFuel - FUEL_PER_JUMP);
     }, 30_000);
 
-    it('plays the warp-up sound when the departure burn begins', async () => {
+    it('plays the warp-up sound when the ship is ready to jump', async () => {
         const { world, ship } = await makeJumpHarness();
         const movement = ship.components.get(MovementStateComponent)!;
         movement.position = new Position(0, -(JUMP_DISTANCE * 2));
@@ -282,10 +283,12 @@ describe('jump sequence', () => {
 
         pressHyperjump(world);
         const jump = ship.components.get(JumpComponent)!;
+        // Silent while stopping and turning...
+        stepUntil(world, () => jump.stage !== 'stopping');
+        expect(sounds).toEqual([]);
+        // ...and starts the moment the ship is stopped and aligned
+        // (entering spinup), not when the burn begins.
         stepUntil(world, () => jump.stage === 'spinup');
-        expect(sounds).not.toContain(WARP_UP_SOUND);
-        stepUntil(world, () => jump.stage === 'accelerating');
-        world.step();
         expect(sounds).toContain(WARP_UP_SOUND);
         expect(sounds).not.toContain(WARP_UP_FAST_SOUND);
         // Warp sounds are player-only: emitted targeted at the jumping
@@ -310,8 +313,7 @@ describe('jump sequence', () => {
 
         pressHyperjump(world);
         const jump = ship.components.get(JumpComponent)!;
-        stepUntil(world, () => jump.stage === 'accelerating');
-        world.step();
+        stepUntil(world, () => jump.stage === 'spinup');
         expect(sounds).toContain(WARP_UP_FAST_SOUND);
         expect(sounds).not.toContain(WARP_UP_SOUND);
     }, 30_000);
@@ -330,7 +332,8 @@ describe('jump sequence', () => {
         expect(ship.components.get(JumpComponent)).toBeDefined();
     }, 30_000);
 
-    it('arrives with inbound velocity and returns control', async () => {
+    it('arrives at regular speed, clips the warp-up, and returns control',
+        async () => {
         const { gameData, world, ship, destinationId } =
             await makeJumpHarness();
         const movement = ship.components.get(MovementStateComponent)!;
@@ -354,35 +357,113 @@ describe('jump sequence', () => {
         const arrivalMovement =
             jumpedShip.components.get(MovementStateComponent)!;
         const physics = jumpedShip.components.get(ShipPhysicsComponent)!;
-        const jumpSpeed = JUMP_BASE_SPEED * physics.jumpSpeedMult;
-        expect(arrivalMovement.velocity.length).toBeCloseTo(jumpSpeed, 3);
+        // Arrives at its regular top speed, not hyperspace speed.
+        expect(arrivalMovement.velocity.length)
+            .toBeCloseTo(physics.speed, 3);
 
-        const sounds: string[] = [];
+        const sounds: { id: string, stop?: boolean }[] = [];
         destWorld.events.get(PlayerSoundEvent).subscribe(({ data }) => {
-            sounds.push(data.id);
+            sounds.push({ id: data.id, stop: data.stop });
         });
 
-        // The ship coasts in above its normal max speed with control
-        // locked, decelerating as it goes.
         applyControlEvents(destWorld, undefined,
             [{ action: 'turnLeft', state: 'start' }]);
+        // The first destination tick finishes the jump outright:
         destWorld.step();
-        destWorld.step();
-        // The warp-out sound plays on the destination's first tick.
-        expect(sounds).toContain(WARP_OUT_SOUND);
-        expect(arrivalMovement.velocity.length).toBeGreaterThan(physics.speed);
-        expect(arrivalMovement.velocity.length).toBeLessThan(jumpSpeed);
-        expect(arrivalMovement.turning).toEqual(0);
-
-        const arrivalTicks = stepUntil(destWorld,
-            () => !jumpedShip.components.has(JumpComponent));
-        expect(arrivalTicks).toBeLessThanOrEqual(
-            ticksFor(JUMP_ARRIVAL_DELAY_MS) + 2);
-        // Hyperspace speed has been shed and control is back.
-        destWorld.step();
-        expect(arrivalMovement.velocity.length)
-            .toBeLessThanOrEqual(physics.speed + 1e-6);
+        // ...the warp-up is clipped so it doesn't ring out over the
+        // new system, and the warp-out plays...
+        expect(sounds).toContain(
+            jasmine.objectContaining({ id: WARP_UP_SOUND, stop: true }));
+        expect(sounds).toContain(
+            jasmine.objectContaining({ id: WARP_OUT_SOUND }));
+        // ...the sequence is over...
+        expect(jumpedShip.components.has(JumpComponent)).toBeFalse();
+        // ...and the ship is far enough outside the no-jump zone to
+        // jump again immediately, despite coasting inward.
+        expect(arrivalMovement.position.length)
+            .toBeGreaterThan(JUMP_DISTANCE);
+        // Control is back on the very next tick.
         destWorld.step();
         expect(arrivalMovement.turning).not.toEqual(0);
+        expect(arrivalMovement.velocity.length)
+            .toBeLessThanOrEqual(physics.speed + 1e-6);
+    }, 30_000);
+
+    it('starts a held jump the moment it becomes possible', async () => {
+        const { world, ship } = await makeJumpHarness();
+        const movement = ship.components.get(MovementStateComponent)!;
+        movement.position = new Position(0, -(JUMP_DISTANCE / 2));
+        world.step();
+
+        // Hold the jump key inside the no-jump zone: nothing happens.
+        pressHyperjump(world);
+        world.step();
+        world.step();
+        expect(ship.components.get(JumpComponent)).toBeUndefined();
+
+        // The moment the ship is outside the zone (key still held),
+        // the jump starts without another press.
+        movement.position = new Position(0, -(JUMP_DISTANCE + 10));
+        world.step();
+        expect(ship.components.get(JumpComponent)).toBeDefined();
+    }, 30_000);
+
+    it('chain-jumps across systems while the jump key is held', async () => {
+        const { gameData, world, ship, destinationId } =
+            await makeJumpHarness();
+        // Plan a two-hop route.
+        const destination = await gameData.data.System.get(destinationId);
+        const nextId = [...destination.links].sort()[0];
+        if (!nextId) {
+            throw new Error('Expected the destination to have links');
+        }
+        await gameData.data.System.get(nextId);
+        ship.components.set(JumpRouteComponent,
+            { route: [destinationId, nextId] });
+        const movement = ship.components.get(MovementStateComponent)!;
+        movement.position = new Position(0, -(JUMP_DISTANCE * 2));
+        world.step();
+
+        let finishJump: FinishJump | undefined;
+        world.events.get(FinishJumpEvent).subscribe(({ data }) => {
+            finishJump = data;
+        });
+        pressHyperjump(world);
+        stepUntil(world, () => finishJump !== undefined);
+
+        const destWorld = await makeSystem(destinationId, gameData);
+        const jumpedShip = finishJump!.entity;
+        await completeEntity(destWorld, jumpedShip);
+        destWorld.entities.set(SHIP_UUID, jumpedShip);
+        // The held key keeps producing control records (browser key
+        // repeat), rebuilding the per-ship control state on arrival.
+        applyControlEvents(destWorld, undefined,
+            [{ action: 'hyperjump', state: 'repeat' }]);
+        // First tick finishes the arrival; the held key starts the
+        // route's next jump right away — the arrival margin guarantees
+        // the ship is still outside the no-jump zone.
+        destWorld.step();
+        destWorld.step();
+        const nextJump = jumpedShip.components.get(JumpComponent);
+        expect(nextJump).toBeDefined();
+        expect(nextJump!.to).toEqual(nextId);
+        expect(jumpedShip.components.get(JumpRouteComponent)!.route)
+            .toEqual([]);
+    }, 30_000);
+
+    it('refuels, free, on landing', async () => {
+        const { world, ship } = await makeJumpHarness();
+        world.step();
+
+        const fuel = ship.components.get(FuelComponent)!;
+        fuel.recharge = 0;
+        fuel.current = 10;
+
+        // Landing refuels the ship (free until credits exist).
+        world.emit(LandEvent,
+            { id: 'nova:128', uuid: 'planet nova:128' }, [SHIP_UUID]);
+        world.step();
+        expect(ship.components.get(FuelComponent)!.current)
+            .toEqual(fuel.max);
     }, 30_000);
 });

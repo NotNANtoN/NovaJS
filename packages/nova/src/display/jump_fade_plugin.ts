@@ -8,7 +8,7 @@ import { System } from 'nova_ecs/system';
 import * as PIXI from 'pixi.js';
 import { Subscription } from 'rxjs';
 import { DisplayAssetDataResource, SimulationGameDataResource } from '../nova_plugin/game_data_resource.js';
-import { FinishJumpEvent, JumpComponent, JUMP_ARRIVAL_DELAY_MS, JUMP_DEPART_DELAY_MS, WARP_OUT_SOUND, WARP_UP_FAST_SOUND, WARP_UP_SOUND } from '../nova_plugin/jump_plugin.js';
+import { FinishJumpEvent, JumpComponent, JUMP_DEPART_DELAY_MS, WARP_OUT_SOUND, WARP_UP_FAST_SOUND, WARP_UP_SOUND } from '../nova_plugin/jump_plugin.js';
 import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin.js';
 import { PixiAppResource } from './pixi_app_resource.js';
 
@@ -100,9 +100,10 @@ const JumpFadeSystem = new System({
         if (jumpVisualSetting.mode === 'fade') {
             if (jump?.stage === 'accelerating') {
                 rate = 1000 / JUMP_DEPART_DELAY_MS;
-            } else if (jump?.stage === 'arriving') {
-                rate = -1000 / JUMP_ARRIVAL_DELAY_MS;
             } else {
+                // Ships arrive at regular speed with control returned
+                // immediately, so there is no arrival stage to track:
+                // fade back in at the fallback rate.
                 rate = -FALLBACK_FADE_RATE;
             }
         } else {
