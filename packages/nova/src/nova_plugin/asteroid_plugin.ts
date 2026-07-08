@@ -13,7 +13,7 @@ import { Plugin } from 'nova_ecs/plugin';
 import { MovementState, MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import { Random, RandomResource } from 'nova_ecs/plugins/random_plugin';
 import { SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
-import { TimeResource } from 'nova_ecs/plugins/time_plugin';
+import { TimeResource, TimeSystem } from 'nova_ecs/plugins/time_plugin';
 import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
 import { World } from 'nova_ecs/world';
@@ -186,6 +186,12 @@ const AsteroidMotionSystem = new System({
         drift(movement, asteroid.spin, time.delta_s,
             ASTEROID_FIELD_HALF_SIZE);
     },
+    // after TimeSystem matters for determinism, not just freshness: a
+    // system that reads TimeResource before TimeSystem updates it sees
+    // delta_s = 0 on a world's very first step but the previous delta
+    // on the first step after a wire-baseline restore, so a late
+    // joiner's asteroids would drift one extra step out of lockstep.
+    after: [TimeSystem],
     before: [UpdateHitboxHullSystem, UpdateHurtboxHullSystem],
 });
 
@@ -202,6 +208,9 @@ const DebrisMotionSystem = new System({
         // world wrap boundary, so wrap at the world's edge.
         drift(movement, debris.spin, time.delta_s, 10000);
     },
+    // See AsteroidMotionSystem: after TimeSystem is load-bearing for
+    // late-join determinism.
+    after: [TimeSystem],
     before: [UpdateHitboxHullSystem, UpdateHurtboxHullSystem],
 });
 
@@ -234,9 +243,26 @@ function asteroidRadius(gameData: SimulationGameDataInterface,
     return Math.sqrt(radiusSquared) || DEFAULT_ASTEROID_RADIUS;
 }
 
+/**
+ * A uniform random unit vector, built from IEEE-exact operations only.
+ * Math.cos/Math.sin are NOT bit-identical across JS engines (node's V8
+ * and Chrome's differ in the last ulp for some inputs), and asteroid
+ * spawn state is genesis state — it is never corrected by input
+ * records, so any engine-dependent bit puts a browser client
+ * permanently out of lockstep with the server's archive. Rejection
+ * sampling + sqrt/divide are correctly rounded per IEEE 754 and thus
+ * identical everywhere.
+ */
 function randomDirection(random: Random): Vector {
-    const angle = random.next() * 2 * Math.PI;
-    return new Vector(Math.cos(angle), Math.sin(angle));
+    while (true) {
+        const x = random.next() * 2 - 1;
+        const y = random.next() * 2 - 1;
+        const lengthSquared = x * x + y * y;
+        if (lengthSquared > 1e-6 && lengthSquared <= 1) {
+            const length = Math.sqrt(lengthSquared);
+            return new Vector(x / length, y / length);
+        }
+    }
 }
 
 function randomBetween(random: Random, min: number, max: number): number {
