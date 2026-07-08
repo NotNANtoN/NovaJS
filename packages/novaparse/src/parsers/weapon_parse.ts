@@ -180,6 +180,16 @@ async function ProjectileWeaponParse(weap: WeapResource, notFoundFunction: (m: s
         vulnerableTo = [];
     }
 
+    // Clamp jamming vulnerabilities to [0, 100]; the resource stores raw
+    // percentages and stock data occasionally carries out-of-range values.
+    const clampPct = (n: number) => Math.max(0, Math.min(100, n));
+    const jamVulnerabilities: [number, number, number, number] = [
+        clampPct(weap.jamVuln[0] ?? 0),
+        clampPct(weap.jamVuln[1] ?? 0),
+        clampPct(weap.jamVuln[2] ?? 0),
+        clampPct(weap.jamVuln[3] ?? 0),
+    ];
+
     return {
         ...notBayBase,
         type: "ProjectileWeaponData",
@@ -190,6 +200,14 @@ async function ProjectileWeaponParse(weap: WeapResource, notFoundFunction: (m: s
         hitParticles: weap.hitParticles,
         animation,
         vulnerableTo,
+        jamVulnerabilities,
+        seeker: {
+            passOverAsteroids: weap.passOverAsteroids,
+            decoyedByAsteroids: weap.decoyedByAsteroids,
+            confusedByInterference: weap.confusedByInterference,
+            turnsAwayIfJammed: weap.turnsAwayIfJammed,
+            attackParentIfJammed: weap.attackParentIfJammed,
+        },
         physics: {
             acceleration: 0,
             armorRecharge: 0,

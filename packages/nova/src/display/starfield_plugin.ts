@@ -166,7 +166,7 @@ class Starfield {
     }
 }
 
-const StarfieldResource = new Resource<Starfield>('Starfield');
+export const StarfieldResource = new Resource<Starfield>('Starfield');
 
 export function starfield({ density = 0.00002,
     positionFactorRange = [0, 0.5] as [number, number] } = {}): Plugin {
