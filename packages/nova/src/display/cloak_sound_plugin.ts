@@ -5,6 +5,7 @@ import { Plugin } from "nova_ecs/plugin";
 import { System } from "nova_ecs/system";
 import { CloakActiveComponent } from "../nova_plugin/cloak_plugin.js";
 import { DisplayAssetDataResource } from "../nova_plugin/game_data_resource.js";
+import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 import { SoundEvent } from "../nova_plugin/sound_plugin.js";
 
 // The stock Nova cloak sounds (snd resources in the Nova Files id space).
@@ -37,14 +38,16 @@ export function cloakTransitionSound(
  * snd 381 "Cloak On" once when a cloak activates and snd 380 "Cloak Off"
  * once when it deactivates — regardless of the decloak path (manual
  * toggle, decloak-on-hit, shield/fuel exhaustion), since all paths flow
- * through the same synced component. Presentation only: it reacts to
- * synced state and emits a display-world SoundEvent, so determinism is
- * untouched.
+ * through the same synced component. LOCAL PLAYER ONLY (same rule as the
+ * warp sounds): gated on PlayerShipSelector, so you hear your own cloak
+ * engage/disengage while NPCs and other players cloaking nearby stay
+ * silent. Presentation only: it reacts to synced state and emits a
+ * display-world SoundEvent, so determinism is untouched.
  */
 export const CloakSoundSystem = new System({
     name: 'CloakSoundSystem',
     args: [CloakActiveComponent, Optional(CloakSoundState),
-        GetEntity, Emit] as const,
+        GetEntity, Emit, PlayerShipSelector] as const,
     step(cloakActive, state, entity, emit) {
         if (!state) {
             // The sim creates CloakActiveComponent on the first toggle,
