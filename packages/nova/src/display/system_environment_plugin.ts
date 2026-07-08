@@ -1,12 +1,13 @@
 import { Plugin } from "nova_ecs/plugin";
+import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
+import { Query } from "nova_ecs/query";
 import { Resource } from "nova_ecs/resource";
 import { System } from "nova_ecs/system";
-import * as PIXI from "pixi.js";
 import { SimulationGameDataResource } from "../nova_plugin/game_data_resource.js";
+import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 import { SystemIdResource } from "../nova_plugin/system_id_resource.js";
+import { AnimationGraphicComponent, ObjectDrawSystem } from "./animation_graphic_plugin.js";
 import { PixiAppResource } from "./pixi_app_resource.js";
-import { ResizeEvent } from "./screen_size_plugin.js";
-import { Stage } from "./stage_resource.js";
 import { StarfieldResource } from "./starfield_plugin.js";
 
 /**
@@ -16,9 +17,10 @@ import { StarfieldResource } from "./starfield_plugin.js";
  * display-side so they never touch the deterministic simulation. See the
  * EVN Bible's sÿst docs for the semantics:
  *  - Background colour renders behind the starfield (black if zero).
- *  - Murk (0-100) fogs the whole view toward the background colour. A
- *    negative murk value is treated as zero murk but also hides the
- *    starfield.
+ *  - Murk (0-100) fogs space objects: the farther an object is from the
+ *    player's ship, the more it fades into the background colour, and murk
+ *    controls how aggressive that falloff is. A negative murk value is
+ *    treated as zero murk but also hides the starfield.
  */
 
 /** How murk is currently being applied, and the hook outfits use to modify it. */
@@ -29,8 +31,9 @@ export interface MurkState {
      * Amount of murk removed by outfits (the "murk modifier" outfit
      * modifier, EVN Bible / ResForge outf case 28: "the amount by which to
      * increase or decrease the current system's murkiness level"). Positive
-     * clears murk; negative deepens it. The effective murk is clamped to
-     * 0-100. Defaults to 0; an outfit hook can change it.
+     * clears murk (extending how far the player can see); negative deepens
+     * it. The effective murk is clamped to 0-100. Defaults to 0; an outfit
+     * hook can change it.
      */
     murkReduction: number;
 }
@@ -43,63 +46,71 @@ export function effectiveMurk(murk: MurkState): number {
 }
 
 /**
- * The strongest haze murk applies, as an alpha over the whole view. Murk 100
- * does not fully hide the scene (the player can still fly), matching Nova's
- * "question their glasses prescription" rather than a total whiteout.
+ * The distance (in Nova pixels) beyond which objects vanish entirely under
+ * full (100) murk. Lower murk scales this range up proportionally.
  */
-const MAX_MURK_ALPHA = 0.85;
+export const FULL_MURK_VANISH_DISTANCE = 300;
 
-class MurkVeil {
-    /** A full-screen rectangle tinted to the background colour. */
-    readonly graphics = new PIXI.Graphics();
-    private width = window.innerWidth;
-    private height = window.innerHeight;
-
-    constructor(private color: number, private murk: MurkState) {
-        this.graphics.name = 'MurkVeil';
-        this.redraw();
+/**
+ * How much of an object murk leaves visible at a given distance from the
+ * player's ship, as an alpha in [0, 1].
+ *
+ * Objects vanish completely at
+ *     vanish = FULL_MURK_VANISH_DISTANCE * (100 / murk)
+ * so the vanishing range is inversely proportional to the effective murk
+ * (murk 100 -> 300px, murk 50 -> 600px, murk -> 0 -> unbounded). The nearer
+ * half of that range renders fully; alpha then falls linearly to zero across
+ * the outer half:
+ *     alpha = 1                             for d <= vanish / 2
+ *     alpha = (vanish - d) / (vanish / 2)   for vanish / 2 < d < vanish
+ *     alpha = 0                             for d >= vanish
+ *
+ * Because the renderer background is already the system's background colour,
+ * fading alpha toward zero blends the object into that colour with no
+ * per-pixel tint math. Murk-clearing outfits (murkReduction) lower the
+ * effective murk, which extends the vanishing range and softens the falloff.
+ */
+export function murkAlpha(distance: number, murk: MurkState): number {
+    const m = effectiveMurk(murk);
+    if (m <= 0) {
+        return 1;
     }
-
-    resize(width: number, height: number) {
-        this.width = width;
-        this.height = height;
-        this.redraw();
+    const vanish = FULL_MURK_VANISH_DISTANCE * (100 / m);
+    const clear = vanish / 2;
+    if (distance <= clear) {
+        return 1;
     }
-
-    /** Recompute the veil after murk, size, or reductions change. */
-    redraw() {
-        const alpha = (effectiveMurk(this.murk) / 100) * MAX_MURK_ALPHA;
-        this.graphics.clear();
-        this.graphics.visible = alpha > 0;
-        if (alpha <= 0) {
-            return;
-        }
-        this.graphics.beginFill(this.color, alpha);
-        this.graphics.drawRect(0, 0, this.width, this.height);
-        this.graphics.endFill();
+    if (distance >= vanish) {
+        return 0;
     }
+    return (vanish - distance) / (vanish - clear);
 }
 
-const MurkVeilResource = new Resource<MurkVeil>('MurkVeil');
+const PlayerPositionQuery =
+    new Query([MovementStateComponent, PlayerShipSelector] as const);
 
-const MurkResize = new System({
-    name: 'MurkResize',
-    events: [ResizeEvent],
-    args: [MurkVeilResource, ResizeEvent] as const,
-    step(veil, { x, y }) {
-        veil.resize(x, y);
-    }
-});
-
-const UpdateMurk = new System({
-    name: 'UpdateMurk',
-    args: [MurkVeilResource] as const,
-    step(veil) {
-        // Cheap: redraw only clears and refills a single rectangle, and
-        // outfit hooks change murkReduction rarely. Keeping it per-frame
-        // means murk-modifier outfits take effect immediately.
-        veil.redraw();
-    }
+/**
+ * Fades each space object into the background colour based on its distance
+ * from the player's ship. The player's own ship is at distance zero, so it
+ * always renders fully. Runs every frame after ObjectDrawSystem so pooled
+ * graphics reacquired by new entities pick up the right alpha immediately.
+ */
+const MurkFadeSystem = new System({
+    name: 'MurkFadeSystem',
+    args: [MurkResource, AnimationGraphicComponent, MovementStateComponent,
+        PlayerPositionQuery] as const,
+    step(murk, graphic, movementState, players) {
+        const player = players[0];
+        if (!player) {
+            graphic.container.alpha = 1;
+            return;
+        }
+        const [{ position: playerPosition }] = player;
+        const distance = movementState.position
+            .subtract(playerPosition).length;
+        graphic.container.alpha = murkAlpha(distance, murk);
+    },
+    after: [ObjectDrawSystem],
 });
 
 export const SystemEnvironmentPlugin: Plugin = {
@@ -113,10 +124,6 @@ export const SystemEnvironmentPlugin: Plugin = {
         if (!systemId) {
             throw new Error('Expected SystemId resource to exist');
         }
-        const stage = world.resources.get(Stage);
-        if (!stage) {
-            throw new Error('Expected Stage resource to exist');
-        }
         const app = world.resources.get(PixiAppResource);
         if (!app) {
             throw new Error('Expected PIXI App resource to exist');
@@ -124,8 +131,9 @@ export const SystemEnvironmentPlugin: Plugin = {
 
         const systemData = await gameData.data.System.get(systemId);
 
-        // Background colour: renders behind everything. Zero is pure black,
-        // which is also PIXI's default, so a normal system looks unchanged.
+        // Background colour: renders behind everything, and is what murk
+        // fades objects into. Zero is pure black, which is also PIXI's
+        // default, so a normal system looks unchanged.
         app.renderer.background.color = systemData.backgroundColor;
 
         // A negative murk value hides the starfield (Bible: "less than zero
@@ -137,36 +145,20 @@ export const SystemEnvironmentPlugin: Plugin = {
             }
         }
 
-        const murkState: MurkState = {
+        world.resources.set(MurkResource, {
             systemMurk: Math.max(0, systemData.murk),
             murkReduction: 0,
-        };
-        world.resources.set(MurkResource, murkState);
-
-        // The veil hazes the view toward the background colour. It sits above
-        // the space/starfield but below the status bar, which is added to the
-        // stage after this plugin.
-        const veil = new MurkVeil(systemData.backgroundColor, murkState);
-        stage.addChild(veil.graphics);
-        world.resources.set(MurkVeilResource, veil);
-        world.addSystem(MurkResize);
-        world.addSystem(UpdateMurk);
+        });
+        world.addSystem(MurkFadeSystem);
     },
     remove(world) {
-        world.removeSystem(UpdateMurk);
-        world.removeSystem(MurkResize);
+        world.removeSystem(MurkFadeSystem);
 
         const app = world.resources.get(PixiAppResource);
         if (app) {
             app.renderer.background.color = 0x000000;
         }
 
-        const stage = world.resources.get(Stage);
-        const veil = world.resources.get(MurkVeilResource);
-        if (stage && veil) {
-            stage.removeChild(veil.graphics);
-        }
-        world.resources.delete(MurkVeilResource);
         world.resources.delete(MurkResource);
     }
 };

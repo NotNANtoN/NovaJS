@@ -50,8 +50,7 @@ export const Display: Plugin = {
         world.resources.set(Space, space);
         await world.addPlugin(ScreenSizePlugin);
         await world.addPlugin(starfieldPlugin);
-        // After the starfield (so it can hide it on negative murk) and before
-        // the status bar (so the murk veil sits under the status bar).
+        // After the starfield so it can hide it on negative murk.
         await world.addPlugin(SystemEnvironmentPlugin);
         await world.addPlugin(StatusBarPlugin);
         await world.addPlugin(AnimationPlugin);

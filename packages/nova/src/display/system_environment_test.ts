@@ -1,6 +1,11 @@
 import "jasmine";
 import { getIntegrationGameData } from "../communication/simulation_test_fixture.js";
-import { effectiveMurk, MurkState } from "./system_environment_plugin.js";
+import {
+    effectiveMurk,
+    FULL_MURK_VANISH_DISTANCE,
+    murkAlpha,
+    MurkState,
+} from "./system_environment_plugin.js";
 
 // These assertions run against the real Nova game data (Nova_Data), so they
 // pin the sÿst murk/interference/background-colour fields end to end: sÿst
@@ -42,5 +47,47 @@ describe("effectiveMurk", () => {
 
     it("clamps above 100", () => {
         expect(effectiveMurk(base({ systemMurk: 150 }))).toBe(100);
+    });
+});
+
+describe("murkAlpha", () => {
+    const murk = (systemMurk: number, murkReduction = 0): MurkState =>
+        ({ systemMurk, murkReduction });
+
+    it("leaves everything fully visible with no murk", () => {
+        expect(murkAlpha(0, murk(0))).toBe(1);
+        expect(murkAlpha(1e6, murk(0))).toBe(1);
+    });
+
+    it("keeps the player's own ship (distance zero) fully visible", () => {
+        expect(murkAlpha(0, murk(100))).toBe(1);
+    });
+
+    it("renders the nearer half of the vanishing range fully", () => {
+        // At murk 100 the vanishing range is FULL_MURK_VANISH_DISTANCE.
+        const vanish = FULL_MURK_VANISH_DISTANCE;
+        expect(murkAlpha(vanish / 2, murk(100))).toBe(1);
+    });
+
+    it("fades linearly to zero across the outer half", () => {
+        const vanish = FULL_MURK_VANISH_DISTANCE;
+        expect(murkAlpha(vanish * 3 / 4, murk(100))).toBeCloseTo(0.5);
+        expect(murkAlpha(vanish, murk(100))).toBe(0);
+        expect(murkAlpha(vanish * 2, murk(100))).toBe(0);
+    });
+
+    it("scales the vanishing range inversely with murk", () => {
+        // Murk 50 sees twice as far as murk 100.
+        const vanish50 = FULL_MURK_VANISH_DISTANCE * 2;
+        expect(murkAlpha(vanish50 / 2, murk(50))).toBe(1);
+        expect(murkAlpha(vanish50, murk(50))).toBe(0);
+        expect(murkAlpha(vanish50 * 3 / 4, murk(50))).toBeCloseTo(0.5);
+    });
+
+    it("extends visibility when an outfit reduces murk", () => {
+        const distance = FULL_MURK_VANISH_DISTANCE * 1.5;
+        // Invisible at murk 100, but visible with a 50-point reduction.
+        expect(murkAlpha(distance, murk(100))).toBe(0);
+        expect(murkAlpha(distance, murk(100, 50))).toBeGreaterThan(0);
     });
 });
