@@ -4,6 +4,7 @@ import { Observable } from "rxjs";
 import { DisplayAssetDataInterface } from "../client/gamedata/display_asset_data.js";
 import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
 import { ControlEvent } from "../nova_plugin/controls_plugin.js";
+import { evaluateNCBTest } from "../nova_plugin/ncb.js";
 import { Button } from "./button.js";
 import { Menu } from "./menu.js";
 import { MenuControls } from "./menu_controls.js";
@@ -57,6 +58,28 @@ function installLabelFont(systems: SystemData[]) {
     });
 }
 
+/**
+ * Whether a system exists for the player according to its visibility NCB
+ * test. Nova swaps between alternate copies of a system (stacked at the same
+ * map position) by giving each a different visibility expression, e.g. the
+ * four Sols at (0,0). The map currently evaluates against an empty control
+ * bit set, which matches a brand-new pilot: the starter chär (nova:128) sets
+ * no bits. Once per-player NCB state exists (with mission support), this
+ * should use the player's actual bits instead.
+ */
+function systemVisible(system: SystemData): boolean {
+    try {
+        return evaluateNCBTest(system.visibility ?? '', {
+            getBit: () => false,
+        });
+    } catch (e) {
+        // Show systems with malformed visibility expressions rather than
+        // hiding parts of the map.
+        console.warn(`Bad visibility NCB test for ${system.id}: ${e}`);
+        return true;
+    }
+}
+
 function drawSystem(system: SystemData, graphics: PIXI.Graphics,
     x: number, y: number) {
     // Use blue if the system has a planet. Otherwise, grey.
@@ -105,9 +128,15 @@ class SystemGraph {
 
     constructor(systems: SystemData[], private currentSystem: string,
         private size = { x: 456, y: 419 }) {
-        this.systems = new Map(systems.map(s => [s.id, s]));
+        // NCB-hidden systems don't exist for the player: they aren't drawn,
+        // clicked, linked, or routed through. The current system is always
+        // kept so the map stays usable even if the player is somewhere the
+        // visibility data says shouldn't exist.
+        const visibleSystems = systems.filter(
+            s => s.id === currentSystem || systemVisible(s));
+        this.systems = new Map(visibleSystems.map(s => [s.id, s]));
         this.routes = this.computeShortestPaths();
-        this.clickTargets = this.pickRepresentativeSystems(systems);
+        this.clickTargets = this.pickRepresentativeSystems(visibleSystems);
 
         this.linkGraphics = new PIXI.Graphics();
         this.routeGraphics = new PIXI.Graphics();
@@ -179,13 +208,11 @@ class SystemGraph {
 
     /**
      * Groups systems by map position and picks the one the map should show
-     * and select for each spot. Prefers a system reachable from the current
-     * system (its NCB-swapped duplicates usually link to a parallel copy of
-     * the galaxy that the player can't jump to), breaking ties by data order.
-     *
-     * TODO(mission-computer NCBs): once NCB evaluation exists, the right rule
-     * is to show exactly the duplicate whose visibility test passes for the
-     * player, rather than guessing by reachability.
+     * and select for each spot. NCB visibility filtering usually collapses a
+     * stack of swapped duplicates to a single system already; this handles
+     * spots where several systems remain (e.g. plugin systems with blank
+     * visibility stacked on stock ones) by preferring a system reachable from
+     * the current system, breaking ties by data order.
      */
     private pickRepresentativeSystems(systems: SystemData[]) {
         const byPosition = new Map<string, SystemData>();

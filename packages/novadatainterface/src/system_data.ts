@@ -32,6 +32,14 @@ export interface SystemData extends BaseData {
      * The system's background colour as 0x00RRGGBB. Zero is pure black.
      */
     backgroundColor: number,
+
+    /**
+     * NCB test expression controlling whether the system exists for the
+     * player. Blank means always visible. Nova swaps between alternate
+     * copies of a system (stacked at the same map position) by giving each
+     * a different visibility expression.
+     */
+    visibility: string,
 }
 
 export function getDefaultSystemData(): SystemData {
@@ -45,5 +53,6 @@ export function getDefaultSystemData(): SystemData {
         murk: 0,
         interference: 0,
         backgroundColor: 0,
+        visibility: '',
     };
 }
