@@ -4,13 +4,17 @@ import { getDefaultSpaceObjectData, getDefaultSpaceObjectPhysics, SpaceObjectDat
 export interface ShipPhysics extends SpaceObjectPhysics {
     freeMass: number;
     freeCargo: number;
+    maxGuns: number;
+    maxTurrets: number;
 }
 
 export function getDefaultShipPhysics(): ShipPhysics {
     return {
         ...getDefaultSpaceObjectPhysics(),
         freeMass: 0,
-        freeCargo: 0
+        freeCargo: 0,
+        maxGuns: 0,
+        maxTurrets: 0
     }
 }
 
@@ -24,6 +28,14 @@ export interface ShipData extends SpaceObjectData {
     largeExplosion: boolean;
     deathDelay: number;
     displayWeight: number;
+    /**
+     * 64-bit flag set contributed while flying this ship, as a hex
+     * string (JSON-safe; decode with BigInt). Combined with outfit
+     * Contribute sets and checked against Require sets.
+     */
+    contribute: string;
+    /** 64-bit flag set required to buy this ship. Hex string. */
+    require: string;
 };
 
 export function getDefaultShipData(): ShipData {
@@ -37,6 +49,8 @@ export function getDefaultShipData(): ShipData {
         finalExplosion: null,
         largeExplosion: false,
         deathDelay: 1,
-        displayWeight: 1
+        displayWeight: 1,
+        contribute: "0x0",
+        require: "0x0"
     }
 }

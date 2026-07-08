@@ -80,7 +80,12 @@ export function getDefaultBeamAnimation(): BeamAnimation {
 }
 
 
-export type AmmoType = "unlimited" | ["energy", number] | ["outfit", string];
+/**
+ * What a weapon consumes per shot: nothing, fuel ("energy", units per
+ * shot), or ammunition drawn from the supply of the weapon type with
+ * the given globalID (usually the weapon's own).
+ */
+export type AmmoType = "unlimited" | ["energy", number] | ["weapon", string];
 
 export interface SubmunitionType {
     id: string;
@@ -113,6 +118,13 @@ export interface BaseWeaponData extends BaseData {
     burstCount: number;
     burstReload: number;
     ammoType: AmmoType;
+    /**
+     * For ammo-using weapons, the maximum ammo per instance of this
+     * weapon. 0 = the ammo quantity is constrained by the ammo
+     * outfit's Max field instead (so the ammo is freely buyable
+     * without a launcher).
+     */
+    maxAmmo: number;
     useFiringAnimation: boolean;
     fireSimultaneously: boolean;
     destroyShipWhenFiring: boolean;
@@ -131,6 +143,7 @@ export function getDefaultBaseWeaponData(): BaseWeaponData {
         burstCount: 0,
         burstReload: 1000,
         ammoType: "unlimited",
+        maxAmmo: 0,
         useFiringAnimation: true,
         fireSimultaneously: false,
         destroyShipWhenFiring: false,
