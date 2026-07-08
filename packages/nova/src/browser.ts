@@ -40,8 +40,10 @@ import { FinishJumpEvent, JumpComponent, JumpRouteComponent } from "./nova_plugi
 import { makeShip } from "./nova_plugin/make_ship.js";
 import { makeSystem, SIMULATION_STEP_MS } from "./nova_plugin/make_system.js";
 import { MultiRoomResource, NovaPlugin } from "./nova_plugin/nova_plugin.js";
+import { OutfitsStateComponent } from "./nova_plugin/outfit_plugin.js";
 import { LandEvent } from "./nova_plugin/planet_plugin.js";
 import { PlayerShipSelector } from "./nova_plugin/player_ship_plugin.js";
+import { extractSaveData, loadSave, resetSave, writeSave } from "./nova_plugin/save_game.js";
 import { ControlledByComponent } from "./nova_plugin/ship_control.js";
 import { SystemIdResource } from "./nova_plugin/system_id_resource.js";
 
@@ -302,6 +304,75 @@ function routesEqual(a?: string[], b?: string[]) {
     return a.every((entry, index) => entry === b[index]);
 }
 
+/** Finds the local player's ship entity in the given display world. */
+function getPlayerShipEntity(displayWorld: World): Entity | undefined {
+    for (const entity of displayWorld.entities.values()) {
+        if (entity.components.has(PlayerShipSelector)) {
+            return entity;
+        }
+    }
+    return undefined;
+}
+
+/**
+ * Serializes the local player's current state to localStorage. A pure
+ * read of the display world's player entity (which mirrors the simulation),
+ * so it's a safe observer that never mutates sim state. No-op if there's no
+ * player ship yet (e.g. mid-jump) or nothing meaningful to persist.
+ */
+function saveNow() {
+    if (!displayWorld || !activeSystemId) {
+        return;
+    }
+    const playerShip = getPlayerShipEntity(displayWorld);
+    if (!playerShip) {
+        return;
+    }
+    const data = extractSaveData(playerShip, activeSystemId);
+    if (!data) {
+        return;
+    }
+    writeSave(data);
+}
+
+let saveTriggersInstalled = false;
+const SAVE_INTERVAL_MS = 10_000;
+
+/**
+ * Wires up when the game persists the player's state:
+ * - periodically (every ~10s),
+ * - when the page is being hidden or unloaded (pagehide / the tab going
+ *   to the background), which are more reliable than beforeunload.
+ * Landing at a spaceport also saves; that hook lives on each display
+ * world's LeaveSpaceportEvent in jumpTo.
+ */
+function installSaveTriggers() {
+    if (saveTriggersInstalled) {
+        return;
+    }
+    saveTriggersInstalled = true;
+
+    setInterval(saveNow, SAVE_INTERVAL_MS);
+
+    // pagehide fires on navigation away / tab close and is far more
+    // reliable than beforeunload (which browsers may skip).
+    window.addEventListener('pagehide', saveNow);
+    // Save whenever the tab is backgrounded: on mobile this is often the
+    // last event before the page is discarded.
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') {
+            saveNow();
+        }
+    });
+
+    // Console-callable escape hatches.
+    (window as any).novaSaveNow = saveNow;
+    (window as any).novaResetSave = () => {
+        resetSave();
+        console.info('Cleared the saved game. Reload to start fresh.');
+    };
+}
+
 async function makeDisplayWorld(systemId: string) {
     const displayWorld = new World(`${systemId} display`);
     displayWorld.resources.set(SimulationGameDataResource, simulationGameData);
@@ -441,6 +512,8 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
             entity: playerShip,
             planetId: data.id,
         };
+        // Landing is a natural save point.
+        saveNow();
     });
     newDisplayWorld.events.get(FinishJumpEvent).subscribe(({ data }) => {
         // Every peer simulates every ship's jump; only follow it to
@@ -497,28 +570,59 @@ async function startGame() {
         await new Promise(resolve => setTimeout(resolve, 10));
     }
     const ids = await simulationGameData.ids;
-    // ?ship=nova:164 picks the player's ship; otherwise it's random.
     const query = new URLSearchParams(window.location.search);
+
+    // ?reset wipes the save before we read it, so a bad session can be
+    // recovered by adding &reset to the URL.
+    if (query.has('reset')) {
+        resetSave();
+        console.info('Cleared the saved game (?reset).');
+    }
+
+    // The saved game (if any) provides defaults; explicit URL params
+    // override it. A corrupt or old-version save is quarantined by
+    // loadSave and we fall back to defaults.
+    const save = loadSave();
+
+    // ?ship=nova:164 picks the player's ship; otherwise the saved ship,
+    // otherwise a random one.
     const requestedShip = query.get('ship');
-    let shipId = ids.Ship[Math.floor(Math.random() * ids.Ship.length)];
+    const savedShipValid = save && ids.Ship.includes(save.ship);
+    let shipId = savedShipValid
+        ? save!.ship
+        : ids.Ship[Math.floor(Math.random() * ids.Ship.length)];
+    // Only restore outfits when we actually use the saved ship: outfits
+    // belong to a specific ship type.
+    let usingSavedShip = savedShipValid;
     if (requestedShip) {
         if (ids.Ship.includes(requestedShip)) {
             shipId = requestedShip;
+            usingSavedShip = save?.ship === requestedShip;
         } else {
-            console.warn(`Unknown ship id '${requestedShip}'. Using random ship ${shipId}.`);
+            console.warn(`Unknown ship id '${requestedShip}'. Using ${shipId}.`);
         }
     }
     const shipData = await simulationGameData.data.Ship.get(shipId);
     const shipEntity = makeShip(shipData);
+    // Restore owned outfits onto the ship. The staging derivers skip a
+    // component that is already present, so setting OutfitsStateComponent
+    // here preserves the saved loadout instead of the ship's stock one.
+    if (usingSavedShip && save && save.outfits.length > 0) {
+        shipEntity.components.set(OutfitsStateComponent,
+            new Map(save.outfits.map(([id, count]) => [id, { count }])));
+    }
     shipEntity.components.set(MultiplayerData, {
         owner: communicator.uuid
     });
     shipEntity.components.set(PlayerShipSelector, undefined);
     shipEntity.components.set(ControlledByComponent, { peerId: communicator.uuid });
     (window as any).myShip = shipEntity;
-    // ?system=nova:131 picks the starting system.
+
+    // ?system=nova:131 picks the starting system; otherwise the saved
+    // system, otherwise the default.
     const requestedSystem = query.get('system');
-    let systemId = 'nova:130';
+    let systemId = (save && ids.System.includes(save.system))
+        ? save.system : 'nova:130';
     if (requestedSystem) {
         if (ids.System.includes(requestedSystem)) {
             systemId = requestedSystem;
@@ -532,6 +636,8 @@ async function startGame() {
         to: systemId,
         uuid: v4(),
     });
+
+    installSaveTriggers();
 
     // if (activeSystem) {
     //     await activeSystem.addPlugin(Display);
