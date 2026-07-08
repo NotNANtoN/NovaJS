@@ -1,4 +1,6 @@
 import { BaseData, getDefaultBaseData } from "./base_data.js";
+import { CloakData, getDefaultCloakData } from "./cloak_data.js";
+import { CloakScannerData, getDefaultCloakScannerData } from "./cloak_scanner_data.js";
 import { ShipPhysics } from "./ship_data.js";
 
 
@@ -24,6 +26,12 @@ export interface OutfitData extends BaseData {
     physics: OutfitPhysics,
     /** Per-type jamming strength this outfit adds to the ship. */
     jamming: JammingStrengths,
+    // Cloaking-device semantics decoded from ModType 17. isCloak is false
+    // for non-cloak outfits. See cloak_data.ts for the bitfield.
+    cloak: CloakData,
+    // Cloak-scanner semantics decoded from ModType 30. isCloakScanner is
+    // false for non-scanner outfits. See cloak_scanner_data.ts.
+    cloakScanner: CloakScannerData,
     pict: string, // id of picture
     price: number,
     desc: string,
@@ -75,6 +83,8 @@ export function getDefaultOutfitData(): OutfitData {
             freeMass: 0
         },
         jamming: getDefaultJammingStrengths(),
+        cloak: getDefaultCloakData(),
+        cloakScanner: getDefaultCloakScannerData(),
         pict: "default",
         price: 0,
         desc: "default outfit",

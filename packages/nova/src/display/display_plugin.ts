@@ -7,6 +7,7 @@ import { AnimationPlugin } from "../nova_plugin/animation_plugin.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 import { AnimationGraphicPlugin } from "./animation_graphic_plugin.js";
 import { BeamDisplayPlugin } from "./beam_display_plugin.js";
+import { CloakSoundPlugin } from "./cloak_sound_plugin.js";
 import { ExplosionPlugin } from "./explosion_plugin.js";
 import { FullscreenPlugin } from "./fullscreen_plugin.js";
 import { JumpFadePlugin } from "./jump_fade_plugin.js";
@@ -66,12 +67,14 @@ export const Display: Plugin = {
         await world.addPlugin(SpaceportPlugin);
         await world.addPlugin(StarmapPlugin);
         await world.addPlugin(SoundPlugin);
+        await world.addPlugin(CloakSoundPlugin);
         await world.addPlugin(ShipAnimationPlugin);
         await world.addPlugin(JumpFadePlugin);
     },
     async remove(world) {
         await world.removePlugin(JumpFadePlugin);
         await world.removePlugin(ShipAnimationPlugin);
+        await world.removePlugin(CloakSoundPlugin);
         await world.removePlugin(SoundPlugin);
         await world.removePlugin(SystemEnvironmentPlugin);
         await world.removePlugin(StarmapPlugin);

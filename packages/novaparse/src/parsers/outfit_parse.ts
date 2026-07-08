@@ -1,6 +1,8 @@
 import { OutfResource } from "../resource_parsers/outf_resource.js";
 import { BaseData } from "novadatainterface/base_data";
 import { BaseParse } from "./base_parse.js";
+import { CloakData, decodeCloakModVal, getDefaultCloakData } from "novadatainterface/cloak_data";
+import { CloakScannerData, decodeCloakScannerModVal, getDefaultCloakScannerData } from "novadatainterface/cloak_scanner_data";
 import { OutfitData, OutfitPhysics } from "novadatainterface/outfit_data";
 import { getDefaultPictData } from "novadatainterface/pict_data";
 import { FPS, OutfitTurnRateConversionFactor, ShipTurnRateConversionFactor } from "./constants.js";
@@ -25,11 +27,33 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
     // Per-type jamming strength (IR, radar, etheric wake, gravimetric) from
     // ModTypes 33-36. Percentages, summed across the outfit's mod pairs.
     var jamming: [number, number, number, number] = [0, 0, 0, 0];
+    // ModType 17 "cloaking device"; decoded from its ModVal bitfield. The
+    // resource parser emits it as a ["cloak", modVal] function tuple.
+    var cloak: CloakData = getDefaultCloakData();
+    // ModType 30 "cloak scanner"; decoded from its ModVal bitfield. The
+    // resource parser emits it as a ["cloak scanner", modVal] tuple.
+    var cloakScanner: CloakScannerData = getDefaultCloakScannerData();
 
     for (let i in outf.functions) {
         let func = outf.functions[i];
         let fType = func[0];
         let fVal = func[1];
+
+        if (fType === "cloak") {
+            if (typeof fVal !== "number") {
+                throw new Error("Wrong type for cloak val. Expected number");
+            }
+            cloak = decodeCloakModVal(fVal);
+            continue;
+        }
+
+        if (fType === "cloak scanner") {
+            if (typeof fVal !== "number") {
+                throw new Error("Wrong type for cloak scanner val. Expected number");
+            }
+            cloakScanner = decodeCloakScannerModVal(fVal);
+            continue;
+        }
 
         // Unit conversions. Everything should be in units / second.
         // Parse weapons as well.
@@ -178,6 +202,8 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
         weapons,
         physics,
         jamming,
+        cloak,
+        cloakScanner,
         pict,
         price: outf.cost,
         desc,

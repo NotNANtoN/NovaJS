@@ -9,6 +9,7 @@ import { Provide } from "nova_ecs/provide";
 import { Query } from "nova_ecs/query";
 import { System } from "nova_ecs/system";
 import { ShipControlEvent, ShipControlStateComponent } from "./ship_control.js";
+import { CloakActiveComponent, CloakScannerComponent, isTargetable } from "./cloak_plugin.js";
 import { OwnerComponent } from "./fire_weapon_plugin.js";
 import { PlayerShipSelector } from "./player_ship_plugin.js";
 import { ShipComponent } from "./ship_plugin.js";
@@ -26,23 +27,29 @@ const TargetIndexProvider = Provide({
 
 export const CycleTargetEvent = new EcsEvent<Target>('CycleTargetEvent');
 
-const TargetsQuery = new Query([UUID, MovementStateComponent, Optional(OwnerComponent), ShipComponent] as const);
+const TargetsQuery = new Query([UUID, MovementStateComponent, Optional(OwnerComponent), ShipComponent, Optional(CloakActiveComponent)] as const);
 const ChooseTargetSystem = new System({
     name: 'ChooseTarget',
     events: [ShipControlEvent],
     args: [ShipControlStateComponent, TargetComponent, TargetIndexComponent, UUID,
-        TargetsQuery, Emit, MovementStateComponent] as const,
-    step(controlState, target, index, uuid, ships, emit, movementState) {
+        TargetsQuery, Emit, MovementStateComponent,
+        Optional(CloakScannerComponent)] as const,
+    step(controlState, target, index, uuid, ships, emit, movementState, myScanner) {
         if (controlState.get('nearestTarget') === 'start') {
             const [closestUuid, _distance, newIndex] = ships
-                .map(([a, b, c], index) => [a, b, c, index] as const)
-                .filter(([otherUuid, _, owner]) => {
+                .map(([a, b, c, d, e], index) => [a, b, c, d, e, index] as const)
+                .filter(([otherUuid, _, owner, __, cloak]) => {
                     if (owner?.owner === uuid) {
+                        return false;
+                    }
+                    // Cloaked ships are untargetable unless this ship has
+                    // a cloak scanner that allows targeting them.
+                    if (!isTargetable(cloak, myScanner)) {
                         return false;
                     }
                     return otherUuid !== uuid;
                 })
-                .map(([uuid, { position }, _, index]) => [
+                .map(([uuid, { position }, _, __, ___, index]) => [
                     uuid,
                     position.subtract(movementState.position).lengthSquared,
                     index
@@ -71,10 +78,12 @@ const ChooseTargetSystem = new System({
                     break;
                 }
 
-                const [targetUuid, _targetMovement, targetOwner] = ships[index.index];
+                const [targetUuid, _targetMovement, targetOwner, _targetShip, targetCloak] = ships[index.index];
                 // Don't target yourself
                 // Don't target escorts
-                if (targetUuid !== uuid && targetOwner?.owner !== uuid) {
+                // Don't target cloaked ships (unless a cloak scanner allows it)
+                if (targetUuid !== uuid && targetOwner?.owner !== uuid
+                    && isTargetable(targetCloak, myScanner)) {
                     break;
                 }
                 index.index = (index.index + 2) % (ships.length + 1) - 1;
@@ -107,6 +116,32 @@ const TargetRemovedSystem = new System({
     }
 });
 
+// Drops any SHIP's target that has become cloaked. A ship you were
+// targeting that cloaks vanishes from your sensors, so the lock is lost —
+// matching the "cloaked ships are untargetable" rule for locks already
+// held. A cloak scanner that allows targeting cloaked ships keeps the
+// lock. Gated on ShipComponent: projectiles keep their TargetComponent,
+// so a homing missile's lock is SUSPENDED while its target is cloaked
+// (it stops homing in ProjectileGuidanceSystem) and resumes on decloak,
+// per observed original-game behavior.
+const CloakedTargetQuery = new Query([UUID, CloakActiveComponent] as const);
+const DropCloakedTargetSystem = new System({
+    name: 'DropCloakedTarget',
+    args: [TargetComponent, ShipComponent, CloakedTargetQuery,
+        Optional(CloakScannerComponent)] as const,
+    step(target, _ship, cloakedShips, myScanner) {
+        if (!target.target) {
+            return;
+        }
+        for (const [uuid, cloak] of cloakedShips) {
+            if (uuid === target.target && !isTargetable(cloak, myScanner)) {
+                target.target = undefined;
+                return;
+            }
+        }
+    }
+});
+
 export const TargetPlugin: Plugin = {
     name: "TargetPlugin",
     build(world) {
@@ -122,5 +157,6 @@ export const TargetPlugin: Plugin = {
         world.addSystem(TargetIndexProvider);
         world.addSystem(ChooseTargetSystem);
         world.addSystem(TargetRemovedSystem);
+        world.addSystem(DropCloakedTargetSystem);
     }
 }

@@ -34,6 +34,7 @@ const SavedControlsPartialObject = t.partial({
     'nextSecondary': ControlInputs,
     'previousSecondary': ControlInputs,
     'afterburner': ControlInputs,
+    'cloak': ControlInputs,
     'hail': ControlInputs,
     'board': ControlInputs,
     'escorts': ControlInputs,

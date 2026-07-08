@@ -7,6 +7,7 @@ import { AnimationPlugin } from "./animation_plugin.js";
 import { BayPlugin } from "./bay_plugin.js";
 import { BeamPlugin } from "./beam_plugin.js";
 import { BlastPlugin } from "./blast_plugin.js";
+import { CloakPlugin } from "./cloak_plugin.js";
 import { CollisionsPlugin } from './collisions_plugin.js';
 import { ControlsPlugin } from "./controls_plugin.js";
 import { CreateTimePlugin } from "./create_time.js";
@@ -54,6 +55,7 @@ export const SystemPlugin: Plugin = {
         world.addPlugin(JammingPlugin);
         world.addPlugin(CollisionsPlugin);
         world.addPlugin(HealthPlugin);
+        world.addPlugin(CloakPlugin);
         world.addPlugin(TargetPlugin);
         world.addPlugin(SoundEventPlugin);
         world.addPlugin(BeamPlugin);
