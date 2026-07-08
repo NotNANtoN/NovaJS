@@ -22,6 +22,9 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
     var physics: OutfitPhysics = { freeMass: outf.mass };
     let ammoFor: string | null = null;
     let increasesMax: string | null = null;
+    // Per-type jamming strength (IR, radar, etheric wake, gravimetric) from
+    // ModTypes 33-36. Percentages, summed across the outfit's mod pairs.
+    var jamming: [number, number, number, number] = [0, 0, 0, 0];
 
     for (let i in outf.functions) {
         let func = outf.functions[i];
@@ -136,6 +139,15 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
         else if (fType === "inertial damper") {
             physics.inertialess = true;
         }
+        else if (fType === "jam 1" || fType === "jam 2"
+            || fType === "jam 3" || fType === "jam 4") {
+            if (typeof fVal !== "number") {
+                throw new Error("Wrong type for jamming. Expected number");
+            }
+            // "jam 1".."jam 4" -> index 0..3
+            const idx = Number(fType.slice(4)) - 1;
+            jamming[idx] += fVal;
+        }
         else {
             //throw new Error("Unknown outfit function " + fType + " on outfit " + base.id);
         }
@@ -165,6 +177,7 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
         ...base,
         weapons,
         physics,
+        jamming,
         pict,
         price: outf.cost,
         desc,
