@@ -15,7 +15,7 @@ import { SpriteSheetData, SpriteSheetFramesData, SpriteSheetImageData } from "no
 import { getDefaultStatusBarColors, getDefaultStatusBarDataAreas } from "novadatainterface/status_bar_data";
 import { WeaponData } from "novadatainterface/weapon_data";
 import { NovaParse } from "../src/nova_parse.js";
-import { FPS, ShipTurnRateConversionFactor } from "../src/parsers/constants.js";
+import { FPS, ShipAccelerationConversionFactor, ShipSpeedConversionFactor, ShipTurnRateConversionFactor } from "../src/parsers/constants.js";
 import { getPNG } from "./resource_parsers/png_compare.js";
 import { resolveFixture } from './fixtures.js';
 
@@ -73,8 +73,8 @@ describe("NovaParse", () => {
         expect(s128.physics.energyRecharge).toEqual(FPS / 22);
         expect(s128.physics.ionization).toEqual(23);
         expect(s128.physics.deionize).toEqual(24 / 100 * FPS);
-        expect(s128.physics.speed).toEqual(12);
-        expect(s128.physics.acceleration).toEqual(11);
+        expect(s128.physics.speed).toEqual(12 * ShipSpeedConversionFactor);
+        expect(s128.physics.acceleration).toEqual(11 * ShipAccelerationConversionFactor);
         expect(s128.physics.turnRate).toEqual(13 * ShipTurnRateConversionFactor);
         expect(s128.physics.mass).toEqual(5678);
         expect(s128.physics.freeMass).toEqual(4234);
@@ -88,6 +88,28 @@ describe("NovaParse", () => {
         expect(s128.displayWeight).toEqual(128);
         expect(s128.deathDelay).toEqual(67 / 30);
         expect(s128.largeExplosion).toEqual(true);
+    });
+
+    it("Converts ship speed and acceleration to pixels per second", async () => {
+        // The original engine ran physics at 30fps and stored speed as
+        // pixels/frame * 100 (EVN Bible: weapon "Speed" is "pixels per
+        // frame * 100"; particle velocity "a value of 100 is one pixel
+        // per frame"). Ship Top Speed and Acceleration share that
+        // encoding, so px/s = field * 30 / 100 = field * 0.3.
+        //
+        // The MovementSystem integrates velocity as px/s (it multiplies
+        // by time.delta_s in seconds), so the parsed values must be px/s.
+        const s128 = await np.data[NovaDataType.Ship].get("nova:128");
+
+        // An "average" ship (Top Speed field 300) should move 90 px/s,
+        // not 300 px/s. Before the fix the field passed through raw,
+        // making every ship 100/30 ~= 3.33x too fast.
+        expect(300 * ShipSpeedConversionFactor).toEqual(90);
+        expect(300 * ShipAccelerationConversionFactor).toEqual(90);
+
+        // The contrived fixture ship has raw speed 12 and acceleration 11.
+        expect(s128.physics.speed).toEqual(12 * 0.3);
+        expect(s128.physics.acceleration).toEqual(11 * 0.3);
     });
 
     it("Should parse the right pict ID for ships with the same baseImage", async () => {
