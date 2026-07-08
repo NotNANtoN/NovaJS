@@ -73,6 +73,33 @@ describe('utils', () => {
 
             expect(() => topologicalSort(graph)).toThrowError('Graph contains a cycle');
         });
+
+        it('ignores incoming edges to nodes not in the graph', () => {
+            // 'a' must come after 'missing', which is not a key in the graph.
+            // The missing node can never be placed, so a naive check would
+            // treat this as an unsatisfiable (cyclic) constraint and throw.
+            // Instead the dangling edge should be ignored.
+            const graph: Map<string, Set<string>> = new Map([
+                ['a', new Set(['missing'])],
+                ['b', new Set(['a'])],
+            ]);
+
+            let sorted: string[] = [];
+            expect(() => { sorted = topologicalSort(graph); }).not.toThrow();
+            // Both nodes are present and 'a' still comes before 'b'.
+            expect(sorted.sort()).toEqual(['a', 'b']);
+            expect(topologicalSort(graph).indexOf('a'))
+                .toBeLessThan(topologicalSort(graph).indexOf('b'));
+        });
+
+        it('still throws for a cycle even when a dangling edge is present', () => {
+            const graph: Map<string, Set<string>> = new Map([
+                ['a', new Set(['b', 'missing'])],
+                ['b', new Set(['a'])],
+            ]);
+
+            expect(() => topologicalSort(graph)).toThrowError('Graph contains a cycle');
+        });
     });
     describe('topologicalSortList', () => {
         it('topologically sorts a list of sortables', () => {
