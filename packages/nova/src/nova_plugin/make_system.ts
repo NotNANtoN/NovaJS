@@ -8,6 +8,7 @@ import { completeEntity } from "./entity_data_loader.js";
 import { configureSnapshotPolicies } from "./snapshot_policies.js";
 import { IdFactory, IdFactoryResource } from "./id_factory.js";
 import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
+import { spawnAsteroids } from "./asteroid_plugin.js";
 import { SimulationGameDataResource } from "./game_data_resource.js";
 import { makePlanet } from "./make_planet.js";
 import { Platform, PlatformResource } from "./platform_plugin.js";
@@ -52,6 +53,11 @@ export async function makeSystem(systemId: string, gameData: SimulationGameDataI
         await completeEntity(world, planet);
         world.entities.set(`planet ${planetId}`, planet);
     }
+
+    // Spawn the system's asteroid field. Deterministic: every peer
+    // draws the same positions from the same per-system Random and
+    // allocates the same entity ids.
+    await spawnAsteroids(world, systemData);
 
     return world;
 }

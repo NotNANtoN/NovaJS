@@ -5,6 +5,7 @@ import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { DefaultMap } from "nova_ecs/utils";
 import { World } from "nova_ecs/world";
 import { AnimationComponent, ExplosionDataComponent } from "./animation_plugin.js";
+import { AsteroidDataComponent } from "./asteroid_plugin.js";
 import { BlastDamageComponent, BlastIgnoreComponent } from "./blast_data.js";
 import { BlastDoneComponent } from "./blast_plugin.js";
 import { CollisionHitterComponent, CollisionVulnerabilityComponent } from "./collision_interaction.js";
@@ -67,6 +68,7 @@ export function configureSnapshotPolicies(world: World) {
     // ShipData per snapshot would dominate the cost.)
     policies.set(ShipDataComponent, { policy: 'share' });
     policies.set(PlanetDataComponent, { policy: 'share' });
+    policies.set(AsteroidDataComponent, { policy: 'share' });
     policies.set(ProjectileDataComponent, { policy: 'share' });
     policies.set(AnimationComponent, { policy: 'share' });
     policies.set(ExplosionDataComponent, { policy: 'share' });
@@ -156,6 +158,9 @@ export function configureSnapshotPolicies(world: World) {
     policies.setWire(ProjectileBlastHull, hullWire);
     // The queue is this world's own pool machinery.
     policies.setWireDerived(ReturnToQueueComponent);
+    // Static shared röid data; the restoring world re-derives it from
+    // AsteroidComponent (see AsteroidDataDeriver).
+    policies.setWireDerived(AsteroidDataComponent);
     // The restoring world's singleton already carries its marker.
     policies.setWireDerived(SingletonComponent);
 

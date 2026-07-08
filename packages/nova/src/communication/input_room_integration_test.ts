@@ -44,10 +44,10 @@ describe('Input-driven rooms', () => {
         relay.close();
     });
 
-    async function makePeer(peerId: string) {
+    async function makePeer(peerId: string, systemId?: string) {
         const gameData = await getIntegrationGameData();
         const ids = await gameData.ids;
-        const systemId = [...ids.System].sort()[0]!;
+        systemId ??= [...ids.System].sort()[0]!;
         const world = await makeSystem(systemId, gameData, 'worker');
         world.resources.set(CommunicatorResource, comms.get(peerId)!);
         const host = new SimulationBridgeHost(world, gameData);
@@ -343,14 +343,17 @@ describe('Input-driven rooms', () => {
         });
         const makeArchiveWorld = async () => {
             const gameData = await getIntegrationGameData();
-            const ids = await gameData.ids;
-            return makeSystem([...ids.System].sort()[0]!, gameData, 'node');
+            return makeSystem('nova:226', gameData, 'node');
         };
         archive = new RoomArchive(relay, makeArchiveWorld,
             { intervalTicks: 60, autoUpdate: false });
 
-        const peerA = await makePeer('a');
-        const peerB = await makePeer('b');
+        // An asteroid-free system (Ver'ashan): this spec depends on a
+        // marginal dogfight where at least one launched fighter
+        // survives to fly home, and an asteroid field absorbing shots
+        // tips that fight the other way.
+        const peerA = await makePeer('a', 'nova:226');
+        const peerB = await makePeer('b', 'nova:226');
         const gameData = await getIntegrationGameData();
         // A pilots a Fed Carrier (it has a fighter bay).
         const carrierData = await gameData.data.Ship.get('nova:143');
@@ -488,19 +491,34 @@ describe('Input-driven rooms', () => {
         peerA.host.controlEvents([{ action: 'nextSecondary', state: 'start' }]);
         await step(3);
         peerA.host.controlEvents([{ action: 'fireSecondary', state: 'start' }]);
-        await step(400);
-        peerA.host.controlEvents([{ action: 'fireSecondary', state: false }]);
-        await step(120);
-        await archive.update();
-
         // The victim must actually have been hit for this to prove
-        // anything.
+        // anything. Watch the shield during the volley: it recharges,
+        // so a check after the quiet tail can miss real hits.
         const { ShieldComponent } =
             await import('../nova_plugin/health_plugin.js');
+        let minVictimShield = Infinity;
+        const watchVictim = () => {
+            const shield = peerA.world.entities.get('ship b')
+                ?.components.get(ShieldComponent);
+            if (shield) {
+                minVictimShield = Math.min(minVictimShield, shield.current);
+            }
+        };
+        for (let i = 0; i < 400; i++) {
+            await step(1);
+            watchVictim();
+        }
+        peerA.host.controlEvents([{ action: 'fireSecondary', state: false }]);
+        for (let i = 0; i < 120; i++) {
+            await step(1);
+            watchVictim();
+        }
+        await archive.update();
+
         const victimShield = peerA.world.entities.get('ship b')
             ?.components.get(ShieldComponent);
         expect(victimShield).toBeDefined();
-        expect(victimShield!.current).toBeLessThan(victimShield!.max);
+        expect(minVictimShield).toBeLessThan(victimShield!.max);
         await compareAll('after missile hits on a player ship');
         for (const world of [peerA.world, peerB.world]) {
             const policies = world.resources.get(

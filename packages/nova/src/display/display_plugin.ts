@@ -6,6 +6,7 @@ import * as PIXI from "pixi.js";
 import { AnimationPlugin } from "../nova_plugin/animation_plugin.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 import { AnimationGraphicPlugin } from "./animation_graphic_plugin.js";
+import { AsteroidDisplayPlugin } from "./asteroid_display_plugin.js";
 import { BeamDisplayPlugin } from "./beam_display_plugin.js";
 import { ExplosionPlugin } from "./explosion_plugin.js";
 import { FullscreenPlugin } from "./fullscreen_plugin.js";
@@ -57,6 +58,7 @@ export const Display: Plugin = {
         await world.addPlugin(ParticlesPlugin);
         await world.addPlugin(FullscreenPlugin);
         await world.addPlugin(ExplosionPlugin);
+        await world.addPlugin(AsteroidDisplayPlugin);
         await world.addPlugin(BeamDisplayPlugin);
         await world.addPlugin(PlanetCornersPlugin);
         await world.addPlugin(SpaceportPlugin);
@@ -71,6 +73,7 @@ export const Display: Plugin = {
         await world.removePlugin(SpaceportPlugin);
         await world.removePlugin(PlanetCornersPlugin);
         await world.removePlugin(BeamDisplayPlugin);
+        await world.removePlugin(AsteroidDisplayPlugin);
         await world.removePlugin(ExplosionPlugin);
         await world.removePlugin(FullscreenPlugin);
         await world.removePlugin(ParticlesPlugin);

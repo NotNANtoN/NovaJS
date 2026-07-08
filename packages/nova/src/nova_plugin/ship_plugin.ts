@@ -114,7 +114,9 @@ const ShipCollisionInteractionProvider = Provide({
     provided: CollisionVulnerabilityComponent,
     args: [ShipComponent] as const,
     factory: () => ({
-        vulnerableTo: new Set(['normal']),
+        // 'debris' lets asteroid resource-boxes (which hit nothing
+        // else) collide with ships for scooping.
+        vulnerableTo: new Set(['normal', 'debris']),
     }),
 });
 

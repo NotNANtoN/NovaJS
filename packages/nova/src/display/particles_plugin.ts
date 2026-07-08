@@ -12,6 +12,7 @@ import { SingletonComponent } from "nova_ecs/world";
 import * as particles from "@pixi/particle-emitter";
 import * as PIXI from "pixi.js";
 import { ProjectileDataComponent } from "../nova_plugin/projectile_data.js";
+import { AsteroidBreakEvent } from "../nova_plugin/asteroid_plugin.js";
 import { ProjectileCollisionEvent } from "../nova_plugin/projectile_plugin.js";
 import { PixiAppResource } from "./pixi_app_resource.js";
 import { Space } from "./space_resource.js";
@@ -152,6 +153,31 @@ const TrailEmitterSystem = new System({
     }
 });
 
+const AsteroidBreakEmitterSystem = new System({
+    name: "AsteroidBreakEmitterSystem",
+    events: [AsteroidBreakEvent],
+    args: [AsteroidBreakEvent, Space, ParticleTextureResource,
+        OrphanParticleEmitters, TimeResource, SingletonComponent] as const,
+    step(breakEvent, space, texture, orphanEmitters, time) {
+        if (!breakEvent.particleCount) {
+            return;
+        }
+        const emitter = makeEmitter(space, texture, 1 /* fps */, {
+            count: breakEvent.particleCount,
+            color: breakEvent.particleColor,
+            velocity: 120,
+            lifeMin: 0.3,
+            lifeMax: 1.2,
+        });
+        emitter.updateOwnerPos(breakEvent.position.x, breakEvent.position.y);
+        emitter.emit = true;
+        // One single frame
+        emitter.update(1);
+        emitter.emit = false;
+        orphanEmitters.set(emitter, time.time + emitter.maxLifetime * 1000);
+    }
+});
+
 const HitEmitterSystem = new System({
     name: "HitEmitterSystem",
     events: [ProjectileCollisionEvent],
@@ -216,6 +242,7 @@ export const ParticlesPlugin: Plugin = {
         world.addSystem(TrailEmitterCleanup);
         world.addSystem(OrphanEmittersSystem);
         world.addSystem(HitEmitterSystem);
+        world.addSystem(AsteroidBreakEmitterSystem);
     },
     remove(world) {
         world.removeSystem(TrailParticlesProvider);

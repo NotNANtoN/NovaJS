@@ -60,6 +60,8 @@ export class AnimationGraphic {
             sprite.pixiSprite.tint = 0xFFFFFF;
             sprite.pixiSprite.alpha = 1;
         }
+        // The container's alpha may have been faded (debris).
+        this.container.alpha = 1;
         this.wrappedProgress = 0;
         this.rotation = 0;
     }

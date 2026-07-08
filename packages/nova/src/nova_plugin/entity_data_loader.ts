@@ -3,6 +3,7 @@ import { decodeWireEntity, WireWorldSnapshot } from "nova_ecs/plugins/snapshot_p
 import { deriveEntityComponents } from "./entity_factory.js";
 import { World } from "nova_ecs/world";
 import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
+import { AsteroidComponent, loadAsteroidGameData } from "./asteroid_plugin.js";
 import { WeaponEntries } from "./fire_weapon_plugin.js";
 import { SimulationGameDataResource } from "./game_data_resource.js";
 import { PlanetComponent } from "./planet_plugin.js";
@@ -89,7 +90,8 @@ async function loadAnimationGameData(gameData: SimulationGameDataInterface,
 export async function loadEntityGameData(world: World, entity: Entity) {
     const ship = entity.components.get(ShipComponent);
     const planet = entity.components.get(PlanetComponent);
-    if (!ship && !planet) {
+    const asteroid = entity.components.get(AsteroidComponent);
+    if (!ship && !planet && !asteroid) {
         return;
     }
     const gameData = world.resources.get(SimulationGameDataResource);
@@ -103,6 +105,10 @@ export async function loadEntityGameData(world: World, entity: Entity) {
     }
     if (planet) {
         await gameData.data.Planet.get(planet.id);
+    }
+    if (asteroid) {
+        // Includes the fragment closure, so breakup stays synchronous.
+        await loadAsteroidGameData(gameData, asteroid.id);
     }
 
     // Prime the lazily-constructed weapon entries so the first shot of
