@@ -6,6 +6,8 @@ import { fnv1a } from "nova_ecs/plugins/world_hash";
 import { World } from "nova_ecs/world";
 import { completeEntity } from "./entity_data_loader.js";
 import { configureSnapshotPolicies } from "./snapshot_policies.js";
+import { DEFAULT_MISSILE_GUIDANCE, MissileGuidanceResource } from "./guidance.js";
+import { SystemInterferenceResource } from "./jamming_plugin.js";
 import { IdFactory, IdFactoryResource } from "./id_factory.js";
 import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
 import { spawnAsteroids } from "./asteroid_plugin.js";
@@ -30,6 +32,13 @@ export async function makeSystem(systemId: string, gameData: SimulationGameDataI
     // while identical runs stay identical.
     world.resources.set(RandomResource, new Random(fnv1a(systemId)));
     world.resources.set(IdFactoryResource, new IdFactory());
+    // Guided-missile steering mode. Set here (the deterministic World builder
+    // that every client and the server's RoomArchive run) so it is identical
+    // for every peer in a room, satisfying the rollback determinism
+    // constraint. To change the game-wide default, edit
+    // DEFAULT_MISSILE_GUIDANCE in guidance.ts ('smart' = hard-to-dodge
+    // leading missiles; 'simple' = dodgeable point-at-current-position).
+    world.resources.set(MissileGuidanceResource, { mode: DEFAULT_MISSILE_GUIDANCE });
     if (platformOverride) {
         world.resources.set(PlatformResource, platformOverride);
     }
@@ -46,6 +55,11 @@ export async function makeSystem(systemId: string, gameData: SimulationGameDataI
     // simulation must not resolve data asynchronously mid-simulation,
     // so all entities are fully loaded before they are inserted.
     const systemData = await gameData.data.System.get(systemId);
+    // The system's inherent sensor interference degrades radar-guided missiles
+    // (see jamming_plugin.ts). Set deterministically here, before the world
+    // steps, so it is identical for every peer in a room.
+    world.resources.set(SystemInterferenceResource,
+        { interference: systemData.interference });
     for (const planetId of systemData.planets) {
         const planetData = await gameData.data.Planet.get(planetId);
         const planet = makePlanet(planetData);

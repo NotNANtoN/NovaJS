@@ -24,7 +24,8 @@ import { CreateTime } from './create_time.js';
 import { DamagedEvent, ZeroArmorEvent } from './death_plugin.js';
 import { FireSubs, OwnerComponent, SourceComponent, SubCounts, VulnerableToPD, WeaponConstructors, WeaponEntry } from './fire_weapon_plugin.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
-import { firstOrderWithFallback, Guidance, GuidanceComponent } from './guidance.js';
+import { guidanceAngle, Guidance, GuidanceComponent, MissileGuidanceResource } from './guidance.js';
+import { JamSteerComponent, MissileJammingSystem } from './jamming_plugin.js';
 import { ArmorComponent, ShieldComponent } from './health_plugin.js';
 import { ProjectileBlastHull, ProjectileComponent, ProjectileDataComponent } from './projectile_data.js';
 import { SoundEvent } from './sound_plugin.js';
@@ -204,9 +205,20 @@ const ProjectileLifespanSystem = new System({
 
 const ProjectileGuidanceSystem = new System({
     name: 'ProjectileGuidanceSystem',
+    // Runs after MissileJammingSystem so a jammed missile's per-frame steer
+    // override / retarget is already in place when we compute the aim.
+    after: [MissileJammingSystem],
     args: [MovementStateComponent, TargetComponent,
-        Entities, ProjectileDataComponent] as const,
-    step(movementState, { target }, entities, projectileData) {
+        Entities, ProjectileDataComponent, MissileGuidanceResource,
+        Optional(JamSteerComponent)] as const,
+    step(movementState, { target }, entities, projectileData, guidanceMode,
+        jamSteer) {
+        // Jamming may have told this missile to fly straight this frame (lost
+        // lock, no special seeker behaviour): ignore the target entirely.
+        if (jamSteer === 'flyStraight') {
+            movementState.turnTo = null;
+            return;
+        }
         if (!target) {
             return;
         }
@@ -217,8 +229,22 @@ const ProjectileGuidanceSystem = new System({
             return;
         }
 
-        movementState.turnTo = firstOrderWithFallback(movementState.position, movementState.velocity,
-            targetMovement.position, targetMovement.velocity, projectileData.shotSpeed)
+        // 'smart' leads the target (hard to dodge); 'simple' just points at
+        // the target's current position (dodgeable by circling). The mode is
+        // a room-wide deterministic resource; see guidance.ts.
+        let aim = guidanceAngle(guidanceMode.mode,
+            movementState.position, movementState.velocity,
+            targetMovement.position, targetMovement.velocity,
+            projectileData.shotSpeed);
+
+        // A jammed 'turns away if jammed' missile veers off: aim 180 degrees
+        // away from where it would otherwise steer, so it peels away from the
+        // target this frame.
+        if (jamSteer === 'veerAway') {
+            aim = aim.add(Math.PI);
+        }
+
+        movementState.turnTo = aim;
     }
 });
 

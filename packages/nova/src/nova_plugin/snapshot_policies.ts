@@ -23,6 +23,7 @@ import { ExplodingComponent } from "./death_plugin.js";
 import { ChooseRandomTargetComponent, DeathAIComponent, FollowComponent, ShootAllWeaponsComponent } from "./npc_plugin.js";
 import { ReturnToQueueComponent } from "./return_to_queue_plugin.js";
 import { GuidanceComponent } from "./guidance.js";
+import { DecoyTargetComponent } from "./jamming_plugin.js";
 import { TargetIndexComponent } from "./target_plugin.js";
 import { ShipPhysicsComponent } from "./ship_plugin.js";
 import { SingletonComponent } from "nova_ecs/world";
@@ -88,6 +89,8 @@ export function configureSnapshotPolicies(world: World) {
     // Enum-valued; effectively immutable.
     policies.set(GuidanceComponent, { policy: 'share' });
     policies.set(SingletonComponent, { policy: 'share' });
+    // Static decoy weight (asteroids); never mutated.
+    policies.set(DecoyTargetComponent, { policy: 'share' });
 
     policies.set(TargetIndexComponent, {
         policy: 'clone',
@@ -169,6 +172,7 @@ export function configureSnapshotPolicies(world: World) {
     policies.setWire(SourceComponent, passthroughWire<string>());
     policies.setWire(BlastDamageComponent, passthroughWire());
     policies.setWire(GuidanceComponent, passthroughWire());
+    policies.setWire(DecoyTargetComponent, passthroughWire());
     policies.setWire(ExplodingComponent, passthroughWire<number>());
     policies.setWire(TargetIndexComponent, passthroughWire());
     policies.setWire(BlastDoneComponent, passthroughWire());

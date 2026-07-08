@@ -29,6 +29,7 @@ import { DamagedEvent } from './death_plugin.js';
 import { registerEntityDeriver } from './entity_factory.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { IdFactory, IdFactoryResource } from './id_factory.js';
+import { DecoyTargetComponent } from './jamming_plugin.js';
 import { OutfitsStateComponent } from './outfit_plugin.js';
 import { ProjectileDataComponent } from './projectile_data.js';
 import { ShipPhysicsComponent } from './ship_plugin.js';
@@ -269,7 +270,11 @@ export function makeAsteroid(gameData: SimulationGameDataInterface,
         ]))
         .addComponent(CollisionVulnerabilityComponent, {
             vulnerableTo: new Set(['normal']),
-        });
+        })
+        // Jammed missiles with the "decoyed by asteroids" seeker flag
+        // retarget onto the nearest decoy (see findNearestDecoy in
+        // jamming_plugin.ts).
+        .addComponent(DecoyTargetComponent, { weight: 1 });
 }
 
 function makeDebris(data: AsteroidData, random: Random, position: Position,

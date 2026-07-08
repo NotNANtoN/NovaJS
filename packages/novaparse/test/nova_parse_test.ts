@@ -164,6 +164,37 @@ describe("NovaParse", () => {
         });
     });
 
+    it("Should plumb per-type jamming strength into OutfitData", async () => {
+        // The fixture outfits carry no jamming ModTypes, so they should parse
+        // to all-zero strengths. This exercises the plumbing (field present and
+        // correctly shaped) without depending on stock jammer outfits.
+        const o131: OutfitData = await np.data.Outfit.get("nova:131");
+        expect(o131.jamming).toEqual([0, 0, 0, 0]);
+    });
+
+    it("Should plumb jam vulnerabilities and seeker flags into ProjectileWeaponData", async () => {
+        const w132: WeaponData = await np.data.Weapon.get("nova:132");
+        if (w132.type !== "ProjectileWeaponData") {
+            fail("Expected w132 to be a projectile weapon");
+            return;
+        }
+        // w132 is unguided in the fixture, so it carries no jamming
+        // vulnerabilities; the important thing here is that the fields exist
+        // and are shaped correctly (four clamped percentages + decoded flags).
+        expect(w132.jamVulnerabilities.length).toEqual(4);
+        for (const v of w132.jamVulnerabilities) {
+            expect(v).toBeGreaterThanOrEqual(0);
+            expect(v).toBeLessThanOrEqual(100);
+        }
+        expect(w132.seeker).toEqual({
+            passOverAsteroids: jasmine.any(Boolean),
+            decoyedByAsteroids: jasmine.any(Boolean),
+            confusedByInterference: jasmine.any(Boolean),
+            turnsAwayIfJammed: jasmine.any(Boolean),
+            attackParentIfJammed: jasmine.any(Boolean),
+        });
+    });
+
     it("Should parse projectileWeapon", async () => {
         const w132: WeaponData = await np.data.Weapon.get("nova:132");
 
@@ -298,6 +329,15 @@ describe("NovaParse", () => {
     it("Should parse system planets", async () => {
         const s128 = await np.data.System.get("nova:128");
         expect(s128.planets).toEqual(['nova:128', 'nova:189', 'nova:194']);
+    });
+
+    it("Should plumb murk, interference, and background color into SystemData", async () => {
+        const s128 = await np.data.System.get("nova:128");
+        // The test fixture's system 128 is a plain system with none of these
+        // hazard fields set; they must still be present and default to zero.
+        expect(s128.murk).toBe(0);
+        expect(s128.interference).toBe(0);
+        expect(s128.backgroundColor).toBe(0);
     });
 
     it("Should parse planet position", async () => {

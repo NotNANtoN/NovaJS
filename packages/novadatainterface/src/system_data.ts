@@ -14,6 +14,24 @@ export interface SystemData extends BaseData {
     asteroids: number,
     /** Global ids of the asteroid types that appear in this system. */
     asteroidTypes: Array<string>,
+
+    /**
+     * How murky (hazy) the system is, from 0 to 100. Zero renders normally;
+     * higher values fog the view. A value below zero is equivalent to zero
+     * murk but also hides the starfield. See the EVN Bible's sÿst docs.
+     */
+    murk: number,
+
+    /**
+     * How thick the sensor static in the system is, from 0 to 100. Zero is a
+     * clear radar; 100 is a complete sensor blackout.
+     */
+    interference: number,
+
+    /**
+     * The system's background colour as 0x00RRGGBB. Zero is pure black.
+     */
+    backgroundColor: number,
 }
 
 export function getDefaultSystemData(): SystemData {
@@ -24,5 +42,8 @@ export function getDefaultSystemData(): SystemData {
         planets: [],
         asteroids: 0,
         asteroidTypes: [],
+        murk: 0,
+        interference: 0,
+        backgroundColor: 0,
     };
 }

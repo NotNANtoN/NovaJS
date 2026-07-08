@@ -61,6 +61,9 @@ export async function SystemParse(syst: SystResource, notFoundFunction: (m: stri
         planets,
         asteroids: syst.asteroids,
         asteroidTypes,
+        murk: syst.murk,
+        interference: syst.interference,
+        backgroundColor: syst.backgroundColor,
     }
 
 }
