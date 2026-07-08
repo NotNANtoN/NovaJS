@@ -1,22 +1,27 @@
 import * as t from 'io-ts';
-import { WeaponData } from 'novadatainterface/weapon_data';
+import { AmmoType, WeaponData } from 'novadatainterface/weapon_data';
 import { Emit, UUID } from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
 import { Entity } from 'nova_ecs/entity';
 import { EcsEvent } from 'nova_ecs/events';
+import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
 import { SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
 import { Time, TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { Provide } from 'nova_ecs/provide';
 import { System } from 'nova_ecs/system';
+import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { registerSimulationBridgeEvent } from '../communication/simulation_bridge_events.js';
 import { mod } from '../util/mod.js';
 import { ControlledByComponent, ShipControlEvent, ShipControlStateComponent } from './ship_control.js';
 import { WeaponEntries, WeaponLocalState, WeaponsComponent } from './fire_weapon_plugin.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
+import { FuelComponent } from './health_plugin.js';
+import { OutfitsState, OutfitsStateComponent } from './outfit_plugin.js';
 import { PlatformResource } from './platform_plugin.js';
 import { PlayerShipSelector } from './player_ship_plugin.js';
+import { Stat } from './stat.js';
 import { WeaponsState, WeaponsStateComponent, WeaponState } from './weapons_state.js';
 
 function checkReloaded(weapon: WeaponData, localState: WeaponLocalState,
@@ -43,11 +48,68 @@ function checkReloaded(weapon: WeaponData, localState: WeaponLocalState,
     return true;
 }
 
+/**
+ * Counts the rounds available for a weapon that draws its ammo from the
+ * supply of the weapon with global id `sourceWeapon`. Ammo outfits
+ * whose data is not cached yet count as zero rounds; entities enter the
+ * simulation with their game data preloaded, so that only affects
+ * entities that bypassed staging.
+ */
+export function countAmmo(sourceWeapon: string, outfits: OutfitsState,
+    gameData: SimulationGameDataInterface): number {
+    let count = 0;
+    for (const [id, state] of outfits) {
+        if (gameData.data.Outfit.getCached(id)?.ammoFor === sourceWeapon) {
+            count += state.count;
+        }
+    }
+    return count;
+}
+
+function hasAmmo(ammoType: AmmoType, outfits: OutfitsState | undefined,
+    fuel: Stat | undefined, gameData: SimulationGameDataInterface): boolean {
+    if (ammoType === 'unlimited') {
+        return true;
+    }
+    if (ammoType[0] === 'energy') {
+        // A weapon with a fuel cost can't fire on insufficient fuel.
+        return (fuel?.current ?? 0) >= ammoType[1];
+    }
+    return outfits ? countAmmo(ammoType[1], outfits, gameData) > 0 : false;
+}
+
+function consumeAmmo(ammoType: AmmoType, outfits: OutfitsState | undefined,
+    fuel: Stat | undefined, gameData: SimulationGameDataInterface) {
+    if (ammoType === 'unlimited') {
+        return;
+    }
+    if (ammoType[0] === 'energy') {
+        if (fuel) {
+            fuel.current = Math.max(fuel.min, fuel.current - ammoType[1]);
+        }
+        return;
+    }
+    if (!outfits) {
+        return;
+    }
+    // Consume from the lowest outfit id with rounds left so every peer
+    // makes the same choice when multiple outfits hold this ammo.
+    const id = [...outfits.keys()]
+        .filter(id => gameData.data.Outfit.getCached(id)?.ammoFor === ammoType[1]
+            && outfits.get(id)!.count > 0)
+        .sort()[0];
+    if (id !== undefined) {
+        outfits.get(id)!.count--;
+    }
+}
+
 export const WeaponsSystem = new System({
     name: 'WeaponsSystem',
-    args: [WeaponsStateComponent, WeaponsComponent,
-        TimeResource, UUID, WeaponEntries] as const,
-    step(weaponsState, weaponsLocalState, time, uuid, weaponEntries) {
+    args: [WeaponsStateComponent, WeaponsComponent, TimeResource, UUID,
+        WeaponEntries, Optional(OutfitsStateComponent), Optional(FuelComponent),
+        SimulationGameDataResource] as const,
+    step(weaponsState, weaponsLocalState, time, uuid, weaponEntries,
+        outfits, fuel, gameData) {
         for (const [id, state] of weaponsState) {
             const weapon = weaponEntries.getCached(id);
             if (!weapon) {
@@ -65,13 +127,33 @@ export const WeaponsSystem = new System({
                 continue;
             }
 
+            // 'Only use ammo at end of burst cycle': shots after the
+            // first of a burst neither require nor consume ammo.
+            const ammoType = weapon.data.ammoType;
+            const usesAmmo = !('oneAmmoPerBurst' in weapon.data
+                && weapon.data.oneAmmoPerBurst)
+                || localState.burstCount === 0;
+
             let fired: Entity | undefined = undefined;
             if (weapon.data.fireSimultaneously) {
                 for (let i = 0; i < state.count; i++) {
-                    fired = weapon.fireFromEntity(uuid) || fired;
+                    if (usesAmmo && !hasAmmo(ammoType, outfits, fuel, gameData)) {
+                        break;
+                    }
+                    const shot = weapon.fireFromEntity(uuid);
+                    if (shot && usesAmmo) {
+                        consumeAmmo(ammoType, outfits, fuel, gameData);
+                    }
+                    fired = shot || fired;
                 }
             } else {
+                if (usesAmmo && !hasAmmo(ammoType, outfits, fuel, gameData)) {
+                    continue;
+                }
                 fired = weapon.fireFromEntity(uuid);
+                if (fired && usesAmmo) {
+                    consumeAmmo(ammoType, outfits, fuel, gameData);
+                }
             }
 
             if (fired) {

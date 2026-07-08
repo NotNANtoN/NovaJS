@@ -2,6 +2,7 @@ import { Animation, getDefaultAnimation } from "novadatainterface/animation";
 import { BaseData } from "novadatainterface/base_data";
 import { getDefaultPictData } from "novadatainterface/pict_data";
 import { ShipData, ShipPhysics } from "novadatainterface/ship_data";
+import { BayGuidanceSet } from "novadatainterface/weapon_data";
 import { NovaResources } from "../resource_parsers/resource_holder_base.js";
 import { ShipResource } from "../resource_parsers/ship_resource.js";
 import { BaseParse } from "./base_parse.js";
@@ -11,14 +12,18 @@ import { ShanParse } from "./shan_parse.js";
 
 export type ShipPictMap = Promise<{ [index: string]: string }>;
 export type WeaponOutfitMap = ShipPictMap;
+/** Maps a weapon's global id to the outfit that is its ammo. */
+export type AmmoOutfitMap = ShipPictMap;
 
 export function ShipParseClosure(shipPictMap: ShipPictMap,
     weaponOutfitMap: WeaponOutfitMap,
+    ammoOutfitMap: AmmoOutfitMap,
     globalIDSpacePromise: Promise<NovaResources | Error>): (s: ShipResource, m: (message: string) => void) => Promise<ShipData> {
 
     // Returns the function ShipParse with shipPictMap already assigned
     return function(ship: ShipResource, notFoundFunction: (m: string) => void) {
-        return ShipParse(ship, notFoundFunction, shipPictMap, weaponOutfitMap, globalIDSpacePromise);
+        return ShipParse(ship, notFoundFunction, shipPictMap, weaponOutfitMap,
+            ammoOutfitMap, globalIDSpacePromise);
     }
 
 }
@@ -27,6 +32,7 @@ export async function ShipParse(ship: ShipResource,
     notFoundFunction: (message: string) => void,
     shipPictMap: ShipPictMap,
     weaponOutfitMap: WeaponOutfitMap,
+    ammoOutfitMap: AmmoOutfitMap,
     globalIDSpacePromise: Promise<NovaResources | Error>): Promise<ShipData> {
 
     var globalIDSpace = await globalIDSpacePromise;
@@ -147,6 +153,24 @@ export async function ShipParse(ship: ShipResource,
             outfits[outfitID] = 0;
         }
         outfits[outfitID] += count;
+
+        // The stock ammo load (AmmoLoad) becomes that many of the
+        // weapon's ammo outfit. It is ignored for weapons that don't
+        // draw ammo from an outfit.
+        if (w.ammo > 0) {
+            var ammoOutfitID = (await ammoOutfitMap)[globalID];
+            if (ammoOutfitID) {
+                if (!outfits[ammoOutfitID]) {
+                    outfits[ammoOutfitID] = 0;
+                }
+                outfits[ammoOutfitID] += w.ammo;
+            }
+            else if (weapon.ammoType >= 0 && weapon.ammoType <= 255
+                && !BayGuidanceSet.has(weapon.guidance)) {
+                notFoundFunction("No ammo oütf for weapon of id "
+                    + weapon.globalID + " on ship of id " + base.id);
+            }
+        }
     }
 
     // The ship's free mass is mass on top of the mass of preinstalled outfits,
@@ -164,7 +188,8 @@ export async function ShipParse(ship: ShipResource,
         armor: ship.armor,
         armorRecharge: ship.armorRecharge * FPS / 1000,
         energy: ship.energy,
-        energyRecharge: FPS / ship.energyRecharge, // Frames per unit -> units per second
+        // Frames per unit -> units per second. 0 means no regeneration.
+        energyRecharge: ship.energyRecharge === 0 ? 0 : FPS / ship.energyRecharge,
         ionization: ship.ionization,
         deionize: ship.deionize / 100 * FPS, // 100 is 1 point of ion energy per 1/30th of a second (evn bible)
         speed: ship.speed, // TODO: Figure out the correct scaling factor for these
@@ -176,6 +201,8 @@ export async function ShipParse(ship: ShipResource,
         freeCargo: ship.cargoSpace,
         maxGuns: ship.maxGuns,
         maxTurrets: ship.maxTurrets,
+        // Afterburners come from outfits (ModType 15), not ship data.
+        afterburner: 0,
     }
 
     return {

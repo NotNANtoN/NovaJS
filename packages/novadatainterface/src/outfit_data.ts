@@ -40,7 +40,8 @@ export interface OutfitData extends BaseData {
     cantSell: boolean,
     /**
      * The globalID of the weapon whose ammo supply this item fills, or
-     * null if this isn't ammunition. Whether the item requires a
+     * null if this isn't ammunition. Each item of the outfit is one
+     * round of that weapon's ammo. Whether the item requires a
      * launcher to buy depends on that weapon's maxAmmo.
      */
     ammoFor: string | null,

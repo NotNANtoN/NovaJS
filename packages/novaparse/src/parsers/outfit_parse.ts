@@ -49,6 +49,8 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
             weapons[weaponGlobalID] += 1;
         }
         else if (fType === "ammunition") {
+            // Each item of this outfit is one round of ammo for the
+            // weapon with the given id.
             if (typeof fVal !== "number") {
                 throw new Error("Wrong type for ammunition val. Expected number");
             }
@@ -69,6 +71,13 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
                 continue;
             }
             increasesMax = maxOutf.globalID;
+        }
+        else if (fType === "afterburner") {
+            // ModVal is fuel units burned per second of afterburner use.
+            if (typeof fVal !== "number") {
+                throw new Error("Wrong type. Expected number");
+            }
+            physics.afterburner = fVal;
         }
         else if (noUnitConversion.has(fType)) {
             //else if (fType === "freeCargo") {
@@ -98,7 +107,9 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
             if (typeof fVal !== "number") {
                 throw new Error("Wrong type. Expected number");
             }
-            physics[fType] = FPS / fVal;
+            // Frames per unit of fuel -> units per second. Negative
+            // values are 'fuel sucking' mode and drain instead.
+            physics[fType] = fVal === 0 ? 0 : FPS / fVal;
         } else if (fType === "speed") {
             if (typeof fVal !== "number") {
                 throw new Error("Wrong type. Expected number");

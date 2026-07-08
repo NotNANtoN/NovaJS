@@ -20,7 +20,7 @@ import { OutfitParse } from "./parsers/outfit_parse.js";
 import { PictImageMulti, PictImageMultiParse } from "./parsers/pict_parse.js";
 import { PlanetParse } from "./parsers/planet_parse.js";
 import { resourceIDNotFoundStrict, resourceIDNotFoundWarn } from "./parsers/resource_id_not_found.js";
-import { ShipParseClosure, ShipPictMap, WeaponOutfitMap } from "./parsers/ship_parse.js";
+import { AmmoOutfitMap, ShipParseClosure, ShipPictMap, WeaponOutfitMap } from "./parsers/ship_parse.js";
 import { SpriteSheetMulti, SpriteSheetMultiParse } from "./parsers/sprite_sheet_multi_parse.js";
 import { StatusBarParse } from "./parsers/status_bar_parse.js";
 import { SystemParse } from "./parsers/system_parse.js";
@@ -57,6 +57,7 @@ export class NovaParse implements GameDataInterface {
 
     private shipPICTMap: ShipPictMap;
     private weaponOutfitMap: WeaponOutfitMap;
+    private ammoOutfitMap: AmmoOutfitMap;
     resourceNotFoundFunction: (message: string) => void;
     public data: NovaDataInterface;
     path: string
@@ -92,7 +93,9 @@ export class NovaParse implements GameDataInterface {
 
         this.shipPICTMap = this.makeShipPictMap();
         this.weaponOutfitMap = this.makeWeaponOutfitMap();
-        this.shipParser = ShipParseClosure(this.shipPICTMap, this.weaponOutfitMap, this.idSpace);
+        this.ammoOutfitMap = this.makeAmmoOutfitMap();
+        this.shipParser = ShipParseClosure(this.shipPICTMap,
+            this.weaponOutfitMap, this.ammoOutfitMap, this.idSpace);
 
 
         // Holds spriteSheetMulti which gets split up
@@ -279,6 +282,24 @@ export class NovaParse implements GameDataInterface {
             }
         }
         return weaponOutfitMap;
+    }
+
+    private async makeAmmoOutfitMap(): AmmoOutfitMap {
+        var idSpace = await this.idSpace;
+        if (idSpace instanceof Error) {
+            return {};
+        }
+
+        // Maps a weapon to the first outfit that is its ammo.
+        var ammoOutfitMap: { [index: string]: string } = {};
+
+        for (let outfitID in idSpace.oütf) {
+            var outfit = await this.data.Outfit.get(outfitID);
+            if (outfit.ammoFor && !(ammoOutfitMap[outfit.ammoFor])) {
+                ammoOutfitMap[outfit.ammoFor] = outfitID;
+            }
+        }
+        return ammoOutfitMap;
     }
 
     private async getSpriteSheetData(id: string): Promise<SpriteSheetData> {

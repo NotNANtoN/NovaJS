@@ -10,6 +10,33 @@ import { FPS, ShipTurnRateConversionFactor } from "./constants.js";
 
 export const WEAP_SPEED_FACTOR = 3 / 10;
 
+function AmmoTypeParse(weap: WeapResource, notFoundFunction: (m: string) => void, base: BaseData): AmmoType {
+    // For bay weapons, the AmmoType field is the carried ship's id
+    // (parsed in BayWeaponParse), not an ammo source.
+    if (BayGuidanceSet.has(weap.guidance)) {
+        return "unlimited";
+    }
+    if (weap.ammoType >= 0 && weap.ammoType <= 255) {
+        // Draws ammo from the supply of wëap id 128 + AmmoType (usually
+        // the weapon itself). Ammo outfits reference the same weapon
+        // via their `ammoFor` field.
+        const ammoWeapon = weap.idSpace.wëap[weap.ammoType + 128];
+        if (!ammoWeapon) {
+            notFoundFunction(`Missing wëap ${weap.ammoType + 128} for`
+                + ` the ammo supply of wëap ${base.id}`);
+            return "unlimited";
+        }
+        return ["weapon", ammoWeapon.globalID];
+    }
+    if (weap.ammoType <= -1000) {
+        // 10 raw units = 1 unit of fuel per shot, e.g. -1005 is 0.5
+        // units per shot.
+        return ["energy", Math.abs(weap.ammoType + 1000) / 10];
+    }
+    // -1 (unlimited) and -999 (destroys ship; see destroyShipWhenFiring).
+    return "unlimited";
+}
+
 async function BaseWeaponParse(weap: WeapResource, notFoundFunction: (m: string) => void, base: BaseData): Promise<BaseWeaponData> {
     // Parse the weapon's sound
     let sound: string | undefined;
@@ -20,30 +47,10 @@ async function BaseWeaponParse(weap: WeapResource, notFoundFunction: (m: string)
         }
     }
 
-    // For a fighter bay, weap.ammoType is the carried ship's ID
-    // instead (see BayWeaponParse).
-    let ammoType: AmmoType = "unlimited";
-    if (!BayGuidanceSet.has(weap.guidance)) {
-        if (weap.ammoType >= 0 && weap.ammoType <= 255) {
-            // Draws ammo from this weapon type's supply.
-            const source = weap.idSpace.wëap[weap.ammoType + 128];
-            if (source) {
-                ammoType = ["weapon", source.globalID];
-            }
-            else {
-                notFoundFunction(`Missing ammo wëap ${weap.ammoType + 128} for wëap ${base.id}`);
-            }
-        }
-        else if (weap.ammoType <= -1000) {
-            // Uses abs(AmmoType + 1000) / 10 units of fuel per shot.
-            ammoType = ["energy", Math.abs(weap.ammoType + 1000) / 10];
-        }
-    }
-
     return {
         ...base,
         accuracy: weap.accuracy,
-        ammoType,
+        ammoType: AmmoTypeParse(weap, notFoundFunction, base),
         maxAmmo: Math.max(weap.maxAmmo, 0),
         burstCount: Math.max(weap.burstCount, 0),
         burstReload: weap.burstReload / FPS * 1000,

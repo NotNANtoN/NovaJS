@@ -206,6 +206,17 @@ describe("NovaParse", () => {
         }
     });
 
+    it("Should parse ammoType", async () => {
+        const w132: WeaponData = await np.data.Weapon.get("nova:132");
+        // AmmoType -1 doesn't use ammo.
+        expect(w132.ammoType).toEqual("unlimited");
+
+        // AmmoType -1540 consumes abs(-1540 + 1000) / 10 units of fuel
+        // per shot.
+        const w133: WeaponData = await np.data.Weapon.get("nova:133");
+        expect(w133.ammoType).toEqual(["energy", 54]);
+    });
+
     it("Should parse beamWeapon", async () => {
         const w133: WeaponData = await np.data.Weapon.get("nova:133");
         if (w133.type !== "BeamWeaponData") {

@@ -6,6 +6,9 @@ export interface ShipPhysics extends SpaceObjectPhysics {
     freeCargo: number;
     maxGuns: number;
     maxTurrets: number;
+    // Fuel burned per second while the afterburner is engaged.
+    // 0 means the ship has no afterburner.
+    afterburner: number;
 }
 
 export function getDefaultShipPhysics(): ShipPhysics {
@@ -14,7 +17,8 @@ export function getDefaultShipPhysics(): ShipPhysics {
         freeMass: 0,
         freeCargo: 0,
         maxGuns: 0,
-        maxTurrets: 0
+        maxTurrets: 0,
+        afterburner: 0
     }
 }
 

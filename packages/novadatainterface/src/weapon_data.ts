@@ -81,9 +81,14 @@ export function getDefaultBeamAnimation(): BeamAnimation {
 
 
 /**
- * What a weapon consumes per shot: nothing, fuel ("energy", units per
- * shot), or ammunition drawn from the supply of the weapon type with
- * the given globalID (usually the weapon's own).
+ * What a weapon consumes per shot (EVN Bible wëap AmmoType):
+ * - "unlimited": no ammo tracking (AmmoType -1; also bays and
+ *   destroys-ship weapons, which handle their "ammo" separately).
+ * - ["energy", n]: consumes n units of fuel per shot (AmmoType -1000
+ *   and below; 10 raw units = 1 unit of fuel).
+ * - ["weapon", id]: draws ammo from the supply of the weapon with this
+ *   global id (AmmoType 0-255). Ammo outfits declare which weapon's
+ *   supply they hold via OutfitData.ammoFor.
  */
 export type AmmoType = "unlimited" | ["energy", number] | ["weapon", string];
 

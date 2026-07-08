@@ -16,7 +16,7 @@ import { TargetComponent } from './target_component.js';
 // Applies a ship's held-control state to its movement. Runs for every
 // controlled ship, local or remote: per-peer input application updates
 // each ship's ShipControlStateComponent from that peer's input records.
-const ControlShipSystem = new System({
+export const ControlShipSystem = new System({
     name: 'ControlPlayerShip',
     args: [ShipControlStateComponent, MovementStateComponent,
         MovementPhysicsComponent, TargetComponent] as const,
