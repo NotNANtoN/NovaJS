@@ -1,0 +1,312 @@
+import { BeamWeaponData, WeaponData } from 'novadatainterface/weapon_data';
+import { EmitNow, Entities, RunQueryFunction, UUID } from 'nova_ecs/arg_types';
+import { Component } from 'nova_ecs/component';
+import { Angle } from 'nova_ecs/datatypes/angle';
+import { Position } from 'nova_ecs/datatypes/position';
+import { Vector } from 'nova_ecs/datatypes/vector';
+import { Entity } from 'nova_ecs/entity';
+import { Optional } from 'nova_ecs/optional';
+import { Plugin } from 'nova_ecs/plugin';
+import { MovementState, MovementStateComponent, MovementSystem } from 'nova_ecs/plugins/movement_plugin';
+import { passthroughType, SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
+import { RandomResource } from 'nova_ecs/plugins/random_plugin';
+import { TimeResource } from 'nova_ecs/plugins/time_plugin';
+import { Query } from 'nova_ecs/query';
+import { System } from 'nova_ecs/system';
+import SAT from "sat";
+import { CollisionSystem, CompositeHull, HitboxHullComponent, HurtboxHullComponent, UpdateHitboxHullSystem } from './collisions_plugin.js';
+import { CollisionEvent, CollisionHitterComponent } from './collision_interaction.js';
+import { CreateTime, CreateTimeArgProvider } from './create_time.js';
+import { DamagedEvent } from './death_plugin.js';
+import { applyExitPoint, ExitPointData } from './exit_point.js';
+import { FireSubs, OwnerComponent, sampleInaccuracy, SourceComponent, WeaponConstructors, WeaponEntry } from './fire_weapon_plugin.js';
+import { zeroOrderGuidance } from './guidance.js';
+import { SoundEvent } from './sound_plugin.js';
+import { TargetComponent } from './target_component.js';
+import { WeaponsSystem } from './weapon_plugin.js';
+
+
+interface BeamState {
+    pointToTarget?: boolean,
+    exitPointData?: ExitPointData,
+    hitDist?: number;
+    targetHit?: string;
+}
+
+export const BeamStateComponent = new Component<BeamState>('BeamState');
+export const BeamDataComponent = new Component<BeamWeaponData>('BeamData');
+
+const BeamSubsQuery = new Query([MovementStateComponent] as const);
+
+class BeamWeaponEntry extends WeaponEntry {
+    declare data: BeamWeaponData;
+    protected pointDefenseRangeSquared: number;
+
+    private hitTypes: Set<string>;
+    constructor(data: WeaponData, runQuery: RunQueryFunction) {
+        if (data.type !== 'BeamWeaponData') {
+            throw new Error('Data must be BeamWeaponData');
+        }
+        super(data, runQuery);
+        this.pointDefenseRangeSquared = data.beamAnimation.length ** 2;
+
+        this.hitTypes = new Set(['normal']);
+        if (data.guidance === 'pointDefenseBeam') {
+            this.hitTypes = new Set(['pointDefense']);
+        }
+    }
+
+    protected override guidance(exitPoint: Position, _movement: MovementState,
+        targetMovement: MovementState) {
+        return zeroOrderGuidance(exitPoint, targetMovement.position);
+    }
+
+    fire(position: Position, angle: Angle, owner?: string, target?: string,
+        source?: string, _sourceVelocity?: Vector, exitPointData?: ExitPointData): Entity {
+        const { width, length } = this.data.beamAnimation;
+        const beamPoly = new SAT.Polygon(new SAT.Vector(0, 0), [
+            new SAT.Vector(-width / 2, 0),
+            new SAT.Vector(-width / 2, -length),
+            new SAT.Vector(width / 2, -length),
+            new SAT.Vector(width / 2, 0),
+        ]);
+
+        const beam = new Entity()
+            .setName(this.data.name)
+            .addComponent(MovementStateComponent, {
+                position,
+                rotation: angle,
+                velocity: new Vector(0, 0),
+                accelerating: 0,
+                turnBack: false,
+                turning: 0,
+            }).addComponent(CollisionHitterComponent, {
+                hitTypes: this.hitTypes,
+            }).addComponent(HurtboxHullComponent, new CompositeHull([beamPoly])
+            ).addComponent(BeamStateComponent, {
+                exitPointData,
+                pointToTarget: this.data.guidance === "beamTurret" ||
+                    this.data.guidance === "pointDefenseBeam",
+            }).addComponent(BeamDataComponent, this.data);
+
+        if (target) {
+            beam.addComponent(TargetComponent, { target });
+        }
+
+        if (owner) {
+            beam.addComponent(OwnerComponent, { owner });
+        }
+        if (source) {
+            beam.addComponent(SourceComponent, source);
+        }
+
+        if (this.data.sound) {
+            this.emit(SoundEvent, {
+                id: this.data.sound,
+                loop: this.data.loopSound,
+            });
+        }
+        this.entities.set(this.ids.next('beam'), beam);
+        return beam;
+    }
+
+    override fireSubs(source: string, sourceExpired = false) {
+        const [{ position, rotation }] = this.runQuery(BeamSubsQuery, source)[0];
+        const endOfBeam = position.add(rotation.getUnitVector()
+            .scale(this.data.beamAnimation.length)) as Position;
+        return super.fireSubs(source, sourceExpired, endOfBeam);
+    }
+}
+
+export const BeamSystem = new System({
+    name: 'BeamSystem',
+    before: [UpdateHitboxHullSystem],
+    after: [MovementSystem, WeaponsSystem],
+    args: [BeamDataComponent, BeamStateComponent, MovementStateComponent, FireSubs,
+        CreateTimeArgProvider, TimeResource, UUID, Entities, Optional(SourceComponent),
+        Optional(TargetComponent), RandomResource] as const,
+    step(beamData, beamState, movement, fireSubs, fireTime, { time }, uuid,
+        entities, source, target, random) {
+        const timeSinceFire = time - fireTime;
+        if (timeSinceFire > beamData.shotDuration) {
+            fireSubs(beamData.id, uuid, true);
+            entities.delete(uuid);
+        }
+
+        if (source) {
+            const parent = entities.get(source);
+            const parentMovement = parent?.components
+                .get(MovementStateComponent);
+            if (parentMovement) {
+                movement.position =
+                    Position.fromVectorLike(parentMovement.position);
+                movement.rotation =
+                    Angle.fromAngleLike(parentMovement.rotation);
+
+                if (beamState.exitPointData) {
+                    const exitPoint = applyExitPoint(beamState.exitPointData,
+                        parentMovement.rotation)
+
+                    movement.position = movement.position.add(exitPoint) as Position;
+                }
+            }
+        }
+
+        if (beamState.pointToTarget && target?.target) {
+            const otherPos = entities.get(target.target)?.components
+                .get(MovementStateComponent)?.position;
+            if (otherPos) {
+                movement.rotation = zeroOrderGuidance(movement.position, otherPos);
+            }
+        }
+        movement.rotation = movement.rotation.add(sampleInaccuracy(beamData.accuracy, random));
+    }
+});
+
+export const BeamResetSystem = new System({
+    name: "BeamResetSystem",
+    args: [BeamStateComponent] as const,
+    step: (state) => {
+        state.hitDist = undefined;
+        state.targetHit = undefined;
+    },
+    before: [CollisionSystem], // Before collisions so we clear previous frame's hits
+});
+
+// Based on: https://stackoverflow.com/questions/563198/how-do-you-detect-where-two-line-segments-intersect
+function getIntersection(r0: Vector, r1: Vector, a0: Vector, a1: Vector): number {
+    const s1 = r1.subtract(r0);
+    const s2 = a1.subtract(a0);
+
+    const s = (-s1.y * (r0.x - a0.x) + s1.x * (r0.y - a0.y)) / (-s2.x * s1.y + s1.x * s2.y);
+    const t = (s2.x * (r0.y - a0.y) - s2.y * (r0.x - a0.x)) / (-s2.x * s1.y + s1.x * s2.y);
+
+    if (s >= 0 && s <= 1 && t >= 0 && t <= 1) {
+        // Collision detected
+        return t; // t is the distance along the ray (fraction of beam length if ray is beam segment)
+    }
+
+    return Infinity; // No collision
+}
+
+const BeamCollisionSystem = new System({
+    name: 'BeamCollisionSystem',
+    events: [CollisionEvent],
+    args: [CollisionEvent, Entities, Optional(OwnerComponent),
+        BeamDataComponent, BeamStateComponent, MovementStateComponent,
+        Optional(SourceComponent)] as const,
+    step(collision, entities, owner, beamData, beamState, movement, source) {
+
+        const other = entities.get(collision.other);
+        if (!other) {
+            return;
+        }
+
+        const otherOwner = other.components.get(OwnerComponent);
+        if (collision.other === owner?.owner || otherOwner?.owner === owner?.owner) {
+            return;
+        }
+
+        const otherHull = other.components.get(HitboxHullComponent);
+        if (!otherHull) {
+            return;
+        }
+
+        // Raycast against the hull
+        const start = movement.position;
+        const beamVector = movement.rotation.getUnitVector().scale(beamData.beamAnimation.length);
+        const end = start.add(beamVector);
+
+        let minT = Infinity;
+        for (const shape of otherHull.shapes) {
+            // Check each edge of the polygon
+            if (shape instanceof SAT.Polygon) {
+                const points = shape.points.map(
+                    v => Vector.fromVectorLike(v)
+                        .rotate(shape.angle)
+                        .add(shape.pos));
+
+                for (let i = 0; i < points.length; i++) {
+                    const p1 = points[i];
+                    const p2 = points[(i + 1) % points.length];
+                    const t = getIntersection(start, end, p1, p2);
+                    if (t < minT) {
+                        minT = t;
+                    }
+                }
+            } else if (shape instanceof SAT.Circle) {
+                // Ray circle intersection
+                // Math based on: https://math.stackexchange.com/questions/311921/get-location-of-vector-circle-intersection
+                const r = shape.r;
+                const c = new Vector(shape.pos.x, shape.pos.y);
+                const d = beamVector; // Direction vector (full length)
+                const f = start.subtract(c);
+
+                const a = d.dot(d);
+                const b = 2 * f.dot(d);
+                const q = f.dot(f) - r * r;
+
+                const discriminant = b * b - 4 * a * q;
+                if (discriminant >= 0) {
+                    const sqrtDisc = Math.sqrt(discriminant);
+                    const t1 = (-b - sqrtDisc) / (2 * a);
+                    const t2 = (-b + sqrtDisc) / (2 * a);
+
+                    if (t1 >= 0 && t1 <= 1) {
+                        if (t1 < minT) minT = t1;
+                    }
+                    if (t2 >= 0 && t2 <= 1) {
+                        if (t2 < minT) minT = t2;
+                    }
+                }
+            }
+        }
+
+        if (minT !== Infinity) {
+            // We found a hit.
+            const distance = minT * beamData.beamAnimation.length;
+            if (beamState.hitDist === undefined || distance < beamState.hitDist) {
+                beamState.hitDist = distance;
+                beamState.targetHit = collision.other;
+            }
+        }
+    }
+});
+
+const BeamDamageSystem = new System({
+    name: 'BeamDamageSystem',
+    args: [BeamDataComponent, BeamStateComponent, CreateTimeArgProvider, EmitNow, TimeResource, UUID] as const,
+    step(beamData, beamState, fireTime, emitNow, { time, delta_ms }, uuid) {
+        if (!beamState.targetHit) {
+            return;
+        }
+
+        const timeSinceFire = time - fireTime;
+        const lastTimeSinceFire = timeSinceFire - delta_ms;
+        const damageTime = Math.min(delta_ms, beamData.shotDuration - lastTimeSinceFire);
+        const scale = damageTime * 30 / 1000;
+
+        emitNow(DamagedEvent, { damage: beamData.damage, damager: uuid, scale }, [beamState.targetHit]);
+    },
+    after: [CollisionSystem],
+});
+
+export const BeamPlugin: Plugin = {
+    name: 'BeamPlugin',
+    build(world) {
+        const weaponConstructors = world.resources.get(WeaponConstructors);
+        if (!weaponConstructors) {
+            throw new Error('Expected WeaponConstructors to exist');
+        }
+        world.resources.get(SerializerResource)?.addComponent(
+            BeamDataComponent, passthroughType<BeamWeaponData>('BeamDataComponentType'));
+        world.resources.get(SerializerResource)?.addComponent(
+            BeamStateComponent, passthroughType<BeamState>('BeamStateComponentType'));
+        weaponConstructors.set('BeamWeaponData', BeamWeaponEntry);
+
+        world.addSystem(BeamResetSystem);
+        world.addSystem(BeamSystem);
+        world.addSystem(BeamCollisionSystem);
+        world.addSystem(BeamDamageSystem);
+    }
+};

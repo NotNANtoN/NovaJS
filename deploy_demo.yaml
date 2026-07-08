@@ -1,28 +1,28 @@
 steps:
+  # Install dependencies
+  - name: node:22
+    id: install
+    entrypoint: npm
+    args: ['ci']
+
   # Test novajs
-  - name: 'gcr.io/cloud-builders/bazel@sha256:771cbcd1d990c1f268bd1a54013252ade4cf6af4ae2bfe1d37fd7e8710e50b08'
+  - name: node:22
     id: unittest
-    args: ['test', '--config=ci', '--google_default_credentials', '...']
+    entrypoint: npx
+    args: ['turbo', 'run', 'test']
+    waitFor: ['install']
 
-  # Copy nova files into the repository
-  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
-    id: copy-novafiles
-    entrypoint: gsutil
-    args: ['cp', '-r', 'gs://novajs-static-data/Nova Files', 'nova/Nova_Data/']
-    waitFor: ['unittest']
+  # Build the image
+  - name: 'gcr.io/cloud-builders/docker'
+    id: build_image
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/nova:dev', '-f', 'docker/Dockerfile', '.']
+    waitFor: ['install']
 
-  # Copy plug-ins into the repository
-  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
-    id: copy-plugins
-    entrypoint: gsutil
-    args: ['cp', '-r', 'gs://novajs-static-data/Plug-ins', 'nova/Nova_Data/']
-    waitFor: ['unittest']
-
-  # Publish the image
-  - name: 'gcr.io/cloud-builders/bazel@sha256:771cbcd1d990c1f268bd1a54013252ade4cf6af4ae2bfe1d37fd7e8710e50b08'
-    id: push_container
-    args: ['run', '--config=ci', '--google_default_credentials', '//nova:push_nova_image']
-    waitFor: ['copy-novafiles', 'copy-plugins']
+  # Push the image
+  - name: 'gcr.io/cloud-builders/docker'
+    id: push_image
+    args: ['push', 'gcr.io/$PROJECT_ID/nova:dev']
+    waitFor: ['build_image']
 
   # Deploy to cloud run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -37,6 +37,11 @@ steps:
       - 'us-central1'
       - '--platform'
       - 'managed'
+      - '--execution-environment=gen2'
+      - '--add-volume=name=nova_data,type=cloud-storage,bucket=novajs-static-data'
+      - '--add-volume-mount=volume=nova_data,mount-path=/mnt/nova_data'
+      - '--set-env-vars=NOVA_DATA_PATH=/mnt/nova_data'
+    waitFor: ['push_image']
 
 timeout: 900s
 options:
