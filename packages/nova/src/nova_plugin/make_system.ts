@@ -7,6 +7,7 @@ import { World } from "nova_ecs/world";
 import { completeEntity } from "./entity_data_loader.js";
 import { configureSnapshotPolicies } from "./snapshot_policies.js";
 import { DEFAULT_MISSILE_GUIDANCE, MissileGuidanceResource } from "./guidance.js";
+import { SystemInterferenceResource } from "./jamming_plugin.js";
 import { IdFactory, IdFactoryResource } from "./id_factory.js";
 import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
 import { SimulationGameDataResource } from "./game_data_resource.js";
@@ -53,6 +54,11 @@ export async function makeSystem(systemId: string, gameData: SimulationGameDataI
     // simulation must not resolve data asynchronously mid-simulation,
     // so all entities are fully loaded before they are inserted.
     const systemData = await gameData.data.System.get(systemId);
+    // The system's inherent sensor interference degrades radar-guided missiles
+    // (see jamming_plugin.ts). Set deterministically here, before the world
+    // steps, so it is identical for every peer in a room.
+    world.resources.set(SystemInterferenceResource,
+        { interference: systemData.interference });
     for (const planetId of systemData.planets) {
         const planetData = await gameData.data.Planet.get(planetId);
         const planet = makePlanet(planetData);
