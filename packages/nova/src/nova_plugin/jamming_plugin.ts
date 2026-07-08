@@ -8,6 +8,7 @@ import { Entity } from 'nova_ecs/entity';
 import { EntityMap } from 'nova_ecs/entity_map';
 import { Plugin } from 'nova_ecs/plugin';
 import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
+import { Optional } from 'nova_ecs/optional';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
 import { RandomResource } from 'nova_ecs/plugins/random_plugin';
 import { Resource } from 'nova_ecs/resource';
@@ -15,6 +16,7 @@ import { System } from 'nova_ecs/system';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { registerEntityDeriver } from './entity_factory.js';
+import { Govt, GovtComponent } from './govt_component.js';
 import { OutfitsState, OutfitsStateComponent } from './outfit_plugin.js';
 import { ProjectileDataComponent } from './projectile_data.js';
 import { ProvideFromCache } from './provide_from_cache.js';
@@ -35,8 +37,11 @@ import { TargetComponent } from './target_component.js';
  *    jamming types (0-100%). "Ignored if the weapon is not a guided weapon."
  *  - oütf ModTypes 33-36 ("Jamming Type 1-4"): jamming strength an outfit adds
  *    to its ship (percent, can be negative), summed across outfits.
- *  - govt InhJam1-4: a government's inherent jamming (not wired here; ships in
- *    this build get their jamming purely from outfits — see judgment calls).
+ *  - govt InhJam1-4: a government's inherent jamming. A ship that carries a
+ *    GovtComponent folds its government's InhJam1-4 into its jamming; see
+ *    deriveJamming and the InhJam composition rule documented there. Ships with
+ *    no GovtComponent (e.g. the player, or NPCs before government-aware spawning
+ *    exists) get their jamming purely from outfits, unchanged.
  *  - sÿst Interference: system sensor static (0-100), which additionally
  *    degrades radar-guided missiles (Seeker flag 0x0008, confusedByInterference).
  *  - Seeker flags: turnsAwayIfJammed (0x0010), attackParentIfJammed (0x8000),
@@ -137,11 +142,48 @@ const DECOY_DISTRACTION_RANGE_SQUARED =
 export const RADAR_JAM_INDEX = 1;
 
 /**
- * Sums the per-type jamming strength contributed by a ship's outfits.
+ * Folds a government's inherent jamming (govt InhJam1-4) into a ship's
+ * outfit-derived jamming, per type.
+ *
+ * INHJAM COMPOSITION RULE (JUDGMENT CALL): the EVN Bible describes InhJam1-4 as
+ * the government's inherent jamming *ability* (a 0-100% value) but does not say
+ * how it combines with outfit jamming (oütf ModTypes 33-36, which add across
+ * hardware). We take the per-type MAX rather than a sum: a government's inherent
+ * sensor tech is a floor, not another piece of bolt-on hardware, so a ship of a
+ * high-jamming government (e.g. the Krypt at InhJam 100) is not pushed past 100
+ * just by also carrying a jammer, and a ship whose outfits already out-jam its
+ * government keeps the stronger outfit value. Outfit sums can be negative (a
+ * "jamming" outfit with a negative ModType), so the max also prevents a negative
+ * outfit total from cancelling a government's inherent jamming below its floor.
+ *
+ * Not modelled yet (deferred to NPC/AiType work): the gövt
+ * `freightersHalfJamming` flag, under which AiType 1-2 freighters get 50% of the
+ * warship InhJam value. Ships have no AiType in the sim yet, so every
+ * govt-carrying ship is treated as getting the full warship InhJam.
+ */
+function foldInhJam(outfitJamming: readonly [number, number, number, number],
+    inhJam: readonly [number, number, number, number]):
+    [number, number, number, number] {
+    return [
+        Math.max(outfitJamming[0], inhJam[0] ?? 0),
+        Math.max(outfitJamming[1], inhJam[1] ?? 0),
+        Math.max(outfitJamming[2], inhJam[2] ?? 0),
+        Math.max(outfitJamming[3], inhJam[3] ?? 0),
+    ];
+}
+
+/**
+ * Derives a ship's jamming: sums the per-type strength contributed by its
+ * outfits (oütf ModTypes 33-36), then, if a government id is given, folds that
+ * government's inherent jamming (govt InhJam1-4) in per type via foldInhJam.
  * Pure and deterministic; returns a fresh 4-tuple.
+ *
+ * Returns undefined (retry next step, matching deriveWeaponsState) if any
+ * outfit -- or the given government -- is not yet in the game-data cache.
  */
 export function deriveJamming(outfits: OutfitsState,
-    gameData: SimulationGameDataInterface): Jamming | undefined {
+    gameData: SimulationGameDataInterface,
+    govtId?: string): Jamming | undefined {
     const total: [number, number, number, number] = [0, 0, 0, 0];
     for (const [id, state] of outfits) {
         const outfit = gameData.data.Outfit.getCached(id);
@@ -153,7 +195,15 @@ export function deriveJamming(outfits: OutfitsState,
             total[i] += (outfit.jamming[i] ?? 0) * state.count;
         }
     }
-    return total;
+    if (govtId === undefined) {
+        return total;
+    }
+    const govt = gameData.data.Govt.getCached(govtId);
+    if (!govt) {
+        // Government data not loaded yet; retry next step.
+        return undefined;
+    }
+    return foldInhJam(total, govt.inhJam);
 }
 
 /**
@@ -303,9 +353,12 @@ export const JamSteerComponent = new Component<JamSteer>('JamSteerComponent');
 const JammingProvider = ProvideFromCache({
     name: 'JammingProvider',
     provided: JammingComponent,
-    update: [OutfitsStateComponent],
-    args: [OutfitsStateComponent, SimulationGameDataResource] as const,
-    factory: deriveJamming,
+    // Re-derive when the outfits change or the ship's government is set/changed.
+    update: [OutfitsStateComponent, GovtComponent],
+    args: [OutfitsStateComponent, Optional(GovtComponent),
+        SimulationGameDataResource] as const,
+    factory: (outfits, govt, gameData) =>
+        deriveJamming(outfits, gameData, govt?.id),
 });
 
 /**
@@ -411,6 +464,15 @@ export const JammingPlugin: Plugin = {
             componentType: Jamming,
         });
 
+        // A ship's government (optional; set by future NPC spawning). Registered
+        // for the delta/serializer so it replicates and survives snapshots; it's
+        // a plain { id } object, so the default codec/snapshot policy suffice.
+        // Registered here because JammingPlugin is its only consumer so far.
+        world.addComponent(GovtComponent);
+        deltaMaker.addComponent(GovtComponent, {
+            componentType: Govt,
+        });
+
         // Default to no interference; make_system.ts overrides this with the
         // current system's SystemData.interference. Defaulting here keeps the
         // MissileJammingSystem's required resource satisfied in any world that
@@ -419,14 +481,17 @@ export const JammingPlugin: Plugin = {
             world.resources.set(SystemInterferenceResource, { interference: 0 });
         }
 
-        // Re-derive a ship's jamming from its outfits at completeEntity /
-        // snapshot restore (mirrors WeaponsStateDeriver).
+        // Re-derive a ship's jamming from its outfits (and its government's
+        // InhJam, if it has a GovtComponent) at completeEntity / snapshot
+        // restore (mirrors WeaponsStateDeriver). GovtComponent is optional, so
+        // it is not in `requires`; when absent, jamming is outfit-only.
         registerEntityDeriver(world, {
             name: 'JammingDeriver',
             provided: JammingComponent,
             requires: [OutfitsStateComponent],
             derive: (entity, gameData) => deriveJamming(
-                entity.components.get(OutfitsStateComponent)!, gameData),
+                entity.components.get(OutfitsStateComponent)!, gameData,
+                entity.components.get(GovtComponent)?.id),
         });
         world.addSystem(JammingProvider);
         world.addSystem(MissileJammingSystem);

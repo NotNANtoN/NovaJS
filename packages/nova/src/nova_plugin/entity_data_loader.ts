@@ -5,6 +5,7 @@ import { World } from "nova_ecs/world";
 import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
 import { WeaponEntries } from "./fire_weapon_plugin.js";
 import { SimulationGameDataResource } from "./game_data_resource.js";
+import { GovtComponent } from "./govt_component.js";
 import { PlanetComponent } from "./planet_plugin.js";
 import { ShipComponent } from "./ship_plugin.js";
 
@@ -103,6 +104,14 @@ export async function loadEntityGameData(world: World, entity: Entity) {
     }
     if (planet) {
         await gameData.data.Planet.get(planet.id);
+    }
+
+    // A ship's government (if any) contributes inherent jamming to the
+    // JammingDeriver, which reads it from the cache synchronously. Load it
+    // here so the derivation never has to wait mid-simulation.
+    const govt = entity.components.get(GovtComponent);
+    if (govt) {
+        await gameData.data.Govt.get(govt.id);
     }
 
     // Prime the lazily-constructed weapon entries so the first shot of
