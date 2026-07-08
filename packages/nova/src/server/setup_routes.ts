@@ -18,7 +18,7 @@ export function setupRoutes(
     bundleMapPath: string,
     simulationWorkerBundlePath: string,
     simulationWorkerBundleMapPath: string,
-    settingsPath: string,
+    settingsDir: string,
 ) {
     return new GameDataServer(
         gameData,
@@ -28,7 +28,7 @@ export function setupRoutes(
         bundleMapPath,
         simulationWorkerBundlePath,
         simulationWorkerBundleMapPath,
-        settingsPath,
+        settingsDir,
     );
 }
 
@@ -42,7 +42,7 @@ class GameDataServer {
         private readonly bundleMapPath: string,
         private readonly simulationWorkerBundlePath: string,
         private readonly simulationWorkerBundleMapPath: string,
-        private readonly settingsPath: string) {
+        private readonly settingsDir: string) {
         this.setupRoutes();
     }
 
@@ -62,15 +62,14 @@ class GameDataServer {
             res.send(this.gameData.preloadData ? await this.gameData.preloadData : {});
         });
 
+        // Serves every client settings file in the settings directory
+        // (controls.json, settings.json, ...).
         this.app.use(settingsPrefix,
-            express.static(this.settingsPath));
+            express.static(this.settingsDir));
 
         //        // This has to be here or else sourcemaps don't work!
         //        const staticPath = path.join(this.appRoot, "build", "static");
         //        this.app.use("/static", express.static(staticPath));
-        this.app.use("/settings/controls.json", (_req: express.Request, res: express.Response) => {
-            res.sendFile(this.settingsPath);
-        });
 
         this.app.use("/browser_bundle.js", (_req: express.Request, res: express.Response) => {
             res.sendFile(this.bundlePath);

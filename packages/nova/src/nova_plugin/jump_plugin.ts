@@ -20,6 +20,7 @@ import { ControlShipSystem } from "./ship_controller_plugin.js";
 import { getShipMovementPhysics, ShipPhysicsComponent } from "./ship_plugin.js";
 import { PlayerShipSelector } from "./player_ship_plugin.js";
 import { SimulationGameDataResource } from "./game_data_resource.js";
+import { SoundEvent } from "./sound_plugin.js";
 import { SystemIdResource } from "./system_id_resource.js";
 
 // Hyperspace jump tuning. The EVN Bible documents the *structure* of
@@ -53,6 +54,16 @@ export const JUMP_BASE_SPEED = 1500;
  * it thrusts to kill its velocity. */
 const RETROGRADE_THRUST_TOLERANCE = 0.3;
 const ALIGNED_TOLERANCE = 1e-9;
+
+// The engine's hyperspace sounds live at fixed snd resource ids in the
+// original game data: 128 "Warp up", 129 "Warp up.x2", 130 "Warp out".
+// The EVN Bible does not document how the two warp-up variants are
+// chosen; the ".x2" name indicates a double-speed variant of the same
+// sound, so ships with an above-normal jump speed (the semi-fast/fast
+// jumping shïp flags) play it here.
+export const WARP_UP_SOUND = 'nova:128';
+export const WARP_UP_FAST_SOUND = 'nova:129';
+export const WARP_OUT_SOUND = 'nova:130';
 
 export interface InitiateJump {
     to: string /* system uuid */,
@@ -291,6 +302,12 @@ const JumpSequenceSystem = new System({
                     >= JUMP_SPINUP_DELAY_MS) {
                     jump.stage = 'accelerating';
                     jump.stageStart = time.time;
+                    // Sounds are display-side; emitting the event does
+                    // not touch simulation state.
+                    emit(SoundEvent, {
+                        id: shipPhysics.jumpSpeedMult > 1
+                            ? WARP_UP_FAST_SOUND : WARP_UP_SOUND,
+                    });
                 }
                 break;
             }
@@ -333,6 +350,7 @@ const JumpSequenceSystem = new System({
                 // hand control back.
                 if (jump.stageStart === undefined) {
                     jump.stageStart = time.time;
+                    emit(SoundEvent, { id: WARP_OUT_SOUND });
                 }
                 const basePhysics = getShipMovementPhysics(shipPhysics);
                 const progress =

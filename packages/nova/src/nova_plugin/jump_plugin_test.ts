@@ -5,12 +5,13 @@ import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
 import { World } from "nova_ecs/world";
 import { getIntegrationGameData } from "../communication/simulation_test_fixture.js";
 import { completeEntity } from "./entity_data_loader.js";
-import { FinishJump, FinishJumpEvent, JumpComponent, JumpRouteComponent, JUMP_ARRIVAL_DELAY_MS, JUMP_BASE_SPEED, JUMP_DEPART_DELAY_MS, JUMP_DISTANCE, JUMP_SPINUP_DELAY_MS } from "./jump_plugin.js";
+import { FinishJump, FinishJumpEvent, JumpComponent, JumpRouteComponent, JUMP_ARRIVAL_DELAY_MS, JUMP_BASE_SPEED, JUMP_DEPART_DELAY_MS, JUMP_DISTANCE, JUMP_SPINUP_DELAY_MS, WARP_OUT_SOUND, WARP_UP_FAST_SOUND, WARP_UP_SOUND } from "./jump_plugin.js";
 import { makeShip } from "./make_ship.js";
 import { makeSystem, SIMULATION_STEP_MS } from "./make_system.js";
 import { applyControlEvents } from "./ship_control.js";
 import { PlayerShipSelector } from "./player_ship_plugin.js";
 import { ShipPhysicsComponent } from "./ship_plugin.js";
+import { SoundEvent } from "./sound_plugin.js";
 
 const SHIP_UUID = 'jump test ship';
 
@@ -200,6 +201,49 @@ describe('jump sequence', () => {
         expect(movement.velocity.length).toBeGreaterThan(0);
     }, 30_000);
 
+    it('plays the warp-up sound when the departure burn begins', async () => {
+        const { world, ship } = await makeJumpHarness();
+        const movement = ship.components.get(MovementStateComponent)!;
+        movement.position = new Position(0, -(JUMP_DISTANCE * 2));
+        world.step();
+
+        const sounds: string[] = [];
+        world.events.get(SoundEvent).subscribe(({ data }) => {
+            sounds.push(data.id);
+        });
+
+        pressHyperjump(world);
+        const jump = ship.components.get(JumpComponent)!;
+        stepUntil(world, () => jump.stage === 'spinup');
+        expect(sounds).not.toContain(WARP_UP_SOUND);
+        stepUntil(world, () => jump.stage === 'accelerating');
+        world.step();
+        expect(sounds).toContain(WARP_UP_SOUND);
+        expect(sounds).not.toContain(WARP_UP_FAST_SOUND);
+    }, 30_000);
+
+    it('plays the double-speed warp-up for fast-jumping ships', async () => {
+        const { world, ship } = await makeJumpHarness();
+        const movement = ship.components.get(MovementStateComponent)!;
+        movement.position = new Position(0, -(JUMP_DISTANCE * 2));
+        const physics = ship.components.get(ShipPhysicsComponent)!;
+        ship.components.set(ShipPhysicsComponent,
+            { ...physics, jumpSpeedMult: 1.5 });
+        world.step();
+
+        const sounds: string[] = [];
+        world.events.get(SoundEvent).subscribe(({ data }) => {
+            sounds.push(data.id);
+        });
+
+        pressHyperjump(world);
+        const jump = ship.components.get(JumpComponent)!;
+        stepUntil(world, () => jump.stage === 'accelerating');
+        world.step();
+        expect(sounds).toContain(WARP_UP_FAST_SOUND);
+        expect(sounds).not.toContain(WARP_UP_SOUND);
+    }, 30_000);
+
     it('respects the jump distance modifier from outfits', async () => {
         const { world, ship } = await makeJumpHarness();
         const movement = ship.components.get(MovementStateComponent)!;
@@ -241,12 +285,19 @@ describe('jump sequence', () => {
         const jumpSpeed = JUMP_BASE_SPEED * physics.jumpSpeedMult;
         expect(arrivalMovement.velocity.length).toBeCloseTo(jumpSpeed, 3);
 
+        const sounds: string[] = [];
+        destWorld.events.get(SoundEvent).subscribe(({ data }) => {
+            sounds.push(data.id);
+        });
+
         // The ship coasts in above its normal max speed with control
         // locked, decelerating as it goes.
         applyControlEvents(destWorld, undefined,
             [{ action: 'turnLeft', state: 'start' }]);
         destWorld.step();
         destWorld.step();
+        // The warp-out sound plays on the destination's first tick.
+        expect(sounds).toContain(WARP_OUT_SOUND);
         expect(arrivalMovement.velocity.length).toBeGreaterThan(physics.speed);
         expect(arrivalMovement.velocity.length).toBeLessThan(jumpSpeed);
         expect(arrivalMovement.turning).toEqual(0);

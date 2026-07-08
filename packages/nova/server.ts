@@ -64,7 +64,7 @@ const bundlePath = path.join(__dirname, "src/browser_bundle.js");
 const bundleMapPath = path.join(__dirname, "src/browser_bundle.js.map");
 const simulationWorkerBundlePath = path.join(__dirname, "src/communication/simulation_bridge_browser_worker_bundle.js");
 const simulationWorkerBundleMapPath = path.join(__dirname, "src/communication/simulation_bridge_browser_worker_bundle.js.map");
-const clientSettingsPath = path.join(__dirname, "../settings/controls.json");
+const clientSettingsDir = path.join(__dirname, "../settings");
 
 
 const channel = new SocketChannelServer({ server: httpServer });
@@ -99,7 +99,7 @@ async function startGame() {
         bundleMapPath,
         simulationWorkerBundlePath,
         simulationWorkerBundleMapPath,
-        clientSettingsPath,
+        clientSettingsDir,
     );
 
     httpServer.listen(port, function () {
