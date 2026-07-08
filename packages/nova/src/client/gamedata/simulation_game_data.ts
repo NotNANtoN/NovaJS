@@ -3,6 +3,7 @@ import { GameDataInterface, PreloadData } from 'novadatainterface/game_data_inte
 import { Gettable } from 'novadatainterface/gettable';
 import { NovaDataType } from 'novadatainterface/nova_data_interface';
 import { NovaIDs } from 'novadatainterface/nova_ids';
+import { GovtData } from 'novadatainterface/govt_data';
 import { OutfitData } from 'novadatainterface/outfit_data';
 import { PlanetData } from 'novadatainterface/planet_data';
 import { ShipData } from 'novadatainterface/ship_data';
@@ -27,7 +28,7 @@ class WeaponGettable extends Gettable<WeaponData> {
 }
 
 export type SimulationGameDataResources = Pick<GameDataInterface['data'],
-    'Ship' | 'Outfit' | 'Weapon' | 'Planet' | 'System' | 'SpriteSheet'>;
+    'Ship' | 'Outfit' | 'Weapon' | 'Planet' | 'System' | 'Govt' | 'SpriteSheet'>;
 
 export interface SimulationGameDataInterface {
     readonly data: SimulationGameDataResources;
@@ -50,6 +51,7 @@ export class SimulationGameData implements SimulationGameDataInterface {
             Weapon: this.addWeaponGettable(),
             Planet: this.addGettable<PlanetData>(NovaDataType.Planet),
             System: this.addGettable<SystemData>(NovaDataType.System),
+            Govt: this.addGettable<GovtData>(NovaDataType.Govt),
             SpriteSheet: this.addGettable<SpriteSheetData>(NovaDataType.SpriteSheet),
         };
 

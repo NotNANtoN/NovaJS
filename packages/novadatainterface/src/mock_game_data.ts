@@ -1,6 +1,7 @@
 import { getDefaultCicnData } from "./cicn_data.js";
 import { getDefaultExplosionData } from "./explosion_data.js";
 import { GameDataInterface } from "./game_data_interface.js";
+import { getDefaultGovtData } from "./govt_data.js";
 import { Gettable } from "./gettable.js";
 import { NovaDataInterface } from "./nova_data_interface.js";
 import { NovaIDs } from "./nova_ids.js";
@@ -64,6 +65,7 @@ export class MockGameData implements GameDataInterface {
         SpriteSheetImage: new MockGettable(new Uint8Array(0).buffer),
         StatusBar: new MockGettable(getDefaultStatusBarData()),
         System: new MockGettable(getDefaultSystemData()),
+        Govt: new MockGettable(getDefaultGovtData()),
         TargetCorners: new MockGettable(getDefaultTargetCornersData()),
         Weapon: new MockGettable(getDefaultProjectileWeaponData()),
         SoundFile: new MockGettable(getDefaultSoundFile()),

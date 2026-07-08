@@ -16,6 +16,7 @@ import { SoundFile } from "novadatainterface/sound_file";
 import { SpriteSheetData, SpriteSheetFramesData, SpriteSheetImageData } from "novadatainterface/sprite_sheet_data";
 import { StatusBarData } from "novadatainterface/status_bar_data";
 import { SystemData } from "novadatainterface/system_data";
+import { GovtData } from "novadatainterface/govt_data";
 import { TargetCornersData } from "novadatainterface/target_corners_data";
 import { WeaponData } from "novadatainterface/weapon_data";
 import * as path from "path";
@@ -36,6 +37,7 @@ const Paths = {
     CicnImage: { path: "CicnImage", extension: "png" } as PathInfo,
     Planet: { path: "Planet", extension: "json" } as PathInfo,
     System: { path: "System", extension: "json" } as PathInfo,
+    Govt: { path: "Govt", extension: "json" } as PathInfo,
     TargetCorners: { path: "TargetCorners", extension: "json" } as PathInfo,
     SpriteSheet: { path: "SpriteSheet", extension: "json" } as PathInfo,
     SpriteSheetImage: { path: "SpriteSheetImage", extension: "png" } as PathInfo,
@@ -60,6 +62,7 @@ class FilesystemData implements GameDataInterface {
             CicnImage: this.getFunction<CicnImageData>(Paths.CicnImage),
             Planet: this.getFunction<PlanetData>(Paths.Planet),
             System: this.getFunction<SystemData>(Paths.System),
+            Govt: this.getFunction<GovtData>(Paths.Govt),
             TargetCorners: this.getFunction<TargetCornersData>(Paths.TargetCorners),
             SpriteSheet: this.getFunction<SpriteSheetData>(Paths.SpriteSheet),
             SpriteSheetImage: this.getFunction<SpriteSheetImageData>(Paths.SpriteSheetImage),
@@ -107,6 +110,7 @@ class FilesystemData implements GameDataInterface {
             CicnImage: await this.buildIDsForPath(Paths.CicnImage),
             Planet: await this.buildIDsForPath(Paths.Planet),
             System: await this.buildIDsForPath(Paths.System),
+            Govt: await this.buildIDsForPath(Paths.Govt),
             TargetCorners: await this.buildIDsForPath(Paths.TargetCorners),
             SpriteSheet: await this.buildIDsForPath(Paths.SpriteSheet),
             SpriteSheetImage: await this.buildIDsForPath(Paths.SpriteSheetImage),

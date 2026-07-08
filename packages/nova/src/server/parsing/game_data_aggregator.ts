@@ -8,6 +8,7 @@ import { WeaponData } from "novadatainterface/weapon_data";
 import { PictData } from "novadatainterface/pict_data";
 import { PlanetData } from "novadatainterface/planet_data";
 import { SystemData } from "novadatainterface/system_data";
+import { GovtData } from "novadatainterface/govt_data";
 import { TargetCornersData } from "novadatainterface/target_corners_data";
 import { SpriteSheetData, SpriteSheetImageData, SpriteSheetFramesData } from "novadatainterface/sprite_sheet_data";
 import { StatusBarData } from "novadatainterface/status_bar_data";
@@ -45,6 +46,7 @@ class GameDataAggregator implements GameDataInterface {
             CicnImage: this.makeAggregator<CicnImageData>(NovaDataType.CicnImage),
             Planet: this.makeAggregator<PlanetData>(NovaDataType.Planet),
             System: this.makeAggregator<SystemData>(NovaDataType.System),
+            Govt: this.makeAggregator<GovtData>(NovaDataType.Govt),
             TargetCorners: this.makeAggregator<TargetCornersData>(NovaDataType.TargetCorners),
             SpriteSheet: this.makeAggregator<SpriteSheetData>(NovaDataType.SpriteSheet),
             SpriteSheetImage: this.makeAggregator<SpriteSheetImageData>(NovaDataType.SpriteSheetImage),

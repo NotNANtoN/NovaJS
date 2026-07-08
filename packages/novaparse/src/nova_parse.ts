@@ -2,6 +2,7 @@ import * as path from "path";
 import { ExplosionData } from "novadatainterface/explosion_data";
 import { GameDataInterface } from "novadatainterface/game_data_interface";
 import { Gettable } from "novadatainterface/gettable";
+import { GovtData } from "novadatainterface/govt_data";
 import { NovaDataInterface, NovaIDNotFoundError } from "novadatainterface/nova_data_interface";
 import { getDefaultNovaIDs, NovaIDs } from "novadatainterface/nova_ids";
 import { OutfitData } from "novadatainterface/outfit_data";
@@ -16,6 +17,7 @@ import { TargetCornersData } from "novadatainterface/target_corners_data";
 import { WeaponData } from "novadatainterface/weapon_data";
 import { IDSpaceHandler } from "./id_space_handler.js";
 import { ExplosionParse } from "./parsers/explosion_parse.js";
+import { GovtParse } from "./parsers/govt_parse.js";
 import { OutfitParse } from "./parsers/outfit_parse.js";
 import { PictImageMulti, PictImageMultiParse } from "./parsers/pict_parse.js";
 import { PlanetParse } from "./parsers/planet_parse.js";
@@ -28,6 +30,7 @@ import { TargetCornersParse } from "./parsers/target_corners_parse.js";
 import { WeaponParse } from "./parsers/weapon_parse.js";
 import { BoomResource } from "./resource_parsers/boom_resource.js";
 import { BaseResource } from "./resource_parsers/nova_resource_base.js";
+import { GovtResource } from "./resource_parsers/govt_resource.js";
 import { OutfResource } from "./resource_parsers/outf_resource.js";
 import { PictResource } from "./resource_parsers/pict_resource.js";
 import { NovaResources, NovaResourceType, ResList } from "./resource_parsers/resource_holder_base.js";
@@ -139,6 +142,7 @@ export class NovaParse implements GameDataInterface {
             CicnImage: this.buildIDsForResource(idSpace.cicn),
             Planet: this.buildIDsForResource(idSpace.spöb),
             System: this.buildIDsForResource(idSpace.sÿst),
+            Govt: this.buildIDsForResource(idSpace.gövt),
             TargetCorners: [], // TODO: parse these
             SpriteSheet: this.buildIDsForResource(idSpace.rlëD),
             SpriteSheetImage: this.buildIDsForResource(idSpace.rlëD),
@@ -162,6 +166,7 @@ export class NovaParse implements GameDataInterface {
             CicnImage: new Gettable(async () => Defaults.CicnImage), // TODO
             Planet: this.makeGettable<SpobResource, PlanetData>(NovaResourceType.spöb, PlanetParse),
             System: this.makeGettable<SystResource, SystemData>(NovaResourceType.sÿst, SystemParse),
+            Govt: this.makeGettable<GovtResource, GovtData>(NovaResourceType.gövt, GovtParse),
             TargetCorners: this.makeGettable<BaseResource, TargetCornersData>(NovaResourceType.cicn, TargetCornersParse),
             SpriteSheet: this.spriteSheetDataGettable,
             SpriteSheetImage: this.spriteSheetImageGettable,
