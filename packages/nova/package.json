@@ -1,0 +1,46 @@
+{
+    "name": "nova",
+    "version": "0.1.0",
+    "type": "module",
+    "main": "dist/server.js",
+    "scripts": {
+        "build": "tsc && node esbuild.config.js",
+        "test": "jasmine --config=jasmine.json",
+        "start": "node dist/server.js",
+        "clean": "rimraf dist",
+        "dev": "npm run start"
+    },
+    "dependencies": {
+        "@pixi/sound": "^5.2.3",
+        "comlink": "^4.4.1",
+        "express": "^4.18.2",
+        "fp-ts": "^2.16.1",
+        "immer": "^10.0.3",
+        "io-ts": "^2.2.21",
+        "nova_ecs": "*",
+        "novadatainterface": "*",
+        "novaparse": "*",
+        "p-queue": "^7.4.1",
+        "pixi.js": "^7.4.3",
+        "rxjs": "^7.8.1",
+        "stats.js": "^0.17.0",
+        "url-join": "^5.0.0",
+        "uuid": "^9.0.1",
+        "ws": "^8.14.2"
+    },
+    "devDependencies": {
+        "@types/express": "^4.17.21",
+        "@types/jasmine": "^5.1.13",
+        "@types/mocha": "^10.0.6",
+        "@types/node": "^20.10.0",
+        "@types/stats.js": "^0.17.3",
+        "@types/uuid": "^9.0.7",
+        "@types/ws": "^8.5.10",
+        "esbuild": "^0.19.8",
+        "jasmine": "^5.12.0",
+        "mocha": "^10.2.0",
+        "rimraf": "^5.0.5",
+        "ts-node": "^10.9.1",
+        "typescript": "5.9.3"
+    }
+}

@@ -1,0 +1,7 @@
+{
+  "extends": "@evn/tsconfig/tsconfig.json",
+  "include": ["src/**/*.ts"],
+  "compilerOptions": {
+    "outDir": "dist"
+  }
+}
