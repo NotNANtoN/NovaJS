@@ -6,6 +6,18 @@
             "runtimeExecutable": "npm",
             "runtimeArgs": ["start", "--prefix", "packages/nova"],
             "port": 8000
+        },
+        {
+            "name": "nova-server-8103",
+            "runtimeExecutable": "env",
+            "runtimeArgs": [
+                "PORT=8103",
+                "npm",
+                "start",
+                "--prefix",
+                "/Users/matthew/Projects/NovaJS/.claude/worktrees/agent-ad75878c89a29c257/packages/nova"
+            ],
+            "port": 8103
         }
     ]
 }
