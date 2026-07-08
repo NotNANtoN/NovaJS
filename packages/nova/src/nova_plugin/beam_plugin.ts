@@ -189,6 +189,106 @@ function getIntersection(r0: Vector, r1: Vector, a0: Vector, a1: Vector): number
     return Infinity; // No collision
 }
 
+// Point-in-convex-polygon test using the sign of the cross products between
+// each edge and the vector from the edge start to the point. For a convex
+// polygon whose vertices are given in a consistent winding order, the point is
+// inside iff all cross products share the same sign (points on an edge count as
+// inside). Deterministic and cheap - no trig, just multiplies and adds.
+// `points` must already be in world space (rotation + position applied).
+function pointInConvexPolygon(point: Vector, points: Vector[]): boolean {
+    if (points.length < 3) {
+        return false;
+    }
+    let hasPositive = false;
+    let hasNegative = false;
+    for (let i = 0; i < points.length; i++) {
+        const p1 = points[i];
+        const p2 = points[(i + 1) % points.length];
+        const edge = p2.subtract(p1);
+        const toPoint = point.subtract(p1);
+        const cross = edge.x * toPoint.y - edge.y * toPoint.x;
+        if (cross > 0) {
+            hasPositive = true;
+        } else if (cross < 0) {
+            hasNegative = true;
+        }
+        if (hasPositive && hasNegative) {
+            // Point is on the outer side of at least one edge.
+            return false;
+        }
+    }
+    return true;
+}
+
+// Computes the fraction along the beam (0..1) at which the beam first hits the
+// given hull, or Infinity if it does not. `shapes` are the hull's component SAT
+// shapes (a hull may be decomposed into several convex polygons and/or circles).
+// A beam whose origin (`start`) lies inside ANY component shape hits immediately
+// at the origin (fraction 0); otherwise the beam segment `start`->`end` is
+// raycast against every component and the nearest crossing is returned.
+export function beamHullHitFraction(start: Vector, end: Vector,
+    shapes: readonly (SAT.Polygon | SAT.Circle)[]): number {
+    const beamVector = end.subtract(start);
+    let minT = Infinity;
+    for (const shape of shapes) {
+        // Check each edge of the polygon
+        if (shape instanceof SAT.Polygon) {
+            const points = shape.points.map(
+                v => Vector.fromVectorLike(v)
+                    .rotate(shape.angle)
+                    .add(shape.pos));
+
+            // If the beam originates inside this convex component, the beam
+            // hits immediately at its origin. A ray starting inside a convex
+            // polygon only crosses the exit edge, so the edge raycast below
+            // would otherwise report the (wrong) exit point instead.
+            if (pointInConvexPolygon(start, points)) {
+                return 0;
+            }
+
+            for (let i = 0; i < points.length; i++) {
+                const p1 = points[i];
+                const p2 = points[(i + 1) % points.length];
+                const t = getIntersection(start, end, p1, p2);
+                if (t < minT) {
+                    minT = t;
+                }
+            }
+        } else if (shape instanceof SAT.Circle) {
+            // Ray circle intersection
+            // Math based on: https://math.stackexchange.com/questions/311921/get-location-of-vector-circle-intersection
+            const r = shape.r;
+            const c = new Vector(shape.pos.x, shape.pos.y);
+            const d = beamVector; // Direction vector (full length)
+            const f = start.subtract(c);
+
+            // Beam origin inside the circle => immediate hit at the origin.
+            if (f.dot(f) <= r * r) {
+                return 0;
+            }
+
+            const a = d.dot(d);
+            const b = 2 * f.dot(d);
+            const q = f.dot(f) - r * r;
+
+            const discriminant = b * b - 4 * a * q;
+            if (discriminant >= 0) {
+                const sqrtDisc = Math.sqrt(discriminant);
+                const t1 = (-b - sqrtDisc) / (2 * a);
+                const t2 = (-b + sqrtDisc) / (2 * a);
+
+                if (t1 >= 0 && t1 <= 1) {
+                    if (t1 < minT) minT = t1;
+                }
+                if (t2 >= 0 && t2 <= 1) {
+                    if (t2 < minT) minT = t2;
+                }
+            }
+        }
+    }
+    return minT;
+}
+
 const BeamCollisionSystem = new System({
     name: 'BeamCollisionSystem',
     events: [CollisionEvent],
@@ -217,50 +317,7 @@ const BeamCollisionSystem = new System({
         const beamVector = movement.rotation.getUnitVector().scale(beamData.beamAnimation.length);
         const end = start.add(beamVector);
 
-        let minT = Infinity;
-        for (const shape of otherHull.shapes) {
-            // Check each edge of the polygon
-            if (shape instanceof SAT.Polygon) {
-                const points = shape.points.map(
-                    v => Vector.fromVectorLike(v)
-                        .rotate(shape.angle)
-                        .add(shape.pos));
-
-                for (let i = 0; i < points.length; i++) {
-                    const p1 = points[i];
-                    const p2 = points[(i + 1) % points.length];
-                    const t = getIntersection(start, end, p1, p2);
-                    if (t < minT) {
-                        minT = t;
-                    }
-                }
-            } else if (shape instanceof SAT.Circle) {
-                // Ray circle intersection
-                // Math based on: https://math.stackexchange.com/questions/311921/get-location-of-vector-circle-intersection
-                const r = shape.r;
-                const c = new Vector(shape.pos.x, shape.pos.y);
-                const d = beamVector; // Direction vector (full length)
-                const f = start.subtract(c);
-
-                const a = d.dot(d);
-                const b = 2 * f.dot(d);
-                const q = f.dot(f) - r * r;
-
-                const discriminant = b * b - 4 * a * q;
-                if (discriminant >= 0) {
-                    const sqrtDisc = Math.sqrt(discriminant);
-                    const t1 = (-b - sqrtDisc) / (2 * a);
-                    const t2 = (-b + sqrtDisc) / (2 * a);
-
-                    if (t1 >= 0 && t1 <= 1) {
-                        if (t1 < minT) minT = t1;
-                    }
-                    if (t2 >= 0 && t2 <= 1) {
-                        if (t2 < minT) minT = t2;
-                    }
-                }
-            }
-        }
+        const minT = beamHullHitFraction(start, end, otherHull.shapes);
 
         if (minT !== Infinity) {
             // We found a hit.
