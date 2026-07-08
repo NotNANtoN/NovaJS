@@ -14,6 +14,7 @@ export const IonizationComponent = new Component<Stat>('Ionization');
 // Fuel isn't health, but it recharges and is serialized exactly like
 // the health stats (100 units = 1 hyperspace jump).
 export const FuelComponent = new Component<Stat>('Fuel');
+export const FUEL_PER_JUMP = 100;
 
 const healthStats = [ShieldComponent, ArmorComponent, IonizationComponent,
     FuelComponent]
