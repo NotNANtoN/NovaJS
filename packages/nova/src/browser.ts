@@ -469,6 +469,10 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
     syncedPlayerJumpRoute = getDisplayPlayerJumpRoute(newDisplayWorld)?.slice();
     simulationBridge = newSimulationBridge;
     displayWorld = newDisplayWorld;
+    // Debug toggles, e.g. novaDebug.showCollisionShapes = true. Settings
+    // carry over when jumping rebuilds the display world.
+    (window as any).novaDebug =
+        new DebugSettings(newDisplayWorld, (window as any).novaDebug);
 }
 
 async function startGame() {

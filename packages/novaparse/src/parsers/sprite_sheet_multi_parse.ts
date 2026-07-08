@@ -6,6 +6,8 @@ import { PNG } from "pngjs";
 import * as path from "path";
 import hull from 'hull.js';
 import { bufferToArrayBuffer } from "./buffer_to_array_buffer.js";
+import { decomposePolygon, Point } from "../hull/convex_decomposition.js";
+import { simplifyPolygon, traceOutline } from "../hull/trace_outline.js";
 
 
 export interface SpriteSheetMulti {
@@ -111,10 +113,40 @@ function makeConvexHull(png: PNG): ConvexHull {
     return hullWithRepeat.slice(0, hullWithRepeat.length - 1);
 }
 
+// Simplification tolerance for the traced pixel outline, in pixels.
+const OUTLINE_SIMPLIFY_EPSILON = 1;
+// A component may be dented by up to this fraction of the sprite's size
+// (with a floor in pixels) before it gets split further.
+const CONCAVITY_TOLERANCE_RATIO = 0.05;
+const MIN_CONCAVITY_TOLERANCE = 3;
+// Keep hitboxes cheap: SAT tests each pair of convex components.
+const MAX_HULL_COMPONENTS = 8;
+
+// Approximate convex decomposition (Lien & Amato) of the sprite's pixel
+// outline, so concave ships get a hull per protrusion instead of one
+// convex hull spanning their notches. Purely deterministic in the sprite
+// data; collision geometry must match across clients.
 function makeHull(png: PNG): Hull {
-    const convexHull = makeConvexHull(png);
-    // TODO: Approximately convex decomposition -> multiple hulls per sprite.
-    return [convexHull];
+    const outline = traceOutline({
+        width: png.width,
+        height: png.height,
+        isFilled: (x, y) => x >= 0 && x < png.width && y >= 0 && y < png.height
+            && png.data[(png.width * y + x) * 4 + 3] === 255,
+    });
+    if (outline) {
+        // Same centered, y-up frame as makeVisibleArray.
+        const centered = outline.map(([x, y]): Point =>
+            [x - png.width / 2, -(y - png.height / 2)]);
+        const simplified = simplifyPolygon(centered, OUTLINE_SIMPLIFY_EPSILON);
+        const tolerance = Math.max(MIN_CONCAVITY_TOLERANCE,
+            Math.max(png.width, png.height) * CONCAVITY_TOLERANCE_RATIO);
+        const components = decomposePolygon(
+            simplified, tolerance, MAX_HULL_COMPONENTS);
+        if (components.length > 0) {
+            return components;
+        }
+    }
+    return [makeConvexHull(png)];
 }
 
 function buildSpriteSheetFrames(rled: RledResource): SpriteSheetFramesData {

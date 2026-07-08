@@ -442,16 +442,25 @@ describe('Input-driven rooms', () => {
         // the carrier — the return path whose (formerly unregistered)
         // escort-state components were lost in rollbacks and resync
         // baselines live.
-        peerA.client.removeEntity('raven');
-        await step(300);
-        await archive.update();
-        expect(bays(peerB.world)).toBe(bays(peerA.world));
-        expect(bays(archive.archiveWorld!)).toBe(bays(peerA.world));
         const returning = (world: World) => [...world.entities]
             .filter(([uuid]) => uuid.startsWith('bay:'))
             .filter(([, entity]) => [...entity.components.keys()]
                 .some(component => component.name === 'ReturnComponent'))
             .length;
+        peerA.client.removeEntity('raven');
+        // Catch the escorts *mid-return*: how quickly they turn home and
+        // how soon the carrier collects them depends on hull sizes and
+        // where the dogfight ended, so step in small chunks and stop
+        // while at least one escort is still flying home instead of
+        // using a fixed step count (long enough for them to have
+        // already been collected).
+        for (let waited = 0;
+            returning(peerA.world) === 0 && waited < 600; waited += 10) {
+            await step(10);
+        }
+        await archive.update();
+        expect(bays(peerB.world)).toBe(bays(peerA.world));
+        expect(bays(archive.archiveWorld!)).toBe(bays(peerA.world));
         expect(returning(peerA.world)).toBeGreaterThan(0);
         await compareAll('during the return flight');
 
