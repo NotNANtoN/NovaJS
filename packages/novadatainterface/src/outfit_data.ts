@@ -13,6 +13,9 @@ export interface OutfitData extends BaseData {
     // Cloaking-device semantics decoded from ModType 17. isCloak is false
     // for non-cloak outfits. See cloak_data.ts for the bitfield.
     cloak: CloakData,
+    // The weapon (globalID) this outfit is ammunition for, or null.
+    // Each item of the outfit is one round of that weapon's ammo.
+    ammoFor: string | null,
     pict: string, // id of picture
     price: number,
     desc: string,
@@ -28,6 +31,7 @@ export function getDefaultOutfitData(): OutfitData {
             freeMass: 0
         },
         cloak: getDefaultCloakData(),
+        ammoFor: null,
         pict: "default",
         price: 0,
         desc: "default outfit",

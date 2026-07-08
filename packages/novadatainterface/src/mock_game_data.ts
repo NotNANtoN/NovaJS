@@ -29,9 +29,12 @@ class MockGettable<T> extends Gettable<T> {
     override async get(id: string): Promise<T> {
         const val = this.map.get(id);
         if (val !== undefined) {
+            // Populate the base class cache so getCached works.
+            this.gotten[id] = val;
             return val;
         }
         else if (this.defaultValue !== undefined) {
+            this.gotten[id] = this.defaultValue;
             return this.defaultValue;
         }
         else {
