@@ -18,7 +18,17 @@ const SYSTEM_TEXT = new PIXI.TextStyle({
     fill: 0xffffff,
 });
 
-function drawSystem(system: SystemData, graphics: PIXI.Graphics, scale: number) {
+// The scale at which system positions are laid out. Zoom is applied on top of
+// this as a transform on the map container, so systems are only drawn once.
+const BASE_SCALE = 2;
+// How far the view can be zoomed relative to BASE_SCALE.
+const MIN_ZOOM = 0.3;
+const MAX_ZOOM = 4;
+const ZOOM_STEP = 1.15;
+// How far the arrow keys pan per press, in screen pixels.
+const KEY_PAN_STEP = 40;
+
+function drawSystem(system: SystemData, graphics: PIXI.Graphics) {
     // Use blue if the system has a planet. Otherwise, grey.
     // TODO: Check if the planet is inhabited.
     const inhabited = system.planets.length > 0;
@@ -26,73 +36,91 @@ function drawSystem(system: SystemData, graphics: PIXI.Graphics, scale: number) 
     const inColor = inhabited ? 0x000044 : 0x000000;
     graphics.lineStyle(1, outColor);
     graphics.beginFill(outColor)
-    graphics.drawCircle(0, 0, 2.7 * scale);
+    graphics.drawCircle(0, 0, 2.7 * BASE_SCALE);
     graphics.beginFill(inColor);
-    graphics.drawCircle(0, 0, 1.8 * scale);
+    graphics.drawCircle(0, 0, 1.8 * BASE_SCALE);
     graphics.endFill();
 }
 
 class SystemGraph {
     readonly container = new PIXI.Container();
-    private readonly graphics: PIXI.Graphics;
+    // Links and the highlighted route live on separate graphics so that
+    // selecting a route only redraws the route, not the whole galaxy.
+    private readonly linkGraphics: PIXI.Graphics;
+    private readonly routeGraphics: PIXI.Graphics;
     private readonly links: [SystemData, SystemData][];
     private readonly systems: Map<string, SystemData>;
-    private scale = 2;
+    // Zoom is a transform applied on top of BASE_SCALE. Panning and zooming
+    // never redraw the systems; they only move/scale mapContainer.
+    private zoom = 1;
     private dragData?: {
-        data: PIXI.FederatedPointerEvent,
-        offset: PIXI.Point,
+        pointerId: number,
+        // Pointer position (screen space) at the previous move event.
+        last: PIXI.Point,
     }
+    // Whether the most recent pointer gesture moved the map, so a system's tap
+    // handler can tell a click apart from the end of a pan.
+    private draggedSinceDown = false;
     private wrappedRoute: string[] = [];
     private routes: Map<string, string[]>;
     private systemCircles: Map<string, [PIXI.Container, PIXI.Graphics]>;
     private mapContainer: PIXI.Container;
     private maskedContainer: PIXI.Container;
+    // Bounding box of all systems in laid-out (BASE_SCALE) coordinates.
+    private worldBounds: { minX: number, minY: number, maxX: number, maxY: number };
 
     constructor(systems: SystemData[], private currentSystem: string,
         private size = { x: 456, y: 419 }) {
         this.systems = new Map(systems.map(s => [s.id, s]));
         this.routes = this.computeShortestPaths();
 
-        this.graphics = new PIXI.Graphics();
-
-        this.container.interactive = true;
-        const onDragStart = this.onDragStart.bind(this);
-        const onDragMove = this.onDragMove.bind(this);
-        const onDragEnd = this.onDragEnd.bind(this);
-        this.container.on('mousedown', onDragStart)
-            .on('touchstart', onDragStart)
-            .on('mouseup', onDragEnd)
-            .on('mouseupoutside', onDragEnd)
-            .on('touchend', onDragEnd)
-            .on('touchendoutside', onDragEnd)
-            .on('mousemove', onDragMove)
-            .on('touchmove', onDragMove);
+        this.linkGraphics = new PIXI.Graphics();
+        this.routeGraphics = new PIXI.Graphics();
 
         this.mapContainer = new PIXI.Container();
-        this.mapContainer.addChild(this.graphics);
+        this.mapContainer.addChild(this.linkGraphics);
+        this.mapContainer.addChild(this.routeGraphics);
 
         this.maskedContainer = new PIXI.Container();
         const mask = new PIXI.Graphics();
-        mask.lineStyle(1);
         mask.beginFill(0xff0000);
         mask.drawRect(0, 0, size.x, size.y);
+        mask.endFill();
         this.maskedContainer.mask = mask;
         this.container.addChild(mask);
 
         this.maskedContainer.addChild(this.mapContainer);
         this.container.addChild(this.maskedContainer);
 
+        // Capture pointer and wheel events over the whole map area (including
+        // the gaps between systems) so panning and zooming work anywhere.
+        this.container.eventMode = 'static';
+        this.container.hitArea = new PIXI.Rectangle(0, 0, size.x, size.y);
+        const onDragStart = this.onDragStart.bind(this);
+        const onDragMove = this.onDragMove.bind(this);
+        const onDragEnd = this.onDragEnd.bind(this);
+        this.container
+            .on('pointerdown', onDragStart)
+            .on('pointerup', onDragEnd)
+            .on('pointerupoutside', onDragEnd)
+            .on('pointermove', onDragMove)
+            .on('wheel', this.onWheel.bind(this));
+
         this.links = [...this.getUniqueLinks()];
 
         this.systemCircles = new Map(systems.map(s => {
             const graphics = new PIXI.Graphics();
-            drawSystem(s, graphics, this.scale);
+            drawSystem(s, graphics);
             const container = new PIXI.Container();
             const circleContainer = new PIXI.Container();
             container.addChild(circleContainer);
-            circleContainer.interactive = true;
-            circleContainer.on('click', () => {
-                this.onClickSystem(s.id);
+            circleContainer.eventMode = 'static';
+            circleContainer.cursor = 'pointer';
+            circleContainer.on('pointertap', () => {
+                // Ignore taps that were actually the end of a drag.
+                if (!this.draggedSinceDown) {
+                    this.onClickSystem(s.id);
+                }
             });
             circleContainer.addChild(graphics);
 
@@ -101,75 +129,129 @@ class SystemGraph {
             nameText.anchor.y = 0.5;
             container.addChild(nameText);
 
+            container.position.set(...this.scalePos(s.position));
             this.mapContainer.addChild(container);
             return [s.id, [container, graphics]]
         }));
 
-        this.draw();
+        this.worldBounds = this.computeWorldBounds();
+
+        this.drawLinks();
+        this.drawRoute();
+        this.applyZoom();
     }
 
+    /** Centers the current system in the viewport at the current zoom. */
     center() {
         const system = this.systems.get(this.currentSystem);
         if (system) {
             const pos = this.scalePos(system.position);
             this.mapContainer.position.set(
-                this.size.x / 2 - pos[0],
-                this.size.y / 2 - pos[1]
+                this.size.x / 2 - pos[0] * this.zoom,
+                this.size.y / 2 - pos[1] * this.zoom,
             );
-            this.updateTransform();
+            this.clampPosition();
         }
     }
 
     set route(route: string[]) {
         this.wrappedRoute = route;
-        this.draw();
+        this.drawRoute();
     }
 
     get route() {
         return this.wrappedRoute;
     }
 
-    draw(scale = this.scale) {
-        this.mapContainer.cacheAsBitmap = false;
-        this.scale = scale;
-        this.graphics.clear();
-        this.drawLinks();
-        this.drawRoute();
-        this.placeSystems();
-        this.mapContainer.cacheAsBitmap = true;
+    /** Pans the map by a screen-space delta (used by the arrow keys). */
+    pan(dx: number, dy: number) {
+        this.mapContainer.position.x += dx;
+        this.mapContainer.position.y += dy;
+        this.clampPosition();
+    }
+
+    /**
+     * Zooms by `factor`, keeping the point at (centerX, centerY) in the
+     * viewport fixed. If no center is given, zooms around the viewport center.
+     */
+    zoomBy(factor: number, centerX = this.size.x / 2, centerY = this.size.y / 2) {
+        const oldZoom = this.zoom;
+        const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, oldZoom * factor));
+        if (newZoom === oldZoom) {
+            return;
+        }
+        // Keep the world point under (centerX, centerY) stationary on screen.
+        const pos = this.mapContainer.position;
+        const worldX = (centerX - pos.x) / oldZoom;
+        const worldY = (centerY - pos.y) / oldZoom;
+        this.zoom = newZoom;
+        pos.set(centerX - worldX * newZoom, centerY - worldY * newZoom);
+        this.applyZoom();
+    }
+
+    private applyZoom() {
+        this.mapContainer.scale.set(this.zoom);
+        this.clampPosition();
+    }
+
+    /**
+     * Keeps the map from being panned entirely out of view. The galaxy is
+     * allowed to move until only a margin of it remains inside the viewport.
+     */
+    private clampPosition() {
+        const b = this.worldBounds;
+        const margin = 40;
+        const pos = this.mapContainer.position;
+        // Screen-space extent of the galaxy at the current zoom.
+        const left = b.minX * this.zoom;
+        const right = b.maxX * this.zoom;
+        const top = b.minY * this.zoom;
+        const bottom = b.maxY * this.zoom;
+
+        // Clamp so at least `margin` px of the galaxy stays on each edge.
+        const minPosX = margin - right;
+        const maxPosX = this.size.x - margin - left;
+        const minPosY = margin - bottom;
+        const maxPosY = this.size.y - margin - top;
+        pos.x = Math.min(maxPosX, Math.max(minPosX, pos.x));
+        pos.y = Math.min(maxPosY, Math.max(minPosY, pos.y));
     }
 
     private onDragStart(event: PIXI.FederatedPointerEvent) {
-        //const dragPos = event.data.getLocalPosition(this.container);
-
-        const offset = new PIXI.Point(
-            this.mapContainer.position.x - event.x,
-            this.mapContainer.position.y - event.y,
-        );
+        this.draggedSinceDown = false;
         this.dragData = {
-            data: event,
-            offset,
+            pointerId: event.pointerId,
+            last: event.global.clone(),
+        };
+    }
+
+    private onDragMove(event: PIXI.FederatedPointerEvent) {
+        if (!this.dragData || event.pointerId !== this.dragData.pointerId) {
+            return;
         }
-    }
-
-    private onDragMove() {
-        if (this.dragData) {
-            this.mapContainer.position.set(
-                this.dragData.data.x + this.dragData.offset.x,
-                this.dragData.data.y + this.dragData.offset.y,
-            );
+        const dx = event.global.x - this.dragData.last.x;
+        const dy = event.global.y - this.dragData.last.y;
+        if (dx !== 0 || dy !== 0) {
+            this.draggedSinceDown = true;
         }
+        this.dragData.last.copyFrom(event.global);
+        this.pan(dx, dy);
     }
 
-    private updateTransform() {
-        // Since the map is cached as a bitmap, this updates the positions
-        // of the system circles so they can be clicked again.
-        this.mapContainer.containerUpdateTransform();
-    }
-
-    private onDragEnd() {
+    private onDragEnd(event: PIXI.FederatedPointerEvent) {
+        if (this.dragData && event.pointerId !== this.dragData.pointerId) {
+            return;
+        }
         this.dragData = undefined;
-        this.updateTransform();
+        // `draggedSinceDown` is intentionally left set until the next
+        // pointerdown so the system tap handler (which fires right after
+        // pointerup) can tell a click apart from a drag.
+    }
+
+    private onWheel(event: PIXI.FederatedWheelEvent) {
+        const local = event.getLocalPosition(this.container);
+        const factor = event.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
+        this.zoomBy(factor, local.x, local.y);
     }
 
     private onClickSystem(system: string) {
@@ -189,48 +271,50 @@ class SystemGraph {
         return linksMap.values();
     }
 
-    private placeSystems() {
-        for (const [id, [container, graphics]] of this.systemCircles) {
-            const system = this.systems.get(id);
-            if (!system) {
-                container.visible = false;
-                console.warn(`missing system ${id}`);
-                continue;
-            }
-            const pos = this.scalePos(system.position);
-            graphics.clear();
-            drawSystem(system, graphics, this.scale);
-            container.position.set(...pos);
+    private computeWorldBounds() {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const system of this.systems.values()) {
+            const [x, y] = this.scalePos(system.position);
+            minX = Math.min(minX, x);
+            minY = Math.min(minY, y);
+            maxX = Math.max(maxX, x);
+            maxY = Math.max(maxY, y);
         }
+        if (!Number.isFinite(minX)) {
+            minX = minY = maxX = maxY = 0;
+        }
+        return { minX, minY, maxX, maxY };
     }
 
     private scalePos(pos: [number, number]): [number, number] {
-        return pos.map(p => p * this.scale) as [number, number];
+        return pos.map(p => p * BASE_SCALE) as [number, number];
     }
 
     private drawLinks() {
+        this.linkGraphics.clear();
         for (const [source, dest] of this.links) {
-            this.drawLink(source, dest)
+            this.drawLink(this.linkGraphics, source, dest);
         }
     }
 
     private drawRoute() {
+        this.routeGraphics.clear();
         let prev = this.systems.get(this.currentSystem);
         for (const system of this.route.map(id => this.systems.get(id))) {
             if (system) {
                 if (prev) {
-                    this.drawLink(prev, system, 0x00ff00, 3);
+                    this.drawLink(this.routeGraphics, prev, system, 0x00ff00, 3);
                 }
                 prev = system;
             }
         }
     }
 
-    private drawLink(a: SystemData, b: SystemData,
+    private drawLink(graphics: PIXI.Graphics, a: SystemData, b: SystemData,
         color = GREY, thickness = 1) {
-        this.graphics.lineStyle(thickness, color);
-        this.graphics.moveTo(...this.scalePos(a.position));
-        this.graphics.lineTo(...this.scalePos(b.position));
+        graphics.lineStyle(thickness, color);
+        graphics.moveTo(...this.scalePos(a.position));
+        graphics.lineTo(...this.scalePos(b.position));
     }
 
     private computeShortestPaths() {
@@ -288,6 +372,11 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
             // TODO: Bind tab to cycle destinations
             depart: this.done.bind(this),
             map: this.done.bind(this),
+            // Arrow keys pan the map.
+            up: () => this.systemGraph?.pan(0, KEY_PAN_STEP),
+            down: () => this.systemGraph?.pan(0, -KEY_PAN_STEP),
+            left: () => this.systemGraph?.pan(KEY_PAN_STEP, 0),
+            right: () => this.systemGraph?.pan(-KEY_PAN_STEP, 0),
         });
 
     }

@@ -45,6 +45,12 @@ export function topologicalSortList(list: Sortable[]): Sortable[] {
 
 /**
  * Topologically sort a directed graph stored as a map from nodes to incoming edges.
+ *
+ * Incoming edges that point to nodes which are not keys in the graph are
+ * ignored. Such an edge can never be satisfied by placing the missing node
+ * (it isn't in the output), and since it isn't in the graph it can't impose an
+ * ordering constraint anyway. This matches how `topologicalSortList` treats
+ * references to sortables that aren't present.
  */
 export function topologicalSort<T>(graph: Map<T, Set<T>>): T[] {
     const usedNodes = new Set<T>();
@@ -57,8 +63,10 @@ export function topologicalSort<T>(graph: Map<T, Set<T>>): T[] {
             if (usedNodes.has(node)) {
                 continue;
             }
-            // Check if all nodes this node must come after are already in the list.
-            if (subset(incomingEdges, usedNodes)) {
+            // Check if all in-graph nodes this node must come after are already
+            // in the list. Edges to nodes outside the graph are ignored so a
+            // dangling edge doesn't get mistaken for a cycle.
+            if (incomingEdgesSatisfied(incomingEdges, usedNodes, graph)) {
                 sorted.push(node);
                 usedNodes.add(node);
             }
@@ -69,6 +77,20 @@ export function topologicalSort<T>(graph: Map<T, Set<T>>): T[] {
     }
 
     return sorted;
+}
+
+// Returns true if every incoming edge that refers to a node in the graph has
+// already been placed (is in `usedNodes`). Edges to nodes absent from the graph
+// are treated as satisfied.
+function incomingEdgesSatisfied<T>(
+    incomingEdges: ReadonlySet<T>, usedNodes: ReadonlySet<T>,
+    graph: ReadonlyMap<T, unknown>): boolean {
+    for (const edge of incomingEdges) {
+        if (!usedNodes.has(edge) && graph.has(edge)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 // Returns true if a is a subset of b
