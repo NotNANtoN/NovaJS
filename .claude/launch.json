@@ -5,7 +5,7 @@
             "name": "nova-server",
             "runtimeExecutable": "npm",
             "runtimeArgs": ["start", "--prefix", "packages/nova"],
-            "port": 8000,
+            "port": 8105,
             "autoPort": true
         }
     ]
