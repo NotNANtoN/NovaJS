@@ -5,6 +5,7 @@ import {
     FULL_MURK_VANISH_DISTANCE,
     murkAlpha,
     MurkState,
+    starfieldMurkAlpha,
 } from "./system_environment_plugin.js";
 
 // These assertions run against the real Nova game data (Nova_Data), so they
@@ -89,5 +90,34 @@ describe("murkAlpha", () => {
         // Invisible at murk 100, but visible with a 50-point reduction.
         expect(murkAlpha(distance, murk(100))).toBe(0);
         expect(murkAlpha(distance, murk(100, 50))).toBeGreaterThan(0);
+    });
+});
+
+describe("starfieldMurkAlpha", () => {
+    const murk = (systemMurk: number, murkReduction = 0): MurkState =>
+        ({ systemMurk, murkReduction });
+
+    it("leaves stars untouched with no murk", () => {
+        expect(starfieldMurkAlpha(0, murk(0))).toBe(1);
+        expect(starfieldMurkAlpha(0.5, murk(0))).toBe(1);
+    });
+
+    it("blacks out the starfield at full murk", () => {
+        expect(starfieldMurkAlpha(0, murk(100))).toBe(0);
+        expect(starfieldMurkAlpha(0.5, murk(100))).toBe(0);
+    });
+
+    it("dims stars with murk", () => {
+        expect(starfieldMurkAlpha(0, murk(50))).toBeCloseTo(0.5);
+    });
+
+    it("fades deeper parallax layers more", () => {
+        expect(starfieldMurkAlpha(0.5, murk(50)))
+            .toBeLessThan(starfieldMurkAlpha(0, murk(50)));
+    });
+
+    it("brightens when an outfit reduces murk", () => {
+        expect(starfieldMurkAlpha(0, murk(50, 25)))
+            .toBeGreaterThan(starfieldMurkAlpha(0, murk(50)));
     });
 });

@@ -1,14 +1,17 @@
+import { Optional } from "nova_ecs/optional";
 import { Plugin } from "nova_ecs/plugin";
 import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
 import { Query } from "nova_ecs/query";
 import { Resource } from "nova_ecs/resource";
 import { System } from "nova_ecs/system";
+import * as PIXI from "pixi.js";
 import { SimulationGameDataResource } from "../nova_plugin/game_data_resource.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 import { SystemIdResource } from "../nova_plugin/system_id_resource.js";
 import { AnimationGraphicComponent, ObjectDrawSystem } from "./animation_graphic_plugin.js";
 import { PixiAppResource } from "./pixi_app_resource.js";
 import { StarfieldResource } from "./starfield_plugin.js";
+import { Stage } from "./stage_resource.js";
 
 /**
  * Per-system visual environment: background colour and murk.
@@ -17,10 +20,12 @@ import { StarfieldResource } from "./starfield_plugin.js";
  * display-side so they never touch the deterministic simulation. See the
  * EVN Bible's sÿst docs for the semantics:
  *  - Background colour renders behind the starfield (black if zero).
- *  - Murk (0-100) fogs space objects: the farther an object is from the
- *    player's ship, the more it fades into the background colour, and murk
- *    controls how aggressive that falloff is. A negative murk value is
- *    treated as zero murk but also hides the starfield.
+ *  - Murk (0-100) is dust obscuring the view. Each space object fades into
+ *    the background colour with distance from the player's ship (murk
+ *    controls how aggressive that falloff is), the starfield dims with murk
+ *    (deeper parallax layers more), and a subtle background-coloured haze
+ *    overlays the scene. A negative murk value is treated as zero murk but
+ *    also hides the starfield.
  */
 
 /** How murk is currently being applied, and the hook outfits use to modify it. */
@@ -86,6 +91,38 @@ export function murkAlpha(distance: number, murk: MurkState): number {
     return (vanish - distance) / (vanish - clear);
 }
 
+/**
+ * How much of a star murk leaves visible, as an alpha in [0, 1]. Stars sit
+ * behind every space object, so dust dims the whole field, and stars with a
+ * higher parallax factor read as deeper in the background, so they fade
+ * more:
+ *     alpha = (1 - murk / 100) ^ (1 + factor)
+ * Murk 0 leaves the starfield untouched; murk 100 blacks it out entirely.
+ * Without this, distant ships fading out while the stars stay crisp reads
+ * as cloaking rather than as dust obscuring the view.
+ */
+export function starfieldMurkAlpha(factor: number, murk: MurkState): number {
+    const m = effectiveMurk(murk);
+    return Math.pow(1 - m / 100, 1 + factor);
+}
+
+/**
+ * The strongest alpha of the ambient haze overlay: a background-coloured
+ * sheet over the whole scene whose alpha is murk / 100 * this. It supplies
+ * the "there's dust here" atmosphere; the per-object distance fade does the
+ * gameplay-relevant hiding.
+ */
+export const AMBIENT_HAZE_MAX_ALPHA = 0.3;
+
+/**
+ * Larger than any realistic viewport, so the ambient haze never needs
+ * resizing.
+ */
+const HAZE_SIZE = 16384;
+
+/** The ambient haze overlay. Module-private: not part of the murk API. */
+const MurkHazeResource = new Resource<PIXI.Graphics>('MurkHaze');
+
 const PlayerPositionQuery =
     new Query([MovementStateComponent, PlayerShipSelector] as const);
 
@@ -113,6 +150,30 @@ const MurkFadeSystem = new System({
     after: [ObjectDrawSystem],
 });
 
+/** The effective murk each starfield was last dimmed for. */
+const appliedStarfieldMurk = new WeakMap<object, number>();
+
+/**
+ * Keeps the ambient haze and starfield dimming in sync with the effective
+ * murk, so murk-modifier outfits (murkReduction) take effect immediately.
+ * The starfield's stars are only re-dimmed when the effective murk actually
+ * changes, since that touches every star sprite.
+ */
+const MurkAmbienceSystem = new System({
+    name: 'MurkAmbienceSystem',
+    args: [MurkResource, MurkHazeResource, Optional(StarfieldResource),
+        PlayerShipSelector] as const,
+    step(murk, haze, starfield) {
+        const m = effectiveMurk(murk);
+        haze.alpha = (m / 100) * AMBIENT_HAZE_MAX_ALPHA;
+        if (starfield && starfield.container.visible &&
+            appliedStarfieldMurk.get(starfield) !== m) {
+            appliedStarfieldMurk.set(starfield, m);
+            starfield.dim(factor => starfieldMurkAlpha(factor, murk));
+        }
+    }
+});
+
 export const SystemEnvironmentPlugin: Plugin = {
     name: 'SystemEnvironment',
     async build(world) {
@@ -136,29 +197,63 @@ export const SystemEnvironmentPlugin: Plugin = {
         // default, so a normal system looks unchanged.
         app.renderer.background.color = systemData.backgroundColor;
 
+        const murkState: MurkState = {
+            systemMurk: Math.max(0, systemData.murk),
+            murkReduction: 0,
+        };
+        world.resources.set(MurkResource, murkState);
+
         // A negative murk value hides the starfield (Bible: "less than zero
         // is equivalent to zero murk but also hides the starfield").
-        if (systemData.murk < 0) {
-            const starfield = world.resources.get(StarfieldResource);
-            if (starfield) {
+        // Positive murk dims it: dust obscures the stars too.
+        const starfield = world.resources.get(StarfieldResource);
+        if (starfield) {
+            if (systemData.murk < 0) {
                 starfield.container.visible = false;
+            } else {
+                appliedStarfieldMurk.set(starfield, effectiveMurk(murkState));
+                starfield.dim(factor => starfieldMurkAlpha(factor, murkState));
             }
         }
 
-        world.resources.set(MurkResource, {
-            systemMurk: Math.max(0, systemData.murk),
-            murkReduction: 0,
-        });
+        // The ambient haze: a subtle background-coloured sheet over the whole
+        // scene (under the status bar, which is added to the stage later). It
+        // sells the dust without hiding anything by itself.
+        const stage = world.resources.get(Stage);
+        if (stage) {
+            const haze = new PIXI.Graphics();
+            haze.name = 'MurkHaze';
+            haze.beginFill(systemData.backgroundColor, 1);
+            haze.drawRect(0, 0, HAZE_SIZE, HAZE_SIZE);
+            haze.endFill();
+            haze.alpha = (effectiveMurk(murkState) / 100) * AMBIENT_HAZE_MAX_ALPHA;
+            stage.addChild(haze);
+            world.resources.set(MurkHazeResource, haze);
+            world.addSystem(MurkAmbienceSystem);
+        }
+
         world.addSystem(MurkFadeSystem);
     },
     remove(world) {
         world.removeSystem(MurkFadeSystem);
+        world.removeSystem(MurkAmbienceSystem);
 
         const app = world.resources.get(PixiAppResource);
         if (app) {
             app.renderer.background.color = 0x000000;
         }
 
+        const starfield = world.resources.get(StarfieldResource);
+        if (starfield) {
+            starfield.dim(() => 1);
+        }
+
+        const stage = world.resources.get(Stage);
+        const haze = world.resources.get(MurkHazeResource);
+        if (stage && haze) {
+            stage.removeChild(haze);
+        }
+        world.resources.delete(MurkHazeResource);
         world.resources.delete(MurkResource);
     }
 };

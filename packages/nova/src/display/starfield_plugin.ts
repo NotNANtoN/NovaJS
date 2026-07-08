@@ -142,6 +142,17 @@ class Starfield {
         }
     }
 
+    /**
+     * Sets each star's alpha from its parallax depth factor. Used by murk to
+     * dim the starfield: a higher factor reads as deeper in the background,
+     * so those stars fade more under dust.
+     */
+    dim(alphaFor: (factor: number) => number) {
+        for (const star of this.rbush.all()) {
+            star.sprite.alpha = alphaFor(star.factor);
+        }
+    }
+
     resize(width: number, height: number) {
         this.screen.width = width + this.fudge * 2;
         this.screen.height = height + this.fudge * 2;
