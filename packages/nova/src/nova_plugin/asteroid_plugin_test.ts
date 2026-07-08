@@ -19,6 +19,7 @@ import {
     DebrisComponent,
     spawnAsteroids,
 } from './asteroid_plugin.js';
+import { TumbleAnimationComponent } from './animation_plugin.js';
 import { CargoComponent } from './cargo_plugin.js';
 import { CollisionEvent } from './collision_interaction.js';
 import { DamagedEvent } from './death_plugin.js';
@@ -108,8 +109,10 @@ function fieldFingerprint(world: World) {
     return asteroidEntities(world).map(([uuid, entity]) => {
         const asteroid = entity.components.get(AsteroidComponent)!;
         const movement = entity.components.get(MovementStateComponent)!;
+        const tumble = entity.components.get(TumbleAnimationComponent);
         return [uuid, asteroid.id, movement.position.x, movement.position.y,
-            movement.velocity.x, movement.velocity.y, asteroid.spin];
+            movement.velocity.x, movement.velocity.y,
+            tumble?.frameRate, tumble?.phase];
     });
 }
 
@@ -182,7 +185,7 @@ describe('AsteroidDamageSystem', () => {
 
         const asteroid = new Entity('rock')
             .addComponent(AsteroidComponent,
-                { id: 'test:big', health: BIG_ROID.strength, spin: 1 })
+                { id: 'test:big', health: BIG_ROID.strength })
             .addComponent(AsteroidDataComponent, BIG_ROID)
             .addComponent(MovementStateComponent, {
                 position: new Position(10, 20),
@@ -312,7 +315,7 @@ describe('ScoopSystem', () => {
     function makeDebrisEntity(commodity: string) {
         return new Entity('box')
             .addComponent(DebrisComponent,
-                { commodity, expires: 1e12, spin: 1 })
+                { commodity, expires: 1e12 })
             .addComponent(MovementStateComponent, {
                 position: new Position(0, 0),
                 velocity: new Vector(0, 0),

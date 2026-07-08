@@ -11,6 +11,17 @@ import { makeExplosion } from "./explosion_plugin.js";
 
 /** How long a fading resource-box takes to disappear, ms. */
 const DEBRIS_FADE_MS = 3000;
+/**
+ * TODO(QA): temporary scale-up so the engine-specified resource-box
+ * sprites (cargo box spïn 500, mini-asteroids 501-504) are clearly
+ * visible for playtest verification. The source art is genuinely
+ * 8x8 pixels per frame — the rlëD resources' own headers (500-508)
+ * declare 8x8, matching the spïn declarations — so unscaled boxes are
+ * imperceptible specks. Tune or remove once Matthew confirms the
+ * intended look. The debris hurtbox radius in asteroid_plugin.ts
+ * (DEBRIS_RADIUS) follows this rendered size.
+ */
+const DEBRIS_SCALE = 4;
 
 /** Shows a röid's explosion when an asteroid breaks apart. */
 const AsteroidExplosionSystem = new System({
@@ -33,11 +44,16 @@ const AsteroidExplosionSystem = new System({
     },
 });
 
-/** Fades resource-boxes out over their last few seconds. */
-const DebrisFadeSystem = new System({
-    name: 'DebrisFadeSystem',
-    args: [DebrisComponent, AnimationGraphicComponent, TimeResource] as const,
+/**
+ * Scales and fades resource-boxes. Their tumble is the generic
+ * TumbleDrawSystem (see animation_graphic_plugin.ts).
+ */
+const DebrisDrawSystem = new System({
+    name: 'DebrisDrawSystem',
+    args: [DebrisComponent, AnimationGraphicComponent,
+        TimeResource] as const,
     step(debris, graphic, time) {
+        graphic.container.scale.set(DEBRIS_SCALE);
         const remaining = debris.expires - time.time;
         graphic.container.alpha =
             Math.max(0, Math.min(1, remaining / DEBRIS_FADE_MS));
@@ -48,10 +64,10 @@ export const AsteroidDisplayPlugin: Plugin = {
     name: 'AsteroidDisplayPlugin',
     build(world) {
         world.addSystem(AsteroidExplosionSystem);
-        world.addSystem(DebrisFadeSystem);
+        world.addSystem(DebrisDrawSystem);
     },
     remove(world) {
         world.removeSystem(AsteroidExplosionSystem);
-        world.removeSystem(DebrisFadeSystem);
+        world.removeSystem(DebrisDrawSystem);
     },
 };

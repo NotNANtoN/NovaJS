@@ -10,7 +10,8 @@ import { System } from "nova_ecs/system";
 import * as PIXI from "pixi.js";
 import { DisplayAssetDataResource } from "../nova_plugin/game_data_resource.js";
 import { currentIfDraft } from "../util/deimmerify.js";
-import { AnimationComponent } from "../nova_plugin/animation_plugin.js";
+import { TimeResource } from "nova_ecs/plugins/time_plugin";
+import { AnimationComponent, TumbleAnimationComponent } from "../nova_plugin/animation_plugin.js";
 import { AsteroidComponent, DebrisComponent } from "../nova_plugin/asteroid_plugin.js";
 import { PlanetComponent } from "../nova_plugin/planet_plugin.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
@@ -127,6 +128,38 @@ export const ObjectDrawSystem = new System({
     after: [MovementSystem],
 });
 
+/**
+ * Draws entities whose sprite frames are a pre-rendered animation (3D
+ * asteroid tumbles, spinning weapon graphics) rather than view
+ * rotations. Frames advance at TumbleAnimation.frameRate on logical
+ * time; the entity's sim rotation is deliberately ignored — mapping it
+ * to a frame or applying it as a screen-space sprite rotation (what
+ * ObjectDrawSystem does, correct for ships) would compose two
+ * unrelated rotations. Runs after ObjectDrawSystem to override it.
+ * See TumbleAnimationComponent for the wëap/shän flags of future
+ * consumers.
+ */
+export const TumbleDrawSystem = new System({
+    name: 'TumbleDrawSystem',
+    args: [TumbleAnimationComponent, AnimationGraphicComponent,
+        TimeResource] as const,
+    step(tumble, graphic, time) {
+        const seconds = time.time / 1000;
+        for (const sprite of graphic.sprites.values()) {
+            if (sprite.frames <= 0) {
+                continue; // Textures still loading.
+            }
+            const cycles = tumble.phase
+                + seconds * tumble.frameRate / sprite.frames;
+            const phase = ((cycles % 1) + 1) % 1;
+            sprite.frame = Math.min(sprite.frames - 1,
+                Math.floor(phase * sprite.frames));
+            sprite.pixiSprite.rotation = 0;
+        }
+    },
+    after: [ObjectDrawSystem],
+});
+
 const AnimationGraphicCleanup = new System({
     name: 'AnimationGraphicCleanup',
     events: [DeleteEvent],
@@ -161,6 +194,7 @@ export const AnimationGraphicPlugin: Plugin = {
         world.addSystem(AnimationGraphicLoader);
         world.addSystem(AnimationGraphicProvider);
         world.addSystem(ObjectDrawSystem);
+        world.addSystem(TumbleDrawSystem);
         world.addSystem(AnimationGraphicCleanup);
         world.addSystem(AnimationGraphicInsert);
     },
@@ -168,6 +202,7 @@ export const AnimationGraphicPlugin: Plugin = {
         world.removeSystem(AnimationGraphicLoader);
         world.removeSystem(AnimationGraphicProvider);
         world.removeSystem(ObjectDrawSystem);
+        world.removeSystem(TumbleDrawSystem);
         world.removeSystem(AnimationGraphicCleanup);
         world.removeSystem(AnimationGraphicInsert);
         world.resources.delete(AnimationGraphicPoolResource);

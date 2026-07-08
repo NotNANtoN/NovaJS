@@ -53,7 +53,12 @@ export async function AsteroidParse(roid: RoidResource,
         roid.id + ASTEROID_SPIN_OFFSET, base, notFoundFunction);
 
     // Resolve what an ejected resource-box contains. 0-5 is a standard
-    // cargo type; 1000-1127 is jünk resource 128-255.
+    // cargo type; 1000-1127 is jünk resource 128-255. Boxes use the
+    // engine-specified sprites: the cargo box (spïn 500) for standard
+    // cargo, a mini-asteroid (spïn 501-504) for jünk. Note the source
+    // art really is 8x8 pixels per frame — the rlëD headers (500-508)
+    // declare 8x8, matching the spïn declarations — so the display
+    // scales boxes up to be visible (see asteroid_display_plugin.ts).
     let yieldType: string | null = null;
     let debrisSpin: number | null = null;
     if (roid.yieldType >= 0 && roid.yieldType <= 5) {
