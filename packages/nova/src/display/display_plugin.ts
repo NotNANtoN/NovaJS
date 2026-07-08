@@ -9,6 +9,7 @@ import { AnimationGraphicPlugin } from "./animation_graphic_plugin.js";
 import { BeamDisplayPlugin } from "./beam_display_plugin.js";
 import { ExplosionPlugin } from "./explosion_plugin.js";
 import { FullscreenPlugin } from "./fullscreen_plugin.js";
+import { JumpFadePlugin } from "./jump_fade_plugin.js";
 import { ParticlesPlugin } from "./particles_plugin.js";
 import { PlanetCornersPlugin } from "./planet_corners_plugin.js";
 import { ScreenSizePlugin } from "./screen_size_plugin.js";
@@ -63,8 +64,10 @@ export const Display: Plugin = {
         await world.addPlugin(StarmapPlugin);
         await world.addPlugin(SoundPlugin);
         await world.addPlugin(ShipAnimationPlugin);
+        await world.addPlugin(JumpFadePlugin);
     },
     async remove(world) {
+        await world.removePlugin(JumpFadePlugin);
         await world.removePlugin(ShipAnimationPlugin);
         await world.removePlugin(SoundPlugin);
         await world.removePlugin(StarmapPlugin);
