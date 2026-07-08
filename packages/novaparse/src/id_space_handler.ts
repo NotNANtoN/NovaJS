@@ -125,7 +125,14 @@ class IDSpaceHandler {
         });
     }
 
-    // Adds the Nova Plug-ins directory
+    // Adds the Nova Plug-ins directory.
+    //
+    // Failure policy: a single broken third-party plug-in must NOT brick the
+    // whole game. Each plug-in is parsed in isolation; if one fails to read or
+    // parse (e.g. a missing/stripped resource fork throwing ENOENT), we log a
+    // prominent error naming the exact file and the underlying exception, then
+    // skip it and continue with the rest. Contrast with the core "Nova Files"
+    // data, where any failure is fatal (see addNovaFilesDirectory).
     async addNovaPluginsDirectory(pluginsPath: string) {
         if (!(await isDirectory(pluginsPath))) {
             throw new BadDirectoryStructureError("Plug-ins must be a directory. Got " + pluginsPath + " instead");
@@ -144,25 +151,30 @@ class IDSpaceHandler {
 
             if (await isDirectory(currentPath)) {
                 log(currentPath + " is a directory");
-                await this.addDirectory(currentPath, prefix);
+                await this.addDirectory(currentPath, prefix, /* fatalOnError */ false);
             }
             else {
-                await this.addPlugin(currentPath, prefix);
+                await this.addPluginSafe(currentPath, prefix);
             }
         }
     }
 
-    // Adds the Nova Files directory
+    // Adds the Nova Files directory.
+    //
+    // Failure policy: the core data is required for anything to work, so any
+    // failure here propagates (is fatal) rather than being swallowed.
     async addNovaFilesDirectory(filePath: string) {
         if (!(await isDirectory(filePath))) {
             throw new BadDirectoryStructureError("Nova Files must be a directory. Got " + filePath + " instead");
         }
 
-        await this.addDirectory(filePath, "nova");
+        await this.addDirectory(filePath, "nova", /* fatalOnError */ true);
     }
 
-    // Adds a directory under a single ID prefix
-    async addDirectory(dirPath: string, prefix: string) {
+    // Adds a directory under a single ID prefix.
+    // When fatalOnError is false (plug-in directories), a failure to read/parse
+    // an individual file is logged and skipped rather than aborting everything.
+    async addDirectory(dirPath: string, prefix: string, fatalOnError: boolean) {
         if (!(await isDirectory(dirPath))) {
             throw new BadDirectoryStructureError("Must be a directory. Got " + dirPath + " instead");
         }
@@ -173,11 +185,38 @@ class IDSpaceHandler {
         for (let i in fileNames) {
             var name = fileNames[i];
             var currentPath = path.join(dirPath, name);
-            await this.addPlugin(currentPath, prefix);
+            if (fatalOnError) {
+                await this.addPlugin(currentPath, prefix);
+            } else {
+                await this.addPluginSafe(currentPath, prefix);
+            }
         }
     }
 
-    // Adds a Nova Plug-in 
+    // Wraps addPlugin so that a single unreadable/corrupt plug-in doesn't take
+    // down the entire id space. Loudly logs the offending file and the
+    // underlying error, then continues.
+    async addPluginSafe(filePath: string, prefix: string): Promise<boolean> {
+        try {
+            return await this.addPlugin(filePath, prefix);
+        } catch (e) {
+            console.error(
+                "\n" +
+                "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n" +
+                "NovaParse: FAILED to load plug-in file and SKIPPED it:\n" +
+                "    " + filePath + "\n" +
+                "Underlying error: " + errorDetail(e) + "\n" +
+                "This plug-in's resources will be missing from the game. If it is a\n" +
+                "macOS resource-fork file, check that its resource fork survived any\n" +
+                "copy/transfer (see the xattr gotcha noted in addPlugin).\n" +
+                "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n",
+                e,
+            );
+            return false;
+        }
+    }
+
+    // Adds a Nova Plug-in
     async addPlugin(filePath: string, prefix: string) {
         // Can't await this.getIDSpace because that causes an infinite loop
         // (getIDSpace awaits this.globalResources which depends on this function)
@@ -192,9 +231,51 @@ class IDSpaceHandler {
         // This is the correct ID space because even though a plugin named,
         // for example, "cats", might have a resource that overwrites a nova resource,
         // that resource should still have access to all the other stuff in "cats"
-        await readNovaFile(filePath, this.getIDSpaceUnsafe(prefix));
+        const resourceCount = await readNovaFile(filePath, this.getIDSpaceUnsafe(prefix));
+
+        // A .plug / .ndat / .rez that parsed to zero resources almost always
+        // means its resource fork is present-but-empty. On macOS the resource
+        // fork lives in an extended attribute (com.apple.ResourceFork); copying
+        // through a filesystem/tool that drops xattrs (zip, some cp, cloud sync,
+        // git) silently strips it, leaving a forkless file that reads clean but
+        // empty. Warn loudly so this doesn't manifest as mysteriously missing
+        // ships/systems/planets down the line.
+        if (resourceCount === 0 && likelyHasResources(filePath)) {
+            console.warn(
+                "\n" +
+                "********************************************************************\n" +
+                "NovaParse: plug-in parsed to ZERO resources:\n" +
+                "    " + filePath + "\n" +
+                "Its resource fork is likely empty. On macOS the resource fork is an\n" +
+                "extended attribute; copying via a tool that drops xattrs (zip, some\n" +
+                "cp invocations, cloud sync, git) silently strips it. Re-copy the\n" +
+                "file preserving its resource fork (e.g. `cp -p`, `ditto`, or a DMG).\n" +
+                "********************************************************************\n",
+            );
+        }
+
         return true;
     }
+}
+
+// Files that are expected to carry Nova resources. A zero-resource read from
+// one of these is suspicious (empty/stripped resource fork).
+function likelyHasResources(filePath: string): boolean {
+    const resourceExtensions = new Set([".plug", ".ndat", ".rez", ".npif"]);
+    const ext = path.extname(filePath).toLowerCase();
+    // Classic Mac resource-fork plug-ins often have no extension at all.
+    return resourceExtensions.has(ext) || ext === "";
+}
+
+// Renders an unknown thrown value into a readable, information-preserving
+// string (name, message, code, and stack when available).
+function errorDetail(e: unknown): string {
+    if (e instanceof Error) {
+        const code = (e as NodeJS.ErrnoException).code;
+        const codePart = code ? " [" + code + "]" : "";
+        return e.name + codePart + ": " + e.message + (e.stack ? "\n" + e.stack : "");
+    }
+    return String(e);
 }
 
 function isDirectory(path: string): Promise<boolean> {

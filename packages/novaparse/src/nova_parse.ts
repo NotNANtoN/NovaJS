@@ -3,7 +3,7 @@ import { ExplosionData } from "novadatainterface/explosion_data";
 import { GameDataInterface } from "novadatainterface/game_data_interface";
 import { Gettable } from "novadatainterface/gettable";
 import { NovaDataInterface, NovaIDNotFoundError } from "novadatainterface/nova_data_interface";
-import { getDefaultNovaIDs, NovaIDs } from "novadatainterface/nova_ids";
+import { NovaIDs } from "novadatainterface/nova_ids";
 import { OutfitData } from "novadatainterface/outfit_data";
 import { PictData } from "novadatainterface/pict_data";
 import { PictImageData } from "novadatainterface/pict_image";
@@ -111,6 +111,13 @@ export class NovaParse implements GameDataInterface {
 
 
         this.ids = this.buildIDs();
+        // buildIDs() now rejects loudly when the core data fails to load
+        // (instead of silently returning empty ids). Attach a no-op catch so
+        // that merely constructing a NovaParse whose data is broken doesn't
+        // produce an "unhandled promise rejection" for callers that only use
+        // `data` (resource-by-id, which throws on demand). Callers that await
+        // `ids` still observe the rejection.
+        this.ids.catch((_e: Error) => { });
         this.data = this.buildData();
 
     }
@@ -123,7 +130,23 @@ export class NovaParse implements GameDataInterface {
     private async buildIDs(): Promise<NovaIDs> {
         var idSpace = await this.idSpace;
         if (idSpace instanceof Error) {
-            return getDefaultNovaIDs();
+            // Fail loudly. Previously this silently returned empty ID defaults,
+            // which meant a single unreadable core file (or, before the
+            // per-plugin isolation in IDSpaceHandler, a single bad plug-in)
+            // would wipe ALL ids — systems, ships, planets, everything — with
+            // no error surfaced. The symptoms (blank starmap, "Expected at
+            // least one system id") were maximally confusing because
+            // fetch-by-id uses a different code path and still half-worked.
+            //
+            // Individual bad plug-ins are now skipped with a loud log inside
+            // IDSpaceHandler and never reach here as an Error. If we DO get an
+            // Error here it means the core "Nova Files" data failed to load,
+            // without which nothing works — so surface it instead of hiding it.
+            console.error(
+                "NovaParse: failed to build ID space (core data load failed). " +
+                "Underlying error: " + (idSpace.stack ?? idSpace.message),
+            );
+            throw idSpace;
         }
 
         return {
