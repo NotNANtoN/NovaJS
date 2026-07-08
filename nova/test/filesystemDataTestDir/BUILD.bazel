@@ -1,7 +1,0 @@
-package(default_visibility = ["//visibility:public"])
-
-# WARNING: Using a directory for Ship since ":" is not allowed!
-filegroup(
-    name = "filesystemDataTestDir",
-    srcs = glob(["Outfit/*"]) + ["Ship"],
-)

@@ -1,9 +1,0 @@
-package(default_visibility = ["//visibility:public"])
-
-filegroup(
-    name = "settings",
-    srcs = [
-        "controls.json",
-        "server.json",
-    ]
-)
