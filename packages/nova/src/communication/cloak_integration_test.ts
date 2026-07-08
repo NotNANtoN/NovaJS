@@ -4,9 +4,12 @@ import { System } from "nova_ecs/system";
 import { SingletonComponent } from "nova_ecs/world";
 import { completeEntity } from "../nova_plugin/entity_data_loader.js";
 import {
+    CLOAK_OFF_SOUND,
+    CLOAK_ON_SOUND,
     CloakActiveComponent,
     CloakComponent,
 } from "../nova_plugin/cloak_plugin.js";
+import { PlayerSoundEvent } from "../nova_plugin/sound_plugin.js";
 import { DamagedEvent } from "../nova_plugin/death_plugin.js";
 import { ShieldComponent } from "../nova_plugin/health_plugin.js";
 import { makeShip } from "../nova_plugin/make_ship.js";
@@ -113,4 +116,85 @@ describe("cloak integration (real Nova data)", () => {
             .withContext("a hit should decloak this ship (ModVal 0x0008)")
             .toBe(false);
     }, 60_000);
+
+    // The cloak sounds ride the PlayerSoundEvent channel: the sim emits
+    // them targeted at the cloaking ship on every transition (any decloak
+    // path), and the display's PlayerSoundSystem plays them only for the
+    // local player's ship — same rule and machinery as the warp sounds.
+    // The local-player display filtering itself is covered by
+    // display/sound_plugin_test.ts.
+    describe("cloak sounds", () => {
+        function recordSounds(
+            world: Awaited<ReturnType<typeof makeCloakWorld>>["world"]) {
+            const sounds: { id: string, targets: string[] }[] = [];
+            world.events.get(PlayerSoundEvent).subscribe(
+                ({ data, entities }) => {
+                    sounds.push({
+                        id: data.id,
+                        targets: (entities ?? []).map(
+                            e => typeof e === "string" ? e : e.uuid),
+                    });
+                });
+            return sounds;
+        }
+
+        it("emits cloak-on then cloak-off, targeted at the ship, on toggles",
+            async () => {
+            const { world, uuid } = await makeCloakWorld();
+            const sounds = recordSounds(world);
+
+            applyControlEvents(world, "test peer",
+                [{ action: "cloak", state: "start" }]);
+            world.step();
+            expect(sounds).toEqual(
+                [{ id: CLOAK_ON_SOUND, targets: [uuid] }]);
+
+            // Steady cloaked ticks emit nothing (once per edge).
+            world.step();
+            world.step();
+            expect(sounds.length).toBe(1);
+
+            applyControlEvents(world, "test peer",
+                [{ action: "cloak", state: "start" }]);
+            world.step();
+            expect(sounds).toEqual([
+                { id: CLOAK_ON_SOUND, targets: [uuid] },
+                { id: CLOAK_OFF_SOUND, targets: [uuid] },
+            ]);
+        }, 60_000);
+
+        it("emits cloak-off when a hit drops the cloak", async () => {
+            const { world, uuid } = await makeCloakWorld();
+            applyControlEvents(world, "test peer",
+                [{ action: "cloak", state: "start" }]);
+            world.step();
+            const sounds = recordSounds(world);
+
+            damage(world, uuid);
+
+            expect(sounds).toEqual(
+                [{ id: CLOAK_OFF_SOUND, targets: [uuid] }]);
+        }, 60_000);
+
+        it("emits cloak-off when resource exhaustion drops the cloak",
+            async () => {
+            const { world, ship, uuid } = await makeCloakWorld();
+            applyControlEvents(world, "test peer",
+                [{ action: "cloak", state: "start" }]);
+            world.step();
+            const sounds = recordSounds(world);
+
+            // Pin shields at the floor so the drain system decloaks on
+            // its next tick (Polaris v1.1 drains shields while cloaked).
+            const shield = ship.components.get(ShieldComponent)!;
+            shield.current = shield.min;
+            shield.recharge = 0;
+            world.step();
+
+            expect(ship.components.get(CloakActiveComponent)?.active)
+                .toBe(false);
+            expect(sounds).toEqual(
+                [{ id: CLOAK_OFF_SOUND, targets: [uuid] }]);
+        }, 60_000);
+    });
 });

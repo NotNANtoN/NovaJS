@@ -1,7 +1,7 @@
 import * as t from 'io-ts';
 import { CloakData, getDefaultCloakData } from 'novadatainterface/cloak_data';
 import { CloakScannerData, getDefaultCloakScannerData } from 'novadatainterface/cloak_scanner_data';
-import { GetEntity } from 'nova_ecs/arg_types';
+import { Emit, GetEntity, UUID } from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
 import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
@@ -16,6 +16,14 @@ import { FuelComponent, ShieldComponent } from './health_plugin.js';
 import { OutfitsState, OutfitsStateComponent } from './outfit_plugin.js';
 import { ProvideFromCache } from './provide_from_cache.js';
 import { ShipControlEvent, ShipControlStateComponent } from './ship_control.js';
+import { PlayerSoundEvent } from './sound_plugin.js';
+
+// The stock Nova cloak sounds (snd resources in the Nova Files id space).
+// Emitted on the PlayerSoundEvent channel targeted at the cloaking ship,
+// so only that ship's own pilot hears them (same rule as the warp
+// sounds); the display's PlayerSoundSystem does the local-player filter.
+export const CLOAK_ON_SOUND = 'nova:381';  // snd 381 "Cloak On"
+export const CLOAK_OFF_SOUND = 'nova:380'; // snd 380 "Cloak Off"
 
 /**
  * A ship's cloaking capability, derived from its owned cloaking-device
@@ -285,8 +293,8 @@ export const CloakControlSystem = new System({
     events: [ShipControlEvent],
     args: [ShipControlStateComponent, CloakComponent,
         Optional(CloakActiveComponent), Optional(ShieldComponent),
-        GetEntity] as const,
-    step(controlState, cloak, active, shield, entity) {
+        GetEntity, UUID, Emit] as const,
+    step(controlState, cloak, active, shield, entity, uuid, emit) {
         if (controlState.get('cloak') !== 'start') {
             return;
         }
@@ -304,6 +312,11 @@ export const CloakControlSystem = new System({
             // Activation immediately drops shields (bit 0x0004).
             shield.current = shield.min;
         }
+        if (next !== current) {
+            emit(PlayerSoundEvent, {
+                id: next ? CLOAK_ON_SOUND : CLOAK_OFF_SOUND,
+            }, [uuid]);
+        }
     },
 });
 
@@ -316,10 +329,16 @@ export const CloakControlSystem = new System({
 export const CloakDrainSystem = new System({
     name: 'CloakDrainSystem',
     args: [CloakActiveComponent, CloakComponent, TimeResource,
-        Optional(ShieldComponent), Optional(FuelComponent)] as const,
-    step(active, cloak, time, shield, fuel) {
+        Optional(ShieldComponent), Optional(FuelComponent),
+        UUID, Emit] as const,
+    step(active, cloak, time, shield, fuel, uuid, emit) {
+        const was = active.active;
         active.active = applyCloakDrain(
             active.active, cloak, time.delta_s, shield, fuel);
+        if (was && !active.active) {
+            // Resource exhaustion dropped the cloak.
+            emit(PlayerSoundEvent, { id: CLOAK_OFF_SOUND }, [uuid]);
+        }
     },
 });
 
@@ -330,9 +349,13 @@ export const CloakDrainSystem = new System({
 export const CloakDecloakOnHitSystem = new System({
     name: 'CloakDecloakOnHitSystem',
     events: [DamagedEvent],
-    args: [CloakActiveComponent, CloakComponent] as const,
-    step(active, cloak) {
+    args: [CloakActiveComponent, CloakComponent, UUID, Emit] as const,
+    step(active, cloak, uuid, emit) {
+        const was = active.active;
         active.active = applyDecloakOnHit(active.active, cloak);
+        if (was && !active.active) {
+            emit(PlayerSoundEvent, { id: CLOAK_OFF_SOUND }, [uuid]);
+        }
     },
 });
 
