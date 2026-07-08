@@ -1,18 +1,58 @@
 import * as t from 'io-ts';
 import { Emit, Entities, GetEntity, UUID } from "nova_ecs/arg_types";
 import { Component } from "nova_ecs/component";
+import { Angle } from "nova_ecs/datatypes/angle";
+import { Position } from "nova_ecs/datatypes/position";
+import { Vector } from "nova_ecs/datatypes/vector";
 import { Entity } from "nova_ecs/entity";
 import { EcsEvent } from "nova_ecs/events";
 import { Plugin } from "nova_ecs/plugin";
+import { MovementPhysicsComponent, MovementStateComponent, MovementSystem, MovementState, teleport } from "nova_ecs/plugins/movement_plugin";
 import { EncodedEntity, Serializer, SerializerResource } from "nova_ecs/plugins/serializer_plugin";
+import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { Provide } from "nova_ecs/provide";
 import { System } from "nova_ecs/system";
 import { isLeft } from "fp-ts/lib/Either.js";
 import { registerSimulationBridgeEvent } from "../communication/simulation_bridge_events.js";
 import { deImmerify } from "../util/deimmerify.js";
 import { ControlledByComponent, ShipControlEvent, ShipControlStateComponent } from "./ship_control.js";
+import { ControlShipSystem } from "./ship_controller_plugin.js";
+import { getShipMovementPhysics, ShipPhysicsComponent } from "./ship_plugin.js";
 import { PlayerShipSelector } from "./player_ship_plugin.js";
+import { SimulationGameDataResource } from "./game_data_resource.js";
 import { SystemIdResource } from "./system_id_resource.js";
+
+// Hyperspace jump tuning. The EVN Bible documents the *structure* of
+// the jump sequence — ships must be outside the no-jump zone ("Jump
+// Distance", 1000 pixels, adjusted by "hyperspace dist mod" outfits),
+// they come to a stop unless they can "jump without slowing down"
+// (shïp Flags2 0x0020 or a "fast jumping" outfit), turn to face the
+// destination, and leave at a multiple of the normal hyperspace speed
+// (shïp Flags 0x0001/0x0002/0x0004); arriving ships "jump in from
+// hyperspace after a short delay". The three delay durations below are
+// not numerically specified in the Bible; they are tuned to match the
+// original game's feel.
+/** Radius of the no-jump zone around the system center, in pixels. */
+export const JUMP_DISTANCE = 1000;
+/** Delay between finishing the turn toward the destination and the
+ * hyperdrive engaging (thrust starting). */
+export const JUMP_SPINUP_DELAY_MS = 1000;
+/** How long a departing ship accelerates before it vanishes into
+ * hyperspace. Acceleration is scaled so the ship reaches its full jump
+ * speed exactly at departure. */
+export const JUMP_DEPART_DELAY_MS = 2000;
+/** How long an arriving ship takes to shed its hyperspace speed. The
+ * player gets control back when it expires. */
+export const JUMP_ARRIVAL_DELAY_MS = 1000;
+/** The "normal" hyperspace jump speed, scaled per ship by the shïp
+ * resource's jump speed flags (75% / 125% / 150%). An average ship's
+ * top speed is 300. */
+export const JUMP_BASE_SPEED = 1500;
+
+/** How closely (radians) an inertial ship must face retrograde before
+ * it thrusts to kill its velocity. */
+const RETROGRADE_THRUST_TOLERANCE = 0.3;
+const ALIGNED_TOLERANCE = 1e-9;
 
 export interface InitiateJump {
     to: string /* system uuid */,
@@ -33,6 +73,35 @@ const JumpRouteProvider = Provide({
         return { route: [] };
     }
 });
+
+/**
+ * The hyperspace jump sequence state machine. Shared, deterministic
+ * simulation state: every peer advances every jumping ship's sequence
+ * identically. Registered with the serializer, so it crosses to the
+ * destination system with the ship (stage 'arriving') and is included
+ * in rollback snapshots via the default codec policy.
+ */
+export const JumpStateType = t.intersection([t.type({
+    /** Destination system uuid. */
+    to: t.string,
+    stage: t.union([
+        t.literal('stopping'),
+        t.literal('aligning'),
+        t.literal('spinup'),
+        t.literal('accelerating'),
+        t.literal('arriving'),
+    ]),
+    /** Travel heading (radians): the map-space direction from the
+     * origin system to the destination system. */
+    direction: t.number,
+}), t.partial({
+    /** Logical time (TimeResource ms) when the current timed stage
+     * began. Unset for 'arriving' until the destination world's first
+     * step, since logical time differs between systems. */
+    stageStart: t.number,
+})]);
+export type JumpState = t.TypeOf<typeof JumpStateType>;
+export const JumpComponent = new Component<JumpState>('JumpSequence');
 
 export interface FinishJump {
     entity: Entity,
@@ -92,26 +161,203 @@ const JumpFromSystem = new System({
     args: [GetEntity, UUID, Entities, InitiateJumpEvent, Emit] as const,
     step(entity, uuid, entities, { to }, emit) {
         entities.delete(uuid);
-        // TODO: Animation etc.
         deImmerify(entity);
         emit(FinishJumpEvent, { entity, uuid, to }, [uuid]);
     }
 });
 
+/**
+ * Starts the jump sequence when a peer presses hyperjump: checks the
+ * no-jump zone, resolves the travel heading from the systems' map
+ * positions (staged at world genesis in makeSystem, so the cache read
+ * is deterministic), and attaches the JumpComponent state machine.
+ */
 const PlayerJumpControl = new System({
     name: 'PlayerJumpControl',
     events: [ShipControlEvent],
-    args: [ShipControlStateComponent, Emit, UUID, SystemIdResource,
-        JumpRouteComponent] as const,
-    step(controlState, emit, uuid, systemId, jumpRoute) {
-        if (controlState.get('hyperjump') === 'start') {
-            // TODO: Prevent this from being called twice before a jump.
-            const nextSystem = jumpRoute.route.shift();
-            if (nextSystem) {
-                emit(InitiateJumpEvent, { to: nextSystem }, [uuid]);
+    args: [ShipControlStateComponent, GetEntity, SystemIdResource,
+        JumpRouteComponent, MovementStateComponent, ShipPhysicsComponent,
+        SimulationGameDataResource] as const,
+    step(controlState, entity, systemId, jumpRoute, movement, shipPhysics,
+        gameData) {
+        if (controlState.get('hyperjump') !== 'start') {
+            return;
+        }
+        if (entity.components.has(JumpComponent)) {
+            // A jump is already in progress.
+            return;
+        }
+        const destination = jumpRoute.route[0];
+        if (!destination) {
+            return;
+        }
+        // EVN Bible: ships can only enter hyperspace outside the
+        // no-jump zone around the system center (standard radius 1000,
+        // adjusted by "hyperspace dist mod" outfits).
+        const jumpRadius = Math.max(0,
+            JUMP_DISTANCE + shipPhysics.jumpDistanceMod);
+        if (movement.position.length < jumpRadius) {
+            return;
+        }
+        const origin = gameData.data.System.getCached(systemId);
+        const dest = gameData.data.System.getCached(destination);
+        if (!origin || !dest) {
+            return;
+        }
+        const direction = new Vector(
+            dest.position[0] - origin.position[0],
+            dest.position[1] - origin.position[1]);
+        jumpRoute.route.shift();
+        entity.components.set(JumpComponent, {
+            to: destination,
+            // Ships with "fast jumping" skip coming to a stop.
+            stage: shipPhysics.canJumpWithoutSlowing ? 'aligning' : 'stopping',
+            direction: direction.length === 0 ? 0 : direction.angle.angle,
+        });
+    }
+});
+
+/** Overrides whatever the player's held controls just wrote: control
+ * of the ship is taken away for the duration of the jump. */
+function overrideControls(movement: MovementState) {
+    movement.accelerating = 0;
+    movement.turning = 0;
+    movement.turnTo = null;
+    movement.turnBack = false;
+}
+
+/**
+ * Advances a jumping ship's state machine each tick. Runs after the
+ * control systems (overriding player input) and before the movement
+ * system (so the physics overrides below govern this tick's motion).
+ *
+ * stopping -> aligning -> spinup -> accelerating happen in the origin
+ * system; the ship then crosses to the destination system carrying
+ * stage 'arriving'.
+ */
+const JumpSequenceSystem = new System({
+    name: 'JumpSequenceSystem',
+    args: [JumpComponent, MovementStateComponent, ShipPhysicsComponent,
+        TimeResource, GetEntity, UUID, Emit] as const,
+    step(jump, movement, shipPhysics, time, entity, uuid, emit) {
+        overrideControls(movement);
+        const jumpSpeed = JUMP_BASE_SPEED * shipPhysics.jumpSpeedMult;
+        const target = new Angle(jump.direction);
+
+        switch (jump.stage) {
+            case 'stopping': {
+                // Come to a complete stop before turning to the
+                // destination (skipped for ships that can jump without
+                // slowing down).
+                const speed = movement.velocity.length;
+                const stopThreshold =
+                    shipPhysics.acceleration * time.delta_s * 2;
+                if (speed <= stopThreshold) {
+                    movement.velocity = new Vector(0, 0);
+                    movement.targetSpeed = 0;
+                    jump.stage = 'aligning';
+                    break;
+                }
+                if (shipPhysics.inertialess) {
+                    movement.accelerating = -1;
+                } else {
+                    // Turn retrograde and thrust once roughly aligned.
+                    movement.turnBack = true;
+                    const reverse = movement.velocity.angle.add(Math.PI);
+                    const misalignment =
+                        movement.rotation.distanceTo(reverse).angle;
+                    if (Math.abs(misalignment) < RETROGRADE_THRUST_TOLERANCE) {
+                        movement.accelerating = 1;
+                    }
+                }
+                break;
+            }
+            case 'aligning': {
+                movement.turnTo = target;
+                const misalignment =
+                    movement.rotation.distanceTo(target).angle;
+                if (Math.abs(misalignment) < ALIGNED_TOLERANCE) {
+                    movement.turnTo = null;
+                    movement.rotation = target;
+                    jump.stage = 'spinup';
+                    jump.stageStart = time.time;
+                }
+                break;
+            }
+            case 'spinup': {
+                // The hyperdrive charges while the ship holds still.
+                movement.turnTo = target;
+                if (time.time - (jump.stageStart ?? time.time)
+                    >= JUMP_SPINUP_DELAY_MS) {
+                    jump.stage = 'accelerating';
+                    jump.stageStart = time.time;
+                }
+                break;
+            }
+            case 'accelerating': {
+                movement.turnTo = target;
+                movement.accelerating = 1;
+                // Raise the speed cap past the ship's normal maximum
+                // and accelerate so the ship hits its full jump speed
+                // exactly when the departure delay expires. Re-applied
+                // every tick, so rollback restores (which re-derive
+                // normal physics) stay consistent.
+                const basePhysics = getShipMovementPhysics(shipPhysics);
+                entity.components.set(MovementPhysicsComponent, {
+                    ...basePhysics,
+                    maxVelocity: jumpSpeed,
+                    acceleration: jumpSpeed / (JUMP_DEPART_DELAY_MS / 1000),
+                });
+                if (time.time - (jump.stageStart ?? time.time)
+                    >= JUMP_DEPART_DELAY_MS) {
+                    // Depart. Set the arrival kinematics the destination
+                    // system will see: the ship jumps in on the side of
+                    // the system facing where it came from, at the edge
+                    // of the no-jump zone, inbound at full jump speed.
+                    const unit = target.getUnitVector();
+                    teleport(movement,
+                        new Position(-unit.x * JUMP_DISTANCE,
+                            -unit.y * JUMP_DISTANCE),
+                        unit.scale(jumpSpeed));
+                    movement.rotation = target;
+                    movement.targetSpeed = jumpSpeed;
+                    jump.stage = 'arriving';
+                    jump.stageStart = undefined;
+                    emit(InitiateJumpEvent, { to: jump.to }, [uuid]);
+                }
+                break;
+            }
+            case 'arriving': {
+                // Runs in the destination system: bleed off hyperspace
+                // speed by ramping the speed cap down to normal, then
+                // hand control back.
+                if (jump.stageStart === undefined) {
+                    jump.stageStart = time.time;
+                }
+                const basePhysics = getShipMovementPhysics(shipPhysics);
+                const progress =
+                    (time.time - jump.stageStart) / JUMP_ARRIVAL_DELAY_MS;
+                if (progress >= 1) {
+                    entity.components.set(MovementPhysicsComponent, basePhysics);
+                    if (movement.targetSpeed !== undefined) {
+                        movement.targetSpeed = Math.min(
+                            movement.targetSpeed, basePhysics.maxVelocity);
+                    }
+                    entity.components.delete(JumpComponent);
+                    break;
+                }
+                const maxVelocity = jumpSpeed
+                    + (basePhysics.maxVelocity - jumpSpeed) * progress;
+                entity.components.set(MovementPhysicsComponent, {
+                    ...basePhysics,
+                    maxVelocity: Math.max(maxVelocity, basePhysics.maxVelocity),
+                });
+                break;
             }
         }
-    }
+    },
+    after: [ControlShipSystem],
+    before: [MovementSystem],
 });
 
 // For a single system to emit jump events.
@@ -122,31 +368,13 @@ export const JumpPlugin: Plugin = {
         serializer?.addComponent(JumpRouteComponent, t.type({
             route: t.array(t.string),
         }));
+        serializer?.addComponent(JumpComponent, JumpStateType);
         if (serializer) {
             serializer.addEvent(FinishJumpEvent, FinishJumpEventType(serializer));
         }
         world.addSystem(JumpFromSystem);
         world.addSystem(PlayerJumpControl);
+        world.addSystem(JumpSequenceSystem);
         world.addSystem(JumpRouteProvider);
     }
 };
-
-// // Pass jump events between systems.
-// // TODO: Support changing set of systems.
-// export const WorldJumpPlugin: Plugin = {
-//     name: 'WorldJumpPlugin',
-//     build(world) {
-//         const systems = world.resources.get(SystemsResource);
-//         if (!systems) {
-//             throw new Error('World must have systems resource');
-//         }
-
-//         for (const [, system] of systems) {
-//             system.events.get(FinishJumpEvent).subscribe(
-//                 ({ entity, to, uuid }) => {
-//                     const destination = systems.get(to) ?? system;
-//                     destination.entities.set(uuid, entity);
-//                 });
-//         }
-//     }
-// }
