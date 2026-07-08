@@ -26,10 +26,11 @@ export interface MurkState {
     /** The system's base murk (0-100), straight from the sÿst resource. */
     readonly systemMurk: number;
     /**
-     * Amount of murk subtracted by outfits (the "System Murk" outfit
-     * modifier, EVN Bible / ResForge outf case 28). Clamped so the
-     * effective murk never drops below zero. Defaults to 0; a murk-reducing
-     * outfit hook can raise it.
+     * Amount of murk removed by outfits (the "murk modifier" outfit
+     * modifier, EVN Bible / ResForge outf case 28: "the amount by which to
+     * increase or decrease the current system's murkiness level"). Positive
+     * clears murk; negative deepens it. The effective murk is clamped to
+     * 0-100. Defaults to 0; an outfit hook can change it.
      */
     murkReduction: number;
 }
