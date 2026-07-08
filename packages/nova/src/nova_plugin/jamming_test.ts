@@ -10,6 +10,7 @@ import { World } from 'nova_ecs/world';
 import { getDefaultProjectileWeaponData, getDefaultSeekerFlags, SeekerFlags }
     from 'novadatainterface/weapon_data';
 import { getDefaultOutfitData } from 'novadatainterface/outfit_data';
+import { getDefaultGovtData, GovtData } from 'novadatainterface/govt_data';
 import {
     decideJamReaction,
     deriveJamming,
@@ -30,14 +31,23 @@ import { SourceComponent } from './fire_weapon_plugin.js';
 import { TargetComponent } from './target_component.js';
 
 /** A stand-in for the simulation game data, exposing only Outfit.getCached. */
-function mockGameData(outfits: Record<string, ReturnType<typeof getDefaultOutfitData>>) {
+function mockGameData(outfits: Record<string, ReturnType<typeof getDefaultOutfitData>>,
+    govts: Record<string, GovtData> = {}) {
     return {
         data: {
             Outfit: {
                 getCached: (id: string) => outfits[id],
             },
+            Govt: {
+                getCached: (id: string) => govts[id],
+            },
         },
     } as any;
+}
+
+/** A GovtData with the given InhJam1-4 and everything else at defaults. */
+function govtWithInhJam(inhJam: [number, number, number, number]): GovtData {
+    return { ...getDefaultGovtData(), inhJam };
 }
 
 function movement(x: number, y: number) {
@@ -88,6 +98,63 @@ describe('deriveJamming (ship jamming accumulation from outfits)', () => {
         const gameData = mockGameData({ p: plain });
         const outfits = new Map([['p', { count: 3 }]]);
         expect(deriveJamming(outfits, gameData)).toEqual([0, 0, 0, 0]);
+    });
+});
+
+describe('deriveJamming with a government (InhJam1-4 composition)', () => {
+    it('gives a ship with a govt and no jammer outfits its govt InhJam values', () => {
+        const gameData = mockGameData({},
+            { 'nova:136': govtWithInhJam([50, 50, 35, 20]) });
+        // No outfits at all.
+        const result = deriveJamming(new Map(), gameData, 'nova:136');
+        expect(result).toEqual([50, 50, 35, 20]);
+    });
+
+    it('takes the per-type MAX of outfit jamming and govt InhJam', () => {
+        // Outfits sum to [40, 10, 0, 0]; govt InhJam is [20, 50, 35, 0].
+        // Expect per-type max: [40, 50, 35, 0].
+        const irJammer = { ...getDefaultOutfitData(), jamming: [20, 0, 0, 0] as const };
+        const radarJammer = { ...getDefaultOutfitData(), jamming: [0, 10, 0, 0] as const };
+        const gameData = mockGameData(
+            { ir: irJammer, radar: radarJammer },
+            { 'nova:g': govtWithInhJam([20, 50, 35, 0]) });
+        const outfits = new Map([['ir', { count: 2 }], ['radar', { count: 1 }]]);
+        expect(deriveJamming(outfits, gameData, 'nova:g')).toEqual([40, 50, 35, 0]);
+    });
+
+    it('does not let govt InhJam push a stronger outfit value down', () => {
+        // Outfit out-jams the govt on type 1; the outfit value wins.
+        const strong = { ...getDefaultOutfitData(), jamming: [80, 0, 0, 0] as const };
+        const gameData = mockGameData({ s: strong },
+            { 'nova:g': govtWithInhJam([50, 0, 0, 0]) });
+        const outfits = new Map([['s', { count: 1 }]]);
+        expect(deriveJamming(outfits, gameData, 'nova:g')).toEqual([80, 0, 0, 0]);
+    });
+
+    it('clamps a negative outfit total up to the govt InhJam floor (max)', () => {
+        // A "disruptor" outfit makes the outfit total negative on type 1;
+        // the govt's inherent jamming is the floor.
+        const disruptor = { ...getDefaultOutfitData(), jamming: [-30, 0, 0, 0] as const };
+        const gameData = mockGameData({ d: disruptor },
+            { 'nova:g': govtWithInhJam([10, 0, 0, 0]) });
+        const outfits = new Map([['d', { count: 1 }]]);
+        expect(deriveJamming(outfits, gameData, 'nova:g')).toEqual([10, 0, 0, 0]);
+    });
+
+    it('leaves jamming outfit-only when no govt id is given (unchanged behaviour)', () => {
+        const jammer = { ...getDefaultOutfitData(), jamming: [20, 0, 0, 0] as const };
+        const gameData = mockGameData({ j: jammer },
+            { 'nova:g': govtWithInhJam([90, 90, 90, 90]) });
+        const outfits = new Map([['j', { count: 1 }]]);
+        // No govtId -> the govt is never consulted.
+        expect(deriveJamming(outfits, gameData)).toEqual([20, 0, 0, 0]);
+    });
+
+    it('returns undefined when the govt is given but not cached yet', () => {
+        const jammer = { ...getDefaultOutfitData(), jamming: [20, 0, 0, 0] as const };
+        const gameData = mockGameData({ j: jammer }); // no govts cached
+        const outfits = new Map([['j', { count: 1 }]]);
+        expect(deriveJamming(outfits, gameData, 'nova:missing')).toBeUndefined();
     });
 });
 
