@@ -58,9 +58,9 @@ export class Spaceport extends Menu<Entity> {
         this.outfitter = new Outfitter(displayAssets, simulationData, controlEvents);
         const showOutfitter = async () => {
             this.controls.unbind();
-            const outfits = this.input.components.get(OutfitsStateComponent) ?? new Map();
-            const newOutfits = await this.outfitter.show(outfits);
-            this.input.components.set(OutfitsStateComponent, newOutfits);
+            // The outfitter mutates the ship's outfits and the
+            // player's control bits.
+            this.input = await this.outfitter.show(this.input);
             // Delete these so they are re-created with the new outfits.
             // TODO: Find a better way to do this.
             this.input.components.delete(WeaponsStateComponent);

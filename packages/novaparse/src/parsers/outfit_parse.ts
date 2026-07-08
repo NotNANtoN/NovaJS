@@ -7,8 +7,8 @@ import { FPS, OutfitTurnRateConversionFactor, ShipTurnRateConversionFactor } fro
 
 
 // This should not be necessary!
-const noUnitConversion = new Set(["freeCargo", "shield", "armor", "energy", "ionization"])
-type NoUnitConversion = "freeCargo" | "shield" | "armor" | "energy" | "ionization";
+const noUnitConversion = new Set(["freeCargo", "shield", "armor", "energy", "ionization", "maxGuns", "maxTurrets"])
+type NoUnitConversion = "freeCargo" | "shield" | "armor" | "energy" | "ionization" | "maxGuns" | "maxTurrets";
 const perFrameTimes1000 = new Set(["shieldRecharge", "armorRecharge"]);
 type PerFrameTimes1000 = "shieldRecharge" | "armorRecharge";
 
@@ -20,6 +20,8 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
     // and objects enforce a "one value per key" requirement.
     var weapons: { [index: string]: number } = {};
     var physics: OutfitPhysics = { freeMass: outf.mass };
+    let ammoFor: string | null = null;
+    let increasesMax: string | null = null;
 
     for (let i in outf.functions) {
         let func = outf.functions[i];
@@ -45,6 +47,28 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
                 weapons[weaponGlobalID] = 0;
             }
             weapons[weaponGlobalID] += 1;
+        }
+        else if (fType === "ammunition") {
+            if (typeof fVal !== "number") {
+                throw new Error("Wrong type for ammunition val. Expected number");
+            }
+            let ammoWeap = outf.idSpace.wëap[fVal];
+            if (!ammoWeap) {
+                notFoundFunction("Missing wëap id " + fVal + " for ammunition oütf " + base.id);
+                continue;
+            }
+            ammoFor = ammoWeap.globalID;
+        }
+        else if (fType === "increase maximum") {
+            if (typeof fVal !== "number") {
+                throw new Error("Wrong type for increase maximum val. Expected number");
+            }
+            let maxOutf = outf.idSpace.oütf[fVal];
+            if (!maxOutf) {
+                notFoundFunction("Missing oütf id " + fVal + " for increase-maximum oütf " + base.id);
+                continue;
+            }
+            increasesMax = maxOutf.globalID;
         }
         else if (noUnitConversion.has(fType)) {
             //else if (fType === "freeCargo") {
@@ -119,6 +143,17 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
         price: outf.cost,
         desc,
         displayWeight: outf.displayWeight,
-        max: outf.max
+        max: outf.max,
+        availability: outf.availability,
+        onPurchase: outf.onPurchase,
+        onSell: outf.onSell,
+        // 64-bit flag sets as JSON-safe hex strings.
+        contribute: "0x" + outf.contribute.toString(16),
+        require: "0x" + outf.require.toString(16),
+        fixedGun: (outf.flags & 0x1) > 0,
+        turret: (outf.flags & 0x2) > 0,
+        cantSell: (outf.flags & 0x8) > 0,
+        ammoFor,
+        increasesMax,
     }
 }

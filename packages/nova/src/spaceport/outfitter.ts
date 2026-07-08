@@ -1,14 +1,20 @@
 import { OutfitData } from "novadatainterface/outfit_data";
+import { ShipData } from "novadatainterface/ship_data";
+import { Entity } from "nova_ecs/entity";
 import { DefaultMap } from "nova_ecs/utils";
 import * as PIXI from 'pixi.js';
 import { Observable } from "rxjs";
 import { DisplayAssetDataInterface } from "../client/gamedata/display_asset_data.js";
 import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
 import { ControlEvent } from "../nova_plugin/controls_plugin.js";
-import { OutfitsState } from "../nova_plugin/outfit_plugin.js";
+import { makeControlBitHooks, NCBParseError, runNCBSet } from "../nova_plugin/ncb.js";
+import { ControlBits, ControlBitsComponent } from "../nova_plugin/ncb_plugin.js";
+import { OutfitsStateComponent } from "../nova_plugin/outfit_plugin.js";
+import { ShipComponent } from "../nova_plugin/ship_plugin.js";
 import { Button } from "./button.js";
 import { ItemGrid, ItemTile } from "./item_grid.js";
 import { Menu } from "./menu.js";
+import { canBuyOutfit, canSellOutfit, freeMass, OutfitterContext } from "./outfitter_rules.js";
 
 
 const descWidth = 190;
@@ -27,10 +33,13 @@ export const FONT = {
     } as const,
 };
 
-export class Outfitter extends Menu<OutfitsState> {
+export class Outfitter extends Menu<Entity> {
     private itemGrid?: ItemGrid<OutfitData>;
     private pictContainer = new PIXI.Container();
+    /** Working copies, committed to the ship entity on done. */
     private outfits: DefaultMap<string, number>;
+    private controlBits: ControlBits = new Set();
+    private shipData?: ShipData;
 
     private text = {
         description: new PIXI.Text("", FONT.normal),
@@ -42,6 +51,7 @@ export class Outfitter extends Menu<OutfitsState> {
         mass: new PIXI.Text("3", FONT.normal),
         availableMass: new PIXI.Text("Available:", FONT.normal),
         freeMass: new PIXI.Text("", FONT.normal),
+        status: new PIXI.Text("", FONT.normal),
     }
 
     constructor(displayAssets: DisplayAssetDataInterface,
@@ -94,6 +104,9 @@ export class Outfitter extends Menu<OutfitsState> {
         this.text.freeMass.position.x = 300;
         this.text.freeMass.position.y = 106;
 
+        this.text.status.position.x = -170;
+        this.text.status.position.y = 118;
+
         for (const t of Object.values(this.text)) {
             this.container.addChild(t);
         }
@@ -125,42 +138,106 @@ export class Outfitter extends Menu<OutfitsState> {
         const outfits = await Promise.all(ids.map(id =>
             this.simulationData.data.Outfit.get(id, 100)));
         outfits.sort((a, b) => b.displayWeight - a.displayWeight);
+
+        // Purchase checks look weapons up synchronously, so warm the
+        // cache with every weapon the outfits grant or feed ammo to.
+        const weaponIds = new Set<string>();
+        for (const outfit of outfits) {
+            for (const weaponId of Object.keys(outfit.weapons)) {
+                weaponIds.add(weaponId);
+            }
+            if (outfit.ammoFor) {
+                weaponIds.add(outfit.ammoFor);
+            }
+        }
+        await Promise.all([...weaponIds].map(id =>
+            this.simulationData.data.Weapon.get(id, 100)));
+
         const itemGrid = new ItemGrid(this.displayAssets, outfits);
         itemGrid.setCounts(this.outfits);
         return itemGrid;
     }
 
-    private buyOutfit() {
-        //const mass = this.itemGrid?.selection.physics.freeMass;
-        //if (mass <= global.myShip.properties.physics.freeMass) {
-        const id = this.itemGrid?.selection.id;
-        if (!id) {
+    private makeContext(): OutfitterContext | undefined {
+        if (!this.shipData) {
+            return undefined;
+        }
+        return {
+            shipData: this.shipData,
+            outfits: this.outfits,
+            getOutfit: id => this.simulationData.data.Outfit.getCached(id),
+            getWeapon: id => this.simulationData.data.Weapon.getCached(id),
+            bits: this.controlBits,
+        };
+    }
+
+    /**
+     * Runs an outfit's OnPurchase / OnSell control bit set string
+     * against the working outfits and control bits. Gxxx grants here
+     * intentionally bypass the purchase checks.
+     */
+    private runSetString(expression: string) {
+        if (!expression) {
             return;
         }
-        this.outfits.set(id, this.outfits.get(id) + 1);
+        try {
+            // The purchase itself is a player decision, not simulation
+            // logic, so plain randomness is fine for R(a b) here: only
+            // the resulting state reaches the simulation.
+            runNCBSet(expression, makeControlBitHooks(this.controlBits, {
+                outfits: this.outfits,
+                resolveId: id => `nova:${id}`,
+            }), Math.random);
+        } catch (error) {
+            if (error instanceof NCBParseError) {
+                console.warn('Bad control bit set string:', error);
+                return;
+            }
+            throw error;
+        }
+    }
 
-        //     global.myShip.addOutfit(outfit, false);
-        // global.myShip.properties.physics.freeMass -= mass;
-        // this.setFreeMassText();
+    private buyOutfit() {
+        const outfit = this.itemGrid?.selection;
+        const context = this.makeContext();
+        if (!outfit || !context) {
+            return;
+        }
+
+        const check = canBuyOutfit(outfit, context);
+        if (!check.allowed) {
+            this.text.status.text = check.message;
+            return;
+        }
+        this.text.status.text = "";
+
+        this.outfits.set(outfit.id, this.outfits.get(outfit.id) + 1);
+        this.runSetString(outfit.onPurchase);
         this.itemGrid?.setCounts(this.outfits);
-        //}
+        this.setFreeMassText();
     }
 
     private sellOutfit() {
-        const id = this.itemGrid?.selection.id;
-        if (!id) {
+        const outfit = this.itemGrid?.selection;
+        const context = this.makeContext();
+        if (!outfit || !context) {
             return;
         }
-        this.outfits.set(id, Math.max(0, this.outfits.get(id) - 1));
-        if (this.outfits.get(id) === 0) {
-            this.outfits.delete(id);
+
+        const check = canSellOutfit(outfit, context);
+        if (!check.allowed) {
+            this.text.status.text = check.message;
+            return;
         }
-        // var outfit = { id: this.itemGrid.selection.id, count: 1 };
-        // if (global.myShip.removeOutfit(outfit, false)) {
-        //     global.myShip.properties.physics.freeMass += this.itemGrid.selection.physics.freeMass;
-        // }
-        // this.setFreeMassText();
+        this.text.status.text = "";
+
+        this.outfits.set(outfit.id, Math.max(0, this.outfits.get(outfit.id) - 1));
+        if (this.outfits.get(outfit.id) === 0) {
+            this.outfits.delete(outfit.id);
+        }
+        this.runSetString(outfit.onSell);
         this.itemGrid?.setCounts(this.outfits);
+        this.setFreeMassText();
     }
 
     private setOutfitSelected(outfitTile: ItemTile<OutfitData> | undefined) {
@@ -168,6 +245,7 @@ export class Outfitter extends Menu<OutfitsState> {
         this.pictContainer.children.length = 0;
         this.text.description.text = "";
         this.text.price.text = "";
+        this.text.status.text = "";
         this.text.mass.visible = false;
         this.text.itemMass.visible = false;
         this.text.availableMass.visible = false;
@@ -199,19 +277,42 @@ export class Outfitter extends Menu<OutfitsState> {
     }
 
     private setFreeMassText() {
-        //this.text.freeMass.text = formatMass(global.myShip.properties.physics.freeMass);
+        const context = this.makeContext();
+        if (context) {
+            this.text.freeMass.text = formatMass(freeMass(context));
+        }
     }
 
-    protected override setInput(input: OutfitsState) {
-        this.outfits = new DefaultMap(() => 0, [...input].map(
-            ([k, v]) => [k, v.count]));
+    protected override setInput(input: Entity) {
         super.setInput(input);
+        const outfitsState = input.components.get(OutfitsStateComponent)
+            ?? new Map();
+        this.outfits = new DefaultMap(() => 0, [...outfitsState].map(
+            ([k, v]) => [k, v.count]));
+        this.controlBits = new Set(
+            input.components.get(ControlBitsComponent) ?? []);
+        this.text.status.text = "";
+
+        this.shipData = undefined;
+        const shipId = input.components.get(ShipComponent)?.id;
+        if (shipId) {
+            this.simulationData.data.Ship.get(shipId).then(shipData => {
+                // Ignore stale loads after the input changes.
+                if (this.input === input) {
+                    this.shipData = shipData;
+                    this.setFreeMassText();
+                }
+            });
+        }
         this.itemGrid?.setCounts(this.outfits);
     }
 
     protected override done() {
-        this.input = new Map([...this.outfits]
-            .map(([id, count]) => [id, { count }]));
+        this.input.components.set(OutfitsStateComponent, new Map(
+            [...this.outfits]
+                .filter(([, count]) => count > 0)
+                .map(([id, count]) => [id, { count }])));
+        this.input.components.set(ControlBitsComponent, this.controlBits);
         super.done();
     }
 }

@@ -7,6 +7,7 @@ import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { ControlEvent } from '../nova_plugin/controls_plugin.js';
 import { makeShip } from '../nova_plugin/make_ship.js';
+import { ControlBitsComponent } from '../nova_plugin/ncb_plugin.js';
 import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin.js';
 import { Button } from './button.js';
 import { ItemGrid, ItemTile } from './item_grid.js';
@@ -97,9 +98,15 @@ export class Shipyard extends Menu<Entity> {
             return;
         }
 
+        // Control bits are player-scoped: they follow the player onto
+        // the new ship.
+        const controlBits = this.input.components.get(ControlBitsComponent);
         this.input = makeShip(this.itemGrid.selection);
         this.input.components.set(PlayerShipSelector, undefined);
         this.input.components.set(MultiplayerData, multiplayerData);
+        if (controlBits) {
+            this.input.components.set(ControlBitsComponent, controlBits);
+        }
         // For convenience
         (window as any).myShip = this.input;
     }

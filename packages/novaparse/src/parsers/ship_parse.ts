@@ -174,6 +174,8 @@ export async function ShipParse(ship: ShipResource,
         mass: ship.mass,
         freeMass,
         freeCargo: ship.cargoSpace,
+        maxGuns: ship.maxGuns,
+        maxTurrets: ship.maxTurrets,
     }
 
     return {
@@ -188,6 +190,9 @@ export async function ShipParse(ship: ShipResource,
         displayWeight: ship.id, // TODO: Fix this once displayweight is implemented
         animation,
         vulnerableTo: ["normal"], // TODO: Parse if it's vulnerable to point defense
+        // 64-bit flag sets as JSON-safe hex strings.
+        contribute: "0x" + ship.contribute.toString(16),
+        require: "0x" + ship.require.toString(16),
         ...base
     }
 }
