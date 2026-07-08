@@ -1,3 +1,4 @@
+import { getDefaultAsteroidData } from "./asteroid_data.js";
 import { getDefaultCicnData } from "./cicn_data.js";
 import { getDefaultExplosionData } from "./explosion_data.js";
 import { GameDataInterface } from "./game_data_interface.js";
@@ -48,6 +49,7 @@ type MockNovaDataInterface = {
 
 export class MockGameData implements GameDataInterface {
     data: MockNovaDataInterface = {
+        Asteroid: new MockGettable(getDefaultAsteroidData()),
         Explosion: new MockGettable(getDefaultExplosionData()),
         Outfit: new MockGettable(getDefaultOutfitData()),
         Pict: new MockGettable(getDefaultPictData()),

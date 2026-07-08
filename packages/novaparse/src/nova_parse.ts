@@ -1,4 +1,5 @@
 import * as path from "path";
+import { AsteroidData } from "novadatainterface/asteroid_data";
 import { ExplosionData } from "novadatainterface/explosion_data";
 import { GameDataInterface } from "novadatainterface/game_data_interface";
 import { Gettable } from "novadatainterface/gettable";
@@ -15,6 +16,7 @@ import { SystemData } from "novadatainterface/system_data";
 import { TargetCornersData } from "novadatainterface/target_corners_data";
 import { WeaponData } from "novadatainterface/weapon_data";
 import { IDSpaceHandler } from "./id_space_handler.js";
+import { AsteroidParse } from "./parsers/asteroid_parse.js";
 import { ExplosionParse } from "./parsers/explosion_parse.js";
 import { OutfitParse } from "./parsers/outfit_parse.js";
 import { PictImageMulti, PictImageMultiParse } from "./parsers/pict_parse.js";
@@ -32,6 +34,7 @@ import { OutfResource } from "./resource_parsers/outf_resource.js";
 import { PictResource } from "./resource_parsers/pict_resource.js";
 import { NovaResources, NovaResourceType, ResList } from "./resource_parsers/resource_holder_base.js";
 import { RledResource } from "./resource_parsers/rled_resource.js";
+import { RoidResource } from "./resource_parsers/roid_resource.js";
 import { ShipResource } from "./resource_parsers/ship_resource.js";
 import { SpobResource } from "./resource_parsers/spob_resource.js";
 import { SystResource } from "./resource_parsers/syst_resource.js";
@@ -127,6 +130,7 @@ export class NovaParse implements GameDataInterface {
         }
 
         return {
+            Asteroid: this.buildIDsForResource(idSpace.röid),
             Ship: this.buildIDsForResource(idSpace.shïp),
             Outfit: this.buildIDsForResource(idSpace.oütf),
             Weapon: this.buildIDsForResource(idSpace.wëap),
@@ -150,6 +154,7 @@ export class NovaParse implements GameDataInterface {
     private buildData(): NovaDataInterface {
         // This should really use NovaDataType.Ship etc but that isn't allowed when constructing like this.
         var data: NovaDataInterface = {
+            Asteroid: this.makeGettable<RoidResource, AsteroidData>(NovaResourceType.röid, AsteroidParse),
             Ship: this.makeGettable<ShipResource, ShipData>(NovaResourceType.shïp, this.shipParser),
             Outfit: this.makeGettable<OutfResource, OutfitData>(NovaResourceType.oütf, OutfitParse),
             Weapon: this.makeGettable<WeapResource, WeaponData>(NovaResourceType.wëap, WeaponParse),

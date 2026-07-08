@@ -49,6 +49,11 @@ export interface OutfitData extends BaseData {
      * item multiplies, or null.
      */
     increasesMax: string | null,
+    /**
+     * This item is a mining scoop (ModType 31): a ship carrying it
+     * collects asteroid debris it flies over into its cargo hold.
+     */
+    miningScoop: boolean,
 }
 
 export function getDefaultOutfitData(): OutfitData {
@@ -73,5 +78,6 @@ export function getDefaultOutfitData(): OutfitData {
         cantSell: false,
         ammoFor: null,
         increasesMax: null,
+        miningScoop: false,
     }
 }

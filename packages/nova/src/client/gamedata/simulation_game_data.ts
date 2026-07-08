@@ -1,3 +1,4 @@
+import { AsteroidData } from 'novadatainterface/asteroid_data';
 import { BaseData } from 'novadatainterface/base_data';
 import { GameDataInterface, PreloadData } from 'novadatainterface/game_data_interface';
 import { Gettable } from 'novadatainterface/gettable';
@@ -27,7 +28,8 @@ class WeaponGettable extends Gettable<WeaponData> {
 }
 
 export type SimulationGameDataResources = Pick<GameDataInterface['data'],
-    'Ship' | 'Outfit' | 'Weapon' | 'Planet' | 'System' | 'SpriteSheet'>;
+    'Ship' | 'Outfit' | 'Weapon' | 'Planet' | 'System' | 'SpriteSheet'
+    | 'Asteroid'>;
 
 export interface SimulationGameDataInterface {
     readonly data: SimulationGameDataResources;
@@ -51,6 +53,7 @@ export class SimulationGameData implements SimulationGameDataInterface {
             Planet: this.addGettable<PlanetData>(NovaDataType.Planet),
             System: this.addGettable<SystemData>(NovaDataType.System),
             SpriteSheet: this.addGettable<SpriteSheetData>(NovaDataType.SpriteSheet),
+            Asteroid: this.addGettable<AsteroidData>(NovaDataType.Asteroid),
         };
 
         this.preloadData = this.preload();

@@ -22,6 +22,7 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
     var physics: OutfitPhysics = { freeMass: outf.mass };
     let ammoFor: string | null = null;
     let increasesMax: string | null = null;
+    let miningScoop = false;
 
     for (let i in outf.functions) {
         let func = outf.functions[i];
@@ -69,6 +70,9 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
                 continue;
             }
             increasesMax = maxOutf.globalID;
+        }
+        else if (fType === "mining scoop") {
+            miningScoop = true;
         }
         else if (noUnitConversion.has(fType)) {
             //else if (fType === "freeCargo") {
@@ -155,5 +159,6 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
         cantSell: (outf.flags & 0x8) > 0,
         ammoFor,
         increasesMax,
+        miningScoop,
     }
 }

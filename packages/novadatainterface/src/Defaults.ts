@@ -1,3 +1,4 @@
+import { getDefaultAsteroidData } from "./asteroid_data.js";
 import { getDefaultCicnData } from "./cicn_data.js";
 import { getDefaultCicnImageData } from "./cicn_image.js";
 import { getDefaultSpriteSheetImage } from "./default_sprite_sheet_image.js";
@@ -16,6 +17,7 @@ import { getDefaultProjectileWeaponData } from "./weapon_data.js";
 
 // Should have one for every NovaDataType
 export const Defaults = {
+    get Asteroid() { return getDefaultAsteroidData() },
     get Ship() { return getDefaultShipData() },
     get Outfit() { return getDefaultOutfitData() },
     get Weapon() { return getDefaultProjectileWeaponData() },

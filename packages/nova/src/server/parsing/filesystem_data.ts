@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import { AsteroidData } from "novadatainterface/asteroid_data";
 import { BaseData } from "novadatainterface/base_data";
 import { CicnData } from "novadatainterface/cicn_data";
 import { CicnImageData } from "novadatainterface/cicn_image";
@@ -27,6 +28,7 @@ type PathInfo = {
 };
 
 const Paths = {
+    Asteroid: { path: "Asteroid", extension: "json" } as PathInfo,
     Ship: { path: "Ship", extension: "json" } as PathInfo,
     Outfit: { path: "Outfit", extension: "json" } as PathInfo,
     Weapon: { path: "Weapon", extension: "json" } as PathInfo,
@@ -51,6 +53,7 @@ class FilesystemData implements GameDataInterface {
 
     constructor(private rootPath: string) {
         this.data = {
+            Asteroid: this.getFunction<AsteroidData>(Paths.Asteroid),
             Ship: this.getFunction<ShipData>(Paths.Ship),
             Outfit: this.getFunction<OutfitData>(Paths.Outfit),
             Weapon: this.getFunction<WeaponData>(Paths.Weapon),
@@ -98,6 +101,7 @@ class FilesystemData implements GameDataInterface {
 
     async buildIDs(): Promise<NovaIDs> {
         return {
+            Asteroid: await this.buildIDsForPath(Paths.Asteroid),
             Ship: await this.buildIDsForPath(Paths.Ship),
             Outfit: await this.buildIDsForPath(Paths.Outfit),
             Weapon: await this.buildIDsForPath(Paths.Weapon),

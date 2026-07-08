@@ -131,6 +131,7 @@ async function NotBayWeaponParse(weap: WeapResource, notFoundFunction: (m: strin
         blastHurtsFiringShip: weap.hitsFiringShip,
         detonateWhenShotExpires: weap.flak,
         damageType,
+        asteroidMiner: weap.asteroidMiner,
     }
 }
 
