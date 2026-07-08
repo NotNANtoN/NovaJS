@@ -7,7 +7,8 @@ import { Vector } from "nova_ecs/datatypes/vector";
 import { Entity } from "nova_ecs/entity";
 import { EcsEvent } from "nova_ecs/events";
 import { Plugin } from "nova_ecs/plugin";
-import { MovementPhysicsComponent, MovementStateComponent, MovementSystem, MovementState, teleport } from "nova_ecs/plugins/movement_plugin";
+import { MovementStateComponent, MovementSystem, MovementState, teleport } from "nova_ecs/plugins/movement_plugin";
+import { Optional } from "nova_ecs/optional";
 import { EncodedEntity, Serializer, SerializerResource } from "nova_ecs/plugins/serializer_plugin";
 import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { Provide } from "nova_ecs/provide";
@@ -15,6 +16,7 @@ import { System } from "nova_ecs/system";
 import { isLeft } from "fp-ts/lib/Either.js";
 import { registerSimulationBridgeEvent } from "../communication/simulation_bridge_events.js";
 import { deImmerify } from "../util/deimmerify.js";
+import { FuelComponent, FUEL_PER_JUMP } from "./health_plugin.js";
 import { ControlledByComponent, ShipControlEvent, ShipControlStateComponent } from "./ship_control.js";
 import { ControlShipSystem } from "./ship_controller_plugin.js";
 import { getShipMovementPhysics, ShipPhysicsComponent } from "./ship_plugin.js";
@@ -188,9 +190,9 @@ const PlayerJumpControl = new System({
     events: [ShipControlEvent],
     args: [ShipControlStateComponent, GetEntity, SystemIdResource,
         JumpRouteComponent, MovementStateComponent, ShipPhysicsComponent,
-        SimulationGameDataResource] as const,
+        FuelComponent, SimulationGameDataResource] as const,
     step(controlState, entity, systemId, jumpRoute, movement, shipPhysics,
-        gameData) {
+        fuel, gameData) {
         if (controlState.get('hyperjump') !== 'start') {
             return;
         }
@@ -208,6 +210,11 @@ const PlayerJumpControl = new System({
         const jumpRadius = Math.max(0,
             JUMP_DISTANCE + shipPhysics.jumpDistanceMod);
         if (movement.position.length < jumpRadius) {
+            return;
+        }
+        // EVN Bible: fuel "100 = 1 jump". Not enough fuel refuses the
+        // jump the same way the no-jump zone does.
+        if (fuel.current < FUEL_PER_JUMP) {
             return;
         }
         const origin = gameData.data.System.getCached(systemId);
@@ -240,17 +247,22 @@ function overrideControls(movement: MovementState) {
 /**
  * Advances a jumping ship's state machine each tick. Runs after the
  * control systems (overriding player input) and before the movement
- * system (so the physics overrides below govern this tick's motion).
+ * system. The physics the stages imply (the raised hyperspace speed
+ * cap and burn acceleration) are applied by the afterburner plugin's
+ * EffectiveMovementPhysicsSystem — the single per-tick writer of
+ * effective movement physics — which orders itself after this system
+ * and reads the jump stage.
  *
  * stopping -> aligning -> spinup -> accelerating happen in the origin
  * system; the ship then crosses to the destination system carrying
  * stage 'arriving'.
  */
-const JumpSequenceSystem = new System({
+export const JumpSequenceSystem = new System({
     name: 'JumpSequenceSystem',
     args: [JumpComponent, MovementStateComponent, ShipPhysicsComponent,
-        TimeResource, GetEntity, UUID, Emit] as const,
-    step(jump, movement, shipPhysics, time, entity, uuid, emit) {
+        Optional(FuelComponent), TimeResource, GetEntity, UUID,
+        Emit] as const,
+    step(jump, movement, shipPhysics, fuel, time, entity, uuid, emit) {
         overrideControls(movement);
         const jumpSpeed = JUMP_BASE_SPEED * shipPhysics.jumpSpeedMult;
         const target = new Angle(jump.direction);
@@ -314,17 +326,10 @@ const JumpSequenceSystem = new System({
             case 'accelerating': {
                 movement.turnTo = target;
                 movement.accelerating = 1;
-                // Raise the speed cap past the ship's normal maximum
-                // and accelerate so the ship hits its full jump speed
-                // exactly when the departure delay expires. Re-applied
-                // every tick, so rollback restores (which re-derive
-                // normal physics) stay consistent.
-                const basePhysics = getShipMovementPhysics(shipPhysics);
-                entity.components.set(MovementPhysicsComponent, {
-                    ...basePhysics,
-                    maxVelocity: jumpSpeed,
-                    acceleration: jumpSpeed / (JUMP_DEPART_DELAY_MS / 1000),
-                });
+                // The raised speed cap and hyperdrive acceleration are
+                // applied by EffectiveMovementPhysicsSystem (the single
+                // per-tick writer of effective movement physics), which
+                // runs after this system and reads the jump stage.
                 if (time.time - (jump.stageStart ?? time.time)
                     >= JUMP_DEPART_DELAY_MS) {
                     // Depart. Set the arrival kinematics the destination
@@ -340,14 +345,23 @@ const JumpSequenceSystem = new System({
                     movement.targetSpeed = jumpSpeed;
                     jump.stage = 'arriving';
                     jump.stageStart = undefined;
+                    // A jump costs FUEL_PER_JUMP (EVN Bible: fuel
+                    // "100 = 1 jump"). The Bible doesn't say when the
+                    // charge lands, so it is deducted at departure —
+                    // the moment the ship actually leaves the system —
+                    // and crosses to the destination with the entity.
+                    if (fuel) {
+                        fuel.current = Math.max(
+                            fuel.min, fuel.current - FUEL_PER_JUMP);
+                    }
                     emit(InitiateJumpEvent, { to: jump.to }, [uuid]);
                 }
                 break;
             }
             case 'arriving': {
                 // Runs in the destination system: bleed off hyperspace
-                // speed by ramping the speed cap down to normal, then
-                // hand control back.
+                // speed (EffectiveMovementPhysicsSystem ramps the speed
+                // cap down from the jump stage), then hand control back.
                 if (jump.stageStart === undefined) {
                     jump.stageStart = time.time;
                     emit(SoundEvent, { id: WARP_OUT_SOUND });
@@ -356,20 +370,12 @@ const JumpSequenceSystem = new System({
                 const progress =
                     (time.time - jump.stageStart) / JUMP_ARRIVAL_DELAY_MS;
                 if (progress >= 1) {
-                    entity.components.set(MovementPhysicsComponent, basePhysics);
                     if (movement.targetSpeed !== undefined) {
                         movement.targetSpeed = Math.min(
                             movement.targetSpeed, basePhysics.maxVelocity);
                     }
                     entity.components.delete(JumpComponent);
-                    break;
                 }
-                const maxVelocity = jumpSpeed
-                    + (basePhysics.maxVelocity - jumpSpeed) * progress;
-                entity.components.set(MovementPhysicsComponent, {
-                    ...basePhysics,
-                    maxVelocity: Math.max(maxVelocity, basePhysics.maxVelocity),
-                });
                 break;
             }
         }

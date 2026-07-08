@@ -11,6 +11,7 @@ import { makeSystem, SIMULATION_STEP_MS } from "./make_system.js";
 import { applyControlEvents } from "./ship_control.js";
 import { PlayerShipSelector } from "./player_ship_plugin.js";
 import { ShipPhysicsComponent } from "./ship_plugin.js";
+import { FuelComponent, FUEL_PER_JUMP } from "./health_plugin.js";
 import { SoundEvent } from "./sound_plugin.js";
 
 const SHIP_UUID = 'jump test ship';
@@ -199,6 +200,70 @@ describe('jump sequence', () => {
         expect(jump.stage).toEqual('aligning');
         // Still moving: the ship never comes to a stop.
         expect(movement.velocity.length).toBeGreaterThan(0);
+    }, 30_000);
+
+    it('refuses to jump without enough fuel', async () => {
+        const { world, ship } = await makeJumpHarness();
+        const movement = ship.components.get(MovementStateComponent)!;
+        movement.position = new Position(0, -(JUMP_DISTANCE * 2));
+        world.step();
+
+        const fuel = ship.components.get(FuelComponent)!;
+        fuel.recharge = 0;
+        fuel.current = FUEL_PER_JUMP - 1;
+
+        pressHyperjump(world);
+        expect(ship.components.get(JumpComponent)).toBeUndefined();
+        // The route is not consumed by a refused jump.
+        expect(ship.components.get(JumpRouteComponent)!.route.length)
+            .toEqual(1);
+
+        // With enough fuel, the same press starts the jump.
+        fuel.current = FUEL_PER_JUMP;
+        pressHyperjump(world);
+        expect(ship.components.get(JumpComponent)).toBeDefined();
+    }, 30_000);
+
+    it('deducts fuel at departure, consistently through arrival', async () => {
+        const { gameData, world, ship, destinationId } =
+            await makeJumpHarness();
+        const movement = ship.components.get(MovementStateComponent)!;
+        movement.position = new Position(0, -(JUMP_DISTANCE * 2));
+        world.step();
+
+        const fuel = ship.components.get(FuelComponent)!;
+        fuel.recharge = 0;
+        const initialFuel = Math.max(fuel.current, FUEL_PER_JUMP * 2);
+        fuel.current = initialFuel;
+
+        let finishJump: FinishJump | undefined;
+        world.events.get(FinishJumpEvent).subscribe(({ data }) => {
+            finishJump = data;
+        });
+        pressHyperjump(world);
+        const jump = ship.components.get(JumpComponent)!;
+        // No charge while the sequence plays out in the origin system.
+        stepUntil(world, () => jump.stage === 'accelerating');
+        expect(ship.components.get(FuelComponent)!.current)
+            .toEqual(initialFuel);
+
+        stepUntil(world, () => finishJump !== undefined);
+        // The charge lands at departure and crosses with the entity.
+        const jumpedFuel = finishJump!.entity.components.get(FuelComponent)!;
+        expect(jumpedFuel.current).toEqual(initialFuel - FUEL_PER_JUMP);
+
+        // Arrival doesn't charge again.
+        const destWorld = await makeSystem(destinationId, gameData);
+        const jumpedShip = finishJump!.entity;
+        await completeEntity(destWorld, jumpedShip);
+        destWorld.entities.set(SHIP_UUID, jumpedShip);
+        // Keep the recharge out of the arithmetic (some ships have
+        // built-in fuel regeneration).
+        jumpedShip.components.get(FuelComponent)!.recharge = 0;
+        stepUntil(destWorld,
+            () => !jumpedShip.components.has(JumpComponent));
+        expect(jumpedShip.components.get(FuelComponent)!.current)
+            .toEqual(initialFuel - FUEL_PER_JUMP);
     }, 30_000);
 
     it('plays the warp-up sound when the departure burn begins', async () => {
