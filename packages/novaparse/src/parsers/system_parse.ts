@@ -40,7 +40,10 @@ export async function SystemParse(syst: SystResource, notFoundFunction: (m: stri
         ...base,
         links,
         position: [syst.position[0], syst.position[1]],
-        planets
+        planets,
+        murk: syst.murk,
+        interference: syst.interference,
+        backgroundColor: syst.backgroundColor,
     }
 
 }
