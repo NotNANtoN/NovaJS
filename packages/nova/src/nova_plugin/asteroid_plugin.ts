@@ -54,12 +54,15 @@ const REFERENCE_SCREEN_AREA = 1024 * 768;
  * the field is (2*3000)^2 / (1024*768) ≈ 45.8 screens, so the demanded
  * total is count * 45.8: Fomalhaut (nova:136, count 2) demands ~92 and
  * the densest systems (count 10, e.g. S7evyn nova:472) demand ~458.
- * Measured on an M-series laptop, 458 asteroids cost ~0.9 ms/step of
- * simulation (mostly the rbush broadphase rebuild) plus ~1.5 ms/frame
- * of sim->display snapshot encoding, which eats most of a 60 Hz frame
- * budget alongside everything else. 256 keeps the worst systems around
- * half that while leaving typical systems (count <= 5, demand <= 229)
- * mostly uncapped.
+ * Measured on an M2 laptop (node, real Nova data): Fomalhaut's 92
+ * asteroids cost 0.09 ms/step of simulation plus 0.31 ms/frame of
+ * sim->display snapshot encoding; an uncapped S7evyn (458) costs
+ * 0.47 ms/step plus 1.79 ms/frame of snapshot encoding — the encode
+ * (every serializer component of every entity, per frame) is the term
+ * that scales worst, and >2 ms of a 16 ms frame on rocks alone is too
+ * much next to everything else the frame must do. 256 holds the worst
+ * systems to ~0.24 ms/step + ~0.66 ms/frame while leaving all systems
+ * with count <= 5 (the vast majority; Fomalhaut included) uncapped.
  */
 export const MAX_ASTEROIDS_PER_SYSTEM = 256;
 /** How often a depleted field regenerates one asteroid. */
