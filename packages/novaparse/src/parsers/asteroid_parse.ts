@@ -9,6 +9,11 @@ import { BaseParse } from "./base_parse.js";
 
 /** röid 128 uses spïn 800, röid 129 spïn 801, etc. (EVN Bible p. 13). */
 const ASTEROID_SPIN_OFFSET = 800 - 128;
+/** The cargo box sprite for standard-cargo resource-boxes. */
+const CARGO_BOX_SPIN = 500;
+/** Mini-asteroid sprites for jünk resource-boxes (spïn 501-504). */
+const MINERAL_SPIN_START = 501;
+const MINERAL_SPIN_COUNT = 4;
 
 function animationFromSpin(idSpace: NovaResources, spinId: number,
     base: BaseData, notFoundFunction: (m: string) => void): Animation {
@@ -48,10 +53,17 @@ export async function AsteroidParse(roid: RoidResource,
         roid.id + ASTEROID_SPIN_OFFSET, base, notFoundFunction);
 
     // Resolve what an ejected resource-box contains. 0-5 is a standard
-    // cargo type; 1000-1127 is jünk resource 128-255.
+    // cargo type; 1000-1127 is jünk resource 128-255. Boxes use the
+    // engine-specified sprites: the cargo box (spïn 500) for standard
+    // cargo, a mini-asteroid (spïn 501-504) for jünk. Note the source
+    // art really is 8x8 pixels per frame — the rlëD headers (500-508)
+    // declare 8x8, matching the spïn declarations — so the display
+    // scales boxes up to be visible (see asteroid_display_plugin.ts).
     let yieldType: string | null = null;
+    let debrisSpin: number | null = null;
     if (roid.yieldType >= 0 && roid.yieldType <= 5) {
         yieldType = `cargo:${roid.yieldType}`;
+        debrisSpin = CARGO_BOX_SPIN;
     } else if (roid.yieldType >= 1000) {
         const junkId = roid.yieldType - 1000 + 128;
         const junk = roid.idSpace.jünk[junkId];
@@ -61,21 +73,14 @@ export async function AsteroidParse(roid: RoidResource,
             notFoundFunction("Missing jünk " + junkId + " for röid " + base.id);
             yieldType = `junk:${junkId}`;
         }
+        debrisSpin = MINERAL_SPIN_START
+            + (roid.yieldType - 1000) % MINERAL_SPIN_COUNT;
     }
 
-    // Resource-boxes look like scaled-down chunks of the asteroid that
-    // broke, matching the original engine's look. (The Bible's
-    // dedicated resource-box sprites — cargo box spïn 500 and
-    // mini-asteroids 501-504 — are 8x8 pixels: imperceptible specks in
-    // game.) The display applies the down-scale; the distinct id keeps
-    // the display's graphic pools separate per debris type.
     let debrisAnimation: Animation | null = null;
-    if (yieldType !== null) {
-        debrisAnimation = {
-            ...animation,
-            id: `${base.id} debris`,
-            name: `${base.name} debris`,
-        };
+    if (debrisSpin !== null) {
+        debrisAnimation = animationFromSpin(roid.idSpace, debrisSpin,
+            { ...base, id: `${base.id} debris` }, notFoundFunction);
     }
 
     // Sub-asteroid types, resolved to global ids.

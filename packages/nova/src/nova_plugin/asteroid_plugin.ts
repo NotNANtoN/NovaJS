@@ -20,7 +20,7 @@ import { World } from 'nova_ecs/world';
 import SAT from 'sat';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { registerSimulationBridgeEvent } from '../communication/simulation_bridge_events.js';
-import { AnimationComponent } from './animation_plugin.js';
+import { AnimationComponent, TumbleAnimation, TumbleAnimationComponent } from './animation_plugin.js';
 import { BeamDataComponent } from './beam_plugin.js';
 import { CargoComponent, cargoUsed } from './cargo_plugin.js';
 import { CollisionEvent, CollisionHitterComponent, CollisionVulnerabilityComponent } from './collision_interaction.js';
@@ -78,27 +78,27 @@ const DEBRIS_MIN_SPEED = 20;
 const DEBRIS_MAX_SPEED = 80;
 /** How long a resource-box lasts before fading away, ms. */
 export const DEBRIS_LIFETIME_MS = 15_000;
-/** Tumble rate of resource-boxes, rad/s. */
-const DEBRIS_SPIN = 2.5;
+/** Tumble rate of resource-boxes, sprite frames/s. */
+const DEBRIS_TUMBLE_FRAME_RATE = 15;
 /**
- * Hurtbox radius of a resource-box. Matches the rendered chunk: the
- * röid's 50x50 sprite at the display's DEBRIS_SCALE (0.35) is ~17 px.
+ * Hurtbox radius of a resource-box. Follows the rendered size: the
+ * engine's 8x8 box sprites at the display's QA DEBRIS_SCALE (4x) are
+ * 32 px.
  */
-const DEBRIS_RADIUS = 9;
+const DEBRIS_RADIUS = 16;
 /** Hitbox radius fallback when an asteroid's sprite hull is unknown. */
 const DEFAULT_ASTEROID_RADIUS = 20;
 
 /**
  * A live asteroid. `id` is the röid's global id, `health` its remaining
- * strength, and `spin` its tumble rate in rad/s (rendering maps
- * rotation onto the sprite's frames, so spinning the rotation plays the
- * tumble animation). Queryable by NPC AI (e.g. future mining behavior)
- * to find asteroids to shoot.
+ * strength. The tumble is purely cosmetic (TumbleAnimationComponent,
+ * rendered by TumbleDrawSystem); the sim rotation stays fixed.
+ * Queryable by NPC AI (e.g. future mining behavior) to find asteroids
+ * to shoot.
  */
 export const AsteroidType = t.type({
     id: t.string, // Not a UUID. A nova id.
     health: t.number,
-    spin: t.number,
 });
 export type AsteroidType = t.TypeOf<typeof AsteroidType>;
 export const AsteroidComponent = new Component<AsteroidType>('Asteroid');
@@ -115,7 +115,6 @@ export const AsteroidDataComponent = new Component<AsteroidData>('AsteroidData')
 export const DebrisType = t.type({
     commodity: t.string,
     expires: t.number,
-    spin: t.number,
 });
 export type DebrisType = t.TypeOf<typeof DebrisType>;
 export const DebrisComponent = new Component<DebrisType>('Debris');
@@ -164,30 +163,29 @@ function mod(n: number, m: number): number {
 }
 
 /**
- * Advances a drifting, tumbling body. Replaces (never mutates) the
- * position and rotation objects: snapshot codecs encode t.type
- * structures by identity, so rollback snapshots share the live objects
- * and in-place mutation would corrupt history. This is the same
- * replace-don't-mutate contract MovementSystem follows; the only
- * per-asteroid allocations per tick are these two small objects, which
- * die young.
+ * Advances a drifting body. Replaces (never mutates) the position
+ * object: snapshot codecs encode t.type structures by identity, so
+ * rollback snapshots share the live objects and in-place mutation
+ * would corrupt history. This is the same replace-don't-mutate
+ * contract MovementSystem follows; the only per-asteroid allocation
+ * per tick is this one small object, which dies young. The visible
+ * tumble is not sim state at all: TumbleAnimationComponent drives it
+ * display-side on logical time, and the sim rotation stays fixed.
  */
-function drift(state: MovementState, spin: number, delta_s: number,
+function drift(state: MovementState, delta_s: number,
     wrapHalfSize: number) {
     const x = mod(state.position.x + state.velocity.x * delta_s
         + wrapHalfSize, 2 * wrapHalfSize) - wrapHalfSize;
     const y = mod(state.position.y + state.velocity.y * delta_s
         + wrapHalfSize, 2 * wrapHalfSize) - wrapHalfSize;
     state.position = new Position(x, y);
-    state.rotation = new Angle(state.rotation.angle + spin * delta_s);
 }
 
 const AsteroidMotionSystem = new System({
     name: 'AsteroidMotionSystem',
     args: [AsteroidComponent, MovementStateComponent, TimeResource] as const,
-    step(asteroid, movement, time) {
-        drift(movement, asteroid.spin, time.delta_s,
-            ASTEROID_FIELD_HALF_SIZE);
+    step(_asteroid, movement, time) {
+        drift(movement, time.delta_s, ASTEROID_FIELD_HALF_SIZE);
     },
     // after TimeSystem matters for determinism, not just freshness: a
     // system that reads TimeResource before TimeSystem updates it sees
@@ -209,7 +207,7 @@ const DebrisMotionSystem = new System({
         }
         // Debris drifts and expires long before it could reach the
         // world wrap boundary, so wrap at the world's edge.
-        drift(movement, debris.spin, time.delta_s, 10000);
+        drift(movement, time.delta_s, 10000);
     },
     // See AsteroidMotionSystem: after TimeSystem is load-bearing for
     // late-join determinism.
@@ -218,14 +216,14 @@ const DebrisMotionSystem = new System({
 });
 
 /**
- * The tumble rate that plays the sprite's frames at the röid's
- * SpinRate. Rendering divides a full rotation among the sprite's
- * frames, so frameRate frames/s equals frameRate/frames revolutions/s.
+ * A tumble at `frameRate` frames/s, random direction, random starting
+ * phase (so a field of the same röid doesn't tumble in unison).
  */
-function spinFor(data: AsteroidData, random: Random): number {
-    const frames = data.animation.images.baseImage.frames.normal.length || 1;
-    const spin = 2 * Math.PI * data.frameRate / frames;
-    return random.next() < 0.5 ? -spin : spin;
+function tumbleFor(frameRate: number, random: Random): TumbleAnimation {
+    return {
+        frameRate: random.next() < 0.5 ? -frameRate : frameRate,
+        phase: random.next(),
+    };
 }
 
 /** The asteroid's collision radius, from its sprite's convex hulls. */
@@ -284,14 +282,17 @@ export function makeAsteroid(gameData: SimulationGameDataInterface,
         .addComponent(AsteroidComponent, {
             id: data.id,
             health: data.strength,
-            spin: spinFor(data, random),
         })
         .addComponent(AsteroidDataComponent, data)
         .addComponent(AnimationComponent, data.animation)
+        // röid SpinRate, pre-converted to frames/s by the parser.
+        .addComponent(TumbleAnimationComponent, tumbleFor(data.frameRate, random))
         .addComponent(MovementStateComponent, {
             position,
             velocity,
-            rotation: new Angle(random.next() * 2 * Math.PI),
+            // Fixed: the visible tumble is TumbleAnimationComponent,
+            // not a sim rotation.
+            rotation: new Angle(0),
             accelerating: 0,
             turning: 0,
             turnBack: false,
@@ -315,15 +316,16 @@ function makeDebris(data: AsteroidData, random: Random, position: Position,
         .addComponent(DebrisComponent, {
             commodity: data.yieldType!,
             expires,
-            spin: random.next() < 0.5 ? -DEBRIS_SPIN : DEBRIS_SPIN,
         })
         // The shared debrisAnimation reference lets the display pool
         // graphics across all boxes of the same röid type.
         .addComponent(AnimationComponent, data.debrisAnimation!)
+        .addComponent(TumbleAnimationComponent,
+            tumbleFor(DEBRIS_TUMBLE_FRAME_RATE, random))
         .addComponent(MovementStateComponent, {
             position,
             velocity,
-            rotation: new Angle(random.next() * 2 * Math.PI),
+            rotation: new Angle(0),
             accelerating: 0,
             turning: 0,
             turnBack: false,
