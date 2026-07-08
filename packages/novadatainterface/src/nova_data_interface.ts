@@ -2,6 +2,7 @@ import { CicnData } from "./cicn_data.js";
 import { CicnImageData } from "./cicn_image.js";
 import { ExplosionData } from "./explosion_data.js";
 import { Gettable } from "./gettable.js";
+import { GovtData } from "./govt_data.js";
 import { OutfitData } from "./outfit_data.js";
 import { PictData } from "./pict_data.js";
 import { PictImageData } from "./pict_image.js";
@@ -25,6 +26,7 @@ enum NovaDataType {
     CicnImage = "CicnImage",
     Planet = "Planet",
     System = "System",
+    Govt = "Govt",
     TargetCorners = "TargetCorners",
     SpriteSheet = "SpriteSheet",
     SpriteSheetImage = "SpriteSheetImage",
@@ -45,6 +47,7 @@ type NovaDataInterface = {
     CicnImage: Gettable<CicnImageData>,
     Planet: Gettable<PlanetData>,
     System: Gettable<SystemData>,
+    Govt: Gettable<GovtData>,
     TargetCorners: Gettable<TargetCornersData>,
     SpriteSheet: Gettable<SpriteSheetData>,
     SpriteSheetImage: Gettable<SpriteSheetImageData>,

@@ -19,6 +19,7 @@ export function getDefaultNovaIDs(): NovaIDs {
         SpriteSheetImage: [],
         StatusBar: [],
         System: [],
+        Govt: [],
         TargetCorners: [],
         Weapon: [],
         SoundFile: [],
