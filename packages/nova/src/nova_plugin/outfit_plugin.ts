@@ -35,6 +35,11 @@ export function applyOutfitPhysics(basePhysics: ShipPhysics,
                 if (basePhysics.hasOwnProperty(key)) {
                     if (typeof val === 'number') {
                         (basePhysics[key] as number) += val * count;
+                    } else if (typeof val === 'boolean') {
+                        // Boolean capabilities (fast jumping, inertial
+                        // dampers) are granted if any outfit has them.
+                        (basePhysics[key] as boolean) =
+                            (basePhysics[key] as boolean) || val;
                     }
                 }
             }
