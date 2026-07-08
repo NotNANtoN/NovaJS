@@ -19,6 +19,7 @@ import { getDefaultNovaIDs, NovaIDs } from "novadatainterface/nova_ids";
 import { Defaults } from "novadatainterface/defaults";
 import { CicnImageData } from "novadatainterface/cicn_image";
 import { CicnData } from "novadatainterface/cicn_data";
+import { PpatImageData } from "novadatainterface/ppat_image";
 import { SoundFile } from "novadatainterface/sound_file";
 
 /**
@@ -46,6 +47,7 @@ class GameDataAggregator implements GameDataInterface {
             PictImage: this.makeAggregator<PictImageData>(NovaDataType.PictImage),
             Cicn: this.makeAggregator<CicnData>(NovaDataType.Cicn),
             CicnImage: this.makeAggregator<CicnImageData>(NovaDataType.CicnImage),
+            PpatImage: this.makeAggregator<PpatImageData>(NovaDataType.PpatImage),
             Planet: this.makeAggregator<PlanetData>(NovaDataType.Planet),
             System: this.makeAggregator<SystemData>(NovaDataType.System),
             Govt: this.makeAggregator<GovtData>(NovaDataType.Govt),

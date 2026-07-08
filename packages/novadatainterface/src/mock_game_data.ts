@@ -60,6 +60,7 @@ export class MockGameData implements GameDataInterface {
         PictImage: new MockGettable(new Uint8Array(0).buffer),
         Cicn: new MockGettable(getDefaultCicnData()),
         CicnImage: new MockGettable(new Uint8Array(0).buffer),
+        PpatImage: new MockGettable(new Uint8Array(0).buffer),
         Planet: new MockGettable(getDefaultPlanetData()),
         Ship: new MockGettable(getDefaultShipData()),
         SpriteSheet: new MockGettable(getDefaultSpriteSheetData()),

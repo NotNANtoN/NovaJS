@@ -3,6 +3,7 @@ import { AsteroidData } from "novadatainterface/asteroid_data";
 import { BaseData } from "novadatainterface/base_data";
 import { CicnData } from "novadatainterface/cicn_data";
 import { CicnImageData } from "novadatainterface/cicn_image";
+import { PpatImageData } from "novadatainterface/ppat_image";
 import { ExplosionData } from "novadatainterface/explosion_data";
 import { GameDataInterface } from "novadatainterface/game_data_interface";
 import { Gettable } from "novadatainterface/gettable";
@@ -37,6 +38,7 @@ const Paths = {
     PictImage: { path: "PictImage", extension: "png" } as PathInfo,
     Cicn: { path: "Cicn", extension: "json" } as PathInfo,
     CicnImage: { path: "CicnImage", extension: "png" } as PathInfo,
+    PpatImage: { path: "PpatImage", extension: "png" } as PathInfo,
     Planet: { path: "Planet", extension: "json" } as PathInfo,
     System: { path: "System", extension: "json" } as PathInfo,
     Govt: { path: "Govt", extension: "json" } as PathInfo,
@@ -63,6 +65,7 @@ class FilesystemData implements GameDataInterface {
             PictImage: this.getFunction<PictImageData>(Paths.PictImage),
             Cicn: this.getFunction<CicnData>(Paths.Cicn),
             CicnImage: this.getFunction<CicnImageData>(Paths.CicnImage),
+            PpatImage: this.getFunction<PpatImageData>(Paths.PpatImage),
             Planet: this.getFunction<PlanetData>(Paths.Planet),
             System: this.getFunction<SystemData>(Paths.System),
             Govt: this.getFunction<GovtData>(Paths.Govt),
@@ -112,6 +115,7 @@ class FilesystemData implements GameDataInterface {
             PictImage: await this.buildIDsForPath(Paths.PictImage),
             Cicn: await this.buildIDsForPath(Paths.Cicn),
             CicnImage: await this.buildIDsForPath(Paths.CicnImage),
+            PpatImage: await this.buildIDsForPath(Paths.PpatImage),
             Planet: await this.buildIDsForPath(Paths.Planet),
             System: await this.buildIDsForPath(Paths.System),
             Govt: await this.buildIDsForPath(Paths.Govt),

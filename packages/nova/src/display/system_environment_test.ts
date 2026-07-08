@@ -28,6 +28,20 @@ describe("system environment data", () => {
         expect(system.interference).toBe(0);
         expect(system.backgroundColor).toBe(0);
     });
+
+    it("parses the radar static ppat patterns from Nova Graphics 1", async () => {
+        const gameData = await getIntegrationGameData();
+        const ids = (await gameData.ids).PpatImage;
+        // Nova Graphics 1 ships ten sensor-static patterns, ids 128-137.
+        for (let id = 128; id <= 137; id++) {
+            expect(ids).toContain(`nova:${id}`);
+        }
+        const png = await gameData.data.PpatImage.get("nova:128");
+        const bytes = new Uint8Array(png);
+        // PNG magic: 137 80 78 71.
+        expect([...bytes.slice(0, 4)]).toEqual([137, 80, 78, 71]);
+        expect(bytes.length).toBeGreaterThan(100);
+    });
 });
 
 describe("effectiveMurk", () => {
@@ -102,13 +116,13 @@ describe("starfieldMurkAlpha", () => {
         expect(starfieldMurkAlpha(0.5, murk(0))).toBe(1);
     });
 
-    it("blacks out the starfield at full murk", () => {
-        expect(starfieldMurkAlpha(0, murk(100))).toBe(0);
-        expect(starfieldMurkAlpha(0.5, murk(100))).toBe(0);
+    it("keeps stars visible past the murk even at full murk", () => {
+        expect(starfieldMurkAlpha(0, murk(100))).toBeCloseTo(0.6);
+        expect(starfieldMurkAlpha(0.5, murk(100))).toBeCloseTo(0.2);
     });
 
     it("dims stars with murk", () => {
-        expect(starfieldMurkAlpha(0, murk(50))).toBeCloseTo(0.5);
+        expect(starfieldMurkAlpha(0, murk(50))).toBeCloseTo(0.8);
     });
 
     it("fades deeper parallax layers more", () => {
