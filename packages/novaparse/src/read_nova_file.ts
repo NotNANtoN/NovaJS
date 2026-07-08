@@ -35,16 +35,22 @@ import { $enum } from "ts-enum-util";
 
 // Reads a single plugin or nova file
 // Puts results in localIDSpace.
-async function readNovaFile(filePath: string, localIDSpace: NovaResources) {
+// Returns the number of resources parsed from the file. A count of zero for a
+// file that should contain resources is a strong signal that its resource fork
+// was lost (see the macOS xattr / resource-fork gotcha in id_space_handler.ts).
+async function readNovaFile(filePath: string, localIDSpace: NovaResources): Promise<number> {
     const rf = await read(filePath);
 
+    let resourceCount = 0;
     for (const resourceType of $enum(NovaResourceType).values()) {
         const parser = getParser(<NovaResourceType>resourceType);
 
         for (const id in rf[resourceType]) {
             localIDSpace[resourceType][id] = new parser(rf[resourceType][id], localIDSpace);
+            resourceCount++;
         }
     }
+    return resourceCount;
 }
 
 function read(path: string) {
