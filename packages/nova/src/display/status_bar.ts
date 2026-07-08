@@ -1,5 +1,4 @@
 import { PlanetData } from "novadatainterface/planet_data";
-import { ShipData } from "novadatainterface/ship_data";
 import { StatusBarData, StatusBarDataArea } from "novadatainterface/status_bar_data";
 import { GetEntity, RunQuery, UUID } from "nova_ecs/arg_types";
 import { Component } from "nova_ecs/component";
@@ -17,6 +16,7 @@ import * as PIXI from "pixi.js";
 import { Subject } from "rxjs";
 import { DisplayAssetDataInterface } from "../client/gamedata/display_asset_data.js";
 import { DisplayAssetDataResource, SimulationGameDataResource } from "../nova_plugin/game_data_resource.js";
+import { CloakActiveComponent, CloakComponent } from "../nova_plugin/cloak_plugin.js";
 import { ArmorComponent, ShieldComponent } from "../nova_plugin/health_plugin.js";
 import { PlanetDataComponent } from "../nova_plugin/planet_plugin.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
@@ -195,7 +195,8 @@ class StatusBar {
         this.text.targetImagePlaceholder.anchor.y = 0.5;
     }
 
-    drawRadar(source: Position, ships: Iterable<readonly [string, MovementState, ShipData]>,
+    drawRadar(source: Position,
+        ships: Iterable<readonly [string, MovementState, ...unknown[]]>,
         planets: Iterable<readonly [string, MovementState, PlanetData]>) {
         this.radar.clear();
 
@@ -370,7 +371,8 @@ const RadarTime = new Component<{ lastTime: number }>('RadarTime');
 const DrawRadar = new System({
     name: 'DrawRadar',
     args: [Optional(RadarTime), TimeResource, StatusBarResource, MovementStateComponent,
-    new Query([UUID, MovementStateComponent, ShipDataComponent] as const),
+    new Query([UUID, MovementStateComponent, ShipDataComponent,
+        Optional(CloakActiveComponent), Optional(CloakComponent)] as const),
     new Query([UUID, MovementStateComponent, PlanetDataComponent] as const),
         GetEntity, PlayerShipSelector] as const,
     step(radarTime, { time }, statusBar, { position }, ships, planets, entity) {
@@ -379,7 +381,13 @@ const DrawRadar = new System({
             entity.components.set(RadarTime, radarTime);
         }
         if (time - radarTime.lastTime > statusBar.radarPeriod) {
-            statusBar.drawRadar(position, ships, planets);
+            // Hide ships that are actively cloaked with a radar-hiding
+            // cloak (bit 0x0002 "visible on radar" clear). Builds on the
+            // merged interference/static radar. The player's own ship is
+            // drawn separately from `source`, so it always shows.
+            const visibleShips = ships.filter(([, , , cloakActive, cloak]) =>
+                !(cloakActive?.active && (cloak?.hidesFromRadar ?? true)));
+            statusBar.drawRadar(position, visibleShips, planets);
             radarTime.lastTime = time;
         }
     }

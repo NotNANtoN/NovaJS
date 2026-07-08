@@ -21,6 +21,7 @@
     "modifiers": ["Alt"]
   },
   "afterburner": "KeyZ",
+  "cloak": "KeyK",
   "hail": "KeyY",
   "board": "KeyB",
   "escorts": "KeyE",

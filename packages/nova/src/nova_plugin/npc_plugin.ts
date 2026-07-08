@@ -11,6 +11,7 @@ import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { Optional } from "nova_ecs/optional";
 import { Query } from "nova_ecs/query";
 import { System } from "nova_ecs/system";
+import { CloakActiveComponent, CloakActiveState, isTargetable } from "./cloak_plugin.js";
 import { DeathEvent } from "./death_plugin.js";
 import { makeShip } from "./make_ship.js";
 import { ShipComponent } from "./ship_plugin.js";
@@ -18,9 +19,15 @@ import { TargetComponent } from "./target_component.js";
 import { WeaponsStateComponent } from "./weapons_state.js";
 import { SimulationGameDataResource } from "./game_data_resource.js";
 
-const TargetsQuery = new Query([UUID, ShipComponent] as const);
-function getValidTargets(targets: Array<readonly [string, any]>, selfUuid: string): string[] {
-    return targets.filter(([targetId]) => targetId !== selfUuid)
+// Cloaked ships (CloakActiveComponent.active) are invisible to NPC AI, so
+// they are excluded as valid targets — same rule the player's targeting
+// uses. A cloak scanner would reveal them, but that outfit is not wired.
+const TargetsQuery = new Query([UUID, ShipComponent, Optional(CloakActiveComponent)] as const);
+export function getValidTargets(
+    targets: Array<readonly [string, unknown, CloakActiveState | undefined]>,
+    selfUuid: string): string[] {
+    return targets
+        .filter(([targetId, , cloak]) => targetId !== selfUuid && isTargetable(cloak))
         .map(([uuid]) => uuid);
 }
 

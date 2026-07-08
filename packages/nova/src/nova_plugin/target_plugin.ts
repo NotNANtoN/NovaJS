@@ -9,6 +9,7 @@ import { Provide } from "nova_ecs/provide";
 import { Query } from "nova_ecs/query";
 import { System } from "nova_ecs/system";
 import { ShipControlEvent, ShipControlStateComponent } from "./ship_control.js";
+import { CloakActiveComponent, isCloaked } from "./cloak_plugin.js";
 import { OwnerComponent } from "./fire_weapon_plugin.js";
 import { PlayerShipSelector } from "./player_ship_plugin.js";
 import { ShipComponent } from "./ship_plugin.js";
@@ -26,7 +27,7 @@ const TargetIndexProvider = Provide({
 
 export const CycleTargetEvent = new EcsEvent<Target>('CycleTargetEvent');
 
-const TargetsQuery = new Query([UUID, MovementStateComponent, Optional(OwnerComponent), ShipComponent] as const);
+const TargetsQuery = new Query([UUID, MovementStateComponent, Optional(OwnerComponent), ShipComponent, Optional(CloakActiveComponent)] as const);
 const ChooseTargetSystem = new System({
     name: 'ChooseTarget',
     events: [ShipControlEvent],
@@ -35,14 +36,17 @@ const ChooseTargetSystem = new System({
     step(controlState, target, index, uuid, ships, emit, movementState) {
         if (controlState.get('nearestTarget') === 'start') {
             const [closestUuid, _distance, newIndex] = ships
-                .map(([a, b, c], index) => [a, b, c, index] as const)
-                .filter(([otherUuid, _, owner]) => {
+                .map(([a, b, c, d, e], index) => [a, b, c, d, e, index] as const)
+                .filter(([otherUuid, _, owner, __, cloak]) => {
                     if (owner?.owner === uuid) {
+                        return false;
+                    }
+                    if (isCloaked(cloak)) {
                         return false;
                     }
                     return otherUuid !== uuid;
                 })
-                .map(([uuid, { position }, _, index]) => [
+                .map(([uuid, { position }, _, __, ___, index]) => [
                     uuid,
                     position.subtract(movementState.position).lengthSquared,
                     index
@@ -71,10 +75,12 @@ const ChooseTargetSystem = new System({
                     break;
                 }
 
-                const [targetUuid, _targetMovement, targetOwner] = ships[index.index];
+                const [targetUuid, _targetMovement, targetOwner, _targetShip, targetCloak] = ships[index.index];
                 // Don't target yourself
                 // Don't target escorts
-                if (targetUuid !== uuid && targetOwner?.owner !== uuid) {
+                // Don't target cloaked ships
+                if (targetUuid !== uuid && targetOwner?.owner !== uuid
+                    && !isCloaked(targetCloak)) {
                     break;
                 }
                 index.index = (index.index + 2) % (ships.length + 1) - 1;
@@ -107,6 +113,26 @@ const TargetRemovedSystem = new System({
     }
 });
 
+// Drops any target that has become cloaked. A ship you were targeting
+// that cloaks vanishes from your sensors, so the lock is lost — matching
+// the "cloaked ships are untargetable" rule for locks already held.
+const CloakedTargetQuery = new Query([UUID, CloakActiveComponent] as const);
+const DropCloakedTargetSystem = new System({
+    name: 'DropCloakedTarget',
+    args: [TargetComponent, CloakedTargetQuery] as const,
+    step(target, cloakedShips) {
+        if (!target.target) {
+            return;
+        }
+        for (const [uuid, cloak] of cloakedShips) {
+            if (uuid === target.target && cloak.active) {
+                target.target = undefined;
+                return;
+            }
+        }
+    }
+});
+
 export const TargetPlugin: Plugin = {
     name: "TargetPlugin",
     build(world) {
@@ -122,5 +148,6 @@ export const TargetPlugin: Plugin = {
         world.addSystem(TargetIndexProvider);
         world.addSystem(ChooseTargetSystem);
         world.addSystem(TargetRemovedSystem);
+        world.addSystem(DropCloakedTargetSystem);
     }
 }

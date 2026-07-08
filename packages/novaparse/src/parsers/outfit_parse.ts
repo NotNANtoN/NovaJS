@@ -1,6 +1,7 @@
 import { OutfResource } from "../resource_parsers/outf_resource.js";
 import { BaseData } from "novadatainterface/base_data";
 import { BaseParse } from "./base_parse.js";
+import { CloakData, decodeCloakModVal, getDefaultCloakData } from "novadatainterface/cloak_data";
 import { OutfitData, OutfitPhysics } from "novadatainterface/outfit_data";
 import { getDefaultPictData } from "novadatainterface/pict_data";
 import { FPS, OutfitTurnRateConversionFactor, ShipTurnRateConversionFactor } from "./constants.js";
@@ -20,11 +21,22 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
     // and objects enforce a "one value per key" requirement.
     var weapons: { [index: string]: number } = {};
     var physics: OutfitPhysics = { freeMass: outf.mass };
+    // ModType 17 "cloaking device"; decoded from its ModVal bitfield. The
+    // resource parser emits it as a ["cloak", modVal] function tuple.
+    var cloak: CloakData = getDefaultCloakData();
 
     for (let i in outf.functions) {
         let func = outf.functions[i];
         let fType = func[0];
         let fVal = func[1];
+
+        if (fType === "cloak") {
+            if (typeof fVal !== "number") {
+                throw new Error("Wrong type for cloak val. Expected number");
+            }
+            cloak = decodeCloakModVal(fVal);
+            continue;
+        }
 
         // Unit conversions. Everything should be in units / second.
         // Parse weapons as well.
@@ -115,6 +127,7 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
         ...base,
         weapons,
         physics,
+        cloak,
         pict,
         price: outf.cost,
         desc,

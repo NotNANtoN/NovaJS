@@ -1,4 +1,5 @@
 import { BaseData, getDefaultBaseData } from "./base_data.js";
+import { CloakData, getDefaultCloakData } from "./cloak_data.js";
 import { ShipPhysics } from "./ship_data.js";
 
 
@@ -9,6 +10,9 @@ export interface OutfitData extends BaseData {
 
     // how it changes the physics of the ship it's attached to. Idea: What if these were allowed to be functions?
     physics: OutfitPhysics,
+    // Cloaking-device semantics decoded from ModType 17. isCloak is false
+    // for non-cloak outfits. See cloak_data.ts for the bitfield.
+    cloak: CloakData,
     pict: string, // id of picture
     price: number,
     desc: string,
@@ -23,6 +27,7 @@ export function getDefaultOutfitData(): OutfitData {
         physics: {
             freeMass: 0
         },
+        cloak: getDefaultCloakData(),
         pict: "default",
         price: 0,
         desc: "default outfit",
