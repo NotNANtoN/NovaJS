@@ -300,6 +300,15 @@ describe("NovaParse", () => {
         expect(s128.planets).toEqual(['nova:128', 'nova:189', 'nova:194']);
     });
 
+    it("Should plumb murk, interference, and background color into SystemData", async () => {
+        const s128 = await np.data.System.get("nova:128");
+        // The test fixture's system 128 is a plain system with none of these
+        // hazard fields set; they must still be present and default to zero.
+        expect(s128.murk).toBe(0);
+        expect(s128.interference).toBe(0);
+        expect(s128.backgroundColor).toBe(0);
+    });
+
     it("Should parse planet position", async () => {
         const p194 = await np.data.Planet.get("nova:194");
         expect(p194.position).toEqual([22, -56]);
