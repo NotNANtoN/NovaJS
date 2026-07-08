@@ -15,6 +15,7 @@ import { System } from 'nova_ecs/system';
 import SAT from "sat";
 import { registerSimulationBridgeEvent } from '../communication/simulation_bridge_events.js';
 import { AnimationComponent } from './animation_plugin.js';
+import { CloakActiveComponent, isCloaked } from './cloak_plugin.js';
 import { IdFactoryResource } from './id_factory.js';
 import { ProvideFromCache } from './provide_from_cache.js';
 import { BlastDamageComponent, BlastIgnoreComponent } from './blast_plugin.js';
@@ -202,7 +203,7 @@ const ProjectileLifespanSystem = new System({
     },
 });
 
-const ProjectileGuidanceSystem = new System({
+export const ProjectileGuidanceSystem = new System({
     name: 'ProjectileGuidanceSystem',
     args: [MovementStateComponent, TargetComponent,
         Entities, ProjectileDataComponent] as const,
@@ -214,6 +215,22 @@ const ProjectileGuidanceSystem = new System({
         const targetMovement = targetEntity?.components.get(MovementStateComponent);
 
         if (!targetMovement) {
+            return;
+        }
+
+        // Missile lock vs cloak (rule from observed original-game
+        // behavior): a homing missile LOSES its lock while its target is
+        // cloaked — it stops homing and flies straight — but REGAINS the
+        // lock if that same target decloaks while the missile is still
+        // alive. The lock is suspended, not cleared: TargetComponent
+        // keeps the target uuid (DropCloakedTargetSystem is ship-only),
+        // so homing resumes here the moment the target decloaks.
+        // Notably, a cloak scanner on the missile's PARENT ship does NOT
+        // keep its missiles tracking: scanners let the ship target
+        // cloaked ships, but missiles still lose lock — "odd behavior,
+        // but it's what the original game does".
+        if (isCloaked(targetEntity?.components.get(CloakActiveComponent))) {
+            movementState.turnTo = null;
             return;
         }
 

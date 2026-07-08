@@ -116,16 +116,20 @@ const TargetRemovedSystem = new System({
     }
 });
 
-// Drops any target that has become cloaked. A ship you were targeting
-// that cloaks vanishes from your sensors, so the lock is lost — matching
-// the "cloaked ships are untargetable" rule for locks already held. A
-// cloak scanner that allows targeting cloaked ships keeps the lock.
+// Drops any SHIP's target that has become cloaked. A ship you were
+// targeting that cloaks vanishes from your sensors, so the lock is lost —
+// matching the "cloaked ships are untargetable" rule for locks already
+// held. A cloak scanner that allows targeting cloaked ships keeps the
+// lock. Gated on ShipComponent: projectiles keep their TargetComponent,
+// so a homing missile's lock is SUSPENDED while its target is cloaked
+// (it stops homing in ProjectileGuidanceSystem) and resumes on decloak,
+// per observed original-game behavior.
 const CloakedTargetQuery = new Query([UUID, CloakActiveComponent] as const);
 const DropCloakedTargetSystem = new System({
     name: 'DropCloakedTarget',
-    args: [TargetComponent, CloakedTargetQuery,
+    args: [TargetComponent, ShipComponent, CloakedTargetQuery,
         Optional(CloakScannerComponent)] as const,
-    step(target, cloakedShips, myScanner) {
+    step(target, _ship, cloakedShips, myScanner) {
         if (!target.target) {
             return;
         }
