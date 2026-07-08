@@ -12,7 +12,7 @@ import { applyControlEvents } from "./ship_control.js";
 import { PlayerShipSelector } from "./player_ship_plugin.js";
 import { ShipPhysicsComponent } from "./ship_plugin.js";
 import { FuelComponent, FUEL_PER_JUMP } from "./health_plugin.js";
-import { SoundEvent } from "./sound_plugin.js";
+import { PlayerSoundEvent } from "./sound_plugin.js";
 
 const SHIP_UUID = 'jump test ship';
 
@@ -273,8 +273,11 @@ describe('jump sequence', () => {
         world.step();
 
         const sounds: string[] = [];
-        world.events.get(SoundEvent).subscribe(({ data }) => {
+        const targets: (string | undefined)[] = [];
+        world.events.get(PlayerSoundEvent).subscribe(({ data, entities }) => {
             sounds.push(data.id);
+            targets.push(...(entities ?? []).map(
+                e => typeof e === 'string' ? e : e.uuid));
         });
 
         pressHyperjump(world);
@@ -285,6 +288,10 @@ describe('jump sequence', () => {
         world.step();
         expect(sounds).toContain(WARP_UP_SOUND);
         expect(sounds).not.toContain(WARP_UP_FAST_SOUND);
+        // Warp sounds are player-only: emitted targeted at the jumping
+        // ship, and the display plays them only for the local player's
+        // ship (see the display sound plugin's PlayerSoundSystem).
+        expect(targets).toEqual([SHIP_UUID]);
     }, 30_000);
 
     it('plays the double-speed warp-up for fast-jumping ships', async () => {
@@ -297,7 +304,7 @@ describe('jump sequence', () => {
         world.step();
 
         const sounds: string[] = [];
-        world.events.get(SoundEvent).subscribe(({ data }) => {
+        world.events.get(PlayerSoundEvent).subscribe(({ data }) => {
             sounds.push(data.id);
         });
 
@@ -351,7 +358,7 @@ describe('jump sequence', () => {
         expect(arrivalMovement.velocity.length).toBeCloseTo(jumpSpeed, 3);
 
         const sounds: string[] = [];
-        destWorld.events.get(SoundEvent).subscribe(({ data }) => {
+        destWorld.events.get(PlayerSoundEvent).subscribe(({ data }) => {
             sounds.push(data.id);
         });
 

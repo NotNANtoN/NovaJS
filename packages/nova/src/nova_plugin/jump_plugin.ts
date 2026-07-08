@@ -22,7 +22,7 @@ import { ControlShipSystem } from "./ship_controller_plugin.js";
 import { getShipMovementPhysics, ShipPhysicsComponent } from "./ship_plugin.js";
 import { PlayerShipSelector } from "./player_ship_plugin.js";
 import { SimulationGameDataResource } from "./game_data_resource.js";
-import { SoundEvent } from "./sound_plugin.js";
+import { PlayerSoundEvent } from "./sound_plugin.js";
 import { SystemIdResource } from "./system_id_resource.js";
 
 // Hyperspace jump tuning. The EVN Bible documents the *structure* of
@@ -315,11 +315,14 @@ export const JumpSequenceSystem = new System({
                     jump.stage = 'accelerating';
                     jump.stageStart = time.time;
                     // Sounds are display-side; emitting the event does
-                    // not touch simulation state.
-                    emit(SoundEvent, {
+                    // not touch simulation state. Warp sounds are only
+                    // heard by the jumping ship's own pilot: targeted
+                    // at the ship, and the display plays them only for
+                    // the local player's ship.
+                    emit(PlayerSoundEvent, {
                         id: shipPhysics.jumpSpeedMult > 1
                             ? WARP_UP_FAST_SOUND : WARP_UP_SOUND,
-                    });
+                    }, [uuid]);
                 }
                 break;
             }
@@ -364,7 +367,7 @@ export const JumpSequenceSystem = new System({
                 // cap down from the jump stage), then hand control back.
                 if (jump.stageStart === undefined) {
                     jump.stageStart = time.time;
-                    emit(SoundEvent, { id: WARP_OUT_SOUND });
+                    emit(PlayerSoundEvent, { id: WARP_OUT_SOUND }, [uuid]);
                 }
                 const basePhysics = getShipMovementPhysics(shipPhysics);
                 const progress =
