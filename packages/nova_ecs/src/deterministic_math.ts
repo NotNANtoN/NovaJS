@@ -207,13 +207,460 @@ export function acos(x: number): number {
     return atan2(Math.sqrt((1 - x) * (1 + x)), x);
 }
 
+// ---------------------------------------------------------------------------
+// Float bit helpers (DataView operations are exact and deterministic).
+
+const BITS = new DataView(new ArrayBuffer(8));
+
+function highWord(x: number): number {
+    BITS.setFloat64(0, x);
+    return BITS.getUint32(0);
+}
+
+function setHighWord(x: number, high: number): number {
+    BITS.setFloat64(0, x);
+    BITS.setUint32(0, high >>> 0);
+    return BITS.getFloat64(0);
+}
+
+/** x * 2^k via exponent-bit construction: exact and deterministic. */
+function scalbn(x: number, k: number): number {
+    if (x === 0 || !Number.isFinite(x)) {
+        return x;
+    }
+    // Two-step through representable powers of two so intermediate
+    // factors never overflow to Infinity or flush to zero.
+    while (k > 1023) {
+        x *= TWO_1023;
+        k -= 1023;
+        if (!Number.isFinite(x)) {
+            return x;
+        }
+    }
+    while (k < -1022) {
+        x *= TWO_M1022;
+        k += 1022;
+        if (x === 0) {
+            return x;
+        }
+    }
+    BITS.setUint32(0, (k + 1023) << 20);
+    BITS.setUint32(4, 0);
+    return x * BITS.getFloat64(0);
+}
+const TWO_1023 = 8.98846567431158e+307;
+const TWO_M1022 = 2.2250738585072014e-308;
+
+// ---------------------------------------------------------------------------
+// exp and log (fdlibm e_exp / e_log).
+
+const EXP_P1 = 1.66666666666666019037e-01;
+const EXP_P2 = -2.77777777770155933842e-03;
+const EXP_P3 = 6.61375632143793436117e-05;
+const EXP_P4 = -1.65339022054652515390e-06;
+const EXP_P5 = 4.13813679705723846039e-08;
+const LN2_HI = 6.93147180369123816490e-01;
+const LN2_LO = 1.90821492927058770002e-10;
+const INV_LN2 = 1.44269504088896338700e+00;
+const EXP_OVERFLOW = 7.09782712893383973096e+02;
+const EXP_UNDERFLOW = -7.45133219101941108420e+02;
+
+export function exp(x: number): number {
+    if (Number.isNaN(x)) {
+        return NaN;
+    }
+    if (x > EXP_OVERFLOW) {
+        return Infinity;
+    }
+    if (x < EXP_UNDERFLOW) {
+        return 0;
+    }
+    let hi = 0;
+    let lo = 0;
+    let k = 0;
+    const absX = x < 0 ? -x : x;
+    if (absX > 0.5 * LN2_HI) {
+        if (absX < 1.5 * LN2_HI) {
+            k = x < 0 ? -1 : 1;
+            hi = x - k * LN2_HI;
+            lo = k * LN2_LO;
+        } else {
+            // trunc, not floor: this ports fdlibm's (int) cast, which
+            // truncates toward zero — floor is off by one for x < 0
+            // and pushes the reduced argument out of kernel range.
+            k = Math.trunc(INV_LN2 * x + (x < 0 ? -0.5 : 0.5));
+            hi = x - k * LN2_HI;
+            lo = k * LN2_LO;
+        }
+        x = hi - lo;
+    } else if (absX < 3.725290298461914e-09) { // 2^-28
+        return 1 + x;
+    }
+    const t = x * x;
+    const c = x - t * (EXP_P1 + t * (EXP_P2 + t * (EXP_P3
+        + t * (EXP_P4 + t * EXP_P5))));
+    if (k === 0) {
+        return 1 - ((x * c) / (c - 2) - x);
+    }
+    const y = 1 - ((lo - (x * c) / (2 - c)) - hi);
+    return scalbn(y, k);
+}
+
+const LG1 = 6.666666666666735130e-01;
+const LG2 = 3.999999999940941908e-01;
+const LG3 = 2.857142874366239149e-01;
+const LG4 = 2.222219843214978396e-01;
+const LG5 = 1.818357216161805012e-01;
+const LG6 = 1.531383769920937332e-01;
+const LG7 = 1.479819860511658591e-01;
+
+export function log(x: number): number {
+    if (Number.isNaN(x) || x < 0) {
+        return NaN;
+    }
+    if (x === 0) {
+        return -Infinity;
+    }
+    if (!Number.isFinite(x)) {
+        return x;
+    }
+    let k = 0;
+    let hx = highWord(x);
+    if (hx < 0x00100000) {
+        // Subnormal: normalize.
+        k -= 54;
+        x *= 18014398509481984; // 2^54
+        hx = highWord(x);
+    }
+    k += (hx >> 20) - 1023;
+    hx &= 0x000fffff;
+    const i = (hx + 0x95f64) & 0x100000;
+    x = setHighWord(x, hx | (i ^ 0x3ff00000));
+    k += i >> 20;
+    const f = x - 1;
+    if (f === 0) {
+        return k === 0 ? 0 : k * LN2_HI + k * LN2_LO;
+    }
+    const s = f / (2 + f);
+    const z = s * s;
+    const w = z * z;
+    const t1 = w * (LG2 + w * (LG4 + w * LG6));
+    const t2 = z * (LG1 + w * (LG3 + w * (LG5 + w * LG7)));
+    const r = t1 + t2;
+    const hfsq = 0.5 * f * f;
+    if (k === 0) {
+        return f - (hfsq - s * (hfsq + r));
+    }
+    return k * LN2_HI - ((hfsq - (s * (hfsq + r) + k * LN2_LO)) - f);
+}
+
+// Goldberg's corrections keep expm1/log1p accurate near zero while
+// reusing the deterministic exp/log kernels.
+export function expm1(x: number): number {
+    if (Number.isNaN(x)) {
+        return NaN;
+    }
+    const u = exp(x);
+    if (u === 1) {
+        return x;
+    }
+    const y = u - 1;
+    if (!Number.isFinite(u) || u === 0) {
+        return u === 0 ? -1 : u;
+    }
+    if (x > 0.5 || x < -0.5) {
+        // Far from zero exp(x) is far from 1: the subtraction does
+        // not cancel, and Goldberg's correction would only add error.
+        return y;
+    }
+    return y * (x / log(u));
+}
+
+export function log1p(x: number): number {
+    if (Number.isNaN(x) || x < -1) {
+        return NaN;
+    }
+    if (x === -1) {
+        return -Infinity;
+    }
+    const u = 1 + x;
+    if (u === 1) {
+        return x;
+    }
+    return log(u) * (x / (u - 1));
+}
+
+const INV_LN10 = 0.4342944819032518;
+
+export function log2(x: number): number {
+    if (Number.isNaN(x) || x < 0) {
+        return NaN;
+    }
+    if (x === 0) {
+        return -Infinity;
+    }
+    if (!Number.isFinite(x)) {
+        return x;
+    }
+    // Split off the exponent so powers of two come out exact.
+    let hx = highWord(x);
+    let k = 0;
+    if (hx < 0x00100000) {
+        k -= 54;
+        x *= 18014398509481984;
+        hx = highWord(x);
+    }
+    k += (hx >> 20) - 1023;
+    const m = setHighWord(x, (hx & 0x000fffff) | 0x3ff00000);
+    return k + log(m) * INV_LN2;
+}
+
+export function log10(x: number): number {
+    if (Number.isNaN(x) || x < 0) {
+        return NaN;
+    }
+    if (x === 0) {
+        return -Infinity;
+    }
+    if (!Number.isFinite(x)) {
+        return x;
+    }
+    return log(x) * INV_LN10;
+}
+
+export function pow(x: number, y: number): number {
+    // Special cases first (the subset the spec and games rely on).
+    if (y === 0) {
+        return 1;
+    }
+    if (Number.isNaN(x) || Number.isNaN(y)) {
+        // Unlike C99, JS defines pow(1, NaN) as NaN.
+        return NaN;
+    }
+    if (Number.isInteger(y) && Math.abs(y) <= 1024) {
+        // Exact-multiplication path: keeps pow(2, 10) === 1024 and
+        // friends bit-exact, and integer powers deterministic.
+        let base = y < 0 ? 1 / x : x;
+        let n = y < 0 ? -y : y;
+        let result = 1;
+        while (n > 0) {
+            if (n % 2 === 1) {
+                result *= base;
+            }
+            base *= base;
+            n = Math.floor(n / 2);
+        }
+        return result;
+    }
+    if (x < 0) {
+        // Non-integer exponent of a negative base.
+        return NaN;
+    }
+    if (y === 0.5) {
+        return Math.sqrt(x);
+    }
+    if (y === -0.5) {
+        return 1 / Math.sqrt(x);
+    }
+    if (x === 0) {
+        return y > 0 ? 0 : Infinity;
+    }
+    if (!Number.isFinite(x)) {
+        return y > 0 ? Infinity : 0;
+    }
+    if (!Number.isFinite(y)) {
+        const absX = Math.abs(x);
+        if (absX === 1) {
+            return NaN;
+        }
+        return (absX > 1) === (y > 0) ? Infinity : 0;
+    }
+    return exp(y * log(x));
+}
+
+// fdlibm s_cbrt.
+const CBRT_B1 = 715094163;
+const CBRT_B2 = 696219795;
+const CBRT_P0 = 1.87595182427177009643;
+const CBRT_P1 = -1.88497979543377169875;
+const CBRT_P2 = 1.621429720105354466140;
+const CBRT_P3 = -0.758397934778766047437;
+const CBRT_P4 = 0.145996192886612446982;
+
+export function cbrt(x: number): number {
+    if (!Number.isFinite(x) || x === 0) {
+        return x;
+    }
+    const negative = x < 0;
+    const absX = negative ? -x : x;
+    let t: number;
+    if (highWord(absX) < 0x00100000) {
+        const scaled = absX * 18014398509481984; // 2^54
+        t = setHighWord(0, Math.floor(highWord(scaled) / 3) + CBRT_B2);
+    } else {
+        t = setHighWord(0, Math.floor(highWord(absX) / 3) + CBRT_B1);
+    }
+    // Polynomial refinement to ~47 bits.
+    const r = (t * t) * (t / absX);
+    t = t * ((CBRT_P0 + r * (CBRT_P1 + r * CBRT_P2))
+        + ((r * r) * r) * (CBRT_P3 + r * CBRT_P4));
+    // One Newton round to full precision.
+    const s = t * t;
+    let q = absX / s;
+    const w = t + t;
+    q = (q - t) / (w + q);
+    t = t + t * q;
+    return negative ? -t : t;
+}
+
+export function hypot(...values: number[]): number {
+    let max = 0;
+    for (const value of values) {
+        if (Number.isNaN(value)) {
+            // Infinity beats NaN per spec; check the rest first.
+            if (values.some(v => v === Infinity || v === -Infinity)) {
+                return Infinity;
+            }
+            return NaN;
+        }
+        const abs = value < 0 ? -value : value;
+        if (abs > max) {
+            max = abs;
+        }
+    }
+    if (max === 0) {
+        return 0;
+    }
+    if (max === Infinity) {
+        return Infinity;
+    }
+    let sum = 0;
+    for (const value of values) {
+        const scaled = value / max;
+        sum += scaled * scaled;
+    }
+    return max * Math.sqrt(sum);
+}
+
+// Hyperbolics, built on the deterministic exp/expm1/log1p kernels
+// (musl-style formulations that avoid cancellation near zero).
+
+export function sinh(x: number): number {
+    if (!Number.isFinite(x) || x === 0) {
+        return x;
+    }
+    const negative = x < 0;
+    const absX = negative ? -x : x;
+    let result: number;
+    if (absX >= EXP_OVERFLOW) {
+        result = Infinity;
+    } else {
+        const t = expm1(absX);
+        result = 0.5 * (t + t / (t + 1));
+    }
+    return negative ? -result : result;
+}
+
+export function cosh(x: number): number {
+    if (Number.isNaN(x)) {
+        return NaN;
+    }
+    const absX = x < 0 ? -x : x;
+    if (absX >= EXP_OVERFLOW) {
+        return Infinity;
+    }
+    const t = expm1(absX);
+    return 1 + (t * t) / (2 * (1 + t));
+}
+
+export function tanh(x: number): number {
+    if (Number.isNaN(x)) {
+        return NaN;
+    }
+    if (x === 0) {
+        return x;
+    }
+    const negative = x < 0;
+    const absX = negative ? -x : x;
+    let result: number;
+    if (absX > 20) {
+        result = 1;
+    } else {
+        const t = expm1(-2 * absX);
+        result = -t / (t + 2);
+    }
+    return negative ? -result : result;
+}
+
+export function asinh(x: number): number {
+    if (!Number.isFinite(x) || x === 0) {
+        return x;
+    }
+    const negative = x < 0;
+    const absX = negative ? -x : x;
+    let result: number;
+    if (absX >= 67108864) { // 2^26: sqrt(x^2+1) ~ |x|
+        result = log(absX) + LN2_HI + LN2_LO;
+    } else {
+        result = log1p(absX
+            + (absX * absX) / (1 + Math.sqrt(absX * absX + 1)));
+    }
+    return negative ? -result : result;
+}
+
+export function acosh(x: number): number {
+    if (Number.isNaN(x) || x < 1) {
+        return NaN;
+    }
+    if (x === 1) {
+        return 0;
+    }
+    if (!Number.isFinite(x)) {
+        return x;
+    }
+    if (x >= 67108864) {
+        return log(x) + LN2_HI + LN2_LO;
+    }
+    if (x > 2) {
+        return log(2 * x - 1 / (x + Math.sqrt(x * x - 1)));
+    }
+    const t = x - 1;
+    return log1p(t + Math.sqrt(2 * t + t * t));
+}
+
+export function atanh(x: number): number {
+    if (Number.isNaN(x) || x < -1 || x > 1) {
+        return NaN;
+    }
+    if (x === 0) {
+        return x;
+    }
+    const negative = x < 0;
+    const absX = negative ? -x : x;
+    let result: number;
+    if (absX === 1) {
+        result = Infinity;
+    } else if (absX < 0.5) {
+        result = 0.5 * log1p(2 * absX + (2 * absX * absX) / (1 - absX));
+    } else {
+        result = 0.5 * log1p((2 * absX) / (1 - absX));
+    }
+    return negative ? -result : result;
+}
+
 /**
- * Replaces Math's engine-dependent transcendental functions with the
- * deterministic ones, process-wide. Call in every context that runs
- * the simulation (the browser sim worker, the server, tests) before
- * any world steps. Idempotent. exp/log/pow are left native: the
- * simulation does not use them (pow, hypot, cbrt, and sqrt also
- * measured bit-identical across engines).
+ * Replaces Math's engine-dependent functions with the deterministic
+ * ones, process-wide. Call in every context that runs the simulation
+ * (the browser sim worker, the server, tests) before any world steps.
+ * Idempotent.
+ *
+ * The whole transcendental surface is patched — including functions
+ * that happened to measure identical on today's engines (cosh, log2,
+ * pow, hypot, cbrt) — so the rule is simply: in a simulation context,
+ * every Math function is deterministic. Untouched: functions IEEE 754
+ * requires to be exactly rounded (sqrt, abs, floor, ceil, round,
+ * trunc, sign, fround, min/max, imul, clz32) and Math.random, which
+ * simulation code must never call (use the seeded Random resource).
  */
 export function installDeterministicMath() {
     const math = Math as typeof Math & { __deterministic?: boolean };
@@ -228,4 +675,19 @@ export function installDeterministicMath() {
     math.atan2 = atan2;
     math.asin = asin;
     math.acos = acos;
+    math.exp = exp;
+    math.log = log;
+    math.expm1 = expm1;
+    math.log1p = log1p;
+    math.log2 = log2;
+    math.log10 = log10;
+    math.pow = pow;
+    math.cbrt = cbrt;
+    math.hypot = hypot;
+    math.sinh = sinh;
+    math.cosh = cosh;
+    math.tanh = tanh;
+    math.asinh = asinh;
+    math.acosh = acosh;
+    math.atanh = atanh;
 }
