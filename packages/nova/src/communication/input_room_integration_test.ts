@@ -126,11 +126,18 @@ describe('Input-driven rooms', () => {
         const joined = await peerB.host.joinRoom();
         expect(joined).toBeTrue();
 
-        // Let B reach A's tick (the relay clock may be slightly ahead).
-        while ((peerB.world.resources.get(
-            (await import('nova_ecs/plugins/time_plugin')).TimeResource)!.frame)
-            < 60) {
-            peerB.host.step();
+        // Align the worlds: the joiner extrapolates the relay clock
+        // from wall time, so with the test's manual clock either side
+        // may be ahead.
+        {
+            const { TimeResource } =
+                await import('nova_ecs/plugins/time_plugin');
+            const frame = (world: World) =>
+                world.resources.get(TimeResource)!.frame;
+            while (frame(peerA.world) !== frame(peerB.world)) {
+                (frame(peerA.world) < frame(peerB.world) ? peerA : peerB)
+                    .host.step();
+            }
         }
 
         const hashA = hashWorld(peerA.world, PEER_LOCAL_COMPONENTS);
@@ -189,10 +196,15 @@ describe('Input-driven rooms', () => {
         expect(joined).toBeTrue();
         expect(baselineTick).toBe(archive.latest!.tick);
 
-        const { TimeResource } = await import('nova_ecs/plugins/time_plugin');
-        const target = peerA.world.resources.get(TimeResource)!.frame;
-        while (peerB.world.resources.get(TimeResource)!.frame < target) {
-            peerB.host.step();
+        {
+            const { TimeResource } =
+                await import('nova_ecs/plugins/time_plugin');
+            const frame = (world: World) =>
+                world.resources.get(TimeResource)!.frame;
+            while (frame(peerA.world) !== frame(peerB.world)) {
+                (frame(peerA.world) < frame(peerB.world) ? peerA : peerB)
+                    .host.step();
+            }
         }
         const hashA = hashWorld(peerA.world, PEER_LOCAL_COMPONENTS);
         const hashB = hashWorld(peerB.world, PEER_LOCAL_COMPONENTS);
@@ -475,10 +487,21 @@ describe('Input-driven rooms', () => {
         }
         const peerC = await makePeer('c');
         expect(await peerC.host.joinRoom()).toBeTrue();
-        const { TimeResource } = await import('nova_ecs/plugins/time_plugin');
-        while (peerC.world.resources.get(TimeResource)!.frame
-            < peerA.world.resources.get(TimeResource)!.frame) {
-            peerC.host.step();
+        {
+            const { TimeResource } =
+                await import('nova_ecs/plugins/time_plugin');
+            const frame = (world: World) =>
+                world.resources.get(TimeResource)!.frame;
+            // C steps alone to catch up; if C landed ahead (its clock
+            // estimate extrapolates wall time against the test's
+            // manual relay clock), A and B advance together so their
+            // lockstep survives.
+            while (frame(peerC.world) < frame(peerA.world)) {
+                peerC.host.step();
+            }
+            while (frame(peerA.world) < frame(peerC.world)) {
+                await step(1);
+            }
         }
         expect(returning(peerC.world)).toBe(returning(peerA.world));
         const hashC = hashWorld(peerC.world, PEER_LOCAL_COMPONENTS);
@@ -593,10 +616,15 @@ describe('Input-driven rooms', () => {
         // genesis plus the relay's log. Let the async join finish, then
         // step B back up to A's tick.
         await new Promise(resolve => setTimeout(resolve));
-        const { TimeResource } = await import('nova_ecs/plugins/time_plugin');
-        const target = peerA.world.resources.get(TimeResource)!.frame;
-        while (peerB.world.resources.get(TimeResource)!.frame < target) {
-            peerB.host.step();
+        {
+            const { TimeResource } =
+                await import('nova_ecs/plugins/time_plugin');
+            const frame = (world: World) =>
+                world.resources.get(TimeResource)!.frame;
+            while (frame(peerA.world) !== frame(peerB.world)) {
+                (frame(peerA.world) < frame(peerB.world) ? peerA : peerB)
+                    .host.step();
+            }
         }
 
         const hashA = hashWorld(peerA.world, PEER_LOCAL_COMPONENTS);

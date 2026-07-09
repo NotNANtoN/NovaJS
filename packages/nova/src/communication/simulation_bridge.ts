@@ -325,6 +325,20 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
                     // the catch-up log: drop them or they apply twice.
                     this.remoteInputs = [];
                     this.remoteInputsGeneration++;
+                    // The reply carries the relay's clock: seed the
+                    // estimate now rather than waiting up to a second
+                    // for the first periodic tickSync. Without this,
+                    // inputs recorded right after a join (the arriving
+                    // ship's insertion after a hyperjump) are stamped
+                    // with the local tick, which trails the relay —
+                    // the relay then retimes the record for everyone
+                    // but the sender, and the sender's own ship
+                    // diverges until a resync rebuilds it from the
+                    // log.
+                    this.lastTickSync = {
+                        tick: rollbackMessage.tick,
+                        at: performance.now(),
+                    };
                     resolve(rollbackMessage);
                 }
             });
