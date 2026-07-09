@@ -648,6 +648,95 @@ export function atanh(x: number): number {
     return negative ? -result : result;
 }
 
+// ---------------------------------------------------------------------------
+// Array.prototype.sort.
+//
+// Since ES2019 sort must be stable, so a well-formed comparator is
+// already deterministic — but an ill-formed one (a single NaN sort
+// key makes `(a, b) => a - b` inconsistent) leaves the order
+// implementation-defined. This stable merge sort clamps comparator
+// results to {-1, 0, 1} (NaN becomes "equal", preserving original
+// order), so even buggy comparators sort deterministically on every
+// engine.
+
+function mergeSort<T>(items: T[], compare: (a: T, b: T) => number): T[] {
+    if (items.length <= 1) {
+        return items;
+    }
+    const middle = items.length >> 1;
+    const left = mergeSort(items.slice(0, middle), compare);
+    const right = mergeSort(items.slice(middle), compare);
+    const merged: T[] = [];
+    let i = 0;
+    let j = 0;
+    while (i < left.length && j < right.length) {
+        // <= keeps the sort stable: ties take from the left run.
+        if (compare(left[i]!, right[j]!) <= 0) {
+            merged.push(left[i]!);
+            i++;
+        } else {
+            merged.push(right[j]!);
+            j++;
+        }
+    }
+    while (i < left.length) {
+        merged.push(left[i]!);
+        i++;
+    }
+    while (j < right.length) {
+        merged.push(right[j]!);
+        j++;
+    }
+    return merged;
+}
+
+/** The spec's default comparator: lexicographic on String(value). */
+function defaultComparator(a: unknown, b: unknown): number {
+    const sa = String(a);
+    const sb = String(b);
+    return sa < sb ? -1 : sa > sb ? 1 : 0;
+}
+
+function deterministicSort<T>(this: T[],
+    comparator?: (a: T, b: T) => number): T[] {
+    if (comparator !== undefined && typeof comparator !== 'function') {
+        throw new TypeError('The comparison function must be either a '
+            + 'function or undefined');
+    }
+    const length = this.length >>> 0;
+    // Per spec: holes sort past undefineds, which sort past values.
+    const items: T[] = [];
+    let undefinedCount = 0;
+    for (let i = 0; i < length; i++) {
+        if (!(i in this)) {
+            continue;
+        }
+        const value = this[i] as T;
+        if (value === undefined) {
+            undefinedCount++;
+        } else {
+            items.push(value);
+        }
+    }
+    const compare = comparator ?? defaultComparator;
+    const sorted = mergeSort(items, (a, b) => {
+        const result = Number(compare(a, b));
+        return result < 0 ? -1 : result > 0 ? 1 : 0;
+    });
+    for (let i = 0; i < sorted.length; i++) {
+        this[i] = sorted[i]!;
+    }
+    for (let i = 0; i < undefinedCount; i++) {
+        this[sorted.length + i] = undefined as T;
+    }
+    for (let i = sorted.length + undefinedCount; i < length; i++) {
+        delete this[i];
+    }
+    return this;
+}
+
+export { deterministicSort as sort };
+
 /**
  * Replaces Math's engine-dependent functions with the deterministic
  * ones, process-wide. Call in every context that runs the simulation
@@ -661,6 +750,11 @@ export function atanh(x: number): number {
  * requires to be exactly rounded (sqrt, abs, floor, ceil, round,
  * trunc, sign, fround, min/max, imul, clz32) and Math.random, which
  * simulation code must never call (use the seeded Random resource).
+ *
+ * Array.prototype.sort (and toSorted) are also replaced: stable sort
+ * is spec'd since ES2019, but an ill-formed comparator (one NaN sort
+ * key is enough) leaves the order implementation-defined, and the
+ * replacement is deterministic even then.
  */
 export function installDeterministicMath() {
     const math = Math as typeof Math & { __deterministic?: boolean };
@@ -668,6 +762,15 @@ export function installDeterministicMath() {
         return;
     }
     math.__deterministic = true;
+    // eslint-disable-next-line no-extend-native
+    Array.prototype.sort = deterministicSort;
+    const arrayProto = Array.prototype as unknown as
+        { toSorted?: (comparator?: (a: unknown, b: unknown) => number) => unknown[] };
+    if (arrayProto.toSorted) {
+        arrayProto.toSorted = function (comparator) {
+            return deterministicSort.call([...this as unknown[]], comparator);
+        };
+    }
     math.sin = sin;
     math.cos = cos;
     math.tan = tan;

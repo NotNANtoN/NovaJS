@@ -1,5 +1,5 @@
 import 'jasmine';
-import { acos, acosh, asin, asinh, atan, atan2, atanh, cbrt, cos, cosh, exp, expm1, hypot, log, log10, log1p, log2, pow, sin, sinh, tan, tanh } from './deterministic_math.js';
+import { acos, acosh, asin, asinh, atan, atan2, atanh, cbrt, cos, cosh, exp, expm1, hypot, log, log10, log1p, log2, pow, sin, sinh, sort, tan, tanh } from './deterministic_math.js';
 
 // Native implementations, captured in case something in the process
 // installed the deterministic patch.
@@ -174,5 +174,56 @@ describe('deterministic math', () => {
         expect(atanh(-1)).toBe(-Infinity);
         expect(sinh(1000)).toBe(Infinity);
         expect(cosh(-1000)).toBe(Infinity);
+    });
+
+    describe('deterministic sort', () => {
+        const sortArray = <T>(array: T[],
+            comparator?: (a: T, b: T) => number) =>
+            sort.call(array, comparator as never) as T[];
+
+        it('matches native sort for well-formed comparators', () => {
+            const values = inputs(2000, 1000);
+            const nativeSorted = [...values].sort((a, b) => a - b);
+            const ours = sortArray([...values], (a, b) => a - b);
+            expect(ours).toEqual(nativeSorted);
+        });
+
+        it('uses the spec default comparator (lexicographic strings)', () => {
+            expect(sortArray([10, 9, 1, 100])).toEqual([1, 10, 100, 9]);
+            expect(sortArray(['b', 'a', 'c'])).toEqual(['a', 'b', 'c']);
+        });
+
+        it('is stable', () => {
+            const items = [
+                { key: 1, tag: 'a' }, { key: 0, tag: 'b' },
+                { key: 1, tag: 'c' }, { key: 0, tag: 'd' },
+                { key: 1, tag: 'e' },
+            ];
+            const sorted = sortArray(items, (a, b) => a.key - b.key);
+            expect(sorted.map(item => item.tag))
+                .toEqual(['b', 'd', 'a', 'c', 'e']);
+        });
+
+        it('is deterministic under an ill-formed comparator', () => {
+            // One NaN key makes (a, b) => a - b inconsistent: native
+            // ordering becomes implementation-defined; ours treats
+            // NaN comparisons as ties and preserves original order.
+            const keys = [3, NaN, 1, NaN, 2];
+            const indexed = keys.map((key, index) => ({ key, index }));
+            const sorted = sortArray(indexed, (a, b) => a.key - b.key);
+            // Golden order from the merge sort's fixed tie behavior.
+            expect(sorted.map(item => item.index)).toEqual([2, 0, 1, 3, 4]);
+            // Repeat runs agree (trivially, but guards regressions).
+            const again = sortArray(keys.map((key, index) => ({ key, index })),
+                (a, b) => a.key - b.key);
+            expect(again.map(item => item.index)).toEqual([2, 0, 1, 3, 4]);
+        });
+
+        it('sorts undefineds to the end and returns the array', () => {
+            const array = [undefined, 3, undefined, 1];
+            const result = sortArray(array, (a, b) => (a as number) - (b as number));
+            expect(result).toBe(array);
+            expect(result).toEqual([1, 3, undefined, undefined]);
+        });
     });
 });
