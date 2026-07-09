@@ -1,3 +1,4 @@
+import { installDeterministicMath } from "nova_ecs/deterministic_math";
 import { MultiplayerData, MultiplayerDataType } from "nova_ecs/plugins/multiplayer_plugin";
 import { SerializerResource } from "nova_ecs/plugins/serializer_plugin";
 import { Random, RandomResource } from "nova_ecs/plugins/random_plugin";
@@ -23,6 +24,12 @@ export const SIMULATION_STEP_MS = 1000 / 60;
 
 export async function makeSystem(systemId: string, gameData: SimulationGameDataInterface,
     platformOverride?: Platform) {
+    // Every context that simulates builds its worlds here (the browser
+    // sim worker, the server's archive, node workers, tests), so this
+    // is the chokepoint that makes Math's trig bit-identical across
+    // engines before any world steps. Display-only contexts (the
+    // browser main thread) never call this and keep native Math.
+    installDeterministicMath();
     const world = new World(systemId);
 
     world.resources.set(SimulationGameDataResource, gameData);
