@@ -252,6 +252,7 @@ export const ParticlesPlugin: Plugin = {
         world.removeSystem(TrailEmitterCleanup);
         world.removeSystem(OrphanEmittersSystem);
         world.removeSystem(HitEmitterSystem);
+        world.removeSystem(AsteroidBreakEmitterSystem);
 
         world.resources.delete(ParticleTextureResource);
         world.resources.delete(OrphanParticleEmitters);

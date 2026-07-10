@@ -179,7 +179,10 @@ export class World {
             await this.pluginPromises.get(plugin)!;
         }
         if (plugin.remove != null) {
-            plugin.remove(this); 
+            // Await async removes: dropping the promise hides teardown
+            // errors as unhandled rejections and lets the caller race
+            // ahead of a teardown still in flight.
+            await plugin.remove(this);
             this.plugins.delete(plugin);
             this.pluginPromises.delete(plugin);
             return true;

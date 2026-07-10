@@ -372,7 +372,7 @@ describe('world', () => {
         expect(stepData).toEqual(['plugin component']);
     });
 
-    it('removes a plugin', () => {
+    it('removes a plugin', async () => {
         const stepData: string[] = [];
         const testSystem = new System({
             name: 'TestSystem',
@@ -398,7 +398,7 @@ describe('world', () => {
 
         expect(stepData).toEqual(['plugin component']);
 
-        world.removePlugin(plugin);
+        await world.removePlugin(plugin);
         expect(world.plugins.has(plugin)).toBeFalse();
 
         world.step();
@@ -1529,7 +1529,7 @@ describe('world', () => {
 
     });
 
-    it('removeAllPlugins() removes all non-base plugins', () => {
+    it('removeAllPlugins() removes all non-base plugins', async () => {
         const stepData: string[] = [];
         const testSystem = new System({
             name: 'TestSystem',
@@ -1555,7 +1555,7 @@ describe('world', () => {
 
         expect(stepData).toEqual(['plugin component']);
 
-        world.removeAllPlugins();
+        await world.removeAllPlugins();
         expect(world.plugins).toEqual(world.basePlugins);
 
         world.step();
