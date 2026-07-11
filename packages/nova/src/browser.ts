@@ -46,6 +46,10 @@ import { PlayerShipSelector } from "./nova_plugin/player_ship_plugin.js";
 import { extractSaveData, loadSave, resetSave, writeSave } from "./nova_plugin/save_game.js";
 import { ControlledByComponent } from "./nova_plugin/ship_control.js";
 import { SystemIdResource } from "./nova_plugin/system_id_resource.js";
+import { AnalogControlState } from "./nova_plugin/ship_control.js";
+import { Autopilot, ControlSinks } from "./autopilot.js";
+import { installTapTargeting } from "./tap_targeting.js";
+import { installTouchControls, wantsTouchControls } from "./touch_controls.js";
 
 
 const simulationGameData = new SimulationGameData();
@@ -88,6 +92,7 @@ let dockedShip: { uuid: string, entity: Entity, planetId: string } | undefined;
 let pendingLaunchedShip: Entity | undefined;
 let controls: Controls | undefined;
 const controlsSubject = new Subject<ControlEvent>();
+let autopilot: Autopilot | undefined;
 let simulationTickInFlight = false;
 let syncedPlayerJumpRoute: string[] | undefined;
 
@@ -390,6 +395,8 @@ async function makeDisplayWorld(systemId: string) {
 }
 
 async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: string }) {
+    autopilot?.cancel();
+    document.body.classList.remove('nova-docked');
     pendingDockedShip = undefined;
     dockedShip = undefined;
     pendingLaunchedShip = undefined;
@@ -487,6 +494,7 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
 
     newDisplayWorld.events.get(LeaveSpaceportEvent).subscribe(({ data }) => {
         pendingLaunchedShip = data;
+        document.body.classList.remove('nova-docked');
     });
     newDisplayWorld.events.get(AddEnemyEvent).subscribe(async ({ data }) => {
         const { shipId } = data;
@@ -699,6 +707,36 @@ async function startGame() {
 
     //(window as any).novaDebug = new DebugSettings(activeSystem);
 
+    function emitControlEvents(controlEvents: ControlEvent[]) {
+        if (controlEvents.length === 0) {
+            return;
+        }
+        displayWorld?.emit(EcsControlEvent, controlEvents);
+        for (const controlEvent of controlEvents) {
+            controlsSubject.next(controlEvent);
+        }
+        void simulationBridge?.controlEvents(controlEvents);
+    }
+
+    const controlSinks: ControlSinks = {
+        controlEvents: emitControlEvents,
+        analogControl(control: AnalogControlState) {
+            void simulationBridge?.analogControl(control);
+        },
+    };
+    autopilot = new Autopilot(controlSinks);
+    const localAutopilot = autopilot;
+    // Console lever for tests/debugging (novaAutopilot.destination etc.).
+    (window as any).novaAutopilot = autopilot;
+
+    // User movement input cancels the autopilot (the autopilot's own
+    // inputs go through controlSinks directly and don't loop back
+    // here). Firing and targeting deliberately don't cancel, so the
+    // player can defend themselves on the way to a planet.
+    const movementActions = new Set<string>(['accelerate', 'turnLeft',
+        'turnRight', 'reverse', 'pointTo', 'land', 'hyperjump',
+        'afterburner', 'board']);
+
     function handleControlEvent(event: KeyboardEvent) {
         if (!controls) {
             return;
@@ -707,21 +745,33 @@ async function startGame() {
             event.preventDefault();
         }
         const actions = getActions(controls, event);
-        if (actions.length === 0) {
-            return;
+        if (actions.some(action => movementActions.has(action))) {
+            localAutopilot.cancel();
         }
         const controlEvents: ControlEvent[] = actions.map(action => ({
             action,
             state: event.type === 'keyup' ? false : event.repeat ? 'repeat' : 'start',
         }));
-        displayWorld?.emit(EcsControlEvent, controlEvents);
-        for (const controlEvent of controlEvents) {
-            controlsSubject.next(controlEvent);
-        }
-        void simulationBridge?.controlEvents(controlEvents);
+        emitControlEvents(controlEvents);
     }
     document.addEventListener('keydown', handleControlEvent);
     document.addEventListener('keyup', handleControlEvent);
+
+    if (wantsTouchControls()) {
+        installTouchControls({
+            sinks: controlSinks,
+            onMovementInput: () => localAutopilot.cancel(),
+        });
+    }
+
+    // Tap or click on a ship to target it; on a planet to autopilot
+    // there and land.
+    installTapTargeting(app.view as unknown as HTMLElement, {
+        getWorld: () => displayWorld,
+        getMyPeerId: () => communicator.uuid ?? undefined,
+        targetShip: uuid => void simulationBridge?.setTarget(uuid),
+        navigateToPlanet: uuid => localAutopilot.navigateTo(uuid),
+    });
 
     async function pumpSimulationFrame() {
         if (simulationTickInFlight) {
@@ -737,12 +787,15 @@ async function startGame() {
         const currentSerializer = simulationSerializer;
         try {
             world.step();
+            localAutopilot.step(displayWorld, communicator.uuid ?? undefined);
             if (pendingDockedShip && !dockedShip) {
                 await currentBridge.removeEntity(pendingDockedShip.uuid);
                 currentDisplayWorld.emit(OpenSpaceportEvent, {
                     planetId: pendingDockedShip.planetId,
                     ship: pendingDockedShip.entity,
                 });
+                // Hide the touch controls under the spaceport UI.
+                document.body.classList.add('nova-docked');
                 dockedShip = pendingDockedShip;
                 pendingDockedShip = undefined;
             }

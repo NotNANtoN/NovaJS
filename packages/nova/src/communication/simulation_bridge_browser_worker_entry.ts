@@ -18,6 +18,7 @@ for (const level of ['log', 'warn', 'error'] as const) {
 import { Communicator, CommunicatorResource, Peers } from "nova_ecs/plugins/multiplayer_plugin";
 import { SimulationGameData } from "../client/gamedata/simulation_game_data.js";
 import { ControlEvent } from "../nova_plugin/controls_plugin.js";
+import { AnalogControlState } from "../nova_plugin/ship_control.js";
 import { makeSystem } from "../nova_plugin/make_system.js";
 import { SimulationBridgeHost, SimulationFrame } from "./simulation_bridge.js";
 import { BrowserSimulationBridgeWorkerApi, BrowserWorkerRoomState } from "./simulation_bridge_browser_worker.js";
@@ -121,6 +122,14 @@ class BrowserSimulationBridgeHost implements BrowserSimulationBridgeWorkerApi {
 
     async controlEvents(events: ControlEvent[]) {
         this.requireBridge().controlEvents(events);
+    }
+
+    async analogControl(control: AnalogControlState) {
+        this.requireBridge().analogControl(control);
+    }
+
+    async setTarget(target: string | null) {
+        this.requireBridge().setTarget(target);
     }
 
     async step(count?: number) {

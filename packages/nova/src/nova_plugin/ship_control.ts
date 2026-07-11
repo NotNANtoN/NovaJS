@@ -27,6 +27,21 @@ export const ShipControlStateComponent =
     new Component<ControlState>('ShipControlState');
 
 /**
+ * A controlled ship's analog steering state (virtual joystick /
+ * autopilot). `heading` is an absolute direction in the Vector.angle
+ * convention; `throttle` is forward acceleration in [0, 1] (negative
+ * values brake inertialess ships). Null fields leave the digital
+ * controls in charge. Like ShipControlStateComponent, it develops
+ * identically on every peer from the same input records.
+ */
+export interface AnalogControlState {
+    heading: number | null;
+    throttle: number | null;
+}
+export const AnalogControlComponent =
+    new Component<AnalogControlState>('AnalogControl');
+
+/**
  * Emitted targeted at a ship when a peer's control events were just
  * applied to it. Edge-triggered systems (landing, target cycling,
  * weapon selection, jumping) listen for this instead of polling.
@@ -34,30 +49,58 @@ export const ShipControlStateComponent =
 export const ShipControlEvent = new EcsEvent<undefined>('ShipControlEvent');
 
 /**
- * Applies a peer's control events to the ship it controls. With no
- * peerId (local play before a connection exists), falls back to the
- * PlayerShipSelector ship.
+ * Finds the ship a peer controls. With no peerId (local play before a
+ * connection exists), falls back to the PlayerShipSelector ship.
  */
-export function applyControlEvents(world: World, peerId: string | undefined,
-    events: ControlEvent[]) {
-    let targetUuid: string | undefined;
-    let targetEntity;
+export function findControlledEntity(world: World, peerId: string | undefined) {
     for (const [uuid, entity] of world.entities) {
         if (peerId !== undefined) {
             if (entity.components.get(ControlledByComponent)?.peerId === peerId) {
-                targetUuid = uuid;
-                targetEntity = entity;
-                break;
+                return { uuid, entity };
             }
         } else if (entity.components.has(PlayerShipSelector)) {
-            targetUuid = uuid;
-            targetEntity = entity;
-            break;
+            return { uuid, entity };
         }
     }
-    if (!targetEntity || targetUuid === undefined) {
+    return undefined;
+}
+
+/**
+ * Applies a peer's analog steering input to the ship it controls.
+ * Sanitizes at the boundary: non-finite numbers (a hostile or buggy
+ * peer) become null and throttle is clamped, so every peer stores the
+ * same well-formed state in the deterministic world.
+ */
+export function applyAnalogControl(world: World, peerId: string | undefined,
+    control: AnalogControlState) {
+    const found = findControlledEntity(world, peerId);
+    if (!found) {
         return;
     }
+    const heading = typeof control.heading === 'number'
+        && Number.isFinite(control.heading) ? control.heading : null;
+    const throttle = typeof control.throttle === 'number'
+        && Number.isFinite(control.throttle)
+        ? Math.max(-1, Math.min(1, control.throttle)) : null;
+    found.entity.components.set(AnalogControlComponent, { heading, throttle });
+    // ControlShipSystem (which consumes analog state) requires the
+    // digital control-state component; a ship steered purely by
+    // analog input would otherwise never match the system's query.
+    if (!found.entity.components.has(ShipControlStateComponent)) {
+        found.entity.components.set(ShipControlStateComponent, new Map());
+    }
+}
+
+/**
+ * Applies a peer's control events to the ship it controls.
+ */
+export function applyControlEvents(world: World, peerId: string | undefined,
+    events: ControlEvent[]) {
+    const found = findControlledEntity(world, peerId);
+    if (!found) {
+        return;
+    }
+    const { uuid: targetUuid, entity: targetEntity } = found;
 
     let state = targetEntity.components.get(ShipControlStateComponent);
     if (!state) {

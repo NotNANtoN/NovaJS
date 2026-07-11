@@ -6,7 +6,8 @@ import { loadEntityGameData } from "../nova_plugin/entity_data_loader.js";
 import { deriveEntityComponents } from "../nova_plugin/entity_factory.js";
 import { JumpRouteComponent } from "../nova_plugin/jump_plugin.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
-import { applyControlEvents, ControlledByComponent } from "../nova_plugin/ship_control.js";
+import { applyAnalogControl, applyControlEvents, ControlledByComponent } from "../nova_plugin/ship_control.js";
+import { applySetTarget } from "../nova_plugin/target_plugin.js";
 
 /**
  * Everything that changes the simulation from outside is an input,
@@ -23,6 +24,11 @@ import { applyControlEvents, ControlledByComponent } from "../nova_plugin/ship_c
  */
 export type SimulationInput =
     | { kind: 'control', events: ControlEvent[] }
+    /** Virtual joystick / autopilot steering. Null fields hand the
+     * corresponding axis back to the digital controls. */
+    | { kind: 'analogControl', heading: number | null, throttle: number | null }
+    /** Explicit target choice (tap/click on a ship); null clears. */
+    | { kind: 'setTarget', target: string | null }
     | { kind: 'addEntity', uuid: string, entity: EncodedEntity }
     | { kind: 'removeEntity', uuid: string }
     | { kind: 'setJumpRoute', route: string[] }
@@ -100,6 +106,15 @@ export function applySimulationInputs(world: World, inputs: SimulationInput[],
                         subject.next(event);
                     }
                 }
+                break;
+            }
+            case 'analogControl': {
+                applyAnalogControl(world, peerId,
+                    { heading: input.heading, throttle: input.throttle });
+                break;
+            }
+            case 'setTarget': {
+                applySetTarget(world, peerId, input.target);
                 break;
             }
             case 'addEntity': {

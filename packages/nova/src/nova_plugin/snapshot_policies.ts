@@ -12,7 +12,7 @@ import { CloakComponent, CloakScannerComponent } from "./cloak_plugin.js";
 import { CollisionHitterComponent, CollisionVulnerabilityComponent } from "./collision_interaction.js";
 import { decodeHull, encodeHull, HitboxHullComponent, HurtboxHullComponent } from "./collisions_plugin.js";
 import { CreateTime } from "./create_time.js";
-import { ShipControlStateComponent } from "./ship_control.js";
+import { AnalogControlComponent, ShipControlStateComponent } from "./ship_control.js";
 import { ControlState } from "./control_state_event.js";
 import { defaultWeaponLocalState, SourceComponent, SubCounts, WeaponsComponent } from "./fire_weapon_plugin.js";
 import { IdFactoryResource } from "./id_factory.js";
@@ -149,6 +149,10 @@ export function configureSnapshotPolicies(world: World) {
         policy: 'clone',
         clone: state => new Map(state),
     });
+    policies.set(AnalogControlComponent, {
+        policy: 'clone',
+        clone: data => ({ ...data }),
+    });
 
     // Multiplayer machinery is not simulation state.
     policies.set(Comms, { policy: 'skip' });
@@ -230,6 +234,7 @@ export function configureSnapshotPolicies(world: World) {
         encode: state => [...state],
         decode: encoded => new Map(encoded as never) as ControlState,
     });
+    policies.setWire(AnalogControlComponent, passthroughWire());
 
     // Simulation-state resources.
     const time = world.resources.get(TimeResource);

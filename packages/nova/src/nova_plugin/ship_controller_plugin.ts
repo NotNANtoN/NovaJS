@@ -1,4 +1,6 @@
 import { Emit } from 'nova_ecs/arg_types';
+import { Angle } from 'nova_ecs/datatypes/angle';
+import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
 import { KeyboardPlugin } from 'nova_ecs/plugins/keyboard_plugin';
 import { MovementPhysicsComponent, MovementStateComponent, MovementSystem, MovementType } from 'nova_ecs/plugins/movement_plugin';
@@ -7,7 +9,7 @@ import { Resource } from 'nova_ecs/resource';
 import { System } from 'nova_ecs/system';
 import { SingletonComponent } from 'nova_ecs/world';
 import { EcsControlEvent } from './controls_plugin.js';
-import { ControlledByComponent, ControlledByType, SetControlledShipSystem, ShipControlStateComponent } from './ship_control.js';
+import { AnalogControlComponent, ControlledByComponent, ControlledByType, SetControlledShipSystem, ShipControlStateComponent } from './ship_control.js';
 import { PlatformResource } from './platform_plugin.js';
 import { PlayerShipPlugin, PlayerShipSelector } from './player_ship_plugin.js';
 import { TargetComponent } from './target_component.js';
@@ -21,8 +23,9 @@ import { TargetComponent } from './target_component.js';
 export const ControlShipSystem = new System({
     name: 'ControlPlayerShip',
     args: [ShipControlStateComponent, MovementStateComponent,
-        MovementPhysicsComponent, TargetComponent] as const,
-    step(controlState, movementState, movementPhysics, { target }) {
+        MovementPhysicsComponent, TargetComponent,
+        Optional(AnalogControlComponent)] as const,
+    step(controlState, movementState, movementPhysics, { target }, analog) {
         movementState.accelerating = controlState.get('accelerate') ? 1 : 0;
         movementState.turning =
             (controlState.get('turnLeft') ? -1 : 0) +
@@ -39,6 +42,31 @@ export const ControlShipSystem = new System({
             movementState.turnBack = false;
             if (controlState.get('reverse')) {
                 movementState.accelerating += -1;
+            }
+        }
+
+        // Analog steering (virtual joystick / autopilot) overrides the
+        // digital controls per axis while active. The movement engine
+        // already supports both halves: turnTo accepts an absolute
+        // Angle, and accelerating is a scalar throttle (negative
+        // values brake inertialess ships; inertial ships ignore them).
+        if (analog) {
+            if (analog.throttle !== null) {
+                movementState.accelerating = movementPhysics.movementType
+                    === MovementType.INERTIAL
+                    ? Math.max(0, analog.throttle)
+                    : analog.throttle;
+            }
+            if (analog.heading !== null) {
+                // Reuse the held Angle when unchanged: a fresh (but
+                // equal) instance every tick would defeat ===-based
+                // change detection downstream.
+                const turnTo: unknown = movementState.turnTo;
+                if (!(turnTo instanceof Angle)
+                    || turnTo.angle !== analog.heading) {
+                    movementState.turnTo = new Angle(analog.heading);
+                }
+                movementState.turnBack = false;
             }
         }
     },

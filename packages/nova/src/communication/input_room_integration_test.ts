@@ -8,6 +8,7 @@ import { makeNpc } from '../nova_plugin/npc_plugin.js';
 import { makeSystem } from '../nova_plugin/make_system.js';
 import { completeEntity } from '../nova_plugin/entity_data_loader.js';
 import { ControlledByComponent, PEER_LOCAL_COMPONENTS } from '../nova_plugin/ship_control.js';
+import { TargetComponent } from '../nova_plugin/target_component.js';
 import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import { Position } from 'nova_ecs/datatypes/position';
 import { Angle } from 'nova_ecs/datatypes/angle';
@@ -108,6 +109,59 @@ describe('Input-driven rooms', () => {
         expect(peerA.world.entities.has('ship b')).toBeTrue();
         expect(peerB.world.entities.has('ship a')).toBeTrue();
         expect(peerB.world.entities.has('ship b')).toBeTrue();
+    }, 120_000);
+
+    it('analog steering and explicit targets stay in lockstep across peers', async () => {
+        const peerA = await makePeer('a');
+        const peerB = await makePeer('b');
+        await peerA.client.addEntity('ship a', await makePeerShip('a', peerA.world));
+        await peerB.client.addEntity('ship b', await makePeerShip('b', peerB.world));
+
+        for (let tick = 1; tick <= 120; tick++) {
+            if (tick === 10) {
+                // Pure analog steering: no digital control ever
+                // touches this ship (the virtual-joystick case).
+                peerA.host.analogControl({ heading: 0.75, throttle: 1 });
+            }
+            if (tick >= 20 && tick < 60 && tick % 2 === 0) {
+                // Wiggle the stick with per-frame updates.
+                peerA.host.analogControl({
+                    heading: 0.75 + tick / 100,
+                    throttle: (60 - tick) / 40,
+                });
+            }
+            if (tick === 30) {
+                // Tap-to-target plus firing on it.
+                peerB.host.setTarget('ship a');
+                peerB.host.controlEvents([
+                    { action: 'firePrimary', state: 'start' }]);
+            }
+            if (tick === 70) {
+                // Stick released: both axes back to digital control.
+                peerA.host.analogControl({ heading: null, throttle: null });
+            }
+            peerA.host.step();
+            peerB.host.step();
+            await new Promise(resolve => setImmediate(resolve));
+        }
+        for (let i = 0; i < 5; i++) {
+            peerA.host.step();
+            peerB.host.step();
+            await new Promise(resolve => setImmediate(resolve));
+        }
+
+        const hashA = hashWorld(peerA.world, PEER_LOCAL_COMPONENTS);
+        const hashB = hashWorld(peerB.world, PEER_LOCAL_COMPONENTS);
+        expect(hashA.hash).toEqual(hashB.hash);
+        // The analog input actually flew A's ship somewhere.
+        const movement = peerA.world.entities.get('ship a')!
+            .components.get(MovementStateComponent)!;
+        expect(movement.velocity.length).toBeGreaterThan(0);
+        // The explicit target stuck, on both peers.
+        expect(peerB.world.entities.get('ship b')!
+            .components.get(TargetComponent)!.target).toEqual('ship a');
+        expect(peerA.world.entities.get('ship b')!
+            .components.get(TargetComponent)!.target).toEqual('ship a');
     }, 120_000);
 
     it('a late joiner reconstructs the world from the input log', async () => {

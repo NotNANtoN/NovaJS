@@ -2,6 +2,7 @@
 <html>
 <head>
   <title>Nova</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <style type="text/css">
 	html {
 		overflow:hidden;
@@ -10,6 +11,10 @@
 		margin: 0;
 		padding: 0;
 		background-color: #000000;
+		/* No native touch gestures (scroll, pinch zoom, double-tap
+		   zoom): touches are game input. */
+		touch-action: none;
+		overscroll-behavior: none;
 	}
   </style>
 </head>

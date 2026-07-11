@@ -17,6 +17,7 @@ import { makeNpc } from "../nova_plugin/npc_plugin.js";
 import { SIMULATION_STEP_MS } from "../nova_plugin/make_system.js";
 import { PEER_LOCAL_COMPONENTS } from "../nova_plugin/ship_control.js";
 import { ControlEvent, ControlsSubject, EcsControlEvent } from "../nova_plugin/controls_plugin.js";
+import { AnalogControlState } from "../nova_plugin/ship_control.js";
 import { EncodedSimulationBridgeEvent, getRegisteredSimulationBridgeEvents } from "./simulation_bridge_events.js";
 
 
@@ -90,6 +91,8 @@ export interface SimulationFrame {
 
 export interface SimulationBridgeHostApi {
     controlEvents(events: ControlEvent[]): void;
+    analogControl(control: AnalogControlState): void;
+    setTarget(target: string | null): void;
     step(count?: number): void;
     snapshot(): SimulationFrame;
     addEntity(uuid: string, entity: EncodedEntity): void | Promise<void>;
@@ -118,6 +121,8 @@ export interface SimulationStatus {
 
 export interface AsyncSimulationBridgeHostApi {
     controlEvents(events: ControlEvent[]): Promise<void>;
+    analogControl(control: AnalogControlState): Promise<void>;
+    setTarget(target: string | null): Promise<void>;
     step(count?: number): Promise<void>;
     snapshot(): Promise<SimulationFrame>;
     addEntity(uuid: string, entity: EncodedEntity): Promise<void>;
@@ -581,6 +586,18 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
         this.schedule({ kind: 'control', events });
     }
 
+    analogControl(control: AnalogControlState) {
+        this.schedule({
+            kind: 'analogControl',
+            heading: control.heading,
+            throttle: control.throttle,
+        });
+    }
+
+    setTarget(target: string | null) {
+        this.schedule({ kind: 'setTarget', target });
+    }
+
     /**
      * How this peer's clock should slew to track the room's: a rate
      * factor proportional to the drift between the local tick and the
@@ -772,6 +789,14 @@ export class SimulationBridgeClient {
         this.host.controlEvents(structuredClone(events));
     }
 
+    analogControl(control: AnalogControlState) {
+        this.host.analogControl(structuredClone(control));
+    }
+
+    setTarget(target: string | null) {
+        this.host.setTarget(target);
+    }
+
     addEntity(uuid: string, entity: Entity) {
         return this.host.addEntity(uuid, structuredClone(this.serializer.encode(entity)) as EncodedEntity);
     }
@@ -834,6 +859,14 @@ export class AsyncSimulationBridgeClient {
 
     async controlEvents(events: ControlEvent[]) {
         await this.host.controlEvents(events);
+    }
+
+    async analogControl(control: AnalogControlState) {
+        await this.host.analogControl(control);
+    }
+
+    async setTarget(target: string | null) {
+        await this.host.setTarget(target);
     }
 
     async addEntity(uuid: string, entity: Entity) {

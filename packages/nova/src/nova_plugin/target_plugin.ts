@@ -8,7 +8,8 @@ import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
 import { Provide } from "nova_ecs/provide";
 import { Query } from "nova_ecs/query";
 import { System } from "nova_ecs/system";
-import { ShipControlEvent, ShipControlStateComponent } from "./ship_control.js";
+import { World } from "nova_ecs/world";
+import { findControlledEntity, ShipControlEvent, ShipControlStateComponent } from "./ship_control.js";
 import { CloakActiveComponent, CloakScannerComponent, isTargetable } from "./cloak_plugin.js";
 import { OwnerComponent } from "./fire_weapon_plugin.js";
 import { PlayerShipSelector } from "./player_ship_plugin.js";
@@ -98,6 +99,42 @@ const ChooseTargetSystem = new System({
         emit(CycleTargetEvent, target);
     }
 });
+
+/**
+ * Applies a peer's explicit target choice (tap/click on a ship) to the
+ * ship it controls. Enforces the same rules as target cycling: no
+ * targeting yourself, your own escorts, or ships your scanner can't
+ * see through their cloak. An invalid choice is dropped rather than
+ * clamped so every peer resolves the input identically.
+ */
+export function applySetTarget(world: World, peerId: string | undefined,
+    targetUuid: string | null) {
+    const found = findControlledEntity(world, peerId);
+    if (!found) {
+        return;
+    }
+    const target = found.entity.components.get(TargetComponent);
+    if (!target) {
+        return;
+    }
+    if (targetUuid === null) {
+        target.target = undefined;
+        return;
+    }
+    const targetEntity = world.entities.get(targetUuid);
+    if (!targetEntity
+        || targetUuid === found.uuid
+        || !targetEntity.components.has(ShipComponent)
+        || targetEntity.components.get(OwnerComponent)?.owner === found.uuid) {
+        return;
+    }
+    const cloak = targetEntity.components.get(CloakActiveComponent);
+    const myScanner = found.entity.components.get(CloakScannerComponent);
+    if (!isTargetable(cloak, myScanner)) {
+        return;
+    }
+    target.target = targetUuid;
+}
 
 export const TargetRemovedEvent = new EcsEvent<string>('TargetRemovedEvent');
 const TargetRemovedSystem = new System({
