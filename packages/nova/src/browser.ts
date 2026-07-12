@@ -27,6 +27,7 @@ import {
 import { SocketChannelClient } from "./communication/socket_channel_client.js";
 import { DebugSettings } from "./debug_settings.js";
 import { Display } from "./display/display_plugin.js";
+import { SimulationTimeResource } from "./display/simulation_time.js";
 import { PixiAppResource } from "./display/pixi_app_resource.js";
 import { ResizeEvent } from "./display/screen_size_plugin.js";
 import { SetJumpRouteEvent } from "./display/starmap_plugin.js";
@@ -234,9 +235,15 @@ function applySimulationFrame(frame: SimulationFrame, serializer: Serializer, di
         displayWorld.entities.delete(uuid);
     }
 
-    // Note: the simulation's time (frame.time) is NOT copied into the
-    // display world. The simulation runs on fixed, 0-based logical time,
-    // while the display world keeps wall-clock time for smooth rendering.
+    // The simulation's time (frame.time) is NOT copied into the display
+    // world's TimeResource: the simulation runs on fixed, 0-based
+    // logical time, while the display world keeps wall-clock time for
+    // smooth rendering. It is mirrored under a separate resource for
+    // display systems that compare against sim-clock timestamps on
+    // components (e.g. debris expiry).
+    if (frame.time) {
+        displayWorld.resources.set(SimulationTimeResource, frame.time);
+    }
 }
 
 function getDisplayPlayerJumpRoute(displayWorld: World) {

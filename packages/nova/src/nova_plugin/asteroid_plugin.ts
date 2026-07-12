@@ -244,16 +244,7 @@ function asteroidRadius(gameData: SimulationGameDataInterface,
     return Math.sqrt(radiusSquared) || DEFAULT_ASTEROID_RADIUS;
 }
 
-/**
- * A uniform random unit vector, built from IEEE-exact operations only.
- * Math.cos/Math.sin are NOT bit-identical across JS engines (node's V8
- * and Chrome's differ in the last ulp for some inputs), and asteroid
- * spawn state is genesis state — it is never corrected by input
- * records, so any engine-dependent bit puts a browser client
- * permanently out of lockstep with the server's archive. Rejection
- * sampling + sqrt/divide are correctly rounded per IEEE 754 and thus
- * identical everywhere.
- */
+/** Uniform random unit vector via rejection sampling; IEEE-exact ops only. */
 function randomDirection(random: Random): Vector {
     while (true) {
         const x = random.next() * 2 - 1;

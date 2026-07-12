@@ -141,8 +141,14 @@ const PlayerPositionQuery =
  * from the player's ship. The player's own ship is at distance zero, so it
  * always renders fully. Runs every frame after ObjectDrawSystem so pooled
  * graphics reacquired by new entities pick up the right alpha immediately.
+ *
+ * Alpha ownership: this system owns every graphic's CONTAINER alpha.
+ * Systems that fade specific entities further (e.g. DebrisDrawSystem)
+ * write the child sprite alphas instead; PIXI multiplies alpha down
+ * the tree, so the effects compose without two systems fighting over
+ * one property.
  */
-const MurkFadeSystem = new System({
+export const MurkFadeSystem = new System({
     name: 'MurkFadeSystem',
     args: [MurkResource, AnimationGraphicComponent, MovementStateComponent,
         PlayerPositionQuery] as const,

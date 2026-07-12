@@ -60,8 +60,8 @@ export class AnimationGraphic {
             sprite.pixiSprite.tint = 0xFFFFFF;
             sprite.pixiSprite.alpha = 1;
         }
-        // The container's alpha and scale may have been changed
-        // (debris fades out and renders at chunk scale).
+        // The container's alpha (murk fade) and scale (debris chunk
+        // scale) may have been changed.
         this.container.alpha = 1;
         this.container.scale.set(1);
         this.wrappedProgress = 0;

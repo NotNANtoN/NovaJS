@@ -1,6 +1,5 @@
 import { Entities } from "nova_ecs/arg_types";
 import { Plugin } from "nova_ecs/plugin";
-import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { System } from "nova_ecs/system";
 import { SingletonComponent } from "nova_ecs/world";
 import { v4 } from "uuid";
@@ -8,9 +7,10 @@ import { AsteroidBreakEvent, DebrisComponent } from "../nova_plugin/asteroid_plu
 import { DisplayAssetDataResource } from "../nova_plugin/game_data_resource.js";
 import { AnimationGraphicComponent } from "./animation_graphic_plugin.js";
 import { makeExplosion } from "./explosion_plugin.js";
+import { defaultSimulationTime, SimulationTimeResource } from "./simulation_time.js";
 
-/** How long a fading resource-box takes to disappear, ms. */
-const DEBRIS_FADE_MS = 3000;
+/** How long a fading resource-box takes to disappear, ms (sim clock). */
+export const DEBRIS_FADE_MS = 3000;
 /**
  * TODO(QA): temporary scale-up so the engine-specified resource-box
  * sprites (cargo box spïn 500, mini-asteroids 501-504) are clearly
@@ -21,7 +21,7 @@ const DEBRIS_FADE_MS = 3000;
  * intended look. The debris hurtbox radius in asteroid_plugin.ts
  * (DEBRIS_RADIUS) follows this rendered size.
  */
-const DEBRIS_SCALE = 4;
+export const DEBRIS_SCALE = 4;
 
 /** Shows a röid's explosion when an asteroid breaks apart. */
 const AsteroidExplosionSystem = new System({
@@ -47,22 +47,41 @@ const AsteroidExplosionSystem = new System({
 /**
  * Scales and fades resource-boxes. Their tumble is the generic
  * TumbleDrawSystem (see animation_graphic_plugin.ts).
+ *
+ * DebrisComponent.expires is a SIM-clock timestamp, so the fade must
+ * read the mirrored simulation clock: the display world's own
+ * TimeResource is wall-clock epoch milliseconds, and subtracting it
+ * makes `remaining` hugely negative — clamping the alpha to 0 from
+ * birth (the invisible-debris bug).
+ *
+ * The fade is written to the graphic's child SPRITE alphas, not the
+ * container: MurkFadeSystem owns every graphic's container alpha, and
+ * PIXI multiplies alpha down the tree, so the murk and expiry fades
+ * compose without the two systems fighting over one property.
  */
-const DebrisDrawSystem = new System({
+export const DebrisDrawSystem = new System({
     name: 'DebrisDrawSystem',
     args: [DebrisComponent, AnimationGraphicComponent,
-        TimeResource] as const,
-    step(debris, graphic, time) {
+        SimulationTimeResource] as const,
+    step(debris, graphic, simTime) {
         graphic.container.scale.set(DEBRIS_SCALE);
-        const remaining = debris.expires - time.time;
-        graphic.container.alpha =
-            Math.max(0, Math.min(1, remaining / DEBRIS_FADE_MS));
+        const remaining = debris.expires - simTime.time;
+        const fade = Math.max(0, Math.min(1, remaining / DEBRIS_FADE_MS));
+        for (const sprite of graphic.sprites.values()) {
+            sprite.pixiSprite.alpha = fade;
+        }
     },
 });
 
 export const AsteroidDisplayPlugin: Plugin = {
     name: 'AsteroidDisplayPlugin',
     build(world) {
+        // applySimulationFrame replaces this with the sim's clock every
+        // frame; until the first frame arrives it reads t=0.
+        if (!world.resources.has(SimulationTimeResource)) {
+            world.resources.set(SimulationTimeResource,
+                defaultSimulationTime());
+        }
         world.addSystem(AsteroidExplosionSystem);
         world.addSystem(DebrisDrawSystem);
     },
