@@ -82,10 +82,10 @@ export const DEBRIS_LIFETIME_MS = 15_000;
 const DEBRIS_TUMBLE_FRAME_RATE = 15;
 /**
  * Hurtbox radius of a resource-box. Follows the rendered size: the
- * engine's 8x8 box sprites at the display's QA DEBRIS_SCALE (4x) are
- * 32 px.
+ * engine's 8x8 box sprites at the display's DEBRIS_SCALE (1x) are
+ * 8 px.
  */
-const DEBRIS_RADIUS = 16;
+const DEBRIS_RADIUS = 4;
 /** Hitbox radius fallback when an asteroid's sprite hull is unknown. */
 const DEFAULT_ASTEROID_RADIUS = 20;
 

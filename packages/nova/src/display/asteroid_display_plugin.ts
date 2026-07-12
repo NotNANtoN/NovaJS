@@ -12,16 +12,14 @@ import { defaultSimulationTime, SimulationTimeResource } from "./simulation_time
 /** How long a fading resource-box takes to disappear, ms (sim clock). */
 export const DEBRIS_FADE_MS = 3000;
 /**
- * TODO(QA): temporary scale-up so the engine-specified resource-box
- * sprites (cargo box spïn 500, mini-asteroids 501-504) are clearly
- * visible for playtest verification. The source art is genuinely
- * 8x8 pixels per frame — the rlëD resources' own headers (500-508)
- * declare 8x8, matching the spïn declarations — so unscaled boxes are
- * imperceptible specks. Tune or remove once Matthew confirms the
- * intended look. The debris hurtbox radius in asteroid_plugin.ts
- * (DEBRIS_RADIUS) follows this rendered size.
+ * Resource-boxes render at the engine-specified sprites' natural size
+ * (cargo box spïn 500, mini-asteroids 501-504; the source art is
+ * genuinely 8x8 pixels per frame — the rlëD headers declare 8x8,
+ * matching the spïn declarations). Playtest-confirmed at natural size.
+ * The debris hurtbox radius in asteroid_plugin.ts (DEBRIS_RADIUS)
+ * follows this rendered size.
  */
-export const DEBRIS_SCALE = 4;
+export const DEBRIS_SCALE = 1;
 
 /** Shows a röid's explosion when an asteroid breaks apart. */
 const AsteroidExplosionSystem = new System({
