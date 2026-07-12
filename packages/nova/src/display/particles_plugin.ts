@@ -153,6 +153,68 @@ const TrailEmitterSystem = new System({
     }
 });
 
+/** How fast breakup dust drifts, px/s (the resource boxes drift 2.5-10). */
+const DUST_SPEED_START = 12;
+const DUST_SPEED_END = 3;
+/** How long a dust mote lingers before fading out completely, seconds. */
+const DUST_LIFE_MIN_S = 1.5;
+const DUST_LIFE_MAX_S = 3;
+
+/**
+ * A dust cloud for an asteroid breakup: the röid's PartCount motes in
+ * its PartColor, already spread across the asteroid's radius, drifting
+ * slowly in the same speed regime as the resource boxes and fading
+ * out. Deliberately NOT makeEmitter: that burst (point spawn, additive
+ * blend, sub-0.05s lifetimes) reads as a firework, and the original
+ * engine's effect reads as dust.
+ */
+function makeDustEmitter(container: PIXI.Container, texture: PIXI.Texture,
+    breakEvent: { particleCount: number, particleColor: number, radius: number }): particles.Emitter {
+    return new particles.Emitter(container, particles.upgradeConfig({
+        alpha: {
+            start: 0.9,
+            end: 0,
+        },
+        scale: {
+            start: 2,
+            end: 1,
+            minimumScaleMultiplier: 0.5,
+        },
+        color: {
+            start: breakEvent.particleColor.toString(16),
+            end: breakEvent.particleColor.toString(16),
+        },
+        speed: {
+            start: DUST_SPEED_START,
+            end: DUST_SPEED_END,
+            minimumSpeedMultiplier: 0.3,
+        },
+        acceleration: { x: 0, y: 0 },
+        maxSpeed: 0,
+        startRotation: { min: 0, max: 360 },
+        noRotation: true,
+        rotationSpeed: { min: 0, max: 0 },
+        lifetime: {
+            min: DUST_LIFE_MIN_S,
+            max: DUST_LIFE_MAX_S,
+        },
+        // Dust obscures; additive blending would glow like sparks.
+        blendMode: "normal",
+        frequency: 1,
+        emitterLifetime: -1,
+        maxParticles: 1000,
+        pos: { x: 0, y: 0 },
+        addAtBack: false,
+        spawnType: "circle",
+        particlesPerWave: breakEvent.particleCount,
+        spawnCircle: {
+            x: 0,
+            y: 0,
+            r: breakEvent.radius,
+        },
+    }, [texture]));
+}
+
 const AsteroidBreakEmitterSystem = new System({
     name: "AsteroidBreakEmitterSystem",
     events: [AsteroidBreakEvent],
@@ -162,17 +224,13 @@ const AsteroidBreakEmitterSystem = new System({
         if (!breakEvent.particleCount) {
             return;
         }
-        const emitter = makeEmitter(space, texture, 1 /* fps */, {
-            count: breakEvent.particleCount,
-            color: breakEvent.particleColor,
-            velocity: 120,
-            lifeMin: 0.3,
-            lifeMax: 1.2,
-        });
+        const emitter = makeDustEmitter(space, texture, breakEvent);
         emitter.updateOwnerPos(breakEvent.position.x, breakEvent.position.y);
         emitter.emit = true;
-        // One single frame
-        emitter.update(1);
+        // A tiny step spawns exactly one wave (the spawn timer starts
+        // due) without pre-aging the motes, whose lifetime is seconds —
+        // update(1) would burn a third of it before the first render.
+        emitter.update(0.001);
         emitter.emit = false;
         orphanEmitters.set(emitter, time.time + emitter.maxLifetime * 1000);
     }

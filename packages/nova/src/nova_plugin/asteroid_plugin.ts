@@ -73,9 +73,15 @@ const ASTEROID_MAX_SPEED = 50;
 /** Fragment ejection speed range, px/s (added to the parent velocity). */
 const FRAGMENT_MIN_SPEED = 15;
 const FRAGMENT_MAX_SPEED = 60;
-/** Resource-box ejection speed range, px/s. */
-const DEBRIS_MIN_SPEED = 20;
-const DEBRIS_MAX_SPEED = 80;
+/**
+ * Resource-box ejection speed range, px/s. In the original engine the
+ * boxes spawn at rest relative to the system — they do NOT inherit the
+ * destroyed asteroid's velocity — and each gets only a small random
+ * drift (playtest observation, 2026-07-09; roughly 1/10-1/5 of the
+ * 20-80 px/s this first shipped with). Tune here.
+ */
+const DEBRIS_MIN_SPEED = 2.5;
+const DEBRIS_MAX_SPEED = 10;
 /** How long a resource-box lasts before fading away, ms. */
 export const DEBRIS_LIFETIME_MS = 15_000;
 /** Tumble rate of resource-boxes, sprite frames/s. */
@@ -142,12 +148,16 @@ export const AsteroidBreakEvent = new EcsEvent<{
     explosion?: string,
     particleCount: number,
     particleColor: number,
+    /** The broken asteroid's collision radius; the dust spawns spread
+     *  across it rather than from a point. */
+    radius: number,
 }>('AsteroidBreakEvent');
 export const AsteroidBreakEventType = t.intersection([
     t.type({
         position: PositionType,
         particleCount: t.number,
         particleColor: t.number,
+        radius: t.number,
     }),
     t.partial({
         explosion: t.string,
@@ -536,6 +546,7 @@ const AsteroidDamageSystem = new System({
             explosion: data.explosion ?? undefined,
             particleCount: data.particles.count,
             particleColor: data.particles.color,
+            radius: asteroidRadius(gameData, data),
         });
     },
 });
