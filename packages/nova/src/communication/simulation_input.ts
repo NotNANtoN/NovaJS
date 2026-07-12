@@ -44,6 +44,15 @@ export interface InputRecord {
     /** Undefined only for local play before a connection exists. */
     peerId?: string;
     tick: number;
+    /**
+     * Sender-assigned sequence number. When the relay retimes a record
+     * (clamping a stale tick into the future), it echoes the retimed
+     * record to the sender, who finds its local application by `seq`
+     * and moves it to the room's tick — otherwise the room applies the
+     * record at one tick and the sender at another, a silent permanent
+     * divergence (the cause of the first real recorded desync).
+     */
+    seq?: number;
     inputs: SimulationInput[];
 }
 

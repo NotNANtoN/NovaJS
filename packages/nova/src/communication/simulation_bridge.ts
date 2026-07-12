@@ -33,13 +33,14 @@ const RESYNC_COOLDOWN_MS = 10_000;
 
 /**
  * How many recent checkpoint states the peer pins for desync dumps:
- * 8 checkpoints = 480 ticks, spanning the divergence window a
- * conviction implies (first mismatch is `desyncThreshold` checkpoints
- * before the convicted one, plus settle and reporting lag) with the
- * last *matching* checkpoint to spare. Pinned in the rollback ring's
- * cheap structural form; wire-encoded only if a dump is actually sent.
+ * 16 checkpoints = 960 ticks. The window must reach back past the
+ * *last matching* checkpoint despite conviction lag (threshold
+ * mismatches, settle, reporting, and the archive's trailing hash) —
+ * the first real incident's dump missed its divergence origin with
+ * half this. Pinned in the rollback ring's cheap structural form;
+ * wire-encoded only if a dump is actually sent.
  */
-const CHECKPOINT_SNAPSHOT_RETENTION = 8;
+const CHECKPOINT_SNAPSHOT_RETENTION = 16;
 /** How many rollback-machinery events the black-box ring retains. */
 const ROLLBACK_LOG_CAPACITY = 64;
 
@@ -192,6 +193,11 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
     private checkpointSnapshots = new Map<number, WorldSnapshot>();
     /** Recent rollback-machinery events, for desync dumps. */
     private rollbackLog: RollbackLogEntry[] = [];
+    /** Sequence numbers for published records, so a relay echo of a
+     * retimed record can name which local application to move. */
+    private nextSeq = 0;
+    /** Where each published record was applied locally, by seq. */
+    private sentRecords = new Map<number, number>();
     /** Desync notifications received (own divergence or another peer's). */
     desyncCount = 0;
     private lastJoinSucceeded?: boolean;
@@ -325,13 +331,22 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
                 const record: InputRecord = {
                     peerId: communicator?.uuid,
                     tick,
+                    seq: this.nextSeq++,
                     inputs: this.pendingInputs,
                 };
                 this.addRecord(tick, record);
+                this.sentRecords.set(record.seq!, tick);
                 this.publishInputs(record);
                 this.pendingInputs = [];
             }
             this.rollback.step();
+        }
+        // Sent records that fell behind the rollback horizon can no
+        // longer be moved by an echo.
+        for (const [seq, tick] of this.sentRecords) {
+            if (tick <= this.rollback.earliestTick) {
+                this.sentRecords.delete(seq);
+            }
         }
         this.publishStateHashes();
     }
@@ -366,6 +381,10 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
                     // the catch-up log: drop them or they apply twice.
                     this.remoteInputs = [];
                     this.remoteInputsGeneration++;
+                    // Our published records are all in the catch-up
+                    // log (retimed where the relay retimed them);
+                    // in-flight echoes must not move anything.
+                    this.sentRecords.clear();
                     // The reply carries the relay's clock: seed the
                     // estimate now rather than waiting up to a second
                     // for the first periodic tickSync. Without this,
@@ -482,8 +501,46 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
         }
         const records = this.remoteInputs;
         this.remoteInputs = [];
+        const communicator = this.world.resources.get(CommunicatorResource);
         let earliestCorrection: number | undefined;
         for (const record of records) {
+            // The relay echoes our own record back only when it
+            // retimed it: the room applies it at the echoed tick, so
+            // move our local application there or fork silently.
+            if (record.peerId !== undefined
+                && record.peerId === communicator?.uuid
+                && record.seq !== undefined) {
+                const oldTick = this.sentRecords.get(record.seq);
+                if (oldTick === undefined) {
+                    // An echo from before a resync: the catch-up log
+                    // already delivered this record at its true tick.
+                    continue;
+                }
+                if (oldTick === record.tick) {
+                    continue;
+                }
+                if (oldTick <= this.rollback.earliestTick) {
+                    // The stale application is beyond the rollback
+                    // horizon; desync detection has to clean this up.
+                    this.logRollbackEvent('retimeTooOld', {
+                        seq: record.seq, from: oldTick, to: record.tick,
+                    });
+                    continue;
+                }
+                this.logRollbackEvent('retimed', {
+                    seq: record.seq, from: oldTick, to: record.tick,
+                });
+                this.rollback.setInputs(oldTick,
+                    (this.rollback.getInputs(oldTick) ?? []).filter(
+                        r => r.seq !== record.seq));
+                this.addRecord(record.tick, record);
+                this.sentRecords.set(record.seq, record.tick);
+                if (oldTick <= this.rollback.tick) {
+                    earliestCorrection =
+                        Math.min(earliestCorrection ?? Infinity, oldTick);
+                }
+                continue;
+            }
             // Too old to roll back to: apply as soon as possible
             // instead of dropping the input entirely. (Desync detection
             // will catch any resulting divergence.)

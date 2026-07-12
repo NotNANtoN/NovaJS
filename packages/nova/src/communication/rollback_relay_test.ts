@@ -60,14 +60,50 @@ describe('RollbackRelay', () => {
         peerA.sendMessage(wrapRollbackMessage({
             kind: 'inputs',
             // Claims to be someone else, in the past.
-            record: { peerId: 'b', tick: 3, inputs: CONTROL },
+            record: { peerId: 'b', tick: 3, seq: 7, inputs: CONTROL },
         }) as never, 'server');
 
-        expect(relay.inputLog[0]).toEqual({
+        const clamped = {
             peerId: 'a',
             tick: 101,
+            seq: 7,
             inputs: CONTROL,
+        };
+        expect(relay.inputLog[0]).toEqual(clamped);
+        // A retimed record is echoed to its sender, who applied it at
+        // the stale tick and must move it to the room's tick — the
+        // room and the sender otherwise fork silently (the cause of
+        // the first real recorded desync).
+        expect(received(peerA)).toEqual([{ kind: 'inputs', record: clamped }]);
+    });
+
+    it('holds hash comparisons until the archive hash exists', () => {
+        relay.close();
+        let reference: string | undefined = undefined;
+        relay = new RollbackRelay(server, {
+            autoClock: false,
+            referenceHash: () => reference,
+            desyncThreshold: 1,
         });
+        // The peers disagree. Without holding, the comparison would
+        // run immediately (all peers reported) and break the tie by
+        // peerId — the archive's actual verdict arrives a beat later.
+        peerA.sendMessage(wrapRollbackMessage({
+            kind: 'stateHash', tick: 60, hash: '11111111',
+        }) as never, 'server');
+        peerB.sendMessage(wrapRollbackMessage({
+            kind: 'stateHash', tick: 60, hash: '22222222',
+        }) as never, 'server');
+        expect(received(peerA).filter(m => m.kind === 'desync').length)
+            .toBe(0);
+        // The archive catches up; the next clock advance compares,
+        // with the archive's vote breaking the tie.
+        reference = '11111111';
+        relay.advanceTicks(1);
+        const desyncs = received(peerA).filter(m => m.kind === 'desync');
+        expect(desyncs.length).toBe(1);
+        expect(desyncs[0]!.kind === 'desync' && desyncs[0].canonical)
+            .toBe('11111111');
     });
 
     it('serves the input log from a tick to late joiners', () => {

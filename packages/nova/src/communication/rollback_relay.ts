@@ -130,22 +130,23 @@ export class RollbackRelay {
                 this.clockDebt -= ticks * stepMs;
                 this.advanceTicks(ticks);
             }, stepMs);
+            // (Stale and held hash reports are swept by advanceTicks,
+            // which the clock drives.)
             this.syncInterval = setInterval(() => {
                 this.room.sendMessage(
                     wrapRollbackMessage({ kind: 'tickSync', tick: this.tick }));
-                // Hash reports that will never complete (a peer left or
-                // joined mid-window) still get compared, then dropped.
-                for (const tick of [...this.stateHashes.keys()]) {
-                    if (tick < this.tick - STATE_HASH_SWEEP_TICKS) {
-                        this.compareStateHashes(tick, true);
-                    }
-                }
             }, 1000);
         }
     }
 
     advanceTicks(ticks: number) {
         this.tick += ticks;
+        // Retry comparisons held for a trailing archive hash, and
+        // force ones whose stragglers never reported.
+        for (const tick of [...this.stateHashes.keys()]) {
+            this.compareStateHashes(tick,
+                tick < this.tick - STATE_HASH_SWEEP_TICKS);
+        }
     }
 
     get inputLog(): readonly InputRecord[] {
@@ -187,15 +188,23 @@ export class RollbackRelay {
         if (!reports) {
             return;
         }
+        const reference = this.getReferenceHash?.(tick);
         if (!force) {
             for (const peer of this.roomPeers()) {
                 if (!reports.has(peer)) {
                     return;
                 }
             }
+            // The archive trails the clock by up to its update
+            // interval; comparing before its hash exists would count
+            // a lone peer as self-agreement and reset its mismatch
+            // streak. Hold the reports — advanceTicks retries, and
+            // the sweep eventually forces a verdict regardless.
+            if (this.getReferenceHash && reference === undefined) {
+                return;
+            }
         }
         this.stateHashes.delete(tick);
-        const reference = this.getReferenceHash?.(tick);
 
         // Only timely reports vote on the canonical state: a report
         // this far behind the room's clock comes from a throttled or
@@ -292,6 +301,8 @@ export class RollbackRelay {
                 const record: InputRecord = {
                     peerId: source,
                     tick: Math.max(message.record.tick, this.tick + 1),
+                    ...(message.record.seq !== undefined
+                        ? { seq: message.record.seq } : {}),
                     inputs: message.record.inputs,
                 };
                 this.log.push(record);
@@ -299,6 +310,15 @@ export class RollbackRelay {
                 if (others.size > 0) {
                     this.room.sendMessage(
                         wrapRollbackMessage({ kind: 'inputs', record }), others);
+                }
+                // A clamped record was retimed for the whole room —
+                // echo it to the sender too, who applied it at the
+                // stale tick and must move it, or the sender's own
+                // timeline silently forks from the log.
+                if (record.tick !== message.record.tick) {
+                    this.room.sendMessage(
+                        wrapRollbackMessage({ kind: 'inputs', record }),
+                        source);
                 }
                 break;
             }

@@ -91,14 +91,33 @@ async function truthAt(fromTick, atTick, gameData) {
     return world;
 }
 
-function stepTo(world, target) {
+function stepTo(world, target, records = byTick) {
     while (tick(world) < target) {
-        const records = byTick.get(tick(world) + 1);
-        if (records) {
-            applyInputRecords(world, records);
+        const atTick = records.get(tick(world) + 1);
+        if (atTick) {
+            applyInputRecords(world, atTick);
         }
         world.step();
     }
+}
+
+function groupByTick(records) {
+    const grouped = new Map();
+    for (const record of records) {
+        grouped.set(record.tick,
+            [...(grouped.get(record.tick) ?? []), record]);
+    }
+    return grouped;
+}
+
+/** Replays a variant record list from genesis and counts differences
+ * against a dumped checkpoint. (Only valid without a baseline gap:
+ * callers check that genesis + log covers the window.) */
+async function variantDiffCount(records, checkpoint, gameData) {
+    const world = await makeSystem(desync.roomId, gameData, 'node');
+    await loadInputRecordsGameData(world, records);
+    stepTo(world, checkpoint.tick, groupByTick(records));
+    return diffSnapshots(wireSnapshotWorld(world), checkpoint.snapshot);
 }
 
 /** Wire components as a name -> JSON map, peer-local excluded. */
@@ -244,6 +263,48 @@ for (const clientFile of clientFiles) {
         console.log(`\nThe earliest dumped checkpoint (tick ${seed.tick}) `
             + 'already differs: the divergence began before the dump\'s '
             + 'window. The diffs above are the trail, not the origin.');
+        if (baselines.length > 0) {
+            console.log('(Origin search needs a genesis-covering log; '
+                + 'a baseline gap prevents it here.)');
+            continue;
+        }
+        // Origin search: the most common cause of a whole-window
+        // divergence is a single input record the sender applied at a
+        // different tick than the room's log (a retimed record whose
+        // echo failed, or a pre-echo build). Try moving each control
+        // record and see if one variant reproduces the client exactly.
+        console.log('Searching for a single retimed control record...');
+        const candidates = log.filter(r => r.tick <= firstMismatch.tick
+            && r.inputs.every(i => i.kind === 'control'));
+        let found = false;
+        for (const record of candidates) {
+            for (const shift of [-1, -2, -3]) {
+                const variant = log.map(r => r === record
+                    ? { ...r, tick: r.tick + shift } : r);
+                const lines = await variantDiffCount(
+                    variant, firstMismatch, gameData);
+                if (lines.length === 0) {
+                    console.log(`  FOUND: the record logged at tick `
+                        + `${record.tick} was applied by the client at `
+                        + `tick ${record.tick + shift} — with that one `
+                        + `shift the replay reproduces the client's `
+                        + `checkpoint ${firstMismatch.tick} exactly. `
+                        + `The relay retimed this record for the room `
+                        + `but its sender kept the stale application.`);
+                    found = true;
+                    break;
+                }
+            }
+            if (found) {
+                break;
+            }
+        }
+        if (!found) {
+            console.log('  No single-record shift explains it: not a '
+                + 'simple retiming. Suspect engine/computation '
+                + 'divergence or a multi-record timing fault; the '
+                + 'checkpoint diffs above are the trail.');
+        }
         continue;
     }
     console.log(`\nInfection pass: client state at tick ${seed.tick} `

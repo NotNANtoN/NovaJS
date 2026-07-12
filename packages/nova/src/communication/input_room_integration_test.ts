@@ -629,6 +629,56 @@ describe('Input-driven rooms', () => {
         }
     }, 240_000);
 
+    it('a record retimed by the relay converges via the clamp echo', async () => {
+        // The first real recorded desync: a control record arrived
+        // behind the relay's clock, was retimed for the room but not
+        // its sender, and the sender's timeline silently forked. The
+        // relay now echoes retimed records to the sender, who rolls
+        // back and reapplies at the room's tick.
+        const peerA = await makePeer('a');
+        const peerB = await makePeer('b');
+        await peerA.client.addEntity('ship a', await makePeerShip('a', peerA.world));
+        await peerB.client.addEntity('ship b', await makePeerShip('b', peerB.world));
+        for (let tick = 1; tick <= 20; tick++) {
+            peerA.host.step();
+            peerB.host.step();
+            relay.advanceTicks(1);
+            await new Promise(resolve => setImmediate(resolve));
+        }
+        // The relay's clock runs ahead of peer A (a stalled sender):
+        // A's next input, stamped at its local tick (it has no
+        // tickSync to extrapolate), arrives behind the clock and gets
+        // retimed.
+        relay.advanceTicks(30);
+        peerA.host.controlEvents([{ action: 'accelerate', state: 'start' }]);
+        peerA.host.step();
+        await new Promise(resolve => setImmediate(resolve));
+        // The echo comes back and A moves its application; B and A
+        // then step to the same tick and agree bit for bit.
+        for (let tick = 0; tick < 60; tick++) {
+            peerA.host.step();
+            peerB.host.step();
+            await new Promise(resolve => setImmediate(resolve));
+        }
+        {
+            const { TimeResource } =
+                await import('nova_ecs/plugins/time_plugin');
+            const frame = (world: World) =>
+                world.resources.get(TimeResource)!.frame;
+            while (frame(peerA.world) !== frame(peerB.world)) {
+                (frame(peerA.world) < frame(peerB.world) ? peerA : peerB)
+                    .host.step();
+            }
+        }
+        const hashA = hashWorld(peerA.world, PEER_LOCAL_COMPONENTS);
+        const hashB = hashWorld(peerB.world, PEER_LOCAL_COMPONENTS);
+        expect(hashA.hash).toEqual(hashB.hash);
+        // The ship actually moved (the input was not lost in the move).
+        const shipA = peerA.world.entities.get('ship a')!;
+        const movement = shipA.components.get(MovementStateComponent)!;
+        expect(movement.velocity.length).toBeGreaterThan(0);
+    }, 240_000);
+
     it('detects a desync and the diverged peer resyncs from the log', async () => {
         // Replace the plain relay with one capturing incident hooks:
         // the conviction report and the diverged peer's uploaded
