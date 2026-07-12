@@ -7,6 +7,7 @@ import { AsteroidComponent, loadAsteroidGameData } from "./asteroid_plugin.js";
 import { WeaponEntries } from "./fire_weapon_plugin.js";
 import { SimulationGameDataResource } from "./game_data_resource.js";
 import { GovtComponent } from "./govt_component.js";
+import { OutfitsStateComponent } from "./outfit_plugin.js";
 import { PlanetComponent } from "./planet_plugin.js";
 import { ShipComponent } from "./ship_plugin.js";
 
@@ -103,6 +104,22 @@ export async function loadEntityGameData(world: World, entity: Entity) {
     const weaponIds = new Set<string>();
     if (ship) {
         await loadShipGameData(gameData, ship.id, weaponIds);
+    }
+    // The ship class's stock loadout is not the entity's loadout: a
+    // player ship carries purchased outfits, and their weapons (and
+    // the outfit data itself — ammo checks read it from the cache)
+    // must stage like everything else. Skipping them left every
+    // replaying world's cache cold: weapon state then materialized at
+    // a load-timing-dependent tick, differently on every peer — the
+    // second real recorded desync.
+    const outfits = entity.components.get(OutfitsStateComponent);
+    if (outfits) {
+        for (const outfitId of outfits.keys()) {
+            const outfit = await gameData.data.Outfit.get(outfitId);
+            for (const weaponId of Object.keys(outfit?.weapons ?? {})) {
+                await loadWeaponGameData(gameData, weaponId, weaponIds);
+            }
+        }
     }
     if (planet) {
         await gameData.data.Planet.get(planet.id);

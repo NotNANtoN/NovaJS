@@ -111,12 +111,17 @@ export const WeaponsSystem = new System({
     step(weaponsState, weaponsLocalState, time, uuid, weaponEntries,
         outfits, fuel, gameData) {
         for (const [id, state] of weaponsState) {
+            // Touch the local state before any cache-dependent guard:
+            // the DefaultMap creates entries on access, entries are
+            // hashed simulation state, and getCached succeeding is a
+            // property of *this world's* load timing — state creation
+            // gated on it diverges peers whose caches warm at
+            // different ticks.
+            const localState = weaponsLocalState.get(id);
             const weapon = weaponEntries.getCached(id);
             if (!weapon) {
                 continue;
             }
-
-            const localState = weaponsLocalState.get(id);
             if (!checkReloaded(weapon.data, localState, state, time)) {
                 continue;
             }

@@ -1,6 +1,11 @@
 import 'jasmine';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
-import { loadShipGameData, loadWeaponGameData } from './entity_data_loader.js';
+import { getIntegrationGameData } from '../communication/simulation_test_fixture.js';
+import { loadEntityGameData, loadShipGameData, loadWeaponGameData } from './entity_data_loader.js';
+import { WeaponEntries } from './fire_weapon_plugin.js';
+import { makeShip } from './make_ship.js';
+import { makeSystem } from './make_system.js';
+import { OutfitsStateComponent } from './outfit_plugin.js';
 
 function fakeGettable<T>(items: Record<string, T>) {
     return {
@@ -70,4 +75,65 @@ describe('entity data loader', () => {
         const weaponIds = await loadWeaponGameData(makeCyclicGameData(), 'subX');
         expect([...weaponIds].sort()).toEqual(['subX', 'subY']);
     }, 5_000);
+
+    it('stages weapons granted by the entity\'s own outfits, not just '
+        + 'the ship class\'s stock loadout', async () => {
+        const gameData = await getIntegrationGameData();
+        const ids = await gameData.ids;
+        const systemId = [...ids.System].sort()[0]!;
+        const shipData = await gameData.data.Ship.get([...ids.Ship].sort()[0]!);
+
+        // The ship class's stock weapons, which staging always covered.
+        const stockWeapons = new Set<string>();
+        for (const outfitId of Object.keys(shipData.outfits)) {
+            const outfit = await gameData.data.Outfit.get(outfitId);
+            for (const weaponId of Object.keys(outfit?.weapons ?? {})) {
+                stockWeapons.add(weaponId);
+            }
+        }
+
+        // A purchasable outfit granting a projectile weapon the stock
+        // loadout lacks — the shape of every player ship with
+        // outfitter purchases (the second real recorded desync: the
+        // purchased weapon staged only on the buying peer's world).
+        let outfitId: string | undefined;
+        let weaponId: string | undefined;
+        for (const id of [...ids.Outfit].sort()) {
+            const outfit = await gameData.data.Outfit.get(id);
+            for (const wid of Object.keys(outfit?.weapons ?? {})) {
+                if (stockWeapons.has(wid)) {
+                    continue;
+                }
+                const weapon = await gameData.data.Weapon.get(wid);
+                if (weapon?.type === 'ProjectileWeaponData') {
+                    outfitId = id;
+                    weaponId = wid;
+                    break;
+                }
+            }
+            if (outfitId) {
+                break;
+            }
+        }
+        expect(outfitId).withContext(
+            'game data has no non-stock weapon outfit to test with')
+            .toBeDefined();
+
+        // A world that never staged this entity has a cold entry —
+        // the control that makes the warm assertion meaningful.
+        const coldWorld = await makeSystem(systemId, gameData, 'node');
+        expect(coldWorld.resources.get(WeaponEntries)!.getCached(weaponId!))
+            .toBeUndefined();
+
+        const world = await makeSystem(systemId, gameData, 'node');
+        const ship = makeShip(shipData);
+        ship.components.set(OutfitsStateComponent,
+            new Map([[outfitId!, { count: 1 }]]));
+        await loadEntityGameData(world, ship);
+        expect(world.resources.get(WeaponEntries)!.getCached(weaponId!))
+            .withContext(`weapon ${weaponId} of outfit ${outfitId} must be `
+                + 'staged synchronously-fireable on every world applying '
+                + 'the insertion')
+            .toBeDefined();
+    }, 120_000);
 });
