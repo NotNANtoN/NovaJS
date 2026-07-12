@@ -14,6 +14,7 @@ import { hashWorld } from "nova_ecs/plugins/world_hash";
 import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { RollbackRelay } from "../communication/rollback_relay.js";
 import { RoomArchive } from "../communication/room_archive.js";
+import { DesyncRecorder } from "../server/desync_recorder.js";
 import { PEER_LOCAL_COMPONENTS } from "./ship_control.js";
 import { SimulationGameDataResource } from "./game_data_resource.js";
 import { makeSystem } from './make_system.js';
@@ -90,6 +91,9 @@ export const ServerPlugin: Plugin = {
         // replaying from genesis.
         const relays = new Map<string, RollbackRelay>();
         const archives = new Map<string, RoomArchive>();
+        // The black-box recorder: every desync conviction becomes a
+        // timestamped directory under desyncs/ for offline analysis.
+        const desyncRecorder = new DesyncRecorder();
         for (const systemId of (await gameData.ids).System) {
             const systemRoom = multiRoom.join(systemId);
             systemRoom.peers.current.subscribe(peers => {
@@ -121,6 +125,17 @@ export const ServerPlugin: Plugin = {
                             console.error(`Archive world (tick ${world.resources
                                 .get(TimeResource)?.frame}):`,
                                 Object.fromEntries(hashes.entities));
+                        },
+                        onDesync: info => {
+                            desyncRecorder.recordDesync(systemId, info, {
+                                baselines:
+                                    archives.get(systemId)?.baselines() ?? [],
+                                log: relays.get(systemId)?.inputLog ?? [],
+                            });
+                        },
+                        onDesyncDump: (peerId, dump) => {
+                            desyncRecorder.recordClientDump(
+                                systemId, peerId, dump);
                         },
                     });
                     relays.set(systemId, relay);

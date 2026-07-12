@@ -29,6 +29,14 @@ const UPDATE_INTERVAL_MS = 1000;
 export class RoomArchive {
     /** The newest baseline; wire it to the relay's `baseline` option. */
     latest?: ArchiveBaseline;
+    /**
+     * The baseline before `latest`, retained for desync incident
+     * records: the divergence window a conviction implies can begin
+     * before `latest` (a baseline can be captured mid-window), and
+     * offline analysis must replay from a baseline at or before the
+     * window's first checkpoint.
+     */
+    previous?: ArchiveBaseline;
     private world?: World;
     private lastBaselineTick = 0;
     private updating = false;
@@ -73,6 +81,12 @@ export class RoomArchive {
     /** The trailing sim itself, for tests and diagnostics. */
     get archiveWorld(): World | undefined {
         return this.world;
+    }
+
+    /** Retained baselines, oldest first, for desync incident records. */
+    baselines(): ArchiveBaseline[] {
+        return [this.previous, this.latest]
+            .filter((b): b is ArchiveBaseline => b !== undefined);
     }
 
     /**
@@ -121,14 +135,16 @@ export class RoomArchive {
                 }
             }
             if (this.tick - this.lastBaselineTick >= this.intervalTicks) {
+                this.previous = this.latest;
                 this.latest = {
                     tick: this.tick,
                     snapshot: wireSnapshotWorld(world),
                 };
                 this.lastBaselineTick = this.tick;
-                // Reconstruction starts at the baseline now; the log
-                // before it can never be needed again.
-                this.relay.trimLog(this.tick);
+                // Joiners reconstruct from `latest`, but desync
+                // incident records replay from `previous`: trim only
+                // behind it, keeping one interval of extra log.
+                this.relay.trimLog(this.previous?.tick ?? 0);
                 console.log(`Archived ${this.name ?? 'room'} at tick ${this.tick}`);
             }
         } finally {

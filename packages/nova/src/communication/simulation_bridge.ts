@@ -1,7 +1,7 @@
 import { isLeft } from "fp-ts/lib/Either.js";
 import { Entity } from "nova_ecs/entity";
 import { RollbackSimulation } from "nova_ecs/plugins/rollback_plugin";
-import { restoreWireWorldSnapshot, restoreWorld, snapshotWorld, SnapshotPolicies, SnapshotPoliciesResource, WorldSnapshot } from "nova_ecs/plugins/snapshot_plugin";
+import { restoreWireWorldSnapshot, restoreWorld, snapshotWorld, SnapshotPolicies, SnapshotPoliciesResource, wireSnapshotOfSnapshot, WorldSnapshot } from "nova_ecs/plugins/snapshot_plugin";
 import { hashWorld } from "nova_ecs/plugins/world_hash";
 import { CommunicatorResource, MultiplayerData } from "nova_ecs/plugins/multiplayer_plugin";
 import { EncodedEntity, Serializer, SerializerResource } from "nova_ecs/plugins/serializer_plugin";
@@ -12,7 +12,7 @@ import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_
 import { loadEntityGameData, loadWireSnapshotGameData } from "../nova_plugin/entity_data_loader.js";
 import { deriveEntityComponents } from "../nova_plugin/entity_factory.js";
 import { applyInputRecords, InputRecord, loadInputRecordsGameData, SimulationInput } from "./simulation_input.js";
-import { ArchiveBaseline, canonicalDesyncHash, STATE_HASH_INTERVAL, unwrapRollbackMessage, wrapRollbackMessage } from "./rollback_protocol.js";
+import { ArchiveBaseline, canonicalDesyncHash, DesyncDump, RollbackLogEntry, STATE_HASH_INTERVAL, unwrapRollbackMessage, wrapRollbackMessage } from "./rollback_protocol.js";
 import { makeNpc } from "../nova_plugin/npc_plugin.js";
 import { SIMULATION_STEP_MS } from "../nova_plugin/make_system.js";
 import { PEER_LOCAL_COMPONENTS } from "../nova_plugin/ship_control.js";
@@ -30,6 +30,18 @@ import { EncodedSimulationBridgeEvent, getRegisteredSimulationBridgeEvents } fro
 const STATE_HASH_SETTLE_TICKS = 30;
 /** Minimum time between automatic desync recoveries. */
 const RESYNC_COOLDOWN_MS = 10_000;
+
+/**
+ * How many recent checkpoint states the peer pins for desync dumps:
+ * 8 checkpoints = 480 ticks, spanning the divergence window a
+ * conviction implies (first mismatch is `desyncThreshold` checkpoints
+ * before the convicted one, plus settle and reporting lag) with the
+ * last *matching* checkpoint to spare. Pinned in the rollback ring's
+ * cheap structural form; wire-encoded only if a dump is actually sent.
+ */
+const CHECKPOINT_SNAPSHOT_RETENTION = 8;
+/** How many rollback-machinery events the black-box ring retains. */
+const ROLLBACK_LOG_CAPACITY = 64;
 
 /**
  * Tick pacing: the peer aims to run this many ticks ahead of the
@@ -171,6 +183,15 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
     private genesis: WorldSnapshot;
     /** World hashes at checkpoint ticks, awaiting settling. */
     private checkpointHashes = new Map<number, string>();
+    /**
+     * Structural snapshots pinned at recent checkpoint ticks, beyond
+     * the rollback ring's horizon: evidence for a desync dump. A
+     * rollback across a pinned checkpoint re-pins the corrected state,
+     * mirroring the hash recompute.
+     */
+    private checkpointSnapshots = new Map<number, WorldSnapshot>();
+    /** Recent rollback-machinery events, for desync dumps. */
+    private rollbackLog: RollbackLogEntry[] = [];
     /** Desync notifications received (own divergence or another peer's). */
     desyncCount = 0;
     private lastJoinSucceeded?: boolean;
@@ -213,6 +234,11 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
                     this.handleDesync(rollbackMessage.tick,
                         rollbackMessage.hashes, rollbackMessage.canonical);
                     break;
+                case 'desyncDumpRequest':
+                    // The server wants this peer's state history as a
+                    // reference (e.g. its own archive was outvoted).
+                    this.sendDesyncDump();
+                    break;
             }
         });
         for (const registration of getRegisteredSimulationBridgeEvents()) {
@@ -243,6 +269,16 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
                 if (tick > 0 && tick % STATE_HASH_INTERVAL === 0) {
                     this.checkpointHashes.set(tick,
                         hashWorld(this.world, PEER_LOCAL_COMPONENTS).hash);
+                    const snapshot = this.rollback.snapshotAt(tick);
+                    if (snapshot) {
+                        this.checkpointSnapshots.set(tick, snapshot);
+                        for (const old of this.checkpointSnapshots.keys()) {
+                            if (old <= tick - STATE_HASH_INTERVAL
+                                * CHECKPOINT_SNAPSHOT_RETENTION) {
+                                this.checkpointSnapshots.delete(old);
+                            }
+                        }
+                    }
                 }
             },
         });
@@ -395,6 +431,11 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
         // against the new position.
         this.smoothedDrift = undefined;
         this.lastJoinSucceeded = true;
+        this.logRollbackEvent('join', {
+            catchUpTick: catchUp.tick,
+            baselineTick: catchUp.baseline?.tick ?? 'none',
+            records: catchUp.records.length,
+        });
         return true;
     }
 
@@ -447,12 +488,23 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
             // instead of dropping the input entirely. (Desync detection
             // will catch any resulting divergence.)
             const tick = Math.max(record.tick, this.rollback.earliestTick + 1);
+            if (tick !== record.tick) {
+                this.logRollbackEvent('lateRecord', {
+                    recordTick: record.tick, appliedAt: tick,
+                    peer: record.peerId ?? 'unknown',
+                });
+            }
             this.addRecord(tick, { ...record, tick });
             if (tick <= this.rollback.tick) {
                 earliestCorrection = Math.min(earliestCorrection ?? Infinity, tick);
             }
         }
         if (earliestCorrection !== undefined) {
+            this.logRollbackEvent('rollback', {
+                toTick: earliestCorrection - 1,
+                depth: this.rollback.tick - (earliestCorrection - 1),
+                records: records.length,
+            });
             this.rollback.rollbackTo(earliestCorrection - 1);
         }
     }
@@ -521,8 +573,58 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
             diverged ? '- this peer diverged; resyncing'
                 : '- this peer matches the canonical state');
         if (diverged) {
+            // Upload the evidence before resync discards it: the
+            // pinned checkpoint states are this timeline's black box.
+            this.sendDesyncDump(tick);
             void this.resync();
         }
+    }
+
+    /** Appends to the rollback black-box ring. */
+    private logRollbackEvent(event: string,
+        detail?: Record<string, number | string>) {
+        this.rollbackLog.push({
+            event,
+            atTick: this.rollback.tick,
+            ...(detail ? { detail } : {}),
+        });
+        if (this.rollbackLog.length > ROLLBACK_LOG_CAPACITY) {
+            this.rollbackLog.splice(0,
+                this.rollbackLog.length - ROLLBACK_LOG_CAPACITY);
+        }
+    }
+
+    /**
+     * Uploads this peer's recent checkpoint states and rollback log to
+     * the server, which records them for offline desync analysis
+     * (analyze_desync.mjs). The pinned structural snapshots are
+     * wire-encoded here — the only time that cost is paid.
+     */
+    private sendDesyncDump(desyncTick?: number) {
+        const communicator = this.world.resources.get(CommunicatorResource);
+        const server = communicator?.uuid
+            ? [...communicator.servers.value][0] : undefined;
+        if (!communicator || !server) {
+            return;
+        }
+        const checkpoints = [...this.checkpointSnapshots]
+            .sort(([a], [b]) => a - b)
+            .map(([tick, snapshot]) => ({
+                tick,
+                snapshot: wireSnapshotOfSnapshot(this.world, snapshot),
+            }));
+        const dump: DesyncDump = {
+            tick: this.rollback.tick,
+            ...(desyncTick !== undefined ? { desyncTick } : {}),
+            engine: typeof navigator === 'object' && navigator?.userAgent
+                ? navigator.userAgent
+                : typeof process === 'object'
+                    ? `node ${process.version}` : 'unknown',
+            checkpoints,
+            rollbackLog: [...this.rollbackLog],
+        };
+        communicator.sendMessage(
+            wrapRollbackMessage({ kind: 'desyncDump', dump }), server);
     }
 
     /**
@@ -537,12 +639,15 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
         }
         this.lastResyncTime = Date.now();
         this.resyncing = true;
+        this.logRollbackEvent('resync');
         try {
             restoreWorld(this.world, this.genesis, deriveEntityComponents);
             this.rollback = this.makeRollback();
             this.remoteInputs = [];
             this.remoteInputsGeneration++;
             this.checkpointHashes.clear();
+            // The pinned states describe the abandoned timeline.
+            this.checkpointSnapshots.clear();
             return await this.joinRoom();
         } finally {
             this.resyncing = false;
@@ -571,11 +676,17 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
         // primitive - which is a visual no-op.)
         const rewound = this.rollback.rewindTo(this.rollback.tick - ticks);
         if (rewound) {
-            // Checkpoint hashes from the discarded future would report
-            // a timeline that no longer exists.
+            this.logRollbackEvent('rewind', { ticks });
+            // Checkpoint hashes and pinned states from the discarded
+            // future would report a timeline that no longer exists.
             for (const tick of this.checkpointHashes.keys()) {
                 if (tick > this.rollback.tick) {
                     this.checkpointHashes.delete(tick);
+                }
+            }
+            for (const tick of this.checkpointSnapshots.keys()) {
+                if (tick > this.rollback.tick) {
+                    this.checkpointSnapshots.delete(tick);
                 }
             }
         }

@@ -1,7 +1,19 @@
 import { Communicator } from "nova_ecs/plugins/multiplayer_plugin";
 import { Subscription } from "rxjs";
 import { SIMULATION_STEP_MS } from "../nova_plugin/make_system.js";
-import { ArchiveBaseline, canonicalDesyncHash, InputRecord, RollbackProtocolMessage, unwrapRollbackMessage, wrapRollbackMessage } from "./rollback_protocol.js";
+import { ArchiveBaseline, canonicalDesyncHash, DesyncDump, InputRecord, unwrapRollbackMessage, wrapRollbackMessage } from "./rollback_protocol.js";
+
+/** Everything the relay knows about a convicted desync, for the
+ * incident recorder. */
+export interface DesyncInfo {
+    tick: number;
+    hashes: [string, string][];
+    canonical: string;
+    /** Peers whose mismatch streak crossed the threshold this tick. */
+    convicted: string[];
+    /** True when the timely majority outvoted the archive's hash. */
+    archiveOutvoted: boolean;
+}
 
 /**
  * The server's role in rollback multiplayer: not a simulation
@@ -49,6 +61,8 @@ export class RollbackRelay {
     private getReferenceHash?: (tick: number) => string | undefined;
     private readonly desyncThreshold: number;
     private onArchiveOutvoted?: (tick: number) => void;
+    private onDesync?: (info: DesyncInfo) => void;
+    private onDesyncDump?: (peerId: string, dump: DesyncDump) => void;
     /** Consecutive mismatched checkpoints per reporter. */
     private mismatchStreaks = new Map<string, number>();
     private readonly subscription: Subscription;
@@ -61,7 +75,7 @@ export class RollbackRelay {
 
     constructor(private room: Communicator,
         { autoClock = true, stepMs = SIMULATION_STEP_MS, baseline,
-            referenceHash, onArchiveOutvoted,
+            referenceHash, onArchiveOutvoted, onDesync, onDesyncDump,
             desyncThreshold = DEFAULT_DESYNC_THRESHOLD }: {
                 autoClock?: boolean, stepMs?: number,
                 /** The newest archived baseline, when an archive runs. */
@@ -75,11 +89,19 @@ export class RollbackRelay {
                 /** Called when unanimous peers outvote the archive:
                  * the hook for dumping archive-side diagnostics. */
                 onArchiveOutvoted?: (tick: number) => void,
+                /** Called on each conviction, with everything the
+                 * incident recorder needs from the relay's side. */
+                onDesync?: (info: DesyncInfo) => void,
+                /** Called when a peer uploads its state history (its
+                 * own conviction, or a desyncDumpRequest). */
+                onDesyncDump?: (peerId: string, dump: DesyncDump) => void,
             } = {}) {
         this.getBaseline = baseline;
         this.getReferenceHash = referenceHash;
         this.desyncThreshold = desyncThreshold;
         this.onArchiveOutvoted = onArchiveOutvoted;
+        this.onDesync = onDesync;
+        this.onDesyncDump = onDesyncDump;
         this.subscription = room.messages.subscribe(({ source, message }) => {
             this.handleMessage(source, message);
         });
@@ -211,7 +233,7 @@ export class RollbackRelay {
         // settle margin makes already-sent reports describe the
         // abandoned timeline — a false positive gone by the next
         // checkpoint. Real divergence keeps the streak alive.
-        let convict = false;
+        const convicted: string[] = [];
         for (const [peerId, hash] of allHashes) {
             if (hash === canonical) {
                 this.mismatchStreaks.delete(peerId);
@@ -220,24 +242,39 @@ export class RollbackRelay {
             const streak = (this.mismatchStreaks.get(peerId) ?? 0) + 1;
             this.mismatchStreaks.set(peerId, streak);
             if (streak >= this.desyncThreshold) {
-                convict = true;
+                convicted.push(peerId);
                 this.mismatchStreaks.delete(peerId);
             }
         }
-        if (!convict) {
+        if (convicted.length === 0) {
             return;
         }
         console.log(`Desync at tick ${tick} (canonical ${canonical}):`,
             Object.fromEntries(allHashes));
+        const archiveOutvoted =
+            reference !== undefined && canonical !== reference;
         // The timely majority outvoting the archive means the
         // *archive* has diverged — and every baseline it captures from
         // here on reconstructs the wrong world. Loud, because recovery
         // (rebuilding the archive) is not automatic yet.
-        if (reference !== undefined && canonical !== reference) {
+        if (archiveOutvoted) {
             console.error(
                 `Archive diverged from all peers at tick ${tick}`);
             this.onArchiveOutvoted?.(tick);
+            // The convicted party is the server's own sim, which the
+            // incident record can already reconstruct — what it lacks
+            // is a canonical *reference*. Ask one healthy timely peer
+            // for its state history.
+            const healthy = voters.find(([peerId, hash]) =>
+                hash === canonical && peerId !== this.room.uuid);
+            if (healthy) {
+                this.room.sendMessage(wrapRollbackMessage(
+                    { kind: 'desyncDumpRequest' }), healthy[0]);
+            }
         }
+        this.onDesync?.({
+            tick, hashes: allHashes, canonical, convicted, archiveOutvoted,
+        });
         this.room.sendMessage(wrapRollbackMessage({
             kind: 'desync', tick, hashes: allHashes, canonical,
         }));
@@ -288,6 +325,10 @@ export class RollbackRelay {
                 reports.set(source,
                     { hash: message.hash, arrivedAt: this.tick });
                 this.compareStateHashes(message.tick);
+                break;
+            }
+            case 'desyncDump': {
+                this.onDesyncDump?.(source, message.dump);
                 break;
             }
             case 'inputLogRequest': {

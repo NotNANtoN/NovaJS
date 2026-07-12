@@ -367,6 +367,65 @@ export function wireSnapshotWorld(world: World): WireWorldSnapshot {
     };
 }
 
+function wireComponentsOfStored(world: World, stored: StoredComponent[],
+    policies: SnapshotPolicies): WireComponent[] {
+    const serializer = world.resources.get(SerializerResource);
+    const wire: WireComponent[] = [];
+    for (const [component, data, kind] of stored) {
+        if (policies.wireDerived.has(component)) {
+            continue;
+        }
+        const codec = policies.wireCodecs.get(component);
+        if (codec && kind === 'value') {
+            wire.push([component.name,
+                toJsonSafe(codec.encode(data)), 'wire']);
+            continue;
+        }
+        if (kind === 'encoded') {
+            // Stored form is already the serializer encoding — the
+            // same bytes wireSnapshotWorld would produce.
+            wire.push([component.name, toJsonSafe(data), 'serializer']);
+            continue;
+        }
+        if (serializer?.hasComponent(component)) {
+            wire.push([component.name, toJsonSafe(
+                serializer.encodeComponent(component, data)), 'serializer']);
+            continue;
+        }
+        policies.unhandledWire.add(component.name);
+    }
+    return wire;
+}
+
+/**
+ * Converts a stored structural snapshot to wire form using the world's
+ * policies and serializer, without touching the world's entities. Lets
+ * a past state (e.g. a pinned rollback checkpoint) cross the wire
+ * without restoring it first — capture stays free until someone
+ * actually asks for the wire form.
+ *
+ * Equivalent to wireSnapshotWorld on a world restored from `snapshot`:
+ * structural snapshots store serializer-registered components in their
+ * encoded form already, and wire-codec'd components in live form.
+ */
+export function wireSnapshotOfSnapshot(world: World,
+    snapshot: WorldSnapshot): WireWorldSnapshot {
+    const policies = world.resources.get(SnapshotPoliciesResource);
+    if (!policies) {
+        throw new Error('Expected SnapshotPoliciesResource to exist');
+    }
+    return {
+        entities: snapshot.entities.map(entity => ({
+            uuid: entity.uuid,
+            ...(entity.name !== undefined ? { name: entity.name } : {}),
+            components: wireComponentsOfStored(
+                world, entity.components, policies),
+        })),
+        singleton: wireComponentsOfStored(world, snapshot.singleton, policies),
+        resources: snapshot.resources.map(toJsonSafe),
+    };
+}
+
 function wireCodecsByName(policies: SnapshotPolicies) {
     const byName = new Map<string, [UnknownComponent, WireComponentCodec]>();
     for (const [component, codec] of policies.wireCodecs) {

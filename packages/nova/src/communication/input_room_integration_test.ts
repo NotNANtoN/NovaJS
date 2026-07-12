@@ -13,9 +13,9 @@ import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import { Position } from 'nova_ecs/datatypes/position';
 import { Angle } from 'nova_ecs/datatypes/angle';
 import { Vector } from 'nova_ecs/datatypes/vector';
-import { RollbackRelay } from './rollback_relay.js';
+import { DesyncInfo, RollbackRelay } from './rollback_relay.js';
 import { RoomArchive } from './room_archive.js';
-import { unwrapRollbackMessage } from './rollback_protocol.js';
+import { DesyncDump, unwrapRollbackMessage } from './rollback_protocol.js';
 import { SimulationBridgeClient, SimulationBridgeHost } from './simulation_bridge.js';
 import { getIntegrationGameData } from './simulation_test_fixture.js';
 
@@ -233,10 +233,13 @@ describe('Input-driven rooms', () => {
         await archive.update();
         expect(archive.latest).toBeDefined();
         expect(archive.latest!.tick).toBeGreaterThanOrEqual(60);
-        // The log before the baseline is gone: reconstruction can no
-        // longer start from genesis, only from the baseline.
+        // The log before the *previous* baseline is gone (one interval
+        // of extra log stays behind `latest` for desync incident
+        // records): reconstruction can no longer start from genesis.
+        expect(archive.previous).toBeDefined();
+        expect(archive.previous!.tick).toBeLessThan(archive.latest!.tick);
         expect(relay.inputLog.every(
-            record => record.tick > archive!.latest!.tick)).toBeTrue();
+            record => record.tick > archive!.previous!.tick)).toBeTrue();
 
         const peerB = await makePeer('b');
         let baselineTick: number | undefined;
@@ -627,6 +630,18 @@ describe('Input-driven rooms', () => {
     }, 240_000);
 
     it('detects a desync and the diverged peer resyncs from the log', async () => {
+        // Replace the plain relay with one capturing incident hooks:
+        // the conviction report and the diverged peer's uploaded
+        // state history (the black-box desync recorder's inputs).
+        relay.close();
+        const desyncInfos: DesyncInfo[] = [];
+        const dumps: [string, DesyncDump][] = [];
+        relay = new RollbackRelay(comms.get('server')!, {
+            autoClock: false,
+            onDesync: info => desyncInfos.push(info),
+            onDesyncDump: (peerId, dump) => dumps.push([peerId, dump]),
+        });
+
         const peerA = await makePeer('a');
         const peerB = await makePeer('b');
         await peerA.client.addEntity('ship a', await makePeerShip('a', peerA.world));
@@ -666,6 +681,37 @@ describe('Input-driven rooms', () => {
         expect(desyncTicks).toEqual([180]);
         expect(peerB.host.desyncCount).toBe(1);
 
+        // The conviction report names the diverged peer ('a' wins the
+        // canonical tie-break with no archive witness in this test).
+        expect(desyncInfos.length).toBe(1);
+        expect(desyncInfos[0]!.tick).toBe(180);
+        expect(desyncInfos[0]!.convicted).toEqual(['b']);
+        expect(desyncInfos[0]!.archiveOutvoted).toBeFalse();
+
+        // The convicted peer uploaded its state history before
+        // resyncing: full wire snapshots at its recent checkpoints,
+        // spanning the whole divergence window (the corruption landed
+        // at tick 50, so checkpoint 60 onward describe the diverged
+        // timeline while genesis..49 matched).
+        expect(dumps.length).toBe(1);
+        const [dumpPeer, dump] = dumps[0]!;
+        expect(dumpPeer).toBe('b');
+        expect(dump.desyncTick).toBe(180);
+        const checkpointTicks = dump.checkpoints.map(c => c.tick);
+        expect(checkpointTicks).toContain(120);
+        expect(checkpointTicks).toContain(180);
+        for (const checkpoint of dump.checkpoints) {
+            const uuids = checkpoint.snapshot.entities.map(e => e.uuid);
+            expect(uuids).toContain('ship a');
+            expect(uuids).toContain('ship b');
+        }
+        // The evidence shows the corruption itself: ship b's dumped
+        // movement at checkpoint 60 reflects the forged position.
+        const evidence = dump.checkpoints.find(c => c.tick === 60)!
+            .snapshot.entities.find(e => e.uuid === 'ship b')!
+            .components.find(([name]) => name === 'MovementState');
+        expect(JSON.stringify(evidence)).toContain('500');
+
         // 'a' wins the canonical tie-break, so B is the one resyncing:
         // genesis plus the relay's log. Let the async join finish, then
         // step B back up to A's tick.
@@ -686,5 +732,15 @@ describe('Input-driven rooms', () => {
         expect(hashB.hash).toEqual(hashA.hash);
         expect(peerB.world.entities.has('ship a')).toBeTrue();
         expect(peerB.world.entities.has('ship b')).toBeTrue();
+
+        // Dump fidelity on real game state: wire-encoding a stored
+        // structural snapshot must produce exactly what wire-encoding
+        // the live world produces — the property the whole incident
+        // record rests on.
+        const { snapshotWorld, wireSnapshotWorld, wireSnapshotOfSnapshot } =
+            await import('nova_ecs/plugins/snapshot_plugin');
+        expect(JSON.stringify(
+            wireSnapshotOfSnapshot(peerA.world, snapshotWorld(peerA.world))))
+            .toEqual(JSON.stringify(wireSnapshotWorld(peerA.world)));
     }, 240_000);
 });

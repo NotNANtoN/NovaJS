@@ -61,6 +61,16 @@ export class RollbackSimulation<Inputs> {
     }
 
     /**
+     * The ring's snapshot at a tick, if still retained. Snapshots are
+     * detached from the live world, so a caller may hold one past its
+     * eviction from the ring (e.g. pinning checkpoint states for
+     * desync diagnostics).
+     */
+    snapshotAt(tick: number): WorldSnapshot | undefined {
+        return this.snapshots.find(s => s.tick === tick)?.snapshot;
+    }
+
+    /**
      * Records the inputs for a tick. For future ticks they apply when
      * that tick is stepped; amending a past tick's inputs takes effect
      * on the next rollback across it.

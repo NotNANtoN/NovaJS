@@ -1,0 +1,284 @@
+// Offline analyzer for a desync incident directory recorded by the
+// server's DesyncRecorder (see src/server/desync_recorder.ts).
+//
+// Reconstructs the room's true simulation from the recorded baseline +
+// input log, then works through the convicted client's uploaded state
+// history in two passes:
+//
+//  1. Checkpoint diff: at each checkpoint the client dumped, wire-
+//     encode the truth and deep-diff against the client's snapshot —
+//     names the exact entities, components, and fields that diverged.
+//     A checkpoint whose *hash* matched but whose wire form differs
+//     exposes divergence hiding in unhashed state.
+//
+//  2. Infection pass: restore the client's earliest dumped checkpoint
+//     into a second world and step it in lockstep with the truth,
+//     applying the same input log, hashing every tick — pins the
+//     exact tick where the client's state stops tracking the log.
+//
+// Usage: node analyze_desync.mjs <incident-dir>
+//   (run from packages/nova; the dir needs desync.json, baselines.json,
+//    log.json, and at least one client_<peer>.json)
+import * as fs from 'fs/promises';
+import * as path from 'path';
+process.chdir(path.dirname(new URL(import.meta.url).pathname));
+
+const { makeSystem } = await import('./dist/src/nova_plugin/make_system.js');
+const { getIntegrationGameData } = await import('./dist/src/communication/simulation_test_fixture.js');
+const { loadWireSnapshotGameData } = await import('./dist/src/nova_plugin/entity_data_loader.js');
+const { deriveEntityComponents } = await import('./dist/src/nova_plugin/entity_factory.js');
+const { applyInputRecords, loadInputRecordsGameData } = await import('./dist/src/communication/simulation_input.js');
+const { PEER_LOCAL_COMPONENTS } = await import('./dist/src/nova_plugin/ship_control.js');
+const { restoreWireWorldSnapshot, wireSnapshotWorld } = await import('nova_ecs/plugins/snapshot_plugin');
+const { hashWorld } = await import('nova_ecs/plugins/world_hash');
+const { TimeResource } = await import('nova_ecs/plugins/time_plugin');
+
+const dir = process.argv[2];
+if (!dir) {
+    console.error('Usage: node analyze_desync.mjs <incident-dir>');
+    process.exit(1);
+}
+
+const readJson = async name =>
+    JSON.parse(await fs.readFile(path.join(dir, name), 'utf8'));
+const desync = await readJson('desync.json');
+const baselines = await readJson('baselines.json');
+const log = await readJson('log.json');
+const clientFiles = (await fs.readdir(dir))
+    .filter(name => name.startsWith('client_') && name.endsWith('.json'));
+if (clientFiles.length === 0) {
+    console.error('No client_<peer>.json in the incident directory: the '
+        + 'convicted peer\'s upload never arrived. Only the server side '
+        + '(baseline + log) is recorded, so there is nothing to diff.');
+    process.exit(1);
+}
+
+console.log(`Incident: room ${desync.roomId}, convicted checkpoint tick `
+    + `${desync.tick} at ${desync.wallTime}`);
+console.log(`  reported hashes:`, Object.fromEntries(desync.hashes));
+console.log(`  canonical: ${desync.canonical}, convicted:`,
+    desync.convicted, desync.archiveOutvoted ? '(ARCHIVE OUTVOTED)' : '');
+
+const tick = world => world.resources.get(TimeResource).frame;
+
+const byTick = new Map();
+for (const record of log) {
+    byTick.set(record.tick, [...(byTick.get(record.tick) ?? []), record]);
+}
+
+/** Builds the truth world at `atTick` from the newest baseline not
+ * after `fromTick`, replaying the log. */
+async function truthAt(fromTick, atTick, gameData) {
+    const world = await makeSystem(desync.roomId, gameData, 'node');
+    const usable = baselines.filter(b => b.tick <= fromTick).at(-1);
+    const baseline = usable ?? baselines[0];
+    if (baseline) {
+        if (!usable) {
+            console.warn(`  (no baseline at or before tick ${fromTick}; `
+                + `using tick ${baseline.tick} — earlier checkpoints are `
+                + `skipped)`);
+        }
+        await loadWireSnapshotGameData(world, baseline.snapshot);
+        await loadInputRecordsGameData(world, log);
+        restoreWireWorldSnapshot(world, baseline.snapshot,
+            deriveEntityComponents);
+    } else {
+        // A young room: no baseline captured yet, so the log is
+        // untrimmed and genesis + log reconstructs everything.
+        await loadInputRecordsGameData(world, log);
+    }
+    stepTo(world, atTick);
+    return world;
+}
+
+function stepTo(world, target) {
+    while (tick(world) < target) {
+        const records = byTick.get(tick(world) + 1);
+        if (records) {
+            applyInputRecords(world, records);
+        }
+        world.step();
+    }
+}
+
+/** Wire components as a name -> JSON map, peer-local excluded. */
+function componentMap(wireEntity) {
+    return new Map(wireEntity.components
+        .filter(([name]) => !PEER_LOCAL_COMPONENTS.has(name))
+        .map(([name, data]) => [name, JSON.stringify(data)]));
+}
+
+const clip = value => value.length > 200 ? value.slice(0, 200) + '…' : value;
+
+/** Deep-diffs two wire snapshots; returns human-readable lines. */
+function diffSnapshots(truth, client) {
+    const lines = [];
+    const truthEntities = new Map(truth.entities.map(e => [e.uuid, e]));
+    const clientEntities = new Map(client.entities.map(e => [e.uuid, e]));
+    for (const uuid of truthEntities.keys()) {
+        if (!clientEntities.has(uuid)) {
+            lines.push(`entity ${uuid} missing from client`);
+        }
+    }
+    for (const uuid of clientEntities.keys()) {
+        if (!truthEntities.has(uuid)) {
+            lines.push(`entity ${uuid} extra on client`);
+        }
+    }
+    const truthOrder = truth.entities.map(e => e.uuid).join();
+    const clientOrder = client.entities.map(e => e.uuid).join();
+    if (truthOrder !== clientOrder
+        && lines.length === 0) {
+        lines.push('entity insertion order differs (iteration-order '
+            + 'divergence: same entities, different sequence)');
+    }
+    for (const [uuid, truthEntity] of truthEntities) {
+        const clientEntity = clientEntities.get(uuid);
+        if (!clientEntity) {
+            continue;
+        }
+        const truthComponents = componentMap(truthEntity);
+        const clientComponents = componentMap(clientEntity);
+        const names = new Set([...truthComponents.keys(),
+            ...clientComponents.keys()]);
+        for (const name of names) {
+            const expected = truthComponents.get(name);
+            const actual = clientComponents.get(name);
+            if (expected === actual) {
+                continue;
+            }
+            const label = `${truthEntity.name ?? clientEntity.name ?? ''}`
+                + `(${uuid}).${name}`;
+            if (expected === undefined) {
+                lines.push(`${label}: extra on client: ${clip(actual)}`);
+            } else if (actual === undefined) {
+                lines.push(`${label}: missing from client`);
+            } else {
+                lines.push(`${label}:\n    truth:  ${clip(expected)}\n`
+                    + `    client: ${clip(actual)}`);
+            }
+        }
+    }
+    const truthSingleton = componentMap({ components: truth.singleton });
+    const clientSingleton = componentMap({ components: client.singleton });
+    for (const name of new Set([...truthSingleton.keys(),
+        ...clientSingleton.keys()])) {
+        if (truthSingleton.get(name) !== clientSingleton.get(name)) {
+            lines.push(`singleton.${name}:\n    truth:  `
+                + `${clip(truthSingleton.get(name) ?? 'absent')}\n    client: `
+                + `${clip(clientSingleton.get(name) ?? 'absent')}`);
+        }
+    }
+    truth.resources.forEach((resource, i) => {
+        const expected = JSON.stringify(resource);
+        const actual = JSON.stringify(client.resources[i]);
+        if (expected !== actual) {
+            lines.push(`resource[${i}]:\n    truth:  ${clip(expected)}\n`
+                + `    client: ${clip(actual)}`);
+        }
+    });
+    return lines;
+}
+
+const gameData = await getIntegrationGameData();
+
+for (const clientFile of clientFiles) {
+    const dump = await readJson(clientFile);
+    console.log(`\n=== ${clientFile} (engine: ${dump.engine}, dumped at `
+        + `tick ${dump.tick}${dump.desyncTick !== undefined
+            ? `, desync tick ${dump.desyncTick}` : ''}) ===`);
+    if (dump.rollbackLog.length > 0) {
+        console.log('Rollback log (how the peer got here):');
+        for (const entry of dump.rollbackLog) {
+            console.log(`  tick ${entry.atTick}: ${entry.event}`,
+                entry.detail ?? '');
+        }
+    }
+    const checkpoints = [...dump.checkpoints].sort((a, b) => a.tick - b.tick);
+    if (checkpoints.length === 0) {
+        console.log('No checkpoints in the dump.');
+        continue;
+    }
+
+    // Pass 1: diff every dumped checkpoint against the resimulated
+    // truth. One truth world steps through all of them in order.
+    console.log('\nCheckpoint diffs (truth = baseline + input log):');
+    const truth = await truthAt(checkpoints[0].tick, checkpoints[0].tick,
+        gameData);
+    let firstMismatch;
+    let lastMatch;
+    for (const checkpoint of checkpoints) {
+        if (tick(truth) > checkpoint.tick) {
+            console.log(`  tick ${checkpoint.tick}: skipped (before the `
+                + `recorded baseline)`);
+            continue;
+        }
+        stepTo(truth, checkpoint.tick);
+        const lines = diffSnapshots(wireSnapshotWorld(truth),
+            checkpoint.snapshot);
+        if (lines.length === 0) {
+            console.log(`  tick ${checkpoint.tick}: MATCH`);
+            lastMatch = checkpoint;
+        } else {
+            console.log(`  tick ${checkpoint.tick}: DIFF `
+                + `(${lines.length} finding${lines.length > 1 ? 's' : ''})`);
+            for (const line of lines) {
+                console.log(`  - ${line}`);
+            }
+            firstMismatch ??= checkpoint;
+        }
+    }
+
+    // Pass 2: pin the infection tick. Step the client's last matching
+    // state (or its earliest dumped state) in lockstep with the truth,
+    // hashing every tick.
+    const seed = lastMatch && (!firstMismatch
+        || lastMatch.tick < firstMismatch.tick) ? lastMatch : checkpoints[0];
+    if (!firstMismatch) {
+        console.log('\nAll dumped checkpoints match the truth: the '
+            + 'divergence healed before the dump, or lives in state the '
+            + 'wire snapshot does not carry.');
+        continue;
+    }
+    if (seed.tick >= firstMismatch.tick) {
+        console.log(`\nThe earliest dumped checkpoint (tick ${seed.tick}) `
+            + 'already differs: the divergence began before the dump\'s '
+            + 'window. The diffs above are the trail, not the origin.');
+        continue;
+    }
+    console.log(`\nInfection pass: client state at tick ${seed.tick} `
+        + `matches the truth; stepping both in lockstep to find where `
+        + `they part...`);
+    const clientWorld = await makeSystem(desync.roomId, gameData, 'node');
+    await loadWireSnapshotGameData(clientWorld, seed.snapshot);
+    await loadInputRecordsGameData(clientWorld, log);
+    restoreWireWorldSnapshot(clientWorld, seed.snapshot,
+        deriveEntityComponents);
+    const truth2 = await truthAt(seed.tick, seed.tick, gameData);
+    let parted = false;
+    while (tick(truth2) < firstMismatch.tick) {
+        stepTo(truth2, tick(truth2) + 1);
+        stepTo(clientWorld, tick(clientWorld) + 1);
+        const truthHash = hashWorld(truth2, PEER_LOCAL_COMPONENTS);
+        const clientHash = hashWorld(clientWorld, PEER_LOCAL_COMPONENTS);
+        if (truthHash.hash !== clientHash.hash) {
+            console.log(`  first divergent tick: ${tick(truth2)}`);
+            const clientEntities = new Map(clientHash.entities);
+            for (const [uuid, hash] of truthHash.entities) {
+                if (clientEntities.get(uuid) !== hash) {
+                    console.log(`  - entity ${uuid}: truth ${hash} vs `
+                        + `client ${clientEntities.get(uuid) ?? 'absent'}`);
+                }
+            }
+            parted = true;
+            break;
+        }
+    }
+    if (!parted) {
+        console.log('  the lockstep replay never diverges: the client\'s '
+            + 'live run diverged through timing (a rollback or late '
+            + 'record), not state — see the rollback log above and the '
+            + `tick ${firstMismatch.tick} diff.`);
+    }
+}
+process.exit(0);

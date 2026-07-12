@@ -17,6 +17,37 @@ export interface ArchiveBaseline {
 export const STATE_HASH_INTERVAL = 60;
 
 /**
+ * One notable event in a peer's rollback machinery, for the black-box
+ * ring included in desync dumps: state alone shows *what* diverged,
+ * the rollback log shows *how the peer got there* (late records,
+ * rollback depths, joins, resyncs).
+ */
+export interface RollbackLogEntry {
+    /** e.g. 'rollback', 'lateRecord', 'join', 'resync', 'rewind'. */
+    event: string;
+    /** The peer's local tick when it happened. */
+    atTick: number;
+    /** Event-specific context (target ticks, record counts...). */
+    detail?: Record<string, number | string>;
+}
+
+/**
+ * A peer's state history around a desync, uploaded to the server for
+ * offline analysis (see analyze_desync.mjs): full wire snapshots at
+ * its recent checkpoint ticks, plus the rollback event log.
+ */
+export interface DesyncDump {
+    /** The peer's tick when the dump was captured. */
+    tick: number;
+    /** The convicted checkpoint, when a desync triggered the dump. */
+    desyncTick?: number;
+    /** What simulated this: user agent or node version. */
+    engine: string;
+    checkpoints: { tick: number, snapshot: WireWorldSnapshot }[];
+    rollbackLog: RollbackLogEntry[];
+}
+
+/**
  * Rollback protocol messages travel on the same room channel as the
  * legacy multiplayer messages, wrapped in a `rollback` envelope. The
  * legacy Message codec is a t.partial, so it decodes these as empty
@@ -49,7 +80,15 @@ export type RollbackProtocolMessage =
     | {
         kind: 'desync', tick: number, hashes: [string, string][],
         canonical?: string,
-    };
+    }
+    /** Ask a peer for its state history (server -> peer). Sent to a
+     * healthy peer when the archive itself is outvoted, so the
+     * incident record includes a canonical reference state. */
+    | { kind: 'desyncDumpRequest' }
+    /** A peer's state history for the incident record (peer ->
+     * server). Diverged peers push this unprompted on conviction,
+     * before resyncing discards the evidence. */
+    | { kind: 'desyncDump', dump: DesyncDump };
 
 export function wrapRollbackMessage(message: RollbackProtocolMessage): unknown {
     return { rollback: message };
