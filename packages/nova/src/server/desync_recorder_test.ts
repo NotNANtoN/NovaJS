@@ -70,6 +70,15 @@ describe('DesyncRecorder', () => {
             .toEqual(['client_peer-a.json']);
     });
 
+    it('suppresses repeat incidents for a room within the cooldown', async () => {
+        const recorder = new DesyncRecorder(root, 50, 60_000);
+        recorder.recordDesync('nova:130', info, { baselines: [], log: [] });
+        recorder.recordDesync('nova:130', { ...info, tick: 360 },
+            { baselines: [], log: [] });
+        await recorder.flush();
+        expect((await fs.readdir(root)).length).toBe(1);
+    });
+
     it('prunes the oldest incidents beyond the cap', async () => {
         const recorder = new DesyncRecorder(root, 2);
         for (let i = 0; i < 4; i++) {

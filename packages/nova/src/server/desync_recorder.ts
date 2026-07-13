@@ -6,6 +6,14 @@ import { DesyncInfo } from "../communication/rollback_relay.js";
 /** How many incident directories to retain before pruning the oldest. */
 const DEFAULT_MAX_INCIDENTS = 50;
 
+/**
+ * Minimum spacing between recorded incidents for one room. A peer
+ * stuck diverged (e.g. mid-resync on a slow link) is re-convicted
+ * every few checkpoints; the first record has all the evidence and
+ * the repeats are noise (one Android session wrote 17 directories).
+ */
+const DEFAULT_ROOM_COOLDOWN_MS = 30_000;
+
 /** Room ids (nova:130) and peer uuids become filesystem-safe names. */
 function sanitize(name: string): string {
     return name.replace(/[^A-Za-z0-9_-]/g, '_');
@@ -31,12 +39,15 @@ function sanitize(name: string): string {
 export class DesyncRecorder {
     /** Most recent incident directory per room, for filing uploads. */
     private latestIncident = new Map<string, string>();
+    /** Wall time of the last recorded incident per room. */
+    private lastRecorded = new Map<string, number>();
     /** Serializes writes so pruning never races directory creation. */
     private queue: Promise<void> = Promise.resolve();
 
     constructor(
         private root = path.join(process.cwd(), 'desyncs'),
         private maxIncidents = DEFAULT_MAX_INCIDENTS,
+        private roomCooldownMs = DEFAULT_ROOM_COOLDOWN_MS,
     ) { }
 
     /** Chains async work, reporting rather than propagating errors. */
@@ -50,6 +61,15 @@ export class DesyncRecorder {
         baselines: ArchiveBaseline[],
         log: readonly InputRecord[],
     }) {
+        // A room's repeat convictions within the cooldown are the same
+        // stuck divergence; the first record holds the evidence.
+        const last = this.lastRecorded.get(roomId);
+        if (last !== undefined && Date.now() - last < this.roomCooldownMs) {
+            console.log(`Desync in ${roomId} at tick ${info.tick} not `
+                + `recorded (within the room's incident cooldown)`);
+            return;
+        }
+        this.lastRecorded.set(roomId, Date.now());
         // Stringify synchronously: the log and baselines mutate as the
         // room runs, and the writes happen later on the queue.
         const files = new Map<string, string>([

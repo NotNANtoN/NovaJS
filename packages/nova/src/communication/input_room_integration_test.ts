@@ -15,7 +15,7 @@ import { Angle } from 'nova_ecs/datatypes/angle';
 import { Vector } from 'nova_ecs/datatypes/vector';
 import { DesyncInfo, RollbackRelay } from './rollback_relay.js';
 import { RoomArchive } from './room_archive.js';
-import { DesyncDump, unwrapRollbackMessage } from './rollback_protocol.js';
+import { DesyncDump, InputRecord, unwrapRollbackMessage } from './rollback_protocol.js';
 import { SimulationBridgeClient, SimulationBridgeHost } from './simulation_bridge.js';
 import { getIntegrationGameData } from './simulation_test_fixture.js';
 
@@ -45,13 +45,15 @@ describe('Input-driven rooms', () => {
         relay.close();
     });
 
-    async function makePeer(peerId: string, systemId?: string) {
+    async function makePeer(peerId: string, systemId?: string,
+        options?: ConstructorParameters<typeof SimulationBridgeHost>[2],
+        HostClass: typeof SimulationBridgeHost = SimulationBridgeHost) {
         const gameData = await getIntegrationGameData();
         const ids = await gameData.ids;
         systemId ??= [...ids.System].sort()[0]!;
         const world = await makeSystem(systemId, gameData, 'worker');
         world.resources.set(CommunicatorResource, comms.get(peerId)!);
-        const host = new SimulationBridgeHost(world, gameData);
+        const host = new HostClass(world, gameData, options);
         const serializer = world.resources.get(
             (await import('nova_ecs/plugins/serializer_plugin')).SerializerResource)!;
         const client = new SimulationBridgeClient(host, serializer);
@@ -627,6 +629,80 @@ describe('Input-driven rooms', () => {
             expect([...policies.unhandled]).toEqual([]);
             expect([...policies.unhandledWire]).toEqual([]);
         }
+    }, 240_000);
+
+    it('an insertion record survives staging failures via retries', async () => {
+        // The Android incident's first half: one flaky fetch while
+        // staging a relayed addEntity silently dropped the record, so
+        // the peer was missing a whole ship — permanently diverged.
+        // Staging now retries.
+        class FlakyStagingHost extends SimulationBridgeHost {
+            failuresLeft = 2;
+            protected override stageRecords(records: InputRecord[]) {
+                if (this.failuresLeft > 0) {
+                    this.failuresLeft--;
+                    return Promise.reject(
+                        new Error('synthetic staging failure'));
+                }
+                return super.stageRecords(records);
+            }
+        }
+        const peerA = await makePeer('a');
+        const peerB = await makePeer('b', undefined,
+            { stagingRetryMs: 5 }, FlakyStagingHost);
+        await peerA.client.addEntity('ship a', await makePeerShip('a', peerA.world));
+        for (let tick = 1; tick <= 25; tick++) {
+            peerA.host.step();
+            peerB.host.step();
+            // Real time, not just a microtask: the staging retries
+            // back off through timers.
+            await new Promise(resolve => setTimeout(resolve, 10));
+        }
+        expect((peerB.host as FlakyStagingHost).failuresLeft).toBe(0);
+        expect(peerB.world.entities.has('ship a')).toBeTrue();
+        {
+            const { TimeResource } =
+                await import('nova_ecs/plugins/time_plugin');
+            const frame = (world: World) =>
+                world.resources.get(TimeResource)!.frame;
+            while (frame(peerA.world) !== frame(peerB.world)) {
+                (frame(peerA.world) < frame(peerB.world) ? peerA : peerB)
+                    .host.step();
+            }
+        }
+        const hashA = hashWorld(peerA.world, PEER_LOCAL_COMPONENTS);
+        const hashB = hashWorld(peerB.world, PEER_LOCAL_COMPONENTS);
+        expect(hashB.hash).toEqual(hashA.hash);
+    }, 240_000);
+
+    it('resync retries until the relay responds again', async () => {
+        // The Android incident's second half: a resync whose join
+        // timed out left the peer on a genesis fork, convicted every
+        // third checkpoint forever. Resync now keeps retrying (the
+        // sim pauses meanwhile), and gives up only after a cap.
+        const peerA = await makePeer('a', undefined, {
+            resyncCooldownMs: 0,
+            resyncJoinTimeoutMs: 150,
+            resyncRetryMs: 10,
+            resyncMaxAttempts: 2,
+        });
+        await peerA.client.addEntity('ship a', await makePeerShip('a', peerA.world));
+        for (let tick = 1; tick <= 5; tick++) {
+            peerA.host.step();
+            relay.advanceTicks(1);
+            await new Promise(resolve => setImmediate(resolve));
+        }
+        // The relay vanishes: every join attempt times out, and the
+        // capped retries report failure.
+        relay.close();
+        expect(await peerA.host.resync()).toBeFalse();
+        expect(peerA.host.status().joined).toBeFalse();
+
+        // The relay returns; the next resync reconstructs and joins.
+        relay = new RollbackRelay(comms.get('server')!, { autoClock: false });
+        relay.advanceTicks(10);
+        expect(await peerA.host.resync()).toBeTrue();
+        expect(peerA.host.status().joined).toBeTrue();
     }, 240_000);
 
     it('a record retimed by the relay converges via the clamp echo', async () => {

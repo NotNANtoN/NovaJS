@@ -30,6 +30,24 @@ import { EncodedSimulationBridgeEvent, getRegisteredSimulationBridgeEvents } fro
 const STATE_HASH_SETTLE_TICKS = 30;
 /** Minimum time between automatic desync recoveries. */
 const RESYNC_COOLDOWN_MS = 10_000;
+/**
+ * Reconstruction traffic is heavy (a baseline snapshot is megabytes)
+ * and mobile links are slow: give a resync's join a generous window,
+ * and keep retrying the whole resync — a peer that gives up plays on
+ * a forked timeline, reporting mismatched hashes forever (the Android
+ * incident: three timed-out resyncs, seventeen convictions).
+ */
+const RESYNC_JOIN_TIMEOUT_MS = 20_000;
+const RESYNC_RETRY_MS = 3_000;
+const RESYNC_MAX_ATTEMPTS = 8;
+/**
+ * Staging an insertion record loads game data over the network on
+ * browser peers; a single failed fetch must not silently drop the
+ * record — a peer missing one entity diverges permanently (the other
+ * half of the Android incident: one dropped ship insertion).
+ */
+const STAGING_MAX_ATTEMPTS = 5;
+const STAGING_RETRY_MS = 1_000;
 
 /**
  * How many recent checkpoint states the peer pins for desync dumps:
@@ -204,10 +222,36 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
     private resyncing = false;
     private lastResyncTime = -Infinity;
 
+    private readonly resyncCooldownMs: number;
+    private readonly resyncJoinTimeoutMs: number;
+    private readonly resyncRetryMs: number;
+    private readonly resyncMaxAttempts: number;
+    private readonly stagingMaxAttempts: number;
+    private readonly stagingRetryMs: number;
+
     constructor(
         private world: World,
         private simulationGameData: SimulationGameDataInterface,
+        { resyncCooldownMs = RESYNC_COOLDOWN_MS,
+            resyncJoinTimeoutMs = RESYNC_JOIN_TIMEOUT_MS,
+            resyncRetryMs = RESYNC_RETRY_MS,
+            resyncMaxAttempts = RESYNC_MAX_ATTEMPTS,
+            stagingMaxAttempts = STAGING_MAX_ATTEMPTS,
+            stagingRetryMs = STAGING_RETRY_MS }: {
+                resyncCooldownMs?: number,
+                resyncJoinTimeoutMs?: number,
+                resyncRetryMs?: number,
+                resyncMaxAttempts?: number,
+                stagingMaxAttempts?: number,
+                stagingRetryMs?: number,
+            } = {},
     ) {
+        this.resyncCooldownMs = resyncCooldownMs;
+        this.resyncJoinTimeoutMs = resyncJoinTimeoutMs;
+        this.resyncRetryMs = resyncRetryMs;
+        this.resyncMaxAttempts = resyncMaxAttempts;
+        this.stagingMaxAttempts = stagingMaxAttempts;
+        this.stagingRetryMs = stagingRetryMs;
         // Bare test worlds may not have snapshot policies configured.
         if (!world.resources.has(SnapshotPoliciesResource)) {
             world.resources.set(SnapshotPoliciesResource, new SnapshotPolicies());
@@ -410,7 +454,11 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
                 }
             };
             // The relay may not exist yet when the first peer joins.
-            const retry = setInterval(request, 1000);
+            // Space the retries out: every request costs the server a
+            // full catch-up reply (baseline + log, megabytes), and
+            // stacking those drowns exactly the slow links that need
+            // the retry.
+            const retry = setInterval(request, 3000);
             const timeout = setTimeout(() => {
                 clearInterval(retry);
                 subscription.unsubscribe();
@@ -473,14 +521,45 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
             // arrived, which contains this record), drop it: pushing
             // after the clear would apply it twice.
             const generation = this.remoteInputsGeneration;
-            void loadInputRecordsGameData(this.world, [record]).then(() => {
+            void (async () => {
+                for (let attempt = 1; ; attempt++) {
+                    try {
+                        await this.stageRecords([record]);
+                        break;
+                    } catch (error) {
+                        if (generation !== this.remoteInputsGeneration) {
+                            return;
+                        }
+                        if (attempt >= this.stagingMaxAttempts) {
+                            // A peer missing this entity is diverged
+                            // for good; a resync re-requests the log
+                            // and retries the loads (and itself
+                            // retries until it lands).
+                            console.error('Failed to stage insertion '
+                                + 'record; resyncing:', error);
+                            this.logRollbackEvent('stagingFailed', {
+                                recordTick: record.tick,
+                                peer: record.peerId ?? 'unknown',
+                            });
+                            void this.resync();
+                            return;
+                        }
+                        await new Promise(resolve => setTimeout(resolve,
+                            this.stagingRetryMs * attempt));
+                    }
+                }
                 if (generation === this.remoteInputsGeneration) {
                     this.remoteInputs.push(record);
                 }
-            });
+            })();
         } else {
             this.remoteInputs.push(record);
         }
+    }
+
+    /** Stages records' game data; overridable for failure-path tests. */
+    protected stageRecords(records: InputRecord[]): Promise<void> {
+        return loadInputRecordsGameData(this.world, records);
     }
 
     /** Merges a record into the tick's record list. */
@@ -691,21 +770,44 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
      */
     async resync(): Promise<boolean> {
         if (this.resyncing
-            || Date.now() - this.lastResyncTime < RESYNC_COOLDOWN_MS) {
+            || Date.now() - this.lastResyncTime < this.resyncCooldownMs) {
             return false;
         }
         this.lastResyncTime = Date.now();
         this.resyncing = true;
         this.logRollbackEvent('resync');
         try {
-            restoreWorld(this.world, this.genesis, deriveEntityComponents);
-            this.rollback = this.makeRollback();
-            this.remoteInputs = [];
-            this.remoteInputsGeneration++;
-            this.checkpointHashes.clear();
-            // The pinned states describe the abandoned timeline.
-            this.checkpointSnapshots.clear();
-            return await this.joinRoom();
+            // Retry the whole reconstruction until it lands: while
+            // `resyncing`, step() is a no-op, so the sim pauses (and
+            // publishes no checkpoint hashes) instead of playing on —
+            // and reporting — a fork. A peer that "gives up" after a
+            // failed join is convicted every third checkpoint forever.
+            for (let attempt = 1; ; attempt++) {
+                restoreWorld(this.world, this.genesis,
+                    deriveEntityComponents);
+                this.rollback = this.makeRollback();
+                this.remoteInputs = [];
+                this.remoteInputsGeneration++;
+                this.checkpointHashes.clear();
+                // The pinned states describe the abandoned timeline.
+                this.checkpointSnapshots.clear();
+                try {
+                    if (await this.joinRoom(this.resyncJoinTimeoutMs)) {
+                        return true;
+                    }
+                } catch (error) {
+                    // Reconstruction staging can fail on a flaky
+                    // link; the retry refetches.
+                    console.error('Resync reconstruction failed:', error);
+                }
+                this.logRollbackEvent('resyncRetry', { attempt });
+                if (attempt >= this.resyncMaxAttempts) {
+                    console.error(`Resync failed after ${attempt} attempts`);
+                    return false;
+                }
+                await new Promise(resolve =>
+                    setTimeout(resolve, this.resyncRetryMs));
+            }
         } finally {
             this.resyncing = false;
         }
