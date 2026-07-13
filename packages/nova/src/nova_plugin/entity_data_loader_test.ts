@@ -1,6 +1,7 @@
 import 'jasmine';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { getIntegrationGameData } from '../communication/simulation_test_fixture.js';
+import { loadAsteroidGameData } from './asteroid_plugin.js';
 import { loadEntityGameData, loadShipGameData, loadWeaponGameData } from './entity_data_loader.js';
 import { WeaponEntries } from './fire_weapon_plugin.js';
 import { makeShip } from './make_ship.js';
@@ -75,6 +76,45 @@ describe('entity data loader', () => {
         const weaponIds = await loadWeaponGameData(makeCyclicGameData(), 'subX');
         expect([...weaponIds].sort()).toEqual(['subX', 'subY']);
     }, 5_000);
+
+    it('retries transient asteroid data load failures', async () => {
+        // One flaky fetch must not leave this world's cache cold: a
+        // cold asteroid type spawns different fields than every other
+        // world (see Gettable.getCached's determinism warning).
+        const base = makeCyclicGameData() as { data: Record<string, unknown> };
+        let failures = 2;
+        const flaky = {
+            data: {
+                ...base.data,
+                Asteroid: {
+                    get: async () => {
+                        if (failures > 0) {
+                            failures--;
+                            throw new Error('synthetic fetch failure');
+                        }
+                        return { animation: ANIMATION, fragments: [] };
+                    },
+                },
+            },
+        } as never;
+        await loadAsteroidGameData(flaky, 'rock');
+        expect(failures).toBe(0);
+    }, 30_000);
+
+    it('throws when asteroid data stays unloadable', async () => {
+        const base = makeCyclicGameData() as { data: Record<string, unknown> };
+        const dead = {
+            data: {
+                ...base.data,
+                Asteroid: {
+                    get: async () => {
+                        throw new Error('synthetic outage');
+                    },
+                },
+            },
+        } as never;
+        await expectAsync(loadAsteroidGameData(dead, 'rock')).toBeRejected();
+    }, 30_000);
 
     it('stages weapons granted by the entity\'s own outfits, not just '
         + 'the ship class\'s stock loadout', async () => {

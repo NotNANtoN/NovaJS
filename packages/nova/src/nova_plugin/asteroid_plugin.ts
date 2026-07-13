@@ -23,6 +23,7 @@ import { registerSimulationBridgeEvent } from '../communication/simulation_bridg
 import { AnimationComponent, TumbleAnimation, TumbleAnimationComponent } from './animation_plugin.js';
 import { BeamDataComponent } from './beam_plugin.js';
 import { CargoComponent, cargoUsed } from './cargo_plugin.js';
+import { loadWithRetries } from './load_retry.js';
 import { CollisionEvent, CollisionHitterComponent, CollisionVulnerabilityComponent } from './collision_interaction.js';
 import { CompositeHull, HitboxHullComponent, HurtboxHullComponent, UpdateHitboxHullSystem, UpdateHurtboxHullSystem } from './collisions_plugin.js';
 import { DamagedEvent } from './death_plugin.js';
@@ -236,7 +237,13 @@ function tumbleFor(frameRate: number, random: Random): TumbleAnimation {
     };
 }
 
-/** The asteroid's collision radius, from its sprite's convex hulls. */
+/**
+ * The asteroid's collision radius, from its sprite's convex hulls.
+ * Simulation state from a getCached read: sound only because
+ * loadAsteroidGameData warmed (or consistently failed to find) the
+ * sheet on every world — the default-radius fallback must never be a
+ * per-world outcome.
+ */
 function asteroidRadius(gameData: SimulationGameDataInterface,
     data: AsteroidData): number {
     const spriteSheet = gameData.data.SpriteSheet
@@ -347,6 +354,10 @@ function spawnFieldAsteroid(entities: EntityMap,
     if (types.length === 0) {
         return;
     }
+    // getCached is deterministic here only because spawnAsteroids
+    // loaded (with retries) every field type and its fragment closure;
+    // a miss would consume a different number of random draws and skip
+    // the spawn on this world alone. See Gettable.getCached's warning.
     const data = gameData.data.Asteroid
         .getCached(types[random.below(types.length)]);
     if (!data) {
@@ -375,6 +386,16 @@ function spawnFieldAsteroid(entities: EntityMap,
  * Loads the transitive closure of data an asteroid type needs: its own
  * data and sprite sheet (for the collision radius) plus everything its
  * fragments need, recursively, so mid-simulation breakup is synchronous.
+ *
+ * This warms every id the asteroid systems later read with `getCached`
+ * (respawn type picks, breakup fragments, hurtbox radii) — the sole
+ * guarantee that those reads behave identically on every world. So
+ * loads retry, and an asteroid whose *data* stays unloadable throws:
+ * a world quietly missing an asteroid type spawns different fields and
+ * different fragments than everyone else (a recorded desync class).
+ * A missing *sprite sheet* only degrades the hurtbox to the default
+ * radius, which is consistent when the sheet is absent from the data
+ * itself (the test fixture); after retries it stays a warning.
  */
 export async function loadAsteroidGameData(
     gameData: SimulationGameDataInterface, asteroidId: string,
@@ -383,17 +404,15 @@ export async function loadAsteroidGameData(
         return;
     }
     seen.add(asteroidId);
-    let data: AsteroidData;
+    const data: AsteroidData = await loadWithRetries(
+        () => gameData.data.Asteroid.get(asteroidId),
+        `asteroid ${asteroidId}`);
     try {
-        data = await gameData.data.Asteroid.get(asteroidId);
+        await loadWithRetries(() => gameData.data.SpriteSheet.get(
+            data.animation.images.baseImage.id),
+            `asteroid ${asteroidId} sprite sheet`, 2);
     } catch (e) {
-        console.warn(`Failed to load asteroid ${asteroidId}:`, e);
-        return;
-    }
-    try {
-        await gameData.data.SpriteSheet.get(data.animation.images.baseImage.id);
-    } catch (e) {
-        console.warn(`Failed to load sprite sheet for asteroid ${asteroidId}:`, e);
+        console.warn(String(e));
     }
     for (const fragment of data.fragments) {
         await loadAsteroidGameData(gameData, fragment, seen);
@@ -515,6 +534,10 @@ const AsteroidDamageSystem = new System({
             const fragmentCount =
                 averagePlusMinusHalf(data.fragmentCount, random);
             for (let i = 0; i < fragmentCount; i++) {
+                // Warm on every world: loadAsteroidGameData stages the
+                // fragment closure recursively (and throws rather than
+                // leave a type cold). A per-world miss here would skip
+                // fragments and fork the Random stream.
                 const fragmentData = gameData.data.Asteroid.getCached(
                     data.fragments[random.below(data.fragments.length)]);
                 if (!fragmentData) {

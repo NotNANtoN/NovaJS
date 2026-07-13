@@ -28,6 +28,20 @@ export class Gettable<T> {
         }
     }
 
+    /**
+     * The cached value, or undefined — in which case a *background
+     * load starts*, so a later call may succeed.
+     *
+     * DETERMINISM WARNING (rollback multiplayer): a getCached hit is a
+     * property of *this world's* load timing, not of shared game
+     * state. Simulation behavior or state creation gated on it
+     * diverges peers whose caches warm at different ticks — two real
+     * recorded desyncs came from exactly this. Sim code may only call
+     * this for ids that staging (loadEntityGameData, spawnAsteroids)
+     * provably loaded first, and a miss must never change what the
+     * simulation does. See docs/rollback_multiplayer.md findings
+     * (11) and (12).
+     */
     getCached(id: string): T | undefined {
         const cached = this.gotten[id];
         if (!cached) {

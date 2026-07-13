@@ -7,6 +7,7 @@ import { AsteroidComponent, loadAsteroidGameData } from "./asteroid_plugin.js";
 import { WeaponEntries } from "./fire_weapon_plugin.js";
 import { SimulationGameDataResource } from "./game_data_resource.js";
 import { GovtComponent } from "./govt_component.js";
+import { loadWithRetries } from "./load_retry.js";
 import { OutfitsStateComponent } from "./outfit_plugin.js";
 import { PlanetComponent } from "./planet_plugin.js";
 import { ShipComponent } from "./ship_plugin.js";
@@ -77,10 +78,15 @@ export async function loadWeaponGameData(gameData: SimulationGameDataInterface,
 
 async function loadAnimationGameData(gameData: SimulationGameDataInterface,
     animation: { images: { baseImage: { id: string } } }) {
+    // Hull geometry (simulation state) derives from the sprite sheet:
+    // retry so a transient fetch failure cannot leave this world's
+    // hulls quietly different from everyone else's.
     try {
-        await gameData.data.SpriteSheet.get(animation.images.baseImage.id);
+        await loadWithRetries(() => gameData.data.SpriteSheet.get(
+            animation.images.baseImage.id),
+            `sprite sheet ${animation.images.baseImage.id}`, 2);
     } catch (e) {
-        console.warn(`Failed to load sprite sheet for hull:`, e);
+        console.warn(String(e));
     }
 }
 
