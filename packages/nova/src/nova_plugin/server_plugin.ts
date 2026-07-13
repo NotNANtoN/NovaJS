@@ -14,7 +14,7 @@ import { hashWorld } from "nova_ecs/plugins/world_hash";
 import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { RollbackRelay } from "../communication/rollback_relay.js";
 import { RoomArchive } from "../communication/room_archive.js";
-import { DesyncRecorder } from "../server/desync_recorder.js";
+import { DesyncRecorder, fingerprintGameData } from "../server/desync_recorder.js";
 import { PEER_LOCAL_COMPONENTS } from "./ship_control.js";
 import { SimulationGameDataResource } from "./game_data_resource.js";
 import { makeSystem } from './make_system.js';
@@ -94,6 +94,8 @@ export const ServerPlugin: Plugin = {
         // The black-box recorder: every desync conviction becomes a
         // timestamped directory under desyncs/ for offline analysis.
         const desyncRecorder = new DesyncRecorder();
+        desyncRecorder.gameDataFingerprint =
+            fingerprintGameData(await gameData.ids);
         for (const systemId of (await gameData.ids).System) {
             const systemRoom = multiRoom.join(systemId);
             systemRoom.peers.current.subscribe(peers => {

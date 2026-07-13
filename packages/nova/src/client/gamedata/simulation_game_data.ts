@@ -46,7 +46,15 @@ export class SimulationGameData implements SimulationGameDataInterface {
     readonly preloadData: Promise<PreloadData>;
     public loaded = Promise.resolve();
 
-    constructor() {
+    /**
+     * `baseUrl` lets node tooling (the desync analyzer, the
+     * cross-engine node client) consume the *running server's* exact
+     * parse over HTTP instead of re-parsing Nova_Data locally — a
+     * local re-parse can genuinely differ for plugin content, which
+     * poisons replay-based forensics. Browsers pass nothing: their
+     * fetches are same-origin relative.
+     */
+    constructor(private baseUrl = '') {
         this.data = {
             Ship: this.addGettable<ShipData>(NovaDataType.Ship),
             Outfit: this.addGettable<OutfitData>(NovaDataType.Outfit),
@@ -68,19 +76,31 @@ export class SimulationGameData implements SimulationGameDataInterface {
     }
 
     private async preload() {
-        const data = await this.getJson('/preloadData.json') as PreloadData;
-        for (const [uncastKey, val] of Object.entries(data)) {
-            const key = uncastKey as keyof typeof data;
-            const resource = this.data[key as keyof SimulationGameDataResources];
-            if (resource) {
-                resource.gotten = val as typeof resource.gotten;
+        // Purely a cache warmer; a missing preload bundle must not
+        // wedge `loaded` (node tooling servers may not serve it).
+        try {
+            const data = await this.getJson('/preloadData.json') as PreloadData;
+            for (const [uncastKey, val] of Object.entries(data)) {
+                const key = uncastKey as keyof typeof data;
+                const resource = this.data[key as keyof SimulationGameDataResources];
+                if (resource) {
+                    resource.gotten = val as typeof resource.gotten;
+                }
             }
+            return data;
+        } catch (e) {
+            console.warn('Failed to preload game data:', e);
+            return {} as PreloadData;
         }
-        return data;
     }
 
     private async getJson(url: string): Promise<unknown> {
-        return (await fetch(url)).json();
+        const response = await fetch(
+            this.baseUrl ? urlJoin(this.baseUrl, url) : url);
+        if (!response.ok) {
+            throw new Error(`${url}: HTTP ${response.status}`);
+        }
+        return response.json();
     }
 
     private getDataPrefix(dataType: NovaDataType): string {
@@ -102,6 +122,6 @@ export class SimulationGameData implements SimulationGameDataInterface {
     }
 
     private async getIds(): Promise<NovaIDs> {
-        return (await fetch(idsPath + '.json')).json() as unknown as NovaIDs;
+        return await this.getJson(idsPath + '.json') as NovaIDs;
     }
 }

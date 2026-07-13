@@ -16,15 +16,24 @@
 //     applying the same input log, hashing every tick — pins the
 //     exact tick where the client's state stops tracking the log.
 //
-// Usage: node analyze_desync.mjs <incident-dir>
-//   (run from packages/nova; the dir needs desync.json, baselines.json,
+// Usage: node analyze_desync.mjs <incident-dir> [serverUrl]
+//   (run from packages/nova with the game server running, default
+//    http://localhost:8000; the dir needs desync.json, baselines.json,
 //    log.json, and at least one client_<peer>.json)
+//
+// Game data comes from the RUNNING SERVER over HTTP — the same parse
+// the live worlds consumed — never from a local re-parse, which can
+// genuinely differ for plugin content and poison every replay-based
+// conclusion. The incident records a fingerprint of the data it was
+// recorded under; a mismatch here means the server's data changed
+// since the session and the replay cannot be trusted.
 import * as fs from 'fs/promises';
 import * as path from 'path';
 process.chdir(path.dirname(new URL(import.meta.url).pathname));
 
 const { makeSystem } = await import('./dist/src/nova_plugin/make_system.js');
-const { getIntegrationGameData } = await import('./dist/src/communication/simulation_test_fixture.js');
+const { SimulationGameData } = await import('./dist/src/client/gamedata/simulation_game_data.js');
+const { fingerprintGameData } = await import('./dist/src/server/desync_recorder.js');
 const { loadWireSnapshotGameData } = await import('./dist/src/nova_plugin/entity_data_loader.js');
 const { deriveEntityComponents } = await import('./dist/src/nova_plugin/entity_factory.js');
 const { applyInputRecords, loadInputRecordsGameData } = await import('./dist/src/communication/simulation_input.js');
@@ -35,9 +44,10 @@ const { TimeResource } = await import('nova_ecs/plugins/time_plugin');
 
 const dir = process.argv[2];
 if (!dir) {
-    console.error('Usage: node analyze_desync.mjs <incident-dir>');
+    console.error('Usage: node analyze_desync.mjs <incident-dir> [serverUrl]');
     process.exit(1);
 }
+const serverUrl = process.argv[3] ?? 'http://localhost:8000';
 
 const readJson = async name =>
     JSON.parse(await fs.readFile(path.join(dir, name), 'utf8'));
@@ -199,7 +209,25 @@ function diffSnapshots(truth, client) {
     return lines;
 }
 
-const gameData = await getIntegrationGameData();
+const gameData = new SimulationGameData(serverUrl);
+let ids;
+try {
+    ids = await gameData.ids;
+} catch (e) {
+    console.error(`Could not reach the game server at ${serverUrl} — start `
+        + `it first (the replay must use the server's exact game data): ${e}`);
+    process.exit(1);
+}
+const fingerprint = fingerprintGameData(ids);
+if (desync.gameDataFingerprint && desync.gameDataFingerprint !== fingerprint) {
+    console.error(`\n*** GAME DATA MISMATCH ***\n`
+        + `The incident was recorded under game data ${desync.gameDataFingerprint}\n`
+        + `but the server now serves ${fingerprint}. The plugins or data\n`
+        + `changed since the session: replay conclusions below are suspect.\n`);
+} else if (desync.gameDataFingerprint) {
+    console.log(`Game data fingerprint matches the incident's `
+        + `(${fingerprint}).`);
+}
 
 for (const clientFile of clientFiles) {
     const dump = await readJson(clientFile);

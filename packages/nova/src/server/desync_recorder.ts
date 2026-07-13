@@ -1,3 +1,4 @@
+import * as crypto from "crypto";
 import * as fs from "fs/promises";
 import * as path from "path";
 import { ArchiveBaseline, DesyncDump, InputRecord } from "../communication/rollback_protocol.js";
@@ -13,6 +14,18 @@ const DEFAULT_MAX_INCIDENTS = 50;
  * the repeats are noise (one Android session wrote 17 directories).
  */
 const DEFAULT_ROOM_COOLDOWN_MS = 30_000;
+
+/**
+ * A stable fingerprint of the game data an incident was recorded
+ * under. Offline analysis replays incidents against a game-data
+ * source; if that source differs from what the live session used
+ * (changed plugins, a different parse), every replay conclusion is
+ * suspect — the analyzer compares fingerprints and warns loudly.
+ */
+export function fingerprintGameData(ids: unknown): string {
+    return crypto.createHash('sha256')
+        .update(JSON.stringify(ids)).digest('hex').slice(0, 16);
+}
 
 /** Room ids (nova:130) and peer uuids become filesystem-safe names. */
 function sanitize(name: string): string {
@@ -37,6 +50,10 @@ function sanitize(name: string): string {
  *   before resyncing.
  */
 export class DesyncRecorder {
+    /** Set by the server once its game data loads (fingerprintGameData);
+     * recorded with each incident so offline analysis can detect a
+     * data mismatch before trusting a replay. */
+    gameDataFingerprint?: string;
     /** Most recent incident directory per room, for filing uploads. */
     private latestIncident = new Map<string, string>();
     /** Wall time of the last recorded incident per room. */
@@ -76,6 +93,8 @@ export class DesyncRecorder {
             ['desync.json', JSON.stringify({
                 roomId,
                 wallTime: new Date().toISOString(),
+                ...(this.gameDataFingerprint
+                    ? { gameDataFingerprint: this.gameDataFingerprint } : {}),
                 ...info,
             }, null, 2)],
             ['baselines.json', JSON.stringify(context.baselines)],

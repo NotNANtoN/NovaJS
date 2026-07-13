@@ -3,7 +3,7 @@ import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 import { DesyncDump } from '../communication/rollback_protocol.js';
-import { DesyncRecorder } from './desync_recorder.js';
+import { DesyncRecorder, fingerprintGameData } from './desync_recorder.js';
 
 describe('DesyncRecorder', () => {
     let root: string;
@@ -68,6 +68,21 @@ describe('DesyncRecorder', () => {
         expect(dir).toContain('nova_130_dump');
         expect(await fs.readdir(path.join(root, dir!)))
             .toEqual(['client_peer-a.json']);
+    });
+
+    it('records the game data fingerprint with the verdict', async () => {
+        const recorder = new DesyncRecorder(root);
+        recorder.gameDataFingerprint =
+            fingerprintGameData({ Ship: ['nova:128'] });
+        recorder.recordDesync('nova:130', info, { baselines: [], log: [] });
+        await recorder.flush();
+        const [incident] = await fs.readdir(root);
+        const desync = JSON.parse(await fs.readFile(
+            path.join(root, incident!, 'desync.json'), 'utf8'));
+        expect(desync.gameDataFingerprint)
+            .toBe(fingerprintGameData({ Ship: ['nova:128'] }));
+        // Stable across processes: a fixed input hashes identically.
+        expect(desync.gameDataFingerprint).toMatch(/^[0-9a-f]{16}$/);
     });
 
     it('suppresses repeat incidents for a room within the cooldown', async () => {
