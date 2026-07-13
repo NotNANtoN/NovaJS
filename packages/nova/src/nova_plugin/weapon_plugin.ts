@@ -198,18 +198,21 @@ const ControlPlayerWeapons = new System({
     name: 'ControlPlayerWeapons',
     events: [ShipControlEvent],
     args: [ShipControlStateComponent, WeaponsStateComponent, WeaponsComponent,
-        ActiveSecondaryWeapon, Emit, SimulationGameDataResource, UUID] as const,
-    step(controlState, weaponsState, weaponsData, activeSecondary, emit, gameData, uuid) {
+        ActiveSecondaryWeapon, Emit, UUID] as const,
+    step(controlState, weaponsState, _weaponsData, activeSecondary, emit, uuid) {
         for (const [, weaponState] of weaponsState) {
             weaponState.firing = false;
         }
 
-        // TODO: Store this somewhere?
+        // Selection is a pure function of the synced weapon state:
+        // fireGroup rides in WeaponsState (set when it derives), never
+        // read from getCached here — a cache-warmth-gated filter at
+        // input-application time is per-world state, and cycling on it
+        // selects different secondaries on different worlds.
         const secondaryWeapons = [
             undefined, // for when no weapon is selected
-            ...[...weaponsData].filter(([id]) => {
-                return gameData.data.Weapon.getCached(id)?.fireGroup === 'secondary';
-            }).map(([id]) => id)
+            ...[...weaponsState].filter(([, state]) =>
+                state.fireGroup === 'secondary').map(([id]) => id)
         ];
 
         let secondary: WeaponState | undefined;
@@ -252,8 +255,8 @@ const ControlPlayerWeapons = new System({
         }
 
         const firing = Boolean(controlState.get('firePrimary'));
-        for (const [id, weaponState] of weaponsState) {
-            if (gameData.data.Weapon.getCached(id)?.fireGroup === 'primary') {
+        for (const [, weaponState] of weaponsState) {
+            if (weaponState.fireGroup === 'primary') {
                 weaponState.firing = firing;
             }
         }

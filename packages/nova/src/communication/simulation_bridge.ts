@@ -51,14 +51,16 @@ const STAGING_RETRY_MS = 1_000;
 
 /**
  * How many recent checkpoint states the peer pins for desync dumps:
- * 16 checkpoints = 960 ticks. The window must reach back past the
- * *last matching* checkpoint despite conviction lag (threshold
- * mismatches, settle, reporting, and the archive's trailing hash) —
- * the first real incident's dump missed its divergence origin with
- * half this. Pinned in the rollback ring's cheap structural form;
- * wire-encoded only if a dump is actually sent.
+ * 32 checkpoints = 1920 ticks (~32s). The window must reach back past
+ * the *last matching* checkpoint despite conviction lag (threshold
+ * mismatches, settle, reporting, the archive's trailing hash) AND
+ * dump-delivery lag — over an internet link, a desyncDumpRequest's
+ * reply arrived ~28s after the conviction it answered, and the
+ * evidence window had already slid past the origin. Pinned in the
+ * rollback ring's cheap structural form; wire-encoded only if a dump
+ * is actually sent.
  */
-const CHECKPOINT_SNAPSHOT_RETENTION = 16;
+const CHECKPOINT_SNAPSHOT_RETENTION = 32;
 /** How many rollback-machinery events the black-box ring retains. */
 const ROLLBACK_LOG_CAPACITY = 64;
 

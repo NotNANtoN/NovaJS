@@ -69,7 +69,16 @@ function deriveWeaponsState(outfits: OutfitsState,
 
             if (outfit.weapons) {
                 for (const [weaponId, count] of Object.entries(outfit.weapons)) {
-                    weaponsState.get(weaponId).count += count * state.count;
+                    // All-or-nothing on the weapon data too: fireGroup
+                    // rides in the synced state so weapon selection
+                    // never reads getCached at input-application time.
+                    const weapon = gameData.data.Weapon.getCached(weaponId);
+                    if (!weapon) {
+                        return undefined;
+                    }
+                    const weaponState = weaponsState.get(weaponId);
+                    weaponState.count += count * state.count;
+                    weaponState.fireGroup = weapon.fireGroup;
                 }
             }
         }

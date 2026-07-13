@@ -7,6 +7,15 @@ const WeaponState = t.intersection([t.type({
     firing: t.boolean,
 }), t.partial({
     target: t.string,
+    /**
+     * The weapon's fire group, copied from its game data when the
+     * state is derived. Carried in synced state so weapon selection
+     * (secondary cycling, primary fire) never reads `getCached` at
+     * input-application time — a cache-warmth-gated read there is
+     * per-world state, and provably made an offline replay select a
+     * different secondary than the live session.
+     */
+    fireGroup: t.string,
 })]);
 export type WeaponState = t.TypeOf<typeof WeaponState>;
 
