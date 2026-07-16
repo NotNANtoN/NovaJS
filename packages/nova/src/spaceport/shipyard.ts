@@ -75,7 +75,7 @@ export class Shipyard extends Menu<Entity> {
     }
 
     private setShipSelected(shipTile: ItemTile<ShipData> | undefined) {
-        this.pictContainer.children.length = 0;
+        this.pictContainer.removeChildren();
         if (!shipTile) {
             return;
         }

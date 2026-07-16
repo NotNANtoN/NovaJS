@@ -40,6 +40,10 @@ export class Stat {
     }
 
     step(delta: number) {
+        // Deliberately writes wrappedVal (bypassing the `val` setter's
+        // changed flag): recharge is simulated deterministically by every
+        // peer each tick, so flagging it would flood getDelta's channel
+        // with values every peer already computes.
         this.wrappedCurrent.wrappedVal = Math.max(this.min,
             Math.min(this.max, this.current + this.recharge * delta));
     }

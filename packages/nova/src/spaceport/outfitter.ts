@@ -242,7 +242,7 @@ export class Outfitter extends Menu<Entity> {
 
     private setOutfitSelected(outfitTile: ItemTile<OutfitData> | undefined) {
         // Set Picture
-        this.pictContainer.children.length = 0;
+        this.pictContainer.removeChildren();
         this.text.description.text = "";
         this.text.price.text = "";
         this.text.status.text = "";

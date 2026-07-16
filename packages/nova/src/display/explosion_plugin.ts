@@ -151,7 +151,7 @@ const ShipFinalExplosionSystem = new System({
 });
 
 // TODO: Sample collisions in the convex hull of the ship
-const ShipSecondaryExposionSystem = new System({
+const ShipSecondaryExplosionSystem = new System({
     name: 'ShipSecondaryExplosionSystem',
     events: [ZeroArmorEvent],
     args: [ShipDataComponent, GetEntity, DisplayAssetDataResource] as const,
@@ -211,7 +211,7 @@ export const ExplosionPlugin: Plugin = {
         world.addSystem(ProjectileExplosionSystem);
         world.addSystem(SecondaryExplosionSystem);
         world.addSystem(ShipFinalExplosionSystem);
-        world.addSystem(ShipSecondaryExposionSystem);
+        world.addSystem(ShipSecondaryExplosionSystem);
         world.addSystem(ShipSecondaryExplosionDoneSystem);
     },
     remove(world) {
@@ -219,7 +219,7 @@ export const ExplosionPlugin: Plugin = {
         world.removeSystem(ProjectileExplosionSystem);
         world.removeSystem(SecondaryExplosionSystem);
         world.removeSystem(ShipFinalExplosionSystem);
-        world.removeSystem(ShipSecondaryExposionSystem);
+        world.removeSystem(ShipSecondaryExplosionSystem);
         world.removeSystem(ShipSecondaryExplosionDoneSystem);
     }
 }

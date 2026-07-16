@@ -103,7 +103,6 @@ export interface SubmunitionType {
 
 
 export interface WeaponDamage {
-    [index: string]: number;
     shield: number;
     armor: number;
     ionization: number;

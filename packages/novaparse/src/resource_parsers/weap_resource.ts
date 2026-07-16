@@ -284,7 +284,10 @@ class WeapResource extends BaseResource {
 
         // Smoke set (offset 32): a cicn index; each set is 8 consecutive cicns
         // starting at 1000. -1 means none.
-        const smokeBase = maybeNull(r.int16() * 8, 1000);
+        // Null-check the raw value before scaling: raw -1 means "no smoke",
+        // and multiplying first (-1 * 8 = -8) would slip past the check.
+        const smokeSet = maybeNull(r.int16(), 0);
+        const smokeBase = smokeSet === null ? null : smokeSet * 8 + 1000;
         if (smokeBase !== null) {
             this.cicnSmoke = [];
             for (let i = smokeBase; i < smokeBase + 8; i++) {

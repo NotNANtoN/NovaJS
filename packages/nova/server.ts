@@ -29,7 +29,6 @@ import { setupRoutes } from "./src/server/setup_routes.js";
 const Settings = t.partial({
     port: t.number,
     relativeDataPath: t.string,
-    https: t.boolean,
 });
 type Settings = t.TypeOf<typeof Settings>;
 
@@ -160,4 +159,7 @@ function stepper() {
     setTimeout(stepper, SIMULATION_STEP_MS);
 }
 
-startGame();
+startGame().catch((err) => {
+    console.error("Failed to start game server:", err);
+    process.exit(1);
+});

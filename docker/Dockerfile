@@ -17,7 +17,8 @@ COPY --from=builder /app/out/json/ .
 COPY --from=builder /app/out/package-lock.json ./package-lock.json
 RUN npm ci
 
-# Build the project
+# Build the project (production mode so bundles ship optimized dependency code)
+ENV NODE_ENV=production
 COPY --from=builder /app/out/full/ .
 COPY turbo.json turbo.json
 RUN npx turbo run build --filter=nova...

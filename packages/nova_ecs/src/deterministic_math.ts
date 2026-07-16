@@ -21,6 +21,12 @@
  * contexts (called by the game's world factory), which also covers
  * third-party simulation code — SAT.js rotates collision hulls with
  * Math.sin/cos internally. Display-only contexts keep native Math.
+ *
+ * CAVEAT: the `**` operator compiles to native exponentiation and does
+ * NOT go through the Math.pow patch. Simulation code must call
+ * Math.pow for fractional exponents (e.g. `Math.pow(x, 1.2)`, never
+ * `x ** 1.2`). Integer exponents like `x ** 2` are IEEE-exact (just
+ * repeated multiplication) and are fine.
  */
 
 // fdlibm __kernel_sin coefficients.

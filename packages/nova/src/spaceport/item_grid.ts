@@ -168,8 +168,6 @@ export class ItemGrid<I extends Item> {
 
     tileClicked(tile: ItemTile<I>) {
         this.selectionIndex = this.tiles.indexOf(tile);
-        console.log(tile);
-        console.log(this.selectionIndex);
 
         this.drawGrid();
     }

@@ -76,6 +76,14 @@ class StatusBar {
     private noTargetContainer = new PIXI.Container();
     private targetSprite = new PIXI.Sprite();
 
+    /**
+     * A single RenderTexture reused across frames to draw the locked
+     * target's ship graphic. Reallocated (destroying the old one and its
+     * base texture) only when the required size changes, so a locked
+     * target no longer leaks a fresh GPU texture every display frame.
+     */
+    private targetRenderTexture?: PIXI.RenderTexture;
+
     private text: { [index: string]: PIXI.Text } = {};
     private addEnemyButton: Button;
     readonly addEnemy: Subject<undefined>;
@@ -342,10 +350,24 @@ class StatusBar {
 
         if (shipGraphic) {
             const shipContainer = shipGraphic?.container;
-            const baseRenderTexture = new PIXI.BaseRenderTexture({
-                width: shipGraphic.size.x, height: shipGraphic.size.y,
-            });
-            const renderTexture = new PIXI.RenderTexture(baseRenderTexture);
+            const width = shipGraphic.size.x;
+            const height = shipGraphic.size.y;
+
+            // Reuse the cached RenderTexture across frames; only reallocate
+            // (destroying the old one and its base texture) when the target's
+            // size changes. Without this a fresh texture would leak every
+            // display frame while a target is locked.
+            let renderTexture = this.targetRenderTexture;
+            if (!renderTexture ||
+                renderTexture.width !== width ||
+                renderTexture.height !== height) {
+                renderTexture?.destroy(true);
+                const baseRenderTexture = new PIXI.BaseRenderTexture({
+                    width, height,
+                });
+                renderTexture = new PIXI.RenderTexture(baseRenderTexture);
+                this.targetRenderTexture = renderTexture;
+            }
 
             shipContainer.setTransform();
             shipContainer.position.x = shipGraphic.size.x / 2;
@@ -369,6 +391,12 @@ class StatusBar {
         this.targetContainer.visible = false;
         this.noTargetContainer.visible = true;
         this.targetSprite.visible = false;
+    }
+
+    /** Releases the cached target RenderTexture (and its base texture). */
+    destroy() {
+        this.targetRenderTexture?.destroy(true);
+        this.targetRenderTexture = undefined;
     }
 }
 
@@ -540,8 +568,11 @@ export const StatusBarPlugin: Plugin = {
 
         const stage = world.resources.get(Stage);
         const statusBar = world.resources.get(StatusBarResource);
-        if (stage && statusBar) {
-            stage.removeChild(statusBar.container);
+        if (statusBar) {
+            if (stage) {
+                stage.removeChild(statusBar.container);
+            }
+            statusBar.destroy();
         }
         world.resources.delete(StatusBarResource);
     }

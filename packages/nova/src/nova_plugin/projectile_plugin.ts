@@ -299,7 +299,16 @@ const ProjectileCollisionSystem = new System({
             return;
         }
         const otherOwner = other.components.get(OwnerComponent);
-        if (collision.other === owner?.owner || otherOwner?.owner === owner?.owner) {
+        // Don't collide with our owner or with things our owner owns.
+        // The owner check only applies when this projectile HAS an owner:
+        // with `owner?.owner` on both sides, an ownerless projectile would
+        // match every ownerless entity (undefined === undefined) and pass
+        // through e.g. asteroids. All current creation paths (fireFromEntity,
+        // fireSubs) always set an owner, so this is intent-clarifying, not
+        // behavior-changing.
+        if (owner !== undefined
+            && (collision.other === owner.owner
+                || otherOwner?.owner === owner.owner)) {
             return;
         }
 

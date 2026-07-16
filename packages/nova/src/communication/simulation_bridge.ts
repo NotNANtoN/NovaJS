@@ -638,12 +638,19 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
             }
         }
         if (earliestCorrection !== undefined) {
+            const toTick = earliestCorrection - 1;
+            const depth = this.rollback.tick - toTick;
             this.logRollbackEvent('rollback', {
-                toTick: earliestCorrection - 1,
-                depth: this.rollback.tick - (earliestCorrection - 1),
+                toTick,
+                depth,
                 records: records.length,
             });
-            this.rollback.rollbackTo(earliestCorrection - 1);
+            if (!this.rollback.rollbackTo(toTick)) {
+                // The target tick is behind the ring-buffer horizon, so
+                // the rollback did not happen and the corrected inputs
+                // apply late. Log it so desync forensics can see why.
+                this.logRollbackEvent('rollbackTooOld', { toTick, depth });
+            }
         }
     }
 

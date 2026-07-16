@@ -14,7 +14,7 @@ class RledResource extends BaseResource {
     get bitsPerPixel(): number {
         var depth = this.data.getUint16(4);
         if (depth !== 16) {
-            throw new Error("Only color depth of 16 bits / pixel supported but got " + this.bitsPerPixel);
+            throw new Error("Only color depth of 16 bits / pixel supported but got " + depth);
         }
         return depth;
     }
@@ -50,9 +50,14 @@ class RledResource extends BaseResource {
         while (keep_going) { //rled has an opcode which says the end
             position = pointer;
 
+            // Realign to a 4-byte boundary relative to the start of the row.
+            // In practice this never fires on Nova's own data (PixelData
+            // already realigns after itself and every other opcode advances
+            // in multiples of 4), but keep it consistent with the row-relative
+            // alignment rather than the previous opcode's count.
             if ((rowStart != 0) && ((position - rowStart) & 0x03)) {
                 position += 4 - ((position - rowStart) & 0x03);
-                pointer += 4 - (count & 0x03);
+                pointer = position;
             }
 
 
@@ -64,7 +69,7 @@ class RledResource extends BaseResource {
             switch (opcode) {
                 case 0://RLEOpCode_EndOfFrame = 0x00; 
                     if (currentLine != this.size[1] - 1) {
-                        throw "wrong number of lines in frame!:" + currentLine + "≠" + (this.size[1] - 1);
+                        throw new Error("wrong number of lines in frame!:" + currentLine + "≠" + (this.size[1] - 1));
                     }
                     if (++currentFrame >= this.numberOfFrames) {
                         keep_going = false;

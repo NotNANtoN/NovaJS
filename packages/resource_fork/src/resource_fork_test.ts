@@ -39,7 +39,8 @@ describe("resourceFork", () => {
         })
         describe("reading .rez", () => {
             testResourceFork(() => {
-                return readResourceFork(ndatPath, false);
+                // .rez files store their data in the data fork.
+                return readResourceFork(rezPath, false);
             });
         });
     });

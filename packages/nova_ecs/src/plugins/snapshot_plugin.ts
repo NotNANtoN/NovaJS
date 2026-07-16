@@ -191,6 +191,20 @@ export function snapshotWorld(world: World): WorldSnapshot {
 }
 
 /**
+ * Resources are restored positionally against the policies order, so a
+ * length mismatch means the snapshot came from a differently configured
+ * world and restoring it would silently write wrong data into wrong
+ * resources. Fail loudly instead: a mismatched snapshot is unusable.
+ */
+function checkResourceCount(snapshotCount: number, policyCount: number) {
+    if (snapshotCount !== policyCount) {
+        throw new Error(`Snapshot has ${snapshotCount} resources but the `
+            + `world has ${policyCount} resource snapshot policies; `
+            + `refusing to restore a mismatched snapshot`);
+    }
+}
+
+/**
  * Restores a world to a snapshot's state. `complete` runs on each
  * restored entity before it is inserted, so derived components can be
  * reattached synchronously (no first-step gap during resimulation).
@@ -201,6 +215,7 @@ export function restoreWorld(world: World, snapshot: WorldSnapshot,
     if (!policies) {
         throw new Error('Expected SnapshotPoliciesResource to exist');
     }
+    checkResourceCount(snapshot.resources.length, policies.resources.length);
 
     for (const uuid of [...world.entities.keys()]) {
         if (uuid !== 'singleton') {
@@ -484,6 +499,7 @@ export function restoreWireWorldSnapshot(world: World,
     if (!policies) {
         throw new Error('Expected SnapshotPoliciesResource to exist');
     }
+    checkResourceCount(snapshot.resources.length, policies.resources.length);
 
     for (const uuid of [...world.entities.keys()]) {
         if (uuid !== 'singleton') {

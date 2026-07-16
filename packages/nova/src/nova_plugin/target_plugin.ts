@@ -56,7 +56,17 @@ const ChooseTargetSystem = new System({
                     index
                 ] as const)
                 .reduce<readonly [string | undefined, number, number]>(
-                    (a, b) => a[1] < b[1] ? a : b,
+                    (a, b) => {
+                        if (a[1] !== b[1]) {
+                            return a[1] < b[1] ? a : b;
+                        }
+                        // Exactly equal distances: query iteration order
+                        // can differ between a peer that built its entity
+                        // map by insertion and one restored from a wire
+                        // snapshot, so break the tie deterministically by
+                        // the lexicographically smaller uuid.
+                        return a[0] !== undefined && a[0] < b[0] ? a : b;
+                    },
                     [undefined, Infinity, -1] as const);
 
             index.index = newIndex;

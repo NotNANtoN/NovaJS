@@ -755,6 +755,26 @@ describe("WeapResource builder-based", () => {
         expect(warnSpy).toHaveBeenCalled();
     });
 
+    it("parses the smoke set into eight consecutive cicn ids", () => {
+        const dv = buildWeap().dataView();
+        // Smoke set 2 -> cicns 1016..1023 (each set is 8 cicns from 1000).
+        dv.setInt16(32, 2);
+        const resource = new Resource("wëap", 201, "Smoky", dv);
+        const w = new WeapResource(resource, idSpace);
+        expect(w.cicnSmoke).toEqual(
+            [1016, 1017, 1018, 1019, 1020, 1021, 1022, 1023]);
+    });
+
+    it("parses a smoke set of -1 as no smoke", () => {
+        const dv = buildWeap().dataView();
+        // Raw -1 means "no smoke"; it must not be scaled into a spurious
+        // set of cicn ids (regression: -1 * 8 + 1000 = 992..999).
+        dv.setInt16(32, -1);
+        const resource = new Resource("wëap", 202, "Smokeless", dv);
+        const w = new WeapResource(resource, idSpace);
+        expect(w.cicnSmoke).toBeNull();
+    });
+
     it("defaults gracefully when the resource is truncated", () => {
         // A resource cut off at offset 40 must not throw; missing trailing
         // fields fall back to their defaults.

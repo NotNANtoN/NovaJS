@@ -15,7 +15,7 @@ await esbuild.build({
     format: 'iife',
     globalName: 'NovaBrowser',
     define: {
-        'process.env.NODE_ENV': '"development"'
+        'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV ?? 'development')
     }
 });
 
@@ -28,7 +28,7 @@ await esbuild.build({
     platform: 'browser',
     format: 'esm',
     define: {
-        'process.env.NODE_ENV': '"development"'
+        'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV ?? 'development')
     }
 });
 

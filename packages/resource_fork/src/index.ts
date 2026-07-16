@@ -51,7 +51,7 @@ export function readRez(dataView: DataView): ResourceMap {
     const [[h1, h2, h3, h4, version], newPos] = unpack('<ccccII', dataView);
     pos = newPos;
     const header = h1 + h2 + h3 + h4;
-    if (version !== 1 && header !== 'BRGR') {
+    if (version !== 1 || header !== 'BRGR') {
         throw new Error('Invalid rez format');
     }
 
@@ -146,7 +146,7 @@ async function readResourceFork(p: string, readResourceFork = true): Promise<Res
         o_map !== dataView.getUint32(o_map + 4) ||
         l_data !== dataView.getUint32(o_map + 8) ||
         l_map !== dataView.getUint32(o_map + 12)) {
-        throw ("Not a valid resourceFork file");
+        throw new Error("Not a valid resourceFork file");
     }
 
     // Get resource map

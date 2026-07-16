@@ -154,7 +154,9 @@ export function approachVec<T extends Vector>(target: T, current: T, maxDelta: n
         return target;
     }
     const difference = target.subtract(current);
-    if (difference.lengthSquared < maxDelta ** 1.2) {
+    // Math.pow, not `**`: the native exponentiation operator bypasses the
+    // deterministic Math.pow patch (see deterministic_math.ts).
+    if (difference.lengthSquared < Math.pow(maxDelta, 1.2)) {
         return target;
     }
 
