@@ -252,11 +252,18 @@ class PICTParse {
                 var decodedScanLine = [];
                 if (px.packType === 3) {
                     decodedScanLine = this.packBitsDecode(2, encodedScanLine);
+                    raw = decodedScanLine.slice(0, sourceRect.width * 2);
                 }
                 else {
+                    // packType 4 scanlines are planar: cmpCount planes of
+                    // bounds.width bytes each (AAA...RRR...GGG...BBB or
+                    // RRR...GGG...BBB). Truncating to width * 2 like packType 3
+                    // kept only the first two planes, which is why 32-bit PICTs
+                    // rendered yellow (RGB: blue lost) or red (ARGB: green and
+                    // blue lost).
                     decodedScanLine = this.packBitsDecode(1, encodedScanLine);
+                    raw = decodedScanLine.slice(0, px.cmpCount * px.bounds.width);
                 }
-                raw = decodedScanLine.slice(0, sourceRect.width * 2);
             }
 
             if (px.packType === 3) {
@@ -267,26 +274,18 @@ class PICTParse {
                 }
             }
             else {
-                if (px.cmpCount === 3) {
-                    // RGB Data
-                    // >>> 0 so javascript interprets it as unsigned
-                    // https://stackoverflow.com/questions/6798111/bitwise-operations-on-32-bit-unsigned-ints
-                    for (let i = 0; i < sourceRect.width; i++) {
-                        pxArray[pxBufOffset + i] = (0xFF000000
-                            | ((raw[i] & 0xFF) << 16)
-                            | ((raw[px.bounds.width + i] & 0xFF) << 8)
-                            | (raw[2 * px.bounds.width + i] & 0xFF)) >>> 0;
-                    }
-                }
-                else {
-                    // ARGB Data
-                    for (let i = 0; i < sourceRect.width; i++) {
-                        pxArray[pxBufOffset + i] =
-                            (((raw[i] & 0xFF) << 24)
-                                | ((raw[px.bounds.width + i] & 0xFF) << 16)
-                                | ((raw[2 * px.bounds.width + i] & 0xFF) << 8)
-                                | (raw[3 * px.bounds.width + i] & 0xFF)) >>> 0;
-                    }
+                // RGB planes at stride bounds.width. When cmpCount is 4 the
+                // first plane is alpha, which QuickDraw ignores (it is often
+                // garbage in the wild) — skip it and force opaque, matching
+                // ResForge.
+                // >>> 0 so javascript interprets it as unsigned
+                // https://stackoverflow.com/questions/6798111/bitwise-operations-on-32-bit-unsigned-ints
+                const skip = px.cmpCount === 4 ? px.bounds.width : 0;
+                for (let i = 0; i < sourceRect.width; i++) {
+                    pxArray[pxBufOffset + i] = (0xFF000000
+                        | ((raw[skip + i] & 0xFF) << 16)
+                        | ((raw[skip + px.bounds.width + i] & 0xFF) << 8)
+                        | (raw[skip + 2 * px.bounds.width + i] & 0xFF)) >>> 0;
                 }
             }
 
