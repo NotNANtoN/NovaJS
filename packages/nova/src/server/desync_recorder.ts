@@ -77,6 +77,10 @@ export class DesyncRecorder {
     recordDesync(roomId: string, info: DesyncInfo, context: {
         baselines: ArchiveBaseline[],
         log: readonly InputRecord[],
+        /** The archive's per-entity hashes at the convicted tick —
+         * names the archive's own diverging entity when the archive
+         * is the wrong one. */
+        archiveEntityHashes?: [string, string][],
     }) {
         // A room's repeat convictions within the cooldown are the same
         // stuck divergence; the first record holds the evidence.
@@ -96,6 +100,9 @@ export class DesyncRecorder {
                 ...(this.gameDataFingerprint
                     ? { gameDataFingerprint: this.gameDataFingerprint } : {}),
                 ...info,
+                ...(context.archiveEntityHashes
+                    ? { archiveEntityHashes: context.archiveEntityHashes }
+                    : {}),
             }, null, 2)],
             ['baselines.json', JSON.stringify(context.baselines)],
             ['log.json', JSON.stringify(context.log)],
@@ -125,7 +132,14 @@ export class DesyncRecorder {
                 + `${sanitize(roomId)}_dump`);
             this.latestIncident.set(roomId, dir);
         }
-        const file = path.join(dir, `client_${sanitize(peerId)}.json`);
+        // Keyed by the dump's own conviction tick: a stuck peer whose
+        // repeat convictions fall inside the incident cooldown uploads
+        // several dumps into this directory, each describing a
+        // different divergence episode — overwriting one file lost all
+        // but the last (and that last one postdated the incident's
+        // recorded log, making the directory self-inconsistent).
+        const file = path.join(dir, `client_${sanitize(peerId)}`
+            + `_tick${dump.desyncTick ?? dump.tick}.json`);
         this.enqueue(async () => {
             await fs.mkdir(dir!, { recursive: true });
             await fs.writeFile(file, data);

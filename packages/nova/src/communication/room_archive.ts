@@ -47,6 +47,13 @@ export class RoomArchive {
      * which one diverged.
      */
     private recentHashes = new Map<number, string>();
+    /**
+     * Per-entity hashes at the same checkpoints, for incident records:
+     * when the *archive* is the diverged party (it happens — a lagging
+     * client's retime storms provoked it repeatedly), the combined
+     * hash alone cannot name which entity its live world got wrong.
+     */
+    private recentEntityHashes = new Map<number, [string, string][]>();
     private updateInterval?: ReturnType<typeof setInterval>;
 
     constructor(
@@ -76,6 +83,11 @@ export class RoomArchive {
     /** The archive's hash at a checkpoint tick, if still retained. */
     hashAt(tick: number): string | undefined {
         return this.recentHashes.get(tick);
+    }
+
+    /** Per-entity hashes at a retained checkpoint, for incident records. */
+    entityHashesAt(tick: number): [string, string][] | undefined {
+        return this.recentEntityHashes.get(tick);
     }
 
     /** The trailing sim itself, for tests and diagnostics. */
@@ -124,11 +136,14 @@ export class RoomArchive {
                     }
                     world.step();
                     if (this.tick % STATE_HASH_INTERVAL === 0) {
-                        this.recentHashes.set(this.tick, hashWorld(
-                            world, PEER_LOCAL_COMPONENTS).hash);
+                        const hashed = hashWorld(world, PEER_LOCAL_COMPONENTS);
+                        this.recentHashes.set(this.tick, hashed.hash);
+                        this.recentEntityHashes.set(this.tick,
+                            [...hashed.entities]);
                         for (const tick of this.recentHashes.keys()) {
                             if (tick < this.tick - STATE_HASH_INTERVAL * 20) {
                                 this.recentHashes.delete(tick);
+                                this.recentEntityHashes.delete(tick);
                             }
                         }
                     }

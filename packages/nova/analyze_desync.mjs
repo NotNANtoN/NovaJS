@@ -229,6 +229,51 @@ if (desync.gameDataFingerprint && desync.gameDataFingerprint !== fingerprint) {
         + `(${fingerprint}).`);
 }
 
+// Whose side is the log on? Replay to the convicted checkpoint and
+// hash: matching a reporter exonerates them — including the archive's
+// witness vote, which is not automatically right (a lagging client's
+// retime storms provoked live-archive divergence, and the innocent
+// peer was convicted on the archive's word). When the incident
+// recorded the archive's per-entity hashes, a mismatch names the
+// exact entities the live archive got wrong.
+try {
+    const verdictWorld = await truthAt(desync.tick, desync.tick, gameData);
+    const hashed = hashWorld(verdictWorld, PEER_LOCAL_COMPONENTS);
+    console.log(`\nReplay verdict at the convicted checkpoint `
+        + `(tick ${desync.tick}):`);
+    for (const [peer, hash] of desync.hashes) {
+        console.log(`  ${hash === hashed.hash ? 'replay MATCHES'
+            : 'replay differs from'} ${peer} (${hash})`);
+    }
+    if (desync.archiveEntityHashes) {
+        const replayEntities = new Map(hashed.entities);
+        const archiveEntities = new Map(desync.archiveEntityHashes);
+        const lines = [];
+        for (const [id, hash] of replayEntities) {
+            if (archiveEntities.get(id) !== hash) {
+                lines.push(`    ${id}: replay ${hash} vs live archive `
+                    + `${archiveEntities.get(id) ?? 'ABSENT'}`);
+            }
+        }
+        for (const id of archiveEntities.keys()) {
+            if (!replayEntities.has(id)) {
+                lines.push(`    ${id}: only in the live archive`);
+            }
+        }
+        if (lines.length > 0) {
+            console.log(`  the LIVE archive diverged from its own log's `
+                + `replay in ${lines.length} entities:`);
+            for (const line of lines.slice(0, 25)) {
+                console.log(line);
+            }
+        } else {
+            console.log('  live archive per-entity hashes match the replay.');
+        }
+    }
+} catch (error) {
+    console.warn('Replay-verdict pass failed:', error);
+}
+
 for (const clientFile of clientFiles) {
     const dump = await readJson(clientFile);
     console.log(`\n=== ${clientFile} (engine: ${dump.engine}, dumped at `
@@ -241,9 +286,20 @@ for (const clientFile of clientFiles) {
                 entry.detail ?? '');
         }
     }
-    const checkpoints = [...dump.checkpoints].sort((a, b) => a.tick - b.tick);
+    // The incident's log was snapshotted when its conviction recorded:
+    // replaying past that point runs without the records that arrived
+    // later and produces pure artifact diffs. (A dump uploaded for a
+    // later, cooldown-suppressed conviction can reach past it — pair
+    // it with the NEXT incident's log instead.)
+    const allCheckpoints = [...dump.checkpoints].sort((a, b) => a.tick - b.tick);
+    const checkpoints = allCheckpoints.filter(c => c.tick <= desync.tick);
+    if (checkpoints.length < allCheckpoints.length) {
+        console.log(`(${allCheckpoints.length - checkpoints.length} `
+            + `checkpoints past tick ${desync.tick} skipped: beyond this `
+            + `incident's log coverage)`);
+    }
     if (checkpoints.length === 0) {
-        console.log('No checkpoints in the dump.');
+        console.log('No checkpoints within this incident\'s log coverage.');
         continue;
     }
 

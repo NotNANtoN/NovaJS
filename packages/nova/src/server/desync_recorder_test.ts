@@ -47,8 +47,8 @@ describe('DesyncRecorder', () => {
             const [incident] = await fs.readdir(root);
             expect(incident).toContain('nova_130_tick180');
             const files = (await fs.readdir(path.join(root, incident!))).sort();
-            expect(files).toEqual(['baselines.json', 'client_peer-b.json',
-                'desync.json', 'log.json']);
+            expect(files).toEqual(['baselines.json',
+                'client_peer-b_tick180.json', 'desync.json', 'log.json']);
 
             const desync = JSON.parse(await fs.readFile(
                 path.join(root, incident!, 'desync.json'), 'utf8'));
@@ -56,7 +56,8 @@ describe('DesyncRecorder', () => {
             expect(desync.tick).toBe(180);
             expect(desync.convicted).toEqual(['b']);
             const written = JSON.parse(await fs.readFile(
-                path.join(root, incident!, 'client_peer-b.json'), 'utf8'));
+                path.join(root, incident!, 'client_peer-b_tick180.json'),
+                'utf8'));
             expect(written).toEqual(dump);
         });
 
@@ -67,7 +68,7 @@ describe('DesyncRecorder', () => {
         const [dir] = await fs.readdir(root);
         expect(dir).toContain('nova_130_dump');
         expect(await fs.readdir(path.join(root, dir!)))
-            .toEqual(['client_peer-a.json']);
+            .toEqual(['client_peer-a_tick180.json']);
     });
 
     it('records the game data fingerprint with the verdict', async () => {

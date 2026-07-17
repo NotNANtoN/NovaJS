@@ -133,6 +133,8 @@ export const ServerPlugin: Plugin = {
                                 baselines:
                                     archives.get(systemId)?.baselines() ?? [],
                                 log: relays.get(systemId)?.inputLog ?? [],
+                                archiveEntityHashes: archives.get(systemId)
+                                    ?.entityHashesAt(info.tick),
                             });
                         },
                         onDesyncDump: (peerId, dump) => {
