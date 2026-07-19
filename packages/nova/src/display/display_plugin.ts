@@ -11,6 +11,8 @@ import { BeamDisplayPlugin } from "./beam_display_plugin.js";
 import { CloakSoundPlugin } from "./cloak_sound_plugin.js";
 import { ExplosionPlugin } from "./explosion_plugin.js";
 import { FullscreenPlugin } from "./fullscreen_plugin.js";
+import { GateAnimationPlugin } from "./gate_animation_plugin.js";
+import { GateMapPlugin } from "./gate_map_plugin.js";
 import { JumpFadePlugin } from "./jump_fade_plugin.js";
 import { ParticlesPlugin } from "./particles_plugin.js";
 import { PlanetCornersPlugin } from "./planet_corners_plugin.js";
@@ -67,6 +69,8 @@ export const Display: Plugin = {
         await world.addPlugin(BeamDisplayPlugin);
         await world.addPlugin(PlanetCornersPlugin);
         await world.addPlugin(SpaceportPlugin);
+        await world.addPlugin(GateMapPlugin);
+        await world.addPlugin(GateAnimationPlugin);
         await world.addPlugin(StarmapPlugin);
         await world.addPlugin(SoundPlugin);
         await world.addPlugin(CloakSoundPlugin);
@@ -80,6 +84,8 @@ export const Display: Plugin = {
         await world.removePlugin(SoundPlugin);
         await world.removePlugin(SystemEnvironmentPlugin);
         await world.removePlugin(StarmapPlugin);
+        await world.removePlugin(GateAnimationPlugin);
+        await world.removePlugin(GateMapPlugin);
         await world.removePlugin(SpaceportPlugin);
         await world.removePlugin(PlanetCornersPlugin);
         await world.removePlugin(BeamDisplayPlugin);

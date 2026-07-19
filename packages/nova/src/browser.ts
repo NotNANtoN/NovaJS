@@ -40,6 +40,7 @@ import { DisplayAssetDataResource, SimulationGameDataResource } from "./nova_plu
 import { FinishJumpEvent, JumpComponent, JumpRouteComponent } from "./nova_plugin/jump_plugin.js";
 import { GateArrivalComponent, GateTransitEvent } from "./nova_plugin/gate_transit_plugin.js";
 import { GateDestinationResolver } from "./nova_plugin/gate_destination_resolver.js";
+import { LeaveGateMapEvent, OpenGateMapEvent } from "./display/gate_map_plugin.js";
 import { makeShip } from "./nova_plugin/make_ship.js";
 import { makeSystem, SIMULATION_STEP_MS } from "./nova_plugin/make_system.js";
 import { MultiRoomResource, NovaPlugin } from "./nova_plugin/nova_plugin.js";
@@ -94,6 +95,12 @@ let roomSubscriptions: Subscription[] = [];
 let pendingDockedShip: { uuid: string, entity: Entity, planetId: string } | undefined;
 let dockedShip: { uuid: string, entity: Entity, planetId: string } | undefined;
 let pendingLaunchedShip: Entity | undefined;
+// Hypergate docking, mirroring the spaceport dock: the ship is removed from
+// the sim while the hypergate map is open, then either transits (jumpTo) or
+// relaunches at the gate.
+let pendingGateShip: { uuid: string, entity: Entity, planetId: string } | undefined;
+let gateDockedShip: { uuid: string, entity: Entity, planetId: string } | undefined;
+let pendingGateLaunch: Entity | undefined;
 let controls: Controls | undefined;
 const controlsSubject = new Subject<ControlEvent>();
 let autopilot: Autopilot | undefined;
@@ -410,6 +417,9 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
     pendingDockedShip = undefined;
     dockedShip = undefined;
     pendingLaunchedShip = undefined;
+    pendingGateShip = undefined;
+    gateDockedShip = undefined;
+    pendingGateLaunch = undefined;
     syncedPlayerJumpRoute = undefined;
     if (simulationBridge) {
         if (uuid) {
@@ -516,21 +526,33 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
         void newSimulationBridge.setPlayerJumpRoute(data.route);
     });
     newDisplayWorld.events.get(LandEvent).subscribe(({ data, entities }) => {
-        if (pendingDockedShip || dockedShip) {
+        if (pendingDockedShip || dockedShip || pendingGateShip || gateDockedShip) {
             return;
         }
-        // Landing on a hypergate/wormhole transits instead of docking. The sim
-        // handles the transfer (GateDepartureSystem -> GateTransitEvent); the
-        // spaceport must not open. The planet's data is warm here (makeSystem
-        // loaded every planet in this system before the world stepped).
+        // The planet's data is warm here (makeSystem loaded every planet in
+        // this system before the world stepped).
         const landedPlanet = simulationGameData.data.Planet.getCached(data.id);
-        if (landedPlanet?.gate) {
+        // Landing on a WORMHOLE transits immediately: the sim handles the
+        // whole transfer (GateDepartureSystem -> GateTransitEvent) and
+        // nothing docks or opens here.
+        if (landedPlanet?.gate?.kind === 'wormhole') {
             return;
         }
         const playerShipRef = entities?.[0];
         const playerShipUuid = typeof playerShipRef === "string" ? playerShipRef : playerShipRef?.uuid;
         const playerShip = playerShipUuid ? newDisplayWorld.entities.get(playerShipUuid) : undefined;
         if (!playerShipUuid || !playerShip || !playerShip.components.has(PlayerShipSelector)) {
+            return;
+        }
+        // Landing on a HYPERGATE docks the ship (removed from the system like
+        // a spaceport landing) and opens the hypergate map, where the player
+        // picks one of the gate's linked neighbors (or lifts back off).
+        if (landedPlanet?.gate?.kind === 'hypergate') {
+            pendingGateShip = {
+                uuid: playerShipUuid,
+                entity: playerShip,
+                planetId: data.id,
+            };
             return;
         }
         pendingDockedShip = {
@@ -553,13 +575,47 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
         void jumpTo(data);
     });
     newDisplayWorld.events.get(GateTransitEvent).subscribe(({ data }) => {
-        // Hypergate/wormhole transit reuses the jump room-switch. Only the
-        // local player follows it to the destination system (like a jump);
-        // the sim already removed the carried ship this frame.
+        // Wormhole transit reuses the jump room-switch. Only the local
+        // player follows it to the destination system (like a jump); the
+        // sim already removed the carried ship this frame.
         if (!data.entity.components.has(PlayerShipSelector)) {
             return;
         }
         void gateTransit(data);
+    });
+    newDisplayWorld.events.get(LeaveGateMapEvent).subscribe(({ data }) => {
+        // The hypergate map closed. With a destination picked, ride the jump
+        // room switch to it; otherwise lift back off from the origin gate.
+        if (!gateDockedShip) {
+            return;
+        }
+        const { ship, destinationSpob } = data;
+        if (!destinationSpob) {
+            pendingGateLaunch = ship;
+            return;
+        }
+        const docked = gateDockedShip;
+        void (async () => {
+            const to = await gateDestinationResolver.systemOf(destinationSpob);
+            if (!to) {
+                console.warn(`Hypergate destination ${destinationSpob} is not `
+                    + `in any system; lifting off instead.`);
+                pendingGateLaunch = ship;
+                return;
+            }
+            // The arrival marker rides the re-insertion input record to every
+            // peer; GateArrivalSystem in the destination world positions the
+            // ship flying out of the arrival gate. The emergence angle is
+            // null so the DESTINATION gate's own CustSndID (read there)
+            // decides the fly-out direction; randomDraw backs it up when
+            // that angle says "random".
+            ship.components.set(GateArrivalComponent, {
+                destinationSpob,
+                emergenceAngle: null,
+                randomDraw: Math.random(),
+            });
+            await jumpTo({ entity: ship, to, uuid: docked.uuid });
+        })();
     });
 
     // Wait until the current peer set includes the server, without racing
@@ -885,6 +941,29 @@ async function startGame() {
                 }
                 dockedShip = undefined;
                 pendingLaunchedShip = undefined;
+            }
+            // Hypergate docking, mirroring the spaceport dock above: remove
+            // the landed ship from the sim and open the hypergate map.
+            if (pendingGateShip && !gateDockedShip) {
+                await currentBridge.removeEntity(pendingGateShip.uuid);
+                currentDisplayWorld.emit(OpenGateMapEvent, {
+                    gateSpob: pendingGateShip.planetId,
+                    systemId: activeSystemId ?? '',
+                    ship: pendingGateShip.entity,
+                });
+                gateDockedShip = pendingGateShip;
+                pendingGateShip = undefined;
+            }
+            // The map closed without a destination: lift back off from the
+            // gate into the origin system (nothing strands the ship).
+            if (pendingGateLaunch && gateDockedShip) {
+                await currentBridge.addEntity(
+                    gateDockedShip.uuid, pendingGateLaunch);
+                if (pendingGateLaunch.components.has(PlayerShipSelector)) {
+                    (window as any).myShip = pendingGateLaunch;
+                }
+                gateDockedShip = undefined;
+                pendingGateLaunch = undefined;
             }
             // The simulation runs on a fixed timestep, so convert real
             // elapsed time into a whole number of simulation steps and
