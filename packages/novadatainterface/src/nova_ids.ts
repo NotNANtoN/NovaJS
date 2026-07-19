@@ -22,6 +22,8 @@ export function getDefaultNovaIDs(): NovaIDs {
         StatusBar: [],
         System: [],
         Govt: [],
+        Dude: [],
+        Fleet: [],
         TargetCorners: [],
         Weapon: [],
         SoundFile: [],

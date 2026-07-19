@@ -1,6 +1,8 @@
 import * as path from "path";
 import { AsteroidData } from "novadatainterface/asteroid_data";
 import { ExplosionData } from "novadatainterface/explosion_data";
+import { DudeData } from "novadatainterface/dude_data";
+import { FleetData } from "novadatainterface/fleet_data";
 import { GameDataInterface } from "novadatainterface/game_data_interface";
 import { Gettable } from "novadatainterface/gettable";
 import { GovtData } from "novadatainterface/govt_data";
@@ -19,7 +21,9 @@ import { TargetCornersData } from "novadatainterface/target_corners_data";
 import { WeaponData } from "novadatainterface/weapon_data";
 import { IDSpaceHandler } from "./id_space_handler.js";
 import { AsteroidParse } from "./parsers/asteroid_parse.js";
+import { DudeParse } from "./parsers/dude_parse.js";
 import { ExplosionParse } from "./parsers/explosion_parse.js";
+import { FleetParse } from "./parsers/fleet_parse.js";
 import { GovtParse } from "./parsers/govt_parse.js";
 import { OutfitParse } from "./parsers/outfit_parse.js";
 import { PictImageMulti, PictImageMultiParse } from "./parsers/pict_parse.js";
@@ -34,6 +38,8 @@ import { TargetCornersParse } from "./parsers/target_corners_parse.js";
 import { WeaponParse } from "./parsers/weapon_parse.js";
 import { BoomResource } from "./resource_parsers/boom_resource.js";
 import { BaseResource } from "./resource_parsers/nova_resource_base.js";
+import { DudeResource } from "./resource_parsers/dude_resource.js";
+import { FletResource } from "./resource_parsers/flet_resource.js";
 import { GovtResource } from "./resource_parsers/govt_resource.js";
 import { OutfResource } from "./resource_parsers/outf_resource.js";
 import { PictResource } from "./resource_parsers/pict_resource.js";
@@ -174,6 +180,8 @@ export class NovaParse implements GameDataInterface {
             Planet: this.buildIDsForResource(idSpace.spöb),
             System: this.buildIDsForResource(idSpace.sÿst),
             Govt: this.buildIDsForResource(idSpace.gövt),
+            Dude: this.buildIDsForResource(idSpace.düde),
+            Fleet: this.buildIDsForResource(idSpace.flët),
             TargetCorners: [], // TODO: parse these
             SpriteSheet: this.buildIDsForResource(idSpace.rlëD),
             SpriteSheetImage: this.buildIDsForResource(idSpace.rlëD),
@@ -200,6 +208,8 @@ export class NovaParse implements GameDataInterface {
             Planet: this.makeGettable<SpobResource, PlanetData>(NovaResourceType.spöb, PlanetParse),
             System: this.makeGettable<SystResource, SystemData>(NovaResourceType.sÿst, SystemParse),
             Govt: this.makeGettable<GovtResource, GovtData>(NovaResourceType.gövt, GovtParse),
+            Dude: this.makeGettable<DudeResource, DudeData>(NovaResourceType.düde, DudeParse),
+            Fleet: this.makeGettable<FletResource, FleetData>(NovaResourceType.flët, FleetParse),
             TargetCorners: this.makeGettable<BaseResource, TargetCornersData>(NovaResourceType.cicn, TargetCornersParse),
             SpriteSheet: this.spriteSheetDataGettable,
             SpriteSheetImage: this.spriteSheetImageGettable,

@@ -234,6 +234,8 @@ export async function ShipParse(ship: ShipResource,
         // 64-bit flag sets as JSON-safe hex strings.
         contribute: "0x" + ship.contribute.toString(16),
         require: "0x" + ship.require.toString(16),
+        strength: ship.strength,
+        inherentAI: ship.inherentAI,
         ...base
     }
 }

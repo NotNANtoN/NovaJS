@@ -3,6 +3,8 @@ import { getDefaultCicnData } from "./cicn_data.js";
 import { getDefaultCicnImageData } from "./cicn_image.js";
 import { getDefaultSpriteSheetImage } from "./default_sprite_sheet_image.js";
 import { getDefaultExplosionData } from "./explosion_data.js";
+import { getDefaultDudeData } from "./dude_data.js";
+import { getDefaultFleetData } from "./fleet_data.js";
 import { getDefaultGovtData } from "./govt_data.js";
 import { getDefaultOutfitData } from "./outfit_data.js";
 import { getDefaultPictData } from "./pict_data.js";
@@ -31,6 +33,8 @@ export const Defaults = {
     get Planet() { return getDefaultPlanetData() },
     get System() { return getDefaultSystemData() },
     get Govt() { return getDefaultGovtData() },
+    get Dude() { return getDefaultDudeData() },
+    get Fleet() { return getDefaultFleetData() },
     get TargetCorners() { return getDefaultTargetCornersData() },
     get SpriteSheet() { return getDefaultSpriteSheetData() },
     get SpriteSheetImage() { return getDefaultSpriteSheetImage() },
