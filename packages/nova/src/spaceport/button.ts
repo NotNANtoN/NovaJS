@@ -41,6 +41,9 @@ export class Button {
     constructor(private displayAssets: DisplayAssetDataInterface, text: string,
         width?: number, position?: { x: number, y: number },
         private buttonIds = BUTTON_IDS) {
+        // Named for scene-graph queries (debugging and headless UI
+        // driving); updated captions keep the original name.
+        this.container.name = `Button:${text}`;
         this.container.position.x = position?.x ?? 0;
         this.container.position.y = position?.y ?? 0;
 
@@ -99,6 +102,14 @@ export class Button {
             this.states.set(name, stateContainer);
         }
         this.container.addChild(this.text);
+    }
+
+    /**
+     * Replaces the button caption (e.g. a mïsn's custom accept/refuse
+     * label). The button keeps its constructed width.
+     */
+    setLabel(label: string) {
+        this.text.text = label;
     }
 
     set state(state: string) {

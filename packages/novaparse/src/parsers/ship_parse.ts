@@ -240,6 +240,14 @@ export async function ShipParse(ship: ShipResource,
         require: "0x" + ship.require.toString(16),
         strength: ship.strength,
         inherentAI: ship.inherentAI,
+        price: ship.cost,
+        techLevel: ship.techLevel,
+        hireRandom: ship.hireRandom,
+        escortType: ship.escortType,
+        shortName: ship.shortName,
+        // The hire-escort pilot description parallels the shipyard
+        // description range: dësc 14000 + (shïp local id - 128).
+        pilotDesc: ship.idSpace.dësc[ship.id - 128 + 14000]?.text ?? "",
         ...base
     }
 }

@@ -6,6 +6,7 @@ import { GameDataInterface } from "./game_data_interface.js";
 import { getDefaultDudeData } from "./dude_data.js";
 import { getDefaultFleetData } from "./fleet_data.js";
 import { getDefaultGovtData } from "./govt_data.js";
+import { getDefaultJunkData } from "./junk_data.js";
 import { getDefaultMissionData } from "./mission_data.js";
 import { getDefaultPlayerStartData } from "./player_start_data.js";
 import { Gettable } from "./gettable.js";
@@ -76,6 +77,7 @@ export class MockGameData implements GameDataInterface {
         Govt: new MockGettable(getDefaultGovtData()),
         Dude: new MockGettable(getDefaultDudeData()),
         Fleet: new MockGettable(getDefaultFleetData()),
+        Junk: new MockGettable(getDefaultJunkData()),
         Mission: new MockGettable(getDefaultMissionData()),
         Cron: new MockGettable(getDefaultCronData()),
         PlayerStart: new MockGettable(getDefaultPlayerStartData()),

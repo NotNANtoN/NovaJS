@@ -71,5 +71,8 @@ export async function GovtParse(govt: GovtResource,
         shipColor: govt.shipColor,
         require: govt.require.toString(),
         voiceType: govt.voiceType,
+        newsPic: govt.newsPic >= 128
+            ? govt.idSpace.PICT[govt.newsPic]?.globalID ?? null
+            : null,
     };
 }

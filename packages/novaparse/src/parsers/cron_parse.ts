@@ -32,5 +32,29 @@ export async function CronParse(cron: CronResource,
         onEnd: cron.onEnd,
         contribute: cron.contribute.toString(),
         require: cron.require.toString(),
+        indNews: newsStrings(cron, cron.indNewsStr),
+        govtNews: cron.govtNews.flatMap(({ govt, newsStr }) => {
+            const govtResource = cron.idSpace.gövt[govt];
+            if (!govtResource) {
+                notFoundFunction(`No gövt ${govt} for crön ${base.id} news`);
+                return [];
+            }
+            const strings = newsStrings(cron, newsStr);
+            return strings.length > 0
+                ? [{ govt: govtResource.globalID, strings }] : [];
+        }),
     };
+}
+
+/**
+ * Resolves a STR# id to its (non-empty) strings. The Bible allows a
+ * positive-but-missing STR# id (used to suppress independent news),
+ * which comes out here as an empty list.
+ */
+function newsStrings(cron: CronResource, strId: number): string[] {
+    if (strId <= 0) {
+        return [];
+    }
+    const list = cron.idSpace["STR#"][strId];
+    return list?.strings.filter(s => s.trim().length > 0) ?? [];
 }

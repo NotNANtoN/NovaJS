@@ -4,9 +4,6 @@ import { BaseData, getDefaultBaseData } from "./base_data.js";
  * A crön: a timed, invisible event that manipulates control bits at
  * random or fixed points as the game date advances. Semantics follow
  * the EVN Bible's crön section.
- *
- * The govt "local news" STR# pairs are not carried: news display is
- * not implemented, and they can be plumbed when it is.
  */
 export interface CronData extends BaseData {
     /** First day (1-31) the event can activate; 0/-1 any. */
@@ -49,6 +46,22 @@ export interface CronData extends BaseData {
      * to activate, as a decimal string.
      */
     require: string;
+    /**
+     * Independent news: the strings of the crön's IndNewsStr STR#
+     * resource, one of which shows in the bar news dialog while the
+     * event is active on stellars with no matching local news.
+     * Resolved from the STR# at parse time so consumers don't need a
+     * string-list data type.
+     */
+    indNews: string[];
+    /**
+     * Local news: up to four govt-specific news string lists
+     * (NewsGovt/GovtNewsStr pairs), keyed by the gövt's global id.
+     * Shown while the event is active on stellars of that government
+     * (and, in the original, its allies). Local news beats independent
+     * news.
+     */
+    govtNews: { govt: string, strings: string[] }[];
 }
 
 export function getDefaultCronData(): CronData {
@@ -71,5 +84,7 @@ export function getDefaultCronData(): CronData {
         onEnd: "",
         contribute: "0",
         require: "0",
+        indNews: [],
+        govtNews: [],
     };
 }

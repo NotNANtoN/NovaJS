@@ -75,6 +75,36 @@ export interface ShipData extends SpaceObjectData {
      * when a düde with AIType 0 spawns this ship.
      */
     inherentAI: number;
+    /** Purchase price in credits (shïp Cost). */
+    price: number;
+    /**
+     * Tech level: the ship appears at stellars whose TechLevel is at
+     * least this (or whose SpecialTech matches it exactly).
+     */
+    techLevel: number;
+    /**
+     * Percent chance per day that this ship is available for hire as
+     * an escort in the bar (shïp HireRandom); 0 = never for hire.
+     */
+    hireRandom: number;
+    /**
+     * Which escort-menu category the ship belongs to (shïp
+     * EscortType): -1 auto, 0 fighter, 1 medium, 2 warship,
+     * 3 freighter.
+     */
+    escortType: number;
+    /**
+     * The short name shown in shipyard-style grids (shïp ShortName).
+     * "\n" splits it into subtitle lines, e.g. "Viper\n- Fighter -".
+     * Empty when unset; fall back to the resource name.
+     */
+    shortName: string;
+    /**
+     * The escort pilot description shown in the hire-escort dialog
+     * (dësc id 14000 + shïp local id - 128); empty when the ship has
+     * none.
+     */
+    pilotDesc: string;
 };
 
 export function getDefaultShipData(): ShipData {
@@ -93,5 +123,11 @@ export function getDefaultShipData(): ShipData {
         require: "0x0",
         strength: 0,
         inherentAI: 1,
+        price: 0,
+        techLevel: 0,
+        hireRandom: 0,
+        escortType: -1,
+        shortName: "",
+        pilotDesc: "",
     }
 }

@@ -2,7 +2,7 @@ import { Animation, getDefaultAnimationImage, getDefaultExitPoints } from "novad
 import { BaseData } from "novadatainterface/base_data";
 import { NovaDataType } from "novadatainterface/nova_data_interface";
 import { getDefaultPictData } from "novadatainterface/pict_data";
-import { GateData, PlanetData } from "novadatainterface/planet_data";
+import { GateData, PlanetData, TradeTier } from "novadatainterface/planet_data";
 import { DamageType } from "novadatainterface/weapon_data";
 import { BLEND_MODES } from "novadatainterface/blend_modes";
 import { SpobResource } from "../resource_parsers/spob_resource.js";
@@ -101,6 +101,25 @@ export async function PlanetParse(spob: SpobResource, notFoundFunction: (m: stri
         govt = spob.idSpace.gövt[spob.government]?.globalID ?? null;
     }
 
+    // The upper spöb Flags nibbles encode a price tier per standard
+    // commodity: 0x1 low, 0x2 medium, 0x4 high, 0 = won't trade
+    // (EVN Bible p. 59). Nibble order (high to low): food, industrial,
+    // medical, luxury, metal, equipment.
+    const tierOf = (nibble: number): TradeTier | null => {
+        switch (nibble & 0x7) {
+            case 0x1: return "low";
+            case 0x2: return "med";
+            case 0x4: return "high";
+            default: return null;
+        }
+    };
+    const tradeTiers = [28, 24, 20, 16, 12, 8].map(
+        shift => tierOf(spob.flags >>> shift));
+
+    // The bar description lives at dësc 10000 + (spöb local id - 128),
+    // paralleling the shipyard (13000+) and pilot (14000+) ranges.
+    const barDesc = spob.idSpace.dësc[spob.id - 128 + 10000]?.text ?? "";
+
     return {
         ...base,
         landingDesc: desc,
@@ -118,6 +137,8 @@ export async function PlanetParse(spob: SpobResource, notFoundFunction: (m: stri
             landOnlyIfDestroyed: Boolean(spob.flags & 0x80),
         },
         techLevel: spob.techLevel,
+        tradeTiers,
+        barDesc,
         vulnerableTo: <Array<DamageType>>["planetBuster"],
         physics: {
             shield: 1000,

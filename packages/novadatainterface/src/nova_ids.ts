@@ -24,6 +24,7 @@ export function getDefaultNovaIDs(): NovaIDs {
         Govt: [],
         Dude: [],
         Fleet: [],
+        Junk: [],
         Mission: [],
         Cron: [],
         PlayerStart: [],
