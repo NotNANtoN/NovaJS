@@ -1,6 +1,7 @@
 import { BaseResource } from "./nova_resource_base.js";
 import { BoomResource } from "./boom_resource.js";
 import { CharResource } from "./char_resource.js";
+import { CicnResource } from "./cicn_resource.js";
 import { ColrResource } from "./colr_resource.js";
 import { CronResource } from "./cron_resource.js";
 import { DescResource } from "./desc_resource.js";
@@ -80,13 +81,13 @@ type ResList<T> = {
 // };
 
 
-// Types without dedicated parsers: cicn, DITL, DLOG (classic Mac UI
-// resources) and rlë8 (8-bit sprites; unused by the game).
+// Types without dedicated parsers: DITL, DLOG (classic Mac UI resources) and
+// rlë8 (8-bit sprites; unused by the game).
 type NovaResources = {
     [index: string]: ResList<BaseResource>;
     bööm: ResList<BoomResource>;
     chär: ResList<CharResource>;
-    cicn: ResList<BaseResource>;
+    cicn: ResList<CicnResource>;
     cölr: ResList<ColrResource>;
     crön: ResList<CronResource>;
     dësc: ResList<DescResource>;

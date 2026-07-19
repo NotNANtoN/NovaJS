@@ -1,5 +1,6 @@
 import { Resource } from "resource_fork";
 import { BaseResource } from "./nova_resource_base.js";
+import { parseColorTable, readIndexedPixel } from "./quickdraw.js";
 import { NovaResources } from "./resource_holder_base.js";
 
 /**
@@ -79,15 +80,10 @@ export class PpatResource extends BaseResource {
         const colors = parseColorTable(d, pmTable, pixelSize);
 
         this.pixels = new Uint8ClampedArray(this.width * this.height * 4);
-        const pixelsPerByte = 8 / pixelSize;
-        const mask = (1 << pixelSize) - 1;
         for (let y = 0; y < this.height; y++) {
             for (let x = 0; x < this.width; x++) {
-                const byte = d.getUint8(
-                    patData + y * rowBytes + Math.floor(x / pixelsPerByte));
-                const shift = 8 - pixelSize * (x % pixelsPerByte + 1);
-                const index = (byte >> shift) & mask;
-                const color = colors[index] ?? [0, 0, 0];
+                const color = readIndexedPixel(d, patData, rowBytes, x, y,
+                    pixelSize, colors);
                 const out = (y * this.width + x) * 4;
                 this.pixels[out] = color[0];
                 this.pixels[out + 1] = color[1];
@@ -96,30 +92,6 @@ export class PpatResource extends BaseResource {
             }
         }
     }
-}
-
-type RGB = [number, number, number];
-
-/** Reads a QuickDraw ColorTable into a pixel-value -> RGB lookup. */
-function parseColorTable(d: DataView, pmTable: number,
-    pixelSize: number): RGB[] {
-    const ctFlags = d.getUint16(pmTable + 4);
-    const ctSize = d.getInt16(pmTable + 6);
-    // When the high flag bit is set the entries' value fields are garbage
-    // and entries apply in order (Inside Macintosh: "indexed device" tables).
-    const sequentialValues = (ctFlags & 0x8000) !== 0;
-
-    const colors: RGB[] = [];
-    for (let i = 0; i <= ctSize; i++) {
-        const entry = pmTable + 8 + i * 8;
-        const value = sequentialValues ? i : d.getUint16(entry);
-        colors[value & ((1 << pixelSize) - 1)] = [
-            d.getUint8(entry + 2), // High byte of each 16-bit component.
-            d.getUint8(entry + 4),
-            d.getUint8(entry + 6),
-        ];
-    }
-    return colors;
 }
 
 /** The old-style 8x8 1-bit pattern at offset 20: set bits are black. */
