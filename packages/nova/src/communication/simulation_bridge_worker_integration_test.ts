@@ -27,11 +27,12 @@ describe("SimulationBridge worker integration", () => {
 
         const client = makeWorkerThreadSimulationBridgeClient(worker, serializer);
         try {
-            // Planets and the asteroid field are loaded before the
-            // world ever steps, so the initial frame already contains
-            // them.
+            // Planets, the asteroid field, and the NPC population
+            // (with its spawner) are loaded before the world ever
+            // steps, so the initial frame already contains them.
             const isSystemFurniture = (uuid: string) =>
-                uuid.includes('planet') || uuid.startsWith('asteroid');
+                uuid.includes('planet') || uuid.startsWith('asteroid')
+                || uuid.startsWith('npc');
             const initialFrame = await client.snapshot();
             for (const [uuid] of initialFrame.added) {
                 expect(isSystemFurniture(uuid)).withContext(uuid).toBeTrue();

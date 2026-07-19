@@ -161,11 +161,11 @@ describe('entity data loader', () => {
 
         // A world that never staged this entity has a cold entry —
         // the control that makes the warm assertion meaningful.
-        const coldWorld = await makeSystem(systemId, gameData, 'node');
+        const coldWorld = await makeSystem(systemId, gameData, 'node', { npcs: false });
         expect(coldWorld.resources.get(WeaponEntries)!.getCached(weaponId!))
             .toBeUndefined();
 
-        const world = await makeSystem(systemId, gameData, 'node');
+        const world = await makeSystem(systemId, gameData, 'node', { npcs: false });
         const ship = makeShip(shipData);
         ship.components.set(OutfitsStateComponent,
             new Map([[outfitId!, { count: 1 }]]));

@@ -29,7 +29,7 @@ async function makeCloakWorld() {
     const gameData = await getIntegrationGameData();
     const ids = await gameData.ids;
     const systemId = [...ids.System].sort()[0]!;
-    const world = await makeSystem(systemId, gameData, "worker");
+    const world = await makeSystem(systemId, gameData, "worker", { npcs: false });
 
     const shipData = await gameData.data.Ship.get(CLOAK_SHIP_ID);
     const ship = makeShip(shipData);

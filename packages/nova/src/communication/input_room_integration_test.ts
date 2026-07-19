@@ -45,13 +45,19 @@ describe('Input-driven rooms', () => {
         relay.close();
     });
 
+    // Most specs here are choreography-sensitive (pinned systems,
+    // marginal dogfights), so peers default to npcs: false — the same
+    // adaptation as pinning the bay-escort spec to an asteroid-free
+    // system. Every world in a room (peers AND the archive) must agree
+    // on the flag: it is genesis state. The NPC-traffic spec opts in.
     async function makePeer(peerId: string, systemId?: string,
         options?: ConstructorParameters<typeof SimulationBridgeHost>[2],
-        HostClass: typeof SimulationBridgeHost = SimulationBridgeHost) {
+        HostClass: typeof SimulationBridgeHost = SimulationBridgeHost,
+        npcs = false) {
         const gameData = await getIntegrationGameData();
         const ids = await gameData.ids;
         systemId ??= [...ids.System].sort()[0]!;
-        const world = await makeSystem(systemId, gameData, 'worker');
+        const world = await makeSystem(systemId, gameData, 'worker', { npcs });
         world.resources.set(CommunicatorResource, comms.get(peerId)!);
         const host = new HostClass(world, gameData, options);
         const serializer = world.resources.get(
@@ -214,7 +220,7 @@ describe('Input-driven rooms', () => {
         const makeArchiveWorld = async () => {
             const gameData = await getIntegrationGameData();
             const ids = await gameData.ids;
-            return makeSystem([...ids.System].sort()[0]!, gameData, 'node');
+            return makeSystem([...ids.System].sort()[0]!, gameData, 'node', { npcs: false });
         };
         archive = new RoomArchive(relay, makeArchiveWorld,
             { intervalTicks: 30, autoUpdate: false });
@@ -287,7 +293,7 @@ describe('Input-driven rooms', () => {
         const makeArchiveWorld = async () => {
             const gameData = await getIntegrationGameData();
             const ids = await gameData.ids;
-            return makeSystem([...ids.System].sort()[0]!, gameData, 'node');
+            return makeSystem([...ids.System].sort()[0]!, gameData, 'node', { npcs: false });
         };
         archive = new RoomArchive(relay, makeArchiveWorld,
             { intervalTicks: 30, autoUpdate: false });
@@ -340,7 +346,7 @@ describe('Input-driven rooms', () => {
         const makeArchiveWorld = async () => {
             const gameData = await getIntegrationGameData();
             const ids = await gameData.ids;
-            return makeSystem([...ids.System].sort()[0]!, gameData, 'node');
+            return makeSystem([...ids.System].sort()[0]!, gameData, 'node', { npcs: false });
         };
         archive = new RoomArchive(relay, makeArchiveWorld,
             { intervalTicks: 60, autoUpdate: false });
@@ -414,7 +420,7 @@ describe('Input-driven rooms', () => {
         });
         const makeArchiveWorld = async () => {
             const gameData = await getIntegrationGameData();
-            return makeSystem('nova:226', gameData, 'node');
+            return makeSystem('nova:226', gameData, 'node', { npcs: false });
         };
         archive = new RoomArchive(relay, makeArchiveWorld,
             { intervalTicks: 60, autoUpdate: false });
@@ -622,6 +628,79 @@ describe('Input-driven rooms', () => {
         // Every piece of simulation state must have an explicit
         // snapshot and wire strategy: a silently skipped component is
         // exactly how the escort desync got out of CI.
+        const { SnapshotPoliciesResource } =
+            await import('nova_ecs/plugins/snapshot_plugin');
+        for (const world of [peerA.world, peerB.world, archive.archiveWorld!]) {
+            const policies = world.resources.get(SnapshotPoliciesResource)!;
+            expect([...policies.unhandled]).toEqual([]);
+            expect([...policies.unhandledWire]).toEqual([]);
+        }
+    }, 240_000);
+
+    it('NPC traffic stays in lockstep across peers and the archive', async () => {
+        // The new deterministic NPC population (npc_spawn_plugin /
+        // npc_ai_plugin): every world in the room — both peers and the
+        // node archive — must genesis the same ships and simulate
+        // their AI identically, including decisions, steering,
+        // departures, and respawns.
+        relay.close();
+        let archive: RoomArchive | undefined;
+        relay = new RollbackRelay(comms.get('server')!, {
+            autoClock: false,
+            baseline: () => archive?.latest,
+            referenceHash: tick => archive?.hashAt(tick),
+        });
+        const makeArchiveWorld = async () => {
+            const gameData = await getIntegrationGameData();
+            return makeSystem('nova:226', gameData, 'node', { npcs: true });
+        };
+        archive = new RoomArchive(relay, makeArchiveWorld,
+            { intervalTicks: 60, autoUpdate: false });
+
+        // nova:226 (Ver'ashan): no asteroids, AvgShips 5.
+        const peerA = await makePeer('a', 'nova:226', undefined,
+            SimulationBridgeHost, true);
+        const peerB = await makePeer('b', 'nova:226', undefined,
+            SimulationBridgeHost, true);
+        await peerA.client.addEntity('ship a',
+            await makePeerShip('a', peerA.world));
+
+        const countNpcs = (world: World) => [...world.entities.values()]
+            .filter(entity => [...entity.components.keys()]
+                .some(component => component.name === 'NpcComponent'))
+            .length;
+        expect(countNpcs(peerA.world)).toBeGreaterThan(0);
+        expect(countNpcs(peerB.world)).toBe(countNpcs(peerA.world));
+
+        // Long enough for several NPC decision intervals and some
+        // planet traffic.
+        for (let tick = 1; tick <= 600; tick++) {
+            peerA.host.step();
+            peerB.host.step();
+            relay.advanceTicks(1);
+            if (tick % 30 === 0) {
+                await archive.update();
+            }
+            await new Promise(resolve => setImmediate(resolve));
+        }
+        await archive.update();
+
+        expect(countNpcs(peerB.world)).toBe(countNpcs(peerA.world));
+        expect(countNpcs(archive.archiveWorld!)).toBe(countNpcs(peerA.world));
+
+        const hashA = hashWorld(peerA.world, PEER_LOCAL_COMPONENTS);
+        const hashB = hashWorld(peerB.world, PEER_LOCAL_COMPONENTS);
+        const hashArchive = hashWorld(
+            archive.archiveWorld!, PEER_LOCAL_COMPONENTS);
+        expect(hashB.hash).toEqual(hashA.hash);
+        if (hashArchive.hash !== hashA.hash) {
+            const { diffWorldHashes } = await import('nova_ecs/plugins/world_hash');
+            fail('Archive diverged: '
+                + diffWorldHashes(hashArchive, hashA).slice(0, 10).join('; '));
+        }
+
+        // NPC state must have full snapshot/wire coverage (the same
+        // guarantee the bay-escort spec enforces).
         const { SnapshotPoliciesResource } =
             await import('nova_ecs/plugins/snapshot_plugin');
         for (const world of [peerA.world, peerB.world, archive.archiveWorld!]) {

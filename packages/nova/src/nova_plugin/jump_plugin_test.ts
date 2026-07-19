@@ -36,7 +36,7 @@ async function makeJumpHarness() {
     const gameData = await getIntegrationGameData();
     const ids = await gameData.ids;
     const { originId, destinationId } = await findLinkedSystems();
-    const world = await makeSystem(originId, gameData);
+    const world = await makeSystem(originId, gameData, undefined, { npcs: false });
 
     // Pick a ship with default jump behavior (inertial, must slow
     // down to jump) so the full sequence is exercised.
@@ -254,7 +254,7 @@ describe('jump sequence', () => {
         expect(jumpedFuel.current).toEqual(initialFuel - FUEL_PER_JUMP);
 
         // Arrival doesn't charge again.
-        const destWorld = await makeSystem(destinationId, gameData);
+        const destWorld = await makeSystem(destinationId, gameData, undefined, { npcs: false });
         const jumpedShip = finishJump!.entity;
         await completeEntity(destWorld, jumpedShip);
         destWorld.entities.set(SHIP_UUID, jumpedShip);
@@ -349,7 +349,7 @@ describe('jump sequence', () => {
 
         // Insert the ship into the destination system, as the
         // simulation bridge does after the room join completes.
-        const destWorld = await makeSystem(destinationId, gameData);
+        const destWorld = await makeSystem(destinationId, gameData, undefined, { npcs: false });
         const jumpedShip = finishJump!.entity;
         await completeEntity(destWorld, jumpedShip);
         destWorld.entities.set(SHIP_UUID, jumpedShip);
@@ -431,7 +431,7 @@ describe('jump sequence', () => {
         pressHyperjump(world);
         stepUntil(world, () => finishJump !== undefined);
 
-        const destWorld = await makeSystem(destinationId, gameData);
+        const destWorld = await makeSystem(destinationId, gameData, undefined, { npcs: false });
         const jumpedShip = finishJump!.entity;
         await completeEntity(destWorld, jumpedShip);
         destWorld.entities.set(SHIP_UUID, jumpedShip);

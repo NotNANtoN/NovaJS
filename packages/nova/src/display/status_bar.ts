@@ -17,6 +17,8 @@ import { Subject } from "rxjs";
 import { DisplayAssetDataInterface } from "../client/gamedata/display_asset_data.js";
 import { DisplayAssetDataResource, SimulationGameDataResource } from "../nova_plugin/game_data_resource.js";
 import { CloakActiveComponent, CloakComponent, CloakScannerComponent } from "../nova_plugin/cloak_plugin.js";
+import { GovtComponent } from "../nova_plugin/govt_component.js";
+import { govtDisposition } from "../nova_plugin/govt_disposition.js";
 import { ArmorComponent, FuelComponent, FUEL_PER_JUMP, ShieldComponent } from "../nova_plugin/health_plugin.js";
 import { OutfitsStateComponent } from "../nova_plugin/outfit_plugin.js";
 import { PlanetDataComponent } from "../nova_plugin/planet_plugin.js";
@@ -218,7 +220,7 @@ class StatusBar {
     }
 
     drawRadar(source: Position,
-        ships: Iterable<readonly [string, MovementState, ...unknown[]]>,
+        ships: Iterable<readonly [string, MovementState, number | undefined]>,
         planets: Iterable<readonly [string, MovementState, PlanetData]>) {
         this.radar.clear();
 
@@ -233,9 +235,9 @@ class StatusBar {
 
         this.drawDot(source, this.statusBarData.colors.brightRadar, source);
 
-        for (const [, { position }] of ships) {
-            const color = this.statusBarData.colors.dimRadar;
-            this.drawDot(position, color, source);
+        for (const [, { position }, color] of ships) {
+            this.drawDot(position,
+                color ?? this.statusBarData.colors.dimRadar, source);
         }
 
         for (const [, { position }] of planets) {
@@ -414,14 +416,24 @@ const StatusBarResize = new System({
 });
 
 const RadarTime = new Component<{ lastTime: number }>('RadarTime');
+
+/** Radar blip colors by political disposition toward the player.
+ * NOTE: in EV Nova this coloring is the IFF outfit's feature; here it
+ * is always on. When the IFF outfit lands, gate the colored path on
+ * owning it and fall back to dimRadar for everyone. */
+const RADAR_HOSTILE_COLOR = 0xff4040;
+const RADAR_ALLY_COLOR = 0x40ff40;
+
 const DrawRadar = new System({
     name: 'DrawRadar',
     args: [Optional(RadarTime), TimeResource, StatusBarResource, MovementStateComponent,
     new Query([UUID, MovementStateComponent, ShipDataComponent,
-        Optional(CloakActiveComponent), Optional(CloakComponent)] as const),
+        Optional(CloakActiveComponent), Optional(CloakComponent),
+        Optional(GovtComponent)] as const),
     new Query([UUID, MovementStateComponent, PlanetDataComponent] as const),
-        GetEntity, PlayerShipSelector] as const,
-    step(radarTime, { time }, statusBar, { position }, ships, planets, entity) {
+        GetEntity, SimulationGameDataResource, PlayerShipSelector] as const,
+    step(radarTime, { time }, statusBar, { position }, ships, planets, entity,
+        gameData) {
         if (!radarTime) {
             radarTime = { lastTime: 0 };
             entity.components.set(RadarTime, radarTime);
@@ -435,9 +447,26 @@ const DrawRadar = new System({
             // from `source`, so it always shows.
             const scanner = entity.components.get(CloakScannerComponent);
             const revealsCloaked = scanner?.revealsOnRadar === true;
-            const visibleShips = revealsCloaked ? ships : ships.filter(
-                ([, , , cloakActive, cloak]) =>
-                    !(cloakActive?.active && (cloak?.hidesFromRadar ?? true)));
+            const playerGovtId = entity.components.get(GovtComponent)?.id;
+            // Display-side getCached: a cold cache just means blips
+            // stay dim for a tick or two while the govt data loads.
+            const playerGovt = playerGovtId
+                ? gameData.data.Govt.getCached(playerGovtId) : undefined;
+            const visibleShips = ships.filter(
+                ([, , , cloakActive, cloak]) => revealsCloaked ||
+                    !(cloakActive?.active && (cloak?.hidesFromRadar ?? true)))
+                .map(([uuid, movement, , , , govt]) => {
+                    // Disposition is evaluated from the NPC's side:
+                    // "would this ship attack me?"
+                    const govtData = govt
+                        ? gameData.data.Govt.getCached(govt.id) : undefined;
+                    const disposition = govtDisposition(govtData, playerGovt);
+                    const color = disposition === 'enemy'
+                        ? RADAR_HOSTILE_COLOR
+                        : disposition === 'ally' && govtData
+                            ? RADAR_ALLY_COLOR : undefined;
+                    return [uuid, movement, color] as const;
+                });
             statusBar.drawRadar(position, visibleShips, planets);
             radarTime.lastTime = time;
         }

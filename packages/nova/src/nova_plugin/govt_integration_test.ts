@@ -57,7 +57,7 @@ describe('GovtData against real Nova data', () => {
 describe('inherent jamming from a ship\'s government (real data)', () => {
     it("folds a Federation ship's InhJam into a jammer-less ship", async () => {
         const gameData = await getIntegrationGameData();
-        const system = await makeSystem('nova:130', gameData);
+        const system = await makeSystem('nova:130', gameData, undefined, { npcs: false });
 
         // nova:128 (Shuttle) carries no jamming outfits, so its jamming comes
         // entirely from its government. The Federation (nova:128) has
@@ -73,7 +73,7 @@ describe('inherent jamming from a ship\'s government (real data)', () => {
 
     it("takes the max of outfit jamming and a strong govt's InhJam", async () => {
         const gameData = await getIntegrationGameData();
-        const system = await makeSystem('nova:130', gameData);
+        const system = await makeSystem('nova:130', gameData, undefined, { npcs: false });
 
         // nova:133 (Starbridge) stocks jammers summing to [20, 15, 0, 0].
         // The Vell-os (nova:136) have InhJam [50, 50, 35, 20], which dominates
@@ -89,7 +89,7 @@ describe('inherent jamming from a ship\'s government (real data)', () => {
 
     it("leaves a ship's outfit jamming intact where it out-jams its govt", async () => {
         const gameData = await getIntegrationGameData();
-        const system = await makeSystem('nova:130', gameData);
+        const system = await makeSystem('nova:130', gameData, undefined, { npcs: false });
 
         // nova:133 (Starbridge) jammers -> [20, 15, 0, 0]; the Federation
         // (nova:128) InhJam is [7, 5, 0, 0], weaker on every type, so the
@@ -105,7 +105,7 @@ describe('inherent jamming from a ship\'s government (real data)', () => {
 
     it('leaves a ship with no GovtComponent unchanged (outfit-only)', async () => {
         const gameData = await getIntegrationGameData();
-        const system = await makeSystem('nova:130', gameData);
+        const system = await makeSystem('nova:130', gameData, undefined, { npcs: false });
 
         // Same Starbridge, but with no government: jamming stays outfit-only.
         const shipData = await gameData.data.Ship.get('nova:133');

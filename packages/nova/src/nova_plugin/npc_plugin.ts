@@ -19,6 +19,39 @@ import { TargetComponent } from "./target_component.js";
 import { WeaponsStateComponent } from "./weapons_state.js";
 import { SimulationGameDataResource } from "./game_data_resource.js";
 
+/**
+ * ============================================================================
+ * LEGACY AI PRIMITIVES — migration status
+ * ============================================================================
+ *
+ * This module predates rollback multiplayer: its components are
+ * excluded from the (state-sync era) multiplayer component set and its
+ * ChooseRandomTarget behavior was designed to run on the owner's sim
+ * only. In the input-driven shared simulation every peer runs these
+ * systems on every entity that carries the components, so in practice
+ * they already execute deterministically-in-sim; the exclusions remain
+ * only so the legacy state-sync path (multiplayer_plugin) doesn't
+ * churn on them.
+ *
+ * MIGRATION DECISION: real NPCs (dude/fleet traffic) use the new
+ * deterministic AI in npc_ai_plugin.ts + npc_spawn_plugin.ts, whose
+ * state is serializer-registered (hashed, snapshotted, wire-carried).
+ * What remains here serves two callers:
+ *  - makeNpc: the dev "Add Enemy" button and test harnesses, which
+ *    want an unconditionally aggressive ship with no govt politics.
+ *  - Bay fighters (bay_plugin.ts): Follow/ShootAllWeapons while they
+ *    have a target; their no-target holding pattern lives in
+ *    npc_ai_plugin's FormationComponent.
+ * When those callers move to the new AI (e.g. "Add Enemy" spawning a
+ * govt warship), delete the ChooseRandomTarget path outright.
+ *
+ * Known wart, documented not fixed: ChooseRandomTargetAI picks from
+ * raw query iteration order. Entity-map order is deterministic for
+ * peers that share a genesis + input history, but a wire-restored
+ * world may iterate differently; the new AI sorts/tie-breaks by uuid
+ * instead (see chooseNearest in npc_ai_plugin.ts).
+ */
+
 // Cloaked ships (CloakActiveComponent.active) are invisible to NPC AI, so
 // they are excluded as valid targets — same rule the player's targeting
 // uses. A cloak scanner would reveal them, but that outfit is not wired.
