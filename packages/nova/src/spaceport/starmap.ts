@@ -12,6 +12,9 @@ import { MenuControls } from "./menu_controls.js";
 
 const GREY = 0x666666;
 const BLUE = 0x0000BB;
+// Hypergate network links, drawn in a distinct cyan so the instant-travel
+// hypergate routes read apart from the grey normal-jump hyperspace links.
+const HYPERGATE_LINK_COLOR = 0x00cccc;
 const LABEL_FONT_NAME = 'StarmapSystemLabel';
 const LABEL_FONT_SIZE = 10;
 
@@ -80,6 +83,31 @@ function systemVisible(system: SystemData): boolean {
     }
 }
 
+/**
+ * Computes the system-to-system hypergate links to overlay on the map from a
+ * spöb -> system index and a per-gate destination lookup. Pure (no PIXI, no
+ * async) so it is unit-testable. `gateDestinations` maps a hypergate spöb
+ * global id to the spöb global ids it links to; non-hypergate spöbs are absent.
+ */
+export function computeHypergateSystemLinks(
+    systemOfSpob: Map<string, string>,
+    gateDestinations: Map<string, string[]>): [string, string][] {
+    const links: [string, string][] = [];
+    for (const [spob, destinations] of gateDestinations) {
+        const fromSystem = systemOfSpob.get(spob);
+        if (!fromSystem) {
+            continue;
+        }
+        for (const dest of destinations) {
+            const toSystem = systemOfSpob.get(dest);
+            if (toSystem) {
+                links.push([fromSystem, toSystem]);
+            }
+        }
+    }
+    return links;
+}
+
 function drawSystem(system: SystemData, graphics: PIXI.Graphics,
     x: number, y: number) {
     // Use blue if the system has a planet. Otherwise, grey.
@@ -126,7 +154,12 @@ class SystemGraph {
     // Bounding box of all systems in laid-out (BASE_SCALE) coordinates.
     private worldBounds: { minX: number, minY: number, maxX: number, maxY: number };
 
+    // Hypergate links between systems (each a pair of system global ids).
+    // Drawn in a distinct style from the normal grey hyperspace links.
+    private readonly gateLinks: [SystemData, SystemData][];
+
     constructor(systems: SystemData[], private currentSystem: string,
+        gateLinks: [string, string][] = [],
         private size = { x: 456, y: 419 }) {
         // NCB-hidden systems don't exist for the player: they aren't drawn,
         // clicked, linked, or routed through. The current system is always
@@ -177,6 +210,24 @@ class SystemGraph {
             .on('wheel', this.onWheel.bind(this));
 
         this.links = [...this.getUniqueLinks()];
+        // Resolve hypergate link ids to the visible systems they connect.
+        // Links touching an NCB-hidden system (not in this.systems) are
+        // dropped, like normal jump links.
+        this.gateLinks = [];
+        const seenGateLink = new Set<string>();
+        for (const [a, b] of gateLinks) {
+            const sa = this.systems.get(a);
+            const sb = this.systems.get(b);
+            if (!sa || !sb || a === b) {
+                continue;
+            }
+            const key = [a, b].sort().join('<->');
+            if (seenGateLink.has(key)) {
+                continue;
+            }
+            seenGateLink.add(key);
+            this.gateLinks.push([sa, sb]);
+        }
 
         // All circles are baked into a single Graphics and all labels share
         // one bitmap font texture, so drawing the whole galaxy takes a couple
@@ -426,6 +477,12 @@ class SystemGraph {
         for (const [source, dest] of this.links) {
             this.drawLink(this.linkGraphics, source, dest);
         }
+        // Hypergate network links, over the normal links in a distinct color
+        // so the instant-travel routes are legible as their own layer.
+        for (const [source, dest] of this.gateLinks) {
+            this.drawLink(this.linkGraphics, source, dest,
+                HYPERGATE_LINK_COLOR, 1);
+        }
     }
 
     private drawRoute() {
@@ -516,9 +573,44 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
         const systemIds = (await this.simulationData.ids).System;
         const systems = await Promise.all(
             systemIds.map(s => this.simulationData.data.System.get(s)));
-        this.systemGraph = new SystemGraph(systems, this.systemId);
+        const gateLinks = await this.computeHypergateLinks(systems);
+        this.systemGraph = new SystemGraph(systems, this.systemId, gateLinks);
         this.systemGraph.container.position.set(-290, -248);
         this.container.addChild(this.systemGraph.container);
+    }
+
+    /**
+     * Builds the system-to-system hypergate links to overlay on the map. A
+     * hypergate spöb connects to other hypergate spöbs (its HyperLink
+     * destinations); each such connection becomes a link between the systems
+     * containing the two gates. Wormholes are deliberately left off the map:
+     * they are meant to be mysterious, and the Bible documents no map display
+     * for them.
+     */
+    private async computeHypergateLinks(systems: SystemData[]):
+        Promise<[string, string][]> {
+        // spöb global id -> system global id that contains it.
+        const systemOfSpob = new Map<string, string>();
+        for (const system of systems) {
+            for (const spob of system.planets) {
+                if (!systemOfSpob.has(spob)) {
+                    systemOfSpob.set(spob, system.id);
+                }
+            }
+        }
+        const gateDestinations = new Map<string, string[]>();
+        await Promise.all([...systemOfSpob.keys()].map(async spob => {
+            let planet;
+            try {
+                planet = await this.simulationData.data.Planet.get(spob);
+            } catch {
+                return;
+            }
+            if (planet.gate?.kind === 'hypergate') {
+                gateDestinations.set(spob, planet.gate.destinations);
+            }
+        }));
+        return computeHypergateSystemLinks(systemOfSpob, gateDestinations);
     }
 
     override async show(route: string[]) {
