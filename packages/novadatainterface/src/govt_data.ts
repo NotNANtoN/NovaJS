@@ -108,6 +108,13 @@ export interface GovtData extends BaseData {
 
     /** Voice set used by escorts of this government (see the Bible / gövt TMPL). */
     voiceType: number;
+
+    /**
+     * Global PICT id used as the background of the news window on this
+     * government's stellars (gövt NewsPic), or null for the standard
+     * independent news background.
+     */
+    newsPic: string | null;
 }
 
 /** gövt Flags1, decoded to named booleans. */
@@ -219,5 +226,6 @@ export function getDefaultGovtData(): GovtData {
         shipColor: 0,
         require: "0",
         voiceType: -1,
+        newsPic: null,
     };
 }

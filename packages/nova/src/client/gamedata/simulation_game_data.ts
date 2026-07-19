@@ -8,6 +8,7 @@ import { CronData } from 'novadatainterface/cron_data';
 import { GovtData } from 'novadatainterface/govt_data';
 import { DudeData } from 'novadatainterface/dude_data';
 import { FleetData } from 'novadatainterface/fleet_data';
+import { JunkData } from 'novadatainterface/junk_data';
 import { MissionData } from 'novadatainterface/mission_data';
 import { OutfitData } from 'novadatainterface/outfit_data';
 import { PlanetData } from 'novadatainterface/planet_data';
@@ -36,7 +37,7 @@ class WeaponGettable extends Gettable<WeaponData> {
 
 export type SimulationGameDataResources = Pick<GameDataInterface['data'],
     'Ship' | 'Outfit' | 'Weapon' | 'Planet' | 'System' | 'Govt' | 'Dude'
-    | 'Fleet' | 'SpriteSheet' | 'Asteroid' | 'Mission' | 'Cron' | 'PlayerStart'>;
+    | 'Fleet' | 'Junk' | 'SpriteSheet' | 'Asteroid' | 'Mission' | 'Cron' | 'PlayerStart'>;
 
 export interface SimulationGameDataInterface {
     readonly data: SimulationGameDataResources;
@@ -73,6 +74,7 @@ export class SimulationGameData implements SimulationGameDataInterface {
             Govt: this.addGettable<GovtData>(NovaDataType.Govt),
             Dude: this.addGettable<DudeData>(NovaDataType.Dude),
             Fleet: this.addGettable<FleetData>(NovaDataType.Fleet),
+            Junk: this.addGettable<JunkData>(NovaDataType.Junk),
             SpriteSheet: this.addGettable<SpriteSheetData>(NovaDataType.SpriteSheet),
             Asteroid: this.addGettable<AsteroidData>(NovaDataType.Asteroid),
             Mission: this.addGettable<MissionData>(NovaDataType.Mission),

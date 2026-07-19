@@ -24,6 +24,7 @@ import { SystemData } from "novadatainterface/system_data";
 import { GovtData } from "novadatainterface/govt_data";
 import { DudeData } from "novadatainterface/dude_data";
 import { FleetData } from "novadatainterface/fleet_data";
+import { JunkData } from "novadatainterface/junk_data";
 import { TargetCornersData } from "novadatainterface/target_corners_data";
 import { WeaponData } from "novadatainterface/weapon_data";
 import * as path from "path";
@@ -49,6 +50,7 @@ const Paths = {
     Govt: { path: "Govt", extension: "json" } as PathInfo,
     Dude: { path: "Dude", extension: "json" } as PathInfo,
     Fleet: { path: "Fleet", extension: "json" } as PathInfo,
+    Junk: { path: "Junk", extension: "json" } as PathInfo,
     Mission: { path: "Mission", extension: "json" } as PathInfo,
     Cron: { path: "Cron", extension: "json" } as PathInfo,
     PlayerStart: { path: "PlayerStart", extension: "json" } as PathInfo,
@@ -81,6 +83,7 @@ class FilesystemData implements GameDataInterface {
             Govt: this.getFunction<GovtData>(Paths.Govt),
             Dude: this.getFunction<DudeData>(Paths.Dude),
             Fleet: this.getFunction<FleetData>(Paths.Fleet),
+            Junk: this.getFunction<JunkData>(Paths.Junk),
             Mission: this.getFunction<MissionData>(Paths.Mission),
             Cron: this.getFunction<CronData>(Paths.Cron),
             PlayerStart: this.getFunction<PlayerStartData>(Paths.PlayerStart),
@@ -136,6 +139,7 @@ class FilesystemData implements GameDataInterface {
             Govt: await this.buildIDsForPath(Paths.Govt),
             Dude: await this.buildIDsForPath(Paths.Dude),
             Fleet: await this.buildIDsForPath(Paths.Fleet),
+            Junk: await this.buildIDsForPath(Paths.Junk),
             Mission: await this.buildIDsForPath(Paths.Mission),
             Cron: await this.buildIDsForPath(Paths.Cron),
             PlayerStart: await this.buildIDsForPath(Paths.PlayerStart),

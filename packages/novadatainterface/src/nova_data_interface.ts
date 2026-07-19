@@ -7,6 +7,7 @@ import { DudeData } from "./dude_data.js";
 import { FleetData } from "./fleet_data.js";
 import { Gettable } from "./gettable.js";
 import { GovtData } from "./govt_data.js";
+import { JunkData } from "./junk_data.js";
 import { MissionData } from "./mission_data.js";
 import { OutfitData } from "./outfit_data.js";
 import { PictData } from "./pict_data.js";
@@ -38,6 +39,7 @@ enum NovaDataType {
     Govt = "Govt",
     Dude = "Dude",
     Fleet = "Fleet",
+    Junk = "Junk",
     Mission = "Mission",
     Cron = "Cron",
     PlayerStart = "PlayerStart",
@@ -66,6 +68,7 @@ type NovaDataInterface = {
     Govt: Gettable<GovtData>,
     Dude: Gettable<DudeData>,
     Fleet: Gettable<FleetData>,
+    Junk: Gettable<JunkData>,
     Mission: Gettable<MissionData>,
     Cron: Gettable<CronData>,
     PlayerStart: Gettable<PlayerStartData>,

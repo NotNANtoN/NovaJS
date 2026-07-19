@@ -51,6 +51,13 @@ export interface PlanetFlags {
     landOnlyIfDestroyed: boolean;
 }
 
+/**
+ * A commodity exchange price tier, from the spöb Flags trade nibbles
+ * (EVN Bible p. 59): each standard commodity trades at low (80%),
+ * medium (100%), or high (125%) of its base price, or not at all.
+ */
+export type TradeTier = "low" | "med" | "high";
+
 export interface PlanetData extends SpaceObjectData {
     landingPict: string;
     landingDesc: string;
@@ -76,6 +83,18 @@ export interface PlanetData extends SpaceObjectData {
     flags: PlanetFlags;
     /** Tech level, controlling default outfit/ship availability. */
     techLevel: number;
+    /**
+     * The commodity exchange price tier for each standard commodity
+     * (index 0 food, 1 industrial, 2 medical, 3 luxury, 4 metal,
+     * 5 equipment), or null when the stellar won't trade in it. From
+     * the upper spöb Flags nibbles (EVN Bible p. 59).
+     */
+    tradeTiers: (TradeTier | null)[];
+    /**
+     * The bar description (dësc id 10000 + spöb local id - 128), shown
+     * in the spaceport bar dialog. Empty when the stellar has none.
+     */
+    barDesc: string;
 }
 
 export function getDefaultPlanetFlags(): PlanetFlags {
@@ -103,5 +122,7 @@ export function getDefaultPlanetData(): PlanetData {
         govt: null,
         flags: getDefaultPlanetFlags(),
         techLevel: 0,
+        tradeTiers: [null, null, null, null, null, null],
+        barDesc: "",
     };
 }
