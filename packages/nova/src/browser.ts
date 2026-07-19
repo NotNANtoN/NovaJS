@@ -57,6 +57,7 @@ import { ControlledByComponent } from "./nova_plugin/ship_control.js";
 import { ShipComponent } from "./nova_plugin/ship_plugin.js";
 import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
 import { Vector } from "nova_ecs/datatypes/vector";
+import { FiringGroupComponent } from "./nova_plugin/firing_group.js";
 import { FormationComponent, formationSlotPosition } from "./nova_plugin/npc_ai_plugin.js";
 import { makeNpcShip } from "./nova_plugin/npc_spawn_plugin.js";
 import { advanceEntityDate, ensurePlayerStateComponents } from "./spaceport/mission_session.js";
@@ -382,6 +383,11 @@ async function spawnHiredEscorts(
                 movement.rotation, new Vector(0, 0));
             escort.components.set(FormationComponent,
                 { leader: leaderUuid, slot });
+            // Hired escorts share the player's firing group so their shots
+            // pass through the player (and vice versa via the owner-root
+            // fallback) — same friendly-fire immunity as NPC fleets.
+            escort.components.set(FiringGroupComponent,
+                { group: leaderUuid });
             if (ownerUuid) {
                 escort.components.set(MultiplayerData, { owner: ownerUuid });
             }
