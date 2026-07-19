@@ -53,7 +53,11 @@ export interface PilotMissionObjectives {
  * instantiated from, with runtime state mixed in.
  */
 export interface PilotMissionData {
-    /** 'mïsn' resource id this slot was instantiated from. */
+    /**
+     * 'mïsn' index this slot was instantiated from (resource id = index +
+     * 128; verified against stock data: a pilot running "Take Krane to
+     * Earth" stores 346, and mïsn 474 is that mission).
+     */
     missionId: number;
     /** Destination stellar (spöb index; id = index + 128). */
     travelStellar: number;

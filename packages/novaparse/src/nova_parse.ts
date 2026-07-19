@@ -51,6 +51,13 @@ import { SndResource } from "./resource_parsers/snd_resource.js";
 import { SoundFile } from "novadatainterface/sound_file";
 
 
+// Pilot (saved-game) file support. Re-exported from the package entry point
+// so a future "import pilot file" feature (feeding packages/nova's
+// save_game.ts) can `import { readPilot, PilotData } from "novaparse"`. See
+// docs/pilot_file_format.md.
+export type { PilotData, PilotGlobalsData, PilotPlayerData } from "./pilot/pilot_data.js";
+export { parsePilotResources, parsePltPilot, readPilot } from "./pilot/pilot_parse.js";
+
 type ParseFunction<T extends BaseResource, O> = (resource: T, errorFunc: (message: string) => void) => Promise<O>;
 
 export class NovaParse implements GameDataInterface {
