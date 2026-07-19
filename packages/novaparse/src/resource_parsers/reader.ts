@@ -1,12 +1,16 @@
 import { decode_macroman } from "resource_fork";
 
 /**
- * Sequential big-endian reader for Nova resource data.
+ * Sequential reader for Nova resource data. Big-endian by default.
  *
  * Nova resources are fixed-layout structs, so parsers read fields in the
  * exact order they appear in the resource (which matches ResForge's TMPL
  * templates and the EVN Bible). Reading sequentially instead of via absolute
  * offsets keeps each parser trivially checkable against the template.
+ *
+ * The Windows `.plt` pilot format stores the same structs with little-endian
+ * fields, so multi-byte reads honor an optional `littleEndian` flag. Strings
+ * are byte streams and are unaffected.
  *
  * EV Nova tolerates resources shorter than the full template (fields past
  * the end of the data take their default values), so all reads past the end
@@ -14,8 +18,12 @@ import { decode_macroman } from "resource_fork";
  */
 export class Reader {
     private pos = 0;
+    private readonly littleEndian: boolean;
 
-    constructor(private data: DataView) { }
+    constructor(private data: DataView,
+        options: { littleEndian?: boolean } = {}) {
+        this.littleEndian = options.littleEndian ?? false;
+    }
 
     /** Bytes remaining after the cursor. */
     get remaining(): number {
@@ -45,22 +53,22 @@ export class Reader {
 
     int16(fallback = 0): number {
         const at = this.advance(2);
-        return at === null ? fallback : this.data.getInt16(at);
+        return at === null ? fallback : this.data.getInt16(at, this.littleEndian);
     }
 
     uint16(fallback = 0): number {
         const at = this.advance(2);
-        return at === null ? fallback : this.data.getUint16(at);
+        return at === null ? fallback : this.data.getUint16(at, this.littleEndian);
     }
 
     int32(fallback = 0): number {
         const at = this.advance(4);
-        return at === null ? fallback : this.data.getInt32(at);
+        return at === null ? fallback : this.data.getInt32(at, this.littleEndian);
     }
 
     uint32(fallback = 0): number {
         const at = this.advance(4);
-        return at === null ? fallback : this.data.getUint32(at);
+        return at === null ? fallback : this.data.getUint32(at, this.littleEndian);
     }
 
     /**
@@ -68,7 +76,7 @@ export class Reader {
      */
     uint64(fallback = 0n): bigint {
         const at = this.advance(8);
-        return at === null ? fallback : this.data.getBigUint64(at);
+        return at === null ? fallback : this.data.getBigUint64(at, this.littleEndian);
     }
 
     /**
