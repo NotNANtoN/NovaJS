@@ -19,6 +19,21 @@ function descText(idSpace: NovaResources, id: number): string {
     return idSpace.dësc[id]?.text ?? "";
 }
 
+/** spöb ids occupy 128-2175; other values are ranged specials. */
+const SPOB_ID_MIN = 128;
+const SPOB_ID_MAX = 2175;
+
+/**
+ * Resolves a stellar reference to a global spöb id when it is a plain
+ * id; null for the special ranges (govt-relative, random, etc.).
+ */
+function stellarId(idSpace: NovaResources, value: number): string | null {
+    if (value < SPOB_ID_MIN || value > SPOB_ID_MAX) {
+        return null;
+    }
+    return idSpace.spöb[value]?.globalID ?? null;
+}
+
 /**
  * Maps a parsed mïsn resource onto the MissionData shape served through
  * the data interface. Numeric stellar references stay raw (they encode
@@ -33,6 +48,7 @@ export async function MisnParse(misn: MisnResource,
     return {
         ...base,
         availStel: misn.availStel,
+        availStelId: stellarId(misn.idSpace, misn.availStel),
         availLoc: misn.availLoc,
         availRecord: misn.availRecord,
         availRating: misn.availRating,
@@ -41,7 +57,9 @@ export async function MisnParse(misn: MisnResource,
         availShipType: misn.availShipType,
         require: misn.require.toString(),
         travelStel: misn.travelStel,
+        travelStelId: stellarId(misn.idSpace, misn.travelStel),
         returnStel: misn.returnStel,
+        returnStelId: stellarId(misn.idSpace, misn.returnStel),
         cargoType: misn.cargoType,
         cargoQty: misn.cargoQty,
         pickupMode: misn.pickupMode,

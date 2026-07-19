@@ -23,6 +23,12 @@ export interface MissionData extends BaseData {
     /** Where the mission is offered (AvailStel); raw ranged value. */
     availStel: number;
     /**
+     * When availStel is a plain spöb id (128-2175), its global id
+     * (resolved at parse time against the mission's own id space so
+     * plug-in prefixes work); null for the special ranges.
+     */
+    availStelId: string | null;
+    /**
      * Where on the stellar the mission is offered (AvailLoc):
      * 0 mission computer; 1 bar; 2 from a ship; 3 main spaceport;
      * 4 trade centre; 5 shipyard; 6 outfitter.
@@ -50,8 +56,12 @@ export interface MissionData extends BaseData {
 
     /** Destination stellar (TravelStel); raw ranged value; -1 none. */
     travelStel: number;
+    /** Global id when travelStel is a plain spöb id; null otherwise. */
+    travelStelId: string | null;
     /** Return-for-payment stellar (ReturnStel); raw ranged value. */
     returnStel: number;
+    /** Global id when returnStel is a plain spöb id; null otherwise. */
+    returnStelId: string | null;
 
     /**
      * Cargo type (CargoType): -1 none; 0-255 a cargo type (0-5 the
@@ -187,6 +197,7 @@ export function getDefaultMissionData(): MissionData {
     return {
         ...getDefaultBaseData(),
         availStel: -1,
+        availStelId: null,
         availLoc: 0,
         availRecord: 0,
         availRating: -1,
@@ -195,7 +206,9 @@ export function getDefaultMissionData(): MissionData {
         availShipType: -1,
         require: "0",
         travelStel: -1,
+        travelStelId: null,
         returnStel: -1,
+        returnStelId: null,
         cargoType: -1,
         cargoQty: -1,
         pickupMode: -1,

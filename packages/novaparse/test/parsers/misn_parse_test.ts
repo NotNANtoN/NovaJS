@@ -96,6 +96,10 @@ function parseMisn(id = 130) {
     // 5006 (shipDoneText) intentionally missing.
     makeDesc(idSpace, 5007, "refused");
 
+    // The parse only reads globalID from referenced spöbs. spöb 130
+    // (availStel) is intentionally absent.
+    idSpace.spöb[200] = { globalID: "nova:200" } as unknown as never;
+
     const resource = new MisnResource(
         buildMisn().resource("mïsn", id, "Test Mission"), idSpace);
     resource.globalID = `nova:${id}`;
@@ -120,6 +124,16 @@ describe("MisnParse", () => {
         expect(misn.availRandom).toBe(75);
         expect(misn.availBits).toBe("b1 & !b128");
         expect(misn.availShipType).toBe(150);
+    });
+
+    it("resolves plain stellar ids and leaves ranged values null", async () => {
+        const misn = await parseMisn();
+        // travelStel 200 is a plain spöb id present in the id space.
+        expect(misn.travelStelId).toBe("nova:200");
+        // availStel 130 is a plain id but the spöb doesn't exist.
+        expect(misn.availStelId).toBe(null);
+        // returnStel -4 (initial stellar) is a ranged special.
+        expect(misn.returnStelId).toBe(null);
     });
 
     it("projects destination and cargo fields", async () => {
