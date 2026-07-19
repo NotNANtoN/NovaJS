@@ -7,6 +7,7 @@ import {
     IFF_HOSTILE_COLOR,
     IFF_NEUTRAL_COLOR,
     shipDisposition,
+    targetCornerStyle,
 } from './iff_plugin.js';
 import { OutfitsState } from './outfit_plugin.js';
 
@@ -123,4 +124,20 @@ describe('dispositionColor', () => {
         expect(dispositionColor('friendly')).toBe(IFF_FRIENDLY_COLOR);
         expect(dispositionColor('neutral')).toBe(IFF_NEUTRAL_COLOR);
     });
+});
+
+describe('targetCornerStyle', () => {
+    it('follows the political disposition when the target is not ' +
+        'attacking the player', () => {
+            expect(targetCornerStyle('neutral', false)).toBe('neutral');
+            expect(targetCornerStyle('friendly', false)).toBe('friendly');
+            expect(targetCornerStyle('hostile', false)).toBe('hostile');
+        });
+
+    it('a ship attacking the player is hostile regardless of politics ' +
+        '(e.g. a brave trader fighting back)', () => {
+            expect(targetCornerStyle('neutral', true)).toBe('hostile');
+            expect(targetCornerStyle('friendly', true)).toBe('hostile');
+            expect(targetCornerStyle('hostile', true)).toBe('hostile');
+        });
 });

@@ -798,6 +798,11 @@ async function startGame() {
     const localAutopilot = autopilot;
     // Console lever for tests/debugging (novaAutopilot.destination etc.).
     (window as any).novaAutopilot = autopilot;
+    // Console lever for tests/debugging: inject control events directly
+    // (bypassing the keyboard), e.g.
+    //   novaControls.send([{action: 'nearestTarget', state: 'start'}])
+    // followed by the matching {state: false} release.
+    (window as any).novaControls = { send: emitControlEvents };
 
     // User movement input cancels the autopilot (the autopilot's own
     // inputs go through controlSinks directly and don't loop back
