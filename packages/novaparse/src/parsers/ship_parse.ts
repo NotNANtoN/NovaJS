@@ -248,6 +248,9 @@ export async function ShipParse(ship: ShipResource,
         // The hire-escort pilot description parallels the shipyard
         // description range: dësc 14000 + (shïp local id - 128).
         pilotDesc: ship.idSpace.dësc[ship.id - 128 + 14000]?.text ?? "",
+        // EVN Bible shïp Flags 0x0010: "Ship is disabled at 10% armor
+        // instead of 33%".
+        disableArmorFraction: (ship.flagsN & 0x0010) ? 0.10 : 0.33,
         ...base
     }
 }

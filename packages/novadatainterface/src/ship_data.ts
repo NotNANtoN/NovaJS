@@ -105,6 +105,13 @@ export interface ShipData extends SpaceObjectData {
      * none.
      */
     pilotDesc: string;
+    /**
+     * The fraction of max armor at or below which the ship becomes
+     * disabled. EVN Bible shïp Flags 0x0010: "Ship is disabled at 10%
+     * armor instead of 33%" — so this is 0.10 when the flag is set and
+     * 0.33 otherwise.
+     */
+    disableArmorFraction: number;
 };
 
 export function getDefaultShipData(): ShipData {
@@ -129,5 +136,6 @@ export function getDefaultShipData(): ShipData {
         escortType: -1,
         shortName: "",
         pilotDesc: "",
+        disableArmorFraction: 0.33,
     }
 }
