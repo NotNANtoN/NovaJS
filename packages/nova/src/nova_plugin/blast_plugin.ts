@@ -9,6 +9,9 @@ import { BlastDamageComponent, BlastIgnoreComponent } from './blast_data.js';
 import { CollisionSystem } from './collisions_plugin.js';
 import { CollisionEvent } from './collision_interaction.js';
 import { DamagedEvent } from './death_plugin.js';
+import { OwnerComponent } from './fire_weapon_plugin.js';
+import { FiringGroupComponent, firingImmune, victimFiringGroup } from './firing_group.js';
+import { GovtComponent } from './govt_component.js';
 
 
 export { BlastDamageComponent, BlastIgnoreComponent } from './blast_data.js';
@@ -16,10 +19,24 @@ export { BlastDamageComponent, BlastIgnoreComponent } from './blast_data.js';
 const BlastCollisionSystem = new System({
     name: 'BlastCollisionSystem',
     events: [CollisionEvent],
-    args: [CollisionEvent, BlastDamageComponent,
-        Optional(BlastIgnoreComponent), EmitNow, UUID] as const,
-    step(collision, damage, ignore, emitNow, uuid) {
+    args: [CollisionEvent, BlastDamageComponent, Entities,
+        Optional(BlastIgnoreComponent), Optional(FiringGroupComponent),
+        EmitNow, UUID] as const,
+    step(collision, damage, entities, ignore, firingGroup, emitNow, uuid) {
         if (ignore?.has(collision.other)) {
+            return;
+        }
+        // Friendly-fire immunity: a blast whose weapon spares its firer
+        // (blastHurtsFiringShip unset) carries the firer's group and
+        // spares the whole group (see firing_group.ts).
+        const other = entities.get(collision.other);
+        if (other && firingImmune(
+            firingGroup?.group,
+            victimFiringGroup(other.components.get(FiringGroupComponent),
+                other.components.get(OwnerComponent)?.owner,
+                collision.other),
+            firingGroup?.govt,
+            other.components.get(GovtComponent)?.id)) {
             return;
         }
         emitNow(DamagedEvent, { damage, damager: uuid }, [collision.other])

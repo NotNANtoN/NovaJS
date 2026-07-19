@@ -270,6 +270,14 @@ export interface ProjectileWeaponData extends SpaceObjectData, NotBayWeaponData 
     guidance: ProjectileGuidanceType,
     proxRadius: number, // Proximity to something before it explodes
     proxSafety: number // Number of seconds after firing that the weapon won't explode
+    /**
+     * Whether this shot collides with (and its proximity fuse triggers on) ANY
+     * ship rather than only its target. Decoded from wëap Flags2 0x0008
+     * ("Proximity detonator is triggered by ships other than the target (for
+     * guided weapons)"); forced true for non-guided weapons, which have no
+     * target restriction (see weap_resource.ts).
+     */
+    proxHitAll: boolean,
     trailParticles: ParticleConfig,
     hitParticles: ParticleConfig,
     /**
@@ -291,6 +299,8 @@ export function getDefaultProjectileWeaponData(): ProjectileWeaponData {
         guidance: "unguided",
         proxRadius: 1,
         proxSafety: 0,
+        // Non-guided weapons always hit any ship (see the field doc).
+        proxHitAll: true,
         trailParticles: getDefaultParticles(),
         hitParticles: getDefaultParticles(),
         jamVulnerabilities: getDefaultJammingVulnerabilities(),
