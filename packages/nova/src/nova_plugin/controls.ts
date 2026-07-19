@@ -30,6 +30,7 @@ const SavedControlsPartialObject = t.partial({
     'resetSecondary': ControlInputs,
     'nextTarget': ControlInputs,
     'friendlyTarget': ControlInputs,
+    'escortTarget': ControlInputs,
     'nearestTarget': ControlInputs,
     'nextSecondary': ControlInputs,
     'previousSecondary': ControlInputs,
@@ -191,11 +192,16 @@ export function getActions(controls: Controls,
         return [];
     }
 
-    const actions: ControlAction[] = [];
-    for (const { action, modifiers } of possibleActions) {
-        if (modifiersPressed(event, modifiers)) {
-            actions.push(action);
-        }
-    }
-    return actions;
+    // Most-specific-binding wins: a binding's modifiers must all be
+    // pressed, and among the bindings that match, only those with the
+    // most required modifiers fire. Without this, plain Tab
+    // (nextTarget, no modifiers — vacuously satisfied) would ALSO fire
+    // on Alt+Tab alongside escortTarget.
+    const matched = possibleActions.filter(
+        ({ modifiers }) => modifiersPressed(event, modifiers));
+    const maxModifiers = Math.max(0,
+        ...matched.map(({ modifiers }) => modifiers.length));
+    return matched
+        .filter(({ modifiers }) => modifiers.length === maxModifiers)
+        .map(({ action }) => action);
 }

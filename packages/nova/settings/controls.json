@@ -10,7 +10,7 @@
   "nextTarget": {
     "key": "Tab"
   },
-  "friendlyTarget": {
+  "escortTarget": {
     "key": "Tab",
     "modifiers": ["Alt"]
   },

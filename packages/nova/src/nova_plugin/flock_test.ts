@@ -1,0 +1,90 @@
+import 'jasmine';
+import { Entity } from 'nova_ecs/entity';
+import { OwnerComponent } from './fire_weapon_plugin.js';
+import { FiringGroupComponent } from './firing_group.js';
+import { isInFlock } from './flock.js';
+import { FormationComponent } from './npc_ai_plugin.js';
+
+const PLAYER = 'player';
+
+describe('isInFlock (transitive own-escort predicate)', () => {
+    function lookup(entities: { [uuid: string]: Entity }) {
+        return (uuid: string) => entities[uuid];
+    }
+
+    it('a hired escort following the player is in the flock', () => {
+        const escort = new Entity('escort')
+            .addComponent(FormationComponent, { leader: PLAYER, slot: 0 });
+        expect(isInFlock('escort', PLAYER, lookup({ escort }))).toBeTrue();
+    });
+
+    it("the escort's own bay fighter is in the flock transitively " +
+        '(formation chain)', () => {
+            const escort = new Entity('escort')
+                .addComponent(FormationComponent, { leader: PLAYER, slot: 0 });
+            const fighter = new Entity('fighter')
+                .addComponent(FormationComponent, { leader: 'escort', slot: 0 });
+            expect(isInFlock('fighter', PLAYER,
+                lookup({ escort, fighter }))).toBeTrue();
+        });
+
+    it("an engaged bay fighter (no formation, only the bay owner " +
+        'chain) is in the flock transitively', () => {
+            const escort = new Entity('escort')
+                .addComponent(FormationComponent, { leader: PLAYER, slot: 0 });
+            const fighter = new Entity('fighter')
+                .addComponent(OwnerComponent, { owner: 'escort' });
+            expect(isInFlock('fighter', PLAYER,
+                lookup({ escort, fighter }))).toBeTrue();
+        });
+
+    it('the firing-group root counts as a parent link (the same root ' +
+        'friendly-fire immunity uses)', () => {
+            const fighter = new Entity('fighter')
+                .addComponent(FiringGroupComponent, { group: PLAYER });
+            expect(isInFlock('fighter', PLAYER, lookup({ fighter })))
+                .toBeTrue();
+        });
+
+    it("an NPC fleet escort following its own leader is NOT in the " +
+        "player's flock", () => {
+            const npcLeader = new Entity('npc leader');
+            const npcEscort = new Entity('npc escort')
+                .addComponent(FormationComponent,
+                    { leader: 'npc leader', slot: 0 })
+                .addComponent(FiringGroupComponent, { group: 'npc leader' });
+            expect(isInFlock('npc escort', PLAYER,
+                lookup({ 'npc leader': npcLeader, 'npc escort': npcEscort })))
+                .toBeFalse();
+        });
+
+    it('a lone enemy ship is not in the flock', () => {
+        const enemy = new Entity('enemy');
+        expect(isInFlock('enemy', PLAYER, lookup({ enemy }))).toBeFalse();
+    });
+
+    it('the player is not in their own flock', () => {
+        expect(isInFlock(PLAYER, PLAYER, lookup({}))).toBeFalse();
+    });
+
+    it('survives leader cycles without looping forever', () => {
+        const a = new Entity('a')
+            .addComponent(FormationComponent, { leader: 'b', slot: 0 });
+        const b = new Entity('b')
+            .addComponent(FormationComponent, { leader: 'a', slot: 0 });
+        expect(isInFlock('a', PLAYER, lookup({ a, b }))).toBeFalse();
+        expect(isInFlock('b', PLAYER, lookup({ a, b }))).toBeFalse();
+    });
+
+    it('a self-referential leader terminates', () => {
+        const weird = new Entity('weird')
+            .addComponent(FormationComponent, { leader: 'weird', slot: 0 });
+        expect(isInFlock('weird', PLAYER, lookup({ weird }))).toBeFalse();
+    });
+
+    it('a dangling parent (despawned mid-chain) is not in the flock', () => {
+        const fighter = new Entity('fighter')
+            .addComponent(OwnerComponent, { owner: 'gone' });
+        expect(isInFlock('fighter', PLAYER, lookup({ fighter }))).toBeFalse();
+    });
+});

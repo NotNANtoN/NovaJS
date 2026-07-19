@@ -1,4 +1,4 @@
-import { Emit, UUID } from "nova_ecs/arg_types";
+import { Emit, Entities, UUID } from "nova_ecs/arg_types";
 import { Component } from "nova_ecs/component";
 import { DeleteEvent, EcsEvent } from "nova_ecs/events";
 import { Optional } from "nova_ecs/optional";
@@ -12,6 +12,7 @@ import { World } from "nova_ecs/world";
 import { findControlledEntity, ShipControlEvent, ShipControlStateComponent } from "./ship_control.js";
 import { CloakActiveComponent, CloakScannerComponent, isTargetable } from "./cloak_plugin.js";
 import { OwnerComponent } from "./fire_weapon_plugin.js";
+import { isInFlock } from "./flock.js";
 import { PlayerShipSelector } from "./player_ship_plugin.js";
 import { ShipComponent } from "./ship_plugin.js";
 import { Target, TargetComponent } from "./target_component.js";
@@ -33,14 +34,43 @@ const ChooseTargetSystem = new System({
     name: 'ChooseTarget',
     events: [ShipControlEvent],
     args: [ShipControlStateComponent, TargetComponent, TargetIndexComponent, UUID,
-        TargetsQuery, Emit, MovementStateComponent,
+        TargetsQuery, Emit, MovementStateComponent, Entities,
         Optional(CloakScannerComponent)] as const,
-    step(controlState, target, index, uuid, ships, emit, movementState, myScanner) {
+    step(controlState, target, index, uuid, ships, emit, movementState,
+        entities, myScanner) {
+        // The ship's own flock — escorts and anything transitively
+        // following them (see flock.ts) — is excluded from general
+        // targeting (tab / r) and cycled by escortTarget instead.
+        // Click/tap targeting still reaches flock members
+        // (applySetTarget below).
+        const getEntity = (u: string) => entities.get(u);
+
+        if (controlState.get('escortTarget') === 'start') {
+            // Cycle the flock in uuid order (deterministic regardless
+            // of entity-map iteration order), starting after the
+            // current target when it is already a flock member.
+            const flock = ships
+                .filter(([otherUuid, , , , cloak]) =>
+                    isInFlock(otherUuid, uuid, getEntity)
+                    && isTargetable(cloak, myScanner))
+                .map(([otherUuid]) => otherUuid)
+                .sort();
+            if (flock.length === 0) {
+                return;
+            }
+            const currentIndex = target.target
+                ? flock.indexOf(target.target) : -1;
+            target.target = flock[(currentIndex + 1) % flock.length];
+            emit(CycleTargetEvent, target);
+            return;
+        }
+
         if (controlState.get('nearestTarget') === 'start') {
             const [closestUuid, _distance, newIndex] = ships
                 .map(([a, b, c, d, e], index) => [a, b, c, d, e, index] as const)
                 .filter(([otherUuid, _, owner, __, cloak]) => {
-                    if (owner?.owner === uuid) {
+                    if (owner?.owner === uuid
+                        || isInFlock(otherUuid, uuid, getEntity)) {
                         return false;
                     }
                     // Cloaked ships are untargetable unless this ship has
@@ -91,9 +121,10 @@ const ChooseTargetSystem = new System({
 
                 const [targetUuid, _targetMovement, targetOwner, _targetShip, targetCloak] = ships[index.index];
                 // Don't target yourself
-                // Don't target escorts
+                // Don't target your flock (escorts and their spawn)
                 // Don't target cloaked ships (unless a cloak scanner allows it)
                 if (targetUuid !== uuid && targetOwner?.owner !== uuid
+                    && !isInFlock(targetUuid, uuid, getEntity)
                     && isTargetable(targetCloak, myScanner)) {
                     break;
                 }
@@ -112,10 +143,11 @@ const ChooseTargetSystem = new System({
 
 /**
  * Applies a peer's explicit target choice (tap/click on a ship) to the
- * ship it controls. Enforces the same rules as target cycling: no
- * targeting yourself, your own escorts, or ships your scanner can't
- * see through their cloak. An invalid choice is dropped rather than
- * clamped so every peer resolves the input identically.
+ * ship it controls: no targeting yourself, or ships your scanner can't
+ * see through their cloak. Unlike tab/r cycling, an EXPLICIT click DOES
+ * target the player's own flock (escorts, idle bay fighters) — that's
+ * how you inspect your own ships. An invalid choice is dropped rather
+ * than clamped so every peer resolves the input identically.
  */
 export function applySetTarget(world: World, peerId: string | undefined,
     targetUuid: string | null) {
@@ -134,8 +166,7 @@ export function applySetTarget(world: World, peerId: string | undefined,
     const targetEntity = world.entities.get(targetUuid);
     if (!targetEntity
         || targetUuid === found.uuid
-        || !targetEntity.components.has(ShipComponent)
-        || targetEntity.components.get(OwnerComponent)?.owner === found.uuid) {
+        || !targetEntity.components.has(ShipComponent)) {
         return;
     }
     const cloak = targetEntity.components.get(CloakActiveComponent);

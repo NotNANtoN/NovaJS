@@ -8,6 +8,7 @@ import * as PIXI from "pixi.js";
 import { DisplayAssetDataInterface } from "../client/gamedata/display_asset_data.js";
 import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
 import { DisplayAssetDataResource, SimulationGameDataResource } from "../nova_plugin/game_data_resource.js";
+import { isInFlock } from "../nova_plugin/flock.js";
 import { GovtComponent } from "../nova_plugin/govt_component.js";
 import { shipDisposition, targetCornerStyle } from "../nova_plugin/iff_plugin.js";
 import { NpcComponent } from "../nova_plugin/npc_ai_plugin.js";
@@ -109,12 +110,23 @@ const TargetCornersResource = new Resource<TargetCorners>('TargetCornersResource
  * The corner set for the player's current ship target — see
  * targetCornerStyle in iff_plugin.ts for the hostility rule. Derived
  * display-side entirely from state that already crosses to the display
- * world (GovtComponent, NpcComponent, TargetComponent, the legacy
+ * world (GovtComponent, NpcComponent, TargetComponent, the Formation/
+ * Owner/FiringGroup chain for the flock walk, the legacy
  * ShootAllWeapons marker — all serializer-registered), so no new wire
  * components are needed.
+ *
+ * The player's OWN FLOCK — hired escorts, idle bay fighters, and
+ * anything transitively following them (see flock.ts) — always shows
+ * the friendly corners, ahead of every political/behavioral tier:
+ * your own ships are yours regardless of government.
  */
-export function styleForTarget(targetEntity: Entity, playerUuid: string,
-    playerEntity: Entity, gameData: SimulationGameDataInterface): string {
+export function styleForTarget(targetUuid: string, targetEntity: Entity,
+    playerUuid: string, playerEntity: Entity,
+    gameData: SimulationGameDataInterface,
+    getEntity: (uuid: string) => Entity | undefined): string {
+    if (isInFlock(targetUuid, playerUuid, getEntity)) {
+        return 'friendly';
+    }
     const govtId = targetEntity.components.get(GovtComponent)?.id;
     // Display-side getCached: a cold cache shows neutral corners for a
     // tick or two while the govt data loads.
@@ -156,8 +168,8 @@ const DrawTargetCornersSystem = new System({
             return;
         }
 
-        targetCorners.setStyle(styleForTarget(
-            targetEntity, playerUuid, playerEntity, gameData));
+        targetCorners.setStyle(styleForTarget(target, targetEntity,
+            playerUuid, playerEntity, gameData, uuid => entities.get(uuid)));
         targetCorners.step(time.time, target, targetGraphic.size);
         targetCorners.setPosition(targetGraphic.container.position);
         targetCorners.visible = true;

@@ -6,8 +6,10 @@ import { Vector } from 'nova_ecs/datatypes/vector';
 import { MovementState } from 'nova_ecs/plugins/movement_plugin';
 import { govtDisposition, effectiveStrength, oddsFavorable } from './govt_disposition.js';
 import {
-    chooseNearest, formationOffset, formationSlotPosition,
-    FORMATION_LATERAL_SPACING, FORMATION_ROW_SPACING, steerFormation,
+    chooseNearest, Formation, formationOffset, formationSlotPosition,
+    FORMATION_LATERAL_SPACING, FORMATION_ROW_SPACING,
+    RCS_ACCEL_FRACTION, RCS_DISENGAGE_SPEED, RCS_ENGAGE_SPEED,
+    steerFormation,
 } from './npc_ai_plugin.js';
 
 function govt(overrides: Partial<ReturnType<typeof getDefaultGovtData>>) {
@@ -148,6 +150,9 @@ describe('formation geometry', () => {
 });
 
 describe('steerFormation', () => {
+    const ACCEL = 200;
+    const DT = 1 / 60;
+
     function movement(overrides: Partial<MovementState>): MovementState {
         return {
             position: new Position(0, 0),
@@ -160,30 +165,39 @@ describe('steerFormation', () => {
         };
     }
 
-    it('thrusts toward a distant slot once facing it', () => {
+    function formation(overrides: Partial<Formation> = {}): Formation {
+        return { leader: 'leader', slot: 0, ...overrides };
+    }
+
+    it('thrusts toward a distant slot once facing it (turn-and-burn)', () => {
         const leader = movement({ position: new Position(0, -1000) });
         // The slot is far up (-y); the follower already faces up.
         const follower = movement({ position: new Position(0, 0) });
-        steerFormation(follower, leader, 0);
+        const state = formation();
+        steerFormation(follower, leader, state, ACCEL, DT);
+        expect(state.rcs ?? false).toBeFalse();
         expect(follower.turnTo instanceof Angle).toBeTrue();
         expect(follower.accelerating).toBe(1);
     });
 
-    it('coasts and aligns with the leader when on station', () => {
-        const leader = movement({
-            position: new Position(0, 0),
-            velocity: new Vector(0, 0),
-            rotation: new Angle(1),
+    it('station-keeps on RCS when on station: heading pinned to the ' +
+        'leader, engine dark', () => {
+            const leader = movement({
+                position: new Position(0, 0),
+                velocity: new Vector(0, 0),
+                rotation: new Angle(1),
+            });
+            const follower = movement({
+                position: formationSlotPosition(
+                    new Position(0, 0), new Angle(1), 2),
+                velocity: new Vector(0, 0),
+            });
+            const state = formation({ slot: 2 });
+            steerFormation(follower, leader, state, ACCEL, DT);
+            expect(state.rcs).toBeTrue();
+            expect(follower.accelerating).toBe(0);
+            expect((follower.turnTo as Angle).angle).toBeCloseTo(1);
         });
-        const follower = movement({
-            position: formationSlotPosition(
-                new Position(0, 0), new Angle(1), 2),
-            velocity: new Vector(0, 0),
-        });
-        steerFormation(follower, leader, 2);
-        expect(follower.accelerating).toBe(0);
-        expect((follower.turnTo as Angle).angle).toBeCloseTo(1);
-    });
 
     it('matches velocity: a follower in the slot of a moving leader ' +
         'is steered along the leader velocity', () => {
@@ -198,11 +212,119 @@ describe('steerFormation', () => {
                 velocity: new Vector(0, 0),
                 rotation: new Angle(Math.PI / 2),
             });
-            steerFormation(follower, leader, 0);
+            const state = formation();
+            steerFormation(follower, leader, state, ACCEL, DT);
             // Stationary follower, moving leader: the correction points
             // along +x, which is exactly where the follower faces.
             expect(follower.accelerating).toBe(1);
             const heading = follower.turnTo as Angle;
             expect(heading.getUnitVector().x).toBeGreaterThan(0.9);
+        });
+
+    it('RCS nudges velocity without rotating and within the budget', () => {
+        const leader = movement({
+            velocity: new Vector(30, 0),
+            rotation: new Angle(0.5),
+        });
+        // Exactly in the (lookahead-led) slot but 30 px/s slow: the
+        // correction is purely velocity, under RCS_ENGAGE_SPEED.
+        const follower = movement({
+            position: formationSlotPosition(
+                new Position(0, 0), new Angle(0.5), 0)
+                .add(new Vector(30 * 0.4, 0)) as Position,
+            velocity: new Vector(0, 0),
+            rotation: new Angle(2),
+        });
+        const state = formation();
+        steerFormation(follower, leader, state, ACCEL, DT);
+        expect(state.rcs).toBeTrue();
+        // Velocity moved toward the leader's, capped by the budget.
+        const budget = ACCEL * RCS_ACCEL_FRACTION * DT;
+        expect(follower.velocity.length).toBeGreaterThan(0);
+        expect(follower.velocity.length).toBeLessThanOrEqual(budget + 1e-9);
+        // No rotation request except aligning with the leader, no
+        // engine.
+        expect(follower.accelerating).toBe(0);
+        expect((follower.turnTo as Angle).angle).toBeCloseTo(0.5);
+        expect(follower.turning).toBe(0);
+    });
+
+    it('converges on station under RCS with the heading never leaving ' +
+        'the leader alignment', () => {
+            const leader = movement({
+                velocity: new Vector(40, 0),
+                rotation: new Angle(Math.PI / 2),
+            });
+            const slot = formationSlotPosition(
+                new Position(0, 0), new Angle(Math.PI / 2), 0);
+            // Slightly off station and slow — a correction well under
+            // the RCS engage threshold.
+            const follower = movement({
+                position: new Position(slot.x - 8, slot.y + 6),
+                velocity: new Vector(30, 0),
+                rotation: new Angle(Math.PI / 2),
+            });
+            const state = formation();
+            // The controller's station point: the slot, led by the
+            // leader's velocity (FORMATION_LOOKAHEAD_S = 0.4).
+            const error = () => formationSlotPosition(
+                Position.fromVectorLike(leader.position),
+                Angle.fromAngleLike(leader.rotation), 0)
+                .add(Vector.fromVectorLike(leader.velocity).scale(0.4))
+                .subtract(follower.position).length;
+            const initialError = error();
+            for (let i = 0; i < 600; i++) {
+                steerFormation(follower, leader, state, ACCEL, DT);
+                expect(state.rcs).toBeTrue();
+                // RCS never asks for rotation away from the leader.
+                expect((follower.turnTo as Angle).angle)
+                    .toBeCloseTo(Math.PI / 2);
+                expect(follower.accelerating).toBe(0);
+                // Integrate: both drift; the follower closes the gap.
+                follower.position = follower.position
+                    .add(follower.velocity.scale(DT)) as Position;
+                leader.position = leader.position
+                    .add(leader.velocity.scale(DT)) as Position;
+            }
+            expect(error()).toBeLessThan(2);
+            expect(error()).toBeLessThan(initialError);
+            expect(follower.velocity.subtract(leader.velocity).length)
+                .toBeLessThan(1);
+        });
+
+    it('hysteresis: holds the current regime between the thresholds', () => {
+        const midpoint = (RCS_ENGAGE_SPEED + RCS_DISENGAGE_SPEED) / 2;
+        const leader = movement({ rotation: new Angle(0) });
+        // In slot with a pure velocity mismatch of exactly `midpoint`.
+        const follower = () => movement({
+            position: formationSlotPosition(
+                new Position(0, 0), new Angle(0), 0),
+            velocity: new Vector(-midpoint, 0),
+            rotation: new Angle(0),
+        });
+        const fromRcs = formation({ rcs: true });
+        steerFormation(follower(), leader, fromRcs, ACCEL, DT);
+        expect(fromRcs.rcs).toBeTrue();
+        const fromBurn = formation({ rcs: false });
+        steerFormation(follower(), leader, fromBurn, ACCEL, DT);
+        expect(fromBurn.rcs).toBeFalse();
+    });
+
+    it('hysteresis: drops RCS above the disengage threshold and ' +
+        'engages below the engage threshold', () => {
+            const leader = movement({ rotation: new Angle(0) });
+            const withMismatch = (speed: number) => movement({
+                position: formationSlotPosition(
+                    new Position(0, 0), new Angle(0), 0),
+                velocity: new Vector(-speed, 0),
+                rotation: new Angle(0),
+            });
+            const state = formation({ rcs: true });
+            steerFormation(withMismatch(RCS_DISENGAGE_SPEED + 10),
+                leader, state, ACCEL, DT);
+            expect(state.rcs).toBeFalse();
+            steerFormation(withMismatch(RCS_ENGAGE_SPEED - 10),
+                leader, state, ACCEL, DT);
+            expect(state.rcs).toBeTrue();
         });
 });
