@@ -15,6 +15,7 @@ import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_
 import { registerSimulationBridgeEvent } from '../communication/simulation_bridge_events.js';
 import { mod } from '../util/mod.js';
 import { ControlledByComponent, ShipControlEvent, ShipControlStateComponent } from './ship_control.js';
+import { DisabledComponent } from './disabled_component.js';
 import { WeaponEntries, WeaponLocalState, WeaponsComponent } from './fire_weapon_plugin.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { FuelComponent } from './health_plugin.js';
@@ -107,9 +108,16 @@ export const WeaponsSystem = new System({
     name: 'WeaponsSystem',
     args: [WeaponsStateComponent, WeaponsComponent, TimeResource, UUID,
         WeaponEntries, Optional(OutfitsStateComponent), Optional(FuelComponent),
-        SimulationGameDataResource] as const,
+        SimulationGameDataResource, Optional(DisabledComponent)] as const,
     step(weaponsState, weaponsLocalState, time, uuid, weaponEntries,
-        outfits, fuel, gameData) {
+        outfits, fuel, gameData, disabled) {
+        // A disabled ship cannot fire anything — held triggers, NPC fire
+        // control, and even automatic point defense are all suspended.
+        // (Safe to gate before the localState touch: DisabledComponent
+        // is deterministic simulation state, identical on every peer.)
+        if (disabled) {
+            return;
+        }
         for (const [id, state] of weaponsState) {
             // Touch the local state before any cache-dependent guard:
             // the DefaultMap creates entries on access, entries are

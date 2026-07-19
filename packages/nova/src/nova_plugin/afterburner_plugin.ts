@@ -37,7 +37,7 @@ export const AFTERBURNER_FACTOR = 2;
  * speed exactly at departure. Ionization still slows turning, but the
  * hyperdrive burn itself is not ion-slowed.
  */
-const EffectiveMovementPhysicsSystem = new System({
+export const EffectiveMovementPhysicsSystem = new System({
     name: 'EffectiveMovementPhysics',
     args: [ShipPhysicsComponent, MovementPhysicsComponent,
         MovementStateComponent, TimeResource,

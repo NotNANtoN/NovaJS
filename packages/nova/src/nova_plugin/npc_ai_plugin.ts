@@ -16,6 +16,7 @@ import { System } from 'nova_ecs/system';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { CloakActiveComponent, isTargetable } from './cloak_plugin.js';
 import { DamagedEvent } from './death_plugin.js';
+import { DisabledComponent } from './disabled_component.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { GovtComponent } from './govt_component.js';
 import { govtDisposition, effectiveStrength, oddsFavorable } from './govt_disposition.js';
@@ -256,7 +257,7 @@ const PlanetsQuery = new Query(
     [UUID, MovementStateComponent, PlanetComponent] as const);
 const NpcTargetsQuery = new Query([UUID, MovementStateComponent, ShipComponent,
     ShipDataComponent, Optional(GovtComponent), Optional(ShieldComponent),
-    Optional(CloakActiveComponent)] as const);
+    Optional(CloakActiveComponent), Optional(DisabledComponent)] as const);
 
 function lookupGovt(gameData: SimulationGameDataInterface,
     govt: { id: string } | undefined) {
@@ -331,12 +332,15 @@ const NpcDecisionSystem = new System({
             shipData.strength, shieldFraction(shield));
 
         // Gather enemies: govt-hostile ships plus the recorded
-        // aggressor, cloaked ships excluded (invisible to AI).
+        // aggressor. Cloaked ships are excluded (invisible to AI), and
+        // so are DISABLED ships: a disabled ship is no longer a threat,
+        // so warships and interceptors drop it and pick a new target
+        // (boarding/piracy behavior is not modeled).
         const hostiles: Array<readonly [string, number]> = [];
         let aggressorEntry: readonly [string, number, number] | undefined;
         for (const [otherUuid, otherMovement, , otherData, otherGovt,
-            otherShield, cloak] of ships) {
-            if (otherUuid === uuid || !isTargetable(cloak)) {
+            otherShield, cloak, otherDisabled] of ships) {
+            if (otherUuid === uuid || !isTargetable(cloak) || otherDisabled) {
                 continue;
             }
             const distanceSquared = otherMovement.position
@@ -615,7 +619,7 @@ function steerOutward(movement: MovementState, away: Vector): boolean {
  * Executes the NPC's current mode every tick. Deleting at the depart
  * radius stands in for jumping out (see the module comment).
  */
-const NpcSteeringSystem = new System({
+export const NpcSteeringSystem = new System({
     name: 'NpcSteeringSystem',
     args: [NpcComponent, MovementStateComponent, ShipPhysicsComponent,
         TargetComponent, Optional(FormationComponent), TimeResource,
@@ -782,7 +786,7 @@ export function steerFormation(movement: MovementState, leader: MovementState,
     movement.accelerating = Math.abs(misalignment) < 0.7 ? 1 : 0;
 }
 
-const FormationSystem = new System({
+export const FormationSystem = new System({
     name: 'FormationSystem',
     args: [FormationComponent, MovementStateComponent,
         Optional(NpcComponent), Entities, GetEntity, UUID] as const,

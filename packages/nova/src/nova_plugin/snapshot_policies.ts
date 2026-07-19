@@ -9,6 +9,7 @@ import { AsteroidDataComponent } from "./asteroid_plugin.js";
 import { BlastDamageComponent, BlastIgnoreComponent } from "./blast_data.js";
 import { BlastDoneComponent } from "./blast_plugin.js";
 import { CloakComponent, CloakScannerComponent } from "./cloak_plugin.js";
+import { RepairComponent } from "./disabled_component.js";
 import { IffComponent } from "./iff_plugin.js";
 import { CollisionHitterComponent, CollisionVulnerabilityComponent } from "./collision_interaction.js";
 import { decodeHull, encodeHull, HitboxHullComponent, HurtboxHullComponent } from "./collisions_plugin.js";
@@ -98,6 +99,11 @@ export function configureSnapshotPolicies(world: World) {
     // The IFF capability is derived from owned outfits and re-derived at
     // restore by IffDeriver, exactly like the cloak capability.
     policies.set(IffComponent, { policy: 'skip' });
+    // The ModType 49 repair-system capability is likewise derived from
+    // outfits (RepairDeriver). The disabled STATE (DisabledComponent) is
+    // real sim state and serializer-registered, so it takes the default
+    // codec path.
+    policies.set(RepairComponent, { policy: 'skip' });
 
     // Enum-valued; effectively immutable.
     policies.set(GuidanceComponent, { policy: 'share' });

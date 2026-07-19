@@ -5,23 +5,37 @@
   "reverse": "ArrowDown",
   "pointTo": "KeyA",
   "firePrimary": "Space",
-  "fireSecondary": ["ControlLeft", "ShiftLeft"],
+  "fireSecondary": [
+    "ControlLeft",
+    "ShiftLeft"
+  ],
   "resetSecondary": "KeyS",
   "nextTarget": {
     "key": "Tab"
   },
   "friendlyTarget": {
     "key": "Tab",
-    "modifiers": ["Alt"]
+    "modifiers": [
+      "Alt"
+    ]
   },
   "nearestTarget": "KeyR",
   "nextSecondary": "KeyW",
   "previousSecondary": {
     "key": "KeyW",
-    "modifiers": ["Alt"]
+    "modifiers": [
+      "Alt"
+    ]
   },
   "afterburner": "KeyZ",
   "cloak": "KeyU",
+  "selfDestruct": {
+    "key": "Minus",
+    "modifiers": [
+      "Alt",
+      "Shift"
+    ]
+  },
   "hail": "KeyY",
   "board": "KeyB",
   "escorts": "KeyE",
@@ -45,7 +59,10 @@
   "right": "ArrowRight",
   "sell": "KeyS",
   "buy": "KeyB",
-  "depart": ["Escape", "KeyD"],
+  "depart": [
+    "Escape",
+    "KeyD"
+  ],
   "properties": "KeyP",
   "missions": "KeyM",
   "fullscreen": "Enter"
