@@ -1,9 +1,77 @@
 import * as express from "express";
 import { Express } from "express";
 import * as path from 'path';
-import { idsPath, dataPath, settingsPrefix } from "../common/game_data_paths.js";
+import { idsPath, dataPath, batchPath, settingsPrefix } from "../common/game_data_paths.js";
 import { GameDataInterface } from "novadatainterface/game_data_interface";
 import { NovaDataType } from "novadatainterface/nova_data_interface";
+
+/**
+ * Request body for the batch endpoint: a map from data type to the
+ * list of ids requested for that type.
+ */
+export type BatchRequest = { [dataType: string]: string[] };
+
+/**
+ * Response from the batch endpoint. For each requested (type, id), the
+ * entry is either `{ data }` on success or `{ error }` if that single
+ * id could not be resolved. A missing id must NOT fail the whole
+ * batch, so errors are reported per-id rather than as a non-200 status.
+ */
+export type BatchResponseEntry<T = unknown> = { data: T } | { error: string };
+export type BatchResponse = {
+    [dataType: string]: { [id: string]: BatchResponseEntry }
+};
+
+/**
+ * Resolves every (dataType, id) in `body` against `gameData`, returning
+ * a per-id success/error map. Pure and transport-agnostic so it can be
+ * unit tested without an HTTP server.
+ *
+ * Contract:
+ *  - An unknown data type marks each of its ids with an error entry.
+ *  - A per-id load rejection becomes that id's error entry; it never
+ *    fails sibling ids or other types.
+ *  - Binary (ArrayBuffer) results are rejected as errors: the batch
+ *    endpoint carries only JSON metadata; binaries keep their
+ *    per-resource routes.
+ */
+export async function resolveBatch(
+    gameData: GameDataInterface,
+    body: BatchRequest,
+): Promise<BatchResponse> {
+    const result: BatchResponse = {};
+    await Promise.all(Object.entries(body).map(async ([name, ids]) => {
+        const typeResult: { [id: string]: BatchResponseEntry } = {};
+        result[name] = typeResult;
+
+        const dataGettable = gameData.data[name as NovaDataType];
+        if (!dataGettable) {
+            for (const id of ids ?? []) {
+                typeResult[id] = { error: 'Unknown data type ' + name };
+            }
+            return;
+        }
+        if (!Array.isArray(ids)) {
+            return;
+        }
+
+        // Resolve every id concurrently; one rejection only affects its
+        // own entry.
+        await Promise.all(ids.map(async (id) => {
+            try {
+                const data = await dataGettable.get(id);
+                if (data instanceof ArrayBuffer) {
+                    typeResult[id] = { error: 'Binary data is not available over the batch endpoint' };
+                    return;
+                }
+                typeResult[id] = { data };
+            } catch (e) {
+                typeResult[id] = { error: e instanceof Error ? e.message : String(e) };
+            }
+        }));
+    }));
+    return result;
+}
 
 
 /**
@@ -51,6 +119,15 @@ class GameDataServer {
         // Earlier routes take precedence over later ones.
         // NOTE: This can not be converted to RPCs because PIXI.js
         // expects assets to be loaded from URLs.
+
+        // The batch route must be registered before the generic
+        // `:name/:item` routes below, or `/data/batch` would be parsed
+        // as `name=batch`. It coalesces many per-id metadata fetches
+        // into one round trip; the per-resource routes remain for other
+        // consumers (PIXI asset loads, node tooling, direct fetches).
+        this.app.post(batchPath,
+            express.json({ limit: '2mb' }),
+            this.batchRequestFulfiller.bind(this));
 
         this.app.get(path.join(dataPath, ":name/:item.png"), this.requestFulfiller.bind(this));
         this.app.get(path.join(dataPath, ":name/:item.json"), this.requestFulfiller.bind(this));
@@ -109,6 +186,24 @@ class GameDataServer {
         else {
             res.send("Unknown data type " + name);
         }
+    }
+
+    /**
+     * Resolves many (dataType, id) pairs in one request. The body is a
+     * BatchRequest ({ [dataType]: id[] }); the response is a
+     * BatchResponse ({ [dataType]: { [id]: { data } | { error } } }).
+     *
+     * A missing id, an unknown data type, or a per-id load failure is
+     * reported in that id's entry and never fails the whole batch. Only
+     * a malformed request body (not an object) yields a 400.
+     */
+    private async batchRequestFulfiller(req: express.Request, res: express.Response): Promise<void> {
+        const body = req.body as BatchRequest | undefined;
+        if (!body || typeof body !== 'object' || Array.isArray(body)) {
+            res.status(400).send({ error: 'Batch request body must be a { dataType: id[] } object' });
+            return;
+        }
+        res.send(await resolveBatch(this.gameData, body));
     }
 
     private async idRequestFulfiller(_req: express.Request, res: express.Response): Promise<void> {
