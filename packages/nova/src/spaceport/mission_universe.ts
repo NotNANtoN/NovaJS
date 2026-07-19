@@ -6,6 +6,22 @@ import { SystemData } from 'novadatainterface/system_data';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { StellarInfo, stellarInfoOf } from '../nova_plugin/mission_logic.js';
 
+/** Maps over `items` with at most `concurrency` calls in flight. */
+async function pooledMap<T, R>(items: readonly T[],
+    map: (item: T) => Promise<R>, concurrency = 12): Promise<R[]> {
+    const results = new Array<R>(items.length);
+    let next = 0;
+    async function worker() {
+        while (next < items.length) {
+            const index = next++;
+            results[index] = await map(items[index]);
+        }
+    }
+    await Promise.all(Array.from(
+        { length: Math.min(concurrency, items.length) }, worker));
+    return results;
+}
+
 /**
  * The static data the mission system needs, loaded once per session
  * and shared by the mission computer, the bar, and landing
@@ -52,16 +68,18 @@ export class MissionUniverse {
         const ids = await this.gameData.ids;
         const data = this.gameData.data;
 
+        // Bounded concurrency: firing thousands of parallel fetches
+        // makes Chrome throw ERR_INSUFFICIENT_RESOURCES.
         const [missions, planets, systems, govts, crons] = await Promise.all([
-            Promise.all(ids.Mission.map(async id =>
-                [id, await data.Mission.get(id)] as const)),
-            Promise.all(ids.Planet.map(async id =>
-                [id, await data.Planet.get(id)] as const)),
-            Promise.all(ids.System.map(async id =>
-                [id, await data.System.get(id)] as const)),
-            Promise.all(ids.Govt.map(async id =>
-                [id, await data.Govt.get(id)] as const)),
-            Promise.all(ids.Cron.map(id => data.Cron.get(id))),
+            pooledMap(ids.Mission, async id =>
+                [id, await data.Mission.get(id)] as const),
+            pooledMap(ids.Planet, async id =>
+                [id, await data.Planet.get(id)] as const),
+            pooledMap(ids.System, async id =>
+                [id, await data.System.get(id)] as const),
+            pooledMap(ids.Govt, async id =>
+                [id, await data.Govt.get(id)] as const),
+            pooledMap(ids.Cron, id => data.Cron.get(id)),
         ]);
 
         this.missionsById = new Map(missions);

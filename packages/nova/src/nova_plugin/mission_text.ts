@@ -32,6 +32,16 @@ export interface MissionTextSubstitutions {
     playerShipType?: string;
 }
 
+/**
+ * The displayable part of a mïsn resource name: scenario authors
+ * append "; comment" annotations (e.g. "Delivery to Earth; Vellos1")
+ * that the game hides.
+ */
+export function missionDisplayName(name: string): string {
+    const semicolon = name.indexOf(';');
+    return (semicolon === -1 ? name : name.slice(0, semicolon)).trim();
+}
+
 export function expandMissionText(text: string,
     subs: MissionTextSubstitutions): string {
     const replacements: [string, string][] = [

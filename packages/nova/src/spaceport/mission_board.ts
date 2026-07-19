@@ -14,7 +14,7 @@ import {
     missionMatchesLocation,
     refuseOffer,
 } from '../nova_plugin/mission_logic.js';
-import { expandMissionText } from '../nova_plugin/mission_text.js';
+import { expandMissionText, missionDisplayName } from '../nova_plugin/mission_text.js';
 import { ActiveMission } from '../nova_plugin/player_state_plugin.js';
 import { Button } from './button.js';
 import { Menu } from './menu.js';
@@ -31,13 +31,21 @@ const LIST_FONT_DIM: Partial<PIXI.ITextStyle> =
 const LIST_FONT_HEADER: Partial<PIXI.ITextStyle> =
     { ...LIST_FONT, fill: 0xffff88 };
 
-const LIST_ROWS = 16;
+// Laid out to fit the 510x201 Mission BBS dialog (PICT 8505).
+const LIST_ROWS = 10;
 const ROW_HEIGHT = 13;
+const LIST_X = -245;
+const CONTENT_TOP = -76;
+const DESC_X = 0;
+const DESC_WIDTH = 240;
+const CONTENT_HEIGHT = 140;
+const BUTTON_Y = 78;
 
 type Row =
     | { kind: 'offer', offer: MissionOffer }
     | { kind: 'active', active: ActiveMission }
     | { kind: 'header', label: string };
+
 
 /**
  * The mission computer / bar: lists the missions available to this
@@ -62,11 +70,11 @@ export class MissionBoard extends Menu<Entity> {
 
     private text = {
         title: new PIXI.Text('', {
-            fontFamily: 'Geneva', fontSize: 14, fill: 0xffffff,
+            fontFamily: 'Geneva', fontSize: 12, fill: 0xffffff,
         }),
-        status: new PIXI.Text('', { ...FONT.normal, wordWrapWidth: 300 }),
+        status: new PIXI.Text('', { ...FONT.normal, wordWrap: false }),
         description: new PIXI.Text('', {
-            ...FONT.normal, wordWrapWidth: 300,
+            ...FONT.normal, wordWrapWidth: DESC_WIDTH,
         }),
         dateCredits: new PIXI.Text('', FONT.normal),
     };
@@ -84,10 +92,10 @@ export class MissionBoard extends Menu<Entity> {
         this.container.name = `MissionBoard-${title}`;
 
         const buttons = {
-            accept: new Button(displayAssets, 'Accept', 60, { x: -140, y: 170 }),
-            refuse: new Button(displayAssets, 'Refuse', 60, { x: -40, y: 170 }),
-            abort: new Button(displayAssets, 'Abort', 60, { x: 60, y: 170 }),
-            done: new Button(displayAssets, 'Done', 60, { x: 160, y: 170 }),
+            accept: new Button(displayAssets, 'Accept', 60, { x: -180, y: BUTTON_Y }),
+            refuse: new Button(displayAssets, 'Refuse', 60, { x: -95, y: BUTTON_Y }),
+            abort: new Button(displayAssets, 'Abort', 60, { x: -10, y: BUTTON_Y }),
+            done: new Button(displayAssets, 'Done', 60, { x: 180, y: BUTTON_Y }),
         };
         buttons.accept.click.subscribe(this.accept.bind(this));
         buttons.refuse.click.subscribe(this.refuse.bind(this));
@@ -96,13 +104,28 @@ export class MissionBoard extends Menu<Entity> {
         this.addButtons(buttons);
 
         this.text.title.text = title;
-        this.text.title.position.set(-300, -190);
-        this.text.dateCredits.position.set(60, -190);
-        this.listContainer.position.set(-300, -160);
-        this.text.description.position.set(-10, -160);
-        this.text.status.position.set(-300, 140);
+        this.text.title.position.set(LIST_X, -95);
+        this.text.dateCredits.position.set(DESC_X + 40, -93);
+        this.listContainer.position.set(LIST_X, CONTENT_TOP);
+        this.text.description.position.set(DESC_X, CONTENT_TOP);
+        this.text.status.position.set(LIST_X, BUTTON_Y - 14);
         this.container.addChild(this.text.title, this.text.dateCredits,
             this.listContainer, this.text.description, this.text.status);
+
+        // Clip the list and the description to their dialog panes.
+        const listMask = new PIXI.Graphics()
+            .beginFill(0xffffff)
+            .drawRect(LIST_X, CONTENT_TOP, DESC_X - LIST_X - 10,
+                CONTENT_HEIGHT)
+            .endFill();
+        this.container.addChild(listMask);
+        this.listContainer.mask = listMask;
+        const descMask = new PIXI.Graphics()
+            .beginFill(0xffffff)
+            .drawRect(DESC_X, CONTENT_TOP, DESC_WIDTH + 10, CONTENT_HEIGHT)
+            .endFill();
+        this.container.addChild(descMask);
+        this.text.description.mask = descMask;
 
         this.controls.controls = {
             up: () => this.moveSelection(-1),
@@ -114,8 +137,14 @@ export class MissionBoard extends Menu<Entity> {
     }
 
     override async show(input: Entity): Promise<Entity> {
-        this.session = await MissionSession.create(input,
-            this.simulationData, this.universe, this.planetId);
+        try {
+            this.session = await MissionSession.create(input,
+                this.simulationData, this.universe, this.planetId);
+        } catch (e) {
+            // Data failed to load; don't wedge the spaceport.
+            console.warn('Mission board failed to load:', e);
+            return input;
+        }
         this.computeOffers();
         this.buildRows();
         this.selectedIndex = this.rows.findIndex(
@@ -193,13 +222,26 @@ export class MissionBoard extends Menu<Entity> {
             let label: string;
             let style: Partial<PIXI.ITextStyle> = LIST_FONT;
             if (row.kind === 'offer') {
-                label = row.offer.data.name;
+                // Mission names use the same <DST>-style wildcards as
+                // the descriptions.
+                label = expandMissionText(missionDisplayName(row.offer.data.name),
+                    this.offerSubstitutions(row.offer));
                 if (!row.offer.acceptable) {
                     style = LIST_FONT_DIM;
                 }
             } else if (row.kind === 'active') {
-                label = this.universe.getMission(row.active.id)?.name
-                    ?? row.active.id;
+                const mission = this.universe.getMission(row.active.id);
+                label = mission
+                    ? expandMissionText(missionDisplayName(mission.name),
+                        this.offerSubstitutions({
+                            data: mission,
+                            travelPlanet: row.active.travelPlanet,
+                            returnPlanet: row.active.returnPlanet,
+                            cargoType: row.active.cargoType,
+                            cargoQty: row.active.cargoQty,
+                            acceptable: true,
+                        }, row.active))
+                    : row.active.id;
             } else {
                 label = row.label;
                 style = LIST_FONT_HEADER;
@@ -310,7 +352,7 @@ export class MissionBoard extends Menu<Entity> {
         const brief = expandMissionText(row.offer.data.briefText,
             this.offerSubstitutions(row.offer));
         this.text.status.text =
-            `Accepted: ${row.offer.data.name}.`;
+            `Accepted: ${missionDisplayName(row.offer.data.name)}.`;
         this.buildRows();
         this.selectedIndex = Math.min(this.selectedIndex,
             this.rows.length - 1);
@@ -341,7 +383,7 @@ export class MissionBoard extends Menu<Entity> {
         }
         this.selectedIndex = Math.min(this.selectedIndex,
             this.rows.length - 1);
-        this.text.status.text = `Refused: ${row.offer.data.name}.`;
+        this.text.status.text = `Refused: ${missionDisplayName(row.offer.data.name)}.`;
         this.refreshList();
         if (refuseText) {
             this.text.description.text = refuseText;
@@ -362,7 +404,7 @@ export class MissionBoard extends Menu<Entity> {
         }
         abortMission(this.session.machinery, row.active.id,
             this.session.outfits);
-        this.text.status.text = `Aborted: ${mission?.name ?? row.active.id}.`;
+        this.text.status.text = `Aborted: ${mission ? missionDisplayName(mission.name) : row.active.id}.`;
         this.buildRows();
         this.selectedIndex = Math.min(this.selectedIndex,
             this.rows.length - 1);

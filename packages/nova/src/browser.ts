@@ -710,12 +710,6 @@ async function startGame() {
     ensurePlayerStateComponents(shipEntity);
     (window as any).myShip = shipEntity;
 
-    // Warm the mission/cron/planet caches in the background so the
-    // first landing or jump doesn't stall on them.
-    void MissionUniverse.shared(simulationGameData).load().catch(e => {
-        console.warn('Failed to preload mission data:', e);
-    });
-
     // ?system=nova:131 picks the starting system; otherwise the saved
     // system, otherwise the chär's start system, otherwise the default.
     const requestedSystem = query.get('system');
@@ -738,6 +732,14 @@ async function startGame() {
         entity: shipEntity,
         to: systemId,
         uuid: v4(),
+    });
+
+    // Warm the mission/cron/planet caches in the background so the
+    // first landing or jump doesn't stall on them. Deliberately after
+    // the initial join: these ~2000 fetches share Chrome's per-host
+    // connection pool with the world-load fetches above.
+    void MissionUniverse.shared(simulationGameData).load().catch(e => {
+        console.warn('Failed to preload mission data:', e);
     });
 
     installSaveTriggers();

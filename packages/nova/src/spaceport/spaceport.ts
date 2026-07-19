@@ -21,6 +21,7 @@ import { SystemPlugin } from '../nova_plugin/system_plugin.js';
 import { WeaponsStateComponent } from '../nova_plugin/weapons_state.js';
 import { formatDate } from '../nova_plugin/calendar.js';
 import { LOCATION_BAR, LOCATION_MISSION_COMPUTER, MissionEvent } from '../nova_plugin/mission_logic.js';
+import { missionDisplayName } from '../nova_plugin/mission_text.js';
 import { CreditsComponent, GameDateComponent } from '../nova_plugin/player_state_plugin.js';
 import { Button } from './button.js';
 import { Menu } from './menu.js';
@@ -173,15 +174,16 @@ export class Spaceport extends Menu<Entity> {
     private setNotices(events: MissionEvent[]) {
         const lines: string[] = [];
         for (const event of events) {
+            const name = missionDisplayName(event.missionName);
             switch (event.type) {
                 case 'completed':
-                    lines.push(`Mission complete: ${event.missionName}`
+                    lines.push(`Mission complete: ${name}`
                         + (event.payment
                             ? ` (+${event.payment.toLocaleString()} cr)`
                             : ''));
                     break;
                 case 'failed':
-                    lines.push(`Mission failed: ${event.missionName}`);
+                    lines.push(`Mission failed: ${name}`);
                     break;
                 default:
                     break;
