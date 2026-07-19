@@ -15,6 +15,7 @@ import { System } from 'nova_ecs/system';
 import SAT from "sat";
 import { registerSimulationBridgeEvent } from '../communication/simulation_bridge_events.js';
 import { AnimationComponent } from './animation_plugin.js';
+import { AsteroidComponent } from './asteroid_plugin.js';
 import { CloakActiveComponent, isCloaked } from './cloak_plugin.js';
 import { IdFactoryResource } from './id_factory.js';
 import { ProvideFromCache } from './provide_from_cache.js';
@@ -24,7 +25,9 @@ import { CollisionEvent, CollisionHitterComponent, CollisionVulnerabilityCompone
 import { CreateTime } from './create_time.js';
 import { DamagedEvent, ZeroArmorEvent } from './death_plugin.js';
 import { FireSubs, OwnerComponent, SourceComponent, SubCounts, VulnerableToPD, WeaponConstructors, WeaponEntry } from './fire_weapon_plugin.js';
+import { FiringGroupComponent, firingImmune, victimFiringGroup } from './firing_group.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
+import { GovtComponent } from './govt_component.js';
 import { guidanceAngle, Guidance, GuidanceComponent, MissileGuidanceResource } from './guidance.js';
 import { JamSteerComponent, MissileJammingSystem } from './jamming_plugin.js';
 import { ArmorComponent, ShieldComponent } from './health_plugin.js';
@@ -288,33 +291,57 @@ const ProjectileHurtboxProvider = ProvideFromCache({
     factory: hullFromAnimation,
 });
 
-const ProjectileCollisionSystem = new System({
+export const ProjectileCollisionSystem = new System({
     name: 'ProjectileCollisionSystem',
     events: [CollisionEvent],
     args: [CollisionEvent, Entities, UUID, ProjectileDataComponent,
-        Optional(OwnerComponent), FireSubs, TimeResource, CreateTime, EmitNow] as const,
-    step(collision, entities, uuid, projectileData, owner, fireSubs, time, createTime, emitNow) {
+        Optional(OwnerComponent), Optional(FiringGroupComponent),
+        Optional(TargetComponent), FireSubs, TimeResource, CreateTime,
+        EmitNow] as const,
+    step(collision, entities, uuid, projectileData, owner, firingGroup,
+        target, fireSubs, time, createTime, emitNow) {
         const other = entities.get(collision.other);
         if (!other) {
             return;
         }
-        const otherOwner = other.components.get(OwnerComponent);
-        // Don't collide with our owner or with things our owner owns.
-        // The owner check only applies when this projectile HAS an owner:
-        // with `owner?.owner` on both sides, an ownerless projectile would
-        // match every ownerless entity (undefined === undefined) and pass
-        // through e.g. asteroids. All current creation paths (fireFromEntity,
-        // fireSubs) always set an owner, so this is intent-clarifying, not
-        // behavior-changing.
-        if (owner !== undefined
-            && (collision.other === owner.owner
-                || otherOwner?.owner === owner.owner)) {
+        // Friendly-fire immunity: don't collide with anything in our
+        // firing group — the firer itself, its fleet (leader+escorts),
+        // its carrier/fighters — see firing_group.ts. The owner uuid is
+        // the fallback group for weapons that predate group stamping;
+        // the predicate never matches when the weapon has neither (an
+        // ownerless projectile must not match every group-less entity
+        // and pass through e.g. asteroids).
+        const victimGroup = victimFiringGroup(
+            other.components.get(FiringGroupComponent),
+            other.components.get(OwnerComponent)?.owner,
+            collision.other);
+        if (firingImmune(firingGroup?.group ?? owner?.owner, victimGroup,
+            firingGroup?.govt, other.components.get(GovtComponent)?.id)) {
             return;
         }
 
         if (projectileData.proxSafety * 1000 + createTime > time.time) {
             // Prox safety is still active. Do not collide.
             return;
+        }
+
+        // A guided weapon only hits the ship it is TARGETING (so a
+        // homing missile weaves through a furball untouched), unless
+        // its wëap sets Flags2 0x0008 "Proximity detonator is triggered
+        // by ships other than the target" — parsed as proxHitAll, which
+        // is forced true for every non-guided weapon. A decoyed missile
+        // whose TargetComponent was retargeted (jamming_plugin) hits
+        // its new target through the same rule; a missile whose target
+        // cloaked keeps flying with the lock suspended and passes
+        // through everything else, which is correct per this rule.
+        if (!projectileData.proxHitAll
+            && collision.other !== target?.target) {
+            // Asteroids are still fair game for guided weapons unless
+            // the Seeker 0x0001 'passes over asteroids' flag is set.
+            if (!other.components.has(AsteroidComponent)
+                || projectileData.seeker.passOverAsteroids) {
+                return;
+            }
         }
 
         const self = entities.get(uuid);
@@ -390,18 +417,13 @@ const ProjectileBlastSystem = new System({
     name: 'ProjectileBlastSystem',
     events: [ProjectileExplodeEvent],
     args: [ProjectileDataComponent, ProjectileBlastHull, CollisionHitterComponent,
-        MovementStateComponent, Optional(OwnerComponent), Entities,
+        MovementStateComponent, Optional(OwnerComponent),
+        Optional(FiringGroupComponent), Entities,
         IdFactoryResource, ProjectileExplodeEvent] as const,
-    step(projectileData, blastHull, hitter, movement, owner, entities, ids, explosion) {
+    step(projectileData, blastHull, hitter, movement, owner, firingGroup,
+        entities, ids, explosion) {
         const blastIgnore = new Set<string>();
         // TODO: Tag ship that was hit as immune to explosion, since it's already hit.
-        if (!projectileData.blastHurtsFiringShip && owner) {
-            // TODO: Compute this accounting for subs, escorts, etc.
-            blastIgnore.add(owner.owner);
-            // const projectile
-            // blast.components.set(BlastIgnoreComponent,
-            //                      new Set([projectile.]));
-        }
 
         if (explosion.otherUuid) {
             // The projectile already damaged this entity, so
@@ -423,6 +445,17 @@ const ProjectileBlastSystem = new System({
                 turnBack: false,
                 velocity: new Vector(0, 0),
             });
+        if (!projectileData.blastHurtsFiringShip) {
+            // The blast inherits the projectile's firing group so it
+            // spares the firer AND its fleet/carrier group (see
+            // firing_group.ts); a blastHurtsFiringShip weapon carries
+            // no group and hurts everyone, firer included — matching
+            // the old owner-only ignore, generalized to the group.
+            const group = firingGroup ?? (owner && { group: owner.owner });
+            if (group) {
+                blast.components.set(FiringGroupComponent, group);
+            }
+        }
         entities.set(ids.next('blast'), blast);
     }
 });

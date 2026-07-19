@@ -223,6 +223,7 @@ async function ProjectileWeaponParse(weap: WeapResource, notFoundFunction: (m: s
         guidance,
         proxRadius: weap.proxRadius,
         proxSafety: weap.proxSafety / FPS,
+        proxHitAll: weap.proxHitAll,
         trailParticles: weap.trailParticles,
         hitParticles: weap.hitParticles,
         animation,

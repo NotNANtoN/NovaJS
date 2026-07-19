@@ -23,7 +23,9 @@ import { DefaultMap } from 'nova_ecs/utils';
 import { SingletonComponent } from 'nova_ecs/world';
 import { AnimationComponent } from './animation_plugin.js';
 import { applyExitPoint, ExitPointData, getExitPointData } from './exit_point.js';
+import { FiringGroup, FiringGroupComponent } from './firing_group.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
+import { GovtComponent } from './govt_component.js';
 import { firstOrderWithFallback } from './guidance.js';
 import { TargetComponent } from './target_component.js';
 import { WeaponsStateComponent } from './weapons_state.js';
@@ -183,6 +185,26 @@ export abstract class WeaponEntry {
         target?: string, source?: string, sourceVelocity?: Vector,
         exitPointData?: ExitPointData): Entity | undefined;
 
+    /**
+     * Stamps a spawned weapon entity (projectile, beam, bay fighter,
+     * submunition) with the firer's firing group so its hits are
+     * filtered by the friendly-fire pair predicate (see
+     * firing_group.ts). The group is the firer's own group when it has
+     * one (fleet members, bay fighters, parent projectiles), else the
+     * firer's owner-chain root; the govt rides along for the (disabled)
+     * same-govt immunity clause.
+     */
+    protected stampFiringGroup(spawned: Entity, firer: Entity,
+        ownerUuid: string) {
+        const inherited = firer.components.get(FiringGroupComponent);
+        const group = inherited?.group ?? ownerUuid;
+        const govt = inherited?.govt
+            ?? firer.components.get(GovtComponent)?.id;
+        const firingGroup: FiringGroup =
+            govt === undefined ? { group } : { group, govt };
+        spawned.components.set(FiringGroupComponent, firingGroup);
+    }
+
     fireFromEntity(source: string, inaccuracy = true): Entity | undefined {
         // TODO: This is expensive. Cache queries for different sources in nova_ecs or
         // add a 'number of shots' argument.
@@ -278,8 +300,12 @@ export abstract class WeaponEntry {
             angle = angle.add(sampleInaccuracy(this.data.accuracy, this.random));
         }
 
-        return this.fire(exitPoint, angle, owner.owner ?? source, target,
-            source, movement.velocity, exitPointData);
+        const spawned = this.fire(exitPoint, angle, owner.owner ?? source,
+            target, source, movement.velocity, exitPointData);
+        if (spawned) {
+            this.stampFiringGroup(spawned, entity, owner.owner);
+        }
+        return spawned;
     }
 
     fireSubs(source: string, sourceExpired = false, position?: Position): Entity[] {
@@ -324,6 +350,8 @@ export abstract class WeaponEntry {
                     target?.target, source);
                 if (subEntity) {
                     subs.push(subEntity);
+                    this.stampFiringGroup(subEntity, sourceEntity,
+                        owner.owner);
                     const newCounts = new DefaultMap(() => 0, subCounts);
                     newCounts.set(sub.id, newCounts.get(sub.id) + 1);
                     subEntity.components.set(SubCounts, newCounts);
@@ -359,10 +387,18 @@ export const FireWeaponPlugin: Plugin = {
             componentType: OwnerComponentType,
         });
 
+        // Firing groups are simulation state (weapon hits depend on
+        // them), so they are serializer-registered: hashed for desync
+        // detection, snapshotted for rollback, carried on the wire.
+        deltaMaker.addComponent(FiringGroupComponent, {
+            componentType: FiringGroup,
+        });
+
         world.addSystem(WeaponsComponentProvider);
         world.addComponent(WeaponsComponent);
         world.addComponent(OwnerComponent);
         world.addComponent(SourceComponent);
+        world.addComponent(FiringGroupComponent);
         world.resources.set(WeaponConstructors, new Map());
         const weaponConstructors = world.resources.get(WeaponConstructors)!;
 

@@ -27,6 +27,7 @@ import { JUMP_ARRIVAL_MARGIN_S, JUMP_DISTANCE } from './jump_plugin.js';
 import { loadWithRetries } from './load_retry.js';
 import { evaluateNCBTest } from './ncb.js';
 import { DeathAIComponent } from './npc_plugin.js';
+import { FiringGroupComponent } from './firing_group.js';
 import { FormationComponent, NpcComponent, formationSlotPosition } from './npc_ai_plugin.js';
 import { WeaponEntries } from './fire_weapon_plugin.js';
 import { ShipComponent } from './ship_plugin.js';
@@ -468,8 +469,14 @@ export function spawnNpc(world: World,
         };
     }
     const leadUuid = ids.next('npc');
-    insert(leadUuid, makeNpcShip(leadData, 0, fleet.govt,
-        leadState.position, leadState.rotation, leadState.velocity));
+    const leadShip = makeNpcShip(leadData, 0, fleet.govt,
+        leadState.position, leadState.rotation, leadState.velocity);
+    // The whole fleet shares one firing group so members' weapons pass
+    // through each other (see firing_group.ts): in the original game an
+    // NPC and its escorts simply cannot hit each other, so a stray
+    // escort shot must never turn the leader hostile to its own fleet.
+    leadShip.components.set(FiringGroupComponent, { group: leadUuid });
+    insert(leadUuid, leadShip);
     let spawned = 1;
     let slot = 0;
     for (const escort of fleet.escorts) {
@@ -490,6 +497,8 @@ export function spawnNpc(world: World,
                 leader: leadUuid,
                 slot,
             });
+            escortEntity.components.set(FiringGroupComponent,
+                { group: leadUuid });
             insert(ids.next('npc'), escortEntity);
             slot++;
             spawned++;

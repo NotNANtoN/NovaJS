@@ -340,8 +340,16 @@ export const CollisionSystem = new System({
 
         rbush.load(entries);
 
-        // Check for collisions
-        const alreadyCollided = new Set<string>();
+        // Check for collisions. Pairs are COLLECTED first and emitted
+        // in canonical (uuid-sorted) order below: discovery order here
+        // follows query-cache/rbush iteration order, which differs
+        // between a live world and a wire-restored one (rebuilt caches
+        // iterate in entity-map order). Without canonicalization, two
+        // missiles striking the same ship on the same tick have their
+        // collision events — and thus their blasts' allocated ids —
+        // ordered differently on the two worlds, a lockstep divergence
+        // the wire-snapshot test caught.
+        const chosen = new Map<string, { initiator: string, receiver: string }>();
 
         for (const entry of entries) {
             const maybeCollisions = rbush.search(entry)
@@ -370,21 +378,38 @@ export const CollisionSystem = new System({
                     vulnerability = entry.vulnerability;
                     hitter = (other as { hitter: CollisionHitter }).hitter;
                 }
-                const canCollide = aHitsB(hitter, vulnerability);
-                if (canCollide &&
-                    !alreadyCollided.has(collisionPair) &&
-                    entry.hull.collides(other.hull)) {
-                    alreadyCollided.add(collisionPair);
-                    emit(CollisionEvent, {
-                        other: other.uuid,
-                        initiator: entryInitiates,
-                    }, [entry.uuid]);
-                    emit(CollisionEvent, {
-                        other: entry.uuid,
-                        initiator: !entryInitiates,
-                    }, [other.uuid]);
+                const initiator = entryInitiates ? entry.uuid : other.uuid;
+                const receiver = entryInitiates ? other.uuid : entry.uuid;
+                const existing = chosen.get(collisionPair);
+                // One collision per unordered pair per tick (as before).
+                // Every valid orientation is discovered from both sides
+                // during the sweep, so the SET of candidates is
+                // iteration-order independent; when both orientations
+                // overlap (mutual hurtbox/hitbox pairs), prefer the
+                // lexicographically smaller initiator — a canonical
+                // stand-in for the old first-discovered-wins rule.
+                if (existing && existing.initiator <= initiator) {
+                    continue;
+                }
+                if (aHitsB(hitter, vulnerability)
+                    && entry.hull.collides(other.hull)) {
+                    chosen.set(collisionPair, { initiator, receiver });
                 }
             }
+        }
+
+        const collisions = [...chosen.values()].sort((p, q) =>
+            p.initiator < q.initiator ? -1 : p.initiator > q.initiator ? 1 :
+                p.receiver < q.receiver ? -1 : p.receiver > q.receiver ? 1 : 0);
+        for (const { initiator, receiver } of collisions) {
+            emit(CollisionEvent, {
+                other: receiver,
+                initiator: true,
+            }, [initiator]);
+            emit(CollisionEvent, {
+                other: initiator,
+                initiator: false,
+            }, [receiver]);
         }
     }
 });

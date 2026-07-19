@@ -20,6 +20,8 @@ import { CreateTime, CreateTimeArgProvider } from './create_time.js';
 import { DamagedEvent } from './death_plugin.js';
 import { applyExitPoint, ExitPointData } from './exit_point.js';
 import { FireSubs, OwnerComponent, sampleInaccuracy, SourceComponent, WeaponConstructors, WeaponEntry } from './fire_weapon_plugin.js';
+import { FiringGroupComponent, firingImmune, victimFiringGroup } from './firing_group.js';
+import { GovtComponent } from './govt_component.js';
 import { zeroOrderGuidance } from './guidance.js';
 import { SoundEvent } from './sound_plugin.js';
 import { TargetComponent } from './target_component.js';
@@ -289,21 +291,31 @@ export function beamHullHitFraction(start: Vector, end: Vector,
     return minT;
 }
 
-const BeamCollisionSystem = new System({
+export const BeamCollisionSystem = new System({
     name: 'BeamCollisionSystem',
     events: [CollisionEvent],
     args: [CollisionEvent, Entities, Optional(OwnerComponent),
-        BeamDataComponent, BeamStateComponent, MovementStateComponent,
+        Optional(FiringGroupComponent), BeamDataComponent,
+        BeamStateComponent, MovementStateComponent,
         Optional(SourceComponent)] as const,
-    step(collision, entities, owner, beamData, beamState, movement, source) {
+    step(collision, entities, owner, firingGroup, beamData, beamState,
+        movement, source) {
 
         const other = entities.get(collision.other);
         if (!other) {
             return;
         }
 
-        const otherOwner = other.components.get(OwnerComponent);
-        if (collision.other === owner?.owner || otherOwner?.owner === owner?.owner) {
+        // Friendly-fire immunity: the beam passes through its firer's
+        // whole firing group (fleet, carrier+fighters); see
+        // firing_group.ts. Owner uuid is the group fallback.
+        if (firingImmune(
+            firingGroup?.group ?? owner?.owner,
+            victimFiringGroup(other.components.get(FiringGroupComponent),
+                other.components.get(OwnerComponent)?.owner,
+                collision.other),
+            firingGroup?.govt,
+            other.components.get(GovtComponent)?.id)) {
             return;
         }
 
