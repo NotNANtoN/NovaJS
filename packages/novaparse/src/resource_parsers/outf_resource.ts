@@ -64,9 +64,9 @@ function modFunction(modType: number, modVal: number): OutfitFunction | null {
         case 45: return ["maxGuns", modVal];
         case 46: return ["maxTurrets", modVal];
         case 47: return ["bomb", modVal];
-        case 48: return ["iff scrambler", true];
+        case 48: return ["iff scrambler", modVal];
         case 49: return ["repair system", true];
-        case 50: return ["nonlethal bomb", true];
+        case 50: return ["nonlethal bomb", modVal];
         default: return null;
     }
 }

@@ -78,6 +78,118 @@ export interface OutfitData extends BaseData {
      * collects asteroid debris it flies over into its cargo hold.
      */
     miningScoop: boolean,
+    /**
+     * Amount this outfit clears the current system's murk by (ModType 28,
+     * "murk modifier"). The Bible's ModVal is the amount to add to the
+     * system's murkiness, so this is its negation: a stock Sensor Boost with
+     * murk modifier -3 gives murkClear +3 (it removes 3 murk). Summed across
+     * the player's outfits and fed into the display's MurkState.murkReduction.
+     */
+    murkClear: number,
+    /**
+     * Amount this outfit subtracts from the current system's radar
+     * interference (ModType 24, "interference mod"). The Bible: "Subtracts the
+     * value in ModVal from the current star system's Interference value", so
+     * this is the ModVal directly. Summed across the player's outfits and fed
+     * into the status bar's interferenceReduction.
+     */
+    interferenceReduction: number,
+    /**
+     * This item is an IFF decoder (ModType 14, "IFF / colorized radar"). When
+     * the player owns one, radar blips are coloured by the ship's disposition
+     * toward the player (hostile / friendly / neutral) instead of the flat dim
+     * colour. ModVal is ignored.
+     */
+    iff: boolean,
+    /**
+     * This item is an auto-refueller (ModType 19): the ship slowly regenerates
+     * hyperspace fuel on its own. ModVal is ignored.
+     */
+    autoRefuel: boolean,
+    /**
+     * Number of extra consecutive hyperspace jumps this outfit grants when the
+     * player initiates a jump (ModType 32, "multi-jump"). Summed across
+     * outfits. Zero for non-multi-jump outfits.
+     */
+    multiJump: number,
+    /**
+     * This item is a density scanner (ModType 13): reveals asteroid density /
+     * lets the pilot see what an asteroid will drop. ModVal is ignored. The
+     * sim has no asteroid-scanning UI yet, so this is plumbed but unconsumed.
+     */
+    densityScanner: boolean,
+    /**
+     * How many jumps out from the purchase system this map outfit reveals
+     * (ModType 16, "map"): >=1 is that many jumps away, -1 reveals all
+     * inhabited independent systems, <= -1000 reveals a whole govt class. null
+     * for non-map outfits. Revealing systems needs per-player explored-system
+     * state (mission/NCB save data) that does not exist yet, so this is
+     * plumbed but unconsumed.
+     */
+    map: number | null,
+    /**
+     * Marines added to the ship's effective crew for capture odds (ModType 25).
+     * Positive adds crew; -1..-100 is a direct capture-odds bonus percent. 0
+     * for non-marine outfits. Boarding/capture does not exist in the sim yet,
+     * so this is plumbed but unconsumed.
+     */
+    marines: number,
+    /**
+     * This item is a repair system (ModType 49): occasionally repairs the ship
+     * while it is disabled. ModVal is ignored. Ships have no disabled state in
+     * the sim yet, so this is plumbed but unconsumed.
+     */
+    repairSystem: boolean,
+    /**
+     * This item is an escape pod (ModType 11): the pilot survives their ship's
+     * destruction. ModVal ignored. Death/respawn is minimal in the sim, so
+     * this is plumbed but unconsumed.
+     */
+    escapePod: boolean,
+    /**
+     * This item is an auto-ejecting escape pod (ModType 20): ejects the pilot
+     * automatically (requires an escape pod). ModVal ignored. Plumbed but
+     * unconsumed (see escapePod).
+     */
+    autoEject: boolean,
+    /**
+     * Govt id whose legal record this outfit clears (ModType 21,
+     * "clean legal record"): a govt id, or -1 for all. null for other outfits.
+     * There is no legal/reputation system in the sim yet, so this is plumbed
+     * but unconsumed. Stored as the raw ModVal (a gövt resource id, or -1).
+     */
+    cleanLegalRecord: number | null,
+    /**
+     * Govt class this IFF scrambler fools (ModType 48): any govt with this
+     * value in its Class1-4 will treat the player as friendly, or -1 for all.
+     * null for non-scrambler outfits. NPC disposition/targeting AI does not
+     * exist yet, so this is plumbed but unconsumed.
+     */
+    iffScramblerClass: number | null,
+    /**
+     * Govt class whose reinforcements this outfit inhibits (ModType 44), or -1
+     * for all. null otherwise. Reinforcement summoning does not exist yet, so
+     * this is plumbed but unconsumed.
+     */
+    reinforcementInhibitorClass: number | null,
+    /**
+     * 15-bit 0RRRRRGGGGGBBBBB colour to paint the player's ship (ModType 43),
+     * or null. Ship-tinting is not wired into the display yet, so this is
+     * plumbed but unconsumed.
+     */
+    paintColor: number | null,
+    /**
+     * dësc id shown when this bomb destroys the player in flight (ModType 47),
+     * or -1 for none. null for non-bomb outfits. Self-destruct/boarding
+     * context does not exist yet, so this is plumbed but unconsumed.
+     */
+    bomb: number | null,
+    /**
+     * bööm id shown when this nonlethal bomb randomly self-destructs and
+     * (nonfatally) damages the player (ModType 50). null for other outfits.
+     * Plumbed but unconsumed.
+     */
+    nonlethalBomb: number | null,
 }
 
 export function getDefaultOutfitData(): OutfitData {
@@ -106,5 +218,22 @@ export function getDefaultOutfitData(): OutfitData {
         ammoFor: null,
         increasesMax: null,
         miningScoop: false,
+        murkClear: 0,
+        interferenceReduction: 0,
+        iff: false,
+        autoRefuel: false,
+        multiJump: 0,
+        densityScanner: false,
+        map: null,
+        marines: 0,
+        repairSystem: false,
+        escapePod: false,
+        autoEject: false,
+        cleanLegalRecord: null,
+        iffScramblerClass: null,
+        reinforcementInhibitorClass: null,
+        paintColor: null,
+        bomb: null,
+        nonlethalBomb: null,
     }
 }
