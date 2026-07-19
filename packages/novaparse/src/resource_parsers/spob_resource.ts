@@ -42,6 +42,19 @@ class SpobResource extends BaseResource {
     defenseCount: number;
     /** Second 16-bit flag set (animation, hypergate/wormhole, ... — p. 61). */
     flags2: number;
+    /**
+     * True if flags2 bit 0x1000 is set: landing on this stellar offers travel
+     * to one of the linked hypergates (EVN Bible p. 61). Hypergate and wormhole
+     * are mutually exclusive in stock data but the flags are independent bits.
+     */
+    isHypergate: boolean;
+    /**
+     * True if flags2 bit 0x2000 is set: landing on this stellar transports the
+     * player through a wormhole (EVN Bible p. 61). If no HyperLink fields are
+     * defined (see `hyperlinks`), the wormhole connects to a random other
+     * link-less wormhole; otherwise it exits at one of its linked wormholes.
+     */
+    isWormhole: boolean;
     /** Frames between animation frames, in 30ths of a second. */
     animationDelay: number;
     /** Multiplier extending the display time of the first animation frame. */
@@ -105,6 +118,8 @@ class SpobResource extends BaseResource {
         this.defenseDude = r.int16(-1);
         this.defenseCount = r.int16();
         this.flags2 = r.uint16();
+        this.isHypergate = (this.flags2 & 0x1000) !== 0;
+        this.isWormhole = (this.flags2 & 0x2000) !== 0;
         this.animationDelay = r.int16();
         this.frame0Bias = r.int16();
 

@@ -2,7 +2,7 @@ import { Animation, getDefaultAnimationImage, getDefaultExitPoints } from "novad
 import { BaseData } from "novadatainterface/base_data";
 import { NovaDataType } from "novadatainterface/nova_data_interface";
 import { getDefaultPictData } from "novadatainterface/pict_data";
-import { PlanetData } from "novadatainterface/planet_data";
+import { GateData, PlanetData } from "novadatainterface/planet_data";
 import { DamageType } from "novadatainterface/weapon_data";
 import { BLEND_MODES } from "novadatainterface/blend_modes";
 import { SpobResource } from "../resource_parsers/spob_resource.js";
@@ -45,6 +45,37 @@ export async function PlanetParse(spob: SpobResource, notFoundFunction: (m: stri
         rledID = defaultAnimationImage.id;
     }
 
+    // Hypergate / wormhole transit metadata. The spöb HyperLink fields hold
+    // local spöb ids of the connected gates/wormholes; resolve each to its
+    // global id (the same key SystemData.planets uses) so transit can find the
+    // destination stellar and the system it lives in.
+    let gate: GateData | null = null;
+    if (spob.isHypergate || spob.isWormhole) {
+        const destinations: string[] = [];
+        for (const linkLocal of spob.hyperlinks) {
+            const linkedSpob = spob.idSpace.spöb[linkLocal];
+            if (linkedSpob) {
+                destinations.push(linkedSpob.globalID);
+            } else {
+                notFoundFunction("No corresponding spöb " + linkLocal
+                    + " for hyperlink from spöb " + base.id);
+            }
+        }
+        // CustSndID doubles as the emergence angle for gates/wormholes: 0-359
+        // is an exact angle, anything else means a random direction (Bible
+        // p. 60). null signals "random" so the transit code can pick a
+        // seeded-random angle deterministically.
+        const angle = spob.ambientSound;
+        const emergenceAngle = (angle >= 0 && angle <= 359) ? angle : null;
+        gate = {
+            // Hypergate and wormhole are independent bits; if a stellar somehow
+            // sets both, treat it as a hypergate (offers an explicit choice).
+            kind: spob.isHypergate ? "hypergate" : "wormhole",
+            destinations,
+            emergenceAngle,
+        };
+    }
+
     const animation: Animation = {
         exitPoints: getDefaultExitPoints(),
         id: base.id,
@@ -84,6 +115,8 @@ export async function PlanetParse(spob: SpobResource, notFoundFunction: (m: stri
             turnRate: 0,
             inertialess: true,
         },
-        position: [spob.position[0], spob.position[1]]
+        position: [spob.position[0], spob.position[1]],
+        gate,
+        landingFee: spob.landingFee,
     }
 }

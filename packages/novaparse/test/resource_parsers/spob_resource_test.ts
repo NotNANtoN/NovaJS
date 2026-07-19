@@ -122,6 +122,12 @@ describe("SpobResource built fields", () => {
         expect(s.onRegen).toEqual("OnRegen");
     });
 
+    it("decodes the hypergate flag from flags2 0x1000", () => {
+        // buildSpob sets flags2 = 0x1000.
+        expect(s.isHypergate).toBe(true);
+        expect(s.isWormhole).toBe(false);
+    });
+
     it("decodes the explosion + sparks bias", () => {
         expect(s.explosion).toEqual(5 + 128);
         expect(s.explosionSparks).toEqual(true);
