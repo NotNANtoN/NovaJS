@@ -14,6 +14,7 @@ import { NovaIDs } from "novadatainterface/nova_ids";
 import { OutfitData } from "novadatainterface/outfit_data";
 import { PictData } from "novadatainterface/pict_data";
 import { PictImageData } from "novadatainterface/pict_image";
+import { CicnImageData } from "novadatainterface/cicn_image";
 import { PlanetData } from "novadatainterface/planet_data";
 import { PpatImageData } from "novadatainterface/ppat_image";
 import { ShipData } from "novadatainterface/ship_data";
@@ -34,6 +35,7 @@ import { MisnParse } from "./parsers/misn_parse.js";
 import { OutfitParse } from "./parsers/outfit_parse.js";
 import { PictImageMulti, PictImageMultiParse } from "./parsers/pict_parse.js";
 import { PlanetParse } from "./parsers/planet_parse.js";
+import { CicnImageParse } from "./parsers/cicn_image_parse.js";
 import { PpatImageParse } from "./parsers/ppat_image_parse.js";
 import { resourceIDNotFoundStrict, resourceIDNotFoundWarn } from "./parsers/resource_id_not_found.js";
 import { AmmoOutfitMap, ShipParseClosure, ShipPictMap, WeaponOutfitMap } from "./parsers/ship_parse.js";
@@ -43,6 +45,7 @@ import { SystemParse } from "./parsers/system_parse.js";
 import { TargetCornersParse } from "./parsers/target_corners_parse.js";
 import { WeaponParse } from "./parsers/weapon_parse.js";
 import { BoomResource } from "./resource_parsers/boom_resource.js";
+import { CicnResource } from "./resource_parsers/cicn_resource.js";
 import { BaseResource } from "./resource_parsers/nova_resource_base.js";
 import { DudeResource } from "./resource_parsers/dude_resource.js";
 import { FletResource } from "./resource_parsers/flet_resource.js";
@@ -221,8 +224,8 @@ export class NovaParse implements GameDataInterface {
             Weapon: this.makeGettable<WeapResource, WeaponData>(NovaResourceType.wëap, WeaponParse),
             Pict: this.pictGettable,
             PictImage: this.pictImageGettable,
-            Cicn: new Gettable(async () => Defaults.Cicn), // TODO
-            CicnImage: new Gettable(async () => Defaults.CicnImage), // TODO
+            Cicn: new Gettable(async () => Defaults.Cicn), // TODO: parse cicn metadata
+            CicnImage: this.makeGettable<CicnResource, CicnImageData>(NovaResourceType.cicn, CicnImageParse),
             PpatImage: this.makeGettable<PpatResource, PpatImageData>(NovaResourceType.ppat, PpatImageParse),
             Planet: this.makeGettable<SpobResource, PlanetData>(NovaResourceType.spöb, PlanetParse),
             System: this.makeGettable<SystResource, SystemData>(NovaResourceType.sÿst, SystemParse),

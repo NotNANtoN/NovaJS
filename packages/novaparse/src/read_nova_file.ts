@@ -2,6 +2,7 @@ import { readResourceFork } from "resource_fork";
 import { NovaResources, NovaResourceType } from "./resource_parsers/resource_holder_base.js";
 import { BoomResource } from "./resource_parsers/boom_resource.js";
 import { CharResource } from "./resource_parsers/char_resource.js";
+import { CicnResource } from "./resource_parsers/cicn_resource.js";
 import { ColrResource } from "./resource_parsers/colr_resource.js";
 import { CronResource } from "./resource_parsers/cron_resource.js";
 import { DescResource } from "./resource_parsers/desc_resource.js";
@@ -63,12 +64,12 @@ function read(path: string) {
 
 
 // Since we're storing subclasses, not instances of subclasses.
-// Still missing: cicn, DITL, DLOG (classic Mac UI resources) and rlë8
+// Still missing: DITL, DLOG (classic Mac UI resources) and rlë8
 // (8-bit sprites; Nova's data has a single one, unused by the game).
 var parserMap: { [index: string]: typeof BaseResource } = {};
 parserMap[NovaResourceType.bööm] = BoomResource;
 parserMap[NovaResourceType.chär] = CharResource;
-//parserMap[NovaResourceType.cicn] = ;
+parserMap[NovaResourceType.cicn] = CicnResource;
 parserMap[NovaResourceType.cölr] = ColrResource;
 parserMap[NovaResourceType.crön] = CronResource;
 parserMap[NovaResourceType.dësc] = DescResource;
