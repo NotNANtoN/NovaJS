@@ -7,6 +7,9 @@ import { makeShip } from "./make_ship.js";
 import { makeSystem } from "./make_system.js";
 import { PlayerShipSelector } from "./player_ship_plugin.js";
 import { LandEvent } from "./planet_plugin.js";
+import { PlayerSoundEvent } from "./sound_plugin.js";
+import { WARP_OUT_SOUND } from "./jump_plugin.js";
+import { ShipPhysicsComponent, getShipMovementPhysics } from "./ship_plugin.js";
 import {
     GateArrivalComponent, GateTransit, GateTransitEvent, GATE_EMERGENCE_DISTANCE,
 } from "./gate_transit_plugin.js";
@@ -14,11 +17,14 @@ import { GateDestinationResolver } from "./gate_destination_resolver.js";
 
 // Stock EV Nova hypergate pair (see the spöb scan): HG-V01 (spöb nova:1400) in
 // system VNP-001 (nova:427) links to HG-V02 (spöb nova:1401) in VNP-002
-// (nova:425), and back.
+// (nova:425), and back. Sol (nova:130) contains the link-less wormhole
+// nova:465 (the Bible's "random wormhole").
 const GATE_A_SPOB = 'nova:1400';
 const GATE_B_SPOB = 'nova:1401';
 const SYSTEM_A = 'nova:427';
 const SYSTEM_B = 'nova:425';
+const WORMHOLE_SPOB = 'nova:465';
+const WORMHOLE_SYSTEM = 'nova:130';
 const SHIP_UUID = 'gate test ship';
 
 async function makeGateHarness(systemId: string) {
@@ -47,34 +53,50 @@ function stepUntil(world: World, predicate: () => boolean, maxSteps = 600) {
 }
 
 describe('gate transit', () => {
-    it('emits a transit event carrying the ship when it lands on a hypergate',
-        async () => {
-        const { world, ship } = await makeGateHarness(SYSTEM_A);
+    it('does NOT auto-transit when landing on a hypergate', async () => {
+        // Hypergate landings dock the ship and open the hypergate map (the
+        // browser's flow); the sim must not choose a destination on its own.
+        const { world } = await makeGateHarness(SYSTEM_A);
         world.step();
 
         let transit: GateTransit | undefined;
         world.events.get(GateTransitEvent).subscribe(({ data }) => {
             transit = data;
         });
-
-        // Landing on the hypergate spöb.
         world.emit(LandEvent,
             { id: GATE_A_SPOB, uuid: `planet ${GATE_A_SPOB}` }, [SHIP_UUID]);
+        world.step();
+        world.step();
+        expect(transit).toBeUndefined();
+        expect(world.entities.has(SHIP_UUID)).toBeTrue();
+    }, 30_000);
+
+    it('transits immediately when landing on a wormhole', async () => {
+        // Wormholes offer no choice: the sim removes the ship and carries it
+        // on a GateTransitEvent. nova:465 is link-less, so the destination is
+        // null (a random other wormhole, resolved by the browser from the
+        // replicated draw).
+        const { world } = await makeGateHarness(WORMHOLE_SYSTEM);
+        world.step();
+
+        let transit: GateTransit | undefined;
+        world.events.get(GateTransitEvent).subscribe(({ data }) => {
+            transit = data;
+        });
+        world.emit(LandEvent,
+            { id: WORMHOLE_SPOB, uuid: `planet ${WORMHOLE_SPOB}` }, [SHIP_UUID]);
         stepUntil(world, () => transit !== undefined);
 
-        // The ship is removed from the origin system and carried on the event.
         expect(world.entities.has(SHIP_UUID)).toBeFalse();
         expect(transit!.uuid).toEqual(SHIP_UUID);
-        expect(transit!.fromSpob).toEqual(GATE_A_SPOB);
-        // A hypergate takes its first defined link as the destination.
-        expect(transit!.destinationSpob).toEqual(GATE_B_SPOB);
+        expect(transit!.fromSpob).toEqual(WORMHOLE_SPOB);
+        expect(transit!.destinationSpob).toBeNull();
 
-        // The carried ship is tagged for arrival at the destination gate.
         const arrival = transit!.entity.components.get(GateArrivalComponent)!;
         expect(arrival).toBeDefined();
-        expect(arrival.destinationSpob).toEqual(GATE_B_SPOB);
-        // Emergence angle carried from the source gate's CustSndID (120°).
-        expect(arrival.emergenceAngle).toEqual(120);
+        expect(arrival.destinationSpob).toBeNull();
+        expect(arrival.randomDraw).toBeGreaterThanOrEqual(0);
+        expect(arrival.randomDraw).toBeLessThan(1);
     }, 30_000);
 
     it('does not transit when landing on an ordinary planet', async () => {
@@ -85,8 +107,6 @@ describe('gate transit', () => {
         world.events.get(GateTransitEvent).subscribe(({ data }) => {
             transit = data;
         });
-        // VNP-001 has no ordinary planet, so land on a non-gate id: nothing
-        // happens because no planet with that id is a gate.
         world.emit(LandEvent,
             { id: 'nova:128', uuid: 'planet nova:128' }, [SHIP_UUID]);
         world.step();
@@ -95,38 +115,59 @@ describe('gate transit', () => {
         expect(world.entities.has(SHIP_UUID)).toBeTrue();
     }, 30_000);
 
-    it('positions the arriving ship at the destination gate', async () => {
-        // Depart system A.
-        const { gameData, world, ship } = await makeGateHarness(SYSTEM_A);
-        world.step();
-        let transit: GateTransit | undefined;
-        world.events.get(GateTransitEvent).subscribe(({ data }) => {
-            transit = data;
-        });
-        world.emit(LandEvent,
-            { id: GATE_A_SPOB, uuid: `planet ${GATE_A_SPOB}` }, [SHIP_UUID]);
-        stepUntil(world, () => transit !== undefined);
-
-        // Insert into the destination system, as the browser does after the
-        // room switch.
+    it('arrives flying out of the destination gate with the jump-in sound',
+        async () => {
+        // The browser (hypergate map pick, or wormhole exit resolution) tags
+        // the ship with a GateArrivalComponent and re-inserts it into the
+        // destination system; the first tick there positions it flying out.
+        const { gameData } = await makeGateHarness(SYSTEM_A);
         const destWorld = await makeSystem(SYSTEM_B, gameData);
-        const jumpedShip = transit!.entity;
-        await completeEntity(destWorld, jumpedShip);
-        destWorld.entities.set(SHIP_UUID, jumpedShip);
 
-        // The first destination tick teleports the ship to the arrival gate
-        // and clears the marker.
+        const ids = await gameData.ids;
+        const shipData = await gameData.data.Ship.get([...ids.Ship].sort()[0]!);
+        const ship = makeShip(shipData);
+        ship.components.set(GateArrivalComponent, {
+            destinationSpob: GATE_B_SPOB,
+            emergenceAngle: null,
+            randomDraw: 0.25,
+        });
+        await completeEntity(destWorld, ship);
+        destWorld.entities.set(SHIP_UUID, ship);
+
+        const sounds: string[] = [];
+        destWorld.events.get(PlayerSoundEvent).subscribe(({ data }) => {
+            sounds.push(data.id);
+        });
         destWorld.step();
-        expect(jumpedShip.components.has(GateArrivalComponent)).toBeFalse();
+        expect(ship.components.has(GateArrivalComponent)).toBeFalse();
 
-        // The destination gate (nova:1401) sits at [0,0] in VNP-002; the ship
-        // emerges GATE_EMERGENCE_DISTANCE away from it.
+        // Positioned at the emergence distance from the gate (it may have
+        // coasted outward for a tick before we observe it)...
         const gatePlanet = destWorld.entities.get(`planet ${GATE_B_SPOB}`)!;
         const gatePos = gatePlanet.components.get(MovementStateComponent)!.position;
-        const arrivalPos =
-            jumpedShip.components.get(MovementStateComponent)!.position;
-        const dist = Math.hypot(arrivalPos.x - gatePos.x, arrivalPos.y - gatePos.y);
-        expect(dist).toBeCloseTo(GATE_EMERGENCE_DISTANCE, 3);
+        const movement = ship.components.get(MovementStateComponent)!;
+        const offset = movement.position.subtract(gatePos);
+        const physics = ship.components.get(ShipPhysicsComponent)!;
+        const speed = getShipMovementPhysics(physics).maxVelocity;
+        expect(offset.length).toBeGreaterThanOrEqual(GATE_EMERGENCE_DISTANCE - 1e-6);
+        expect(offset.length).toBeLessThan(GATE_EMERGENCE_DISTANCE + speed * 0.05);
+
+        // ...flying outward at the ship's regular top speed, facing out...
+        expect(movement.velocity.length).toBeCloseTo(speed, 3);
+        // Velocity is along the emergence offset (outward, not inward).
+        expect(movement.velocity.dot(offset)).toBeGreaterThan(0);
+        expect(movement.rotation.angle)
+            .toBeCloseTo(movement.velocity.angle.angle, 6);
+
+        // ...with the "jump in" sound (snd 130 Warp out) for the pilot.
+        expect(sounds).toContain(WARP_OUT_SOUND);
+
+        // The destination gate's own emergence angle (CustSndID 120°) decides
+        // the direction: 120° in clock-angle radians.
+        const expected = 120 * Math.PI / 180;
+        const angleOff = Math.abs(movement.rotation.angle - (
+            expected >= Math.PI ? expected - 2 * Math.PI : expected));
+        expect(angleOff).toBeLessThan(1e-6);
     }, 30_000);
 
     it('resolves a real hypergate pair end-to-end (system and position)',
