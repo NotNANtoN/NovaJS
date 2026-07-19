@@ -43,6 +43,8 @@ const SavedControlsPartialObject = t.partial({
     'attack': ControlInputs,
     'defend': ControlInputs,
     'formation': ControlInputs,
+    'returnToBay': ControlInputs,
+    'escortRestrictFire': ControlInputs,
     'map': ControlInputs,
     'smallMap': ControlInputs,
     'hyperjump': ControlInputs,

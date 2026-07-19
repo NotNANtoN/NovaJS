@@ -15,6 +15,7 @@ import { CollisionsPlugin } from './collisions_plugin.js';
 import { ControlsPlugin } from "./controls_plugin.js";
 import { CreateTimePlugin } from "./create_time.js";
 import { DeathPlugin } from "./death_plugin.js";
+import { EscortCommandPlugin } from "./escort_command_plugin.js";
 import { FireWeaponPlugin } from "./fire_weapon_plugin.js";
 import { HealthPlugin } from "./health_plugin.js";
 import { IonizedPlugin } from "./ionization_plugin.js";
@@ -69,6 +70,7 @@ export const SystemPlugin: Plugin = {
         world.addPlugin(SoundEventPlugin);
         world.addPlugin(BeamPlugin);
         world.addPlugin(BayPlugin);
+        world.addPlugin(EscortCommandPlugin);
         world.addPlugin(JumpPlugin);
         world.addPlugin(GateTransitPlugin);
         world.addPlugin(NpcPlugin);

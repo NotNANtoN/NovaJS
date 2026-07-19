@@ -16,6 +16,7 @@ import { System } from 'nova_ecs/system';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { CloakActiveComponent, isTargetable } from './cloak_plugin.js';
 import { DamagedEvent } from './death_plugin.js';
+import { EscortCommandComponent } from './escort_command.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { GovtComponent } from './govt_component.js';
 import { govtDisposition, effectiveStrength, oddsFavorable } from './govt_disposition.js';
@@ -331,11 +332,18 @@ const NpcDecisionSystem = new System({
     name: 'NpcDecisionSystem',
     args: [NpcComponent, MovementStateComponent, TargetComponent,
         Optional(GovtComponent), Optional(ShieldComponent),
-        ShipDataComponent, Optional(FormationComponent), NpcTargetsQuery,
+        ShipDataComponent, Optional(FormationComponent),
+        Optional(EscortCommandComponent), NpcTargetsQuery,
         PlanetsQuery, TimeResource, RandomResource, Entities, UUID,
         SimulationGameDataResource] as const,
-    step(npc, movement, target, govt, shield, shipData, formation, ships,
-        planets, time, random, entities, uuid, gameData) {
+    step(npc, movement, target, govt, shield, shipData, formation,
+        escortCommand, ships, planets, time, random, entities, uuid,
+        gameData) {
+        if (escortCommand) {
+            // A player-commanded escort: its brain is the escort
+            // command framework (escort_command_plugin), not NPC AI.
+            return;
+        }
         if (npc.mode === 'depart') {
             return;
         }
@@ -647,9 +655,14 @@ function steerOutward(movement: MovementState, away: Vector): boolean {
 const NpcSteeringSystem = new System({
     name: 'NpcSteeringSystem',
     args: [NpcComponent, MovementStateComponent, ShipPhysicsComponent,
-        TargetComponent, Optional(FormationComponent), TimeResource,
+        TargetComponent, Optional(FormationComponent),
+        Optional(EscortCommandComponent), TimeResource,
         Entities, UUID] as const,
-    step(npc, movement, physics, target, formation, time, entities, uuid) {
+    step(npc, movement, physics, target, formation, escortCommand, time,
+        entities, uuid) {
+        if (escortCommand) {
+            return; // Player-commanded: see escort_command_plugin.
+        }
         // Escorts holding formation are steered by FormationSystem.
         if (formation && entities.has(formation.leader)
             && npc.mode !== 'attack' && npc.mode !== 'flee'
@@ -847,12 +860,21 @@ export function steerFormation(movement: MovementState, leader: MovementState,
 const FormationSystem = new System({
     name: 'FormationSystem',
     args: [FormationComponent, MovementStateComponent, ShipPhysicsComponent,
-        Optional(NpcComponent), TimeResource, Entities, GetEntity,
-        UUID] as const,
-    step(formation, movement, physics, npc, time, entities, entity) {
+        Optional(NpcComponent), Optional(EscortCommandComponent),
+        TimeResource, Entities, GetEntity, UUID] as const,
+    step(formation, movement, physics, npc, escortCommand, time, entities,
+        entity) {
         // Engaged escorts fight; FormationSystem only holds station.
-        if (npc && (npc.mode === 'attack' || npc.mode === 'flee'
-            || npc.mode === 'depart')) {
+        if (npc && !escortCommand && (npc.mode === 'attack'
+            || npc.mode === 'flee' || npc.mode === 'depart')) {
+            return;
+        }
+        // Player-commanded escorts: station-keep only while the
+        // command is formation (or defend with no intruder engaged) —
+        // the command behavior system steers everything else.
+        if (escortCommand && !(escortCommand.command === 'formation'
+            || (escortCommand.command === 'defend'
+                && escortCommand.target === undefined))) {
             return;
         }
         const leader = entities.get(formation.leader)?.components

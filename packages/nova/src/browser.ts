@@ -57,6 +57,7 @@ import { ControlledByComponent } from "./nova_plugin/ship_control.js";
 import { ShipComponent } from "./nova_plugin/ship_plugin.js";
 import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
 import { Vector } from "nova_ecs/datatypes/vector";
+import { EscortCommandComponent } from "./nova_plugin/escort_command.js";
 import { FiringGroupComponent } from "./nova_plugin/firing_group.js";
 import { FormationComponent, formationSlotPosition } from "./nova_plugin/npc_ai_plugin.js";
 import { makeNpcShip } from "./nova_plugin/npc_spawn_plugin.js";
@@ -383,6 +384,11 @@ async function spawnHiredEscorts(
                 movement.rotation, new Vector(0, 0));
             escort.components.set(FormationComponent,
                 { leader: leaderUuid, slot });
+            // Fresh escorts start under the default escort command;
+            // spawning here (on liftoff / system entry) IS the
+            // "commands reset to formation" rule.
+            escort.components.set(EscortCommandComponent,
+                { command: 'formation' });
             // Hired escorts share the player's firing group so their shots
             // pass through the player (and vice versa via the owner-root
             // fallback) — same friendly-fire immunity as NPC fleets.

@@ -29,6 +29,10 @@
   "attack": "KeyF",
   "defend": "KeyD",
   "formation": "KeyC",
+  "returnToBay": {
+    "key": "KeyC",
+    "modifiers": ["Alt"]
+  },
   "map": "KeyM",
   "smallMap": "KeyH",
   "hyperjump": "KeyJ",
