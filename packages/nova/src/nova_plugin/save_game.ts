@@ -1,7 +1,18 @@
 import { isLeft } from 'fp-ts/lib/Either.js';
 import * as t from 'io-ts';
 import { Entity } from 'nova_ecs/entity';
+import { CargoComponent } from './cargo_plugin.js';
+import { ControlBitsComponent } from './ncb_plugin.js';
 import { OutfitsStateComponent } from './outfit_plugin.js';
+import {
+    ActiveMissionType,
+    CreditsComponent,
+    CronStatesComponent,
+    CronStateType,
+    GameDateComponent,
+    GameDateType,
+    MissionsComponent,
+} from './player_state_plugin.js';
 import { ShipComponent } from './ship_plugin.js';
 
 /**
@@ -43,11 +54,12 @@ export type SavedOutfit = t.TypeOf<typeof SavedOutfit>;
  * The player state we persist.
  *
  * `ship`, `outfits`, and `system` exist in the simulation today and are
- * always written. The remaining fields (credits, missions, novaControlBits,
- * reputations, combatRatings) do not exist in the game yet; they are
- * reserved as optional so a future version can start writing them without a
- * schema-version bump and old saves keep loading. Nothing reads or writes
- * them today.
+ * always written. The optional fields cover gameplay state that may be
+ * absent (older saves keep loading because they are `t.partial`):
+ * credits, the game date, active missions with their runtime state,
+ * mission/scooped cargo, control bits, and cron progress.
+ * `reputations` and `combatRatings` remain reserved for systems that
+ * do not exist yet.
  */
 export const SaveData = t.intersection([
     t.type({
@@ -59,12 +71,21 @@ export const SaveData = t.intersection([
         system: t.string,
     }),
     t.partial({
-        // --- Reserved for gameplay state that does not exist yet. ---
         credits: t.number,
-        // Opaque per-mission blobs, keyed by mission id.
-        missions: t.array(t.tuple([t.string, t.unknown])),
-        // Nova control bits, keyed by bit id.
+        // The player's calendar date.
+        date: GameDateType,
+        // Active missions and their runtime state, keyed by mission id.
+        missions: t.array(t.tuple([t.string, ActiveMissionType])),
+        // Set Nova control bits, keyed by decimal bit id ("342").
+        // The number is unused (always 1); the shape predates this
+        // field being written and stays for compatibility.
         novaControlBits: t.array(t.tuple([t.string, t.number])),
+        // Cargo aboard: commodity key ('mission:<id>', 'cargo:<n>',
+        // 'junk:<id>') -> tons.
+        cargo: t.array(t.tuple([t.string, t.number])),
+        // Per-cron progress, keyed by cron id.
+        cronStates: t.array(t.tuple([t.string, CronStateType])),
+        // --- Reserved for gameplay state that does not exist yet. ---
         // Government reputations / standings, keyed by government id.
         reputations: t.array(t.tuple([t.string, t.number])),
         // Combat ratings, keyed by category.
@@ -96,11 +117,68 @@ export function extractSaveData(entity: Entity, systemId: string):
     const outfits: SavedOutfit[] = outfitsState
         ? [...outfitsState].map(([id, { count }]) => [id, count])
         : [];
-    return {
+    const save: SaveData = {
         ship: ship.id,
         outfits,
         system: systemId,
     };
+
+    const credits = entity.components.get(CreditsComponent);
+    if (credits) {
+        save.credits = credits.credits;
+    }
+    const date = entity.components.get(GameDateComponent);
+    if (date) {
+        save.date = date;
+    }
+    const missions = entity.components.get(MissionsComponent);
+    if (missions) {
+        save.missions = [...missions];
+    }
+    const bits = entity.components.get(ControlBitsComponent);
+    if (bits) {
+        save.novaControlBits = [...bits].map(bit => [String(bit), 1]);
+    }
+    const cargo = entity.components.get(CargoComponent);
+    if (cargo) {
+        save.cargo = [...cargo];
+    }
+    const cronStates = entity.components.get(CronStatesComponent);
+    if (cronStates) {
+        save.cronStates = [...cronStates];
+    }
+    return save;
+}
+
+/**
+ * Applies the optional player-state fields of a save onto the player
+ * entity's components. The required fields (ship/outfits/system) are
+ * consumed by the spawn path in browser.ts; this handles the rest.
+ */
+export function restorePlayerState(entity: Entity, save: SaveData): void {
+    if (save.credits !== undefined) {
+        entity.components.set(CreditsComponent, { credits: save.credits });
+    }
+    if (save.date) {
+        entity.components.set(GameDateComponent, { ...save.date });
+    }
+    if (save.missions) {
+        entity.components.set(MissionsComponent, new Map(
+            save.missions.map(([id, mission]) => [id, { ...mission }])));
+    }
+    if (save.novaControlBits) {
+        entity.components.set(ControlBitsComponent, new Set(
+            save.novaControlBits
+                .map(([bit]) => parseInt(bit, 10))
+                .filter(bit => !Number.isNaN(bit))));
+    }
+    if (save.cargo) {
+        entity.components.set(CargoComponent, new Map(save.cargo));
+    }
+    if (save.cronStates) {
+        entity.components.set(CronStatesComponent, new Map(
+            save.cronStates.map(([id, state]) => [id, { ...state }])));
+    }
 }
 
 /** Wraps a payload in the current versioned envelope. */

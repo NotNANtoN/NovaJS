@@ -6,6 +6,7 @@ import { Subscription } from 'rxjs';
 import { DisplayAssetDataResource, SimulationGameDataResource } from '../nova_plugin/game_data_resource.js';
 import { ControlsSubject } from '../nova_plugin/controls_plugin.js';
 import { JumpRouteComponent } from '../nova_plugin/jump_plugin.js';
+import { ControlBitsComponent } from '../nova_plugin/ncb_plugin.js';
 import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin.js';
 import { SystemIdResource } from '../nova_plugin/system_id_resource.js';
 import { Starmap } from '../spaceport/starmap.js';
@@ -57,7 +58,18 @@ export const StarmapPlugin: Plugin = {
             throw new Error('Expected ScreenSize to exist');
         }
 
-        const starmap = new Starmap(displayAssets, simulationData, systemId, controls);
+        // NCB system visibility uses the player's real control bits.
+        const getPlayerBits = (): ReadonlySet<number> => {
+            for (const entity of world.entities.values()) {
+                if (entity.components.has(PlayerShipSelector)) {
+                    return entity.components.get(ControlBitsComponent)
+                        ?? new Set();
+                }
+            }
+            return new Set();
+        };
+        const starmap = new Starmap(displayAssets, simulationData, systemId,
+            controls, getPlayerBits);
         let opening = false;
         stage.addChild(starmap.container);
         world.resources.set(StarmapResource, starmap);

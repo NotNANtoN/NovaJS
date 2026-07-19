@@ -34,18 +34,25 @@ import { SetJumpRouteEvent } from "./display/starmap_plugin.js";
 import { LeaveSpaceportEvent, OpenSpaceportEvent } from "./display/spaceport_plugin.js";
 import { Stage } from "./display/stage_resource.js";
 import { AddEnemyEvent } from "./display/status_bar.js";
+import { daysPerJump } from "./nova_plugin/calendar.js";
 import { ControlEvent, ControlsSubject, EcsControlEvent } from "./nova_plugin/controls_plugin.js";
 import { Controls, getActions, SavedControls } from "./nova_plugin/controls.js";
 import { DisplayAssetDataResource, SimulationGameDataResource } from "./nova_plugin/game_data_resource.js";
 import { FinishJumpEvent, JumpComponent, JumpRouteComponent } from "./nova_plugin/jump_plugin.js";
 import { makeShip } from "./nova_plugin/make_ship.js";
 import { makeSystem, SIMULATION_STEP_MS } from "./nova_plugin/make_system.js";
+import { makeControlBitHooks, NCBParseError, runNCBSet } from "./nova_plugin/ncb.js";
+import { ControlBitsComponent } from "./nova_plugin/ncb_plugin.js";
 import { MultiRoomResource, NovaPlugin } from "./nova_plugin/nova_plugin.js";
 import { OutfitsStateComponent } from "./nova_plugin/outfit_plugin.js";
 import { LandEvent } from "./nova_plugin/planet_plugin.js";
 import { PlayerShipSelector } from "./nova_plugin/player_ship_plugin.js";
-import { extractSaveData, loadSave, resetSave, writeSave } from "./nova_plugin/save_game.js";
+import { CreditsComponent, GameDateComponent } from "./nova_plugin/player_state_plugin.js";
+import { extractSaveData, loadSave, resetSave, restorePlayerState, writeSave } from "./nova_plugin/save_game.js";
 import { ControlledByComponent } from "./nova_plugin/ship_control.js";
+import { ShipComponent } from "./nova_plugin/ship_plugin.js";
+import { advanceEntityDate, ensurePlayerStateComponents } from "./spaceport/mission_session.js";
+import { MissionUniverse } from "./spaceport/mission_universe.js";
 import { SystemIdResource } from "./nova_plugin/system_id_resource.js";
 import { AnalogControlState } from "./nova_plugin/ship_control.js";
 import { Autopilot, ControlSinks } from "./autopilot.js";
@@ -336,7 +343,13 @@ function saveNow() {
     if (!displayWorld || !activeSystemId) {
         return;
     }
-    const playerShip = getPlayerShipEntity(displayWorld);
+    // While docked the player entity is out of the display world; the
+    // docked/relaunching entity carries the freshest state (mission
+    // acceptances, payments, the advanced date).
+    const playerShip = pendingLaunchedShip
+        ?? dockedShip?.entity
+        ?? pendingDockedShip?.entity
+        ?? getPlayerShipEntity(displayWorld);
     if (!playerShip) {
         return;
     }
@@ -539,7 +552,23 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
         if (!data.entity.components.has(PlayerShipSelector)) {
             return;
         }
-        void jumpTo(data);
+        void (async () => {
+            // A jump takes days (by ship mass); advance the player's
+            // calendar while the entity is between simulations. The
+            // date rides to peers with the re-added entity.
+            try {
+                const shipId = data.entity.components.get(ShipComponent)?.id;
+                const mass = shipId
+                    ? (await simulationGameData.data.Ship.get(shipId))
+                        .physics.mass
+                    : 100;
+                await advanceEntityDate(data.entity, daysPerJump(mass),
+                    MissionUniverse.shared(simulationGameData));
+            } catch (e) {
+                console.warn('Failed to advance the date on jump:', e);
+            }
+            await jumpTo(data);
+        })();
     });
 
     // Wait until the current peer set includes the server, without racing
@@ -599,13 +628,35 @@ async function startGame() {
     // loadSave and we fall back to defaults.
     const save = loadSave();
 
+    // A fresh pilot starts from a chär "player start": ship, credits,
+    // date, systems, and its OnStart control bits. ?char=nova:129
+    // picks one; otherwise the scenario's default.
+    let playerStart;
+    try {
+        const requestedChar = query.get('char');
+        if (ids.PlayerStart.length > 0) {
+            const starts = await Promise.all(ids.PlayerStart.map(
+                id => simulationGameData.data.PlayerStart.get(id)));
+            playerStart = (requestedChar
+                && starts.find(s => s.id === requestedChar))
+                || starts.find(s => s.isDefault)
+                || starts[0];
+        }
+    } catch (e) {
+        console.warn('Failed to load player starts:', e);
+    }
+
     // ?ship=nova:164 picks the player's ship; otherwise the saved ship,
-    // otherwise a random one.
+    // otherwise the chär's starting ship, otherwise a random one.
     const requestedShip = query.get('ship');
     const savedShipValid = save && ids.Ship.includes(save.ship);
+    const startShipValid =
+        playerStart && ids.Ship.includes(playerStart.ship);
     let shipId = savedShipValid
         ? save!.ship
-        : ids.Ship[Math.floor(Math.random() * ids.Ship.length)];
+        : startShipValid
+            ? playerStart!.ship
+            : ids.Ship[Math.floor(Math.random() * ids.Ship.length)];
     // Only restore outfits when we actually use the saved ship: outfits
     // belong to a specific ship type.
     let usingSavedShip = savedShipValid;
@@ -631,13 +682,50 @@ async function startGame() {
     });
     shipEntity.components.set(PlayerShipSelector, undefined);
     shipEntity.components.set(ControlledByComponent, { peerId: communicator.uuid });
+
+    // Player state: restore it from the save, or start a fresh pilot
+    // from the chär (credits, date, OnStart control bits).
+    if (save) {
+        restorePlayerState(shipEntity, save);
+    } else if (playerStart) {
+        shipEntity.components.set(GameDateComponent,
+            { ...playerStart.date });
+        shipEntity.components.set(CreditsComponent,
+            { credits: playerStart.credits });
+        const bits = new Set<number>();
+        try {
+            // New-pilot setup is player-local; plain randomness is
+            // fine for R(a b) here (see the outfitter's runSetString).
+            runNCBSet(playerStart.onStart, makeControlBitHooks(bits),
+                Math.random);
+        } catch (e) {
+            if (e instanceof NCBParseError) {
+                console.warn('Bad chär OnStart string:', e);
+            } else {
+                throw e;
+            }
+        }
+        shipEntity.components.set(ControlBitsComponent, bits);
+    }
+    ensurePlayerStateComponents(shipEntity);
     (window as any).myShip = shipEntity;
 
+    // Warm the mission/cron/planet caches in the background so the
+    // first landing or jump doesn't stall on them.
+    void MissionUniverse.shared(simulationGameData).load().catch(e => {
+        console.warn('Failed to preload mission data:', e);
+    });
+
     // ?system=nova:131 picks the starting system; otherwise the saved
-    // system, otherwise the default.
+    // system, otherwise the chär's start system, otherwise the default.
     const requestedSystem = query.get('system');
+    const startSystems = playerStart?.systems.filter(
+        id => ids.System.includes(id)) ?? [];
     let systemId = (save && ids.System.includes(save.system))
-        ? save.system : 'nova:130';
+        ? save.system
+        : startSystems.length > 0
+            ? startSystems[Math.floor(Math.random() * startSystems.length)]
+            : 'nova:130';
     if (requestedSystem) {
         if (ids.System.includes(requestedSystem)) {
             systemId = requestedSystem;

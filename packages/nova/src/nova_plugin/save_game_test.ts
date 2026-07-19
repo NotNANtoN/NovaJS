@@ -1,12 +1,21 @@
 import 'jasmine';
 import { Entity } from 'nova_ecs/entity';
+import { CargoComponent } from './cargo_plugin.js';
+import { ControlBitsComponent } from './ncb_plugin.js';
 import { OutfitsState, OutfitsStateComponent } from './outfit_plugin.js';
+import {
+    CreditsComponent,
+    CronStatesComponent,
+    GameDateComponent,
+    MissionsComponent,
+} from './player_state_plugin.js';
 import {
     decodeSave,
     encodeSave,
     extractSaveData,
     loadSave,
     resetSave,
+    restorePlayerState,
     SaveData,
     SaveStorage,
     SAVE_KEY,
@@ -75,6 +84,71 @@ describe('save_game schema', () => {
     it('returns undefined when the entity has no ship component', () => {
         const entity = new Entity('not a ship');
         expect(extractSaveData(entity, 'nova:130')).toBeUndefined();
+    });
+
+    it('round-trips the full player state through extract and restore', () => {
+        const entity = new Entity('player');
+        entity.components.set(ShipComponent, { id: 'nova:164' });
+        entity.components.set(CreditsComponent, { credits: 40000 });
+        entity.components.set(GameDateComponent,
+            { day: 24, month: 6, year: 1177 });
+        entity.components.set(ControlBitsComponent, new Set([13, 342]));
+        entity.components.set(CargoComponent, new Map([
+            ['mission:nova:128', 10],
+            ['cargo:2', 3],
+        ]));
+        entity.components.set(MissionsComponent, new Map([['nova:128', {
+            id: 'nova:128',
+            acceptedDay: 430064,
+            acceptedAt: 'nova:172',
+            travelPlanet: null,
+            returnPlanet: 'nova:128',
+            cargoType: 2,
+            cargoQty: 10,
+            cargoLoaded: true,
+            travelDone: false,
+            deadlineDay: null,
+        }]]));
+        entity.components.set(CronStatesComponent, new Map([['nova:300', {
+            phase: 'active' as const,
+            phaseStart: 430064,
+            nextEligible: 0,
+        }]]));
+
+        const saved = extractSaveData(entity, 'nova:130')!;
+        // The save must survive the JSON envelope.
+        const decoded = decodeSave(encodeSave(saved))!;
+        expect(decoded).toEqual(saved);
+
+        const restored = new Entity('restored');
+        restored.components.set(ShipComponent, { id: 'nova:164' });
+        restorePlayerState(restored, decoded);
+        expect(restored.components.get(CreditsComponent))
+            .toEqual({ credits: 40000 });
+        expect(restored.components.get(GameDateComponent))
+            .toEqual({ day: 24, month: 6, year: 1177 });
+        expect(restored.components.get(ControlBitsComponent))
+            .toEqual(new Set([13, 342]));
+        expect(restored.components.get(CargoComponent))
+            .toEqual(entity.components.get(CargoComponent)!);
+        expect(restored.components.get(MissionsComponent))
+            .toEqual(entity.components.get(MissionsComponent)!);
+        expect(restored.components.get(CronStatesComponent))
+            .toEqual(entity.components.get(CronStatesComponent)!);
+    });
+
+    it('loads a v1 save written before player state existed', () => {
+        // Exactly what an old build wrote: only ship/outfits/system.
+        const legacy = JSON.stringify({
+            version: SAVE_VERSION,
+            data: SAMPLE,
+        });
+        const decoded = decodeSave(legacy);
+        expect(decoded).toEqual(SAMPLE);
+        // Restoring applies nothing (fields absent) and doesn't throw.
+        const entity = new Entity('restored');
+        restorePlayerState(entity, decoded!);
+        expect(entity.components.get(CreditsComponent)).toBeUndefined();
     });
 });
 
