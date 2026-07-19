@@ -244,7 +244,7 @@ class OfferPopup {
 
         const textSprite = new PIXI.Text(text, POPUP_FONT);
         const textHeight = Math.min(
-            Math.max(textSprite.height, 40), 300);
+            Math.max(textSprite.height, 40), 480);
 
         const top = this.displayAssets.spriteFromPict('nova:8521');
         const middle = new PIXI.TilingSprite(
@@ -262,6 +262,14 @@ class OfferPopup {
         textSprite.position.set(-POPUP_WIDTH / 2 + POPUP_TEXT_MARGIN,
             originY + 9 + POPUP_TEXT_MARGIN / 2);
         this.container.addChild(textSprite);
+        // Clip overlong offer text to the frame (it stays readable —
+        // EVN offer texts rarely exceed this height).
+        const textMask = new PIXI.Graphics().beginFill(0xffffff)
+            .drawRect(-POPUP_WIDTH / 2, originY + 9, POPUP_WIDTH,
+                middle.height)
+            .endFill();
+        this.container.addChild(textMask);
+        textSprite.mask = textMask;
 
         const buttonY = originY + totalHeight - 32;
         const accept = new Button(this.displayAssets, buttons.accept,

@@ -41,6 +41,9 @@ export class Button {
     constructor(private displayAssets: DisplayAssetDataInterface, text: string,
         width?: number, position?: { x: number, y: number },
         private buttonIds = BUTTON_IDS) {
+        // Named for scene-graph queries (debugging and headless UI
+        // driving); updated captions keep the original name.
+        this.container.name = `Button:${text}`;
         this.container.position.x = position?.x ?? 0;
         this.container.position.y = position?.y ?? 0;
 

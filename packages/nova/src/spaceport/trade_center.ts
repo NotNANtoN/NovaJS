@@ -124,18 +124,33 @@ export class TradeCenter extends Menu<Entity> {
         };
     }
 
-    protected override async build() {
-        const [planet, junkIds] = await Promise.all([
-            this.simulationData.data.Planet.get(this.planetId),
-            this.simulationData.ids.then(ids => ids.Junk),
-        ]);
-        this.planet = planet;
-        this.junks = await Promise.all(junkIds.map(
-            id => this.simulationData.data.Junk.get(id)));
+    private loadPromise?: Promise<void>;
+
+    /**
+     * Lazily loads the planet and jünk data. NOT Menu.build: that runs
+     * synchronously from the Menu constructor, before this subclass's
+     * planetId parameter property is assigned.
+     */
+    private load(): Promise<void> {
+        this.loadPromise ??= (async () => {
+            const [planet, junkIds] = await Promise.all([
+                this.simulationData.data.Planet.get(this.planetId),
+                this.simulationData.ids.then(ids => ids.Junk),
+            ]);
+            this.planet = planet;
+            this.junks = await Promise.all(junkIds.map(
+                id => this.simulationData.data.Junk.get(id)));
+        })();
+        return this.loadPromise;
     }
 
     override async show(input: Entity): Promise<Entity> {
-        await this.buildPromise;
+        try {
+            await this.load();
+        } catch (e) {
+            console.warn('Trade center failed to load:', e);
+            return input;
+        }
         this.state = {
             cargo: new Map(input.components.get(CargoComponent) ?? []),
             credits: {

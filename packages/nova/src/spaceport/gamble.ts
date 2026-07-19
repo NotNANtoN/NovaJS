@@ -19,7 +19,9 @@ const RACER_PICTS = ['nova:8530', 'nova:8531', 'nova:8532', 'nova:8533'];
 
 const STATUS_FONT: Partial<PIXI.ITextStyle> = {
     fontFamily: 'Geneva', fontSize: 12, fill: 0xffffff,
-    align: 'center', wordWrap: true, wordWrapWidth: 420,
+    // Kept narrower than the LED strip so text clears the checkered
+    // flag art on either side.
+    align: 'center', wordWrap: true, wordWrapWidth: 310,
 };
 
 const RACE_DURATION_MS = 3500;

@@ -205,6 +205,7 @@ export class Spaceport extends Menu<Entity> {
             shipyard: showShipyard,
             missionBBS: showMissionComputer,
             bar: showBar,
+            tradeCenter: showTradeCenter,
             depart: this.done.bind(this),
         });
     }
