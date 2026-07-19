@@ -18,7 +18,7 @@ import { DisplayAssetDataInterface } from "../client/gamedata/display_asset_data
 import { DisplayAssetDataResource, SimulationGameDataResource } from "../nova_plugin/game_data_resource.js";
 import { CloakActiveComponent, CloakComponent, CloakScannerComponent } from "../nova_plugin/cloak_plugin.js";
 import { GovtComponent } from "../nova_plugin/govt_component.js";
-import { dispositionColor, IffComponent, shipDisposition } from "../nova_plugin/iff_plugin.js";
+import { deriveIff, dispositionColor, shipDisposition } from "../nova_plugin/iff_plugin.js";
 import { ArmorComponent, FuelComponent, FUEL_PER_JUMP, ShieldComponent } from "../nova_plugin/health_plugin.js";
 import { OutfitsStateComponent, sumOutfitField } from "../nova_plugin/outfit_plugin.js";
 import { PlanetDataComponent } from "../nova_plugin/planet_plugin.js";
@@ -455,8 +455,14 @@ const DrawRadar = new System({
             // IFF (ModType 14): when the player owns an IFF outfit, colour
             // each ship's blip by its disposition toward the player. Without
             // IFF, or before govt data caches, blips stay the flat dim colour.
+            // The capability is derived here from the player's (delta-synced)
+            // outfits rather than read off a component: the radar runs in the
+            // display world, and IffComponent lives only in the sim worker.
+            const playerOutfits = entity.components.get(OutfitsStateComponent);
+            const hasIff = playerOutfits
+                ? deriveIff(playerOutfits, gameData)?.hasIff === true : false;
             let iffColors: Map<string, number> | undefined;
-            if (entity.components.get(IffComponent)?.hasIff) {
+            if (hasIff) {
                 const playerGovtId = entity.components.get(GovtComponent)?.id;
                 const playerGovt = playerGovtId
                     ? gameData.data.Govt.getCached(playerGovtId) : undefined;

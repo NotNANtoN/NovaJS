@@ -1,3 +1,4 @@
+import * as t from 'io-ts';
 import { GovtData } from 'novadatainterface/govt_data';
 import { Component } from 'nova_ecs/component';
 import { Plugin } from 'nova_ecs/plugin';
@@ -21,9 +22,8 @@ import { OutfitsState, OutfitsStateComponent } from './outfit_plugin.js';
  * modelled as a component for symmetry with the cloak / cloak-scanner
  * capabilities and so display systems can query it per ship.
  */
-export interface IffCapability {
-    hasIff: boolean;
-}
+export const IffCapabilityType = t.type({ hasIff: t.boolean });
+export type IffCapability = t.TypeOf<typeof IffCapabilityType>;
 
 export const IffComponent = new Component<IffCapability>('IffComponent');
 
@@ -136,6 +136,15 @@ export const IffPlugin: Plugin = {
     name: 'IffPlugin',
     build(world) {
         world.addComponent(IffComponent);
+
+        // NOTE: IffComponent is NOT delta-registered. The radar runs in the
+        // display world (not the sim worker), and delta-syncing a
+        // snapshot-skipped derived component would break wire-snapshot
+        // fidelity (the rollback snapshot skips it, so a wire snapshot taken
+        // from a rollback snapshot would omit it while a direct wire snapshot
+        // would include it). Instead the display's DrawRadar derives the
+        // player's IFF locally from the delta-synced OutfitsStateComponent via
+        // deriveIff — the same source of truth, no cross-world component.
 
         // Re-derive the capability wherever a full entity is built (staged
         // insertion, snapshot restore), like the cloak capability.
