@@ -291,7 +291,7 @@ const ProjectileHurtboxProvider = ProvideFromCache({
     factory: hullFromAnimation,
 });
 
-const ProjectileCollisionSystem = new System({
+export const ProjectileCollisionSystem = new System({
     name: 'ProjectileCollisionSystem',
     events: [CollisionEvent],
     args: [CollisionEvent, Entities, UUID, ProjectileDataComponent,

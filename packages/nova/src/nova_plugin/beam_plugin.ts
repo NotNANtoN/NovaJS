@@ -291,7 +291,7 @@ export function beamHullHitFraction(start: Vector, end: Vector,
     return minT;
 }
 
-const BeamCollisionSystem = new System({
+export const BeamCollisionSystem = new System({
     name: 'BeamCollisionSystem',
     events: [CollisionEvent],
     args: [CollisionEvent, Entities, Optional(OwnerComponent),

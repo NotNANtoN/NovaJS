@@ -1,6 +1,7 @@
 import 'jasmine';
 import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import { getIntegrationGameData } from '../communication/simulation_test_fixture.js';
+import { FiringGroupComponent } from './firing_group.js';
 import { GovtComponent } from './govt_component.js';
 import { makeSystem } from './make_system.js';
 import { FormationComponent, NpcComponent } from './npc_ai_plugin.js';
@@ -160,6 +161,12 @@ describe('NPC spawning in a real system', () => {
                 expect(leader!.components.has(NpcComponent)).toBeTrue();
                 expect(entity.components.get(GovtComponent)?.id)
                     .toEqual(leader!.components.get(GovtComponent)?.id);
+                // The fleet shares one firing group (friendly-fire
+                // immunity; see firing_group.ts).
+                expect(entity.components.get(FiringGroupComponent))
+                    .toEqual({ group: formation.leader });
+                expect(leader!.components.get(FiringGroupComponent))
+                    .toEqual({ group: formation.leader });
             }
         }
     }, 240_000);

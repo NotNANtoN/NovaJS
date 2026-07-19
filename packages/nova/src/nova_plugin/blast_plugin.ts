@@ -16,7 +16,7 @@ import { GovtComponent } from './govt_component.js';
 
 export { BlastDamageComponent, BlastIgnoreComponent } from './blast_data.js';
 
-const BlastCollisionSystem = new System({
+export const BlastCollisionSystem = new System({
     name: 'BlastCollisionSystem',
     events: [CollisionEvent],
     args: [CollisionEvent, BlastDamageComponent, Entities,
