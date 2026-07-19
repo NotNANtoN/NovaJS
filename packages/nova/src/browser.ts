@@ -38,6 +38,8 @@ import { ControlEvent, ControlsSubject, EcsControlEvent } from "./nova_plugin/co
 import { Controls, getActions, SavedControls } from "./nova_plugin/controls.js";
 import { DisplayAssetDataResource, SimulationGameDataResource } from "./nova_plugin/game_data_resource.js";
 import { FinishJumpEvent, JumpComponent, JumpRouteComponent } from "./nova_plugin/jump_plugin.js";
+import { GateArrivalComponent, GateTransitEvent } from "./nova_plugin/gate_transit_plugin.js";
+import { GateDestinationResolver } from "./nova_plugin/gate_destination_resolver.js";
 import { makeShip } from "./nova_plugin/make_ship.js";
 import { makeSystem, SIMULATION_STEP_MS } from "./nova_plugin/make_system.js";
 import { MultiRoomResource, NovaPlugin } from "./nova_plugin/nova_plugin.js";
@@ -54,6 +56,7 @@ import { installTouchControls, wantsTouchControls } from "./touch_controls.js";
 
 
 const simulationGameData = new SimulationGameData();
+const gateDestinationResolver = new GateDestinationResolver(simulationGameData);
 const displayAssetData = new DisplayAssetData();
 (window as any).simulationGameData = simulationGameData;
 (window as any).displayAssetData = displayAssetData;
@@ -516,6 +519,14 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
         if (pendingDockedShip || dockedShip) {
             return;
         }
+        // Landing on a hypergate/wormhole transits instead of docking. The sim
+        // handles the transfer (GateDepartureSystem -> GateTransitEvent); the
+        // spaceport must not open. The planet's data is warm here (makeSystem
+        // loaded every planet in this system before the world stepped).
+        const landedPlanet = simulationGameData.data.Planet.getCached(data.id);
+        if (landedPlanet?.gate) {
+            return;
+        }
         const playerShipRef = entities?.[0];
         const playerShipUuid = typeof playerShipRef === "string" ? playerShipRef : playerShipRef?.uuid;
         const playerShip = playerShipUuid ? newDisplayWorld.entities.get(playerShipUuid) : undefined;
@@ -541,6 +552,15 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
         }
         void jumpTo(data);
     });
+    newDisplayWorld.events.get(GateTransitEvent).subscribe(({ data }) => {
+        // Hypergate/wormhole transit reuses the jump room-switch. Only the
+        // local player follows it to the destination system (like a jump);
+        // the sim already removed the carried ship this frame.
+        if (!data.entity.components.has(PlayerShipSelector)) {
+            return;
+        }
+        void gateTransit(data);
+    });
 
     // Wait until the current peer set includes the server, without racing
     // between an immediate state check and a later join event subscription.
@@ -561,6 +581,49 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
     // carry over when jumping rebuilds the display world.
     (window as any).novaDebug =
         new DebugSettings(newDisplayWorld, (window as any).novaDebug);
+}
+
+/**
+ * Follows a hypergate/wormhole transit to its destination system. The sim
+ * already chose the exit spöb (or a random draw for a link-less wormhole) and
+ * tagged the ship with a GateArrivalComponent; here we resolve that spöb to its
+ * containing system, patch a random wormhole's exit onto the arrival marker,
+ * and reuse the jump room-switch to move the player there. GateArrivalSystem in
+ * the destination world then teleports the ship to the arrival gate.
+ */
+async function gateTransit(data: {
+    entity: Entity, uuid: string, fromSpob: string, destinationSpob: string | null,
+}) {
+    const arrival = data.entity.components.get(GateArrivalComponent);
+    let destinationSpob = data.destinationSpob;
+    if (!destinationSpob) {
+        // Random wormhole: resolve the exit from the full link-less-wormhole
+        // list using the sim's replicated random draw.
+        destinationSpob = (await gateDestinationResolver.randomWormholeExit(
+            data.fromSpob, arrival?.randomDraw ?? 0)) ?? null;
+        if (arrival && destinationSpob) {
+            // Record the resolved exit so GateArrivalSystem can position the
+            // ship at it in the destination world.
+            data.entity.components.set(GateArrivalComponent, {
+                ...arrival,
+                destinationSpob,
+            });
+        }
+    }
+    if (!destinationSpob) {
+        console.warn(`Gate transit from ${data.fromSpob} had no resolvable `
+            + `destination; staying put.`);
+        data.entity.components.delete(GateArrivalComponent);
+        return;
+    }
+    const to = await gateDestinationResolver.systemOf(destinationSpob);
+    if (!to) {
+        console.warn(`Gate destination spöb ${destinationSpob} is not in any `
+            + `system; staying put.`);
+        data.entity.components.delete(GateArrivalComponent);
+        return;
+    }
+    await jumpTo({ entity: data.entity, to, uuid: data.uuid });
 }
 
 async function startGame() {
