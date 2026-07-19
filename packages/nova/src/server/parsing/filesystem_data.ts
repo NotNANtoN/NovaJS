@@ -2,6 +2,9 @@ import * as fs from "fs";
 import { AsteroidData } from "novadatainterface/asteroid_data";
 import { BaseData } from "novadatainterface/base_data";
 import { CicnData } from "novadatainterface/cicn_data";
+import { CronData } from "novadatainterface/cron_data";
+import { MissionData } from "novadatainterface/mission_data";
+import { PlayerStartData } from "novadatainterface/player_start_data";
 import { CicnImageData } from "novadatainterface/cicn_image";
 import { PpatImageData } from "novadatainterface/ppat_image";
 import { ExplosionData } from "novadatainterface/explosion_data";
@@ -42,6 +45,9 @@ const Paths = {
     Planet: { path: "Planet", extension: "json" } as PathInfo,
     System: { path: "System", extension: "json" } as PathInfo,
     Govt: { path: "Govt", extension: "json" } as PathInfo,
+    Mission: { path: "Mission", extension: "json" } as PathInfo,
+    Cron: { path: "Cron", extension: "json" } as PathInfo,
+    PlayerStart: { path: "PlayerStart", extension: "json" } as PathInfo,
     TargetCorners: { path: "TargetCorners", extension: "json" } as PathInfo,
     SpriteSheet: { path: "SpriteSheet", extension: "json" } as PathInfo,
     SpriteSheetImage: { path: "SpriteSheetImage", extension: "png" } as PathInfo,
@@ -69,6 +75,9 @@ class FilesystemData implements GameDataInterface {
             Planet: this.getFunction<PlanetData>(Paths.Planet),
             System: this.getFunction<SystemData>(Paths.System),
             Govt: this.getFunction<GovtData>(Paths.Govt),
+            Mission: this.getFunction<MissionData>(Paths.Mission),
+            Cron: this.getFunction<CronData>(Paths.Cron),
+            PlayerStart: this.getFunction<PlayerStartData>(Paths.PlayerStart),
             TargetCorners: this.getFunction<TargetCornersData>(Paths.TargetCorners),
             SpriteSheet: this.getFunction<SpriteSheetData>(Paths.SpriteSheet),
             SpriteSheetImage: this.getFunction<SpriteSheetImageData>(Paths.SpriteSheetImage),
@@ -119,6 +128,9 @@ class FilesystemData implements GameDataInterface {
             Planet: await this.buildIDsForPath(Paths.Planet),
             System: await this.buildIDsForPath(Paths.System),
             Govt: await this.buildIDsForPath(Paths.Govt),
+            Mission: await this.buildIDsForPath(Paths.Mission),
+            Cron: await this.buildIDsForPath(Paths.Cron),
+            PlayerStart: await this.buildIDsForPath(Paths.PlayerStart),
             TargetCorners: await this.buildIDsForPath(Paths.TargetCorners),
             SpriteSheet: await this.buildIDsForPath(Paths.SpriteSheet),
             SpriteSheetImage: await this.buildIDsForPath(Paths.SpriteSheetImage),

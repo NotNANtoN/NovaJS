@@ -1,13 +1,16 @@
 import { AsteroidData } from "./asteroid_data.js";
 import { CicnData } from "./cicn_data.js";
 import { CicnImageData } from "./cicn_image.js";
+import { CronData } from "./cron_data.js";
 import { ExplosionData } from "./explosion_data.js";
 import { Gettable } from "./gettable.js";
 import { GovtData } from "./govt_data.js";
+import { MissionData } from "./mission_data.js";
 import { OutfitData } from "./outfit_data.js";
 import { PictData } from "./pict_data.js";
 import { PictImageData } from "./pict_image.js";
 import { PlanetData } from "./planet_data.js";
+import { PlayerStartData } from "./player_start_data.js";
 import { PpatImageData } from "./ppat_image.js";
 import { ShipData } from "./ship_data.js";
 import { SoundFile } from "./sound_file.js";
@@ -31,6 +34,9 @@ enum NovaDataType {
     Planet = "Planet",
     System = "System",
     Govt = "Govt",
+    Mission = "Mission",
+    Cron = "Cron",
+    PlayerStart = "PlayerStart",
     TargetCorners = "TargetCorners",
     SpriteSheet = "SpriteSheet",
     SpriteSheetImage = "SpriteSheetImage",
@@ -54,6 +60,9 @@ type NovaDataInterface = {
     Planet: Gettable<PlanetData>,
     System: Gettable<SystemData>,
     Govt: Gettable<GovtData>,
+    Mission: Gettable<MissionData>,
+    Cron: Gettable<CronData>,
+    PlayerStart: Gettable<PlayerStartData>,
     TargetCorners: Gettable<TargetCornersData>,
     SpriteSheet: Gettable<SpriteSheetData>,
     SpriteSheetImage: Gettable<SpriteSheetImageData>,

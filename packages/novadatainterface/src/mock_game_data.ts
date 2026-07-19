@@ -1,8 +1,11 @@
 import { getDefaultAsteroidData } from "./asteroid_data.js";
 import { getDefaultCicnData } from "./cicn_data.js";
 import { getDefaultExplosionData } from "./explosion_data.js";
+import { getDefaultCronData } from "./cron_data.js";
 import { GameDataInterface } from "./game_data_interface.js";
 import { getDefaultGovtData } from "./govt_data.js";
+import { getDefaultMissionData } from "./mission_data.js";
+import { getDefaultPlayerStartData } from "./player_start_data.js";
 import { Gettable } from "./gettable.js";
 import { NovaDataInterface } from "./nova_data_interface.js";
 import { NovaIDs } from "./nova_ids.js";
@@ -69,6 +72,9 @@ export class MockGameData implements GameDataInterface {
         StatusBar: new MockGettable(getDefaultStatusBarData()),
         System: new MockGettable(getDefaultSystemData()),
         Govt: new MockGettable(getDefaultGovtData()),
+        Mission: new MockGettable(getDefaultMissionData()),
+        Cron: new MockGettable(getDefaultCronData()),
+        PlayerStart: new MockGettable(getDefaultPlayerStartData()),
         TargetCorners: new MockGettable(getDefaultTargetCornersData()),
         Weapon: new MockGettable(getDefaultProjectileWeaponData()),
         SoundFile: new MockGettable(getDefaultSoundFile()),
