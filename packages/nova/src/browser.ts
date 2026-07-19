@@ -42,6 +42,7 @@ import { FinishJumpEvent, JumpComponent, JumpRouteComponent } from "./nova_plugi
 import { GateArrivalComponent, GateTransitEvent } from "./nova_plugin/gate_transit_plugin.js";
 import { GateDestinationResolver } from "./nova_plugin/gate_destination_resolver.js";
 import { LeaveGateMapEvent, OpenGateMapEvent } from "./display/gate_map_plugin.js";
+import { GateArrivalAnticipationEvent } from "./display/gate_animation_plugin.js";
 import { makeShip } from "./nova_plugin/make_ship.js";
 import { makeSystem, SIMULATION_STEP_MS } from "./nova_plugin/make_system.js";
 import { makeControlBitHooks, NCBParseError, runNCBSet } from "./nova_plugin/ncb.js";
@@ -108,6 +109,11 @@ let pendingLaunchedShip: Entity | undefined;
 let pendingGateShip: { uuid: string, entity: Entity, planetId: string } | undefined;
 let gateDockedShip: { uuid: string, entity: Entity, planetId: string } | undefined;
 let pendingGateLaunch: Entity | undefined;
+// The gate the player is about to arrive through. Set just before the
+// transit's jumpTo; the destination display world is told the moment it is
+// created (GateArrivalAnticipationEvent) so the gate's opening animation
+// gets a head start of the room join + insertion latency.
+let pendingGateArrivalSpob: string | undefined;
 let controls: Controls | undefined;
 const controlsSubject = new Subject<ControlEvent>();
 let autopilot: Autopilot | undefined;
@@ -515,6 +521,15 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
 
     const initialFrame = await newSimulationBridge.snapshot();
     const newDisplayWorld = await makeDisplayWorld(to);
+    if (pendingGateArrivalSpob) {
+        // Announce the incoming gate arrival before the room join completes:
+        // the event is queued and processed once this world starts stepping
+        // (its planets are inserted by then), opening the destination gate
+        // ahead of the ship's appearance.
+        newDisplayWorld.emit(GateArrivalAnticipationEvent,
+            { spob: pendingGateArrivalSpob });
+        pendingGateArrivalSpob = undefined;
+    }
     (window as any).simulationWorker = worker;
     (window as any).displayWorld = newDisplayWorld;
 
@@ -643,6 +658,7 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
                 emergenceAngle: null,
                 randomDraw: Math.random(),
             });
+            pendingGateArrivalSpob = destinationSpob;
             await jumpTo({ entity: ship, to, uuid: docked.uuid });
         })();
     });
@@ -708,6 +724,7 @@ async function gateTransit(data: {
         data.entity.components.delete(GateArrivalComponent);
         return;
     }
+    pendingGateArrivalSpob = destinationSpob;
     await jumpTo({ entity: data.entity, to, uuid: data.uuid });
 }
 

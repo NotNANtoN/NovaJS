@@ -1,47 +1,135 @@
 import { RunQuery, UUID } from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
+import { AddEvent, EcsEvent } from 'nova_ecs/events';
 import { Plugin } from 'nova_ecs/plugin';
 import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { Provide } from 'nova_ecs/provide';
 import { Query } from 'nova_ecs/query';
+import { Resource } from 'nova_ecs/resource';
 import { System } from 'nova_ecs/system';
-import { PlanetDataComponent, PlanetTargetComponent } from '../nova_plugin/planet_plugin.js';
-import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin.js';
+import { GATE_EMERGENCE_DISTANCE } from '../nova_plugin/gate_transit_plugin.js';
+import { PlanetComponent, PlanetDataComponent, PlanetTargetComponent } from '../nova_plugin/planet_plugin.js';
+import { ShipComponent } from '../nova_plugin/ship_plugin.js';
 import { AnimationGraphicComponent, ObjectDrawSystem } from './animation_graphic_plugin.js';
 
 /**
  * Hypergate open/close animation (display-only, player-local).
  *
  * The stock hypergate sprite (rlëD 2001, shared by every animated stock gate)
- * has 42 frames. Per the EVN Bible's animated-hypergate rule (CustPicID 0 or
- * out of range — all stock gates — means "use the first half of the frames
- * for opening/closing and the second half for working"), frames 0-20 are the
- * opening/closing sequence and frames 21-41 the working loop.
+ * has 42 frames: one opening sequence whose final two frames flicker while
+ * the gate stands open.
  *
- * The gate opens when this player targets it for landing (the land key's
- * target selection) or is near it (which also covers "the destination gate is
- * open as you emerge from it" — arrivals appear within the proximity radius).
- * It plays the closing sequence when neither holds. Purely cosmetic and
- * driven by the display world's wall clock, so it never touches simulation
- * state.
+ * Behavior (matching the original game):
+ * - IDLE: closed and un-animated (frame 0, frozen) while no ship has the
+ *   gate selected as its landing target and no arrival is due.
+ * - SELECTED: the opening sequence plays FORWARD; on reaching the last two
+ *   frames it ALTERNATES between them (the "working" flicker).
+ * - DESELECTED: the sequence plays BACKWARDS from wherever it is, back to
+ *   closed. Mid-animation reversals continue from the current frame.
+ * - ARRIVAL: the gate also opens when a ship is about to arrive through it.
+ *   For the local player the browser announces the destination gate the
+ *   moment the room switch starts (GateArrivalAnticipationEvent), giving the
+ *   opening a head start of roughly the room join + insertion latency.
+ *   Remote ships' arrivals carry no advance information (the sim consumes
+ *   the arrival marker within a tick, before any delta reaches this peer),
+ *   so their gates open when the ship appears at the emergence point.
+ *
+ * Selection visibility: PlanetTargetComponent is per-ship, delta-synced
+ * simulation state, so every ship's landing target — including other
+ * players' — is visible to this display world; "no one selecting it" means
+ * exactly that. (In practice only player ships ever set a landing target.)
+ *
+ * Purely cosmetic and driven by the display world's wall clock; never
+ * touches simulation state.
  */
 
 /** How long each animation frame shows. The spöb AnimDelay of every stock
  * gate is 0 (unset; the Bible's unit is 30ths of a second), so the rate is
- * tuned to feel: ~80ms/frame plays the 21-frame stock opening in ~1.7s. */
+ * tuned to feel. */
 export const GATE_FRAME_MS = 80;
-/** Distance within which a gate stands open for the approaching/emerging
- * player, in pixels. Covers the 300px emergence point with enough margin
- * that a slow ship flying straight out still sees the full ~1.7s opening
- * play before it leaves the radius and the gate closes behind it. */
-export const GATE_OPEN_PROXIMITY = 600;
+/** How long an announced/observed arrival holds the gate open. Covers the
+ * full stock opening (~3.4s) plus a beat of flicker while the arriving ship
+ * pulls away. */
+export const GATE_ARRIVAL_HOLD_MS = 5000;
 
-interface GateAnimationState {
-    stage: 'closed' | 'opening' | 'working' | 'closing';
+export interface GateAnimationState {
+    mode: 'closed' | 'opening' | 'flicker' | 'closing';
     frame: number;
     /** Display-clock time (ms) the frame last advanced. */
     lastAdvance: number;
+}
+
+/**
+ * Advances the gate animation state machine one display tick. Pure and
+ * unit-testable: `wantOpen` is the resolved trigger (selection or arrival),
+ * `frames` the sprite's frame count, `now` the display clock in ms.
+ *
+ * closed --open--> opening --(reaches the last two frames)--> flicker;
+ * opening/flicker --close--> closing, which steps BACKWARDS from the
+ * CURRENT frame (no jumps on mid-animation reversals) down to closed;
+ * closing --open--> opening resumes forward from the current frame.
+ */
+export function stepGateAnimation(state: GateAnimationState, wantOpen: boolean,
+    frames: number, now: number) {
+    if (frames < 2) {
+        return; // A static (single-frame) gate has nothing to animate.
+    }
+    const advance = now - state.lastAdvance >= GATE_FRAME_MS;
+    switch (state.mode) {
+        case 'closed':
+            state.frame = 0;
+            if (wantOpen) {
+                state.mode = 'opening';
+                state.lastAdvance = now;
+            }
+            break;
+        case 'opening':
+            if (!wantOpen) {
+                // Reverse from the current frame; no jump.
+                state.mode = 'closing';
+                break;
+            }
+            if (advance) {
+                state.lastAdvance = now;
+                if (state.frame + 1 >= frames - 1) {
+                    state.frame = frames - 1;
+                    state.mode = 'flicker';
+                } else {
+                    state.frame++;
+                }
+            }
+            break;
+        case 'flicker':
+            if (!wantOpen) {
+                state.mode = 'closing';
+                break;
+            }
+            if (advance) {
+                state.lastAdvance = now;
+                // The open gate alternates between the sequence's last two
+                // frames.
+                state.frame =
+                    state.frame === frames - 1 ? frames - 2 : frames - 1;
+            }
+            break;
+        case 'closing':
+            if (wantOpen) {
+                // Resume opening from the current frame; no jump.
+                state.mode = 'opening';
+                break;
+            }
+            if (advance) {
+                state.lastAdvance = now;
+                if (state.frame <= 1) {
+                    state.frame = 0;
+                    state.mode = 'closed';
+                } else {
+                    state.frame--;
+                }
+            }
+            break;
+    }
 }
 
 export const GateAnimationComponent =
@@ -51,18 +139,76 @@ const GateAnimationProvider = Provide({
     name: 'GateAnimationProvider',
     provided: GateAnimationComponent,
     args: [PlanetDataComponent] as const,
-    factory: () => ({ stage: 'closed' as const, frame: 0, lastAdvance: 0 }),
+    factory: (): GateAnimationState =>
+        ({ mode: 'closed', frame: 0, lastAdvance: 0 }),
 });
 
-const PlayerQuery = new Query([PlanetTargetComponent, MovementStateComponent,
-    PlayerShipSelector] as const);
+/**
+ * Announces that a ship (the local player) is about to arrive through the
+ * gate whose spöb global id is `spob`. The browser emits this on the
+ * destination display world as soon as it exists — before the room join
+ * completes and the ship is inserted — so the gate's opening gets whatever
+ * head start that latency provides.
+ */
+export const GateArrivalAnticipationEvent =
+    new EcsEvent<{ spob: string }>('GateArrivalAnticipationEvent');
+
+/**
+ * spöb global id -> display-clock time (ms) until which that gate holds
+ * open for an arrival. A resource (not per-gate state) so an anticipation
+ * that lands before the gate entity or its animation state exists is not
+ * lost.
+ */
+export const GateAnticipationResource =
+    new Resource<Map<string, number>>('GateAnticipation');
+
+const AnticipateArrivalSystem = new System({
+    name: 'AnticipateArrivalSystem',
+    events: [GateArrivalAnticipationEvent],
+    args: [GateArrivalAnticipationEvent, GateAnticipationResource,
+        TimeResource] as const,
+    step({ spob }, anticipation, time) {
+        anticipation.set(spob, time.time + GATE_ARRIVAL_HOLD_MS);
+    },
+});
+
+const GateQuery = new Query([PlanetComponent, PlanetDataComponent,
+    MovementStateComponent] as const);
+
+/**
+ * A ship appearing out of nowhere at a gate's emergence point just arrived
+ * through it (remote players' transits give this peer no earlier signal):
+ * hold that gate open. The margin over the emergence distance allows for the
+ * ship coasting outward before this peer first saw it.
+ */
+const ShipArrivedAtGateSystem = new System({
+    name: 'ShipArrivedAtGateSystem',
+    events: [AddEvent],
+    args: [ShipComponent, MovementStateComponent, GateAnticipationResource,
+        TimeResource, RunQuery] as const,
+    step(_ship, movement, anticipation, time, runQuery) {
+        for (const [planet, planetData, gateMovement] of runQuery(GateQuery)) {
+            if (planetData.gate?.kind !== 'hypergate') {
+                continue;
+            }
+            const distance = movement.position
+                .subtract(gateMovement.position).length;
+            if (distance < GATE_EMERGENCE_DISTANCE * 2) {
+                anticipation.set(planet.id, time.time + GATE_ARRIVAL_HOLD_MS);
+            }
+        }
+    },
+});
+
+const ShipTargetQuery = new Query([PlanetTargetComponent] as const);
 
 export const GateAnimationSystem = new System({
     name: 'GateAnimationSystem',
-    args: [GateAnimationComponent, PlanetDataComponent,
-        AnimationGraphicComponent, MovementStateComponent, UUID, TimeResource,
-        RunQuery] as const,
-    step(state, planetData, graphic, movement, uuid, time, runQuery) {
+    args: [GateAnimationComponent, PlanetComponent, PlanetDataComponent,
+        AnimationGraphicComponent, UUID, TimeResource,
+        GateAnticipationResource, RunQuery] as const,
+    step(state, planet, planetData, graphic, uuid, time, anticipation,
+        runQuery) {
         if (planetData.gate?.kind !== 'hypergate') {
             return;
         }
@@ -74,72 +220,29 @@ export const GateAnimationSystem = new System({
         if (!Number.isFinite(frames) || frames < 2) {
             return;
         }
-        const openingFrames = Math.floor(frames / 2);
 
-        // Open for the player who targets the gate for landing or is close
-        // to it (approach and emergence).
+        // Open while ANY ship has this gate selected as its landing target
+        // (per-ship synced state, so other players' selections count too),
+        // or while an arrival through this gate is pending/fresh.
         let wantOpen = false;
-        for (const [target, playerMovement] of runQuery(PlayerQuery)) {
+        for (const [target] of runQuery(ShipTargetQuery)) {
             if (target.target === uuid) {
                 wantOpen = true;
                 break;
             }
-            const distance = playerMovement.position
-                .subtract(movement.position).length;
-            if (distance < GATE_OPEN_PROXIMITY) {
-                wantOpen = true;
-                break;
+        }
+        if (!wantOpen) {
+            const until = anticipation.get(planet.id);
+            if (until !== undefined) {
+                if (time.time < until) {
+                    wantOpen = true;
+                } else {
+                    anticipation.delete(planet.id);
+                }
             }
         }
 
-        const advance = time.time - state.lastAdvance >= GATE_FRAME_MS;
-        switch (state.stage) {
-            case 'closed':
-                state.frame = 0;
-                if (wantOpen) {
-                    state.stage = 'opening';
-                    state.lastAdvance = time.time;
-                }
-                break;
-            case 'opening':
-                if (!wantOpen) {
-                    state.stage = 'closing';
-                } else if (advance) {
-                    state.lastAdvance = time.time;
-                    if (state.frame + 1 >= openingFrames) {
-                        state.stage = 'working';
-                        state.frame = openingFrames;
-                    } else {
-                        state.frame++;
-                    }
-                }
-                break;
-            case 'working':
-                if (!wantOpen) {
-                    state.stage = 'closing';
-                    state.frame = Math.max(0, openingFrames - 1);
-                    state.lastAdvance = time.time;
-                } else if (advance) {
-                    state.lastAdvance = time.time;
-                    // Loop the working frames [openingFrames, frames).
-                    state.frame = state.frame + 1 >= frames
-                        ? openingFrames : state.frame + 1;
-                }
-                break;
-            case 'closing':
-                if (wantOpen) {
-                    state.stage = 'opening';
-                } else if (advance) {
-                    state.lastAdvance = time.time;
-                    if (state.frame <= 0) {
-                        state.stage = 'closed';
-                        state.frame = 0;
-                    } else {
-                        state.frame--;
-                    }
-                }
-                break;
-        }
+        stepGateAnimation(state, wantOpen, frames, time.time);
 
         // Override the frame ObjectDrawSystem's rotation pass picked (planets
         // have a 1-frame 'normal' set, which pins frame 0 every tick).
@@ -154,11 +257,17 @@ export const GateAnimationPlugin: Plugin = {
     name: 'GateAnimationPlugin',
     build(world) {
         world.addComponent(GateAnimationComponent);
+        world.resources.set(GateAnticipationResource, new Map());
         world.addSystem(GateAnimationProvider);
+        world.addSystem(AnticipateArrivalSystem);
+        world.addSystem(ShipArrivedAtGateSystem);
         world.addSystem(GateAnimationSystem);
     },
     remove(world) {
         world.removeSystem(GateAnimationSystem);
+        world.removeSystem(ShipArrivedAtGateSystem);
+        world.removeSystem(AnticipateArrivalSystem);
         world.removeSystem(GateAnimationProvider);
+        world.resources.delete(GateAnticipationResource);
     }
 }
