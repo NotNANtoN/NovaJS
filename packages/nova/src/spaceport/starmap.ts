@@ -63,17 +63,16 @@ function installLabelFont(systems: SystemData[]) {
 
 /**
  * Whether a system exists for the player according to its visibility NCB
- * test. Nova swaps between alternate copies of a system (stacked at the same
- * map position) by giving each a different visibility expression, e.g. the
- * four Sols at (0,0). The map currently evaluates against an empty control
- * bit set, which matches a brand-new pilot: the starter chär (nova:128) sets
- * no bits. Once per-player NCB state exists (with mission support), this
- * should use the player's actual bits instead.
+ * test, evaluated against the player's control bits. Nova swaps between
+ * alternate copies of a system (stacked at the same map position) by
+ * giving each a different visibility expression, e.g. the four Sols
+ * at (0,0).
  */
-function systemVisible(system: SystemData): boolean {
+function systemVisible(system: SystemData,
+    bits: ReadonlySet<number>): boolean {
     try {
         return evaluateNCBTest(system.visibility ?? '', {
-            getBit: () => false,
+            getBit: bit => bits.has(bit),
         });
     } catch (e) {
         // Show systems with malformed visibility expressions rather than
@@ -160,13 +159,14 @@ class SystemGraph {
 
     constructor(systems: SystemData[], private currentSystem: string,
         gateLinks: [string, string][] = [],
+        playerBits: ReadonlySet<number> = new Set(),
         private size = { x: 456, y: 419 }) {
         // NCB-hidden systems don't exist for the player: they aren't drawn,
         // clicked, linked, or routed through. The current system is always
         // kept so the map stays usable even if the player is somewhere the
         // visibility data says shouldn't exist.
         const visibleSystems = systems.filter(
-            s => s.id === currentSystem || systemVisible(s));
+            s => s.id === currentSystem || systemVisible(s, playerBits));
         this.systems = new Map(visibleSystems.map(s => [s.id, s]));
         this.routes = this.computeShortestPaths();
         this.clickTargets = this.pickRepresentativeSystems(visibleSystems);
@@ -542,10 +542,15 @@ class SystemGraph {
 
 export class Starmap extends Menu<string[] /* route list of systems */> {
     private systemGraph?: SystemGraph;
+    private allSystems?: SystemData[];
+    private gateLinks?: [string, string][];
+    private graphBitsKey?: string;
 
     constructor(displayAssets: DisplayAssetDataInterface,
         simulationData: SimulationGameDataInterface,
-        private systemId: string, controlEvents: Observable<ControlEvent>) {
+        private systemId: string, controlEvents: Observable<ControlEvent>,
+        /** The player's control bits, for NCB system visibility. */
+        private getPlayerBits: () => ReadonlySet<number> = () => new Set()) {
         super(displayAssets, simulationData, "nova:8509", controlEvents);
         this.container.name = "StarMap";
         //this.container.alpha = 0.5;
@@ -571,10 +576,27 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
     override async build() {
         await super.build();
         const systemIds = (await this.simulationData.ids).System;
-        const systems = await Promise.all(
+        this.allSystems = await Promise.all(
             systemIds.map(s => this.simulationData.data.System.get(s)));
-        const gateLinks = await this.computeHypergateLinks(systems);
-        this.systemGraph = new SystemGraph(systems, this.systemId, gateLinks);
+        this.gateLinks = await this.computeHypergateLinks(this.allSystems);
+        this.rebuildGraph(this.getPlayerBits());
+    }
+
+    /** (Re)filters the map against the given control bits. */
+    private rebuildGraph(bits: ReadonlySet<number>) {
+        if (!this.allSystems) {
+            return;
+        }
+        const key = [...bits].sort((a, b) => a - b).join(',');
+        if (this.systemGraph && key === this.graphBitsKey) {
+            return;
+        }
+        if (this.systemGraph) {
+            this.container.removeChild(this.systemGraph.container);
+        }
+        this.graphBitsKey = key;
+        this.systemGraph = new SystemGraph(this.allSystems, this.systemId,
+            this.gateLinks ?? [], bits);
         this.systemGraph.container.position.set(-290, -248);
         this.container.addChild(this.systemGraph.container);
     }
@@ -615,6 +637,9 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
 
     override async show(route: string[]) {
         await this.buildPromise
+        // The player's bits may have changed (missions, outfits) since
+        // the graph was built; refilter NCB-gated systems.
+        this.rebuildGraph(this.getPlayerBits());
         if (!this.systemGraph) {
             throw new Error('Expected system graph to be built')
         }

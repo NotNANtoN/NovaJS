@@ -94,11 +94,30 @@ export async function PlanetParse(spob: SpobResource, notFoundFunction: (m: stri
         }
     };
 
+    // Resolve the owning gövt to its global id; -1 and other sentinel
+    // values stay null (independent).
+    let govt: string | null = null;
+    if (spob.government >= 128) {
+        govt = spob.idSpace.gövt[spob.government]?.globalID ?? null;
+    }
+
     return {
         ...base,
         landingDesc: desc,
         landingPict: pictID,
         animation,
+        govt,
+        flags: {
+            canLand: Boolean(spob.flags & 0x1),
+            hasCommodityExchange: Boolean(spob.flags & 0x2),
+            hasOutfitter: Boolean(spob.flags & 0x4),
+            hasShipyard: Boolean(spob.flags & 0x8),
+            isStation: Boolean(spob.flags & 0x10),
+            uninhabited: Boolean(spob.flags & 0x20),
+            hasBar: Boolean(spob.flags & 0x40),
+            landOnlyIfDestroyed: Boolean(spob.flags & 0x80),
+        },
+        techLevel: spob.techLevel,
         vulnerableTo: <Array<DamageType>>["planetBuster"],
         physics: {
             shield: 1000,

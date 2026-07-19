@@ -2,6 +2,9 @@ import * as fs from "fs";
 import { AsteroidData } from "novadatainterface/asteroid_data";
 import { BaseData } from "novadatainterface/base_data";
 import { CicnData } from "novadatainterface/cicn_data";
+import { CronData } from "novadatainterface/cron_data";
+import { MissionData } from "novadatainterface/mission_data";
+import { PlayerStartData } from "novadatainterface/player_start_data";
 import { CicnImageData } from "novadatainterface/cicn_image";
 import { PpatImageData } from "novadatainterface/ppat_image";
 import { ExplosionData } from "novadatainterface/explosion_data";
@@ -46,6 +49,9 @@ const Paths = {
     Govt: { path: "Govt", extension: "json" } as PathInfo,
     Dude: { path: "Dude", extension: "json" } as PathInfo,
     Fleet: { path: "Fleet", extension: "json" } as PathInfo,
+    Mission: { path: "Mission", extension: "json" } as PathInfo,
+    Cron: { path: "Cron", extension: "json" } as PathInfo,
+    PlayerStart: { path: "PlayerStart", extension: "json" } as PathInfo,
     TargetCorners: { path: "TargetCorners", extension: "json" } as PathInfo,
     SpriteSheet: { path: "SpriteSheet", extension: "json" } as PathInfo,
     SpriteSheetImage: { path: "SpriteSheetImage", extension: "png" } as PathInfo,
@@ -75,6 +81,9 @@ class FilesystemData implements GameDataInterface {
             Govt: this.getFunction<GovtData>(Paths.Govt),
             Dude: this.getFunction<DudeData>(Paths.Dude),
             Fleet: this.getFunction<FleetData>(Paths.Fleet),
+            Mission: this.getFunction<MissionData>(Paths.Mission),
+            Cron: this.getFunction<CronData>(Paths.Cron),
+            PlayerStart: this.getFunction<PlayerStartData>(Paths.PlayerStart),
             TargetCorners: this.getFunction<TargetCornersData>(Paths.TargetCorners),
             SpriteSheet: this.getFunction<SpriteSheetData>(Paths.SpriteSheet),
             SpriteSheetImage: this.getFunction<SpriteSheetImageData>(Paths.SpriteSheetImage),
@@ -127,6 +136,9 @@ class FilesystemData implements GameDataInterface {
             Govt: await this.buildIDsForPath(Paths.Govt),
             Dude: await this.buildIDsForPath(Paths.Dude),
             Fleet: await this.buildIDsForPath(Paths.Fleet),
+            Mission: await this.buildIDsForPath(Paths.Mission),
+            Cron: await this.buildIDsForPath(Paths.Cron),
+            PlayerStart: await this.buildIDsForPath(Paths.PlayerStart),
             TargetCorners: await this.buildIDsForPath(Paths.TargetCorners),
             SpriteSheet: await this.buildIDsForPath(Paths.SpriteSheet),
             SpriteSheetImage: await this.buildIDsForPath(Paths.SpriteSheetImage),

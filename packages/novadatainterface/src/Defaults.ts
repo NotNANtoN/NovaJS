@@ -5,7 +5,10 @@ import { getDefaultSpriteSheetImage } from "./default_sprite_sheet_image.js";
 import { getDefaultExplosionData } from "./explosion_data.js";
 import { getDefaultDudeData } from "./dude_data.js";
 import { getDefaultFleetData } from "./fleet_data.js";
+import { getDefaultCronData } from "./cron_data.js";
 import { getDefaultGovtData } from "./govt_data.js";
+import { getDefaultMissionData } from "./mission_data.js";
+import { getDefaultPlayerStartData } from "./player_start_data.js";
 import { getDefaultOutfitData } from "./outfit_data.js";
 import { getDefaultPictData } from "./pict_data.js";
 import { getDefaultPictImageData } from "./pict_image.js";
@@ -35,6 +38,9 @@ export const Defaults = {
     get Govt() { return getDefaultGovtData() },
     get Dude() { return getDefaultDudeData() },
     get Fleet() { return getDefaultFleetData() },
+    get Mission() { return getDefaultMissionData() },
+    get Cron() { return getDefaultCronData() },
+    get PlayerStart() { return getDefaultPlayerStartData() },
     get TargetCorners() { return getDefaultTargetCornersData() },
     get SpriteSheet() { return getDefaultSpriteSheetData() },
     get SpriteSheetImage() { return getDefaultSpriteSheetImage() },

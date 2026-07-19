@@ -12,6 +12,9 @@ import { SystemData } from "novadatainterface/system_data";
 import { GovtData } from "novadatainterface/govt_data";
 import { DudeData } from "novadatainterface/dude_data";
 import { FleetData } from "novadatainterface/fleet_data";
+import { MissionData } from "novadatainterface/mission_data";
+import { CronData } from "novadatainterface/cron_data";
+import { PlayerStartData } from "novadatainterface/player_start_data";
 import { TargetCornersData } from "novadatainterface/target_corners_data";
 import { SpriteSheetData, SpriteSheetImageData, SpriteSheetFramesData } from "novadatainterface/sprite_sheet_data";
 import { StatusBarData } from "novadatainterface/status_bar_data";
@@ -55,6 +58,9 @@ class GameDataAggregator implements GameDataInterface {
             Govt: this.makeAggregator<GovtData>(NovaDataType.Govt),
             Dude: this.makeAggregator<DudeData>(NovaDataType.Dude),
             Fleet: this.makeAggregator<FleetData>(NovaDataType.Fleet),
+            Mission: this.makeAggregator<MissionData>(NovaDataType.Mission),
+            Cron: this.makeAggregator<CronData>(NovaDataType.Cron),
+            PlayerStart: this.makeAggregator<PlayerStartData>(NovaDataType.PlayerStart),
             TargetCorners: this.makeAggregator<TargetCornersData>(NovaDataType.TargetCorners),
             SpriteSheet: this.makeAggregator<SpriteSheetData>(NovaDataType.SpriteSheet),
             SpriteSheetImage: this.makeAggregator<SpriteSheetImageData>(NovaDataType.SpriteSheetImage),

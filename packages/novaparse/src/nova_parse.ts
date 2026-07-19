@@ -5,8 +5,11 @@ import { DudeData } from "novadatainterface/dude_data";
 import { FleetData } from "novadatainterface/fleet_data";
 import { GameDataInterface } from "novadatainterface/game_data_interface";
 import { Gettable } from "novadatainterface/gettable";
+import { CronData } from "novadatainterface/cron_data";
 import { GovtData } from "novadatainterface/govt_data";
+import { MissionData } from "novadatainterface/mission_data";
 import { NovaDataInterface, NovaIDNotFoundError } from "novadatainterface/nova_data_interface";
+import { PlayerStartData } from "novadatainterface/player_start_data";
 import { NovaIDs } from "novadatainterface/nova_ids";
 import { OutfitData } from "novadatainterface/outfit_data";
 import { PictData } from "novadatainterface/pict_data";
@@ -24,7 +27,10 @@ import { AsteroidParse } from "./parsers/asteroid_parse.js";
 import { DudeParse } from "./parsers/dude_parse.js";
 import { ExplosionParse } from "./parsers/explosion_parse.js";
 import { FleetParse } from "./parsers/fleet_parse.js";
+import { CharParse } from "./parsers/char_parse.js";
+import { CronParse } from "./parsers/cron_parse.js";
 import { GovtParse } from "./parsers/govt_parse.js";
+import { MisnParse } from "./parsers/misn_parse.js";
 import { OutfitParse } from "./parsers/outfit_parse.js";
 import { PictImageMulti, PictImageMultiParse } from "./parsers/pict_parse.js";
 import { PlanetParse } from "./parsers/planet_parse.js";
@@ -40,7 +46,10 @@ import { BoomResource } from "./resource_parsers/boom_resource.js";
 import { BaseResource } from "./resource_parsers/nova_resource_base.js";
 import { DudeResource } from "./resource_parsers/dude_resource.js";
 import { FletResource } from "./resource_parsers/flet_resource.js";
+import { CharResource } from "./resource_parsers/char_resource.js";
+import { CronResource } from "./resource_parsers/cron_resource.js";
 import { GovtResource } from "./resource_parsers/govt_resource.js";
+import { MisnResource } from "./resource_parsers/misn_resource.js";
 import { OutfResource } from "./resource_parsers/outf_resource.js";
 import { PictResource } from "./resource_parsers/pict_resource.js";
 import { PpatResource } from "./resource_parsers/ppat_resource.js";
@@ -189,6 +198,9 @@ export class NovaParse implements GameDataInterface {
             Govt: this.buildIDsForResource(idSpace.gövt),
             Dude: this.buildIDsForResource(idSpace.düde),
             Fleet: this.buildIDsForResource(idSpace.flët),
+            Mission: this.buildIDsForResource(idSpace.mïsn),
+            Cron: this.buildIDsForResource(idSpace.crön),
+            PlayerStart: this.buildIDsForResource(idSpace.chär),
             TargetCorners: [], // TODO: parse these
             SpriteSheet: this.buildIDsForResource(idSpace.rlëD),
             SpriteSheetImage: this.buildIDsForResource(idSpace.rlëD),
@@ -217,6 +229,9 @@ export class NovaParse implements GameDataInterface {
             Govt: this.makeGettable<GovtResource, GovtData>(NovaResourceType.gövt, GovtParse),
             Dude: this.makeGettable<DudeResource, DudeData>(NovaResourceType.düde, DudeParse),
             Fleet: this.makeGettable<FletResource, FleetData>(NovaResourceType.flët, FleetParse),
+            Mission: this.makeGettable<MisnResource, MissionData>(NovaResourceType.mïsn, MisnParse),
+            Cron: this.makeGettable<CronResource, CronData>(NovaResourceType.crön, CronParse),
+            PlayerStart: this.makeGettable<CharResource, PlayerStartData>(NovaResourceType.chär, CharParse),
             TargetCorners: this.makeGettable<BaseResource, TargetCornersData>(NovaResourceType.cicn, TargetCornersParse),
             SpriteSheet: this.spriteSheetDataGettable,
             SpriteSheetImage: this.spriteSheetImageGettable,

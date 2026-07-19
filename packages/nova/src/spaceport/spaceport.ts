@@ -19,16 +19,35 @@ import { ShipPhysicsComponent } from '../nova_plugin/ship_plugin.js';
 import { SystemIdResource } from '../nova_plugin/system_id_resource.js';
 import { SystemPlugin } from '../nova_plugin/system_plugin.js';
 import { WeaponsStateComponent } from '../nova_plugin/weapons_state.js';
+import { formatDate } from '../nova_plugin/calendar.js';
+import { LOCATION_BAR, LOCATION_MISSION_COMPUTER, MissionEvent } from '../nova_plugin/mission_logic.js';
+import { missionDisplayName } from '../nova_plugin/mission_text.js';
+import { CreditsComponent, GameDateComponent } from '../nova_plugin/player_state_plugin.js';
 import { Button } from './button.js';
 import { Menu } from './menu.js';
 import { MenuControls } from './menu_controls.js';
+import { MissionBoard } from './mission_board.js';
+import { processEntityLanding } from './mission_session.js';
+import { MissionUniverse } from './mission_universe.js';
 import { Outfitter } from './outfitter.js';
 import { Shipyard } from './shipyard.js';
 
 export class Spaceport extends Menu<Entity> {
     private outfitter: Outfitter;
     private shipyard: Shipyard;
+    private missionComputer: MissionBoard;
+    private bar: MissionBoard;
+    private universe: MissionUniverse;
+    private barButton?: Button;
     private data?: PlanetData;
+    private notices = new PIXI.Text('', {
+        fontFamily: 'Geneva', fontSize: 10, fill: 0xffff88,
+        align: 'left', wordWrap: true, wordWrapWidth: 301,
+    });
+    private statusLine = new PIXI.Text('', {
+        fontFamily: 'Geneva', fontSize: 10, fill: 0xffffff,
+        align: 'left', wordWrap: false,
+    });
 
     private font = {
         title: {
@@ -48,10 +67,13 @@ export class Spaceport extends Menu<Entity> {
         this.container.name = 'Spaceport';
 
         const buttons = {
-            outfitter: new Button(displayAssets, "Outfitter", 120, { x: 160, y: 116 }),
+            bar: new Button(displayAssets, "Bar", 120, { x: 160, y: 32 }),
             shipyard: new Button(displayAssets, "Shipyard", 120, { x: 160, y: 74 }),
+            outfitter: new Button(displayAssets, "Outfitter", 120, { x: 160, y: 116 }),
+            missions: new Button(displayAssets, "Missions", 120, { x: 160, y: 158 }),
             leave: new Button(displayAssets, "Leave", 120, { x: 160, y: 200 })
         };
+        this.barButton = buttons.bar;
 
         buttons.leave.click.subscribe(this.done.bind(this));
 
@@ -68,6 +90,26 @@ export class Spaceport extends Menu<Entity> {
             this.controls.bind();
         };
         buttons.outfitter.click.subscribe(showOutfitter);
+
+        this.universe = MissionUniverse.shared(simulationData);
+        this.missionComputer = new MissionBoard(displayAssets, simulationData,
+            controlEvents, this.universe, id, LOCATION_MISSION_COMPUTER,
+            "nova:8505", "Mission Computer");
+        this.bar = new MissionBoard(displayAssets, simulationData,
+            controlEvents, this.universe, id, LOCATION_BAR,
+            "nova:8503", "Bar");
+        const showMissionBoard = (board: MissionBoard) => async () => {
+            this.controls.unbind();
+            // The board mutates missions, cargo, credits, control
+            // bits, and (through Gxxx grants) outfits.
+            this.input = await board.show(this.input);
+            this.refreshStatusLine();
+            this.controls.bind();
+        };
+        const showMissionComputer = showMissionBoard(this.missionComputer);
+        const showBar = showMissionBoard(this.bar);
+        buttons.missions.click.subscribe(showMissionComputer);
+        buttons.bar.click.subscribe(showBar);
 
         this.shipyard = new Shipyard(displayAssets, simulationData, controlEvents);
 
@@ -103,8 +145,71 @@ export class Spaceport extends Menu<Entity> {
         this.controls = new MenuControls(controlEvents, {
             outfitter: showOutfitter,
             shipyard: showShipyard,
+            missionBBS: showMissionComputer,
+            bar: showBar,
             depart: this.done.bind(this),
         });
+    }
+
+    /**
+     * Landing bookkeeping happens before the spaceport is shown: the
+     * player's date advances one day, and every active mission is
+     * checked against this stellar (completion + payment, deadline
+     * failures, travel-leg cargo transfer). The entity is out of the
+     * simulation while docked, so mutating its components here is the
+     * standard spaceport commit pattern.
+     */
+    override async show(input: Entity): Promise<Entity> {
+        try {
+            const events = await processEntityLanding(input,
+                this.simulationData, this.universe, this.id);
+            this.setNotices(events);
+        } catch (e) {
+            console.warn('Mission landing processing failed:', e);
+        }
+        this.refreshStatusLine(input);
+        return super.show(input);
+    }
+
+    private setNotices(events: MissionEvent[]) {
+        const lines: string[] = [];
+        for (const event of events) {
+            const name = missionDisplayName(event.missionName);
+            switch (event.type) {
+                case 'completed':
+                    lines.push(`Mission complete: ${name}`
+                        + (event.payment
+                            ? ` (+${event.payment.toLocaleString()} cr)`
+                            : ''));
+                    break;
+                case 'failed':
+                    lines.push(`Mission failed: ${name}`);
+                    break;
+                default:
+                    break;
+            }
+            if (event.text) {
+                lines.push(event.text);
+            }
+        }
+        this.notices.text = lines.join('\n\n');
+    }
+
+    private refreshStatusLine(input?: Entity) {
+        const entity = input ?? this.input;
+        if (!entity) {
+            return;
+        }
+        const date = entity.components.get(GameDateComponent);
+        const credits = entity.components.get(CreditsComponent);
+        const parts: string[] = [];
+        if (date) {
+            parts.push(formatDate(date));
+        }
+        if (credits) {
+            parts.push(`${credits.credits.toLocaleString()} cr`);
+        }
+        this.statusLine.text = parts.join('    ');
     }
 
     override async build() {
@@ -121,12 +226,25 @@ export class Spaceport extends Menu<Entity> {
         desc.position.y = 70;
         this.container.addChild(desc);
 
+        // Mission completion / failure notices, over the landing desc.
+        this.notices.position.set(-149, 180);
+        this.container.addChild(this.notices);
+        // The player's date and credits.
+        this.statusLine.position.set(-149, 250);
+        this.container.addChild(this.statusLine);
+
+        if (this.barButton && !data.flags.hasBar) {
+            this.barButton.container.visible = false;
+        }
+
         const spaceportPict = this.displayAssets.spriteFromPict(data.landingPict)
         spaceportPict.position.x = -306;
         spaceportPict.position.y = -256;
         this.container.addChild(spaceportPict)
         this.container.addChild(this.outfitter.container);
         this.container.addChild(this.shipyard.container);
+        this.container.addChild(this.missionComputer.container);
+        this.container.addChild(this.bar.container);
     }
 
     protected override done() {
