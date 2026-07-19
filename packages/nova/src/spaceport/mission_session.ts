@@ -95,23 +95,9 @@ export class MissionSession {
         Promise<MissionSession> {
         await universe.load();
         const shipId = entity.components.get(ShipComponent)?.id ?? 'default';
-        let cargoCapacity = 0;
-        try {
-            const shipData = await gameData.data.Ship.get(shipId);
-            cargoCapacity = shipData.physics.freeCargo;
-            const outfitsState = entity.components.get(OutfitsStateComponent);
-            if (outfitsState) {
-                for (const [outfitId, { count }] of outfitsState) {
-                    const outfit = await gameData.data.Outfit.get(outfitId);
-                    cargoCapacity +=
-                        (outfit.physics.freeCargo ?? 0) * count;
-                }
-            }
-        } catch (e) {
-            console.warn('Failed to compute cargo capacity:', e);
-        }
+        const cargoCapacity = await computeCargoCapacity(entity, gameData);
         return new MissionSession(entity, universe, planetId,
-            Math.max(0, cargoCapacity), shipId);
+            cargoCapacity, shipId);
     }
 
     /** Writes the working copies back onto the entity. */
@@ -147,6 +133,31 @@ export class MissionSession {
         }
         return this.state.events;
     }
+}
+
+/**
+ * A ship's total cargo capacity in tons: the hull's freeCargo plus any
+ * freeCargo granted by its outfits.
+ */
+export async function computeCargoCapacity(entity: Entity,
+    gameData: SimulationGameDataInterface): Promise<number> {
+    const shipId = entity.components.get(ShipComponent)?.id ?? 'default';
+    let cargoCapacity = 0;
+    try {
+        const shipData = await gameData.data.Ship.get(shipId);
+        cargoCapacity = shipData.physics.freeCargo;
+        const outfitsState = entity.components.get(OutfitsStateComponent);
+        if (outfitsState) {
+            for (const [outfitId, { count }] of outfitsState) {
+                const outfit = await gameData.data.Outfit.get(outfitId);
+                cargoCapacity +=
+                    (outfit.physics.freeCargo ?? 0) * count;
+            }
+        }
+    } catch (e) {
+        console.warn('Failed to compute cargo capacity:', e);
+    }
+    return Math.max(0, cargoCapacity);
 }
 
 /**

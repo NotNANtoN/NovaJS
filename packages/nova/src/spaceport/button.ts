@@ -101,6 +101,14 @@ export class Button {
         this.container.addChild(this.text);
     }
 
+    /**
+     * Replaces the button caption (e.g. a mïsn's custom accept/refuse
+     * label). The button keeps its constructed width.
+     */
+    setLabel(label: string) {
+        this.text.text = label;
+    }
+
     set state(state: string) {
         for (const container of this.states.values()) {
             container.visible = false;

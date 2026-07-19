@@ -8,16 +8,14 @@ import { dateFromDayNumber, formatDate } from '../nova_plugin/calendar.js';
 import {
     abortMission,
     acceptOffer,
-    cargoName,
-    makeMissionOffer,
     MissionOffer,
-    missionMatchesLocation,
     refuseOffer,
 } from '../nova_plugin/mission_logic.js';
 import { expandMissionText, missionDisplayName } from '../nova_plugin/mission_text.js';
 import { ActiveMission } from '../nova_plugin/player_state_plugin.js';
 import { Button } from './button.js';
 import { Menu } from './menu.js';
+import { activeAsOffer, offerSubstitutions, rollOffers } from './mission_offers.js';
 import { MissionSession } from './mission_session.js';
 import { MissionUniverse } from './mission_universe.js';
 import { FONT } from './outfitter.js';
@@ -31,15 +29,22 @@ const LIST_FONT_DIM: Partial<PIXI.ITextStyle> =
 const LIST_FONT_HEADER: Partial<PIXI.ITextStyle> =
     { ...LIST_FONT, fill: 0xffff88 };
 
-// Laid out to fit the 510x201 Mission BBS dialog (PICT 8505).
-const LIST_ROWS = 10;
-const ROW_HEIGHT = 13;
+// Laid out to fit the 510x201 Mission BBS dialog (PICT 8505):
+// header strip x 8..410, y 4..18; list pane x 6..219, y 26..173;
+// right upper strip y 30..58 and description pane below it; metal
+// button row along the bottom. Center-anchored coordinates.
+const HEADER_Y = -95;
 const LIST_X = -245;
-const CONTENT_TOP = -76;
-const DESC_X = 0;
+const LIST_TOP = -72;
+const LIST_ROWS = 11;
+const ROW_HEIGHT = 13;
+const LIST_WIDTH = 208;
+const DESC_X = -24;
+const DESC_TOP = -36;
 const DESC_WIDTH = 240;
-const CONTENT_HEIGHT = 140;
-const BUTTON_Y = 78;
+const DESC_HEIGHT = 108;
+const INFO_Y = -66;
+const BUTTON_Y = 75;
 
 type Row =
     | { kind: 'offer', offer: MissionOffer }
@@ -48,17 +53,16 @@ type Row =
 
 
 /**
- * The mission computer / bar: lists the missions available to this
- * player at this stellar (availability is evaluated against the
- * player's REAL control bits), shows the expanded offer text, and
- * accepts or refuses them through the real NCB machinery. Active
- * missions are listed below the offers and can be aborted when the
- * mission allows it.
+ * The mission BBS (and its bar-flavored sibling): the original's
+ * list/detail dialog on the 510x201 PICT 8505 frame. The left pane
+ * lists the day's offers (availability evaluated against the player's
+ * REAL control bits) with active missions below them; the right pane
+ * shows the expanded offer text. Accept / Refuse use the mïsn's
+ * custom button labels when present, and run through the real NCB
+ * machinery. Active missions can be aborted when the mission allows.
  *
- * The AvailRandom percentage roll happens when the board opens. It is
- * player-local UI randomness (like the outfitter's R(a b) rolls), so
- * plain Math.random is fine here — only the resulting accepted-
- * mission state ever reaches the simulation.
+ * The AvailRandom roll happens when the board opens (see
+ * mission_offers.ts — player-local UI randomness).
  */
 export class MissionBoard extends Menu<Entity> {
     private session?: MissionSession;
@@ -67,16 +71,21 @@ export class MissionBoard extends Menu<Entity> {
     private selectedIndex = 0;
     private rowTexts: PIXI.Text[] = [];
     private listContainer = new PIXI.Container();
+    private highlight = new PIXI.Graphics();
+    private buttons: {
+        accept: Button, refuse: Button, abort: Button, done: Button,
+    };
 
     private text = {
         title: new PIXI.Text('', {
             fontFamily: 'Geneva', fontSize: 12, fill: 0xffffff,
         }),
-        status: new PIXI.Text('', { ...FONT.normal, wordWrap: false }),
+        dateCredits: new PIXI.Text('', { ...LIST_FONT, align: 'right' }),
+        info: new PIXI.Text('', LIST_FONT),
         description: new PIXI.Text('', {
             ...FONT.normal, wordWrapWidth: DESC_WIDTH,
         }),
-        dateCredits: new PIXI.Text('', FONT.normal),
+        status: new PIXI.Text('', { ...FONT.normal, wordWrap: false }),
     };
 
     constructor(displayAssets: DisplayAssetDataInterface,
@@ -91,38 +100,41 @@ export class MissionBoard extends Menu<Entity> {
         super(displayAssets, simulationData, background, controlEvents);
         this.container.name = `MissionBoard-${title}`;
 
-        const buttons = {
-            accept: new Button(displayAssets, 'Accept', 60, { x: -180, y: BUTTON_Y }),
-            refuse: new Button(displayAssets, 'Refuse', 60, { x: -95, y: BUTTON_Y }),
-            abort: new Button(displayAssets, 'Abort', 60, { x: -10, y: BUTTON_Y }),
+        this.buttons = {
+            accept: new Button(displayAssets, 'Accept', 74, { x: -245, y: BUTTON_Y }),
+            refuse: new Button(displayAssets, 'Refuse', 74, { x: -140, y: BUTTON_Y }),
+            abort: new Button(displayAssets, 'Abort', 60, { x: -35, y: BUTTON_Y }),
             done: new Button(displayAssets, 'Done', 60, { x: 180, y: BUTTON_Y }),
         };
-        buttons.accept.click.subscribe(this.accept.bind(this));
-        buttons.refuse.click.subscribe(this.refuse.bind(this));
-        buttons.abort.click.subscribe(this.abort.bind(this));
-        buttons.done.click.subscribe(this.done.bind(this));
-        this.addButtons(buttons);
+        this.buttons.accept.click.subscribe(this.accept.bind(this));
+        this.buttons.refuse.click.subscribe(this.refuse.bind(this));
+        this.buttons.abort.click.subscribe(this.abort.bind(this));
+        this.buttons.done.click.subscribe(this.done.bind(this));
+        this.addButtons(this.buttons);
 
         this.text.title.text = title;
-        this.text.title.position.set(LIST_X, -95);
-        this.text.dateCredits.position.set(DESC_X + 40, -93);
-        this.listContainer.position.set(LIST_X, CONTENT_TOP);
-        this.text.description.position.set(DESC_X, CONTENT_TOP);
-        this.text.status.position.set(LIST_X, BUTTON_Y - 14);
-        this.container.addChild(this.text.title, this.text.dateCredits,
-            this.listContainer, this.text.description, this.text.status);
+        this.text.title.position.set(LIST_X, HEADER_Y);
+        this.text.dateCredits.anchor.x = 1;
+        this.text.dateCredits.position.set(155, HEADER_Y + 2);
+        this.text.info.position.set(DESC_X, INFO_Y);
+        this.listContainer.position.set(LIST_X, LIST_TOP);
+        this.text.description.position.set(DESC_X, DESC_TOP);
+        this.text.status.position.set(LIST_X, BUTTON_Y - 16);
+        this.container.addChild(this.highlight, this.text.title,
+            this.text.dateCredits, this.text.info, this.listContainer,
+            this.text.description, this.text.status);
 
         // Clip the list and the description to their dialog panes.
         const listMask = new PIXI.Graphics()
             .beginFill(0xffffff)
-            .drawRect(LIST_X, CONTENT_TOP, DESC_X - LIST_X - 10,
-                CONTENT_HEIGHT)
+            .drawRect(LIST_X, LIST_TOP, LIST_WIDTH,
+                LIST_ROWS * ROW_HEIGHT + 4)
             .endFill();
         this.container.addChild(listMask);
         this.listContainer.mask = listMask;
         const descMask = new PIXI.Graphics()
             .beginFill(0xffffff)
-            .drawRect(DESC_X, CONTENT_TOP, DESC_WIDTH + 10, CONTENT_HEIGHT)
+            .drawRect(DESC_X, DESC_TOP, DESC_WIDTH + 10, DESC_HEIGHT)
             .endFill();
         this.container.addChild(descMask);
         this.text.description.mask = descMask;
@@ -145,7 +157,8 @@ export class MissionBoard extends Menu<Entity> {
             console.warn('Mission board failed to load:', e);
             return input;
         }
-        this.computeOffers();
+        this.offers = rollOffers(this.session, this.universe,
+            this.location);
         this.buildRows();
         this.selectedIndex = this.rows.findIndex(
             row => row.kind !== 'header');
@@ -154,27 +167,6 @@ export class MissionBoard extends Menu<Entity> {
         this.refreshList();
         this.refreshDescription();
         return super.show(input);
-    }
-
-    /** Rolls availability once per opening and freezes the offers. */
-    private computeOffers() {
-        const ctx = this.session!.machinery.offerContext();
-        this.offers = [];
-        for (const mission of this.universe.missions) {
-            if (!missionMatchesLocation(mission, this.location, ctx)) {
-                continue;
-            }
-            // The AvailRandom roll (per board opening; see class doc).
-            if (mission.availRandom < 100
-                && Math.random() * 100 >= mission.availRandom) {
-                continue;
-            }
-            const offer = makeMissionOffer(mission, ctx);
-            if (offer) {
-                this.offers.push(offer);
-            }
-        }
-        this.offers.sort((a, b) => b.data.dispWeight - a.data.dispWeight);
     }
 
     /** Rebuilds the row list from the frozen offers + active missions. */
@@ -210,6 +202,7 @@ export class MissionBoard extends Menu<Entity> {
             text.destroy();
         }
         this.rowTexts = [];
+        this.highlight.clear();
 
         // A simple window keeps the selection visible.
         const start = Math.max(0, Math.min(
@@ -218,37 +211,35 @@ export class MissionBoard extends Menu<Entity> {
         const visible = this.rows.slice(start, start + LIST_ROWS);
         visible.forEach((row, i) => {
             const index = start + i;
-            const selected = index === this.selectedIndex;
             let label: string;
             let style: Partial<PIXI.ITextStyle> = LIST_FONT;
             if (row.kind === 'offer') {
                 // Mission names use the same <DST>-style wildcards as
                 // the descriptions.
                 label = expandMissionText(missionDisplayName(row.offer.data.name),
-                    this.offerSubstitutions(row.offer));
+                    this.substitutionsFor(row.offer));
                 if (!row.offer.acceptable) {
                     style = LIST_FONT_DIM;
                 }
             } else if (row.kind === 'active') {
-                const mission = this.universe.getMission(row.active.id);
-                label = mission
-                    ? expandMissionText(missionDisplayName(mission.name),
-                        this.offerSubstitutions({
-                            data: mission,
-                            travelPlanet: row.active.travelPlanet,
-                            returnPlanet: row.active.returnPlanet,
-                            cargoType: row.active.cargoType,
-                            cargoQty: row.active.cargoQty,
-                            acceptable: true,
-                        }, row.active))
+                const offer = activeAsOffer(this.universe, row.active);
+                label = offer
+                    ? expandMissionText(missionDisplayName(offer.data.name),
+                        this.substitutionsFor(offer, row.active))
                     : row.active.id;
             } else {
                 label = row.label;
                 style = LIST_FONT_HEADER;
             }
-            const text = new PIXI.Text(
-                `${selected ? '> ' : '  '}${label}`, style);
-            text.position.set(0, i * ROW_HEIGHT);
+            if (index === this.selectedIndex && row.kind !== 'header') {
+                // The original's full-width selection bar.
+                this.highlight.beginFill(0x8b0000)
+                    .drawRect(LIST_X, LIST_TOP + i * ROW_HEIGHT,
+                        LIST_WIDTH, ROW_HEIGHT)
+                    .endFill();
+            }
+            const text = new PIXI.Text(label, style);
+            text.position.set(4, i * ROW_HEIGHT);
             if (row.kind !== 'header') {
                 text.interactive = true;
                 text.cursor = 'pointer';
@@ -283,59 +274,64 @@ export class MissionBoard extends Menu<Entity> {
         this.refreshDescription();
     }
 
-    private offerSubstitutions(offer: MissionOffer,
+    private substitutionsFor(offer: MissionOffer,
         active?: ActiveMission) {
-        const session = this.session!;
-        const travel = active?.travelPlanet ?? offer.travelPlanet;
-        const ret = active?.returnPlanet ?? offer.returnPlanet;
-        const deadlineDay = active?.deadlineDay
-            ?? (offer.data.timeLimit > 0
-                ? session.currentDay + offer.data.timeLimit : null);
-        return {
-            destinationStellar: this.universe.planetName(travel ?? ret),
-            destinationSystem: this.universe.systemNameOfPlanet(travel ?? ret),
-            returnStellar: this.universe.planetName(ret),
-            returnSystem: this.universe.systemNameOfPlanet(ret),
-            cargoType: offer.cargoType >= 0
-                ? cargoName(offer.cargoType) : undefined,
-            cargoQty: offer.cargoQty > 0 ? offer.cargoQty : undefined,
-            deadline: deadlineDay !== null
-                ? formatDate(dateFromDayNumber(deadlineDay)) : undefined,
-            payment: offer.data.payVal > 0 ? offer.data.payVal : undefined,
-        };
+        return offerSubstitutions(this.universe, this.session!, offer,
+            active);
     }
 
+    /** The right pane: expanded text, info line, and button labels. */
     private refreshDescription() {
         const row = this.selectedRow();
+        this.buttons.accept.setLabel('Accept');
+        this.buttons.refuse.setLabel('Refuse');
+        this.text.info.text = '';
         if (!row || row.kind === 'header') {
             this.text.description.text = '';
+            this.buttons.accept.state = 'grey';
+            this.buttons.refuse.state = 'grey';
+            this.buttons.abort.state = 'grey';
             return;
         }
         if (row.kind === 'offer') {
             const { offer } = row;
-            const text = expandMissionText(offer.data.offerText,
-                this.offerSubstitutions(offer));
+            const subs = this.substitutionsFor(offer);
+            const text = expandMissionText(offer.data.offerText, subs);
             const extra = offer.acceptable ? '' : `\n\n[${offer.reason}]`;
             this.text.description.text = text + extra;
+            this.text.info.text = [
+                subs.payment !== undefined
+                    ? `Pay: ${subs.payment.toLocaleString()} cr` : '',
+                subs.deadline !== undefined
+                    ? `Deadline: ${subs.deadline}` : '',
+            ].filter(Boolean).join('    ');
+            // The mïsn's custom button labels, where present.
+            if (offer.data.acceptButton) {
+                this.buttons.accept.setLabel(offer.data.acceptButton);
+            }
+            if (offer.data.refuseButton) {
+                this.buttons.refuse.setLabel(offer.data.refuseButton);
+            }
+            this.buttons.accept.state =
+                offer.acceptable ? 'normal' : 'grey';
+            this.buttons.refuse.state =
+                offer.data.flags.cantRefuse ? 'grey' : 'normal';
+            this.buttons.abort.state = 'grey';
         } else {
-            const mission = this.universe.getMission(row.active.id);
-            if (!mission) {
+            const offer = activeAsOffer(this.universe, row.active);
+            if (!offer) {
                 this.text.description.text = row.active.id;
                 return;
             }
-            const pseudoOffer: MissionOffer = {
-                data: mission,
-                travelPlanet: row.active.travelPlanet,
-                returnPlanet: row.active.returnPlanet,
-                cargoType: row.active.cargoType,
-                cargoQty: row.active.cargoQty,
-                acceptable: true,
-            };
+            const mission = offer.data;
             const brief = mission.quickBrief || mission.briefText
                 || mission.offerText;
             this.text.description.text = expandMissionText(brief,
-                this.offerSubstitutions(pseudoOffer, row.active))
+                this.substitutionsFor(offer, row.active))
                 + (mission.canAbort ? '' : '\n\n[This mission cannot be aborted.]');
+            this.buttons.accept.state = 'grey';
+            this.buttons.refuse.state = 'grey';
+            this.buttons.abort.state = mission.canAbort ? 'normal' : 'grey';
         }
     }
 
@@ -350,7 +346,7 @@ export class MissionBoard extends Menu<Entity> {
         }
         acceptOffer(this.session.machinery, row.offer, this.session.outfits);
         const brief = expandMissionText(row.offer.data.briefText,
-            this.offerSubstitutions(row.offer));
+            this.substitutionsFor(row.offer));
         this.text.status.text =
             `Accepted: ${missionDisplayName(row.offer.data.name)}.`;
         this.buildRows();
@@ -358,10 +354,9 @@ export class MissionBoard extends Menu<Entity> {
             this.rows.length - 1);
         this.refreshHeader();
         this.refreshList();
+        this.refreshDescription();
         if (brief) {
             this.text.description.text = brief;
-        } else {
-            this.refreshDescription();
         }
     }
 
@@ -376,7 +371,7 @@ export class MissionBoard extends Menu<Entity> {
         }
         refuseOffer(this.session.machinery, row.offer, this.session.outfits);
         const refuseText = expandMissionText(row.offer.data.refuseText,
-            this.offerSubstitutions(row.offer));
+            this.substitutionsFor(row.offer));
         this.rows = this.rows.filter(r => r !== row);
         if (this.rows.length === 0) {
             this.rows.push({ kind: 'header', label: '(no missions available)' });
@@ -385,10 +380,9 @@ export class MissionBoard extends Menu<Entity> {
             this.rows.length - 1);
         this.text.status.text = `Refused: ${missionDisplayName(row.offer.data.name)}.`;
         this.refreshList();
+        this.refreshDescription();
         if (refuseText) {
             this.text.description.text = refuseText;
-        } else {
-            this.refreshDescription();
         }
     }
 

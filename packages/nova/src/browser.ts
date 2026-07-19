@@ -53,7 +53,12 @@ import { CreditsComponent, GameDateComponent } from "./nova_plugin/player_state_
 import { extractSaveData, loadSave, resetSave, restorePlayerState, writeSave } from "./nova_plugin/save_game.js";
 import { ControlledByComponent } from "./nova_plugin/ship_control.js";
 import { ShipComponent } from "./nova_plugin/ship_plugin.js";
+import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
+import { Vector } from "nova_ecs/datatypes/vector";
+import { FormationComponent, formationSlotPosition } from "./nova_plugin/npc_ai_plugin.js";
+import { makeNpcShip } from "./nova_plugin/npc_spawn_plugin.js";
 import { advanceEntityDate, ensurePlayerStateComponents } from "./spaceport/mission_session.js";
+import { PendingEscortsComponent } from "./spaceport/pending_escorts.js";
 import { MissionUniverse } from "./spaceport/mission_universe.js";
 import { SystemIdResource } from "./nova_plugin/system_id_resource.js";
 import { AnalogControlState } from "./nova_plugin/ship_control.js";
@@ -327,6 +332,54 @@ function routesEqual(a?: string[], b?: string[]) {
 }
 
 /** Finds the local player's ship entity in the given display world. */
+/**
+ * Spawns the escorts hired in the bar (see pending_escorts.ts) as NPC
+ * sim entities in formation on the relaunched player ship, through
+ * the same input-record addEntity path the player entity itself uses
+ * — deterministic across peers because the fully-built entity is
+ * baked into the record. Slots continue after any followers the
+ * player already has. In-system only: hired escorts do not follow
+ * through hyperspace (documented gap; tied to future persistence
+ * work).
+ */
+async function spawnHiredEscorts(
+    bridge: AsyncSimulationBridgeClient, displayWorld: World,
+    leaderUuid: string, leader: Entity, shipIds: string[],
+    ownerUuid?: string): Promise<void> {
+    const movement = leader.components.get(MovementStateComponent);
+    if (!movement) {
+        console.warn('Hired escorts skipped: leader has no movement state');
+        return;
+    }
+    // Continue slot numbering after existing followers (e.g. escorts
+    // hired on an earlier landing this session).
+    let slot = 0;
+    for (const entity of displayWorld.entities.values()) {
+        const formation = entity.components.get(FormationComponent);
+        if (formation?.leader === leaderUuid) {
+            slot = Math.max(slot, formation.slot + 1);
+        }
+    }
+    for (const shipId of shipIds) {
+        try {
+            const shipData = await simulationGameData.data.Ship.get(shipId);
+            const position = formationSlotPosition(
+                movement.position, movement.rotation, slot);
+            const escort = makeNpcShip(shipData, 0, null, position,
+                movement.rotation, new Vector(0, 0));
+            escort.components.set(FormationComponent,
+                { leader: leaderUuid, slot });
+            if (ownerUuid) {
+                escort.components.set(MultiplayerData, { owner: ownerUuid });
+            }
+            await bridge.addEntity(v4(), escort);
+            slot++;
+        } catch (e) {
+            console.warn(`Failed to spawn hired escort ${shipId}:`, e);
+        }
+    }
+}
+
 function getPlayerShipEntity(displayWorld: World): Entity | undefined {
     for (const entity of displayWorld.entities.values()) {
         if (entity.components.has(PlayerShipSelector)) {
@@ -969,7 +1022,20 @@ async function startGame() {
                     pendingLaunchedShip.components.set(MultiplayerData,
                         { owner: communicator.uuid });
                 }
+                // Escorts hired in the bar spawn alongside the
+                // relaunched player ship. The pending list is
+                // display-side bookkeeping; pop it before the entity
+                // is encoded into the addEntity input record.
+                const pendingEscorts =
+                    pendingLaunchedShip.components.get(PendingEscortsComponent);
+                pendingLaunchedShip.components.delete(PendingEscortsComponent);
                 await currentBridge.addEntity(dockedShip.uuid, pendingLaunchedShip);
+                if (pendingEscorts && pendingEscorts.length > 0) {
+                    await spawnHiredEscorts(currentBridge,
+                        currentDisplayWorld, dockedShip.uuid,
+                        pendingLaunchedShip, pendingEscorts,
+                        communicator.uuid ?? undefined);
+                }
                 if (pendingLaunchedShip.components.has(PlayerShipSelector)) {
                     (window as any).myShip = pendingLaunchedShip;
                 }

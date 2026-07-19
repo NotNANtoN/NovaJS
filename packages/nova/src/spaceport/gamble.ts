@@ -1,0 +1,262 @@
+import * as PIXI from 'pixi.js';
+import { firstValueFrom, Observable, Subject } from 'rxjs';
+import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data.js';
+import { ControlEvent } from '../nova_plugin/controls_plugin.js';
+import { Button } from './button.js';
+import { MenuControls } from './menu_controls.js';
+
+// Laid out to fit the 470x230 racing dialog (PICT 8529): the header
+// LED strip on top, four ~100x103 racer boxes at y 84..187, and the
+// metal button strip along the bottom. Center-anchored coordinates.
+const SLOT_CENTERS_X = [-173, -60, 57.5, 169.5];
+const SLOT_CENTER_Y = 20.5;
+const SLOT_SIZE = 100;
+const TRACK = { left: -223, right: 221, top: -31, bottom: 72 };
+const BUTTON_Y = 78;
+
+/** The four racer PICTs (8530-8533), one per selection box. */
+const RACER_PICTS = ['nova:8530', 'nova:8531', 'nova:8532', 'nova:8533'];
+
+const STATUS_FONT: Partial<PIXI.ITextStyle> = {
+    fontFamily: 'Geneva', fontSize: 12, fill: 0xffffff,
+    align: 'center', wordWrap: true, wordWrapWidth: 420,
+};
+
+const RACE_DURATION_MS = 3500;
+
+/**
+ * The bar's gambling minigame, the Galactic Racing Network: pick a
+ * racer, place a bet (the original's fixed Bet 1000 / Bet 5000
+ * stakes, STR# 150), and watch the race. A win pays 3-to-1 profit —
+ * fair odds for four racers; the exact payout is not documented in
+ * the Bible, so this is an assumption.
+ *
+ * Bets settle into the caller's credits working copy (the bar
+ * session), which commits on leaving the bar — the outfitter pattern.
+ * The race outcome uses plain Math.random: this is landed,
+ * player-local UI (like mission offer rolls); only the resulting
+ * credit balance ever reaches the simulation.
+ */
+export class GambleDialog {
+    container = new PIXI.Container();
+    private controls: MenuControls;
+    private closed = new Subject<void>();
+    private credits: { credits: number } = { credits: 0 };
+    private selected = -1;
+    private racerSprites: PIXI.Sprite[] = [];
+    private selectionBoxes: PIXI.Graphics[] = [];
+    private highlight = new PIXI.Graphics();
+    private statusBackdrop = new PIXI.Graphics();
+    private status = new PIXI.Text('', STATUS_FONT);
+    private raceOverlay = new PIXI.Container();
+    private racing = false;
+    private buttons: {
+        help: Button, bet1000: Button, bet5000: Button, cancel: Button,
+    };
+
+    constructor(private displayAssets: DisplayAssetDataInterface,
+        controlEvents: Observable<ControlEvent>) {
+        this.container.name = 'GambleDialog';
+        this.container.visible = false;
+
+        const background = displayAssets.spriteFromPict('nova:8529');
+        background.anchor.set(0.5);
+        background.interactive = true;
+        this.container.addChild(background);
+
+        // The header LED strip already carries the baked-in "choose
+        // your racer" prompt; the backdrop covers it once there is
+        // race status to show instead.
+        this.statusBackdrop.beginFill(0x000000)
+            .drawRect(-165, -105, 330, 62).endFill();
+        this.statusBackdrop.visible = false;
+        this.status.anchor.set(0.5);
+        this.status.position.set(0, -74);
+        this.container.addChild(this.statusBackdrop);
+
+        RACER_PICTS.forEach((pict, i) => {
+            const sprite = displayAssets.spriteFromPict(pict);
+            sprite.anchor.set(0.5);
+            sprite.position.set(SLOT_CENTERS_X[i], SLOT_CENTER_Y);
+            const scale = SLOT_SIZE / Math.max(
+                sprite.width || SLOT_SIZE, sprite.height || SLOT_SIZE, 1);
+            sprite.scale.set(Math.min(scale, 1) * 0.9);
+            sprite.interactive = true;
+            sprite.cursor = 'pointer';
+            sprite.on('pointerdown', () => this.select(i));
+            this.container.addChild(sprite);
+            this.racerSprites.push(sprite);
+        });
+        this.container.addChild(this.highlight);
+        this.container.addChild(this.raceOverlay);
+        this.container.addChild(this.status);
+
+        this.buttons = {
+            help: new Button(displayAssets, 'Help', 60,
+                { x: -125, y: BUTTON_Y }),
+            bet1000: new Button(displayAssets, 'Bet 1000', 70,
+                { x: -180, y: BUTTON_Y }),
+            bet5000: new Button(displayAssets, 'Bet 5000', 70,
+                { x: -55, y: BUTTON_Y }),
+            cancel: new Button(displayAssets, 'Cancel', 60,
+                { x: 25, y: BUTTON_Y }),
+        };
+        this.buttons.help.click.subscribe(() => this.showHelp());
+        this.buttons.bet1000.click.subscribe(() => void this.bet(1000));
+        this.buttons.bet5000.click.subscribe(() => void this.bet(5000));
+        this.buttons.cancel.click.subscribe(() => {
+            if (!this.racing) {
+                this.closed.next();
+            }
+        });
+        for (const button of Object.values(this.buttons)) {
+            this.container.addChild(button.container);
+        }
+
+        this.controls = new MenuControls(controlEvents, {
+            depart: () => {
+                if (!this.racing) {
+                    this.closed.next();
+                }
+            },
+        });
+    }
+
+    /** Bet buttons appear once a racer is chosen, per the original. */
+    private layoutButtons() {
+        const chosen = this.selected >= 0;
+        this.buttons.help.container.visible = !chosen;
+        this.buttons.bet1000.container.visible = chosen;
+        this.buttons.bet5000.container.visible = chosen;
+        this.buttons.cancel.container.position.x = chosen ? 80 : 25;
+        const affordable = (bet: number) =>
+            chosen && !this.racing && this.credits.credits >= bet;
+        this.buttons.bet1000.state = affordable(1000) ? 'normal' : 'grey';
+        this.buttons.bet5000.state = affordable(5000) ? 'normal' : 'grey';
+    }
+
+    private select(index: number) {
+        if (this.racing) {
+            return;
+        }
+        this.selected = index;
+        this.highlight.clear();
+        this.highlight.lineStyle(2, 0xff0000);
+        this.highlight.drawRect(SLOT_CENTERS_X[index] - SLOT_SIZE / 2,
+            SLOT_CENTER_Y - SLOT_SIZE / 2 - 2, SLOT_SIZE, SLOT_SIZE + 4);
+        this.setStatus('Place your bet!');
+        this.layoutButtons();
+    }
+
+    private showHelp() {
+        this.setStatus('Pick a racer, place your bet, and watch the '
+            + 'race. A win pays 3 to 1.');
+    }
+
+    private setStatus(text: string) {
+        this.status.text = text;
+        this.statusBackdrop.visible = text.length > 0;
+    }
+
+    private async bet(amount: number) {
+        if (this.racing || this.selected < 0
+            || this.credits.credits < amount) {
+            return;
+        }
+        this.racing = true;
+        this.credits.credits -= amount;
+        this.layoutButtons();
+
+        // Player-local UI randomness (see class doc).
+        const winner = Math.floor(Math.random() * RACER_PICTS.length);
+        this.setStatus('And they’re off!');
+        await this.runRace(winner);
+
+        const won = winner === this.selected;
+        if (won) {
+            this.credits.credits += amount * 4;
+        }
+        this.setStatus(won
+            ? `Your racer wins! You collect ${(amount * 3).toLocaleString()} `
+            + `credits. You now have ${this.credits.credits.toLocaleString()} cr.`
+            : `Racer ${winner + 1} takes the race. You lose your `
+            + `${amount.toLocaleString()} credit bet. You now have `
+            + `${this.credits.credits.toLocaleString()} cr.`);
+        this.racing = false;
+        this.layoutButtons();
+    }
+
+    /** A stand-in for the original's race holovid (the QuickTime
+     * "Race N.mov" files): the racers sprint across a black track
+     * overlay, the predetermined winner leading at the finish. */
+    private runRace(winner: number): Promise<void> {
+        const overlay = this.raceOverlay;
+        overlay.removeChildren();
+        const backdrop = new PIXI.Graphics().beginFill(0x000008)
+            .drawRect(TRACK.left, TRACK.top,
+                TRACK.right - TRACK.left, TRACK.bottom - TRACK.top)
+            .endFill();
+        overlay.addChild(backdrop);
+
+        const laneHeight = (TRACK.bottom - TRACK.top) / RACER_PICTS.length;
+        const racers = RACER_PICTS.map((pict, i) => {
+            const sprite = this.displayAssets.spriteFromPict(pict);
+            sprite.anchor.set(0.5);
+            const scale = (laneHeight * 0.9) / Math.max(
+                sprite.height || laneHeight, 1);
+            sprite.scale.set(scale);
+            sprite.rotation = Math.PI / 2; // Racer art points up; run right.
+            sprite.position.set(TRACK.left + 12,
+                TRACK.top + laneHeight * (i + 0.5));
+            overlay.addChild(sprite);
+            return sprite;
+        });
+
+        const start = performance.now();
+        const distance = TRACK.right - TRACK.left - 24;
+        // Everyone else finishes a beat behind the winner.
+        const paces = racers.map((_, i) => i === winner
+            ? 1 : 0.75 + Math.random() * 0.17);
+        return new Promise(resolve => {
+            const tick = () => {
+                const t = Math.min(1,
+                    (performance.now() - start) / RACE_DURATION_MS);
+                racers.forEach((sprite, i) => {
+                    // A dash of jitter so the pack trades places.
+                    const wobble = Math.sin(t * 20 + i * 1.7) * 0.02;
+                    const progress = Math.min(1,
+                        t * paces[i] + (t < 0.9 ? wobble : 0));
+                    sprite.position.x = TRACK.left + 12
+                        + distance * Math.max(0, progress);
+                });
+                if (t >= 1) {
+                    PIXI.Ticker.shared.remove(tick);
+                    setTimeout(() => {
+                        overlay.removeChildren();
+                        resolve();
+                    }, 400);
+                    return;
+                }
+            };
+            PIXI.Ticker.shared.add(tick);
+        });
+    }
+
+    /**
+     * Shows the dialog; bets settle into `credits` (a working copy —
+     * the caller commits it). Resolves when the player leaves.
+     */
+    async show(credits: { credits: number }): Promise<void> {
+        this.credits = credits;
+        this.selected = -1;
+        this.highlight.clear();
+        this.raceOverlay.removeChildren();
+        this.setStatus('');
+        this.layoutButtons();
+        this.container.visible = true;
+        this.controls.bind();
+        await firstValueFrom(this.closed);
+        this.controls.unbind();
+        this.container.visible = false;
+    }
+}

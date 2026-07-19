@@ -12,17 +12,17 @@ import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { ControlEvent } from '../nova_plugin/controls_plugin.js';
 import { DisplayAssetDataResource, SimulationGameDataResource } from '../nova_plugin/game_data_resource.js';
-import { ArmorComponent, IonizationComponent, ShieldComponent } from '../nova_plugin/health_plugin.js';
+import { ArmorComponent, FuelComponent, IonizationComponent, ShieldComponent } from '../nova_plugin/health_plugin.js';
 import { IdFactory, IdFactoryResource } from '../nova_plugin/id_factory.js';
-import { OutfitsStateComponent } from '../nova_plugin/outfit_plugin.js';
 import { ShipPhysicsComponent } from '../nova_plugin/ship_plugin.js';
 import { SystemIdResource } from '../nova_plugin/system_id_resource.js';
 import { SystemPlugin } from '../nova_plugin/system_plugin.js';
 import { WeaponsStateComponent } from '../nova_plugin/weapons_state.js';
 import { formatDate } from '../nova_plugin/calendar.js';
-import { LOCATION_BAR, LOCATION_MISSION_COMPUTER, MissionEvent } from '../nova_plugin/mission_logic.js';
+import { LOCATION_MISSION_COMPUTER, MissionEvent } from '../nova_plugin/mission_logic.js';
 import { missionDisplayName } from '../nova_plugin/mission_text.js';
 import { CreditsComponent, GameDateComponent } from '../nova_plugin/player_state_plugin.js';
+import { Bar } from './bar.js';
 import { Button } from './button.js';
 import { Menu } from './menu.js';
 import { MenuControls } from './menu_controls.js';
@@ -31,14 +31,31 @@ import { processEntityLanding } from './mission_session.js';
 import { MissionUniverse } from './mission_universe.js';
 import { Outfitter } from './outfitter.js';
 import { Shipyard } from './shipyard.js';
+import { TradeCenter } from './trade_center.js';
+
+// The 618x517 spaceport frame (PICT 8500): the landing image fills the
+// top, the stellar name and description sit in the center panel, and
+// the venue buttons run down the left and right metal panels — Bar /
+// Mission BBS / Trade Center on the left, Shipyard / Outfitter /
+// Recharge / Leave on the right, per the original's arrangement.
+const LEFT_BUTTON_X = -296;
+const RIGHT_BUTTON_X = 162;
+const BUTTON_TOP = 42;
+const BUTTON_SPACING = 42;
+const BUTTON_WIDTH = 120;
 
 export class Spaceport extends Menu<Entity> {
     private outfitter: Outfitter;
     private shipyard: Shipyard;
     private missionComputer: MissionBoard;
-    private bar: MissionBoard;
+    private bar: Bar;
+    private tradeCenter: TradeCenter;
     private universe: MissionUniverse;
-    private barButton?: Button;
+    private buttons: {
+        bar: Button, missions: Button, tradeCenter: Button,
+        shipyard: Button, outfitter: Button, recharge: Button,
+        leave: Button,
+    };
     private data?: PlanetData;
     private notices = new PIXI.Text('', {
         fontFamily: 'Geneva', fontSize: 10, fill: 0xffff88,
@@ -66,19 +83,34 @@ export class Spaceport extends Menu<Entity> {
         super(displayAssets, simulationData, "nova:8500", controlEvents);
         this.container.name = 'Spaceport';
 
-        const buttons = {
-            bar: new Button(displayAssets, "Bar", 120, { x: 160, y: 32 }),
-            shipyard: new Button(displayAssets, "Shipyard", 120, { x: 160, y: 74 }),
-            outfitter: new Button(displayAssets, "Outfitter", 120, { x: 160, y: 116 }),
-            missions: new Button(displayAssets, "Missions", 120, { x: 160, y: 158 }),
-            leave: new Button(displayAssets, "Leave", 120, { x: 160, y: 200 })
+        const buttonY = (slot: number) =>
+            BUTTON_TOP + slot * BUTTON_SPACING;
+        this.buttons = {
+            bar: new Button(displayAssets, "Bar", BUTTON_WIDTH,
+                { x: LEFT_BUTTON_X, y: buttonY(0) }),
+            missions: new Button(displayAssets, "Mission BBS", BUTTON_WIDTH,
+                { x: LEFT_BUTTON_X, y: buttonY(1) }),
+            tradeCenter: new Button(displayAssets, "Trade Center", BUTTON_WIDTH,
+                { x: LEFT_BUTTON_X, y: buttonY(2) }),
+            shipyard: new Button(displayAssets, "Shipyard", BUTTON_WIDTH,
+                { x: RIGHT_BUTTON_X, y: buttonY(0) }),
+            outfitter: new Button(displayAssets, "Outfitter", BUTTON_WIDTH,
+                { x: RIGHT_BUTTON_X, y: buttonY(1) }),
+            recharge: new Button(displayAssets, "Recharge", BUTTON_WIDTH,
+                { x: RIGHT_BUTTON_X, y: buttonY(2) }),
+            leave: new Button(displayAssets, "Leave", BUTTON_WIDTH,
+                { x: RIGHT_BUTTON_X, y: buttonY(3) }),
         };
-        this.barButton = buttons.bar;
+        const buttons = this.buttons;
 
         buttons.leave.click.subscribe(this.done.bind(this));
+        buttons.recharge.click.subscribe(this.recharge.bind(this));
 
         this.outfitter = new Outfitter(displayAssets, simulationData, controlEvents);
         const showOutfitter = async () => {
+            if (this.data && !this.data.flags.hasOutfitter) {
+                return;
+            }
             this.controls.unbind();
             // The outfitter mutates the ship's outfits and the
             // player's control bits.
@@ -94,26 +126,52 @@ export class Spaceport extends Menu<Entity> {
         this.universe = MissionUniverse.shared(simulationData);
         this.missionComputer = new MissionBoard(displayAssets, simulationData,
             controlEvents, this.universe, id, LOCATION_MISSION_COMPUTER,
-            "nova:8505", "Mission Computer");
-        this.bar = new MissionBoard(displayAssets, simulationData,
-            controlEvents, this.universe, id, LOCATION_BAR,
-            "nova:8503", "Bar");
-        const showMissionBoard = (board: MissionBoard) => async () => {
+            "nova:8505", "Mission BBS");
+        const showMissionComputer = async () => {
             this.controls.unbind();
             // The board mutates missions, cargo, credits, control
             // bits, and (through Gxxx grants) outfits.
-            this.input = await board.show(this.input);
+            this.input = await this.missionComputer.show(this.input);
             this.refreshStatusLine();
             this.controls.bind();
         };
-        const showMissionComputer = showMissionBoard(this.missionComputer);
-        const showBar = showMissionBoard(this.bar);
         buttons.missions.click.subscribe(showMissionComputer);
+
+        this.bar = new Bar(displayAssets, simulationData, controlEvents,
+            this.universe, id);
+        const showBar = async () => {
+            if (this.data && !this.data.flags.hasBar) {
+                return;
+            }
+            this.controls.unbind();
+            // The bar mutates missions, credits (gambling, hire fees),
+            // cargo, bits, and records hired escorts.
+            this.input = await this.bar.show(this.input);
+            this.refreshStatusLine();
+            this.controls.bind();
+        };
         buttons.bar.click.subscribe(showBar);
+
+        this.tradeCenter = new TradeCenter(displayAssets, simulationData,
+            controlEvents, id);
+        const showTradeCenter = async () => {
+            if (this.data && !this.data.flags.hasCommodityExchange) {
+                return;
+            }
+            this.controls.unbind();
+            // The trade center mutates cargo and credits.
+            this.input = await this.tradeCenter.show(this.input);
+            this.refreshStatusLine();
+            this.controls.bind();
+        };
+        buttons.tradeCenter.click.subscribe(showTradeCenter);
 
         this.shipyard = new Shipyard(displayAssets, simulationData, controlEvents);
 
         const showShipyard = async () => {
+            if (this.data && !this.data.flags.hasShipyard) {
+                return;
+            }
             this.controls.unbind();
             const newInput = await this.shipyard.show(this.input);
             if (newInput !== this.input) {
@@ -168,6 +226,7 @@ export class Spaceport extends Menu<Entity> {
             console.warn('Mission landing processing failed:', e);
         }
         this.refreshStatusLine(input);
+        this.refreshRecharge(input);
         return super.show(input);
     }
 
@@ -212,12 +271,28 @@ export class Spaceport extends Menu<Entity> {
         this.statusLine.text = parts.join('    ');
     }
 
+    /** Refills hyperspace fuel (free, as at the original's ports). */
+    private recharge() {
+        const fuel = this.input?.components.get(FuelComponent);
+        if (fuel) {
+            fuel.current = fuel.max;
+        }
+        this.refreshRecharge(this.input);
+    }
+
+    private refreshRecharge(input?: Entity) {
+        const fuel = (input ?? this.input)?.components.get(FuelComponent);
+        this.buttons.recharge.state =
+            fuel && fuel.current < fuel.max ? 'normal' : 'grey';
+    }
+
     override async build() {
         await super.build();
         const data = await this.simulationData.data.Planet.get(this.id);
         this.data = data;
         const title = new PIXI.Text(data.name, this.font.title);
-        title.position.x = -24;
+        title.anchor.x = 0.5;
+        title.position.x = -2;
         title.position.y = 39;
         this.container.addChild(title);
 
@@ -233,8 +308,19 @@ export class Spaceport extends Menu<Entity> {
         this.statusLine.position.set(-149, 250);
         this.container.addChild(this.statusLine);
 
-        if (this.barButton && !data.flags.hasBar) {
-            this.barButton.container.visible = false;
+        // Venue buttons only appear where the stellar offers the
+        // service (spöb flags).
+        if (!data.flags.hasBar) {
+            this.buttons.bar.container.visible = false;
+        }
+        if (!data.flags.hasCommodityExchange) {
+            this.buttons.tradeCenter.container.visible = false;
+        }
+        if (!data.flags.hasOutfitter) {
+            this.buttons.outfitter.container.visible = false;
+        }
+        if (!data.flags.hasShipyard) {
+            this.buttons.shipyard.container.visible = false;
         }
 
         const spaceportPict = this.displayAssets.spriteFromPict(data.landingPict)
@@ -243,6 +329,7 @@ export class Spaceport extends Menu<Entity> {
         this.container.addChild(spaceportPict)
         this.container.addChild(this.outfitter.container);
         this.container.addChild(this.shipyard.container);
+        this.container.addChild(this.tradeCenter.container);
         this.container.addChild(this.missionComputer.container);
         this.container.addChild(this.bar.container);
     }
