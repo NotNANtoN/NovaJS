@@ -122,7 +122,29 @@ function drawSystem(system: SystemData, graphics: PIXI.Graphics,
     graphics.endFill();
 }
 
-class SystemGraph {
+export interface SystemGraphOptions {
+    /**
+     * Hypergate lanes to overlay (pairs of system global ids). The REGULAR
+     * starmap does not show hypergate lanes (matching the original game);
+     * only the hypergate transit map (GateMap) passes these.
+     */
+    gateLinks?: [string, string][];
+    /**
+     * Destination-picker mode: clicking is restricted to these systems, and a
+     * click selects (highlights) the system instead of plotting a route. Used
+     * by the hypergate map to pick one of the gate's linked neighbors.
+     */
+    selectable?: Set<string>;
+    size?: { x: number, y: number };
+    /**
+     * The player's control bits for NCB visibility filtering: systems whose
+     * visibility expression fails against these bits aren't drawn, clicked,
+     * linked, or routed through. Defaults to no bits (a new pilot).
+     */
+    playerBits?: ReadonlySet<number>;
+}
+
+export class SystemGraph {
     readonly container = new PIXI.Container();
     // Links and the highlighted route live on separate graphics so that
     // selecting a route only redraws the route, not the whole galaxy.
@@ -156,11 +178,18 @@ class SystemGraph {
     // Hypergate links between systems (each a pair of system global ids).
     // Drawn in a distinct style from the normal grey hyperspace links.
     private readonly gateLinks: [SystemData, SystemData][];
+    // Destination-picker mode (see SystemGraphOptions.selectable).
+    private readonly selectable?: Set<string>;
+    /** The picked system in destination-picker mode, if any. */
+    selectedSystem?: string;
+    private size: { x: number, y: number };
 
     constructor(systems: SystemData[], private currentSystem: string,
-        gateLinks: [string, string][] = [],
-        playerBits: ReadonlySet<number> = new Set(),
-        private size = { x: 456, y: 419 }) {
+        options: SystemGraphOptions = {}) {
+        const gateLinks = options.gateLinks ?? [];
+        const playerBits = options.playerBits ?? new Set<number>();
+        this.selectable = options.selectable;
+        const size = this.size = options.size ?? { x: 456, y: 419 };
         // NCB-hidden systems don't exist for the player: they aren't drawn,
         // clicked, linked, or routed through. The current system is always
         // kept so the map stays usable even if the player is somewhere the
@@ -253,7 +282,11 @@ class SystemGraph {
         this.worldBounds = this.computeWorldBounds();
 
         this.drawLinks();
-        this.drawRoute();
+        if (this.selectable) {
+            this.drawSelection();
+        } else {
+            this.drawRoute();
+        }
         this.applyZoom();
     }
 
@@ -437,7 +470,40 @@ class SystemGraph {
     }
 
     private onClickSystem(system: string) {
+        if (this.selectable) {
+            // Destination-picker mode: only the offered systems respond, and
+            // clicking one selects it (clicking again deselects).
+            if (!this.selectable.has(system)) {
+                return;
+            }
+            this.selectedSystem =
+                this.selectedSystem === system ? undefined : system;
+            this.drawSelection();
+            return;
+        }
         this.route = this.routes.get(system) ?? [];
+    }
+
+    /**
+     * Draws the destination-picker overlay on the route layer: a ring around
+     * each offered system, and a filled highlight on the picked one.
+     */
+    private drawSelection() {
+        this.routeGraphics.clear();
+        if (!this.selectable) {
+            return;
+        }
+        for (const id of this.selectable) {
+            const system = this.systems.get(id);
+            if (!system) {
+                continue;
+            }
+            const [x, y] = this.scalePos(system.position);
+            const picked = id === this.selectedSystem;
+            this.routeGraphics.lineStyle(picked ? 2 : 1,
+                picked ? 0x00ff00 : HYPERGATE_LINK_COLOR);
+            this.routeGraphics.drawCircle(x, y, SYSTEM_RADIUS + 3);
+        }
     }
 
     private getUniqueLinks() {
@@ -543,7 +609,6 @@ class SystemGraph {
 export class Starmap extends Menu<string[] /* route list of systems */> {
     private systemGraph?: SystemGraph;
     private allSystems?: SystemData[];
-    private gateLinks?: [string, string][];
     private graphBitsKey?: string;
 
     constructor(displayAssets: DisplayAssetDataInterface,
@@ -578,7 +643,6 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
         const systemIds = (await this.simulationData.ids).System;
         this.allSystems = await Promise.all(
             systemIds.map(s => this.simulationData.data.System.get(s)));
-        this.gateLinks = await this.computeHypergateLinks(this.allSystems);
         this.rebuildGraph(this.getPlayerBits());
     }
 
@@ -595,44 +659,14 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
             this.container.removeChild(this.systemGraph.container);
         }
         this.graphBitsKey = key;
+        // The regular starmap does NOT show hypergate lanes — the original
+        // game only reveals the network on the hypergate transit map
+        // (GateMap), which is where the lanes are drawn (via
+        // SystemGraphOptions.gateLinks).
         this.systemGraph = new SystemGraph(this.allSystems, this.systemId,
-            this.gateLinks ?? [], bits);
+            { playerBits: bits });
         this.systemGraph.container.position.set(-290, -248);
         this.container.addChild(this.systemGraph.container);
-    }
-
-    /**
-     * Builds the system-to-system hypergate links to overlay on the map. A
-     * hypergate spöb connects to other hypergate spöbs (its HyperLink
-     * destinations); each such connection becomes a link between the systems
-     * containing the two gates. Wormholes are deliberately left off the map:
-     * they are meant to be mysterious, and the Bible documents no map display
-     * for them.
-     */
-    private async computeHypergateLinks(systems: SystemData[]):
-        Promise<[string, string][]> {
-        // spöb global id -> system global id that contains it.
-        const systemOfSpob = new Map<string, string>();
-        for (const system of systems) {
-            for (const spob of system.planets) {
-                if (!systemOfSpob.has(spob)) {
-                    systemOfSpob.set(spob, system.id);
-                }
-            }
-        }
-        const gateDestinations = new Map<string, string[]>();
-        await Promise.all([...systemOfSpob.keys()].map(async spob => {
-            let planet;
-            try {
-                planet = await this.simulationData.data.Planet.get(spob);
-            } catch {
-                return;
-            }
-            if (planet.gate?.kind === 'hypergate') {
-                gateDestinations.set(spob, planet.gate.destinations);
-            }
-        }));
-        return computeHypergateSystemLinks(systemOfSpob, gateDestinations);
     }
 
     override async show(route: string[]) {

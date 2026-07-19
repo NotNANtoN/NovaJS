@@ -8,13 +8,17 @@ import { Entity } from 'nova_ecs/entity';
 import { EcsEvent } from 'nova_ecs/events';
 import { Plugin } from 'nova_ecs/plugin';
 import { MovementStateComponent, teleport } from 'nova_ecs/plugins/movement_plugin';
+import { Optional } from 'nova_ecs/optional';
 import { EncodedEntity, Serializer, SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
 import { RandomResource } from 'nova_ecs/plugins/random_plugin';
 import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
 import { registerSimulationBridgeEvent } from '../communication/simulation_bridge_events.js';
 import { deImmerify } from '../util/deimmerify.js';
+import { WARP_OUT_SOUND } from './jump_plugin.js';
 import { LandEvent, PlanetComponent, PlanetDataComponent } from './planet_plugin.js';
+import { getShipMovementPhysics, ShipPhysicsComponent } from './ship_plugin.js';
+import { PlayerSoundEvent } from './sound_plugin.js';
 
 /**
  * Hypergate / wormhole transit. Landing on a stellar whose spöb has the
@@ -22,20 +26,31 @@ import { LandEvent, PlanetComponent, PlanetDataComponent } from './planet_plugin
  * gate/wormhole in another system instead of opening the spaceport (EVN Bible
  * p. 61).
  *
- * This reuses the hyperspace-jump cross-system machinery. Departure emits
- * {@link GateTransitEvent} (mirroring FinishJumpEvent: it carries the whole
- * serialized entity across the worker/room boundary), and the browser's
- * subscription resolves the destination spöb to its system and calls the same
- * `jumpTo` room switch the jump sequence uses. Arrival is positioned in the
- * destination system by {@link GateArrivalSystem}, which teleports the ship to
- * the destination gate/wormhole's own position — the sim world there already
- * has that gate loaded as a planet entity, so no cross-system data lookup is
- * needed mid-step.
+ * Two flows share the arrival machinery here:
  *
- * Determinism: the *choice* of destination (fixed link for a hypergate,
- * seeded-random for a linked or link-less wormhole) is made here in the sim
- * from the replicated RandomResource, so every peer picks the same exit. The
- * spöb -> system *resolution* and the room switch are player-local (only the
+ * - WORMHOLE: no choice — {@link GateDepartureSystem} picks the exit with the
+ *   replicated RandomResource, removes the ship, and emits
+ *   {@link GateTransitEvent} (mirroring FinishJumpEvent: it carries the whole
+ *   serialized entity across the worker/room boundary). The browser resolves
+ *   the exit spöb to its system and calls the same `jumpTo` room switch the
+ *   jump sequence uses.
+ *
+ * - HYPERGATE: landing docks the ship like a spaceport landing (the browser
+ *   removes it through the dock machinery) and opens the hypergate map
+ *   (gate_map_plugin.ts / GateMap), where the player picks one of the gate's
+ *   linked neighbors. On selection the browser tags the ship with a
+ *   {@link GateArrivalComponent} and rides the same `jumpTo` room switch;
+ *   closing the map without a pick relaunches the ship at the origin gate.
+ *
+ * Arrival in the destination system is positioned by {@link GateArrivalSystem}:
+ * the ship appears flying out of the arrival gate — the sim world there
+ * already has that gate loaded as a planet entity, so no cross-system data
+ * lookup is needed mid-step.
+ *
+ * Determinism: the wormhole choice is sim-side seeded random (every peer picks
+ * the same exit); the hypergate choice is the player's own input, carried in
+ * the re-insertion input record like any other player decision. The spöb ->
+ * system *resolution* and the room switch are player-local (only the
  * transiting player follows), exactly like a normal jump.
  */
 
@@ -127,13 +142,19 @@ export function GateTransitEventType(serializer: Serializer) {
 registerSimulationBridgeEvent({ event: GateTransitEvent });
 
 /**
- * On landing, if the landed stellar is a hypergate or wormhole, choose the
- * exit, tag the ship with a {@link GateArrivalComponent}, remove it from this
- * system, and emit {@link GateTransitEvent} to carry it across.
+ * On landing, if the landed stellar is a WORMHOLE, choose the exit, tag the
+ * ship with a {@link GateArrivalComponent}, remove it from this system, and
+ * emit {@link GateTransitEvent} to carry it across. A wormhole offers no
+ * choice (EVN Bible p. 61), so the whole transit is sim-side and immediate.
+ *
+ * Hypergates are NOT handled here: landing on one docks the ship like a
+ * spaceport landing (the browser removes it through the same dock machinery)
+ * and opens the hypergate map, where the player picks one of the gate's
+ * linked neighbors. See the browser's gate-map flow and gate_map_plugin.ts.
  *
  * Runs on the landing ship (LandEvent is targeted at it). The refuel-on-land
  * system also fires on this event; that is harmless (the ship simply arrives
- * refuelled). The browser's spaceport handler skips gates, so no dock UI opens.
+ * refuelled).
  */
 export const GateDepartureSystem = new System({
     name: 'GateDepartureSystem',
@@ -149,28 +170,21 @@ export const GateDepartureSystem = new System({
                 break;
             }
         }
-        if (!gate) {
-            return; // An ordinary planet/station: normal landing.
+        if (gate?.kind !== 'wormhole') {
+            // Ordinary planet: normal landing. Hypergate: the browser docks
+            // the ship and opens the hypergate map instead.
+            return;
         }
 
-        // Choose the exit. A hypergate offers the player a choice of any of
-        // its links; without a selection UI we take the first link (HOOK: wire
-        // a hypergate destination-picker here once the transit prompt exists).
-        // A wormhole with links exits at a seeded-random one of them; a
-        // link-less wormhole exits at a random other link-less wormhole,
-        // resolved by the browser (which has the full list) from randomDraw.
+        // Choose the exit. A wormhole with links exits at a seeded-random one
+        // of them; a link-less wormhole exits at a random other link-less
+        // wormhole, resolved by the browser (which has the full list) from
+        // randomDraw. The draw comes from the replicated RandomResource, so
+        // every peer picks the same exit.
         const randomDraw = random.next();
-        let destinationSpob: string | null;
-        if (gate.destinations.length === 0) {
-            // Random wormhole: exit resolved on the browser side.
-            destinationSpob = null;
-        } else if (gate.kind === 'hypergate') {
-            destinationSpob = gate.destinations[0];
-        } else {
-            // Wormhole with defined links: seeded-random among them.
-            destinationSpob =
-                gate.destinations[Math.floor(randomDraw * gate.destinations.length)];
-        }
+        const destinationSpob = gate.destinations.length === 0
+            ? null
+            : gate.destinations[Math.floor(randomDraw * gate.destinations.length)];
 
         entity.components.set(GateArrivalComponent, {
             destinationSpob,
@@ -187,25 +201,41 @@ export const GateDepartureSystem = new System({
 
 /**
  * The first tick after a transiting ship arrives in the destination system.
- * Teleports it to the arrival gate (matched by spöb global id among the
- * system's planet entities) and clears the arrival marker. The emergence angle
- * (from the source gate's CustSndID) decides which side of the gate the ship
- * appears on; a null angle means "random direction", chosen deterministically
- * from the replicated randomDraw.
+ * The ship appears FLYING OUT of the arrival gate (matched by spöb global id
+ * among the system's planet entities): teleported to the gate's emergence
+ * point, facing outward, coasting outward at its regular top speed, with the
+ * "jump in" sound (snd 130 "Warp out" — the same sound a hyperspace arrival
+ * plays; the data has no gate-specific sound). The emergence angle (from the
+ * source gate's CustSndID) decides the fly-out direction; a null angle means
+ * "random direction", chosen deterministically from the replicated randomDraw.
+ *
+ * The sound is emitted targeted at the ship, so only that ship's own pilot
+ * hears it (the display's PlayerSoundSystem plays player-targeted sounds for
+ * the local player's ship only) — the established self-only sound channel the
+ * jump sequence uses.
  */
 export const GateArrivalSystem = new System({
     name: 'GateArrivalSystem',
-    args: [GateArrivalComponent, MovementStateComponent, GetEntity,
-        new Query([PlanetComponent, MovementStateComponent] as const)] as const,
-    step(arrival, movement, entity, planets) {
-        // The browser rewrites destinationSpob to a concrete gate before
-        // re-inserting the ship (random wormholes are resolved there), so by
-        // the time this runs it should name a real gate in this system.
+    args: [GateArrivalComponent, MovementStateComponent, GetEntity, UUID,
+        Optional(ShipPhysicsComponent), Emit,
+        new Query([PlanetComponent, MovementStateComponent,
+            PlanetDataComponent] as const)] as const,
+    step(arrival, movement, entity, uuid, shipPhysics, emit, planets) {
+        // The browser resolves destinationSpob to a concrete gate before
+        // re-inserting the ship (random wormholes and the hypergate map's
+        // pick both happen there), so by the time this runs it should name a
+        // real gate in this system.
         let gatePosition: Position | undefined;
+        let gateAngle: number | null = null;
         if (arrival.destinationSpob) {
-            for (const [planet, planetMovement] of planets) {
+            for (const [planet, planetMovement, planetData] of planets) {
                 if (planet.id === arrival.destinationSpob) {
                     gatePosition = planetMovement.position;
+                    // The DESTINATION gate's own CustSndID controls the angle
+                    // ships emerge from it (Bible p. 60). The carried angle
+                    // (from the departure side) is the fallback.
+                    gateAngle = planetData.gate?.emergenceAngle
+                        ?? arrival.emergenceAngle;
                     break;
                 }
             }
@@ -213,17 +243,24 @@ export const GateArrivalSystem = new System({
 
         if (gatePosition) {
             // Emerge a fixed distance from the gate, at the emergence angle
-            // (or a seeded-random direction when the angle is unspecified).
-            const angle = arrival.emergenceAngle !== null
-                ? new Angle(arrival.emergenceAngle * Math.PI / 180)
+            // (or a seeded-random direction when the angle is unspecified),
+            // flying outward.
+            const angle = gateAngle !== null
+                ? new Angle(gateAngle * Math.PI / 180)
                 : new Angle(arrival.randomDraw * 2 * Math.PI - Math.PI);
-            const offset = angle.getUnitVector().scale(GATE_EMERGENCE_DISTANCE);
+            const unit = angle.getUnitVector();
+            const speed = shipPhysics
+                ? getShipMovementPhysics(shipPhysics).maxVelocity : 0;
             teleport(movement,
-                new Position(gatePosition.x + offset.x,
-                    gatePosition.y + offset.y));
+                new Position(gatePosition.x + unit.x * GATE_EMERGENCE_DISTANCE,
+                    gatePosition.y + unit.y * GATE_EMERGENCE_DISTANCE),
+                unit.scale(speed));
+            movement.rotation = angle;
+            movement.targetSpeed = speed;
         }
         // If the gate wasn't found (shouldn't happen), the ship simply keeps
         // the position it arrived with rather than getting stuck.
+        emit(PlayerSoundEvent, { id: WARP_OUT_SOUND }, [uuid]);
         entity.components.delete(GateArrivalComponent);
     },
 });
