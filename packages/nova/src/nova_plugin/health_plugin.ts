@@ -15,6 +15,15 @@ export const IonizationComponent = new Component<Stat>('Ionization');
 // the health stats (100 units = 1 hyperspace jump).
 export const FuelComponent = new Component<Stat>('Fuel');
 export const FUEL_PER_JUMP = 100;
+/**
+ * Fuel regenerated per second by an "auto-refueller" outfit (oütf ModType 19).
+ * The EVN Bible does not give a rate, so this is a tuned constant: 2.5
+ * units/second regenerates one jump's fuel (100 units) in 40 seconds — slow
+ * enough to feel like a trickle, fast enough to matter over a trip. Folded
+ * into the fuel Stat's recharge in ShipFuelProvider when the ship has the
+ * capability (physics.autoRefuel).
+ */
+export const AUTO_REFUEL_PER_SECOND = 2.5;
 
 const healthStats = [ShieldComponent, ArmorComponent, IonizationComponent,
     FuelComponent]

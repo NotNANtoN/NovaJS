@@ -210,12 +210,18 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
         }
         else if (fType === "auto refuel") {
             autoRefuel = true;
+            // Flow through the ship physics so applyOutfitPhysics ORs the
+            // capability onto the ship (like fast jump / inertial damper).
+            physics.autoRefuel = true;
         }
         else if (fType === "multi-jump") {
             if (typeof fVal !== "number") {
                 throw new Error("Wrong type for multi-jump. Expected number");
             }
             multiJump += fVal;
+            // Also flow it through the ship physics so applyOutfitPhysics sums
+            // it into the ship's ShipPhysics.multiJump (like jumpDistanceMod).
+            physics.multiJump = (physics.multiJump ?? 0) + fVal;
         }
         else if (fType === "density scanner") {
             densityScanner = true;

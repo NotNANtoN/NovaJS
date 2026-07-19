@@ -26,6 +26,30 @@ export type OutfitsState = t.TypeOf<typeof OutfitsState>;
 export const OutfitsStateComponent = new Component<OutfitsState>('OutfitsStateComponent');
 export const AppliedOutfitsComponent = new Component<{}>('AppliedOutfitsComponent');
 
+/**
+ * Sums a numeric field over a ship's owned outfits, weighting each by its
+ * count. Returns undefined when any owned outfit's data is not yet cached
+ * (so the caller can retry next step, matching the deriveWeaponsState
+ * contract). Used by display-side hooks that add up a passive modifier
+ * (e.g. murk / interference clearing) across the player's outfits.
+ */
+export function sumOutfitField(outfits: OutfitsState,
+    gameData: SimulationGameDataInterface,
+    field: (outfit: OutfitData) => number): number | undefined {
+    let total = 0;
+    for (const [id, state] of outfits) {
+        if (state.count <= 0) {
+            continue;
+        }
+        const outfit = gameData.data.Outfit.getCached(id);
+        if (!outfit) {
+            return undefined;
+        }
+        total += field(outfit) * state.count;
+    }
+    return total;
+}
+
 export function applyOutfitPhysics(basePhysics: ShipPhysics,
     outfits: Iterable<readonly [OutfitData, number /* count */]>) {
     return produce(basePhysics, (basePhysics) => {

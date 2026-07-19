@@ -8,7 +8,7 @@ import { MovementPhysicsComponent, MovementStateComponent } from 'nova_ecs/plugi
 import { World } from 'nova_ecs/world';
 import { AFTERBURNER_FACTOR } from './afterburner_plugin.js';
 import { completeEntity } from './entity_data_loader.js';
-import { FuelComponent } from './health_plugin.js';
+import { AUTO_REFUEL_PER_SECOND, FuelComponent } from './health_plugin.js';
 import { makeShip } from './make_ship.js';
 import { makeSystem, SIMULATION_STEP_MS } from './make_system.js';
 import { OutfitsStateComponent } from './outfit_plugin.js';
@@ -29,12 +29,13 @@ const AMMO_B_ID = 'test:ammoB';
  * type, ready to fire.
  */
 async function makeTestWorld({ ammoType, ammoCounts = {}, energy = 200,
-    energyRecharge = 0, afterburner = 0 }: {
+    energyRecharge = 0, afterburner = 0, autoRefuel = false }: {
         ammoType: AmmoType,
         ammoCounts?: { [id: string]: number },
         energy?: number,
         energyRecharge?: number,
         afterburner?: number,
+        autoRefuel?: boolean,
     }) {
     const gameData = new MockGameData();
 
@@ -57,6 +58,17 @@ async function makeTestWorld({ ammoType, ammoCounts = {}, energy = 200,
         weapons: { [WEAPON_ID]: 1 },
     };
     gameData.data.Outfit.map.set(LAUNCHER_ID, launcher);
+
+    // An auto-refueller outfit (ModType 19): its physics.autoRefuel ORs the
+    // capability onto the ship via applyOutfitPhysics.
+    const AUTO_REFUEL_ID = 'test:autorefuel';
+    gameData.data.Outfit.map.set(AUTO_REFUEL_ID, {
+        ...getDefaultOutfitData(),
+        id: AUTO_REFUEL_ID,
+        autoRefuel: true,
+        physics: { freeMass: 0, autoRefuel: true },
+    });
+
     for (const ammoId of [AMMO_A_ID, AMMO_B_ID]) {
         gameData.data.Outfit.map.set(ammoId, {
             ...getDefaultOutfitData(),
@@ -68,7 +80,10 @@ async function makeTestWorld({ ammoType, ammoCounts = {}, energy = 200,
     const shipData: ShipData = {
         ...getDefaultShipData(),
         id: SHIP_ID,
-        outfits: { [LAUNCHER_ID]: 1, ...ammoCounts },
+        outfits: {
+            [LAUNCHER_ID]: 1, ...ammoCounts,
+            ...(autoRefuel ? { [AUTO_REFUEL_ID]: 1 } : {}),
+        },
         physics: {
             ...getDefaultShipPhysics(),
             energy,
@@ -220,6 +235,37 @@ describe('fuel regeneration', () => {
         await stepWorld(world, 10);
         const fuel = ship.components.get(FuelComponent)!;
         expect(fuel.current).toEqual(100);
+    });
+
+    it('an auto-refueller outfit trickles fuel back (ModType 19)', async () => {
+        // No fuel-scoop recharge; the only regeneration is the auto-refueller.
+        const { world, ship } = await makeTestWorld({
+            ammoType: 'unlimited',
+            energy: 100,
+            energyRecharge: 0,
+            autoRefuel: true,
+        });
+        const fuel = ship.components.get(FuelComponent)!;
+        fuel.current = 0;
+
+        await stepWorld(world, 60);
+        // AUTO_REFUEL_PER_SECOND (2.5) units/second for 60 sim ticks.
+        expect(fuel.current).toBeCloseTo(
+            AUTO_REFUEL_PER_SECOND * 60 * SIMULATION_STEP_MS / 1000, 0);
+        expect(fuel.current).toBeGreaterThan(0);
+    });
+
+    it('a ship without an auto-refueller does not regenerate fuel', async () => {
+        const { world, ship } = await makeTestWorld({
+            ammoType: 'unlimited',
+            energy: 100,
+            energyRecharge: 0,
+        });
+        const fuel = ship.components.get(FuelComponent)!;
+        fuel.current = 10;
+
+        await stepWorld(world, 60);
+        expect(fuel.current).toEqual(10);
     });
 });
 

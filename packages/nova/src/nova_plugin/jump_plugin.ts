@@ -19,8 +19,10 @@ import { deImmerify } from "../util/deimmerify.js";
 import { FuelComponent, FUEL_PER_JUMP } from "./health_plugin.js";
 import { ControlledByComponent, ShipControlStateComponent } from "./ship_control.js";
 import { ControlShipSystem } from "./ship_controller_plugin.js";
+import { ShipPhysics } from "novadatainterface/ship_data";
 import { getShipMovementPhysics, ShipPhysicsComponent } from "./ship_plugin.js";
 import { PlayerShipSelector } from "./player_ship_plugin.js";
+import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
 import { SimulationGameDataResource } from "./game_data_resource.js";
 import { PlayerSoundEvent } from "./sound_plugin.js";
 import { SystemIdResource } from "./system_id_resource.js";
@@ -119,9 +121,27 @@ export const JumpStateType = t.intersection([t.type({
      * (spinup, accelerating) began. Cleared at departure: logical time
      * differs between systems. */
     stageStart: t.number,
+    /**
+     * How many further jumps to auto-continue along the route without the
+     * player re-pressing the jump key ("multi-jump" outfits, ModType 32). Set
+     * when the player first initiates a jump to min(multiJump, route length),
+     * decremented on each auto-continued jump, and carried across systems with
+     * the entity. Absent/0 means the ship stops after this jump. */
+    autoJumpsLeft: t.number,
 })]);
 export type JumpState = t.TypeOf<typeof JumpStateType>;
 export const JumpComponent = new Component<JumpState>('JumpSequence');
+
+/**
+ * Marker left on a ship that just arrived from a jump and still has
+ * "multi-jump" budget (ModType 32), telling MultiJumpContinueSystem to start
+ * the route's next jump this tick without a fresh key press. `left` is the
+ * remaining auto-jump budget, passed on to the next JumpComponent. Transient
+ * sim state: cloned in snapshots (see snapshot_policies) so a rollback across
+ * an arrival tick still auto-continues.
+ */
+export const MultiJumpContinueComponent =
+    new Component<{ left: number }>('MultiJumpContinue');
 
 export interface FinishJump {
     entity: Entity,
@@ -187,6 +207,36 @@ const JumpFromSystem = new System({
 });
 
 /**
+ * Attaches a JumpComponent for a jump to `destination`, resolving the travel
+ * heading from the origin and destination systems' map positions (staged at
+ * world genesis in makeSystem, so the cache read is deterministic). Shifts the
+ * destination off the route. Returns false (and does nothing) if the system
+ * data is not yet cached. `autoJumpsLeft` is the remaining multi-jump budget
+ * to carry into this jump.
+ */
+function beginJump(entity: Entity, systemId: string, destination: string,
+    jumpRoute: JumpRoute, shipPhysics: ShipPhysics,
+    gameData: SimulationGameDataInterface, autoJumpsLeft: number): boolean {
+    const origin = gameData.data.System.getCached(systemId);
+    const dest = gameData.data.System.getCached(destination);
+    if (!origin || !dest) {
+        return false;
+    }
+    const direction = new Vector(
+        dest.position[0] - origin.position[0],
+        dest.position[1] - origin.position[1]);
+    jumpRoute.route.shift();
+    entity.components.set(JumpComponent, {
+        to: destination,
+        // Ships with "fast jumping" skip coming to a stop.
+        stage: shipPhysics.canJumpWithoutSlowing ? 'aligning' : 'stopping',
+        direction: direction.length === 0 ? 0 : direction.angle.angle,
+        autoJumpsLeft,
+    });
+    return true;
+}
+
+/**
  * Starts the jump sequence while a peer holds hyperjump: checks the
  * no-jump zone, resolves the travel heading from the systems' map
  * positions (staged at world genesis in makeSystem, so the cache read
@@ -230,22 +280,48 @@ const PlayerJumpControl = new System({
         if (fuel.current < FUEL_PER_JUMP) {
             return;
         }
-        const origin = gameData.data.System.getCached(systemId);
-        const dest = gameData.data.System.getCached(destination);
-        if (!origin || !dest) {
+        // "multi-jump" (ModType 32): a single jump initiation performs up to
+        // multiJump EXTRA jumps along the route automatically. Budget the
+        // auto-continues to what the remaining route can actually reach (after
+        // this jump's own destination is shifted off).
+        const autoJumpsLeft = Math.max(0,
+            Math.min(shipPhysics.multiJump, jumpRoute.route.length - 1));
+        beginJump(entity, systemId, destination, jumpRoute, shipPhysics,
+            gameData, autoJumpsLeft);
+    }
+});
+
+/**
+ * Auto-continues a multi-jump (ModType 32) route the tick after a ship arrives
+ * from hyperspace: if it left a MultiJumpContinueComponent marker and still
+ * has a routed destination and enough fuel, it starts the next jump without a
+ * fresh key press (the ship arrives outside the no-jump zone, so no radius
+ * check is needed). Runs before PlayerJumpControl so a released key never
+ * cancels an in-flight multi-jump chain.
+ */
+const MultiJumpContinueSystem = new System({
+    name: 'MultiJumpContinueSystem',
+    args: [MultiJumpContinueComponent, GetEntity, SystemIdResource,
+        JumpRouteComponent, ShipPhysicsComponent, FuelComponent,
+        SimulationGameDataResource] as const,
+    step(cont, entity, systemId, jumpRoute, shipPhysics, fuel, gameData) {
+        // Consume the marker regardless of outcome, so a blocked continuation
+        // (no route / no fuel) simply ends the chain.
+        entity.components.delete(MultiJumpContinueComponent);
+        if (entity.components.has(JumpComponent)) {
             return;
         }
-        const direction = new Vector(
-            dest.position[0] - origin.position[0],
-            dest.position[1] - origin.position[1]);
-        jumpRoute.route.shift();
-        entity.components.set(JumpComponent, {
-            to: destination,
-            // Ships with "fast jumping" skip coming to a stop.
-            stage: shipPhysics.canJumpWithoutSlowing ? 'aligning' : 'stopping',
-            direction: direction.length === 0 ? 0 : direction.angle.angle,
-        });
-    }
+        const destination = jumpRoute.route[0];
+        if (!destination || cont.left <= 0) {
+            return;
+        }
+        if (fuel.current < FUEL_PER_JUMP) {
+            return;
+        }
+        beginJump(entity, systemId, destination, jumpRoute, shipPhysics,
+            gameData, cont.left - 1);
+    },
+    before: [PlayerJumpControl],
 });
 
 /** Overrides whatever the player's held controls just wrote: control
@@ -273,9 +349,10 @@ function overrideControls(movement: MovementState) {
 export const JumpSequenceSystem = new System({
     name: 'JumpSequenceSystem',
     args: [JumpComponent, MovementStateComponent, ShipPhysicsComponent,
-        Optional(FuelComponent), TimeResource, GetEntity, UUID,
-        Emit] as const,
-    step(jump, movement, shipPhysics, fuel, time, entity, uuid, emit) {
+        Optional(FuelComponent), Optional(JumpRouteComponent), TimeResource,
+        GetEntity, UUID, Emit] as const,
+    step(jump, movement, shipPhysics, fuel, jumpRoute, time, entity, uuid,
+        emit) {
         overrideControls(movement);
         const target = new Angle(jump.direction);
 
@@ -394,6 +471,17 @@ export const JumpSequenceSystem = new System({
                     { id: warpUpSound(shipPhysics), stop: true }, [uuid]);
                 emit(PlayerSoundEvent, { id: WARP_OUT_SOUND }, [uuid]);
                 entity.components.delete(JumpComponent);
+                // "multi-jump" (ModType 32): if the ship still has auto-jump
+                // budget, leave a marker so MultiJumpContinueSystem starts the
+                // route's next jump this tick without the player re-pressing
+                // the key. The marker carries the remaining budget across to
+                // the fresh JumpComponent.
+                if ((jump.autoJumpsLeft ?? 0) > 0) {
+                    entity.components.set(MultiJumpContinueComponent,
+                        { left: jump.autoJumpsLeft! });
+                } else {
+                    entity.components.delete(MultiJumpContinueComponent);
+                }
                 break;
             }
         }
@@ -411,10 +499,16 @@ export const JumpPlugin: Plugin = {
             route: t.array(t.string),
         }));
         serializer?.addComponent(JumpComponent, JumpStateType);
+        // The multi-jump continuation marker crosses systems with the entity
+        // (it is set in the origin world at departure and read in the
+        // destination world), so it must serialize.
+        serializer?.addComponent(MultiJumpContinueComponent,
+            t.type({ left: t.number }));
         if (serializer) {
             serializer.addEvent(FinishJumpEvent, FinishJumpEventType(serializer));
         }
         world.addSystem(JumpFromSystem);
+        world.addSystem(MultiJumpContinueSystem);
         world.addSystem(PlayerJumpControl);
         world.addSystem(JumpSequenceSystem);
         world.addSystem(JumpRouteProvider);
