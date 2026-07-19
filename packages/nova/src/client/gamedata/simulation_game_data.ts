@@ -14,7 +14,8 @@ import { SpriteSheetData } from 'novadatainterface/sprite_sheet_data';
 import { SystemData } from 'novadatainterface/system_data';
 import { WeaponData } from 'novadatainterface/weapon_data';
 import urlJoin from 'url-join';
-import { dataPath, idsPath } from '../../common/game_data_paths.js';
+import { idsPath } from '../../common/game_data_paths.js';
+import { BatchDataFetcher } from './batch_data_fetcher.js';
 
 class WeaponGettable extends Gettable<WeaponData> {
     override async get(id: string, priority = 0) {
@@ -56,7 +57,10 @@ export class SimulationGameData implements SimulationGameDataInterface {
      * poisons replay-based forensics. Browsers pass nothing: their
      * fetches are same-origin relative.
      */
+    private readonly batchFetcher: BatchDataFetcher;
+
     constructor(private baseUrl = '') {
+        this.batchFetcher = new BatchDataFetcher(baseUrl);
         this.data = {
             Ship: this.addGettable<ShipData>(NovaDataType.Ship),
             Outfit: this.addGettable<OutfitData>(NovaDataType.Outfit),
@@ -107,21 +111,18 @@ export class SimulationGameData implements SimulationGameDataInterface {
         return response.json();
     }
 
-    private getDataPrefix(dataType: NovaDataType): string {
-        return urlJoin(dataPath, dataType);
-    }
-
     private addGettable<T extends BaseData>(dataType: NovaDataType): Gettable<T> {
-        const dataPrefix = this.getDataPrefix(dataType);
-        return new Gettable<T>(async (id: string): Promise<T> => {
-            return await this.getJson(urlJoin(dataPrefix, id + '.json')) as T;
+        // Route through the batch fetcher so the many per-id metadata
+        // loads on join coalesce into batched POSTs. Gettable's caching
+        // and dedup sit above this, unchanged.
+        return new Gettable<T>((id: string): Promise<T> => {
+            return this.batchFetcher.fetch<T>(dataType, id);
         });
     }
 
     private addWeaponGettable(): WeaponGettable {
-        const dataPrefix = this.getDataPrefix(NovaDataType.Weapon);
-        return new WeaponGettable(async (id: string): Promise<WeaponData> => {
-            return await this.getJson(urlJoin(dataPrefix, id + '.json')) as WeaponData;
+        return new WeaponGettable((id: string): Promise<WeaponData> => {
+            return this.batchFetcher.fetch<WeaponData>(NovaDataType.Weapon, id);
         });
     }
 
