@@ -12,6 +12,7 @@ import { SystemInterferenceResource } from "./jamming_plugin.js";
 import { IdFactory, IdFactoryResource } from "./id_factory.js";
 import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
 import { spawnAsteroids } from "./asteroid_plugin.js";
+import { spawnNpcs } from "./npc_spawn_plugin.js";
 import { SimulationGameDataResource } from "./game_data_resource.js";
 import { makePlanet } from "./make_planet.js";
 import { Platform, PlatformResource } from "./platform_plugin.js";
@@ -22,8 +23,21 @@ import { SystemPlugin } from "./system_plugin.js";
 /** The simulation runs at a fixed 60Hz. */
 export const SIMULATION_STEP_MS = 1000 / 60;
 
+export interface MakeSystemOptions {
+    /**
+     * Whether to populate the system with its NPC traffic (sÿst
+     * DudeTypes / flët fleets). Defaults to true. Genesis state must
+     * be identical for every world in a room, so every peer AND the
+     * server archive must build the system with the same value; the
+     * opt-out exists for choreography-sensitive tests and benchmarks
+     * that need a controlled battlefield (the same reason the bay-
+     * escort spec pinned itself to an asteroid-free system).
+     */
+    npcs?: boolean;
+}
+
 export async function makeSystem(systemId: string, gameData: SimulationGameDataInterface,
-    platformOverride?: Platform) {
+    platformOverride?: Platform, options: MakeSystemOptions = {}) {
     // Every context that simulates builds its worlds here (the browser
     // sim worker, the server's archive, node workers, tests), so this
     // is the chokepoint that makes Math's trig bit-identical across
@@ -85,6 +99,14 @@ export async function makeSystem(systemId: string, gameData: SimulationGameDataI
     // draws the same positions from the same per-system Random and
     // allocates the same entity ids.
     await spawnAsteroids(world, systemData);
+
+    // Populate the system's NPC traffic (same determinism story: the
+    // spawn table and initial population come from the per-system
+    // seeded Random, with all game data staged before the world
+    // steps).
+    if (options.npcs !== false) {
+        await spawnNpcs(world, systemId, systemData);
+    }
 
     return world;
 }

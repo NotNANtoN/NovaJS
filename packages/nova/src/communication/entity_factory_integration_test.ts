@@ -15,7 +15,7 @@ describe("completeEntity", () => {
         const ids = await gameData.ids;
         const systemId = [...ids.System].sort()[0]!;
         const shipId = [...ids.Ship].sort()[0]!;
-        const world = await makeSystem(systemId, gameData);
+        const world = await makeSystem(systemId, gameData, undefined, { npcs: false });
 
         const shipData = await gameData.data.Ship.get(shipId);
         const ship = makeShip(shipData);
@@ -36,7 +36,7 @@ describe("completeEntity", () => {
         const gameData = await getIntegrationGameData();
         const ids = await gameData.ids;
         const systemId = [...ids.System].sort()[0]!;
-        const world = await makeSystem(systemId, gameData);
+        const world = await makeSystem(systemId, gameData, undefined, { npcs: false });
 
         // Planets are completed before insertion in makeSystem, without
         // ever stepping the world.

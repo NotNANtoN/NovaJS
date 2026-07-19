@@ -425,6 +425,7 @@ const StatusBarResize = new System({
 });
 
 const RadarTime = new Component<{ lastTime: number }>('RadarTime');
+
 const DrawRadar = new System({
     name: 'DrawRadar',
     args: [Optional(RadarTime), TimeResource, StatusBarResource, MovementStateComponent,

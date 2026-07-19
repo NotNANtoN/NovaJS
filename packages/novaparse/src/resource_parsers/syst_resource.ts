@@ -25,6 +25,11 @@ class SystResource extends BaseResource {
     spobs: number[];
     /** AI ship classes spawned here, with percent chances. */
     dudes: SpawnChance[];
+    /**
+     * Fleets spawned here through the DudeTypes table (entries -128 to
+     * -383 reference flët -id), with percent chances.
+     */
+    fleets: SpawnChance[];
     /** Average number of AI ships in the system. */
     avgShips: number;
     /** Owning gövt id; -1 = independent. */
@@ -62,10 +67,14 @@ class SystResource extends BaseResource {
             r.array(16, () => r.int16(-1)).filter(id => id >= 128));
         this.spobs = r.array(16, () => r.int16(-1)).filter(id => id >= 128);
 
+        // DudeTypes: 128-639 is a düde id; -128 to -383 references
+        // flët -id; -1 (or 0) is unused. See the EVN Bible's sÿst docs.
         const dudeIds = r.array(8, () => r.int16(-1));
         const dudeChances = r.array(8, () => r.int16());
         this.dudes = dudeIds.flatMap((id, i) =>
             id >= 128 ? [{ id, chance: dudeChances[i] }] : []);
+        this.fleets = dudeIds.flatMap((id, i) =>
+            id <= -128 ? [{ id: -id, chance: dudeChances[i] }] : []);
 
         this.avgShips = r.int16();
         this.govt = r.int16(-1);

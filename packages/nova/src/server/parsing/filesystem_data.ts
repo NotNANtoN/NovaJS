@@ -19,6 +19,8 @@ import { SpriteSheetData, SpriteSheetFramesData, SpriteSheetImageData } from "no
 import { StatusBarData } from "novadatainterface/status_bar_data";
 import { SystemData } from "novadatainterface/system_data";
 import { GovtData } from "novadatainterface/govt_data";
+import { DudeData } from "novadatainterface/dude_data";
+import { FleetData } from "novadatainterface/fleet_data";
 import { TargetCornersData } from "novadatainterface/target_corners_data";
 import { WeaponData } from "novadatainterface/weapon_data";
 import * as path from "path";
@@ -42,6 +44,8 @@ const Paths = {
     Planet: { path: "Planet", extension: "json" } as PathInfo,
     System: { path: "System", extension: "json" } as PathInfo,
     Govt: { path: "Govt", extension: "json" } as PathInfo,
+    Dude: { path: "Dude", extension: "json" } as PathInfo,
+    Fleet: { path: "Fleet", extension: "json" } as PathInfo,
     TargetCorners: { path: "TargetCorners", extension: "json" } as PathInfo,
     SpriteSheet: { path: "SpriteSheet", extension: "json" } as PathInfo,
     SpriteSheetImage: { path: "SpriteSheetImage", extension: "png" } as PathInfo,
@@ -69,6 +73,8 @@ class FilesystemData implements GameDataInterface {
             Planet: this.getFunction<PlanetData>(Paths.Planet),
             System: this.getFunction<SystemData>(Paths.System),
             Govt: this.getFunction<GovtData>(Paths.Govt),
+            Dude: this.getFunction<DudeData>(Paths.Dude),
+            Fleet: this.getFunction<FleetData>(Paths.Fleet),
             TargetCorners: this.getFunction<TargetCornersData>(Paths.TargetCorners),
             SpriteSheet: this.getFunction<SpriteSheetData>(Paths.SpriteSheet),
             SpriteSheetImage: this.getFunction<SpriteSheetImageData>(Paths.SpriteSheetImage),
@@ -119,6 +125,8 @@ class FilesystemData implements GameDataInterface {
             Planet: await this.buildIDsForPath(Paths.Planet),
             System: await this.buildIDsForPath(Paths.System),
             Govt: await this.buildIDsForPath(Paths.Govt),
+            Dude: await this.buildIDsForPath(Paths.Dude),
+            Fleet: await this.buildIDsForPath(Paths.Fleet),
             TargetCorners: await this.buildIDsForPath(Paths.TargetCorners),
             SpriteSheet: await this.buildIDsForPath(Paths.SpriteSheet),
             SpriteSheetImage: await this.buildIDsForPath(Paths.SpriteSheetImage),

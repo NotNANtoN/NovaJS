@@ -13,7 +13,7 @@ import { JammingComponent, SystemInterferenceResource } from './jamming_plugin.j
 describe('jamming wiring against real Nova data', () => {
     it('derives a ship JammingComponent by summing its stock jammer outfits', async () => {
         const gameData = await getIntegrationGameData();
-        const system = await makeSystem('nova:130', gameData);
+        const system = await makeSystem('nova:130', gameData, undefined, { npcs: false });
 
         // nova:133 (Starbridge; Class A) stocks the Civilian IR Jammer
         // (nova:238 -> [20,0,0,0]) and the Civilian Radar Jammer
@@ -31,18 +31,18 @@ describe('jamming wiring against real Nova data', () => {
     it('sets the system interference resource from SystemData.interference', async () => {
         const gameData = await getIntegrationGameData();
         // nova:130 is a clear system; nova:155 is a reference murky/static one.
-        const clear = await makeSystem('nova:130', gameData);
+        const clear = await makeSystem('nova:130', gameData, undefined, { npcs: false });
         expect(clear.resources.get(SystemInterferenceResource))
             .toEqual({ interference: 0 });
 
-        const staticky = await makeSystem('nova:155', gameData);
+        const staticky = await makeSystem('nova:155', gameData, undefined, { npcs: false });
         expect(staticky.resources.get(SystemInterferenceResource))
             .toEqual({ interference: 50 });
     });
 
     it('gives a ship with no jammer outfits an all-zero JammingComponent', async () => {
         const gameData = await getIntegrationGameData();
-        const system = await makeSystem('nova:130', gameData);
+        const system = await makeSystem('nova:130', gameData, undefined, { npcs: false });
 
         // nova:128 (Shuttle) carries no jamming outfits.
         const shipData = await gameData.data.Ship.get('nova:128');

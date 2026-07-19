@@ -16,10 +16,22 @@ import { CollisionEvent, CollisionHitterComponent, CollisionVulnerabilityCompone
 import { ExitPointData } from './exit_point.js';
 import { OwnerComponent, SourceComponent, WeaponConstructors, WeaponEntry } from './fire_weapon_plugin.js';
 import { DeathAIComponent, FollowComponent, ShootAllWeaponsComponent } from './npc_plugin.js';
+import { FormationComponent } from './npc_ai_plugin.js';
 import { ShipComponent } from './ship_plugin.js';
 import { TargetComponent } from './target_component.js';
 import { TargetRemovedEvent } from './target_plugin.js';
 import { WeaponsStateComponent } from './weapons_state.js';
+import { TimeResource } from 'nova_ecs/plugins/time_plugin';
+
+/**
+ * How long a fighter that lost its target holds formation on its
+ * carrier before turning home to dock. EV Nova's fighters circle their
+ * carrier until recalled; NovaJS has no recall control yet, so the
+ * hold is a timed phase between "target gone" and the existing
+ * return-and-collect flow. Matthew wants the holding pattern itself to
+ * feel right — tune the formation geometry in npc_ai_plugin.ts.
+ */
+export const FIGHTER_HOLD_MS = 5000;
 
 const CollectableEscortComponent = new Component<undefined>('CollectableEscort');
 const ReturnComponent = new Component<undefined>('ReturnComponent');
@@ -127,26 +139,68 @@ const CollectableEscortAI = new System({
     },
 });
 
+/** Flips a no-longer-holding fighter into the return-and-collect
+ * flow: fly home and be scooped up on contact with the carrier. */
+function startReturnHome(entity: Entity) {
+    entity.components.set(ReturnComponent, undefined);
+    entity.components.set(CollectableEscortComponent, undefined);
+    entity.components.set(CollisionHitterComponent, {
+        hitTypes: new Set([`return_escorts`]),
+    });
+    const hitbox = entity.components.get(HitboxHullComponent);
+    if (hitbox) {
+        entity.components.set(HurtboxHullComponent, hitbox);
+    }
+}
+
+const FormationQuery = new Query([FormationComponent] as const);
+
+/**
+ * A fighter whose target vanished stops fighting and falls into a
+ * formation slot on its carrier (the holding pattern; steering in
+ * npc_ai_plugin's FormationSystem), then turns home to dock after
+ * FIGHTER_HOLD_MS. Slots count existing followers of the same leader
+ * so simultaneous events assign distinct slots deterministically.
+ */
 const ReturnWhenTargetRemovedAI = new System({
     name: 'ReturnWhenTargetRemovedAI',
     events: [TargetRemovedEvent],
-    args: [GetEntity, WeaponsStateComponent,
-        ReturnWhenTargetRemovedComponent] as const,
-    step(entity, weapons) {
+    args: [GetEntity, WeaponsStateComponent, OwnerComponent, FormationQuery,
+        TimeResource, ReturnWhenTargetRemovedComponent] as const,
+    step(entity, weapons, owner, formations, time) {
         entity.components.delete(ShootAllWeaponsComponent);
         entity.components.delete(FollowComponent);
         for (const [, weapon] of weapons) {
             weapon.firing = false;
         }
-        entity.components.set(ReturnComponent, undefined);
-        entity.components.set(CollectableEscortComponent, undefined);
-        entity.components.set(CollisionHitterComponent, {
-            hitTypes: new Set([`return_escorts`]),
+        const slot = formations
+            .filter(([formation]) => formation.leader === owner.owner)
+            .length;
+        entity.components.set(FormationComponent, {
+            leader: owner.owner,
+            slot,
+            dockAt: time.time + FIGHTER_HOLD_MS,
         });
-        const hitbox = entity.components.get(HitboxHullComponent);
-        if (hitbox) {
-            entity.components.set(HurtboxHullComponent, hitbox);
+    }
+});
+
+/**
+ * Ends a bay fighter's formation hold: at dockAt (or if the carrier
+ * vanished, leaving FormationSystem to delete the component — the
+ * ReturnComponent then has no live owner and the fighter drifts, the
+ * pre-formation behavior) the fighter turns home to be collected.
+ */
+const BayFighterDockSystem = new System({
+    name: 'BayFighterDockSystem',
+    args: [GetEntity, FormationComponent, TimeResource,
+        ReturnWhenTargetRemovedComponent] as const,
+    step(entity, formation, time) {
+        if (formation.dockAt === undefined
+            || time.time < formation.dockAt) {
+            return;
         }
+        entity.components.delete(FormationComponent);
+        startReturnHome(entity);
     }
 });
 
@@ -178,6 +232,7 @@ export const BayPlugin: Plugin = {
         serializer?.addComponent(ReturnWhenTargetRemovedComponent, markerType);
         world.addSystem(ReturnAI);
         world.addSystem(ReturnWhenTargetRemovedAI);
+        world.addSystem(BayFighterDockSystem);
         world.addSystem(CollectableEscortAI);
     }
 }

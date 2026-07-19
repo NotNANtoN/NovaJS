@@ -62,6 +62,19 @@ export interface ShipData extends SpaceObjectData {
     contribute: string;
     /** 64-bit flag set required to buy this ship. Hex string. */
     require: string;
+    /**
+     * The ship's combat strength rating (shïp Strength), used for the
+     * govt MaxOdds fight-or-flee calculation. The Bible scales a ship's
+     * effective strength between 30% and 100% of this by its current
+     * shield level.
+     */
+    strength: number;
+    /**
+     * The ship class's inherent AI type (shïp InherentAI, 1 = wimpy
+     * trader, 2 = brave trader, 3 = warship, 4 = interceptor), used
+     * when a düde with AIType 0 spawns this ship.
+     */
+    inherentAI: number;
 };
 
 export function getDefaultShipData(): ShipData {
@@ -77,6 +90,8 @@ export function getDefaultShipData(): ShipData {
         deathDelay: 1,
         displayWeight: 1,
         contribute: "0x0",
-        require: "0x0"
+        require: "0x0",
+        strength: 0,
+        inherentAI: 1,
     }
 }

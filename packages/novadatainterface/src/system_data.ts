@@ -1,6 +1,18 @@
 import { BaseData, getDefaultBaseData } from "./base_data.js";
 
 
+/**
+ * One NPC spawn entry from the sÿst DudeTypes table: a global dude or
+ * fleet id with a percent-probability weight. Weights are normalized at
+ * selection time (the Bible allows them to sum to less than 100).
+ */
+export interface SystemSpawnChance {
+    /** Global düde or flët id. */
+    id: string;
+    /** Percent probability weight (sÿst "% Prob", 1-99). */
+    weight: number;
+}
+
 export interface SystemData extends BaseData {
     position: [number, number],
     links: Array<string>,
@@ -40,6 +52,29 @@ export interface SystemData extends BaseData {
      * a different visibility expression.
      */
     visibility: string,
+
+    /**
+     * The dude classes AI ships spawned in this system are drawn from
+     * (sÿst DudeTypes with positive ids), with percent weights.
+     */
+    dudes: Array<SystemSpawnChance>,
+
+    /**
+     * The fleets spawned through this system's DudeTypes table
+     * (DudeTypes entries -128 to -383 reference flët -id), with percent
+     * weights. Distinct from fleets that roam in via their own LinkSyst
+     * ranges (see FleetData.linkSyst).
+     */
+    fleets: Array<SystemSpawnChance>,
+
+    /**
+     * The average number of AI ships in the system (sÿst AvgShips,
+     * +/- 50% per the Bible). Zero means an empty system.
+     */
+    avgShips: number,
+
+    /** Global id of the owning government, or null for independent. */
+    govt: string | null,
 }
 
 export function getDefaultSystemData(): SystemData {
@@ -54,5 +89,9 @@ export function getDefaultSystemData(): SystemData {
         interference: 0,
         backgroundColor: 0,
         visibility: '',
+        dudes: [],
+        fleets: [],
+        avgShips: 0,
+        govt: null,
     };
 }

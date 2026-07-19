@@ -1,5 +1,5 @@
 import { SystResource } from "../resource_parsers/syst_resource.js";
-import { SystemData } from "novadatainterface/system_data";
+import { SystemData, SystemSpawnChance } from "novadatainterface/system_data";
 import { BaseParse } from "./base_parse.js";
 import { BaseData } from "novadatainterface/base_data";
 
@@ -54,6 +54,44 @@ export async function SystemParse(syst: SystResource, notFoundFunction: (m: stri
         }
     }
 
+    // Resolve the NPC spawn table: DudeTypes entries reference düde
+    // resources (positive) or flët resources (negative, parsed into
+    // syst.fleets). These are soft references — plug-ins routinely
+    // point at resources they don't ship — so drop the entry with a
+    // warning rather than calling notFoundFunction (which throws in
+    // strict mode and would take the whole system down with it).
+    const dudes: Array<SystemSpawnChance> = [];
+    for (const { id, chance } of syst.dudes) {
+        const dude = syst.idSpace.düde[id];
+        if (dude) {
+            dudes.push({ id: dude.globalID, weight: chance });
+        } else {
+            console.warn("Missing düde id " + id + " for sÿst " + base.id);
+        }
+    }
+    const fleets: Array<SystemSpawnChance> = [];
+    for (const { id, chance } of syst.fleets) {
+        const fleet = syst.idSpace.flët[id];
+        if (fleet) {
+            fleets.push({ id: fleet.globalID, weight: chance });
+        } else {
+            console.warn("Missing flët id " + id + " for sÿst " + base.id);
+        }
+    }
+
+    // Also a soft reference: an unresolvable owning govt degrades to
+    // independent.
+    let govt: string | null = null;
+    if (syst.govt >= 128) {
+        const govtResource = syst.idSpace.gövt[syst.govt];
+        if (govtResource) {
+            govt = govtResource.globalID;
+        } else {
+            console.warn("Missing gövt id " + syst.govt
+                + " for sÿst " + base.id);
+        }
+    }
+
     return {
         ...base,
         links,
@@ -65,6 +103,10 @@ export async function SystemParse(syst: SystResource, notFoundFunction: (m: stri
         interference: syst.interference,
         backgroundColor: syst.backgroundColor,
         visibility: syst.visibility,
+        dudes,
+        fleets,
+        avgShips: syst.avgShips,
+        govt,
     }
 
 }

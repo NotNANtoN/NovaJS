@@ -52,7 +52,10 @@ export async function makeSimulationBridgeHarness() {
         throw new Error("Expected at least one ship id");
     }
 
-    const world = await makeSystem(systemId, gameData);
+    // No NPC traffic: this harness is a controlled battlefield (the
+    // sorted-first system is a plugin system with a large AvgShips).
+    const world = await makeSystem(systemId, gameData, undefined,
+        { npcs: false });
     const communicator = new MockCommunicator("server");
     await world.addPlugin(multiplayer(communicator));
 

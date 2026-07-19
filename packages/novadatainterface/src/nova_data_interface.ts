@@ -2,6 +2,8 @@ import { AsteroidData } from "./asteroid_data.js";
 import { CicnData } from "./cicn_data.js";
 import { CicnImageData } from "./cicn_image.js";
 import { ExplosionData } from "./explosion_data.js";
+import { DudeData } from "./dude_data.js";
+import { FleetData } from "./fleet_data.js";
 import { Gettable } from "./gettable.js";
 import { GovtData } from "./govt_data.js";
 import { OutfitData } from "./outfit_data.js";
@@ -31,6 +33,8 @@ enum NovaDataType {
     Planet = "Planet",
     System = "System",
     Govt = "Govt",
+    Dude = "Dude",
+    Fleet = "Fleet",
     TargetCorners = "TargetCorners",
     SpriteSheet = "SpriteSheet",
     SpriteSheetImage = "SpriteSheetImage",
@@ -54,6 +58,8 @@ type NovaDataInterface = {
     Planet: Gettable<PlanetData>,
     System: Gettable<SystemData>,
     Govt: Gettable<GovtData>,
+    Dude: Gettable<DudeData>,
+    Fleet: Gettable<FleetData>,
     TargetCorners: Gettable<TargetCornersData>,
     SpriteSheet: Gettable<SpriteSheetData>,
     SpriteSheetImage: Gettable<SpriteSheetImageData>,
