@@ -25,6 +25,26 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
     let ammoFor: string | null = null;
     let increasesMax: string | null = null;
     let miningScoop = false;
+    // Passive outfit modifiers decoded from the long-tail ModTypes. See
+    // OutfitData for each field's semantics; values default to their
+    // "not present" value and are set / accumulated by the loop below.
+    let murkClear = 0;
+    let interferenceReduction = 0;
+    let iff = false;
+    let autoRefuel = false;
+    let multiJump = 0;
+    let densityScanner = false;
+    let map: number | null = null;
+    let marines = 0;
+    let repairSystem = false;
+    let escapePod = false;
+    let autoEject = false;
+    let cleanLegalRecord: number | null = null;
+    let iffScramblerClass: number | null = null;
+    let reinforcementInhibitorClass: number | null = null;
+    let paintColor: number | null = null;
+    let bomb: number | null = null;
+    let nonlethalBomb: number | null = null;
     // Per-type jamming strength (IR, radar, etheric wake, gravimetric) from
     // ModTypes 33-36. Percentages, summed across the outfit's mod pairs.
     var jamming: [number, number, number, number] = [0, 0, 0, 0];
@@ -167,6 +187,102 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
         else if (fType === "inertial damper") {
             physics.inertialess = true;
         }
+        else if (fType === "murk modifier") {
+            // ModVal is the amount ADDED to the system's murkiness (EVN
+            // Bible); murkClear is how much murk this outfit REMOVES, so it
+            // is the negation. Summed across outfits (an outfit could carry
+            // several murk-modifier pairs).
+            if (typeof fVal !== "number") {
+                throw new Error("Wrong type for murk modifier. Expected number");
+            }
+            murkClear -= fVal;
+        }
+        else if (fType === "interference mod") {
+            // ModVal is subtracted from the system's radar interference (EVN
+            // Bible), so it is the reduction directly. Summed across outfits.
+            if (typeof fVal !== "number") {
+                throw new Error("Wrong type for interference mod. Expected number");
+            }
+            interferenceReduction += fVal;
+        }
+        else if (fType === "IFF") {
+            iff = true;
+        }
+        else if (fType === "auto refuel") {
+            autoRefuel = true;
+            // Flow through the ship physics so applyOutfitPhysics ORs the
+            // capability onto the ship (like fast jump / inertial damper).
+            physics.autoRefuel = true;
+        }
+        else if (fType === "multi-jump") {
+            if (typeof fVal !== "number") {
+                throw new Error("Wrong type for multi-jump. Expected number");
+            }
+            multiJump += fVal;
+            // Also flow it through the ship physics so applyOutfitPhysics sums
+            // it into the ship's ShipPhysics.multiJump (like jumpDistanceMod).
+            physics.multiJump = (physics.multiJump ?? 0) + fVal;
+        }
+        else if (fType === "density scanner") {
+            densityScanner = true;
+        }
+        else if (fType === "map") {
+            if (typeof fVal !== "number") {
+                throw new Error("Wrong type for map. Expected number");
+            }
+            map = fVal;
+        }
+        else if (fType === "marines") {
+            if (typeof fVal !== "number") {
+                throw new Error("Wrong type for marines. Expected number");
+            }
+            marines += fVal;
+        }
+        else if (fType === "repair system") {
+            repairSystem = true;
+        }
+        else if (fType === "escape pod") {
+            escapePod = true;
+        }
+        else if (fType === "auto eject") {
+            autoEject = true;
+        }
+        else if (fType === "clean legal record") {
+            if (typeof fVal !== "number") {
+                throw new Error("Wrong type for clean legal record. Expected number");
+            }
+            cleanLegalRecord = fVal;
+        }
+        else if (fType === "iff scrambler") {
+            if (typeof fVal !== "number") {
+                throw new Error("Wrong type for iff scrambler. Expected number");
+            }
+            iffScramblerClass = fVal;
+        }
+        else if (fType === "reinforcement inhibitor") {
+            if (typeof fVal !== "number") {
+                throw new Error("Wrong type for reinforcement inhibitor. Expected number");
+            }
+            reinforcementInhibitorClass = fVal;
+        }
+        else if (fType === "paint") {
+            if (typeof fVal !== "number") {
+                throw new Error("Wrong type for paint. Expected number");
+            }
+            paintColor = fVal;
+        }
+        else if (fType === "bomb") {
+            if (typeof fVal !== "number") {
+                throw new Error("Wrong type for bomb. Expected number");
+            }
+            bomb = fVal;
+        }
+        else if (fType === "nonlethal bomb") {
+            if (typeof fVal !== "number") {
+                throw new Error("Wrong type for nonlethal bomb. Expected number");
+            }
+            nonlethalBomb = fVal;
+        }
         else if (fType === "jam 1" || fType === "jam 2"
             || fType === "jam 3" || fType === "jam 4") {
             if (typeof fVal !== "number") {
@@ -225,5 +341,22 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
         ammoFor,
         increasesMax,
         miningScoop,
+        murkClear,
+        interferenceReduction,
+        iff,
+        autoRefuel,
+        multiJump,
+        densityScanner,
+        map,
+        marines,
+        repairSystem,
+        escapePod,
+        autoEject,
+        cleanLegalRecord,
+        iffScramblerClass,
+        reinforcementInhibitorClass,
+        paintColor,
+        bomb,
+        nonlethalBomb,
     }
 }

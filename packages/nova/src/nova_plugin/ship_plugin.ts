@@ -16,7 +16,7 @@ import { ProvideFromCache } from './provide_from_cache.js';
 import { AnimationComponent } from './animation_plugin.js';
 import { CollisionVulnerabilityComponent } from './collision_interaction.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
-import { ArmorComponent, FuelComponent, IonizationColorComponent, IonizationComponent, ShieldComponent } from './health_plugin.js';
+import { ArmorComponent, AUTO_REFUEL_PER_SECOND, FuelComponent, IonizationColorComponent, IonizationComponent, ShieldComponent } from './health_plugin.js';
 import { applyOutfitPhysics, OutfitsState, OutfitsStateComponent } from './outfit_plugin.js';
 import { registerEntityDeriver } from './entity_factory.js';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
@@ -156,11 +156,15 @@ const ShipFuelProvider = Provide({
     update: [ShipPhysicsComponent],
     args: [ShipPhysicsComponent, Optional(FuelComponent)] as const,
     factory(physics, fuel) {
+        // Base recharge is the fuel scoop (ModType 18); an auto-refueller
+        // (ModType 19) adds a slow constant trickle on top.
+        const recharge = physics.energyRecharge
+            + (physics.autoRefuel ? AUTO_REFUEL_PER_SECOND : 0);
         return new Stat({
             current: fuel?.current ?? physics.energy,
             max: physics.energy,
             min: 0,
-            recharge: physics.energyRecharge,
+            recharge,
         });
     }
 });

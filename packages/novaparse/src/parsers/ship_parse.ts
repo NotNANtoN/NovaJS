@@ -217,6 +217,10 @@ export async function ShipParse(ship: ShipResource,
         jumpDistanceMod: 0,
         // Afterburners come from outfits (ModType 15), not ship data.
         afterburner: 0,
+        // Multi-jump (ModType 32) and auto-refuel (ModType 19) come from
+        // outfits, not ship data.
+        multiJump: 0,
+        autoRefuel: false,
     }
 
     return {

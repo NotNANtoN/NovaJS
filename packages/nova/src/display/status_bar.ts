@@ -17,8 +17,10 @@ import { Subject } from "rxjs";
 import { DisplayAssetDataInterface } from "../client/gamedata/display_asset_data.js";
 import { DisplayAssetDataResource, SimulationGameDataResource } from "../nova_plugin/game_data_resource.js";
 import { CloakActiveComponent, CloakComponent, CloakScannerComponent } from "../nova_plugin/cloak_plugin.js";
+import { GovtComponent } from "../nova_plugin/govt_component.js";
+import { deriveIff, dispositionColor, shipDisposition } from "../nova_plugin/iff_plugin.js";
 import { ArmorComponent, FuelComponent, FUEL_PER_JUMP, ShieldComponent } from "../nova_plugin/health_plugin.js";
-import { OutfitsStateComponent } from "../nova_plugin/outfit_plugin.js";
+import { OutfitsStateComponent, sumOutfitField } from "../nova_plugin/outfit_plugin.js";
 import { PlanetDataComponent } from "../nova_plugin/planet_plugin.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 import { ShipDataComponent } from "../nova_plugin/ship_plugin.js";
@@ -219,7 +221,15 @@ class StatusBar {
 
     drawRadar(source: Position,
         ships: Iterable<readonly [string, MovementState, ...unknown[]]>,
-        planets: Iterable<readonly [string, MovementState, PlanetData]>) {
+        planets: Iterable<readonly [string, MovementState, PlanetData]>,
+        /**
+         * Per-ship blip colour by uuid, from IFF (ModType 14). When the map is
+         * absent or a ship is missing, blips use the flat dimRadar colour;
+         * when the player owns an IFF outfit the DrawRadar system fills this in
+         * so hostile/friendly/neutral ships are coloured (EVN Bible: an IFF
+         * outfit overrides the radar colours).
+         */
+        iffColors?: ReadonlyMap<string, number>) {
         this.radar.clear();
 
         // Interference (0-100) makes sensors unreliable: on each radar tick,
@@ -233,8 +243,9 @@ class StatusBar {
 
         this.drawDot(source, this.statusBarData.colors.brightRadar, source);
 
-        for (const [, { position }] of ships) {
-            const color = this.statusBarData.colors.dimRadar;
+        for (const [uuid, { position }] of ships) {
+            const color = iffColors?.get(uuid)
+                ?? this.statusBarData.colors.dimRadar;
             this.drawDot(position, color, source);
         }
 
@@ -418,10 +429,12 @@ const DrawRadar = new System({
     name: 'DrawRadar',
     args: [Optional(RadarTime), TimeResource, StatusBarResource, MovementStateComponent,
     new Query([UUID, MovementStateComponent, ShipDataComponent,
-        Optional(CloakActiveComponent), Optional(CloakComponent)] as const),
+        Optional(CloakActiveComponent), Optional(CloakComponent),
+        Optional(GovtComponent)] as const),
     new Query([UUID, MovementStateComponent, PlanetDataComponent] as const),
-        GetEntity, PlayerShipSelector] as const,
-    step(radarTime, { time }, statusBar, { position }, ships, planets, entity) {
+        SimulationGameDataResource, GetEntity, PlayerShipSelector] as const,
+    step(radarTime, { time }, statusBar, { position }, ships, planets,
+        gameData, entity) {
         if (!radarTime) {
             radarTime = { lastTime: 0 };
             entity.components.set(RadarTime, radarTime);
@@ -438,7 +451,30 @@ const DrawRadar = new System({
             const visibleShips = revealsCloaked ? ships : ships.filter(
                 ([, , , cloakActive, cloak]) =>
                     !(cloakActive?.active && (cloak?.hidesFromRadar ?? true)));
-            statusBar.drawRadar(position, visibleShips, planets);
+
+            // IFF (ModType 14): when the player owns an IFF outfit, colour
+            // each ship's blip by its disposition toward the player. Without
+            // IFF, or before govt data caches, blips stay the flat dim colour.
+            // The capability is derived here from the player's (delta-synced)
+            // outfits rather than read off a component: the radar runs in the
+            // display world, and IffComponent lives only in the sim worker.
+            const playerOutfits = entity.components.get(OutfitsStateComponent);
+            const hasIff = playerOutfits
+                ? deriveIff(playerOutfits, gameData)?.hasIff === true : false;
+            let iffColors: Map<string, number> | undefined;
+            if (hasIff) {
+                const playerGovtId = entity.components.get(GovtComponent)?.id;
+                const playerGovt = playerGovtId
+                    ? gameData.data.Govt.getCached(playerGovtId) : undefined;
+                iffColors = new Map();
+                for (const [uuid, , , , , shipGovt] of visibleShips) {
+                    const govt = shipGovt
+                        ? gameData.data.Govt.getCached(shipGovt.id) : undefined;
+                    iffColors.set(uuid,
+                        dispositionColor(shipDisposition(govt, playerGovt)));
+                }
+            }
+            statusBar.drawRadar(position, visibleShips, planets, iffColors);
             radarTime.lastTime = time;
         }
     }
@@ -499,6 +535,28 @@ const DrawStatusBarTarget = new System({
     }
 })
 
+/**
+ * Feeds the interference-mod outfits (oütf ModType 24) into the radar: sums
+ * the player ship's owned outfits' interferenceReduction and writes it to the
+ * status bar. The Bible: "Subtracts the value in ModVal from the current star
+ * system's Interference value when calculating how fuzzy to make the radar."
+ * Display-only (interference never affects the simulation), so this reads the
+ * player's outfits directly. A stock Sensor Boost (nova:203) clears 20
+ * interference; several stack. Runs every step so buying/selling updates it.
+ */
+const DrawStatusBarInterference = new System({
+    name: 'DrawStatusBarInterference',
+    args: [StatusBarResource, OutfitsStateComponent,
+        SimulationGameDataResource, PlayerShipSelector] as const,
+    step(statusBar, outfits, gameData) {
+        const reduction = sumOutfitField(
+            outfits, gameData, o => o.interferenceReduction);
+        if (reduction !== undefined) {
+            statusBar.interferenceReduction = reduction;
+        }
+    },
+});
+
 export const StatusBarPlugin: Plugin = {
     name: 'StatusBar',
     async build(world) {
@@ -558,6 +616,7 @@ export const StatusBarPlugin: Plugin = {
         world.addSystem(DrawStatusBarStats);
         world.addSystem(DrawStatusBarSecondaryWeapon);
         world.addSystem(DrawStatusBarTarget);
+        world.addSystem(DrawStatusBarInterference);
     },
     remove(world) {
         world.removeSystem(DrawRadar);
@@ -565,6 +624,7 @@ export const StatusBarPlugin: Plugin = {
         world.removeSystem(DrawStatusBarStats);
         world.removeSystem(DrawStatusBarSecondaryWeapon);
         world.removeSystem(DrawStatusBarTarget);
+        world.removeSystem(DrawStatusBarInterference);
 
         const stage = world.resources.get(Stage);
         const statusBar = world.resources.get(StatusBarResource);

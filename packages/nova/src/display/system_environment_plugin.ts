@@ -6,7 +6,9 @@ import { Resource } from "nova_ecs/resource";
 import { System } from "nova_ecs/system";
 import * as PIXI from "pixi.js";
 import { SimulationGameDataResource } from "../nova_plugin/game_data_resource.js";
+import { OutfitsState, OutfitsStateComponent, sumOutfitField } from "../nova_plugin/outfit_plugin.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
+import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
 import { SystemIdResource } from "../nova_plugin/system_id_resource.js";
 import { AnimationGraphicComponent, ObjectDrawSystem } from "./animation_graphic_plugin.js";
 import { PixiAppResource } from "./pixi_app_resource.js";
@@ -190,6 +192,36 @@ const MurkAmbienceSystem = new System({
     }
 });
 
+/**
+ * Feeds the murk-modifier outfits (oütf ModType 28) into the murk display:
+ * sums the player ship's owned outfits' murkClear and writes it to
+ * MurkResource.murkReduction. Display-only — murk never touches the
+ * deterministic simulation, so this reads the player's outfits directly here
+ * rather than through a synced component. A stock Sensor Boost (nova:203)
+ * clears 3 murk; several stack.
+ *
+ * Runs every frame (cheap: a handful of outfits) so buying/selling a Sensor
+ * Boost updates the murk immediately, and MurkAmbienceSystem picks up the new
+ * effective murk on the same tick.
+ */
+export const MurkOutfitSystem = new System({
+    name: 'MurkOutfitSystem',
+    args: [MurkResource, OutfitsStateComponent, SimulationGameDataResource,
+        PlayerShipSelector] as const,
+    step(murk, outfits, gameData) {
+        const cleared = playerMurkClear(outfits, gameData);
+        if (cleared !== undefined) {
+            (murk as { murkReduction: number }).murkReduction = cleared;
+        }
+    },
+});
+
+/** Sums murkClear over the player's outfits (undefined until data caches). */
+function playerMurkClear(outfits: OutfitsState,
+    gameData: SimulationGameDataInterface): number | undefined {
+    return sumOutfitField(outfits, gameData, o => o.murkClear);
+}
+
 export const SystemEnvironmentPlugin: Plugin = {
     name: 'SystemEnvironment',
     async build(world) {
@@ -249,9 +281,11 @@ export const SystemEnvironmentPlugin: Plugin = {
         }
 
         world.addSystem(MurkFadeSystem);
+        world.addSystem(MurkOutfitSystem);
     },
     remove(world) {
         world.removeSystem(MurkFadeSystem);
+        world.removeSystem(MurkOutfitSystem);
         world.removeSystem(MurkAmbienceSystem);
 
         const app = world.resources.get(PixiAppResource);

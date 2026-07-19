@@ -451,6 +451,73 @@ describe('jump sequence', () => {
             .toEqual([]);
     }, 30_000);
 
+    it('multi-jump budgets extra jumps from a single initiation (ModType 32)', async () => {
+        const { gameData, world, ship, destinationId } =
+            await makeJumpHarness();
+        const destination = await gameData.data.System.get(destinationId);
+        const nextId = [...destination.links].sort()[0];
+        if (!nextId) {
+            throw new Error('Expected the destination to have links');
+        }
+        await gameData.data.System.get(nextId);
+        ship.components.set(JumpRouteComponent,
+            { route: [destinationId, nextId] });
+        // The re-derived ShipPhysicsComponent is frozen; replace it with a
+        // copy carrying multiJump (what an outfit's multiJump folds in).
+        const physics = ship.components.get(ShipPhysicsComponent)!;
+        ship.components.set(ShipPhysicsComponent, { ...physics, multiJump: 5 });
+        const movement = ship.components.get(MovementStateComponent)!;
+        movement.position = new Position(0, -(JUMP_DISTANCE * 2));
+        world.step();
+
+        pressHyperjump(world);
+        // The first jump is initiated; its budget is capped to the one
+        // remaining route hop, not the full multiJump of 5.
+        const jump = ship.components.get(JumpComponent)!;
+        expect(jump).toBeDefined();
+        expect(jump.autoJumpsLeft).toEqual(1);
+    }, 30_000);
+
+    it('auto-continues a multi-jump on arrival without a key press', async () => {
+        const { gameData, world, ship, destinationId } =
+            await makeJumpHarness();
+        const destination = await gameData.data.System.get(destinationId);
+        const nextId = [...destination.links].sort()[0];
+        if (!nextId) {
+            throw new Error('Expected the destination to have links');
+        }
+        await gameData.data.System.get(nextId);
+        ship.components.set(JumpRouteComponent,
+            { route: [destinationId, nextId] });
+        const physics = ship.components.get(ShipPhysicsComponent)!;
+        ship.components.set(ShipPhysicsComponent, { ...physics, multiJump: 5 });
+        const movement = ship.components.get(MovementStateComponent)!;
+        movement.position = new Position(0, -(JUMP_DISTANCE * 2));
+        world.step();
+
+        let finishJump: FinishJump | undefined;
+        world.events.get(FinishJumpEvent).subscribe(({ data }) => {
+            finishJump = data;
+        });
+        pressHyperjump(world);
+        stepUntil(world, () => finishJump !== undefined);
+
+        const destWorld = await makeSystem(destinationId, gameData);
+        const jumpedShip = finishJump!.entity;
+        await completeEntity(destWorld, jumpedShip);
+        destWorld.entities.set(SHIP_UUID, jumpedShip);
+        // No held key this time: the multi-jump budget alone continues the
+        // route. First tick finishes arrival (dropping JumpComponent and
+        // leaving the continuation marker); the second starts the next jump.
+        destWorld.step();
+        destWorld.step();
+        const nextJump = jumpedShip.components.get(JumpComponent);
+        expect(nextJump).toBeDefined();
+        expect(nextJump!.to).toEqual(nextId);
+        expect(jumpedShip.components.get(JumpRouteComponent)!.route)
+            .toEqual([]);
+    }, 30_000);
+
     it('refuels, free, on landing', async () => {
         const { world, ship } = await makeJumpHarness();
         world.step();

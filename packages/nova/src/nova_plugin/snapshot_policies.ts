@@ -9,6 +9,7 @@ import { AsteroidDataComponent } from "./asteroid_plugin.js";
 import { BlastDamageComponent, BlastIgnoreComponent } from "./blast_data.js";
 import { BlastDoneComponent } from "./blast_plugin.js";
 import { CloakComponent, CloakScannerComponent } from "./cloak_plugin.js";
+import { IffComponent } from "./iff_plugin.js";
 import { CollisionHitterComponent, CollisionVulnerabilityComponent } from "./collision_interaction.js";
 import { decodeHull, encodeHull, HitboxHullComponent, HurtboxHullComponent } from "./collisions_plugin.js";
 import { CreateTime } from "./create_time.js";
@@ -94,6 +95,9 @@ export function configureSnapshotPolicies(world: World) {
     policies.set(CloakComponent, { policy: 'skip' });
     // The cloak-scanner capability is likewise derived from outfits.
     policies.set(CloakScannerComponent, { policy: 'skip' });
+    // The IFF capability is derived from owned outfits and re-derived at
+    // restore by IffDeriver, exactly like the cloak capability.
+    policies.set(IffComponent, { policy: 'skip' });
 
     // Enum-valued; effectively immutable.
     policies.set(GuidanceComponent, { policy: 'share' });
