@@ -124,6 +124,32 @@ export function dispositionColor(disposition: Disposition): number {
     }
 }
 
+/**
+ * Which corner-bracket set (TargetCornersData.images key) a targeted SHIP
+ * gets. THE HOSTILITY RULE, in priority order:
+ *
+ *  1. Behavioral: a ship that is *currently attacking the player* shows
+ *     hostile corners regardless of politics — a brave trader fighting the
+ *     player back, or a neutral-govt warship the player provoked, is hostile
+ *     in every sense that matters to the pilot. "Currently attacking" is
+ *     derived display-side from synced state: the target's own
+ *     TargetComponent points at the player AND its AI is in an attacking
+ *     posture (NpcComponent mode 'attack', or the legacy dev-enemy
+ *     ShootAllWeapons marker). A ship merely *fleeing* the player keeps its
+ *     political corners.
+ *  2. Political: shipDisposition(target govt, player govt) — hostile and
+ *     friendly map to their corner sets.
+ *  3. Everything else: neutral.
+ *
+ * The 'disabled' corner set exists in the data but ships cannot be disabled
+ * in the sim yet; wire it here when disabling lands. Planets use their own
+ * corner instance (planet_corners_plugin) and are unaffected.
+ */
+export function targetCornerStyle(disposition: Disposition,
+    attackingPlayer: boolean): Disposition {
+    return attackingPlayer ? 'hostile' : disposition;
+}
+
 const IffProvider = ProvideFromCache({
     name: 'IffProvider',
     provided: IffComponent,

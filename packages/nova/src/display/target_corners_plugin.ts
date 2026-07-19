@@ -1,11 +1,17 @@
-import { Entities } from "nova_ecs/arg_types";
+import { Entities, GetEntity, UUID } from "nova_ecs/arg_types";
+import { Entity } from "nova_ecs/entity";
 import { Plugin } from 'nova_ecs/plugin';
 import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { Resource } from "nova_ecs/resource";
 import { System } from "nova_ecs/system";
 import * as PIXI from "pixi.js";
 import { DisplayAssetDataInterface } from "../client/gamedata/display_asset_data.js";
-import { DisplayAssetDataResource } from "../nova_plugin/game_data_resource.js";
+import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
+import { DisplayAssetDataResource, SimulationGameDataResource } from "../nova_plugin/game_data_resource.js";
+import { GovtComponent } from "../nova_plugin/govt_component.js";
+import { shipDisposition, targetCornerStyle } from "../nova_plugin/iff_plugin.js";
+import { NpcComponent } from "../nova_plugin/npc_ai_plugin.js";
+import { ShootAllWeaponsComponent } from "../nova_plugin/npc_plugin.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 import { TargetComponent } from "../nova_plugin/target_component.js";
 import { mod } from "../util/mod.js";
@@ -99,25 +105,59 @@ export class TargetCorners {
 
 const TargetCornersResource = new Resource<TargetCorners>('TargetCornersResource');
 
+/**
+ * The corner set for the player's current ship target — see
+ * targetCornerStyle in iff_plugin.ts for the hostility rule. Derived
+ * display-side entirely from state that already crosses to the display
+ * world (GovtComponent, NpcComponent, TargetComponent, the legacy
+ * ShootAllWeapons marker — all serializer-registered), so no new wire
+ * components are needed.
+ */
+export function styleForTarget(targetEntity: Entity, playerUuid: string,
+    playerEntity: Entity, gameData: SimulationGameDataInterface): string {
+    const govtId = targetEntity.components.get(GovtComponent)?.id;
+    // Display-side getCached: a cold cache shows neutral corners for a
+    // tick or two while the govt data loads.
+    const targetGovt = govtId
+        ? gameData.data.Govt.getCached(govtId) : undefined;
+    const playerGovtId = playerEntity.components.get(GovtComponent)?.id;
+    const playerGovt = playerGovtId
+        ? gameData.data.Govt.getCached(playerGovtId) : undefined;
+
+    const targetsPlayer = targetEntity.components
+        .get(TargetComponent)?.target === playerUuid;
+    const npcMode = targetEntity.components.get(NpcComponent)?.mode;
+    const attackingPlayer = targetsPlayer && (npcMode === 'attack'
+        || targetEntity.components.has(ShootAllWeaponsComponent));
+
+    return targetCornerStyle(
+        shipDisposition(targetGovt, playerGovt), attackingPlayer);
+}
+
 const DrawTargetCornersSystem = new System({
     name: "DrawTargetCornersSystem",
     args: [TargetComponent, TimeResource, TargetCornersResource, Entities,
+        UUID, GetEntity, SimulationGameDataResource,
         PlayerShipSelector] as const,
-    step({ target }, time, targetCorners, entities) {
+    step({ target }, time, targetCorners, entities, playerUuid, playerEntity,
+        gameData) {
         if (!target) {
             targetCorners.visible = false;
             targetCorners.targetUuid = undefined;
             return;
         }
 
-        const targetGraphic = entities.get(target)?.components
+        const targetEntity = entities.get(target);
+        const targetGraphic = targetEntity?.components
             .get(AnimationGraphicComponent);
-        if (!targetGraphic) {
+        if (!targetEntity || !targetGraphic) {
             targetCorners.visible = false;
             targetCorners.targetUuid = undefined;
             return;
         }
 
+        targetCorners.setStyle(styleForTarget(
+            targetEntity, playerUuid, playerEntity, gameData));
         targetCorners.step(time.time, target, targetGraphic.size);
         targetCorners.setPosition(targetGraphic.container.position);
         targetCorners.visible = true;
