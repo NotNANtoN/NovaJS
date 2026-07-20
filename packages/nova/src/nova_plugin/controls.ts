@@ -63,6 +63,13 @@ const SavedControlsPartialObject = t.partial({
     'sell': ControlInputs,
     'buy': ControlInputs,
     'depart': ControlInputs,
+    // Landed-UI actions: refuel at the spaceport, the bar's venues,
+    // hiring the selected escort, and accepting the selected mission.
+    'recharge': ControlInputs,
+    'hire': ControlInputs,
+    'news': ControlInputs,
+    'gamble': ControlInputs,
+    'accept': ControlInputs,
     'properties': ControlInputs,
     'missions': ControlInputs,
     'fullscreen': ControlInputs,

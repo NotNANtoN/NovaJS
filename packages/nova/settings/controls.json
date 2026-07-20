@@ -67,6 +67,11 @@
     "Escape",
     "KeyD"
   ],
+  "recharge": "KeyR",
+  "hire": "KeyH",
+  "news": "KeyN",
+  "gamble": "KeyG",
+  "accept": "KeyA",
   "properties": "KeyP",
   "missions": "KeyM",
   "fullscreen": "Enter"

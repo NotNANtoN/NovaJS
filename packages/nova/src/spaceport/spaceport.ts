@@ -79,7 +79,10 @@ export class Spaceport extends Menu<Entity> {
 
     constructor(displayAssets: DisplayAssetDataInterface,
         simulationData: SimulationGameDataInterface, private id: string,
-        controlEvents: Observable<ControlEvent>) {
+        controlEvents: Observable<ControlEvent>,
+        /** Opens the starmap over the spaceport (the 'm' key), so the
+         * player can check mission destinations while docked. */
+        private openStarmap?: () => Promise<unknown>) {
         super(displayAssets, simulationData, "nova:8500", controlEvents);
         this.container.name = 'Spaceport';
 
@@ -206,6 +209,11 @@ export class Spaceport extends Menu<Entity> {
             missionBBS: showMissionComputer,
             bar: showBar,
             tradeCenter: showTradeCenter,
+            recharge: this.recharge.bind(this),
+            // The starmap binds its own controls on top of the focus
+            // stack while open, so the spaceport keys stay quiet under
+            // it and 'd' backs out of just the map.
+            map: () => void this.openStarmap?.(),
             depart: this.done.bind(this),
         });
     }

@@ -9,7 +9,6 @@ import {
     abortMission,
     acceptOffer,
     MissionOffer,
-    refuseOffer,
 } from '../nova_plugin/mission_logic.js';
 import { expandMissionText, missionDisplayName } from '../nova_plugin/mission_text.js';
 import { ActiveMission } from '../nova_plugin/player_state_plugin.js';
@@ -57,9 +56,10 @@ type Row =
  * list/detail dialog on the 510x201 PICT 8505 frame. The left pane
  * lists the day's offers (availability evaluated against the player's
  * REAL control bits) with active missions below them; the right pane
- * shows the expanded offer text. Accept / Refuse use the mïsn's
- * custom button labels when present, and run through the real NCB
- * machinery. Active missions can be aborted when the mission allows.
+ * shows the expanded offer text. Accept uses the mïsn's custom button
+ * label when present, and runs through the real NCB machinery. There
+ * is no Refuse here — a listing the player doesn't want is simply not
+ * accepted. Active missions can be aborted when the mission allows.
  *
  * The AvailRandom roll happens when the board opens (see
  * mission_offers.ts — player-local UI randomness).
@@ -73,7 +73,7 @@ export class MissionBoard extends Menu<Entity> {
     private listContainer = new PIXI.Container();
     private highlight = new PIXI.Graphics();
     private buttons: {
-        accept: Button, refuse: Button, abort: Button, done: Button,
+        accept: Button, abort: Button, done: Button,
     };
 
     private text = {
@@ -100,14 +100,15 @@ export class MissionBoard extends Menu<Entity> {
         super(displayAssets, simulationData, background, controlEvents);
         this.container.name = `MissionBoard-${title}`;
 
+        // No Refuse on the BBS: an uninteresting listing is simply not
+        // accepted. (Bar mission POPUPS keep their accept/refuse
+        // choice — that's a different surface; see bar.ts.)
         this.buttons = {
             accept: new Button(displayAssets, 'Accept', 74, { x: -245, y: BUTTON_Y }),
-            refuse: new Button(displayAssets, 'Refuse', 74, { x: -140, y: BUTTON_Y }),
-            abort: new Button(displayAssets, 'Abort', 60, { x: -35, y: BUTTON_Y }),
+            abort: new Button(displayAssets, 'Abort', 60, { x: -140, y: BUTTON_Y }),
             done: new Button(displayAssets, 'Done', 60, { x: 180, y: BUTTON_Y }),
         };
         this.buttons.accept.click.subscribe(this.accept.bind(this));
-        this.buttons.refuse.click.subscribe(this.refuse.bind(this));
         this.buttons.abort.click.subscribe(this.abort.bind(this));
         this.buttons.done.click.subscribe(this.done.bind(this));
         this.addButtons(this.buttons);
@@ -142,8 +143,7 @@ export class MissionBoard extends Menu<Entity> {
         this.controls.controls = {
             up: () => this.moveSelection(-1),
             down: () => this.moveSelection(1),
-            buy: this.accept.bind(this),
-            sell: this.refuse.bind(this),
+            accept: this.accept.bind(this),
             depart: this.done.bind(this),
         };
     }
@@ -284,12 +284,10 @@ export class MissionBoard extends Menu<Entity> {
     private refreshDescription() {
         const row = this.selectedRow();
         this.buttons.accept.setLabel('Accept');
-        this.buttons.refuse.setLabel('Refuse');
         this.text.info.text = '';
         if (!row || row.kind === 'header') {
             this.text.description.text = '';
             this.buttons.accept.state = 'grey';
-            this.buttons.refuse.state = 'grey';
             this.buttons.abort.state = 'grey';
             return;
         }
@@ -305,17 +303,12 @@ export class MissionBoard extends Menu<Entity> {
                 subs.deadline !== undefined
                     ? `Deadline: ${subs.deadline}` : '',
             ].filter(Boolean).join('    ');
-            // The mïsn's custom button labels, where present.
+            // The mïsn's custom accept label, where present.
             if (offer.data.acceptButton) {
                 this.buttons.accept.setLabel(offer.data.acceptButton);
             }
-            if (offer.data.refuseButton) {
-                this.buttons.refuse.setLabel(offer.data.refuseButton);
-            }
             this.buttons.accept.state =
                 offer.acceptable ? 'normal' : 'grey';
-            this.buttons.refuse.state =
-                offer.data.flags.cantRefuse ? 'grey' : 'normal';
             this.buttons.abort.state = 'grey';
         } else {
             const offer = activeAsOffer(this.universe, row.active);
@@ -330,7 +323,6 @@ export class MissionBoard extends Menu<Entity> {
                 this.substitutionsFor(offer, row.active))
                 + (mission.canAbort ? '' : '\n\n[This mission cannot be aborted.]');
             this.buttons.accept.state = 'grey';
-            this.buttons.refuse.state = 'grey';
             this.buttons.abort.state = mission.canAbort ? 'normal' : 'grey';
         }
     }
@@ -357,32 +349,6 @@ export class MissionBoard extends Menu<Entity> {
         this.refreshDescription();
         if (brief) {
             this.text.description.text = brief;
-        }
-    }
-
-    private refuse() {
-        const row = this.selectedRow();
-        if (!row || row.kind !== 'offer' || !this.session) {
-            return;
-        }
-        if (row.offer.data.flags.cantRefuse) {
-            this.text.status.text = 'This offer cannot be refused.';
-            return;
-        }
-        refuseOffer(this.session.machinery, row.offer, this.session.outfits);
-        const refuseText = expandMissionText(row.offer.data.refuseText,
-            this.substitutionsFor(row.offer));
-        this.rows = this.rows.filter(r => r !== row);
-        if (this.rows.length === 0) {
-            this.rows.push({ kind: 'header', label: '(no missions available)' });
-        }
-        this.selectedIndex = Math.min(this.selectedIndex,
-            this.rows.length - 1);
-        this.text.status.text = `Refused: ${missionDisplayName(row.offer.data.name)}.`;
-        this.refreshList();
-        this.refreshDescription();
-        if (refuseText) {
-            this.text.description.text = refuseText;
         }
     }
 
