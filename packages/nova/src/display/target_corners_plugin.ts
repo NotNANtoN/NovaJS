@@ -8,6 +8,7 @@ import * as PIXI from "pixi.js";
 import { DisplayAssetDataInterface } from "../client/gamedata/display_asset_data.js";
 import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
 import { DisplayAssetDataResource, SimulationGameDataResource } from "../nova_plugin/game_data_resource.js";
+import { DisabledComponent } from "../nova_plugin/disabled_component.js";
 import { isInFlock } from "../nova_plugin/flock.js";
 import { GovtComponent } from "../nova_plugin/govt_component.js";
 import { shipDisposition, targetCornerStyle } from "../nova_plugin/iff_plugin.js";
@@ -124,6 +125,11 @@ export function styleForTarget(targetUuid: string, targetEntity: Entity,
     playerUuid: string, playerEntity: Entity,
     gameData: SimulationGameDataInterface,
     getEntity: (uuid: string) => Entity | undefined): string {
+    // Disabled beats everything, own flock included: gray corners mean
+    // "dead in space" whoever the hulk belongs to.
+    if (targetEntity.components.has(DisabledComponent)) {
+        return targetCornerStyle('neutral', false, true);
+    }
     if (isInFlock(targetUuid, playerUuid, getEntity)) {
         return 'friendly';
     }
