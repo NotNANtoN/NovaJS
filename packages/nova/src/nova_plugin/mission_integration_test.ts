@@ -14,6 +14,7 @@ import {
 } from './mission_logic.js';
 import { GOAL_DESTROY } from './mission_ship_state.js';
 import { ControlBitsComponent } from './ncb_plugin.js';
+import { CombatRatingComponent } from './reputation_plugin.js';
 import {
     CreditsComponent,
     GameDateComponent,
@@ -152,6 +153,9 @@ describe('missions against real Nova data', () => {
             entity.components.set(CreditsComponent, { credits: 0 });
             entity.components.set(ControlBitsComponent,
                 new Set([204, 511]));
+            // nova:657 requires AvailRating 150; give the test pilot
+            // enough kill points to qualify (reputations gate offers).
+            entity.components.set(CombatRatingComponent, { kills: 150 });
 
             const session = await MissionSession.create(
                 entity, gameData, universe, 'nova:360');
