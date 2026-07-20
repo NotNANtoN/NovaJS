@@ -3,6 +3,7 @@ import { Entity } from 'nova_ecs/entity';
 import { CargoComponent } from './cargo_plugin.js';
 import { ControlBitsComponent } from './ncb_plugin.js';
 import { OutfitsState, OutfitsStateComponent } from './outfit_plugin.js';
+import { CombatRatingComponent, LegalRecordsComponent } from './reputation_plugin.js';
 import {
     CreditsComponent,
     CronStatesComponent,
@@ -114,6 +115,11 @@ describe('save_game schema', () => {
             phaseStart: 430064,
             nextEligible: 0,
         }]]));
+        entity.components.set(LegalRecordsComponent, new Map([
+            ['nova:128', -15],
+            ['nova:129', 7],
+        ]));
+        entity.components.set(CombatRatingComponent, { kills: 420 });
 
         const saved = extractSaveData(entity, 'nova:130')!;
         // The save must survive the JSON envelope.
@@ -135,6 +141,10 @@ describe('save_game schema', () => {
             .toEqual(entity.components.get(MissionsComponent)!);
         expect(restored.components.get(CronStatesComponent))
             .toEqual(entity.components.get(CronStatesComponent)!);
+        expect(restored.components.get(LegalRecordsComponent))
+            .toEqual(entity.components.get(LegalRecordsComponent)!);
+        expect(restored.components.get(CombatRatingComponent))
+            .toEqual({ kills: 420 });
     });
 
     it('loads a v1 save written before player state existed', () => {

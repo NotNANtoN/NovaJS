@@ -1,0 +1,281 @@
+import 'jasmine';
+import { getDefaultGovtData, GovtData } from 'novadatainterface/govt_data';
+import { getDefaultMissionData, MissionData } from 'novadatainterface/mission_data';
+import {
+    abortMission,
+    acceptOffer,
+    makeMissionOffer,
+    MissionContext,
+    MissionMachineryContext,
+    missionMatchesLocation,
+    MissionWorkingState,
+    LOCATION_MISSION_COMPUTER,
+    processLanding,
+    stellarRecord,
+    StellarInfo,
+} from './mission_logic.js';
+import { Missions } from './player_state_plugin.js';
+import { LegalRecords } from './reputation.js';
+
+/**
+ * Mission-layer reputation: AvailRecord/AvailRating gating,
+ * CompGovt/CompReward outcome changes, and the PayVal negative
+ * encodings. Kept separate from mission_logic_test so the reputation
+ * layer's tests live together.
+ */
+
+function makeStellar(partial: Partial<StellarInfo> = {}): StellarInfo {
+    return {
+        id: 'nova:128',
+        govt: 'nova:128',
+        uninhabited: false,
+        canLand: true,
+        ...partial,
+    };
+}
+
+function makeMission(partial: Partial<MissionData> = {}): MissionData {
+    return {
+        ...getDefaultMissionData(),
+        id: 'nova:200',
+        name: 'Test Mission',
+        // Completable by landing where it was accepted.
+        returnStel: 128,
+        returnStelId: 'nova:128',
+        ...partial,
+    };
+}
+
+function makeGovt(id: string, partial: Partial<GovtData> = {}): GovtData {
+    return { ...getDefaultGovtData(), id, ...partial };
+}
+
+const fed = makeGovt('nova:128', { classes: [1], allies: [0], enemies: [2] });
+const bureau = makeGovt('nova:153', { classes: [0], allies: [1] });
+const auroran = makeGovt('nova:129', { classes: [2], enemies: [1] });
+const govts = new Map([[fed.id, fed], [bureau.id, bureau],
+    [auroran.id, auroran]]);
+const getGovt = (id: string) => govts.get(id);
+
+function makeContext(partial: Partial<MissionContext> = {}): MissionContext {
+    return {
+        stellar: makeStellar(),
+        stellarCandidates: [makeStellar(), makeStellar({ id: 'nova:129' })],
+        bits: new Set<number>(),
+        shipId: 'nova:164',
+        activeMissions: new Map(),
+        freeCargoSpace: 20,
+        random: () => 0.5,
+        getGovt,
+        currentDay: 1000,
+        ...partial,
+    };
+}
+
+function makeState(partial: Partial<MissionWorkingState> = {}):
+    MissionWorkingState {
+    return {
+        missions: new Map() as Missions,
+        cargo: new Map(),
+        credits: { credits: 1000 },
+        bits: new Set<number>(),
+        cargoCapacity: 20,
+        dateAdvance: 0,
+        events: [],
+        records: new Map(),
+        ...partial,
+    };
+}
+
+function makeMachinery(state: MissionWorkingState,
+    missionData: MissionData[],
+    ctxPartial: Partial<MissionContext> = {}): MissionMachineryContext {
+    const byId = new Map(missionData.map(m => [m.id, m]));
+    return {
+        state,
+        getMission: id => byId.get(id),
+        offerContext: () => makeContext({
+            bits: state.bits,
+            activeMissions: state.missions,
+            freeCargoSpace: state.cargoCapacity,
+            records: state.records,
+            ...ctxPartial,
+        }),
+        random: () => 0.5,
+        allGovts: () => [...govts],
+    };
+}
+
+/** Accepts a mission and completes it by landing at the return stellar. */
+function runToCompletion(mission: MissionData, state: MissionWorkingState,
+    ctxPartial: Partial<MissionContext> = {}) {
+    const machinery = makeMachinery(state, [mission], ctxPartial);
+    const offer = makeMissionOffer(mission, machinery.offerContext())!;
+    expect(offer).not.toBeNull();
+    acceptOffer(machinery, offer);
+    processLanding(machinery, offer.returnPlanet ?? 'nova:128', 1000);
+    return machinery;
+}
+
+describe('AvailRecord gating', () => {
+    const ctxWith = (records: LegalRecords) => makeContext({ records });
+
+    it('requires a good record for positive AvailRecord', () => {
+        const mission = makeMission({ availRecord: 5 });
+        expect(missionMatchesLocation(mission, LOCATION_MISSION_COMPUTER,
+            ctxWith(new Map([['nova:128', 5]])))).toBe(true);
+        expect(missionMatchesLocation(mission, LOCATION_MISSION_COMPUTER,
+            ctxWith(new Map([['nova:128', 4]])))).toBe(false);
+    });
+
+    it('requires a criminal record for negative AvailRecord', () => {
+        const mission = makeMission({ availRecord: -1 });
+        expect(missionMatchesLocation(mission, LOCATION_MISSION_COMPUTER,
+            ctxWith(new Map([['nova:128', -3]])))).toBe(true);
+        expect(missionMatchesLocation(mission, LOCATION_MISSION_COMPUTER,
+            ctxWith(new Map()))).toBe(false);
+    });
+
+    it('judges the record with the STELLAR\'s govt', () => {
+        const mission = makeMission({ availRecord: 5 });
+        // Criminal with the Federation but upstanding with the
+        // Aurorans: available on an Auroran world only.
+        const records: LegalRecords = new Map([
+            ['nova:128', -20], ['nova:129', 8]]);
+        expect(missionMatchesLocation(mission, LOCATION_MISSION_COMPUTER,
+            makeContext({ records }))).toBe(false);
+        expect(missionMatchesLocation(mission, LOCATION_MISSION_COMPUTER,
+            makeContext({
+                records,
+                stellar: makeStellar({ govt: 'nova:129' }),
+            }))).toBe(true);
+    });
+
+    it('judges independent stellars by govt 128 (Appendix II)', () => {
+        const records: LegalRecords = new Map([['nova:128', 7]]);
+        expect(stellarRecord(makeStellar({ govt: null }), records,
+            'nova', getGovt)).toBe(7);
+    });
+
+    it('still fails closed on the domination sentinels', () => {
+        expect(missionMatchesLocation(
+            makeMission({ availRecord: -32000 }),
+            LOCATION_MISSION_COMPUTER, makeContext())).toBe(false);
+        expect(missionMatchesLocation(
+            makeMission({ availRecord: -32001 }),
+            LOCATION_MISSION_COMPUTER, makeContext())).toBe(false);
+    });
+});
+
+describe('AvailRating gating', () => {
+    it('gates on kill points', () => {
+        const mission = makeMission({ availRating: 200 });
+        expect(missionMatchesLocation(mission, LOCATION_MISSION_COMPUTER,
+            makeContext({ combatRating: 199 }))).toBe(false);
+        expect(missionMatchesLocation(mission, LOCATION_MISSION_COMPUTER,
+            makeContext({ combatRating: 200 }))).toBe(true);
+    });
+
+    it('ignores -1', () => {
+        expect(missionMatchesLocation(makeMission({ availRating: -1 }),
+            LOCATION_MISSION_COMPUTER, makeContext())).toBe(true);
+    });
+});
+
+describe('CompGovt/CompReward', () => {
+    it('raises the record with CompGovt on completion', () => {
+        const state = makeState();
+        runToCompletion(makeMission({
+            compGovt: 128, compReward: 3,
+        }), state);
+        expect(state.records!.get('nova:128')).toBe(3);
+        expect(state.missions.size).toBe(0);
+    });
+
+    it('costs half the reward (truncated) on failure', () => {
+        const state = makeState();
+        const mission = makeMission({
+            compGovt: 128, compReward: 3, timeLimit: 1,
+        });
+        const machinery = makeMachinery(state, [mission]);
+        const offer = makeMissionOffer(mission, machinery.offerContext())!;
+        acceptOffer(machinery, offer);
+        // Land far past the deadline: the mission fails.
+        processLanding(machinery, 'nova:999', 5000);
+        expect(state.records!.get('nova:128')).toBe(-1);
+        expect(state.events.some(e => e.type === 'failed')).toBe(true);
+    });
+
+    it('costs 5x on abort only under the 0x0040 flag', () => {
+        const plain = makeState();
+        let mission = makeMission({ compGovt: 128, compReward: 3 });
+        let machinery = makeMachinery(plain, [mission]);
+        acceptOffer(machinery,
+            makeMissionOffer(mission, machinery.offerContext())!);
+        abortMission(machinery, mission.id);
+        expect(plain.records!.has('nova:128')).toBe(false);
+
+        const flagged = makeState();
+        mission = makeMission({ compGovt: 128, compReward: 3 });
+        mission.flags = { ...mission.flags, lose5xCompRewardOnAbort: true };
+        machinery = makeMachinery(flagged, [mission]);
+        acceptOffer(machinery,
+            makeMissionOffer(mission, machinery.offerContext())!);
+        abortMission(machinery, mission.id);
+        expect(flagged.records!.get('nova:128')).toBe(-15);
+    });
+});
+
+describe('PayVal negative encodings', () => {
+    it('cleans the record with the encoded govt on completion', () => {
+        const state = makeState({
+            records: new Map([['nova:128', -40], ['nova:129', -40]]),
+        });
+        runToCompletion(makeMission({ payVal: -10128 }), state);
+        expect(state.records!.get('nova:128')).toBe(0);
+        expect(state.records!.get('nova:129')).toBe(-40);
+        expect(state.credits.credits).toBe(1000);
+    });
+
+    it('cleans allies too for the -20xxx encoding', () => {
+        const state = makeState({
+            records: new Map([
+                ['nova:128', -40], ['nova:153', -40], ['nova:129', -40]]),
+        });
+        runToCompletion(makeMission({ payVal: -20128 }), state);
+        expect(state.records!.get('nova:128')).toBe(0);
+        expect(state.records!.get('nova:153')).toBe(0);
+        expect(state.records!.get('nova:129')).toBe(-40);
+    });
+
+    it('takes a percentage of cash on completion (-40xxx)', () => {
+        const state = makeState({ credits: { credits: 1000 } });
+        runToCompletion(makeMission({ payVal: -40010 }), state);
+        expect(state.credits.credits).toBe(900);
+    });
+
+    it('takes flat credits at mission START (-50xxx), clamped at 0', () => {
+        const state = makeState({ credits: { credits: 1000 } });
+        const mission = makeMission({ payVal: -50300 });
+        const machinery = makeMachinery(state, [mission]);
+        acceptOffer(machinery,
+            makeMissionOffer(mission, machinery.offerContext())!);
+        // Taken at accept, before any landing.
+        expect(state.credits.credits).toBe(700);
+
+        const broke = makeState({ credits: { credits: 100 } });
+        const machinery2 = makeMachinery(broke, [mission]);
+        acceptOffer(machinery2,
+            makeMissionOffer(mission, machinery2.offerContext())!);
+        expect(broke.credits.credits).toBe(0);
+    });
+
+    it('still pays positive PayVal as credits', () => {
+        const state = makeState({ credits: { credits: 0 } });
+        const machinery = runToCompletion(
+            makeMission({ payVal: 5000 }), state);
+        expect(state.credits.credits).toBe(5000);
+        expect(machinery.state.events.find(e => e.type === 'completed')
+            ?.payment).toBe(5000);
+    });
+});

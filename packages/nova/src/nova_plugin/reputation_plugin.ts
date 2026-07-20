@@ -15,6 +15,7 @@ import { FiringGroupComponent } from './firing_group.js';
 import { SourceComponent } from './fire_weapon_plugin.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { GovtComponent } from './govt_component.js';
+import { ArmorComponent } from './health_plugin.js';
 import { applyCrime } from './reputation.js';
 import { ShipDataComponent } from './ship_plugin.js';
 
@@ -167,21 +168,23 @@ const KillCreditSystem = new System({
  * carries DisabledComponent and its last damager root has legal
  * records, that player takes the DisabPenalty (with propagation).
  * The guard resets when the ship is repaired, so disabling it again
- * counts again.
+ * counts again. Dead ships (armor 0 — a hulk mid-explosion is
+ * "below the disable threshold" too) charge the KILL penalty only.
  */
 const DisableCreditSystem = new System({
     name: 'DisableCreditSystem',
     args: [DamageAttributionComponent, Optional(DisabledComponent),
-        Optional(GovtComponent), Entities, Optional(GovtsResource),
-        SimulationGameDataResource] as const,
-    step(attribution, disabled, govt, entities, govts, gameData) {
+        Optional(ArmorComponent), Optional(GovtComponent), Entities,
+        Optional(GovtsResource), SimulationGameDataResource] as const,
+    step(attribution, disabled, armor, govt, entities, govts, gameData) {
         if (!disabled) {
             if (attribution.disableCredited) {
                 attribution.disableCredited = false;
             }
             return;
         }
-        if (attribution.disableCredited) {
+        if (attribution.disableCredited || attribution.killCredited
+            || !armor || armor.current <= 0) {
             return;
         }
         attribution.disableCredited = true;
