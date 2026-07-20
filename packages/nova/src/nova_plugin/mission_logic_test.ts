@@ -7,6 +7,7 @@ import {
     failExpiredMissions,
     makeMissionOffer,
     matchesStellarRef,
+    missionMapMarks,
     runPendingShipDone,
     MissionContext,
     MissionMachineryContext,
@@ -18,7 +19,7 @@ import {
     runMissionSetString,
     StellarInfo,
 } from './mission_logic.js';
-import { MAX_ACTIVE_MISSIONS, Missions } from './player_state_plugin.js';
+import { ActiveMission, MAX_ACTIVE_MISSIONS, Missions } from './player_state_plugin.js';
 
 function makeStellar(partial: Partial<StellarInfo> = {}): StellarInfo {
     return {
@@ -693,5 +694,78 @@ describe('mission set-string hooks (Sxxx/Axxx/Fxxx)', () => {
         // Must terminate.
         runMissionSetString(machinery, 's213', 'nova');
         expect(state.missions.size).toBe(0);
+    });
+});
+
+describe('missionMapMarks', () => {
+    function activeMission(partial: Partial<ActiveMission>): ActiveMission {
+        return {
+            id: 'nova:200', acceptedDay: 0, acceptedAt: 'nova:128',
+            travelPlanet: null, returnPlanet: null, cargoType: -1,
+            cargoQty: 0, cargoLoaded: false, travelDone: false,
+            deadlineDay: null, ...partial,
+        };
+    }
+    // Planet -> system map for the test.
+    const systemOf = (planetId: string) => ({
+        'nova:300': 'nova:400', // travel
+        'nova:301': 'nova:401', // return
+    } as Record<string, string | undefined>)[planetId];
+
+    it('marks travel and return systems as destinations', () => {
+        const mission = makeMission({ id: 'nova:200' });
+        const getMission = (id: string) => id === 'nova:200'
+            ? mission : undefined;
+        const marks = missionMapMarks([activeMission({
+            travelPlanet: 'nova:300', returnPlanet: 'nova:301',
+        })], getMission, systemOf);
+        expect(marks).toEqual([
+            { systemId: 'nova:400', kind: 'destination', missionId: 'nova:200' },
+            { systemId: 'nova:401', kind: 'destination', missionId: 'nova:200' },
+        ]);
+    });
+
+    it('suppresses destination marks under hideDestArrows', () => {
+        const mission = makeMission({ id: 'nova:200' });
+        mission.flags = { ...mission.flags, hideDestArrows: true };
+        const getMission = () => mission;
+        const marks = missionMapMarks([activeMission({
+            travelPlanet: 'nova:300', returnPlanet: 'nova:301',
+        })], getMission, systemOf);
+        expect(marks).toEqual([]);
+    });
+
+    it('marks the ship-syst system only under showArrowForShipSyst', () => {
+        const mission = makeMission({ id: 'nova:200' });
+        const getMission = () => mission;
+        const active = activeMission({
+            travelPlanet: null, returnPlanet: null,
+            shipObjective: {
+                goal: 0, systemId: 'nova:500', shipStart: 0, behavior: -1,
+                dudeId: 'nova:240', total: 1, satisfied: 0, complete: false,
+                failed: false, shipDonePending: false, live: new Map(),
+            },
+        });
+        // Without the flag: no mark.
+        expect(missionMapMarks([active], getMission, systemOf)).toEqual([]);
+        // With the flag: a ship-syst mark.
+        mission.flags = { ...mission.flags, showArrowForShipSyst: true };
+        expect(missionMapMarks([active], getMission, systemOf)).toEqual([
+            { systemId: 'nova:500', kind: 'shipSyst', missionId: 'nova:200' },
+        ]);
+    });
+
+    it('deduplicates and skips unplaced/unknown systems', () => {
+        const mission = makeMission({ id: 'nova:200' });
+        const getMission = () => mission;
+        const marks = missionMapMarks([
+            activeMission({ travelPlanet: 'nova:300' }),
+            // Same system again (dedup) and an unplaced planet (skipped).
+            activeMission({ id: 'nova:200', travelPlanet: 'nova:300',
+                returnPlanet: 'nova:999' }),
+        ], getMission, systemOf);
+        expect(marks).toEqual([
+            { systemId: 'nova:400', kind: 'destination', missionId: 'nova:200' },
+        ]);
     });
 });
