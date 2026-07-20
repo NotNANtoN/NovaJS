@@ -217,10 +217,12 @@ export async function ShipParse(ship: ShipResource,
         jumpDistanceMod: 0,
         // Afterburners come from outfits (ModType 15), not ship data.
         afterburner: 0,
-        // Multi-jump (ModType 32) and auto-refuel (ModType 19) come from
-        // outfits, not ship data.
+        // Multi-jump (ModType 32), auto-refuel (ModType 19), and the
+        // hyperspace speed mod (ModType 22) come from outfits, not ship
+        // data.
         multiJump: 0,
         autoRefuel: false,
+        hyperspaceSpeedMod: 0,
     }
 
     return {
@@ -240,6 +242,11 @@ export async function ShipParse(ship: ShipResource,
         require: "0x" + ship.require.toString(16),
         strength: ship.strength,
         inherentAI: ship.inherentAI,
+        // Resolve the ship's inherent gövt to its global id (-1 / missing
+        // becomes null), for the mïsn AvailShipType ship-govt ranges.
+        inherentGovt: ship.inherentGovt >= 128
+            ? (ship.idSpace.gövt[ship.inherentGovt]?.globalID ?? null)
+            : null,
         price: ship.cost,
         techLevel: ship.techLevel,
         hireRandom: ship.hireRandom,

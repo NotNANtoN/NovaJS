@@ -75,6 +75,12 @@ export interface MissionContext {
     bits: Set<number>;
     /** Global id of the player's ship type. */
     shipId: string;
+    /**
+     * Global gövt id of the player's ship's inherent government, or
+     * null/undefined when it has none (or the ship data isn't loaded).
+     * Gates the AvailShipType ship-govt ranges (2128+/3128+).
+     */
+    shipGovt?: string | null;
     /** Missions already active (missions can't be offered twice). */
     activeMissions: Missions;
     /** Free cargo space in tons (capacity minus cargo aboard). */
@@ -104,19 +110,47 @@ function intersects(a: number[], b: number[]): boolean {
 }
 
 /**
+ * Resolves whether a stellar sits in a target system or one adjacent to
+ * it, for the AvailStel 5000-7047 range. Supplied by callers that have
+ * system topology (the mission board / landing); callers without it
+ * (e.g. the travel/return resolution, where the Bible does not define
+ * 5000-7047) omit it and the range never matches.
+ */
+export interface StellarAdjacency {
+    /** The global system id containing `stellarId`, or undefined. */
+    systemOfStellar(stellarId: string): string | undefined;
+    /** Whether system `a` is the same as or hyperlinked to system `b`. */
+    systemsAdjacentOrEqual(a: string, b: string): boolean;
+}
+
+/**
  * Whether `stellar` matches a mïsn stellar reference (the AvailStel /
  * TravelStel / ReturnStel encoding). `refId` is the parse-time
  * resolved global id for plain ids. The adjacent-system range
- * (5000-7047) is not supported and never matches.
+ * (5000-7047, AvailStel only per the Bible) is matched only when the
+ * caller supplies `adjacency`; otherwise it never matches.
  */
 export function matchesStellarRef(ref: number, refId: string | null,
     stellar: StellarInfo, missionPrefix: string,
-    getGovt: (id: string) => GovtData | undefined): boolean {
+    getGovt: (id: string) => GovtData | undefined,
+    adjacency?: StellarAdjacency): boolean {
     if (ref === -1) {
         return !stellar.uninhabited;
     }
     if (refId !== null) {
         return stellar.id === refId;
+    }
+    // AvailStel 5000-7047: "Stellar in a system adjacent to specific
+    // system" (the range indexes system ids 128-2175 by 5000 + (id -
+    // 128)). Matches the target system itself as well as its neighbors.
+    if (ref >= 5000 && ref <= 7047) {
+        if (!adjacency) {
+            return false;
+        }
+        const targetSystem = `${missionPrefix}:${ref - 5000 + 128}`;
+        const stellarSystem = adjacency.systemOfStellar(stellar.id);
+        return stellarSystem !== undefined
+            && adjacency.systemsAdjacentOrEqual(stellarSystem, targetSystem);
     }
     if (ref === 9999) {
         return stellar.govt === null;
@@ -162,6 +196,25 @@ export function matchesStellarRef(ref: number, refId: string | null,
         return !(isGovt(31000) || classmate(rangeGovt(31000)));
     }
     return false;
+}
+
+/**
+ * Builds the StellarAdjacency for AvailStel 5000-7047 from a mission
+ * context's system topology. Returns undefined when the caller didn't
+ * supply systems (the range then never matches — fail closed).
+ */
+export function stellarAdjacencyOf(ctx: MissionContext):
+    StellarAdjacency | undefined {
+    const { systems, systemIdOfStellar } = ctx;
+    if (!systems || !systemIdOfStellar) {
+        return undefined;
+    }
+    const linksById = new Map(systems.map(s => [s.id, s.links]));
+    return {
+        systemOfStellar: id => systemIdOfStellar(id),
+        systemsAdjacentOrEqual: (a, b) =>
+            a === b || (linksById.get(a)?.includes(b) ?? false),
+    };
 }
 
 /** Safe NCB test evaluation: malformed expressions fail closed. */
@@ -219,7 +272,8 @@ export function missionMatchesLocation(mission: MissionData,
         return false;
     }
     if (!matchesStellarRef(mission.availStel, mission.availStelId,
-        ctx.stellar, idPrefix(mission.id), ctx.getGovt)) {
+        ctx.stellar, idPrefix(mission.id), ctx.getGovt,
+        stellarAdjacencyOf(ctx))) {
         return false;
     }
     // Domination is not implemented; missions gated on it never show.
@@ -247,7 +301,7 @@ export function missionMatchesLocation(mission: MissionData,
     if (!shipGoalOfferable(mission)) {
         return false;
     }
-    if (!shipTypeMatches(mission.availShipType, ctx.shipId)) {
+    if (!shipTypeMatches(mission.availShipType, ctx.shipId, ctx.shipGovt)) {
         return false;
     }
     if (!testBits(mission.availBits, ctx.bits)) {
@@ -268,18 +322,32 @@ export function stellarRecord(stellar: StellarInfo, records: LegalRecords,
     return recordWith(records, govtId, getGovt(govtId));
 }
 
-function shipTypeMatches(availShipType: number, shipId: string): boolean {
+/**
+ * Whether the player's ship satisfies a mïsn AvailShipType. The Bible's
+ * ranges: 0/-1 ignored; 128-895 must be this ship type; 1128-1895 must
+ * not be; 2128-2383 must be a ship of this inherent gövt; 3128-3383
+ * must not be. `shipGovt` is the global id of the player's ship's
+ * inherent gövt (null when it has none).
+ */
+function shipTypeMatches(availShipType: number, shipId: string,
+    shipGovt: string | null | undefined): boolean {
     if (availShipType <= 0) {
         return true;
     }
     const shipNumber = numericId(shipId);
-    if (availShipType >= 128 && availShipType <= 255) {
+    if (availShipType >= 128 && availShipType <= 895) {
         return shipNumber === availShipType;
     }
-    if (availShipType >= 1128 && availShipType <= 1255) {
+    if (availShipType >= 1128 && availShipType <= 1895) {
         return shipNumber !== availShipType - 1000;
     }
-    // Ship-govt ranges (2128+/3128+) are not modeled; don't restrict.
+    // Ship-govt ranges: the govt id is the range offset (2000 / 3000).
+    if (availShipType >= 2128 && availShipType <= 2383) {
+        return numericId(shipGovt ?? null) === availShipType - 2000;
+    }
+    if (availShipType >= 3128 && availShipType <= 3383) {
+        return numericId(shipGovt ?? null) !== availShipType - 3000;
+    }
     return true;
 }
 

@@ -165,6 +165,54 @@ describe('matchesStellarRef', () => {
         expect(matchesStellarRef(31000, null,
             makeStellar({ govt: 'nova:130' }), 'nova', get)).toBe(true);
     });
+
+    describe('the AvailStel 5000-7047 adjacent-system range', () => {
+        // System topology: nova:200 links to nova:201; nova:202 is
+        // unconnected. Stellars: 300 in system 200, 301 in system 201,
+        // 302 in system 202.
+        const adjacency = {
+            systemOfStellar: (id: string) => ({
+                'nova:300': 'nova:200',
+                'nova:301': 'nova:201',
+                'nova:302': 'nova:202',
+            } as Record<string, string | undefined>)[id],
+            systemsAdjacentOrEqual: (a: string, b: string) => {
+                if (a === b) return true;
+                const links: Record<string, string[]> = {
+                    'nova:200': ['nova:201'],
+                    'nova:201': ['nova:200'],
+                    'nova:202': [],
+                };
+                return links[a]?.includes(b) ?? false;
+            },
+        };
+        // ref 5072 -> target system 128 + (5072 - 5000) = 200.
+        const refFor200 = 5000 + (200 - 128);
+
+        it('matches a stellar in the target system itself', () => {
+            expect(matchesStellarRef(refFor200, null,
+                makeStellar({ id: 'nova:300' }), 'nova', getGovt, adjacency))
+                .toBe(true);
+        });
+
+        it('matches a stellar in an adjacent system', () => {
+            expect(matchesStellarRef(refFor200, null,
+                makeStellar({ id: 'nova:301' }), 'nova', getGovt, adjacency))
+                .toBe(true);
+        });
+
+        it('rejects a stellar in a non-adjacent system', () => {
+            expect(matchesStellarRef(refFor200, null,
+                makeStellar({ id: 'nova:302' }), 'nova', getGovt, adjacency))
+                .toBe(false);
+        });
+
+        it('never matches without an adjacency resolver (fail closed)', () => {
+            expect(matchesStellarRef(refFor200, null,
+                makeStellar({ id: 'nova:300' }), 'nova', getGovt))
+                .toBe(false);
+        });
+    });
 });
 
 describe('missionMatchesLocation', () => {
@@ -232,6 +280,39 @@ describe('missionMatchesLocation', () => {
             .toBe(true);
         expect(missionMatchesLocation(mustNotFly, LOCATION_MISSION_COMPUTER,
             ctx)).toBe(false);
+    });
+
+    it('restricts by ship type across the full Bible range (128-895)', () => {
+        // A high-id ship (>255) must still match a 128-895 restriction.
+        const mustFly = makeMission({ availShipType: 500 });
+        expect(missionMatchesLocation(mustFly, LOCATION_MISSION_COMPUTER,
+            makeContext({ shipId: 'nova:500' }))).toBe(true);
+        expect(missionMatchesLocation(mustFly, LOCATION_MISSION_COMPUTER,
+            makeContext({ shipId: 'nova:164' }))).toBe(false);
+    });
+
+    it('restricts by the ship\'s inherent govt (2128+/3128+)', () => {
+        // 2128 + (govt 130 - 128) = 2130: must fly a ship of govt 130.
+        const mustBeGovt130 = makeMission({ availShipType: 2130 });
+        const mustNotBeGovt130 = makeMission({ availShipType: 3130 });
+        const govt130 = makeContext({ shipGovt: 'nova:130' });
+        const govt129 = makeContext({ shipGovt: 'nova:129' });
+        const noGovt = makeContext({ shipGovt: null });
+
+        expect(missionMatchesLocation(mustBeGovt130,
+            LOCATION_MISSION_COMPUTER, govt130)).toBe(true);
+        expect(missionMatchesLocation(mustBeGovt130,
+            LOCATION_MISSION_COMPUTER, govt129)).toBe(false);
+        expect(missionMatchesLocation(mustBeGovt130,
+            LOCATION_MISSION_COMPUTER, noGovt)).toBe(false);
+
+        expect(missionMatchesLocation(mustNotBeGovt130,
+            LOCATION_MISSION_COMPUTER, govt130)).toBe(false);
+        expect(missionMatchesLocation(mustNotBeGovt130,
+            LOCATION_MISSION_COMPUTER, govt129)).toBe(true);
+        // A ship with no inherent govt is "not of govt 130".
+        expect(missionMatchesLocation(mustNotBeGovt130,
+            LOCATION_MISSION_COMPUTER, noGovt)).toBe(true);
     });
 });
 

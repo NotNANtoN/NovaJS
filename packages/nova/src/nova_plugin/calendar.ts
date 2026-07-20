@@ -91,12 +91,11 @@ export function formatDate(date: GameDate, prefix = '', suffix = ''): string {
 }
 
 /**
- * Days a hyperspace jump takes for a ship of the given mass, per the
- * EVN Bible's shïp Mass table: 1-99 tons is 1 day, 100-199 is 2, 200
- * and up is 3. (Outfit "hyperspace speed mod" adjustments are not
- * modeled yet.)
+ * Base days a hyperspace jump takes for a ship of the given mass, per
+ * the EVN Bible's shïp Mass table: 1-99 tons is 1 day, 100-199 is 2,
+ * 200 and up is 3.
  */
-export function daysPerJump(mass: number): number {
+export function baseDaysPerJump(mass: number): number {
     if (mass < 100) {
         return 1;
     }
@@ -104,4 +103,14 @@ export function daysPerJump(mass: number): number {
         return 2;
     }
     return 3;
+}
+
+/**
+ * Days a hyperspace jump takes for a ship of the given mass, after the
+ * summed "hyperspace speed mod" outfit adjustment (oütf ModType 22).
+ * ModVal is a signed number of days added to the base; the Bible caps
+ * the result so it "still can't go below 1 day/jump".
+ */
+export function daysPerJump(mass: number, hyperspaceSpeedMod = 0): number {
+    return Math.max(1, baseDaysPerJump(mass) + hyperspaceSpeedMod);
 }

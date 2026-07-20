@@ -57,7 +57,7 @@ import { initialRecordsFromGovtStatuses } from "./nova_plugin/reputation.js";
 import { CombatRatingComponent, LegalRecordsComponent } from "./nova_plugin/reputation_plugin.js";
 import { extractSaveData, loadSave, resetSave, restorePlayerState, writeSave } from "./nova_plugin/save_game.js";
 import { ControlledByComponent } from "./nova_plugin/ship_control.js";
-import { ShipComponent } from "./nova_plugin/ship_plugin.js";
+import { ShipComponent, ShipPhysicsComponent } from "./nova_plugin/ship_plugin.js";
 import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
 import { Vector } from "nova_ecs/datatypes/vector";
 import { EscortCommandComponent } from "./nova_plugin/escort_command.js";
@@ -731,16 +731,29 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
             return;
         }
         void (async () => {
-            // A jump takes days (by ship mass); advance the player's
+            // A jump takes days (by ship mass, adjusted by any
+            // "hyperspace speed mod" outfits); advance the player's
             // calendar while the entity is between simulations. The
-            // date rides to peers with the re-added entity.
+            // date rides to peers with the re-added entity. The derived
+            // ShipPhysicsComponent already sums the outfit mods; fall
+            // back to the raw ship data if it isn't populated yet.
             try {
-                const shipId = data.entity.components.get(ShipComponent)?.id;
-                const mass = shipId
-                    ? (await simulationGameData.data.Ship.get(shipId))
-                        .physics.mass
-                    : 100;
-                await advanceEntityDate(data.entity, daysPerJump(mass),
+                const derived = data.entity.components
+                    .get(ShipPhysicsComponent);
+                let mass = derived?.mass;
+                let speedMod = derived?.hyperspaceSpeedMod ?? 0;
+                if (mass === undefined) {
+                    const shipId = data.entity.components
+                        .get(ShipComponent)?.id;
+                    const physics = shipId
+                        ? (await simulationGameData.data.Ship.get(shipId))
+                            .physics
+                        : undefined;
+                    mass = physics?.mass ?? 100;
+                    speedMod = physics?.hyperspaceSpeedMod ?? 0;
+                }
+                await advanceEntityDate(data.entity,
+                    daysPerJump(mass, speedMod),
                     MissionUniverse.shared(simulationGameData));
             } catch (e) {
                 console.warn('Failed to advance the date on jump:', e);

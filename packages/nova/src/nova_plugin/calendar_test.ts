@@ -1,5 +1,5 @@
 import 'jasmine';
-import { addDays, dateFromDayNumber, dayNumber, daysInMonth, daysPerJump, formatDate } from './calendar.js';
+import { addDays, baseDaysPerJump, dateFromDayNumber, dayNumber, daysInMonth, daysPerJump, formatDate } from './calendar.js';
 
 describe('calendar', () => {
     it('round-trips dates through day numbers', () => {
@@ -53,11 +53,28 @@ describe('calendar', () => {
     });
 
     it('maps ship mass to days per jump per the Bible table', () => {
+        expect(baseDaysPerJump(0)).toBe(1);
+        expect(baseDaysPerJump(99)).toBe(1);
+        expect(baseDaysPerJump(100)).toBe(2);
+        expect(baseDaysPerJump(199)).toBe(2);
+        expect(baseDaysPerJump(200)).toBe(3);
+        expect(baseDaysPerJump(5000)).toBe(3);
+        // daysPerJump with no mod matches the base table.
         expect(daysPerJump(0)).toBe(1);
-        expect(daysPerJump(99)).toBe(1);
         expect(daysPerJump(100)).toBe(2);
-        expect(daysPerJump(199)).toBe(2);
         expect(daysPerJump(200)).toBe(3);
-        expect(daysPerJump(5000)).toBe(3);
+    });
+
+    it('applies the ModType 22 hyperspace speed mod, floored at 1 day', () => {
+        // A negative mod speeds jumps up.
+        expect(daysPerJump(200, -1)).toBe(2);
+        expect(daysPerJump(200, -2)).toBe(1);
+        // The floor: never below 1 day/jump, however large the negative.
+        expect(daysPerJump(200, -3)).toBe(1);
+        expect(daysPerJump(100, -5)).toBe(1);
+        expect(daysPerJump(50, -1)).toBe(1);
+        // A positive mod slows jumps down (no upper cap).
+        expect(daysPerJump(50, 2)).toBe(3);
+        expect(daysPerJump(200, 4)).toBe(7);
     });
 });

@@ -42,7 +42,8 @@ export class MissionSession {
         private universe: MissionUniverse,
         public planetId: string,
         cargoCapacity: number,
-        public shipId: string) {
+        public shipId: string,
+        private shipGovt: string | null) {
         this.currentDay = dayNumber(
             entity.components.get(GameDateComponent) ?? getDefaultGameDate());
 
@@ -85,6 +86,7 @@ export class MissionSession {
             stellarCandidates: this.universe.stellarCandidates,
             bits: this.state.bits,
             shipId: this.shipId,
+            shipGovt: this.shipGovt,
             activeMissions: this.state.missions,
             freeCargoSpace: this.state.cargoCapacity - cargoUsedTons,
             random: Math.random,
@@ -105,8 +107,16 @@ export class MissionSession {
         await universe.load();
         const shipId = entity.components.get(ShipComponent)?.id ?? 'default';
         const cargoCapacity = await computeCargoCapacity(entity, gameData);
+        // The ship's inherent gövt gates the AvailShipType ship-govt
+        // ranges (2128+/3128+); missing ship data leaves it unrestricted.
+        let shipGovt: string | null = null;
+        try {
+            shipGovt = (await gameData.data.Ship.get(shipId)).inherentGovt;
+        } catch {
+            // Unknown ship: the ship-govt ranges simply don't match.
+        }
         return new MissionSession(entity, universe, planetId,
-            cargoCapacity, shipId);
+            cargoCapacity, shipId, shipGovt);
     }
 
     /** Writes the working copies back onto the entity. */
