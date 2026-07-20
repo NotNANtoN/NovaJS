@@ -3,10 +3,14 @@ import { getDefaultJunkData, JunkData } from 'novadatainterface/junk_data';
 import { getDefaultPlanetData, PlanetData, TradeTier } from 'novadatainterface/planet_data';
 import {
     buyGood,
+    buyGoodQuantity,
     freeCargoSpace,
     junkTradeGood,
+    maxBuyQuantity,
+    maxSellQuantity,
     otherCargoNames,
     sellGood,
+    sellGoodQuantity,
     standardTradeGoods,
     STANDARD_COMMODITY_BASE_PRICES,
     tierPrice,
@@ -172,6 +176,85 @@ describe('sellGood', () => {
         const state = makeState({ cargo: [['mission:nova:128', 7]] });
         expect(sellGood(state, good())).toEqual(0);
         expect(state.cargo.get('mission:nova:128')).toEqual(7);
+    });
+});
+
+describe('maxBuyQuantity', () => {
+    it('is the lesser of what fits and what is affordable', () => {
+        // 1000 cr at 75/ton affords 13; 50 tons fit.
+        expect(maxBuyQuantity(makeState({ credits: 1000 }), good()))
+            .toEqual(13);
+        // 100,000 cr affords plenty; only 50 tons fit.
+        expect(maxBuyQuantity(makeState({ credits: 100_000 }), good()))
+            .toEqual(50);
+    });
+
+    it('is zero for unbuyable goods or a broke player', () => {
+        expect(maxBuyQuantity(makeState(), good({ canBuy: false })))
+            .toEqual(0);
+        expect(maxBuyQuantity(makeState({ credits: 74 }), good()))
+            .toEqual(0);
+    });
+});
+
+describe('maxSellQuantity', () => {
+    it('is the held tonnage of a sellable good', () => {
+        const state = makeState({ cargo: [['cargo:0', 8]] });
+        expect(maxSellQuantity(state, good())).toEqual(8);
+        expect(maxSellQuantity(state, good({ canSell: false }))).toEqual(0);
+        expect(maxSellQuantity(makeState(), good())).toEqual(0);
+    });
+});
+
+describe('buyGoodQuantity', () => {
+    it('buys the requested tonnage when the limits allow it', () => {
+        const state = makeState({ credits: 1000, capacity: 50 });
+        expect(buyGoodQuantity(state, good(), 5)).toEqual(5);
+        expect(state.cargo.get('cargo:0')).toEqual(5);
+        expect(state.credits.credits).toEqual(1000 - 5 * 75);
+    });
+
+    it('clamps an over-entered quantity to the most allowed', () => {
+        const state = makeState({ credits: 1000, capacity: 50 });
+        // 999 requested; 13 affordable.
+        expect(buyGoodQuantity(state, good(), 999)).toEqual(13);
+        expect(state.credits.credits).toEqual(1000 - 13 * 75);
+
+        const cramped = makeState({ credits: 100_000, capacity: 10 });
+        expect(buyGoodQuantity(cramped, good(), 999)).toEqual(10);
+    });
+
+    it('buys nothing for zero, unbuyable, or broke requests', () => {
+        const state = makeState({ credits: 1000 });
+        expect(buyGoodQuantity(state, good(), 0)).toEqual(0);
+        expect(buyGoodQuantity(state, good({ canBuy: false }), 5)).toEqual(0);
+        expect(buyGoodQuantity(makeState({ credits: 0 }), good(), 5))
+            .toEqual(0);
+        expect(state.cargo.size).toEqual(0);
+    });
+});
+
+describe('sellGoodQuantity', () => {
+    it('sells the requested tonnage, leaving the rest aboard', () => {
+        const state = makeState({ cargo: [['cargo:0', 8]], credits: 0 });
+        expect(sellGoodQuantity(state, good(), 3)).toEqual(3);
+        expect(state.cargo.get('cargo:0')).toEqual(5);
+        expect(state.credits.credits).toEqual(3 * 75);
+    });
+
+    it('clamps an over-entered quantity to the held amount', () => {
+        const state = makeState({ cargo: [['cargo:0', 8]], credits: 0 });
+        expect(sellGoodQuantity(state, good(), 999)).toEqual(8);
+        expect(state.cargo.has('cargo:0')).toBeFalse();
+        expect(state.credits.credits).toEqual(8 * 75);
+    });
+
+    it('sells nothing when barred or nothing is held', () => {
+        const state = makeState({ cargo: [['cargo:0', 8]] });
+        expect(sellGoodQuantity(state, good({ canSell: false }), 3))
+            .toEqual(0);
+        expect(sellGoodQuantity(makeState(), good(), 3)).toEqual(0);
+        expect(state.cargo.get('cargo:0')).toEqual(8);
     });
 });
 
