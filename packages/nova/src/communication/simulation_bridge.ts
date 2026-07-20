@@ -1121,63 +1121,105 @@ export class SimulationBridgeClient {
     }
 }
 
+/**
+ * Thrown (as a rejection) by every in-flight or later call on an
+ * AsyncSimulationBridgeClient once it has been closed. Callers that
+ * race a system transition (the frame pump) catch this and bail out.
+ */
+export class SimulationBridgeClosedError extends Error {
+    constructor() {
+        super('Simulation bridge closed');
+        this.name = 'SimulationBridgeClosedError';
+    }
+}
+
 export class AsyncSimulationBridgeClient {
+    /**
+     * Rejects when close() runs. Every host call races against it:
+     * closing a bridge whose worker is terminated mid-call would
+     * otherwise leave the caller's promise unsettled FOREVER (a
+     * message posted to a terminated worker gets no reply), which
+     * wedged the browser's frame pump and froze every transit that
+     * raced it (the hypergate black screen / jump white screen hang).
+     */
+    private closedRejection: Promise<never>;
+    private rejectClosed!: (error: Error) => void;
+    private closed = false;
+
     constructor(
         private host: AsyncSimulationBridgeHostApi,
         private serializer: Serializer,
         private closeImpl?: () => void | Promise<void>,
-    ) { }
+    ) {
+        this.closedRejection = new Promise<never>((_, reject) => {
+            this.rejectClosed = reject;
+        });
+        // If close() runs with no call in flight, the bare rejection
+        // must not surface as an unhandled rejection.
+        this.closedRejection.catch(() => { });
+    }
+
+    /**
+     * Races a worker call against bridge closure so it always settles.
+     */
+    private guard<T>(call: () => Promise<T>): Promise<T> {
+        if (this.closed) {
+            return Promise.reject(new SimulationBridgeClosedError());
+        }
+        return Promise.race([call(), this.closedRejection]);
+    }
 
     async snapshot(): Promise<SimulationFrame> {
-        return await this.host.snapshot();
+        return await this.guard(() => this.host.snapshot());
     }
 
     async step(count = 1) {
-        await this.host.step(count);
+        await this.guard(() => this.host.step(count));
     }
 
     async controlEvents(events: ControlEvent[]) {
-        await this.host.controlEvents(events);
+        await this.guard(() => this.host.controlEvents(events));
     }
 
     async analogControl(control: AnalogControlState) {
-        await this.host.analogControl(control);
+        await this.guard(() => this.host.analogControl(control));
     }
 
     async setTarget(target: string | null) {
-        await this.host.setTarget(target);
+        await this.guard(() => this.host.setTarget(target));
     }
 
     async addEntity(uuid: string, entity: Entity) {
-        await this.host.addEntity(uuid, this.serializer.encode(entity));
+        await this.guard(() =>
+            this.host.addEntity(uuid, this.serializer.encode(entity)));
     }
 
     async removeEntity(uuid: string) {
-        await this.host.removeEntity(uuid);
+        await this.guard(() => this.host.removeEntity(uuid));
     }
 
     async setPlayerJumpRoute(route: string[]) {
-        await this.host.setPlayerJumpRoute(route);
+        await this.guard(() => this.host.setPlayerJumpRoute(route));
     }
 
     async spawnNpc(shipId: string) {
-        await this.host.spawnNpc(shipId);
+        await this.guard(() => this.host.spawnNpc(shipId));
     }
 
     async rewind(ticks: number) {
-        return this.host.rewind(ticks);
+        return this.guard(() => this.host.rewind(ticks));
     }
 
     async resync() {
-        return this.host.resync();
+        return this.guard(() => this.host.resync());
     }
 
     async status() {
-        return this.host.status();
+        return this.guard(() => this.host.status());
     }
 
     async entityHashes() {
-        return this.host.entityHashes();
+        return this.guard(() => this.host.entityHashes());
     }
 
     getSerializer() {
@@ -1193,6 +1235,11 @@ export class AsyncSimulationBridgeClient {
     }
 
     async close() {
+        // Settle every in-flight (and future) call BEFORE terminating
+        // the worker: terminate() silences the worker, so any call
+        // still awaiting a reply would never settle.
+        this.closed = true;
+        this.rejectClosed(new SimulationBridgeClosedError());
         await this.closeImpl?.();
     }
 }
