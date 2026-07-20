@@ -14,6 +14,7 @@ import { OutfitsStateComponent } from "../nova_plugin/outfit_plugin.js";
 import { cleanRecords, LegalRecords } from "../nova_plugin/reputation.js";
 import { LegalRecordsComponent } from "../nova_plugin/reputation_plugin.js";
 import { ShipComponent } from "../nova_plugin/ship_plugin.js";
+import { idPrefix } from "../nova_plugin/mission_logic.js";
 import { Button } from "./button.js";
 import { ItemGrid, ItemTile } from "./item_grid.js";
 import { Menu } from "./menu.js";
@@ -196,7 +197,7 @@ export class Outfitter extends Menu<Entity> {
      * against the working outfits and control bits. Gxxx grants here
      * intentionally bypass the purchase checks.
      */
-    private runSetString(expression: string) {
+    private runSetString(expression: string, resourcePrefix = 'nova') {
         if (!expression) {
             return;
         }
@@ -213,7 +214,7 @@ export class Outfitter extends Menu<Entity> {
                 }
             }
             try {
-                this.missionSession.runMissionSet(expression, 'nova');
+                this.missionSession.runMissionSet(expression, resourcePrefix);
             } catch (error) {
                 if (error instanceof NCBParseError) {
                     console.warn('Bad outfit mission set string:', error);
@@ -271,7 +272,7 @@ export class Outfitter extends Menu<Entity> {
                     this.govts);
             }
         }
-        this.runSetString(outfit.onPurchase);
+        this.runSetString(outfit.onPurchase, idPrefix(outfit.id));
         this.itemGrid?.setCounts(this.outfits);
         this.setFreeMassText();
     }
@@ -294,7 +295,7 @@ export class Outfitter extends Menu<Entity> {
         if (this.outfits.get(outfit.id) === 0) {
             this.outfits.delete(outfit.id);
         }
-        this.runSetString(outfit.onSell);
+        this.runSetString(outfit.onSell, idPrefix(outfit.id));
         this.itemGrid?.setCounts(this.outfits);
         this.setFreeMassText();
     }

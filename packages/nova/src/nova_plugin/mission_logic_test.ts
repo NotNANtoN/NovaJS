@@ -7,6 +7,7 @@ import {
     failExpiredMissions,
     makeMissionOffer,
     matchesStellarRef,
+    runPendingShipDone,
     MissionContext,
     MissionMachineryContext,
     missionMatchesLocation,
@@ -555,6 +556,40 @@ describe('accept / landing / completion flow', () => {
         expect(state.bits.has(77)).toBe(true);
         expect(state.events.find(e => e.type === 'failed')?.text)
             .toBe('You were disabled.');
+    });
+
+    it('runs OnShipDone when the sim marks the goal done (in flight)', () => {
+        const mission = makeMission({
+            id: 'nova:207',
+            shipGoal: 0, shipCount: 2, shipDudeId: 'nova:240',
+            returnStel: 129, returnStelId: 'nova:129',
+            onShipDone: 'b88',
+            shipDoneText: 'Targets eliminated.',
+        });
+        const state = makeState();
+        // Special-ship resolution needs system topology in the context.
+        const machinery = makeMachinery(state, [mission], {
+            systems: [{ id: 'nova:200', govt: null, links: [] }],
+            systemIdOfStellar: () => 'nova:200',
+        });
+        acceptOffer(machinery,
+            makeMissionOffer(mission, machinery.offerContext())!);
+        const active = state.missions.get('nova:207')!;
+        // Nothing pending yet.
+        expect(runPendingShipDone(machinery)).toBe(0);
+        // The shared sim completes the goal and flags OnShipDone.
+        active.shipObjective!.complete = true;
+        active.shipObjective!.shipDonePending = true;
+        // Runs at the next date advance (jump or landing), not just at
+        // the return landing: OnShipDone fires and the mission stays.
+        expect(runPendingShipDone(machinery)).toBe(1);
+        expect(state.bits.has(88)).toBe(true);
+        expect(state.events.find(e => e.type === 'shipDone')?.text)
+            .toBe('Targets eliminated.');
+        expect(active.shipObjective!.shipDonePending).toBe(false);
+        expect(state.missions.has('nova:207')).toBe(true);
+        // Idempotent: it does not run again.
+        expect(runPendingShipDone(machinery)).toBe(0);
     });
 
     it('freezes failIfPlayerDisabledOrDestroyed onto the active mission', () => {

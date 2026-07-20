@@ -845,6 +845,59 @@ function completeMission(machinery: MissionMachineryContext,
 }
 
 /**
+ * Runs a mission's OnShipDone (and queues its ShipDoneText event) if the
+ * shared sim flagged its ship goal complete (shipDonePending). The Bible
+ * runs OnShipDone the moment the goal completes; the set string mutates
+ * control bits player-locally, so the earliest deterministic, owner-
+ * driven point is the next date advance (jump or landing). Clears the
+ * pending flag so it runs exactly once.
+ */
+function runShipDoneIfPending(machinery: MissionMachineryContext,
+    active: ActiveMission, mission: MissionData,
+    outfits?: Map<string, number>): void {
+    const objective = active.shipObjective;
+    if (!objective?.shipDonePending) {
+        return;
+    }
+    objective.shipDonePending = false;
+    runMissionSetString(machinery, mission.onShipDone,
+        idPrefix(mission.id), outfits);
+    if (mission.shipDoneText) {
+        machinery.state.events.push({
+            missionId: mission.id,
+            missionName: mission.name,
+            type: 'shipDone',
+            text: mission.shipDoneText,
+        });
+    }
+}
+
+/**
+ * Runs OnShipDone for every active mission whose ship goal just
+ * completed (shipDonePending), appending any ShipDoneText events.
+ * Called at each date advance (jump or landing) so OnShipDone fires at
+ * the first player-local opportunity after the goal completes rather
+ * than waiting for a landing. Returns how many ran.
+ */
+export function runPendingShipDone(machinery: MissionMachineryContext,
+    outfits?: Map<string, number>): number {
+    const { state } = machinery;
+    let ran = 0;
+    for (const active of [...state.missions.values()]) {
+        if (!active.shipObjective?.shipDonePending) {
+            continue;
+        }
+        const mission = machinery.getMission(active.id);
+        if (!mission) {
+            continue;
+        }
+        runShipDoneIfPending(machinery, active, mission, outfits);
+        ran++;
+    }
+    return ran;
+}
+
+/**
  * Fails every active mission whose deadline has passed as of
  * `currentDay`, or which the shared sim marked failed (`active.failed`).
  * Runs OnFailure and appends a failure event for each — the same as a
@@ -902,23 +955,10 @@ export function processLanding(machinery: MissionMachineryContext,
             failMission(machinery, active.id, outfits);
             continue;
         }
-        if (objective?.shipDonePending) {
-            // OnShipDone. Timing gap (documented): the Bible evaluates
-            // it the moment the goal completes; control bits only
-            // change player-locally here, so it runs at the next
-            // landing instead.
-            objective.shipDonePending = false;
-            runMissionSetString(machinery, mission.onShipDone,
-                idPrefix(mission.id), outfits);
-            if (mission.shipDoneText) {
-                state.events.push({
-                    missionId: mission.id,
-                    missionName: mission.name,
-                    type: 'shipDone',
-                    text: mission.shipDoneText,
-                });
-            }
-        }
+        // OnShipDone normally runs at the previous date advance (jump or
+        // landing) the moment the goal completed; this catches the case
+        // where the goal completed at this very landing's date advance.
+        runShipDoneIfPending(machinery, active, mission, outfits);
         if (active.travelPlanet === planetId && !active.travelDone) {
             let transferred = true;
             if (mission.pickupMode === 1) {

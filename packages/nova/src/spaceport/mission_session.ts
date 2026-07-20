@@ -6,13 +6,13 @@ import { CargoComponent } from '../nova_plugin/cargo_plugin.js';
 import { runCronsForDays } from '../nova_plugin/cron_logic.js';
 import {
     failExpiredMissions,
-    idPrefix,
     MissionContext,
     MissionEvent,
     MissionMachineryContext,
     MissionWorkingState,
     processLanding,
     runMissionSetString,
+    runPendingShipDone,
     stellarInfoOf,
 } from '../nova_plugin/mission_logic.js';
 import { ControlBitsComponent } from '../nova_plugin/ncb_plugin.js';
@@ -322,26 +322,32 @@ export async function advanceEntityDate(entity: Entity, days: number,
         console.warn('Cron evaluation failed:', e);
     }
 
-    // Fail missions whose deadline has now passed (or which the sim
-    // marked failed). Needs the game data for OnFailure set strings and
-    // reputation, so it's skipped for the bare (gameData-less) callers.
+    // In-flight mission upkeep: fail now-expired / sim-flagged missions
+    // and run OnShipDone for goals the sim just completed. Needs the game
+    // data for set strings and reputation, so it's skipped for the bare
+    // (gameData-less) callers.
     if (gameData) {
         try {
-            await failExpiredEntityMissions(entity, gameData, universe);
+            await processInFlightMissions(entity, gameData, universe);
         } catch (e) {
-            console.warn('Mission deadline evaluation failed:', e);
+            console.warn('In-flight mission evaluation failed:', e);
         }
     }
 }
 
 /**
- * Fails every active mission on the entity whose deadline has passed as
- * of the entity's (already-advanced) game date, or which the shared sim
- * flagged failed, running OnFailure and queueing a failure notice for
- * the next spaceport screen. A no-op when nothing has expired, so
- * jump/landing date advances stay cheap in the common case.
+ * In-flight mission upkeep at a date advance (jump or landing), before
+ * any landing is processed:
+ *  - fails missions whose deadline has passed or which the shared sim
+ *    marked failed (running OnFailure), and
+ *  - runs OnShipDone for missions whose ship goal the sim just completed
+ *    (shipDonePending), so it fires at the first player-local
+ *    opportunity rather than only at a landing.
+ * Any resulting notices are queued for the next spaceport screen. A
+ * no-op — skipping the session build — when nothing is due, so the
+ * common date advance stays cheap.
  */
-async function failExpiredEntityMissions(entity: Entity,
+async function processInFlightMissions(entity: Entity,
     gameData: SimulationGameDataInterface,
     universe: MissionUniverse): Promise<void> {
     const missions = entity.components.get(MissionsComponent);
@@ -350,24 +356,19 @@ async function failExpiredEntityMissions(entity: Entity,
     }
     const currentDay = dayNumber(
         entity.components.get(GameDateComponent) ?? getDefaultGameDate());
-    // Skip the (relatively expensive) session build unless something is
-    // actually due to fail this advance.
     const anyDue = [...missions.values()].some(active =>
         active.failed
-        || (active.deadlineDay !== null && currentDay > active.deadlineDay));
+        || (active.deadlineDay !== null && currentDay > active.deadlineDay)
+        || active.shipObjective?.shipDonePending);
     if (!anyDue) {
         return;
     }
-    // A landing at "deep space" is never processed; use the entity's
-    // last accepted-at stellar only for offer context (unused by
-    // failure), falling back to a synthetic id.
     const session = await MissionSession.create(
         entity, gameData, universe, '<in-flight>');
-    const failed = failExpiredMissions(session.machinery, currentDay,
-        session.outfits);
-    if (failed === 0) {
-        return;
-    }
+    // OnShipDone first: a goal that completed can influence a mission
+    // that then fails (e.g. an OnShipDone that starts a timed follow-up).
+    runPendingShipDone(session.machinery, session.outfits);
+    failExpiredMissions(session.machinery, currentDay, session.outfits);
     const events = session.commit();
     if (events.length > 0) {
         const existing =
