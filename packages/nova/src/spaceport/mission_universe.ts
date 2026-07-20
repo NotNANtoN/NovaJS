@@ -115,6 +115,11 @@ export class MissionUniverse {
         return this.govtsById.get(id);
     }
 
+    /** Every govt, sorted by id, for reputation ally/classmate scopes. */
+    govts(): Iterable<readonly [string, GovtData]> {
+        return [...this.govtsById].sort(([a], [b]) => a < b ? -1 : 1);
+    }
+
     planetName(id: string | null): string {
         if (!id) {
             return 'nowhere';

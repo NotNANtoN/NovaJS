@@ -4,6 +4,18 @@ import { PlanetData } from 'novadatainterface/planet_data';
 import { evaluateNCBTest, makeControlBitHooks, NCBParseError, NCBSetHooks, runNCBSet } from './ncb.js';
 import { Cargo, cargoUsed } from './cargo_plugin.js';
 import { ActiveMission, MAX_ACTIVE_MISSIONS, Missions } from './player_state_plugin.js';
+import {
+    addRecord,
+    AVAIL_RECORD_DOMINATED_ANY,
+    AVAIL_RECORD_DOMINATED_HERE,
+    availRatingOk,
+    availRecordOk,
+    cleanRecords,
+    compRewardDelta,
+    decodePayVal,
+    LegalRecords,
+    recordWith,
+} from './reputation.js';
 
 /**
  * Pure mission mechanics: availability evaluation, offer resolution
@@ -64,6 +76,10 @@ export interface MissionContext {
     activeMissions: Missions;
     /** Free cargo space in tons (capacity minus cargo aboard). */
     freeCargoSpace: number;
+    /** The player's legal records (AvailRecord); absent = no records. */
+    records?: LegalRecords;
+    /** The player's combat-rating kill points (AvailRating). */
+    combatRating?: number;
     /** Uniform [0, 1). Player-local; plain randomness is fine. */
     random(): number;
     /** Synchronous cached govt lookup (warm the cache first). */
@@ -176,12 +192,10 @@ export const LOCATION_BAR = 1;
  * player, not counting the AvailRandom roll (the caller rolls per
  * landing so re-opening the board doesn't reroll).
  *
- * Known simplifications (documented gaps): AvailRecord is ignored
- * except the domination sentinels (no legal records yet), AvailRating
- * is ignored (no combat rating), Require must be zero (no Contribute
- * bits), and missions with special-ship goals are never offered
- * (combat objectives are unimplemented, so they could never be
- * completed).
+ * Known simplifications (documented gaps): Require must be zero (no
+ * Contribute bits), and missions with special-ship goals are never
+ * offered (combat objectives are unimplemented, so they could never
+ * be completed).
  */
 export function missionMatchesLocation(mission: MissionData,
     location: number, ctx: MissionContext): boolean {
@@ -196,7 +210,19 @@ export function missionMatchesLocation(mission: MissionData,
         return false;
     }
     // Domination is not implemented; missions gated on it never show.
-    if (mission.availRecord === -32000 || mission.availRecord === -32001) {
+    if (mission.availRecord === AVAIL_RECORD_DOMINATED_HERE
+        || mission.availRecord === AVAIL_RECORD_DOMINATED_ANY) {
+        return false;
+    }
+    // AvailRecord: the record with this stellar's govt (independent
+    // stellars judge by govt 128, per the Bible's Appendix II rule for
+    // independent systems).
+    if (!availRecordOk(mission.availRecord,
+        stellarRecord(ctx.stellar, ctx.records ?? new Map(),
+            idPrefix(mission.id), ctx.getGovt))) {
+        return false;
+    }
+    if (!availRatingOk(mission.availRating, ctx.combatRating ?? 0)) {
         return false;
     }
     // Contribute bits are not implemented; fail closed on Require.
@@ -216,6 +242,18 @@ export function missionMatchesLocation(mission: MissionData,
         return false;
     }
     return true;
+}
+
+/**
+ * The player's legal record at a stellar: the record with its govt,
+ * or — for an independent stellar — with govt 128, the Bible's rule
+ * for independent systems (Appendix II).
+ */
+export function stellarRecord(stellar: StellarInfo, records: LegalRecords,
+    missionPrefix: string,
+    getGovt: (id: string) => GovtData | undefined): number {
+    const govtId = stellar.govt ?? `${missionPrefix}:128`;
+    return recordWith(records, govtId, getGovt(govtId));
 }
 
 function shipTypeMatches(availShipType: number, shipId: string): boolean {
@@ -377,6 +415,12 @@ export interface MissionWorkingState {
     /** Days the game date should be advanced (DatePostInc), summed. */
     dateAdvance: number;
     events: MissionEvent[];
+    /**
+     * The player's legal records, for CompReward and the PayVal
+     * record-cleaning encodings. Optional so bare test states keep
+     * working; reputation effects are skipped when absent.
+     */
+    records?: LegalRecords;
 }
 
 export interface MissionMachineryContext {
@@ -386,6 +430,33 @@ export interface MissionMachineryContext {
     /** Context for resolving Sxxx-started missions' destinations. */
     offerContext(): MissionContext;
     random(): number;
+    /**
+     * Every govt (deterministic order), for ally/classmate scopes of
+     * the PayVal record-cleaning encodings. Optional; cleaning
+     * degrades to the named govt only when absent.
+     */
+    allGovts?(): Iterable<readonly [string, GovtData]>;
+}
+
+/**
+ * Applies a mission outcome's CompGovt/CompReward record change
+ * (Bible: complete grants CompReward; failure costs half — "that govt
+ * will take it personally"; abort costs 5x under mïsn flag 0x0040).
+ */
+function applyOutcomeReputation(machinery: MissionMachineryContext,
+    mission: MissionData, outcome: 'complete' | 'fail' | 'abort'): void {
+    const { state } = machinery;
+    if (!state.records || mission.compGovt < 128) {
+        return;
+    }
+    const delta = compRewardDelta(mission.compReward, outcome,
+        mission.flags.lose5xCompRewardOnAbort);
+    if (delta === 0) {
+        return;
+    }
+    const govtId = `${idPrefix(mission.id)}:${mission.compGovt}`;
+    addRecord(state.records, govtId,
+        machinery.offerContext().getGovt(govtId), delta);
 }
 
 function freeCargoSpace(state: MissionWorkingState): number {
@@ -524,6 +595,14 @@ export function acceptOffer(machinery: MissionMachineryContext,
         && (mission.pickupMode === 0 || mission.pickupMode === -1)) {
         loadMissionCargo(state, active);
     }
+    // PayVal -50000 and down: take credits at mission START (the only
+    // PayVal encoding that applies before completion). Clamped at 0 —
+    // EV Nova has no debt.
+    const pay = decodePayVal(mission.payVal);
+    if (pay.type === 'takeCredits') {
+        state.credits.credits = Math.max(0,
+            state.credits.credits - pay.amount);
+    }
     runMissionSetString(machinery, mission.onAccept, prefix, outfits, depth);
     state.events.push({
         missionId: mission.id,
@@ -573,6 +652,7 @@ export function abortMission(machinery: MissionMachineryContext,
     unloadMissionCargo(state, active);
     const mission = machinery.getMission(missionId);
     if (mission) {
+        applyOutcomeReputation(machinery, mission, 'abort');
         runMissionSetString(machinery, mission.onAbort,
             idPrefix(missionId), outfits, depth);
     }
@@ -596,6 +676,7 @@ export function failMission(machinery: MissionMachineryContext,
     unloadMissionCargo(state, active);
     const mission = machinery.getMission(missionId);
     if (mission) {
+        applyOutcomeReputation(machinery, mission, 'fail');
         runMissionSetString(machinery, mission.onFailure,
             idPrefix(missionId), outfits, depth);
     }
@@ -614,12 +695,22 @@ function completeMission(machinery: MissionMachineryContext,
     state.missions.delete(active.id);
     unloadMissionCargo(state, active);
     let payment: number | undefined;
-    // Positive PayVal is credits; the negative encodings (legal-record
-    // cleaning, cash removal) are not modeled yet.
-    if (mission.payVal > 0) {
-        state.credits.credits += mission.payVal;
-        payment = mission.payVal;
+    // PayVal: credits, record cleaning, or cash removal (the Bible's
+    // negative encodings; takeCredits already applied at accept).
+    const pay = decodePayVal(mission.payVal);
+    if (pay.type === 'credits') {
+        state.credits.credits += pay.amount;
+        payment = pay.amount;
+    } else if (pay.type === 'takePercent') {
+        state.credits.credits -= Math.trunc(
+            state.credits.credits * pay.percent / 100);
+    } else if (pay.type === 'cleanRecord' && state.records) {
+        const govtId = `${idPrefix(mission.id)}:${pay.govtResourceId}`;
+        cleanRecords(state.records, pay.scope,
+            machinery.offerContext().getGovt(govtId),
+            machinery.allGovts?.() ?? []);
     }
+    applyOutcomeReputation(machinery, mission, 'complete');
     state.dateAdvance += Math.max(0, mission.datePostInc);
     runMissionSetString(machinery, mission.onSuccess,
         idPrefix(mission.id), outfits);

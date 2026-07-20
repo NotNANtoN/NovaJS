@@ -53,6 +53,8 @@ import { OutfitsStateComponent } from "./nova_plugin/outfit_plugin.js";
 import { LandEvent } from "./nova_plugin/planet_plugin.js";
 import { PlayerShipSelector } from "./nova_plugin/player_ship_plugin.js";
 import { CreditsComponent, GameDateComponent } from "./nova_plugin/player_state_plugin.js";
+import { initialRecordsFromGovtStatuses } from "./nova_plugin/reputation.js";
+import { CombatRatingComponent, LegalRecordsComponent } from "./nova_plugin/reputation_plugin.js";
 import { extractSaveData, loadSave, resetSave, restorePlayerState, writeSave } from "./nova_plugin/save_game.js";
 import { ControlledByComponent } from "./nova_plugin/ship_control.js";
 import { ShipComponent } from "./nova_plugin/ship_plugin.js";
@@ -900,10 +902,27 @@ async function startGame() {
     shipEntity.components.set(ControlledByComponent, { peerId: communicator.uuid });
 
     // Player state: restore it from the save, or start a fresh pilot
-    // from the chär (credits, date, OnStart control bits).
+    // from the chär (credits, date, OnStart control bits, starting
+    // legal statuses and combat rating).
     if (save) {
         restorePlayerState(shipEntity, save);
     } else if (playerStart) {
+        // chär Govt1-4/Status1-4: the status applies to the govt and
+        // its allies, negated for its enemies (reputation.ts). The
+        // pilot-file importer extracts the same shape, so a future
+        // pilot import lands here too.
+        try {
+            const govtIds = [...ids.Govt].sort();
+            const allGovts = await Promise.all(govtIds.map(async id =>
+                [id, await simulationGameData.data.Govt.get(id)] as const));
+            shipEntity.components.set(LegalRecordsComponent,
+                initialRecordsFromGovtStatuses(
+                    playerStart.govtStatuses, allGovts));
+        } catch (e) {
+            console.warn('Failed to set starting legal records:', e);
+        }
+        shipEntity.components.set(CombatRatingComponent,
+            { kills: Math.max(0, playerStart.combatRating) });
         shipEntity.components.set(GameDateComponent,
             { ...playerStart.date });
         shipEntity.components.set(CreditsComponent,

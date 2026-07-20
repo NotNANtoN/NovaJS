@@ -13,6 +13,7 @@ import {
     GameDateType,
     MissionsComponent,
 } from './player_state_plugin.js';
+import { CombatRatingComponent, LegalRecordsComponent } from './reputation_plugin.js';
 import { ShipComponent } from './ship_plugin.js';
 
 /**
@@ -57,9 +58,8 @@ export type SavedOutfit = t.TypeOf<typeof SavedOutfit>;
  * always written. The optional fields cover gameplay state that may be
  * absent (older saves keep loading because they are `t.partial`):
  * credits, the game date, active missions with their runtime state,
- * mission/scooped cargo, control bits, and cron progress.
- * `reputations` and `combatRatings` remain reserved for systems that
- * do not exist yet.
+ * mission/scooped cargo, control bits, cron progress, legal records
+ * (reputations), and the combat rating.
  */
 export const SaveData = t.intersection([
     t.type({
@@ -85,10 +85,11 @@ export const SaveData = t.intersection([
         cargo: t.array(t.tuple([t.string, t.number])),
         // Per-cron progress, keyed by cron id.
         cronStates: t.array(t.tuple([t.string, CronStateType])),
-        // --- Reserved for gameplay state that does not exist yet. ---
-        // Government reputations / standings, keyed by government id.
+        // Legal records, keyed by gövt id ('nova:128'). A govt absent
+        // here reads as its InitialRec (see reputation.ts).
         reputations: t.array(t.tuple([t.string, t.number])),
-        // Combat ratings, keyed by category.
+        // Combat ratings, keyed by category; 'kills' holds the
+        // Appendix I kill points.
         combatRatings: t.array(t.tuple([t.string, t.number])),
     }),
 ]);
@@ -147,6 +148,14 @@ export function extractSaveData(entity: Entity, systemId: string):
     if (cronStates) {
         save.cronStates = [...cronStates];
     }
+    const records = entity.components.get(LegalRecordsComponent);
+    if (records) {
+        save.reputations = [...records];
+    }
+    const rating = entity.components.get(CombatRatingComponent);
+    if (rating) {
+        save.combatRatings = [['kills', rating.kills]];
+    }
     return save;
 }
 
@@ -178,6 +187,17 @@ export function restorePlayerState(entity: Entity, save: SaveData): void {
     if (save.cronStates) {
         entity.components.set(CronStatesComponent, new Map(
             save.cronStates.map(([id, state]) => [id, { ...state }])));
+    }
+    if (save.reputations) {
+        entity.components.set(LegalRecordsComponent,
+            new Map(save.reputations));
+    }
+    if (save.combatRatings) {
+        const kills = save.combatRatings
+            .find(([category]) => category === 'kills')?.[1];
+        if (kills !== undefined) {
+            entity.components.set(CombatRatingComponent, { kills });
+        }
     }
 }
 

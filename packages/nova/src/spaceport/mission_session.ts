@@ -56,6 +56,8 @@ export class MissionSession {
             cargoCapacity,
             dateAdvance: 0,
             events: [],
+            records: new Map(
+                entity.components.get(LegalRecordsComponent) ?? []),
         };
         this.outfits = new Map([...entity.components.get(OutfitsStateComponent)
             ?? []].map(([id, { count }]) => [id, count]));
@@ -67,6 +69,7 @@ export class MissionSession {
             offerContext: () => session.offerContext(),
             // Player-local: only resulting state reaches the sim.
             random: Math.random,
+            allGovts: () => universe.govts(),
         };
     }
 
@@ -87,6 +90,9 @@ export class MissionSession {
             random: Math.random,
             getGovt: id => this.universe.getGovt(id),
             currentDay: this.currentDay,
+            records: this.state.records,
+            combatRating: this.entity.components
+                .get(CombatRatingComponent)?.kills ?? 0,
         };
     }
 
@@ -109,6 +115,9 @@ export class MissionSession {
         entity.components.set(CreditsComponent,
             { credits: this.state.credits.credits });
         entity.components.set(ControlBitsComponent, this.state.bits);
+        if (this.state.records) {
+            entity.components.set(LegalRecordsComponent, this.state.records);
+        }
 
         const previousOutfits = entity.components.get(OutfitsStateComponent);
         const outfitsChanged = !previousOutfits

@@ -1,3 +1,4 @@
+import { GovtData } from "novadatainterface/govt_data";
 import { OutfitData } from "novadatainterface/outfit_data";
 import { ShipData } from "novadatainterface/ship_data";
 import { Entity } from "nova_ecs/entity";
@@ -10,6 +11,8 @@ import { ControlEvent } from "../nova_plugin/controls_plugin.js";
 import { makeControlBitHooks, NCBParseError, runNCBSet } from "../nova_plugin/ncb.js";
 import { ControlBits, ControlBitsComponent } from "../nova_plugin/ncb_plugin.js";
 import { OutfitsStateComponent } from "../nova_plugin/outfit_plugin.js";
+import { cleanRecords, LegalRecords } from "../nova_plugin/reputation.js";
+import { LegalRecordsComponent } from "../nova_plugin/reputation_plugin.js";
 import { ShipComponent } from "../nova_plugin/ship_plugin.js";
 import { Button } from "./button.js";
 import { ItemGrid, ItemTile } from "./item_grid.js";
@@ -39,6 +42,9 @@ export class Outfitter extends Menu<Entity> {
     /** Working copies, committed to the ship entity on done. */
     private outfits: DefaultMap<string, number>;
     private controlBits: ControlBits = new Set();
+    private records: LegalRecords = new Map();
+    /** Every govt, sorted by id, loaded in build() for ModType 21. */
+    private govts: (readonly [string, GovtData])[] = [];
     private shipData?: ShipData;
 
     private text = {
@@ -113,6 +119,11 @@ export class Outfitter extends Menu<Entity> {
     }
 
     protected override async build() {
+        // ModType 21 (clean legal record) needs govt data: ModVal -1
+        // cleans every govt, and cleaning consults InitialRec.
+        const govtIds = [...(await this.simulationData.ids).Govt].sort();
+        this.govts = await Promise.all(govtIds.map(async id =>
+            [id, await this.simulationData.data.Govt.get(id)] as const));
         const itemGrid = await this.makeOutfitsGrid();
         this.itemGrid = itemGrid;
         this.container.addChild(this.itemGrid.container);
@@ -212,6 +223,19 @@ export class Outfitter extends Menu<Entity> {
         this.text.status.text = "";
 
         this.outfits.set(outfit.id, this.outfits.get(outfit.id) + 1);
+        // ModType 21: buying the outfit cleans (raises to at least 0)
+        // the player's legal record with the ModVal govt, or with every
+        // govt when ModVal is -1. Applies once, at purchase.
+        if (outfit.cleanLegalRecord !== null) {
+            if (outfit.cleanLegalRecord === -1) {
+                cleanRecords(this.records, 'all', undefined, this.govts);
+            } else {
+                const govtId = `nova:${outfit.cleanLegalRecord}`;
+                cleanRecords(this.records, 'govt',
+                    this.govts.find(([id]) => id === govtId)?.[1],
+                    this.govts);
+            }
+        }
         this.runSetString(outfit.onPurchase);
         this.itemGrid?.setCounts(this.outfits);
         this.setFreeMassText();
@@ -291,6 +315,8 @@ export class Outfitter extends Menu<Entity> {
             ([k, v]) => [k, v.count]));
         this.controlBits = new Set(
             input.components.get(ControlBitsComponent) ?? []);
+        this.records = new Map(
+            input.components.get(LegalRecordsComponent) ?? []);
         this.text.status.text = "";
 
         this.shipData = undefined;
@@ -313,6 +339,7 @@ export class Outfitter extends Menu<Entity> {
                 .filter(([, count]) => count > 0)
                 .map(([id, count]) => [id, { count }])));
         this.input.components.set(ControlBitsComponent, this.controlBits);
+        this.input.components.set(LegalRecordsComponent, this.records);
         super.done();
     }
 }
