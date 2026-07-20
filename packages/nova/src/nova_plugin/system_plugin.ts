@@ -24,6 +24,7 @@ import { JammingPlugin } from "./jamming_plugin.js";
 import { JumpPlugin } from "./jump_plugin.js";
 import { GateTransitPlugin } from "./gate_transit_plugin.js";
 import { MissionShipPlugin } from "./mission_ship_plugin.js";
+import { PersPlugin } from "./pers_plugin.js";
 import { NCBPlugin } from "./ncb_plugin.js";
 import { NpcAiPlugin } from "./npc_ai_plugin.js";
 import { NpcPlugin } from "./npc_plugin.js";
@@ -77,6 +78,7 @@ export const SystemPlugin: Plugin = {
         world.addPlugin(GateTransitPlugin);
         world.addPlugin(NpcPlugin);
         world.addPlugin(NpcAiPlugin);
+        world.addPlugin(PersPlugin);
         world.addPlugin(NpcSpawnPlugin);
         world.addPlugin(MissionShipPlugin);
         world.addPlugin(IonizedPlugin);

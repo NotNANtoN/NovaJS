@@ -21,6 +21,7 @@ import { GovtComponent } from "../nova_plugin/govt_component.js";
 import { deriveIff, dispositionColor, shipDisposition } from "../nova_plugin/iff_plugin.js";
 import { ArmorComponent, FuelComponent, FUEL_PER_JUMP, ShieldComponent } from "../nova_plugin/health_plugin.js";
 import { OutfitsStateComponent, sumOutfitField } from "../nova_plugin/outfit_plugin.js";
+import { PersComponent } from "../nova_plugin/pers_plugin.js";
 import { PlanetDataComponent } from "../nova_plugin/planet_plugin.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 import { ShipDataComponent } from "../nova_plugin/ship_plugin.js";
@@ -519,7 +520,8 @@ const DrawStatusBarSecondaryWeapon = new System({
 });
 
 const TargetQuery = new Query([ShipDataComponent, Optional(ShieldComponent),
-    Optional(ArmorComponent), Optional(AnimationGraphicComponent)] as const);
+    Optional(ArmorComponent), Optional(AnimationGraphicComponent),
+    Optional(PersComponent)] as const);
 const DrawStatusBarTarget = new System({
     name: 'DrawStatusBarTarget',
     args: [StatusBarResource, TargetComponent, RunQuery, PlayerShipSelector] as const,
@@ -530,8 +532,11 @@ const DrawStatusBarTarget = new System({
         }
         const result = runQuery(TargetQuery, target)[0];
         if (result) {
-            const [shipData, shield, armor, shipGraphic] = result;
-            statusBar.drawTarget(shipData.name, shield?.percent, armor?.percent, shipGraphic);
+            const [shipData, shield, armor, shipGraphic, pers] = result;
+            // A përs person's name replaces the ship class name on the
+            // target display (EVN Bible, përs section).
+            statusBar.drawTarget(pers?.name ?? shipData.name,
+                shield?.percent, armor?.percent, shipGraphic);
         }
     }
 })

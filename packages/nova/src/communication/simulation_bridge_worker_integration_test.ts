@@ -60,5 +60,9 @@ describe("SimulationBridge worker integration", () => {
         } finally {
             await client.close();
         }
-    });
+        // Full system genesis (planets, asteroids, the NPC spawn
+        // table, and the përs table over every përs resource) runs
+        // twice here (harness + worker); the default 5s was already
+        // borderline before the përs table existed.
+    }, 30_000);
 });
