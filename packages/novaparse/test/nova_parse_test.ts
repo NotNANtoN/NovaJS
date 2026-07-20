@@ -248,6 +248,7 @@ describe("NovaParse", () => {
             });
             expect(w132.animation).toEqual({
                 exitPoints: getDefaultExitPoints(),
+                blink: null,
                 id: w132.id,
                 name: w132.name,
                 prefix: w132.prefix,

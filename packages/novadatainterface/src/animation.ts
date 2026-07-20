@@ -48,6 +48,45 @@ export type AnimationImages = {
     baseImage: AnimationImage
 }
 
+/**
+ * How a ship's running-light sprite layer flashes, from the shän resource's
+ * BlinkMode / BlinkValA-D fields (EVN Bible pp. 15). Display-only.
+ *
+ * All timings (`period`, on/off durations, delays) are in animation frames,
+ * i.e. 30ths of a second, matching Nova's other shän timing fields.
+ *
+ * - `square`: on/off strobe grouped into bursts. `onFrames` on, `offFrames`
+ *   off, repeated `blinksPerGroup` times, then `groupDelayFrames` off before
+ *   the next group. (Per the Bible's errata, BlinkValA is the on-time and
+ *   BlinkValB the between-blink off-time — swapped from the main text.)
+ * - `triangle`: intensity ramps linearly up from `minIntensity` to
+ *   `maxIntensity` (increasing `riseRate`/frame) then back down
+ *   (`fallRate`/frame). Intensities are 1-32, mapped to sprite alpha.
+ * - `random`: intensity jumps to a fresh random value in
+ *   [`minIntensity`, `maxIntensity`] every `changeDelayFrames` frames.
+ */
+export type BlinkPattern =
+    | {
+        mode: "square";
+        onFrames: number;
+        offFrames: number;
+        blinksPerGroup: number;
+        groupDelayFrames: number;
+    }
+    | {
+        mode: "triangle";
+        minIntensity: number;
+        riseRate: number;
+        maxIntensity: number;
+        fallRate: number;
+    }
+    | {
+        mode: "random";
+        minIntensity: number;
+        maxIntensity: number;
+        changeDelayFrames: number;
+    };
+
 export type ExitPoint = Array<[number, number, number]>;
 export interface ExitPoints {
     gun: ExitPoint;
@@ -73,6 +112,11 @@ export function getDefaultExitPoints(): ExitPoints {
 export interface Animation extends BaseData {
     images: AnimationImages;
     exitPoints: ExitPoints;
+    /**
+     * How the running-lights sprite layer flashes, or `null` for a steady
+     * (non-blinking) light. Display-only; has no effect on simulation.
+     */
+    blink: BlinkPattern | null;
 }
 
 export function getDefaultAnimation(): Animation {
@@ -81,6 +125,7 @@ export function getDefaultAnimation(): Animation {
             baseImage: getDefaultAnimationImage()
         },
         exitPoints: getDefaultExitPoints(),
+        blink: null,
         ...getDefaultBaseData()
     }
 }

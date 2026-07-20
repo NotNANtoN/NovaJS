@@ -163,6 +163,7 @@ async function ProjectileWeaponParse(weap: WeapResource, notFoundFunction: (m: s
             // instead of rleds
             animation = {
                 exitPoints: getDefaultExitPoints(),
+                blink: null, // Weapon graphics have no running lights.
                 id: baseWeapon.id,
                 name: baseWeapon.name,
                 prefix: baseWeapon.prefix,

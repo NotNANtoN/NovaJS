@@ -78,6 +78,7 @@ export async function PlanetParse(spob: SpobResource, notFoundFunction: (m: stri
 
     const animation: Animation = {
         exitPoints: getDefaultExitPoints(),
+        blink: null, // Planets have no running lights.
         id: base.id,
         name: base.name,
         prefix: base.prefix,

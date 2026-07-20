@@ -1,4 +1,4 @@
-import { Animation, AnimationFrames, AnimationImages, getDefaultAnimationImage } from "novadatainterface/animation";
+import { Animation, AnimationFrames, AnimationImages, BlinkPattern, getDefaultAnimationImage } from "novadatainterface/animation";
 import { BaseData } from "novadatainterface/base_data";
 import { NovaDataType } from "novadatainterface/nova_data_interface";
 import { NovaIDNotFoundError } from "novadatainterface/nova_data_interface";
@@ -82,6 +82,50 @@ export async function ShanParse(shan: ShanResource, notFoundFunction: (message: 
     return {
         ...base,
         images,
-        exitPoints: shan.exitPoints
+        exitPoints: shan.exitPoints,
+        blink: blinkPattern(shan.blink),
+    }
+}
+
+/**
+ * Maps the shän resource's raw blink mode + BlinkValA-D into the named
+ * `BlinkPattern` the display layer consumes. Returns null for steady lights.
+ *
+ * Note the errata swap for square-wave mode: BlinkValA is the on-time and
+ * BlinkValB the between-blink off-time (the Bible's main text has these
+ * reversed; the errata corrects them).
+ */
+export function blinkPattern(
+    blink: ShanResource["blink"]): BlinkPattern | null {
+    if (!blink) {
+        return null;
+    }
+    switch (blink.mode) {
+        case "square":
+            return {
+                mode: "square",
+                onFrames: blink.a,
+                offFrames: blink.b,
+                blinksPerGroup: blink.c,
+                groupDelayFrames: blink.d,
+            };
+        case "triangle":
+            return {
+                mode: "triangle",
+                minIntensity: blink.a,
+                riseRate: blink.b,
+                maxIntensity: blink.c,
+                fallRate: blink.d,
+            };
+        case "random":
+            return {
+                mode: "random",
+                minIntensity: blink.a,
+                maxIntensity: blink.b,
+                changeDelayFrames: blink.c,
+            };
+        default:
+            // "unknown" mode — treat as steady.
+            return null;
     }
 }

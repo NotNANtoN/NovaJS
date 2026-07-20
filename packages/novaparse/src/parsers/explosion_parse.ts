@@ -40,6 +40,7 @@ export async function ExplosionParse(boom: BoomResource, notFoundFunction: (m: s
             baseImage: animationImage
         },
         exitPoints: getDefaultExitPoints(), // Unused. Refactor???
+        blink: null, // Explosions have no running lights.
         ...base
     };
 

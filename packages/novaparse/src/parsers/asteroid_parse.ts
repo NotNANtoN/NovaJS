@@ -42,6 +42,7 @@ function animationFromSpin(idSpace: NovaResources, spinId: number,
         ...base,
         images: { baseImage: animationImage },
         exitPoints: getDefaultExitPoints(),
+        blink: null, // Asteroids have no running lights.
     };
 }
 

@@ -1,5 +1,5 @@
 import * as PIXI from "pixi.js";
-import { Animation } from "novadatainterface/animation";
+import { Animation, BlinkPattern } from "novadatainterface/animation";
 import { DisplayAssetDataInterface } from "../client/gamedata/display_asset_data.js";
 import { SpriteSheetSprite } from "./sprite_sheet_sprite.js";
 
@@ -19,6 +19,11 @@ export class AnimationGraphic {
     readonly buildPromise: Promise<AnimationGraphic>;
     built = false;
     size = { x: 0, y: 0 }
+    /**
+     * The running-lights blink pattern for this animation, or null for a
+     * steady light / no lights. Resolved once the graphic is built.
+     */
+    blink: BlinkPattern | null = null;
 
     constructor({ displayAssets, animation }: { displayAssets: DisplayAssetDataInterface, animation: Animation | Promise<Animation> }) {
         this.animation = animation;
@@ -29,6 +34,7 @@ export class AnimationGraphic {
 
     private async build(): Promise<AnimationGraphic> {
         var promises: Promise<unknown>[] = [];
+        this.blink = (await this.animation).blink;
         for (const imageName in (await this.animation).images) {
             const image = (await this.animation).images[imageName];
             const sprite = new SpriteSheetSprite({

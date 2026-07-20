@@ -14,6 +14,7 @@ import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 import { ShipComponent } from "../nova_plugin/ship_plugin.js";
 import { WeaponsStateComponent } from "../nova_plugin/weapons_state.js";
 import { AnimationGraphicComponent } from "./animation_graphic_plugin.js";
+import { blinkPhaseFromUuid, runningLightState } from "./running_light_blink.js";
 
 // How visible a ship is while cloaked. Other ships fade to nearly
 // invisible; your own ship stays faintly visible so you can still fly it
@@ -91,10 +92,17 @@ export const ShipAnimationSystem = new System({
                 activeBeams);
         }
 
-        // Blink running lights every two seconds.
+        // Flash the running lights per the ship's shän blink pattern (steady,
+        // square strobe, triangle pulse, or random). A per-ship phase offset
+        // from the uuid keeps a fleet of identical ships from blinking in
+        // unison. If the ship is disabled and its shän hides lights when
+        // disabled, keep them off. Display-only; no sim state involved.
         const runningLights = animation.sprites.get('lightImage');
         if (runningLights) {
-            runningLights.pixiSprite.visible = time.time % 2000 < 1000;
+            const light = runningLightState(
+                animation.blink, time.time, blinkPhaseFromUuid(uuid));
+            runningLights.pixiSprite.visible = light.visible;
+            runningLights.pixiSprite.alpha = light.alpha;
         }
 
         const sprite = animation.sprites.get('baseImage')?.pixiSprite;
