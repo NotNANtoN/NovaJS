@@ -102,7 +102,7 @@ const ChooseRandomTargetAI = new System({
 });
 
 export const FollowComponent = new Component<undefined>('FollowComponent');
-const FollowAI = new System({
+export const FollowAI = new System({
     name: 'FollowAndShootAI',
     args: [MovementStateComponent, TargetComponent, FollowComponent] as const,
     step(movementState, target) {

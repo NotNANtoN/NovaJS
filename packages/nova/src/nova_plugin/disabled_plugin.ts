@@ -8,8 +8,11 @@ import { SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
 import { TimeResource, TimeSystem } from 'nova_ecs/plugins/time_plugin';
 import { System } from 'nova_ecs/system';
 import { EffectiveMovementPhysicsSystem } from './afterburner_plugin.js';
+import { ReturnAI } from './bay_plugin.js';
 import { CloakActiveComponent, CLOAK_OFF_SOUND } from './cloak_plugin.js';
 import { ZeroArmorEvent } from './death_plugin.js';
+import { EscortCommandBehaviorSystem } from './escort_command_plugin.js';
+import { FollowAI } from './npc_plugin.js';
 import { deriveRepair, DisabledComponent, DisabledState, DISABLED_DECELERATION, isBelowDisableThreshold, repairedArmor, RepairComponent, rollRepairTime } from './disabled_component.js';
 import { registerEntityDeriver } from './entity_factory.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
@@ -144,7 +147,8 @@ export const DisabledMovementSystem = new System({
     },
     after: [TimeSystem, ShipDisableSystem, ControlShipSystem,
         JumpSequenceSystem, EffectiveMovementPhysicsSystem,
-        NpcSteeringSystem, FormationSystem],
+        NpcSteeringSystem, FormationSystem, EscortCommandBehaviorSystem,
+        ReturnAI, FollowAI],
     before: [MovementSystem],
 });
 

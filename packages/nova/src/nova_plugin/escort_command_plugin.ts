@@ -281,7 +281,7 @@ export function frontQuadrantWeaponRange(
  * rule. Formation STATION-KEEPING itself stays in FormationSystem
  * (which yields to this system for non-formation commands).
  */
-const EscortCommandBehaviorSystem = new System({
+export const EscortCommandBehaviorSystem = new System({
     name: 'EscortCommandBehavior',
     args: [EscortCommandComponent, MovementStateComponent,
         ShipPhysicsComponent, WeaponsStateComponent, TargetComponent,
