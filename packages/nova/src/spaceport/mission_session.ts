@@ -6,11 +6,13 @@ import { CargoComponent } from '../nova_plugin/cargo_plugin.js';
 import { runCronsForDays } from '../nova_plugin/cron_logic.js';
 import {
     failExpiredMissions,
+    idPrefix,
     MissionContext,
     MissionEvent,
     MissionMachineryContext,
     MissionWorkingState,
     processLanding,
+    runMissionSetString,
     stellarInfoOf,
 } from '../nova_plugin/mission_logic.js';
 import { ControlBitsComponent } from '../nova_plugin/ncb_plugin.js';
@@ -156,6 +158,18 @@ export class MissionSession {
                 addDays(date, this.state.dateAdvance));
         }
         return this.state.events;
+    }
+
+    /**
+     * Runs a mission NCB set string (an outfit's OnPurchase/OnSell, say)
+     * against this session's working state, with the mission operators
+     * Sxxx/Axxx/Fxxx and outfit grants Gxxx/Dxxx all wired to the real
+     * machinery. `missionPrefix` scopes numeric ids to the running
+     * resource's plug-in. Call commit() afterwards to persist.
+     */
+    runMissionSet(expression: string, missionPrefix: string): void {
+        runMissionSetString(this.machinery, expression, missionPrefix,
+            this.outfits);
     }
 }
 
