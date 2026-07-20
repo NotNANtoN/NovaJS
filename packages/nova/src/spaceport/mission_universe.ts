@@ -36,6 +36,8 @@ async function pooledMap<T, R>(items: readonly T[],
 export class MissionUniverse {
     missions: MissionData[] = [];
     crons: CronData[] = [];
+    /** Standard cargo display names (STR# 4000), parsed from any chär. */
+    cargoNames: string[] = [];
     stellarCandidates: StellarInfo[] = [];
     /** Systems, for special/aux ship spawn-system resolution. */
     systemInfos: SystemInfo[] = [];
@@ -93,6 +95,19 @@ export class MissionUniverse {
         this.crons = crons;
 
         this.missions = [...this.missionsById.values()];
+
+        // Standard cargo names (STR# 4000) ride on every chär; read the
+        // first available one, falling back to the built-in names.
+        this.cargoNames = [];
+        try {
+            const playerStartId = ids.PlayerStart[0];
+            if (playerStartId) {
+                this.cargoNames = [...(await data.PlayerStart
+                    .get(playerStartId)).cargoNames];
+            }
+        } catch (e) {
+            console.warn('Failed to load standard cargo names:', e);
+        }
 
         // Only planets that appear in some system are candidate
         // destinations (spöbs can exist without being placed).

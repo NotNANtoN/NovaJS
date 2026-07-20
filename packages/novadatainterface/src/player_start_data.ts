@@ -47,7 +47,20 @@ export interface PlayerStartData extends BaseData {
      * of the status applies in enemy-owned systems.
      */
     govtStatuses: { govt: string, status: number }[];
+    /**
+     * The scenario's standard-cargo display names, resolved from STR#
+     * 4000 at parse time (the six standard commodities plus any extra
+     * mission cargo names). Indexed by mïsn CargoType (0-based). Carried
+     * here because it's a single global table and PlayerStart is the
+     * game-wide config resource; empty falls back to the built-in names.
+     */
+    cargoNames: string[];
 }
+
+/** The stock scenario's standard cargo names (STR# 4000), the fallback
+ * when the data provides none. */
+export const DEFAULT_CARGO_NAMES = ['Food', 'Industrial',
+    'Medical Supplies', 'Luxury Goods', 'Metal', 'Equipment'];
 
 export function getDefaultGameDate(): GameDate {
     // EV Nova's stock scenario starts in October 1177 NC; a neutral
@@ -69,5 +82,6 @@ export function getDefaultPlayerStartData(): PlayerStartData {
         combatRating: 0,
         isDefault: false,
         govtStatuses: [],
+        cargoNames: [...DEFAULT_CARGO_NAMES],
     };
 }

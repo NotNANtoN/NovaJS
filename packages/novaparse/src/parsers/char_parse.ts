@@ -40,8 +40,14 @@ export async function CharParse(char: CharResource,
         }
     }
 
+    // The standard-cargo display names are STR# 4000 (the proper-case
+    // list; STR# 4001-4002 are the lowercase/abbreviated variants). A
+    // missing resource falls back to the built-in names.
+    const cargoNames = char.idSpace["STR#"][4000]?.strings ?? [];
+
     return {
         ...base,
+        cargoNames,
         credits: char.startingCredits,
         ship,
         systems,

@@ -72,6 +72,17 @@ describe('standardTradeGoods', () => {
         expect(standardTradeGoods(makePlanet(
             [null, null, null, null, null, null]))).toEqual([]);
     });
+
+    it('uses the scenario cargo names (STR# 4000) when supplied', () => {
+        const planet = makePlanet(['med', 'med', null, null, null, null]);
+        const goods = standardTradeGoods(planet,
+            ['Grain', 'Machinery', 'Medicine']);
+        expect(goods.map(g => g.name)).toEqual(['Grain', 'Machinery']);
+        // A gap in the supplied list falls back to the built-in name.
+        const partial = standardTradeGoods(
+            makePlanet(['med', null, null, null, null, 'med']), ['Grain']);
+        expect(partial.map(g => g.name)).toEqual(['Grain', 'Equipment']);
+    });
 });
 
 describe('junkTradeGood', () => {

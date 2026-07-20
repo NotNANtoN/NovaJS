@@ -1,6 +1,7 @@
 import { GovtData } from 'novadatainterface/govt_data';
 import { MissionData } from 'novadatainterface/mission_data';
 import { PlanetData } from 'novadatainterface/planet_data';
+import { DEFAULT_CARGO_NAMES } from 'novadatainterface/player_start_data';
 import { evaluateNCBTest, makeControlBitHooks, NCBParseError, NCBSetHooks, runNCBSet } from './ncb.js';
 import { Cargo, cargoUsed } from './cargo_plugin.js';
 import { resolveShipObjective, shipGoalOfferable } from './mission_ship_logic.js';
@@ -414,12 +415,21 @@ function resolveStellarRef(ref: number, refId: string | null,
     return candidates[Math.floor(ctx.random() * candidates.length)].id;
 }
 
-/** The six standard cargo types (STR# 4001 in stock Nova). */
-export const STANDARD_CARGO_NAMES = ['Food', 'Industrial', 'Medical Supplies',
-    'Luxury Goods', 'Metal', 'Equipment'];
+/**
+ * The standard cargo names (STR# 4000 in stock Nova). Kept as a
+ * fallback for the built-in six commodities; the live names come from
+ * the parsed PlayerStartData.cargoNames (DEFAULT_CARGO_NAMES).
+ */
+export const STANDARD_CARGO_NAMES = [...DEFAULT_CARGO_NAMES];
 
-export function cargoName(cargoType: number): string {
-    return STANDARD_CARGO_NAMES[cargoType] ?? `Cargo ${cargoType}`;
+/**
+ * The display name for a cargo type, resolved from the scenario's
+ * parsed STR# 4000 names when supplied, else the built-in fallback.
+ */
+export function cargoName(cargoType: number,
+    names: readonly string[] = STANDARD_CARGO_NAMES): string {
+    return names[cargoType] || STANDARD_CARGO_NAMES[cargoType]
+        || `Cargo ${cargoType}`;
 }
 
 /** The CargoComponent key that holds a mission's cargo. */

@@ -46,7 +46,7 @@ function buildChar(): ResourceBuilder {
     return b;
 }
 
-function parseChar() {
+function parseChar(withCargoNames = false) {
     const idSpace = getEmptyNovaResources();
     stub(idSpace, "shïp", 164);
     stub(idSpace, "sÿst", 200);
@@ -54,6 +54,12 @@ function parseChar() {
     stub(idSpace, "gövt", 128);
     stub(idSpace, "gövt", 129);
     makeDesc(idSpace, 3000, "Welcome to the galaxy.");
+    if (withCargoNames) {
+        // STR# 4000: the standard-cargo display names.
+        idSpace["STR#"][4000] = {
+            strings: ["Food", "Industrial", "Medical Supplies"],
+        } as unknown as never;
+    }
 
     const resource = new CharResource(
         buildChar().resource("chär", 128, "Trader"), idSpace);
@@ -101,5 +107,16 @@ describe("CharParse", () => {
         const start = await parseChar();
         expect(start.introText).toBe("Welcome to the galaxy.");
         expect(start.onStart).toBe("b13 b14");
+    });
+
+    it("resolves the standard cargo names from STR# 4000", async () => {
+        const start = await parseChar(true);
+        expect(start.cargoNames).toEqual(
+            ["Food", "Industrial", "Medical Supplies"]);
+    });
+
+    it("leaves cargo names empty when STR# 4000 is absent", async () => {
+        const start = await parseChar(false);
+        expect(start.cargoNames).toEqual([]);
     });
 });
