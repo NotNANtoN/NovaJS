@@ -93,6 +93,8 @@ export class MissionSession {
             records: this.state.records,
             combatRating: this.entity.components
                 .get(CombatRatingComponent)?.kills ?? 0,
+            systems: this.universe.systemInfos,
+            systemIdOfStellar: id => this.universe.systemIdOfPlanet(id),
         };
     }
 

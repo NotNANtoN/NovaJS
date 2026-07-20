@@ -1,6 +1,7 @@
 import "jasmine";
 import { MisnResource } from "../../src/resource_parsers/misn_resource.js";
 import { DescResource } from "../../src/resource_parsers/desc_resource.js";
+import { StrNResource } from "../../src/resource_parsers/strn_resource.js";
 import { MisnParse } from "../../src/parsers/misn_parse.js";
 import { getEmptyNovaResources, NovaResources } from "../../src/resource_parsers/resource_holder_base.js";
 import { ResourceBuilder } from "../resource_parsers/resource_builder.js";
@@ -14,6 +15,17 @@ function makeDesc(idSpace: NovaResources, id: number, text: string) {
     b.uint8(0);
     idSpace.dësc[id] = new DescResource(
         b.resource("dësc", id, `desc ${id}`), idSpace);
+}
+
+/** Builds a STR# resource holding the given strings. */
+function makeStrN(idSpace: NovaResources, id: number, strings: string[]) {
+    const b = new ResourceBuilder();
+    b.uint16(strings.length);
+    for (const s of strings) {
+        b.pstring(s);
+    }
+    idSpace["STR#"][id] = new StrNResource(
+        b.resource("STR#", id, `strings ${id}`), idSpace);
 }
 
 /**
@@ -99,6 +111,15 @@ function parseMisn(id = 130) {
     // The parse only reads globalID from referenced spöbs. spöb 130
     // (availStel) is intentionally absent.
     idSpace.spöb[200] = { globalID: "nova:200" } as unknown as never;
+
+    // Special/aux ship references: düde 200 (shipDude) and 210
+    // (auxShipDude); sÿst 128 (auxShipSyst). shipSyst is -1 (a ranged
+    // special) so it must stay unresolved.
+    idSpace.düde[200] = { globalID: "nova:200" } as unknown as never;
+    idSpace.düde[210] = { globalID: "nova:210" } as unknown as never;
+    idSpace.sÿst[128] = { globalID: "nova:128" } as unknown as never;
+    makeStrN(idSpace, 300, ["Raider Alpha", "Raider Beta"]);
+    // 301 (shipSubtitle) intentionally missing.
 
     const resource = new MisnResource(
         buildMisn().resource("mïsn", id, "Test Mission"), idSpace);
@@ -206,6 +227,30 @@ describe("MisnParse", () => {
         expect(misn.flags.notOfferedIfInsufficientCargoSpace).toBe(true);
         expect(misn.flags.failIfPlayerDisabledOrDestroyed).toBe(true);
         expect(misn.flags.applyPayOnAutoAbort).toBe(false);
+    });
+
+    it("projects the special-ship objective fields", async () => {
+        const misn = await parseMisn();
+        expect(misn.shipCount).toBe(3);
+        expect(misn.shipSyst).toBe(-1);
+        expect(misn.shipSystId).toBe(null);   // ranged special
+        expect(misn.shipDude).toBe(200);
+        expect(misn.shipDudeId).toBe("nova:200");
+        expect(misn.shipGoal).toBe(0);        // destroy
+        expect(misn.shipBehav).toBe(1);       // protect the player
+        expect(misn.shipStart).toBe(1);       // jump in from hyperspace
+        expect(misn.shipNames).toEqual(["Raider Alpha", "Raider Beta"]);
+        // ShipSubtitle STR# 301 doesn't exist.
+        expect(misn.shipSubtitles).toEqual([]);
+    });
+
+    it("projects the aux-ship fields", async () => {
+        const misn = await parseMisn();
+        expect(misn.auxShipCount).toBe(2);
+        expect(misn.auxShipDude).toBe(210);
+        expect(misn.auxShipDudeId).toBe("nova:210");
+        expect(misn.auxShipSyst).toBe(128);
+        expect(misn.auxShipSystId).toBe("nova:128");
     });
 
     it("serializes require as a decimal string (JSON-safe)", async () => {

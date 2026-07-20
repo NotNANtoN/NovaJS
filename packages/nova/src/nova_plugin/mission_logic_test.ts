@@ -204,10 +204,18 @@ describe('missionMatchesLocation', () => {
             makeContext({ activeMissions }))).toBe(false);
     });
 
-    it('never offers special-ship-goal missions (unsupported)', () => {
-        const mission = makeMission({ shipGoal: 0, shipCount: 3 });
-        expect(missionMatchesLocation(mission, LOCATION_MISSION_COMPUTER,
-            makeContext())).toBe(false);
+    it('offers supported ship goals; suppresses board/rescue', () => {
+        // Destroy goals are supported now (mission_ship_logic.ts).
+        expect(missionMatchesLocation(makeMission({
+            shipGoal: 0, shipCount: 3, shipDudeId: 'nova:240',
+        }), LOCATION_MISSION_COMPUTER, makeContext())).toBe(true);
+        // Board (2) and rescue (5) need boarding: still unofferable.
+        expect(missionMatchesLocation(makeMission({
+            shipGoal: 2, shipCount: 1, shipDudeId: 'nova:240',
+        }), LOCATION_MISSION_COMPUTER, makeContext())).toBe(false);
+        expect(missionMatchesLocation(makeMission({
+            shipGoal: 5, shipCount: 1, shipDudeId: 'nova:240',
+        }), LOCATION_MISSION_COMPUTER, makeContext())).toBe(false);
     });
 
     it('fails closed on nonzero Require masks', () => {

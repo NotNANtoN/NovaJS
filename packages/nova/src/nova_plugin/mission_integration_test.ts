@@ -7,10 +7,12 @@ import { CargoComponent } from './cargo_plugin.js';
 import { makeShip } from './make_ship.js';
 import {
     acceptOffer,
+    LOCATION_BAR,
     LOCATION_MISSION_COMPUTER,
     makeMissionOffer,
     missionMatchesLocation,
 } from './mission_logic.js';
+import { GOAL_DESTROY } from './mission_ship_state.js';
 import { ControlBitsComponent } from './ncb_plugin.js';
 import {
     CreditsComponent,
@@ -129,5 +131,134 @@ describe('missions against real Nova data', () => {
             .has('mission:nova:128')).toBe(false);
         expect(dayNumber(entity.components.get(GameDateComponent)!))
             .toBe(startDay + 2);
+    });
+
+    /**
+     * nova:657 "Defeat Fellow Initiates" (Auroran 005): destroy 4
+     * ships from düde nova:240 in sÿst nova:329, offered in the bar
+     * on Heraan (nova:360) to a pilot with bits b204 & b511; return
+     * to Heraan; OnSuccess sets b205.
+     */
+    it('offers a real destroy mission and gates completion on the goal',
+        async () => {
+            const gameData = await getIntegrationGameData();
+            const universe = MissionUniverse.shared(gameData);
+            await universe.load();
+
+            const start = await gameData.data.PlayerStart.get('nova:128');
+            const shipData = await gameData.data.Ship.get(start.ship);
+            const entity = makeShip(shipData);
+            entity.components.set(GameDateComponent, { ...start.date });
+            entity.components.set(CreditsComponent, { credits: 0 });
+            entity.components.set(ControlBitsComponent,
+                new Set([204, 511]));
+
+            const session = await MissionSession.create(
+                entity, gameData, universe, 'nova:360');
+            const mission = universe.getMission('nova:657')!;
+            const ctx = session.machinery.offerContext();
+            expect(missionMatchesLocation(mission, LOCATION_BAR, ctx))
+                .toBe(true);
+
+            const offer = makeMissionOffer(mission, ctx)!;
+            expect(offer).not.toBeNull();
+            expect(offer.shipObjective).toEqual(jasmine.objectContaining({
+                goal: GOAL_DESTROY,
+                systemId: 'nova:329',
+                dudeId: 'nova:240',
+                total: 4,
+                satisfied: 0,
+                complete: false,
+            }));
+
+            acceptOffer(session.machinery, offer, session.outfits);
+            session.commit();
+            const active = entity.components.get(MissionsComponent)!
+                .get('nova:657')!;
+            expect(active.shipObjective).toBeDefined();
+
+            // Landing back at Heraan with the goal incomplete must
+            // NOT complete the mission.
+            let events = await processEntityLanding(
+                entity, gameData, universe, 'nova:360');
+            expect(events.find(e => e.type === 'completed'))
+                .toBeUndefined();
+            expect(entity.components.get(MissionsComponent)!
+                .has('nova:657')).toBe(true);
+
+            // The shared sim reports all four ships destroyed.
+            const objective = entity.components.get(MissionsComponent)!
+                .get('nova:657')!.shipObjective!;
+            objective.satisfied = 4;
+            objective.complete = true;
+            objective.shipDonePending = true;
+
+            events = await processEntityLanding(
+                entity, gameData, universe, 'nova:360');
+            const completed = events.find(e => e.type === 'completed');
+            expect(completed).toBeDefined();
+            expect(entity.components.get(ControlBitsComponent)!.has(205))
+                .toBe(true);
+            expect(entity.components.get(MissionsComponent)!.size).toBe(0);
+        });
+
+    it('fails a mission whose ship goal failed, at the next landing',
+        async () => {
+            const gameData = await getIntegrationGameData();
+            const universe = MissionUniverse.shared(gameData);
+            await universe.load();
+
+            const start = await gameData.data.PlayerStart.get('nova:128');
+            const shipData = await gameData.data.Ship.get(start.ship);
+            const entity = makeShip(shipData);
+            entity.components.set(GameDateComponent, { ...start.date });
+            entity.components.set(CreditsComponent, { credits: 0 });
+            entity.components.set(ControlBitsComponent,
+                new Set([204, 511]));
+
+            const session = await MissionSession.create(
+                entity, gameData, universe, 'nova:360');
+            const offer = makeMissionOffer(universe.getMission('nova:657')!,
+                session.machinery.offerContext())!;
+            acceptOffer(session.machinery, offer, session.outfits);
+            session.commit();
+
+            entity.components.get(MissionsComponent)!
+                .get('nova:657')!.shipObjective!.failed = true;
+            const events = await processEntityLanding(
+                entity, gameData, universe, 'nova:360');
+            expect(events.find(e => e.type === 'failed')).toBeDefined();
+            expect(entity.components.get(MissionsComponent)!.size).toBe(0);
+        });
+
+    /**
+     * nova:155 "Take Sample" (Polaris6a) is a BOARD-goal mission
+     * (ShipGoal 2), offered in the bar on nova:286 with bit b279.
+     * Boarding does not exist, so it must stay suppressed even when
+     * every other condition matches.
+     */
+    it('still suppresses a real board-goal mission', async () => {
+        const gameData = await getIntegrationGameData();
+        const universe = MissionUniverse.shared(gameData);
+        await universe.load();
+
+        const start = await gameData.data.PlayerStart.get('nova:128');
+        const shipData = await gameData.data.Ship.get(start.ship);
+        const entity = makeShip(shipData);
+        entity.components.set(GameDateComponent, { ...start.date });
+        entity.components.set(CreditsComponent, { credits: 0 });
+        entity.components.set(ControlBitsComponent, new Set([279]));
+
+        const session = await MissionSession.create(
+            entity, gameData, universe, 'nova:286');
+        const mission = universe.getMission('nova:155')!;
+        expect(mission.shipGoal).toBe(2);
+        const ctx = session.machinery.offerContext();
+        // Everything else about the mission matches this bar...
+        expect(mission.availStelId).toBe('nova:286');
+        expect(mission.availLoc).toBe(LOCATION_BAR);
+        // ...but the board goal keeps it unofferable.
+        expect(missionMatchesLocation(mission, LOCATION_BAR, ctx))
+            .toBe(false);
     });
 });

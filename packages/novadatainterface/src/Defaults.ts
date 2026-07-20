@@ -9,6 +9,7 @@ import { getDefaultCronData } from "./cron_data.js";
 import { getDefaultGovtData } from "./govt_data.js";
 import { getDefaultJunkData } from "./junk_data.js";
 import { getDefaultMissionData } from "./mission_data.js";
+import { getDefaultPersData } from "./pers_data.js";
 import { getDefaultPlayerStartData } from "./player_start_data.js";
 import { getDefaultOutfitData } from "./outfit_data.js";
 import { getDefaultPictData } from "./pict_data.js";
@@ -41,6 +42,7 @@ export const Defaults = {
     get Fleet() { return getDefaultFleetData() },
     get Junk() { return getDefaultJunkData() },
     get Mission() { return getDefaultMissionData() },
+    get Pers() { return getDefaultPersData() },
     get Cron() { return getDefaultCronData() },
     get PlayerStart() { return getDefaultPlayerStartData() },
     get TargetCorners() { return getDefaultTargetCornersData() },

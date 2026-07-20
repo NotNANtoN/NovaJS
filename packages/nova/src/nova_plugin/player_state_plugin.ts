@@ -3,6 +3,7 @@ import { Component } from 'nova_ecs/component';
 import { map } from 'nova_ecs/datatypes/map';
 import { Plugin } from 'nova_ecs/plugin';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
+import { ShipObjectiveType } from './mission_ship_state.js';
 
 /**
  * Serializable per-player gameplay state: the game date, credits, and
@@ -10,13 +11,17 @@ import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
  * live on the player's ship entity and follow the player across ship
  * trades and system jumps.
  *
- * Nothing inside the simulation reads or writes these components: the
- * date advances at jump/landing transitions and missions change while
- * docked, both of which happen player-locally while the entity is
- * outside the simulation world (the spaceport/outfitter commit
- * pattern). The components are serializer-registered so they ride
- * through rollback snapshots, wire snapshots, and multiplayer sync
- * unchanged.
+ * Almost nothing inside the simulation reads or writes these
+ * components: the date advances at jump/landing transitions and
+ * missions change while docked, both of which happen player-locally
+ * while the entity is outside the simulation world (the
+ * spaceport/outfitter commit pattern). The one exception is the
+ * ShipObjective inside an ActiveMission: mission special-ship goal
+ * progress accrues from SHARED sim events (deaths, disables), so the
+ * shared goal systems (mission_ship_plugin.ts) mutate it identically
+ * on every peer. The components are serializer-registered so they
+ * ride through rollback snapshots, wire snapshots, and multiplayer
+ * sync unchanged.
  */
 
 export const GameDateType = t.type({
@@ -41,7 +46,7 @@ export const CreditsComponent = new Component<Credits>('Credits');
  * done with it. Random choices (destination, cargo quantity) are
  * resolved at accept time and frozen here.
  */
-export const ActiveMissionType = t.type({
+export const ActiveMissionType = t.intersection([t.type({
     /** MissionData id, e.g. 'nova:128'. */
     id: t.string,
     /** Absolute day number (calendar.ts) when the mission was accepted. */
@@ -63,7 +68,14 @@ export const ActiveMissionType = t.type({
     travelDone: t.boolean,
     /** Absolute day number after which the mission fails, or null. */
     deadlineDay: t.union([t.number, t.null]),
-});
+}), t.partial({
+    /**
+     * Special-ship goal progress (mission_ship_state.ts). Absent for
+     * missions without special ships. The shared sim's goal systems
+     * mutate this identically on every peer.
+     */
+    shipObjective: ShipObjectiveType,
+})]);
 export type ActiveMission = t.TypeOf<typeof ActiveMissionType>;
 
 /** EV Nova allows at most 16 concurrently active missions. */

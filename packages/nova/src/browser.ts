@@ -64,6 +64,7 @@ import { EscortCommandComponent } from "./nova_plugin/escort_command.js";
 import { FiringGroupComponent } from "./nova_plugin/firing_group.js";
 import { FormationComponent, formationSlotPosition } from "./nova_plugin/npc_ai_plugin.js";
 import { makeNpcShip } from "./nova_plugin/npc_spawn_plugin.js";
+import { buildMissionShipSpawns } from "./nova_plugin/mission_ship_spawn.js";
 import { advanceEntityDate, ensurePlayerStateComponents } from "./spaceport/mission_session.js";
 import { PendingEscortsComponent } from "./spaceport/pending_escorts.js";
 import { MissionUniverse } from "./spaceport/mission_universe.js";
@@ -368,6 +369,19 @@ function routesEqual(a?: string[], b?: string[]) {
  * through hyperspace (documented gap; tied to future persistence
  * work).
  */
+/** The first free formation slot on `leaderUuid` in the display
+ * world (used to continue slot numbering across spawn batches). */
+function nextFormationSlot(displayWorld: World, leaderUuid: string): number {
+    let slot = 0;
+    for (const entity of displayWorld.entities.values()) {
+        const formation = entity.components.get(FormationComponent);
+        if (formation?.leader === leaderUuid) {
+            slot = Math.max(slot, formation.slot + 1);
+        }
+    }
+    return slot;
+}
+
 async function spawnHiredEscorts(
     bridge: AsyncSimulationBridgeClient, displayWorld: World,
     leaderUuid: string, leader: Entity, shipIds: string[],
@@ -379,13 +393,7 @@ async function spawnHiredEscorts(
     }
     // Continue slot numbering after existing followers (e.g. escorts
     // hired on an earlier landing this session).
-    let slot = 0;
-    for (const entity of displayWorld.entities.values()) {
-        const formation = entity.components.get(FormationComponent);
-        if (formation?.leader === leaderUuid) {
-            slot = Math.max(slot, formation.slot + 1);
-        }
-    }
+    let slot = nextFormationSlot(displayWorld, leaderUuid);
     for (const shipId of shipIds) {
         try {
             const shipData = await simulationGameData.data.Ship.get(shipId);
@@ -412,6 +420,46 @@ async function spawnHiredEscorts(
             slot++;
         } catch (e) {
             console.warn(`Failed to spawn hired escort ${shipId}:`, e);
+        }
+    }
+}
+
+/**
+ * Mission special/aux ships entering with the player — the owning
+ * client's half of the multiplayer design in mission_ship_plugin.ts.
+ * `prepareMissionShips` must run BEFORE the player entity is encoded
+ * into its own insertion record: it clears the stale mission-ship
+ * rosters on the entity (so the cleared state rides that record) and
+ * builds the ships whose spawn system matches. `insertMissionShips`
+ * then pushes them through the same input-record addEntity path as
+ * hired escorts, after the owner is in (the goal systems track ships
+ * against their owner's mission state).
+ */
+async function prepareMissionShips(playerEntity: Entity, playerUuid: string,
+    systemId: string, firstSlot: number): Promise<Entity[]> {
+    try {
+        const universe = MissionUniverse.shared(simulationGameData);
+        await universe.load();
+        return await buildMissionShipSpawns(playerEntity, playerUuid,
+            systemId, simulationGameData, universe, firstSlot);
+    } catch (e) {
+        console.warn('Failed to prepare mission ships:', e);
+        return [];
+    }
+}
+
+async function insertMissionShips(bridge: AsyncSimulationBridgeClient,
+    ships: Entity[], ownerUuid?: string): Promise<void> {
+    for (const ship of ships) {
+        try {
+            if (ownerUuid) {
+                // Like hired escorts: peer-owned so removePeer cleans
+                // them up if this client vanishes.
+                ship.components.set(MultiplayerData, { owner: ownerUuid });
+            }
+            await bridge.addEntity(v4(), ship);
+        } catch (e) {
+            console.warn('Failed to spawn mission ship:', e);
         }
     }
 }
@@ -748,10 +796,17 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
     // Wait until the current peer set includes the server, without racing
     // between an immediate state check and a later join event subscription.
     await firstValueFrom(room.peers.current.pipe(filter(peers => peers.has('server'))));
+    // Mission ships whose spawn system this is (or that follow the
+    // player) jump in with the player. Prepared before the player
+    // entity is encoded into its insertion record.
+    const missionShips = entity.components.has(PlayerShipSelector)
+        ? await prepareMissionShips(entity, uuid, to, 0) : [];
     await newSimulationBridge.addEntity(uuid, entity);
     if (entity.components.has(PlayerShipSelector)) {
         (window as any).myShip = entity;
     }
+    await insertMissionShips(newSimulationBridge, missionShips,
+        communicator.uuid ?? undefined);
     // The new bridge starts from a fresh delta stream, so drop any
     // bookkeeping from the previous system's sync.
     syncedComponents.clear();
@@ -1153,6 +1208,14 @@ async function startGame() {
                 const pendingEscorts =
                     pendingLaunchedShip.components.get(PendingEscortsComponent);
                 pendingLaunchedShip.components.delete(PendingEscortsComponent);
+                // Mission ships spawn alongside the relaunch; prepared
+                // before the player entity is encoded (see
+                // prepareMissionShips), inserted after it.
+                const missionShips = await prepareMissionShips(
+                    pendingLaunchedShip, dockedShip.uuid,
+                    activeSystemId ?? '',
+                    nextFormationSlot(currentDisplayWorld, dockedShip.uuid)
+                    + (pendingEscorts?.length ?? 0));
                 await currentBridge.addEntity(dockedShip.uuid, pendingLaunchedShip);
                 if (pendingEscorts && pendingEscorts.length > 0) {
                     await spawnHiredEscorts(currentBridge,
@@ -1160,6 +1223,8 @@ async function startGame() {
                         pendingLaunchedShip, pendingEscorts,
                         communicator.uuid ?? undefined);
                 }
+                await insertMissionShips(currentBridge, missionShips,
+                    communicator.uuid ?? undefined);
                 if (pendingLaunchedShip.components.has(PlayerShipSelector)) {
                     (window as any).myShip = pendingLaunchedShip;
                 }
@@ -1181,8 +1246,17 @@ async function startGame() {
             // The map closed without a destination: lift back off from the
             // gate into the origin system (nothing strands the ship).
             if (pendingGateLaunch && gateDockedShip) {
+                // Mission ships despawned while gate-docked; respawn
+                // them with the lift-off (same shape as the spaceport
+                // launch above).
+                const gateMissionShips = await prepareMissionShips(
+                    pendingGateLaunch, gateDockedShip.uuid,
+                    activeSystemId ?? '', nextFormationSlot(
+                        currentDisplayWorld, gateDockedShip.uuid));
                 await currentBridge.addEntity(
                     gateDockedShip.uuid, pendingGateLaunch);
+                await insertMissionShips(currentBridge, gateMissionShips,
+                    communicator.uuid ?? undefined);
                 if (pendingGateLaunch.components.has(PlayerShipSelector)) {
                     (window as any).myShip = pendingGateLaunch;
                 }

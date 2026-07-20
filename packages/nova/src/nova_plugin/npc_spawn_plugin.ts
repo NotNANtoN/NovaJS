@@ -1,6 +1,7 @@
 import * as t from 'io-ts';
 import { FleetData } from 'novadatainterface/fleet_data';
 import { GovtData } from 'novadatainterface/govt_data';
+import { PersData } from 'novadatainterface/pers_data';
 import { ShipData } from 'novadatainterface/ship_data';
 import { SystemData } from 'novadatainterface/system_data';
 import { GetWorld } from 'nova_ecs/arg_types';
@@ -30,6 +31,7 @@ import { DeathAIComponent } from './npc_plugin.js';
 import { FiringGroupComponent } from './firing_group.js';
 import { FormationComponent, NpcComponent, formationSlotPosition } from './npc_ai_plugin.js';
 import { WeaponEntries } from './fire_weapon_plugin.js';
+import { PersComponent } from './pers_plugin.js';
 import { ShipComponent } from './ship_plugin.js';
 import { TargetComponent } from './target_component.js';
 
@@ -72,6 +74,15 @@ import { TargetComponent } from './target_component.js';
  * design for shared-vs-personal encounters exists, only fleets whose
  * AppearOn passes with no bits set (i.e. unconditional or negated-bit
  * expressions) can spawn.
+ *
+ * përs unique characters ride the same machinery: the Bible's "when
+ * ships are created, there is a 5% chance that a specific AI-person
+ * will also be created" is implemented as a 5% roll on each spawn
+ * draw against a genesis përs table (LinkSyst eligibility, ActiveOn
+ * under the same empty-bit-set constraint as AppearOn, ship/govt
+ * staged like everything else). At most one living instance of a
+ * person exists in the system at a time. See pers_plugin.ts for what
+ * of the përs resource is and isn't applied.
  */
 
 /** Hard cap on the NPC population. AvgShips reaches 20 in stock data
@@ -83,7 +94,7 @@ export const MAX_NPC_POPULATION = 12;
 export const NPC_RESPAWN_INTERVAL_MS = 15_000;
 /** Initial spawns scatter within this half-size box (the region where
  * planets and gameplay live; matches the asteroid field). */
-const INITIAL_SPAWN_HALF_SIZE = 2000;
+export const INITIAL_SPAWN_HALF_SIZE = 2000;
 /** Total table weight given to all roaming (LinkSyst) fleets combined,
  * relative to dude weights that typically sum to ~100. */
 const ROAMING_FLEET_WEIGHT = 15;
@@ -117,28 +128,49 @@ export const NpcSpawnEntry = t.intersection([t.type({
 })]);
 export type NpcSpawnEntry = t.TypeOf<typeof NpcSpawnEntry>;
 
+/** One person eligible to appear in this system (the genesis-staged
+ * projection of PersData the 5% roll draws from). */
+export const PersSpawnEntry = t.type({
+    /** PersData id. */
+    id: t.string,
+    name: t.string,
+    subtitle: t.string,
+    /** Global shïp id (staged at genesis). */
+    ship: t.string,
+    govt: t.union([t.string, t.null]),
+    /** 1-4 (përs AIType). */
+    aiType: t.number,
+});
+export type PersSpawnEntry = t.TypeOf<typeof PersSpawnEntry>;
+
 /**
  * Per-system NPC spawner state, attached to a dedicated entity with
  * the deterministic uuid 'npc spawner' (like 'asteroid field').
  */
-export const NpcSpawnerType = t.type({
+export const NpcSpawnerType = t.intersection([t.type({
     /** How many NPC ships the system wants alive. */
     targetCount: t.number,
     /** The weighted spawn table (see the module comment). */
     entries: t.array(NpcSpawnEntry),
     /** Sim time (ms) after which the spawner may add a ship. */
     nextSpawn: t.number,
-});
+}), t.partial({
+    /** The people eligible to appear here (see the module comment).
+     * Optional so pre-përs snapshots still decode. */
+    persEntries: t.array(PersSpawnEntry),
+})]);
 export type NpcSpawnerType = t.TypeOf<typeof NpcSpawnerType>;
 export const NpcSpawnerComponent = new Component<NpcSpawnerType>('NpcSpawner');
 
 /**
  * Picks an entry from a weighted list with a single Random draw (so
  * the PRNG stream stays in lockstep no matter which entry wins).
- * Returns undefined only for an empty/zero-weight list.
+ * Returns undefined only for an empty/zero-weight list. The random
+ * source is structural so input-record-path callers (mission ships)
+ * can pass plain randomness.
  */
 export function pickWeighted<T extends { weight: number }>(
-    entries: readonly T[], random: Random): T | undefined {
+    entries: readonly T[], random: { next(): number }): T | undefined {
     const total = entries.reduce((sum, entry) =>
         sum + Math.max(0, entry.weight), 0);
     if (total <= 0) {
@@ -189,6 +221,22 @@ export function fleetAllowedInSystem(link: FleetData['linkSyst'],
             return linkGovtData.classes.some(c => lists.includes(c));
         }
     }
+}
+
+/**
+ * Whether a përs's LinkSyst admits it into the given system. The
+ * shared govt-relative cases delegate to fleetAllowedInSystem (the
+ * ranges are identical); përs adds 9999 = independent systems.
+ */
+export function persAllowedInSystem(link: PersData['linkSyst'],
+    systemId: string, systemGovt: string | null,
+    systemGovtData: GovtData | undefined,
+    linkGovtData: GovtData | undefined): boolean {
+    if (link.type === 'independentSystems') {
+        return systemGovt === null;
+    }
+    return fleetAllowedInSystem(link, systemId, systemGovt,
+        systemGovtData, linkGovtData);
 }
 
 /**
@@ -334,6 +382,161 @@ export async function buildNpcSpawnTable(world: World, systemId: string,
     return entries;
 }
 
+/** Maps over `items` with at most `concurrency` calls in flight,
+ * preserving order (genesis-time cache warming; see buildPersSpawnTable). */
+async function pooledMap<T, R>(items: readonly T[],
+    map: (item: T) => Promise<R>, concurrency = 8): Promise<R[]> {
+    const results = new Array<R>(items.length);
+    let next = 0;
+    async function worker() {
+        while (next < items.length) {
+            const index = next++;
+            results[index] = await map(items[index]);
+        }
+    }
+    await Promise.all(Array.from(
+        { length: Math.min(concurrency, items.length) }, worker));
+    return results;
+}
+
+/**
+ * Builds the system's përs table: every person whose LinkSyst admits
+ * this system and whose ActiveOn passes with no bits set (the same
+ * shared-spawn constraint as flët AppearOn; see the module comment),
+ * with their ship class and govt staged. Sorted ids (and order-
+ * preserving pooled loads) so the table is identical on every world;
+ * the bounded concurrency and per-ship-class dedup keep the scan of
+ * several hundred përs resources off the genesis critical path.
+ */
+export async function buildPersSpawnTable(world: World, systemId: string,
+    systemData: SystemData): Promise<PersSpawnEntry[]> {
+    const gameData = world.resources.get(SimulationGameDataResource);
+    if (!gameData) {
+        throw new Error('Expected SimulationGameDataResource to exist');
+    }
+    const systemGovtData = systemData.govt
+        ? await gameData.data.Govt.get(systemData.govt).catch(() => undefined)
+        : undefined;
+
+    const persIds = [...(await gameData.ids).Pers].sort();
+    const eligible = (await pooledMap(persIds, async persId => {
+        let pers: PersData;
+        try {
+            pers = await gameData.data.Pers.get(persId);
+        } catch {
+            return undefined;
+        }
+        const link = pers.linkSyst;
+        const linkGovtData =
+            (link.type === 'allySystems' || link.type === 'enemySystems')
+                ? await gameData.data.Govt.get(link.govt)
+                    .catch(() => undefined)
+                : undefined;
+        if (!persAllowedInSystem(link, systemId, systemData.govt,
+            systemGovtData, linkGovtData)) {
+            return undefined;
+        }
+        // ActiveOn under an empty bit set (per-player bits cannot
+        // drive shared spawns).
+        try {
+            if (pers.activeOn && !evaluateNCBTest(pers.activeOn,
+                { getBit: () => false })) {
+                return undefined;
+            }
+        } catch (e) {
+            console.warn(`Bad ActiveOn for përs ${persId}: ${e}`);
+            return undefined;
+        }
+        return pers;
+    })).filter((pers): pers is PersData => pers !== undefined);
+
+    // Stage each distinct ship-class/govt pair once.
+    const staged = new Map<string, Promise<boolean>>();
+    const stageOnce = (ship: string, govt: string | null) => {
+        const key = `${ship} ${govt ?? ''}`;
+        let promise = staged.get(key);
+        if (!promise) {
+            promise = stageShip(world, ship, govt)
+                .then(() => true, e => {
+                    console.warn(`përs table: dropping ships of class `
+                        + `${ship}: ${e}`);
+                    return false;
+                });
+            staged.set(key, promise);
+        }
+        return promise;
+    };
+    const stagedOk = await pooledMap(eligible,
+        pers => stageOnce(pers.ship, pers.govt));
+
+    return eligible.filter((_, index) => stagedOk[index]).map(pers => ({
+        id: pers.id,
+        name: pers.name,
+        subtitle: pers.subtitle,
+        ship: pers.ship,
+        govt: pers.govt,
+        aiType: pers.aiType,
+    }));
+}
+
+/** The Bible's chance that a spawn draw also creates a person. */
+export const PERS_SPAWN_CHANCE = 0.05;
+
+/**
+ * The Bible's "when ships are created, there is a 5% chance that a
+ * specific AI-person will also be created": rolled on each spawn draw.
+ * A person already alive in the system is not duplicated (the roll is
+ * still consumed, keeping the PRNG stream in lockstep). Deterministic:
+ * seeded Random, staged getCached reads, ids from the IdFactory.
+ */
+function maybeSpawnPers(world: World,
+    gameData: SimulationGameDataInterface, ids: IdFactory, random: Random,
+    persEntries: readonly PersSpawnEntry[], atEdge: boolean): number {
+    if (persEntries.length === 0) {
+        return 0;
+    }
+    if (random.next() >= PERS_SPAWN_CHANCE) {
+        return 0;
+    }
+    const pers = persEntries[random.below(persEntries.length)];
+    for (const entity of world.entities.values()) {
+        if (entity.components.get(PersComponent)?.id === pers.id) {
+            // Only one of each person at a time.
+            return 0;
+        }
+    }
+    const shipData = gameData.data.Ship.getCached(pers.ship);
+    if (!shipData) {
+        // Staged at genesis, so a miss is identical on every world.
+        return 0;
+    }
+    let state;
+    if (atEdge) {
+        state = jumpInState(shipData, random);
+    } else {
+        state = {
+            position: new Position(
+                (random.next() * 2 - 1) * INITIAL_SPAWN_HALF_SIZE,
+                (random.next() * 2 - 1) * INITIAL_SPAWN_HALF_SIZE),
+            rotation: new Angle(random.next() * 2 * Math.PI),
+            velocity: new Vector(0, 0),
+        };
+    }
+    const ship = makeNpcShip(shipData, pers.aiType, pers.govt,
+        state.position, state.rotation, state.velocity);
+    ship.name = pers.name;
+    ship.components.set(PersComponent, {
+        id: pers.id,
+        name: pers.name,
+        subtitle: pers.subtitle,
+    });
+    deriveEntityComponents(world, ship);
+    // The 'npc' uuid prefix: a person IS an NPC (population counting,
+    // system-furniture checks); the PersComponent is the tag.
+    world.entities.set(ids.next('npc'), ship);
+    return 1;
+}
+
 /** The Bible's "average +/- 50%" population roll. */
 export function rollPopulationTarget(avgShips: number,
     random: Random): number {
@@ -375,8 +578,10 @@ export function makeNpcShip(shipData: ShipData, aiType: number,
 
 /** Jump-in kinematics: where an arriving NPC appears and how it moves
  * (mirrors jump_plugin's arrival: outside the no-jump zone, coasting
- * inward at top speed). */
-function jumpInState(shipData: ShipData, random: Random) {
+ * inward at top speed). The random source is structural so callers on
+ * the input-record path (mission ships) can pass plain randomness. */
+export function jumpInState(shipData: ShipData,
+    random: { next(): number }) {
     const bearing = new Angle(random.next() * 2 * Math.PI);
     const inward = bearing.getUnitVector().scale(-1);
     const arrivalDistance = JUMP_DISTANCE
@@ -409,11 +614,17 @@ function jumpInState(shipData: ShipData, random: Random) {
  */
 export function spawnNpc(world: World,
     gameData: SimulationGameDataInterface, ids: IdFactory, random: Random,
-    entries: NpcSpawnEntry[], atEdge: boolean): number {
+    entries: NpcSpawnEntry[], atEdge: boolean,
+    persEntries: readonly PersSpawnEntry[] = []): number {
     const entities = world.entities;
+    // Each spawn draw may also create a unique person (see
+    // maybeSpawnPers); rolled first so the draw count per spawn stays
+    // fixed regardless of what the dude/fleet pick does.
+    const spawnedPers = maybeSpawnPers(world, gameData, ids, random,
+        persEntries, atEdge);
     const entry = pickWeighted(entries, random);
     if (!entry) {
-        return 0;
+        return spawnedPers;
     }
     const insert = (uuid: string, entity: Entity) => {
         deriveEntityComponents(world, entity);
@@ -427,12 +638,12 @@ export function spawnNpc(world: World,
     if (entry.dude) {
         const choice = pickWeighted(entry.dude.ships, random);
         if (!choice) {
-            return 0;
+            return spawnedPers;
         }
         const shipData = gameData.data.Ship.getCached(choice.id);
         if (!shipData) {
             // Staged at genesis, so a miss is identical on every world.
-            return 0;
+            return spawnedPers;
         }
         let state;
         if (atEdge) {
@@ -447,16 +658,16 @@ export function spawnNpc(world: World,
         insert(ids.next('npc'), makeNpcShip(shipData,
             entry.dude.aiType, entry.dude.govt,
             state.position, state.rotation, state.velocity));
-        return 1;
+        return spawnedPers + 1;
     }
 
     if (!entry.fleet) {
-        return 0;
+        return spawnedPers;
     }
     const fleet = entry.fleet;
     const leadData = gameData.data.Ship.getCached(fleet.leadShip);
     if (!leadData) {
-        return 0;
+        return spawnedPers;
     }
     let leadState;
     if (atEdge) {
@@ -477,7 +688,7 @@ export function spawnNpc(world: World,
     // escort shot must never turn the leader hostile to its own fleet.
     leadShip.components.set(FiringGroupComponent, { group: leadUuid });
     insert(leadUuid, leadShip);
-    let spawned = 1;
+    let spawned = spawnedPers + 1;
     let slot = 0;
     for (const escort of fleet.escorts) {
         const count = escort.min
@@ -523,6 +734,7 @@ export async function spawnNpcs(world: World, systemId: string,
     }
 
     const entries = await buildNpcSpawnTable(world, systemId, systemData);
+    const persEntries = await buildPersSpawnTable(world, systemId, systemData);
     const targetCount = entries.length === 0 ? 0
         : rollPopulationTarget(systemData.avgShips, random);
 
@@ -531,7 +743,8 @@ export async function spawnNpcs(world: World, systemId: string,
     // the Bible's own behavior (a fleet arrives whole) and the excess
     // decays as ships depart.
     for (let guard = 0; population < targetCount && guard < 100; guard++) {
-        population += spawnNpc(world, gameData, ids, random, entries, false);
+        population += spawnNpc(world, gameData, ids, random, entries,
+            false, persEntries);
     }
 
     const spawner = new Entity('npc spawner')
@@ -539,6 +752,7 @@ export async function spawnNpcs(world: World, systemId: string,
             targetCount,
             entries,
             nextSpawn: 0,
+            persEntries,
         });
     world.entities.set('npc spawner', spawner);
 }
@@ -561,7 +775,8 @@ const NpcRespawnSystem = new System({
             return;
         }
         spawner.nextSpawn = time.time + NPC_RESPAWN_INTERVAL_MS;
-        spawnNpc(world, gameData, ids, random, spawner.entries, true);
+        spawnNpc(world, gameData, ids, random, spawner.entries, true,
+            spawner.persEntries ?? []);
     },
     // After TimeSystem for the same late-join determinism reason as
     // AsteroidMotionSystem.

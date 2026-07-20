@@ -3,6 +3,9 @@ import { MissionData } from 'novadatainterface/mission_data';
 import { PlanetData } from 'novadatainterface/planet_data';
 import { evaluateNCBTest, makeControlBitHooks, NCBParseError, NCBSetHooks, runNCBSet } from './ncb.js';
 import { Cargo, cargoUsed } from './cargo_plugin.js';
+import { resolveShipObjective, shipGoalOfferable } from './mission_ship_logic.js';
+import type { SystemInfo } from './mission_ship_logic.js';
+import { objectiveAllowsCompletion, ShipObjective } from './mission_ship_state.js';
 import { ActiveMission, MAX_ACTIVE_MISSIONS, Missions } from './player_state_plugin.js';
 import {
     addRecord,
@@ -86,6 +89,14 @@ export interface MissionContext {
     getGovt(id: string): GovtData | undefined;
     /** Current absolute day number (calendar.ts dayNumber). */
     currentDay: number;
+    /**
+     * All systems, for resolving special/aux ship spawn systems
+     * (mission_ship_logic.ts). Optional: callers that don't supply it
+     * keep ship-goal missions unofferable (fail closed).
+     */
+    systems?: SystemInfo[];
+    /** Maps a planet id to its containing system id. */
+    systemIdOfStellar?(planetId: string): string | undefined;
 }
 
 function intersects(a: number[], b: number[]): boolean {
@@ -177,6 +188,8 @@ export interface MissionOffer {
     /** Resolved cargo type (0-255) or -1. */
     cargoType: number;
     cargoQty: number;
+    /** Frozen special-ship objective; absent without special ships. */
+    shipObjective?: ShipObjective;
     /** Whether Accept may be clicked (cargo fits, mission cap). */
     acceptable: boolean;
     /** Why not, when !acceptable. */
@@ -193,9 +206,9 @@ export const LOCATION_BAR = 1;
  * landing so re-opening the board doesn't reroll).
  *
  * Known simplifications (documented gaps): Require must be zero (no
- * Contribute bits), and missions with special-ship goals are never
- * offered (combat objectives are unimplemented, so they could never
- * be completed).
+ * Contribute bits), and missions with board/rescue ship goals are
+ * never offered (boarding is unimplemented, so they could never be
+ * completed; see mission_ship_logic.ts).
  */
 export function missionMatchesLocation(mission: MissionData,
     location: number, ctx: MissionContext): boolean {
@@ -229,10 +242,9 @@ export function missionMatchesLocation(mission: MissionData,
     if (mission.require !== '0') {
         return false;
     }
-    // Special-ship goals (destroy/board/escort/...) are unimplemented;
+    // Board/rescue ship goals need boarding, which is unimplemented;
     // offering such a mission would make it impossible to complete.
-    if (mission.shipGoal >= 0 && mission.shipCount !== 0
-        && mission.shipCount !== -1) {
+    if (!shipGoalOfferable(mission)) {
         return false;
     }
     if (!shipTypeMatches(mission.availShipType, ctx.shipId)) {
@@ -341,6 +353,13 @@ export function makeMissionOffer(mission: MissionData,
     if (returnPlanet === undefined) {
         return null;
     }
+    // Special ships: freeze the spawn system and goal state. null
+    // means unresolvable (or an unsupported goal): unofferable.
+    const shipObjective = resolveShipObjective(mission, ctx,
+        travelPlanet, returnPlanet);
+    if (shipObjective === null) {
+        return null;
+    }
 
     let cargoType = mission.cargoType;
     if (cargoType === 1000) {
@@ -367,6 +386,7 @@ export function makeMissionOffer(mission: MissionData,
         returnPlanet,
         cargoType,
         cargoQty,
+        shipObjective,
         acceptable: true,
     };
 
@@ -393,7 +413,8 @@ export function makeMissionOffer(mission: MissionData,
 export interface MissionEvent {
     missionId: string;
     missionName: string;
-    type: 'completed' | 'failed' | 'aborted' | 'accepted' | 'autoAborted';
+    type: 'completed' | 'failed' | 'aborted' | 'accepted' | 'autoAborted'
+        | 'shipDone';
     /** The mission's dësc text for this event ('' if none). */
     text: string;
     /** Credits paid (positive) with this event, if any. */
@@ -589,6 +610,11 @@ export function acceptOffer(machinery: MissionMachineryContext,
         deadlineDay: mission.timeLimit > 0
             ? ctx.currentDay + mission.timeLimit
             : null,
+        // Copied (not aliased) so re-showing the offer stays pristine.
+        shipObjective: offer.shipObjective && {
+            ...offer.shipObjective,
+            live: new Map(offer.shipObjective.live),
+        },
     };
     state.missions.set(mission.id, active);
     if (offer.cargoQty > 0
@@ -743,6 +769,30 @@ export function processLanding(machinery: MissionMachineryContext,
             failMission(machinery, active.id, outfits);
             continue;
         }
+        const objective = active.shipObjective;
+        if (objective?.failed) {
+            // The ship goal became unachievable (an escort died, a
+            // disable target was destroyed).
+            failMission(machinery, active.id, outfits);
+            continue;
+        }
+        if (objective?.shipDonePending) {
+            // OnShipDone. Timing gap (documented): the Bible evaluates
+            // it the moment the goal completes; control bits only
+            // change player-locally here, so it runs at the next
+            // landing instead.
+            objective.shipDonePending = false;
+            runMissionSetString(machinery, mission.onShipDone,
+                idPrefix(mission.id), outfits);
+            if (mission.shipDoneText) {
+                state.events.push({
+                    missionId: mission.id,
+                    missionName: mission.name,
+                    type: 'shipDone',
+                    text: mission.shipDoneText,
+                });
+            }
+        }
         if (active.travelPlanet === planetId && !active.travelDone) {
             let transferred = true;
             if (mission.pickupMode === 1) {
@@ -760,7 +810,10 @@ export function processLanding(machinery: MissionMachineryContext,
         const completionPlanet = active.returnPlanet ?? active.travelPlanet;
         const travelSatisfied = active.travelPlanet === null
             || active.travelDone;
-        if (completionPlanet === planetId && travelSatisfied) {
+        const goalSatisfied = !objective
+            || objectiveAllowsCompletion(objective);
+        if (completionPlanet === planetId && travelSatisfied
+            && goalSatisfied) {
             completeMission(machinery, active, mission, outfits);
         }
     }

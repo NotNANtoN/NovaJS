@@ -14,6 +14,7 @@ import { DudeData } from "novadatainterface/dude_data";
 import { FleetData } from "novadatainterface/fleet_data";
 import { JunkData } from "novadatainterface/junk_data";
 import { MissionData } from "novadatainterface/mission_data";
+import { PersData } from "novadatainterface/pers_data";
 import { CronData } from "novadatainterface/cron_data";
 import { PlayerStartData } from "novadatainterface/player_start_data";
 import { TargetCornersData } from "novadatainterface/target_corners_data";
@@ -61,6 +62,7 @@ class GameDataAggregator implements GameDataInterface {
             Fleet: this.makeAggregator<FleetData>(NovaDataType.Fleet),
             Junk: this.makeAggregator<JunkData>(NovaDataType.Junk),
             Mission: this.makeAggregator<MissionData>(NovaDataType.Mission),
+            Pers: this.makeAggregator<PersData>(NovaDataType.Pers),
             Cron: this.makeAggregator<CronData>(NovaDataType.Cron),
             PlayerStart: this.makeAggregator<PlayerStartData>(NovaDataType.PlayerStart),
             TargetCorners: this.makeAggregator<TargetCornersData>(NovaDataType.TargetCorners),

@@ -2,8 +2,8 @@ import 'jasmine';
 import { getDefaultGovtData } from 'novadatainterface/govt_data';
 import { Random } from 'nova_ecs/plugins/random_plugin';
 import {
-    fleetAllowedInSystem, MAX_NPC_POPULATION, pickWeighted,
-    rollPopulationTarget,
+    fleetAllowedInSystem, MAX_NPC_POPULATION, persAllowedInSystem,
+    pickWeighted, rollPopulationTarget,
 } from './npc_spawn_plugin.js';
 
 function govt(overrides: Partial<ReturnType<typeof getDefaultGovtData>>) {
@@ -147,4 +147,28 @@ describe('fleetAllowedInSystem (flët LinkSyst ranges)', () => {
                 { type: 'enemySystems', govt: 'nova:128' },
                 'nova:130', 'nova:128', federation, federation)).toBeFalse();
         });
+});
+
+describe('persAllowedInSystem (përs LinkSyst ranges)', () => {
+    const federation = govt({ id: 'nova:128', classes: [1] });
+
+    it('independentSystems: only ungoverned systems', () => {
+        const link = { type: 'independentSystems' } as const;
+        expect(persAllowedInSystem(link, 'nova:130', null,
+            undefined, undefined)).toBeTrue();
+        expect(persAllowedInSystem(link, 'nova:130', 'nova:128',
+            federation, undefined)).toBeFalse();
+    });
+
+    it('delegates the shared ranges to the flët rules', () => {
+        expect(persAllowedInSystem({ type: 'any' }, 'nova:130', null,
+            undefined, undefined)).toBeTrue();
+        expect(persAllowedInSystem({ type: 'system', id: 'nova:132' },
+            'nova:132', null, undefined, undefined)).toBeTrue();
+        expect(persAllowedInSystem({ type: 'system', id: 'nova:132' },
+            'nova:130', null, undefined, undefined)).toBeFalse();
+        expect(persAllowedInSystem(
+            { type: 'govtSystems', govt: 'nova:128' },
+            'nova:130', 'nova:128', federation, undefined)).toBeTrue();
+    });
 });
