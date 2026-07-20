@@ -4,8 +4,11 @@ import { getDefaultMissionData, MissionData } from 'novadatainterface/mission_da
 import {
     abortMission,
     acceptOffer,
+    failExpiredMissions,
     makeMissionOffer,
     matchesStellarRef,
+    missionMapMarks,
+    runPendingShipDone,
     MissionContext,
     MissionMachineryContext,
     missionMatchesLocation,
@@ -16,7 +19,7 @@ import {
     runMissionSetString,
     StellarInfo,
 } from './mission_logic.js';
-import { MAX_ACTIVE_MISSIONS, Missions } from './player_state_plugin.js';
+import { ActiveMission, MAX_ACTIVE_MISSIONS, Missions } from './player_state_plugin.js';
 
 function makeStellar(partial: Partial<StellarInfo> = {}): StellarInfo {
     return {
@@ -165,6 +168,54 @@ describe('matchesStellarRef', () => {
         expect(matchesStellarRef(31000, null,
             makeStellar({ govt: 'nova:130' }), 'nova', get)).toBe(true);
     });
+
+    describe('the AvailStel 5000-7047 adjacent-system range', () => {
+        // System topology: nova:200 links to nova:201; nova:202 is
+        // unconnected. Stellars: 300 in system 200, 301 in system 201,
+        // 302 in system 202.
+        const adjacency = {
+            systemOfStellar: (id: string) => ({
+                'nova:300': 'nova:200',
+                'nova:301': 'nova:201',
+                'nova:302': 'nova:202',
+            } as Record<string, string | undefined>)[id],
+            systemsAdjacentOrEqual: (a: string, b: string) => {
+                if (a === b) return true;
+                const links: Record<string, string[]> = {
+                    'nova:200': ['nova:201'],
+                    'nova:201': ['nova:200'],
+                    'nova:202': [],
+                };
+                return links[a]?.includes(b) ?? false;
+            },
+        };
+        // ref 5072 -> target system 128 + (5072 - 5000) = 200.
+        const refFor200 = 5000 + (200 - 128);
+
+        it('matches a stellar in the target system itself', () => {
+            expect(matchesStellarRef(refFor200, null,
+                makeStellar({ id: 'nova:300' }), 'nova', getGovt, adjacency))
+                .toBe(true);
+        });
+
+        it('matches a stellar in an adjacent system', () => {
+            expect(matchesStellarRef(refFor200, null,
+                makeStellar({ id: 'nova:301' }), 'nova', getGovt, adjacency))
+                .toBe(true);
+        });
+
+        it('rejects a stellar in a non-adjacent system', () => {
+            expect(matchesStellarRef(refFor200, null,
+                makeStellar({ id: 'nova:302' }), 'nova', getGovt, adjacency))
+                .toBe(false);
+        });
+
+        it('never matches without an adjacency resolver (fail closed)', () => {
+            expect(matchesStellarRef(refFor200, null,
+                makeStellar({ id: 'nova:300' }), 'nova', getGovt))
+                .toBe(false);
+        });
+    });
 });
 
 describe('missionMatchesLocation', () => {
@@ -218,10 +269,20 @@ describe('missionMatchesLocation', () => {
         }), LOCATION_MISSION_COMPUTER, makeContext())).toBe(false);
     });
 
-    it('fails closed on nonzero Require masks', () => {
-        const mission = makeMission({ require: '3' });
+    it('gates a Require mask on the player Contribute mask', () => {
+        const mission = makeMission({ require: '3' }); // bits 0x1 | 0x2
+        // No contribute: the requirement is unmet.
         expect(missionMatchesLocation(mission, LOCATION_MISSION_COMPUTER,
             makeContext())).toBe(false);
+        // Partial cover is still unmet.
+        expect(missionMatchesLocation(mission, LOCATION_MISSION_COMPUTER,
+            makeContext({ playerContribute: 0x1n }))).toBe(false);
+        // Full cover passes.
+        expect(missionMatchesLocation(mission, LOCATION_MISSION_COMPUTER,
+            makeContext({ playerContribute: 0x3n }))).toBe(true);
+        // Extra contribute bits don't hurt.
+        expect(missionMatchesLocation(mission, LOCATION_MISSION_COMPUTER,
+            makeContext({ playerContribute: 0xFFn }))).toBe(true);
     });
 
     it('restricts by ship type', () => {
@@ -232,6 +293,39 @@ describe('missionMatchesLocation', () => {
             .toBe(true);
         expect(missionMatchesLocation(mustNotFly, LOCATION_MISSION_COMPUTER,
             ctx)).toBe(false);
+    });
+
+    it('restricts by ship type across the full Bible range (128-895)', () => {
+        // A high-id ship (>255) must still match a 128-895 restriction.
+        const mustFly = makeMission({ availShipType: 500 });
+        expect(missionMatchesLocation(mustFly, LOCATION_MISSION_COMPUTER,
+            makeContext({ shipId: 'nova:500' }))).toBe(true);
+        expect(missionMatchesLocation(mustFly, LOCATION_MISSION_COMPUTER,
+            makeContext({ shipId: 'nova:164' }))).toBe(false);
+    });
+
+    it('restricts by the ship\'s inherent govt (2128+/3128+)', () => {
+        // 2128 + (govt 130 - 128) = 2130: must fly a ship of govt 130.
+        const mustBeGovt130 = makeMission({ availShipType: 2130 });
+        const mustNotBeGovt130 = makeMission({ availShipType: 3130 });
+        const govt130 = makeContext({ shipGovt: 'nova:130' });
+        const govt129 = makeContext({ shipGovt: 'nova:129' });
+        const noGovt = makeContext({ shipGovt: null });
+
+        expect(missionMatchesLocation(mustBeGovt130,
+            LOCATION_MISSION_COMPUTER, govt130)).toBe(true);
+        expect(missionMatchesLocation(mustBeGovt130,
+            LOCATION_MISSION_COMPUTER, govt129)).toBe(false);
+        expect(missionMatchesLocation(mustBeGovt130,
+            LOCATION_MISSION_COMPUTER, noGovt)).toBe(false);
+
+        expect(missionMatchesLocation(mustNotBeGovt130,
+            LOCATION_MISSION_COMPUTER, govt130)).toBe(false);
+        expect(missionMatchesLocation(mustNotBeGovt130,
+            LOCATION_MISSION_COMPUTER, govt129)).toBe(true);
+        // A ship with no inherent govt is "not of govt 130".
+        expect(missionMatchesLocation(mustNotBeGovt130,
+            LOCATION_MISSION_COMPUTER, noGovt)).toBe(true);
     });
 });
 
@@ -419,6 +513,99 @@ describe('accept / landing / completion flow', () => {
         expect(failed.text).toBe('You blew it.');
     });
 
+    it('fails an expired deadline via failExpiredMissions (in flight)', () => {
+        const mission = makeMission({
+            id: 'nova:202',
+            returnStel: 129,
+            returnStelId: 'nova:129',
+            timeLimit: 5,
+            onFailure: 'b666',
+            failText: 'Out of time.',
+        });
+        const state = makeState();
+        const machinery = makeMachinery(state, [mission]);
+        acceptOffer(machinery,
+            makeMissionOffer(mission, machinery.offerContext())!);
+        // Accepted at day 1000, deadline day 1005.
+        expect(failExpiredMissions(machinery, 1003)).toBe(0);
+        expect(state.missions.size).toBe(1);
+        // The day passes the deadline: fails immediately, no landing.
+        expect(failExpiredMissions(machinery, 1006)).toBe(1);
+        expect(state.missions.size).toBe(0);
+        expect(state.bits.has(666)).toBe(true);
+        expect(state.events.find(e => e.type === 'failed')?.text)
+            .toBe('Out of time.');
+    });
+
+    it('fails a mission the sim marked failed (player disable/destroy)', () => {
+        const mission = makeMission({
+            id: 'nova:205',
+            returnStel: 129,
+            returnStelId: 'nova:129',
+            onFailure: 'b77',
+            failText: 'You were disabled.',
+        });
+        const state = makeState();
+        const machinery = makeMachinery(state, [mission]);
+        acceptOffer(machinery,
+            makeMissionOffer(mission, machinery.offerContext())!);
+        // The shared sim sets active.failed on a disable/destroy.
+        state.missions.get('nova:205')!.failed = true;
+        // No deadline, but failExpiredMissions still fails it.
+        expect(failExpiredMissions(machinery, 1001)).toBe(1);
+        expect(state.missions.size).toBe(0);
+        expect(state.bits.has(77)).toBe(true);
+        expect(state.events.find(e => e.type === 'failed')?.text)
+            .toBe('You were disabled.');
+    });
+
+    it('runs OnShipDone when the sim marks the goal done (in flight)', () => {
+        const mission = makeMission({
+            id: 'nova:207',
+            shipGoal: 0, shipCount: 2, shipDudeId: 'nova:240',
+            returnStel: 129, returnStelId: 'nova:129',
+            onShipDone: 'b88',
+            shipDoneText: 'Targets eliminated.',
+        });
+        const state = makeState();
+        // Special-ship resolution needs system topology in the context.
+        const machinery = makeMachinery(state, [mission], {
+            systems: [{ id: 'nova:200', govt: null, links: [] }],
+            systemIdOfStellar: () => 'nova:200',
+        });
+        acceptOffer(machinery,
+            makeMissionOffer(mission, machinery.offerContext())!);
+        const active = state.missions.get('nova:207')!;
+        // Nothing pending yet.
+        expect(runPendingShipDone(machinery)).toBe(0);
+        // The shared sim completes the goal and flags OnShipDone.
+        active.shipObjective!.complete = true;
+        active.shipObjective!.shipDonePending = true;
+        // Runs at the next date advance (jump or landing), not just at
+        // the return landing: OnShipDone fires and the mission stays.
+        expect(runPendingShipDone(machinery)).toBe(1);
+        expect(state.bits.has(88)).toBe(true);
+        expect(state.events.find(e => e.type === 'shipDone')?.text)
+            .toBe('Targets eliminated.');
+        expect(active.shipObjective!.shipDonePending).toBe(false);
+        expect(state.missions.has('nova:207')).toBe(true);
+        // Idempotent: it does not run again.
+        expect(runPendingShipDone(machinery)).toBe(0);
+    });
+
+    it('freezes failIfPlayerDisabledOrDestroyed onto the active mission', () => {
+        const flagged = makeMission({ id: 'nova:206' });
+        flagged.flags = {
+            ...flagged.flags, failIfPlayerDisabledOrDestroyed: true,
+        };
+        const state = makeState();
+        const machinery = makeMachinery(state, [flagged]);
+        acceptOffer(machinery,
+            makeMissionOffer(flagged, machinery.offerContext())!);
+        expect(state.missions.get('nova:206')!
+            .failIfPlayerDisabledOrDestroyed).toBe(true);
+    });
+
     it('aborts a mission, dropping its cargo and running OnAbort', () => {
         const mission = makeMission({
             id: 'nova:203',
@@ -507,5 +694,78 @@ describe('mission set-string hooks (Sxxx/Axxx/Fxxx)', () => {
         // Must terminate.
         runMissionSetString(machinery, 's213', 'nova');
         expect(state.missions.size).toBe(0);
+    });
+});
+
+describe('missionMapMarks', () => {
+    function activeMission(partial: Partial<ActiveMission>): ActiveMission {
+        return {
+            id: 'nova:200', acceptedDay: 0, acceptedAt: 'nova:128',
+            travelPlanet: null, returnPlanet: null, cargoType: -1,
+            cargoQty: 0, cargoLoaded: false, travelDone: false,
+            deadlineDay: null, ...partial,
+        };
+    }
+    // Planet -> system map for the test.
+    const systemOf = (planetId: string) => ({
+        'nova:300': 'nova:400', // travel
+        'nova:301': 'nova:401', // return
+    } as Record<string, string | undefined>)[planetId];
+
+    it('marks travel and return systems as destinations', () => {
+        const mission = makeMission({ id: 'nova:200' });
+        const getMission = (id: string) => id === 'nova:200'
+            ? mission : undefined;
+        const marks = missionMapMarks([activeMission({
+            travelPlanet: 'nova:300', returnPlanet: 'nova:301',
+        })], getMission, systemOf);
+        expect(marks).toEqual([
+            { systemId: 'nova:400', kind: 'destination', missionId: 'nova:200' },
+            { systemId: 'nova:401', kind: 'destination', missionId: 'nova:200' },
+        ]);
+    });
+
+    it('suppresses destination marks under hideDestArrows', () => {
+        const mission = makeMission({ id: 'nova:200' });
+        mission.flags = { ...mission.flags, hideDestArrows: true };
+        const getMission = () => mission;
+        const marks = missionMapMarks([activeMission({
+            travelPlanet: 'nova:300', returnPlanet: 'nova:301',
+        })], getMission, systemOf);
+        expect(marks).toEqual([]);
+    });
+
+    it('marks the ship-syst system only under showArrowForShipSyst', () => {
+        const mission = makeMission({ id: 'nova:200' });
+        const getMission = () => mission;
+        const active = activeMission({
+            travelPlanet: null, returnPlanet: null,
+            shipObjective: {
+                goal: 0, systemId: 'nova:500', shipStart: 0, behavior: -1,
+                dudeId: 'nova:240', total: 1, satisfied: 0, complete: false,
+                failed: false, shipDonePending: false, live: new Map(),
+            },
+        });
+        // Without the flag: no mark.
+        expect(missionMapMarks([active], getMission, systemOf)).toEqual([]);
+        // With the flag: a ship-syst mark.
+        mission.flags = { ...mission.flags, showArrowForShipSyst: true };
+        expect(missionMapMarks([active], getMission, systemOf)).toEqual([
+            { systemId: 'nova:500', kind: 'shipSyst', missionId: 'nova:200' },
+        ]);
+    });
+
+    it('deduplicates and skips unplaced/unknown systems', () => {
+        const mission = makeMission({ id: 'nova:200' });
+        const getMission = () => mission;
+        const marks = missionMapMarks([
+            activeMission({ travelPlanet: 'nova:300' }),
+            // Same system again (dedup) and an unplaced planet (skipped).
+            activeMission({ id: 'nova:200', travelPlanet: 'nova:300',
+                returnPlanet: 'nova:999' }),
+        ], getMission, systemOf);
+        expect(marks).toEqual([
+            { systemId: 'nova:400', kind: 'destination', missionId: 'nova:200' },
+        ]);
     });
 });

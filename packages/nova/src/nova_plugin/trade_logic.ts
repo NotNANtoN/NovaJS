@@ -10,9 +10,10 @@ import { STANDARD_CARGO_NAMES } from './mission_logic.js';
  * Standard commodities trade at every stellar whose spöb flags give
  * them a price tier: low = 80%, medium = 100%, high = 125% of the base
  * price. Base prices are the strings of STR# 4004 in the stock data
- * ([75, 350, 750, 900, 200, 550]); they are hardcoded here the same
- * way STANDARD_CARGO_NAMES hardcodes STR# 4000 (documented gap:
- * plugins overriding those STR# resources aren't picked up).
+ * ([75, 350, 750, 900, 200, 550]); they are hardcoded here (documented
+ * gap: plugins overriding STR# 4004 aren't picked up). The commodity
+ * NAMES (STR# 4000) are no longer hardcoded — standardTradeGoods takes
+ * the scenario's parsed PlayerStartData.cargoNames.
  *
  * Jünk commodities are bought by the player at their SoldAt stellars
  * (low tier) and sold at their BoughtAt stellars (high tier), gated by
@@ -52,8 +53,13 @@ export interface TradeGood {
     canSell: boolean;
 }
 
-/** The standard-commodity rows of a stellar's exchange, in STR# order. */
-export function standardTradeGoods(planet: PlanetData): TradeGood[] {
+/**
+ * The standard-commodity rows of a stellar's exchange, in STR# order.
+ * `cargoNames` is the scenario's parsed STR# 4000 names; it falls back
+ * to the built-in commodity names.
+ */
+export function standardTradeGoods(planet: PlanetData,
+    cargoNames: readonly string[] = STANDARD_CARGO_NAMES): TradeGood[] {
     const goods: TradeGood[] = [];
     planet.tradeTiers.forEach((tier, index) => {
         if (!tier) {
@@ -65,7 +71,8 @@ export function standardTradeGoods(planet: PlanetData): TradeGood[] {
         }
         goods.push({
             key: `cargo:${index}`,
-            name: STANDARD_CARGO_NAMES[index] ?? `Commodity ${index}`,
+            name: cargoNames[index] || STANDARD_CARGO_NAMES[index]
+                || `Commodity ${index}`,
             tier,
             price: tierPrice(base, tier),
             canBuy: true,

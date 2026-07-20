@@ -14,9 +14,12 @@ import { OutfitsStateComponent } from "../nova_plugin/outfit_plugin.js";
 import { cleanRecords, LegalRecords } from "../nova_plugin/reputation.js";
 import { LegalRecordsComponent } from "../nova_plugin/reputation_plugin.js";
 import { ShipComponent } from "../nova_plugin/ship_plugin.js";
+import { idPrefix } from "../nova_plugin/mission_logic.js";
 import { Button, ButtonClick } from "./button.js";
 import { ItemGrid, ItemTile } from "./item_grid.js";
 import { Menu } from "./menu.js";
+import { MissionSession } from "./mission_session.js";
+import { MissionUniverse } from "./mission_universe.js";
 import { canBuyOutfit, canSellOutfit, freeMass, maxBuyCount, maxSellCount, OutfitterContext } from "./outfitter_rules.js";
 import { QuantityDialog } from "./quantity_dialog.js";
 
@@ -48,6 +51,13 @@ export class Outfitter extends Menu<Entity> {
     /** Every govt, sorted by id, loaded in build() for ModType 21. */
     private govts: (readonly [string, GovtData])[] = [];
     private shipData?: ShipData;
+    /**
+     * Built per-visit so outfit purchase/sell set strings can run the
+     * mission operators Sxxx/Axxx/Fxxx (start/fail/abort a mission), not
+     * just control-bit ops. Undefined until show() has built it (or if
+     * the build failed — then set strings fall back to bit-only hooks).
+     */
+    private missionSession?: MissionSession;
 
     private text = {
         description: new PIXI.Text("", FONT.normal),
@@ -197,8 +207,34 @@ export class Outfitter extends Menu<Entity> {
      * against the working outfits and control bits. Gxxx grants here
      * intentionally bypass the purchase checks.
      */
-    private runSetString(expression: string) {
+    private runSetString(expression: string, resourcePrefix = 'nova') {
         if (!expression) {
+            return;
+        }
+        // When a mission session is available, run the string through the
+        // full mission machinery so Sxxx/Axxx/Fxxx (start/fail/abort a
+        // mission) take effect, not just control-bit ops. The session
+        // shares this.outfits' contents and this.controlBits, so sync the
+        // outfit counts into it first (buy/sell mutate this.outfits).
+        if (this.missionSession) {
+            this.missionSession.outfits.clear();
+            for (const [id, count] of this.outfits) {
+                if (count > 0) {
+                    this.missionSession.outfits.set(id, count);
+                }
+            }
+            try {
+                this.missionSession.runMissionSet(expression, resourcePrefix);
+            } catch (error) {
+                if (error instanceof NCBParseError) {
+                    console.warn('Bad outfit mission set string:', error);
+                } else {
+                    throw error;
+                }
+            }
+            // Reflect any Gxxx/Dxxx outfit grants back into the grid copy.
+            this.outfits = new DefaultMap(() => 0,
+                [...this.missionSession.outfits]);
             return;
         }
         try {
@@ -234,7 +270,7 @@ export class Outfitter extends Menu<Entity> {
                     this.govts);
             }
         }
-        this.runSetString(outfit.onPurchase);
+        this.runSetString(outfit.onPurchase, idPrefix(outfit.id));
     }
 
     /** Applies one unit's sale: count and OnSell. */
@@ -243,7 +279,7 @@ export class Outfitter extends Menu<Entity> {
         if (this.outfits.get(outfit.id) === 0) {
             this.outfits.delete(outfit.id);
         }
-        this.runSetString(outfit.onSell);
+        this.runSetString(outfit.onSell, idPrefix(outfit.id));
     }
 
     private buyOutfit(click?: ButtonClick) {
@@ -412,8 +448,47 @@ export class Outfitter extends Menu<Entity> {
         }
     }
 
+    override async show(input: Entity): Promise<Entity> {
+        // Build a mission session so outfit set strings can run the
+        // mission operators. Built before setInput seeds the working
+        // copies; a failure just leaves set strings on the bit-only path.
+        this.missionSession = undefined;
+        try {
+            const universe = MissionUniverse.shared(this.simulationData);
+            // The planet id is only used for offer context (Sxxx
+            // destination resolution); the entity carries the accepted-at
+            // stellar, so a placeholder is fine for outfitter-run scripts.
+            this.missionSession = await MissionSession.create(
+                input, this.simulationData, universe, '<outfitter>');
+        } catch (e) {
+            console.warn('Outfitter mission session unavailable:', e);
+        }
+        return super.show(input);
+    }
+
     protected override setInput(input: Entity) {
         super.setInput(input);
+        // Share the mission session's working copies so purchases and
+        // mission set strings mutate the same bits/outfits/records.
+        if (this.missionSession) {
+            const session = this.missionSession;
+            this.outfits = new DefaultMap(() => 0, [...session.outfits]);
+            this.controlBits = session.state.bits;
+            this.records = session.state.records ?? new Map();
+            this.shipData = undefined;
+            const shipId = input.components.get(ShipComponent)?.id;
+            if (shipId) {
+                this.simulationData.data.Ship.get(shipId).then(shipData => {
+                    if (this.input === input) {
+                        this.shipData = shipData;
+                        this.setFreeMassText();
+                    }
+                });
+            }
+            this.text.status.text = "";
+            this.itemGrid?.setCounts(this.outfits);
+            return;
+        }
         const outfitsState = input.components.get(OutfitsStateComponent)
             ?? new Map();
         this.outfits = new DefaultMap(() => 0, [...outfitsState].map(
@@ -439,6 +514,20 @@ export class Outfitter extends Menu<Entity> {
     }
 
     protected override done() {
+        if (this.missionSession) {
+            // Push the final outfit counts into the session, then commit
+            // it — that writes outfits, bits, records, and any mission /
+            // cargo / credits / date changes an Sxxx/Axxx/Fxxx caused.
+            this.missionSession.outfits.clear();
+            for (const [id, count] of this.outfits) {
+                if (count > 0) {
+                    this.missionSession.outfits.set(id, count);
+                }
+            }
+            this.missionSession.commit();
+            super.done();
+            return;
+        }
         this.input.components.set(OutfitsStateComponent, new Map(
             [...this.outfits]
                 .filter(([, count]) => count > 0)

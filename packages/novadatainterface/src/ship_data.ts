@@ -26,6 +26,11 @@ export interface ShipPhysics extends SpaceObjectPhysics {
     // Whether the ship slowly regenerates hyperspace fuel on its own
     // ("auto-refueller" outfits, ModType 19). Granted if any outfit has it.
     autoRefuel: boolean;
+    // Signed change to the number of days each hyperspace jump takes
+    // ("hyperspace speed mod" outfits, ModType 22; summed across
+    // outfits). Negative speeds jumps up; the effective per-jump time is
+    // still floored at 1 day (see calendar.ts daysPerJump). 0 = no mod.
+    hyperspaceSpeedMod: number;
 }
 
 export function getDefaultShipPhysics(): ShipPhysics {
@@ -41,6 +46,7 @@ export function getDefaultShipPhysics(): ShipPhysics {
         afterburner: 0,
         multiJump: 0,
         autoRefuel: false,
+        hyperspaceSpeedMod: 0,
     }
 }
 
@@ -75,6 +81,13 @@ export interface ShipData extends SpaceObjectData {
      * when a düde with AIType 0 spawns this ship.
      */
     inherentAI: number;
+    /**
+     * The ship class's inherent government as a global gövt id (shïp
+     * InherentGovt), or null when it has none. Used by the mïsn
+     * AvailShipType ship-govt ranges (2128+/3128+) to gate offers by
+     * the government of the ship the player is flying.
+     */
+    inherentGovt: string | null;
     /** Purchase price in credits (shïp Cost). */
     price: number;
     /**
@@ -130,6 +143,7 @@ export function getDefaultShipData(): ShipData {
         require: "0x0",
         strength: 0,
         inherentAI: 1,
+        inherentGovt: null,
         price: 0,
         techLevel: 0,
         hireRandom: 0,

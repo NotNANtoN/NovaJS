@@ -11,7 +11,7 @@ import { System } from 'nova_ecs/system';
 import { CloakActiveComponent, CloakComponent, isTargetable } from './cloak_plugin.js';
 import { DeathEvent } from './death_plugin.js';
 import { DisabledComponent } from './disabled_component.js';
-import { MissionsComponent } from './player_state_plugin.js';
+import { Missions, MissionsComponent } from './player_state_plugin.js';
 import { DeathAISystem } from './npc_plugin.js';
 import {
     registerShip,
@@ -194,6 +194,64 @@ const MissionShipCleanupSystem = new System({
     after: [TimeSystem],
 });
 
+/**
+ * Player-loss mission failure (mïsn Flags2 0x0004,
+ * failIfPlayerDisabledOrDestroyed). The disabled and destroyed cases
+ * are wired below off the shared DisabledComponent / DeathEvent. The
+ * sibling mïsn Flags 0x0020 flag, failIfScanned, is NOT modeled: the
+ * engine has no cargo-scan mechanic, so there is no scan event to fail
+ * on. It stays a parsed-but-inert flag until scanning exists.
+ *
+ * Marks every active mission with the failIfPlayerDisabledOrDestroyed
+ * flag as failed. The flag was frozen onto the ActiveMission at accept
+ * time, so the sim never needs the mission game data. Returns whether
+ * anything changed (so callers can avoid touching the component
+ * needlessly). Idempotent: an already-failed mission stays failed.
+ */
+function failPlayerMissionsOnLoss(missions: Missions): boolean {
+    let changed = false;
+    for (const active of missions.values()) {
+        if (active.failIfPlayerDisabledOrDestroyed && !active.failed) {
+            active.failed = true;
+            changed = true;
+        }
+    }
+    return changed;
+}
+
+/**
+ * Fails the owner's flagged missions when the owner's ship becomes
+ * disabled (mïsn Flags2 0x0004). Runs on every peer identically off the
+ * shared DisabledComponent; the actual OnFailure/notice happens at the
+ * next landing (processLanding reads active.failed), matching how
+ * special-ship goal failures surface.
+ */
+const MissionPlayerDisabledSystem = new System({
+    name: 'MissionPlayerDisabledSystem',
+    args: [MissionsComponent, DisabledComponent] as const,
+    step(missions) {
+        failPlayerMissionsOnLoss(missions);
+    },
+    after: [TimeSystem],
+});
+
+/**
+ * Fails the owner's flagged missions when the owner's ship is destroyed
+ * (mïsn Flags2 0x0004). Runs before DeathAISystem deletes the entity so
+ * the mission state — which rides on that same entity — is still
+ * mutable. (For players the ship isn't deleted; an escape pod respawns
+ * it, carrying the now-failed missions to the next landing.)
+ */
+const MissionPlayerDeathSystem = new System({
+    name: 'MissionPlayerDeathSystem',
+    events: [DeathEvent],
+    args: [DeathEvent, MissionsComponent] as const,
+    step(_death, missions) {
+        failPlayerMissionsOnLoss(missions);
+    },
+    before: [DeathAISystem],
+});
+
 export const MissionShipPlugin: Plugin = {
     name: 'MissionShipPlugin',
     build(world) {
@@ -203,5 +261,7 @@ export const MissionShipPlugin: Plugin = {
         world.addSystem(MissionShipDeathSystem);
         world.addSystem(MissionShipDepartureSystem);
         world.addSystem(MissionShipCleanupSystem);
+        world.addSystem(MissionPlayerDisabledSystem);
+        world.addSystem(MissionPlayerDeathSystem);
     },
 };

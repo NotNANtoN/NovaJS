@@ -4,6 +4,7 @@ import { Observable } from "rxjs";
 import { DisplayAssetDataInterface } from "../client/gamedata/display_asset_data.js";
 import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
 import { ControlEvent } from "../nova_plugin/controls_plugin.js";
+import { MissionMapMark } from "../nova_plugin/mission_logic.js";
 import { evaluateNCBTest } from "../nova_plugin/ncb.js";
 import { Button } from "./button.js";
 import { Menu } from "./menu.js";
@@ -15,6 +16,11 @@ const BLUE = 0x0000BB;
 // Hypergate network links, drawn in a distinct cyan so the instant-travel
 // hypergate routes read apart from the grey normal-jump hyperspace links.
 const HYPERGATE_LINK_COLOR = 0x00cccc;
+// Active-mission markers: a red ring around destination (travel/return)
+// systems, echoing the original's red destination arrows, and a yellow
+// ring for a mission's special-ship system (the additional arrow).
+const MISSION_DEST_COLOR = 0xff3333;
+const MISSION_SHIPSYST_COLOR = 0xffcc00;
 const LABEL_FONT_NAME = 'StarmapSystemLabel';
 const LABEL_FONT_SIZE = 10;
 
@@ -29,6 +35,8 @@ const ZOOM_STEP = 1.15;
 const KEY_PAN_STEP = 40;
 // Radius of a system's outer circle in laid-out coordinates.
 const SYSTEM_RADIUS = 2.7 * BASE_SCALE;
+// Radius of a mission marker ring, outside the system circle.
+const MISSION_MARK_RADIUS = 5 * BASE_SCALE;
 // How close (in screen pixels) a click must be to a system to select it.
 const CLICK_RADIUS = 12;
 
@@ -142,6 +150,13 @@ export interface SystemGraphOptions {
      * linked, or routed through. Defaults to no bits (a new pilot).
      */
     playerBits?: ReadonlySet<number>;
+    /**
+     * Systems to mark for the player's active missions (mission_logic
+     * missionMapMarks): the original's destination arrows plus optional
+     * special-ship-system arrows. Purely decorative — an additive overlay
+     * that never affects clicking, linking, or routing.
+     */
+    missionMarks?: MissionMapMark[];
 }
 
 export class SystemGraph {
@@ -180,6 +195,8 @@ export class SystemGraph {
     private readonly gateLinks: [SystemData, SystemData][];
     // Destination-picker mode (see SystemGraphOptions.selectable).
     private readonly selectable?: Set<string>;
+    // Active-mission destination / ship-syst markers (decorative overlay).
+    private readonly missionMarks: MissionMapMark[];
     /** The picked system in destination-picker mode, if any. */
     selectedSystem?: string;
     private size: { x: number, y: number };
@@ -189,6 +206,7 @@ export class SystemGraph {
         const gateLinks = options.gateLinks ?? [];
         const playerBits = options.playerBits ?? new Set<number>();
         this.selectable = options.selectable;
+        this.missionMarks = options.missionMarks ?? [];
         const size = this.size = options.size ?? { x: 456, y: 419 };
         // NCB-hidden systems don't exist for the player: they aren't drawn,
         // clicked, linked, or routed through. The current system is always
@@ -278,6 +296,7 @@ export class SystemGraph {
         }
         this.mapContainer.addChild(circleGraphics);
         this.mapContainer.addChild(labelContainer);
+        this.drawMissionMarks();
 
         this.worldBounds = this.computeWorldBounds();
 
@@ -538,6 +557,32 @@ export class SystemGraph {
         return pos.map(p => p * BASE_SCALE) as [number, number];
     }
 
+    /**
+     * Draws the active-mission markers as colored rings around their
+     * systems (destinations red, ship-syst yellow). Additive and
+     * decorative: baked into the map container like the circles, so it
+     * pans/zooms with them and never intercepts clicks. Marks whose
+     * system is NCB-hidden (not visible on this map) are skipped.
+     */
+    private drawMissionMarks() {
+        if (this.missionMarks.length === 0) {
+            return;
+        }
+        const graphics = new PIXI.Graphics();
+        for (const mark of this.missionMarks) {
+            const system = this.systems.get(mark.systemId);
+            if (!system) {
+                continue;
+            }
+            const [x, y] = this.scalePos(system.position);
+            const color = mark.kind === 'shipSyst'
+                ? MISSION_SHIPSYST_COLOR : MISSION_DEST_COLOR;
+            graphics.lineStyle(1.5, color, 1);
+            graphics.drawCircle(x, y, MISSION_MARK_RADIUS);
+        }
+        this.mapContainer.addChild(graphics);
+    }
+
     private drawLinks() {
         this.linkGraphics.clear();
         for (const [source, dest] of this.links) {
@@ -615,7 +660,13 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
         simulationData: SimulationGameDataInterface,
         private systemId: string, controlEvents: Observable<ControlEvent>,
         /** The player's control bits, for NCB system visibility. */
-        private getPlayerBits: () => ReadonlySet<number> = () => new Set()) {
+        private getPlayerBits: () => ReadonlySet<number> = () => new Set(),
+        /**
+         * The player's active-mission map markers (mission_logic
+         * missionMapMarks), refreshed each time the map opens. Optional:
+         * omit for a marker-free map.
+         */
+        private getMissionMarks: () => MissionMapMark[] = () => []) {
         super(displayAssets, simulationData, "nova:8509", controlEvents);
         this.container.name = "StarMap";
         //this.container.alpha = 0.5;
@@ -651,7 +702,12 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
         if (!this.allSystems) {
             return;
         }
-        const key = [...bits].sort((a, b) => a - b).join(',');
+        // The active-mission markers can change independently of the bits
+        // (accepting/completing a mission), so they're part of the key.
+        const missionMarks = this.getMissionMarks();
+        const marksKey = missionMarks
+            .map(m => `${m.systemId}:${m.kind}`).sort().join('|');
+        const key = [...bits].sort((a, b) => a - b).join(',') + '#' + marksKey;
         if (this.systemGraph && key === this.graphBitsKey) {
             return;
         }
@@ -664,7 +720,7 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
         // (GateMap), which is where the lanes are drawn (via
         // SystemGraphOptions.gateLinks).
         this.systemGraph = new SystemGraph(this.allSystems, this.systemId,
-            { playerBits: bits });
+            { playerBits: bits, missionMarks });
         this.systemGraph.container.position.set(-290, -248);
         this.container.addChild(this.systemGraph.container);
     }

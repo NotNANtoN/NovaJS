@@ -102,4 +102,91 @@ describe('runCronsForDays', () => {
         runCronsForDays([cron], states, bits, DAY + 10, DAY + 12, () => 0);
         expect(bits.has(10)).toBe(false);
     });
+
+    describe('Require / Contribute', () => {
+        it('does not activate unless Require is covered by Contribute', () => {
+            // Require bit 0x4 (the third contribute bit).
+            const cron = makeCron({ require: '4', onStart: 'b10' });
+            const bits = new Set<number>();
+            const states: CronStates = new Map();
+            // No contribute: the cron never activates.
+            runCronsForDays([cron], states, bits, DAY, DAY + 1, () => 0, 0n);
+            expect(bits.has(10)).toBe(false);
+            // With the required bit contributed, it activates.
+            runCronsForDays([cron], states, bits, DAY + 1, DAY + 2,
+                () => 0, 0x4n);
+            expect(bits.has(10)).toBe(true);
+        });
+
+        it('folds an active cron\'s Contribute into others\' Require', () => {
+            // cronA contributes bit 0x8 while active; cronB requires it.
+            const cronA = makeCron({
+                id: 'nova:200', contribute: '8', duration: 5,
+                onStart: 'b20',
+            });
+            const cronB = makeCron({
+                id: 'nova:201', require: '8', onStart: 'b21',
+            });
+            const bits = new Set<number>();
+            const states: CronStates = new Map();
+            // cronA activates first (order matters: it precedes cronB),
+            // so its contribute is available to cronB the same day.
+            runCronsForDays([cronA, cronB], states, bits,
+                DAY, DAY + 1, () => 0, 0n);
+            expect(bits.has(20)).toBe(true);
+            expect(bits.has(21)).toBe(true);
+        });
+    });
+
+    describe('loop flags', () => {
+        it('re-runs OnStart each active day with loopOnStart', () => {
+            // Counts up a bit toggle each day; use a set (not toggle) so
+            // we can observe repeated runs via a duration window. OnStart
+            // sets b10 each day; combine with an EnableOn that we clear
+            // mid-window to prove the loop stops.
+            const cron = makeCron({
+                loopOnStart: true, duration: 4, enableOn: 'b1',
+                onStart: '^b10',
+            });
+            const bits = new Set<number>([1]);
+            const states: CronStates = new Map();
+            // Day 1 (entry): OnStart runs once -> b10 on.
+            runCronsForDays([cron], states, bits, DAY, DAY + 1, () => 0);
+            expect(bits.has(10)).toBe(true);
+            // Day 2: loop re-runs OnStart -> toggles b10 off.
+            runCronsForDays([cron], states, bits, DAY + 1, DAY + 2, () => 0);
+            expect(bits.has(10)).toBe(false);
+            // Clear EnableOn: the loop stops, b10 stays as-is.
+            bits.delete(1);
+            runCronsForDays([cron], states, bits, DAY + 2, DAY + 3, () => 0);
+            expect(bits.has(10)).toBe(false);
+        });
+
+        it('does not re-run OnStart without the loop flag', () => {
+            const cron = makeCron({ duration: 4, onStart: '^b10' });
+            const bits = new Set<number>();
+            const states: CronStates = new Map();
+            runCronsForDays([cron], states, bits, DAY, DAY + 1, () => 0);
+            expect(bits.has(10)).toBe(true);
+            // Subsequent active days do NOT re-run OnStart.
+            runCronsForDays([cron], states, bits, DAY + 1, DAY + 3, () => 0);
+            expect(bits.has(10)).toBe(true);
+        });
+
+        it('re-runs OnEnd during postHoldoff with loopOnEnd', () => {
+            const cron = makeCron({
+                loopOnEnd: true, postHoldoff: 4, enableOn: 'b1',
+                onEnd: '^b11',
+            });
+            const bits = new Set<number>([1]);
+            const states: CronStates = new Map();
+            // Duration 0: OnStart+OnEnd together on the entry day. OnEnd
+            // toggles b11 on.
+            runCronsForDays([cron], states, bits, DAY, DAY + 1, () => 0);
+            expect(bits.has(11)).toBe(true);
+            // Next postHoldoff day: loopOnEnd re-runs OnEnd -> b11 off.
+            runCronsForDays([cron], states, bits, DAY + 1, DAY + 2, () => 0);
+            expect(bits.has(11)).toBe(false);
+        });
+    });
 });

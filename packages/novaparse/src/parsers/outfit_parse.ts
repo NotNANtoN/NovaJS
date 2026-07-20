@@ -223,6 +223,17 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
             // it into the ship's ShipPhysics.multiJump (like jumpDistanceMod).
             physics.multiJump = (physics.multiJump ?? 0) + fVal;
         }
+        else if (fType === "hyperspace speed mod") {
+            // Signed change (in days) to the ship's per-jump hyperspace
+            // travel time (EVN Bible ModType 22). Summed across outfits and
+            // flowed through the ship physics; the effective per-jump time is
+            // floored at 1 day in calendar.ts.
+            if (typeof fVal !== "number") {
+                throw new Error("Wrong type for hyperspace speed mod. Expected number");
+            }
+            physics.hyperspaceSpeedMod =
+                (physics.hyperspaceSpeedMod ?? 0) + fVal;
+        }
         else if (fType === "density scanner") {
             densityScanner = true;
         }

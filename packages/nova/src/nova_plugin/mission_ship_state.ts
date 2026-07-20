@@ -95,7 +95,8 @@ export const ShipObjectiveType = t.type({
     complete: t.boolean,
     /** The goal can no longer be achieved; fail the mission on landing. */
     failed: t.boolean,
-    /** OnShipDone has not run yet (runs at the next landing). */
+    /** OnShipDone has not run yet (runs at the next date advance — the
+     * first jump or landing after the goal completes). */
     shipDonePending: t.boolean,
     /** Live tracked mission ships (uuid -> per-ship flags). Cleared by
      * the owner's client before it re-enters a system. */

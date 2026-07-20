@@ -75,6 +75,21 @@ export const ActiveMissionType = t.intersection([t.type({
      * mutate this identically on every peer.
      */
     shipObjective: ShipObjectiveType,
+    /**
+     * Frozen at accept time from the mïsn Flags2 0x0004 bit
+     * ("mission fails if player is disabled or destroyed"). The shared
+     * sim reads this to decide whether a player disable/destroy should
+     * fail the mission, without needing the mission game data.
+     */
+    failIfPlayerDisabledOrDestroyed: t.boolean,
+    /**
+     * Set true by the shared sim when a fail condition it can observe
+     * has occurred (the owner was disabled or destroyed while
+     * failIfPlayerDisabledOrDestroyed is set). Landing processing turns
+     * this into an actual failure (OnFailure, failure notice). Mirrors
+     * the shipObjective.failed marker for special-ship goals.
+     */
+    failed: t.boolean,
 })]);
 export type ActiveMission = t.TypeOf<typeof ActiveMissionType>;
 
@@ -104,6 +119,30 @@ export const CronStatesType = map(t.string, CronStateType);
 export type CronStates = t.TypeOf<typeof CronStatesType>;
 export const CronStatesComponent = new Component<CronStates>('CronStates');
 
+/**
+ * A mission event (completed / failed / ... ) generated while the
+ * player was NOT at a spaceport screen — e.g. a deadline that expired
+ * mid-flight during a jump's date advance. Queued here on the entity
+ * and drained into the spaceport notices at the next landing so the
+ * player still sees "Mission failed: ...". Kept minimal and
+ * serializer-registered so it rides through rollback/sync like the
+ * other player-state components.
+ */
+export const PendingMissionNoticeType = t.intersection([t.type({
+    missionId: t.string,
+    missionName: t.string,
+    type: t.string,
+    text: t.string,
+}), t.partial({
+    payment: t.number,
+})]);
+export type PendingMissionNotice = t.TypeOf<typeof PendingMissionNoticeType>;
+export const PendingMissionNoticesType = t.array(PendingMissionNoticeType);
+export type PendingMissionNotices =
+    t.TypeOf<typeof PendingMissionNoticesType>;
+export const PendingMissionNoticesComponent =
+    new Component<PendingMissionNotices>('PendingMissionNotices');
+
 export const PlayerStatePlugin: Plugin = {
     name: 'PlayerStatePlugin',
     build(world) {
@@ -122,6 +161,9 @@ export const PlayerStatePlugin: Plugin = {
         });
         deltaMaker.addComponent(CronStatesComponent, {
             componentType: CronStatesType,
+        });
+        deltaMaker.addComponent(PendingMissionNoticesComponent, {
+            componentType: PendingMissionNoticesType,
         });
     }
 };

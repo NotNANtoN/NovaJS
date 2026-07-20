@@ -58,7 +58,7 @@ export function offerSubstitutions(universe: MissionUniverse,
         returnStellar: universe.planetName(ret),
         returnSystem: universe.systemNameOfPlanet(ret),
         cargoType: offer.cargoType >= 0
-            ? cargoName(offer.cargoType) : undefined,
+            ? cargoName(offer.cargoType, universe.cargoNames) : undefined,
         cargoQty: offer.cargoQty > 0 ? offer.cargoQty : undefined,
         deadline: deadlineDay !== null
             ? formatDate(dateFromDayNumber(deadlineDay)) : undefined,

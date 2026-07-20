@@ -204,4 +204,60 @@ describe('mission ships in the shared simulation', () => {
         }
         expect(world.entities.has(missionShipUuid)).toBe(false);
     }, 30_000);
+
+    describe('failIfPlayerDisabledOrDestroyed (Flags2 0x0004)', () => {
+        // A player mission (no special ships) carrying the frozen flag.
+        function flaggedMission(flag: boolean): ActiveMission {
+            return {
+                id: 'nova:9998',
+                acceptedDay: 0, acceptedAt: 'nova:128',
+                travelPlanet: null, returnPlanet: 'nova:128',
+                cargoType: -1, cargoQty: 0, cargoLoaded: false,
+                travelDone: false, deadlineDay: null,
+                failIfPlayerDisabledOrDestroyed: flag,
+            };
+        }
+        async function makeWorldWithPlayerMission(flag: boolean) {
+            const harness = await makeSimulationBridgeHarness();
+            const { world, shipUuid } = harness;
+            const gameData = await getIntegrationGameData();
+            world.entities.get(shipUuid)!.components.set(MissionsComponent,
+                new Map([['nova:9998', flaggedMission(flag)]]));
+            for (let i = 0; i < 60; i++) {
+                world.step();
+                await new Promise(resolve => setImmediate(resolve));
+            }
+            const shipData = await gameData.data.Ship.get(harness.shipId);
+            const activeMission = () => world.entities.get(shipUuid)
+                ?.components.get(MissionsComponent)?.get('nova:9998');
+            return { world, shipUuid, deathDelay: shipData.deathDelay,
+                activeMission };
+        }
+
+        it('fails the mission when the player is disabled', async () => {
+            const { world, shipUuid, activeMission } =
+                await makeWorldWithPlayerMission(true);
+            const armor = world.entities.get(shipUuid)!.components
+                .get(ArmorComponent)!;
+            armor.current = armor.max * 0.05;
+            for (let i = 0; i < 5; i++) {
+                world.step();
+            }
+            expect(world.entities.get(shipUuid)!.components
+                .has(DisabledComponent)).toBe(true);
+            expect(activeMission()!.failed).toBe(true);
+        }, 30_000);
+
+        it('leaves the mission alone without the flag', async () => {
+            const { world, shipUuid, activeMission } =
+                await makeWorldWithPlayerMission(false);
+            const armor = world.entities.get(shipUuid)!.components
+                .get(ArmorComponent)!;
+            armor.current = armor.max * 0.05;
+            for (let i = 0; i < 5; i++) {
+                world.step();
+            }
+            expect(activeMission()!.failed).toBeFalsy();
+        }, 30_000);
+    });
 });

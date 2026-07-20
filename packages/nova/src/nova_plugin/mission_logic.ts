@@ -1,6 +1,7 @@
 import { GovtData } from 'novadatainterface/govt_data';
 import { MissionData } from 'novadatainterface/mission_data';
 import { PlanetData } from 'novadatainterface/planet_data';
+import { DEFAULT_CARGO_NAMES } from 'novadatainterface/player_start_data';
 import { evaluateNCBTest, makeControlBitHooks, NCBParseError, NCBSetHooks, runNCBSet } from './ncb.js';
 import { Cargo, cargoUsed } from './cargo_plugin.js';
 import { resolveShipObjective, shipGoalOfferable } from './mission_ship_logic.js';
@@ -75,6 +76,12 @@ export interface MissionContext {
     bits: Set<number>;
     /** Global id of the player's ship type. */
     shipId: string;
+    /**
+     * Global gövt id of the player's ship's inherent government, or
+     * null/undefined when it has none (or the ship data isn't loaded).
+     * Gates the AvailShipType ship-govt ranges (2128+/3128+).
+     */
+    shipGovt?: string | null;
     /** Missions already active (missions can't be offered twice). */
     activeMissions: Missions;
     /** Free cargo space in tons (capacity minus cargo aboard). */
@@ -83,6 +90,12 @@ export interface MissionContext {
     records?: LegalRecords;
     /** The player's combat-rating kill points (AvailRating). */
     combatRating?: number;
+    /**
+     * The player's combined 64-bit Contribute mask (ship + outfits),
+     * checked against the mïsn Require field. Absent = 0n (only a
+     * zero Require passes).
+     */
+    playerContribute?: bigint;
     /** Uniform [0, 1). Player-local; plain randomness is fine. */
     random(): number;
     /** Synchronous cached govt lookup (warm the cache first). */
@@ -104,19 +117,62 @@ function intersects(a: number[], b: number[]): boolean {
 }
 
 /**
+ * Whether the player's Contribute mask covers a mïsn/oütf Require field
+ * (a decimal or hex 64-bit string). Every 1-bit in Require must be set
+ * in `contribute`. A '0' (or malformed) require is always satisfied.
+ */
+function requireMet(require: string, contribute: bigint): boolean {
+    let mask: bigint;
+    try {
+        mask = BigInt(require);
+    } catch {
+        return true;
+    }
+    return (mask & contribute) === mask;
+}
+
+/**
+ * Resolves whether a stellar sits in a target system or one adjacent to
+ * it, for the AvailStel 5000-7047 range. Supplied by callers that have
+ * system topology (the mission board / landing); callers without it
+ * (e.g. the travel/return resolution, where the Bible does not define
+ * 5000-7047) omit it and the range never matches.
+ */
+export interface StellarAdjacency {
+    /** The global system id containing `stellarId`, or undefined. */
+    systemOfStellar(stellarId: string): string | undefined;
+    /** Whether system `a` is the same as or hyperlinked to system `b`. */
+    systemsAdjacentOrEqual(a: string, b: string): boolean;
+}
+
+/**
  * Whether `stellar` matches a mïsn stellar reference (the AvailStel /
  * TravelStel / ReturnStel encoding). `refId` is the parse-time
  * resolved global id for plain ids. The adjacent-system range
- * (5000-7047) is not supported and never matches.
+ * (5000-7047, AvailStel only per the Bible) is matched only when the
+ * caller supplies `adjacency`; otherwise it never matches.
  */
 export function matchesStellarRef(ref: number, refId: string | null,
     stellar: StellarInfo, missionPrefix: string,
-    getGovt: (id: string) => GovtData | undefined): boolean {
+    getGovt: (id: string) => GovtData | undefined,
+    adjacency?: StellarAdjacency): boolean {
     if (ref === -1) {
         return !stellar.uninhabited;
     }
     if (refId !== null) {
         return stellar.id === refId;
+    }
+    // AvailStel 5000-7047: "Stellar in a system adjacent to specific
+    // system" (the range indexes system ids 128-2175 by 5000 + (id -
+    // 128)). Matches the target system itself as well as its neighbors.
+    if (ref >= 5000 && ref <= 7047) {
+        if (!adjacency) {
+            return false;
+        }
+        const targetSystem = `${missionPrefix}:${ref - 5000 + 128}`;
+        const stellarSystem = adjacency.systemOfStellar(stellar.id);
+        return stellarSystem !== undefined
+            && adjacency.systemsAdjacentOrEqual(stellarSystem, targetSystem);
     }
     if (ref === 9999) {
         return stellar.govt === null;
@@ -162,6 +218,25 @@ export function matchesStellarRef(ref: number, refId: string | null,
         return !(isGovt(31000) || classmate(rangeGovt(31000)));
     }
     return false;
+}
+
+/**
+ * Builds the StellarAdjacency for AvailStel 5000-7047 from a mission
+ * context's system topology. Returns undefined when the caller didn't
+ * supply systems (the range then never matches — fail closed).
+ */
+export function stellarAdjacencyOf(ctx: MissionContext):
+    StellarAdjacency | undefined {
+    const { systems, systemIdOfStellar } = ctx;
+    if (!systems || !systemIdOfStellar) {
+        return undefined;
+    }
+    const linksById = new Map(systems.map(s => [s.id, s.links]));
+    return {
+        systemOfStellar: id => systemIdOfStellar(id),
+        systemsAdjacentOrEqual: (a, b) =>
+            a === b || (linksById.get(a)?.includes(b) ?? false),
+    };
 }
 
 /** Safe NCB test evaluation: malformed expressions fail closed. */
@@ -219,7 +294,8 @@ export function missionMatchesLocation(mission: MissionData,
         return false;
     }
     if (!matchesStellarRef(mission.availStel, mission.availStelId,
-        ctx.stellar, idPrefix(mission.id), ctx.getGovt)) {
+        ctx.stellar, idPrefix(mission.id), ctx.getGovt,
+        stellarAdjacencyOf(ctx))) {
         return false;
     }
     // Domination is not implemented; missions gated on it never show.
@@ -238,8 +314,10 @@ export function missionMatchesLocation(mission: MissionData,
     if (!availRatingOk(mission.availRating, ctx.combatRating ?? 0)) {
         return false;
     }
-    // Contribute bits are not implemented; fail closed on Require.
-    if (mission.require !== '0') {
+    // Require: every 1-bit must be covered by the player's Contribute
+    // mask (ship + outfits). Absent contribute means only require '0'
+    // (no requirement) passes.
+    if (!requireMet(mission.require, ctx.playerContribute ?? 0n)) {
         return false;
     }
     // Board/rescue ship goals need boarding, which is unimplemented;
@@ -247,7 +325,7 @@ export function missionMatchesLocation(mission: MissionData,
     if (!shipGoalOfferable(mission)) {
         return false;
     }
-    if (!shipTypeMatches(mission.availShipType, ctx.shipId)) {
+    if (!shipTypeMatches(mission.availShipType, ctx.shipId, ctx.shipGovt)) {
         return false;
     }
     if (!testBits(mission.availBits, ctx.bits)) {
@@ -268,18 +346,32 @@ export function stellarRecord(stellar: StellarInfo, records: LegalRecords,
     return recordWith(records, govtId, getGovt(govtId));
 }
 
-function shipTypeMatches(availShipType: number, shipId: string): boolean {
+/**
+ * Whether the player's ship satisfies a mïsn AvailShipType. The Bible's
+ * ranges: 0/-1 ignored; 128-895 must be this ship type; 1128-1895 must
+ * not be; 2128-2383 must be a ship of this inherent gövt; 3128-3383
+ * must not be. `shipGovt` is the global id of the player's ship's
+ * inherent gövt (null when it has none).
+ */
+function shipTypeMatches(availShipType: number, shipId: string,
+    shipGovt: string | null | undefined): boolean {
     if (availShipType <= 0) {
         return true;
     }
     const shipNumber = numericId(shipId);
-    if (availShipType >= 128 && availShipType <= 255) {
+    if (availShipType >= 128 && availShipType <= 895) {
         return shipNumber === availShipType;
     }
-    if (availShipType >= 1128 && availShipType <= 1255) {
+    if (availShipType >= 1128 && availShipType <= 1895) {
         return shipNumber !== availShipType - 1000;
     }
-    // Ship-govt ranges (2128+/3128+) are not modeled; don't restrict.
+    // Ship-govt ranges: the govt id is the range offset (2000 / 3000).
+    if (availShipType >= 2128 && availShipType <= 2383) {
+        return numericId(shipGovt ?? null) === availShipType - 2000;
+    }
+    if (availShipType >= 3128 && availShipType <= 3383) {
+        return numericId(shipGovt ?? null) !== availShipType - 3000;
+    }
     return true;
 }
 
@@ -323,17 +415,89 @@ function resolveStellarRef(ref: number, refId: string | null,
     return candidates[Math.floor(ctx.random() * candidates.length)].id;
 }
 
-/** The six standard cargo types (STR# 4001 in stock Nova). */
-export const STANDARD_CARGO_NAMES = ['Food', 'Industrial', 'Medical Supplies',
-    'Luxury Goods', 'Metal', 'Equipment'];
+/**
+ * The standard cargo names (STR# 4000 in stock Nova). Kept as a
+ * fallback for the built-in six commodities; the live names come from
+ * the parsed PlayerStartData.cargoNames (DEFAULT_CARGO_NAMES).
+ */
+export const STANDARD_CARGO_NAMES = [...DEFAULT_CARGO_NAMES];
 
-export function cargoName(cargoType: number): string {
-    return STANDARD_CARGO_NAMES[cargoType] ?? `Cargo ${cargoType}`;
+/**
+ * The display name for a cargo type, resolved from the scenario's
+ * parsed STR# 4000 names when supplied, else the built-in fallback.
+ */
+export function cargoName(cargoType: number,
+    names: readonly string[] = STANDARD_CARGO_NAMES): string {
+    return names[cargoType] || STANDARD_CARGO_NAMES[cargoType]
+        || `Cargo ${cargoType}`;
 }
 
 /** The CargoComponent key that holds a mission's cargo. */
 export function missionCargoKey(missionId: string): string {
     return `mission:${missionId}`;
+}
+
+/**
+ * A system to mark on the starmap for an active mission.
+ *  - 'destination': a travel or return stellar's system (the original's
+ *    red destination arrows), suppressed by the mïsn hideDestArrows flag.
+ *  - 'shipSyst': the special-ship spawn system, marked only when the
+ *    mïsn showArrowForShipSyst flag is set (the additional arrow).
+ */
+export interface MissionMapMark {
+    systemId: string;
+    kind: 'destination' | 'shipSyst';
+    missionId: string;
+}
+
+/**
+ * The systems to mark on the starmap for the player's active missions,
+ * per the mïsn map flags. Pure: `systemOfStellar` maps a planet id to
+ * its system id (undefined = unplaced), `getMission` fetches the static
+ * mission data (undefined = not loaded). Destination marks come from the
+ * travel/return stellars unless hideDestArrows is set; a ship-goal
+ * system is marked only under showArrowForShipSyst. Deduplicated per
+ * (system, kind, mission).
+ */
+export function missionMapMarks(missions: Iterable<ActiveMission>,
+    getMission: (id: string) => MissionData | undefined,
+    systemOfStellar: (planetId: string) => string | undefined):
+    MissionMapMark[] {
+    const marks: MissionMapMark[] = [];
+    const seen = new Set<string>();
+    const add = (systemId: string | undefined,
+        kind: MissionMapMark['kind'], missionId: string) => {
+        if (!systemId) {
+            return;
+        }
+        const key = `${systemId}|${kind}|${missionId}`;
+        if (seen.has(key)) {
+            return;
+        }
+        seen.add(key);
+        marks.push({ systemId, kind, missionId });
+    };
+    for (const active of missions) {
+        const mission = getMission(active.id);
+        if (!mission) {
+            continue;
+        }
+        if (!mission.flags.hideDestArrows) {
+            if (active.travelPlanet) {
+                add(systemOfStellar(active.travelPlanet),
+                    'destination', active.id);
+            }
+            if (active.returnPlanet) {
+                add(systemOfStellar(active.returnPlanet),
+                    'destination', active.id);
+            }
+        }
+        if (mission.flags.showArrowForShipSyst
+            && active.shipObjective?.systemId) {
+            add(active.shipObjective.systemId, 'shipSyst', active.id);
+        }
+    }
+    return marks;
 }
 
 /**
@@ -610,6 +774,10 @@ export function acceptOffer(machinery: MissionMachineryContext,
         deadlineDay: mission.timeLimit > 0
             ? ctx.currentDay + mission.timeLimit
             : null,
+        // Frozen so the shared sim can fail the mission on a player
+        // disable/destroy without reading mission game data.
+        failIfPlayerDisabledOrDestroyed:
+            mission.flags.failIfPlayerDisabledOrDestroyed,
         // Copied (not aliased) so re-showing the offer stays pristine.
         shipObjective: offer.shipObjective && {
             ...offer.shipObjective,
@@ -750,6 +918,84 @@ function completeMission(machinery: MissionMachineryContext,
 }
 
 /**
+ * Runs a mission's OnShipDone (and queues its ShipDoneText event) if the
+ * shared sim flagged its ship goal complete (shipDonePending). The Bible
+ * runs OnShipDone the moment the goal completes; the set string mutates
+ * control bits player-locally, so the earliest deterministic, owner-
+ * driven point is the next date advance (jump or landing). Clears the
+ * pending flag so it runs exactly once.
+ */
+function runShipDoneIfPending(machinery: MissionMachineryContext,
+    active: ActiveMission, mission: MissionData,
+    outfits?: Map<string, number>): void {
+    const objective = active.shipObjective;
+    if (!objective?.shipDonePending) {
+        return;
+    }
+    objective.shipDonePending = false;
+    runMissionSetString(machinery, mission.onShipDone,
+        idPrefix(mission.id), outfits);
+    if (mission.shipDoneText) {
+        machinery.state.events.push({
+            missionId: mission.id,
+            missionName: mission.name,
+            type: 'shipDone',
+            text: mission.shipDoneText,
+        });
+    }
+}
+
+/**
+ * Runs OnShipDone for every active mission whose ship goal just
+ * completed (shipDonePending), appending any ShipDoneText events.
+ * Called at each date advance (jump or landing) so OnShipDone fires at
+ * the first player-local opportunity after the goal completes rather
+ * than waiting for a landing. Returns how many ran.
+ */
+export function runPendingShipDone(machinery: MissionMachineryContext,
+    outfits?: Map<string, number>): number {
+    const { state } = machinery;
+    let ran = 0;
+    for (const active of [...state.missions.values()]) {
+        if (!active.shipObjective?.shipDonePending) {
+            continue;
+        }
+        const mission = machinery.getMission(active.id);
+        if (!mission) {
+            continue;
+        }
+        runShipDoneIfPending(machinery, active, mission, outfits);
+        ran++;
+    }
+    return ran;
+}
+
+/**
+ * Fails every active mission whose deadline has passed as of
+ * `currentDay`, or which the shared sim marked failed (`active.failed`).
+ * Runs OnFailure and appends a failure event for each — the same as a
+ * landing-time deadline failure, but callable at every date advance
+ * (jump or landing) so a deadline that expires in flight fails the
+ * moment it passes rather than at the next landing. Returns the number
+ * of missions failed. Missions completing at their destination are left
+ * to processLanding.
+ */
+export function failExpiredMissions(machinery: MissionMachineryContext,
+    currentDay: number, outfits?: Map<string, number>): number {
+    const { state } = machinery;
+    let failed = 0;
+    for (const active of [...state.missions.values()]) {
+        const expired = active.deadlineDay !== null
+            && currentDay > active.deadlineDay;
+        if (expired || active.failed) {
+            failMission(machinery, active.id, outfits);
+            failed++;
+        }
+    }
+    return failed;
+}
+
+/**
  * Processes a landing at `planetId` for every active mission:
  * deadline failures, travel-leg cargo transfer, and completion at the
  * return stellar (paying and running OnSuccess). Events are appended
@@ -769,6 +1015,12 @@ export function processLanding(machinery: MissionMachineryContext,
             failMission(machinery, active.id, outfits);
             continue;
         }
+        if (active.failed) {
+            // The shared sim marked the mission failed (the owner was
+            // disabled or destroyed under Flags2 0x0004).
+            failMission(machinery, active.id, outfits);
+            continue;
+        }
         const objective = active.shipObjective;
         if (objective?.failed) {
             // The ship goal became unachievable (an escort died, a
@@ -776,23 +1028,10 @@ export function processLanding(machinery: MissionMachineryContext,
             failMission(machinery, active.id, outfits);
             continue;
         }
-        if (objective?.shipDonePending) {
-            // OnShipDone. Timing gap (documented): the Bible evaluates
-            // it the moment the goal completes; control bits only
-            // change player-locally here, so it runs at the next
-            // landing instead.
-            objective.shipDonePending = false;
-            runMissionSetString(machinery, mission.onShipDone,
-                idPrefix(mission.id), outfits);
-            if (mission.shipDoneText) {
-                state.events.push({
-                    missionId: mission.id,
-                    missionName: mission.name,
-                    type: 'shipDone',
-                    text: mission.shipDoneText,
-                });
-            }
-        }
+        // OnShipDone normally runs at the previous date advance (jump or
+        // landing) the moment the goal completed; this catches the case
+        // where the goal completed at this very landing's date advance.
+        runShipDoneIfPending(machinery, active, mission, outfits);
         if (active.travelPlanet === planetId && !active.travelDone) {
             let transferred = true;
             if (mission.pickupMode === 1) {

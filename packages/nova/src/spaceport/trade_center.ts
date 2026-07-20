@@ -66,6 +66,8 @@ const RIGHT_FONT: Partial<PIXI.ITextStyle> =
 export class TradeCenter extends Menu<Entity> {
     private planet?: PlanetData;
     private junks: JunkData[] = [];
+    /** Standard cargo names (STR# 4000), loaded from any chär. */
+    private cargoNames: string[] = [];
     private goods: TradeGood[] = [];
     private state: TradeWorkingState = {
         cargo: new Map(),
@@ -145,13 +147,22 @@ export class TradeCenter extends Menu<Entity> {
      */
     private load(): Promise<void> {
         this.loadPromise ??= (async () => {
-            const [planet, junkIds] = await Promise.all([
+            const [planet, ids] = await Promise.all([
                 this.simulationData.data.Planet.get(this.planetId),
-                this.simulationData.ids.then(ids => ids.Junk),
+                this.simulationData.ids,
             ]);
             this.planet = planet;
-            this.junks = await Promise.all(junkIds.map(
+            this.junks = await Promise.all(ids.Junk.map(
                 id => this.simulationData.data.Junk.get(id)));
+            // Standard commodity names (STR# 4000) ride on every chär.
+            try {
+                if (ids.PlayerStart[0]) {
+                    this.cargoNames = [...(await this.simulationData.data
+                        .PlayerStart.get(ids.PlayerStart[0])).cargoNames];
+                }
+            } catch (e) {
+                console.warn('Trade center cargo names unavailable:', e);
+            }
         })();
         return this.loadPromise;
     }
@@ -173,7 +184,8 @@ export class TradeCenter extends Menu<Entity> {
         };
         const bits = input.components.get(ControlBitsComponent)
             ?? new Set<number>();
-        this.goods = this.planet ? standardTradeGoods(this.planet) : [];
+        this.goods = this.planet
+            ? standardTradeGoods(this.planet, this.cargoNames) : [];
         // Jünk rows follow the standard commodities, as in the
         // original's exchange listing.
         for (const junk of this.junks) {

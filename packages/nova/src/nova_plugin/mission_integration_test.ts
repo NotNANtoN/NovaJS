@@ -265,4 +265,74 @@ describe('missions against real Nova data', () => {
         expect(missionMatchesLocation(mission, LOCATION_BAR, ctx))
             .toBe(false);
     });
+
+    it('starts a mission from an outfit-style Sxxx set string', async () => {
+        // This is the outfitter hook (item 3): a set string run through
+        // the session's mission machinery must be able to Sxxx-start a
+        // mission, not just flip control bits.
+        const gameData = await getIntegrationGameData();
+        const universe = MissionUniverse.shared(gameData);
+        await universe.load();
+
+        const start = await gameData.data.PlayerStart.get('nova:128');
+        const shipData = await gameData.data.Ship.get(start.ship);
+        const entity = makeShip(shipData);
+        entity.components.set(GameDateComponent, { ...start.date });
+        entity.components.set(CreditsComponent, { credits: 0 });
+        entity.components.set(ControlBitsComponent, new Set());
+
+        // Docked somewhere inhabited (nova:128 "Delivery to Earth"
+        // resolves a return of Earth from any inhabited stellar).
+        const dockedAt = universe.stellarCandidates.find(
+            s => !s.uninhabited && s.canLand && s.id !== 'nova:128')!;
+        const session = await MissionSession.create(
+            entity, gameData, universe, dockedAt.id);
+
+        // "S128" — start mission 128 — as an outfit OnPurchase would.
+        session.runMissionSet('S128', 'nova');
+        session.commit();
+
+        expect(entity.components.get(MissionsComponent)!.has('nova:128'))
+            .toBe(true);
+    });
+
+    it('fails an in-flight deadline the moment it passes, on jump',
+        async () => {
+            // Item 1: advanceEntityDate (with game data) fails an expired
+            // mission mid-flight and queues the notice for the next
+            // landing rather than waiting for the landing to notice.
+            const gameData = await getIntegrationGameData();
+            const universe = MissionUniverse.shared(gameData);
+            await universe.load();
+
+            const start = await gameData.data.PlayerStart.get('nova:128');
+            const shipData = await gameData.data.Ship.get(start.ship);
+            const entity = makeShip(shipData);
+            entity.components.set(GameDateComponent, { ...start.date });
+            entity.components.set(CreditsComponent, { credits: 0 });
+            entity.components.set(ControlBitsComponent, new Set());
+
+            const dockedAt = universe.stellarCandidates.find(
+                s => !s.uninhabited && s.canLand && s.id !== 'nova:128')!;
+            const session = await MissionSession.create(
+                entity, gameData, universe, dockedAt.id);
+            const offer = makeMissionOffer(universe.getMission('nova:128')!,
+                session.machinery.offerContext())!;
+            acceptOffer(session.machinery, offer, session.outfits);
+            // Give it a 1-day deadline so a single jump overruns it.
+            session.state.missions.get('nova:128')!.deadlineDay =
+                dayNumber(entity.components.get(GameDateComponent)!);
+            session.commit();
+
+            // A jump-length date advance (with game data) passes the
+            // deadline: the mission fails now, not at the next landing.
+            await advanceEntityDate(entity, 3, universe, gameData);
+            expect(entity.components.get(MissionsComponent)!.size).toBe(0);
+
+            // The failure notice surfaces at the next landing.
+            const events = await processEntityLanding(
+                entity, gameData, universe, dockedAt.id);
+            expect(events.find(e => e.type === 'failed')?.missionId)
+                .toBe('nova:128');
+        });
 });
