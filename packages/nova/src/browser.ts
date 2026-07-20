@@ -1261,6 +1261,30 @@ async function startGame() {
     app.ticker.add(() => {
         void pumpSimulationFrame();
     });
+
+    // A fully backgrounded (or occluded) window gets zero rAF, so the
+    // ticker — and with it the frame pump — freezes: the peer stays in
+    // the room but stops stepping, publishing inputs, and reporting
+    // hashes, a zombie that only revives on refocus. Worker timers are
+    // exempt from background throttling, so a tiny worker heartbeat
+    // drives the ticker whenever real rAF stalls. The staleness check
+    // covers occluded-but-not-hidden windows, and keeps the heartbeat
+    // from stacking on healthy rAF (which would run the sim fast).
+    let lastAnimationFrame = performance.now();
+    const animationFrameAlive = () => {
+        lastAnimationFrame = performance.now();
+        requestAnimationFrame(animationFrameAlive);
+    };
+    requestAnimationFrame(animationFrameAlive);
+    const pumpWorker = new Worker(URL.createObjectURL(new Blob(
+        ['setInterval(() => postMessage(0), 16)'],
+        { type: 'text/javascript' })));
+    pumpWorker.onmessage = () => {
+        if (document.hidden
+            || performance.now() - lastAnimationFrame > 100) {
+            app.ticker.update(performance.now());
+        }
+    };
 }
 
 startGame()
