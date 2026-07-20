@@ -109,6 +109,14 @@ export interface WeaponDamage {
     ionizationColor: number;
     passThroughShield: number; // Factor of damage that passes through shield. 1 means all
     knockback: number;
+    /**
+     * wëap Flags2 0x1000 "Weapon can disable but not destroy": armor
+     * damage from this weapon clamps just above zero (see
+     * DISABLE_ONLY_ARMOR_FLOOR in the sim), so an ion barrage can leave
+     * a ship deeply disabled but never destroys it. Optional so
+     * hand-built damage payloads (tests, blasts) default to lethal.
+     */
+    disableOnly?: boolean;
 }
 
 export type FireGroup = "primary" | "secondary" | "pointDefense";
@@ -180,6 +188,7 @@ export function getDefaultNotBayWeaponData(): NotBayWeaponData {
             ionizationColor: 0xffffff,
             passThroughShield: 0,
             knockback: 0,
+            disableOnly: false,
         },
         submunitions: [],
         oneAmmoPerBurst: false,

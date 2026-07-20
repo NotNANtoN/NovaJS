@@ -440,6 +440,64 @@ describe('ship disabling in a live world', () => {
             expect(ship.components.has(DisabledComponent)).toBeFalse();
         }, 120_000);
 
+    it('disable-only weapons floor armor above zero; a normal weapon ' +
+        'finishes the job', async () => {
+            const { DamagedEvent, DISABLE_ONLY_ARMOR_FLOOR, ExplodingComponent } =
+                await import('./death_plugin.js');
+            const ionBarrage = {
+                shield: 100_000, armor: 100_000, ionization: 0,
+                ionizationColor: 0xffffff, passThroughShield: 0,
+                knockback: 0, disableOnly: true,
+            };
+            const lightBlaster = {
+                shield: 0, armor: 5, ionization: 0,
+                ionizationColor: 0xffffff, passThroughShield: 1,
+                knockback: 0,
+            };
+            // Both threshold flavors: 33% Shuttle and 10% Fed Destroyer.
+            for (const shipId of ['nova:128', 'nova:141']) {
+                const { world, ship } = await shipWorld(shipId);
+                world.emit(DamagedEvent,
+                    { damage: ionBarrage, damager: 'nobody' }, [SHIP]);
+                world.step();
+                const armor = armorOf(ship);
+                // Far below the disable threshold, but never zero.
+                expect(armor.current).toEqual(DISABLE_ONLY_ARMOR_FLOOR);
+                expect(ship.components.has(DisabledComponent)).toBeTrue();
+                expect(ship.components.has(ExplodingComponent)).toBeFalse();
+                // More ion fire changes nothing.
+                world.emit(DamagedEvent,
+                    { damage: ionBarrage, damager: 'nobody' }, [SHIP]);
+                world.step();
+                expect(armor.current).toEqual(DISABLE_ONLY_ARMOR_FLOOR);
+                expect(ship.components.has(ExplodingComponent)).toBeFalse();
+                // One tap from a lethal weapon destroys it.
+                world.emit(DamagedEvent,
+                    { damage: lightBlaster, damager: 'nobody' }, [SHIP]);
+                world.step();
+                expect(armor.current).toEqual(0);
+                expect(ship.components.has(ExplodingComponent)).toBeTrue();
+            }
+        }, 120_000);
+
+    it('pins the stock disable-only weapons (real data)', async () => {
+        const gameData = await getIntegrationGameData();
+        const damageOf = async (id: string) => {
+            const weapon = await gameData.data.Weapon.get(id);
+            if (!weapon || !('damage' in weapon)) {
+                throw new Error(`No damage on weapon ${id}`);
+            }
+            return weapon.damage;
+        };
+        // Ion Cannon (the Manticore's Ionic Particle Cannons fire it).
+        expect((await damageOf('nova:142')).disableOnly).toBeTrue();
+        // A normal blaster turret is lethal.
+        expect((await damageOf('nova:131')).disableOnly).toBeFalse();
+        // The Manticore stocks 8 Ionic Particle Cannons.
+        const manticore = (await gameData.data.Ship.get('nova:146'))!;
+        expect(manticore.outfits['nova:148']).toEqual(8);
+    }, 120_000);
+
     it('NPC warships drop disabled ships as attack targets', async () => {
         const gameData = await getIntegrationGameData();
         const world = await makeSystem('nova:226', gameData, 'worker',
