@@ -26,6 +26,7 @@ export class Shipyard extends Menu<Entity> {
         simulationData: SimulationGameDataInterface,
         controlEvents: Observable<ControlEvent>) {
         super(displayAssets, simulationData, "nova:8502", controlEvents);
+        this.container.name = 'Shipyard';
         const buttons = {
             buy: new Button(displayAssets, "Buy", 60, { x: -20, y: 126 }),
             done: new Button(displayAssets, "Done", 60, { x: 100, y: 126 }),

@@ -4,11 +4,14 @@ import { getDefaultShipData, ShipData } from 'novadatainterface/ship_data';
 import { getDefaultProjectileWeaponData, WeaponData } from 'novadatainterface/weapon_data';
 import {
     ammoCapacity,
+    BULK_BUY_LIMIT,
     canBuyOutfit,
     canSellOutfit,
     effectiveMax,
     freeCargo,
     freeMass,
+    maxBuyCount,
+    maxSellCount,
     OutfitterContext,
     playerContribute,
 } from './outfitter_rules.js';
@@ -328,5 +331,76 @@ describe('canSellOutfit', () => {
             owned: [['nova:200', 1]],
         });
         expect(canSellOutfit(outfit, context)).toEqual({ allowed: true });
+    });
+});
+
+describe('maxBuyCount', () => {
+    it('is limited by the ship\'s free mass', () => {
+        const outfit = makeOutfit('nova:200', {}, { freeMass: 30 });
+        const context = makeContext({ outfits: [outfit] });
+        // 100 tons free / 30 per unit = 3.
+        expect(maxBuyCount(outfit, context)).toBe(3);
+        // The simulation must not mutate the real outfit list.
+        expect(context.outfits.get('nova:200')).toBeUndefined();
+    });
+
+    it('is limited by the effective Max including owned units', () => {
+        const outfit = makeOutfit('nova:200', { max: 5 });
+        const context = makeContext({
+            outfits: [outfit],
+            owned: [['nova:200', 3]],
+        });
+        expect(maxBuyCount(outfit, context)).toBe(2);
+    });
+
+    it('is zero when the availability test fails', () => {
+        const outfit = makeOutfit('nova:200', { availability: 'b1' });
+        expect(maxBuyCount(outfit, makeContext({ outfits: [outfit] })))
+            .toBe(0);
+    });
+
+    it('caps effectively unlimited outfits at the bulk limit', () => {
+        const outfit = makeOutfit('nova:200'); // No mass, no Max.
+        const context = makeContext({ outfits: [outfit] });
+        expect(maxBuyCount(outfit, context)).toBe(BULK_BUY_LIMIT);
+        expect(maxBuyCount(outfit, context, 25)).toBe(25);
+    });
+
+    it('is limited by launcher ammo capacity', () => {
+        const launcherWeapon = makeWeapon('nova:300', {
+            maxAmmo: 4,
+            ammoType: ['weapon', 'nova:300'],
+        });
+        const launcher = makeOutfit('nova:201',
+            { weapons: { 'nova:300': 1 } });
+        const ammo = makeOutfit('nova:202', { ammoFor: 'nova:300' });
+        const context = makeContext({
+            outfits: [launcher, ammo],
+            weapons: [launcherWeapon],
+            owned: [['nova:201', 1], ['nova:202', 1]],
+        });
+        expect(maxBuyCount(ammo, context)).toBe(3);
+    });
+});
+
+describe('maxSellCount', () => {
+    it('is everything owned for a sellable outfit', () => {
+        const outfit = makeOutfit('nova:200');
+        const context = makeContext({
+            outfits: [outfit],
+            owned: [['nova:200', 7]],
+        });
+        expect(maxSellCount(outfit, context)).toBe(7);
+    });
+
+    it('is zero for unsellable or unowned outfits', () => {
+        const unsellable = makeOutfit('nova:200', { cantSell: true });
+        const context = makeContext({
+            outfits: [unsellable],
+            owned: [['nova:200', 7]],
+        });
+        expect(maxSellCount(unsellable, context)).toBe(0);
+        const unowned = makeOutfit('nova:201');
+        expect(maxSellCount(unowned, context)).toBe(0);
     });
 });

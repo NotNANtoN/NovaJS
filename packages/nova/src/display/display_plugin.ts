@@ -68,10 +68,12 @@ export const Display: Plugin = {
         await world.addPlugin(AsteroidDisplayPlugin);
         await world.addPlugin(BeamDisplayPlugin);
         await world.addPlugin(PlanetCornersPlugin);
+        // The starmap must precede the spaceport: SpaceportProvider
+        // consumes its OpenStarmapResource (the docked 'm' key).
+        await world.addPlugin(StarmapPlugin);
         await world.addPlugin(SpaceportPlugin);
         await world.addPlugin(GateMapPlugin);
         await world.addPlugin(GateAnimationPlugin);
-        await world.addPlugin(StarmapPlugin);
         await world.addPlugin(SoundPlugin);
         await world.addPlugin(CloakSoundPlugin);
         await world.addPlugin(ShipAnimationPlugin);
@@ -83,10 +85,10 @@ export const Display: Plugin = {
         await world.removePlugin(CloakSoundPlugin);
         await world.removePlugin(SoundPlugin);
         await world.removePlugin(SystemEnvironmentPlugin);
-        await world.removePlugin(StarmapPlugin);
         await world.removePlugin(GateAnimationPlugin);
         await world.removePlugin(GateMapPlugin);
         await world.removePlugin(SpaceportPlugin);
+        await world.removePlugin(StarmapPlugin);
         await world.removePlugin(PlanetCornersPlugin);
         await world.removePlugin(BeamDisplayPlugin);
         await world.removePlugin(AsteroidDisplayPlugin);

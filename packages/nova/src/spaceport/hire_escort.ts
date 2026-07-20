@@ -102,6 +102,7 @@ export class HireEscortDialog {
             up: () => this.itemGrid?.up(),
             down: () => this.itemGrid?.down(),
             buy: this.hire.bind(this),
+            hire: this.hire.bind(this),
             depart: () => this.closed.next(),
         });
     }

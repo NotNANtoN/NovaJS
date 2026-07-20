@@ -15,6 +15,7 @@ import { Button } from './button.js';
 import { GambleDialog } from './gamble.js';
 import { HireEscortDialog } from './hire_escort.js';
 import { Menu } from './menu.js';
+import { MenuControls } from './menu_controls.js';
 import { offerSubstitutions, rollOffers } from './mission_offers.js';
 import { MissionSession } from './mission_session.js';
 import { MissionUniverse } from './mission_universe.js';
@@ -39,18 +40,19 @@ const FALLBACK_DESC = 'The bar is quiet tonight. A tired bartender '
     + 'polishes glasses and keeps one eye on the door.';
 
 /**
- * The spaceport bar (spöb flag 0x40), following the original's flow:
- * entering the bar shows the news window, then any bar mission offers
+ * The spaceport bar (spöb flag 0x40): on entry any bar mission offers
  * (availLoc 1) approach the player one at a time as popup dialogs,
  * and then the bar itself — its dësc 10000-range description and the
- * Hire Escort / Gamble / Holovid / Leave buttons.
+ * Hire Escort / Gamble / Holovid / Leave buttons. The news does NOT
+ * open automatically; the Holovid button (or the 'n' key) shows it.
  *
  * All money movement (gambling, hire fees, mission Sxxx/payment
  * effects) happens in one MissionSession working copy, committed when
  * the player leaves the bar — the outfitter pattern.
  *
- * The Holovid (the original plays a QuickTime short) is not
- * implemented; its button is greyed out (documented gap).
+ * The Holovid's QuickTime short ("Race N.mov") is unplayable in the
+ * browser (documented gap), so its button shows the news feed the
+ * original played alongside it.
  */
 export class Bar extends Menu<Entity> {
     private session?: MissionSession;
@@ -60,6 +62,8 @@ export class Bar extends Menu<Entity> {
     private gamble: GambleDialog;
     private hireEscort: HireEscortDialog;
     private offerPopup: OfferPopup;
+    /** Holds keyboard focus while the pointer-only offer popups show. */
+    private popupBlocker: MenuControls;
     private buttons: {
         hireEscort: Button, gamble: Button, holovid: Button, leave: Button,
     };
@@ -85,8 +89,9 @@ export class Bar extends Menu<Entity> {
         this.buttons.hireEscort.click.subscribe(
             () => void this.showHireEscort());
         this.buttons.gamble.click.subscribe(() => void this.showGamble());
-        // The Holovid is unimplemented (see class doc).
-        this.buttons.holovid.state = 'grey';
+        // The Holovid's movie is unplayable in the browser; the button
+        // opens the news feed instead (see class doc).
+        this.buttons.holovid.click.subscribe(() => void this.showNews());
         this.buttons.leave.click.subscribe(this.done.bind(this));
         this.addButtons(this.buttons);
 
@@ -99,11 +104,15 @@ export class Bar extends Menu<Entity> {
         this.hireEscort = new HireEscortDialog(displayAssets,
             simulationData, controlEvents, planetId);
         this.offerPopup = new OfferPopup(displayAssets);
+        this.popupBlocker = new MenuControls(controlEvents);
         this.container.addChild(this.hireEscort.container,
             this.gamble.container, this.news.container,
             this.offerPopup.container);
 
         this.controls.controls = {
+            hire: () => void this.showHireEscort(),
+            news: () => void this.showNews(),
+            gamble: () => void this.showGamble(),
             depart: this.done.bind(this),
         };
     }
@@ -126,17 +135,30 @@ export class Bar extends Menu<Entity> {
         }
 
         const result = super.show(input);
-        // The original's bar entry sequence: news first, then any bar
-        // mission offers approach the player, then the bar itself.
+        // Bar mission offers approach the player on entry, then the
+        // bar itself. (The news no longer auto-opens; the Holovid
+        // button or the 'n' key shows it.) The blocker keeps the bar's
+        // own keys — and the global map key — quiet while the
+        // pointer-driven offer popups are up.
         this.controls.unbind();
+        this.popupBlocker.bind();
         try {
-            await this.news.show(input);
             await this.presentBarOffers();
         } catch (e) {
             console.warn('Bar entry sequence failed:', e);
         }
+        this.popupBlocker.unbind();
         this.controls.bind();
         return result;
+    }
+
+    private async showNews() {
+        if (!this.input) {
+            return;
+        }
+        this.controls.unbind();
+        await this.news.show(this.input);
+        this.controls.bind();
     }
 
     /** Bar mission offers (availLoc 1), one popup at a time. */

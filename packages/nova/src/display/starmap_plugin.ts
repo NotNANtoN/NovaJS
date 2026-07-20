@@ -9,6 +9,7 @@ import { JumpRouteComponent } from '../nova_plugin/jump_plugin.js';
 import { ControlBitsComponent } from '../nova_plugin/ncb_plugin.js';
 import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin.js';
 import { SystemIdResource } from '../nova_plugin/system_id_resource.js';
+import { MenuControls } from '../spaceport/menu_controls.js';
 import { Starmap } from '../spaceport/starmap.js';
 import { ScreenSize } from './screen_size_plugin.js';
 import { Stage } from './stage_resource.js';
@@ -16,6 +17,15 @@ import { Stage } from './stage_resource.js';
 const StarmapResource = new Resource<Starmap>("Starmap");
 const StarmapControlsSubscription = new Resource<Subscription>('StarmapControlsSubscription');
 export const SetJumpRouteEvent = new EcsEvent<{ route: string[] }>('SetJumpRouteEvent');
+/**
+ * Opens the starmap over whatever is on screen and resolves with the
+ * chosen route when it closes. Landed menus (the spaceport) call this
+ * for their 'map' key; in flight the plugin's own subscription below
+ * opens it. No-ops (resolving with the current route) while the map is
+ * already open.
+ */
+export const OpenStarmapResource =
+    new Resource<() => Promise<string[]>>('OpenStarmap');
 
 function getPlayerJumpRoute(world: World) {
     for (const entity of world.entities.values()) {
@@ -73,22 +83,40 @@ export const StarmapPlugin: Plugin = {
         let opening = false;
         stage.addChild(starmap.container);
         world.resources.set(StarmapResource, starmap);
-        world.resources.set(StarmapControlsSubscription, controls.subscribe(async ({ action, state }) => {
-            if (action !== 'map' || state !== 'start' || starmap.container.visible || opening) {
-                return;
+        const openStarmap = async (): Promise<string[]> => {
+            const jumpRoute = getPlayerJumpRoute(world);
+            if (starmap.container.visible || opening) {
+                return jumpRoute?.route ?? [];
             }
             opening = true;
             try {
+                // Re-adding moves the map to the top of the stage: the
+                // spaceport's container is added after the starmap's,
+                // so a docked map would otherwise open underneath it.
+                stage.addChild(starmap.container);
                 starmap.container.position.set(screenSize.x / 2, screenSize.y / 2);
-                const jumpRoute = getPlayerJumpRoute(world);
                 const route = await starmap.show(jumpRoute?.route ?? []);
                 if (jumpRoute) {
                     jumpRoute.route = route;
                 }
                 world.emit(SetJumpRouteEvent, { route });
+                return route;
             } finally {
                 opening = false;
             }
+        };
+        world.resources.set(OpenStarmapResource, openStarmap);
+        world.resources.set(StarmapControlsSubscription, controls.subscribe(({ action, state }) => {
+            if (action !== 'map' || state !== 'start') {
+                return;
+            }
+            // While a landed menu owns the keyboard, 'm' belongs to
+            // that menu (the spaceport opens the map itself; deeper
+            // screens reserve the key but don't act on it).
+            if (MenuControls.focused) {
+                return;
+            }
+            void openStarmap();
         }));
     },
     remove(world) {
@@ -100,5 +128,6 @@ export const StarmapPlugin: Plugin = {
         }
         world.resources.delete(StarmapControlsSubscription);
         world.resources.delete(StarmapResource);
+        world.resources.delete(OpenStarmapResource);
     }
 }
