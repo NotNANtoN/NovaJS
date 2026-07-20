@@ -136,8 +136,9 @@ export interface OutfitData extends BaseData {
     marines: number,
     /**
      * This item is a repair system (ModType 49): occasionally repairs the ship
-     * while it is disabled. ModVal is ignored. Ships have no disabled state in
-     * the sim yet, so this is plumbed but unconsumed.
+     * while it is disabled. ModVal is ignored. Consumed by the sim's disabled
+     * state (nova_plugin/disabled_component.ts): owning one repairs a disabled
+     * ship to just above its disable threshold after a seeded-random delay.
      */
     repairSystem: boolean,
     /**
