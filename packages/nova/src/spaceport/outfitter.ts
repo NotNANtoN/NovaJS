@@ -66,6 +66,7 @@ export class Outfitter extends Menu<Entity> {
         simulationData: SimulationGameDataInterface,
         controlEvents: Observable<ControlEvent>) {
         super(displayAssets, simulationData, "nova:8502", controlEvents);
+        this.container.name = 'Outfitter';
 
         this.outfits = new DefaultMap(() => 0);
         const buttons = {

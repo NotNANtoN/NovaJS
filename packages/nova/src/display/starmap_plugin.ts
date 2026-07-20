@@ -90,6 +90,10 @@ export const StarmapPlugin: Plugin = {
             }
             opening = true;
             try {
+                // Re-adding moves the map to the top of the stage: the
+                // spaceport's container is added after the starmap's,
+                // so a docked map would otherwise open underneath it.
+                stage.addChild(starmap.container);
                 starmap.container.position.set(screenSize.x / 2, screenSize.y / 2);
                 const route = await starmap.show(jumpRoute?.route ?? []);
                 if (jumpRoute) {

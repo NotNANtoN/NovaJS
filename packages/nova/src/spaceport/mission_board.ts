@@ -337,10 +337,12 @@ export class MissionBoard extends Menu<Entity> {
             return;
         }
         acceptOffer(this.session.machinery, row.offer, this.session.outfits);
-        const brief = expandMissionText(row.offer.data.briefText,
-            this.substitutionsFor(row.offer));
-        this.text.status.text =
-            `Accepted: ${missionDisplayName(row.offer.data.name)}.`;
+        const subs = this.substitutionsFor(row.offer);
+        const brief = expandMissionText(row.offer.data.briefText, subs);
+        // Mission names carry the same <DST>-style wildcards as the
+        // descriptions; expand them in the status line too.
+        this.text.status.text = `Accepted: ${expandMissionText(
+            missionDisplayName(row.offer.data.name), subs)}.`;
         this.buildRows();
         this.selectedIndex = Math.min(this.selectedIndex,
             this.rows.length - 1);
