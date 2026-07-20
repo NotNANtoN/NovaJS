@@ -83,7 +83,7 @@ export const MAX_NPC_POPULATION = 12;
 export const NPC_RESPAWN_INTERVAL_MS = 15_000;
 /** Initial spawns scatter within this half-size box (the region where
  * planets and gameplay live; matches the asteroid field). */
-const INITIAL_SPAWN_HALF_SIZE = 2000;
+export const INITIAL_SPAWN_HALF_SIZE = 2000;
 /** Total table weight given to all roaming (LinkSyst) fleets combined,
  * relative to dude weights that typically sum to ~100. */
 const ROAMING_FLEET_WEIGHT = 15;
@@ -135,10 +135,12 @@ export const NpcSpawnerComponent = new Component<NpcSpawnerType>('NpcSpawner');
 /**
  * Picks an entry from a weighted list with a single Random draw (so
  * the PRNG stream stays in lockstep no matter which entry wins).
- * Returns undefined only for an empty/zero-weight list.
+ * Returns undefined only for an empty/zero-weight list. The random
+ * source is structural so input-record-path callers (mission ships)
+ * can pass plain randomness.
  */
 export function pickWeighted<T extends { weight: number }>(
-    entries: readonly T[], random: Random): T | undefined {
+    entries: readonly T[], random: { next(): number }): T | undefined {
     const total = entries.reduce((sum, entry) =>
         sum + Math.max(0, entry.weight), 0);
     if (total <= 0) {
@@ -375,8 +377,10 @@ export function makeNpcShip(shipData: ShipData, aiType: number,
 
 /** Jump-in kinematics: where an arriving NPC appears and how it moves
  * (mirrors jump_plugin's arrival: outside the no-jump zone, coasting
- * inward at top speed). */
-function jumpInState(shipData: ShipData, random: Random) {
+ * inward at top speed). The random source is structural so callers on
+ * the input-record path (mission ships) can pass plain randomness. */
+export function jumpInState(shipData: ShipData,
+    random: { next(): number }) {
     const bearing = new Angle(random.next() * 2 * Math.PI);
     const inward = bearing.getUnitVector().scale(-1);
     const arrivalDistance = JUMP_DISTANCE

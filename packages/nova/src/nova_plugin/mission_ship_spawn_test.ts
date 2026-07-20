@@ -1,0 +1,216 @@
+import 'jasmine';
+import { getDefaultDudeData } from 'novadatainterface/dude_data';
+import { getDefaultMissionData, MissionData } from 'novadatainterface/mission_data';
+import { getDefaultShipData } from 'novadatainterface/ship_data';
+import { MockGameData } from 'novadatainterface/mock_game_data';
+import { Entity } from 'nova_ecs/entity';
+import { FiringGroupComponent } from './firing_group.js';
+import { MissionShipComponent } from './mission_ship_plugin.js';
+import {
+    buildMissionShipSpawns,
+    MISSION_SHIP_NO_DEPART_MS,
+    MissionShipUniverse,
+} from './mission_ship_spawn.js';
+import {
+    GOAL_CHASE_OFF,
+    GOAL_DESTROY,
+    GOAL_ESCORT,
+    ShipObjective,
+} from './mission_ship_state.js';
+import { FormationComponent, NpcComponent } from './npc_ai_plugin.js';
+import { ActiveMission, MissionsComponent } from './player_state_plugin.js';
+import { TargetComponent } from './target_component.js';
+
+const MISSION_ID = 'nova:500';
+const OWNER = 'owner-uuid';
+const DUDE = 'nova:240';
+const SHIP = 'nova:300';
+
+function makeGameData(): MockGameData {
+    const gameData = new MockGameData();
+    gameData.data.Dude.map.set(DUDE, {
+        ...getDefaultDudeData(),
+        id: DUDE,
+        aiType: 3,
+        govt: 'nova:200',
+        ships: [{ id: SHIP, weight: 100 }],
+    });
+    gameData.data.Ship.map.set(SHIP, {
+        ...getDefaultShipData(),
+        id: SHIP,
+        name: 'Test Raider',
+    });
+    return gameData;
+}
+
+function makeUniverse(mission?: MissionData): MissionShipUniverse {
+    return {
+        getMission: id => mission?.id === id ? mission : undefined,
+        systemIdOfPlanet: () => undefined,
+        getGovt: () => undefined,
+        getSystemInfo: id => ({ id, govt: null, links: [] }),
+    };
+}
+
+function makeObjective(overrides: Partial<ShipObjective>): ShipObjective {
+    return {
+        goal: GOAL_DESTROY,
+        systemId: 'nova:128',
+        shipStart: 0,
+        behavior: -1,
+        dudeId: DUDE,
+        total: 3,
+        satisfied: 0,
+        complete: false,
+        failed: false,
+        shipDonePending: false,
+        live: new Map(),
+        ...overrides,
+    };
+}
+
+function makePlayer(objective?: ShipObjective,
+    mission?: MissionData): Entity {
+    const active: ActiveMission = {
+        id: mission?.id ?? MISSION_ID,
+        acceptedDay: 0,
+        acceptedAt: 'nova:128',
+        travelPlanet: null,
+        returnPlanet: null,
+        cargoType: -1,
+        cargoQty: 0,
+        cargoLoaded: false,
+        travelDone: false,
+        deadlineDay: null,
+        ...(objective ? { shipObjective: objective } : {}),
+    };
+    const player = new Entity('player');
+    player.components.set(MissionsComponent,
+        new Map([[active.id, active]]));
+    return player;
+}
+
+describe('buildMissionShipSpawns', () => {
+    it('spawns the remaining ships in the objective system', async () => {
+        const objective = makeObjective({ satisfied: 1 });
+        const player = makePlayer(objective);
+        const ships = await buildMissionShipSpawns(player, OWNER,
+            'nova:128', makeGameData(), makeUniverse());
+        expect(ships.length).toBe(2);
+        for (const ship of ships) {
+            expect(ship.components.get(MissionShipComponent)).toEqual({
+                mission: MISSION_ID,
+                owner: OWNER,
+            });
+            // Goal targets must not auto-depart.
+            expect(ship.components.get(NpcComponent)?.departAt)
+                .toBe(MISSION_SHIP_NO_DEPART_MS);
+        }
+    });
+
+    it('spawns nothing in a non-matching system', async () => {
+        const player = makePlayer(makeObjective({}));
+        const ships = await buildMissionShipSpawns(player, OWNER,
+            'nova:129', makeGameData(), makeUniverse());
+        expect(ships.length).toBe(0);
+    });
+
+    it('spawns follow-the-player objectives in any system', async () => {
+        const player = makePlayer(makeObjective({ systemId: null }));
+        const ships = await buildMissionShipSpawns(player, OWNER,
+            'nova:129', makeGameData(), makeUniverse());
+        expect(ships.length).toBe(3);
+    });
+
+    it('clears the stale live roster on the player entity', async () => {
+        const objective = makeObjective({
+            live: new Map([['stale-uuid', {}]]),
+        });
+        const player = makePlayer(objective);
+        await buildMissionShipSpawns(player, OWNER, 'nova:128',
+            makeGameData(), makeUniverse());
+        const committed = player.components.get(MissionsComponent)!
+            .get(MISSION_ID)!.shipObjective!;
+        expect(committed.live.size).toBe(0);
+    });
+
+    it('spawns nothing for complete or failed objectives', async () => {
+        const done = makePlayer(makeObjective(
+            { satisfied: 3, complete: true }));
+        expect((await buildMissionShipSpawns(done, OWNER, 'nova:128',
+            makeGameData(), makeUniverse())).length).toBe(0);
+        const failed = makePlayer(makeObjective({ failed: true }));
+        expect((await buildMissionShipSpawns(failed, OWNER, 'nova:128',
+            makeGameData(), makeUniverse())).length).toBe(0);
+    });
+
+    it('aggresses ShipBehav-0 ships at the owner', async () => {
+        const player = makePlayer(makeObjective({ behavior: 0, total: 1 }));
+        const [ship] = await buildMissionShipSpawns(player, OWNER,
+            'nova:128', makeGameData(), makeUniverse());
+        expect(ship.components.get(NpcComponent)?.aggressor).toBe(OWNER);
+        expect(ship.components.get(TargetComponent)?.target).toBe(OWNER);
+    });
+
+    it('forms escort-goal ships on the owner', async () => {
+        const player = makePlayer(makeObjective(
+            { goal: GOAL_ESCORT, total: 2 }));
+        const ships = await buildMissionShipSpawns(player, OWNER,
+            'nova:128', makeGameData(), makeUniverse(), 5);
+        expect(ships.length).toBe(2);
+        expect(ships.map(s => s.components.get(FormationComponent)))
+            .toEqual([
+                { leader: OWNER, slot: 5 },
+                { leader: OWNER, slot: 6 },
+            ]);
+        for (const ship of ships) {
+            expect(ship.components.get(FiringGroupComponent))
+                .toEqual({ group: OWNER });
+        }
+    });
+
+    it('keeps natural departure timers on chase-off targets', async () => {
+        const player = makePlayer(makeObjective(
+            { goal: GOAL_CHASE_OFF, total: 1 }));
+        const [ship] = await buildMissionShipSpawns(player, OWNER,
+            'nova:128', makeGameData(), makeUniverse());
+        expect(ship.components.get(NpcComponent)?.departAt).toBeUndefined();
+    });
+
+    it('names ships from the mission ShipNameID list', async () => {
+        const mission: MissionData = {
+            ...getDefaultMissionData(),
+            id: MISSION_ID,
+            shipNames: ['Doomblade'],
+        };
+        const player = makePlayer(makeObjective({ total: 1 }), mission);
+        const [ship] = await buildMissionShipSpawns(player, OWNER,
+            'nova:128', makeGameData(), makeUniverse(mission));
+        expect(ship.name).toBe('Doomblade');
+    });
+
+    it('spawns aux ships wherever the player goes', async () => {
+        const mission: MissionData = {
+            ...getDefaultMissionData(),
+            id: MISSION_ID,
+            auxShipCount: 2,
+            auxShipDude: 240,
+            auxShipDudeId: DUDE,
+            auxShipSyst: -1,
+        };
+        const player = makePlayer(undefined, mission);
+        const ships = await buildMissionShipSpawns(player, OWNER,
+            'nova:129', makeGameData(), makeUniverse(mission));
+        expect(ships.length).toBe(2);
+        for (const ship of ships) {
+            expect(ship.components.get(MissionShipComponent)).toEqual({
+                mission: MISSION_ID,
+                owner: OWNER,
+                aux: true,
+            });
+            // Aux ships keep natural AI and departure behavior.
+            expect(ship.components.get(NpcComponent)?.departAt)
+                .toBeUndefined();
+        }
+    });
+});

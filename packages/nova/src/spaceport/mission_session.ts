@@ -86,6 +86,8 @@ export class MissionSession {
             random: Math.random,
             getGovt: id => this.universe.getGovt(id),
             currentDay: this.currentDay,
+            systems: this.universe.systemInfos,
+            systemIdOfStellar: id => this.universe.systemIdOfPlanet(id),
         };
     }
 

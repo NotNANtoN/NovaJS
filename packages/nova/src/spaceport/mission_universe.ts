@@ -5,6 +5,7 @@ import { PlanetData } from 'novadatainterface/planet_data';
 import { SystemData } from 'novadatainterface/system_data';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { StellarInfo, stellarInfoOf } from '../nova_plugin/mission_logic.js';
+import { SystemInfo } from '../nova_plugin/mission_ship_logic.js';
 
 /** Maps over `items` with at most `concurrency` calls in flight. */
 async function pooledMap<T, R>(items: readonly T[],
@@ -36,6 +37,9 @@ export class MissionUniverse {
     missions: MissionData[] = [];
     crons: CronData[] = [];
     stellarCandidates: StellarInfo[] = [];
+    /** Systems, for special/aux ship spawn-system resolution. */
+    systemInfos: SystemInfo[] = [];
+    private systemInfosById = new Map<string, SystemInfo>();
     private missionsById = new Map<string, MissionData>();
     private planetsById = new Map<string, PlanetData>();
     private govtsById = new Map<string, GovtData>();
@@ -101,6 +105,18 @@ export class MissionUniverse {
         this.stellarCandidates = [...this.planetsById.values()]
             .filter(planet => this.planetSystem.has(planet.id))
             .map(stellarInfoOf);
+
+        this.systemInfos = [...this.systemsById.values()].map(system => ({
+            id: system.id,
+            govt: system.govt,
+            links: [...system.links],
+        }));
+        this.systemInfosById = new Map(
+            this.systemInfos.map(info => [info.id, info]));
+    }
+
+    getSystemInfo(systemId: string): SystemInfo | undefined {
+        return this.systemInfosById.get(systemId);
     }
 
     getMission(id: string): MissionData | undefined {
