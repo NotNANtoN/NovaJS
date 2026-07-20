@@ -602,10 +602,15 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
                 }
                 if (oldTick <= this.rollback.earliestTick) {
                     // The stale application is beyond the rollback
-                    // horizon; desync detection has to clean this up.
+                    // horizon: this timeline has already forked from
+                    // the room's. Resync now (cooldown-gated) instead
+                    // of playing on a fork until checkpoint conviction
+                    // says so seconds later — quieter, and no desync
+                    // line for a divergence we already know about.
                     this.logRollbackEvent('retimeTooOld', {
                         seq: record.seq, from: oldTick, to: record.tick,
                     });
+                    void this.resync();
                     continue;
                 }
                 this.logRollbackEvent('retimed', {
@@ -907,6 +912,16 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
     }
 
     snapshot(): SimulationFrame {
+        if (this.resyncing) {
+            // Mid-resync the world is a genesis reconstruction being
+            // replayed forward; serializing it would flash pre-join
+            // state onto the display — and the autopilot, watching its
+            // ship vanish from the frame stream, cancels itself. Hold
+            // the frame (and the queued events) until the resync
+            // lands; the first post-resync snapshot diffs against
+            // lastSent as usual.
+            return { added: [], changed: [], removed: [], events: [] };
+        }
         const events = this.queuedEvents;
         this.queuedEvents = [];
         const serializer = this.serializer;
