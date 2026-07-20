@@ -4,6 +4,7 @@ import { getDefaultShipData } from 'novadatainterface/ship_data';
 import { Position } from 'nova_ecs/datatypes/position';
 import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import { World } from 'nova_ecs/world';
+import { ExplodingComponent } from './death_plugin.js';
 import { completeEntity } from './entity_data_loader.js';
 import { makeShip } from './make_ship.js';
 import { makeSystem } from './make_system.js';
@@ -133,4 +134,59 @@ describe('escort targeting', () => {
         applySetTarget(world, PEER, null);
         expect(playerTarget(world)).toBeUndefined();
     });
+});
+
+describe('exploding ships are untargetable', () => {
+    function markExploding(world: World, uuid: string) {
+        world.entities.get(uuid)!.components.set(ExplodingComponent, 1e12);
+    }
+
+    it('anyone targeting a ship loses the lock the moment it starts ' +
+        'exploding', async () => {
+            const world = await makeTargetingWorld();
+            press(world, 'nearestTarget');
+            expect(playerTarget(world)).toBe('enemy');
+            markExploding(world, 'enemy');
+            world.step();
+            expect(playerTarget(world)).toBeUndefined();
+        });
+
+    it('nearest-target (r) skips exploding ships', async () => {
+        const world = await makeTargetingWorld();
+        markExploding(world, 'enemy');
+        world.step();
+        press(world, 'nearestTarget');
+        expect(playerTarget(world)).toBeUndefined();
+    });
+
+    it('tab cycling never lands on an exploding ship', async () => {
+        const world = await makeTargetingWorld();
+        markExploding(world, 'enemy');
+        world.step();
+        const seen = new Set<string | undefined>();
+        for (let i = 0; i < 6; i++) {
+            press(world, 'nextTarget');
+            seen.add(playerTarget(world));
+        }
+        expect(seen.has('enemy')).toBeFalse();
+    });
+
+    it('clicking an exploding ship is rejected', async () => {
+        const world = await makeTargetingWorld();
+        markExploding(world, 'enemy');
+        world.step();
+        applySetTarget(world, PEER, 'enemy');
+        expect(playerTarget(world)).toBeUndefined();
+    });
+
+    it('the escort-cycle control skips an exploding flock member',
+        async () => {
+            const world = await makeTargetingWorld();
+            markExploding(world, 'escort');
+            world.step();
+            press(world, 'escortTarget');
+            expect(playerTarget(world)).toBe('fighter');
+            press(world, 'escortTarget');
+            expect(playerTarget(world)).toBe('fighter');
+        });
 });

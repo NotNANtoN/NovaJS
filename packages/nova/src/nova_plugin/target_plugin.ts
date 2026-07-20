@@ -9,6 +9,7 @@ import { Provide } from "nova_ecs/provide";
 import { Query } from "nova_ecs/query";
 import { System } from "nova_ecs/system";
 import { World } from "nova_ecs/world";
+import { ExplodingComponent } from "./death_plugin.js";
 import { findControlledEntity, ShipControlEvent, ShipControlStateComponent } from "./ship_control.js";
 import { CloakActiveComponent, CloakScannerComponent, isTargetable } from "./cloak_plugin.js";
 import { OwnerComponent } from "./fire_weapon_plugin.js";
@@ -29,7 +30,9 @@ const TargetIndexProvider = Provide({
 
 export const CycleTargetEvent = new EcsEvent<Target>('CycleTargetEvent');
 
-const TargetsQuery = new Query([UUID, MovementStateComponent, Optional(OwnerComponent), ShipComponent, Optional(CloakActiveComponent)] as const);
+const TargetsQuery = new Query([UUID, MovementStateComponent,
+    Optional(OwnerComponent), ShipComponent, Optional(CloakActiveComponent),
+    Optional(ExplodingComponent)] as const);
 const ChooseTargetSystem = new System({
     name: 'ChooseTarget',
     events: [ShipControlEvent],
@@ -50,9 +53,10 @@ const ChooseTargetSystem = new System({
             // of entity-map iteration order), starting after the
             // current target when it is already a flock member.
             const flock = ships
-                .filter(([otherUuid, , , , cloak]) =>
+                .filter(([otherUuid, , , , cloak, exploding]) =>
                     isInFlock(otherUuid, uuid, getEntity)
-                    && isTargetable(cloak, myScanner))
+                    && isTargetable(cloak, myScanner)
+                    && exploding === undefined)
                 .map(([otherUuid]) => otherUuid)
                 .sort();
             if (flock.length === 0) {
@@ -67,8 +71,9 @@ const ChooseTargetSystem = new System({
 
         if (controlState.get('nearestTarget') === 'start') {
             const [closestUuid, _distance, newIndex] = ships
-                .map(([a, b, c, d, e], index) => [a, b, c, d, e, index] as const)
-                .filter(([otherUuid, _, owner, __, cloak]) => {
+                .map(([a, b, c, d, e, f], index) =>
+                    [a, b, c, d, e, f, index] as const)
+                .filter(([otherUuid, _, owner, __, cloak, exploding]) => {
                     if (owner?.owner === uuid
                         || isInFlock(otherUuid, uuid, getEntity)) {
                         return false;
@@ -78,9 +83,13 @@ const ChooseTargetSystem = new System({
                     if (!isTargetable(cloak, myScanner)) {
                         return false;
                     }
+                    // A ship in its death sequence is already gone.
+                    if (exploding !== undefined) {
+                        return false;
+                    }
                     return otherUuid !== uuid;
                 })
-                .map(([uuid, { position }, _, __, ___, index]) => [
+                .map(([uuid, { position }, _, __, ___, ____, index]) => [
                     uuid,
                     position.subtract(movementState.position).lengthSquared,
                     index
@@ -119,13 +128,16 @@ const ChooseTargetSystem = new System({
                     break;
                 }
 
-                const [targetUuid, _targetMovement, targetOwner, _targetShip, targetCloak] = ships[index.index];
+                const [targetUuid, _targetMovement, targetOwner, _targetShip,
+                    targetCloak, targetExploding] = ships[index.index];
                 // Don't target yourself
                 // Don't target your flock (escorts and their spawn)
                 // Don't target cloaked ships (unless a cloak scanner allows it)
+                // Don't target exploding ships (death sequence started)
                 if (targetUuid !== uuid && targetOwner?.owner !== uuid
                     && !isInFlock(targetUuid, uuid, getEntity)
-                    && isTargetable(targetCloak, myScanner)) {
+                    && isTargetable(targetCloak, myScanner)
+                    && targetExploding === undefined) {
                     break;
                 }
                 index.index = (index.index + 2) % (ships.length + 1) - 1;
@@ -166,7 +178,9 @@ export function applySetTarget(world: World, peerId: string | undefined,
     const targetEntity = world.entities.get(targetUuid);
     if (!targetEntity
         || targetUuid === found.uuid
-        || !targetEntity.components.has(ShipComponent)) {
+        || !targetEntity.components.has(ShipComponent)
+        // Exploding ships are untargetable everywhere.
+        || targetEntity.components.has(ExplodingComponent)) {
         return;
     }
     const cloak = targetEntity.components.get(CloakActiveComponent);
@@ -220,6 +234,31 @@ const DropCloakedTargetSystem = new System({
     }
 });
 
+/**
+ * Drops ANY entity's target the moment that target starts its death
+ * sequence (ExplodingComponent, set at zero armor): an exploding ship
+ * is beyond shooting at, so locks break immediately — for the player,
+ * NPCs, escorts, and guided weapons alike. ExplodingComponent is
+ * shared sim state (snapshot/wire covered), so every peer drops the
+ * lock on the same tick.
+ */
+const ExplodingShipsQuery = new Query([UUID, ExplodingComponent] as const);
+const DropExplodingTargetSystem = new System({
+    name: 'DropExplodingTarget',
+    args: [TargetComponent, ExplodingShipsQuery] as const,
+    step(target, explodingShips) {
+        if (!target.target) {
+            return;
+        }
+        for (const [uuid] of explodingShips) {
+            if (uuid === target.target) {
+                target.target = undefined;
+                return;
+            }
+        }
+    }
+});
+
 export const TargetPlugin: Plugin = {
     name: "TargetPlugin",
     build(world) {
@@ -236,5 +275,6 @@ export const TargetPlugin: Plugin = {
         world.addSystem(ChooseTargetSystem);
         world.addSystem(TargetRemovedSystem);
         world.addSystem(DropCloakedTargetSystem);
+        world.addSystem(DropExplodingTargetSystem);
     }
 }

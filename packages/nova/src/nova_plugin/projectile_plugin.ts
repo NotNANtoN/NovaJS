@@ -26,6 +26,7 @@ import { CreateTime } from './create_time.js';
 import { DamagedEvent, ZeroArmorEvent } from './death_plugin.js';
 import { FireSubs, OwnerComponent, SourceComponent, SubCounts, VulnerableToPD, WeaponConstructors, WeaponEntry } from './fire_weapon_plugin.js';
 import { FiringGroupComponent, firingImmune, victimFiringGroup } from './firing_group.js';
+import { provokeGuidedLock } from './flock.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { GovtComponent } from './govt_component.js';
 import { guidanceAngle, Guidance, GuidanceComponent, MissileGuidanceResource } from './guidance.js';
@@ -173,6 +174,14 @@ class ProjectileWeaponEntry extends WeaponEntry {
         const shield = projectile.components.get(ShieldComponent);
         if (shield) {
             shield.current = shield.max;
+        }
+
+        // Locking a guided missile on is itself the provocation: the
+        // target turns hostile to the shooter the moment the missile
+        // spawns (see provokeGuidedLock).
+        if (this.data.guidance === 'guided' && target) {
+            provokeGuidedLock(target, source, owner ?? source ?? target,
+                uuid => this.entities.get(uuid));
         }
 
         this.entities.set(this.ids.next('projectile'), projectile);

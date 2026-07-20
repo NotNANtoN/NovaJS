@@ -6,7 +6,8 @@ import { Vector } from 'nova_ecs/datatypes/vector';
 import { MovementState } from 'nova_ecs/plugins/movement_plugin';
 import { govtDisposition, effectiveStrength, oddsFavorable } from './govt_disposition.js';
 import {
-    chooseNearest, Formation, formationOffset, formationSlotPosition,
+    chaserBlocksJump, chooseNearest, Formation, formationOffset,
+    formationSlotPosition, FLEE_JUMP_BLOCK_RANGE,
     FORMATION_LATERAL_SPACING, FORMATION_ROW_SPACING,
     RCS_ACCEL_FRACTION, RCS_DISENGAGE_SPEED, RCS_ENGAGE_SPEED,
     steerFormation,
@@ -327,4 +328,55 @@ describe('steerFormation', () => {
                 leader, state, ACCEL, DT);
             expect(state.rcs).toBeTrue();
         });
+});
+
+describe('chaserBlocksJump ("right behind" a fleeing ship)', () => {
+    // The fleeing ship sits at the origin facing +x (Angle pi/2).
+    function fleeing(): MovementState {
+        return {
+            position: new Position(0, 0),
+            velocity: new Vector(100, 0),
+            rotation: new Angle(Math.PI / 2),
+            accelerating: 1,
+            turning: 0,
+            turnBack: false,
+        };
+    }
+    function chaserAt(x: number, y: number): MovementState {
+        return {
+            position: new Position(x, y),
+            velocity: new Vector(0, 0),
+            rotation: new Angle(Math.PI / 2),
+            accelerating: 0,
+            turning: 0,
+            turnBack: false,
+        };
+    }
+
+    it('a close pursuer directly astern blocks the jump', () => {
+        expect(chaserBlocksJump(fleeing(),
+            chaserAt(-FLEE_JUMP_BLOCK_RANGE * 0.5, 0))).toBeTrue();
+    });
+
+    it('a pursuer astern but out of range does not', () => {
+        expect(chaserBlocksJump(fleeing(),
+            chaserAt(-FLEE_JUMP_BLOCK_RANGE * 2, 0))).toBeFalse();
+    });
+
+    it('a close ship AHEAD of the fleeing ship does not block', () => {
+        expect(chaserBlocksJump(fleeing(),
+            chaserAt(FLEE_JUMP_BLOCK_RANGE * 0.5, 0))).toBeFalse();
+    });
+
+    it('a close ship directly abeam does not block (outside the ' +
+        'rear cone)', () => {
+            expect(chaserBlocksJump(fleeing(),
+                chaserAt(0, FLEE_JUMP_BLOCK_RANGE * 0.5))).toBeFalse();
+        });
+
+    it('astern-and-off-axis inside the cone still blocks', () => {
+        // 45 degrees off dead-astern: inside the 60-degree half-angle.
+        const d = FLEE_JUMP_BLOCK_RANGE * 0.5 / Math.SQRT2;
+        expect(chaserBlocksJump(fleeing(), chaserAt(-d, d))).toBeTrue();
+    });
 });
