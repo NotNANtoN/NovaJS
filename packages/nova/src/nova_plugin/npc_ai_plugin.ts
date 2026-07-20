@@ -15,7 +15,7 @@ import { RunQuery } from 'nova_ecs/arg_types';
 import { System } from 'nova_ecs/system';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { CloakActiveComponent, isTargetable } from './cloak_plugin.js';
-import { DamagedEvent } from './death_plugin.js';
+import { DamagedEvent, ExplodingComponent } from './death_plugin.js';
 import { DisabledComponent } from './disabled_component.js';
 import { EscortCommandComponent } from './escort_command.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
@@ -112,6 +112,35 @@ export const NPC_DEPART_MIN_MS = 120_000;
 export const NPC_DEPART_MAX_MS = 300_000;
 /** Fleeing/departing ships are deleted ("jump out") beyond this radius. */
 export const NPC_DEPART_RADIUS = JUMP_DISTANCE + 500 * JUMP_ARRIVAL_MARGIN_S;
+
+// JUDGMENT CALL (Matthew wants to tune this): a fleeing ship that is
+// far enough out to jump (outside the no-jump radius) jumps away —
+// UNLESS its chaser is "right behind it". "Right behind" has no
+// original-game definition, so it is defined here as: the chaser is
+// within FLEE_JUMP_BLOCK_RANGE px AND inside the cone directly astern
+// of the fleeing ship (within FLEE_JUMP_BLOCK_HALF_ANGLE of the
+// direction opposite its heading) — close pursuit on its tail. A
+// chaser alongside or ahead doesn't stop the jump.
+export const FLEE_JUMP_BLOCK_RANGE = 500;
+export const FLEE_JUMP_BLOCK_HALF_ANGLE = Math.PI / 3;
+
+/**
+ * Whether a pursuer is "right behind" a fleeing ship, blocking its
+ * hyperspace escape (see the judgment-call note on the constants).
+ */
+export function chaserBlocksJump(fleeing: MovementState,
+    chaser: MovementState): boolean {
+    const toChaser = chaser.position.subtract(fleeing.position);
+    if (toChaser.length > FLEE_JUMP_BLOCK_RANGE) {
+        return false;
+    }
+    if (toChaser.lengthSquared < 1e-12) {
+        return true;
+    }
+    const astern = Angle.fromAngleLike(fleeing.rotation).add(Math.PI);
+    return Math.abs(astern.distanceTo(toChaser.angle).angle)
+        < FLEE_JUMP_BLOCK_HALF_ANGLE;
+}
 
 // --- Formation tuning ---
 
@@ -739,6 +768,15 @@ export const NpcSteeringSystem = new System({
                     ? entities.get(npc.aggressor)?.components
                         .get(MovementStateComponent)
                     : undefined;
+                // Far enough from the center to jump: jump away
+                // (simplified NPC depart, same as 'depart') — unless
+                // the chaser is right behind (see chaserBlocksJump).
+                if (movement.position.length > JUMP_DISTANCE
+                    && !(aggressor
+                        && chaserBlocksJump(movement, aggressor))) {
+                    entities.delete(uuid);
+                    break;
+                }
                 // Run from the attacker; with no attacker position,
                 // run outward from the system center.
                 const away = aggressor

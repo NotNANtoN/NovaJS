@@ -2,8 +2,8 @@ import 'jasmine';
 import { Entity } from 'nova_ecs/entity';
 import { OwnerComponent } from './fire_weapon_plugin.js';
 import { FiringGroupComponent } from './firing_group.js';
-import { isInFlock } from './flock.js';
-import { FormationComponent } from './npc_ai_plugin.js';
+import { isInFlock, provokeGuidedLock } from './flock.js';
+import { FormationComponent, NpcComponent } from './npc_ai_plugin.js';
 
 const PLAYER = 'player';
 
@@ -86,5 +86,57 @@ describe('isInFlock (transitive own-escort predicate)', () => {
         const fighter = new Entity('fighter')
             .addComponent(OwnerComponent, { owner: 'gone' });
         expect(isInFlock('fighter', PLAYER, lookup({ fighter }))).toBeFalse();
+    });
+});
+
+describe('provokeGuidedLock (guided-missile provocation)', () => {
+    function lookup(entities: { [uuid: string]: Entity }) {
+        return (uuid: string) => entities[uuid];
+    }
+
+    it('locking on flips a neutral NPC hostile to the shooter, ' +
+        'reacting immediately', () => {
+            const trader = new Entity('trader')
+                .addComponent(NpcComponent,
+                    { aiType: 2, mode: 'travel', nextDecision: 99999 });
+            const shooter = new Entity('shooter');
+            provokeGuidedLock('trader', 'shooter', 'shooter',
+                lookup({ trader, shooter }));
+            const npc = trader.components.get(NpcComponent)!;
+            expect(npc.aggressor).toBe('shooter');
+            // The think timer is zeroed: no waiting out the interval.
+            expect(npc.nextDecision).toBe(0);
+        });
+
+    it("the shooter's own flock is exempt (a stray lock on your " +
+        'wing is not a betrayal)', () => {
+            const escort = new Entity('escort')
+                .addComponent(NpcComponent, { aiType: 3 })
+                .addComponent(FormationComponent,
+                    { leader: 'shooter', slot: 0 });
+            const shooter = new Entity('shooter');
+            provokeGuidedLock('escort', 'shooter', 'shooter',
+                lookup({ escort, shooter }));
+            expect(escort.components.get(NpcComponent)!.aggressor)
+                .toBeUndefined();
+        });
+
+    it('the same firing group (fleetmates) is exempt', () => {
+        const wingman = new Entity('wingman')
+            .addComponent(NpcComponent, { aiType: 3 })
+            .addComponent(FiringGroupComponent, { group: 'fleet leader' });
+        const shooter = new Entity('shooter')
+            .addComponent(FiringGroupComponent, { group: 'fleet leader' });
+        provokeGuidedLock('wingman', 'shooter', 'shooter',
+            lookup({ wingman, shooter }));
+        expect(wingman.components.get(NpcComponent)!.aggressor)
+            .toBeUndefined();
+    });
+
+    it('non-NPC targets (other players) are unaffected', () => {
+        const player = new Entity('player');
+        const shooter = new Entity('shooter');
+        expect(() => provokeGuidedLock('player', 'shooter', 'shooter',
+            lookup({ player, shooter }))).not.toThrow();
     });
 });

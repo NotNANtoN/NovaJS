@@ -523,8 +523,13 @@ describe('ship disabling in a live world', () => {
         world.entities.set('prey', prey);
 
         // Let the decision system run (1s think interval, faster with
-        // govt SkillMult).
-        for (let i = 0; i < 120; i++) {
+        // govt SkillMult). Only as far as the first think: the moment
+        // the warship's first GUIDED missile locks on, the lock itself
+        // provokes the wimpy prey into fleeing (guided-missile
+        // provocation), so a long dogfight now ends with the prey
+        // destroyed rather than intact — this spec is about the
+        // disabled-target drop, so keep the shooting window short.
+        for (let i = 0; i < 70; i++) {
             world.step();
         }
         expect(warship.components.get(TargetComponent)?.target)
@@ -537,6 +542,16 @@ describe('ship disabling in a live world', () => {
         const preyShield = prey.components.get(ShieldComponent);
         if (preyShield) {
             preyShield.current = 0;
+        }
+        // Clear the sky of in-flight ordnance: at 5% armor a single
+        // already-launched missile would destroy the prey and turn
+        // this into a death test instead of a disable test.
+        const { ProjectileDataComponent } =
+            await import('./projectile_data.js');
+        for (const [uuid, entity] of [...world.entities]) {
+            if (entity.components.has(ProjectileDataComponent)) {
+                world.entities.delete(uuid);
+            }
         }
         for (let i = 0; i < 180; i++) {
             world.step();

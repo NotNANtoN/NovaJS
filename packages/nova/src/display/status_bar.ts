@@ -22,6 +22,7 @@ import { deriveIff, dispositionColor, shipDisposition } from "../nova_plugin/iff
 import { LegalRecordsComponent } from "../nova_plugin/reputation_plugin.js";
 import { ArmorComponent, FuelComponent, FUEL_PER_JUMP, ShieldComponent } from "../nova_plugin/health_plugin.js";
 import { OutfitsStateComponent, sumOutfitField } from "../nova_plugin/outfit_plugin.js";
+import { DisabledComponent } from "../nova_plugin/disabled_component.js";
 import { PlanetDataComponent } from "../nova_plugin/planet_plugin.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 import { ShipDataComponent } from "../nova_plugin/ship_plugin.js";
@@ -31,6 +32,7 @@ import { TargetComponent } from "../nova_plugin/target_component.js";
 import { ActiveSecondaryWeapon, countAmmo } from "../nova_plugin/weapon_plugin.js";
 import { Button } from "../spaceport/button.js";
 import { AnimationGraphic } from "./animation_graphic.js";
+import { targetReadout } from "./target_readout.js";
 import { AnimationGraphicComponent } from "./animation_graphic_plugin.js";
 import { PixiAppResource } from "./pixi_app_resource.js";
 import { ResizeEvent } from "./screen_size_plugin.js";
@@ -196,6 +198,15 @@ class StatusBar {
 
         this.targetContainer.addChild(this.text.percent);
 
+        // Replaces the whole shield/armor readout while the target is
+        // disabled (bright text, per the original game's target pane).
+        this.text.disabled = new PIXI.Text('Disabled', font);
+        this.text.disabled.anchor.y = 1;
+        this.text.disabled.position.x = 6;
+        this.text.disabled.position.y = size[1] - 3;
+        this.text.disabled.visible = false;
+        this.targetContainer.addChild(this.text.disabled);
+
         const middle = [this.statusBarData.dataAreas.targeting.size[0] / 2,
         this.statusBarData.dataAreas.targeting.size[1] / 2 - 15];
 
@@ -342,22 +353,19 @@ class StatusBar {
     }
 
     drawTarget(name: string, shield?: number, armor?: number,
-        shipGraphic?: AnimationGraphic) {
+        shipGraphic?: AnimationGraphic, disabled = false) {
         this.targetContainer.visible = true;
         this.noTargetContainer.visible = false;
         this.text.targetName.text = name;
 
-        if (shield && shield > 0) {
-            this.text.shield.visible = true;
-            this.text.armor.visible = false;
-            this.text.percent.text = `${String(shield)}%`;
-        } else if (typeof armor === 'number') {
-            this.text.shield.visible = false;
-            this.text.armor.visible = true;
-            this.text.percent.text = `${String(armor)}%`;
-        } else {
-            this.text.shield.visible = false;
-            this.text.armor.visible = false;
+        const readout = targetReadout(disabled, shield, armor);
+        this.text.disabled.visible = readout.kind === 'disabled';
+        this.text.shield.visible = readout.kind === 'shield';
+        this.text.armor.visible = readout.kind === 'armor';
+        this.text.percent.visible = readout.kind === 'shield'
+            || readout.kind === 'armor';
+        if (readout.kind === 'shield' || readout.kind === 'armor') {
+            this.text.percent.text = `${String(readout.percent)}%`;
         }
 
         if (shipGraphic) {
@@ -524,7 +532,8 @@ const DrawStatusBarSecondaryWeapon = new System({
 });
 
 const TargetQuery = new Query([ShipDataComponent, Optional(ShieldComponent),
-    Optional(ArmorComponent), Optional(AnimationGraphicComponent)] as const);
+    Optional(ArmorComponent), Optional(AnimationGraphicComponent),
+    Optional(DisabledComponent)] as const);
 const DrawStatusBarTarget = new System({
     name: 'DrawStatusBarTarget',
     args: [StatusBarResource, TargetComponent, RunQuery, PlayerShipSelector] as const,
@@ -535,8 +544,9 @@ const DrawStatusBarTarget = new System({
         }
         const result = runQuery(TargetQuery, target)[0];
         if (result) {
-            const [shipData, shield, armor, shipGraphic] = result;
-            statusBar.drawTarget(shipData.name, shield?.percent, armor?.percent, shipGraphic);
+            const [shipData, shield, armor, shipGraphic, disabled] = result;
+            statusBar.drawTarget(shipData.name, shield?.percent,
+                armor?.percent, shipGraphic, disabled !== undefined);
         }
     }
 })

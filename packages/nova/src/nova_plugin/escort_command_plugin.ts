@@ -16,6 +16,7 @@ import { DisabledComponent } from './disabled_component.js';
 import { EscortCommandComponent, EscortCommandState, EscortOrders, EscortOrdersComponent } from './escort_command.js';
 import { OwnerComponent } from './fire_weapon_plugin.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
+import { ExplodingComponent } from './death_plugin.js';
 import { GovtComponent } from './govt_component.js';
 import { shipDisposition } from './iff_plugin.js';
 import { chooseNearest, FormationComponent, NpcComponent, RCS_ACCEL_FRACTION } from './npc_ai_plugin.js';
@@ -327,8 +328,10 @@ export const EscortCommandBehaviorSystem = new System({
                     ? entities.get(command.target) : undefined;
                 const victimMovement = victim?.components
                     .get(MovementStateComponent);
-                if (!victim || !victimMovement) {
-                    // Destroyed (or otherwise gone): back to formation.
+                if (!victim || !victimMovement
+                    || victim.components.has(ExplodingComponent)) {
+                    // Destroyed (or exploding — untargetable): back to
+                    // formation.
                     entity.components.set(EscortCommandComponent,
                         { command: 'formation' });
                     target.target = undefined;
