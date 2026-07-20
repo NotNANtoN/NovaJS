@@ -2,7 +2,7 @@ import 'jasmine';
 import { getDefaultGovtData, GovtData } from 'novadatainterface/govt_data';
 import { Entity } from 'nova_ecs/entity';
 import { GovtComponent } from '../nova_plugin/govt_component.js';
-import { NpcComponent } from '../nova_plugin/npc_ai_plugin.js';
+import { FormationComponent, NpcComponent } from '../nova_plugin/npc_ai_plugin.js';
 import { ShootAllWeaponsComponent } from '../nova_plugin/npc_plugin.js';
 import { TargetComponent } from '../nova_plugin/target_component.js';
 import { styleForTarget } from './target_corners_plugin.js';
@@ -34,12 +34,18 @@ describe('styleForTarget (target corner selection)', () => {
     });
     const player = new Entity('player');
 
+    /** Runs the rule for `entities[uuid]` with the rest as the world. */
+    function style(uuid: string, entities: { [uuid: string]: Entity },
+        playerEntity = player) {
+        return styleForTarget(uuid, entities[uuid], PLAYER, playerEntity,
+            gameData, u => entities[u]);
+    }
+
     it('shows neutral corners for a trader going about its business', () => {
         const trader = new Entity('trader')
             .addComponent(GovtComponent, { id: 'nova:157' })
             .addComponent(NpcComponent, { aiType: 1, mode: 'travel' });
-        expect(styleForTarget(trader, PLAYER, player, gameData))
-            .toBe('neutral');
+        expect(style('trader', { trader })).toBe('neutral');
     });
 
     it('shows hostile corners for a pirate (xenophobic govt), even when ' +
@@ -48,8 +54,7 @@ describe('styleForTarget (target corner selection)', () => {
                 .addComponent(GovtComponent, { id: 'nova:137' })
                 .addComponent(NpcComponent, { aiType: 3, mode: 'attack' })
                 .addComponent(TargetComponent, { target: 'someone else' });
-            expect(styleForTarget(pirate, PLAYER, player, gameData))
-                .toBe('hostile');
+            expect(style('pirate', { pirate })).toBe('hostile');
         });
 
     it('shows hostile corners for a neutral-govt ship currently attacking ' +
@@ -58,8 +63,7 @@ describe('styleForTarget (target corner selection)', () => {
                 .addComponent(GovtComponent, { id: 'nova:157' })
                 .addComponent(NpcComponent, { aiType: 2, mode: 'attack' })
                 .addComponent(TargetComponent, { target: PLAYER });
-            expect(styleForTarget(trader, PLAYER, player, gameData))
-                .toBe('hostile');
+            expect(style('trader', { trader })).toBe('hostile');
         });
 
     it('keeps neutral corners for a ship merely fleeing the player', () => {
@@ -69,8 +73,7 @@ describe('styleForTarget (target corner selection)', () => {
                 aiType: 1, mode: 'flee', aggressor: PLAYER,
             })
             .addComponent(TargetComponent, { target: PLAYER });
-        expect(styleForTarget(trader, PLAYER, player, gameData))
-            .toBe('neutral');
+        expect(style('trader', { trader })).toBe('neutral');
     });
 
     it('keeps neutral corners for an attacker whose target is not the ' +
@@ -79,8 +82,7 @@ describe('styleForTarget (target corner selection)', () => {
                 .addComponent(GovtComponent, { id: 'nova:157' })
                 .addComponent(NpcComponent, { aiType: 3, mode: 'attack' })
                 .addComponent(TargetComponent, { target: 'someone else' });
-            expect(styleForTarget(warship, PLAYER, player, gameData))
-                .toBe('neutral');
+            expect(style('warship', { warship })).toBe('neutral');
         });
 
     it('shows hostile corners for a legacy dev enemy (ShootAllWeapons) ' +
@@ -88,8 +90,7 @@ describe('styleForTarget (target corner selection)', () => {
             const enemy = new Entity('dev enemy')
                 .addComponent(ShootAllWeaponsComponent, undefined)
                 .addComponent(TargetComponent, { target: PLAYER });
-            expect(styleForTarget(enemy, PLAYER, player, gameData))
-                .toBe('hostile');
+            expect(style('enemy', { enemy })).toBe('hostile');
         });
 
     it('shows friendly corners for a ship sharing the player government',
@@ -99,14 +100,45 @@ describe('styleForTarget (target corner selection)', () => {
             const wingman = new Entity('wingman')
                 .addComponent(GovtComponent, { id: 'nova:157' })
                 .addComponent(NpcComponent, { aiType: 3, mode: 'patrol' });
-            expect(styleForTarget(wingman, PLAYER, playerWithGovt, gameData))
+            expect(style('wingman', { wingman }, playerWithGovt))
                 .toBe('friendly');
         });
 
     it('shows neutral corners while govt data is not yet cached', () => {
         const unknown = new Entity('unknown')
             .addComponent(GovtComponent, { id: 'nova:999' });
-        expect(styleForTarget(unknown, PLAYER, player, gameData))
-            .toBe('neutral');
+        expect(style('unknown', { unknown })).toBe('neutral');
+    });
+
+    it("shows friendly corners for the player's own hired escort, " +
+        'whatever its government', () => {
+            const escort = new Entity('escort')
+                .addComponent(GovtComponent, { id: 'nova:137' }) // pirate!
+                .addComponent(FormationComponent,
+                    { leader: PLAYER, slot: 0 });
+            expect(style('escort', { escort })).toBe('friendly');
+        });
+
+    it("shows friendly corners for an escort's own bay fighter " +
+        '(transitive flock)', () => {
+            const escort = new Entity('escort')
+                .addComponent(FormationComponent,
+                    { leader: PLAYER, slot: 0 });
+            const fighter = new Entity('fighter')
+                .addComponent(FormationComponent,
+                    { leader: 'escort', slot: 0 });
+            expect(style('fighter', { escort, fighter })).toBe('friendly');
+        });
+
+    it("an NPC fleet escort (someone else's flock) is not friendly", () => {
+        const npcLeader = new Entity('npc leader')
+            .addComponent(GovtComponent, { id: 'nova:137' });
+        const npcEscort = new Entity('npc escort')
+            .addComponent(GovtComponent, { id: 'nova:137' })
+            .addComponent(FormationComponent,
+                { leader: 'npc leader', slot: 0 });
+        expect(style('npc escort',
+            { 'npc leader': npcLeader, 'npc escort': npcEscort }))
+            .toBe('hostile');
     });
 });

@@ -1,6 +1,6 @@
 import { isLeft } from 'fp-ts/lib/Either.js';
 import 'jasmine';
-import { Controls, SavedControls } from './controls.js';
+import { Controls, getActions, SavedControls } from './controls.js';
 
 describe('SavedControls', () => {
     it('parses single keys', () => {
@@ -139,5 +139,39 @@ describe('Controls', () => {
         const encoded = Controls.encode(controls.right);
 
         expect(encoded).toEqual(savedControls);
+    });
+});
+
+describe('getActions', () => {
+    // Tab is nextTarget bare and escortTarget with Alt — the live
+    // layout this specificity rule exists for.
+    const controls: Controls = new Map([
+        ['Tab', [
+            { action: 'escortTarget', modifiers: ['Alt'] },
+            { action: 'nextTarget', modifiers: [] },
+        ]],
+    ]);
+
+    function keyEvent(code: string, pressedModifiers: string[]) {
+        return {
+            code,
+            getModifierState: (modifier: string) =>
+                pressedModifiers.includes(modifier),
+        } as unknown as KeyboardEvent;
+    }
+
+    it('fires the bare binding on an unmodified press', () => {
+        expect(getActions(controls, keyEvent('Tab', [])))
+            .toEqual(['nextTarget']);
+    });
+
+    it('the most specific matching binding wins: Alt+Tab fires ONLY ' +
+        'escortTarget, not nextTarget too', () => {
+            expect(getActions(controls, keyEvent('Tab', ['Alt'])))
+                .toEqual(['escortTarget']);
+        });
+
+    it('returns nothing for unbound keys', () => {
+        expect(getActions(controls, keyEvent('KeyQ', []))).toEqual([]);
     });
 });

@@ -501,9 +501,19 @@ describe('Input-driven rooms', () => {
             }
         }
         expect(foundBay).toBeTrue();
-        // Launch escorts, then let everything settle.
+        // Launch escorts. Fighters launch into FORMATION under the
+        // escort-command framework (no auto-attack), so keep pressing
+        // the attack command while the bay cycles: each press sends
+        // every fighter launched so far at the player's target (the
+        // raven), which fights back — the dogfight this spec's
+        // choreography depends on.
         peerA.host.controlEvents([{ action: 'fireSecondary', state: 'start' }]);
-        await step(400);
+        for (let volley = 0; volley < 6; volley++) {
+            peerA.host.controlEvents([{ action: 'attack', state: 'start' }]);
+            await step(2);
+            peerA.host.controlEvents([{ action: 'attack', state: false }]);
+            await step(64);
+        }
         peerA.host.controlEvents([{ action: 'fireSecondary', state: false }]);
         await step(200);
         await archive.update();
@@ -530,16 +540,21 @@ describe('Input-driven rooms', () => {
         };
         await compareAll('after launch');
 
-        // Remove the escorts' target: they turn home and fly back to
-        // the carrier — the return path whose (formerly unregistered)
-        // escort-state components were lost in rollbacks and resync
-        // baselines live.
+        // Remove the escorts' victim (their attack command completes,
+        // dropping them back to formation), then order them home with
+        // the returnToBay command — the return path whose (formerly
+        // unregistered) escort-state components were lost in rollbacks
+        // and resync baselines live.
         const returning = (world: World) => [...world.entities]
             .filter(([uuid]) => uuid.startsWith('bay:'))
             .filter(([, entity]) => [...entity.components.keys()]
                 .some(component => component.name === 'ReturnComponent'))
             .length;
         peerA.client.removeEntity('raven');
+        await step(30);
+        peerA.host.controlEvents([{ action: 'returnToBay', state: 'start' }]);
+        await step(2);
+        peerA.host.controlEvents([{ action: 'returnToBay', state: false }]);
         // Catch the escorts *mid-return*: how quickly they turn home and
         // how soon the carrier collects them depends on hull sizes and
         // where the dogfight ended, so step in small chunks and stop

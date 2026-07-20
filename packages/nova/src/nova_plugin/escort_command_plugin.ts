@@ -1,0 +1,474 @@
+import { ProjectileWeaponData } from 'novadatainterface/weapon_data';
+import { Entities, GetEntity, UUID } from 'nova_ecs/arg_types';
+import { Angle } from 'nova_ecs/datatypes/angle';
+import { Vector } from 'nova_ecs/datatypes/vector';
+import { Entity } from 'nova_ecs/entity';
+import { Optional } from 'nova_ecs/optional';
+import { Plugin } from 'nova_ecs/plugin';
+import { MovementState, MovementStateComponent, MovementSystem } from 'nova_ecs/plugins/movement_plugin';
+import { SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
+import { TimeResource, TimeSystem } from 'nova_ecs/plugins/time_plugin';
+import { Query } from 'nova_ecs/query';
+import { System } from 'nova_ecs/system';
+import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
+import { ReturnWhenTargetRemovedComponent, startReturnHome } from './bay_plugin.js';
+import { EscortCommandComponent, EscortCommandState, EscortOrders, EscortOrdersComponent } from './escort_command.js';
+import { OwnerComponent } from './fire_weapon_plugin.js';
+import { SimulationGameDataResource } from './game_data_resource.js';
+import { GovtComponent } from './govt_component.js';
+import { shipDisposition } from './iff_plugin.js';
+import { chooseNearest, FormationComponent, NpcComponent, RCS_ACCEL_FRACTION } from './npc_ai_plugin.js';
+import { ShootAllWeaponsComponent } from './npc_plugin.js';
+import { ShipComponent, ShipPhysicsComponent } from './ship_plugin.js';
+import { ShipControlEvent, ShipControlStateComponent } from './ship_control.js';
+import { TargetComponent } from './target_component.js';
+import { WeaponsStateComponent } from './weapons_state.js';
+
+/**
+ * ============================================================================
+ * Escort commands (attack / defend / formation / holdPosition / returnToBay)
+ * ============================================================================
+ *
+ * Commands apply to the player's DIRECT escorts only — one parent-link
+ * hop: hired escorts holding formation on the player, and fighters
+ * launched from the PLAYER's own bays. Fighters launched from an
+ * ESCORT's bays are indirect: the player never commands them; their
+ * carrier escort mirrors its own command to its wings every tick
+ * (EscortCommandPropagationSystem). Transitive flock MEMBERSHIP is
+ * flock.ts's isInFlock; this module adds the one-hop-vs-deeper split.
+ *
+ * Flow: player keypress -> control input record -> ShipControlEvent on
+ * the player's ship -> EscortCommandInputSystem writes per-escort
+ * EscortCommandComponent state (serializer-registered, so it is
+ * hashed, rolls back, and crosses the wire). Any new command
+ * interrupts the current one. State resets to 'formation' at the
+ * boundaries where escorts are (re)created — jumping into a system and
+ * lifting off from a planet both rebuild the escort entities with the
+ * default command (bay fighters launch with it; spawnHiredEscorts
+ * spawns fresh) — so the reset rule falls out of creation rather than
+ * needing a boundary hook.
+ *
+ * This framework REPLACES the old bay behavior ("launch at the current
+ * target and attack it until it dies, then auto-dock"): fighters now
+ * launch into formation like every other escort and fight only when
+ * commanded; docking happens only on the returnToBay command.
+ *
+ * DEFEND ENDPOINT: the spec is attack-until-DISABLED; ship disabling
+ * (DisabledComponent) is being built on a sibling branch and has not
+ * landed as of this writing, so defend currently attacks until the
+ * intruder is DESTROYED.
+ * TODO(disabling): when DisabledComponent lands, stop the defend
+ * engagement when the intruder becomes disabled (and skip disabled
+ * ships when picking intruders).
+ */
+
+// --- Tuning constants ---
+
+/** defend: engage iff-hostile ships that come within this distance of
+ * the escort. Matthew wants to tune this. */
+export const DEFEND_RADIUS = 1000;
+/** Attacking escorts stop thrusting toward their victim inside this
+ * range (same standoff feel as NPC warships). */
+export const ESCORT_ATTACK_STANDOFF = 250;
+/** Attacking escorts only fire within this range of their victim. */
+export const ESCORT_FIRE_RANGE = 1200;
+/** holdPosition counts as "stopped" below this speed (px/s); under it
+ * the RCS-style damping just pins velocity to zero. */
+export const HOLD_STOPPED_SPEED = 5;
+
+/**
+ * The one-hop parent link used for command targeting: who this ship
+ * directly follows. Formation leader first (hired escorts, idle
+ * fighters), else the bay owner (fighters that are mid-fight when the
+ * old formation component was replaced). One HOP only — command
+ * addressing is deliberately not transitive (see the module comment).
+ */
+export function escortParent(entity: Entity): string | undefined {
+    return entity.components.get(FormationComponent)?.leader
+        ?? entity.components.get(OwnerComponent)?.owner;
+}
+
+const EscortsQuery = new Query([UUID, GetEntity, ShipComponent,
+    Optional(FormationComponent), Optional(OwnerComponent),
+    EscortCommandComponent] as const);
+
+const COMMAND_ACTIONS = ['attack', 'defend', 'formation', 'holdPosition',
+    'returnToBay'] as const;
+type CommandAction = typeof COMMAND_ACTIONS[number];
+
+/**
+ * Applies the player's escort-command keys to their direct escorts.
+ * Runs on the commanding ship (the ShipControlEvent target).
+ */
+const EscortCommandInputSystem = new System({
+    name: 'EscortCommandInput',
+    events: [ShipControlEvent],
+    args: [ShipControlStateComponent, TargetComponent, UUID, GetEntity,
+        EscortsQuery] as const,
+    step(controlState, target, uuid, entity, escorts) {
+        // The restrict-turrets toggle rides the same input path (see
+        // EscortOrdersComponent's rationale in escort_command.ts).
+        if (controlState.get('escortRestrictFire') === 'start') {
+            const orders = entity.components.get(EscortOrdersComponent);
+            entity.components.set(EscortOrdersComponent, {
+                restrictTurretsToTarget: !(orders?.restrictTurretsToTarget
+                    ?? false),
+            });
+        }
+
+        let action: CommandAction | undefined;
+        for (const candidate of COMMAND_ACTIONS) {
+            if (controlState.get(candidate) === 'start') {
+                action = candidate;
+                break;
+            }
+        }
+        if (!action) {
+            return;
+        }
+        // attack needs a victim: the player's current target at
+        // command time. With no target the command is ignored.
+        if (action === 'attack' && !target.target) {
+            return;
+        }
+        for (const [, escortEntity, , formation, owner] of escorts) {
+            const parent = formation?.leader ?? owner?.owner;
+            if (parent !== uuid) {
+                continue; // Not a DIRECT escort of the commander.
+            }
+            const state: EscortCommandState = action === 'attack'
+                ? { command: 'attack', target: target.target }
+                : { command: action };
+            escortEntity.components.set(EscortCommandComponent, state);
+        }
+    },
+});
+
+/**
+ * Carrier escorts mirror their own command to their wings (fighters
+ * from THEIR bays) every tick: the indirect layer the player never
+ * commands directly. Idempotent copy, so ordering within the tick
+ * doesn't matter.
+ */
+const EscortCommandPropagationSystem = new System({
+    name: 'EscortCommandPropagation',
+    args: [EscortCommandComponent, UUID, GetEntity, Entities] as const,
+    step(command, uuid, entity, entities) {
+        // Only escorts that CARRY fighters propagate; walk this
+        // entity's one-hop followers.
+        for (const [, other] of entities) {
+            const otherCommand = other.components.get(EscortCommandComponent);
+            if (!otherCommand || other === entity) {
+                continue;
+            }
+            if (escortParent(other) !== uuid) {
+                continue;
+            }
+            if (otherCommand.command !== command.command
+                || otherCommand.target !== command.target) {
+                other.components.set(EscortCommandComponent,
+                    { ...command });
+            }
+        }
+    },
+    after: [TimeSystem],
+    before: [MovementSystem],
+});
+
+function lookupGovt(gameData: SimulationGameDataInterface,
+    govt: { id: string } | undefined) {
+    return govt ? gameData.data.Govt.getCached(govt.id) : undefined;
+}
+
+/**
+ * Whether `other` is iff-hostile toward the escort's owner root:
+ * politically hostile toward the root's government, or currently
+ * attacking the root or the escort itself. The same disposition brain
+ * as the radar/corners (shipDisposition), evaluated sim-side from
+ * staged govt data.
+ */
+function isHostileTo(other: Entity, rootUuid: string, escortUuid: string,
+    rootGovt: ReturnType<typeof lookupGovt>,
+    gameData: SimulationGameDataInterface): boolean {
+    const disposition = shipDisposition(
+        lookupGovt(gameData, other.components.get(GovtComponent)), rootGovt);
+    if (disposition === 'hostile') {
+        return true;
+    }
+    const theirTarget = other.components.get(TargetComponent)?.target;
+    if (theirTarget !== rootUuid && theirTarget !== escortUuid) {
+        return false;
+    }
+    return other.components.get(NpcComponent)?.mode === 'attack'
+        || other.components.has(ShootAllWeaponsComponent);
+}
+
+const HostileCandidatesQuery = new Query(
+    [UUID, GetEntity, MovementStateComponent, ShipComponent] as const);
+
+/** Point-and-thrust pursuit of a target (attack/defend engagements). */
+function steerAttack(movement: MovementState, target: MovementState) {
+    const toTarget = target.position.subtract(movement.position);
+    movement.turnTo = toTarget.angle;
+    movement.turnBack = false;
+    movement.accelerating =
+        toTarget.length > ESCORT_ATTACK_STANDOFF ? 1 : 0;
+}
+
+/**
+ * holdPosition steering: come to rest relative to the system. Fast:
+ * retro turn-and-burn. Slow: RCS-style direct damping (budgeted like
+ * formation RCS), so the last few px/s bleed off without the ship
+ * spinning around. No anchor: if weapon hits knock the ship around, it
+ * stops again WHERE IT IS (per the spec, it does not fly back to the
+ * original hold point, and it does not return fire).
+ */
+function steerHold(movement: MovementState, acceleration: number,
+    delta_s: number) {
+    const speed = movement.velocity.length;
+    movement.turnTo = null;
+    if (speed <= HOLD_STOPPED_SPEED) {
+        movement.turnBack = false;
+        movement.accelerating = 0;
+        const budget = acceleration * RCS_ACCEL_FRACTION * delta_s;
+        movement.velocity = speed <= budget
+            ? new Vector(0, 0)
+            : Vector.fromVectorLike(movement.velocity)
+                .normalize(speed - budget);
+        return;
+    }
+    movement.turnBack = true;
+    movement.accelerating = 0;
+    const reverse = movement.velocity.angle.add(Math.PI);
+    if (Math.abs(movement.rotation.distanceTo(reverse).angle) < 0.4) {
+        movement.accelerating = 1;
+    }
+}
+
+/** π/4: half-angle of the front quadrant (see frontQuadrant reading). */
+const FRONT_QUADRANT_HALF_ANGLE = Math.PI / 4;
+
+/**
+ * Whether `target` lies in the ship's FRONT QUADRANT: within ±45° of
+ * the ship's facing — the 90° cone centered on its heading. This is
+ * the same reading fire_weapon_plugin's getQuadrant uses to aim
+ * frontQuadrant-guidance weapons (and the natural reading of the
+ * original game's front-quadrant turrets, which can only track targets
+ * ahead of the ship).
+ */
+export function inFrontQuadrant(movement: MovementState,
+    targetPosition: { x: number, y: number }): boolean {
+    const toTarget = new Vector(targetPosition.x - movement.position.x,
+        targetPosition.y - movement.position.y);
+    if (toTarget.lengthSquared < 1e-12) {
+        return true;
+    }
+    const misalignment = Angle.fromAngleLike(movement.rotation)
+        .distanceTo(toTarget.angle).angle;
+    return Math.abs(misalignment) < FRONT_QUADRANT_HALF_ANGLE;
+}
+
+/**
+ * The reach of a front-quadrant turret's shots: projectile speed times
+ * lifetime (the same math point-defense range uses).
+ */
+export function frontQuadrantWeaponRange(
+    weapon: ProjectileWeaponData): number {
+    return weapon.physics.speed * weapon.shotDuration / 1000;
+}
+
+/**
+ * Executes each escort's current command every tick: steering, firing,
+ * command completion, and the formation-time front-quadrant-turret
+ * rule. Formation STATION-KEEPING itself stays in FormationSystem
+ * (which yields to this system for non-formation commands).
+ */
+const EscortCommandBehaviorSystem = new System({
+    name: 'EscortCommandBehavior',
+    args: [EscortCommandComponent, MovementStateComponent,
+        ShipPhysicsComponent, WeaponsStateComponent, TargetComponent,
+        UUID, GetEntity, Entities, HostileCandidatesQuery, TimeResource,
+        SimulationGameDataResource] as const,
+    step(command, movement, physics, weapons, target, uuid, entity,
+        entities, candidates, time, gameData) {
+        const ceaseFire = () => {
+            for (const [, weapon] of weapons) {
+                weapon.firing = false;
+            }
+        };
+        const fireAt = (victim: string) => {
+            const victimMovement = entities.get(victim)?.components
+                .get(MovementStateComponent);
+            const inRange = victimMovement !== undefined
+                && victimMovement.position.subtract(movement.position)
+                    .lengthSquared <= ESCORT_FIRE_RANGE * ESCORT_FIRE_RANGE;
+            for (const [id, weapon] of weapons) {
+                const weaponType = gameData.data.Weapon.getCached(id)?.type;
+                if (weaponType == null || weaponType === 'BayWeaponData') {
+                    continue;
+                }
+                weapon.target = victim;
+                weapon.firing = inRange;
+            }
+        };
+        const root = escortParent(entity);
+        const rootEntity = root ? entities.get(root) : undefined;
+        const rootGovt = lookupGovt(gameData,
+            rootEntity?.components.get(GovtComponent));
+
+        switch (command.command) {
+            case 'attack': {
+                const victim = command.target !== undefined
+                    ? entities.get(command.target) : undefined;
+                const victimMovement = victim?.components
+                    .get(MovementStateComponent);
+                if (!victim || !victimMovement) {
+                    // Destroyed (or otherwise gone): back to formation.
+                    entity.components.set(EscortCommandComponent,
+                        { command: 'formation' });
+                    target.target = undefined;
+                    ceaseFire();
+                    return;
+                }
+                target.target = command.target;
+                steerAttack(movement, victimMovement);
+                fireAt(command.target!);
+                return;
+            }
+            case 'defend': {
+                // Engagement upkeep.
+                // TODO(disabling): when DisabledComponent lands, also
+                // end the engagement when the intruder is disabled,
+                // and exclude disabled ships from intruder selection.
+                let engaged = command.target !== undefined
+                    ? entities.get(command.target) : undefined;
+                if (engaged && !isHostileTo(engaged, root ?? uuid, uuid,
+                    rootGovt, gameData)) {
+                    engaged = undefined;
+                }
+                if (!engaged) {
+                    // Watch for intruders inside the defend bubble.
+                    const nearby: Array<readonly [string, number]> = [];
+                    for (const [otherUuid, other, otherMovement]
+                        of candidates) {
+                        if (otherUuid === uuid || otherUuid === root) {
+                            continue;
+                        }
+                        const distanceSquared = otherMovement.position
+                            .subtract(movement.position).lengthSquared;
+                        if (distanceSquared
+                            > DEFEND_RADIUS * DEFEND_RADIUS) {
+                            continue;
+                        }
+                        if (isHostileTo(other, root ?? uuid, uuid,
+                            rootGovt, gameData)) {
+                            nearby.push([otherUuid, distanceSquared]);
+                        }
+                    }
+                    const chosen = chooseNearest(nearby);
+                    command.target = chosen;
+                    engaged = chosen ? entities.get(chosen) : undefined;
+                }
+                const engagedMovement = engaged?.components
+                    .get(MovementStateComponent);
+                if (!engaged || !engagedMovement) {
+                    // Nothing to fight: FormationSystem keeps station;
+                    // turrets stay opportunistic below.
+                    command.target = undefined;
+                    target.target = undefined;
+                    break;
+                }
+                target.target = command.target;
+                steerAttack(movement, engagedMovement);
+                fireAt(command.target!);
+                return;
+            }
+            case 'holdPosition': {
+                steerHold(movement, physics.acceleration, time.delta_s);
+                ceaseFire();
+                return;
+            }
+            case 'returnToBay': {
+                if (!entity.components.has(ReturnWhenTargetRemovedComponent)) {
+                    // Not bay-launched: just fall back into formation.
+                    entity.components.set(EscortCommandComponent,
+                        { command: 'formation' });
+                    ceaseFire();
+                    return;
+                }
+                if (!entity.components.has(FormationComponent)) {
+                    // Already flying home (startReturnHome ran).
+                    return;
+                }
+                entity.components.delete(FormationComponent);
+                startReturnHome(entity);
+                ceaseFire();
+                return;
+            }
+            case 'formation':
+                break;
+        }
+
+        // --- Formation (and defend-with-no-intruder): the front-
+        // quadrant-turret rule. Faithful to the original game's odd
+        // behavior: while flying formation, ONLY front-quadrant-turret
+        // weapons (wëap guidance 'frontQuadrant' — no other weapon
+        // type, not even full turrets) opportunistically fire at
+        // iff-hostile ships in range, and only while the hostile is in
+        // the ship's front quadrant (±45° of its facing; see
+        // inFrontQuadrant). The player's restrictTurretsToTarget order
+        // narrows candidates to their current target.
+        const orders = rootEntity?.components.get(EscortOrdersComponent);
+        const restrictTo = orders?.restrictTurretsToTarget
+            ? rootEntity?.components.get(TargetComponent)?.target
+            : undefined;
+        for (const [id, weapon] of weapons) {
+            const weaponData = gameData.data.Weapon.getCached(id);
+            if (weaponData?.type !== 'ProjectileWeaponData'
+                || weaponData.guidance !== 'frontQuadrant') {
+                weapon.firing = false;
+                continue;
+            }
+            const range = frontQuadrantWeaponRange(weaponData);
+            const inReach: Array<readonly [string, number]> = [];
+            for (const [otherUuid, other, otherMovement] of candidates) {
+                if (otherUuid === uuid || otherUuid === root) {
+                    continue;
+                }
+                if (orders?.restrictTurretsToTarget
+                    && otherUuid !== restrictTo) {
+                    continue;
+                }
+                const distanceSquared = otherMovement.position
+                    .subtract(movement.position).lengthSquared;
+                if (distanceSquared > range * range) {
+                    continue;
+                }
+                if (!inFrontQuadrant(movement, otherMovement.position)) {
+                    continue;
+                }
+                if (isHostileTo(other, root ?? uuid, uuid, rootGovt,
+                    gameData)) {
+                    inReach.push([otherUuid, distanceSquared]);
+                }
+            }
+            const chosen = chooseNearest(inReach);
+            weapon.target = chosen ?? weapon.target;
+            weapon.firing = chosen !== undefined;
+        }
+    },
+    after: [TimeSystem, EscortCommandPropagationSystem],
+    before: [MovementSystem],
+});
+
+export const EscortCommandPlugin: Plugin = {
+    name: 'EscortCommandPlugin',
+    build(world) {
+        const serializer = world.resources.get(SerializerResource);
+        serializer?.addComponent(EscortCommandComponent, EscortCommandState);
+        serializer?.addComponent(EscortOrdersComponent, EscortOrders);
+        world.addSystem(EscortCommandInputSystem);
+        world.addSystem(EscortCommandPropagationSystem);
+        world.addSystem(EscortCommandBehaviorSystem);
+    },
+};

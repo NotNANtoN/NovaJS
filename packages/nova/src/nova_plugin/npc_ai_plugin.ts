@@ -17,6 +17,7 @@ import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_
 import { CloakActiveComponent, isTargetable } from './cloak_plugin.js';
 import { DamagedEvent } from './death_plugin.js';
 import { DisabledComponent } from './disabled_component.js';
+import { EscortCommandComponent } from './escort_command.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { GovtComponent } from './govt_component.js';
 import { govtDisposition, effectiveStrength, oddsFavorable } from './govt_disposition.js';
@@ -123,9 +124,33 @@ const FORMATION_LOOKAHEAD_S = 0.4;
 /** Position error is converted to closing velocity at this rate (1/s):
  * the proportional term of the follower controller. */
 const FORMATION_POSITION_GAIN = 1.2;
-/** Followers stop thrusting when their correction is smaller than
- * this (px/s) — inside it they coast with the leader. */
-const FORMATION_DEADBAND = 30;
+
+// --- RCS (reaction control) tuning ---
+//
+// Ships holding formation get a reaction-control ability: small
+// velocity corrections applied directly, WITHOUT rotating the ship,
+// so station-keeping doesn't read as constant spin-and-thrust wiggle.
+// The ship keeps its heading aligned with the leader's and the main
+// engine stays dark (the engine flare is driven by the `accelerating`
+// flag — animation_graphic_plugin's glowAlpha — which RCS never sets).
+//
+// This lives in the AI/steering layer (the formation controller), NOT
+// in movement physics: EffectiveMovementPhysicsSystem stays the single
+// per-tick writer of MovementPhysics, and RCS is a bounded velocity
+// nudge made by steering before MovementSystem integrates — the same
+// layer where knockback adjusts velocity. The budget derives from the
+// ship's BASE acceleration (ShipPhysics), so afterburners and jump
+// drives don't secretly boost thrusterless station-keeping.
+
+/** RCS strength as a fraction of the ship's main-engine acceleration
+ * (Matthew's spec: proportional to the ship's acceleration). */
+export const RCS_ACCEL_FRACTION = 0.25;
+/** Turn-and-burn hands over to RCS when the correction (desired minus
+ * actual velocity, px/s) drops below this... */
+export const RCS_ENGAGE_SPEED = 60;
+/** ...and RCS hands back to turn-and-burn above this. The gap is the
+ * hysteresis that stops flip-flopping at the boundary. */
+export const RCS_DISENGAGE_SPEED = 120;
 
 export const NpcMode = t.union([
     t.literal('travel'), t.literal('dwell'), t.literal('flee'),
@@ -168,6 +193,11 @@ export const Formation = t.intersection([t.type({
     /** Bay fighters: sim time (ms) at which the fighter stops holding
      * and turns home to dock (see bay_plugin). */
     dockAt: t.number,
+    /** Whether the follower is currently station-keeping on RCS (the
+     * hysteresis state of the formation controller). Sim state: it
+     * must roll back and cross the wire with the ship or peers flip
+     * modes at different ticks. */
+    rcs: t.boolean,
 })]);
 export type Formation = t.TypeOf<typeof Formation>;
 export const FormationComponent = new Component<Formation>('FormationComponent');
@@ -303,11 +333,18 @@ const NpcDecisionSystem = new System({
     name: 'NpcDecisionSystem',
     args: [NpcComponent, MovementStateComponent, TargetComponent,
         Optional(GovtComponent), Optional(ShieldComponent),
-        ShipDataComponent, Optional(FormationComponent), NpcTargetsQuery,
+        ShipDataComponent, Optional(FormationComponent),
+        Optional(EscortCommandComponent), NpcTargetsQuery,
         PlanetsQuery, TimeResource, RandomResource, Entities, UUID,
         SimulationGameDataResource] as const,
-    step(npc, movement, target, govt, shield, shipData, formation, ships,
-        planets, time, random, entities, uuid, gameData) {
+    step(npc, movement, target, govt, shield, shipData, formation,
+        escortCommand, ships, planets, time, random, entities, uuid,
+        gameData) {
+        if (escortCommand) {
+            // A player-commanded escort: its brain is the escort
+            // command framework (escort_command_plugin), not NPC AI.
+            return;
+        }
         if (npc.mode === 'depart') {
             return;
         }
@@ -622,9 +659,14 @@ function steerOutward(movement: MovementState, away: Vector): boolean {
 export const NpcSteeringSystem = new System({
     name: 'NpcSteeringSystem',
     args: [NpcComponent, MovementStateComponent, ShipPhysicsComponent,
-        TargetComponent, Optional(FormationComponent), TimeResource,
+        TargetComponent, Optional(FormationComponent),
+        Optional(EscortCommandComponent), TimeResource,
         Entities, UUID] as const,
-    step(npc, movement, physics, target, formation, time, entities, uuid) {
+    step(npc, movement, physics, target, formation, escortCommand, time,
+        entities, uuid) {
+        if (escortCommand) {
+            return; // Player-commanded: see escort_command_plugin.
+        }
         // Escorts holding formation are steered by FormationSystem.
         if (formation && entities.has(formation.leader)
             && npc.mode !== 'attack' && npc.mode !== 'flee'
@@ -754,16 +796,26 @@ const NpcFireControlSystem = new System({
 // --- Formation keeping ---
 
 /**
- * Steers a follower toward its slot: a proportional controller that
- * chases the slot position (led by the leader's velocity) and matches
- * the leader's velocity inside the deadband. Pure so tests can check
- * the geometry converges.
+ * Steers a follower toward its slot. Two regimes with hysteresis
+ * (state in formation.rcs):
+ *
+ *  - Large correction (above RCS_DISENGAGE_SPEED, or above
+ *    RCS_ENGAGE_SPEED when not yet on RCS): the classic turn-and-burn
+ *    — point at the correction and use the main engine.
+ *  - Small correction: RCS station-keeping — a velocity nudge budgeted
+ *    at RCS_ACCEL_FRACTION of the ship's main acceleration, applied
+ *    directly with NO rotation and NO `accelerating` (so no engine
+ *    flare); the ship holds its heading on the leader's.
+ *
+ * The correction is the desired velocity (leader's, plus a
+ * proportional pull toward the slot) minus the follower's. Pure so
+ * tests can check convergence and that RCS never turns the ship.
  */
 export function steerFormation(movement: MovementState, leader: MovementState,
-    slot: number): void {
+    formation: Formation, acceleration: number, delta_s: number): void {
     const slotPosition = formationSlotPosition(
         Position.fromVectorLike(leader.position),
-        Angle.fromAngleLike(leader.rotation), slot);
+        Angle.fromAngleLike(leader.rotation), formation.slot);
     const lead = Vector.fromVectorLike(leader.velocity)
         .scale(FORMATION_LOOKAHEAD_S);
     const error = slotPosition.add(lead).subtract(movement.position);
@@ -772,13 +824,36 @@ export function steerFormation(movement: MovementState, leader: MovementState,
     const desired = Vector.fromVectorLike(leader.velocity)
         .add(error.scale(FORMATION_POSITION_GAIN));
     const correction = desired.subtract(movement.velocity);
-    if (correction.length < FORMATION_DEADBAND) {
-        // On station: coast, aligning with the leader's heading.
+
+    // Hysteresis: engage RCS below the low threshold, drop it above
+    // the high one, keep the previous regime in between.
+    const magnitude = correction.length;
+    if (formation.rcs) {
+        if (magnitude > RCS_DISENGAGE_SPEED) {
+            formation.rcs = false;
+        }
+    } else if (magnitude < RCS_ENGAGE_SPEED) {
+        formation.rcs = true;
+    }
+
+    if (formation.rcs) {
+        // RCS station-keeping: nudge velocity toward desired, capped
+        // by this tick's RCS budget; never rotate, never light the
+        // main engine. Replaces (does not mutate) the velocity object
+        // per the movement contract.
+        const budget = acceleration * RCS_ACCEL_FRACTION * delta_s;
+        const nudge = magnitude <= budget
+            ? correction : correction.normalize(budget);
+        movement.velocity = Vector.fromVectorLike(movement.velocity)
+            .add(nudge);
         movement.accelerating = 0;
         movement.turnBack = false;
         movement.turnTo = Angle.fromAngleLike(leader.rotation);
         return;
     }
+
+    // Turn-and-burn: point at the correction, main engine when
+    // roughly aligned.
     const heading = correction.angle;
     movement.turnTo = heading;
     movement.turnBack = false;
@@ -788,12 +863,22 @@ export function steerFormation(movement: MovementState, leader: MovementState,
 
 export const FormationSystem = new System({
     name: 'FormationSystem',
-    args: [FormationComponent, MovementStateComponent,
-        Optional(NpcComponent), Entities, GetEntity, UUID] as const,
-    step(formation, movement, npc, entities, entity) {
+    args: [FormationComponent, MovementStateComponent, ShipPhysicsComponent,
+        Optional(NpcComponent), Optional(EscortCommandComponent),
+        TimeResource, Entities, GetEntity, UUID] as const,
+    step(formation, movement, physics, npc, escortCommand, time, entities,
+        entity) {
         // Engaged escorts fight; FormationSystem only holds station.
-        if (npc && (npc.mode === 'attack' || npc.mode === 'flee'
-            || npc.mode === 'depart')) {
+        if (npc && !escortCommand && (npc.mode === 'attack'
+            || npc.mode === 'flee' || npc.mode === 'depart')) {
+            return;
+        }
+        // Player-commanded escorts: station-keep only while the
+        // command is formation (or defend with no intruder engaged) —
+        // the command behavior system steers everything else.
+        if (escortCommand && !(escortCommand.command === 'formation'
+            || (escortCommand.command === 'defend'
+                && escortCommand.target === undefined))) {
             return;
         }
         const leader = entities.get(formation.leader)?.components
@@ -806,7 +891,10 @@ export const FormationSystem = new System({
             entity.components.delete(FormationComponent);
             return;
         }
-        steerFormation(movement, leader, formation.slot);
+        // Base acceleration (not the per-tick effective physics):
+        // afterburners must not boost the RCS budget.
+        steerFormation(movement, leader, formation,
+            physics.acceleration, time.delta_s);
     },
     after: [TimeSystem, NpcDecisionSystem],
     before: [MovementSystem],
