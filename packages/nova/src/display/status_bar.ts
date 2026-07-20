@@ -29,7 +29,7 @@ import { SystemIdResource } from "../nova_plugin/system_id_resource.js";
 import { Stat } from "../nova_plugin/stat.js";
 import { TargetComponent } from "../nova_plugin/target_component.js";
 import { ActiveSecondaryWeapon, countAmmo } from "../nova_plugin/weapon_plugin.js";
-import { Button } from "../spaceport/button.js";
+import { Button, ButtonClick } from "../spaceport/button.js";
 import { AnimationGraphic } from "./animation_graphic.js";
 import { AnimationGraphicComponent } from "./animation_graphic_plugin.js";
 import { PixiAppResource } from "./pixi_app_resource.js";
@@ -89,7 +89,7 @@ class StatusBar {
 
     private text: { [index: string]: PIXI.Text } = {};
     private addEnemyButton: Button;
-    readonly addEnemy: Subject<undefined>;
+    readonly addEnemy: Subject<ButtonClick>;
 
     constructor(private statusBarData: StatusBarData, private displayAssets: DisplayAssetDataInterface,
                 private renderer: PIXI.Renderer | PIXI.IRenderer) {

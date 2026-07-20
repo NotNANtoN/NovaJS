@@ -130,40 +130,80 @@ export function freeCargoSpace(state: TradeWorkingState): number {
 }
 
 /**
+ * The most tons of the good the player could buy right now: limited by
+ * credits and free hold space (0 when the good can't be bought here).
+ */
+export function maxBuyQuantity(state: TradeWorkingState,
+    good: TradeGood): number {
+    if (!good.canBuy || good.price <= 0) {
+        return 0;
+    }
+    const affordable = Math.floor(state.credits.credits / good.price);
+    return Math.max(0, Math.min(affordable, freeCargoSpace(state)));
+}
+
+/** The tons of the good the player could sell here: the held amount. */
+export function maxSellQuantity(state: TradeWorkingState,
+    good: TradeGood): number {
+    if (!good.canSell) {
+        return 0;
+    }
+    return Math.max(0, state.cargo.get(good.key) ?? 0);
+}
+
+/**
+ * Buys up to `quantity` tons, clamped to what fits and is affordable
+ * (the option-click bulk rule — an over-entered amount buys the most
+ * allowed). Returns the tons bought.
+ */
+export function buyGoodQuantity(state: TradeWorkingState, good: TradeGood,
+    quantity: number): number {
+    const bought = Math.min(Math.floor(quantity), maxBuyQuantity(state, good));
+    if (bought <= 0) {
+        return 0;
+    }
+    state.credits.credits -= bought * good.price;
+    state.cargo.set(good.key, (state.cargo.get(good.key) ?? 0) + bought);
+    return bought;
+}
+
+/**
  * Buys as many tons as fit and are affordable, the original's
  * one-click behavior. Returns the tons bought (0 when out of money or
  * space).
  */
 export function buyGood(state: TradeWorkingState, good: TradeGood): number {
-    if (!good.canBuy || good.price <= 0) {
+    return buyGoodQuantity(state, good, maxBuyQuantity(state, good));
+}
+
+/**
+ * Sells up to `quantity` tons, clamped to the held amount (the
+ * option-click bulk rule). Returns the tons sold. Mission cargo is
+ * untouchable: it lives under 'mission:*' keys which are never
+ * TradeGood keys.
+ */
+export function sellGoodQuantity(state: TradeWorkingState, good: TradeGood,
+    quantity: number): number {
+    const sold = Math.min(Math.floor(quantity), maxSellQuantity(state, good));
+    if (sold <= 0) {
         return 0;
     }
-    const affordable = Math.floor(state.credits.credits / good.price);
-    const quantity = Math.min(affordable, freeCargoSpace(state));
-    if (quantity <= 0) {
-        return 0;
+    const held = state.cargo.get(good.key) ?? 0;
+    if (sold >= held) {
+        state.cargo.delete(good.key);
+    } else {
+        state.cargo.set(good.key, held - sold);
     }
-    state.credits.credits -= quantity * good.price;
-    state.cargo.set(good.key, (state.cargo.get(good.key) ?? 0) + quantity);
-    return quantity;
+    state.credits.credits += sold * good.price;
+    return sold;
 }
 
 /**
  * Sells the entire held quantity of the good, the original's one-click
- * behavior. Returns the tons sold. Mission cargo is untouchable: it
- * lives under 'mission:*' keys which are never TradeGood keys.
+ * behavior. Returns the tons sold.
  */
 export function sellGood(state: TradeWorkingState, good: TradeGood): number {
-    if (!good.canSell) {
-        return 0;
-    }
-    const held = state.cargo.get(good.key) ?? 0;
-    if (held <= 0) {
-        return 0;
-    }
-    state.cargo.delete(good.key);
-    state.credits.credits += held * good.price;
-    return held;
+    return sellGoodQuantity(state, good, maxSellQuantity(state, good));
 }
 
 /**

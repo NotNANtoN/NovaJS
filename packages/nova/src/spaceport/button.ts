@@ -22,10 +22,16 @@ const BUTTON_IDS = new Map([
 
 const LEFT_POS = 13.2 // TODO: infer from texture width
 
+/** Modifier state of a button click. `option` is the option/alt key,
+ * which the original uses for bulk buy/sell quantity entry. */
+export interface ButtonClick {
+    option: boolean;
+}
+
 export class Button {
     container = new PIXI.Container();
     private states = new Map<string, PIXI.Container>();
-    readonly click = new Subject<undefined>();
+    readonly click = new Subject<ButtonClick>();
     private text: PIXI.Text;
     private wrappedState = 'normal';
     private width: number;
@@ -75,9 +81,9 @@ export class Button {
             this.state = 'clicked';
         });
 
-        this.container.on('pointerup', () => {
+        this.container.on('pointerup', (event: PIXI.FederatedPointerEvent) => {
             this.state = 'normal';
-            this.click.next(undefined);
+            this.click.next({ option: event.altKey });
         });
 
         for (const [name, { left, middle, right }] of this.buttonIds) {

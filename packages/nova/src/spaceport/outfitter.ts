@@ -14,10 +14,11 @@ import { OutfitsStateComponent } from "../nova_plugin/outfit_plugin.js";
 import { cleanRecords, LegalRecords } from "../nova_plugin/reputation.js";
 import { LegalRecordsComponent } from "../nova_plugin/reputation_plugin.js";
 import { ShipComponent } from "../nova_plugin/ship_plugin.js";
-import { Button } from "./button.js";
+import { Button, ButtonClick } from "./button.js";
 import { ItemGrid, ItemTile } from "./item_grid.js";
 import { Menu } from "./menu.js";
-import { canBuyOutfit, canSellOutfit, freeMass, OutfitterContext } from "./outfitter_rules.js";
+import { canBuyOutfit, canSellOutfit, freeMass, maxBuyCount, maxSellCount, OutfitterContext } from "./outfitter_rules.js";
+import { QuantityDialog } from "./quantity_dialog.js";
 
 
 const descWidth = 190;
@@ -38,6 +39,7 @@ export const FONT = {
 
 export class Outfitter extends Menu<Entity> {
     private itemGrid?: ItemGrid<OutfitData>;
+    private quantityDialog: QuantityDialog;
     private pictContainer = new PIXI.Container();
     /** Working copies, committed to the ship entity on done. */
     private outfits: DefaultMap<string, number>;
@@ -72,10 +74,14 @@ export class Outfitter extends Menu<Entity> {
             done: new Button(displayAssets, "Done", 60, { x: 100, y: 126 })
         };
 
-        buttons.buy.click.subscribe(this.buyOutfit.bind(this));
-        buttons.sell.click.subscribe(this.sellOutfit.bind(this));
+        // Option+click opens the bulk quantity dialog, as the
+        // original's outfitter does.
+        buttons.buy.click.subscribe(click => this.buyOutfit(click));
+        buttons.sell.click.subscribe(click => this.sellOutfit(click));
         buttons.done.click.subscribe(this.done.bind(this));
         this.addButtons(buttons);
+
+        this.quantityDialog = new QuantityDialog(controlEvents);
 
         this.pictContainer.position.x = 174;
         this.pictContainer.position.y = -152.5;
@@ -132,6 +138,9 @@ export class Outfitter extends Menu<Entity> {
         this.itemGrid.container.position.x = -373;
         this.itemGrid.container.position.y = -153;
         this.itemGrid.activeTile.subscribe(this.setOutfitSelected.bind(this));
+
+        // On top of everything, so its modal shield covers the screen.
+        this.container.addChild(this.quantityDialog.container);
 
         this.controls.controls = {
             left: () => itemGrid.left(),
@@ -208,20 +217,8 @@ export class Outfitter extends Menu<Entity> {
         }
     }
 
-    private buyOutfit() {
-        const outfit = this.itemGrid?.selection;
-        const context = this.makeContext();
-        if (!outfit || !context) {
-            return;
-        }
-
-        const check = canBuyOutfit(outfit, context);
-        if (!check.allowed) {
-            this.text.status.text = check.message;
-            return;
-        }
-        this.text.status.text = "";
-
+    /** Applies one unit's purchase: count, ModType 21, OnPurchase. */
+    private applyBuy(outfit: OutfitData) {
         this.outfits.set(outfit.id, this.outfits.get(outfit.id) + 1);
         // ModType 21: buying the outfit cleans (raises to at least 0)
         // the player's legal record with the ModVal govt, or with every
@@ -237,11 +234,87 @@ export class Outfitter extends Menu<Entity> {
             }
         }
         this.runSetString(outfit.onPurchase);
+    }
+
+    /** Applies one unit's sale: count and OnSell. */
+    private applySell(outfit: OutfitData) {
+        this.outfits.set(outfit.id, Math.max(0, this.outfits.get(outfit.id) - 1));
+        if (this.outfits.get(outfit.id) === 0) {
+            this.outfits.delete(outfit.id);
+        }
+        this.runSetString(outfit.onSell);
+    }
+
+    private buyOutfit(click?: ButtonClick) {
+        if (click?.option) {
+            // Option+click: the bulk quantity dialog.
+            void this.bulkBuy();
+            return;
+        }
+        const outfit = this.itemGrid?.selection;
+        const context = this.makeContext();
+        if (!outfit || !context) {
+            return;
+        }
+
+        const check = canBuyOutfit(outfit, context);
+        if (!check.allowed) {
+            this.text.status.text = check.message;
+            return;
+        }
+        this.text.status.text = "";
+
+        this.applyBuy(outfit);
         this.itemGrid?.setCounts(this.outfits);
         this.setFreeMassText();
     }
 
-    private sellOutfit() {
+    /**
+     * The option-click bulk buy: a quantity dialog prefilled with (and
+     * clamped to) the most the checks allow, then that many unit
+     * purchases, each re-checked (OnPurchase effects can change what a
+     * later unit is allowed to do).
+     */
+    private async bulkBuy() {
+        const outfit = this.itemGrid?.selection;
+        const context = this.makeContext();
+        if (!outfit || !context) {
+            return;
+        }
+        const max = maxBuyCount(outfit, context);
+        if (max <= 0) {
+            const check = canBuyOutfit(outfit, context);
+            if (!check.allowed) {
+                this.text.status.text = check.message;
+            }
+            return;
+        }
+        const quantity = await this.quantityDialog.show(
+            { verb: 'Buy', initial: max, max });
+        if (!quantity) {
+            return;
+        }
+        let bought = 0;
+        while (bought < quantity) {
+            const step = this.makeContext();
+            if (!step || !canBuyOutfit(outfit, step).allowed) {
+                break;
+            }
+            this.applyBuy(outfit);
+            bought++;
+        }
+        this.text.status.text = bought > 0
+            ? `Bought ${bought} x ${outfit.name}.` : '';
+        this.itemGrid?.setCounts(this.outfits);
+        this.setFreeMassText();
+    }
+
+    private sellOutfit(click?: ButtonClick) {
+        if (click?.option) {
+            // Option+click: the bulk quantity dialog.
+            void this.bulkSell();
+            return;
+        }
         const outfit = this.itemGrid?.selection;
         const context = this.makeContext();
         if (!outfit || !context) {
@@ -255,11 +328,42 @@ export class Outfitter extends Menu<Entity> {
         }
         this.text.status.text = "";
 
-        this.outfits.set(outfit.id, Math.max(0, this.outfits.get(outfit.id) - 1));
-        if (this.outfits.get(outfit.id) === 0) {
-            this.outfits.delete(outfit.id);
+        this.applySell(outfit);
+        this.itemGrid?.setCounts(this.outfits);
+        this.setFreeMassText();
+    }
+
+    /** The option-click bulk sell: prefilled with everything owned. */
+    private async bulkSell() {
+        const outfit = this.itemGrid?.selection;
+        const context = this.makeContext();
+        if (!outfit || !context) {
+            return;
         }
-        this.runSetString(outfit.onSell);
+        const max = maxSellCount(outfit, context);
+        if (max <= 0) {
+            const check = canSellOutfit(outfit, context);
+            if (!check.allowed) {
+                this.text.status.text = check.message;
+            }
+            return;
+        }
+        const quantity = await this.quantityDialog.show(
+            { verb: 'Sell', initial: max, max });
+        if (!quantity) {
+            return;
+        }
+        let sold = 0;
+        while (sold < quantity) {
+            const step = this.makeContext();
+            if (!step || !canSellOutfit(outfit, step).allowed) {
+                break;
+            }
+            this.applySell(outfit);
+            sold++;
+        }
+        this.text.status.text = sold > 0
+            ? `Sold ${sold} x ${outfit.name}.` : '';
         this.itemGrid?.setCounts(this.outfits);
         this.setFreeMassText();
     }

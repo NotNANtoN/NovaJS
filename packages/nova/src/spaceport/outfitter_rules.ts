@@ -261,3 +261,37 @@ export function canSellOutfit(outfit: OutfitData,
     }
     return { allowed: true };
 }
+
+/** A sane ceiling for bulk purchases of an effectively unlimited
+ * outfit (zero mass, no Max): the quantity dialog clamps here. */
+export const BULK_BUY_LIMIT = 9999;
+
+/**
+ * The most of this outfit the player could buy right now, for the
+ * option-click quantity dialog: unit purchases are simulated against a
+ * working copy of the outfit list until one fails a check in
+ * canBuyOutfit (mass, Max, hardpoints, ammo capacity, availability).
+ * OnPurchase side effects aren't simulated; the real purchase loop
+ * still applies them (and re-checks) per unit.
+ */
+export function maxBuyCount(outfit: OutfitData, context: OutfitterContext,
+    limit = BULK_BUY_LIMIT): number {
+    const working = new Map(context.outfits);
+    const simulated: OutfitterContext = { ...context, outfits: working };
+    let count = 0;
+    while (count < limit && canBuyOutfit(outfit, simulated).allowed) {
+        working.set(outfit.id, (working.get(outfit.id) ?? 0) + 1);
+        count++;
+    }
+    return count;
+}
+
+/**
+ * The most of this outfit the player could sell right now: everything
+ * owned, or nothing when it can't be sold.
+ */
+export function maxSellCount(outfit: OutfitData,
+    context: OutfitterContext): number {
+    return canSellOutfit(outfit, context).allowed
+        ? (context.outfits.get(outfit.id) ?? 0) : 0;
+}

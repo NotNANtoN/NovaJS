@@ -11,17 +11,22 @@ import { ControlBitsComponent } from '../nova_plugin/ncb_plugin.js';
 import { CreditsComponent } from '../nova_plugin/player_state_plugin.js';
 import {
     buyGood,
+    buyGoodQuantity,
     freeCargoSpace,
     junkTradeGood,
+    maxBuyQuantity,
+    maxSellQuantity,
     otherCargoNames,
     sellGood,
+    sellGoodQuantity,
     standardTradeGoods,
     TradeGood,
     TradeWorkingState,
 } from '../nova_plugin/trade_logic.js';
-import { Button } from './button.js';
+import { Button, ButtonClick } from './button.js';
 import { Menu } from './menu.js';
 import { computeCargoCapacity } from './mission_session.js';
+import { QuantityDialog } from './quantity_dialog.js';
 
 // Laid out to fit the 426x252 Trade dialog (PICT 8510): the main pane
 // spans x 37..388, y 6..183; the strip below it y 189..213; the metal
@@ -74,6 +79,7 @@ export class TradeCenter extends Menu<Entity> {
     private buttons: {
         buy: Button, sell: Button, done: Button,
     };
+    private quantityDialog: QuantityDialog;
 
     private text = {
         headerCommodity: new PIXI.Text('Commodity:', LIST_FONT),
@@ -96,10 +102,14 @@ export class TradeCenter extends Menu<Entity> {
             sell: new Button(displayAssets, 'Sell', 60, { x: -30, y: BUTTON_Y }),
             done: new Button(displayAssets, 'Done', 60, { x: 90, y: BUTTON_Y }),
         };
-        this.buttons.buy.click.subscribe(this.buy.bind(this));
-        this.buttons.sell.click.subscribe(this.sell.bind(this));
+        // Option+click opens the bulk quantity dialog, as the
+        // original's exchange does.
+        this.buttons.buy.click.subscribe(click => this.buy(click));
+        this.buttons.sell.click.subscribe(click => this.sell(click));
         this.buttons.done.click.subscribe(this.done.bind(this));
         this.addButtons(this.buttons);
+
+        this.quantityDialog = new QuantityDialog(controlEvents);
 
         this.text.headerCommodity.position.set(PANE_LEFT + 4, PANE_TOP);
         this.text.headerHold.anchor.x = 1;
@@ -114,6 +124,8 @@ export class TradeCenter extends Menu<Entity> {
         for (const t of Object.values(this.text)) {
             this.container.addChild(t);
         }
+        // On top of everything, so its modal shield covers the screen.
+        this.container.addChild(this.quantityDialog.container);
 
         this.controls.controls = {
             up: () => this.moveSelection(-1),
@@ -189,9 +201,14 @@ export class TradeCenter extends Menu<Entity> {
         this.refresh();
     }
 
-    private buy() {
+    private buy(click?: ButtonClick) {
         const good = this.selectedGood();
         if (!good || !this.canBuySelected()) {
+            return;
+        }
+        if (click?.option) {
+            // Option+click: the bulk quantity dialog.
+            void this.bulkBuy(good);
             return;
         }
         const bought = buyGood(this.state, good);
@@ -201,12 +218,59 @@ export class TradeCenter extends Menu<Entity> {
         this.refresh();
     }
 
-    private sell() {
+    /**
+     * The option-click bulk buy: a quantity dialog prefilled with (and
+     * clamped to) the most that fits and is affordable.
+     */
+    private async bulkBuy(good: TradeGood) {
+        const max = maxBuyQuantity(this.state, good);
+        if (max <= 0) {
+            return;
+        }
+        const quantity = await this.quantityDialog.show(
+            { verb: 'Buy', initial: max, max });
+        if (!quantity) {
+            return;
+        }
+        const bought = buyGoodQuantity(this.state, good, quantity);
+        this.text.status.text = bought > 0
+            ? `Bought ${bought} ton${bought === 1 ? '' : 's'} of ${good.name}.`
+            : '';
+        this.refresh();
+    }
+
+    private sell(click?: ButtonClick) {
         const good = this.selectedGood();
         if (!good || !this.canSellSelected()) {
             return;
         }
+        if (click?.option) {
+            // Option+click: the bulk quantity dialog.
+            void this.bulkSell(good);
+            return;
+        }
         const sold = sellGood(this.state, good);
+        this.text.status.text = sold > 0
+            ? `Sold ${sold} ton${sold === 1 ? '' : 's'} of ${good.name}.`
+            : '';
+        this.refresh();
+    }
+
+    /**
+     * The option-click bulk sell: prefilled with the held tonnage, as
+     * in the trade_center_hold_option_amount reference screenshot.
+     */
+    private async bulkSell(good: TradeGood) {
+        const max = maxSellQuantity(this.state, good);
+        if (max <= 0) {
+            return;
+        }
+        const quantity = await this.quantityDialog.show(
+            { verb: 'Sell', initial: max, max });
+        if (!quantity) {
+            return;
+        }
+        const sold = sellGoodQuantity(this.state, good, quantity);
         this.text.status.text = sold > 0
             ? `Sold ${sold} ton${sold === 1 ? '' : 's'} of ${good.name}.`
             : '';

@@ -2,8 +2,9 @@ import * as PIXI from 'pixi.js';
 import { firstValueFrom, Observable, Subject } from 'rxjs';
 import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data.js';
 import { ControlEvent } from '../nova_plugin/controls_plugin.js';
-import { Button } from './button.js';
+import { Button, ButtonClick } from './button.js';
 import { MenuControls } from './menu_controls.js';
+import { QuantityDialog } from './quantity_dialog.js';
 
 // Laid out to fit the 470x230 racing dialog (PICT 8529): the header
 // LED strip on top, four ~100x103 racer boxes at y 84..187, and the
@@ -55,6 +56,7 @@ export class GambleDialog {
     private buttons: {
         help: Button, bet1000: Button, bet5000: Button, cancel: Button,
     };
+    private quantityDialog: QuantityDialog;
 
     constructor(private displayAssets: DisplayAssetDataInterface,
         controlEvents: Observable<ControlEvent>) {
@@ -104,8 +106,12 @@ export class GambleDialog {
                 { x: 25, y: BUTTON_Y }),
         };
         this.buttons.help.click.subscribe(() => this.showHelp());
-        this.buttons.bet1000.click.subscribe(() => void this.bet(1000));
-        this.buttons.bet5000.click.subscribe(() => void this.bet(5000));
+        // Option+click on a bet button opens the quantity dialog for a
+        // custom stake, in the outfitter/trade-center style.
+        this.buttons.bet1000.click.subscribe(
+            click => void this.betClicked(1000, click));
+        this.buttons.bet5000.click.subscribe(
+            click => void this.betClicked(5000, click));
         this.buttons.cancel.click.subscribe(() => {
             if (!this.racing) {
                 this.closed.next();
@@ -114,6 +120,10 @@ export class GambleDialog {
         for (const button of Object.values(this.buttons)) {
             this.container.addChild(button.container);
         }
+
+        this.quantityDialog = new QuantityDialog(controlEvents);
+        // On top of everything, so its modal shield covers the dialog.
+        this.container.addChild(this.quantityDialog.container);
 
         this.controls = new MenuControls(controlEvents, {
             depart: () => {
@@ -158,6 +168,33 @@ export class GambleDialog {
     private setStatus(text: string) {
         this.status.text = text;
         this.statusBackdrop.visible = text.length > 0;
+    }
+
+    /**
+     * A bet button press: plain clicks stake the button's amount; an
+     * option+click asks for a custom stake, clamped to the player's
+     * credits and prefilled with the button's amount.
+     */
+    private async betClicked(amount: number, click?: ButtonClick) {
+        if (!click?.option) {
+            return this.bet(amount);
+        }
+        if (this.racing || this.selected < 0) {
+            return;
+        }
+        const max = this.credits.credits;
+        if (max <= 0) {
+            return;
+        }
+        const quantity = await this.quantityDialog.show({
+            verb: 'Bet',
+            initial: Math.min(amount, max),
+            max,
+        });
+        if (!quantity) {
+            return;
+        }
+        return this.bet(quantity);
     }
 
     private async bet(amount: number) {
