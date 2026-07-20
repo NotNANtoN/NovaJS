@@ -8,6 +8,7 @@ import { getDefaultFleetData } from "./fleet_data.js";
 import { getDefaultGovtData } from "./govt_data.js";
 import { getDefaultJunkData } from "./junk_data.js";
 import { getDefaultMissionData } from "./mission_data.js";
+import { getDefaultPersData } from "./pers_data.js";
 import { getDefaultPlayerStartData } from "./player_start_data.js";
 import { Gettable } from "./gettable.js";
 import { NovaDataInterface } from "./nova_data_interface.js";
@@ -79,6 +80,7 @@ export class MockGameData implements GameDataInterface {
         Fleet: new MockGettable(getDefaultFleetData()),
         Junk: new MockGettable(getDefaultJunkData()),
         Mission: new MockGettable(getDefaultMissionData()),
+        Pers: new MockGettable(getDefaultPersData()),
         Cron: new MockGettable(getDefaultCronData()),
         PlayerStart: new MockGettable(getDefaultPlayerStartData()),
         TargetCorners: new MockGettable(getDefaultTargetCornersData()),

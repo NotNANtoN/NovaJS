@@ -12,6 +12,7 @@ import { MissionData } from "./mission_data.js";
 import { OutfitData } from "./outfit_data.js";
 import { PictData } from "./pict_data.js";
 import { PictImageData } from "./pict_image.js";
+import { PersData } from "./pers_data.js";
 import { PlanetData } from "./planet_data.js";
 import { PlayerStartData } from "./player_start_data.js";
 import { PpatImageData } from "./ppat_image.js";
@@ -41,6 +42,7 @@ enum NovaDataType {
     Fleet = "Fleet",
     Junk = "Junk",
     Mission = "Mission",
+    Pers = "Pers",
     Cron = "Cron",
     PlayerStart = "PlayerStart",
     TargetCorners = "TargetCorners",
@@ -70,6 +72,7 @@ type NovaDataInterface = {
     Fleet: Gettable<FleetData>,
     Junk: Gettable<JunkData>,
     Mission: Gettable<MissionData>,
+    Pers: Gettable<PersData>,
     Cron: Gettable<CronData>,
     PlayerStart: Gettable<PlayerStartData>,
     TargetCorners: Gettable<TargetCornersData>,

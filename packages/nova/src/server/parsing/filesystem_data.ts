@@ -13,6 +13,7 @@ import { Gettable } from "novadatainterface/gettable";
 import { NovaDataInterface } from "novadatainterface/nova_data_interface";
 import { NovaIDs } from "novadatainterface/nova_ids";
 import { OutfitData } from "novadatainterface/outfit_data";
+import { PersData } from "novadatainterface/pers_data";
 import { PictData } from "novadatainterface/pict_data";
 import { PictImageData } from "novadatainterface/pict_image";
 import { PlanetData } from "novadatainterface/planet_data";
@@ -52,6 +53,7 @@ const Paths = {
     Fleet: { path: "Fleet", extension: "json" } as PathInfo,
     Junk: { path: "Junk", extension: "json" } as PathInfo,
     Mission: { path: "Mission", extension: "json" } as PathInfo,
+    Pers: { path: "Pers", extension: "json" } as PathInfo,
     Cron: { path: "Cron", extension: "json" } as PathInfo,
     PlayerStart: { path: "PlayerStart", extension: "json" } as PathInfo,
     TargetCorners: { path: "TargetCorners", extension: "json" } as PathInfo,
@@ -85,6 +87,7 @@ class FilesystemData implements GameDataInterface {
             Fleet: this.getFunction<FleetData>(Paths.Fleet),
             Junk: this.getFunction<JunkData>(Paths.Junk),
             Mission: this.getFunction<MissionData>(Paths.Mission),
+            Pers: this.getFunction<PersData>(Paths.Pers),
             Cron: this.getFunction<CronData>(Paths.Cron),
             PlayerStart: this.getFunction<PlayerStartData>(Paths.PlayerStart),
             TargetCorners: this.getFunction<TargetCornersData>(Paths.TargetCorners),
@@ -141,6 +144,7 @@ class FilesystemData implements GameDataInterface {
             Fleet: await this.buildIDsForPath(Paths.Fleet),
             Junk: await this.buildIDsForPath(Paths.Junk),
             Mission: await this.buildIDsForPath(Paths.Mission),
+            Pers: await this.buildIDsForPath(Paths.Pers),
             Cron: await this.buildIDsForPath(Paths.Cron),
             PlayerStart: await this.buildIDsForPath(Paths.PlayerStart),
             TargetCorners: await this.buildIDsForPath(Paths.TargetCorners),

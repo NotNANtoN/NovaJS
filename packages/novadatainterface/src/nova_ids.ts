@@ -26,6 +26,7 @@ export function getDefaultNovaIDs(): NovaIDs {
         Fleet: [],
         Junk: [],
         Mission: [],
+        Pers: [],
         Cron: [],
         PlayerStart: [],
         TargetCorners: [],

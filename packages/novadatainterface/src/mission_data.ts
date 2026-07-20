@@ -96,19 +96,47 @@ export interface MissionData extends BaseData {
     /** Bar/BBS ordering weight; higher first. */
     dispWeight: number;
 
-    // --- Special/auxiliary ships (combat objectives). Carried raw;
-    // the game does not implement them yet. ---
+    // --- Special/auxiliary ships (combat objectives). The numeric
+    // system references (shipSyst/auxShipSyst) are carried raw like
+    // the stellar references (most encode runtime-relative ranges: -1
+    // initial system, -6 the player's current system, the govt ranges,
+    // ...); the plain-id cases resolve to global ids at parse time
+    // (shipSystId etc.), like availStelId. See misn_resource.ts for
+    // the full range tables. ---
+    /** Number of special ships (ShipCount): -1/0 none; 1-31 count. */
     shipCount: number;
+    /** Where the special ships appear (ShipSyst); raw ranged value. */
     shipSyst: number;
+    /** Global sÿst id when shipSyst is a plain id; null otherwise. */
+    shipSystId: string | null;
+    /** dude defining the special ships' types (ShipDude); -1 none. */
     shipDude: number;
+    /** Global düde id for shipDude; null when none/missing. */
+    shipDudeId: string | null;
     /** -1 none; 0 destroy; 1 disable; 2 board; 3 escort; 4 observe;
      * 5 rescue; 6 chase off. */
     shipGoal: number;
+    /** -1 standard AI; 0 always attack player; 1 protect player;
+     * 2 destroy enemy stellars. */
     shipBehav: number;
+    /** -4..-1 on a nav default; 0 random; 1 jump in; 2 random cloaked. */
     shipStart: number;
+    /** Names for the special ships (ShipNameID STR#), resolved;
+     * empty when the ships use normal names. */
+    shipNames: string[];
+    /** Subtitles for the special ships (ShipSubtitle STR#), resolved;
+     * empty when the ships use normal subtitles. */
+    shipSubtitles: string[];
+    /** Auxiliary "atmosphere" ships (AuxShipCount): -1 none; 1-31. */
     auxShipCount: number;
+    /** dude defining the aux ships' types (AuxShipDude). */
     auxShipDude: number;
+    /** Global düde id for auxShipDude; null when none/missing. */
+    auxShipDudeId: string | null;
+    /** Where the aux ships appear (AuxShipSyst); raw ranged value. */
     auxShipSyst: number;
+    /** Global sÿst id when auxShipSyst is a plain id; null otherwise. */
+    auxShipSystId: string | null;
 
     flags: MissionFlags;
 
@@ -223,13 +251,19 @@ export function getDefaultMissionData(): MissionData {
         dispWeight: 0,
         shipCount: -1,
         shipSyst: -1,
+        shipSystId: null,
         shipDude: -1,
+        shipDudeId: null,
         shipGoal: -1,
         shipBehav: -1,
         shipStart: 0,
+        shipNames: [],
+        shipSubtitles: [],
         auxShipCount: -1,
         auxShipDude: -1,
+        auxShipDudeId: null,
         auxShipSyst: -1,
+        auxShipSystId: null,
         flags: getDefaultMissionFlags(),
         onAccept: "",
         onRefuse: "",

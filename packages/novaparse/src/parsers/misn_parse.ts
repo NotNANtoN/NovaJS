@@ -34,6 +34,38 @@ function stellarId(idSpace: NovaResources, value: number): string | null {
     return idSpace.spöb[value]?.globalID ?? null;
 }
 
+/** sÿst ids occupy 128-2175; other values are ranged specials. */
+const SYST_ID_MIN = 128;
+const SYST_ID_MAX = 2175;
+
+/**
+ * Resolves a ShipSyst/AuxShipSyst reference to a global sÿst id when
+ * it is a plain id; null for the special ranges (-1..-6 relative,
+ * govt-relative, adjacency).
+ */
+function systemId(idSpace: NovaResources, value: number): string | null {
+    if (value < SYST_ID_MIN || value > SYST_ID_MAX) {
+        return null;
+    }
+    return idSpace.sÿst[value]?.globalID ?? null;
+}
+
+/** Resolves a ShipDude/AuxShipDude reference to a global düde id. */
+function dudeId(idSpace: NovaResources, value: number): string | null {
+    if (value < 128) {
+        return null;
+    }
+    return idSpace.düde[value]?.globalID ?? null;
+}
+
+/** The strings of a STR# reference; [] when -1 or absent. */
+function strList(idSpace: NovaResources, id: number): string[] {
+    if (id < 128) {
+        return [];
+    }
+    return idSpace["STR#"][id]?.strings ?? [];
+}
+
 /**
  * Maps a parsed mïsn resource onto the MissionData shape served through
  * the data interface. Numeric stellar references stay raw (they encode
@@ -74,13 +106,19 @@ export async function MisnParse(misn: MisnResource,
         dispWeight: misn.dispWeight,
         shipCount: misn.shipCount,
         shipSyst: misn.shipSyst,
+        shipSystId: systemId(misn.idSpace, misn.shipSyst),
         shipDude: misn.shipDude,
+        shipDudeId: dudeId(misn.idSpace, misn.shipDude),
         shipGoal: misn.shipGoal,
         shipBehav: misn.shipBehav,
         shipStart: misn.shipStart,
+        shipNames: strList(misn.idSpace, misn.shipNameID),
+        shipSubtitles: strList(misn.idSpace, misn.shipSubtitle),
         auxShipCount: misn.auxShipCount,
         auxShipDude: misn.auxShipDude,
+        auxShipDudeId: dudeId(misn.idSpace, misn.auxShipDude),
         auxShipSyst: misn.auxShipSyst,
+        auxShipSystId: systemId(misn.idSpace, misn.auxShipSyst),
         flags: {
             autoAbort: misn.autoAbort,
             hideDestArrows: misn.hideDestArrows,

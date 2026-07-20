@@ -13,6 +13,7 @@ import { NovaDataInterface, NovaIDNotFoundError } from "novadatainterface/nova_d
 import { PlayerStartData } from "novadatainterface/player_start_data";
 import { NovaIDs } from "novadatainterface/nova_ids";
 import { OutfitData } from "novadatainterface/outfit_data";
+import { PersData } from "novadatainterface/pers_data";
 import { PictData } from "novadatainterface/pict_data";
 import { PictImageData } from "novadatainterface/pict_image";
 import { CicnImageData } from "novadatainterface/cicn_image";
@@ -35,6 +36,7 @@ import { JunkParse } from "./parsers/junk_parse.js";
 import { GovtParse } from "./parsers/govt_parse.js";
 import { MisnParse } from "./parsers/misn_parse.js";
 import { OutfitParse } from "./parsers/outfit_parse.js";
+import { PersParse } from "./parsers/pers_parse.js";
 import { PictImageMulti, PictImageMultiParse } from "./parsers/pict_parse.js";
 import { PlanetParse } from "./parsers/planet_parse.js";
 import { CicnImageParse } from "./parsers/cicn_image_parse.js";
@@ -57,6 +59,7 @@ import { JunkResource } from "./resource_parsers/junk_resource.js";
 import { GovtResource } from "./resource_parsers/govt_resource.js";
 import { MisnResource } from "./resource_parsers/misn_resource.js";
 import { OutfResource } from "./resource_parsers/outf_resource.js";
+import { PersResource } from "./resource_parsers/pers_resource.js";
 import { PictResource } from "./resource_parsers/pict_resource.js";
 import { PpatResource } from "./resource_parsers/ppat_resource.js";
 import { NovaResources, NovaResourceType, ResList } from "./resource_parsers/resource_holder_base.js";
@@ -206,6 +209,7 @@ export class NovaParse implements GameDataInterface {
             Fleet: this.buildIDsForResource(idSpace.flët),
             Junk: this.buildIDsForResource(idSpace.jünk),
             Mission: this.buildIDsForResource(idSpace.mïsn),
+            Pers: this.buildIDsForResource(idSpace.përs),
             Cron: this.buildIDsForResource(idSpace.crön),
             PlayerStart: this.buildIDsForResource(idSpace.chär),
             TargetCorners: [], // TODO: parse these
@@ -238,6 +242,7 @@ export class NovaParse implements GameDataInterface {
             Fleet: this.makeGettable<FletResource, FleetData>(NovaResourceType.flët, FleetParse),
             Junk: this.makeGettable<JunkResource, JunkData>(NovaResourceType.jünk, JunkParse),
             Mission: this.makeGettable<MisnResource, MissionData>(NovaResourceType.mïsn, MisnParse),
+            Pers: this.makeGettable<PersResource, PersData>(NovaResourceType.përs, PersParse),
             Cron: this.makeGettable<CronResource, CronData>(NovaResourceType.crön, CronParse),
             PlayerStart: this.makeGettable<CharResource, PlayerStartData>(NovaResourceType.chär, CharParse),
             TargetCorners: this.makeGettable<BaseResource, TargetCornersData>(NovaResourceType.cicn, TargetCornersParse),
