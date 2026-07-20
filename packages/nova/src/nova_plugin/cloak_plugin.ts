@@ -12,6 +12,7 @@ import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_
 import { registerEntityDeriver } from './entity_factory.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { DamagedEvent } from './death_plugin.js';
+import { DisabledComponent } from './disabled_component.js';
 import { FuelComponent, ShieldComponent } from './health_plugin.js';
 import { OutfitsState, OutfitsStateComponent } from './outfit_plugin.js';
 import { ProvideFromCache } from './provide_from_cache.js';
@@ -293,12 +294,18 @@ export const CloakControlSystem = new System({
     events: [ShipControlEvent],
     args: [ShipControlStateComponent, CloakComponent,
         Optional(CloakActiveComponent), Optional(ShieldComponent),
-        GetEntity, UUID, Emit] as const,
-    step(controlState, cloak, active, shield, entity, uuid, emit) {
+        Optional(DisabledComponent), GetEntity, UUID, Emit] as const,
+    step(controlState, cloak, active, shield, disabled, entity, uuid, emit) {
         if (controlState.get('cloak') !== 'start') {
             return;
         }
         if (!cloak.canCloak) {
+            return;
+        }
+        // A disabled ship's cloaking device is offline: disabling
+        // force-decloaks (ShipDisableSystem), and the cloak cannot be
+        // re-engaged until the ship is repaired.
+        if (disabled) {
             return;
         }
         const current = active?.active ?? false;

@@ -63,13 +63,34 @@ const DamageSystem = new System({
             }
         }
         if (armor) {
-            armor.current = Math.max(0, armor.current - damage.armor * scale)
+            // weap Flags2 0x1000 "can disable but not destroy": armor
+            // damage from such a weapon clamps just above zero, so an
+            // ion barrage can pound a ship far below its disable
+            // threshold (leaving it thoroughly disabled) but can never
+            // deliver the killing blow — that takes one tap from any
+            // normal weapon.
+            const floor = damage.disableOnly
+                ? disableOnlyArmorFloor(armor.max) : 0;
+            armor.current = Math.max(floor,
+                armor.current - damage.armor * scale);
             if (armor.current === 0) {
                 emit(ZeroArmorEvent, time, [uuid]);
             }
         }
     }
 });
+
+/**
+ * The armor floor a disable-only weapon can reach: DISABLE_ONLY_ARMOR_FLOOR
+ * (1 armor point) — far below any disable threshold, small enough that a
+ * single hit from even the lightest lethal weapon finishes the ship.
+ * Degenerate targets with max armor <= 1 floor at half their armor
+ * instead so the clamp never exceeds the target's actual armor pool.
+ */
+export const DISABLE_ONLY_ARMOR_FLOOR = 1;
+export function disableOnlyArmorFloor(maxArmor: number): number {
+    return Math.min(DISABLE_ONLY_ARMOR_FLOOR, maxArmor / 2);
+}
 
 export const ExplodingComponent = new Component<number>('ShipExplodingComponent');
 const ShipZeroArmorSystem = new System({

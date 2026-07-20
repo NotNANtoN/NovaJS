@@ -16,6 +16,7 @@ import { System } from "nova_ecs/system";
 import { isLeft } from "fp-ts/lib/Either.js";
 import { registerSimulationBridgeEvent } from "../communication/simulation_bridge_events.js";
 import { deImmerify } from "../util/deimmerify.js";
+import { DisabledComponent } from "./disabled_component.js";
 import { FuelComponent, FUEL_PER_JUMP } from "./health_plugin.js";
 import { ControlledByComponent, ShipControlStateComponent } from "./ship_control.js";
 import { ControlShipSystem } from "./ship_controller_plugin.js";
@@ -252,11 +253,17 @@ const PlayerJumpControl = new System({
     name: 'PlayerJumpControl',
     args: [ShipControlStateComponent, GetEntity, SystemIdResource,
         JumpRouteComponent, MovementStateComponent, ShipPhysicsComponent,
-        FuelComponent, SimulationGameDataResource] as const,
+        FuelComponent, SimulationGameDataResource,
+        Optional(DisabledComponent)] as const,
     step(controlState, entity, systemId, jumpRoute, movement, shipPhysics,
-        fuel, gameData) {
+        fuel, gameData, disabled) {
         // Truthy while held ('start'/'repeat'/true); false on release.
         if (!controlState.get('hyperjump')) {
+            return;
+        }
+        // A disabled ship cannot spin up its hyperdrive (it cannot even
+        // thrust; see disabled_component.ts).
+        if (disabled) {
             return;
         }
         if (entity.components.has(JumpComponent)) {

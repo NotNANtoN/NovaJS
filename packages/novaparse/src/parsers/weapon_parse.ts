@@ -105,6 +105,8 @@ async function NotBayWeaponParse(weap: WeapResource, notFoundFunction: (m: strin
         ionizationColor: weap.ionizeColor,
         passThroughShield: weap.passThroughShields ? 1 : 0,
         knockback: weap.impact,
+        // Flags2 0x1000 "Weapon can disable but not destroy".
+        disableOnly: weap.disableOnly,
     }
 
     // Parse Submunition if it exists

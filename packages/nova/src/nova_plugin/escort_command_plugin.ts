@@ -12,6 +12,7 @@ import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { ReturnWhenTargetRemovedComponent, startReturnHome } from './bay_plugin.js';
+import { DisabledComponent } from './disabled_component.js';
 import { EscortCommandComponent, EscortCommandState, EscortOrders, EscortOrdersComponent } from './escort_command.js';
 import { OwnerComponent } from './fire_weapon_plugin.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
@@ -53,13 +54,10 @@ import { WeaponsStateComponent } from './weapons_state.js';
  * launch into formation like every other escort and fight only when
  * commanded; docking happens only on the returnToBay command.
  *
- * DEFEND ENDPOINT: the spec is attack-until-DISABLED; ship disabling
- * (DisabledComponent) is being built on a sibling branch and has not
- * landed as of this writing, so defend currently attacks until the
- * intruder is DESTROYED.
- * TODO(disabling): when DisabledComponent lands, stop the defend
- * engagement when the intruder becomes disabled (and skip disabled
- * ships when picking intruders).
+ * DEFEND ENDPOINT: attack-until-DISABLED. A defend engagement ends the
+ * moment the intruder becomes disabled (DisabledComponent), and
+ * disabled ships are never picked as intruders — matching the NPC AI's
+ * rule that a disabled ship stops being a valid attack target.
  */
 
 // --- Tuning constants ---
@@ -283,7 +281,7 @@ export function frontQuadrantWeaponRange(
  * rule. Formation STATION-KEEPING itself stays in FormationSystem
  * (which yields to this system for non-formation commands).
  */
-const EscortCommandBehaviorSystem = new System({
+export const EscortCommandBehaviorSystem = new System({
     name: 'EscortCommandBehavior',
     args: [EscortCommandComponent, MovementStateComponent,
         ShipPhysicsComponent, WeaponsStateComponent, TargetComponent,
@@ -336,22 +334,25 @@ const EscortCommandBehaviorSystem = new System({
                 return;
             }
             case 'defend': {
-                // Engagement upkeep.
-                // TODO(disabling): when DisabledComponent lands, also
-                // end the engagement when the intruder is disabled,
-                // and exclude disabled ships from intruder selection.
+                // Engagement upkeep. Defend is attack-until-DISABLED:
+                // a disabled intruder is no longer a threat, so the
+                // engagement ends there (matching the NPC AI's rule),
+                // not at destruction.
                 let engaged = command.target !== undefined
                     ? entities.get(command.target) : undefined;
-                if (engaged && !isHostileTo(engaged, root ?? uuid, uuid,
-                    rootGovt, gameData)) {
+                if (engaged && (engaged.components.has(DisabledComponent)
+                    || !isHostileTo(engaged, root ?? uuid, uuid,
+                        rootGovt, gameData))) {
                     engaged = undefined;
                 }
                 if (!engaged) {
-                    // Watch for intruders inside the defend bubble.
+                    // Watch for intruders inside the defend bubble
+                    // (disabled ships are not intruders).
                     const nearby: Array<readonly [string, number]> = [];
                     for (const [otherUuid, other, otherMovement]
                         of candidates) {
-                        if (otherUuid === uuid || otherUuid === root) {
+                        if (otherUuid === uuid || otherUuid === root
+                            || other.components.has(DisabledComponent)) {
                             continue;
                         }
                         const distanceSquared = otherMovement.position
@@ -432,7 +433,9 @@ const EscortCommandBehaviorSystem = new System({
             const range = frontQuadrantWeaponRange(weaponData);
             const inReach: Array<readonly [string, number]> = [];
             for (const [otherUuid, other, otherMovement] of candidates) {
-                if (otherUuid === uuid || otherUuid === root) {
+                if (otherUuid === uuid || otherUuid === root
+                    // Disabled ships aren't valid attack targets.
+                    || other.components.has(DisabledComponent)) {
                     continue;
                 }
                 if (orders?.restrictTurretsToTarget

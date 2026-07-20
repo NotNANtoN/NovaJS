@@ -8,6 +8,7 @@ import { makeNpc } from '../nova_plugin/npc_plugin.js';
 import { makeSystem } from '../nova_plugin/make_system.js';
 import { completeEntity } from '../nova_plugin/entity_data_loader.js';
 import { ControlledByComponent, PEER_LOCAL_COMPONENTS } from '../nova_plugin/ship_control.js';
+import { ShipDataComponent } from '../nova_plugin/ship_plugin.js';
 import { TargetComponent } from '../nova_plugin/target_component.js';
 import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import { Position } from 'nova_ecs/datatypes/position';
@@ -434,7 +435,21 @@ describe('Input-driven rooms', () => {
         const gameData = await getIntegrationGameData();
         // A pilots a Fed Carrier (it has a fighter bay).
         const carrierData = await gameData.data.Ship.get('nova:143');
-        const carrier = makeShip(carrierData!);
+        // The raven mauls the carrier hard enough to push it below its
+        // disable threshold mid-launch, and a DISABLED ship can't fire
+        // its bay (ship disabling landed after this spec was written).
+        // This spec is about escort lockstep, not attrition, so give
+        // the carrier effectively indestructible armor THROUGH the ship
+        // data (the armor Stat and disable threshold derive from it).
+        // The custom ShipDataComponent is set before insertion, so it
+        // rides the insertion record and every peer — and every
+        // snapshot re-derivation — agrees.
+        const toughCarrierData = {
+            ...carrierData!,
+            physics: { ...carrierData!.physics, armor: 1_000_000 },
+        };
+        const carrier = makeShip(toughCarrierData);
+        carrier.components.set(ShipDataComponent, toughCarrierData);
         carrier.components.set(ControlledByComponent, { peerId: 'a' });
         const carrierMovement = carrier.components.get(MovementStateComponent)!;
         carrierMovement.position = new Position(0, 300);

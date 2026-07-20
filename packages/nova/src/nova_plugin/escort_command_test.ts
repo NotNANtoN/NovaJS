@@ -10,7 +10,9 @@ import { Vector } from 'nova_ecs/datatypes/vector';
 import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import { World } from 'nova_ecs/world';
 import { ReturnWhenTargetRemovedComponent, startReturnHome } from './bay_plugin.js';
+import { DisabledComponent } from './disabled_component.js';
 import { completeEntity } from './entity_data_loader.js';
+import { ArmorComponent } from './health_plugin.js';
 import { EscortCommandComponent, EscortOrdersComponent } from './escort_command.js';
 import { DEFEND_RADIUS, inFrontQuadrant } from './escort_command_plugin.js';
 import { OwnerComponent, SourceComponent } from './fire_weapon_plugin.js';
@@ -217,8 +219,24 @@ describe('escort commands', () => {
             world.step();
             world.step();
             expect(command(world).target).toBe('nearPirate');
-            // TODO(disabling): when DisabledComponent lands, this
-            // engagement should end at disable, not destruction.
+            // Attack-until-DISABLED: the engagement ends the moment the
+            // intruder disables, and a disabled ship is never re-picked
+            // as an intruder.
+            const pirateArmor = world.entities.get('nearPirate')!
+                .components.get(ArmorComponent)!;
+            pirateArmor.current = 0.1 * pirateArmor.max;
+            world.step(); // ShipDisableSystem disables the pirate...
+            world.step(); // ...and the escort disengages.
+            expect(world.entities.get('nearPirate')!.components
+                .has(DisabledComponent)).toBeTrue();
+            expect(command(world).command).toBe('defend');
+            expect(command(world).target).toBeUndefined();
+            // Repaired above the threshold, it becomes a threat again.
+            pirateArmor.current = pirateArmor.max;
+            world.step();
+            world.step();
+            expect(command(world).target).toBe('nearPirate');
+            // Destruction ends the engagement too.
             world.entities.delete('nearPirate');
             world.step();
             expect(command(world).command).toBe('defend');

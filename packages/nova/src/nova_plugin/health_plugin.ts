@@ -1,10 +1,12 @@
 import * as t from 'io-ts';
 import { Component } from "nova_ecs/component";
+import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
 import { DeltaResource } from "nova_ecs/plugins/delta_plugin";
 import { SerializerResource } from "nova_ecs/plugins/serializer_plugin";
 import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { System } from "nova_ecs/system";
+import { DisabledComponent } from './disabled_component.js';
 import { applyStatDelta, getStatDelta, PartialStat, stat, Stat } from "./stat.js";
 
 
@@ -25,12 +27,29 @@ export const FUEL_PER_JUMP = 100;
  */
 export const AUTO_REFUEL_PER_SECOND = 2.5;
 
+// Shield, armor, and fuel ("energy") recharges are suspended while the
+// ship is disabled — a disabled ship regains nothing on its own (EVN
+// Bible; see disabled_component.ts). That covers inherent, outfit-driven
+// (solar panels etc. fold into the Stat's recharge rate), and
+// auto-refuel regeneration alike. Ionization is NOT suspended: its
+// "recharge" is the deionization decay, which keeps draining.
+const disableSuspendedStats = new Set<Component<Stat>>(
+    [ShieldComponent, ArmorComponent, FuelComponent]);
+
 const healthStats = [ShieldComponent, ArmorComponent, IonizationComponent,
     FuelComponent]
     .map(statComponent => [statComponent, new System({
         name: `${statComponent.name}Recharge`,
-        args: [statComponent, TimeResource] as const,
-        step(stat, time) {
+        args: [statComponent, TimeResource,
+            Optional(DisabledComponent)] as const,
+        step(stat, time, disabled) {
+            if (disabled && disableSuspendedStats.has(statComponent)) {
+                // No recharge, but still clamp to [min, max]: damage
+                // subtraction (DamageSystem) is unbounded and normally
+                // relies on this step's clamping.
+                stat.step(0);
+                return;
+            }
             stat.step(time.delta_s);
         }
     })] as const);

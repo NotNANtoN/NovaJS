@@ -159,7 +159,7 @@ export function startReturnHome(entity: Entity) {
     }
 }
 
-const ReturnAI = new System({
+export const ReturnAI = new System({
     name: 'ReturnToBase',
     args: [OwnerComponent, MovementStateComponent, ReturnComponent] as const,
     step(owner, movementState) {

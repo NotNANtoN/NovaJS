@@ -1,6 +1,7 @@
 import 'jasmine';
 import { getDefaultGovtData, GovtData } from 'novadatainterface/govt_data';
 import { Entity } from 'nova_ecs/entity';
+import { DisabledComponent } from '../nova_plugin/disabled_component.js';
 import { GovtComponent } from '../nova_plugin/govt_component.js';
 import { FormationComponent, NpcComponent } from '../nova_plugin/npc_ai_plugin.js';
 import { ShootAllWeaponsComponent } from '../nova_plugin/npc_plugin.js';
@@ -129,6 +130,23 @@ describe('styleForTarget (target corner selection)', () => {
                     { leader: 'escort', slot: 0 });
             expect(style('fighter', { escort, fighter })).toBe('friendly');
         });
+
+    it('shows the gray disabled corners regardless of politics', () => {
+        // A pirate actively attacking the player... but disabled: gray.
+        const pirate = new Entity('pirate')
+            .addComponent(GovtComponent, { id: 'nova:137' })
+            .addComponent(NpcComponent, { aiType: 3, mode: 'attack' })
+            .addComponent(TargetComponent, { target: PLAYER })
+            .addComponent(DisabledComponent, { repairAt: null });
+        expect(style('pirate', { pirate })).toBe('disabled');
+    });
+
+    it('shows disabled corners even for own-flock ships', () => {
+        const escort = new Entity('escort')
+            .addComponent(FormationComponent, { leader: PLAYER, slot: 0 })
+            .addComponent(DisabledComponent, { repairAt: null });
+        expect(style('escort', { escort })).toBe('disabled');
+    });
 
     it("an NPC fleet escort (someone else's flock) is not friendly", () => {
         const npcLeader = new Entity('npc leader')

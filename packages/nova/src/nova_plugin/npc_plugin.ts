@@ -13,6 +13,7 @@ import { Query } from "nova_ecs/query";
 import { System } from "nova_ecs/system";
 import { CloakActiveComponent, CloakActiveState, isTargetable } from "./cloak_plugin.js";
 import { DeathEvent } from "./death_plugin.js";
+import { DisabledComponent, DisabledState } from "./disabled_component.js";
 import { makeShip } from "./make_ship.js";
 import { ShipComponent } from "./ship_plugin.js";
 import { TargetComponent } from "./target_component.js";
@@ -55,12 +56,17 @@ import { SimulationGameDataResource } from "./game_data_resource.js";
 // Cloaked ships (CloakActiveComponent.active) are invisible to NPC AI, so
 // they are excluded as valid targets — same rule the player's targeting
 // uses. A cloak scanner would reveal them, but that outfit is not wired.
-const TargetsQuery = new Query([UUID, ShipComponent, Optional(CloakActiveComponent)] as const);
+// Disabled ships (DisabledComponent) are excluded too: a disabled ship
+// stops being a valid attack target (same rule as the modern NPC AI).
+const TargetsQuery = new Query([UUID, ShipComponent, Optional(CloakActiveComponent),
+    Optional(DisabledComponent)] as const);
 export function getValidTargets(
-    targets: Array<readonly [string, unknown, CloakActiveState | undefined]>,
+    targets: Array<readonly [string, unknown, CloakActiveState | undefined,
+        DisabledState?]>,
     selfUuid: string): string[] {
     return targets
-        .filter(([targetId, , cloak]) => targetId !== selfUuid && isTargetable(cloak))
+        .filter(([targetId, , cloak, disabled]) => targetId !== selfUuid
+            && isTargetable(cloak) && !disabled)
         .map(([uuid]) => uuid);
 }
 
@@ -74,8 +80,12 @@ const ChooseRandomTargetAI = new System({
     args: [TargetComponent, TargetsQuery, ChooseRandomTargetComponent,
         TimeResource, UUID, Entities, RandomResource] as const,
     step(target, targets, randomTargetData, time, uuid, entities, random) {
-        if ((randomTargetData.nextTime ?? 0) > time.time &&
-            target.target && entities.has(target.target)) {
+        if ((randomTargetData.nextTime ?? 0) > time.time
+            && target.target && entities.has(target.target)
+            // A target that got disabled is dropped at once, not held
+            // until the next re-roll.
+            && !entities.get(target.target)!.components
+                .has(DisabledComponent)) {
             return;
         }
         randomTargetData.nextTime = time.time + randomTargetData.interval;
@@ -92,7 +102,7 @@ const ChooseRandomTargetAI = new System({
 });
 
 export const FollowComponent = new Component<undefined>('FollowComponent');
-const FollowAI = new System({
+export const FollowAI = new System({
     name: 'FollowAndShootAI',
     args: [MovementStateComponent, TargetComponent, FollowComponent] as const,
     step(movementState, target) {

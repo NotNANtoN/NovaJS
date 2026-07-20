@@ -8,6 +8,7 @@ import { BeamDataComponent } from "../nova_plugin/beam_plugin.js";
 import { SourceComponent } from "../nova_plugin/fire_weapon_plugin.js";
 import { SimulationGameDataResource } from "../nova_plugin/game_data_resource.js";
 import { CloakActiveComponent, CloakScannerComponent } from "../nova_plugin/cloak_plugin.js";
+import { DisabledComponent } from "../nova_plugin/disabled_component.js";
 import { IonizationColorComponent } from "../nova_plugin/health_plugin.js";
 import { IsIonizedComponent } from "../nova_plugin/ionization_plugin.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
@@ -73,9 +74,10 @@ export const ShipAnimationSystem = new System({
     args: [ShipComponent, WeaponsStateComponent, SimulationGameDataResource,
         AnimationGraphicComponent, TimeResource, IsIonizedComponent,
         IonizationColorComponent, Optional(CloakActiveComponent),
-        PlayerScannerQuery, GetEntity, UUID, ActiveBeamsQuery] as const,
+        Optional(DisabledComponent), PlayerScannerQuery, GetEntity, UUID,
+        ActiveBeamsQuery] as const,
     step(ship, weaponStates, gameData, animation, time, ionized, ionizationColor,
-        cloakActive, playerScanners, entity, uuid, activeBeams) {
+        cloakActive, disabled, playerScanners, entity, uuid, activeBeams) {
         // For now, always hide the ship's shield.
         // TODO: Blink this when hit.
         const shield = animation.sprites.get('shieldImage');
@@ -95,13 +97,13 @@ export const ShipAnimationSystem = new System({
         // Flash the running lights per the ship's shän blink pattern (steady,
         // square strobe, triangle pulse, or random). A per-ship phase offset
         // from the uuid keeps a fleet of identical ships from blinking in
-        // unison. If the ship is disabled and its shän hides lights when
-        // disabled, keep them off. Display-only; no sim state involved.
+        // unison. A disabled ship's lights go dark entirely (dead in space;
+        // EVN Bible ship disabling). Display-only; no sim state involved.
         const runningLights = animation.sprites.get('lightImage');
         if (runningLights) {
             const light = runningLightState(
                 animation.blink, time.time, blinkPhaseFromUuid(uuid));
-            runningLights.pixiSprite.visible = light.visible;
+            runningLights.pixiSprite.visible = !disabled && light.visible;
             runningLights.pixiSprite.alpha = light.alpha;
         }
 
