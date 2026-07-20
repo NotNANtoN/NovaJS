@@ -267,10 +267,20 @@ describe('missionMatchesLocation', () => {
         }), LOCATION_MISSION_COMPUTER, makeContext())).toBe(false);
     });
 
-    it('fails closed on nonzero Require masks', () => {
-        const mission = makeMission({ require: '3' });
+    it('gates a Require mask on the player Contribute mask', () => {
+        const mission = makeMission({ require: '3' }); // bits 0x1 | 0x2
+        // No contribute: the requirement is unmet.
         expect(missionMatchesLocation(mission, LOCATION_MISSION_COMPUTER,
             makeContext())).toBe(false);
+        // Partial cover is still unmet.
+        expect(missionMatchesLocation(mission, LOCATION_MISSION_COMPUTER,
+            makeContext({ playerContribute: 0x1n }))).toBe(false);
+        // Full cover passes.
+        expect(missionMatchesLocation(mission, LOCATION_MISSION_COMPUTER,
+            makeContext({ playerContribute: 0x3n }))).toBe(true);
+        // Extra contribute bits don't hurt.
+        expect(missionMatchesLocation(mission, LOCATION_MISSION_COMPUTER,
+            makeContext({ playerContribute: 0xFFn }))).toBe(true);
     });
 
     it('restricts by ship type', () => {

@@ -11,11 +11,16 @@ import { CronState, CronStates } from './player_state_plugin.js';
  * days later OnStart runs; Duration days after that OnEnd runs; then
  * PostHoldoff days must pass before it may activate again.
  *
- * Simplifications (documented gaps): Contribute/Require flags are
- * ignored, the news strings are not shown, and the loop-OnStart /
- * loop-OnEnd flags run their string once. Cron set strings run with
- * bit hooks only, so exotic operators (Gxxx, Sxxx, ...) are ignored
- * with a console warning.
+ * The Contribute/Require flags and the loop-OnStart / loop-OnEnd flags
+ * are modeled (see stepCron): a cron only activates when its Require
+ * mask is covered by the player's combined Contribute mask (ship,
+ * outfits, and every currently-active cron's own Contribute), and the
+ * loop flags re-run OnStart / OnEnd each day while their conditions
+ * still hold.
+ *
+ * Remaining simplifications (documented gaps): the news strings are not
+ * shown. Cron set strings run with bit hooks only, so exotic operators
+ * (Gxxx, Sxxx, ...) are ignored with a console warning.
  */
 
 function inDateRange(cron: CronData, day: number): boolean {
@@ -69,20 +74,55 @@ function enableOnPasses(cron: CronData, bits: Set<number>): boolean {
     }
 }
 
+/** Parses a 64-bit Contribute/Require decimal string, 0n on garbage. */
+function mask(decimal: string): bigint {
+    try {
+        return BigInt(decimal);
+    } catch {
+        return 0n;
+    }
+}
+
+/**
+ * Whether the player's combined Contribute mask covers the cron's
+ * Require mask (each 1-bit in Require must be set in `contribute`). An
+ * all-zero Require is always satisfied.
+ */
+function requireMet(cron: CronData, contribute: bigint): boolean {
+    const require = mask(cron.require);
+    return (require & contribute) === require;
+}
+
+/**
+ * Whether the cron may run / keep looping this day: EnableOn passes and
+ * its Require mask is covered.
+ */
+function conditionsHold(cron: CronData, bits: Set<number>,
+    contribute: bigint): boolean {
+    return enableOnPasses(cron, bits) && requireMet(cron, contribute);
+}
+
 /**
  * Steps one cron's state machine for day `day`, running its set
- * strings against `bits` as it starts/ends.
+ * strings against `bits` as it starts/ends. `contribute` is the
+ * player's combined Contribute mask (ship + outfits + active crons),
+ * checked against the cron's Require mask.
  */
 function stepCron(cron: CronData, state: CronState, day: number,
-    bits: Set<number>, random: () => number): void {
+    bits: Set<number>, contribute: bigint, random: () => number): void {
     if (state.phase === 'idle') {
+        // loopOnEnd: while inside the postHoldoff window after ending,
+        // keep re-running OnEnd each day its conditions still hold.
         if (day < state.nextEligible) {
+            if (cron.loopOnEnd && conditionsHold(cron, bits, contribute)) {
+                runCronSetString(cron.onEnd, bits, random);
+            }
             return;
         }
         if (!inDateRange(cron, day)) {
             return;
         }
-        if (!enableOnPasses(cron, bits)) {
+        if (!conditionsHold(cron, bits, contribute)) {
             return;
         }
         const chance = cron.random >= 100 ? 100 : Math.max(0, cron.random);
@@ -101,6 +141,12 @@ function stepCron(cron: CronData, state: CronState, day: number,
         state.phase = 'active';
         state.phaseStart = day;
         // Fall through so duration 0 ends today.
+    } else if (state.phase === 'active' && cron.loopOnStart
+        && day > state.phaseStart
+        && conditionsHold(cron, bits, contribute)) {
+        // loopOnStart: re-run OnStart each subsequent active day while
+        // its conditions still hold (the entry day already ran it above).
+        runCronSetString(cron.onStart, bits, random);
     }
     if (state.phase === 'active') {
         if (day < state.phaseStart + Math.max(0, cron.duration)) {
@@ -114,12 +160,31 @@ function stepCron(cron: CronData, state: CronState, day: number,
 }
 
 /**
+ * The player's combined Contribute mask for the crons currently in
+ * their active phase, OR'd onto the base (ship + outfit) contribute.
+ * Recomputed each day so a cron that activated today contributes to the
+ * Require checks of others.
+ */
+function activeCronContribute(crons: CronData[], states: CronStates,
+    base: bigint): bigint {
+    let contribute = base;
+    for (const cron of crons) {
+        if (states.get(cron.id)?.phase === 'active') {
+            contribute |= mask(cron.contribute);
+        }
+    }
+    return contribute;
+}
+
+/**
  * Advances the cron state machines from `fromDay` (exclusive) to
- * `toDay` (inclusive), mutating `states` and `bits`.
+ * `toDay` (inclusive), mutating `states` and `bits`. `baseContribute`
+ * is the player's ship + outfit Contribute mask (the active crons' own
+ * Contribute is folded in per day); default 0n means no contributions.
  */
 export function runCronsForDays(crons: CronData[], states: CronStates,
     bits: Set<number>, fromDay: number, toDay: number,
-    random: () => number = Math.random): void {
+    random: () => number = Math.random, baseContribute: bigint = 0n): void {
     for (let day = fromDay + 1; day <= toDay; day++) {
         for (const cron of crons) {
             let state = states.get(cron.id);
@@ -127,7 +192,9 @@ export function runCronsForDays(crons: CronData[], states: CronStates,
                 state = { phase: 'idle', phaseStart: 0, nextEligible: 0 };
                 states.set(cron.id, state);
             }
-            stepCron(cron, state, day, bits, random);
+            const contribute =
+                activeCronContribute(crons, states, baseContribute);
+            stepCron(cron, state, day, bits, contribute, random);
         }
     }
 }

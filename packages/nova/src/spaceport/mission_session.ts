@@ -47,7 +47,8 @@ export class MissionSession {
         public planetId: string,
         cargoCapacity: number,
         public shipId: string,
-        private shipGovt: string | null) {
+        private shipGovt: string | null,
+        private playerContribute: bigint) {
         this.currentDay = dayNumber(
             entity.components.get(GameDateComponent) ?? getDefaultGameDate());
 
@@ -99,6 +100,7 @@ export class MissionSession {
             records: this.state.records,
             combatRating: this.entity.components
                 .get(CombatRatingComponent)?.kills ?? 0,
+            playerContribute: this.playerContribute,
             systems: this.universe.systemInfos,
             systemIdOfStellar: id => this.universe.systemIdOfPlanet(id),
         };
@@ -119,8 +121,11 @@ export class MissionSession {
         } catch {
             // Unknown ship: the ship-govt ranges simply don't match.
         }
+        // The ship + outfit Contribute mask gates the mïsn Require field.
+        const playerContribute =
+            await computePlayerContribute(entity, gameData);
         return new MissionSession(entity, universe, planetId,
-            cargoCapacity, shipId, shipGovt);
+            cargoCapacity, shipId, shipGovt, playerContribute);
     }
 
     /** Writes the working copies back onto the entity. */
@@ -199,6 +204,41 @@ export async function computeCargoCapacity(entity: Entity,
 }
 
 /**
+ * The player's combined Contribute mask: the ship's Contribute OR'd
+ * with each owned outfit's Contribute (per the EVN Bible's shared
+ * Contribute/Require mechanic). Used to gate crön Require. Contribute
+ * fields are stored as hex strings; a malformed one is treated as 0.
+ */
+export async function computePlayerContribute(entity: Entity,
+    gameData: SimulationGameDataInterface): Promise<bigint> {
+    const parseMask = (hex: string | undefined): bigint => {
+        try {
+            return BigInt(hex ?? '0x0');
+        } catch {
+            return 0n;
+        }
+    };
+    let contribute = 0n;
+    try {
+        const shipId = entity.components.get(ShipComponent)?.id ?? 'default';
+        contribute = parseMask((await gameData.data.Ship.get(shipId))
+            .contribute);
+        const outfitsState = entity.components.get(OutfitsStateComponent);
+        if (outfitsState) {
+            for (const [outfitId, { count }] of outfitsState) {
+                if (count > 0) {
+                    contribute |= parseMask(
+                        (await gameData.data.Outfit.get(outfitId)).contribute);
+                }
+            }
+        }
+    } catch (e) {
+        console.warn('Failed to compute player contribute:', e);
+    }
+    return contribute;
+}
+
+/**
  * Landing bookkeeping for the docked player entity: advances the date
  * by one day (landing takes a day in EV Nova), then processes every
  * active mission against this stellar — deadline failures, travel
@@ -269,8 +309,13 @@ export async function advanceEntityDate(entity: Entity, days: number,
         const bits = new Set(entity.components.get(ControlBitsComponent)!);
         const cronStates =
             new Map(entity.components.get(CronStatesComponent)!);
+        // The player's ship + outfit Contribute mask gates cron Require
+        // (needs game data; without it crons see no contributions).
+        const contribute = gameData
+            ? await computePlayerContribute(entity, gameData)
+            : 0n;
         runCronsForDays(universe.crons, cronStates, bits,
-            fromDay, fromDay + days);
+            fromDay, fromDay + days, Math.random, contribute);
         entity.components.set(ControlBitsComponent, bits);
         entity.components.set(CronStatesComponent, cronStates);
     } catch (e) {

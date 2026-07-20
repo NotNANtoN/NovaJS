@@ -89,6 +89,12 @@ export interface MissionContext {
     records?: LegalRecords;
     /** The player's combat-rating kill points (AvailRating). */
     combatRating?: number;
+    /**
+     * The player's combined 64-bit Contribute mask (ship + outfits),
+     * checked against the mïsn Require field. Absent = 0n (only a
+     * zero Require passes).
+     */
+    playerContribute?: bigint;
     /** Uniform [0, 1). Player-local; plain randomness is fine. */
     random(): number;
     /** Synchronous cached govt lookup (warm the cache first). */
@@ -107,6 +113,21 @@ export interface MissionContext {
 
 function intersects(a: number[], b: number[]): boolean {
     return a.some(x => b.includes(x));
+}
+
+/**
+ * Whether the player's Contribute mask covers a mïsn/oütf Require field
+ * (a decimal or hex 64-bit string). Every 1-bit in Require must be set
+ * in `contribute`. A '0' (or malformed) require is always satisfied.
+ */
+function requireMet(require: string, contribute: bigint): boolean {
+    let mask: bigint;
+    try {
+        mask = BigInt(require);
+    } catch {
+        return true;
+    }
+    return (mask & contribute) === mask;
 }
 
 /**
@@ -292,8 +313,10 @@ export function missionMatchesLocation(mission: MissionData,
     if (!availRatingOk(mission.availRating, ctx.combatRating ?? 0)) {
         return false;
     }
-    // Contribute bits are not implemented; fail closed on Require.
-    if (mission.require !== '0') {
+    // Require: every 1-bit must be covered by the player's Contribute
+    // mask (ship + outfits). Absent contribute means only require '0'
+    // (no requirement) passes.
+    if (!requireMet(mission.require, ctx.playerContribute ?? 0n)) {
         return false;
     }
     // Board/rescue ship goals need boarding, which is unimplemented;
