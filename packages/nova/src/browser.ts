@@ -21,6 +21,7 @@ import { emitSimulationBridgeEvent } from "./communication/simulation_bridge_eve
 import {
     AsyncSimulationBridgeClient,
     EntityDelta,
+    SimulationBridgeClosedError,
     SimulationFrame,
     SimulationPacing,
 } from "./communication/simulation_bridge.js";
@@ -125,6 +126,7 @@ let controls: Controls | undefined;
 const controlsSubject = new Subject<ControlEvent>();
 let autopilot: Autopilot | undefined;
 let simulationTickInFlight = false;
+let lastPumpDone: number | undefined;
 let syncedPlayerJumpRoute: string[] | undefined;
 
 // Fixed-timestep bookkeeping: real elapsed ms not yet simulated.
@@ -166,6 +168,13 @@ const simulationControl = {
      * (or the server's archive dump on desync). */
     async hashes() {
         return await simulationBridge?.entityHashes() ?? null;
+    },
+    /** Debug: is the frame pump wedged on an await? */
+    get inFlight() { return simulationTickInFlight; },
+    /** Debug: wall-clock ms since the pump last completed a frame. */
+    get sinceLastPump() {
+        return lastPumpDone === undefined
+            ? null : performance.now() - lastPumpDone;
     },
 };
 (window as any).novaSim = simulationControl;
@@ -506,12 +515,18 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
     pendingGateLaunch = undefined;
     syncedPlayerJumpRoute = undefined;
     if (simulationBridge) {
-        if (uuid) {
-            await simulationBridge.removeEntity(uuid);
-        }
-        await simulationBridge.close();
+        // Detach the bridge from the pump BEFORE tearing it down, so
+        // no new pump frame starts a call against the dying worker. A
+        // frame already awaiting one is unwedged by close(), which
+        // settles every in-flight call with SimulationBridgeClosedError
+        // (the pump treats that as "a transition took my bridge").
+        const oldBridge = simulationBridge;
         simulationBridge = undefined;
         simulationPacing = undefined;
+        if (uuid) {
+            await oldBridge.removeEntity(uuid);
+        }
+        await oldBridge.close();
     }
     simulationWorker = undefined;
     for (const subscription of roomSubscriptions) {
@@ -1206,8 +1221,20 @@ async function startGame() {
                 await currentBridge.setPlayerJumpRoute(displayedJumpRoute ?? []);
                 syncedPlayerJumpRoute = displayedJumpRoute?.slice() ?? [];
             }
+        } catch (e) {
+            // A system transition (jumpTo) closes the bridge this frame
+            // captured; its in-flight calls settle with
+            // SimulationBridgeClosedError. That is expected — bail out
+            // and let the next frame pick up the new bridge. Anything
+            // else is a real error, but the pump must never die (a
+            // frame pump that stops ends the game), so log and go on.
+            if (!(e instanceof SimulationBridgeClosedError
+                || currentBridge !== simulationBridge)) {
+                console.error('Simulation frame pump error:', e);
+            }
         } finally {
             simulationTickInFlight = false;
+            lastPumpDone = performance.now();
             stats.end();
         }
     }

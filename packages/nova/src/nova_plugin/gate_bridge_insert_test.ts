@@ -11,6 +11,13 @@ import { completeEntity } from "./entity_data_loader.js";
 import { GateArrivalComponent } from "./gate_transit_plugin.js";
 import { PlayerShipSelector } from "./player_ship_plugin.js";
 
+// NOTE: this covers the insertion path *inside* one live bridge. The
+// 2026-07 "ship missing at destination" hang lived one level up, in
+// the browser's bridge lifecycle: jumpTo terminated the origin worker
+// while the frame pump awaited a call on it, the never-settling
+// promise wedged the pump, and the destination bridge (whose insertion
+// path is exercised here) was simply never stepped. That level is
+// covered by simulation_bridge_close_test.ts.
 describe('gate arrival through the bridge insertion path', () => {
     it('inserts a ship carrying GateArrivalComponent via addEntity', async () => {
         const gameData = await getIntegrationGameData();
