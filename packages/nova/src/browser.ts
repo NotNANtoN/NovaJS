@@ -754,7 +754,8 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
                 }
                 await advanceEntityDate(data.entity,
                     daysPerJump(mass, speedMod),
-                    MissionUniverse.shared(simulationGameData));
+                    MissionUniverse.shared(simulationGameData),
+                    simulationGameData);
             } catch (e) {
                 console.warn('Failed to advance the date on jump:', e);
             }

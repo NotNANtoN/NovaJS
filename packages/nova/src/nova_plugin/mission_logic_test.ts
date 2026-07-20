@@ -4,6 +4,7 @@ import { getDefaultMissionData, MissionData } from 'novadatainterface/mission_da
 import {
     abortMission,
     acceptOffer,
+    failExpiredMissions,
     makeMissionOffer,
     matchesStellarRef,
     MissionContext,
@@ -498,6 +499,65 @@ describe('accept / landing / completion flow', () => {
         expect(state.bits.has(666)).toBe(true);
         const failed = state.events.find(e => e.type === 'failed')!;
         expect(failed.text).toBe('You blew it.');
+    });
+
+    it('fails an expired deadline via failExpiredMissions (in flight)', () => {
+        const mission = makeMission({
+            id: 'nova:202',
+            returnStel: 129,
+            returnStelId: 'nova:129',
+            timeLimit: 5,
+            onFailure: 'b666',
+            failText: 'Out of time.',
+        });
+        const state = makeState();
+        const machinery = makeMachinery(state, [mission]);
+        acceptOffer(machinery,
+            makeMissionOffer(mission, machinery.offerContext())!);
+        // Accepted at day 1000, deadline day 1005.
+        expect(failExpiredMissions(machinery, 1003)).toBe(0);
+        expect(state.missions.size).toBe(1);
+        // The day passes the deadline: fails immediately, no landing.
+        expect(failExpiredMissions(machinery, 1006)).toBe(1);
+        expect(state.missions.size).toBe(0);
+        expect(state.bits.has(666)).toBe(true);
+        expect(state.events.find(e => e.type === 'failed')?.text)
+            .toBe('Out of time.');
+    });
+
+    it('fails a mission the sim marked failed (player disable/destroy)', () => {
+        const mission = makeMission({
+            id: 'nova:205',
+            returnStel: 129,
+            returnStelId: 'nova:129',
+            onFailure: 'b77',
+            failText: 'You were disabled.',
+        });
+        const state = makeState();
+        const machinery = makeMachinery(state, [mission]);
+        acceptOffer(machinery,
+            makeMissionOffer(mission, machinery.offerContext())!);
+        // The shared sim sets active.failed on a disable/destroy.
+        state.missions.get('nova:205')!.failed = true;
+        // No deadline, but failExpiredMissions still fails it.
+        expect(failExpiredMissions(machinery, 1001)).toBe(1);
+        expect(state.missions.size).toBe(0);
+        expect(state.bits.has(77)).toBe(true);
+        expect(state.events.find(e => e.type === 'failed')?.text)
+            .toBe('You were disabled.');
+    });
+
+    it('freezes failIfPlayerDisabledOrDestroyed onto the active mission', () => {
+        const flagged = makeMission({ id: 'nova:206' });
+        flagged.flags = {
+            ...flagged.flags, failIfPlayerDisabledOrDestroyed: true,
+        };
+        const state = makeState();
+        const machinery = makeMachinery(state, [flagged]);
+        acceptOffer(machinery,
+            makeMissionOffer(flagged, machinery.offerContext())!);
+        expect(state.missions.get('nova:206')!
+            .failIfPlayerDisabledOrDestroyed).toBe(true);
     });
 
     it('aborts a mission, dropping its cargo and running OnAbort', () => {

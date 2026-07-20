@@ -5,6 +5,7 @@ import { addDays, dayNumber } from '../nova_plugin/calendar.js';
 import { CargoComponent } from '../nova_plugin/cargo_plugin.js';
 import { runCronsForDays } from '../nova_plugin/cron_logic.js';
 import {
+    failExpiredMissions,
     MissionContext,
     MissionEvent,
     MissionMachineryContext,
@@ -19,6 +20,7 @@ import {
     CronStatesComponent,
     GameDateComponent,
     MissionsComponent,
+    PendingMissionNoticesComponent,
 } from '../nova_plugin/player_state_plugin.js';
 import { CombatRatingComponent, LegalRecordsComponent } from '../nova_plugin/reputation_plugin.js';
 import { ShipComponent, ShipPhysicsComponent } from '../nova_plugin/ship_plugin.js';
@@ -186,30 +188,60 @@ export async function computeCargoCapacity(entity: Entity,
  * Landing bookkeeping for the docked player entity: advances the date
  * by one day (landing takes a day in EV Nova), then processes every
  * active mission against this stellar — deadline failures, travel
- * legs, and completion with payment. Returns the events for the UI.
+ * legs, and completion with payment. Returns the events for the UI,
+ * including any notices queued from mid-flight failures (deadlines that
+ * expired during jumps, sim-marked disable/destroy failures).
  */
 export async function processEntityLanding(entity: Entity,
     gameData: SimulationGameDataInterface, universe: MissionUniverse,
     planetId: string): Promise<MissionEvent[]> {
     // A landing advances the player's calendar by one day (and runs
-    // any crons that fire on it).
-    await advanceEntityDate(entity, 1, universe);
+    // any crons that fire on it, and fails any now-expired missions).
+    await advanceEntityDate(entity, 1, universe, gameData);
+
+    // Notices queued while the player was in flight surface here first.
+    const pending = drainPendingMissionNotices(entity);
 
     const session = await MissionSession.create(
         entity, gameData, universe, planetId);
     processLanding(session.machinery, planetId, session.currentDay,
         session.outfits);
-    return session.commit();
+    return [...pending, ...session.commit()];
 }
 
 /**
- * Advances the player's calendar by `days`, evaluating crön events
- * for each day passed. Runs player-locally while the entity is
- * outside the simulation (docked, or during the jump handoff); the
- * mutated components sync to peers with the re-added entity.
+ * Removes and returns the mission notices queued on the entity from
+ * mid-flight failures (see PendingMissionNoticesComponent).
+ */
+export function drainPendingMissionNotices(entity: Entity): MissionEvent[] {
+    const pending = entity.components.get(PendingMissionNoticesComponent);
+    if (!pending || pending.length === 0) {
+        return [];
+    }
+    entity.components.set(PendingMissionNoticesComponent, []);
+    return pending.map(notice => ({
+        missionId: notice.missionId,
+        missionName: notice.missionName,
+        type: notice.type as MissionEvent['type'],
+        text: notice.text,
+        payment: notice.payment,
+    }));
+}
+
+/**
+ * Advances the player's calendar by `days`, evaluating crön events for
+ * each day passed and — when `gameData` is supplied — failing any
+ * mission whose deadline has now passed (or which the shared sim marked
+ * failed), so an in-flight deadline fails the moment it expires rather
+ * than waiting for the next landing. Failure notices are queued on the
+ * entity (PendingMissionNoticesComponent) for the next spaceport
+ * screen. Runs player-locally while the entity is outside the
+ * simulation (docked, or during the jump handoff); the mutated
+ * components sync to peers with the re-added entity.
  */
 export async function advanceEntityDate(entity: Entity, days: number,
-    universe: MissionUniverse): Promise<void> {
+    universe: MissionUniverse,
+    gameData?: SimulationGameDataInterface): Promise<void> {
     ensurePlayerStateComponents(entity);
     if (days <= 0) {
         return;
@@ -229,6 +261,66 @@ export async function advanceEntityDate(entity: Entity, days: number,
         entity.components.set(CronStatesComponent, cronStates);
     } catch (e) {
         console.warn('Cron evaluation failed:', e);
+    }
+
+    // Fail missions whose deadline has now passed (or which the sim
+    // marked failed). Needs the game data for OnFailure set strings and
+    // reputation, so it's skipped for the bare (gameData-less) callers.
+    if (gameData) {
+        try {
+            await failExpiredEntityMissions(entity, gameData, universe);
+        } catch (e) {
+            console.warn('Mission deadline evaluation failed:', e);
+        }
+    }
+}
+
+/**
+ * Fails every active mission on the entity whose deadline has passed as
+ * of the entity's (already-advanced) game date, or which the shared sim
+ * flagged failed, running OnFailure and queueing a failure notice for
+ * the next spaceport screen. A no-op when nothing has expired, so
+ * jump/landing date advances stay cheap in the common case.
+ */
+async function failExpiredEntityMissions(entity: Entity,
+    gameData: SimulationGameDataInterface,
+    universe: MissionUniverse): Promise<void> {
+    const missions = entity.components.get(MissionsComponent);
+    if (!missions || missions.size === 0) {
+        return;
+    }
+    const currentDay = dayNumber(
+        entity.components.get(GameDateComponent) ?? getDefaultGameDate());
+    // Skip the (relatively expensive) session build unless something is
+    // actually due to fail this advance.
+    const anyDue = [...missions.values()].some(active =>
+        active.failed
+        || (active.deadlineDay !== null && currentDay > active.deadlineDay));
+    if (!anyDue) {
+        return;
+    }
+    // A landing at "deep space" is never processed; use the entity's
+    // last accepted-at stellar only for offer context (unused by
+    // failure), falling back to a synthetic id.
+    const session = await MissionSession.create(
+        entity, gameData, universe, '<in-flight>');
+    const failed = failExpiredMissions(session.machinery, currentDay,
+        session.outfits);
+    if (failed === 0) {
+        return;
+    }
+    const events = session.commit();
+    if (events.length > 0) {
+        const existing =
+            entity.components.get(PendingMissionNoticesComponent) ?? [];
+        entity.components.set(PendingMissionNoticesComponent,
+            [...existing, ...events.map(e => ({
+                missionId: e.missionId,
+                missionName: e.missionName,
+                type: e.type,
+                text: e.text,
+                payment: e.payment,
+            }))]);
     }
 }
 

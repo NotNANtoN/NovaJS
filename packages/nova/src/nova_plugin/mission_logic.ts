@@ -678,6 +678,10 @@ export function acceptOffer(machinery: MissionMachineryContext,
         deadlineDay: mission.timeLimit > 0
             ? ctx.currentDay + mission.timeLimit
             : null,
+        // Frozen so the shared sim can fail the mission on a player
+        // disable/destroy without reading mission game data.
+        failIfPlayerDisabledOrDestroyed:
+            mission.flags.failIfPlayerDisabledOrDestroyed,
         // Copied (not aliased) so re-showing the offer stays pristine.
         shipObjective: offer.shipObjective && {
             ...offer.shipObjective,
@@ -818,6 +822,31 @@ function completeMission(machinery: MissionMachineryContext,
 }
 
 /**
+ * Fails every active mission whose deadline has passed as of
+ * `currentDay`, or which the shared sim marked failed (`active.failed`).
+ * Runs OnFailure and appends a failure event for each — the same as a
+ * landing-time deadline failure, but callable at every date advance
+ * (jump or landing) so a deadline that expires in flight fails the
+ * moment it passes rather than at the next landing. Returns the number
+ * of missions failed. Missions completing at their destination are left
+ * to processLanding.
+ */
+export function failExpiredMissions(machinery: MissionMachineryContext,
+    currentDay: number, outfits?: Map<string, number>): number {
+    const { state } = machinery;
+    let failed = 0;
+    for (const active of [...state.missions.values()]) {
+        const expired = active.deadlineDay !== null
+            && currentDay > active.deadlineDay;
+        if (expired || active.failed) {
+            failMission(machinery, active.id, outfits);
+            failed++;
+        }
+    }
+    return failed;
+}
+
+/**
  * Processes a landing at `planetId` for every active mission:
  * deadline failures, travel-leg cargo transfer, and completion at the
  * return stellar (paying and running OnSuccess). Events are appended
@@ -834,6 +863,12 @@ export function processLanding(machinery: MissionMachineryContext,
             continue;
         }
         if (active.deadlineDay !== null && currentDay > active.deadlineDay) {
+            failMission(machinery, active.id, outfits);
+            continue;
+        }
+        if (active.failed) {
+            // The shared sim marked the mission failed (the owner was
+            // disabled or destroyed under Flags2 0x0004).
             failMission(machinery, active.id, outfits);
             continue;
         }
