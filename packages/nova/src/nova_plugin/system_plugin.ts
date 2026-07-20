@@ -32,6 +32,7 @@ import { PlanetPlugin } from "./planet_plugin.js";
 import { PlatformPlugin } from "./platform_plugin.js";
 import { PlayerStatePlugin } from "./player_state_plugin.js";
 import { ProjectilePlugin } from "./projectile_plugin.js";
+import { ReputationPlugin } from "./reputation_plugin.js";
 import { ReturnToQueuePlugin } from "./return_to_queue_plugin.js";
 import { ShipController } from "./ship_controller_plugin.js";
 import { ShipPlugin } from "./ship_plugin.js";
@@ -62,6 +63,7 @@ export const SystemPlugin: Plugin = {
         world.addPlugin(OutfitPlugin);
         world.addPlugin(NCBPlugin);
         world.addPlugin(PlayerStatePlugin);
+        world.addPlugin(ReputationPlugin);
         world.addPlugin(JammingPlugin);
         world.addPlugin(CollisionsPlugin);
         world.addPlugin(HealthPlugin);

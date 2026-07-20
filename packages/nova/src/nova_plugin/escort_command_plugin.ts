@@ -20,6 +20,7 @@ import { GovtComponent } from './govt_component.js';
 import { shipDisposition } from './iff_plugin.js';
 import { chooseNearest, FormationComponent, NpcComponent, RCS_ACCEL_FRACTION } from './npc_ai_plugin.js';
 import { ShootAllWeaponsComponent } from './npc_plugin.js';
+import { LegalRecordsComponent, LegalRecordsState } from './reputation_plugin.js';
 import { ShipComponent, ShipPhysicsComponent } from './ship_plugin.js';
 import { ShipControlEvent, ShipControlStateComponent } from './ship_control.js';
 import { TargetComponent } from './target_component.js';
@@ -187,9 +188,11 @@ function lookupGovt(gameData: SimulationGameDataInterface,
  */
 function isHostileTo(other: Entity, rootUuid: string, escortUuid: string,
     rootGovt: ReturnType<typeof lookupGovt>,
-    gameData: SimulationGameDataInterface): boolean {
+    gameData: SimulationGameDataInterface,
+    rootRecords?: LegalRecordsState): boolean {
     const disposition = shipDisposition(
-        lookupGovt(gameData, other.components.get(GovtComponent)), rootGovt);
+        lookupGovt(gameData, other.components.get(GovtComponent)), rootGovt,
+        rootRecords);
     if (disposition === 'hostile') {
         return true;
     }
@@ -313,6 +316,10 @@ export const EscortCommandBehaviorSystem = new System({
         const rootEntity = root ? entities.get(root) : undefined;
         const rootGovt = lookupGovt(gameData,
             rootEntity?.components.get(GovtComponent));
+        // The owner's legal records: govts hostile to a criminal owner
+        // are hostile to the escort's defend/patrol brain too.
+        const rootRecords =
+            rootEntity?.components.get(LegalRecordsComponent);
 
         switch (command.command) {
             case 'attack': {
@@ -342,7 +349,7 @@ export const EscortCommandBehaviorSystem = new System({
                     ? entities.get(command.target) : undefined;
                 if (engaged && (engaged.components.has(DisabledComponent)
                     || !isHostileTo(engaged, root ?? uuid, uuid,
-                        rootGovt, gameData))) {
+                        rootGovt, gameData, rootRecords))) {
                     engaged = undefined;
                 }
                 if (!engaged) {
@@ -362,7 +369,7 @@ export const EscortCommandBehaviorSystem = new System({
                             continue;
                         }
                         if (isHostileTo(other, root ?? uuid, uuid,
-                            rootGovt, gameData)) {
+                            rootGovt, gameData, rootRecords)) {
                             nearby.push([otherUuid, distanceSquared]);
                         }
                     }
@@ -451,7 +458,7 @@ export const EscortCommandBehaviorSystem = new System({
                     continue;
                 }
                 if (isHostileTo(other, root ?? uuid, uuid, rootGovt,
-                    gameData)) {
+                    gameData, rootRecords)) {
                     inReach.push([otherUuid, distanceSquared]);
                 }
             }

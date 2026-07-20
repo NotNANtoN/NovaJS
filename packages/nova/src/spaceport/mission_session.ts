@@ -20,6 +20,7 @@ import {
     GameDateComponent,
     MissionsComponent,
 } from '../nova_plugin/player_state_plugin.js';
+import { CombatRatingComponent, LegalRecordsComponent } from '../nova_plugin/reputation_plugin.js';
 import { ShipComponent, ShipPhysicsComponent } from '../nova_plugin/ship_plugin.js';
 import { WeaponsStateComponent } from '../nova_plugin/weapons_state.js';
 import { MissionUniverse } from './mission_universe.js';
@@ -233,5 +234,11 @@ export function ensurePlayerStateComponents(entity: Entity): void {
     }
     if (!entity.components.get(CronStatesComponent)) {
         entity.components.set(CronStatesComponent, new Map());
+    }
+    if (!entity.components.get(LegalRecordsComponent)) {
+        entity.components.set(LegalRecordsComponent, new Map());
+    }
+    if (!entity.components.get(CombatRatingComponent)) {
+        entity.components.set(CombatRatingComponent, { kills: 0 });
     }
 }

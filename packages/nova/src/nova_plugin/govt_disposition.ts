@@ -1,4 +1,5 @@
 import { GovtData } from "novadatainterface/govt_data";
+import { LegalRecords, recordHostile, recordWith } from "./reputation.js";
 
 /**
  * How one government regards another ship, per the EVN Bible's gövt
@@ -14,9 +15,13 @@ import { GovtData } from "novadatainterface/govt_data";
  * alwaysAttacksPlayer treat them as enemies.
  *
  * This is the single source of truth for NPC target selection and for
- * radar blip coloring. Reputation (the player's per-govt legal record,
- * CrimeTol, attacksPlayerIfCriminal) is not modeled yet; when it is,
- * it slots in here.
+ * radar blip coloring.
+ *
+ * Reputation: ships that carry legal records (players) are judged
+ * per-record on top of the political baseline — a govt whose record
+ * with THAT player is below -CrimeTol treats the player as an enemy
+ * (govtDispositionTo). Records are synced sim state, so every peer
+ * draws the same conclusion about the same player.
  */
 export type Disposition = 'ally' | 'neutral' | 'enemy';
 
@@ -57,6 +62,27 @@ export function govtDisposition(self: GovtData | undefined,
         return 'enemy';
     }
     return 'neutral';
+}
+
+/**
+ * The disposition of a ship of govt `self` toward a specific ship,
+ * folding in the target's legal records when it has any (players):
+ * a criminal record with `self` (record < -CrimeTol, the Bible's
+ * warships-attack threshold) makes the target an enemy, unless the
+ * govt never attacks the player. All other pairs fall back to the
+ * political govtDisposition.
+ */
+export function govtDispositionTo(self: GovtData | undefined,
+    other: GovtData | undefined,
+    otherRecords?: LegalRecords): Disposition {
+    const base = govtDisposition(self, other);
+    if (base !== 'enemy' && self && otherRecords
+        && !self.flags.neverAttacksPlayer
+        && recordHostile(recordWith(otherRecords, self.id, self),
+            self.crimeTol)) {
+        return 'enemy';
+    }
+    return base;
 }
 
 /**

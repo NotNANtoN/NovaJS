@@ -7,6 +7,7 @@ import { registerEntityDeriver } from './entity_factory.js';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { OutfitsState, OutfitsStateComponent } from './outfit_plugin.js';
+import { LegalRecords, recordHostile, recordWith } from './reputation.js';
 
 /**
  * A ship's IFF (Identify Friend or Foe) capability, derived from its owned
@@ -74,16 +75,17 @@ function intersects(a: readonly number[], b: readonly number[]): boolean {
  *     (alwaysAttacksPlayer, or xenophobic which "attacks everyone except
  *     allies"). neverAttacksPlayer overrides these to non-hostile.
  *  2. The ship's govt `enemies` classes intersect the player's govt classes.
+ *  3. The player's legal record with the ship's govt is below -CrimeTol
+ *     (the Bible's warships-attack-criminals threshold) — the same rule
+ *     the sim's target selection uses (govtDispositionTo), so the radar
+ *     and corners flip hostile exactly when the warships do.
  * Friendliness (only if not hostile): the ship's govt `allies` classes
  * intersect the player's govt classes, or ship and player share a government.
  * Everything else is neutral.
- *
- * NOTE: reputation / legal-record-driven hostility (attacksPlayerIfCriminal)
- * is not modelled — there is no legal record in the sim yet — so a "nosy" govt
- * reads as neutral until the player provokes it, which matches a clean record.
  */
 export function shipDisposition(shipGovt: GovtData | undefined,
-    playerGovt: GovtData | undefined): Disposition {
+    playerGovt: GovtData | undefined,
+    playerRecords?: LegalRecords): Disposition {
     if (!shipGovt) {
         return 'neutral';
     }
@@ -93,6 +95,11 @@ export function shipDisposition(shipGovt: GovtData | undefined,
             return 'hostile';
         }
         if (playerGovt && intersects(shipGovt.enemies, playerGovt.classes)) {
+            return 'hostile';
+        }
+        if (playerRecords && recordHostile(
+            recordWith(playerRecords, shipGovt.id, shipGovt),
+            shipGovt.crimeTol)) {
             return 'hostile';
         }
     }

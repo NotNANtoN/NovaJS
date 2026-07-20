@@ -19,6 +19,7 @@ import { DisplayAssetDataResource, SimulationGameDataResource } from "../nova_pl
 import { CloakActiveComponent, CloakComponent, CloakScannerComponent } from "../nova_plugin/cloak_plugin.js";
 import { GovtComponent } from "../nova_plugin/govt_component.js";
 import { deriveIff, dispositionColor, shipDisposition } from "../nova_plugin/iff_plugin.js";
+import { LegalRecordsComponent } from "../nova_plugin/reputation_plugin.js";
 import { ArmorComponent, FuelComponent, FUEL_PER_JUMP, ShieldComponent } from "../nova_plugin/health_plugin.js";
 import { OutfitsStateComponent, sumOutfitField } from "../nova_plugin/outfit_plugin.js";
 import { PlanetDataComponent } from "../nova_plugin/planet_plugin.js";
@@ -467,12 +468,16 @@ const DrawRadar = new System({
                 const playerGovtId = entity.components.get(GovtComponent)?.id;
                 const playerGovt = playerGovtId
                     ? gameData.data.Govt.getCached(playerGovtId) : undefined;
+                // The player's legal records (delta-synced): a govt the
+                // player is criminal with shows hostile blips.
+                const playerRecords =
+                    entity.components.get(LegalRecordsComponent);
                 iffColors = new Map();
                 for (const [uuid, , , , , shipGovt] of visibleShips) {
                     const govt = shipGovt
                         ? gameData.data.Govt.getCached(shipGovt.id) : undefined;
-                    iffColors.set(uuid,
-                        dispositionColor(shipDisposition(govt, playerGovt)));
+                    iffColors.set(uuid, dispositionColor(
+                        shipDisposition(govt, playerGovt, playerRecords)));
                 }
             }
             statusBar.drawRadar(position, visibleShips, planets, iffColors);

@@ -12,6 +12,7 @@ import { DisabledComponent } from "../nova_plugin/disabled_component.js";
 import { isInFlock } from "../nova_plugin/flock.js";
 import { GovtComponent } from "../nova_plugin/govt_component.js";
 import { shipDisposition, targetCornerStyle } from "../nova_plugin/iff_plugin.js";
+import { LegalRecordsComponent } from "../nova_plugin/reputation_plugin.js";
 import { NpcComponent } from "../nova_plugin/npc_ai_plugin.js";
 import { ShootAllWeaponsComponent } from "../nova_plugin/npc_plugin.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
@@ -148,8 +149,12 @@ export function styleForTarget(targetUuid: string, targetEntity: Entity,
     const attackingPlayer = targetsPlayer && (npcMode === 'attack'
         || targetEntity.components.has(ShootAllWeaponsComponent));
 
+    // The player's legal records (delta-synced): a govt the player is
+    // criminal with shows hostile corners, same rule as the sim.
+    const playerRecords = playerEntity.components.get(LegalRecordsComponent);
     return targetCornerStyle(
-        shipDisposition(targetGovt, playerGovt), attackingPlayer);
+        shipDisposition(targetGovt, playerGovt, playerRecords),
+        attackingPlayer);
 }
 
 const DrawTargetCornersSystem = new System({

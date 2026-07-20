@@ -16,6 +16,7 @@ import { spawnNpcs } from "./npc_spawn_plugin.js";
 import { SimulationGameDataResource } from "./game_data_resource.js";
 import { makePlanet } from "./make_planet.js";
 import { Platform, PlatformResource } from "./platform_plugin.js";
+import { GovtsResource } from "./reputation_plugin.js";
 import { SystemIdResource } from "./system_id_resource.js";
 import { SystemPlugin } from "./system_plugin.js";
 
@@ -76,6 +77,15 @@ export async function makeSystem(systemId: string, gameData: SimulationGameDataI
     // simulation must not resolve data asynchronously mid-simulation,
     // so all entities are fully loaded before they are inserted.
     const systemData = await gameData.data.System.get(systemId);
+    // Stage EVERY gövt (they are tiny) and publish them as a resource
+    // in sorted-id order: reputation record propagation and criminal-
+    // hostility checks consult arbitrary govts synchronously, and the
+    // sorted order makes record-map materialization deterministic on
+    // every peer regardless of the data source's id ordering.
+    const allIds = await gameData.ids;
+    const govtEntries = await Promise.all([...allIds.Govt].sort().map(
+        async id => [id, await gameData.data.Govt.get(id)] as const));
+    world.resources.set(GovtsResource, new Map(govtEntries));
     // Stage the linked systems' metadata too: starting a hyperspace
     // jump reads the destination's map position synchronously
     // (getCached) to compute the travel heading, and every peer builds

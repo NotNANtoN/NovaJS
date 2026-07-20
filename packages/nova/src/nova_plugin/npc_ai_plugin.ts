@@ -20,10 +20,11 @@ import { DisabledComponent } from './disabled_component.js';
 import { EscortCommandComponent } from './escort_command.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { GovtComponent } from './govt_component.js';
-import { govtDisposition, effectiveStrength, oddsFavorable } from './govt_disposition.js';
+import { govtDispositionTo, effectiveStrength, oddsFavorable } from './govt_disposition.js';
 import { ArmorComponent, ShieldComponent } from './health_plugin.js';
 import { JUMP_DISTANCE, JUMP_ARRIVAL_MARGIN_S } from './jump_plugin.js';
 import { PlanetComponent } from './planet_plugin.js';
+import { LegalRecordsComponent } from './reputation_plugin.js';
 import { SourceComponent } from './fire_weapon_plugin.js';
 import { ShipComponent, ShipDataComponent, ShipPhysicsComponent } from './ship_plugin.js';
 import { TargetComponent } from './target_component.js';
@@ -287,7 +288,8 @@ const PlanetsQuery = new Query(
     [UUID, MovementStateComponent, PlanetComponent] as const);
 const NpcTargetsQuery = new Query([UUID, MovementStateComponent, ShipComponent,
     ShipDataComponent, Optional(GovtComponent), Optional(ShieldComponent),
-    Optional(CloakActiveComponent), Optional(DisabledComponent)] as const);
+    Optional(CloakActiveComponent), Optional(DisabledComponent),
+    Optional(LegalRecordsComponent)] as const);
 
 function lookupGovt(gameData: SimulationGameDataInterface,
     govt: { id: string } | undefined) {
@@ -372,11 +374,13 @@ const NpcDecisionSystem = new System({
         // aggressor. Cloaked ships are excluded (invisible to AI), and
         // so are DISABLED ships: a disabled ship is no longer a threat,
         // so warships and interceptors drop it and pick a new target
-        // (boarding/piracy behavior is not modeled).
+        // (boarding/piracy behavior is not modeled). Ships with legal
+        // records (players) whose record with this govt is below its
+        // crime tolerance are enemies too: crime has consequences.
         const hostiles: Array<readonly [string, number]> = [];
         let aggressorEntry: readonly [string, number, number] | undefined;
         for (const [otherUuid, otherMovement, , otherData, otherGovt,
-            otherShield, cloak, otherDisabled] of ships) {
+            otherShield, cloak, otherDisabled, otherRecords] of ships) {
             if (otherUuid === uuid || !isTargetable(cloak) || otherDisabled) {
                 continue;
             }
@@ -387,8 +391,8 @@ const NpcDecisionSystem = new System({
             if (otherUuid === npc.aggressor) {
                 aggressorEntry = [otherUuid, distanceSquared, otherStrength];
             }
-            const disposition = govtDisposition(govtData,
-                lookupGovt(gameData, otherGovt));
+            const disposition = govtDispositionTo(govtData,
+                lookupGovt(gameData, otherGovt), otherRecords);
             if (disposition === 'enemy') {
                 hostiles.push([otherUuid, distanceSquared] as const);
             }
