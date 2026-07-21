@@ -235,41 +235,44 @@ export type Formation = t.TypeOf<typeof Formation>;
 export const FormationComponent = new Component<Formation>('FormationComponent');
 
 /**
- * Formation slot geometry: triangle rows behind the leader (row r sits
- * r * FORMATION_ROW_SPACING astern; adjacent cells in a row are
- * FORMATION_LATERAL_SPACING apart, centered on the leader's axis),
- * with the RANKS laid out so that EVERY escort count flies a formation
- * symmetric about the leader's axis. Counts 1-7 use an explicit table
- * (diagrams below — Matthew gets to veto specifics); larger counts
- * fill triangle rows (1, 2, 3, ... cells) with each row's occupants
+ * Formation slot geometry: the LEADER is the apex of the triangle, and
+ * escort rows widen behind it — row r sits r * FORMATION_ROW_SPACING
+ * astern and is (r + 1) cells wide (2, 3, 4, ... cells), each row
+ * centered on the leader's axis with adjacent cells
+ * FORMATION_LATERAL_SPACING apart. No escort ever occupies the apex
+ * (that's the player's ship — Matthew's spec); the first escort row is
+ * the flanking pair. RANKS are laid out so that EVERY escort count
+ * flies a formation symmetric about the leader's axis. Counts 1-7 use
+ * an explicit table (diagrams below — Matthew gets to veto specifics);
+ * larger counts fill the widening rows with each row's occupants
  * arranged center-out, which keeps any occupancy symmetric.
  *
  *  count 1        count 2        count 3        count 4
  *     L              L              L              L
- *     1            1   2            1            1   2
- *                                 2   3         3       4
+ *     1            1   2          1   2          1   2
+ *                                   3          3       4
  *
  *  count 5        count 6          count 7
  *     L              L                L
- *     1            1   2              1
- *   2   3        3       4         2   3
- *  4     5         5   6          4   6   5
- *                                     7
+ *   1   2          1   2            1   2
+ *  3  4  5       3       4        3   4   5
+ *                  5   6            6   7
  *
- *  - Odd counts build the classic triangle: a lone ship dead astern,
- *    then centered pairs widening behind it (count 5's second pair
- *    sits a full cell out; count 7 fills row 3's middle and drops the
- *    seventh dead-center of row 4).
+ *  - Count 1's lone escort sits centered one row back (a two-ship
+ *    column; with one escort there is no triangle to have a top).
+ *  - Count 3 is the leader-apex diamond: pair, then one centered in
+ *    the 3-wide row. Count 5 fills that row (pair + full triple);
+ *    count 7 adds a centered pair in the 4-wide row.
  *  - Counts 2 and 4 fly center-free flanking pairs — count 4 is the
  *    widening V from Paul's fork (escortPosition's hand-tuned 4-case).
  *  - Count 6 is the fork's other special case: three PAIRS with the
- *    middle column EMPTY (a hexagon). Filling the triangle instead
- *    would park the sixth ship dead-center of row 3, stacking the
- *    center column; the sixth takes an outer position instead.
+ *    middle column EMPTY (a hexagon). Filling the rows instead would
+ *    park the sixth ship alone off-axis in the 4-wide row; the middle
+ *    of the 3-wide row is skipped and the last pair tucks in behind.
  *  (Fork provenance: paul-npcs-era `escortPosition` special-cases 4
- *  and 6 exactly this way; its base `triangleRaster` starts rows at
- *  two cells, so its odd counts are NOT axis-symmetric — the odd-count
- *  layouts here are new, following the same pair-based spirit.)
+ *  and 6 exactly this way, and its base `triangleRaster` also starts
+ *  rows at two cells — the leader-apex shape matches the fork's; the
+ *  odd-count centered layouts here are new.)
  *
  * The layout is a function of (rank, count), NOT the persistent slot
  * number: slot ASSIGNMENT (hire order, continuation numbering) is
@@ -288,11 +291,12 @@ export function formationOffset(rank: number,
             [],
             [[1, 0]],
             [[1, 0.5], [1, -0.5]],
-            [[1, 0], [2, -0.5], [2, 0.5]],
+            [[1, 0.5], [1, -0.5], [2, 0]],
             [[1, 0.5], [1, -0.5], [2, 1], [2, -1]],
-            [[1, 0], [2, -0.5], [2, 0.5], [3, -1], [3, 1]],
+            [[1, 0.5], [1, -0.5], [2, -1], [2, 0], [2, 1]],
             [[1, 0.5], [1, -0.5], [2, 1], [2, -1], [3, 0.5], [3, -0.5]],
-            [[1, 0], [2, -0.5], [2, 0.5], [3, -1], [3, 1], [3, 0], [4, 0]],
+            [[1, 0.5], [1, -0.5], [2, -1], [2, 0], [2, 1],
+                [3, 0.5], [3, -0.5]],
         ];
     if (count !== undefined && count >= 1 && count <= 7 && rank < count) {
         const [row, lateralUnits] = SMALL_FORMATIONS[count][rank];
@@ -301,14 +305,16 @@ export function formationOffset(rank: number,
             lateral: lateralUnits * FORMATION_LATERAL_SPACING,
         };
     }
-    // General triangle: row r (1-based) holds ranks T(r-1) .. T(r)-1
-    // (r is the unique integer with r(r-1)/2 <= rank < r(r+1)/2).
-    const row = Math.floor((Math.sqrt(8 * rank + 1) + 1) / 2);
-    const indexInRow = rank - (row * (row - 1)) / 2;
-    // This row's occupancy: full (r cells) unless it is the deepest,
-    // partially filled row of the formation.
-    const occupancy = count === undefined ? row
-        : Math.min(row, count - (row * (row - 1)) / 2);
+    // General leader-apex triangle: row r (1-based) is (r + 1) cells
+    // wide and holds ranks C(r-1) .. C(r)-1, where C(r) = r(r+3)/2 is
+    // the cumulative capacity of rows 1..r.
+    const row = Math.ceil((Math.sqrt(8 * rank + 17) - 3) / 2);
+    const capacityBefore = ((row - 1) * (row + 2)) / 2;
+    const indexInRow = rank - capacityBefore;
+    // This row's occupancy: full (r + 1 cells) unless it is the
+    // deepest, partially filled row of the formation.
+    const occupancy = count === undefined ? row + 1
+        : Math.min(row + 1, count - capacityBefore);
     // Occupants arranged center-out and symmetric for ANY occupancy:
     // odd k sits at 0, -1, +1, -2, +2, ...; even k at -0.5, +0.5,
     // -1.5, +1.5, ... (cell units).

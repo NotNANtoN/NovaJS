@@ -132,22 +132,24 @@ describe('formation geometry (per-count symmetric layouts)', () => {
         expect(layout(2)).toEqual([
             { back: ROW, lateral: 0.5 * LAT },
             { back: ROW, lateral: -0.5 * LAT }]);
+        // Count 3: the leader-apex diamond (no escort at the apex).
         expect(layout(3)).toEqual([
-            { back: ROW, lateral: 0 },
-            { back: 2 * ROW, lateral: -0.5 * LAT },
-            { back: 2 * ROW, lateral: 0.5 * LAT }]);
+            { back: ROW, lateral: 0.5 * LAT },
+            { back: ROW, lateral: -0.5 * LAT },
+            { back: 2 * ROW, lateral: 0 }]);
         // Count 4: the widening V from Paul's fork.
         expect(layout(4)).toEqual([
             { back: ROW, lateral: 0.5 * LAT },
             { back: ROW, lateral: -0.5 * LAT },
             { back: 2 * ROW, lateral: LAT },
             { back: 2 * ROW, lateral: -LAT }]);
+        // Count 5: pair, then the full 3-wide row.
         expect(layout(5)).toEqual([
-            { back: ROW, lateral: 0 },
-            { back: 2 * ROW, lateral: -0.5 * LAT },
-            { back: 2 * ROW, lateral: 0.5 * LAT },
-            { back: 3 * ROW, lateral: -LAT },
-            { back: 3 * ROW, lateral: LAT }]);
+            { back: ROW, lateral: 0.5 * LAT },
+            { back: ROW, lateral: -0.5 * LAT },
+            { back: 2 * ROW, lateral: -LAT },
+            { back: 2 * ROW, lateral: 0 },
+            { back: 2 * ROW, lateral: LAT }]);
         // Count 6: the fork's center-free hexagon of pairs.
         expect(layout(6)).toEqual([
             { back: ROW, lateral: 0.5 * LAT },
@@ -156,14 +158,23 @@ describe('formation geometry (per-count symmetric layouts)', () => {
             { back: 2 * ROW, lateral: -LAT },
             { back: 3 * ROW, lateral: 0.5 * LAT },
             { back: 3 * ROW, lateral: -0.5 * LAT }]);
+        // Count 7: pair, full triple, centered pair in the 4-wide row.
         expect(layout(7)).toEqual([
-            { back: ROW, lateral: 0 },
-            { back: 2 * ROW, lateral: -0.5 * LAT },
-            { back: 2 * ROW, lateral: 0.5 * LAT },
-            { back: 3 * ROW, lateral: -LAT },
-            { back: 3 * ROW, lateral: LAT },
-            { back: 3 * ROW, lateral: 0 },
-            { back: 4 * ROW, lateral: 0 }]);
+            { back: ROW, lateral: 0.5 * LAT },
+            { back: ROW, lateral: -0.5 * LAT },
+            { back: 2 * ROW, lateral: -LAT },
+            { back: 2 * ROW, lateral: 0 },
+            { back: 2 * ROW, lateral: LAT },
+            { back: 3 * ROW, lateral: 0.5 * LAT },
+            { back: 3 * ROW, lateral: -0.5 * LAT }]);
+    });
+
+    it('no escort ever occupies the leader\'s apex position', () => {
+        for (let count = 1; count <= 12; count++) {
+            for (const cell of layout(count)) {
+                expect(cell.back).toBeGreaterThan(0);
+            }
+        }
     });
 
     it('every count 1-12 is symmetric about the leader axis', () => {
@@ -186,19 +197,24 @@ describe('formation geometry (per-count symmetric layouts)', () => {
         }
     });
 
-    it('counts beyond the table fill triangle rows center-out', () => {
-        // Count 8: full rows 1+2+3, then two of row 4 (even occupancy:
-        // a centered pair at +-0.5).
+    it('counts beyond the table fill widening rows center-out', () => {
+        // Count 8: full 2-wide and 3-wide rows (5 ships), then three of
+        // the 4-wide row arranged center-out (odd occupancy: 0, -1, +1).
         const cells = layout(8);
-        expect(cells[6]).toEqual({ back: 4 * ROW, lateral: -0.5 * LAT });
-        expect(cells[7]).toEqual({ back: 4 * ROW, lateral: 0.5 * LAT });
-        // Full row 3 in a large formation: center, then a pair.
+        expect(cells[5]).toEqual({ back: 3 * ROW, lateral: 0 });
+        expect(cells[6]).toEqual({ back: 3 * ROW, lateral: -LAT });
+        expect(cells[7]).toEqual({ back: 3 * ROW, lateral: LAT });
+        // Full 3-wide row (ranks 2-4) in a larger formation: center,
+        // then a pair.
+        expect(formationOffset(2, 10)).toEqual(
+            { back: 2 * ROW, lateral: 0 });
         expect(formationOffset(3, 10)).toEqual(
-            { back: 3 * ROW, lateral: 0 });
+            { back: 2 * ROW, lateral: -LAT });
         expect(formationOffset(4, 10)).toEqual(
-            { back: 3 * ROW, lateral: -LAT });
-        expect(formationOffset(5, 10)).toEqual(
-            { back: 3 * ROW, lateral: LAT });
+            { back: 2 * ROW, lateral: LAT });
+        // A lone overflow ship centers in its fresh row.
+        expect(formationOffset(9, 10)).toEqual(
+            { back: 4 * ROW, lateral: 0 });
     });
 
     it('places the lone escort dead astern of a leader facing "up" ' +
