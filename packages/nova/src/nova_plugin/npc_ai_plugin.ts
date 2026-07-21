@@ -144,10 +144,12 @@ export function chaserBlocksJump(fleeing: MovementState,
 
 // --- Formation tuning ---
 
-/** Longitudinal spacing between formation rows, px. */
-export const FORMATION_ROW_SPACING = 120;
-/** Lateral spacing between the two slots of a row, px. */
-export const FORMATION_LATERAL_SPACING = 110;
+/** Longitudinal spacing between formation rows, px. (Halved from the
+ * first-cut 120 after Matthew's playtest: tighter wedge.) */
+export const FORMATION_ROW_SPACING = 60;
+/** Lateral spacing between adjacent cells of a row, px. (Halved from
+ * the first-cut 110.) */
+export const FORMATION_LATERAL_SPACING = 55;
 /** How far ahead (seconds) followers lead the slot by the leader's
  * velocity, so they fly toward where the slot is going. */
 const FORMATION_LOOKAHEAD_S = 0.4;
@@ -233,24 +235,102 @@ export type Formation = t.TypeOf<typeof Formation>;
 export const FormationComponent = new Component<Formation>('FormationComponent');
 
 /**
- * Formation slot geometry: a V behind the leader. Slots pair up into
- * rows (slot 0 right of the leader's wake, slot 1 left, slot 2 right
- * one row further back, ...), each row FORMATION_ROW_SPACING behind
- * the previous and fanning outward by FORMATION_LATERAL_SPACING.
+ * Formation slot geometry: triangle rows behind the leader (row r sits
+ * r * FORMATION_ROW_SPACING astern; adjacent cells in a row are
+ * FORMATION_LATERAL_SPACING apart, centered on the leader's axis),
+ * with the RANKS laid out so that EVERY escort count flies a formation
+ * symmetric about the leader's axis. Counts 1-7 use an explicit table
+ * (diagrams below — Matthew gets to veto specifics); larger counts
+ * fill triangle rows (1, 2, 3, ... cells) with each row's occupants
+ * arranged center-out, which keeps any occupancy symmetric.
+ *
+ *  count 1        count 2        count 3        count 4
+ *     L              L              L              L
+ *     1            1   2            1            1   2
+ *                                 2   3         3       4
+ *
+ *  count 5        count 6          count 7
+ *     L              L                L
+ *     1            1   2              1
+ *   2   3        3       4         2   3
+ *  4     5         5   6          4   6   5
+ *                                     7
+ *
+ *  - Odd counts build the classic triangle: a lone ship dead astern,
+ *    then centered pairs widening behind it (count 5's second pair
+ *    sits a full cell out; count 7 fills row 3's middle and drops the
+ *    seventh dead-center of row 4).
+ *  - Counts 2 and 4 fly center-free flanking pairs — count 4 is the
+ *    widening V from Paul's fork (escortPosition's hand-tuned 4-case).
+ *  - Count 6 is the fork's other special case: three PAIRS with the
+ *    middle column EMPTY (a hexagon). Filling the triangle instead
+ *    would park the sixth ship dead-center of row 3, stacking the
+ *    center column; the sixth takes an outer position instead.
+ *  (Fork provenance: paul-npcs-era `escortPosition` special-cases 4
+ *  and 6 exactly this way; its base `triangleRaster` starts rows at
+ *  two cells, so its odd counts are NOT axis-symmetric — the odd-count
+ *  layouts here are new, following the same pair-based spirit.)
+ *
+ * The layout is a function of (rank, count), NOT the persistent slot
+ * number: slot ASSIGNMENT (hire order, continuation numbering) is
+ * unchanged, but the formation-keeping systems convert a ship's slot
+ * to its RANK among the live same-leader slots and pass the live
+ * count. An escort joining or leaving therefore re-flows everyone to
+ * the new count's layout — pure geometry, deterministic on every peer
+ * (ranks come from sorting the synced slot numbers), and the RCS
+ * controller slides ships the short hop to their new stations.
  */
-export function formationOffset(slot: number): { back: number, lateral: number } {
-    const row = Math.floor(slot / 2) + 1;
-    const side = slot % 2 === 0 ? 1 : -1;
+export function formationOffset(rank: number,
+    count?: number): { back: number, lateral: number } {
+    // [row, lateral] in row/cell units, per rank, for counts 1-7.
+    const SMALL_FORMATIONS: ReadonlyArray<
+        ReadonlyArray<readonly [number, number]>> = [
+            [],
+            [[1, 0]],
+            [[1, 0.5], [1, -0.5]],
+            [[1, 0], [2, -0.5], [2, 0.5]],
+            [[1, 0.5], [1, -0.5], [2, 1], [2, -1]],
+            [[1, 0], [2, -0.5], [2, 0.5], [3, -1], [3, 1]],
+            [[1, 0.5], [1, -0.5], [2, 1], [2, -1], [3, 0.5], [3, -0.5]],
+            [[1, 0], [2, -0.5], [2, 0.5], [3, -1], [3, 1], [3, 0], [4, 0]],
+        ];
+    if (count !== undefined && count >= 1 && count <= 7 && rank < count) {
+        const [row, lateralUnits] = SMALL_FORMATIONS[count][rank];
+        return {
+            back: row * FORMATION_ROW_SPACING,
+            lateral: lateralUnits * FORMATION_LATERAL_SPACING,
+        };
+    }
+    // General triangle: row r (1-based) holds ranks T(r-1) .. T(r)-1
+    // (r is the unique integer with r(r-1)/2 <= rank < r(r+1)/2).
+    const row = Math.floor((Math.sqrt(8 * rank + 1) + 1) / 2);
+    const indexInRow = rank - (row * (row - 1)) / 2;
+    // This row's occupancy: full (r cells) unless it is the deepest,
+    // partially filled row of the formation.
+    const occupancy = count === undefined ? row
+        : Math.min(row, count - (row * (row - 1)) / 2);
+    // Occupants arranged center-out and symmetric for ANY occupancy:
+    // odd k sits at 0, -1, +1, -2, +2, ...; even k at -0.5, +0.5,
+    // -1.5, +1.5, ... (cell units).
+    const oddRow = occupancy % 2 === 1;
+    const pairIndex = oddRow
+        ? Math.floor((indexInRow + 1) / 2) : Math.floor(indexInRow / 2) + 0.5;
+    const side = (oddRow ? indexInRow : indexInRow + 1) % 2 === 1 ? -1 : 1;
+    const lateralUnits = oddRow && indexInRow === 0 ? 0 : side * pairIndex;
     return {
         back: row * FORMATION_ROW_SPACING,
-        lateral: side * row * FORMATION_LATERAL_SPACING,
+        lateral: lateralUnits * FORMATION_LATERAL_SPACING,
     };
 }
 
-/** The world-space position of a leader's formation slot. */
+/**
+ * The world-space position of a leader's formation station for the
+ * escort of the given RANK (see formationOffset) — pass the live
+ * formation count for the per-count symmetric layouts.
+ */
 export function formationSlotPosition(leaderPosition: Position,
-    leaderRotation: Angle, slot: number): Position {
-    const { back, lateral } = formationOffset(slot);
+    leaderRotation: Angle, rank: number, count?: number): Position {
+    const { back, lateral } = formationOffset(rank, count);
     const u = leaderRotation.getUnitVector();
     // Perpendicular (rotate u by +90°).
     const p = new Vector(-u.y, u.x);
@@ -854,10 +934,11 @@ const NpcFireControlSystem = new System({
  * tests can check convergence and that RCS never turns the ship.
  */
 export function steerFormation(movement: MovementState, leader: MovementState,
-    formation: Formation, acceleration: number, delta_s: number): void {
+    formation: Formation, acceleration: number, delta_s: number,
+    rank = formation.slot, count?: number): void {
     const slotPosition = formationSlotPosition(
         Position.fromVectorLike(leader.position),
-        Angle.fromAngleLike(leader.rotation), formation.slot);
+        Angle.fromAngleLike(leader.rotation), rank, count);
     const lead = Vector.fromVectorLike(leader.velocity)
         .scale(FORMATION_LOOKAHEAD_S);
     const error = slotPosition.add(lead).subtract(movement.position);
@@ -903,13 +984,16 @@ export function steerFormation(movement: MovementState, leader: MovementState,
     movement.accelerating = Math.abs(misalignment) < 0.7 ? 1 : 0;
 }
 
+export const AllFormationsQuery = new Query([FormationComponent] as const);
+
 export const FormationSystem = new System({
     name: 'FormationSystem',
     args: [FormationComponent, MovementStateComponent, ShipPhysicsComponent,
         Optional(NpcComponent), Optional(EscortCommandComponent),
-        TimeResource, Entities, GetEntity, UUID] as const,
-    step(formation, movement, physics, npc, escortCommand, time, entities,
-        entity) {
+        AllFormationsQuery, TimeResource, Entities, GetEntity,
+        UUID] as const,
+    step(formation, movement, physics, npc, escortCommand, allFormations,
+        time, entities, entity) {
         // Engaged escorts fight; FormationSystem only holds station.
         if (npc && !escortCommand && (npc.mode === 'attack'
             || npc.mode === 'flee' || npc.mode === 'depart')) {
@@ -933,10 +1017,22 @@ export const FormationSystem = new System({
             entity.components.delete(FormationComponent);
             return;
         }
+        // Rank + live count drive the per-count symmetric layouts:
+        // the ship's persistent slot number is only an ORDER; its
+        // station comes from its rank among the live same-leader
+        // slots. Deterministic (sorting synced slot numbers) and
+        // cheap (formations are tiny); an escort joining or leaving
+        // re-flows the rest to the new count's layout.
+        const siblingSlots = allFormations
+            .filter(([other]) => other.leader === formation.leader)
+            .map(([other]) => other.slot)
+            .sort((a, b) => a - b);
+        const rank = siblingSlots.indexOf(formation.slot);
         // Base acceleration (not the per-tick effective physics):
         // afterburners must not boost the RCS budget.
         steerFormation(movement, leader, formation,
-            physics.acceleration, time.delta_s);
+            physics.acceleration, time.delta_s,
+            rank < 0 ? formation.slot : rank, siblingSlots.length);
     },
     after: [TimeSystem, NpcDecisionSystem],
     before: [MovementSystem],

@@ -457,15 +457,22 @@ describe('Input-driven rooms', () => {
         carrierMovement.velocity = new Vector(0, 0);
         await completeEntity(peerA.world, carrier);
         await peerA.client.addEntity('ship a', carrier);
-        // A target for the bay (fighters need one to launch).
-        const ravenData = await gameData.data.Ship.get('nova:164');
-        const raven = makeNpc(ravenData!);
-        const ravenMovement = raven.components.get(MovementStateComponent)!;
-        ravenMovement.position = new Position(0, 500);
-        ravenMovement.rotation = new Angle(Math.PI);
-        ravenMovement.velocity = new Vector(0, 0);
-        await completeEntity(peerA.world, raven);
-        await peerA.client.addEntity('raven', raven);
+        // The dogfight victim: a second Fed Carrier. (This spec once
+        // used a Raven, but the tighter halved formation spacing parks
+        // freshly launched fighters in the line of fire, and a Raven
+        // one-shots each fighter before the next launches — no
+        // survivor ever flies home. Carrier-vs-carrier keeps a real
+        // dogfight while letting a couple of fighters live to return:
+        // the same adaptation-not-weakening rule as pinning this spec
+        // to an asteroid-free system.)
+        const preyData = await gameData.data.Ship.get('nova:143');
+        const prey = makeNpc(preyData!);
+        const preyMovement = prey.components.get(MovementStateComponent)!;
+        preyMovement.position = new Position(0, 800);
+        preyMovement.rotation = new Angle(Math.PI);
+        preyMovement.velocity = new Vector(0, 0);
+        await completeEntity(peerA.world, prey);
+        await peerA.client.addEntity('raven', prey);
 
         const step = async (ticks: number) => {
             for (let i = 0; i < ticks; i++) {

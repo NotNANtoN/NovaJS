@@ -115,35 +115,105 @@ describe('chooseNearest', () => {
     });
 });
 
-describe('formation geometry', () => {
-    it('pairs slots into rows fanning out behind the leader', () => {
-        expect(formationOffset(0)).toEqual(
-            { back: FORMATION_ROW_SPACING, lateral: FORMATION_LATERAL_SPACING });
-        expect(formationOffset(1)).toEqual(
-            { back: FORMATION_ROW_SPACING, lateral: -FORMATION_LATERAL_SPACING });
-        expect(formationOffset(2)).toEqual({
-            back: 2 * FORMATION_ROW_SPACING,
-            lateral: 2 * FORMATION_LATERAL_SPACING,
-        });
-        expect(formationOffset(3)).toEqual({
-            back: 2 * FORMATION_ROW_SPACING,
-            lateral: -2 * FORMATION_LATERAL_SPACING,
-        });
+describe('formation geometry (per-count symmetric layouts)', () => {
+    const ROW = FORMATION_ROW_SPACING;
+    const LAT = FORMATION_LATERAL_SPACING;
+
+    function layout(count: number) {
+        const out: Array<{ back: number, lateral: number }> = [];
+        for (let rank = 0; rank < count; rank++) {
+            out.push(formationOffset(rank, count));
+        }
+        return out;
+    }
+
+    it('counts 1-7 match the diagrammed layouts', () => {
+        expect(layout(1)).toEqual([{ back: ROW, lateral: 0 }]);
+        expect(layout(2)).toEqual([
+            { back: ROW, lateral: 0.5 * LAT },
+            { back: ROW, lateral: -0.5 * LAT }]);
+        expect(layout(3)).toEqual([
+            { back: ROW, lateral: 0 },
+            { back: 2 * ROW, lateral: -0.5 * LAT },
+            { back: 2 * ROW, lateral: 0.5 * LAT }]);
+        // Count 4: the widening V from Paul's fork.
+        expect(layout(4)).toEqual([
+            { back: ROW, lateral: 0.5 * LAT },
+            { back: ROW, lateral: -0.5 * LAT },
+            { back: 2 * ROW, lateral: LAT },
+            { back: 2 * ROW, lateral: -LAT }]);
+        expect(layout(5)).toEqual([
+            { back: ROW, lateral: 0 },
+            { back: 2 * ROW, lateral: -0.5 * LAT },
+            { back: 2 * ROW, lateral: 0.5 * LAT },
+            { back: 3 * ROW, lateral: -LAT },
+            { back: 3 * ROW, lateral: LAT }]);
+        // Count 6: the fork's center-free hexagon of pairs.
+        expect(layout(6)).toEqual([
+            { back: ROW, lateral: 0.5 * LAT },
+            { back: ROW, lateral: -0.5 * LAT },
+            { back: 2 * ROW, lateral: LAT },
+            { back: 2 * ROW, lateral: -LAT },
+            { back: 3 * ROW, lateral: 0.5 * LAT },
+            { back: 3 * ROW, lateral: -0.5 * LAT }]);
+        expect(layout(7)).toEqual([
+            { back: ROW, lateral: 0 },
+            { back: 2 * ROW, lateral: -0.5 * LAT },
+            { back: 2 * ROW, lateral: 0.5 * LAT },
+            { back: 3 * ROW, lateral: -LAT },
+            { back: 3 * ROW, lateral: LAT },
+            { back: 3 * ROW, lateral: 0 },
+            { back: 4 * ROW, lateral: 0 }]);
     });
 
-    it('places slots behind a leader facing "up" (angle 0)', () => {
-        // Angle 0 is clock-up: unit vector (0, -1). Behind is +y.
-        const slot = formationSlotPosition(
-            new Position(0, 0), new Angle(0), 0);
-        expect(slot.y).toBeCloseTo(FORMATION_ROW_SPACING);
-        // Slot 0 sits laterally offset (rotated +90° from facing).
-        expect(Math.abs(slot.x)).toBeCloseTo(FORMATION_LATERAL_SPACING);
+    it('every count 1-12 is symmetric about the leader axis', () => {
+        for (let count = 1; count <= 12; count++) {
+            // Symmetric = the multiset of (back, lateral) equals the
+            // multiset of (back, -lateral).
+            const key = (o: { back: number, lateral: number }) =>
+                `${o.back}:${o.lateral}`;
+            const mirrored = (o: { back: number, lateral: number }) =>
+                `${o.back}:${-o.lateral || 0}`;
+            const cells = layout(count);
+            expect(cells.map(key).sort())
+                .toEqual(cells.map(mirrored).sort());
+        }
     });
+
+    it('exactly six escorts leave the middle column empty', () => {
+        for (const { lateral } of layout(6)) {
+            expect(lateral).not.toBe(0);
+        }
+    });
+
+    it('counts beyond the table fill triangle rows center-out', () => {
+        // Count 8: full rows 1+2+3, then two of row 4 (even occupancy:
+        // a centered pair at +-0.5).
+        const cells = layout(8);
+        expect(cells[6]).toEqual({ back: 4 * ROW, lateral: -0.5 * LAT });
+        expect(cells[7]).toEqual({ back: 4 * ROW, lateral: 0.5 * LAT });
+        // Full row 3 in a large formation: center, then a pair.
+        expect(formationOffset(3, 10)).toEqual(
+            { back: 3 * ROW, lateral: 0 });
+        expect(formationOffset(4, 10)).toEqual(
+            { back: 3 * ROW, lateral: -LAT });
+        expect(formationOffset(5, 10)).toEqual(
+            { back: 3 * ROW, lateral: LAT });
+    });
+
+    it('places the lone escort dead astern of a leader facing "up" ' +
+        '(angle 0)', () => {
+            // Angle 0 is clock-up: unit vector (0, -1). Behind is +y.
+            const slot = formationSlotPosition(
+                new Position(0, 0), new Angle(0), 0, 1);
+            expect(slot.y).toBeCloseTo(FORMATION_ROW_SPACING);
+            expect(slot.x).toBeCloseTo(0);
+        });
 
     it('rotates slot positions with the leader', () => {
-        const up = formationSlotPosition(new Position(0, 0), new Angle(0), 0);
+        const up = formationSlotPosition(new Position(0, 0), new Angle(0), 3);
         const right = formationSlotPosition(
-            new Position(0, 0), new Angle(Math.PI / 2), 0);
+            new Position(0, 0), new Angle(Math.PI / 2), 3);
         // Rotating the leader 90° rotates the slot 90°.
         expect(right.x).toBeCloseTo(-up.y);
         expect(right.y).toBeCloseTo(up.x);
