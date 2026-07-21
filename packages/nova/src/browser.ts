@@ -1134,6 +1134,28 @@ async function startGame() {
     //   novaControls.send([{action: 'nearestTarget', state: 'start'}])
     // followed by the matching {state: false} release.
     (window as any).novaControls = { send: emitControlEvents };
+    // Console lever for tests/debugging: hire escorts onto the player
+    // through the SAME spawn path the bar's hire flow uses (formation
+    // slots, firing group, default escort command), without the
+    // landing UI — e.g. novaSpawnEscorts(['nova:133', 'nova:133']).
+    (window as any).novaSpawnEscorts = async (shipIds: string[]) => {
+        if (!simulationBridge || !displayWorld) {
+            throw new Error('No live system');
+        }
+        let playerUuid: string | undefined;
+        let player: Entity | undefined;
+        for (const [uuid, entity] of displayWorld.entities) {
+            if (entity.components.has(PlayerShipSelector)) {
+                playerUuid = uuid;
+                player = entity;
+            }
+        }
+        if (!playerUuid || !player) {
+            throw new Error('No player ship');
+        }
+        await spawnHiredEscorts(simulationBridge, displayWorld, playerUuid,
+            player, shipIds, communicator.uuid ?? undefined);
+    };
 
     // User movement input cancels the autopilot (the autopilot's own
     // inputs go through controlSinks directly and don't loop back
