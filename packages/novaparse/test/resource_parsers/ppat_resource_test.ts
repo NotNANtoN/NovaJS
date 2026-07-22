@@ -1,4 +1,5 @@
 import "jasmine";
+import { Resource } from "resource_fork";
 import { PpatResource } from "../../src/resource_parsers/ppat_resource.js";
 import { defaultIDSpace } from "./default_id_space.js";
 import { ResourceBuilder } from "./resource_builder.js";
@@ -96,5 +97,80 @@ describe("PpatResource", () => {
         // (1,0) is clear (white).
         expect(pixelAt(ppat, 0, 0)).toEqual([0, 0, 0, 255]);
         expect(pixelAt(ppat, 1, 0)).toEqual([255, 255, 255, 255]);
+    });
+});
+
+/**
+ * Malformed ppats must never throw (a RangeError here aborts the whole
+ * readNovaFile call — fatal for the core Nova Files). Each attack degrades to
+ * the 1-bit fallback (or a blank pixel when even that can't be read) and warns.
+ */
+describe("PpatResource (malformed, hostile input)", () => {
+    const idSpace = defaultIDSpace;
+    let warnSpy: jasmine.Spy;
+
+    beforeEach(() => {
+        warnSpy = spyOn(console, "warn");
+    });
+
+    // A ppat built from buildPpat() then mutated in place via `patch`, so each
+    // attack starts from a valid resource and corrupts one field.
+    function corruptPpat(patch: (view: DataView) => void) {
+        const view = buildPpat().dataView();
+        patch(view);
+        return new Resource("ppat", 200, "Bad", view);
+    }
+
+    it("degrades when patMap points past the end", () => {
+        // patMap (offset 2) = 0xFFFF: the PixMap record would read past the end.
+        const ppat = new PpatResource(
+            corruptPpat(v => v.setUint32(2, 0xffff)), idSpace);
+        expect(ppat.width).toBe(8);   // 1-bit fallback
+        expect(ppat.height).toBe(8);
+        expect(warnSpy).toHaveBeenCalled();
+    });
+
+    it("degrades when pmTable (colour table) points past the end", () => {
+        // pmTable lives at patMap + 42 = 28 + 42 = 70.
+        const ppat = new PpatResource(
+            corruptPpat(v => v.setUint32(70, 0x7fffffff)), idSpace);
+        expect(ppat.width).toBe(8);
+        expect(warnSpy.calls.mostRecent().args[0]).toMatch(/colour table/);
+    });
+
+    it("degrades on a huge colour-table size (ctSize)", () => {
+        // ctSize is a signed int16 at pmTable + 6 = 86 + 6 = 92. 0x7fff entries
+        // would read ~256KB past a tiny resource.
+        const ppat = new PpatResource(
+            corruptPpat(v => v.setInt16(92, 0x7fff)), idSpace);
+        expect(ppat.width).toBe(8);
+        expect(warnSpy.calls.mostRecent().args[0]).toMatch(/colour table/);
+    });
+
+    it("degrades when the pixel data runs past the end (rowBytes)", () => {
+        // rowBytes at patMap + 4 = 32. A huge rowBytes overruns the resource.
+        const ppat = new PpatResource(
+            corruptPpat(v => v.setUint16(32, 0x8000 | 0x3000)), idSpace);
+        expect(ppat.width).toBe(8);
+        expect(warnSpy.calls.mostRecent().args[0]).toMatch(/pixel data/);
+    });
+
+    it("degrades a resource truncated mid-pixel-data", () => {
+        // Full ppat is 86 + 32 = 118 bytes; cut the pixel data short.
+        const ppat = new PpatResource(
+            buildPpat().truncate(80).resource("ppat", 204, "Truncated"),
+            idSpace);
+        expect(ppat.width).toBe(8);   // 1-bit fallback (pat1Data still present)
+        expect(warnSpy).toHaveBeenCalled();
+    });
+
+    it("degrades to a blank pixel when even the header is truncated", () => {
+        // Shorter than the 28-byte PixPat header: no pat1Data to fall back to.
+        const ppat = new PpatResource(
+            buildPpat().truncate(10).resource("ppat", 205, "Stub"), idSpace);
+        expect(ppat.width).toBe(1);
+        expect(ppat.height).toBe(1);
+        expect([...ppat.pixels]).toEqual([0, 0, 0, 0]);
+        expect(warnSpy).toHaveBeenCalled();
     });
 });

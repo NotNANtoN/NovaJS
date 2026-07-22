@@ -7,6 +7,33 @@
 export type RGB = [number, number, number];
 
 /**
+ * True when the byte range [offset, offset + length) lies entirely within the
+ * DataView. cicn/ppat compute offsets from untrusted header fields (table
+ * offsets, sizes, rowBytes * height); callers use this to bounds-check every
+ * derived range before reading so a corrupt or malicious resource degrades to
+ * a fallback image instead of throwing a RangeError that aborts file load.
+ */
+export function fitsWithin(d: DataView, offset: number, length: number)
+    : boolean {
+    return offset >= 0 && length >= 0 && offset + length <= d.byteLength;
+}
+
+/**
+ * The number of bytes a ColorTable at `pmTable` occupies, or null when its
+ * header (or any of its entries) would read past the end of `d`. A null return
+ * means the caller should degrade rather than trust ctSize.
+ */
+export function colorTableByteLengthChecked(d: DataView, pmTable: number)
+    : number | null {
+    // The 8-byte header must be present before ctSize can be trusted.
+    if (!fitsWithin(d, pmTable, 8)) {
+        return null;
+    }
+    const length = colorTableByteLength(d, pmTable);
+    return fitsWithin(d, pmTable, length) ? length : null;
+}
+
+/**
  * Reads a QuickDraw ColorTable into a pixel-value -> RGB lookup.
  *
  *   ColorTable (at pmTable):

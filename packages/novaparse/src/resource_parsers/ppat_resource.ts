@@ -1,6 +1,8 @@
 import { Resource } from "resource_fork";
 import { BaseResource } from "./nova_resource_base.js";
-import { parseColorTable, readIndexedPixel } from "./quickdraw.js";
+import {
+    colorTableByteLengthChecked, fitsWithin, parseColorTable, readIndexedPixel,
+} from "./quickdraw.js";
 import { NovaResources } from "./resource_holder_base.js";
 
 /**
@@ -33,14 +35,23 @@ import { NovaResources } from "./resource_holder_base.js";
  *                   byte of a 16-bit value)
  */
 export class PpatResource extends BaseResource {
-    width: number;
-    height: number;
+    // Assigned by the constructor's decode path or by degrade().
+    width!: number;
+    height!: number;
     /** Row-major RGBA pixels, 4 bytes per pixel, fully opaque. */
-    pixels: Uint8ClampedArray;
+    pixels!: Uint8ClampedArray;
 
     constructor(resource: Resource, idSpace: NovaResources) {
         super(resource, idSpace);
         const d = this.data;
+
+        // The PixPat header runs to offset 28 (pat1Data ends there). A ppat
+        // shorter than that can't carry a type-1 image or even the 1-bit
+        // fallback; treat it as fully malformed.
+        if (!fitsWithin(d, 0, 28)) {
+            this.degrade("header truncated");
+            return;
+        }
 
         const patType = d.getInt16(0);
         if (patType !== 1) {
@@ -53,6 +64,14 @@ export class PpatResource extends BaseResource {
 
         const patMap = d.getUint32(2);
         const patData = d.getUint32(6);
+
+        // patMap comes from the (untrusted) header; the PixMap record it
+        // points at is 50 bytes and pmTable lives at patMap + 42. Guard the
+        // whole record before reading any of its fields.
+        if (!fitsWithin(d, patMap, 50)) {
+            this.degrade(`PixMap offset ${patMap} out of range`);
+            return;
+        }
 
         const rowBytes = d.getUint16(patMap + 4) & 0x3fff;
         const top = d.getInt16(patMap + 6);
@@ -69,11 +88,22 @@ export class PpatResource extends BaseResource {
             // Malformed or exotic (direct-colour) pattern. Resources parse
             // eagerly at file load, so degrade to the 1-bit fallback rather
             // than failing the whole file.
-            console.warn(`ppat id ${this.id} is malformed or unsupported `
-                + `(bounds ${this.width}x${this.height}, `
-                + `pixel size ${pixelSize}); using its 1-bit fallback`);
-            ({ width: this.width, height: this.height, pixels: this.pixels } =
-                parsePat1Data(d));
+            this.degrade(`bounds ${this.width}x${this.height}, `
+                + `pixel size ${pixelSize}`);
+            return;
+        }
+
+        // Bounds-check the colour table and the pixel data (rowBytes * height
+        // from the last row) before decoding: pmTable, patData and rowBytes
+        // are all untrusted, so a bad value must degrade rather than throw.
+        const colorTableLength = colorTableByteLengthChecked(d, pmTable);
+        if (colorTableLength === null) {
+            this.degrade(`colour table at ${pmTable} out of range`);
+            return;
+        }
+        if (!fitsWithin(d, patData, rowBytes * this.height)) {
+            this.degrade(`pixel data at ${patData} `
+                + `(${rowBytes}x${this.height}) out of range`);
             return;
         }
 
@@ -90,6 +120,25 @@ export class PpatResource extends BaseResource {
                 this.pixels[out + 2] = color[2];
                 this.pixels[out + 3] = 255;
             }
+        }
+    }
+
+    /**
+     * Degrade a malformed/unsupported ppat to a fallback image, warning
+     * loudly with the resource id (matching the id-loading convention). Uses
+     * the 8x8 1-bit pattern the ppat carries when it's present, else a single
+     * transparent pixel when the resource is too short to hold even that.
+     */
+    private degrade(reason: string): void {
+        console.warn(`ppat id ${this.id} is malformed or unsupported `
+            + `(${reason}); using its 1-bit fallback`);
+        if (fitsWithin(this.data, 20, 8)) {
+            ({ width: this.width, height: this.height, pixels: this.pixels } =
+                parsePat1Data(this.data));
+        } else {
+            this.width = 1;
+            this.height = 1;
+            this.pixels = new Uint8ClampedArray(4);
         }
     }
 }

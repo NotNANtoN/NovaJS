@@ -1,7 +1,8 @@
 import { Resource } from "resource_fork";
 import { BaseResource } from "./nova_resource_base.js";
 import {
-    colorTableByteLength, parseColorTable, readBit, readIndexedPixel, RGB,
+    colorTableByteLengthChecked, fitsWithin, parseColorTable, readBit,
+    readIndexedPixel, RGB,
 } from "./quickdraw.js";
 import { NovaResources } from "./resource_holder_base.js";
 
@@ -36,14 +37,23 @@ import { NovaResources } from "./resource_holder_base.js";
  * bitmap as the alpha channel, yielding straight RGBA.
  */
 export class CicnResource extends BaseResource {
-    width: number;
-    height: number;
+    // Assigned by the constructor's decode path or by degrade().
+    width!: number;
+    height!: number;
     /** Row-major RGBA pixels, 4 bytes per pixel; alpha from the 1-bit mask. */
-    pixels: Uint8ClampedArray;
+    pixels!: Uint8ClampedArray;
 
     constructor(resource: Resource, idSpace: NovaResources) {
         super(resource, idSpace);
         const d = this.data;
+
+        // The three fixed headers (PixMap 50 + mask BitMap 14 + icon BitMap 14
+        // + iconData handle 4) run to offset 82. Guard them before reading any
+        // field so a truncated resource degrades instead of throwing.
+        if (!fitsWithin(d, 0, 50 + 14 + 14 + 4)) {
+            this.degrade("headers truncated");
+            return;
+        }
 
         // PixMap (colour image) at offset 0.
         const pmRowBytes = d.getUint16(4) & 0x3fff;
@@ -61,12 +71,8 @@ export class CicnResource extends BaseResource {
             // Malformed or exotic (direct-colour) icon. Resources parse
             // eagerly at file load, so degrade to a 1x1 transparent pixel
             // rather than failing the whole file.
-            console.warn(`cicn id ${this.id} is malformed or unsupported `
-                + `(bounds ${this.width}x${this.height}, `
-                + `pixel size ${pixelSize}); using a blank icon`);
-            this.width = 1;
-            this.height = 1;
-            this.pixels = new Uint8ClampedArray(4);
+            this.degrade(`bounds ${this.width}x${this.height}, `
+                + `pixel size ${pixelSize}`);
             return;
         }
 
@@ -81,8 +87,28 @@ export class CicnResource extends BaseResource {
         // Skip the 1-bit icon bitmap; the colour PixMap carries the image.
         offset += iconRowBytes * this.height;
         const colorTable = offset;
-        offset += colorTableByteLength(d, colorTable);
+
+        // maskRowBytes, iconRowBytes, ctSize and pmRowBytes are all untrusted
+        // header fields. Bounds-check every derived range against the resource
+        // length before decoding so a corrupt cicn degrades rather than
+        // throwing a RangeError that would abort the whole file load.
+        if (!fitsWithin(d, maskData, maskRowBytes * this.height)) {
+            this.degrade(`mask data (${maskRowBytes}x${this.height}) `
+                + `out of range`);
+            return;
+        }
+        const colorTableLength = colorTableByteLengthChecked(d, colorTable);
+        if (colorTableLength === null) {
+            this.degrade(`colour table at ${colorTable} out of range`);
+            return;
+        }
+        offset += colorTableLength;
         const pixelData = offset;
+        if (!fitsWithin(d, pixelData, pmRowBytes * this.height)) {
+            this.degrade(`pixel data (${pmRowBytes}x${this.height}) `
+                + `out of range`);
+            return;
+        }
 
         const colors = parseColorTable(d, colorTable, pixelSize);
 
@@ -100,5 +126,18 @@ export class CicnResource extends BaseResource {
                 this.pixels[out + 3] = opaque ? 255 : 0;
             }
         }
+    }
+
+    /**
+     * Degrade a malformed/unsupported cicn to a 1x1 transparent pixel,
+     * warning loudly with the resource id (matching the id-loading
+     * convention) so a corrupt icon can't abort the whole file load.
+     */
+    private degrade(reason: string): void {
+        console.warn(`cicn id ${this.id} is malformed or unsupported `
+            + `(${reason}); using a blank icon`);
+        this.width = 1;
+        this.height = 1;
+        this.pixels = new Uint8ClampedArray(4);
     }
 }

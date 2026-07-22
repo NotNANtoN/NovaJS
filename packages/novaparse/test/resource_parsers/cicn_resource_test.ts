@@ -1,5 +1,5 @@
 import "jasmine";
-import { readResourceFork } from "resource_fork";
+import { readResourceFork, Resource } from "resource_fork";
 import { CicnResource } from "../../src/resource_parsers/cicn_resource.js";
 import { getEmptyNovaResources } from "../../src/resource_parsers/resource_holder_base.js";
 import { resolveFixture } from "../fixtures.js";
@@ -158,6 +158,76 @@ describe("CicnResource (synthetic)", () => {
         expect(c.width).toBe(1);
         expect(c.height).toBe(1);
         expect([...c.pixels]).toEqual([0, 0, 0, 0]);
+    });
+});
+
+/**
+ * Malformed cicns must never throw (a RangeError here aborts the whole
+ * readNovaFile call — fatal for the core Nova Files). Each attack degrades to
+ * a 1x1 transparent pixel and warns.
+ *
+ * Default buildCicn() layout (4x2, 8-bit): PixMap 0-49, mask BitMap 50-63,
+ * icon BitMap 64-77, iconData 78-81, mask data 82-83, icon data 84-85,
+ * ColorTable 86-117 (8 + 3*8), pixel data 118-125.
+ */
+describe("CicnResource (malformed, hostile input)", () => {
+    const idSpace = defaultIDSpace;
+    let warnSpy: jasmine.Spy;
+
+    beforeEach(() => {
+        warnSpy = spyOn(console, "warn");
+    });
+
+    // A cicn built from buildCicn() then mutated in place via `patch`.
+    function corruptCicn(patch: (view: DataView) => void) {
+        const view = buildCicn().dataView();
+        patch(view);
+        return new Resource("cicn", 300, "Bad", view);
+    }
+
+    function expectBlank(c: CicnResource, reason?: RegExp) {
+        expect(c.width).toBe(1);
+        expect(c.height).toBe(1);
+        expect([...c.pixels]).toEqual([0, 0, 0, 0]);
+        expect(warnSpy).toHaveBeenCalled();
+        if (reason) {
+            expect(warnSpy.calls.mostRecent().args[0]).toMatch(reason);
+        }
+    }
+
+    it("degrades on a huge colour-table size (ctSize)", () => {
+        // ctSize is a signed int16 at colorTable + 6 = 86 + 6 = 92.
+        expectBlank(new CicnResource(
+            corruptCicn(v => v.setInt16(92, 0x7fff)), idSpace),
+            /colour table/);
+    });
+
+    it("degrades when the mask rowBytes overruns the resource", () => {
+        // Mask BitMap rowBytes at 50 + 4 = 54. A huge value makes
+        // maskRowBytes * height run past the end.
+        expectBlank(new CicnResource(
+            corruptCicn(v => v.setUint16(54, 0x3000)), idSpace),
+            /mask data/);
+    });
+
+    it("degrades when the pixel data rowBytes overruns the resource", () => {
+        // PixMap rowBytes at offset 4 (top two bits are flags).
+        expectBlank(new CicnResource(
+            corruptCicn(v => v.setUint16(4, 0x8000 | 0x3000)), idSpace),
+            /pixel data/);
+    });
+
+    it("degrades a resource truncated mid-pixel-data", () => {
+        // Full cicn is 126 bytes; cut into the pixel data.
+        expectBlank(new CicnResource(
+            buildCicn().truncate(120).resource("cicn", 301, "Truncated"),
+            idSpace));
+    });
+
+    it("degrades a resource truncated before the fixed headers end", () => {
+        // Shorter than the 82-byte fixed-header block.
+        expectBlank(new CicnResource(
+            buildCicn().truncate(40).resource("cicn", 302, "Stub"), idSpace));
     });
 });
 
