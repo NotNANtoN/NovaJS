@@ -209,11 +209,20 @@ const JumpFromSystem = new System({
 
 /**
  * Attaches a JumpComponent for a jump to `destination`, resolving the travel
- * heading from the origin and destination systems' map positions (staged at
- * world genesis in makeSystem, so the cache read is deterministic). Shifts the
+ * heading from the origin and destination systems' map positions. Shifts the
  * destination off the route. Returns false (and does nothing) if the system
  * data is not yet cached. `autoJumpsLeft` is the remaining multi-jump budget
  * to carry into this jump.
+ *
+ * Both getCached reads are provably warm (the staging contract for in-sim
+ * getCached): `systemId` is this world's own system, and `destination` is
+ * always route[0] — the next hop. A route is a Dijkstra path over
+ * system.links (starmap.computeShortestPaths), so every consecutive pair is
+ * adjacent; route[0] is therefore a *link* of this world's system, and
+ * makeSystem stages every linked system's data at genesis (make_system.ts).
+ * This holds at every hop of a multi-jump chain: each per-system world is
+ * built through makeSystem on every peer (browser worker, server archive,
+ * node worker), so the link set is warm before the world steps.
  */
 function beginJump(entity: Entity, systemId: string, destination: string,
     jumpRoute: JumpRoute, shipPhysics: ShipPhysics,
