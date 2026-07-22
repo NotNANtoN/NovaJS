@@ -1,6 +1,7 @@
 import * as crypto from "crypto";
 import * as fs from "fs/promises";
 import * as path from "path";
+import { WireWorldSnapshot } from "nova_ecs/plugins/snapshot_plugin";
 import { ArchiveBaseline, DesyncDump, InputRecord } from "../communication/rollback_protocol.js";
 import { DesyncInfo } from "../communication/rollback_relay.js";
 
@@ -81,6 +82,9 @@ export class DesyncRecorder {
          * names the archive's own diverging entity when the archive
          * is the wrong one. */
         archiveEntityHashes?: [string, string][],
+        /** The archive's full live state at recording time: the
+         * component-level evidence for live-archive divergence. */
+        archiveState?: { tick: number, snapshot: WireWorldSnapshot },
     }) {
         // A room's repeat convictions within the cooldown are the same
         // stuck divergence; the first record holds the evidence.
@@ -106,6 +110,8 @@ export class DesyncRecorder {
             }, null, 2)],
             ['baselines.json', JSON.stringify(context.baselines)],
             ['log.json', JSON.stringify(context.log)],
+            ...(context.archiveState ? [['archive_state.json',
+                JSON.stringify(context.archiveState)] as [string, string]] : []),
         ]);
         const dir = path.join(this.root,
             `${new Date().toISOString().replace(/[:.]/g, '-')}_`

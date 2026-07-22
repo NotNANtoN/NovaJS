@@ -637,15 +637,21 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
                 }
                 continue;
             }
-            // Too old to roll back to: apply as soon as possible
-            // instead of dropping the input entirely. (Desync detection
-            // will catch any resulting divergence.)
+            // Too old to roll back to: apply as soon as possible so
+            // the entity at least exists, and resync (cooldown-gated)
+            // — applying at the wrong tick is a guaranteed fork, and
+            // waiting for checkpoint conviction to say so costs
+            // seconds on a fork we already know about. (Seen live: a
+            // heavy plugin carrier's insertion staging outran the
+            // ring horizon on a slow link, and every NPC that shot at
+            // the not-yet-present carrier diverged.)
             const tick = Math.max(record.tick, this.rollback.earliestTick + 1);
             if (tick !== record.tick) {
                 this.logRollbackEvent('lateRecord', {
                     recordTick: record.tick, appliedAt: tick,
                     peer: record.peerId ?? 'unknown',
                 });
+                void this.resync();
             }
             this.addRecord(tick, { ...record, tick });
             if (tick <= this.rollback.tick) {

@@ -1,5 +1,5 @@
 import { TimeResource } from "nova_ecs/plugins/time_plugin";
-import { wireSnapshotWorld } from "nova_ecs/plugins/snapshot_plugin";
+import { WireWorldSnapshot, wireSnapshotWorld } from "nova_ecs/plugins/snapshot_plugin";
 import { hashWorld } from "nova_ecs/plugins/world_hash";
 import { World } from "nova_ecs/world";
 import { PEER_LOCAL_COMPONENTS } from "../nova_plugin/ship_control.js";
@@ -88,6 +88,19 @@ export class RoomArchive {
     /** Per-entity hashes at a retained checkpoint, for incident records. */
     entityHashesAt(tick: number): [string, string][] | undefined {
         return this.recentEntityHashes.get(tick);
+    }
+
+    /**
+     * The live world's full wire state right now, for incident
+     * records: per-entity hashes name WHICH entity the live archive
+     * got wrong versus a clean replay of its own log; this names the
+     * components and fields. Captured once per recorded incident.
+     */
+    captureState(): { tick: number, snapshot: WireWorldSnapshot } | undefined {
+        if (!this.world) {
+            return undefined;
+        }
+        return { tick: this.tick, snapshot: wireSnapshotWorld(this.world) };
     }
 
     /** The trailing sim itself, for tests and diagnostics. */

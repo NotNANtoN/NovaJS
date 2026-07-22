@@ -274,6 +274,34 @@ try {
     console.warn('Replay-verdict pass failed:', error);
 }
 
+// When the incident captured the archive's full live state, diff it
+// against a clean replay at the same tick: component-level evidence
+// for exactly what the live archive's world got wrong.
+try {
+    const archiveState = JSON.parse(
+        await fs.readFile(path.join(dir, 'archive_state.json'), 'utf8'));
+    const replayWorld = await truthAt(archiveState.tick, archiveState.tick,
+        gameData);
+    const lines = diffSnapshots(wireSnapshotWorld(replayWorld),
+        archiveState.snapshot);
+    console.log(`\nLive archive state vs clean replay at its capture `
+        + `tick (${archiveState.tick}):`);
+    if (lines.length === 0) {
+        console.log('  identical — the live archive re-converged by '
+            + 'capture time (transient divergence).');
+    } else {
+        console.log(`  ${lines.length} findings (replay is "truth", the `
+            + `live archive is "client"):`);
+        for (const line of lines.slice(0, 30)) {
+            console.log(`  - ${line}`);
+        }
+    }
+} catch (error) {
+    if (error?.code !== 'ENOENT') {
+        console.warn('Archive-state pass failed:', error);
+    }
+}
+
 for (const clientFile of clientFiles) {
     const dump = await readJson(clientFile);
     console.log(`\n=== ${clientFile} (engine: ${dump.engine}, dumped at `
