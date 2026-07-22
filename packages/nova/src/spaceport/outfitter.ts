@@ -20,7 +20,7 @@ import { ItemGrid, ItemTile } from "./item_grid.js";
 import { Menu } from "./menu.js";
 import { MissionSession } from "./mission_session.js";
 import { MissionUniverse } from "./mission_universe.js";
-import { canBuyOutfit, canSellOutfit, freeMass, maxBuyCount, maxSellCount, OutfitterContext } from "./outfitter_rules.js";
+import { canBuyOutfit, canSellOutfit, freeCargo, freeMass, maxBuyCount, maxSellCount, OutfitterContext } from "./outfitter_rules.js";
 import { QuantityDialog } from "./quantity_dialog.js";
 
 
@@ -222,6 +222,13 @@ export class Outfitter extends Menu<Entity> {
                 if (count > 0) {
                     this.missionSession.outfits.set(id, count);
                 }
+            }
+            // Buying/selling a freeCargo outfit changes the hold; refresh
+            // the session's cargo capacity so an OnPurchase/OnSell Sxxx that
+            // starts a cargo mission checks against the current hold (L6).
+            const context = this.makeContext();
+            if (context) {
+                this.missionSession.setCargoCapacity(freeCargo(context));
             }
             try {
                 this.missionSession.runMissionSet(expression, resourcePrefix);
