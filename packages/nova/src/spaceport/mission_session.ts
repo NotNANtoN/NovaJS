@@ -79,6 +79,17 @@ export class MissionSession {
         };
     }
 
+    /**
+     * Updates the working cargo capacity. The outfitter calls this after
+     * every buy/sell so an OnPurchase/OnSell set string that starts a
+     * cargo mission (Sxxx) checks against the CURRENT capacity — buying or
+     * selling a freeCargo outfit changes the hold, and the capacity frozen
+     * at session create would otherwise be stale in either direction (L6).
+     */
+    setCargoCapacity(cargoCapacity: number): void {
+        this.state.cargoCapacity = Math.max(0, cargoCapacity);
+    }
+
     private offerContext(): MissionContext {
         const planet = this.universe.getPlanet(this.planetId);
         const cargoUsedTons = [...this.state.cargo.values()]
@@ -155,12 +166,18 @@ export class MissionSession {
             entity.components.delete(ShipPhysicsComponent);
         }
 
-        // DatePostInc effects.
+        // DatePostInc effects. Zero it after applying so a second commit()
+        // doesn't advance the date again — dateAdvance is an increment
+        // applied to the entity, unlike the other working-copy fields which
+        // are absolute maps/sets and are safe to re-set (L5). The events
+        // array is returned, not written to the entity, so re-committing
+        // does not duplicate notices in entity state.
         if (this.state.dateAdvance > 0) {
             const date = entity.components.get(GameDateComponent)
                 ?? getDefaultGameDate();
             entity.components.set(GameDateComponent,
                 addDays(date, this.state.dateAdvance));
+            this.state.dateAdvance = 0;
         }
         return this.state.events;
     }

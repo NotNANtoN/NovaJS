@@ -1,4 +1,5 @@
 import 'jasmine';
+import { MissionData } from 'novadatainterface/mission_data';
 import { getIntegrationGameData } from '../communication/simulation_test_fixture.js';
 import { MissionSession, advanceEntityDate, processEntityLanding } from '../spaceport/mission_session.js';
 import { MissionUniverse } from '../spaceport/mission_universe.js';
@@ -334,5 +335,101 @@ describe('missions against real Nova data', () => {
                 entity, gameData, universe, dockedAt.id);
             expect(events.find(e => e.type === 'failed')?.missionId)
                 .toBe('nova:128');
+        });
+
+    it('does not double-apply dateAdvance on a second commit (L5)', async () => {
+        const gameData = await getIntegrationGameData();
+        const universe = MissionUniverse.shared(gameData);
+        await universe.load();
+
+        const start = await gameData.data.PlayerStart.get('nova:128');
+        const shipData = await gameData.data.Ship.get(start.ship);
+        const entity = makeShip(shipData);
+        entity.components.set(GameDateComponent, { ...start.date });
+        entity.components.set(CreditsComponent, { credits: 0 });
+        entity.components.set(ControlBitsComponent, new Set());
+
+        const dockedAt = universe.stellarCandidates.find(
+            s => !s.uninhabited && s.canLand && s.id !== 'nova:128')!;
+        const session = await MissionSession.create(
+            entity, gameData, universe, dockedAt.id);
+
+        const startDay = dayNumber(entity.components.get(GameDateComponent)!);
+        // Simulate a DatePostInc effect having accumulated on the session.
+        session.state.dateAdvance = 5;
+
+        session.commit();
+        expect(dayNumber(entity.components.get(GameDateComponent)!))
+            .toBe(startDay + 5);
+
+        // A second commit must be idempotent for the date: the advance was
+        // already applied and must not be applied again.
+        session.commit();
+        expect(dayNumber(entity.components.get(GameDateComponent)!))
+            .toBe(startDay + 5);
+        expect(session.state.dateAdvance).toBe(0);
+    });
+
+    it('refreshes cargo capacity so an outfitter-run cargo mission sees ' +
+        'the current hold (L6)', async () => {
+            const gameData = await getIntegrationGameData();
+            const universe = MissionUniverse.shared(gameData);
+            await universe.load();
+
+            const start = await gameData.data.PlayerStart.get('nova:128');
+            const shipData = await gameData.data.Ship.get(start.ship);
+            const entity = makeShip(shipData);
+            entity.components.set(GameDateComponent, { ...start.date });
+            entity.components.set(CreditsComponent, { credits: 0 });
+            entity.components.set(ControlBitsComponent, new Set());
+
+            const dockedAt = universe.stellarCandidates.find(
+                s => !s.uninhabited && s.canLand && s.id !== 'nova:128')!;
+            const session = await MissionSession.create(
+                entity, gameData, universe, dockedAt.id);
+
+            // A cargo delivery whose quantity is bigger than the session's
+            // starting capacity: it can't be accepted now (the frozen offer
+            // is unacceptable), but must become acceptable once the outfitter
+            // enlarges the hold and pushes the new capacity in (L6).
+            const baseFree = session.machinery.offerContext().freeCargoSpace;
+            const cargoQty = baseFree + 12;
+            const template = universe.getMission('nova:128')!; // Delivery
+            // A synthetic pickup-at-start delivery with a fixed, oversized
+            // cargo requirement (returns to Earth like the template).
+            const withCargo: MissionData = {
+                ...template,
+                id: 'test:cargo',
+                cargoType: 2,
+                cargoQty,
+                pickupMode: 0,
+                flags: {
+                    ...template.flags,
+                    // Must stay offerable-but-unacceptable, not hidden.
+                    notOfferedIfInsufficientCargoSpace: false,
+                },
+            };
+
+            const before = makeMissionOffer(withCargo,
+                session.machinery.offerContext())!;
+            expect(before.acceptable).toBe(false);
+            expect(before.reason).toContain('cargo space');
+
+            // The outfitter buys a freeCargo outfit and refreshes capacity.
+            session.setCargoCapacity(baseFree + 20);
+            const after = makeMissionOffer(withCargo,
+                session.machinery.offerContext())!;
+            expect(after.acceptable).toBe(true);
+
+            // Selling it back shrinks the hold again (stale-in-both-
+            // directions: the frozen capacity would have been wrong here too).
+            session.setCargoCapacity(baseFree);
+            const shrunk = makeMissionOffer(withCargo,
+                session.machinery.offerContext())!;
+            expect(shrunk.acceptable).toBe(false);
+
+            // Capacity never goes negative.
+            session.setCargoCapacity(-5);
+            expect(session.machinery.offerContext().freeCargoSpace).toBe(0);
         });
 });

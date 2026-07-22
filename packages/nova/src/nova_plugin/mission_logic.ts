@@ -557,20 +557,47 @@ export function makeMissionOffer(mission: MissionData,
     // Cargo picked up at mission start must fit now.
     const loadsNow = cargoQty > 0
         && (mission.pickupMode === 0 || mission.pickupMode === -1);
-    if (loadsNow && cargoQty > ctx.freeCargoSpace) {
-        if (mission.flags.notOfferedIfInsufficientCargoSpace) {
-            return null;
-        }
-        offer.acceptable = false;
-        offer.reason = `You need ${cargoQty} tons of free cargo space `
-            + `to accept this mission.`;
+    if (loadsNow && cargoQty > ctx.freeCargoSpace
+        && mission.flags.notOfferedIfInsufficientCargoSpace) {
+        return null;
     }
-    if (ctx.activeMissions.size >= MAX_ACTIVE_MISSIONS) {
+    const check = checkAcceptable(offer, ctx);
+    if (!check.acceptable) {
         offer.acceptable = false;
-        offer.reason = `You cannot take on more than `
-            + `${MAX_ACTIVE_MISSIONS} missions at once.`;
+        offer.reason = check.reason;
     }
     return offer;
+}
+
+/**
+ * Re-evaluates whether an offer can be accepted against the CURRENT
+ * context (cargo already committed by other accepted missions, current
+ * active-mission count). `makeMissionOffer` freezes `acceptable` at
+ * board-open; this is called again at accept time so a second cargo
+ * mission can't slip past a now-full hold, and the 16-mission cap can't
+ * be exceeded by a stale offer (L3/L4).
+ */
+export function checkAcceptable(offer: MissionOffer, ctx: MissionContext):
+    { acceptable: true } | { acceptable: false; reason: string } {
+    const mission = offer.data;
+    // Cargo picked up at mission start must fit now.
+    const loadsNow = offer.cargoQty > 0
+        && (mission.pickupMode === 0 || mission.pickupMode === -1);
+    if (loadsNow && offer.cargoQty > ctx.freeCargoSpace) {
+        return {
+            acceptable: false,
+            reason: `You need ${offer.cargoQty} tons of free cargo space `
+                + `to accept this mission.`,
+        };
+    }
+    if (ctx.activeMissions.size >= MAX_ACTIVE_MISSIONS) {
+        return {
+            acceptable: false,
+            reason: `You cannot take on more than `
+                + `${MAX_ACTIVE_MISSIONS} missions at once.`,
+        };
+    }
+    return { acceptable: true };
 }
 
 /** An observable consequence of mission processing, for the UI. */
@@ -728,13 +755,27 @@ export function runMissionSetString(machinery: MissionMachineryContext,
     }
 }
 
+/** The result of an accept attempt (see acceptOffer). */
+export type AcceptResult =
+    | { accepted: true }
+    | { accepted: false; reason: string };
+
 /**
  * Accepts an offer: registers the active mission, loads start-time
  * cargo, runs OnAccept, and handles auto-abort missions (which run
  * their effects and never stay active).
+ *
+ * The offer's `acceptable` flag is frozen at board-open; a normal
+ * (staying) mission is re-checked against the CURRENT context here so a
+ * stale offer can't slip cargo past a hold another accepted mission has
+ * since filled, or exceed the 16-mission cap (L3/L4). When the re-check
+ * fails, nothing is committed and the reason is returned for the UI.
+ * `skipAcceptabilityCheck` is for scripted starts (Sxxx), which ignore
+ * availability by contract and gate the cap themselves.
  */
 export function acceptOffer(machinery: MissionMachineryContext,
-    offer: MissionOffer, outfits?: Map<string, number>, depth = 0): void {
+    offer: MissionOffer, outfits?: Map<string, number>, depth = 0,
+    skipAcceptabilityCheck = false): AcceptResult {
     const { state } = machinery;
     const mission = offer.data;
     const prefix = idPrefix(mission.id);
@@ -758,7 +799,16 @@ export function acceptOffer(machinery: MissionMachineryContext,
             text: mission.briefText,
             payment,
         });
-        return;
+        return { accepted: true };
+    }
+
+    // Re-evaluate cargo fit + the mission cap against current state: the
+    // frozen offer may no longer be acceptable.
+    if (!skipAcceptabilityCheck) {
+        const check = checkAcceptable(offer, ctx);
+        if (!check.acceptable) {
+            return { accepted: false, reason: check.reason };
+        }
     }
 
     const active: ActiveMission = {
@@ -804,6 +854,7 @@ export function acceptOffer(machinery: MissionMachineryContext,
         type: 'accepted',
         text: mission.briefText,
     });
+    return { accepted: true };
 }
 
 /** Refusing an offer just runs OnRefuse. */
@@ -831,7 +882,10 @@ export function startMissionById(machinery: MissionMachineryContext,
         console.warn(`Sxxx: could not resolve destinations for ${missionId}.`);
         return;
     }
-    acceptOffer(machinery, offer, outfits, depth);
+    // Scripted starts ignore availability (cargo fit): the cap is gated
+    // above. Skip the accept-time re-check so a full hold can't silently
+    // block a story mission the way it blocks a board accept.
+    acceptOffer(machinery, offer, outfits, depth, true);
 }
 
 /** Axxx / the abort button: run OnAbort, drop cargo, remove. */
@@ -1006,6 +1060,14 @@ export function processLanding(machinery: MissionMachineryContext,
     outfits?: Map<string, number>): void {
     const { state } = machinery;
     for (const active of [...state.missions.values()]) {
+        // The loop iterates a snapshot; an earlier mission's OnSuccess (or
+        // OnShipDone/OnAbort) can abort/fail/complete a later one via an
+        // Axxx/Fxxx set string, removing it from state.missions mid-loop.
+        // Skip any mission that is no longer active so we never re-process
+        // (and re-pay) it.
+        if (!state.missions.has(active.id)) {
+            continue;
+        }
         const mission = machinery.getMission(active.id);
         if (!mission) {
             console.warn(`Active mission ${active.id} has no data; skipping.`);
