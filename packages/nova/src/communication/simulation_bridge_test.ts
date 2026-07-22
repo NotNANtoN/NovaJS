@@ -288,4 +288,97 @@ describe('SimulationBridge', () => {
             expect(pacing.rate).toBeCloseTo(0.95, 5);
         });
     });
+
+    describe('staging-failure recovery', () => {
+        // A host whose insertion staging always fails, and which records
+        // every resync call (with the `force` flag) plus whether that call
+        // actually proceeded past the cooldown guard (i.e. returned via the
+        // join loop rather than the early cooldown no-op).
+        class StagingFailsHost extends SimulationBridgeHost {
+            resyncCalls: { force: boolean; proceeded: boolean }[] = [];
+            protected override stageRecords(): Promise<void> {
+                return Promise.reject(new Error('staging always fails'));
+            }
+            override async resync(force = false): Promise<boolean> {
+                // A resync that proceeds past the cooldown guard refreshes
+                // lastResyncTime; a cooldown no-op leaves it untouched. Diff
+                // it across the call to tell the two apart.
+                const before = this.lastResyncTime;
+                const result = await super.resync(force);
+                const proceeded = this.lastResyncTime !== before;
+                this.resyncCalls.push({ force, proceeded });
+                return result;
+            }
+        }
+
+        function makeStagingHost() {
+            const communicator = new MockCommunicator('client');
+            world.resources.set(CommunicatorResource, communicator);
+            // No server uuid handshake happens here, so joinRoom returns
+            // false immediately; a proceeding resync just runs its (single,
+            // zero-delay) attempt and returns false. We only care that it
+            // *ran*, not that it succeeded.
+            const host = new StagingFailsHost(world, makeFakeSimulationData(), {
+                stagingMaxAttempts: 1,
+                stagingRetryMs: 0,
+                resyncMaxAttempts: 1,
+                resyncRetryMs: 0,
+                // No relay answers the join, so let it time out fast rather
+                // than block the test on the multi-second default.
+                resyncJoinTimeoutMs: 10,
+                resyncCooldownMs: 10_000,
+            });
+            const relayInsertion = (uuid: string, tick: number) => {
+                const entity = new Entity('foo')
+                    .addComponent(FooComponent, { x: 1 });
+                const serializer = world.resources.get(SerializerResource)!;
+                communicator.messages.next({
+                    source: 'server',
+                    message: wrapRollbackMessage({
+                        kind: 'inputs',
+                        record: {
+                            peerId: 'other',
+                            tick,
+                            inputs: [{
+                                kind: 'addEntity',
+                                uuid,
+                                entity: serializer.encode(entity),
+                            }],
+                        },
+                    }),
+                });
+            };
+            return { host, relayInsertion };
+        }
+
+        it('resyncs on staging failure even inside the resync cooldown', async () => {
+            const { host, relayInsertion } = makeStagingHost();
+
+            // Warm the cooldown: a plain resync now runs and stamps
+            // lastResyncTime, so any *non-forced* resync for the next 10s
+            // would no-op.
+            await host.resync();
+            expect(host.resyncCalls[0]).toEqual({ force: false, proceeded: true });
+
+            // Sanity: a plain resync inside the cooldown is a no-op.
+            await host.resync();
+            expect(host.resyncCalls[1]).toEqual({ force: false, proceeded: false });
+
+            // Now relay an insertion whose staging will fail. The
+            // staging-failure path must force a resync that PROCEEDS despite
+            // the still-cooling cooldown — otherwise the record is silently
+            // dropped and this peer forks until desync detection ~10s later.
+            relayInsertion('inserted-uuid', host.status().tick);
+
+            // integrateStaged stages asynchronously (one failed attempt, then
+            // a forced resync whose join times out after ~10ms). Wait past
+            // that for the forced resync to land.
+            await new Promise(resolve => setTimeout(resolve, 100));
+
+            const forced = host.resyncCalls.filter(c => c.force);
+            expect(forced.length).toBeGreaterThanOrEqual(1);
+            // The forced staging-failure resync bypassed the cooldown.
+            expect(forced.some(c => c.proceeded)).toBe(true);
+        });
+    });
 });
