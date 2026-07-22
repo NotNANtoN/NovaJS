@@ -7,7 +7,7 @@ import * as t from 'io-ts';
 import { CommunicatorResource, ExcludedMultiplayerComponentsResource, MultiplayerData } from "nova_ecs/plugins/multiplayer_plugin";
 import { markerType, SerializerResource } from "nova_ecs/plugins/serializer_plugin";
 import { RandomResource } from "nova_ecs/plugins/random_plugin";
-import { TimeResource } from "nova_ecs/plugins/time_plugin";
+import { TimeResource, TimeSystem } from "nova_ecs/plugins/time_plugin";
 import { Optional } from "nova_ecs/optional";
 import { Query } from "nova_ecs/query";
 import { System } from "nova_ecs/system";
@@ -98,7 +98,10 @@ const ChooseRandomTargetAI = new System({
         }
 
         target.target = validTargets[random.below(validTargets.length)];
-    }
+    },
+    // Determinism rule 4: the re-roll timer compares against time.time,
+    // so this must run after TimeSystem advances the clock.
+    after: [TimeSystem],
 });
 
 export const FollowComponent = new Component<undefined>('FollowComponent');

@@ -480,6 +480,9 @@ const AsteroidRespawnSystem = new System({
         field.nextRespawn = time.time + RESPAWN_INTERVAL_MS;
         spawnFieldAsteroid(entities, gameData, ids, random, field.types, true);
     },
+    // Determinism rule 4: the respawn timer compares against time.time,
+    // so this must run after TimeSystem advances the clock.
+    after: [TimeSystem],
 });
 
 const DamagerQuery = new Query([Optional(ProjectileDataComponent),

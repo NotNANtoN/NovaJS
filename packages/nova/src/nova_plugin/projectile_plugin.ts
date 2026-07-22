@@ -10,7 +10,7 @@ import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
 import { MovementPhysicsComponent, MovementStateComponent, MovementType } from 'nova_ecs/plugins/movement_plugin';
 import { passthroughType, SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
-import { TimeResource } from 'nova_ecs/plugins/time_plugin';
+import { TimeResource, TimeSystem } from 'nova_ecs/plugins/time_plugin';
 import { System } from 'nova_ecs/system';
 import SAT from "sat";
 import { registerSimulationBridgeEvent } from '../communication/simulation_bridge_events.js';
@@ -214,6 +214,9 @@ const ProjectileLifespanSystem = new System({
             emit(ProjectileExpireEvent, undefined, [self]);
         }
     },
+    // Determinism rule 4: expiry compares the projectile's fire time
+    // against time.time, so this must run after TimeSystem.
+    after: [TimeSystem],
 });
 
 export const ProjectileGuidanceSystem = new System({

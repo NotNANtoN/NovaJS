@@ -10,7 +10,7 @@ import { Plugin } from "nova_ecs/plugin";
 import { MovementStateComponent, MovementSystem, MovementState, teleport } from "nova_ecs/plugins/movement_plugin";
 import { Optional } from "nova_ecs/optional";
 import { EncodedEntity, Serializer, SerializerResource } from "nova_ecs/plugins/serializer_plugin";
-import { TimeResource } from "nova_ecs/plugins/time_plugin";
+import { TimeResource, TimeSystem } from "nova_ecs/plugins/time_plugin";
 import { Provide } from "nova_ecs/provide";
 import { System } from "nova_ecs/system";
 import { isLeft } from "fp-ts/lib/Either.js";
@@ -493,7 +493,12 @@ export const JumpSequenceSystem = new System({
             }
         }
     },
-    after: [ControlShipSystem],
+    // Determinism rule 4: this stage machine reads time.time/time.delta_s
+    // to advance its timed stages, so it must run after TimeSystem. The
+    // after: [ControlShipSystem] edge does NOT imply this (ControlShipSystem
+    // is not itself ordered after TimeSystem), so without the explicit edge a
+    // restore could toposort JumpSequenceSystem before TimeSystem.
+    after: [TimeSystem, ControlShipSystem],
     before: [MovementSystem],
 });
 

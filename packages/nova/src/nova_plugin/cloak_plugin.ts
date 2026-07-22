@@ -6,7 +6,7 @@ import { Component } from 'nova_ecs/component';
 import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
-import { TimeResource } from 'nova_ecs/plugins/time_plugin';
+import { TimeResource, TimeSystem } from 'nova_ecs/plugins/time_plugin';
 import { System } from 'nova_ecs/system';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { registerEntityDeriver } from './entity_factory.js';
@@ -347,6 +347,10 @@ export const CloakDrainSystem = new System({
             emit(PlayerSoundEvent, { id: CLOAK_OFF_SOUND }, [uuid]);
         }
     },
+    // Determinism rule 4: reads time.delta_s to drain the cloak's
+    // resource cost, so it must run after TimeSystem produces this
+    // tick's delta.
+    after: [TimeSystem],
 });
 
 /**

@@ -8,7 +8,7 @@ import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
 import { SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
-import { Time, TimeResource } from 'nova_ecs/plugins/time_plugin';
+import { Time, TimeResource, TimeSystem } from 'nova_ecs/plugins/time_plugin';
 import { Provide } from 'nova_ecs/provide';
 import { System } from 'nova_ecs/system';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
@@ -176,7 +176,10 @@ export const WeaponsSystem = new System({
                 localState.lastFired = time.time;
             }
         }
-    }
+    },
+    // Determinism rule 4: reload/burst timing compares against time.time
+    // and time.delta_s, so this must run after TimeSystem.
+    after: [TimeSystem],
 });
 
 type ActiveSecondary = {
