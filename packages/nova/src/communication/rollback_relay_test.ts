@@ -106,6 +106,49 @@ describe('RollbackRelay', () => {
             .toBe('11111111');
     });
 
+    it('serves a fresh baseline to fresh join requests', () => {
+        relay.close();
+        const empty = { entities: [], singleton: [], resources: [] };
+        relay = new RollbackRelay(server, {
+            autoClock: false,
+            baseline: () => ({ tick: 60, snapshot: empty }),
+            freshBaseline: () => ({ tick: 300, snapshot: empty }),
+        });
+        // Records land before the clock advances so their ticks stay
+        // as stamped (a past-clock record would be clamped and echoed).
+        for (const tick of [100, 250, 350]) {
+            peerA.sendMessage(wrapRollbackMessage({
+                kind: 'inputs',
+                record: { peerId: 'a', tick, inputs: CONTROL },
+            }) as never, 'server');
+        }
+        relay.advanceTicks(310);
+
+        // A fresh request reconstructs from a baseline captured now:
+        // only the tail after it comes along (a resync's whole point —
+        // replaying a 30s-old baseline's tail is the recovery hiccup).
+        peerB.allMessages.length = 0;
+        peerB.sendMessage(wrapRollbackMessage({
+            kind: 'joinRequest', fresh: true,
+        }) as never, 'server');
+        const freshReply = received(peerB).find(m => m.kind === 'catchUp');
+        expect(freshReply?.kind === 'catchUp'
+            && freshReply.baseline?.tick).toBe(300);
+        expect(freshReply?.kind === 'catchUp'
+            && freshReply.records.map(r => r.tick)).toEqual([350]);
+
+        // A plain request gets the periodic baseline and full tail.
+        peerB.allMessages.length = 0;
+        peerB.sendMessage(wrapRollbackMessage({
+            kind: 'joinRequest',
+        }) as never, 'server');
+        const plainReply = received(peerB).find(m => m.kind === 'catchUp');
+        expect(plainReply?.kind === 'catchUp'
+            && plainReply.baseline?.tick).toBe(60);
+        expect(plainReply?.kind === 'catchUp'
+            && plainReply.records.map(r => r.tick)).toEqual([100, 250, 350]);
+    });
+
     it('serves the input log from a tick to late joiners', () => {
         for (const tick of [5, 15, 25]) {
             peerA.sendMessage(wrapRollbackMessage({

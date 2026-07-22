@@ -58,6 +58,7 @@ export class RollbackRelay {
     private stateHashes =
         new Map<number, Map<string, { hash: string, arrivedAt: number }>>();
     private getBaseline?: () => ArchiveBaseline | undefined;
+    private getFreshBaseline?: () => ArchiveBaseline | undefined;
     private getReferenceHash?: (tick: number) => string | undefined;
     private readonly desyncThreshold: number;
     private onArchiveOutvoted?: (tick: number) => void;
@@ -75,11 +76,17 @@ export class RollbackRelay {
 
     constructor(private room: Communicator,
         { autoClock = true, stepMs = SIMULATION_STEP_MS, baseline,
-            referenceHash, onArchiveOutvoted, onDesync, onDesyncDump,
+            freshBaseline, referenceHash, onArchiveOutvoted, onDesync,
+            onDesyncDump,
             desyncThreshold = DEFAULT_DESYNC_THRESHOLD }: {
                 autoClock?: boolean, stepMs?: number,
                 /** The newest archived baseline, when an archive runs. */
                 baseline?: () => ArchiveBaseline | undefined,
+                /** A baseline captured on demand from the archive's
+                 * live world, for `fresh` join requests (resyncs):
+                 * the log tail over it is seconds shorter than over
+                 * the periodic baseline, making recovery cheap. */
+                freshBaseline?: () => ArchiveBaseline | undefined,
                 /** The archive sim's hash at a checkpoint tick: the
                  * true simulation's vote in desync comparisons. */
                 referenceHash?: (tick: number) => string | undefined,
@@ -97,6 +104,7 @@ export class RollbackRelay {
                 onDesyncDump?: (peerId: string, dump: DesyncDump) => void,
             } = {}) {
         this.getBaseline = baseline;
+        this.getFreshBaseline = freshBaseline;
         this.getReferenceHash = referenceHash;
         this.desyncThreshold = desyncThreshold;
         this.onArchiveOutvoted = onArchiveOutvoted;
@@ -324,8 +332,12 @@ export class RollbackRelay {
             }
             case 'joinRequest': {
                 // With an archived baseline, reconstruction starts
-                // there: only the log tail after it is needed.
-                const baseline = this.getBaseline?.();
+                // there: only the log tail after it is needed. A
+                // fresh request (resync) gets a baseline captured
+                // now, shrinking the tail to the transit window.
+                const baseline = (message.fresh
+                    ? this.getFreshBaseline?.() : undefined)
+                    ?? this.getBaseline?.();
                 this.room.sendMessage(wrapRollbackMessage({
                     kind: 'catchUp',
                     tick: this.tick,

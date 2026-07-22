@@ -91,16 +91,24 @@ export class RoomArchive {
     }
 
     /**
-     * The live world's full wire state right now, for incident
-     * records: per-entity hashes name WHICH entity the live archive
-     * got wrong versus a clean replay of its own log; this names the
-     * components and fields. Captured once per recorded incident.
+     * The live world's full wire state right now: incident records
+     * (component-level archive evidence) and `fresh` join baselines
+     * for cheap resyncs both use it. Memoized per tick — several
+     * peers resyncing after one desync broadcast all arrive within
+     * the same archive step.
      */
+    private lastCapture?: { tick: number, snapshot: WireWorldSnapshot };
     captureState(): { tick: number, snapshot: WireWorldSnapshot } | undefined {
         if (!this.world) {
             return undefined;
         }
-        return { tick: this.tick, snapshot: wireSnapshotWorld(this.world) };
+        if (this.lastCapture?.tick !== this.tick) {
+            this.lastCapture = {
+                tick: this.tick,
+                snapshot: wireSnapshotWorld(this.world),
+            };
+        }
+        return this.lastCapture;
     }
 
     /** The trailing sim itself, for tests and diagnostics. */

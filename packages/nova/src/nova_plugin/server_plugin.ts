@@ -112,6 +112,12 @@ export const ServerPlugin: Plugin = {
                     console.log(`Starting rollback room ${systemId}`);
                     const relay = new RollbackRelay(systemRoom, {
                         baseline: () => archives.get(systemId)?.latest,
+                        // Resyncs reconstruct from a baseline captured
+                        // now: the log tail shrinks from up-to-30s to
+                        // the transit window, making recovery ~200ms
+                        // instead of a 1-2s rebuild hiccup.
+                        freshBaseline: () =>
+                            archives.get(systemId)?.captureState(),
                         referenceHash: tick =>
                             archives.get(systemId)?.hashAt(tick),
                         // Diagnostics for the unresolved archive-vs-

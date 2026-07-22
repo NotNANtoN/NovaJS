@@ -146,8 +146,15 @@ export class RollbackSimulation<Inputs> {
      * but only snapshotting the final `capacity` ticks. Used to catch
      * up from an input log when joining a room: genesis plus the log
      * deterministically reconstructs the present.
+     *
+     * With `yieldEvery` set, the loop yields a macrotask every that
+     * many ticks so a long reconstruction doesn't block its thread
+     * (a worker mid-rebuild must still receive room messages).
+     * Without it the entire loop runs synchronously, so callers that
+     * do not await keep their old behavior.
      */
-    fastForward(tick: number) {
+    async fastForward(tick: number, yieldEvery?: number) {
+        let sinceYield = 0;
         while (this.tick < tick) {
             const inputs = this.inputs.get(this.tick + 1);
             if (inputs !== undefined) {
@@ -156,6 +163,10 @@ export class RollbackSimulation<Inputs> {
             this.world.step();
             if (tick - this.tick < this.capacity) {
                 this.takeSnapshot();
+            }
+            if (yieldEvery !== undefined && ++sinceYield >= yieldEvery) {
+                sinceYield = 0;
+                await new Promise(resolve => setTimeout(resolve));
             }
         }
     }

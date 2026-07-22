@@ -64,8 +64,11 @@ export type RollbackProtocolMessage =
     /** Join: the input log up to the server's current tick, plus the
      * newest archived baseline when the server has one. The joiner
      * replays the log over the baseline (or the deterministic genesis
-     * world when there is none). */
-    | { kind: 'joinRequest' }
+     * world when there is none). `fresh` asks for a baseline captured
+     * NOW instead of the last periodic one: a resync replaying a
+     * ~30s-stale baseline's log tail costs 1-2s of blocked rebuild,
+     * while a fresh baseline's tail is just the transit window. */
+    | { kind: 'joinRequest', fresh?: boolean }
     | {
         kind: 'catchUp', tick: number, records: InputRecord[],
         baseline?: ArchiveBaseline,

@@ -48,6 +48,13 @@ const RESYNC_MAX_ATTEMPTS = 8;
  */
 const STAGING_MAX_ATTEMPTS = 5;
 const STAGING_RETRY_MS = 1_000;
+/**
+ * Reconstruction fast-forward yields a macrotask every this many
+ * ticks, so a worker mid-rebuild keeps receiving room traffic (and
+ * the clock estimate stays live) instead of blocking for the whole
+ * replay.
+ */
+const FAST_FORWARD_YIELD_TICKS = 120;
 
 /**
  * How many recent checkpoint states the peer pins for desync dumps:
@@ -406,7 +413,13 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
      * world. If no relay responds (offline play), continues from
      * tick 0.
      */
-    async joinRoom(timeoutMs = 5000): Promise<boolean> {
+    // `fresh` defaults on: joins (system entry, hyperjump arrivals)
+    // and resyncs all replay the log tail over the baseline, and a
+    // baseline captured now shrinks that tail from up-to-30s to the
+    // transit window. Relays without a fresh provider fall back to
+    // the periodic baseline.
+    async joinRoom(timeoutMs = 5000,
+        { fresh = true }: { fresh?: boolean } = {}): Promise<boolean> {
         const communicator = this.world.resources.get(CommunicatorResource);
         if (!communicator?.uuid) {
             return false;
@@ -453,8 +466,13 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
             const request = () => {
                 const server = [...communicator.servers.value][0];
                 if (server) {
-                    communicator.sendMessage(
-                        wrapRollbackMessage({ kind: 'joinRequest' }), server);
+                    // Resyncs ask for a baseline captured now: the log
+                    // tail over a fresh baseline is just the transit
+                    // window, so recovery costs ~200ms instead of the
+                    // 1-2s rebuild of an up-to-30s-old baseline's tail.
+                    communicator.sendMessage(wrapRollbackMessage(
+                        { kind: 'joinRequest', ...(fresh ? { fresh } : {}) }),
+                        server);
                 }
             };
             // The relay may not exist yet when the first peer joins.
@@ -495,9 +513,24 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
         // catchUp.tick is stale by however long staging took (seconds
         // of asset loading on a cold cache); fast-forward to the
         // room's clock *now*, or play begins far behind and the pump
-        // snaps through the gap at a visible fast-forward.
-        this.rollback.fastForward(Math.max(catchUp.tick,
-            Math.ceil(this.estimatedServerTick() ?? 0)));
+        // snaps through the gap at a visible fast-forward. Chunked so
+        // the worker keeps servicing room traffic mid-rebuild, and
+        // re-targeted afterward since the clock moves while it runs.
+        await this.rollback.fastForward(Math.max(catchUp.tick,
+            Math.ceil(this.estimatedServerTick() ?? 0)),
+            FAST_FORWARD_YIELD_TICKS);
+        for (let pass = 0; pass < 3; pass++) {
+            const target = Math.ceil(this.estimatedServerTick() ?? 0);
+            if (target - this.rollback.tick <= 30) {
+                break;
+            }
+            await this.rollback.fastForward(target, FAST_FORWARD_YIELD_TICKS);
+        }
+        // Events emitted during the replay describe history: a
+        // resyncing display already showed the real versions before
+        // the desync, and a fresh join should not open on 30 seconds
+        // of stale explosions. Drop them rather than deliver a burst.
+        this.queuedEvents = [];
         // The local tick just jumped; stale smoothed drift would slew
         // against the new position.
         this.smoothedDrift = undefined;
@@ -834,7 +867,8 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
                 // The pinned states describe the abandoned timeline.
                 this.checkpointSnapshots.clear();
                 try {
-                    if (await this.joinRoom(this.resyncJoinTimeoutMs)) {
+                    if (await this.joinRoom(this.resyncJoinTimeoutMs,
+                        { fresh: true })) {
                         return true;
                     }
                 } catch (error) {
