@@ -492,6 +492,54 @@ describe('accept / landing / completion flow', () => {
         expect(state.credits.credits).toBe(6000);
     });
 
+    it('does not complete a mission aborted by another mission\'s ' +
+        'OnSuccess during the same landing (M1)', () => {
+        // Two active missions share a return stellar. A's OnSuccess
+        // aborts C via an Axxx set string. Landing processes A first
+        // (removing C from state.missions), but the loop iterates a
+        // snapshot: C must NOT be completed/paid.
+        const missionA = makeMission({
+            id: 'nova:200',
+            name: 'A',
+            returnStel: 129,
+            returnStelId: 'nova:129',
+            payVal: 1000,
+            onSuccess: 'a203', // aborts mission C
+        });
+        const missionC = makeMission({
+            id: 'nova:203',
+            name: 'C',
+            returnStel: 129,
+            returnStelId: 'nova:129',
+            payVal: 5000,
+            onSuccess: 'b99', // proof it did NOT run
+        });
+        const state = makeState();
+        const machinery = makeMachinery(state, [missionA, missionC]);
+        // Accept A first so it is iterated first (Map insertion order).
+        acceptOffer(machinery,
+            makeMissionOffer(missionA, machinery.offerContext())!);
+        acceptOffer(machinery,
+            makeMissionOffer(missionC, machinery.offerContext())!);
+        expect(state.missions.size).toBe(2);
+
+        const creditsBefore = state.credits.credits;
+        processLanding(machinery, 'nova:129', 1001);
+
+        // A completed and paid.
+        expect(state.events.some(
+            e => e.type === 'completed' && e.missionName === 'A')).toBe(true);
+        // C was aborted, NOT completed: no completion event, no OnSuccess.
+        expect(state.events.some(
+            e => e.type === 'completed' && e.missionName === 'C')).toBe(false);
+        expect(state.events.some(
+            e => e.type === 'aborted' && e.missionName === 'C')).toBe(true);
+        expect(state.bits.has(99)).toBe(false);
+        // C's 5000 payVal was not applied; only A's 1000.
+        expect(state.credits.credits).toBe(creditsBefore + 1000);
+        expect(state.missions.size).toBe(0);
+    });
+
     it('fails a mission whose deadline passed, running OnFailure', () => {
         const mission = makeMission({
             id: 'nova:202',

@@ -1006,6 +1006,14 @@ export function processLanding(machinery: MissionMachineryContext,
     outfits?: Map<string, number>): void {
     const { state } = machinery;
     for (const active of [...state.missions.values()]) {
+        // The loop iterates a snapshot; an earlier mission's OnSuccess (or
+        // OnShipDone/OnAbort) can abort/fail/complete a later one via an
+        // Axxx/Fxxx set string, removing it from state.missions mid-loop.
+        // Skip any mission that is no longer active so we never re-process
+        // (and re-pay) it.
+        if (!state.missions.has(active.id)) {
+            continue;
+        }
         const mission = machinery.getMission(active.id);
         if (!mission) {
             console.warn(`Active mission ${active.id} has no data; skipping.`);
