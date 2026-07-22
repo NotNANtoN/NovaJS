@@ -10,7 +10,7 @@ import { Plugin } from 'nova_ecs/plugin';
 import { MovementState, MovementStateComponent, MovementSystem } from 'nova_ecs/plugins/movement_plugin';
 import { passthroughType, SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
 import { RandomResource } from 'nova_ecs/plugins/random_plugin';
-import { TimeResource } from 'nova_ecs/plugins/time_plugin';
+import { TimeResource, TimeSystem } from 'nova_ecs/plugins/time_plugin';
 import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
 import SAT from "sat";
@@ -123,7 +123,10 @@ class BeamWeaponEntry extends WeaponEntry {
 export const BeamSystem = new System({
     name: 'BeamSystem',
     before: [UpdateHitboxHullSystem],
-    after: [MovementSystem, WeaponsSystem],
+    // TimeSystem listed explicitly (determinism rule 4): reads time.time
+    // for beam aging. after: [MovementSystem] already pins it after
+    // TimeSystem transitively, but the explicit edge keeps it robust.
+    after: [TimeSystem, MovementSystem, WeaponsSystem],
     args: [BeamDataComponent, BeamStateComponent, MovementStateComponent, FireSubs,
         CreateTimeArgProvider, TimeResource, UUID, Entities, Optional(SourceComponent),
         Optional(TargetComponent), RandomResource] as const,
@@ -357,7 +360,10 @@ const BeamDamageSystem = new System({
 
         emitNow(DamagedEvent, { damage: beamData.damage, damager: uuid, scale }, [beamState.targetHit]);
     },
-    after: [CollisionSystem],
+    // TimeSystem listed explicitly (determinism rule 4): computes damage
+    // from time and delta_ms. after: [CollisionSystem] already pins it
+    // after TimeSystem transitively; the explicit edge keeps it robust.
+    after: [TimeSystem, CollisionSystem],
 });
 
 export const BeamPlugin: Plugin = {

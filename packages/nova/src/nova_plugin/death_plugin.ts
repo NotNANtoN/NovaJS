@@ -7,7 +7,7 @@ import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
 import { MovementPhysicsComponent, MovementState, MovementStateComponent, MovementType, teleport } from 'nova_ecs/plugins/movement_plugin';
 import { passthroughType, SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
-import { Time, TimeResource } from 'nova_ecs/plugins/time_plugin';
+import { Time, TimeResource, TimeSystem } from 'nova_ecs/plugins/time_plugin';
 import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
 import { registerSimulationBridgeEvent } from '../communication/simulation_bridge_events.js';
@@ -115,7 +115,10 @@ const ExplodingFinishedSystem = new System({
             entity.components.delete(ExplodingComponent);
             emit(DeathEvent, time, [uuid]);
         }
-    }
+    },
+    // Determinism rule 4: the explosion end check compares against
+    // time.time, so this must run after TimeSystem advances the clock.
+    after: [TimeSystem],
 });
 
 const MovementQuery = new Query([MovementStateComponent, Optional(BlastDamageComponent)] as const);

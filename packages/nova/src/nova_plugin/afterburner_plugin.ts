@@ -1,7 +1,7 @@
 import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
 import { MovementPhysicsComponent, MovementStateComponent, MovementSystem } from 'nova_ecs/plugins/movement_plugin';
-import { TimeResource } from 'nova_ecs/plugins/time_plugin';
+import { TimeResource, TimeSystem } from 'nova_ecs/plugins/time_plugin';
 import { System } from 'nova_ecs/system';
 import { FuelComponent } from './health_plugin.js';
 import { ION_FACTOR, IsIonizedComponent } from './ionization_plugin.js';
@@ -77,8 +77,11 @@ export const EffectiveMovementPhysicsSystem = new System({
     },
     // Overrides the acceleration ControlShipSystem chose (and the jump
     // sequence's stage transitions must land first), and must take
-    // effect before the ship moves.
-    after: [ControlShipSystem, JumpSequenceSystem],
+    // effect before the ship moves. TimeSystem is listed explicitly
+    // (determinism rule 4): this system reads time.delta_s to drain
+    // afterburner fuel, and neither ControlShipSystem nor JumpSequenceSystem's
+    // ordering alone pins it after TimeSystem across a restore.
+    after: [TimeSystem, ControlShipSystem, JumpSequenceSystem],
     before: [MovementSystem],
 });
 

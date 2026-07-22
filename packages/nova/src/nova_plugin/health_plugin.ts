@@ -4,7 +4,7 @@ import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
 import { DeltaResource } from "nova_ecs/plugins/delta_plugin";
 import { SerializerResource } from "nova_ecs/plugins/serializer_plugin";
-import { TimeResource } from "nova_ecs/plugins/time_plugin";
+import { TimeResource, TimeSystem } from "nova_ecs/plugins/time_plugin";
 import { System } from "nova_ecs/system";
 import { DisabledComponent } from './disabled_component.js';
 import { applyStatDelta, getStatDelta, PartialStat, stat, Stat } from "./stat.js";
@@ -51,7 +51,13 @@ const healthStats = [ShieldComponent, ArmorComponent, IonizationComponent,
                 return;
             }
             stat.step(time.delta_s);
-        }
+        },
+        // Determinism rule 4: this recharge reads time.delta_s, so it must
+        // run after TimeSystem has produced this tick's delta. Without the
+        // edge the toposort could place it before TimeSystem after a
+        // wire-baseline restore, applying the previous tick's delta and
+        // diverging late joiners by one tick's worth of recharge.
+        after: [TimeSystem],
     })] as const);
 
 export const IonizationColorComponent =

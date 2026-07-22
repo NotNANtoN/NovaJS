@@ -222,7 +222,9 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
     desyncCount = 0;
     private lastJoinSucceeded?: boolean;
     private resyncing = false;
-    private lastResyncTime = -Infinity;
+    // protected so failure-path tests can observe whether a resync proceeded
+    // (a proceeding resync refreshes this; a cooldown no-op leaves it).
+    protected lastResyncTime = -Infinity;
 
     private readonly resyncCooldownMs: number;
     private readonly resyncJoinTimeoutMs: number;
@@ -533,17 +535,25 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
                             return;
                         }
                         if (attempt >= this.stagingMaxAttempts) {
-                            // A peer missing this entity is diverged
-                            // for good; a resync re-requests the log
-                            // and retries the loads (and itself
-                            // retries until it lands).
+                            // A peer missing this entity is diverged for
+                            // good; force a resync (bypassing the time
+                            // cooldown) so the record is never silently
+                            // dropped. A plain resync() would no-op if the
+                            // cooldown were still cooling from a recent
+                            // resync, leaving this peer forked for ~10s
+                            // until checkpoint conviction notices. The
+                            // resync re-requests the whole log and retries
+                            // the loads (and itself retries until it lands);
+                            // if a resync is already running, force still
+                            // yields to it — that resync re-stages this
+                            // record anyway.
                             console.error('Failed to stage insertion '
                                 + 'record; resyncing:', error);
                             this.logRollbackEvent('stagingFailed', {
                                 recordTick: record.tick,
                                 peer: record.peerId ?? 'unknown',
                             });
-                            void this.resync();
+                            void this.resync(true);
                             return;
                         }
                         await new Promise(resolve => setTimeout(resolve,
@@ -782,9 +792,21 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
      * and rejoin the room, resimulating the relay's input log — the
      * same reconstruction a late joiner performs.
      */
-    async resync(): Promise<boolean> {
+    // `force` bypasses the time cooldown but NOT the `resyncing` guard. It
+    // exists solely for the staging-failure path (integrateStaged): a peer
+    // that cannot load an inserted entity's data is diverged for good, so it
+    // must resync even if the cooldown is still cooling from an earlier
+    // resync — otherwise the record is dropped and the peer forks silently
+    // until the desync detector fires ~10s later. The `resyncing` guard is
+    // still honoured, so a burst of failed insertions can't storm: the first
+    // forced resync sets `resyncing`, the rest fold into it (it rebuilds the
+    // whole log and re-stages every record), and once it lands `lastResyncTime`
+    // is fresh so the ordinary desync-detector callers are cooldown-gated
+    // again. Not exposed on the public interface — internal callers only.
+    async resync(force = false): Promise<boolean> {
         if (this.resyncing
-            || Date.now() - this.lastResyncTime < this.resyncCooldownMs) {
+            || (!force
+                && Date.now() - this.lastResyncTime < this.resyncCooldownMs)) {
             return false;
         }
         this.lastResyncTime = Date.now();
