@@ -183,7 +183,15 @@ export class Bar extends Menu<Entity> {
                     : (offer.data.refuseButton || 'Refuse'),
             });
             if (choice === 'accept') {
-                acceptOffer(session.machinery, offer, session.outfits);
+                // The offer's acceptable flag was frozen when offers were
+                // rolled; a prior accept this visit may have filled the
+                // hold or the cap, so re-check and report cleanly.
+                const result = acceptOffer(session.machinery, offer,
+                    session.outfits);
+                if (!result.accepted) {
+                    await this.offerPopup.show(result.reason, { accept: 'OK' });
+                    continue;
+                }
                 const brief = expandMissionText(offer.data.briefText,
                     substitutions);
                 if (brief) {

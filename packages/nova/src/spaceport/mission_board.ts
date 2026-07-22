@@ -336,7 +336,15 @@ export class MissionBoard extends Menu<Entity> {
             this.text.status.text = row.offer.reason ?? 'Cannot accept.';
             return;
         }
-        acceptOffer(this.session.machinery, row.offer, this.session.outfits);
+        // The offer's acceptable flag was frozen at board-open; the accept
+        // re-checks cargo fit + the mission cap against current state and
+        // may still refuse (e.g. another accepted mission filled the hold).
+        const result = acceptOffer(this.session.machinery, row.offer,
+            this.session.outfits);
+        if (!result.accepted) {
+            this.text.status.text = result.reason;
+            return;
+        }
         const subs = this.substitutionsFor(row.offer);
         const brief = expandMissionText(row.offer.data.briefText, subs);
         // Mission names carry the same <DST>-style wildcards as the

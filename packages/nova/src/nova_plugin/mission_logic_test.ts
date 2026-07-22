@@ -492,6 +492,113 @@ describe('accept / landing / completion flow', () => {
         expect(state.credits.credits).toBe(6000);
     });
 
+    // The real MissionSession recomputes freeCargoSpace from the current
+    // cargo on every offerContext() call; the default makeMachinery freezes
+    // it. This variant mirrors the session so accept-time re-checks (L3/L4)
+    // see cargo committed by earlier accepts.
+    function makeMachineryLiveCargo(state: MissionWorkingState,
+        missionData: MissionData[]): MissionMachineryContext {
+        const byId = new Map(missionData.map(m => [m.id, m]));
+        return {
+            state,
+            getMission: id => byId.get(id),
+            offerContext: () => {
+                const used = [...state.cargo.values()].reduce((a, b) => a + b, 0);
+                return makeContext({
+                    bits: state.bits,
+                    activeMissions: state.missions,
+                    freeCargoSpace: state.cargoCapacity - used,
+                });
+            },
+            random: () => 0.5,
+        };
+    }
+
+    it('refuses a second cargo mission that no longer fits the hold (L3)', () => {
+        // Two 8-ton pickupMode-0 missions, 10 tons free: the first fits,
+        // the second must be refused (its frozen offer is stale) and must
+        // NOT become an active mission that later completes without cargo.
+        const first = makeMission({
+            id: 'nova:220', name: 'First', cargoType: 0, cargoQty: 8,
+            pickupMode: 0, returnStel: 129, returnStelId: 'nova:129',
+            payVal: 1000,
+        });
+        const second = makeMission({
+            id: 'nova:221', name: 'Second', cargoType: 0, cargoQty: 8,
+            pickupMode: 0, returnStel: 129, returnStelId: 'nova:129',
+            payVal: 5000,
+        });
+        const state = makeState({ cargoCapacity: 10 });
+        const machinery = makeMachineryLiveCargo(state, [first, second]);
+
+        // Both offers look acceptable when the board opens (10 >= 8 each).
+        const offerA = makeMissionOffer(first, machinery.offerContext())!;
+        const offerB = makeMissionOffer(second, machinery.offerContext())!;
+        expect(offerA.acceptable).toBe(true);
+        expect(offerB.acceptable).toBe(true);
+
+        expect(acceptOffer(machinery, offerA).accepted).toBe(true);
+        expect(state.missions.get('nova:220')!.cargoLoaded).toBe(true);
+
+        // The second no longer fits (only 2 tons free): refused cleanly.
+        const result = acceptOffer(machinery, offerB);
+        expect(result.accepted).toBe(false);
+        if (!result.accepted) {
+            expect(result.reason).toContain('cargo space');
+        }
+        expect(state.missions.has('nova:221')).toBe(false);
+
+        // Completing at the return stellar pays ONLY the first mission.
+        const creditsBefore = state.credits.credits;
+        processLanding(machinery, 'nova:129', 1001);
+        expect(state.credits.credits).toBe(creditsBefore + 1000);
+        expect(state.events.some(
+            e => e.type === 'completed' && e.missionName === 'Second'))
+            .toBe(false);
+    });
+
+    it('refuses a stale offer that would exceed the mission cap (L4)', () => {
+        const state = makeState();
+        // Fill to one below the cap with cargo-free missions.
+        const filler: MissionData[] = [];
+        for (let i = 0; i < MAX_ACTIVE_MISSIONS - 1; i++) {
+            const m = makeMission({
+                id: `nova:${400 + i}`, returnStel: 129, returnStelId: 'nova:129',
+            });
+            filler.push(m);
+        }
+        const a = makeMission({
+            id: 'nova:450', name: 'A', returnStel: 129, returnStelId: 'nova:129',
+        });
+        const b = makeMission({
+            id: 'nova:451', name: 'B', returnStel: 129, returnStelId: 'nova:129',
+        });
+        const machinery = makeMachineryLiveCargo(state, [...filler, a, b]);
+        for (const m of filler) {
+            acceptOffer(machinery,
+                makeMissionOffer(m, machinery.offerContext())!);
+        }
+        expect(state.missions.size).toBe(MAX_ACTIVE_MISSIONS - 1);
+
+        // Both offers frozen at size 15 (acceptable). Accepting A hits the
+        // cap; B must then be refused rather than exceeding it.
+        const offerA = makeMissionOffer(a, machinery.offerContext())!;
+        const offerB = makeMissionOffer(b, machinery.offerContext())!;
+        expect(offerA.acceptable).toBe(true);
+        expect(offerB.acceptable).toBe(true);
+
+        expect(acceptOffer(machinery, offerA).accepted).toBe(true);
+        expect(state.missions.size).toBe(MAX_ACTIVE_MISSIONS);
+
+        const result = acceptOffer(machinery, offerB);
+        expect(result.accepted).toBe(false);
+        if (!result.accepted) {
+            expect(result.reason).toContain('16');
+        }
+        expect(state.missions.has('nova:451')).toBe(false);
+        expect(state.missions.size).toBe(MAX_ACTIVE_MISSIONS);
+    });
+
     it('does not complete a mission aborted by another mission\'s ' +
         'OnSuccess during the same landing (M1)', () => {
         // Two active missions share a return stellar. A's OnSuccess
