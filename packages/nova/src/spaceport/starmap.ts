@@ -730,17 +730,23 @@ export class SystemGraph {
     private drawBorders(govtColorOf: (system: SystemData) => number | null) {
         // Two concentric translucent circles per system approximate the
         // original's soft-edged blobs; neighbors overlap into contiguous
-        // territory.
+        // territory. Colors are dimmed toward the original's deep muted
+        // shading (govt_borders.png) — full-strength gövt colors (including
+        // white ones) wash out the map.
+        const dim = (color: number) =>
+            (((color >> 16 & 0xff) * 0.55) & 0xff) << 16
+            | (((color >> 8 & 0xff) * 0.55) & 0xff) << 8
+            | ((color & 0xff) * 0.55) & 0xff;
         for (const { system, x, y } of this.clickTargets) {
             const color = govtColorOf(system);
             if (color === null) {
                 continue;
             }
             this.borderGraphics.lineStyle(0);
-            this.borderGraphics.beginFill(color, 0.28);
+            this.borderGraphics.beginFill(dim(color), 0.30);
             this.borderGraphics.drawCircle(x, y, 34 * BASE_SCALE);
             this.borderGraphics.endFill();
-            this.borderGraphics.beginFill(color, 0.30);
+            this.borderGraphics.beginFill(dim(color), 0.32);
             this.borderGraphics.drawCircle(x, y, 20 * BASE_SCALE);
             this.borderGraphics.endFill();
         }
@@ -965,6 +971,13 @@ export interface OpenStarmapOptions {
      */
     viewedMarks?: MissionMapMark[];
     /**
+     * Overrides the plugin's active-mission marks (orange) for this open.
+     * Landed screens must pass these: the docked entity — and with it the
+     * Missions component — is out of the display world, so the plugin's own
+     * lookup comes up empty while a menu has the ship.
+     */
+    missionMarks?: MissionMapMark[];
+    /**
      * The player's calendar date for the gray readout, when the caller has
      * it handy (landed screens; the entity is out of the display world
      * while docked, so the plugin can't always read it itself).
@@ -997,7 +1010,7 @@ const PROP_TOP = -240;
 const PROP_LINE = 13;
 const PORTS_Y = 182;
 const HAZARDS_Y = 202;
-const DATE_RIGHT_X = 296;
+const DATE_RIGHT_X = 288;
 const BUTTON_Y = 220;
 
 export class Starmap extends Menu<string[] /* route list of systems */> {
@@ -1053,15 +1066,15 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
             borders: new Button(displayAssets, "Show Borders", 100,
                 { x: -287, y: BUTTON_Y }),
             clear: new Button(displayAssets, "Clear Route", 88,
-                { x: -152, y: BUTTON_Y }),
+                { x: -142, y: BUTTON_Y }),
             find: new Button(displayAssets, "Find", 66,
-                { x: -30, y: BUTTON_Y }),
+                { x: -10, y: BUTTON_Y }),
             zoomOut: new Button(displayAssets, "-", 10,
-                { x: 70, y: BUTTON_Y }),
+                { x: 110, y: BUTTON_Y }),
             zoomIn: new Button(displayAssets, "+", 10,
-                { x: 105, y: BUTTON_Y }),
-            done: new Button(displayAssets, "Done", 80,
-                { x: 190, y: BUTTON_Y }),
+                { x: 141, y: BUTTON_Y }),
+            done: new Button(displayAssets, "Done", 64,
+                { x: 188, y: BUTTON_Y }),
         };
         this.addButtons(this.buttons);
 
@@ -1123,7 +1136,8 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
         // The active-mission markers can change independently of the bits
         // (accepting/completing a mission), and the BBS-viewed marks change
         // per open, so they're part of the key.
-        const missionMarks = this.getMissionMarks();
+        const missionMarks =
+            this.openOptions.missionMarks ?? this.getMissionMarks();
         const viewedMarks = this.openOptions.viewedMarks ?? [];
         const marksKey = [
             ...missionMarks.map(m => `${m.systemId}:${m.kind}`).sort(),

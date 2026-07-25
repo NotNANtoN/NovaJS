@@ -9,6 +9,7 @@ import {
     abortMission,
     acceptOffer,
     MissionMapMark,
+    missionMapMarks,
     MissionOffer,
 } from '../nova_plugin/mission_logic.js';
 import { expandMissionText, missionDisplayName } from '../nova_plugin/mission_text.js';
@@ -194,8 +195,16 @@ export class MissionBoard extends Menu<Entity> {
         if (!this.openStarmap) {
             return;
         }
+        // The docked entity is out of the display world, so the active
+        // missions' orange marks ride along with the green viewed ones.
+        const active = this.session
+            ? missionMapMarks(this.session.state.missions.values(),
+                id => this.universe.getMission(id),
+                planetId => this.universe.systemIdOfPlanet(planetId))
+            : [];
         await this.openStarmap({
             viewedMarks: this.viewedMarks(),
+            missionMarks: active,
             date: this.session
                 ? dateFromDayNumber(this.session.currentDay) : undefined,
         });

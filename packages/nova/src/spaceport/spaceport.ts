@@ -19,9 +19,9 @@ import { SystemIdResource } from '../nova_plugin/system_id_resource.js';
 import { SystemPlugin } from '../nova_plugin/system_plugin.js';
 import { WeaponsStateComponent } from '../nova_plugin/weapons_state.js';
 import { formatDate } from '../nova_plugin/calendar.js';
-import { LOCATION_MISSION_COMPUTER, MissionEvent } from '../nova_plugin/mission_logic.js';
+import { LOCATION_MISSION_COMPUTER, MissionEvent, MissionMapMark, missionMapMarks } from '../nova_plugin/mission_logic.js';
 import { missionDisplayName } from '../nova_plugin/mission_text.js';
-import { CreditsComponent, GameDateComponent } from '../nova_plugin/player_state_plugin.js';
+import { CreditsComponent, GameDateComponent, MissionsComponent } from '../nova_plugin/player_state_plugin.js';
 import { Bar } from './bar.js';
 import { Button } from './button.js';
 import { Menu } from './menu.js';
@@ -215,12 +215,29 @@ export class Spaceport extends Menu<Entity> {
             // The starmap binds its own controls on top of the focus
             // stack while open, so the spaceport keys stay quiet under
             // it and 'd' backs out of just the map. The docked entity is
-            // out of the display world, so its date rides along.
+            // out of the display world, so its date and mission marks
+            // ride along.
             map: () => void this.openStarmap?.({
                 date: this.input?.components.get(GameDateComponent),
+                missionMarks: this.activeMissionMarks(),
             }),
             depart: this.done.bind(this),
         });
+    }
+
+    /**
+     * The orange active-mission map marks for the docked ship (the
+     * entity is out of the display world while docked, so the starmap
+     * plugin can't derive these itself).
+     */
+    private activeMissionMarks(): MissionMapMark[] {
+        const missions = this.input?.components.get(MissionsComponent);
+        if (!missions) {
+            return [];
+        }
+        return missionMapMarks(missions.values(),
+            missionId => this.universe.getMission(missionId),
+            planetId => this.universe.systemIdOfPlanet(planetId));
     }
 
     /**

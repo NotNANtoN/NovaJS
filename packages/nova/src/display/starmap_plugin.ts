@@ -120,6 +120,11 @@ export const StarmapPlugin: Plugin = {
         let opening = false;
         stage.addChild(starmap.container);
         world.resources.set(StarmapResource, starmap);
+        // Debug/headless-driving handle, like window.displayWorld.
+        if (typeof window !== 'undefined') {
+            (window as unknown as { novaStarmap: Starmap }).novaStarmap =
+                starmap;
+        }
         const openStarmap = async (
             options?: OpenStarmapOptions): Promise<string[]> => {
             const jumpRoute = getPlayerJumpRoute(world);
