@@ -278,7 +278,7 @@ describe('otherCargoNames', () => {
             ['junk:nova:130', 1],
         ]);
         expect(otherCargoNames(cargo, [good()])).toEqual(
-            ['mission cargo', 'junk:nova:130']);
+            ['5 tons of mission cargo', 'junk:nova:130']);
     });
 });
 

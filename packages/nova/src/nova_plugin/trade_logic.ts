@@ -216,20 +216,29 @@ export function sellGood(state: TradeWorkingState, good: TradeGood): number {
 /**
  * Tons of cargo aboard that no TradeGood row covers (mission cargo
  * and junk that doesn't trade here), for the "Other cargo" line.
+ * Mission cargo reports its tonnage — "5 tons of mission cargo" — as
+ * in the trade_center_port_kane_with_mission_cargo reference
+ * screenshot.
  */
 export function otherCargoNames(cargo: Cargo,
     goods: TradeGood[]): string[] {
     const tradeable = new Set(goods.map(g => g.key));
     const names: string[] = [];
+    let missionTons = 0;
     for (const [key, count] of cargo) {
         if (count <= 0 || tradeable.has(key)) {
             continue;
         }
         if (key.startsWith('mission:')) {
-            names.push('mission cargo');
+            missionTons += count;
         } else {
             names.push(key);
         }
     }
-    return [...new Set(names)];
+    const result = [...new Set(names)];
+    if (missionTons > 0) {
+        result.unshift(`${missionTons} ton${missionTons === 1 ? '' : 's'}`
+            + ' of mission cargo');
+    }
+    return result;
 }
