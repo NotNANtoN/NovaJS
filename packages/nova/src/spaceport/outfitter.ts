@@ -20,7 +20,7 @@ import { ItemGrid, ItemTile } from "./item_grid.js";
 import { Menu } from "./menu.js";
 import { MissionSession } from "./mission_session.js";
 import { MissionUniverse } from "./mission_universe.js";
-import { canBuyOutfit, canSellOutfit, freeCargo, freeMass, maxBuyCount, maxSellCount, OutfitterContext } from "./outfitter_rules.js";
+import { BuyDenialReason, canBuyOutfit, canSellOutfit, freeCargo, freeMass, maxBuyCount, maxSellCount, OutfitterContext } from "./outfitter_rules.js";
 import { QuantityDialog } from "./quantity_dialog.js";
 
 
@@ -69,8 +69,14 @@ export class Outfitter extends Menu<Entity> {
         mass: new PIXI.Text("3", FONT.normal),
         availableMass: new PIXI.Text("Available:", FONT.normal),
         freeMass: new PIXI.Text("", FONT.normal),
-        status: new PIXI.Text("", FONT.normal),
+        // The denial / purchase feedback line at the bottom of the
+        // right info pane ("Can't have any more!" in the reference
+        // outfitter screenshots).
+        status: new PIXI.Text("", {
+            ...FONT.normal, wordWrapWidth: 145,
+        }),
     }
+    private buttons: { buy: Button, sell: Button, done: Button };
 
     constructor(displayAssets: DisplayAssetDataInterface,
         simulationData: SimulationGameDataInterface,
@@ -79,18 +85,21 @@ export class Outfitter extends Menu<Entity> {
         this.container.name = 'Outfitter';
 
         this.outfits = new DefaultMap(() => 0);
-        const buttons = {
-            buy: new Button(displayAssets, "Buy", 60, { x: -100, y: 126 }),
-            sell: new Button(displayAssets, "Sell", 60, { x: 0, y: 126 }),
-            done: new Button(displayAssets, "Done", 60, { x: 100, y: 126 })
+        // Measured against outfitter/earth_outfitter.png: the pill
+        // centers sit at -48 / +62 / +170 relative to the frame
+        // center, on a row centered 147px below it.
+        this.buttons = {
+            buy: new Button(displayAssets, "Buy", 70, { x: -96, y: 134 }),
+            sell: new Button(displayAssets, "Sell", 70, { x: 14, y: 134 }),
+            done: new Button(displayAssets, "Done", 70, { x: 122, y: 134 })
         };
 
         // Option+click opens the bulk quantity dialog, as the
         // original's outfitter does.
-        buttons.buy.click.subscribe(click => this.buyOutfit(click));
-        buttons.sell.click.subscribe(click => this.sellOutfit(click));
-        buttons.done.click.subscribe(this.done.bind(this));
-        this.addButtons(buttons);
+        this.buttons.buy.click.subscribe(click => this.buyOutfit(click));
+        this.buttons.sell.click.subscribe(click => this.sellOutfit(click));
+        this.buttons.done.click.subscribe(this.done.bind(this));
+        this.addButtons(this.buttons);
 
         this.quantityDialog = new QuantityDialog(controlEvents);
 
@@ -127,8 +136,10 @@ export class Outfitter extends Menu<Entity> {
         this.text.freeMass.position.x = 300;
         this.text.freeMass.position.y = 106;
 
-        this.text.status.position.x = -170;
-        this.text.status.position.y = 118;
+        // Bottom of the right info pane, under the Available row —
+        // where the reference screenshots put "Can't have any more!".
+        this.text.status.position.x = 234;
+        this.text.status.position.y = 128;
 
         for (const t of Object.values(this.text)) {
             this.container.addChild(t);
@@ -289,6 +300,55 @@ export class Outfitter extends Menu<Entity> {
         this.runSetString(outfit.onSell, idPrefix(outfit.id));
     }
 
+    /**
+     * The original outfitter's denial captions (see the
+     * outfitter/earth_outfitter_cant_*.png reference screenshots):
+     * shown persistently at the bottom of the right info pane while a
+     * denied selection is highlighted, with the Buy button greyed.
+     */
+    private denialCaption(reason: BuyDenialReason, owned: number,
+        fallback: string): string {
+        switch (reason) {
+            case 'availability':
+            case 'require':
+                return owned > 0
+                    ? "Can't have any more!"
+                    : "Can't have any of this item!";
+            case 'maxCount':
+                return "Can't have any more!";
+            case 'mass':
+            case 'cargo':
+                return owned > 0
+                    ? "Can't hold any more of this item!"
+                    : "Can't hold any of this item!";
+            default:
+                // Hardpoint / launcher denials keep the descriptive
+                // rule message (the references don't show them).
+                return fallback;
+        }
+    }
+
+    /**
+     * Recomputes the Buy/Sell button states and the persistent denial
+     * caption for the current selection, as the original does.
+     */
+    private refreshTradeState() {
+        const outfit = this.itemGrid?.selection;
+        const context = this.makeContext();
+        if (!outfit || !context) {
+            this.buttons.buy.state = 'grey';
+            this.buttons.sell.state = 'grey';
+            return;
+        }
+        const buyCheck = canBuyOutfit(outfit, context);
+        const sellCheck = canSellOutfit(outfit, context);
+        this.buttons.buy.state = buyCheck.allowed ? 'normal' : 'grey';
+        this.buttons.sell.state = sellCheck.allowed ? 'normal' : 'grey';
+        this.text.status.text = buyCheck.allowed ? ''
+            : this.denialCaption(buyCheck.reason,
+                context.outfits.get(outfit.id) ?? 0, buyCheck.message);
+    }
+
     private buyOutfit(click?: ButtonClick) {
         if (click?.option) {
             // Option+click: the bulk quantity dialog.
@@ -301,16 +361,16 @@ export class Outfitter extends Menu<Entity> {
             return;
         }
 
-        const check = canBuyOutfit(outfit, context);
-        if (!check.allowed) {
-            this.text.status.text = check.message;
+        if (!canBuyOutfit(outfit, context).allowed) {
+            // The persistent caption and greyed button already explain.
+            this.refreshTradeState();
             return;
         }
-        this.text.status.text = "";
 
         this.applyBuy(outfit);
         this.itemGrid?.setCounts(this.outfits);
         this.setFreeMassText();
+        this.refreshTradeState();
     }
 
     /**
@@ -347,10 +407,12 @@ export class Outfitter extends Menu<Entity> {
             this.applyBuy(outfit);
             bought++;
         }
-        this.text.status.text = bought > 0
-            ? `Bought ${bought} x ${outfit.name}.` : '';
         this.itemGrid?.setCounts(this.outfits);
         this.setFreeMassText();
+        this.refreshTradeState();
+        if (bought > 0 && !this.text.status.text) {
+            this.text.status.text = `Bought ${bought} x ${outfit.name}.`;
+        }
     }
 
     private sellOutfit(click?: ButtonClick) {
@@ -370,11 +432,11 @@ export class Outfitter extends Menu<Entity> {
             this.text.status.text = check.message;
             return;
         }
-        this.text.status.text = "";
 
         this.applySell(outfit);
         this.itemGrid?.setCounts(this.outfits);
         this.setFreeMassText();
+        this.refreshTradeState();
     }
 
     /** The option-click bulk sell: prefilled with everything owned. */
@@ -406,10 +468,12 @@ export class Outfitter extends Menu<Entity> {
             this.applySell(outfit);
             sold++;
         }
-        this.text.status.text = sold > 0
-            ? `Sold ${sold} x ${outfit.name}.` : '';
         this.itemGrid?.setCounts(this.outfits);
         this.setFreeMassText();
+        this.refreshTradeState();
+        if (sold > 0 && !this.text.status.text) {
+            this.text.status.text = `Sold ${sold} x ${outfit.name}.`;
+        }
     }
 
     private setOutfitSelected(outfitTile: ItemTile<OutfitData> | undefined) {
@@ -446,6 +510,7 @@ export class Outfitter extends Menu<Entity> {
             this.text.availableMass.visible = true;
             this.text.freeMass.visible = true;
         }
+        this.refreshTradeState();
     }
 
     private setFreeMassText() {
@@ -489,6 +554,7 @@ export class Outfitter extends Menu<Entity> {
                     if (this.input === input) {
                         this.shipData = shipData;
                         this.setFreeMassText();
+                        this.refreshTradeState();
                     }
                 });
             }
@@ -514,6 +580,7 @@ export class Outfitter extends Menu<Entity> {
                 if (this.input === input) {
                     this.shipData = shipData;
                     this.setFreeMassText();
+                    this.refreshTradeState();
                 }
             });
         }
