@@ -351,6 +351,8 @@ describe("NovaParse", () => {
         expect(sb128.colors).toEqual(getDefaultStatusBarColors());
         expect(sb128.dataAreas).toEqual(getDefaultStatusBarDataAreas());
         expect(sb128.image).toEqual("nova:700");
+        expect(sb128.fontSize).toEqual(12);
+        expect(sb128.subtitleSize).toEqual(10);
     });
 
     it("Should parse ids", async () => {
