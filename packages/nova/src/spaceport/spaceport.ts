@@ -36,12 +36,16 @@ import { TradeCenter } from './trade_center.js';
 // The 618x517 spaceport frame (PICT 8500): the landing image fills the
 // top, the stellar name and description sit in the center panel, and
 // the venue buttons run down the left and right metal panels — Bar /
-// Mission BBS / Trade Center on the left, Shipyard / Outfitter /
-// Recharge / Leave on the right, per the original's arrangement.
+// Mission BBS / Trade Center on the left, Shipyard / Outfitter and
+// (after a one-slot gap) Leave on the right, per the original's
+// arrangement. Measured against the 1920x1080 reference screenshots
+// (spaceport/earth.png): the first button row's center sits 88px below
+// the frame's center, rows are 41px apart, and Leave occupies the
+// fourth slot.
 const LEFT_BUTTON_X = -296;
 const RIGHT_BUTTON_X = 162;
-const BUTTON_TOP = 42;
-const BUTTON_SPACING = 42;
+const BUTTON_TOP = 75;
+const BUTTON_SPACING = 41;
 const BUTTON_WIDTH = 120;
 
 export class Spaceport extends Menu<Entity> {
@@ -53,8 +57,7 @@ export class Spaceport extends Menu<Entity> {
     private universe: MissionUniverse;
     private buttons: {
         bar: Button, missions: Button, tradeCenter: Button,
-        shipyard: Button, outfitter: Button, recharge: Button,
-        leave: Button,
+        shipyard: Button, outfitter: Button, leave: Button,
     };
     private data?: PlanetData;
     private notices = new PIXI.Text('', {
@@ -82,7 +85,12 @@ export class Spaceport extends Menu<Entity> {
         controlEvents: Observable<ControlEvent>,
         /** Opens the starmap over the spaceport (the 'm' key), so the
          * player can check mission destinations while docked. */
-        private openStarmap?: () => Promise<unknown>) {
+        private openStarmap?: () => Promise<unknown>,
+        /** Opens the player-info dialog over the spaceport (the 'p'
+         * key) — it works both in flight and docked. The docked ship
+         * entity is passed explicitly: while docked it is out of the
+         * world, held by this menu. */
+        private openPlayerInfo?: (entity: Entity) => Promise<unknown>) {
         super(displayAssets, simulationData, "nova:8500", controlEvents);
         this.container.name = 'Spaceport';
 
@@ -99,15 +107,15 @@ export class Spaceport extends Menu<Entity> {
                 { x: RIGHT_BUTTON_X, y: buttonY(0) }),
             outfitter: new Button(displayAssets, "Outfitter", BUTTON_WIDTH,
                 { x: RIGHT_BUTTON_X, y: buttonY(1) }),
-            recharge: new Button(displayAssets, "Recharge", BUTTON_WIDTH,
-                { x: RIGHT_BUTTON_X, y: buttonY(2) }),
+            // No Recharge button: the original has none (fuel refills
+            // as part of landing — see show()), and its right column
+            // is Shipyard / Outfitter / (gap) / Leave.
             leave: new Button(displayAssets, "Leave", BUTTON_WIDTH,
                 { x: RIGHT_BUTTON_X, y: buttonY(3) }),
         };
         const buttons = this.buttons;
 
         buttons.leave.click.subscribe(this.done.bind(this));
-        buttons.recharge.click.subscribe(this.recharge.bind(this));
 
         this.outfitter = new Outfitter(displayAssets, simulationData, controlEvents);
         const showOutfitter = async () => {
@@ -209,11 +217,12 @@ export class Spaceport extends Menu<Entity> {
             missionBBS: showMissionComputer,
             bar: showBar,
             tradeCenter: showTradeCenter,
-            recharge: this.recharge.bind(this),
-            // The starmap binds its own controls on top of the focus
-            // stack while open, so the spaceport keys stay quiet under
-            // it and 'd' backs out of just the map.
+            // The starmap and player info bind their own controls on
+            // top of the focus stack while open, so the spaceport keys
+            // stay quiet under them and 'd' backs out of just the
+            // overlay.
             map: () => void this.openStarmap?.(),
+            properties: () => void this.openPlayerInfo?.(this.input),
             depart: this.done.bind(this),
         });
     }
@@ -234,8 +243,14 @@ export class Spaceport extends Menu<Entity> {
         } catch (e) {
             console.warn('Mission landing processing failed:', e);
         }
+        // Landing refuels the ship, as at the original's spaceports
+        // (there is no Recharge button). Mutating the docked entity's
+        // components is the standard spaceport commit pattern.
+        const fuel = input.components.get(FuelComponent);
+        if (fuel) {
+            fuel.current = fuel.max;
+        }
         this.refreshStatusLine(input);
-        this.refreshRecharge(input);
         return super.show(input);
     }
 
@@ -278,21 +293,6 @@ export class Spaceport extends Menu<Entity> {
             parts.push(`${credits.credits.toLocaleString()} cr`);
         }
         this.statusLine.text = parts.join('    ');
-    }
-
-    /** Refills hyperspace fuel (free, as at the original's ports). */
-    private recharge() {
-        const fuel = this.input?.components.get(FuelComponent);
-        if (fuel) {
-            fuel.current = fuel.max;
-        }
-        this.refreshRecharge(this.input);
-    }
-
-    private refreshRecharge(input?: Entity) {
-        const fuel = (input ?? this.input)?.components.get(FuelComponent);
-        this.buttons.recharge.state =
-            fuel && fuel.current < fuel.max ? 'normal' : 'grey';
     }
 
     override async build() {
