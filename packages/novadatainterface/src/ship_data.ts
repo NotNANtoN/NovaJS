@@ -113,6 +113,12 @@ export interface ShipData extends SpaceObjectData {
      */
     shortName: string;
     /**
+     * The ship class's subtitle (shïp SubTitle), shown on the second line
+     * of the status-bar target display beneath the ship/përs name, e.g.
+     * "Heavy Fighter Class" under "Pirate Viper". Empty when unset.
+     */
+    subtitle: string;
+    /**
      * The escort pilot description shown in the hire-escort dialog
      * (dësc id 14000 + shïp local id - 128); empty when the ship has
      * none.
@@ -149,6 +155,7 @@ export function getDefaultShipData(): ShipData {
         hireRandom: 0,
         escortType: -1,
         shortName: "",
+        subtitle: "",
         pilotDesc: "",
         disableArmorFraction: 0.33,
     }
