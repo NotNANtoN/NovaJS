@@ -24,7 +24,16 @@ import { ArmorComponent, FuelComponent, FUEL_PER_JUMP, ShieldComponent } from ".
 import { OutfitsStateComponent, sumOutfitField } from "../nova_plugin/outfit_plugin.js";
 import { PersComponent } from "../nova_plugin/pers_plugin.js";
 import { DisabledComponent } from "../nova_plugin/disabled_component.js";
-import { PlanetDataComponent } from "../nova_plugin/planet_plugin.js";
+import { PlanetDataComponent, PlanetTargetComponent } from "../nova_plugin/planet_plugin.js";
+import { JumpRouteComponent } from "../nova_plugin/jump_plugin.js";
+import { CargoComponent, cargoUsed } from "../nova_plugin/cargo_plugin.js";
+import { CreditsComponent } from "../nova_plugin/player_state_plugin.js";
+import { STANDARD_CARGO_NAMES } from "../nova_plugin/mission_logic.js";
+import { ShipComponent } from "../nova_plugin/ship_plugin.js";
+import {
+    formatCredits, navReadout, NavReadout, CargoLine, abbreviateCargoName,
+    specialCargoSummary, standardCargoIndex,
+} from "./status_bar_content.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 import { ShipDataComponent } from "../nova_plugin/ship_plugin.js";
 import { SystemIdResource } from "../nova_plugin/system_id_resource.js";
@@ -91,6 +100,13 @@ class StatusBar {
     private targetRenderTexture?: PIXI.RenderTexture;
 
     private text: { [index: string]: PIXI.Text } = {};
+    private brightFont!: PIXI.TextStyle;
+    private dimFont!: PIXI.TextStyle;
+    private subtitleFont!: PIXI.TextStyle;
+    /** Reused text objects for the regular-cargo manifest (left column). */
+    private cargoLineTexts: PIXI.Text[] = [];
+    private cargoContainer?: PIXI.Container;
+    private static readonly MAX_CARGO_LINES = 6;
     private addEnemyButton: Button;
     readonly addEnemy: Subject<ButtonClick>;
 
@@ -131,18 +147,34 @@ class StatusBar {
     }
 
     private makeText() {
+        // Text sizes and colours come from the parsed ïntf resource
+        // (StatFontSize / SubtitleSize and the bright/dim text colours).
+        const fontFamily = 'Geneva';
+        const fontSize = this.statusBarData.fontSize || 12;
+        const subtitleSize = this.statusBarData.subtitleSize || 10;
         const font = new PIXI.TextStyle({
-            fontFamily: 'Geneva',
-            fontSize: 12,
+            fontFamily,
+            fontSize,
             align: 'center',
             fill: this.statusBarData.colors.brightText,
         });
         const dimFont = new PIXI.TextStyle({
-            fontFamily: 'Geneva',
-            fontSize: 12,
+            fontFamily,
+            fontSize,
             align: 'center',
             fill: this.statusBarData.colors.dimText,
         });
+        const subtitleFont = new PIXI.TextStyle({
+            fontFamily,
+            fontSize: subtitleSize,
+            align: 'center',
+            fill: this.statusBarData.colors.dimText,
+        });
+        this.brightFont = font;
+        this.dimFont = dimFont;
+        this.subtitleFont = subtitleFont;
+
+        this.makeNavigationText(font, dimFont);
 
         const secondaryWeaponContainer = new PIXI.Container();
         this.container.addChild(secondaryWeaponContainer);
@@ -221,15 +253,103 @@ class StatusBar {
 
         this.text.targetName = new PIXI.Text("Name Placeholder", font);
         this.text.targetName.anchor.x = 0.5;
-        this.text.targetName.anchor.y = 0.5;
+        this.text.targetName.anchor.y = 0;
         this.text.targetName.position.x = middle[0];
-        this.text.targetName.position.y = 12;
+        this.text.targetName.position.y = 2;
 
         this.targetContainer.addChild(this.text.targetName);
+
+        // The ship class subtitle (shïp SubTitle), smaller and dim, sits just
+        // beneath the target name — "Heavy Fighter Class" under "Pirate Viper".
+        this.text.targetSubtitle = new PIXI.Text("", subtitleFont);
+        this.text.targetSubtitle.anchor.x = 0.5;
+        this.text.targetSubtitle.anchor.y = 0;
+        this.text.targetSubtitle.position.x = middle[0];
+        this.text.targetSubtitle.position.y = 2 + fontSize + 1;
+        this.targetContainer.addChild(this.text.targetSubtitle);
+
+        // The target's government, dim, in the lower-right of the pane
+        // ("Sigma" / "Trader" / "Pirate" in the reference screenshots).
+        this.text.targetGovt = new PIXI.Text("", dimFont);
+        this.text.targetGovt.anchor.x = 1;
+        this.text.targetGovt.anchor.y = 1;
+        this.text.targetGovt.position.x = size[0] - 6;
+        this.text.targetGovt.position.y = size[1] - 3;
+        this.targetContainer.addChild(this.text.targetGovt);
 
         this.text.targetImagePlaceholder = new PIXI.Text("No target image", dimFont);
         this.text.targetImagePlaceholder.anchor.x = 0.5;
         this.text.targetImagePlaceholder.anchor.y = 0.5;
+
+        this.makeCargoText(font, dimFont);
+    }
+
+    private makeNavigationText(font: PIXI.TextStyle, dimFont: PIXI.TextStyle) {
+        const nav = this.statusBarData.dataAreas.navigation;
+        const container = new PIXI.Container();
+        this.container.addChild(container);
+        container.position.set(nav.position[0], nav.position[1]);
+
+        this.text.navHeader = new PIXI.Text("Stellar Navigation", dimFont);
+        this.text.navHeader.anchor.x = 0.5;
+        this.text.navHeader.anchor.y = 0;
+        this.text.navHeader.position.x = nav.size[0] / 2;
+        this.text.navHeader.position.y = 2;
+        container.addChild(this.text.navHeader);
+
+        this.text.navValue = new PIXI.Text("No Destination", dimFont);
+        this.text.navValue.anchor.x = 0.5;
+        this.text.navValue.anchor.y = 0;
+        this.text.navValue.position.x = nav.size[0] / 2;
+        this.text.navValue.position.y = 2 + (this.statusBarData.fontSize || 12) + 2;
+        container.addChild(this.text.navValue);
+    }
+
+    private makeCargoText(font: PIXI.TextStyle, dimFont: PIXI.TextStyle) {
+        const cargo = this.statusBarData.dataAreas.cargo;
+        const container = new PIXI.Container();
+        this.container.addChild(container);
+        container.position.set(cargo.position[0], cargo.position[1]);
+        this.cargoContainer = container;
+
+        // Regular-cargo manifest lines (left column), reused across frames.
+        for (let i = 0; i < StatusBar.MAX_CARGO_LINES; i++) {
+            const line = new PIXI.Text("", dimFont);
+            line.anchor.set(0, 0);
+            line.visible = false;
+            container.addChild(line);
+            this.cargoLineTexts.push(line);
+        }
+
+        // Initial positions match the empty-hold (centred) layout so the panel
+        // reads sensibly before the first drawCargo, without any overlap.
+        const cx = cargo.size[0] / 2;
+        const lineHeight = (this.statusBarData.fontSize || 12) + 2;
+
+        this.text.free = new PIXI.Text("Free: 0", font);
+        this.text.free.anchor.set(0.5, 0);
+        this.text.free.position.set(cx, 6);
+        container.addChild(this.text.free);
+
+        this.text.specialLabel = new PIXI.Text("Special:", dimFont);
+        this.text.specialLabel.anchor.y = 0;
+        this.text.specialLabel.visible = false;
+        container.addChild(this.text.specialLabel);
+
+        this.text.special = new PIXI.Text("", font);
+        this.text.special.anchor.y = 0;
+        this.text.special.visible = false;
+        container.addChild(this.text.special);
+
+        this.text.creditsLabel = new PIXI.Text("Credits:", dimFont);
+        this.text.creditsLabel.anchor.set(0.5, 0);
+        this.text.creditsLabel.position.set(cx, 6 + lineHeight * 3);
+        container.addChild(this.text.creditsLabel);
+
+        this.text.credits = new PIXI.Text("0", font);
+        this.text.credits.anchor.set(0.5, 0);
+        this.text.credits.position.set(cx, 6 + lineHeight * 4);
+        container.addChild(this.text.credits);
     }
 
     drawRadar(source: Position,
@@ -354,10 +474,15 @@ class StatusBar {
     }
 
     drawTarget(name: string, shield?: number, armor?: number,
-        shipGraphic?: AnimationGraphic, disabled = false) {
+        shipGraphic?: AnimationGraphic, disabled = false,
+        subtitle = "", government = "") {
         this.targetContainer.visible = true;
         this.noTargetContainer.visible = false;
         this.text.targetName.text = name;
+        this.text.targetSubtitle.text = subtitle;
+        this.text.targetSubtitle.visible = subtitle.length > 0;
+        this.text.targetGovt.text = government;
+        this.text.targetGovt.visible = government.length > 0;
 
         const readout = targetReadout(disabled, shield, armor);
         this.text.disabled.visible = readout.kind === 'disabled';
@@ -412,6 +537,97 @@ class StatusBar {
         this.targetContainer.visible = false;
         this.noTargetContainer.visible = true;
         this.targetSprite.visible = false;
+    }
+
+    private lastNav?: string;
+    drawNavigation(readout: NavReadout) {
+        if (!this.built) {
+            return;
+        }
+        const key = `${readout.header} ${readout.value}`;
+        if (key === this.lastNav) {
+            return;
+        }
+        this.lastNav = key;
+        this.text.navHeader.text = readout.header;
+        this.text.navValue.text = readout.value;
+        this.text.navValue.style = readout.dim ? this.dimFont : this.brightFont;
+    }
+
+    private lastCargo?: string;
+    /**
+     * Draws the cargo/credits panel. With no regular cargo the Free and Credits
+     * lines centre in the panel (the original's empty-hold look); with cargo
+     * the manifest fills the left column and Free/Special/Credits the right.
+     */
+    drawCargo(free: number, credits: number, lines: CargoLine[],
+        special: string | null) {
+        if (!this.built) {
+            return;
+        }
+        const cargo = this.statusBarData.dataAreas.cargo;
+        const width = cargo.size[0];
+        const lineHeight = (this.statusBarData.fontSize || 12) + 2;
+        const creditsText = formatCredits(credits);
+        const key = JSON.stringify([free, creditsText, lines, special]);
+        if (key === this.lastCargo) {
+            return;
+        }
+        this.lastCargo = key;
+
+        // Regular cargo manifest, left column.
+        const shown = Math.min(lines.length, StatusBar.MAX_CARGO_LINES);
+        for (let i = 0; i < this.cargoLineTexts.length; i++) {
+            const text = this.cargoLineTexts[i];
+            if (i < shown) {
+                const line = lines[i];
+                text.text = `${line.name}: ${line.quantity}`;
+                text.anchor.set(0, 0);
+                text.position.set(6, 6 + i * lineHeight);
+                text.visible = true;
+            } else {
+                text.visible = false;
+            }
+        }
+
+        this.text.free.text = `Free: ${free}`;
+        this.text.credits.text = creditsText;
+        const hasSpecial = special !== null;
+        this.text.specialLabel.visible = hasSpecial;
+        this.text.special.visible = hasSpecial;
+        if (hasSpecial) {
+            this.text.special.text = special;
+        }
+
+        if (shown === 0) {
+            // Empty hold: centre Free and the Credits label/value.
+            const cx = width / 2;
+            this.text.free.anchor.x = 0.5;
+            this.text.free.position.set(cx, 6);
+            this.text.creditsLabel.anchor.x = 0.5;
+            this.text.creditsLabel.position.set(cx, 6 + lineHeight * 3);
+            this.text.credits.anchor.x = 0.5;
+            this.text.credits.position.set(cx, 6 + lineHeight * 4);
+            this.text.specialLabel.visible = false;
+            this.text.special.visible = false;
+        } else {
+            // Right column: Free, then Special (label+value), then Credits.
+            const rx = Math.round(width * 0.52);
+            this.text.free.anchor.x = 0;
+            this.text.free.position.set(rx, 6);
+            let y = 6 + lineHeight;
+            if (hasSpecial) {
+                this.text.specialLabel.anchor.x = 0;
+                this.text.specialLabel.position.set(rx, y);
+                this.text.special.anchor.x = 0;
+                this.text.special.position.set(rx, y + lineHeight);
+                y += lineHeight * 2;
+            }
+            this.text.creditsLabel.anchor.x = 0;
+            this.text.creditsLabel.position.set(rx, y);
+            this.text.credits.anchor.x = 0;
+            this.text.credits.position.set(rx, y + lineHeight);
+        }
     }
 
     /** Releases the cached target RenderTexture (and its base texture). */
@@ -534,24 +750,31 @@ const DrawStatusBarSecondaryWeapon = new System({
 
 const TargetQuery = new Query([ShipDataComponent, Optional(ShieldComponent),
     Optional(ArmorComponent), Optional(AnimationGraphicComponent),
-    Optional(PersComponent), Optional(DisabledComponent)] as const);
+    Optional(PersComponent), Optional(DisabledComponent),
+    Optional(GovtComponent)] as const);
 const DrawStatusBarTarget = new System({
     name: 'DrawStatusBarTarget',
-    args: [StatusBarResource, TargetComponent, RunQuery, PlayerShipSelector] as const,
-    step(statusBar, { target }, runQuery) {
+    args: [StatusBarResource, TargetComponent, RunQuery,
+        SimulationGameDataResource, PlayerShipSelector] as const,
+    step(statusBar, { target }, runQuery, gameData) {
         if (!target) {
             statusBar.clearTarget();
             return;
         }
         const result = runQuery(TargetQuery, target)[0];
         if (result) {
-            const [shipData, shield, armor, shipGraphic, pers, disabled] =
+            const [shipData, shield, armor, shipGraphic, pers, disabled, govt] =
                 result;
-            // A përs person's name replaces the ship class name on the
-            // target display (EVN Bible, përs section).
+            // The government name shown lower-right of the target pane. Cached
+            // lookup: undefined until the govt data loads, then it appears.
+            const government = govt
+                ? (gameData.data.Govt.getCached(govt.id)?.name ?? "") : "";
+            // A përs person's name and subtitle replace the ship class name
+            // and subtitle on the target display (EVN Bible, përs section).
+            const subtitle = (pers?.subtitle || shipData.subtitle);
             statusBar.drawTarget(pers?.name ?? shipData.name,
                 shield?.percent, armor?.percent, shipGraphic,
-                disabled !== undefined);
+                disabled !== undefined, subtitle, government);
         }
     }
 })
@@ -576,6 +799,87 @@ const DrawStatusBarInterference = new System({
             statusBar.interferenceReduction = reduction;
         }
     },
+});
+
+const PlanetNavQuery = new Query([PlanetDataComponent] as const);
+const DrawStatusBarNavigation = new System({
+    name: 'DrawStatusBarNavigation',
+    args: [StatusBarResource, Optional(JumpRouteComponent),
+        Optional(PlanetTargetComponent), RunQuery,
+        SimulationGameDataResource, PlayerShipSelector] as const,
+    step(statusBar, jumpRoute, planetTarget, runQuery, gameData) {
+        // A set hyperspace route shows the next system; getCached is undefined
+        // until the system data loads, then the name appears.
+        let destinationName: string | null = null;
+        const nextSystem = jumpRoute?.route[0];
+        if (nextSystem) {
+            destinationName =
+                gameData.data.System.getCached(nextSystem)?.name ?? null;
+        }
+
+        // Otherwise the selected stellar's name, read off the planet entity.
+        let stellarName: string | null = null;
+        if (planetTarget?.target) {
+            const planet = runQuery(PlanetNavQuery, planetTarget.target)[0];
+            stellarName = planet ? planet[0].name : null;
+        }
+
+        statusBar.drawNavigation(navReadout(destinationName, stellarName));
+    }
+});
+
+const DrawStatusBarCargo = new System({
+    name: 'DrawStatusBarCargo',
+    args: [StatusBarResource, Optional(CargoComponent), Optional(CreditsComponent),
+        ShipComponent, Optional(OutfitsStateComponent),
+        SimulationGameDataResource, PlayerShipSelector] as const,
+    step(statusBar, cargo, credits, ship, outfits, gameData) {
+        const shipData = gameData.data.Ship.getCached(ship.id);
+        if (!shipData) {
+            // Not cached yet; getCached kicked off the load.
+            return;
+        }
+        let capacity = shipData.physics.freeCargo;
+        if (outfits) {
+            const outfitCargo = sumOutfitField(
+                outfits, gameData, o => o.physics.freeCargo ?? 0);
+            if (outfitCargo === undefined) {
+                return; // An outfit's data isn't cached yet.
+            }
+            capacity += outfitCargo;
+        }
+
+        const lines: CargoLine[] = [];
+        const specialNames: string[] = [];
+        if (cargo) {
+            for (const [key, quantity] of cargo) {
+                if (quantity <= 0) {
+                    continue;
+                }
+                const stdIndex = standardCargoIndex(key);
+                if (stdIndex !== null) {
+                    lines.push({
+                        name: abbreviateCargoName(
+                            STANDARD_CARGO_NAMES[stdIndex] ?? `Cargo ${stdIndex}`),
+                        quantity,
+                    });
+                } else if (key.startsWith('junk:')) {
+                    const junk = gameData.data.Junk.getCached(key.slice(5));
+                    lines.push({
+                        name: abbreviateCargoName(junk?.abbrev || 'Cargo'),
+                        quantity,
+                    });
+                } else if (key.startsWith('mission:')) {
+                    specialNames.push('Cargo');
+                }
+            }
+        }
+
+        const used = cargo ? cargoUsed(cargo) : 0;
+        const free = Math.max(0, capacity - used);
+        statusBar.drawCargo(free, credits?.credits ?? 0, lines,
+            specialCargoSummary(specialNames));
+    }
 });
 
 export const StatusBarPlugin: Plugin = {
@@ -638,6 +942,8 @@ export const StatusBarPlugin: Plugin = {
         world.addSystem(DrawStatusBarSecondaryWeapon);
         world.addSystem(DrawStatusBarTarget);
         world.addSystem(DrawStatusBarInterference);
+        world.addSystem(DrawStatusBarNavigation);
+        world.addSystem(DrawStatusBarCargo);
     },
     remove(world) {
         world.removeSystem(DrawRadar);
@@ -646,6 +952,8 @@ export const StatusBarPlugin: Plugin = {
         world.removeSystem(DrawStatusBarSecondaryWeapon);
         world.removeSystem(DrawStatusBarTarget);
         world.removeSystem(DrawStatusBarInterference);
+        world.removeSystem(DrawStatusBarNavigation);
+        world.removeSystem(DrawStatusBarCargo);
 
         const stage = world.resources.get(Stage);
         const statusBar = world.resources.get(StatusBarResource);

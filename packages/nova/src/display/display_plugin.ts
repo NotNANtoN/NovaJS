@@ -27,6 +27,7 @@ import { starfield } from "./starfield_plugin.js";
 import { SystemEnvironmentPlugin } from "./system_environment_plugin.js";
 import { StarmapPlugin } from "./starmap_plugin.js";
 import { StatusBarResource, StatusBarPlugin } from "./status_bar.js";
+import { StatusMessagePlugin } from "./status_message_plugin.js";
 import { TargetCornersPlugin } from "./target_corners_plugin.js";
 
 
@@ -59,6 +60,7 @@ export const Display: Plugin = {
         // After the starfield so it can hide it on negative murk.
         await world.addPlugin(SystemEnvironmentPlugin);
         await world.addPlugin(StatusBarPlugin);
+        await world.addPlugin(StatusMessagePlugin);
         await world.addPlugin(AnimationPlugin);
         await world.addPlugin(AnimationGraphicPlugin);
         world.addSystem(CenterShipSystem);
@@ -106,6 +108,7 @@ export const Display: Plugin = {
         await world.removePlugin(AnimationGraphicPlugin);
         await world.removePlugin(AnimationPlugin);
         await world.removePlugin(StatusBarPlugin);
+        await world.removePlugin(StatusMessagePlugin);
         await world.removePlugin(starfieldPlugin);
         await world.removePlugin(ScreenSizePlugin);
 

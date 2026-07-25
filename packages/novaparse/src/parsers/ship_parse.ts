@@ -252,6 +252,7 @@ export async function ShipParse(ship: ShipResource,
         hireRandom: ship.hireRandom,
         escortType: ship.escortType,
         shortName: ship.shortName,
+        subtitle: ship.subtitle,
         // The hire-escort pilot description parallels the shipyard
         // description range: dësc 14000 + (shïp local id - 128).
         pilotDesc: ship.idSpace.dësc[ship.id - 128 + 14000]?.text ?? "",

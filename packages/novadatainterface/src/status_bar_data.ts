@@ -81,7 +81,11 @@ export function getDefaultStatusBarDataAreas(): StatusBarDataAreas {
 export interface StatusBarData extends BaseData {
     image: string,
     colors: StatusBarColors,
-    dataAreas: StatusBarDataAreas
+    dataAreas: StatusBarDataAreas,
+    /** Normal status-bar text size (ïntf StatFontSize). */
+    fontSize: number,
+    /** Smaller size used for target subtitles (ïntf SubtitleSize). */
+    subtitleSize: number,
 }
 
 export function getDefaultStatusBarData(): StatusBarData {
@@ -89,6 +93,8 @@ export function getDefaultStatusBarData(): StatusBarData {
         ...getDefaultBaseData(),
         image: "default",
         colors: getDefaultStatusBarColors(),
-        dataAreas: getDefaultStatusBarDataAreas()
+        dataAreas: getDefaultStatusBarDataAreas(),
+        fontSize: 12,
+        subtitleSize: 10,
     }
 }

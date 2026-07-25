@@ -57,6 +57,7 @@ import { CharResource } from "./resource_parsers/char_resource.js";
 import { CronResource } from "./resource_parsers/cron_resource.js";
 import { JunkResource } from "./resource_parsers/junk_resource.js";
 import { GovtResource } from "./resource_parsers/govt_resource.js";
+import { IntfResource } from "./resource_parsers/intf_resource.js";
 import { MisnResource } from "./resource_parsers/misn_resource.js";
 import { OutfResource } from "./resource_parsers/outf_resource.js";
 import { PersResource } from "./resource_parsers/pers_resource.js";
@@ -249,7 +250,7 @@ export class NovaParse implements GameDataInterface {
             SpriteSheet: this.spriteSheetDataGettable,
             SpriteSheetImage: this.spriteSheetImageGettable,
             SpriteSheetFrames: this.spriteSheetFramesGettable,
-            StatusBar: this.makeGettable<BaseResource, StatusBarData>(NovaResourceType.ïntf, StatusBarParse),
+            StatusBar: this.makeGettable<IntfResource, StatusBarData>(NovaResourceType.ïntf, StatusBarParse),
             Explosion: this.makeGettable<BoomResource, ExplosionData>(NovaResourceType.bööm, ExplosionParse),
             SoundFile: this.makeGettable<SndResource, SoundFile>(NovaResourceType.snd, SoundFileParse),
         }
