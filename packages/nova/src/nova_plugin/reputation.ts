@@ -253,6 +253,30 @@ export function combatRatingName(kills: number): string {
     return name;
 }
 
+/**
+ * The map's "Legal Status:" name for a legal record with a government
+ * (map/govt_borders.png shows "Citizen" at a clean record). The stock
+ * strings live in STR# resources that are not parsed, so these tiers
+ * are illustrative in the COMBAT_RATING_TIERS style: hostile records
+ * (record < -crimeTol, see recordHostile) read as Criminal/Fugitive,
+ * mild negatives as Offender, and positives improve with magnitude.
+ */
+export function legalStatusName(record: number, crimeTol: number): string {
+    if (recordHostile(record, crimeTol)) {
+        return record <= -1000 ? 'Fugitive' : 'Criminal';
+    }
+    if (record < 0) {
+        return 'Offender';
+    }
+    if (record >= 1000) {
+        return 'Upstanding Citizen';
+    }
+    if (record >= 100) {
+        return 'Decent Citizen';
+    }
+    return 'Citizen';
+}
+
 // --- mïsn PayVal decoding ---
 
 /** A decoded mïsn PayVal (Bible's positive/negative encodings). */

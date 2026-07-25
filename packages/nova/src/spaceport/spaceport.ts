@@ -19,9 +19,9 @@ import { SystemIdResource } from '../nova_plugin/system_id_resource.js';
 import { SystemPlugin } from '../nova_plugin/system_plugin.js';
 import { WeaponsStateComponent } from '../nova_plugin/weapons_state.js';
 import { formatDate } from '../nova_plugin/calendar.js';
-import { LOCATION_MISSION_COMPUTER, MissionEvent } from '../nova_plugin/mission_logic.js';
+import { LOCATION_MISSION_COMPUTER, MissionEvent, MissionMapMark, missionMapMarks } from '../nova_plugin/mission_logic.js';
 import { missionDisplayName } from '../nova_plugin/mission_text.js';
-import { CreditsComponent, GameDateComponent } from '../nova_plugin/player_state_plugin.js';
+import { CreditsComponent, GameDateComponent, MissionsComponent } from '../nova_plugin/player_state_plugin.js';
 import { Bar } from './bar.js';
 import { Button } from './button.js';
 import { Menu } from './menu.js';
@@ -31,6 +31,7 @@ import { processEntityLanding } from './mission_session.js';
 import { MissionUniverse } from './mission_universe.js';
 import { Outfitter } from './outfitter.js';
 import { Shipyard } from './shipyard.js';
+import { OpenStarmapOptions } from './starmap.js';
 import { TradeCenter } from './trade_center.js';
 
 // The 618x517 spaceport frame (PICT 8500): the landing image fills the
@@ -96,7 +97,8 @@ export class Spaceport extends Menu<Entity> {
         controlEvents: Observable<ControlEvent>,
         /** Opens the starmap over the spaceport (the 'm' key), so the
          * player can check mission destinations while docked. */
-        private openStarmap?: () => Promise<unknown>,
+        private openStarmap?: (options?: OpenStarmapOptions)
+            => Promise<unknown>,
         /** Opens the player-info dialog over the spaceport (the 'p'
          * key) — it works both in flight and docked. The docked ship
          * entity is passed explicitly: while docked it is out of the
@@ -157,7 +159,7 @@ export class Spaceport extends Menu<Entity> {
         this.universe = MissionUniverse.shared(simulationData);
         this.missionComputer = new MissionBoard(displayAssets, simulationData,
             controlEvents, this.universe, id, LOCATION_MISSION_COMPUTER,
-            "nova:8505", "Mission BBS");
+            "nova:8505", "Mission BBS", this.openStarmap);
         const showMissionComputer = async () => {
             this.controls.unbind();
             // The board mutates missions, cargo, credits, control
@@ -237,14 +239,34 @@ export class Spaceport extends Menu<Entity> {
             missionBBS: showMissionComputer,
             bar: showBar,
             tradeCenter: showTradeCenter,
+            recharge: this.refuel.bind(this),
             // The starmap and player info bind their own controls on
             // top of the focus stack while open, so the spaceport keys
             // stay quiet under them and 'd' backs out of just the
-            // overlay.
-            map: () => void this.openStarmap?.(),
+            // overlay. The docked entity is out of the display world,
+            // so its date and mission marks ride along to the map.
+            map: () => void this.openStarmap?.({
+                date: this.input?.components.get(GameDateComponent),
+                missionMarks: this.activeMissionMarks(),
+            }),
             properties: () => void this.openPlayerInfo?.(this.input),
             depart: this.done.bind(this),
         });
+    }
+
+    /**
+     * The orange active-mission map marks for the docked ship (the
+     * entity is out of the display world while docked, so the starmap
+     * plugin can't derive these itself).
+     */
+    private activeMissionMarks(): MissionMapMark[] {
+        const missions = this.input?.components.get(MissionsComponent);
+        if (!missions) {
+            return [];
+        }
+        return missionMapMarks(missions.values(),
+            missionId => this.universe.getMission(missionId),
+            planetId => this.universe.systemIdOfPlanet(planetId));
     }
 
     /**

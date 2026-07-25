@@ -3,14 +3,21 @@ import { Resource } from 'nova_ecs/resource';
 import { World } from 'nova_ecs/world';
 import { EcsEvent } from 'nova_ecs/events';
 import { Subscription } from 'rxjs';
+import { Component } from 'nova_ecs/component';
 import { DisplayAssetDataResource, SimulationGameDataResource } from '../nova_plugin/game_data_resource.js';
 import { ControlsSubject } from '../nova_plugin/controls_plugin.js';
+import { isExplored, markExplored } from '../nova_plugin/explored_store.js';
 import { JumpRouteComponent } from '../nova_plugin/jump_plugin.js';
+import { missionMapMarks } from '../nova_plugin/mission_logic.js';
 import { ControlBitsComponent } from '../nova_plugin/ncb_plugin.js';
 import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin.js';
+import { GameDateComponent, MissionsComponent } from '../nova_plugin/player_state_plugin.js';
+import { LegalRecordsComponent } from '../nova_plugin/reputation_plugin.js';
 import { SystemIdResource } from '../nova_plugin/system_id_resource.js';
 import { MenuControls } from '../spaceport/menu_controls.js';
-import { Starmap } from '../spaceport/starmap.js';
+import { MissionUniverse } from '../spaceport/mission_universe.js';
+import { emptyRouteState } from '../spaceport/route.js';
+import { OpenStarmapOptions, RouteStateStore, Starmap } from '../spaceport/starmap.js';
 import { ScreenSize } from './screen_size_plugin.js';
 import { Stage } from './stage_resource.js';
 
@@ -20,21 +27,35 @@ export const SetJumpRouteEvent = new EcsEvent<{ route: string[] }>('SetJumpRoute
 /**
  * Opens the starmap over whatever is on screen and resolves with the
  * chosen route when it closes. Landed menus (the spaceport) call this
- * for their 'map' key; in flight the plugin's own subscription below
- * opens it. No-ops (resolving with the current route) while the map is
- * already open.
+ * for their 'map' key — the Mission BBS passes the viewed mission's
+ * destination marks and the player's date through the options; in
+ * flight the plugin's own subscription below opens it. No-ops
+ * (resolving with the current route) while the map is already open.
  */
 export const OpenStarmapResource =
-    new Resource<() => Promise<string[]>>('OpenStarmap');
+    new Resource<(options?: OpenStarmapOptions) => Promise<string[]>>(
+        'OpenStarmap');
 
-function getPlayerJumpRoute(world: World) {
+/**
+ * The map's client-side route state (pinned multi-jump waypoints and the
+ * single-jump pick). Module-level so it survives world rebuilds (system
+ * transits): the display world is torn down at every jump, but pinned
+ * waypoints must persist until the player reaches or unpins them. Per-player
+ * by construction (it lives in this client's page). Only the derived
+ * effective route — plain adjacent hops — ever reaches the simulation, via
+ * the SetJumpRouteEvent -> setPlayerJumpRoute input-record path.
+ */
+const persistentRouteStore: RouteStateStore = { state: emptyRouteState() };
+
+function playerComponent<T>(world: World,
+    component: Component<T>): T | undefined {
     for (const entity of world.entities.values()) {
         if (!entity.components.has(PlayerShipSelector)) {
             continue;
         }
-        const jumpRoute = entity.components.get(JumpRouteComponent);
-        if (jumpRoute) {
-            return jumpRoute;
+        const value = entity.components.get(component);
+        if (value !== undefined) {
+            return value;
         }
     }
     return undefined;
@@ -68,22 +89,44 @@ export const StarmapPlugin: Plugin = {
             throw new Error('Expected ScreenSize to exist');
         }
 
+        // Being here explores this system: a display world only exists for
+        // the system the player is in (including the starting one).
+        markExplored(systemId);
+
         // NCB system visibility uses the player's real control bits.
-        const getPlayerBits = (): ReadonlySet<number> => {
-            for (const entity of world.entities.values()) {
-                if (entity.components.has(PlayerShipSelector)) {
-                    return entity.components.get(ControlBitsComponent)
-                        ?? new Set();
-                }
+        const getPlayerBits = (): ReadonlySet<number> =>
+            playerComponent(world, ControlBitsComponent) ?? new Set();
+
+        // Active-mission destination marks (the original's orange arrows),
+        // derived from the player's missions against the shared
+        // stellar->system index. Universe load is idempotent and shared.
+        const universe = MissionUniverse.shared(simulationData);
+        void universe.load();
+        const getMissionMarks = () => {
+            const missions = playerComponent(world, MissionsComponent);
+            if (!missions) {
+                return [];
             }
-            return new Set();
+            return missionMapMarks(missions.values(),
+                id => universe.getMission(id),
+                planetId => universe.systemIdOfPlanet(planetId));
         };
+
         const starmap = new Starmap(displayAssets, simulationData, systemId,
-            controls, getPlayerBits);
+            controls, getPlayerBits, getMissionMarks, persistentRouteStore,
+            isExplored,
+            () => playerComponent(world, GameDateComponent),
+            () => playerComponent(world, LegalRecordsComponent));
         let opening = false;
         stage.addChild(starmap.container);
         world.resources.set(StarmapResource, starmap);
-        const openStarmap = async (): Promise<string[]> => {
+        // Debug/headless-driving handle, like window.displayWorld.
+        if (typeof window !== 'undefined') {
+            (window as unknown as { novaStarmap: Starmap }).novaStarmap =
+                starmap;
+        }
+        const openStarmap = async (
+            options?: OpenStarmapOptions): Promise<string[]> => {
             const jumpRoute = getPlayerJumpRoute(world);
             if (starmap.container.visible || opening) {
                 return jumpRoute?.route ?? [];
@@ -95,6 +138,7 @@ export const StarmapPlugin: Plugin = {
                 // so a docked map would otherwise open underneath it.
                 stage.addChild(starmap.container);
                 starmap.container.position.set(screenSize.x / 2, screenSize.y / 2);
+                starmap.openOptions = options ?? {};
                 const route = await starmap.show(jumpRoute?.route ?? []);
                 if (jumpRoute) {
                     jumpRoute.route = route;
@@ -130,4 +174,17 @@ export const StarmapPlugin: Plugin = {
         world.resources.delete(StarmapResource);
         world.resources.delete(OpenStarmapResource);
     }
+}
+
+function getPlayerJumpRoute(world: World) {
+    for (const entity of world.entities.values()) {
+        if (!entity.components.has(PlayerShipSelector)) {
+            continue;
+        }
+        const jumpRoute = entity.components.get(JumpRouteComponent);
+        if (jumpRoute) {
+            return jumpRoute;
+        }
+    }
+    return undefined;
 }

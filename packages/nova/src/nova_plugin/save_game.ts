@@ -323,4 +323,10 @@ export function resetSave(storage?: SaveStorage): void {
     } catch {
         // Ignore.
     }
+    // A new pilot starts with nothing explored. The exploration record is
+    // client-local UI state kept beside the save (explored_store.ts); a
+    // dynamic import avoids a static save_game <-> explored_store cycle.
+    void import('./explored_store.js').then(
+        ({ resetExplored }) => resetExplored(storage),
+        () => { /* ignore */ });
 }
