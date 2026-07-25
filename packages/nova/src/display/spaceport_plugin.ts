@@ -11,6 +11,7 @@ import { ControlsSubject } from '../nova_plugin/controls_plugin.js';
 import { DisplayAssetDataResource, SimulationGameDataResource } from '../nova_plugin/game_data_resource.js';
 import { PlanetComponent } from '../nova_plugin/planet_plugin.js';
 import { Spaceport } from '../spaceport/spaceport.js';
+import { OpenPlayerInfoResource } from './player_info_plugin.js';
 import { ResizeEvent, ScreenSize } from './screen_size_plugin.js';
 import { Stage } from './stage_resource.js';
 import { OpenStarmapResource } from './starmap_plugin.js';
@@ -21,9 +22,9 @@ const SpaceportComponent = new Component<Spaceport>("Spaceport");
 const SpaceportProvider = Provide({
     name: "SpaceportProvider",
     provided: SpaceportComponent,
-    args: [DisplayAssetDataResource, SimulationGameDataResource, ControlsSubject, Stage, OpenStarmapResource, PlanetComponent] as const,
-    factory(displayAssets, simulationData, controls, stage, openStarmap, { id }) {
-        const spaceport = new Spaceport(displayAssets, simulationData, id, controls, openStarmap);
+    args: [DisplayAssetDataResource, SimulationGameDataResource, ControlsSubject, Stage, OpenStarmapResource, OpenPlayerInfoResource, PlanetComponent] as const,
+    factory(displayAssets, simulationData, controls, stage, openStarmap, openPlayerInfo, { id }) {
+        const spaceport = new Spaceport(displayAssets, simulationData, id, controls, openStarmap, openPlayerInfo);
         stage.addChild(spaceport.container);
         return spaceport;
     }

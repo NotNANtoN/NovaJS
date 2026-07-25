@@ -16,6 +16,7 @@ import { GateMapPlugin } from "./gate_map_plugin.js";
 import { JumpFadePlugin } from "./jump_fade_plugin.js";
 import { ParticlesPlugin } from "./particles_plugin.js";
 import { PlanetCornersPlugin } from "./planet_corners_plugin.js";
+import { PlayerInfoPlugin } from "./player_info_plugin.js";
 import { ScreenSizePlugin } from "./screen_size_plugin.js";
 import { ShipAnimationPlugin } from "./ship_animation_plugin.js";
 import { SoundPlugin } from "./sound_plugin.js";
@@ -68,9 +69,11 @@ export const Display: Plugin = {
         await world.addPlugin(AsteroidDisplayPlugin);
         await world.addPlugin(BeamDisplayPlugin);
         await world.addPlugin(PlanetCornersPlugin);
-        // The starmap must precede the spaceport: SpaceportProvider
-        // consumes its OpenStarmapResource (the docked 'm' key).
+        // The starmap and player info must precede the spaceport:
+        // SpaceportProvider consumes their OpenStarmapResource /
+        // OpenPlayerInfoResource (the docked 'm' and 'p' keys).
         await world.addPlugin(StarmapPlugin);
+        await world.addPlugin(PlayerInfoPlugin);
         await world.addPlugin(SpaceportPlugin);
         await world.addPlugin(GateMapPlugin);
         await world.addPlugin(GateAnimationPlugin);
@@ -88,6 +91,7 @@ export const Display: Plugin = {
         await world.removePlugin(GateAnimationPlugin);
         await world.removePlugin(GateMapPlugin);
         await world.removePlugin(SpaceportPlugin);
+        await world.removePlugin(PlayerInfoPlugin);
         await world.removePlugin(StarmapPlugin);
         await world.removePlugin(PlanetCornersPlugin);
         await world.removePlugin(BeamDisplayPlugin);
