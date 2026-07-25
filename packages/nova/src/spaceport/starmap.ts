@@ -1,14 +1,24 @@
+import { GameDate } from "novadatainterface/player_start_data";
 import { SystemData } from "novadatainterface/system_data";
 import * as PIXI from 'pixi.js';
-import { Observable } from "rxjs";
+import { Observable, Subject } from "rxjs";
 import { DisplayAssetDataInterface } from "../client/gamedata/display_asset_data.js";
 import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
 import { ControlEvent } from "../nova_plugin/controls_plugin.js";
-import { MissionMapMark } from "../nova_plugin/mission_logic.js";
+import { MissionMapMark, STANDARD_CARGO_NAMES } from "../nova_plugin/mission_logic.js";
 import { evaluateNCBTest } from "../nova_plugin/ncb.js";
+import { legalStatusName } from "../nova_plugin/reputation.js";
+import { LegalRecordsState } from "../nova_plugin/reputation_plugin.js";
 import { Button } from "./button.js";
+import { FindDialog } from "./find_dialog.js";
 import { Menu } from "./menu.js";
 import { MenuControls } from "./menu_controls.js";
+import { MissionUniverse } from "./mission_universe.js";
+import {
+    Adjacency, adjacentSystems, buildAdjacency, cycleSingle, effectiveRoute,
+    expandRoute, formatMapDate, hazardDescription, reconcileRouteState,
+    RouteState,
+} from "./route.js";
 
 
 const GREY = 0x666666;
@@ -16,11 +26,21 @@ const BLUE = 0x0000BB;
 // Hypergate network links, drawn in a distinct cyan so the instant-travel
 // hypergate routes read apart from the grey normal-jump hyperspace links.
 const HYPERGATE_LINK_COLOR = 0x00cccc;
-// Active-mission markers: a red ring around destination (travel/return)
-// systems, echoing the original's red destination arrows, and a yellow
-// ring for a mission's special-ship system (the additional arrow).
-const MISSION_DEST_COLOR = 0xff3333;
+// Route colors (map/notes.txt): the multi-jump route is the STRONGER green
+// line; the single-jump route is the WEAKER one.
+const ROUTE_MULTI_COLOR = 0x00ff00;
+const ROUTE_MULTI_WIDTH = 3;
+const ROUTE_SINGLE_COLOR = 0x00b400;
+const ROUTE_SINGLE_WIDTH = 1;
+// Active-mission markers: ORANGE arrows on destination (travel/return)
+// systems (mission_bbs/notes.txt), yellow for a mission's special-ship
+// system (the Bible's additional arrow), and GREEN for the destinations of
+// the mission being viewed in the Mission BBS. Orange and green marks may
+// share a system, so they sit on opposite sides of it.
+const MISSION_DEST_COLOR = 0xff8000;
 const MISSION_SHIPSYST_COLOR = 0xffcc00;
+const MISSION_VIEWED_COLOR = 0x00dd00;
+const SELECT_COLOR = 0x00ff00;
 const LABEL_FONT_NAME = 'StarmapSystemLabel';
 const LABEL_FONT_SIZE = 10;
 
@@ -35,8 +55,6 @@ const ZOOM_STEP = 1.15;
 const KEY_PAN_STEP = 40;
 // Radius of a system's outer circle in laid-out coordinates.
 const SYSTEM_RADIUS = 2.7 * BASE_SCALE;
-// Radius of a mission marker ring, outside the system circle.
-const MISSION_MARK_RADIUS = 5 * BASE_SCALE;
 // How close (in screen pixels) a click must be to a system to select it.
 const CLICK_RADIUS = 12;
 
@@ -152,21 +170,42 @@ export interface SystemGraphOptions {
     playerBits?: ReadonlySet<number>;
     /**
      * Systems to mark for the player's active missions (mission_logic
-     * missionMapMarks): the original's destination arrows plus optional
+     * missionMapMarks): orange destination arrows plus optional yellow
      * special-ship-system arrows. Purely decorative — an additive overlay
-     * that never affects clicking, linking, or routing.
+     * that never affects clicking, linking, or routing. Marks on systems the
+     * player hasn't explored still render (mission_bbs/notes.txt).
      */
     missionMarks?: MissionMapMark[];
+    /**
+     * Destination systems of the mission currently being viewed in the
+     * Mission BBS, marked with GREEN arrows. May share systems with
+     * missionMarks (both arrows show).
+     */
+    viewedMarks?: MissionMapMark[];
+    /**
+     * The government border color for a system (Show Borders), or null for
+     * no blob. Injected so the graph itself stays free of async data loads.
+     */
+    govtColorOf?: (system: SystemData) => number | null;
 }
 
 export class SystemGraph {
     readonly container = new PIXI.Container();
+    /** Emits the plainly-clicked system (route mode), for the properties
+     * panel. */
+    readonly infoSelection = new Subject<string>();
+    /** Emits whenever the pinned/single route state changes (route mode). */
+    readonly routeChanged = new Subject<void>();
+
     // Links and the highlighted route live on separate graphics so that
     // selecting a route only redraws the route, not the whole galaxy.
     private readonly linkGraphics: PIXI.Graphics;
     private readonly routeGraphics: PIXI.Graphics;
+    private readonly borderGraphics: PIXI.Graphics;
     private readonly links: [SystemData, SystemData][];
     private readonly systems: Map<string, SystemData>;
+    /** Adjacency over the visible systems, for route planning. */
+    private readonly adj: Adjacency;
     // Zoom is a transform applied on top of BASE_SCALE. Panning and zooming
     // never redraw the systems; they only move/scale mapContainer.
     private zoom = 1;
@@ -178,7 +217,11 @@ export class SystemGraph {
     // Whether the most recent pointer gesture moved the map, so the tap
     // handler can tell a click apart from the end of a pan.
     private draggedSinceDown = false;
-    private wrappedRoute: string[] = [];
+    // Route mode state (see route.ts): pinned multi-jump waypoints, the
+    // single-jump destination, and the system whose properties are shown.
+    private pinned: string[] = [];
+    private single?: string;
+    private infoSelected?: string;
     private routes: Map<string, string[]>;
     // One representative system per map position, used for drawing circles and
     // labels and for resolving clicks. Nova swaps between multiple copies of a
@@ -197,6 +240,7 @@ export class SystemGraph {
     private readonly selectable?: Set<string>;
     // Active-mission destination / ship-syst markers (decorative overlay).
     private readonly missionMarks: MissionMapMark[];
+    private readonly viewedMarks: MissionMapMark[];
     /** The picked system in destination-picker mode, if any. */
     selectedSystem?: string;
     private size: { x: number, y: number };
@@ -207,6 +251,7 @@ export class SystemGraph {
         const playerBits = options.playerBits ?? new Set<number>();
         this.selectable = options.selectable;
         this.missionMarks = options.missionMarks ?? [];
+        this.viewedMarks = options.viewedMarks ?? [];
         const size = this.size = options.size ?? { x: 456, y: 419 };
         // NCB-hidden systems don't exist for the player: they aren't drawn,
         // clicked, linked, or routed through. The current system is always
@@ -215,13 +260,18 @@ export class SystemGraph {
         const visibleSystems = systems.filter(
             s => s.id === currentSystem || systemVisible(s, playerBits));
         this.systems = new Map(visibleSystems.map(s => [s.id, s]));
+        this.adj = buildAdjacency(visibleSystems);
         this.routes = this.computeShortestPaths();
         this.clickTargets = this.pickRepresentativeSystems(visibleSystems);
 
         this.linkGraphics = new PIXI.Graphics();
         this.routeGraphics = new PIXI.Graphics();
+        this.borderGraphics = new PIXI.Graphics();
+        this.borderGraphics.visible = false;
 
         this.mapContainer = new PIXI.Container();
+        // Borders sit under everything; the route overlays the links.
+        this.mapContainer.addChild(this.borderGraphics);
         this.mapContainer.addChild(this.linkGraphics);
         this.mapContainer.addChild(this.routeGraphics);
 
@@ -300,6 +350,9 @@ export class SystemGraph {
 
         this.worldBounds = this.computeWorldBounds();
 
+        if (options.govtColorOf) {
+            this.drawBorders(options.govtColorOf);
+        }
         this.drawLinks();
         if (this.selectable) {
             this.drawSelection();
@@ -340,7 +393,12 @@ export class SystemGraph {
 
     /** Centers the current system in the viewport at the current zoom. */
     center() {
-        const system = this.systems.get(this.currentSystem);
+        this.centerOn(this.currentSystem);
+    }
+
+    /** Centers any system in the viewport at the current zoom. */
+    centerOn(systemId: string) {
+        const system = this.systems.get(systemId);
         if (system) {
             const pos = this.scalePos(system.position);
             this.mapContainer.position.set(
@@ -351,13 +409,95 @@ export class SystemGraph {
         }
     }
 
-    set route(route: string[]) {
-        this.wrappedRoute = route;
+    // --- Route mode (the regular starmap) ---
+
+    /** Loads route state (pinned waypoints + single-jump destination). */
+    setRouteState(state: RouteState) {
+        this.pinned = [...state.pinned];
+        this.single = state.single;
         this.drawRoute();
     }
 
-    get route() {
-        return this.wrappedRoute;
+    getRouteState(): RouteState {
+        return { pinned: [...this.pinned], single: this.single };
+    }
+
+    /** The route hyperspace jumps follow (multi-jump takes precedence). */
+    getEffectiveRoute(): string[] {
+        return effectiveRoute(this.adj, this.currentSystem,
+            this.getRouteState());
+    }
+
+    get adjacency(): Adjacency {
+        return this.adj;
+    }
+
+    get hasRoute(): boolean {
+        return this.pinned.length > 0 || this.single !== undefined;
+    }
+
+    /** The system whose properties the panel shows. */
+    get infoSystem(): string | undefined {
+        return this.infoSelected;
+    }
+
+    clearRoute() {
+        this.pinned = [];
+        this.single = undefined;
+        this.routeChanged.next();
+        this.drawRoute();
+    }
+
+    /** Tab: cycles the single-jump route through the current system's
+     * neighbours (through an "off" slot to clear it). */
+    cycleSingleRoute(direction = 1) {
+        if (this.selectable) {
+            return;
+        }
+        const neighbours = adjacentSystems(this.adj, this.currentSystem);
+        this.single = cycleSingle(neighbours, this.single, direction);
+        if (this.single !== undefined) {
+            this.selectForInfo(this.single);
+        }
+        this.routeChanged.next();
+        this.drawRoute();
+    }
+
+    /**
+     * Selects (and centers on) a system by name for the Find button.
+     * Exact match first, then a unique prefix match. Returns the id, or
+     * undefined if no match.
+     */
+    findByName(name: string): string | undefined {
+        const wanted = name.trim().toLowerCase();
+        if (!wanted) {
+            return undefined;
+        }
+        let prefixMatch: SystemData | undefined;
+        let prefixMatches = 0;
+        for (const { system } of this.clickTargets) {
+            const candidate = system.name.toLowerCase();
+            if (candidate === wanted) {
+                this.selectForInfo(system.id);
+                this.centerOn(system.id);
+                return system.id;
+            }
+            if (candidate.startsWith(wanted)) {
+                prefixMatch = system;
+                prefixMatches++;
+            }
+        }
+        if (prefixMatch && prefixMatches === 1) {
+            this.selectForInfo(prefixMatch.id);
+            this.centerOn(prefixMatch.id);
+            return prefixMatch.id;
+        }
+        return undefined;
+    }
+
+    /** Shows or hides the government border overlay. */
+    setBordersShown(shown: boolean) {
+        this.borderGraphics.visible = shown;
     }
 
     /** Pans the map by a screen-space delta (used by the arrow keys). */
@@ -459,7 +599,7 @@ export class SystemGraph {
         const local = event.getLocalPosition(this.container);
         const system = this.systemAt(local.x, local.y);
         if (system) {
-            this.onClickSystem(system.id);
+            this.onClickSystem(system.id, event.shiftKey);
         }
     }
 
@@ -488,7 +628,13 @@ export class SystemGraph {
         return best;
     }
 
-    private onClickSystem(system: string) {
+    private selectForInfo(system: string) {
+        this.infoSelected = system;
+        this.infoSelection.next(system);
+        this.drawRoute();
+    }
+
+    private onClickSystem(system: string, shiftKey: boolean) {
         if (this.selectable) {
             // Destination-picker mode: only the offered systems respond, and
             // clicking one selects it (clicking again deselects).
@@ -500,7 +646,25 @@ export class SystemGraph {
             this.drawSelection();
             return;
         }
-        this.route = this.routes.get(system) ?? [];
+        if (shiftKey) {
+            // Shift-click appends the system to the multi-jump route as a
+            // pinned waypoint (or unpins it). Gaps between pins auto-fill
+            // with the shortest path when the route is expanded — the only
+            // auto-routing there is (map/notes.txt).
+            if (system !== this.currentSystem) {
+                this.pinned = this.pinned.includes(system)
+                    ? this.pinned.filter(p => p !== system)
+                    : [...this.pinned, system];
+                this.routeChanged.next();
+            }
+        } else if (adjacentSystems(this.adj, this.currentSystem)
+            .includes(system)) {
+            // A plain click on an adjacent system sets (or toggles off) the
+            // single-jump route. Clicking anything else only inspects it.
+            this.single = this.single === system ? undefined : system;
+            this.routeChanged.next();
+        }
+        this.selectForInfo(system);
     }
 
     /**
@@ -558,29 +722,90 @@ export class SystemGraph {
     }
 
     /**
-     * Draws the active-mission markers as colored rings around their
-     * systems (destinations red, ship-syst yellow). Additive and
-     * decorative: baked into the map container like the circles, so it
-     * pans/zooms with them and never intercepts clicks. Marks whose
-     * system is NCB-hidden (not visible on this map) are skipped.
+     * Draws the government border overlay (Show Borders): a soft blob of the
+     * owning government's color around each governed system, like the
+     * original's territory shading (map/govt_borders.png). Baked once into
+     * its own layer and simply hidden until toggled on.
+     */
+    private drawBorders(govtColorOf: (system: SystemData) => number | null) {
+        // Two concentric translucent circles per system approximate the
+        // original's soft-edged blobs; neighbors overlap into contiguous
+        // territory.
+        for (const { system, x, y } of this.clickTargets) {
+            const color = govtColorOf(system);
+            if (color === null) {
+                continue;
+            }
+            this.borderGraphics.lineStyle(0);
+            this.borderGraphics.beginFill(color, 0.28);
+            this.borderGraphics.drawCircle(x, y, 34 * BASE_SCALE);
+            this.borderGraphics.endFill();
+            this.borderGraphics.beginFill(color, 0.30);
+            this.borderGraphics.drawCircle(x, y, 20 * BASE_SCALE);
+            this.borderGraphics.endFill();
+        }
+    }
+
+    /**
+     * Draws the active-mission markers: small arrows beside their systems
+     * (destinations orange, ship-syst yellow, BBS-viewed green). Additive
+     * and decorative: baked into the map container like the circles, so it
+     * pans/zooms with them and never intercepts clicks. Marks whose system
+     * is NCB-hidden (not on this map) are skipped; marks on unexplored
+     * systems still render.
      */
     private drawMissionMarks() {
-        if (this.missionMarks.length === 0) {
+        if (this.missionMarks.length === 0 && this.viewedMarks.length === 0) {
             return;
         }
         const graphics = new PIXI.Graphics();
         for (const mark of this.missionMarks) {
-            const system = this.systems.get(mark.systemId);
-            if (!system) {
-                continue;
-            }
-            const [x, y] = this.scalePos(system.position);
             const color = mark.kind === 'shipSyst'
                 ? MISSION_SHIPSYST_COLOR : MISSION_DEST_COLOR;
-            graphics.lineStyle(1.5, color, 1);
-            graphics.drawCircle(x, y, MISSION_MARK_RADIUS);
+            // Active-mission arrows sit below-left, pointing up at the
+            // system (map_showing_mission_location.png).
+            this.drawMarkArrow(graphics, mark.systemId, color, 1);
+        }
+        for (const mark of this.viewedMarks) {
+            // Viewed-mission arrows sit above-left pointing down, so both
+            // can share a system (mission_bbs/notes.txt).
+            this.drawMarkArrow(graphics, mark.systemId,
+                MISSION_VIEWED_COLOR, -1);
         }
         this.mapContainer.addChild(graphics);
+    }
+
+    /** Draws one diagonal mark arrow beside a system. `side` +1 = below-left
+     * pointing up-right at it; -1 = above-left pointing down-right. */
+    private drawMarkArrow(graphics: PIXI.Graphics, systemId: string,
+        color: number, side: number) {
+        const system = this.systems.get(systemId);
+        if (!system) {
+            return;
+        }
+        const [x, y] = this.scalePos(system.position);
+        // Arrow tip just outside the system circle, on the lower-left (or
+        // upper-left) diagonal; tail extends away from the system.
+        const tipX = x - SYSTEM_RADIUS - 1;
+        const tipY = y + side * (SYSTEM_RADIUS + 1);
+        const dir = { x: -1, y: side }; // Away from the system.
+        const len = 5 * BASE_SCALE;
+        const tailX = tipX + dir.x * len;
+        const tailY = tipY + dir.y * len;
+        // Shaft.
+        graphics.lineStyle(1.5, color, 1);
+        graphics.moveTo(tailX, tailY);
+        graphics.lineTo(tipX, tipY);
+        // Head: a small filled triangle at the tip.
+        const head = 2.2 * BASE_SCALE;
+        graphics.lineStyle(0);
+        graphics.beginFill(color, 1);
+        graphics.drawPolygon([
+            tipX + dir.x * 0.2, tipY + dir.y * 0.2,
+            tipX + dir.x * head, tipY + dir.y * head - side * head * 0.7,
+            tipX + dir.x * head + head * 0.7, tipY + dir.y * head,
+        ]);
+        graphics.endFill();
     }
 
     private drawLinks() {
@@ -596,15 +821,84 @@ export class SystemGraph {
         }
     }
 
+    /**
+     * Draws the route overlay: the WEAK single-jump line, the STRONG
+     * multi-jump line over it, pinned-waypoint boxes, the current system's
+     * ring, and the properties-selection brackets.
+     */
     private drawRoute() {
-        this.routeGraphics.clear();
+        if (this.selectable) {
+            return;
+        }
+        const g = this.routeGraphics;
+        g.clear();
+
+        // Single-jump route: the weaker green line.
+        if (this.single !== undefined) {
+            const from = this.systems.get(this.currentSystem);
+            const to = this.systems.get(this.single);
+            if (from && to) {
+                this.drawLink(g, from, to,
+                    ROUTE_SINGLE_COLOR, ROUTE_SINGLE_WIDTH);
+            }
+        }
+
+        // Multi-jump route: the stronger green line, over the single one.
+        const multi = expandRoute(this.adj, this.currentSystem, this.pinned);
         let prev = this.systems.get(this.currentSystem);
-        for (const system of this.route.map(id => this.systems.get(id))) {
+        for (const system of multi.map(id => this.systems.get(id))) {
             if (system) {
                 if (prev) {
-                    this.drawLink(this.routeGraphics, prev, system, 0x00ff00, 3);
+                    this.drawLink(g, prev, system,
+                        ROUTE_MULTI_COLOR, ROUTE_MULTI_WIDTH);
                 }
                 prev = system;
+            }
+        }
+
+        // Pinned waypoints: a small green box marks each explicitly
+        // selected system (they always stay in the route).
+        for (const id of this.pinned) {
+            const system = this.systems.get(id);
+            if (!system) {
+                continue;
+            }
+            const [x, y] = this.scalePos(system.position);
+            const r = SYSTEM_RADIUS + 2;
+            g.lineStyle(1, ROUTE_MULTI_COLOR);
+            g.drawRect(x - r, y - r, 2 * r, 2 * r);
+        }
+
+        // The current system: a dashed green ring (the original's marker).
+        const current = this.systems.get(this.currentSystem);
+        if (current) {
+            const [x, y] = this.scalePos(current.position);
+            const r = SYSTEM_RADIUS + 2.5;
+            g.lineStyle(1.2, SELECT_COLOR);
+            const segments = 8;
+            for (let i = 0; i < segments; i++) {
+                const a0 = (i * 2 * Math.PI) / segments;
+                const a1 = a0 + Math.PI / segments;
+                g.moveTo(x + r * Math.cos(a0), y + r * Math.sin(a0));
+                g.arc(x, y, r, a0, a1);
+            }
+        }
+
+        // The inspected system: green corner brackets around it.
+        if (this.infoSelected !== undefined
+            && this.infoSelected !== this.currentSystem) {
+            const system = this.systems.get(this.infoSelected);
+            if (system) {
+                const [x, y] = this.scalePos(system.position);
+                const r = SYSTEM_RADIUS + 3;
+                const arm = 3;
+                g.lineStyle(1, SELECT_COLOR);
+                for (const [sx, sy] of
+                    [[-1, -1], [1, -1], [1, 1], [-1, 1]] as const) {
+                    g.moveTo(x + sx * r - sx * arm, y + sy * r);
+                    g.lineTo(x + sx * r, y + sy * r);
+                    g.lineTo(x + sx * r, y + sy * r - sy * arm);
+                }
             }
         }
     }
@@ -651,10 +945,84 @@ export class SystemGraph {
     }
 }
 
+/**
+ * Client-side persistence for the map's route state, owned by the plugin so
+ * pinned waypoints and the single-jump pick survive world rebuilds (system
+ * transits). Never simulation state: only the effective route (a plain
+ * string[] of adjacent hops) reaches the sim, through the same
+ * SetJumpRouteEvent -> setPlayerJumpRoute input-record path a plain route
+ * always used.
+ */
+export interface RouteStateStore {
+    state: RouteState;
+}
+
+/** Extra per-open context for the starmap (see OpenStarmapResource). */
+export interface OpenStarmapOptions {
+    /**
+     * Destination marks of the mission being viewed in the Mission BBS,
+     * shown in green while this map is open.
+     */
+    viewedMarks?: MissionMapMark[];
+    /**
+     * The player's calendar date for the gray readout, when the caller has
+     * it handy (landed screens; the entity is out of the display world
+     * while docked, so the plugin can't always read it itself).
+     */
+    date?: GameDate;
+}
+
+// Right-column/properties fonts. The label blue-gray matches the original's
+// field captions; values are white.
+const PROP_LABEL_FONT: Partial<PIXI.ITextStyle> = {
+    fontFamily: 'Geneva', fontSize: 10, fill: 0x8f9fc0,
+    align: 'left', wordWrap: false,
+};
+const PROP_VALUE_FONT: Partial<PIXI.ITextStyle> = {
+    fontFamily: 'Geneva', fontSize: 10, fill: 0xffffff,
+    align: 'left', wordWrap: false,
+};
+const DATE_FONT: Partial<PIXI.ITextStyle> = {
+    fontFamily: 'Geneva', fontSize: 10, fill: 0x888888,
+    align: 'right', wordWrap: false,
+};
+
+// Layout (container-centered like every menu): the nova:8509 dialog frame
+// holds the 456x419 map pane at (-290,-248); the properties column sits to
+// its right and the Ports/Hazards readouts plus the button row below it,
+// matching map_open_over_spaceport.png.
+const MAP_POS = { x: -290, y: -248 };
+const PROP_X = 178;
+const PROP_TOP = -240;
+const PROP_LINE = 13;
+const PORTS_Y = 182;
+const HAZARDS_Y = 202;
+const DATE_RIGHT_X = 296;
+const BUTTON_Y = 220;
+
 export class Starmap extends Menu<string[] /* route list of systems */> {
     private systemGraph?: SystemGraph;
     private allSystems?: SystemData[];
     private graphBitsKey?: string;
+    private universe: MissionUniverse;
+    private findDialog: FindDialog;
+    private buttons: {
+        borders: Button, clear: Button, find: Button,
+        zoomOut: Button, zoomIn: Button, done: Button,
+    };
+    private bordersShown = false;
+    /** Set by the plugin for the current open (BBS-viewed mission marks,
+     * a landed caller's date). */
+    openOptions: OpenStarmapOptions = {};
+
+    // The properties readouts.
+    private propContainer = new PIXI.Container();
+    private portsLabel = new PIXI.Text('Ports:', PROP_LABEL_FONT);
+    private portsValue = new PIXI.Text('', PROP_VALUE_FONT);
+    private hazardsLabel = new PIXI.Text('Navigation Hazards:',
+        PROP_LABEL_FONT);
+    private hazardsValue = new PIXI.Text('', PROP_VALUE_FONT);
+    private dateText = new PIXI.Text('', DATE_FONT);
 
     constructor(displayAssets: DisplayAssetDataInterface,
         simulationData: SimulationGameDataInterface,
@@ -666,35 +1034,85 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
          * missionMapMarks), refreshed each time the map opens. Optional:
          * omit for a marker-free map.
          */
-        private getMissionMarks: () => MissionMapMark[] = () => []) {
+        private getMissionMarks: () => MissionMapMark[] = () => [],
+        /** Persistent route state (see RouteStateStore). */
+        private routeStore: RouteStateStore = { state: { pinned: [] } },
+        /** Whether the player has explored (entered) a system; unexplored
+         * systems' properties read "<Unknown>". */
+        private isSystemExplored: (systemId: string) => boolean = () => true,
+        /** The player's calendar date (in flight). Landed callers pass it
+         * through OpenStarmapOptions instead. */
+        private getDate: () => GameDate | undefined = () => undefined,
+        /** The player's legal records, for the Legal Status line. */
+        private getLegalRecords: () => LegalRecordsState | undefined =
+            () => undefined) {
         super(displayAssets, simulationData, "nova:8509", controlEvents);
         this.container.name = "StarMap";
-        //this.container.alpha = 0.5;
-        const buttons = {
-            done: new Button(displayAssets, "Done", 120, { x: 150, y: 220 }),
+        this.universe = MissionUniverse.shared(simulationData);
+        this.buttons = {
+            borders: new Button(displayAssets, "Show Borders", 100,
+                { x: -287, y: BUTTON_Y }),
+            clear: new Button(displayAssets, "Clear Route", 88,
+                { x: -152, y: BUTTON_Y }),
+            find: new Button(displayAssets, "Find", 66,
+                { x: -30, y: BUTTON_Y }),
+            zoomOut: new Button(displayAssets, "-", 10,
+                { x: 70, y: BUTTON_Y }),
+            zoomIn: new Button(displayAssets, "+", 10,
+                { x: 105, y: BUTTON_Y }),
+            done: new Button(displayAssets, "Done", 80,
+                { x: 190, y: BUTTON_Y }),
         };
-        this.addButtons(buttons);
+        this.addButtons(this.buttons);
 
-        buttons.done.click.subscribe(this.done.bind(this));
+        this.buttons.done.click.subscribe(this.done.bind(this));
+        this.buttons.borders.click.subscribe(() => this.toggleBorders());
+        this.buttons.clear.click.subscribe(() => {
+            this.systemGraph?.clearRoute();
+        });
+        this.buttons.find.click.subscribe(() => void this.openFind());
+        this.buttons.zoomOut.click.subscribe(
+            () => this.systemGraph?.zoomBy(1 / ZOOM_STEP ** 2));
+        this.buttons.zoomIn.click.subscribe(
+            () => this.systemGraph?.zoomBy(ZOOM_STEP ** 2));
+
+        this.findDialog = new FindDialog(controlEvents);
 
         this.controls = new MenuControls(controlEvents, {
-            // TODO: Bind tab to cycle destinations
             depart: this.done.bind(this),
             map: this.done.bind(this),
+            // Tab cycles through possible single-jump routes.
+            nextTarget: () => this.systemGraph?.cycleSingleRoute(1),
+            // Space re-centers the view on the current system.
+            firePrimary: () => this.systemGraph?.center(),
             // Arrow keys pan the map.
             up: () => this.systemGraph?.pan(0, KEY_PAN_STEP),
             down: () => this.systemGraph?.pan(0, -KEY_PAN_STEP),
             left: () => this.systemGraph?.pan(KEY_PAN_STEP, 0),
             right: () => this.systemGraph?.pan(-KEY_PAN_STEP, 0),
         });
-
     }
+
     override async build() {
         await super.build();
         const systemIds = (await this.simulationData.ids).System;
         this.allSystems = await Promise.all(
             systemIds.map(s => this.simulationData.data.System.get(s)));
+        // Planet/govt/system indices for the properties panel and borders.
+        await this.universe.load();
         this.rebuildGraph(this.getPlayerBits());
+
+        this.propContainer.position.set(0, 0);
+        this.container.addChild(this.propContainer);
+        this.portsLabel.position.set(MAP_POS.x, PORTS_Y);
+        this.portsValue.position.set(MAP_POS.x + 42, PORTS_Y);
+        this.hazardsLabel.position.set(MAP_POS.x, HAZARDS_Y);
+        this.hazardsValue.position.set(MAP_POS.x + 118, HAZARDS_Y);
+        this.dateText.anchor.x = 1;
+        this.dateText.position.set(DATE_RIGHT_X, HAZARDS_Y);
+        this.container.addChild(this.portsLabel, this.portsValue,
+            this.hazardsLabel, this.hazardsValue, this.dateText);
+        this.container.addChild(this.findDialog.container);
     }
 
     /** (Re)filters the map against the given control bits. */
@@ -703,10 +1121,15 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
             return;
         }
         // The active-mission markers can change independently of the bits
-        // (accepting/completing a mission), so they're part of the key.
+        // (accepting/completing a mission), and the BBS-viewed marks change
+        // per open, so they're part of the key.
         const missionMarks = this.getMissionMarks();
-        const marksKey = missionMarks
-            .map(m => `${m.systemId}:${m.kind}`).sort().join('|');
+        const viewedMarks = this.openOptions.viewedMarks ?? [];
+        const marksKey = [
+            ...missionMarks.map(m => `${m.systemId}:${m.kind}`).sort(),
+            '#viewed',
+            ...viewedMarks.map(m => m.systemId).sort(),
+        ].join('|');
         const key = [...bits].sort((a, b) => a - b).join(',') + '#' + marksKey;
         if (this.systemGraph && key === this.graphBitsKey) {
             return;
@@ -719,10 +1142,139 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
         // game only reveals the network on the hypergate transit map
         // (GateMap), which is where the lanes are drawn (via
         // SystemGraphOptions.gateLinks).
-        this.systemGraph = new SystemGraph(this.allSystems, this.systemId,
-            { playerBits: bits, missionMarks });
-        this.systemGraph.container.position.set(-290, -248);
-        this.container.addChild(this.systemGraph.container);
+        this.systemGraph = new SystemGraph(this.allSystems, this.systemId, {
+            playerBits: bits,
+            missionMarks,
+            viewedMarks,
+            govtColorOf: system => this.govtColorOf(system),
+        });
+        this.systemGraph.container.position.set(MAP_POS.x, MAP_POS.y);
+        // Keep the graph under the buttons/readouts (they were added to the
+        // container first), matching the dialog frame's layering.
+        this.container.addChildAt(this.systemGraph.container, 1);
+        this.systemGraph.setBordersShown(this.bordersShown);
+        this.systemGraph.infoSelection.subscribe(
+            id => this.showProperties(id));
+        this.systemGraph.routeChanged.subscribe(
+            () => this.refreshClearButton());
+    }
+
+    /** The Show Borders blob color for a system: its govt's color. */
+    private govtColorOf(system: SystemData): number | null {
+        if (!system.govt) {
+            return null;
+        }
+        const govt = this.universe.getGovt(system.govt);
+        if (!govt) {
+            return null;
+        }
+        // A govt with color 0 (black, the field's default) still owns
+        // territory; give it the original's deep blue so its space shows.
+        const color = govt.color & 0xffffff;
+        return color === 0 ? 0x000090 : color;
+    }
+
+    private toggleBorders() {
+        this.bordersShown = !this.bordersShown;
+        this.systemGraph?.setBordersShown(this.bordersShown);
+        this.buttons.borders.setLabel(
+            this.bordersShown ? 'Hide Borders' : 'Show Borders');
+    }
+
+    private refreshClearButton() {
+        this.buttons.clear.state =
+            this.systemGraph?.hasRoute ? 'normal' : 'grey';
+    }
+
+    private async openFind() {
+        if (!this.systemGraph) {
+            return;
+        }
+        const name = await this.findDialog.show();
+        if (name) {
+            this.systemGraph.findByName(name);
+        }
+    }
+
+    /**
+     * Fills the properties panel for a system: the right-hand column
+     * (Current/Destination System, Government, Legal Status, Goods Traded,
+     * Services) and the Ports / Navigation Hazards readouts. Everything but
+     * the title reads "<Unknown>" until the player has explored the system.
+     */
+    private showProperties(systemId: string) {
+        this.propContainer.removeChildren();
+        let y = PROP_TOP;
+        const addLine = (label: string, values: string[]) => {
+            const labelText = new PIXI.Text(label, PROP_LABEL_FONT);
+            labelText.position.set(PROP_X, y);
+            this.propContainer.addChild(labelText);
+            y += PROP_LINE;
+            for (const value of values) {
+                const valueText = new PIXI.Text(value, PROP_VALUE_FONT);
+                valueText.position.set(PROP_X + 6, y);
+                this.propContainer.addChild(valueText);
+                y += PROP_LINE;
+            }
+            y += 5;
+        };
+
+        const isCurrent = systemId === this.systemId;
+        const title = isCurrent ? 'Current System:' : 'Destination System:';
+        const system = this.allSystems?.find(s => s.id === systemId);
+        const explored = this.isSystemExplored(systemId);
+        if (!system || !explored) {
+            addLine(title, [explored && system ? system.name : '<Unknown>']);
+            this.portsValue.text = '<Unknown>';
+            this.hazardsValue.text = '<Unknown>';
+            return;
+        }
+
+        addLine(title, [system.name]);
+
+        const govt = system.govt
+            ? this.universe.getGovt(system.govt) : undefined;
+        addLine('Government:', [govt?.name ?? 'Independent']);
+
+        if (govt && system.govt) {
+            const record = this.getLegalRecords()?.get(system.govt) ?? 0;
+            addLine('Legal Status:',
+                [legalStatusName(record, govt.crimeTol)]);
+        }
+
+        // Ports: the landable stellars. Goods/services aggregate over them.
+        const planets = system.planets
+            .map(id => this.universe.getPlanet(id))
+            .filter(<T>(p: T): p is NonNullable<T> => p != null);
+        const ports = planets.filter(p => p.flags.canLand);
+
+        const goods = new Set<number>();
+        let trading = false, outfitting = false, shipyard = false;
+        for (const port of ports) {
+            port.tradeTiers.forEach((tier, i) => {
+                if (tier !== null) {
+                    goods.add(i);
+                }
+            });
+            trading ||= port.flags.hasCommodityExchange;
+            outfitting ||= port.flags.hasOutfitter;
+            shipyard ||= port.flags.hasShipyard;
+        }
+        addLine('Goods Traded:', goods.size > 0
+            ? [...goods].sort((a, b) => a - b)
+                .map(i => STANDARD_CARGO_NAMES[i] ?? `Cargo ${i}`)
+            : ['None']);
+        const services = [
+            ...(trading ? ['Trading'] : []),
+            ...(outfitting ? ['Outfitting'] : []),
+            ...(shipyard ? ['Shipyard'] : []),
+        ];
+        addLine('Services:', services.length > 0 ? services : ['None']);
+
+        this.portsValue.text = ports.length > 0
+            ? ports.map(p => p.name).join(', ') : 'None';
+        this.hazardsValue.text =
+            hazardDescription(system.asteroids, system.interference);
     }
 
     override async show(route: string[]) {
@@ -733,14 +1285,28 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
         if (!this.systemGraph) {
             throw new Error('Expected system graph to be built')
         }
+        // Bring the persisted pins/single up to date with where the player
+        // is now, adopting the sim's route if the client state was lost.
+        this.routeStore.state = reconcileRouteState(this.routeStore.state,
+            this.systemId, this.systemGraph.adjacency, route);
+        this.systemGraph.setRouteState(this.routeStore.state);
         this.systemGraph.center();
-        this.systemGraph.route = route;
-        return super.show(route);
+        this.refreshClearButton();
+        this.showProperties(this.systemId);
+        const date = this.openOptions.date ?? this.getDate();
+        this.dateText.text = date ? formatMapDate(date) : '';
+        try {
+            return await super.show(route);
+        } finally {
+            // Viewed-mission marks only last for the open that set them.
+            this.openOptions = {};
+        }
     }
 
     override done() {
         if (this.systemGraph) {
-            this.input = this.systemGraph.route;
+            this.routeStore.state = this.systemGraph.getRouteState();
+            this.input = this.systemGraph.getEffectiveRoute();
         }
         super.done();
     }

@@ -8,6 +8,7 @@ import { dateFromDayNumber, formatDate } from '../nova_plugin/calendar.js';
 import {
     abortMission,
     acceptOffer,
+    MissionMapMark,
     MissionOffer,
 } from '../nova_plugin/mission_logic.js';
 import { expandMissionText, missionDisplayName } from '../nova_plugin/mission_text.js';
@@ -16,6 +17,7 @@ import { Button } from './button.js';
 import { Menu } from './menu.js';
 import { activeAsOffer, offerSubstitutions, rollOffers } from './mission_offers.js';
 import { MissionSession } from './mission_session.js';
+import { OpenStarmapOptions } from './starmap.js';
 import { MissionUniverse } from './mission_universe.js';
 import { FONT } from './outfitter.js';
 
@@ -96,7 +98,14 @@ export class MissionBoard extends Menu<Entity> {
         /** LOCATION_MISSION_COMPUTER or LOCATION_BAR. */
         private location: number,
         background: string,
-        title: string) {
+        title: string,
+        /**
+         * Opens the starmap over the board (the 'm' key), marking the
+         * selected listing's destinations in green
+         * (mission_bbs/notes.txt). Optional: without it, 'm' does nothing.
+         */
+        private openStarmap?: (options?: OpenStarmapOptions)
+            => Promise<unknown>) {
         super(displayAssets, simulationData, background, controlEvents);
         this.container.name = `MissionBoard-${title}`;
 
@@ -144,8 +153,52 @@ export class MissionBoard extends Menu<Entity> {
             up: () => this.moveSelection(-1),
             down: () => this.moveSelection(1),
             accept: this.accept.bind(this),
+            // The map over the BBS shows the selected listing's
+            // destinations in green (the starmap binds its own controls
+            // on top of the focus stack while open).
+            map: () => void this.openMap(),
             depart: this.done.bind(this),
         };
+    }
+
+    /**
+     * The green viewed-mission marks for the selected listing: its travel
+     * and return destinations' systems (mission_bbs/notes.txt). Missions to
+     * systems the player hasn't explored still get marks.
+     */
+    private viewedMarks(): MissionMapMark[] {
+        const row = this.rows[this.selectedIndex];
+        if (!row || row.kind === 'header') {
+            return [];
+        }
+        const missionId = row.kind === 'offer'
+            ? row.offer.data.id : row.active.id;
+        const planets = row.kind === 'offer'
+            ? [row.offer.travelPlanet, row.offer.returnPlanet]
+            : [row.active.travelPlanet, row.active.returnPlanet];
+        const marks: MissionMapMark[] = [];
+        const seen = new Set<string>();
+        for (const planet of planets) {
+            const systemId = planet
+                ? this.universe.systemIdOfPlanet(planet) : undefined;
+            if (!systemId || seen.has(systemId)) {
+                continue;
+            }
+            seen.add(systemId);
+            marks.push({ systemId, kind: 'destination', missionId });
+        }
+        return marks;
+    }
+
+    private async openMap() {
+        if (!this.openStarmap) {
+            return;
+        }
+        await this.openStarmap({
+            viewedMarks: this.viewedMarks(),
+            date: this.session
+                ? dateFromDayNumber(this.session.currentDay) : undefined,
+        });
     }
 
     override async show(input: Entity): Promise<Entity> {

@@ -31,6 +31,7 @@ import { processEntityLanding } from './mission_session.js';
 import { MissionUniverse } from './mission_universe.js';
 import { Outfitter } from './outfitter.js';
 import { Shipyard } from './shipyard.js';
+import { OpenStarmapOptions } from './starmap.js';
 import { TradeCenter } from './trade_center.js';
 
 // The 618x517 spaceport frame (PICT 8500): the landing image fills the
@@ -82,7 +83,8 @@ export class Spaceport extends Menu<Entity> {
         controlEvents: Observable<ControlEvent>,
         /** Opens the starmap over the spaceport (the 'm' key), so the
          * player can check mission destinations while docked. */
-        private openStarmap?: () => Promise<unknown>) {
+        private openStarmap?: (options?: OpenStarmapOptions)
+            => Promise<unknown>) {
         super(displayAssets, simulationData, "nova:8500", controlEvents);
         this.container.name = 'Spaceport';
 
@@ -129,7 +131,7 @@ export class Spaceport extends Menu<Entity> {
         this.universe = MissionUniverse.shared(simulationData);
         this.missionComputer = new MissionBoard(displayAssets, simulationData,
             controlEvents, this.universe, id, LOCATION_MISSION_COMPUTER,
-            "nova:8505", "Mission BBS");
+            "nova:8505", "Mission BBS", this.openStarmap);
         const showMissionComputer = async () => {
             this.controls.unbind();
             // The board mutates missions, cargo, credits, control
@@ -212,8 +214,11 @@ export class Spaceport extends Menu<Entity> {
             recharge: this.recharge.bind(this),
             // The starmap binds its own controls on top of the focus
             // stack while open, so the spaceport keys stay quiet under
-            // it and 'd' backs out of just the map.
-            map: () => void this.openStarmap?.(),
+            // it and 'd' backs out of just the map. The docked entity is
+            // out of the display world, so its date rides along.
+            map: () => void this.openStarmap?.({
+                date: this.input?.components.get(GameDateComponent),
+            }),
             depart: this.done.bind(this),
         });
     }
