@@ -75,6 +75,37 @@ export function findContainer(page, name) {
     }, name);
 }
 
+/** Wait until a named PIXI container is worldVisible. */
+export async function waitForContainer(page, name, { timeout = 15000 } = {}) {
+    await page.waitForFunction((n) => {
+        let vis = false;
+        (function walk(node) {
+            if (!node || vis) return;
+            if (node.name === n && node.worldVisible) { vis = true; return; }
+            (node.children || []).forEach(walk);
+        })(window.app.stage);
+        return vis;
+    }, { timeout }, name);
+}
+
+/** Click the center of a named PIXI container (e.g. 'Button:Cargo'). */
+export async function clickContainer(page, name) {
+    const info = await findContainer(page, name);
+    if (!info) {
+        throw new Error(`Container not found: ${name}`);
+    }
+    const { x, y, width, height } = info.bounds;
+    await page.mouse.click(x + width / 2, y + height / 2);
+    await sleep(300);
+}
+
+/** Open the player-info dialog (control 'properties' = KeyP). */
+export async function openPlayerInfo(page) {
+    await pressKey(page, 'KeyP');
+    await waitForContainer(page, 'PlayerInfo');
+    await sleep(1000);
+}
+
 /** Open the starmap (control 'map' = KeyM) and wait for it to be visible. */
 export async function openStarmap(page) {
     await pressKey(page, 'KeyM');

@@ -100,4 +100,68 @@ export const scenarios = [
             region('spaceport_right_buttons', 'Right button column (Shipyard/Outfitter/Leave)', 1122, 578, 150, 165),
         ],
     },
+    {
+        id: 'player_info_general',
+        title: "Player info ('p') — General page",
+        description: 'The player-info dialog toggled with KeyP in flight. '
+            + 'Compare the 8518/8519/8520 three-part frame, tab row and Done '
+            + 'row against p_properties/general.png. Text values legitimately '
+            + 'differ (date, credits, ship).',
+        params: { ship: 'nova:164', system: 'nova:130' },
+        hideDebug: true,
+        setup: async (page, driver) => { await driver.openPlayerInfo(page); },
+        references: [
+            { name: 'general', file: 'p_properties/general.png' },
+        ],
+        regions: [
+            region('pinfo_frame', 'Whole dialog frame', 753, 425, 414, 231),
+            region('pinfo_tab_row', 'Tab row (General/Cargo/Extras/Honors)', 757, 429, 406, 36),
+            region('pinfo_done_row', 'Bottom strip with Done', 757, 615, 406, 37),
+        ],
+    },
+    {
+        id: 'player_info_cargo',
+        title: "Player info ('p') — Cargo page",
+        description: 'The Cargo page: greyed Cargo tab, cargo listing, and the '
+            + 'greyed Jettison Cargo button next to Done, against '
+            + 'p_properties/cargo.png.',
+        params: { ship: 'nova:164', system: 'nova:130' },
+        hideDebug: true,
+        setup: async (page, driver) => {
+            await driver.openPlayerInfo(page);
+            await driver.clickContainer(page, 'Button:Cargo');
+        },
+        references: [
+            { name: 'cargo', file: 'p_properties/cargo.png' },
+        ],
+        regions: [
+            region('pinfo_frame', 'Whole dialog frame', 753, 425, 414, 231),
+            region('pinfo_tab_row', 'Tab row (Cargo tab greyed)', 757, 429, 406, 36),
+            region('pinfo_bottom_row', 'Jettison Cargo + Done row', 757, 615, 406, 37),
+        ],
+    },
+    {
+        id: 'earth_outfitter',
+        title: 'Earth outfitter — dialog chrome',
+        description: 'The outfitter opened from the Earth spaceport. Compare '
+            + 'the 8502 frame, item grid pane and button row against '
+            + 'outfitter/earth_outfitter.png. Item selection state and the '
+            + 'info-pane text legitimately differ.',
+        params: { ship: 'nova:164', system: 'nova:130' },
+        hideDebug: true,
+        setup: async (page, driver) => {
+            await driver.landAt(page, 'planet nova:128');
+            await driver.clickContainer(page, 'Button:Outfitter');
+            await driver.waitForContainer(page, 'Outfitter');
+            await driver.sleep(1500);
+        },
+        references: [
+            { name: 'earth_outfitter', file: 'outfitter/earth_outfitter.png' },
+        ],
+        regions: [
+            region('outfitter_frame', 'Whole dialog frame', 578, 380, 765, 321),
+            region('outfitter_grid', 'Item grid pane', 585, 388, 335, 278),
+            region('outfitter_button_row', 'Buy/Sell/Done button row', 660, 668, 520, 30),
+        ],
+    },
 ];
