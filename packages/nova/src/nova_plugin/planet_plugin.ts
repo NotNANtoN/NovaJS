@@ -15,7 +15,6 @@ import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
 import { registerSimulationBridgeEvent } from '../communication/simulation_bridge_events.js';
 import { AnimationComponent } from './animation_plugin.js';
-import { FuelComponent } from './health_plugin.js';
 import { ShipControlEvent, ShipControlStateComponent } from './ship_control.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { PlayerShipSelector } from './player_ship_plugin.js';
@@ -92,21 +91,11 @@ const AttemptLandingSystem = new System({
     }
 });
 
-/**
- * Ships refuel when they land. Runs in the sim on the landing ship
- * (LandEvent is targeted at it), so every peer computes the same fuel
- * state deterministically. Free for now: when credits exist this
- * becomes a paid transaction (and should move behind the spaceport's
- * refuel prompt instead of being automatic).
- */
-const RefuelOnLandingSystem = new System({
-    name: 'RefuelOnLandingSystem',
-    events: [LandEvent],
-    args: [LandEvent, FuelComponent] as const,
-    step(_landed, fuel) {
-        fuel.current = fuel.max;
-    }
-});
+// Landing no longer refuels for free: the spaceport's Refuel button
+// (spaceport.ts) charges credits, appears only while fuel isn't full,
+// and greys out when unaffordable, matching the original game. The
+// paid fill commits with the rest of the docked entity's state via the
+// launch addEntity input record.
 
 const PlanetAnimationProvider = Provide({
     name: "PlanetAnimationProvider",
@@ -147,6 +136,5 @@ export const PlanetPlugin: Plugin = {
         world.addSystem(PlanetAnimationProvider);
         world.addSystem(PlanetDataProvider);
         world.addSystem(AttemptLandingSystem);
-        world.addSystem(RefuelOnLandingSystem);
     }
 };

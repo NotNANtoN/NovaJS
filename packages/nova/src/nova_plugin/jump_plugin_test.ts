@@ -518,7 +518,7 @@ describe('jump sequence', () => {
             .toEqual([]);
     }, 30_000);
 
-    it('refuels, free, on landing', async () => {
+    it('does not refuel on landing (refueling is paid, via the spaceport)', async () => {
         const { world, ship } = await makeJumpHarness();
         world.step();
 
@@ -526,11 +526,13 @@ describe('jump sequence', () => {
         fuel.recharge = 0;
         fuel.current = 10;
 
-        // Landing refuels the ship (free until credits exist).
+        // Landing must NOT refill fuel: the spaceport's Refuel button
+        // (spaceport.ts) is the only refuel path, and it charges
+        // credits.
         world.emit(LandEvent,
             { id: 'nova:128', uuid: 'planet nova:128' }, [SHIP_UUID]);
         world.step();
         expect(ship.components.get(FuelComponent)!.current)
-            .toEqual(fuel.max);
+            .toEqual(10);
     }, 30_000);
 });

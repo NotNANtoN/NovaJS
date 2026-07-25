@@ -12,7 +12,7 @@ import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { ControlEvent } from '../nova_plugin/controls_plugin.js';
 import { DisplayAssetDataResource, SimulationGameDataResource } from '../nova_plugin/game_data_resource.js';
-import { ArmorComponent, FuelComponent, IonizationComponent, ShieldComponent } from '../nova_plugin/health_plugin.js';
+import { ArmorComponent, FUEL_PER_JUMP, FuelComponent, IonizationComponent, ShieldComponent } from '../nova_plugin/health_plugin.js';
 import { IdFactory, IdFactoryResource } from '../nova_plugin/id_factory.js';
 import { ShipPhysicsComponent } from '../nova_plugin/ship_plugin.js';
 import { SystemIdResource } from '../nova_plugin/system_id_resource.js';
@@ -48,6 +48,16 @@ const BUTTON_TOP = 75;
 const BUTTON_SPACING = 41;
 const BUTTON_WIDTH = 120;
 
+// Refueling is paid: 100 credits per jump's worth of fuel
+// (FUEL_PER_JUMP units), prorated for partial jumps and rounded up.
+const REFUEL_COST_PER_JUMP = 100;
+
+/** Cost in credits to fill the tank from `current` to `max`. */
+export function refuelCost(fuel: { current: number, max: number }): number {
+    return Math.ceil(
+        (fuel.max - fuel.current) / FUEL_PER_JUMP * REFUEL_COST_PER_JUMP);
+}
+
 export class Spaceport extends Menu<Entity> {
     private outfitter: Outfitter;
     private shipyard: Shipyard;
@@ -57,7 +67,8 @@ export class Spaceport extends Menu<Entity> {
     private universe: MissionUniverse;
     private buttons: {
         bar: Button, missions: Button, tradeCenter: Button,
-        shipyard: Button, outfitter: Button, leave: Button,
+        shipyard: Button, outfitter: Button, refuel: Button,
+        leave: Button,
     };
     private data?: PlanetData;
     private notices = new PIXI.Text('', {
@@ -107,15 +118,21 @@ export class Spaceport extends Menu<Entity> {
                 { x: RIGHT_BUTTON_X, y: buttonY(0) }),
             outfitter: new Button(displayAssets, "Outfitter", BUTTON_WIDTH,
                 { x: RIGHT_BUTTON_X, y: buttonY(1) }),
-            // No Recharge button: the original has none (fuel refills
-            // as part of landing — see show()), and its right column
-            // is Shipyard / Outfitter / (gap) / Leave.
+            // The Refuel button occupies the right column's third slot,
+            // but only exists while the player's fuel isn't full — it
+            // disappears when full (e.g. an auto-refueller outfit) and
+            // greys out when the player can't afford the fill. The
+            // reference screenshot (spaceport/earth.png) shows the gap
+            // because that capture's player had full fuel.
+            refuel: new Button(displayAssets, "Refuel", BUTTON_WIDTH,
+                { x: RIGHT_BUTTON_X, y: buttonY(2) }),
             leave: new Button(displayAssets, "Leave", BUTTON_WIDTH,
                 { x: RIGHT_BUTTON_X, y: buttonY(3) }),
         };
         const buttons = this.buttons;
 
         buttons.leave.click.subscribe(this.done.bind(this));
+        buttons.refuel.click.subscribe(this.refuel.bind(this));
 
         this.outfitter = new Outfitter(displayAssets, simulationData, controlEvents);
         const showOutfitter = async () => {
@@ -130,6 +147,9 @@ export class Spaceport extends Menu<Entity> {
             // TODO: Find a better way to do this.
             this.input.components.delete(WeaponsStateComponent);
             this.input.components.delete(ShipPhysicsComponent);
+            // Outfits can change fuel capacity (fuel tanks), which
+            // affects the Refuel button.
+            this.refreshStatusLine();
             this.controls.bind();
         };
         buttons.outfitter.click.subscribe(showOutfitter);
@@ -243,13 +263,6 @@ export class Spaceport extends Menu<Entity> {
         } catch (e) {
             console.warn('Mission landing processing failed:', e);
         }
-        // Landing refuels the ship, as at the original's spaceports
-        // (there is no Recharge button). Mutating the docked entity's
-        // components is the standard spaceport commit pattern.
-        const fuel = input.components.get(FuelComponent);
-        if (fuel) {
-            fuel.current = fuel.max;
-        }
         this.refreshStatusLine(input);
         return super.show(input);
     }
@@ -293,6 +306,46 @@ export class Spaceport extends Menu<Entity> {
             parts.push(`${credits.credits.toLocaleString()} cr`);
         }
         this.statusLine.text = parts.join('    ');
+        this.updateRefuelButton(entity);
+    }
+
+    /** Hidden when fuel is full; greyed when unaffordable. */
+    private updateRefuelButton(entity: Entity) {
+        const button = this.buttons.refuel;
+        const fuel = entity.components.get(FuelComponent);
+        if (!fuel || fuel.current >= fuel.max) {
+            button.container.visible = false;
+            return;
+        }
+        button.container.visible = true;
+        const credits = entity.components.get(CreditsComponent);
+        button.state = credits && credits.credits >= refuelCost(fuel)
+            ? 'normal' : 'grey';
+    }
+
+    private refuel() {
+        const entity = this.input;
+        if (!entity) {
+            return;
+        }
+        const fuel = entity.components.get(FuelComponent);
+        const credits = entity.components.get(CreditsComponent);
+        // Re-check rather than trusting button state: clicking flips a
+        // Button to 'clicked'/'normal' regardless of greying.
+        if (!fuel || fuel.current >= fuel.max || !credits) {
+            this.refreshStatusLine();
+            return;
+        }
+        const cost = refuelCost(fuel);
+        if (credits.credits < cost) {
+            this.refreshStatusLine();
+            return;
+        }
+        // Mutating the docked entity's components is the standard
+        // spaceport commit pattern (the entity is out of the world).
+        credits.credits -= cost;
+        fuel.current = fuel.max;
+        this.refreshStatusLine();
     }
 
     override async build() {
