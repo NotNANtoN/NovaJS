@@ -73,6 +73,18 @@ import { AnalogControlState } from "./nova_plugin/ship_control.js";
 import { Autopilot, ControlSinks } from "./autopilot.js";
 import { installTapTargeting } from "./tap_targeting.js";
 import { installTouchControls, wantsTouchControls } from "./touch_controls.js";
+import { TitleScreen, TitleStatus } from "./title/title_screen.js";
+import {
+    showAboutDialog, showNewPilotDialog, showOpenPilotDialog,
+    showPreferencesDialog, PilotEntry,
+} from "./title/title_dialogs.js";
+import {
+    clearPilotProfile, loadControlsOverride, loadPilotProfile, mergeControls,
+    savePilotProfile,
+} from "./title/client_prefs.js";
+// clearPilotProfile is wired into the ?reset path below.
+import { combatRatingName } from "./nova_plugin/reputation.js";
+import { formatDate } from "./nova_plugin/calendar.js";
 
 
 const simulationGameData = new SimulationGameData();
@@ -889,7 +901,12 @@ async function startGame() {
     if (!controlsJson) {
         throw new Error("Expected controls settings to exist");
     }
-    const decodedControls = SavedControls.pipe(Controls).decode(controlsJson);
+    // Layer the player's title-screen "Set Prefs" rebindings (stored in
+    // localStorage; the served controls.json is read-only) over the
+    // defaults before decoding.
+    const mergedControlsJson = mergeControls(
+        controlsJson as Record<string, unknown>, loadControlsOverride());
+    const decodedControls = SavedControls.pipe(Controls).decode(mergedControlsJson);
     if (isLeft(decodedControls)) {
         console.error(decodedControls.left);
         throw new Error("Failed to parse controls");
@@ -907,6 +924,7 @@ async function startGame() {
     // recovered by adding &reset to the URL.
     if (query.has('reset')) {
         resetSave();
+        clearPilotProfile();
         console.info('Cleared the saved game (?reset).');
     }
 
@@ -1397,4 +1415,193 @@ async function startGame() {
     };
 }
 
-startGame()
+/**
+ * Builds the bottom status readout for the title screen from the
+ * current save + pilot profile. A pure read; never mutates state.
+ */
+async function computeTitleStatus(): Promise<TitleStatus> {
+    const profile = loadPilotProfile();
+    const save = loadSave();
+    const empty: TitleStatus = {
+        pilotName: profile?.name ?? '—',
+        shipName: '—', shipClass: '—', shipSubtitle: '',
+        legalStatus: 'Citizen', combatRating: combatRatingName(0),
+        date: '—',
+    };
+    if (!save) {
+        return empty;
+    }
+    let shipClass = '—';
+    let shipSubtitle = '';
+    try {
+        const shipData = await simulationGameData.data.Ship.get(save.ship);
+        // The ship's name can carry a "; variant" suffix that the
+        // subtitle already spells out; show just the class on the first
+        // line and the subtitle beneath (as the original does).
+        shipClass = (shipData.name || save.ship).split(';')[0].trim();
+        shipSubtitle = shipData.subtitle || '';
+        if (shipSubtitle && shipSubtitle === shipClass) {
+            shipSubtitle = '';
+        }
+    } catch {
+        // Fall back to the raw id.
+        shipClass = save.ship;
+    }
+    const shipNumber = profile?.shipNumber ?? 1;
+    const kills = save.combatRatings
+        ?.find(([category]) => category === 'kills')?.[1] ?? 0;
+    return {
+        pilotName: profile?.name ?? 'Captain',
+        shipName: `${shipClass} ${shipNumber}`,
+        shipClass,
+        shipSubtitle,
+        legalStatus: 'Citizen',
+        combatRating: combatRatingName(kills),
+        date: save.date ? formatDate(save.date) : '—',
+    };
+}
+
+/**
+ * Shows the title screen (the game's entry experience) and runs the
+ * flow the player picks. Everything here is client-only — the sim/room
+ * is only joined once the player enters the game via startGame().
+ */
+async function runTitle() {
+    const title = new TitleScreen(displayAssetData);
+    (window as any).novaTitle = title;
+    app.stage.addChild(title.container);
+    await title.buildPromise;
+    title.resize(window.innerWidth, window.innerHeight);
+    window.addEventListener('resize', () =>
+        title.resize(window.innerWidth, window.innerHeight));
+    // Drive the title's flame animation until the game is entered.
+    let lastTitleTick = performance.now();
+    const titleTicker = () => {
+        const now = performance.now();
+        title.tick(now - lastTitleTick);
+        lastTitleTick = now;
+    };
+    app.ticker.add(titleTicker);
+
+    try {
+        title.setStatus(await computeTitleStatus());
+    } catch (e) {
+        console.warn('Failed to compute title status:', e);
+    }
+
+    let entering = false;
+    const enterGame = async () => {
+        if (entering) {
+            return;
+        }
+        entering = true;
+        title.hide();
+        app.ticker.remove(titleTicker);
+        app.stage.removeChild(title.container);
+        await startGame();
+    };
+
+    title.show();
+    title.action.subscribe(async (action) => {
+        if (entering) {
+            return;
+        }
+        switch (action) {
+            case 'enterShip':
+                await enterGame();
+                break;
+            case 'newPilot': {
+                title.setEnabled(false);
+                const profile = await showNewPilotDialog();
+                if (profile) {
+                    // A fresh pilot: wipe the previous save so startGame
+                    // spawns from the scenario's default chär, and record
+                    // the new pilot's profile for the status readout.
+                    resetSave();
+                    savePilotProfile({
+                        ...profile,
+                        shipNumber: 100 + Math.floor(Math.random() * 900),
+                    });
+                    await enterGame();
+                } else {
+                    title.setEnabled(true);
+                }
+                break;
+            }
+            case 'openPilot': {
+                title.setEnabled(false);
+                const save = loadSave();
+                const profile = loadPilotProfile();
+                const entries: PilotEntry[] = save ? [{
+                    id: 'current',
+                    name: profile?.name ?? 'Saved Pilot',
+                    detail: save.date ? formatDate(save.date) : undefined,
+                }] : [];
+                const chosen = await showOpenPilotDialog(entries);
+                if (chosen) {
+                    // Single browser save slot: "opening" it just enters
+                    // the game, which loads that save.
+                    await enterGame();
+                } else {
+                    title.setEnabled(true);
+                }
+                break;
+            }
+            case 'setPrefs': {
+                title.setEnabled(false);
+                const controlsJson =
+                    await simulationGameData.getSettings?.('controls.json');
+                await showPreferencesDialog(
+                    (controlsJson as Record<string, unknown>) ?? {});
+                title.setEnabled(true);
+                break;
+            }
+            case 'about':
+                title.setEnabled(false);
+                await showAboutDialog();
+                title.setEnabled(true);
+                break;
+            case 'quit': {
+                title.setEnabled(false);
+                // A browser tab can't reliably self-close; show a farewell
+                // and leave the title in place.
+                const farewell = document.createElement('div');
+                farewell.textContent = 'Thanks for playing. '
+                    + 'You may now close this tab.';
+                Object.assign(farewell.style, {
+                    position: 'fixed', inset: '0', display: 'flex',
+                    alignItems: 'center', justifyContent: 'center',
+                    background: 'rgba(0,0,0,0.85)', color: '#c42a1e',
+                    font: '20px Geneva, sans-serif', zIndex: '10000',
+                } as Partial<CSSStyleDeclaration>);
+                farewell.addEventListener('click', () => {
+                    farewell.remove();
+                    title.setEnabled(true);
+                });
+                document.body.appendChild(farewell);
+                try { window.close(); } catch { /* ignore */ }
+                break;
+            }
+            default:
+                break;
+        }
+    });
+}
+
+// A bare load shows the title screen first. A deep-link that names a
+// ship / system / chär (used by tests, the visual-compare harness, and
+// shareable URLs), or an explicit ?enter, skips straight into the game.
+const entryQuery = new URLSearchParams(window.location.search);
+const autoEnter = ['enter', 'ship', 'system', 'char']
+    .some(param => entryQuery.has(param));
+
+if (autoEnter) {
+    startGame().catch((e) => {
+        console.error('Failed to start game:', e);
+    });
+} else {
+    runTitle().catch((e) => {
+        console.error('Title screen failed; entering game directly.', e);
+        void startGame();
+    });
+}
