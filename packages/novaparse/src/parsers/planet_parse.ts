@@ -44,13 +44,25 @@ export async function PlanetParse(spob: SpobResource, notFoundFunction: (m: stri
         pictID = defaultPictData.id;
     }
 
-    var rledResource = spob.idSpace.rlëD[spob.graphic];
+    // Resolve the stellar graphic through its spïn (sprite-info) resource:
+    // Nova maps the spöb Type (0-255) to spïn (1000 + Type), whose SpriteID
+    // is the real rlëD id (EVN Bible p. 13). This indirection is NOT a plain
+    // 2000 + Type offset — wormholes (Type 59) point at rlëD 2300, and some
+    // stellars reuse a lower sprite — so the spïn lookup is authoritative.
+    // Done here (not in the spöb resource ctor) because it needs the fully
+    // built id space: a spöb's spïn can live in a different data file, so a
+    // constructor-time lookup would race the parse order. Fall back to the
+    // spöb's linear-approximation `graphic` when no spïn exists (e.g. sparse
+    // plug-in data).
+    const spin = spob.idSpace.spïn[1000 + spob.type];
+    const rledGraphicID = spin ? spin.spriteID : spob.graphic;
+    var rledResource = spob.idSpace.rlëD[rledGraphicID];
     var rledID: string;
     if (rledResource) {
         rledID = rledResource.globalID;
     }
     else {
-        notFoundFunction("No matching rlëd id " + spob.graphic + " for spöb of id " + base.id);
+        notFoundFunction("No matching rlëd id " + rledGraphicID + " for spöb of id " + base.id);
         rledID = defaultAnimationImage.id;
     }
 
@@ -149,6 +161,7 @@ export async function PlanetParse(spob: SpobResource, notFoundFunction: (m: stri
         techLevel: spob.techLevel,
         tradeTiers,
         barDesc,
+        animationDelay: spob.animationDelay,
         vulnerableTo: <Array<DamageType>>["planetBuster"],
         physics: {
             shield: 1000,

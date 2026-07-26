@@ -95,6 +95,14 @@ export interface PlanetData extends SpaceObjectData {
      * in the spaceport bar dialog. Empty when the stellar has none.
      */
     barDesc: string;
+
+    /**
+     * The spöb AnimDelay: frames between animation frames in 30ths of a
+     * second (EVN Bible p. 61). 0 means unset. The display turns this into a
+     * frame rate (30 / animationDelay) for continuously-animated stellars
+     * such as wormholes.
+     */
+    animationDelay: number;
 }
 
 export function getDefaultPlanetFlags(): PlanetFlags {
@@ -124,5 +132,6 @@ export function getDefaultPlanetData(): PlanetData {
         techLevel: 0,
         tradeTiers: [null, null, null, null, null, null],
         barDesc: "",
+        animationDelay: 0,
     };
 }

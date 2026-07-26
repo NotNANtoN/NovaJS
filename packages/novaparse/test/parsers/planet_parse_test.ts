@@ -16,6 +16,7 @@ function buildSpob(opts: {
     fee: number,
     type?: number,
     landingPictID?: number,
+    animationDelay?: number,
 }): ResourceBuilder {
     const links = [...opts.hyperlinks];
     while (links.length < 8) {
@@ -35,7 +36,7 @@ function buildSpob(opts: {
         .int16(-1)                             // defenseDude
         .int16(0)                              // defenseCount
         .uint16(opts.flags2)                   // flags2
-        .int16(0)                              // animationDelay
+        .int16(opts.animationDelay ?? 0)       // animationDelay
         .int16(0)                              // frame0Bias
         .array(links, v => b.int16(v))         // hyperlinks
         .string("", 0xff)                      // onDominate
@@ -123,6 +124,70 @@ describe("PlanetParse gate projection", () => {
         // Any CustSndID outside 0-359 (here -1) => random emergence direction.
         expect(planet.gate!.emergenceAngle).toBeNull();
     });
+});
+
+describe("PlanetParse stellar graphic (spïn -> rlëD resolution)", () => {
+    let idSpace: ReturnType<typeof getEmptyNovaResources>;
+    // The parser reads spïn.spriteID and rlëD.globalID; stub just those.
+    const spin = (spriteID: number) => ({ spriteID }) as never;
+    const rled = (globalID: string) => ({ globalID }) as never;
+
+    beforeEach(() => {
+        idSpace = getEmptyNovaResources();
+    });
+
+    function graphicOf(type: number): Promise<string> {
+        const spob = new SpobResource(
+            buildSpob({
+                flags2: type === 59 ? 0x2000 : 0,
+                hyperlinks: [], ambientSound: -1, fee: 0, type,
+            }).resource("spöb", 200), idSpace);
+        return parse(spob).then(p => p.animation.images.baseImage.id);
+    }
+
+    it("resolves Type through spïn (1000 + Type), not a linear 2000 + Type",
+        async () => {
+            // Wormhole: Type 59 -> spïn 1059 -> rlëD 2300 (NOT the linear
+            // 2058 the spöb resource approximates). This is the long-standing
+            // wormhole-graphic bug.
+            idSpace.spïn[1059] = spin(2300);
+            idSpace.rlëD[2300] = rled("nova:2300");
+            expect(await graphicOf(59)).toBe("nova:2300");
+        });
+
+    it("resolves an ordinary planet through spïn (Earth: Type 0 -> rlëD 2000)",
+        async () => {
+            idSpace.spïn[1000] = spin(2000);
+            idSpace.rlëD[2000] = rled("nova:2000");
+            expect(await graphicOf(0)).toBe("nova:2000");
+        });
+
+    it("honors a spïn that remaps to a shared sprite (Type 33 -> rlëD 2000)",
+        async () => {
+            // Ring World II reuses rlëD 2000; the linear guess (2033) is a
+            // missing sprite. The spïn lookup gets it right.
+            idSpace.spïn[1033] = spin(2000);
+            idSpace.rlëD[2000] = rled("nova:2000");
+            expect(await graphicOf(33)).toBe("nova:2000");
+        });
+
+    it("falls back to the linear graphic approximation when no spïn exists",
+        async () => {
+            // No spïn 1030 registered; falls back to spob.graphic (2030).
+            idSpace.rlëD[2030] = rled("nova:2030");
+            expect(await graphicOf(30)).toBe("nova:2030");
+        });
+
+    it("carries the spöb AnimDelay through to PlanetData.animationDelay",
+        async () => {
+            const spob = new SpobResource(
+                buildSpob({
+                    flags2: 0, hyperlinks: [], ambientSound: -1, fee: 0,
+                    animationDelay: 7,
+                }).resource("spöb", 200), idSpace);
+            const planet = await parse(spob);
+            expect(planet.animationDelay).toBe(7);
+        });
 });
 
 describe("PlanetParse landing picture", () => {

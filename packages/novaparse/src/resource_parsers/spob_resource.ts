@@ -13,9 +13,16 @@ class SpobResource extends BaseResource {
     /** Position in the system; (0, 0) is centred. */
     position: number[];
     /**
-     * rlëD id of the stellar graphic. Stored as a 0-based Type (0-255) which
-     * Nova maps to the rlëD sprites at 2000+; a one-id gap above 2058 is
-     * skipped to match Nova's own numbering.
+     * A LINEAR APPROXIMATION of the rlëD id (2000 + Type, less a one-id gap
+     * above the missing rlëD 2056). This is only a fallback: Nova actually
+     * resolves Type through the spïn (sprite-info) resource at (1000 + Type),
+     * whose SpriteID names the real rlëD sprite sheet (EVN Bible p. 13). The
+     * rlëD ids are not a contiguous 2000+Type run — e.g. wormholes (Type 59)
+     * point at rlëD 2300 — so PlanetParse does the authoritative spïn lookup
+     * (it runs after the whole id space is built; the spïn a spöb references
+     * may live in a different data file, so a constructor-time lookup here
+     * would race the parse order). Callers wanting the true graphic should
+     * resolve via spïn and fall back to this.
      */
     graphic: number;
     /**
@@ -100,8 +107,9 @@ class SpobResource extends BaseResource {
 
         this.position = [r.int16(), r.int16()];
 
-        // Type (0-255) mapped to the rlëD stellar sprites at 2000+, with a
-        // one-id gap above 2058 skipped to match Nova's own numbering.
+        // Linear-approximation fallback only; PlanetParse resolves the real
+        // rlëD through the spïn (1000 + Type) indirection. See the `graphic`
+        // field doc for why the authoritative lookup can't happen here.
         this.type = r.int16();
         this.graphic = this.type + 2000;
         if (this.graphic > 2058) {
