@@ -261,6 +261,7 @@ export async function ShipParse(ship: ShipResource,
         disableArmorFraction: (ship.flagsN & 0x0010) ? 0.10 : 0.33,
         length: ship.length,
         crew: ship.crew,
+        freeSpace: ship.freeSpace,
         ...base
     }
 }
