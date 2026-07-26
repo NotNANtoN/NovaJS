@@ -23,7 +23,8 @@ import { GovtComponent } from './govt_component.js';
 import { govtDispositionTo, effectiveStrength, oddsFavorable } from './govt_disposition.js';
 import { ArmorComponent, ShieldComponent } from './health_plugin.js';
 import { JUMP_DISTANCE, JUMP_ARRIVAL_MARGIN_S } from './jump_plugin.js';
-import { PlanetComponent } from './planet_plugin.js';
+import { PlanetData } from 'novadatainterface/planet_data';
+import { PlanetComponent, PlanetDataComponent } from './planet_plugin.js';
 import { LegalRecordsComponent } from './reputation_plugin.js';
 import { SourceComponent } from './fire_weapon_plugin.js';
 import { ShipComponent, ShipDataComponent, ShipPhysicsComponent } from './ship_plugin.js';
@@ -400,7 +401,8 @@ const NpcAggressionSystem = new System({
 // --- Decision making ---
 
 const PlanetsQuery = new Query(
-    [UUID, MovementStateComponent, PlanetComponent] as const);
+    [UUID, MovementStateComponent, PlanetComponent,
+        PlanetDataComponent] as const);
 const NpcTargetsQuery = new Query([UUID, MovementStateComponent, ShipComponent,
     ShipDataComponent, Optional(GovtComponent), Optional(ShieldComponent),
     Optional(CloakActiveComponent), Optional(DisabledComponent),
@@ -422,9 +424,23 @@ function shieldFraction(shield: { current: number, max: number } | undefined) {
     return Math.max(0, shield.current / shield.max);
 }
 
+/** A PlanetsQuery row: [uuid, movement, planet, planetData]. */
+export type PlanetEntry = readonly [string, MovementState, unknown, PlanetData];
+
+/**
+ * The stellars NPCs treat as landing destinations / patrol homes. Wormholes
+ * are excluded: they are transit portals, not places a ship parks (the player
+ * can still deliberately fly into one to transit — that path is
+ * AttemptLandingSystem, not the AI). Hidden the same way on every peer because
+ * PlanetDataComponent is genesis state, so the AI stays deterministic.
+ */
+export function landingDestinations(planets: PlanetEntry[]): PlanetEntry[] {
+    return planets.filter(([, , , data]) => data.gate?.kind !== 'wormhole');
+}
+
 /** Picks the next planet a trader heads for (uuid order for
  * determinism; Random for variety; excludes the one it's at). */
-function pickPlanet(planets: Array<readonly [string, MovementState, unknown]>,
+function pickPlanet(planets: PlanetEntry[],
     random: Random, exclude?: string): string | undefined {
     const ids = planets.map(([uuid]) => uuid)
         .filter(uuid => uuid !== exclude)
@@ -435,7 +451,7 @@ function pickPlanet(planets: Array<readonly [string, MovementState, unknown]>,
     return ids[random.below(ids.length)];
 }
 
-function nearestPlanet(planets: Array<readonly [string, MovementState, unknown]>,
+function nearestPlanet(planets: PlanetEntry[],
     position: Position): string | undefined {
     return chooseNearest(planets.map(([uuid, movement]) => [uuid,
         movement.position.subtract(position).lengthSquared] as const));
@@ -558,12 +574,14 @@ const NpcDecisionSystem = new System({
                             return;
                         }
                         npc.destination = pickPlanet(
-                            planets, random, npc.destination);
+                            landingDestinations(planets), random,
+                            npc.destination);
                         npc.mode = npc.destination ? 'travel' : 'depart';
                     }
                 }
                 if (npc.mode === undefined) {
-                    npc.destination = pickPlanet(planets, random);
+                    npc.destination = pickPlanet(
+                        landingDestinations(planets), random);
                     npc.mode = npc.destination ? 'travel' : 'depart';
                 }
                 break;
@@ -630,7 +648,8 @@ const NpcDecisionSystem = new System({
             }
             case 4: { // Interceptor: orbit home, engage intruders.
                 if (!npc.destination || !entities.has(npc.destination)) {
-                    npc.destination = nearestPlanet(planets, position);
+                    npc.destination =
+                        nearestPlanet(landingDestinations(planets), position);
                     npc.waypoint = undefined;
                 }
                 const home = npc.destination
