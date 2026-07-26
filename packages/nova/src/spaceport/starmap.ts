@@ -1011,7 +1011,11 @@ const PROP_LINE = 13;
 const PORTS_Y = 182;
 const HAZARDS_Y = 202;
 const DATE_RIGHT_X = 288;
-const BUTTON_Y = 220;
+// Measured against map_single_jump_route.png at 1920x1080: the reference
+// row's red button core spans y=773..783 (center 778); at BUTTON_Y=220 ours
+// sat at center 771 with the dialog frame edges exactly aligned, so the row
+// moves 7px down.
+const BUTTON_Y = 227;
 
 export class Starmap extends Menu<string[] /* route list of systems */> {
     private systemGraph?: SystemGraph;
