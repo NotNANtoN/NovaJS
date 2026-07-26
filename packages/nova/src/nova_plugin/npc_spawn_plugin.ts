@@ -21,8 +21,10 @@ import { World } from 'nova_ecs/world';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { loadShipGameData } from './entity_data_loader.js';
 import { deriveEntityComponents } from './entity_factory.js';
+import { DisabledComponent } from './disabled_component.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { GovtComponent } from './govt_component.js';
+import { ArmorComponent, ShieldComponent } from './health_plugin.js';
 import { IdFactory, IdFactoryResource } from './id_factory.js';
 import { JUMP_ARRIVAL_MARGIN_S, JUMP_DISTANCE } from './jump_plugin.js';
 import { loadWithRetries } from './load_retry.js';
@@ -32,7 +34,8 @@ import { FiringGroupComponent } from './firing_group.js';
 import { FormationComponent, NpcComponent, formationSlotPosition } from './npc_ai_plugin.js';
 import { WeaponEntries } from './fire_weapon_plugin.js';
 import { PersComponent } from './pers_plugin.js';
-import { ShipComponent } from './ship_plugin.js';
+import { ShipComponent, ShipDataComponent, ShipPhysicsComponent } from './ship_plugin.js';
+import { Stat } from './stat.js';
 import { TargetComponent } from './target_component.js';
 
 /**
@@ -531,6 +534,10 @@ function maybeSpawnPers(world: World,
         subtitle: pers.subtitle,
     });
     deriveEntityComponents(world, ship);
+    // Drifting Derelict përs belong to the derelict govt (Flags1 0x0800),
+    // so they spawn disabled — a hulk drifting in space (the origin of the
+    // "; Only show hail quote when disabled" derelict përs flavour).
+    applyStartsDisabled(ship, gameData);
     // The 'npc' uuid prefix: a person IS an NPC (population counting,
     // system-furniture checks); the PersComponent is the tag.
     world.entities.set(ids.next('npc'), ship);
@@ -574,6 +581,61 @@ export function makeNpcShip(shipData: ShipData, aiType: number,
         npc.components.set(GovtComponent, { id: govt });
     }
     return npc;
+}
+
+/**
+ * Ships of a government with the "start disabled (derelicts)" flag (gövt
+ * Flags1 0x0800; the "Derelicts" govt nova:160 that owns the Drifting
+ * Derelict përs) spawn as drifting hulks. The existing disable machinery
+ * (disabled_plugin.ts) keeps a ship disabled only while its armor is at or
+ * below the disable threshold, so this pins the fresh hull's armor to that
+ * threshold and drops its shields, then attaches DisabledComponent so the
+ * ship reads as disabled from tick 0 (gray target corners, drifting to
+ * rest, no thrust/turn/fire, no recharge). repairAt is null — an NPC hulk
+ * never self-repairs — so this consumes no Random and is pure genesis
+ * state, identical on every peer (a late joiner receives the armor/shield
+ * values and DisabledComponent through the wire snapshot). A no-op for
+ * ordinary governments, and must run AFTER deriveEntityComponents has
+ * provided the armor/shield/ship-data components.
+ */
+export function applyStartsDisabled(entity: Entity,
+    gameData: SimulationGameDataInterface): void {
+    const govt = entity.components.get(GovtComponent)?.id;
+    if (!govt) {
+        return;
+    }
+    const govtData = gameData.data.Govt.getCached(govt);
+    if (!govtData?.flags.startsDisabled) {
+        return;
+    }
+    const shipData = entity.components.get(ShipDataComponent);
+    const physics = entity.components.get(ShipPhysicsComponent);
+    if (!shipData || !physics) {
+        return;
+    }
+    // deriveEntityComponents provides ShipData/physics but NOT armor or
+    // shields (those are provider systems that first run a tick later), so
+    // seed proper Stats here to make the hull fully formed at insertion.
+    // Armor is pinned at the disable threshold — isBelowDisableThreshold
+    // uses <=, so ShipDisableSystem keeps the ship disabled rather than
+    // re-enabling it — and shields are dropped. The provider systems
+    // preserve `current` on the next tick (armor?.current ?? physics.armor),
+    // so the low values persist; recharge stays suspended while disabled.
+    entity.components.set(ArmorComponent, new Stat({
+        current: shipData.disableArmorFraction * physics.armor,
+        max: physics.armor,
+        min: 0,
+        recharge: physics.armorRecharge,
+    }));
+    entity.components.set(ShieldComponent, new Stat({
+        current: 0,
+        max: physics.shield,
+        min: -physics.shield * 0.05,
+        recharge: physics.shieldRecharge,
+    }));
+    // Disabled from tick 0 (repairAt null: an NPC hulk never self-repairs,
+    // so no Random is drawn — pure, peer-identical genesis state).
+    entity.components.set(DisabledComponent, { repairAt: null });
 }
 
 /** Jump-in kinematics: where an arriving NPC appears and how it moves
@@ -628,6 +690,8 @@ export function spawnNpc(world: World,
     }
     const insert = (uuid: string, entity: Entity) => {
         deriveEntityComponents(world, entity);
+        // Derelict-govt ships spawn disabled (gövt Flags1 0x0800).
+        applyStartsDisabled(entity, gameData);
         entities.set(uuid, entity);
     };
 

@@ -5,6 +5,7 @@ import { Observable, Subject } from "rxjs";
 import { DisplayAssetDataInterface } from "../client/gamedata/display_asset_data.js";
 import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
 import { ControlEvent } from "../nova_plugin/controls_plugin.js";
+import { displayName } from "../nova_plugin/display_name.js";
 import { MissionMapMark, STANDARD_CARGO_NAMES } from "../nova_plugin/mission_logic.js";
 import { evaluateNCBTest } from "../nova_plugin/ncb.js";
 import { legalStatusName } from "../nova_plugin/reputation.js";
@@ -1271,7 +1272,10 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
 
         const govt = system.govt
             ? this.universe.getGovt(system.govt) : undefined;
-        addLine('Government:', [govt?.name ?? 'Independent']);
+        // Strip the "; note" author suffix ("Federation;hates Temmin
+        // Shard" -> "Federation") the original never shows.
+        addLine('Government:',
+            [govt ? displayName(govt.name) : 'Independent']);
 
         if (govt && system.govt) {
             const record = this.getLegalRecords()?.get(system.govt) ?? 0;

@@ -4,6 +4,7 @@ import { firstValueFrom, Observable, Subject } from 'rxjs';
 import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data.js';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { ControlEvent } from '../nova_plugin/controls_plugin.js';
+import { displayName } from '../nova_plugin/display_name.js';
 import { Button } from './button.js';
 import { MenuControls } from './menu_controls.js';
 
@@ -133,7 +134,8 @@ export class ShipInfoDialog {
     async show(ship: ShipData): Promise<void> {
         this.pictContainer.removeChildren();
         this.content.removeChildren();
-        this.nameText.text = ship.name;
+        // Strip the "; note" author suffix the original never shows.
+        this.nameText.text = displayName(ship.name);
 
         // The ship's rendered PICT, scaled to fit the picture area.
         if (ship.pict) {
@@ -237,8 +239,10 @@ export class ShipInfoDialog {
             const isWeapon = Object.keys(outfit.weapons).length > 0
                 || outfit.fixedGun || outfit.turret;
             if (isWeapon) {
-                weapons.push(count > 1 ? `${count} ${outfit.name}s`
-                    : `${count} ${outfit.name}`);
+                // Strip the "; note" author suffix from the outfit name.
+                const outfitName = displayName(outfit.name);
+                weapons.push(count > 1 ? `${count} ${outfitName}s`
+                    : `${count} ${outfitName}`);
             } else if (outfit.ammoFor) {
                 ammo += count;
             }

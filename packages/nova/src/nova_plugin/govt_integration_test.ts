@@ -46,6 +46,28 @@ describe('GovtData against real Nova data', () => {
         expect(auroran.inhJam).toEqual([8, 3, 0, 0]);
     });
 
+    it("pins Pyrogenesis Skymining's (nova:173) short names", async () => {
+        const gameData = await getIntegrationGameData();
+        const pyro = await gameData.data.Govt.get('nova:173');
+        expect(pyro.name).toBe('Pyrogenesis Skymining');
+        // The gövt name-ish fields (gövt TMPL offsets 52/68/100): the
+        // Comms Name, the short Target Code the target box shows, and the
+        // Medium Name. The full name overflows the target box; "Pyro" is
+        // what the original shows there.
+        expect(pyro.commName).toBe('Pyrogenesis');
+        expect(pyro.targetCode).toBe('Pyro');
+        expect(pyro.mediumName).toBe('Pyrogenesis Skymining');
+    });
+
+    it("pins the Derelicts govt (nova:160) start-disabled flag", async () => {
+        const gameData = await getIntegrationGameData();
+        const derelicts = await gameData.data.Govt.get('nova:160');
+        expect(derelicts.name).toBe('Derelicts');
+        // gövt Flags1 0x0800: "Ships of this govt start out disabled
+        // (derelicts)" — the mechanism behind the Drifting Derelict përs.
+        expect(derelicts.flags.startsDisabled).toBeTrue();
+    });
+
     it('exposes govt ids through the aggregated data interface', async () => {
         const gameData = await getIntegrationGameData();
         const ids = await gameData.ids;
