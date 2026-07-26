@@ -73,6 +73,8 @@ import { AnalogControlState } from "./nova_plugin/ship_control.js";
 import { Autopilot, ControlSinks } from "./autopilot.js";
 import { installTapTargeting } from "./tap_targeting.js";
 import { installTouchControls, wantsTouchControls } from "./touch_controls.js";
+import { isTextEntryActive } from "./input_focus.js";
+import { MenuControls } from "./spaceport/menu_controls.js";
 
 
 const simulationGameData = new SimulationGameData();
@@ -1169,17 +1171,49 @@ async function startGame() {
         if (!controls) {
             return;
         }
+        // A focused text-entry surface (the starmap Find dialog, the
+        // quantity dialog, an HTML input overlay, ...) owns the keyboard:
+        // generate no game control PRESSES at all, so typing can't fire
+        // hotkeys (digits selecting stellar bodies, 'd' departing, 'm'
+        // opening the map). Releases still flow (like the overlay case
+        // below) so a control held when the field opened can't stay stuck
+        // on. Determinism-safe: dropped presses are never recorded as
+        // inputs, so no peer is affected.
+        if (isTextEntryActive() && event.type !== 'keyup') {
+            return;
+        }
         if (event.key === 'Tab') {
             event.preventDefault();
         }
         const actions = getActions(controls, event);
-        if (actions.some(action => movementActions.has(action))) {
-            localAutopilot.cancel();
-        }
         const controlEvents: ControlEvent[] = actions.map(action => ({
             action,
             state: event.type === 'keyup' ? false : event.repeat ? 'repeat' : 'start',
         }));
+        // A modal overlay (starmap, gate map, player info, spaceport menus)
+        // owns the keyboard while it holds focus: its own control bindings
+        // still fire (via controlsSubject), but the same keys must NOT also
+        // drive the ship in the sim underneath — otherwise Tab cycles the
+        // ship target while it cycles the map's jump route, Space fires the
+        // primary weapon, and the arrows turn the ship. Route presses to the
+        // menu layer (and display-only handlers) only.
+        //
+        // Key RELEASES are the exception: they still reach the sim, so a
+        // control held down when the overlay opened (e.g. accelerate) doesn't
+        // stay stuck on after the overlay closes.
+        if (MenuControls.focused && event.type !== 'keyup') {
+            if (controlEvents.length === 0) {
+                return;
+            }
+            displayWorld?.emit(EcsControlEvent, controlEvents);
+            for (const controlEvent of controlEvents) {
+                controlsSubject.next(controlEvent);
+            }
+            return;
+        }
+        if (actions.some(action => movementActions.has(action))) {
+            localAutopilot.cancel();
+        }
         emitControlEvents(controlEvents);
     }
     document.addEventListener('keydown', handleControlEvent);

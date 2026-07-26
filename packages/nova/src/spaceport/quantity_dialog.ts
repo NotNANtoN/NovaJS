@@ -1,6 +1,7 @@
 import * as PIXI from 'pixi.js';
 import { firstValueFrom, Observable, Subject } from 'rxjs';
 import { ControlEvent } from '../nova_plugin/controls_plugin.js';
+import { beginPixiTextEntry } from '../input_focus.js';
 import { MenuControls } from './menu_controls.js';
 
 // The plain system dialog from the reference screenshots
@@ -154,6 +155,13 @@ export class QuantityDialog {
             this.confirm();
             return;
         }
+        // Handled here rather than via the MenuControls 'depart' binding:
+        // while this field owns the keyboard the control relay is muted
+        // (input_focus), so no control events arrive.
+        if (event.key === 'Escape') {
+            this.close(undefined);
+            return;
+        }
         const edited = editQuantityText(this.text, event.key);
         if (edited !== undefined) {
             this.setText(edited);
@@ -185,11 +193,15 @@ export class QuantityDialog {
         this.setText(`${Math.max(0, Math.floor(request.initial))}`);
         this.container.visible = true;
         this.controls.bind();
+        // The quantity field owns the keyboard: without this, typed digits
+        // (and Enter) would also reach the game's control relay as hotkeys.
+        const releaseTextEntry = beginPixiTextEntry();
         document.addEventListener('keydown', this.keyListener);
         try {
             return await firstValueFrom(this.result);
         } finally {
             document.removeEventListener('keydown', this.keyListener);
+            releaseTextEntry();
             this.controls.unbind();
             this.container.visible = false;
         }

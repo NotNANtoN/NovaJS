@@ -1,6 +1,7 @@
 import * as PIXI from 'pixi.js';
 import { firstValueFrom, Observable, Subject } from 'rxjs';
 import { ControlEvent } from '../nova_plugin/controls_plugin.js';
+import { beginPixiTextEntry } from '../input_focus.js';
 import { MenuControls } from './menu_controls.js';
 import { SystemButton } from './quantity_dialog.js';
 
@@ -141,6 +142,12 @@ export class FindDialog {
         this.valueText.text = '';
         this.container.visible = true;
         this.controls.bind();
+        // This field owns the keyboard while it's up. Two lines of defense:
+        // the capture-phase listener below stops typed keys from propagating
+        // to the game's relay, and registering as a text-entry surface makes
+        // the relay itself stand down (so nothing slips through even if
+        // propagation ever changes).
+        const releaseTextEntry = beginPixiTextEntry();
         // Capture phase, ahead of the game's keyboard plugin.
         window.addEventListener('keydown', this.keyListener, true);
         try {
@@ -148,6 +155,7 @@ export class FindDialog {
             return name?.trim() ? name.trim() : undefined;
         } finally {
             window.removeEventListener('keydown', this.keyListener, true);
+            releaseTextEntry();
             this.controls.unbind();
             this.container.visible = false;
         }
