@@ -98,20 +98,35 @@ async function run() {
                             ref: `${base}__ref.png`,
                             ours: `${base}__ours.png`,
                             diff: `${base}__diff.png`,
+                            heat: `${base}__heat.png`,
                         };
                         writePng(cmp.refCrop, path.join(OUTPUT_DIR, files.ref));
                         writePng(cmp.oursCrop, path.join(OUTPUT_DIR, files.ours));
                         writePng(cmp.diffPng, path.join(OUTPUT_DIR, files.diff));
+                        writePng(cmp.heatmapPng, path.join(OUTPUT_DIR, files.heat));
                         regionResults.push({
                             id: rgn.id, label: rgn.label,
                             rect: rgn.ref,
                             diffPixels: cmp.diffPixels,
                             totalPixels: cmp.totalPixels,
                             diffPercent: cmp.diffPercent,
+                            // Localized-inaccuracy metric (additive): the worst
+                            // grid cell's density and how concentrated the diff
+                            // is. A low diffPercent with high concentration =
+                            // a small, badly-misplaced widget.
+                            maxCellPercent: cmp.grid.maxCellPercent,
+                            meanCellPercent: cmp.grid.meanCellPercent,
+                            concentration: cmp.grid.concentration,
+                            grid: {
+                                cols: cmp.grid.cols, rows: cmp.grid.rows,
+                                worst: cmp.grid.worst,
+                            },
                             files,
                         });
                         console.log(`  [${ref.name}] ${rgn.id}: `
-                            + `${cmp.diffPercent.toFixed(1)}% (${cmp.diffPixels}/${cmp.totalPixels})`);
+                            + `${cmp.diffPercent.toFixed(1)}% (${cmp.diffPixels}/${cmp.totalPixels})`
+                            + `  maxCell ${cmp.grid.maxCellPercent.toFixed(1)}%`
+                            + `  conc ${cmp.grid.concentration.toFixed(1)}x`);
                     }
                     refEntries.push({ name: ref.name, file: ref.file,
                         fullFile: refFullOut, regions: regionResults });
@@ -142,11 +157,25 @@ async function run() {
     for (const s of results)
         for (const r of s.references)
             for (const rg of r.regions)
-                flat.push({ scenario: s.id, ref: r.name, region: rg.id, pct: rg.diffPercent });
+                flat.push({ scenario: s.id, ref: r.name, region: rg.id,
+                    pct: rg.diffPercent, conc: rg.concentration ?? 0,
+                    maxCell: rg.maxCellPercent ?? 0 });
     flat.sort((a, b) => b.pct - a.pct);
     console.log('\nBiggest region mismatches:');
     for (const f of flat.slice(0, 12))
         console.log(`  ${f.pct.toFixed(1).padStart(6)}%  ${f.scenario} / ${f.region} (vs ${f.ref})`);
+
+    // Localized hotspots: low overall diff but the error piled into a corner.
+    const hotspots = flat
+        .filter(f => f.pct < 10 && f.conc >= 4 && f.maxCell >= 15)
+        .sort((a, b) => b.conc - a.conc);
+    if (hotspots.length) {
+        console.log('\nSuspicious localized hotspots (low overall, concentrated):');
+        for (const f of hotspots)
+            console.log(`  ${f.pct.toFixed(1).padStart(6)}% overall · `
+                + `maxCell ${f.maxCell.toFixed(0)}% · ${f.conc.toFixed(1)}x  `
+                + `${f.scenario} / ${f.region} (vs ${f.ref})`);
+    }
 }
 
 run().catch((e) => { console.error(e); process.exit(1); });

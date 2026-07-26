@@ -16,10 +16,42 @@ function pctColor(pct) {
     return '#c53030';
 }
 
+/**
+ * A region is a "localized hotspot" when its overall diff is low but the
+ * error is piled into a few grid cells (e.g. one misplaced widget), rather
+ * than sprinkled evenly (starfield noise / dynamic text). These deserve
+ * attention despite the reassuring overall number.
+ */
+export function isLocalizedHotspot(rg) {
+    return (rg.diffPercent ?? 0) < 10
+        && (rg.concentration ?? 0) >= 4
+        && (rg.maxCellPercent ?? 0) >= 15;
+}
+
+function concentrationLine(rg) {
+    if (rg.maxCellPercent === undefined) {
+        return ''; // Old result objects without the metric.
+    }
+    const flag = isLocalizedHotspot(rg)
+        ? `<div class="hotflag">&#9888; localized hotspot &mdash; low overall diff
+           but the error is concentrated (likely a misplaced element)</div>`
+        : '';
+    return `
+        <div class="rmeta conc">
+          max cell <b style="color:${pctColor(rg.maxCellPercent)}">${rg.maxCellPercent.toFixed(1)}%</b>
+          · mean cell ${rg.meanCellPercent.toFixed(2)}%
+          · concentration <b>${rg.concentration.toFixed(1)}×</b>
+          ${rg.grid ? `(${rg.grid.cols}×${rg.grid.rows} grid)` : ''}
+        </div>${flag}`;
+}
+
 function regionRow(rg) {
     const { rect } = rg;
+    const heat = rg.files.heat
+        ? `<td><figure><img src="${esc(rg.files.heat)}" loading="lazy"><figcaption>hotspots (worst cell outlined)</figcaption></figure></td>`
+        : '<td></td>';
     return `
-    <tr>
+    <tr${isLocalizedHotspot(rg) ? ' class="hotspot"' : ''}>
       <td>
         <div class="rid">${esc(rg.label)}</div>
         <div class="rmeta">${esc(rg.id)} · ${rect.width}×${rect.height} @ (${rect.x},${rect.y})</div>
@@ -27,10 +59,12 @@ function regionRow(rg) {
           ${rg.diffPercent.toFixed(2)}%
           <span class="rmeta">(${rg.diffPixels.toLocaleString()} / ${rg.totalPixels.toLocaleString()} px)</span>
         </div>
+        ${concentrationLine(rg)}
       </td>
       <td><figure><img src="${esc(rg.files.ref)}" loading="lazy"><figcaption>reference</figcaption></figure></td>
       <td><figure><img src="${esc(rg.files.ours)}" loading="lazy"><figcaption>ours</figcaption></figure></td>
       <td><figure><img src="${esc(rg.files.diff)}" loading="lazy"><figcaption>diff</figcaption></figure></td>
+      ${heat}
     </tr>`;
 }
 
@@ -39,7 +73,7 @@ function referenceBlock(ref) {
     <div class="refblock">
       <h3>vs <code>${esc(ref.file)}</code></h3>
       <table class="regions">
-        <thead><tr><th>region</th><th>reference crop</th><th>our crop</th><th>pixelmatch diff</th></tr></thead>
+        <thead><tr><th>region</th><th>reference crop</th><th>our crop</th><th>pixelmatch diff</th><th>hotspot heatmap</th></tr></thead>
         <tbody>${ref.regions.map(regionRow).join('')}</tbody>
       </table>
     </div>`;
@@ -69,14 +103,40 @@ export function renderReport(results, { referenceDir } = {}) {
     for (const s of results)
         for (const r of s.references)
             for (const rg of r.regions)
-                flat.push({ scenario: s.id, ref: r.name, region: rg.label, pct: rg.diffPercent });
+                flat.push({
+                    scenario: s.id, ref: r.name, region: rg.label,
+                    pct: rg.diffPercent,
+                    maxCell: rg.maxCellPercent,
+                    conc: rg.concentration,
+                    hot: isLocalizedHotspot(rg),
+                });
     flat.sort((a, b) => b.pct - a.pct);
 
     const summaryRows = flat.map(f => `
-      <tr>
-        <td>${esc(f.scenario)}</td><td>${esc(f.region)}</td><td>${esc(f.ref)}</td>
+      <tr${f.hot ? ' class="hotspot"' : ''}>
+        <td>${esc(f.scenario)}</td><td>${esc(f.region)}${f.hot ? ' <span class="hotmark" title="localized hotspot">&#9888;</span>' : ''}</td><td>${esc(f.ref)}</td>
         <td style="color:${pctColor(f.pct)};font-weight:600;text-align:right">${f.pct.toFixed(2)}%</td>
+        <td style="text-align:right">${f.maxCell === undefined ? '' : `<span style="color:${pctColor(f.maxCell)}">${f.maxCell.toFixed(1)}%</span>`}</td>
+        <td style="text-align:right">${f.conc === undefined ? '' : `${f.conc.toFixed(1)}×`}</td>
       </tr>`).join('');
+
+    const hotspots = flat.filter(f => f.hot);
+    const hotspotBlock = hotspots.length ? `
+  <h2>&#9888; Localized hotspots</h2>
+  <p class="rmeta">Regions whose OVERALL diff is low but whose error is
+    concentrated in a few grid cells — the signature of a misplaced widget
+    rather than diffuse noise. (diff &lt; 10%, concentration &ge; 4×, worst
+    cell &ge; 15%.)</p>
+  <table class="summary">
+    <thead><tr><th>scenario</th><th>region</th><th>reference</th><th>diff %</th><th>max cell</th><th>conc.</th></tr></thead>
+    <tbody>${hotspots.map(f => `
+      <tr class="hotspot">
+        <td>${esc(f.scenario)}</td><td>${esc(f.region)}</td><td>${esc(f.ref)}</td>
+        <td style="text-align:right">${f.pct.toFixed(2)}%</td>
+        <td style="text-align:right;color:${pctColor(f.maxCell)}">${f.maxCell.toFixed(1)}%</td>
+        <td style="text-align:right">${f.conc.toFixed(1)}×</td>
+      </tr>`).join('')}</tbody>
+  </table>` : '';
 
     return `<!doctype html>
 <html><head><meta charset="utf-8"><title>NovaJS visual comparison</title>
@@ -107,6 +167,11 @@ export function renderReport(results, { referenceDir } = {}) {
   details.errs pre { background:#1b1f24; padding:8px; overflow:auto; font-size:12px; }
   .legend span { display:inline-block; margin-right:14px; }
   .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:4px; vertical-align:middle; }
+  .conc { margin-top:4px; }
+  tr.hotspot { background:rgba(217,119,6,0.10); }
+  tr.hotspot td { border-left:none; }
+  .hotflag { color:#f0a840; font-size:12px; margin-top:4px; max-width:32ch; }
+  .hotmark { color:#f0a840; }
 </style></head>
 <body>
   <h1>NovaJS visual comparison</h1>
@@ -122,14 +187,18 @@ export function renderReport(results, { referenceDir } = {}) {
     <span><i class="dot" style="background:#c53030"></i>≥40%</span>
   </div>
 
+  ${hotspotBlock}
+
   <h2>Summary — biggest mismatches first</h2>
   <table class="summary">
-    <thead><tr><th>scenario</th><th>region</th><th>reference</th><th>diff %</th></tr></thead>
+    <thead><tr><th>scenario</th><th>region</th><th>reference</th><th>diff %</th><th>max cell</th><th>conc.</th></tr></thead>
     <tbody>${summaryRows}</tbody>
   </table>
   <p class="rmeta">Diff % = fraction of pixels in the region that pixelmatch flags
     as different (threshold 0.1). High numbers on dynamic content (map graph,
-    live text, blips) are expected; watch the chrome-only regions.</p>
+    live text, blips) are expected; watch the chrome-only regions.<br>
+    Max cell = worst grid-cell diff density; conc. = worst cell ÷ mean cell.
+    Low diff % with high concentration = a small element in the wrong place.</p>
 
   ${results.map(scenarioBlock).join('')}
 </body></html>`;

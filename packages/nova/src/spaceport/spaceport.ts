@@ -278,6 +278,19 @@ export class Spaceport extends Menu<Entity> {
      * standard spaceport commit pattern.
      */
     override async show(input: Entity): Promise<Entity> {
+        // Own the keyboard immediately, before the landing processing below.
+        // That processing awaits the mission universe, which on the very
+        // first landing can still be loading (~thousands of resources); until
+        // super.show() runs, the spaceport isn't the focused MenuControls
+        // layer, so the first docked 'p' (player info) / mission keypress
+        // falls through to the in-flight handlers — which can't serve the
+        // docked entity (it's out of the world while docked). Binding here
+        // makes MenuControls.focused the spaceport from the moment it opens;
+        // super.show() re-binds (idempotent) and unbinds on depart. The
+        // input is set first so handlers that read it (e.g. 'p' passing the
+        // docked entity to player info) work during the gap too.
+        this.setInput(input);
+        this.controls.bind();
         try {
             const events = await processEntityLanding(input,
                 this.simulationData, this.universe, this.id);
