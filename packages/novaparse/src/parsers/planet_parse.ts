@@ -25,8 +25,17 @@ export async function PlanetParse(spob: SpobResource, notFoundFunction: (m: stri
         notFoundFunction(desc);
     }
 
+    // CustPicID < 128 means "no custom landscape" (EVN Bible p. 60; the
+    // field is parsed unsigned, so -1 reads as 65535 and misses the first
+    // lookup). The engine then shows the STANDARD landscape for the
+    // stellar's Type: a pre-made PICT at 10000 + Type (the raw type, before
+    // the rlëD gap adjustment). Validated against original hardware: Port
+    // Kane (Type 34, CustPicID -1) renders exactly PICT 10034. Hypergates,
+    // wormholes, and unlandable stellars have no standard landscape PICT in
+    // the game data; only those fall through to the default placeholder.
     var pictID: string;
     var pict = spob.idSpace.PICT[spob.landingPictID]
+        ?? spob.idSpace.PICT[10000 + spob.type];
     if (pict) {
         pictID = pict.globalID;
     }

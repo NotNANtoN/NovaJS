@@ -18,6 +18,12 @@ class SpobResource extends BaseResource {
      * skipped to match Nova's own numbering.
      */
     graphic: number;
+    /**
+     * The raw stellar Type (0-based graphic index) as stored, WITHOUT the
+     * rlëD gap adjustment applied to `graphic`. Keys the standard landscape
+     * PICT at 10000 + type shown when there is no custom landscape.
+     */
+    type: number;
     /** 32-bit flag set (landability, trade prices, station/bar/... — p. 59). */
     flags: number;
     /** Daily tribute when dominated; 0/-1 = default (1000 x tech level). */
@@ -96,7 +102,8 @@ class SpobResource extends BaseResource {
 
         // Type (0-255) mapped to the rlëD stellar sprites at 2000+, with a
         // one-id gap above 2058 skipped to match Nova's own numbering.
-        this.graphic = r.int16() + 2000;
+        this.type = r.int16();
+        this.graphic = this.type + 2000;
         if (this.graphic > 2058) {
             this.graphic -= 1;
         }
