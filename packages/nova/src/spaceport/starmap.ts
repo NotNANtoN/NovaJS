@@ -32,14 +32,14 @@ const ROUTE_MULTI_COLOR = 0x00ff00;
 const ROUTE_MULTI_WIDTH = 3;
 const ROUTE_SINGLE_COLOR = 0x00b400;
 const ROUTE_SINGLE_WIDTH = 1;
-// Active-mission markers: ORANGE arrows on destination (travel/return)
-// systems (mission_bbs/notes.txt), yellow for a mission's special-ship
-// system (the Bible's additional arrow), and GREEN for the destinations of
-// the mission being viewed in the Mission BBS. Orange and green marks may
-// share a system, so they sit on opposite sides of it.
-const MISSION_DEST_COLOR = 0xff8000;
-const MISSION_SHIPSYST_COLOR = 0xffcc00;
-const MISSION_VIEWED_COLOR = 0x00dd00;
+// Active-mission markers use the original game's own icons: the ORANGE
+// cicn 15000 on active-mission destination/ship systems (mission_bbs/
+// notes.txt) and the GREEN cicn 15001 on the destinations of the mission
+// being viewed in the Mission BBS. The green art mirrors the orange (they
+// point down-right and down-left respectively), so the two marks can flank
+// a shared system from opposite sides. Placement in placeMarkIcon.
+const MISSION_MARK_ACTIVE_CICN = 'nova:15000';
+const MISSION_MARK_VIEWED_CICN = 'nova:15001';
 const SELECT_COLOR = 0x00ff00;
 const LABEL_FONT_NAME = 'StarmapSystemLabel';
 const LABEL_FONT_SIZE = 10;
@@ -183,6 +183,15 @@ export interface SystemGraphOptions {
      */
     viewedMarks?: MissionMapMark[];
     /**
+     * The original game's mission-mark icons (cicn 15000 orange / 15001
+     * green), preloaded by the owning Starmap. Omitted only in tests /
+     * standalone graphs, in which case no mission marks are drawn.
+     */
+    missionMarkTextures?: {
+        active: PIXI.Texture,
+        viewed: PIXI.Texture,
+    };
+    /**
      * The government border color for a system (Show Borders), or null for
      * no blob. Injected so the graph itself stays free of async data loads.
      */
@@ -241,6 +250,11 @@ export class SystemGraph {
     // Active-mission destination / ship-syst markers (decorative overlay).
     private readonly missionMarks: MissionMapMark[];
     private readonly viewedMarks: MissionMapMark[];
+    // The original game's mission-mark icons (cicn 15000/15001), or
+    // undefined when the graph is built without them (tests).
+    private readonly missionMarkTextures?: {
+        active: PIXI.Texture, viewed: PIXI.Texture,
+    };
     /** The picked system in destination-picker mode, if any. */
     selectedSystem?: string;
     private size: { x: number, y: number };
@@ -252,6 +266,7 @@ export class SystemGraph {
         this.selectable = options.selectable;
         this.missionMarks = options.missionMarks ?? [];
         this.viewedMarks = options.viewedMarks ?? [];
+        this.missionMarkTextures = options.missionMarkTextures;
         const size = this.size = options.size ?? { x: 456, y: 419 };
         // NCB-hidden systems don't exist for the player: they aren't drawn,
         // clicked, linked, or routed through. The current system is always
@@ -753,65 +768,60 @@ export class SystemGraph {
     }
 
     /**
-     * Draws the active-mission markers: small arrows beside their systems
-     * (destinations orange, ship-syst yellow, BBS-viewed green). Additive
-     * and decorative: baked into the map container like the circles, so it
-     * pans/zooms with them and never intercepts clicks. Marks whose system
-     * is NCB-hidden (not on this map) are skipped; marks on unexplored
-     * systems still render.
+     * Draws the active-mission markers using the original game's own cicn
+     * icons: cicn 15000 (orange) on active-mission systems and cicn 15001
+     * (green) on the destinations of the mission being viewed in the BBS
+     * (mission_bbs/notes.txt). Additive and decorative: baked into the map
+     * container like the circles, so the sprites pan/zoom with them and
+     * never intercept clicks. Marks whose system is NCB-hidden (not on this
+     * map) are skipped; marks on unexplored systems still render. When no
+     * icons were preloaded (standalone/test graphs), nothing is drawn.
      */
     private drawMissionMarks() {
+        const textures = this.missionMarkTextures;
+        if (!textures) {
+            return;
+        }
         if (this.missionMarks.length === 0 && this.viewedMarks.length === 0) {
             return;
         }
-        const graphics = new PIXI.Graphics();
+        const container = new PIXI.Container();
         for (const mark of this.missionMarks) {
-            const color = mark.kind === 'shipSyst'
-                ? MISSION_SHIPSYST_COLOR : MISSION_DEST_COLOR;
-            // Active-mission arrows sit below-left, pointing up at the
-            // system (map_showing_mission_location.png).
-            this.drawMarkArrow(graphics, mark.systemId, color, 1);
+            // The orange icon points DOWN-RIGHT (tip at its lower-right
+            // corner): it sits above-left of the system dot, aimed at it
+            // (mission_bbs/accepted_un_mission_orange_mark...png).
+            this.placeMarkIcon(container, mark.systemId, textures.active, 1);
         }
         for (const mark of this.viewedMarks) {
-            // Viewed-mission arrows sit above-left pointing down, so both
-            // can share a system (mission_bbs/notes.txt).
-            this.drawMarkArrow(graphics, mark.systemId,
-                MISSION_VIEWED_COLOR, -1);
+            // The green icon is the mirrored art pointing DOWN-LEFT (tip at
+            // its lower-left corner): it sits above-right of the dot, so
+            // both icons stay legible when a system has an active AND a
+            // viewed mission on it (mission_bbs/notes.txt,
+            // selected_mission_destination_green_mark.png).
+            this.placeMarkIcon(container, mark.systemId, textures.viewed, 0);
         }
-        this.mapContainer.addChild(graphics);
+        this.mapContainer.addChild(container);
     }
 
-    /** Draws one diagonal mark arrow beside a system. `side` +1 = below-left
-     * pointing up-right at it; -1 = above-left pointing down-right. */
-    private drawMarkArrow(graphics: PIXI.Graphics, systemId: string,
-        color: number, side: number) {
+    /** Places one mission-mark cicn sprite beside a system, its pointed tip
+     * anchored just outside the system circle on the upper diagonal it aims
+     * along. `tipAnchorX` is the tip's corner within the art: 1 = lower-right
+     * (the orange down-right arrow, placed above-left of the dot), 0 =
+     * lower-left (the green down-left arrow, placed above-right).
+     * Non-interactive and unscaled, so it reads at its native size. */
+    private placeMarkIcon(container: PIXI.Container, systemId: string,
+        texture: PIXI.Texture, tipAnchorX: number) {
         const system = this.systems.get(systemId);
         if (!system) {
             return;
         }
         const [x, y] = this.scalePos(system.position);
-        // Arrow tip just outside the system circle, on the lower-left (or
-        // upper-left) diagonal; tail extends away from the system.
-        const tipX = x - SYSTEM_RADIUS - 1;
-        const tipY = y + side * (SYSTEM_RADIUS + 1);
-        const dir = { x: -1, y: side }; // Away from the system.
-        const len = 5 * BASE_SCALE;
-        const tailX = tipX + dir.x * len;
-        const tailY = tipY + dir.y * len;
-        // Shaft.
-        graphics.lineStyle(1.5, color, 1);
-        graphics.moveTo(tailX, tailY);
-        graphics.lineTo(tipX, tipY);
-        // Head: a small filled triangle at the tip.
-        const head = 2.2 * BASE_SCALE;
-        graphics.lineStyle(0);
-        graphics.beginFill(color, 1);
-        graphics.drawPolygon([
-            tipX + dir.x * 0.2, tipY + dir.y * 0.2,
-            tipX + dir.x * head, tipY + dir.y * head - side * head * 0.7,
-            tipX + dir.x * head + head * 0.7, tipY + dir.y * head,
-        ]);
-        graphics.endFill();
+        const sprite = new PIXI.Sprite(texture);
+        sprite.eventMode = 'none';
+        sprite.anchor.set(tipAnchorX, 1);
+        const dx = tipAnchorX === 1 ? -SYSTEM_RADIUS : SYSTEM_RADIUS;
+        sprite.position.set(x + dx, y - SYSTEM_RADIUS);
+        container.addChild(sprite);
     }
 
     private drawLinks() {
@@ -1017,6 +1027,12 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
     private systemGraph?: SystemGraph;
     private allSystems?: SystemData[];
     private graphBitsKey?: string;
+    // The original game's mission-mark icons (cicn 15000 orange active /
+    // 15001 green BBS-viewed), loaded once in build() and handed to each
+    // SystemGraph so the marks render as the real art.
+    private missionMarkTextures?: {
+        active: PIXI.Texture, viewed: PIXI.Texture,
+    };
     private universe: MissionUniverse;
     private findDialog: FindDialog;
     private buttons: {
@@ -1113,6 +1129,15 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
             systemIds.map(s => this.simulationData.data.System.get(s)));
         // Planet/govt/system indices for the properties panel and borders.
         await this.universe.load();
+        // The original's mission-mark icons. Loaded via the same
+        // textureFromCicn path the target-corner icons use; the objects/
+        // FilesystemData overlay wins over parsed data if it ever provides
+        // these ids.
+        const [active, viewed] = await Promise.all([
+            this.displayAssets.textureFromCicn(MISSION_MARK_ACTIVE_CICN),
+            this.displayAssets.textureFromCicn(MISSION_MARK_VIEWED_CICN),
+        ]);
+        this.missionMarkTextures = { active, viewed };
         this.rebuildGraph(this.getPlayerBits());
 
         this.propContainer.position.set(0, 0);
@@ -1160,6 +1185,7 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
             playerBits: bits,
             missionMarks,
             viewedMarks,
+            missionMarkTextures: this.missionMarkTextures,
             govtColorOf: system => this.govtColorOf(system),
         });
         this.systemGraph.container.position.set(MAP_POS.x, MAP_POS.y);

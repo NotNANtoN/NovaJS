@@ -9,6 +9,7 @@ import { AnimationGraphicPlugin } from "./animation_graphic_plugin.js";
 import { AsteroidDisplayPlugin } from "./asteroid_display_plugin.js";
 import { BeamDisplayPlugin } from "./beam_display_plugin.js";
 import { CloakSoundPlugin } from "./cloak_sound_plugin.js";
+import { CursorPlugin } from "./cursor_plugin.js";
 import { ExplosionPlugin } from "./explosion_plugin.js";
 import { FullscreenPlugin } from "./fullscreen_plugin.js";
 import { GateAnimationPlugin } from "./gate_animation_plugin.js";
@@ -83,8 +84,11 @@ export const Display: Plugin = {
         await world.addPlugin(CloakSoundPlugin);
         await world.addPlugin(ShipAnimationPlugin);
         await world.addPlugin(JumpFadePlugin);
+        // Last, so the cursor's container sits on top of the whole view.
+        await world.addPlugin(CursorPlugin);
     },
     async remove(world) {
+        await world.removePlugin(CursorPlugin);
         await world.removePlugin(JumpFadePlugin);
         await world.removePlugin(ShipAnimationPlugin);
         await world.removePlugin(CloakSoundPlugin);

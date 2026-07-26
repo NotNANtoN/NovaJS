@@ -50,6 +50,17 @@ const SavedControlsPartialObject = t.partial({
     'smallMap': ControlInputs,
     'hyperjump': ControlInputs,
     'resetNav': ControlInputs,
+    // Number keys 1..9 select the Nth stellar body in the current system
+    // (controls_nits.txt); resetNav (tilde/backquote) clears the selection.
+    'selectStellar1': ControlInputs,
+    'selectStellar2': ControlInputs,
+    'selectStellar3': ControlInputs,
+    'selectStellar4': ControlInputs,
+    'selectStellar5': ControlInputs,
+    'selectStellar6': ControlInputs,
+    'selectStellar7': ControlInputs,
+    'selectStellar8': ControlInputs,
+    'selectStellar9': ControlInputs,
     'land': ControlInputs,
     'tradeCenter': ControlInputs,
     'shipyard': ControlInputs,
