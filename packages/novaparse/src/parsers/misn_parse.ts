@@ -19,6 +19,22 @@ function descText(idSpace: NovaResources, id: number): string {
     return idSpace.dësc[id]?.text ?? "";
 }
 
+/**
+ * The global PICT id of a dësc's Graphic field (shown alongside the
+ * text in mission dialogs); null when the id is -1, the dësc is absent,
+ * the dësc has no graphic, or the PICT can't be resolved.
+ */
+function descGraphic(idSpace: NovaResources, id: number): string | null {
+    if (id < 0) {
+        return null;
+    }
+    const graphic = idSpace.dësc[id]?.graphic ?? -1;
+    if (graphic < 0) {
+        return null;
+    }
+    return idSpace.PICT[graphic]?.globalID ?? null;
+}
+
 /** spöb ids occupy 128-2175; other values are ranged specials. */
 const SPOB_ID_MIN = 128;
 const SPOB_ID_MAX = 2175;
@@ -159,5 +175,15 @@ export async function MisnParse(misn: MisnResource,
         shipDoneText: descText(misn.idSpace, misn.shipDoneText),
         acceptButton: misn.acceptButton,
         refuseButton: misn.refuseButton,
+        offerPict: descGraphic(misn.idSpace,
+            OFFER_TEXT_DESC_BASE + (misn.id - MISN_ID_BASE)),
+        briefPict: descGraphic(misn.idSpace, misn.briefText),
+        quickBriefPict: descGraphic(misn.idSpace, misn.quickBrief),
+        loadCargoPict: descGraphic(misn.idSpace, misn.loadCargText),
+        dropOffCargoPict: descGraphic(misn.idSpace, misn.dropCargText),
+        completionPict: descGraphic(misn.idSpace, misn.compText),
+        failPict: descGraphic(misn.idSpace, misn.failText),
+        refusePict: descGraphic(misn.idSpace, misn.refuseText),
+        shipDonePict: descGraphic(misn.idSpace, misn.shipDoneText),
     };
 }

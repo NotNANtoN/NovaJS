@@ -131,6 +131,10 @@ export interface ShipData extends SpaceObjectData {
      * 0.33 otherwise.
      */
     disableArmorFraction: number;
+    /** Hull length in metres (shïp Length), shown in the ship info dialog. */
+    length: number;
+    /** Standard crew complement (shïp Crew), shown in the ship info dialog. */
+    crew: number;
 };
 
 export function getDefaultShipData(): ShipData {
@@ -158,5 +162,7 @@ export function getDefaultShipData(): ShipData {
         subtitle: "",
         pilotDesc: "",
         disableArmorFraction: 0.33,
+        length: 0,
+        crew: 0,
     }
 }

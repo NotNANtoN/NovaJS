@@ -259,6 +259,8 @@ export async function ShipParse(ship: ShipResource,
         // EVN Bible shïp Flags 0x0010: "Ship is disabled at 10% armor
         // instead of 33%".
         disableArmorFraction: (ship.flagsN & 0x0010) ? 0.10 : 0.33,
+        length: ship.length,
+        crew: ship.crew,
         ...base
     }
 }
