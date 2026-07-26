@@ -95,6 +95,12 @@ export interface PlanetData extends SpaceObjectData {
      * in the spaceport bar dialog. Empty when the stellar has none.
      */
     barDesc: string;
+    /**
+     * The global PICT id of the bar description's Graphic (the bar
+     * dësc's Graphic field), shown as an embedded image in the bar's
+     * "Bar + pict" frame (PICT 8504). null when the bar has no picture.
+     */
+    barPict: string | null;
 }
 
 export function getDefaultPlanetFlags(): PlanetFlags {
@@ -124,5 +130,6 @@ export function getDefaultPlanetData(): PlanetData {
         techLevel: 0,
         tradeTiers: [null, null, null, null, null, null],
         barDesc: "",
+        barPict: null,
     };
 }

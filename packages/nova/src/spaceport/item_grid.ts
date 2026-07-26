@@ -205,6 +205,37 @@ export class ItemGrid<I extends Item> {
         }
     }
 
+    /** The furthest the grid can scroll: the top row of the last page. */
+    private get maxScroll() {
+        const rows = Math.ceil(this.items.length / BOX_COUNT[0]);
+        return Math.max(0, rows - BOX_COUNT[1]);
+    }
+
+    /** True when more items exist above / below the visible page. */
+    get canScrollUp() {
+        return this.scroll > 0;
+    }
+    get canScrollDown() {
+        return this.scroll < this.maxScroll;
+    }
+
+    /** Scrolls the visible page up/down by a page, for the scroll-arrow
+     * buttons (the view moves without changing the selection). */
+    scrollUp() {
+        if (this.scroll <= 0) {
+            return;
+        }
+        this.scroll = Math.max(0, this.scroll - BOX_COUNT[1]);
+        this.drawGrid();
+    }
+    scrollDown() {
+        if (this.scroll >= this.maxScroll) {
+            return;
+        }
+        this.scroll = Math.min(this.maxScroll, this.scroll + BOX_COUNT[1]);
+        this.drawGrid();
+    }
+
     setCounts(items: Map<string, number>) {
         for (const tile of this.tiles) {
             tile.quantity = 0;

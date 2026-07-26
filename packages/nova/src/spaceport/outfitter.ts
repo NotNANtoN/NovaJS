@@ -4,7 +4,7 @@ import { ShipData } from "novadatainterface/ship_data";
 import { Entity } from "nova_ecs/entity";
 import { DefaultMap } from "nova_ecs/utils";
 import * as PIXI from 'pixi.js';
-import { Observable } from "rxjs";
+import { Observable, Subject } from "rxjs";
 import { DisplayAssetDataInterface } from "../client/gamedata/display_asset_data.js";
 import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
 import { ControlEvent } from "../nova_plugin/controls_plugin.js";
@@ -39,6 +39,55 @@ export const FONT = {
         align: 'right', wordWrap: false, wordWrapWidth: descWidth
     } as const,
 };
+
+/**
+ * A small round scroll-arrow button for the item grid (the original's
+ * outfitter has an up/down pair at the grid's bottom-left). Drawn with
+ * graphics — a dark disc and a triangle that reddens when enabled and
+ * dims when the page is at that end.
+ */
+class ScrollArrow {
+    container = new PIXI.Container();
+    readonly click = new Subject<void>();
+    private glyph = new PIXI.Graphics();
+    private wrappedEnabled = true;
+
+    constructor(private direction: 'up' | 'down') {
+        const disc = new PIXI.Graphics()
+            .lineStyle(1, 0x555555)
+            .beginFill(0x181818)
+            .drawCircle(0, 0, 9)
+            .endFill();
+        this.container.addChild(disc, this.glyph);
+        this.container.interactive = true;
+        this.container.cursor = 'pointer';
+        // An explicit hit area so the whole disc is reliably clickable
+        // (graphics-only children can hit-test inconsistently).
+        this.container.hitArea = new PIXI.Circle(0, 0, 10);
+        this.container.on('pointerup', () => {
+            if (this.wrappedEnabled) {
+                this.click.next();
+            }
+        });
+        this.draw();
+    }
+
+    private draw() {
+        const fill = this.wrappedEnabled ? 0xcc0000 : 0x444444;
+        this.glyph.clear().beginFill(fill);
+        if (this.direction === 'up') {
+            this.glyph.drawPolygon([0, -4, 4, 3, -4, 3]);
+        } else {
+            this.glyph.drawPolygon([0, 4, 4, -3, -4, -3]);
+        }
+        this.glyph.endFill();
+    }
+
+    set enabled(value: boolean) {
+        this.wrappedEnabled = value;
+        this.draw();
+    }
+}
 
 export class Outfitter extends Menu<Entity> {
     private itemGrid?: ItemGrid<OutfitData>;
@@ -77,12 +126,30 @@ export class Outfitter extends Menu<Entity> {
         }),
     }
     private buttons: { buy: Button, sell: Button, done: Button };
+    // The item-grid scroll arrows, at the grid's bottom-left (only shown
+    // when the outfit list is taller than the 4x5 grid). Measured
+    // against outfitter/earth_outfitter.png.
+    private scrollUpArrow = new ScrollArrow('up');
+    private scrollDownArrow = new ScrollArrow('down');
 
     constructor(displayAssets: DisplayAssetDataInterface,
         simulationData: SimulationGameDataInterface,
         controlEvents: Observable<ControlEvent>) {
         super(displayAssets, simulationData, "nova:8502", controlEvents);
         this.container.name = 'Outfitter';
+
+        this.scrollUpArrow.container.position.set(-214, 141);
+        this.scrollDownArrow.container.position.set(-190, 141);
+        this.scrollUpArrow.click.subscribe(() => {
+            this.itemGrid?.scrollUp();
+            this.updateArrows();
+        });
+        this.scrollDownArrow.click.subscribe(() => {
+            this.itemGrid?.scrollDown();
+            this.updateArrows();
+        });
+        this.container.addChild(this.scrollUpArrow.container,
+            this.scrollDownArrow.container);
 
         this.outfits = new DefaultMap(() => 0);
         // Measured against outfitter/earth_outfitter.png: the pill
@@ -160,19 +227,38 @@ export class Outfitter extends Menu<Entity> {
         this.itemGrid.container.position.x = -373;
         this.itemGrid.container.position.y = -153;
         this.itemGrid.activeTile.subscribe(this.setOutfitSelected.bind(this));
+        this.updateArrows();
 
         // On top of everything, so its modal shield covers the screen.
         this.container.addChild(this.quantityDialog.container);
 
+        // Keyboard grid navigation can scroll the page too, so keep the
+        // arrows' enabled state in sync.
         this.controls.controls = {
-            left: () => itemGrid.left(),
-            right: () => itemGrid.right(),
-            up: () => itemGrid.up(),
-            down: () => itemGrid.down(),
+            left: () => { itemGrid.left(); this.updateArrows(); },
+            right: () => { itemGrid.right(); this.updateArrows(); },
+            up: () => { itemGrid.up(); this.updateArrows(); },
+            down: () => { itemGrid.down(); this.updateArrows(); },
             buy: this.buyOutfit.bind(this),
             sell: this.sellOutfit.bind(this),
             depart: this.done.bind(this),
         };
+    }
+
+    /**
+     * Shows the scroll arrows only when the outfit list overflows the
+     * grid, and greys each when the page is already at that end.
+     */
+    private updateArrows() {
+        if (!this.itemGrid) {
+            return;
+        }
+        const scrollable =
+            this.itemGrid.canScrollUp || this.itemGrid.canScrollDown;
+        this.scrollUpArrow.container.visible = scrollable;
+        this.scrollDownArrow.container.visible = scrollable;
+        this.scrollUpArrow.enabled = this.itemGrid.canScrollUp;
+        this.scrollDownArrow.enabled = this.itemGrid.canScrollDown;
     }
 
     private async makeOutfitsGrid() {

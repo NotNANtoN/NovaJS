@@ -166,6 +166,22 @@ export interface MissionData extends BaseData {
     acceptButton: string;
     /** Refuse-button label; "" = use the default. */
     refuseButton: string;
+
+    // --- Briefing-text graphics, resolved from each dësc's Graphic
+    // field to a global PICT id (or null when the dësc has no graphic).
+    // Nova shows this picture alongside the text in every mission dialog
+    // except the Mission Computer and Mission Info lists (EVN Bible, the
+    // dësc Graphic field). These pair one-to-one with the *Text fields
+    // above. ---
+    offerPict: string | null;
+    briefPict: string | null;
+    quickBriefPict: string | null;
+    loadCargoPict: string | null;
+    dropOffCargoPict: string | null;
+    completionPict: string | null;
+    failPict: string | null;
+    refusePict: string | null;
+    shipDonePict: string | null;
 }
 
 /** mïsn Flags/Flags2 decoded to named booleans. */
@@ -282,5 +298,14 @@ export function getDefaultMissionData(): MissionData {
         shipDoneText: "",
         acceptButton: "",
         refuseButton: "",
+        offerPict: null,
+        briefPict: null,
+        quickBriefPict: null,
+        loadCargoPict: null,
+        dropOffCargoPict: null,
+        completionPict: null,
+        failPict: null,
+        refusePict: null,
+        shipDonePict: null,
     };
 }
