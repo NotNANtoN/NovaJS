@@ -1,6 +1,6 @@
 import * as t from 'io-ts';
 import { PlanetData } from "novadatainterface/planet_data";
-import { Emit, UUID } from 'nova_ecs/arg_types';
+import { Emit, Entities, UUID } from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
 import { EcsEvent } from 'nova_ecs/events';
 import { Plugin } from 'nova_ecs/plugin';
@@ -15,8 +15,10 @@ import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
 import { registerSimulationBridgeEvent } from '../communication/simulation_bridge_events.js';
 import { AnimationComponent } from './animation_plugin.js';
+import { ControlAction } from './controls.js';
 import { ShipControlEvent, ShipControlStateComponent } from './ship_control.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
+import { SystemIdResource } from './system_id_resource.js';
 import { PlayerShipSelector } from './player_ship_plugin.js';
 import { ShipComponent } from './ship_plugin.js';
 import { Target } from './target_component.js';
@@ -91,6 +93,52 @@ const AttemptLandingSystem = new System({
     }
 });
 
+// Stellar-body hotkeys (controls_nits.txt): number keys 1..9 select the
+// Nth stellar body in the current system, and resetNav (tilde/backquote)
+// clears the selection. Selection routes through the SAME per-player
+// PlanetTargetComponent that clicking/landing use, so the statusbar's
+// "Stellar Navigation" readout, the on-screen planet reticle, and the
+// land handshake all agree with the number-key pick.
+//
+// Ordering is the system's own SystemData.planets array — the exact order
+// make_system.ts spawns the planet entities in, each under the
+// deterministic `planet ${planetId}` UUID. getCached(systemId) is warm
+// (this world's own system; the make_system staging contract), and the
+// system is event-driven on ShipControlEvent (like AttemptLandingSystem),
+// so no clock read / after:[TimeSystem] is needed. Display-synced via the
+// existing PlanetTargetComponent delta registration.
+const NUM_STELLAR_HOTKEYS = 9;
+const SelectStellarSystem = new System({
+    name: 'SelectStellarSystem',
+    events: [ShipControlEvent] as const,
+    args: [ShipControlStateComponent, PlanetTargetComponent,
+        SystemIdResource, SimulationGameDataResource, Entities] as const,
+    step(controls, planetTarget, systemId, gameData, entities) {
+        // Tilde/backquote clears the selected stellar body.
+        if (controls.get('resetNav') === 'start') {
+            planetTarget.target = undefined;
+            return;
+        }
+        for (let i = 1; i <= NUM_STELLAR_HOTKEYS; i++) {
+            const action = `selectStellar${i}` as ControlAction;
+            if (controls.get(action) !== 'start') {
+                continue;
+            }
+            const planetIds =
+                gameData.data.System.getCached(systemId)?.planets ?? [];
+            const planetId = planetIds[i - 1];
+            if (planetId === undefined) {
+                return;
+            }
+            const uuid = `planet ${planetId}`;
+            if (entities.has(uuid)) {
+                planetTarget.target = uuid;
+            }
+            return;
+        }
+    },
+});
+
 // Landing no longer refuels for free: the spaceport's Refuel button
 // (spaceport.ts) charges credits, appears only while fuel isn't full,
 // and greys out when unaffordable, matching the original game. The
@@ -136,5 +184,6 @@ export const PlanetPlugin: Plugin = {
         world.addSystem(PlanetAnimationProvider);
         world.addSystem(PlanetDataProvider);
         world.addSystem(AttemptLandingSystem);
+        world.addSystem(SelectStellarSystem);
     }
 };

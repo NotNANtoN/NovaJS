@@ -1,3 +1,4 @@
+import { Entity } from 'nova_ecs/entity';
 import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import { World } from 'nova_ecs/world';
 import { Space } from './display/space_resource.js';
@@ -22,17 +23,22 @@ export interface TapHandlers {
 }
 
 /** How close (world units ≈ px) a tap must be to count as a hit. */
-const SHIP_PICK_RADIUS = 45;
-const PLANET_PICK_RADIUS = 70;
+export const SHIP_PICK_RADIUS = 45;
+export const PLANET_PICK_RADIUS = 70;
 /** Longer presses / larger drags are not taps. */
 const TAP_MS = 400;
 const TAP_SLOP_PX = 12;
 
-function pickNearest(world: World, myPeerId: string | undefined,
-    worldX: number, worldY: number) {
+/**
+ * The nearest selectable ship and/or planet to a world-space point, using the
+ * same radii and own-ship exclusion as tap targeting. Shared with the in-flight
+ * cursor plugin so the cursor animates over exactly what a tap would select.
+ */
+export function pickNearest(entities: Iterable<[string, Entity]>,
+    myPeerId: string | undefined, worldX: number, worldY: number) {
     let bestShip: { uuid: string, distance: number } | undefined;
     let bestPlanet: { uuid: string, distance: number } | undefined;
-    for (const [uuid, entity] of world.entities) {
+    for (const [uuid, entity] of entities) {
         const movement = entity.components.get(MovementStateComponent);
         if (!movement) {
             continue;
@@ -97,7 +103,7 @@ export function installTapTargeting(view: HTMLElement,
         const worldX = event.clientX - space.position.x;
         const worldY = event.clientY - space.position.y;
         const { bestShip, bestPlanet } = pickNearest(
-            world, handlers.getMyPeerId(), worldX, worldY);
+            world.entities, handlers.getMyPeerId(), worldX, worldY);
         if (bestShip) {
             handlers.targetShip(bestShip.uuid);
         } else if (bestPlanet) {
