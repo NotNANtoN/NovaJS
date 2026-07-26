@@ -164,4 +164,63 @@ export const scenarios = [
             region('outfitter_button_row', 'Buy/Sell/Done button row', 660, 668, 520, 30),
         ],
     },
+    {
+        id: 'ship_info',
+        title: 'Shipyard ship info dialog (8507)',
+        description: "The shipyard's Info button opens the ship-description "
+            + 'dialog on the 8507 frame: the ship PICT, name strip, stat '
+            + 'columns and Done button. Compare the frame chrome against '
+            + 'shipyard/shuttle_info.png (the pictured ship, name and stat '
+            + 'values legitimately differ — our parsed data is not the retail '
+            + "capture's).",
+        params: { ship: 'nova:164', system: 'nova:130' },
+        hideDebug: true,
+        setup: async (page, driver) => {
+            await driver.landAt(page, 'planet nova:128');
+            await driver.clickContainer(page, 'Button:Shipyard');
+            await driver.waitForContainer(page, 'Shipyard');
+            await driver.pressKey(page, 'ArrowRight'); // select a ship
+            await driver.sleep(300);
+            await driver.clickContainer(page, 'Button:Info');
+            await driver.waitForContainer(page, 'ShipInfo');
+            await driver.sleep(1200);
+        },
+        references: [
+            { name: 'shuttle_info', file: 'shipyard/shuttle_info.png' },
+        ],
+        regions: [
+            // The 614x537 8507 frame, centered on screen.
+            region('shipinfo_frame', 'Whole dialog frame', 653, 271, 614, 537),
+            region('shipinfo_name_strip', 'Ship name strip', 655, 682, 610, 30),
+            region('shipinfo_done', 'Done button', 1168, 780, 90, 24),
+        ],
+    },
+    {
+        id: 'mission_info',
+        title: "Mission info dialog (8517, 'i')",
+        description: "The Mission Info dialog toggled with 'i' (KeyI) in "
+            + 'flight, like the reference (missions_info.png is a flight '
+            + 'capture). Compare the 8517 frame, the "Currently active '
+            + 'missions:" header, the date strip and the Abort/Done row. The '
+            + "list content legitimately differs (this capture's pilot has no "
+            + 'active missions); the compared regions are the static chrome.',
+        params: { ship: 'nova:164', system: 'nova:130' },
+        hideDebug: true,
+        setup: async (page, driver) => {
+            // In flight the plugin's own handler opens it for the world's
+            // player ship (no landing / ambiguous button clicks needed).
+            await driver.pressKey(page, 'KeyI');
+            await driver.waitForContainer(page, 'MissionInfo');
+            await driver.sleep(1000);
+        },
+        references: [
+            { name: 'missions_info', file: 'missions/missions_info.png' },
+        ],
+        regions: [
+            // The 471x155 8517 frame, centered on screen.
+            region('missioninfo_frame', 'Whole dialog frame', 725, 463, 471, 155),
+            region('missioninfo_header', 'Active-missions header', 731, 469, 200, 14),
+            region('missioninfo_button_row', 'Abort / Done row', 731, 592, 460, 28),
+        ],
+    },
 ];
