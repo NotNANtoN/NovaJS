@@ -171,8 +171,9 @@ export class Autopilot {
             this.framesUntilLandTap--;
             return;
         }
-        // The landing system takes two presses: the first selects the
-        // nearest planet, the second lands on it.
+        // navigateTo already selected this planet (setPlanetTarget), so a
+        // single 'land' press lands on it. The tap repeats until the ship is
+        // inside the landing window, at which point the press takes.
         this.sinks.controlEvents([{ action: 'land', state: 'start' }]);
         this.landHeldFrames = LAND_TAP_HOLD;
         this.framesUntilLandTap = LAND_TAP_INTERVAL;

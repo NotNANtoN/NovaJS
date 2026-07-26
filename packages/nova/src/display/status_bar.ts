@@ -2,7 +2,7 @@ import { PlanetData } from "novadatainterface/planet_data";
 import { StatusBarData, StatusBarDataArea } from "novadatainterface/status_bar_data";
 import { GetEntity, RunQuery, UUID } from "nova_ecs/arg_types";
 import { Component } from "nova_ecs/component";
-import { Position } from "nova_ecs/datatypes/position";
+import { Position, wrapNearestDelta } from "nova_ecs/datatypes/position";
 import { Vector } from "nova_ecs/datatypes/vector";
 import { EcsEvent } from "nova_ecs/events";
 import { Optional } from "nova_ecs/optional";
@@ -49,6 +49,9 @@ import { PixiAppResource } from "./pixi_app_resource.js";
 import { ResizeEvent } from "./screen_size_plugin.js";
 import { Stage } from "./stage_resource.js";
 
+
+/** Full on+off period of the blinking system-center radar arrow, in ms. */
+const CENTER_ARROW_BLINK_MS = 700;
 
 class StatusBar {
     readonly container = new PIXI.Container();
@@ -355,6 +358,15 @@ class StatusBar {
         container.addChild(this.text.credits);
     }
 
+    /**
+     * Half the radar's world span on each axis: a stellar within this of the
+     * player shows as a blip. Used to decide when to draw the system-center
+     * arrow (when nothing stellar is on the radar).
+     */
+    get radarRange(): Vector {
+        return this.radarScale.scale(0.5);
+    }
+
     drawRadar(source: Position,
         ships: Iterable<readonly [string, MovementState, ...unknown[]]>,
         planets: Iterable<readonly [string, MovementState, PlanetData]>,
@@ -365,7 +377,16 @@ class StatusBar {
          * so hostile/friendly/neutral ships are coloured (EVN Bible: an IFF
          * outfit overrides the radar colours).
          */
-        iffColors?: ReadonlyMap<string, number>) {
+        iffColors?: ReadonlyMap<string, number>,
+        /**
+         * When set, the toroidal-nearest direction from the player to the
+         * system centre. The radar draws a blinking white arrow at its edge
+         * pointing that way — the original's cue that you are so far out no
+         * stellar shows on the radar. The DrawRadar system passes this only
+         * while the arrow should be visible (nothing stellar on radar, and the
+         * blink is in its ON phase); otherwise it is omitted.
+         */
+        centerArrow?: { x: number, y: number } | null) {
         this.radar.clear();
 
         // Interference (0-100) makes sensors unreliable: on each radar tick,
@@ -388,6 +409,45 @@ class StatusBar {
         for (const [, { position }] of planets) {
             this.drawDot(position, 0xFFFF00, source, 2);
         }
+
+        if (centerArrow) {
+            this.drawCenterArrow(centerArrow.x, centerArrow.y);
+        }
+    }
+
+    /**
+     * Draws a white arrowhead at the radar's edge pointing along (dx, dy) —
+     * toward the system centre. Called only when the DrawRadar system has
+     * decided the arrow should show this tick.
+     */
+    private drawCenterArrow(dx: number, dy: number) {
+        const radarSize = new Vector(...this.statusBarData.dataAreas.radar.size);
+        const len = Math.hypot(dx, dy);
+        if (len === 0) {
+            return;
+        }
+        const nx = dx / len;
+        const ny = dy / len;
+        const cx = radarSize.x / 2;
+        const cy = radarSize.y / 2;
+        // Sit the arrowhead just inside the radar's edge (min half-dimension).
+        const edge = Math.min(radarSize.x, radarSize.y) / 2;
+        const tipR = edge * 0.95;
+        const tipX = cx + nx * tipR;
+        const tipY = cy + ny * tipR;
+        // Arrowhead triangle: a tip along (nx, ny) and a base behind it.
+        const length = 8;
+        const halfWidth = 4;
+        const baseX = cx + nx * (tipR - length);
+        const baseY = cy + ny * (tipR - length);
+        const px = -ny;
+        const py = nx;
+        this.radar.beginFill(0xFFFFFF);
+        this.radar.moveTo(tipX, tipY);
+        this.radar.lineTo(baseX + px * halfWidth, baseY + py * halfWidth);
+        this.radar.lineTo(baseX - px * halfWidth, baseY - py * halfWidth);
+        this.radar.lineTo(tipX, tipY);
+        this.radar.endFill();
     }
 
     /**
@@ -409,9 +469,13 @@ class StatusBar {
     }
 
     private drawDot(dotPos: Position, color: number, source = new Position(0, 0), size = 1) {
-        // draws a dot from nova position
+        // draws a dot from nova position. The offset from the player uses the
+        // toroidal-nearest delta so an object just across the loop boundary
+        // still blips near the player instead of falling off the far edge.
         const radarSize = new Vector(...this.statusBarData.dataAreas.radar.size);
-        const pixiPos = new Vector(dotPos.x, dotPos.y).subtract(source)
+        const delta = new Vector(wrapNearestDelta(dotPos.x - source.x),
+            wrapNearestDelta(dotPos.y - source.y));
+        const pixiPos = delta
             .times(radarSize).div(this.radarScale).add(radarSize.scale(0.5));
 
         if (pixiPos.x <= radarSize.x && pixiPos.x >= 0 &&
@@ -708,7 +772,31 @@ const DrawRadar = new System({
                         shipDisposition(govt, playerGovt, playerRecords)));
                 }
             }
-            statusBar.drawRadar(position, visibleShips, planets, iffColors);
+            // System-center arrow: when no stellar object falls within the
+            // radar's range, the original blinks a white arrow at the radar's
+            // edge pointing back toward the system centre (0, 0). Chosen gate:
+            // "no stellar within the radar's range" (radarScale/2 on each
+            // axis) — i.e. nothing stellar is on the radar. Blinks on a
+            // wall-clock cadence, like the running lights.
+            const range = statusBar.radarRange;
+            let stellarOnRadar = false;
+            for (const [, { position: planetPos }] of planets) {
+                if (Math.abs(wrapNearestDelta(planetPos.x - position.x)) <= range.x
+                    && Math.abs(wrapNearestDelta(planetPos.y - position.y)) <= range.y) {
+                    stellarOnRadar = true;
+                    break;
+                }
+            }
+            const blinkOn = (time % CENTER_ARROW_BLINK_MS)
+                < CENTER_ARROW_BLINK_MS / 2;
+            const centerArrow = (!stellarOnRadar && blinkOn)
+                ? {
+                    x: wrapNearestDelta(0 - position.x),
+                    y: wrapNearestDelta(0 - position.y),
+                }
+                : null;
+            statusBar.drawRadar(position, visibleShips, planets, iffColors,
+                centerArrow);
             radarTime.lastTime = time;
         }
     }

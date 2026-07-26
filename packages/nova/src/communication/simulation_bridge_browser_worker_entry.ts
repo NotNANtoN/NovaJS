@@ -132,6 +132,10 @@ class BrowserSimulationBridgeHost implements BrowserSimulationBridgeWorkerApi {
         this.requireBridge().setTarget(target);
     }
 
+    async setPlanetTarget(target: string | null) {
+        this.requireBridge().setPlanetTarget(target);
+    }
+
     async step(count?: number) {
         this.requireBridge().step(count);
     }

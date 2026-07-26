@@ -133,6 +133,7 @@ export interface SimulationBridgeHostApi {
     controlEvents(events: ControlEvent[]): void;
     analogControl(control: AnalogControlState): void;
     setTarget(target: string | null): void;
+    setPlanetTarget(target: string | null): void;
     step(count?: number): void;
     snapshot(): SimulationFrame;
     addEntity(uuid: string, entity: EncodedEntity): void | Promise<void>;
@@ -163,6 +164,7 @@ export interface AsyncSimulationBridgeHostApi {
     controlEvents(events: ControlEvent[]): Promise<void>;
     analogControl(control: AnalogControlState): Promise<void>;
     setTarget(target: string | null): Promise<void>;
+    setPlanetTarget(target: string | null): Promise<void>;
     step(count?: number): Promise<void>;
     snapshot(): Promise<SimulationFrame>;
     addEntity(uuid: string, entity: EncodedEntity): Promise<void>;
@@ -944,6 +946,10 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
         this.schedule({ kind: 'setTarget', target });
     }
 
+    setPlanetTarget(target: string | null) {
+        this.schedule({ kind: 'setPlanetTarget', target });
+    }
+
     /**
      * How this peer's clock should slew to track the room's: a rate
      * factor proportional to the drift between the local tick and the
@@ -1153,6 +1159,10 @@ export class SimulationBridgeClient {
         this.host.setTarget(target);
     }
 
+    setPlanetTarget(target: string | null) {
+        this.host.setPlanetTarget(target);
+    }
+
     addEntity(uuid: string, entity: Entity) {
         return this.host.addEntity(uuid, structuredClone(this.serializer.encode(entity)) as EncodedEntity);
     }
@@ -1264,6 +1274,10 @@ export class AsyncSimulationBridgeClient {
 
     async setTarget(target: string | null) {
         await this.guard(() => this.host.setTarget(target));
+    }
+
+    async setPlanetTarget(target: string | null) {
+        await this.guard(() => this.host.setPlanetTarget(target));
     }
 
     async addEntity(uuid: string, entity: Entity) {

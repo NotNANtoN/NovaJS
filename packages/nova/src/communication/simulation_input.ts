@@ -8,6 +8,7 @@ import { JumpRouteComponent } from "../nova_plugin/jump_plugin.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 import { applyAnalogControl, applyControlEvents, ControlledByComponent } from "../nova_plugin/ship_control.js";
 import { applySetTarget } from "../nova_plugin/target_plugin.js";
+import { applySetPlanetTarget } from "../nova_plugin/planet_plugin.js";
 
 /**
  * Everything that changes the simulation from outside is an input,
@@ -29,6 +30,8 @@ export type SimulationInput =
     | { kind: 'analogControl', heading: number | null, throttle: number | null }
     /** Explicit target choice (tap/click on a ship); null clears. */
     | { kind: 'setTarget', target: string | null }
+    /** Explicit stellar selection (tap/click on a planet); null clears. */
+    | { kind: 'setPlanetTarget', target: string | null }
     | { kind: 'addEntity', uuid: string, entity: EncodedEntity }
     | { kind: 'removeEntity', uuid: string }
     | { kind: 'setJumpRoute', route: string[] }
@@ -124,6 +127,10 @@ export function applySimulationInputs(world: World, inputs: SimulationInput[],
             }
             case 'setTarget': {
                 applySetTarget(world, peerId, input.target);
+                break;
+            }
+            case 'setPlanetTarget': {
+                applySetPlanetTarget(world, peerId, input.target);
                 break;
             }
             case 'addEntity': {
