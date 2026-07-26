@@ -185,4 +185,32 @@ export const scenarios = [
             region('outfitter_button_row', 'Buy/Sell/Done button row', 660, 668, 520, 30),
         ],
     },
+    {
+        id: 'title_screen',
+        title: 'Title screen — layout, logo & buttons',
+        description: 'The game entry screen (before the world is joined), '
+            + 'rendered from the original resources (PICT 8000 background, '
+            + 'animated title 8010, rollover emblem 8020, button sheets '
+            + '8050-8055). Compared against title_screen/title_screen.png. '
+            + 'The flame animation frame and the bottom pilot status '
+            + 'legitimately differ; the frame chrome, logo placement and '
+            + 'button cluster should match.',
+        entry: 'title',
+        params: {},
+        hideDebug: false,
+        setup: null,
+        references: [
+            { name: 'title_screen', file: 'title_screen/title_screen.png' },
+        ],
+        regions: [
+            // Frame origin in the reference is screen (448,157); the art is
+            // drawn at native 1024x768 centered, so the same rectangles
+            // apply to our capture.
+            region('title_button_cluster', 'Six corner buttons + emblem', 783, 565, 375, 210),
+            region('title_logo', 'Flaming NOVA title logo', 636, 305, 660, 220),
+            region('title_left_fan', 'Left fan chrome (text-free)', 890, 300, 130, 260),
+            region('title_right_fan', 'Right fan chrome (text-free)', 900, 300, 130, 260),
+            region('title_top_frame', 'Top metal frame band', 620, 165, 680, 90),
+        ],
+    },
 ];

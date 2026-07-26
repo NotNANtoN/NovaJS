@@ -26,7 +26,7 @@ export async function launchBrowser() {
  * and wait until the sim world and PIXI app exist and the first frames have
  * settled (sprites stream in asynchronously).
  */
-export async function openGame(browser, params = {}, { settleMs = 6000 } = {}) {
+export async function openGame(browser, params = {}, { settleMs = 6000, entry = 'game' } = {}) {
     const page = await browser.newPage();
     const errors = [];
     page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
@@ -34,9 +34,17 @@ export async function openGame(browser, params = {}, { settleMs = 6000 } = {}) {
 
     const qs = new URLSearchParams({ reset: '1', ...params }).toString();
     await page.goto(`${BASE_URL}/?${qs}`, { waitUntil: 'networkidle2', timeout: 60000 });
-    await page.waitForFunction(
-        () => window.displayWorld && window.app && window.communicator?.uuid,
-        { timeout: 60000 });
+    if (entry === 'title') {
+        // The title screen shows before the game world is joined; wait for
+        // it (and its resource load) rather than for displayWorld.
+        await page.waitForFunction(() => window.novaTitle && window.app,
+            { timeout: 60000 });
+        await page.evaluate(() => window.novaTitle.buildPromise);
+    } else {
+        await page.waitForFunction(
+            () => window.displayWorld && window.app && window.communicator?.uuid,
+            { timeout: 60000 });
+    }
     await sleep(settleMs);
     page._vcErrors = errors;
     return page;

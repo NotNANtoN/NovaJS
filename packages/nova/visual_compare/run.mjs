@@ -66,7 +66,8 @@ async function run() {
     try {
         for (const scenario of scenarios) {
             console.log(`\n=== Scenario: ${scenario.id} ===`);
-            const page = await driver.openGame(browser, scenario.params);
+            const page = await driver.openGame(browser, scenario.params,
+                { entry: scenario.entry ?? 'game' });
             try {
                 if (scenario.setup) await scenario.setup(page, driver);
                 if (scenario.hideDebug) await driver.hideDebugOverlays(page);
