@@ -18,6 +18,7 @@ import {
     processLanding,
     runMissionSetString,
     StellarInfo,
+    stellarVisible,
 } from './mission_logic.js';
 import { ActiveMission, MAX_ACTIVE_MISSIONS, Missions } from './player_state_plugin.js';
 
@@ -329,12 +330,77 @@ describe('missionMatchesLocation', () => {
     });
 });
 
+describe('stellarVisible', () => {
+    it('treats a stellar with no visibility info as visible', () => {
+        expect(stellarVisible(makeStellar(), new Set())).toBe(true);
+    });
+
+    it('treats a blank Visibility expression as always visible', () => {
+        expect(stellarVisible(
+            makeStellar({ systemVisibilities: ['', '   '] }), new Set()))
+            .toBe(true);
+    });
+
+    it('evaluates the Visibility NCB test against the player bits', () => {
+        const hidden = makeStellar({ systemVisibilities: ['b88 | b3009'] });
+        expect(stellarVisible(hidden, new Set())).toBe(false);
+        expect(stellarVisible(hidden, new Set([88]))).toBe(true);
+    });
+
+    it('is visible when ANY containing system is visible', () => {
+        // A stellar listed by two stacked systems with mutually exclusive
+        // Visibility expressions is always visible through one of them.
+        const stellar = makeStellar({
+            systemVisibilities: ['!b88', 'b88'],
+        });
+        expect(stellarVisible(stellar, new Set())).toBe(true);
+        expect(stellarVisible(stellar, new Set([88]))).toBe(true);
+    });
+
+    it('stays visible when a Visibility expression is malformed', () => {
+        expect(stellarVisible(
+            makeStellar({ systemVisibilities: ['b('] }), new Set()))
+            .toBe(true);
+    });
+});
+
 describe('makeMissionOffer', () => {
     it('resolves a random inhabited destination (-2)', () => {
         const mission = makeMission({ travelStel: -2 });
         const offer = makeMissionOffer(mission, makeContext());
         // The only inhabited candidate that isn't the current stellar.
         expect(offer?.travelPlanet).toBe('nova:129');
+    });
+
+    it('never samples a currently-hidden duplicate stellar (-2)', () => {
+        // Two same-position inhabited destinations: one visible, one hidden
+        // behind an unset story bit. The random pick must be the visible one.
+        const mission = makeMission({ travelStel: -2 });
+        const ctx = makeContext({
+            stellarCandidates: [
+                makeStellar(),  // current stellar (nova:128), excluded
+                makeStellar({ id: 'nova:214', systemVisibilities: ['!b6300'] }),
+                makeStellar({ id: 'nova:503', systemVisibilities: ['b6300'] }),
+            ],
+        });
+        // No bits set: only nova:214 is visible.
+        expect(makeMissionOffer(mission, ctx)?.travelPlanet).toBe('nova:214');
+    });
+
+    it('samples a govt-ranged destination only from visible stellars', () => {
+        const fed = makeGovt('nova:128', { classes: [1] });
+        const mission = makeMission({ travelStel: 10000 }); // govt 128
+        const ctx = makeContext({
+            stellar: makeStellar({ id: 'nova:900' }),
+            getGovt: id => (id === 'nova:128' ? fed : undefined),
+            stellarCandidates: [
+                makeStellar({ id: 'nova:214', govt: 'nova:128',
+                    systemVisibilities: ['!b6300'] }),
+                makeStellar({ id: 'nova:503', govt: 'nova:128',
+                    systemVisibilities: ['b6300'] }),
+            ],
+        });
+        expect(makeMissionOffer(mission, ctx)?.travelPlanet).toBe('nova:214');
     });
 
     it('resolves the return stellar -4 to the offering stellar', () => {
@@ -454,6 +520,73 @@ describe('accept / landing / completion flow', () => {
         expect(completed.payment).toBe(15000);
         expect(completed.text).toBe('Thanks for the delivery.');
     });
+
+    it('completes when landing on a duplicate of the return stellar', () => {
+        // The Bible: a travel/return objective is fulfilled by landing on a
+        // duplicate stellar with the identical name and coordinates. The
+        // mission is frozen to nova:503 (a hidden Brass duplicate) but the
+        // player lands on nova:214 (the visible Brass); sameStellar bridges
+        // them so the mission still completes and pays.
+        const mission = makeMission({
+            id: 'nova:211',
+            name: 'Delivery to <DST>',
+            travelStel: 10000,
+            returnStel: -1,
+            cargoType: 0,
+            cargoQty: 2,
+            pickupMode: 0,
+            dropOffMode: 0,
+            payVal: 15000,
+        });
+        const state = makeState();
+        const machinery = makeMachinery(state, [mission]);
+        machinery.sameStellar = (a, b) =>
+            a === b || (a === 'nova:503' && b === 'nova:214')
+            || (a === 'nova:214' && b === 'nova:503');
+
+        acceptOffer(machinery, {
+            data: mission, travelPlanet: 'nova:503', returnPlanet: null,
+            cargoType: 0, cargoQty: 2, acceptable: true,
+        });
+        expect(state.missions.size).toBe(1);
+
+        // Landing on the visible duplicate completes the mission.
+        processLanding(machinery, 'nova:214', 1005);
+        expect(state.missions.size).toBe(0);
+        expect(state.credits.credits).toBe(16000);
+        expect(state.events.find(e => e.type === 'completed')?.missionId)
+            .toBe('nova:211');
+    });
+
+    it('completes two missions bound to the same stellar on one landing',
+        () => {
+            const make = (id: string) => makeMission({
+                id, name: `Delivery ${id}`,
+                travelStel: 10000, returnStel: -1,
+                cargoType: 0, cargoQty: 1, pickupMode: 0, dropOffMode: 0,
+                payVal: 15000,
+            });
+            const m1 = make('nova:211');
+            const m2 = make('nova:418');
+            const state = makeState();
+            const machinery = makeMachinery(state, [m1, m2]);
+
+            for (const m of [m1, m2]) {
+                acceptOffer(machinery, {
+                    data: m, travelPlanet: 'nova:214', returnPlanet: null,
+                    cargoType: 0, cargoQty: 1, acceptable: true,
+                });
+            }
+            expect(state.missions.size).toBe(2);
+
+            processLanding(machinery, 'nova:214', 1005);
+            expect(state.missions.size).toBe(0);
+            const completed = state.events
+                .filter(e => e.type === 'completed')
+                .map(e => e.missionId).sort();
+            expect(completed).toEqual(['nova:211', 'nova:418']);
+            expect(state.credits.credits).toBe(1000 + 15000 + 15000);
+        });
 
     it('handles a two-leg mission (travel then return)', () => {
         const mission = makeMission({
