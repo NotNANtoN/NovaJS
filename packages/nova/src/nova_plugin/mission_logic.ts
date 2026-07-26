@@ -41,6 +41,13 @@ export interface StellarInfo {
     govt: string | null;
     uninhabited: boolean;
     canLand: boolean;
+    /**
+     * The sÿst Visibility NCB test expressions of every system that
+     * contains this stellar (blank = always visible). Absent when the
+     * caller has no system topology (bare test stellars, the landed
+     * stellar); such stellars are treated as visible. See stellarVisible.
+     */
+    systemVisibilities?: string[];
 }
 
 export function stellarInfoOf(planet: PlanetData): StellarInfo {
@@ -50,6 +57,38 @@ export function stellarInfoOf(planet: PlanetData): StellarInfo {
         uninhabited: planet.flags.uninhabited,
         canLand: planet.flags.canLand && !planet.flags.landOnlyIfDestroyed,
     };
+}
+
+/**
+ * Whether a candidate stellar sits in a currently-visible system, per the
+ * sÿst Visibility field (EVN Bible, "The Visibility field controls how and
+ * when to make the system visible or invisible... an NCB control bit test
+ * expression - leave it blank if unused"). Duplicate stellars stacked at
+ * one map position use mutually-exclusive Visibility expressions, so only
+ * one copy is real at a time; a stellar is visible if ANY of its containing
+ * systems is visible. Absent visibility info (bare test stellars) is
+ * treated as visible (fail open, so a malformed expression can't empty the
+ * candidate pool). Keeps currently-hidden duplicate stellars — e.g. the
+ * Federation-govt copy of a Polaris system, or an alternate story-state
+ * copy of a planet — out of random/ranged mission-destination sampling.
+ */
+export function stellarVisible(stellar: StellarInfo,
+    bits: Set<number>): boolean {
+    const exprs = stellar.systemVisibilities;
+    if (!exprs || exprs.length === 0) {
+        return true;
+    }
+    return exprs.some(expr => {
+        if (!expr || expr.trim() === '') {
+            return true;
+        }
+        try {
+            return evaluateNCBTest(expr, { getBit: bit => bits.has(bit) });
+        } catch {
+            // A malformed Visibility expression must not hide the galaxy.
+            return true;
+        }
+    });
 }
 
 /** The numeric resource id of a global id like "nova:130", or null. */
@@ -392,15 +431,23 @@ function resolveStellarRef(ref: number, refId: string | null,
     if (forReturn && ref === -4) {
         return ctx.stellar.id;
     }
+    // Random / govt-ranged destinations sample only currently-VISIBLE
+    // stellars: a hidden duplicate (e.g. an alternate-story-state copy of
+    // a planet, stacked at the same coordinates under a mutually-exclusive
+    // Visibility bit) must never be frozen as a destination — the player
+    // would land on the visible copy under a different id and the mission
+    // could never complete. Specific-id destinations (refId !== null) are
+    // authored deliberately and are left unfiltered.
     let candidates: StellarInfo[];
     if (ref === -2) {
         candidates = ctx.stellarCandidates.filter(
-            s => !s.uninhabited && s.canLand);
+            s => !s.uninhabited && s.canLand && stellarVisible(s, ctx.bits));
     } else if (ref === -3) {
         candidates = ctx.stellarCandidates.filter(
-            s => s.uninhabited && s.canLand);
+            s => s.uninhabited && s.canLand && stellarVisible(s, ctx.bits));
     } else {
         candidates = ctx.stellarCandidates.filter(s => s.canLand
+            && stellarVisible(s, ctx.bits)
             && matchesStellarRef(ref, null, s, idPrefix(mission.id),
                 ctx.getGovt));
     }
@@ -648,6 +695,16 @@ export interface MissionMachineryContext {
      * degrades to the named govt only when absent.
      */
     allGovts?(): Iterable<readonly [string, GovtData]>;
+    /**
+     * Whether two stellar ids denote the "same stellar" — identical name
+     * and map coordinates — so landing on one fulfils a travel/return
+     * objective set to the other (EVN Bible, TravelStel/ReturnStel: "the
+     * mission travel objectives will also be fulfilled when landing on a
+     * duplicate stellar that has the idendical name and coordinates to the
+     * stellar you specify here"). Optional; without it only exact-id
+     * matches complete a landing.
+     */
+    sameStellar?(a: string, b: string): boolean;
 }
 
 /**
@@ -1059,6 +1116,12 @@ export function processLanding(machinery: MissionMachineryContext,
     planetId: string, currentDay: number,
     outfits?: Map<string, number>): void {
     const { state } = machinery;
+    // Landing at `planetId` also satisfies an objective set to a duplicate
+    // stellar (same name + coordinates), per the Bible. Threaded via
+    // sameStellar so pure callers without topology keep exact-id matching.
+    const landedAt = (destId: string | null): boolean =>
+        destId !== null && (destId === planetId
+            || (machinery.sameStellar?.(destId, planetId) ?? false));
     for (const active of [...state.missions.values()]) {
         // The loop iterates a snapshot; an earlier mission's OnSuccess (or
         // OnShipDone/OnAbort) can abort/fail/complete a later one via an
@@ -1094,7 +1157,7 @@ export function processLanding(machinery: MissionMachineryContext,
         // landing) the moment the goal completed; this catches the case
         // where the goal completed at this very landing's date advance.
         runShipDoneIfPending(machinery, active, mission, outfits);
-        if (active.travelPlanet === planetId && !active.travelDone) {
+        if (landedAt(active.travelPlanet) && !active.travelDone) {
             let transferred = true;
             if (mission.pickupMode === 1) {
                 transferred = loadMissionCargo(state, active);
@@ -1113,7 +1176,7 @@ export function processLanding(machinery: MissionMachineryContext,
             || active.travelDone;
         const goalSatisfied = !objective
             || objectiveAllowsCompletion(objective);
-        if (completionPlanet === planetId && travelSatisfied
+        if (landedAt(completionPlanet) && travelSatisfied
             && goalSatisfied) {
             completeMission(machinery, active, mission, outfits);
         }

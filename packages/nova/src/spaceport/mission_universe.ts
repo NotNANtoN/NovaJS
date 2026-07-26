@@ -47,6 +47,10 @@ export class MissionUniverse {
     private govtsById = new Map<string, GovtData>();
     private systemsById = new Map<string, SystemData>();
     private planetSystem = new Map<string, string>();
+    /** The Visibility expressions of every system a placed planet sits in. */
+    private planetVisibilities = new Map<string, string[]>();
+    /** Canonical "same stellar" key (name + map coords) per placed planet. */
+    private stellarKeyById = new Map<string, string>();
     private loadPromise?: Promise<void>;
 
     private static instances =
@@ -110,16 +114,35 @@ export class MissionUniverse {
         }
 
         // Only planets that appear in some system are candidate
-        // destinations (spöbs can exist without being placed).
+        // destinations (spöbs can exist without being placed). Track every
+        // containing system's Visibility expression (a stellar can be listed
+        // by several stacked systems) so hidden duplicates stay out of
+        // random destination sampling, and a canonical name+coords key so a
+        // frozen duplicate id still completes on landing at its visible copy.
         this.planetSystem.clear();
+        this.planetVisibilities.clear();
+        this.stellarKeyById.clear();
         for (const [systemId, system] of this.systemsById) {
             for (const planetId of system.planets) {
                 this.planetSystem.set(planetId, systemId);
+                const vis = this.planetVisibilities.get(planetId) ?? [];
+                vis.push(system.visibility);
+                this.planetVisibilities.set(planetId, vis);
+                const planet = this.planetsById.get(planetId);
+                if (planet && !this.stellarKeyById.has(planetId)) {
+                    const [x, y] = system.position;
+                    this.stellarKeyById.set(planetId,
+                        `${planet.name}|${x}|${y}`);
+                }
             }
         }
         this.stellarCandidates = [...this.planetsById.values()]
             .filter(planet => this.planetSystem.has(planet.id))
-            .map(stellarInfoOf);
+            .map(planet => ({
+                ...stellarInfoOf(planet),
+                systemVisibilities:
+                    this.planetVisibilities.get(planet.id) ?? [],
+            }));
 
         this.systemInfos = [...this.systemsById.values()].map(system => ({
             id: system.id,
@@ -160,6 +183,23 @@ export class MissionUniverse {
 
     systemIdOfPlanet(planetId: string): string | undefined {
         return this.planetSystem.get(planetId);
+    }
+
+    /**
+     * Whether two stellar ids are the "same stellar" — identical name and
+     * map coordinates — so landing on one fulfils a mission objective set
+     * to the other (EVN Bible, TravelStel/ReturnStel duplicate rule).
+     * Duplicate stellars are stacked at one system position under
+     * mutually-exclusive Visibility bits, so name + containing-system
+     * coordinates uniquely identifies a stellar across its copies.
+     */
+    sameStellar(a: string, b: string): boolean {
+        if (a === b) {
+            return true;
+        }
+        const keyA = this.stellarKeyById.get(a);
+        const keyB = this.stellarKeyById.get(b);
+        return keyA !== undefined && keyA === keyB;
     }
 
     systemNameOfPlanet(planetId: string | null): string {
