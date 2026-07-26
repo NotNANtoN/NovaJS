@@ -101,6 +101,14 @@ export interface PlanetData extends SpaceObjectData {
      * "Bar + pict" frame (PICT 8504). null when the bar has no picture.
      */
     barPict: string | null;
+
+    /**
+     * The spöb AnimDelay: frames between animation frames in 30ths of a
+     * second (EVN Bible p. 61). 0 means unset. The display turns this into a
+     * frame rate (30 / animationDelay) for continuously-animated stellars
+     * such as wormholes.
+     */
+    animationDelay: number;
 }
 
 export function getDefaultPlanetFlags(): PlanetFlags {
@@ -131,5 +139,6 @@ export function getDefaultPlanetData(): PlanetData {
         tradeTiers: [null, null, null, null, null, null],
         barDesc: "",
         barPict: null,
+        animationDelay: 0,
     };
 }

@@ -126,7 +126,17 @@ const SelectStellarSystem = new System({
             }
             const planetIds =
                 gameData.data.System.getCached(systemId)?.planets ?? [];
-            const planetId = planetIds[i - 1];
+            // Hidden stellars (wormholes) are skipped: they never appear in
+            // the number-key enumeration, so pressing N selects the Nth
+            // NON-wormhole stellar. The order is SystemData.planets (identical
+            // on every peer) filtered by each entity's synced, genesis
+            // PlanetDataComponent, so the skip is deterministic across peers.
+            // Players still transit a wormhole by flying into it and landing
+            // (AttemptLandingSystem), which does not go through this selection.
+            const selectable = planetIds.filter(id =>
+                entities.get(`planet ${id}`)?.components
+                    .get(PlanetDataComponent)?.gate?.kind !== 'wormhole');
+            const planetId = selectable[i - 1];
             if (planetId === undefined) {
                 return;
             }

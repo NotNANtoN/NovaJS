@@ -9,9 +9,11 @@ import {
     chaserBlocksJump, chooseNearest, Formation, formationOffset,
     formationSlotPosition, FLEE_JUMP_BLOCK_RANGE,
     FORMATION_LATERAL_SPACING, FORMATION_ROW_SPACING,
+    landingDestinations, PlanetEntry,
     RCS_ACCEL_FRACTION, RCS_DISENGAGE_SPEED, RCS_ENGAGE_SPEED,
     steerFormation,
 } from './npc_ai_plugin.js';
+import { getDefaultPlanetData, PlanetData } from 'novadatainterface/planet_data';
 
 function govt(overrides: Partial<ReturnType<typeof getDefaultGovtData>>) {
     return { ...getDefaultGovtData(), ...overrides };
@@ -464,5 +466,35 @@ describe('chaserBlocksJump ("right behind" a fleeing ship)', () => {
         // 45 degrees off dead-astern: inside the 60-degree half-angle.
         const d = FLEE_JUMP_BLOCK_RANGE * 0.5 / Math.SQRT2;
         expect(chaserBlocksJump(fleeing(), chaserAt(-d, d))).toBeTrue();
+    });
+});
+
+describe('landingDestinations', () => {
+    const stubMovement = { position: new Position(0, 0) } as unknown as MovementState;
+    function entry(uuid: string, data: Partial<PlanetData>): PlanetEntry {
+        return [uuid, stubMovement, { id: uuid },
+            { ...getDefaultPlanetData(), ...data }] as const;
+    }
+    const planet = entry('planet nova:128', { gate: null });
+    const hypergate = entry('planet nova:130', {
+        gate: { kind: 'hypergate', destinations: [], emergenceAngle: null },
+    });
+    const wormhole = entry('planet nova:465', {
+        gate: { kind: 'wormhole', destinations: [], emergenceAngle: null },
+    });
+
+    it('excludes wormholes (NPCs never park on a transit portal)', () => {
+        const result = landingDestinations([planet, wormhole, hypergate]);
+        expect(result.map(([uuid]) => uuid))
+            .toEqual(['planet nova:128', 'planet nova:130']);
+    });
+
+    it('keeps ordinary planets and hypergates', () => {
+        expect(landingDestinations([planet]).length).toBe(1);
+        expect(landingDestinations([hypergate]).length).toBe(1);
+    });
+
+    it('returns an empty list when every stellar is a wormhole', () => {
+        expect(landingDestinations([wormhole])).toEqual([]);
     });
 });
