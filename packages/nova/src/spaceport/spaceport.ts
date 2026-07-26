@@ -18,7 +18,6 @@ import { ShipPhysicsComponent } from '../nova_plugin/ship_plugin.js';
 import { SystemIdResource } from '../nova_plugin/system_id_resource.js';
 import { SystemPlugin } from '../nova_plugin/system_plugin.js';
 import { WeaponsStateComponent } from '../nova_plugin/weapons_state.js';
-import { formatDate } from '../nova_plugin/calendar.js';
 import { LOCATION_MISSION_COMPUTER, MissionEvent, MissionMapMark, missionMapMarks } from '../nova_plugin/mission_logic.js';
 import { missionDisplayName } from '../nova_plugin/mission_text.js';
 import { CreditsComponent, GameDateComponent, MissionsComponent } from '../nova_plugin/player_state_plugin.js';
@@ -76,10 +75,6 @@ export class Spaceport extends Menu<Entity> {
         fontFamily: 'Geneva', fontSize: 10, fill: 0xffff88,
         align: 'left', wordWrap: true, wordWrapWidth: 301,
     });
-    private statusLine = new PIXI.Text('', {
-        fontFamily: 'Geneva', fontSize: 10, fill: 0xffffff,
-        align: 'left', wordWrap: false,
-    });
 
     private font = {
         title: {
@@ -103,7 +98,11 @@ export class Spaceport extends Menu<Entity> {
          * key) — it works both in flight and docked. The docked ship
          * entity is passed explicitly: while docked it is out of the
          * world, held by this menu. */
-        private openPlayerInfo?: (entity: Entity) => Promise<unknown>) {
+        private openPlayerInfo?: (entity: Entity) => Promise<unknown>,
+        /** Opens the mission-info dialog over the spaceport (the 'i'
+         * key). Like the player-info dialog, the docked ship entity is
+         * passed explicitly (it is out of the world while docked). */
+        private openMissionInfo?: (entity: Entity) => Promise<unknown>) {
         super(displayAssets, simulationData, "nova:8500", controlEvents);
         this.container.name = 'Spaceport';
 
@@ -151,7 +150,7 @@ export class Spaceport extends Menu<Entity> {
             this.input.components.delete(ShipPhysicsComponent);
             // Outfits can change fuel capacity (fuel tanks), which
             // affects the Refuel button.
-            this.refreshStatusLine();
+            this.refreshRefuelButton();
             this.controls.bind();
         };
         buttons.outfitter.click.subscribe(showOutfitter);
@@ -165,7 +164,7 @@ export class Spaceport extends Menu<Entity> {
             // The board mutates missions, cargo, credits, control
             // bits, and (through Gxxx grants) outfits.
             this.input = await this.missionComputer.show(this.input);
-            this.refreshStatusLine();
+            this.refreshRefuelButton();
             this.controls.bind();
         };
         buttons.missions.click.subscribe(showMissionComputer);
@@ -180,7 +179,7 @@ export class Spaceport extends Menu<Entity> {
             // The bar mutates missions, credits (gambling, hire fees),
             // cargo, bits, and records hired escorts.
             this.input = await this.bar.show(this.input);
-            this.refreshStatusLine();
+            this.refreshRefuelButton();
             this.controls.bind();
         };
         buttons.bar.click.subscribe(showBar);
@@ -194,7 +193,7 @@ export class Spaceport extends Menu<Entity> {
             this.controls.unbind();
             // The trade center mutates cargo and credits.
             this.input = await this.tradeCenter.show(this.input);
-            this.refreshStatusLine();
+            this.refreshRefuelButton();
             this.controls.bind();
         };
         buttons.tradeCenter.click.subscribe(showTradeCenter);
@@ -250,6 +249,7 @@ export class Spaceport extends Menu<Entity> {
                 missionMarks: this.activeMissionMarks(),
             }),
             properties: () => void this.openPlayerInfo?.(this.input),
+            missions: () => void this.openMissionInfo?.(this.input),
             depart: this.done.bind(this),
         });
     }
@@ -285,7 +285,7 @@ export class Spaceport extends Menu<Entity> {
         } catch (e) {
             console.warn('Mission landing processing failed:', e);
         }
-        this.refreshStatusLine(input);
+        this.refreshRefuelButton(input);
         return super.show(input);
     }
 
@@ -313,21 +313,17 @@ export class Spaceport extends Menu<Entity> {
         this.notices.text = lines.join('\n\n');
     }
 
-    private refreshStatusLine(input?: Entity) {
+    /**
+     * Re-evaluates the Refuel button's visibility (hidden when the tank
+     * is full) and greyed state (when the fill is unaffordable). The
+     * original's spaceport shows no persistent credits/date line here, so
+     * this no longer draws any text — it only drives the button.
+     */
+    private refreshRefuelButton(input?: Entity) {
         const entity = input ?? this.input;
         if (!entity) {
             return;
         }
-        const date = entity.components.get(GameDateComponent);
-        const credits = entity.components.get(CreditsComponent);
-        const parts: string[] = [];
-        if (date) {
-            parts.push(formatDate(date));
-        }
-        if (credits) {
-            parts.push(`${credits.credits.toLocaleString()} cr`);
-        }
-        this.statusLine.text = parts.join('    ');
         this.updateRefuelButton(entity);
     }
 
@@ -355,19 +351,19 @@ export class Spaceport extends Menu<Entity> {
         // Re-check rather than trusting button state: clicking flips a
         // Button to 'clicked'/'normal' regardless of greying.
         if (!fuel || fuel.current >= fuel.max || !credits) {
-            this.refreshStatusLine();
+            this.refreshRefuelButton();
             return;
         }
         const cost = refuelCost(fuel);
         if (credits.credits < cost) {
-            this.refreshStatusLine();
+            this.refreshRefuelButton();
             return;
         }
         // Mutating the docked entity's components is the standard
         // spaceport commit pattern (the entity is out of the world).
         credits.credits -= cost;
         fuel.current = fuel.max;
-        this.refreshStatusLine();
+        this.refreshRefuelButton();
     }
 
     override async build() {
@@ -388,9 +384,6 @@ export class Spaceport extends Menu<Entity> {
         // Mission completion / failure notices, over the landing desc.
         this.notices.position.set(-149, 180);
         this.container.addChild(this.notices);
-        // The player's date and credits.
-        this.statusLine.position.set(-149, 250);
-        this.container.addChild(this.statusLine);
 
         // Venue buttons only appear where the stellar offers the
         // service (spöb flags).

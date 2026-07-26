@@ -43,15 +43,21 @@ export function rollOffers(session: MissionSession,
     return offers;
 }
 
-/** The <DST>/<RET>/... substitution table for one offer. */
+/**
+ * The <DST>/<RET>/... substitution table for one offer. `currentDay`
+ * is the player's day number, used only to derive an offer's deadline
+ * when the (not-yet-active) offer has a time limit; an already-active
+ * mission carries its own resolved deadlineDay, so this dialog works in
+ * flight (no MissionSession) as well as docked.
+ */
 export function offerSubstitutions(universe: MissionUniverse,
-    session: MissionSession, offer: MissionOffer,
+    currentDay: number, offer: MissionOffer,
     active?: ActiveMission) {
     const travel = active?.travelPlanet ?? offer.travelPlanet;
     const ret = active?.returnPlanet ?? offer.returnPlanet;
     const deadlineDay = active?.deadlineDay
         ?? (offer.data.timeLimit > 0
-            ? session.currentDay + offer.data.timeLimit : null);
+            ? currentDay + offer.data.timeLimit : null);
     return {
         destinationStellar: universe.planetName(travel ?? ret),
         destinationSystem: universe.systemNameOfPlanet(travel ?? ret),

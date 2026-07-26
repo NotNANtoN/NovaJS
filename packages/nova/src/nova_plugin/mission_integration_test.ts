@@ -11,7 +11,10 @@ import {
     LOCATION_BAR,
     LOCATION_MISSION_COMPUTER,
     makeMissionOffer,
+    matchesStellarRef,
+    MissionOffer,
     missionMatchesLocation,
+    stellarVisible,
 } from './mission_logic.js';
 import { GOAL_DESTROY } from './mission_ship_state.js';
 import { ControlBitsComponent } from './ncb_plugin.js';
@@ -335,6 +338,194 @@ describe('missions against real Nova data', () => {
                 entity, gameData, universe, dockedAt.id);
             expect(events.find(e => e.type === 'failed')?.missionId)
                 .toBe('nova:128');
+        });
+
+    /**
+     * BUG 1: "Rush Delivery to Nil'ar Nina" was offered on a Federation
+     * board. Nova stacks alternate-story copies of a system at one map
+     * position under mutually-exclusive sÿst Visibility bits (EVN Bible,
+     * "The Visibility field controls how and when to make the system
+     * visible or invisible"). The currently-visible Nil'ar Nina is the
+     * Polaris one (nova:223, system "Nil'kol" vis "!b88"); a Federation-govt
+     * duplicate (nova:453, system vis "b88 | b3009") is hidden for a default
+     * pilot. Random / govt-ranged mission destinations must sample only
+     * currently-visible stellars, never a hidden duplicate.
+     */
+    it('samples mission destinations only from visible systems (BUG 1)',
+        async () => {
+            const gameData = await getIntegrationGameData();
+            const universe = MissionUniverse.shared(gameData);
+            await universe.load();
+
+            const byId = new Map(
+                universe.stellarCandidates.map(s => [s.id, s]));
+            const noBits = new Set<number>();
+
+            // Visible Polaris Nil'ar Nina vs the hidden Federation duplicate.
+            expect(stellarVisible(byId.get('nova:223')!, noBits)).toBe(true);
+            expect(stellarVisible(byId.get('nova:453')!, noBits)).toBe(false);
+            // Visible Brass (Glimmer, "!(b6300 | b6302)") vs hidden story
+            // duplicates gated on b6300/b6302/b130.
+            expect(stellarVisible(byId.get('nova:214')!, noBits)).toBe(true);
+            for (const dup of ['nova:503', 'nova:505', 'nova:512']) {
+                expect(stellarVisible(byId.get(dup)!, noBits)).toBe(false);
+            }
+
+            // The visible Federation (travelStel 10000 -> govt 128) pool
+            // includes the real Brass and excludes every hidden duplicate.
+            const getGovt = (id: string) => universe.getGovt(id);
+            const visibleFederation = universe.stellarCandidates.filter(s =>
+                s.canLand && stellarVisible(s, noBits)
+                && matchesStellarRef(10000, null, s, 'nova', getGovt));
+            const ids = new Set(visibleFederation.map(s => s.id));
+            expect(ids.has('nova:214')).toBe(true);
+            expect(ids.has('nova:453')).toBe(false);
+            expect(ids.has('nova:503')).toBe(false);
+
+            // A real Federation "Delivery to <DST>" (nova:211): every draw of
+            // its random destination is a currently-visible Federation
+            // stellar, so the offered planet name is never a hidden copy.
+            const start = await gameData.data.PlayerStart.get('nova:128');
+            const shipData = await gameData.data.Ship.get(start.ship);
+            const entity = makeShip(shipData);
+            entity.components.set(GameDateComponent, { ...start.date });
+            entity.components.set(CreditsComponent, { credits: 0 });
+            entity.components.set(ControlBitsComponent, new Set());
+            const session = await MissionSession.create(
+                entity, gameData, universe, 'nova:128'); // docked at Earth
+            const delivery = universe.getMission('nova:211')!;
+            expect(delivery.travelStel).toBe(10000);
+            for (let i = 0; i < 200; i++) {
+                const offer = makeMissionOffer(
+                    delivery, session.machinery.offerContext());
+                expect(offer).not.toBeNull();
+                expect(ids.has(offer!.travelPlanet!)).toBe(true);
+            }
+        });
+
+    /**
+     * BUG 2: a "deliver cargo to Brass" mission would not complete on
+     * landing at Brass. Root cause: the random Federation destination froze
+     * to a HIDDEN Brass duplicate id (nova:503/505/512) while the player
+     * lands on the visible Brass (nova:214). Two fixes converge here: the
+     * destination now samples only visible stellars (so it freezes
+     * nova:214), and — belt and suspenders — landing on a duplicate stellar
+     * with the identical name and coordinates completes the mission anyway
+     * (EVN Bible, TravelStel/ReturnStel duplicate rule).
+     */
+    it('completes a real Federation delivery on landing at Brass (BUG 2)',
+        async () => {
+            const gameData = await getIntegrationGameData();
+            const universe = MissionUniverse.shared(gameData);
+            await universe.load();
+
+            const start = await gameData.data.PlayerStart.get('nova:128');
+            const shipData = await gameData.data.Ship.get(start.ship);
+            const entity = makeShip(shipData);
+            entity.components.set(GameDateComponent, { ...start.date });
+            entity.components.set(CreditsComponent, { credits: 0 });
+            entity.components.set(ControlBitsComponent, new Set());
+
+            const session = await MissionSession.create(
+                entity, gameData, universe, 'nova:128');
+            const mission = universe.getMission('nova:211')!; // Delivery
+            // A concrete offer of the real mission, frozen (as the sampler
+            // now would) to the visible Brass in Glimmer.
+            const offer: MissionOffer = {
+                data: mission,
+                travelPlanet: 'nova:214',
+                returnPlanet: null, // returnStel -1 => completes at travel
+                cargoType: 0, cargoQty: 2,
+                acceptable: true,
+            };
+            acceptOffer(session.machinery, offer, session.outfits);
+            session.commit();
+            expect(entity.components.get(MissionsComponent)!.has('nova:211'))
+                .toBe(true);
+
+            const events = await processEntityLanding(
+                entity, gameData, universe, 'nova:214');
+            const completed = events.find(e => e.type === 'completed');
+            expect(completed?.missionId).toBe('nova:211');
+            expect(completed?.payment).toBe(15000);
+            expect(entity.components.get(CreditsComponent)!.credits)
+                .toBe(15000);
+            expect(entity.components.get(MissionsComponent)!.size).toBe(0);
+        });
+
+    it('completes a delivery frozen to a hidden Brass duplicate when the ' +
+        'player lands at the visible Brass (BUG 2, duplicate rule)',
+        async () => {
+            const gameData = await getIntegrationGameData();
+            const universe = MissionUniverse.shared(gameData);
+            await universe.load();
+            // nova:214 (visible Brass, Glimmer) and nova:503 (a hidden
+            // duplicate Brass) are the same stellar by name + coordinates.
+            expect(universe.sameStellar('nova:503', 'nova:214')).toBe(true);
+
+            const start = await gameData.data.PlayerStart.get('nova:128');
+            const shipData = await gameData.data.Ship.get(start.ship);
+            const entity = makeShip(shipData);
+            entity.components.set(GameDateComponent, { ...start.date });
+            entity.components.set(CreditsComponent, { credits: 0 });
+            entity.components.set(ControlBitsComponent, new Set());
+
+            const session = await MissionSession.create(
+                entity, gameData, universe, 'nova:128');
+            const mission = universe.getMission('nova:211')!;
+            acceptOffer(session.machinery, {
+                data: mission,
+                travelPlanet: 'nova:503', // frozen to the hidden duplicate
+                returnPlanet: null,
+                cargoType: 0, cargoQty: 2,
+                acceptable: true,
+            }, session.outfits);
+            session.commit();
+
+            const events = await processEntityLanding(
+                entity, gameData, universe, 'nova:214'); // the visible Brass
+            expect(events.find(e => e.type === 'completed')?.missionId)
+                .toBe('nova:211');
+            expect(entity.components.get(MissionsComponent)!.size).toBe(0);
+        });
+
+    it('completes BOTH missions bound to Brass on a single landing (BUG 2)',
+        async () => {
+            const gameData = await getIntegrationGameData();
+            const universe = MissionUniverse.shared(gameData);
+            await universe.load();
+
+            const start = await gameData.data.PlayerStart.get('nova:128');
+            const shipData = await gameData.data.Ship.get(start.ship);
+            const entity = makeShip(shipData);
+            entity.components.set(GameDateComponent, { ...start.date });
+            entity.components.set(CreditsComponent, { credits: 0 });
+            entity.components.set(ControlBitsComponent, new Set());
+
+            const session = await MissionSession.create(
+                entity, gameData, universe, 'nova:128');
+            // Two distinct real "Delivery to <DST>" missions, both bound to
+            // the visible Brass (one to the id, one to a hidden duplicate).
+            const first = universe.getMission('nova:211')!;
+            const second = universe.getMission('nova:418')!;
+            acceptOffer(session.machinery, {
+                data: first, travelPlanet: 'nova:214', returnPlanet: null,
+                cargoType: 0, cargoQty: 2, acceptable: true,
+            }, session.outfits);
+            acceptOffer(session.machinery, {
+                data: second, travelPlanet: 'nova:503', returnPlanet: null,
+                cargoType: 0, cargoQty: 2, acceptable: true,
+            }, session.outfits);
+            session.commit();
+            expect(entity.components.get(MissionsComponent)!.size).toBe(2);
+
+            const events = await processEntityLanding(
+                entity, gameData, universe, 'nova:214');
+            const completed = events
+                .filter(e => e.type === 'completed')
+                .map(e => e.missionId).sort();
+            expect(completed).toEqual(['nova:211', 'nova:418']);
+            expect(entity.components.get(MissionsComponent)!.size).toBe(0);
         });
 
     it('does not double-apply dateAdvance on a second commit (L5)', async () => {

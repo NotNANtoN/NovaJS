@@ -1,6 +1,7 @@
 import * as PIXI from 'pixi.js';
 import { BehaviorSubject } from 'rxjs';
 import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data.js';
+import { displayName } from '../nova_plugin/display_name.js';
 
 
 const TILE_SIZE = [83, 54];
@@ -38,7 +39,8 @@ export class ItemTile<I extends Item> {
     public largePict = new PIXI.Container();
 
     constructor(private displayAssets: DisplayAssetDataInterface, readonly item: I) {
-        const nameText = new PIXI.Text(item.name, this.font.normal);
+        // Outfit / ship tile captions hide the "; developer note" suffix.
+        const nameText = new PIXI.Text(displayName(item.name), this.font.normal);
         nameText.anchor.x = 0.5;
         nameText.position.x = TILE_SIZE[0] / 2;
         nameText.position.y = TILE_SIZE[1] / 2;
@@ -203,6 +205,37 @@ export class ItemGrid<I extends Item> {
             tile.moveTo(xcount * TILE_SIZE[0], ycount * TILE_SIZE[1])
             tile.draw();
         }
+    }
+
+    /** The furthest the grid can scroll: the top row of the last page. */
+    private get maxScroll() {
+        const rows = Math.ceil(this.items.length / BOX_COUNT[0]);
+        return Math.max(0, rows - BOX_COUNT[1]);
+    }
+
+    /** True when more items exist above / below the visible page. */
+    get canScrollUp() {
+        return this.scroll > 0;
+    }
+    get canScrollDown() {
+        return this.scroll < this.maxScroll;
+    }
+
+    /** Scrolls the visible page up/down by a page, for the scroll-arrow
+     * buttons (the view moves without changing the selection). */
+    scrollUp() {
+        if (this.scroll <= 0) {
+            return;
+        }
+        this.scroll = Math.max(0, this.scroll - BOX_COUNT[1]);
+        this.drawGrid();
+    }
+    scrollDown() {
+        if (this.scroll >= this.maxScroll) {
+            return;
+        }
+        this.scroll = Math.min(this.maxScroll, this.scroll + BOX_COUNT[1]);
+        this.drawGrid();
     }
 
     setCounts(items: Map<string, number>) {

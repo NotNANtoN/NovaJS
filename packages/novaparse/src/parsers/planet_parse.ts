@@ -140,7 +140,13 @@ export async function PlanetParse(spob: SpobResource, notFoundFunction: (m: stri
 
     // The bar description lives at dësc 10000 + (spöb local id - 128),
     // paralleling the shipyard (13000+) and pilot (14000+) ranges.
-    const barDesc = spob.idSpace.dësc[spob.id - 128 + 10000]?.text ?? "";
+    const barDescResource = spob.idSpace.dësc[spob.id - 128 + 10000];
+    const barDesc = barDescResource?.text ?? "";
+    // The bar dësc's Graphic field points to a PICT shown in the bar's
+    // "Bar + pict" frame (PICT 8504); -1/absent means no picture.
+    const barGraphic = barDescResource?.graphic ?? -1;
+    const barPict = barGraphic >= 0
+        ? (spob.idSpace.PICT[barGraphic]?.globalID ?? null) : null;
 
     return {
         ...base,
@@ -161,6 +167,7 @@ export async function PlanetParse(spob: SpobResource, notFoundFunction: (m: stri
         techLevel: spob.techLevel,
         tradeTiers,
         barDesc,
+        barPict,
         animationDelay: spob.animationDelay,
         vulnerableTo: <Array<DamageType>>["planetBuster"],
         physics: {

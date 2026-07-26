@@ -76,6 +76,7 @@ export class MissionSession {
             // Player-local: only resulting state reaches the sim.
             random: Math.random,
             allGovts: () => universe.govts(),
+            sameStellar: (a, b) => universe.sameStellar(a, b),
         };
     }
 

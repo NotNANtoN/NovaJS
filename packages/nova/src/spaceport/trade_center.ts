@@ -83,6 +83,8 @@ export class TradeCenter extends Menu<Entity> {
     private listContainer = new PIXI.Container();
     private highlight = new PIXI.Graphics();
     private rowTexts: PIXI.Text[] = [];
+    /** Full-width transparent click targets, one per commodity row. */
+    private rowHits: PIXI.Container[] = [];
     private buttons: {
         buy: Button, sell: Button, done: Button,
     };
@@ -338,6 +340,11 @@ export class TradeCenter extends Menu<Entity> {
             text.destroy();
         }
         this.rowTexts = [];
+        for (const hit of this.rowHits) {
+            this.listContainer.removeChild(hit);
+            hit.destroy();
+        }
+        this.rowHits = [];
         this.highlight.clear();
 
         const start = Math.max(0, Math.min(
@@ -358,6 +365,21 @@ export class TradeCenter extends Menu<Entity> {
                         PANE_RIGHT - PANE_LEFT - 4, ROW_HEIGHT)
                     .endFill();
             }
+            // A full-width transparent hit target so the whole row —
+            // everywhere the selection bar renders, not just the column
+            // text — selects the commodity. Matches the highlight bounds.
+            const hit = new PIXI.Container();
+            hit.interactive = true;
+            hit.cursor = 'pointer';
+            hit.hitArea = new PIXI.Rectangle(
+                PANE_LEFT + 2, y, PANE_RIGHT - PANE_LEFT - 4, ROW_HEIGHT);
+            hit.on('pointerdown', () => {
+                this.selectedIndex = index;
+                this.text.status.text = '';
+                this.refresh();
+            });
+            this.listContainer.addChild(hit);
+            this.rowHits.push(hit);
             const held = this.state.cargo.get(good.key) ?? 0;
             // A price event replaces the Low/Med/High word with the
             // comparative "Lower"/"Higher", as in the reference.
@@ -378,13 +400,6 @@ export class TradeCenter extends Menu<Entity> {
                     anchor ? RIGHT_FONT : LIST_FONT);
                 text.anchor.x = anchor;
                 text.position.set(x, y);
-                text.interactive = true;
-                text.cursor = 'pointer';
-                text.on('pointerdown', () => {
-                    this.selectedIndex = index;
-                    this.text.status.text = '';
-                    this.refresh();
-                });
                 this.listContainer.addChild(text);
                 this.rowTexts.push(text);
             }

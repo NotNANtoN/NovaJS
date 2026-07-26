@@ -13,11 +13,13 @@ import { Button } from './button.js';
 import { ItemGrid, ItemTile } from './item_grid.js';
 import { Menu } from './menu.js';
 import { FONT } from './outfitter.js';
+import { ShipInfoDialog } from './ship_info.js';
 
 
 export class Shipyard extends Menu<Entity> {
     private pictContainer = new PIXI.Container();
     itemGrid?: ItemGrid<ShipData>;
+    private shipInfo: ShipInfoDialog;
     private text = {
         description: new PIXI.Text("", FONT.normal),
     }
@@ -28,13 +30,19 @@ export class Shipyard extends Menu<Entity> {
         super(displayAssets, simulationData, "nova:8502", controlEvents);
         this.container.name = 'Shipyard';
         const buttons = {
+            info: new Button(displayAssets, "Info", 60, { x: -140, y: 126 }),
             buy: new Button(displayAssets, "Buy", 60, { x: -20, y: 126 }),
             done: new Button(displayAssets, "Done", 60, { x: 100, y: 126 }),
         };
         this.addButtons(buttons);
 
+        buttons.info.click.subscribe(() => void this.showInfo());
         buttons.buy.click.subscribe(this.buyShip.bind(this));
         buttons.done.click.subscribe(this.done.bind(this));
+
+        this.shipInfo = new ShipInfoDialog(displayAssets, simulationData,
+            controlEvents);
+        this.container.addChild(this.shipInfo.container);
 
         this.text.description.position.x = -27;
         this.text.description.position.y = -150;
@@ -87,6 +95,20 @@ export class Shipyard extends Menu<Entity> {
 
         // Set Description
         this.text.description.text = shipTile.item.desc;
+    }
+
+    /** Opens the ship info dialog for the selected ship. */
+    private async showInfo() {
+        const ship = this.itemGrid?.selection;
+        if (!ship) {
+            return;
+        }
+        this.controls.unbind();
+        // Re-adding moves the dialog to the top of the shipyard's
+        // display list, so it draws over the ship grid.
+        this.container.addChild(this.shipInfo.container);
+        await this.shipInfo.show(ship);
+        this.controls.bind();
     }
 
     private buyShip() {
