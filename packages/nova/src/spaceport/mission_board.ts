@@ -73,6 +73,8 @@ export class MissionBoard extends Menu<Entity> {
     private rows: Row[] = [];
     private selectedIndex = 0;
     private rowTexts: PIXI.Text[] = [];
+    /** Full-width transparent click targets, one per selectable row. */
+    private rowHits: PIXI.Container[] = [];
     private listContainer = new PIXI.Container();
     private highlight = new PIXI.Graphics();
     private buttons: {
@@ -264,6 +266,11 @@ export class MissionBoard extends Menu<Entity> {
             text.destroy();
         }
         this.rowTexts = [];
+        for (const hit of this.rowHits) {
+            this.listContainer.removeChild(hit);
+            hit.destroy();
+        }
+        this.rowHits = [];
         this.highlight.clear();
 
         // A simple window keeps the selection visible.
@@ -300,17 +307,26 @@ export class MissionBoard extends Menu<Entity> {
                         LIST_WIDTH, ROW_HEIGHT)
                     .endFill();
             }
-            const text = new PIXI.Text(label, style);
-            text.position.set(4, i * ROW_HEIGHT);
             if (row.kind !== 'header') {
-                text.interactive = true;
-                text.cursor = 'pointer';
-                text.on('pointerdown', () => {
+                // A full-width transparent hit target so the whole row —
+                // everywhere the selection bar renders, not just the text —
+                // is clickable. Matches the highlight's bounds in
+                // listContainer-local coordinates.
+                const hit = new PIXI.Container();
+                hit.interactive = true;
+                hit.cursor = 'pointer';
+                hit.hitArea = new PIXI.Rectangle(
+                    0, i * ROW_HEIGHT, LIST_WIDTH, ROW_HEIGHT);
+                hit.on('pointerdown', () => {
                     this.selectedIndex = index;
                     this.refreshList();
                     this.refreshDescription();
                 });
+                this.listContainer.addChild(hit);
+                this.rowHits.push(hit);
             }
+            const text = new PIXI.Text(label, style);
+            text.position.set(4, i * ROW_HEIGHT);
             this.listContainer.addChild(text);
             this.rowTexts.push(text);
         });

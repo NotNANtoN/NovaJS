@@ -1,6 +1,7 @@
 import * as PIXI from 'pixi.js';
 import { BehaviorSubject } from 'rxjs';
 import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data.js';
+import { displayName } from '../nova_plugin/display_name.js';
 
 
 const TILE_SIZE = [83, 54];
@@ -38,7 +39,8 @@ export class ItemTile<I extends Item> {
     public largePict = new PIXI.Container();
 
     constructor(private displayAssets: DisplayAssetDataInterface, readonly item: I) {
-        const nameText = new PIXI.Text(item.name, this.font.normal);
+        // Outfit / ship tile captions hide the "; developer note" suffix.
+        const nameText = new PIXI.Text(displayName(item.name), this.font.normal);
         nameText.anchor.x = 0.5;
         nameText.position.x = TILE_SIZE[0] / 2;
         nameText.position.y = TILE_SIZE[1] / 2;
