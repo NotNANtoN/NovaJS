@@ -12,6 +12,7 @@ import { EcsControlEvent } from './controls_plugin.js';
 import { AnalogControlComponent, ControlledByComponent, ControlledByType, SetControlledShipSystem, ShipControlStateComponent } from './ship_control.js';
 import { PlatformResource } from './platform_plugin.js';
 import { PlayerShipPlugin, PlayerShipSelector } from './player_ship_plugin.js';
+import { PlanetTargetComponent } from './planet_plugin.js';
 import { TargetComponent } from './target_component.js';
 
 
@@ -24,16 +25,27 @@ export const ControlShipSystem = new System({
     name: 'ControlPlayerShip',
     args: [ShipControlStateComponent, MovementStateComponent,
         MovementPhysicsComponent, TargetComponent,
+        Optional(PlanetTargetComponent),
         Optional(AnalogControlComponent)] as const,
-    step(controlState, movementState, movementPhysics, { target }, analog) {
+    step(controlState, movementState, movementPhysics, { target },
+        planetTarget, analog) {
         movementState.accelerating = controlState.get('accelerate') ? 1 : 0;
         movementState.turning =
             (controlState.get('turnLeft') ? -1 : 0) +
             (controlState.get('turnRight') ? 1 : 0);
 
         movementState.turnTo = null;
-        if (controlState.get('pointTo') && target) {
-            movementState.turnTo = target;
+        if (controlState.get('pointTo')) {
+            // Point at the targeted ship if there is one; otherwise fall back
+            // to the selected stellar body. Both are entity UUIDs the
+            // MovementSystem resolves to a position (PlanetTargetComponent's
+            // `planet <id>` entity always carries a MovementState). Reads only
+            // synced state and the control is input-recorded, so it stays
+            // deterministic.
+            const steerTarget = target ?? planetTarget?.target;
+            if (steerTarget) {
+                movementState.turnTo = steerTarget;
+            }
         }
 
         if (movementPhysics.movementType === MovementType.INERTIAL) {
