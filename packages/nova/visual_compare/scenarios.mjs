@@ -101,6 +101,27 @@ export const scenarios = [
         ],
     },
     {
+        id: 'port_kane_spaceport',
+        title: 'Landed at Port Kane — standard landscape',
+        description: 'Docked at Port Kane (CustPicID -1): the landing panel '
+            + 'must show the STANDARD landscape for the stellar\'s Type, the '
+            + 'pre-made PICT at 10000 + Type (10034 here — the station scene), '
+            + 'not a placeholder. Compare against spaceport/port_kane.png.',
+        params: { ship: 'nova:164', system: 'nova:128' },
+        hideDebug: true,
+        setup: async (page, driver) => { await driver.landAt(page, 'planet nova:137'); },
+        references: [
+            { name: 'port_kane', file: 'spaceport/port_kane.png' },
+        ],
+        regions: [
+            region('spaceport_frame', 'Whole dialog frame', 651, 281, 618, 522),
+            region('spaceport_landing_pict', 'Standard landscape (station scene)', 655, 286, 610, 268),
+            region('spaceport_title', 'Stellar name title bar', 812, 578, 292, 26),
+            region('spaceport_left_buttons', 'Left button column (Bar/BBS/Trade)', 658, 578, 158, 122),
+            region('spaceport_right_buttons', 'Right button column (Outfitter/Leave)', 1122, 578, 150, 165),
+        ],
+    },
+    {
         id: 'player_info_general',
         title: "Player info ('p') — General page",
         description: 'The player-info dialog toggled with KeyP in flight. '
