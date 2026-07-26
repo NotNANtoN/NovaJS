@@ -103,7 +103,11 @@ export class Spaceport extends Menu<Entity> {
          * key) — it works both in flight and docked. The docked ship
          * entity is passed explicitly: while docked it is out of the
          * world, held by this menu. */
-        private openPlayerInfo?: (entity: Entity) => Promise<unknown>) {
+        private openPlayerInfo?: (entity: Entity) => Promise<unknown>,
+        /** Opens the mission-info dialog over the spaceport (the 'i'
+         * key). Like the player-info dialog, the docked ship entity is
+         * passed explicitly (it is out of the world while docked). */
+        private openMissionInfo?: (entity: Entity) => Promise<unknown>) {
         super(displayAssets, simulationData, "nova:8500", controlEvents);
         this.container.name = 'Spaceport';
 
@@ -250,6 +254,7 @@ export class Spaceport extends Menu<Entity> {
                 missionMarks: this.activeMissionMarks(),
             }),
             properties: () => void this.openPlayerInfo?.(this.input),
+            missions: () => void this.openMissionInfo?.(this.input),
             depart: this.done.bind(this),
         });
     }

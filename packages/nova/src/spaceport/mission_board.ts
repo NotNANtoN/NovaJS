@@ -338,8 +338,8 @@ export class MissionBoard extends Menu<Entity> {
 
     private substitutionsFor(offer: MissionOffer,
         active?: ActiveMission) {
-        return offerSubstitutions(this.universe, this.session!, offer,
-            active);
+        return offerSubstitutions(this.universe, this.session!.currentDay,
+            offer, active);
     }
 
     /** The right pane: expanded text, info line, and button labels. */

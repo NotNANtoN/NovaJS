@@ -171,7 +171,7 @@ export class Bar extends Menu<Entity> {
                 continue;
             }
             const substitutions =
-                offerSubstitutions(this.universe, session, offer);
+                offerSubstitutions(this.universe, session.currentDay, offer);
             const text = expandMissionText(offer.data.offerText,
                 substitutions);
             if (!text) {
