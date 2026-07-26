@@ -106,7 +106,8 @@ export class Spaceport extends Menu<Entity> {
         /** Opens the mission-info dialog over the spaceport (the 'i'
          * key). Like the player-info dialog, the docked ship entity is
          * passed explicitly (it is out of the world while docked). */
-        private openMissionInfo?: (entity: Entity) => Promise<unknown>) {
+        private openMissionInfo?: (entity: Entity, planetId?: string)
+            => Promise<unknown>) {
         super(displayAssets, simulationData, "nova:8500", controlEvents);
         this.container.name = 'Spaceport';
 
@@ -253,7 +254,8 @@ export class Spaceport extends Menu<Entity> {
                 missionMarks: this.activeMissionMarks(),
             }),
             properties: () => void this.openPlayerInfo?.(this.input),
-            missions: () => void this.openMissionInfo?.(this.input),
+            // The planetId enables the dialog's docked-only Abort.
+            missions: () => void this.openMissionInfo?.(this.input, this.id),
             depart: this.done.bind(this),
         });
     }

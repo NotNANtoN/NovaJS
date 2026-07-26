@@ -6,7 +6,6 @@ import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_
 import { ControlEvent } from '../nova_plugin/controls_plugin.js';
 import { dateFromDayNumber, formatDate } from '../nova_plugin/calendar.js';
 import {
-    abortMission,
     acceptOffer,
     MissionMapMark,
     missionMapMarks,
@@ -62,7 +61,7 @@ type Row =
  * shows the expanded offer text. Accept uses the mïsn's custom button
  * label when present, and runs through the real NCB machinery. There
  * is no Refuse here — a listing the player doesn't want is simply not
- * accepted. Active missions can be aborted when the mission allows.
+ * accepted, and no Abort — aborting lives in the Mission Info dialog.
  *
  * The AvailRandom roll happens when the board opens (see
  * mission_offers.ts — player-local UI randomness).
@@ -78,7 +77,7 @@ export class MissionBoard extends Menu<Entity> {
     private listContainer = new PIXI.Container();
     private highlight = new PIXI.Graphics();
     private buttons: {
-        accept: Button, abort: Button, done: Button,
+        accept: Button, done: Button,
     };
 
     private text = {
@@ -114,14 +113,16 @@ export class MissionBoard extends Menu<Entity> {
 
         // No Refuse on the BBS: an uninteresting listing is simply not
         // accepted. (Bar mission POPUPS keep their accept/refuse
-        // choice — that's a different surface; see bar.ts.)
+        // choice — that's a different surface; see bar.ts.) No Abort
+        // either — the original's row is just Accept / Leave, adjacent
+        // and right-of-center (mission_bbs/earth_mission_bbs.png:
+        // Accept pill at x975, Leave at x1078); aborting lives in the
+        // Mission Info dialog ('i').
         this.buttons = {
-            accept: new Button(displayAssets, 'Accept', 74, { x: -245, y: BUTTON_Y }),
-            abort: new Button(displayAssets, 'Abort', 60, { x: -140, y: BUTTON_Y }),
-            done: new Button(displayAssets, 'Done', 60, { x: 180, y: BUTTON_Y }),
+            accept: new Button(displayAssets, 'Accept', 74, { x: 8, y: BUTTON_Y }),
+            done: new Button(displayAssets, 'Leave', 74, { x: 111, y: BUTTON_Y }),
         };
         this.buttons.accept.click.subscribe(this.accept.bind(this));
-        this.buttons.abort.click.subscribe(this.abort.bind(this));
         this.buttons.done.click.subscribe(this.done.bind(this));
         this.addButtons(this.buttons);
 
@@ -366,7 +367,6 @@ export class MissionBoard extends Menu<Entity> {
         if (!row || row.kind === 'header') {
             this.text.description.text = '';
             this.buttons.accept.state = 'grey';
-            this.buttons.abort.state = 'grey';
             return;
         }
         if (row.kind === 'offer') {
@@ -387,7 +387,6 @@ export class MissionBoard extends Menu<Entity> {
             }
             this.buttons.accept.state =
                 offer.acceptable ? 'normal' : 'grey';
-            this.buttons.abort.state = 'grey';
         } else {
             const offer = activeAsOffer(this.universe, row.active);
             if (!offer) {
@@ -401,7 +400,6 @@ export class MissionBoard extends Menu<Entity> {
                 this.substitutionsFor(offer, row.active))
                 + (mission.canAbort ? '' : '\n\n[This mission cannot be aborted.]');
             this.buttons.accept.state = 'grey';
-            this.buttons.abort.state = mission.canAbort ? 'normal' : 'grey';
         }
     }
 
@@ -438,27 +436,6 @@ export class MissionBoard extends Menu<Entity> {
         if (brief) {
             this.text.description.text = brief;
         }
-    }
-
-    private abort() {
-        const row = this.selectedRow();
-        if (!row || row.kind !== 'active' || !this.session) {
-            return;
-        }
-        const mission = this.universe.getMission(row.active.id);
-        if (mission && !mission.canAbort) {
-            this.text.status.text = 'This mission cannot be aborted.';
-            return;
-        }
-        abortMission(this.session.machinery, row.active.id,
-            this.session.outfits);
-        this.text.status.text = `Aborted: ${mission ? missionDisplayName(mission.name) : row.active.id}.`;
-        this.buildRows();
-        this.selectedIndex = Math.min(this.selectedIndex,
-            this.rows.length - 1);
-        this.refreshHeader();
-        this.refreshList();
-        this.refreshDescription();
     }
 
     protected override done() {

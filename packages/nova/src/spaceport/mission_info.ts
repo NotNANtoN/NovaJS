@@ -2,14 +2,29 @@ import { Entity } from 'nova_ecs/entity';
 import * as PIXI from 'pixi.js';
 import { firstValueFrom, Observable, Subject } from 'rxjs';
 import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data.js';
+import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { dayNumber, formatDate } from '../nova_plugin/calendar.js';
 import { ControlEvent } from '../nova_plugin/controls_plugin.js';
+import { abortMission } from '../nova_plugin/mission_logic.js';
 import { expandMissionText, missionDisplayName } from '../nova_plugin/mission_text.js';
 import { ActiveMission, GameDateComponent, MissionsComponent } from '../nova_plugin/player_state_plugin.js';
 import { Button } from './button.js';
 import { MenuControls } from './menu_controls.js';
 import { activeAsOffer, offerSubstitutions } from './mission_offers.js';
+import { MissionSession } from './mission_session.js';
 import { MissionUniverse } from './mission_universe.js';
+
+/**
+ * Docked context that makes the Abort button functional: aborting runs
+ * through a MissionSession over the held entity (the standard spaceport
+ * working-copy/commit pattern), which is only sound while docked. In
+ * flight the button stays greyed — an in-flight abort would need an
+ * input-record path of its own.
+ */
+export interface MissionInfoAbortContext {
+    gameData: SimulationGameDataInterface;
+    planetId: string;
+}
 
 // The Mission Info dialog on the 471x155 PICT 8517 frame: a left list of
 // the player's active missions, a right pane with the current date and
@@ -59,9 +74,10 @@ const NO_MISSIONS = 'You have no active missions.';
  * shows the selected one's briefing text and the current date, on the
  * 8517 frame. Opens in flight and while docked, as a modal overlay on
  * the same focus stack as the starmap / player-info dialogs. Read-only:
- * the reference's Abort button is shown greyed — aborting a mission
- * mid-flight would bypass the deterministic mission machinery, so it is
- * done from the Mission BBS while docked instead.
+ * the Abort button is functional while DOCKED (an abort context routes
+ * it through a MissionSession over the held entity) and greyed in
+ * flight, where an abort would bypass the deterministic mission
+ * machinery.
  */
 export class MissionInfoDialog {
     container = new PIXI.Container();
@@ -77,6 +93,9 @@ export class MissionInfoDialog {
     private missions: [string, ActiveMission][] = [];
     private selectedIndex = 0;
     private currentDay = 0;
+    private entity?: Entity;
+    private abortContext?: MissionInfoAbortContext;
+    private aborting = false;
 
     constructor(private displayAssets: DisplayAssetDataInterface,
         private universe: MissionUniverse,
@@ -119,12 +138,12 @@ export class MissionInfoDialog {
         this.container.addChild(descMask);
         this.description.mask = descMask;
 
-        // Abort is greyed: aborting is done from the Mission BBS while
-        // docked (see class doc). Kept for layout parity with the
-        // reference.
+        // Functional while docked (see class doc); greyed in flight or
+        // when the selected mission can't be aborted.
         this.abort = new Button(displayAssets, 'Abort', 80,
             { x: ORIGIN_X + 60, y: BUTTON_Y });
         this.abort.state = 'grey';
+        this.abort.click.subscribe(() => void this.doAbort());
         const done = new Button(displayAssets, 'Done', 80,
             { x: ORIGIN_X + 285, y: BUTTON_Y });
         done.click.subscribe(() => this.closed.next());
@@ -139,8 +158,14 @@ export class MissionInfoDialog {
         });
     }
 
-    /** Shows the dialog for a ship entity; resolves when dismissed. */
-    async show(entity: Entity): Promise<void> {
+    /**
+     * Shows the dialog for a ship entity; resolves when dismissed.
+     * Passing an abort context (docked only) enables the Abort button.
+     */
+    async show(entity: Entity,
+        abortContext?: MissionInfoAbortContext): Promise<void> {
+        this.entity = entity;
+        this.abortContext = abortContext;
         try {
             await this.universe.load();
         } catch (e) {
@@ -222,6 +247,7 @@ export class MissionInfoDialog {
     }
 
     private refreshDescription() {
+        this.refreshAbortState();
         const entry = this.missions[this.selectedIndex];
         if (!entry) {
             this.description.text = this.missions.length === 0
@@ -240,6 +266,49 @@ export class MissionInfoDialog {
         this.description.text = expandMissionText(brief,
             offerSubstitutions(this.universe, this.currentDay, offer,
                 active));
+    }
+
+    private refreshAbortState() {
+        const entry = this.missions[this.selectedIndex];
+        const canAbort = !!this.abortContext && !!entry
+            && (this.universe.getMission(entry[0])?.canAbort ?? true);
+        this.abort.state = canAbort ? 'normal' : 'grey';
+    }
+
+    /**
+     * Aborts the selected mission (docked only): runs OnAbort, drops
+     * mission cargo and removes the mission via a MissionSession over
+     * the held entity, then re-reads the entity's mission list.
+     */
+    private async doAbort() {
+        const entry = this.missions[this.selectedIndex];
+        if (!entry || !this.entity || !this.abortContext || this.aborting) {
+            return;
+        }
+        const [id] = entry;
+        if (!(this.universe.getMission(id)?.canAbort ?? true)) {
+            this.refreshAbortState();
+            return;
+        }
+        this.aborting = true;
+        try {
+            const session = await MissionSession.create(this.entity,
+                this.abortContext.gameData, this.universe,
+                this.abortContext.planetId);
+            abortMission(session.machinery, id, session.outfits);
+            session.commit();
+        } finally {
+            this.aborting = false;
+        }
+        const missions = this.entity.components.get(MissionsComponent);
+        this.missions = missions
+            ? [...missions].filter(([mid]) =>
+                !this.universe.getMission(mid)?.flags.invisible)
+            : [];
+        this.selectedIndex = Math.min(this.selectedIndex,
+            Math.max(0, this.missions.length - 1));
+        this.refreshList();
+        this.refreshDescription();
     }
 
     private moveSelection(delta: number) {

@@ -24,7 +24,8 @@ const MissionInfoControlsSubscription =
  * opens it for the world's player ship. No-ops while already open.
  */
 export const OpenMissionInfoResource =
-    new Resource<(entity?: Entity) => Promise<void>>('OpenMissionInfo');
+    new Resource<(entity?: Entity, planetId?: string) => Promise<void>>(
+        'OpenMissionInfo');
 
 function getPlayerShip(world: World) {
     for (const entity of world.entities.values()) {
@@ -66,7 +67,10 @@ export const MissionInfoPlugin: Plugin = {
         let opening = false;
         stage.addChild(dialog.container);
         world.resources.set(MissionInfoResource, dialog);
-        const openMissionInfo = async (entity?: Entity): Promise<void> => {
+        // A planetId marks a DOCKED open: it enables the functional
+        // Abort button (session-backed, spaceport commit pattern).
+        const openMissionInfo = async (entity?: Entity,
+            planetId?: string): Promise<void> => {
             if (dialog.container.visible || opening) {
                 return;
             }
@@ -82,7 +86,8 @@ export const MissionInfoPlugin: Plugin = {
                 stage.addChild(dialog.container);
                 dialog.container.position.set(
                     screenSize.x / 2, screenSize.y / 2);
-                await dialog.show(ship);
+                await dialog.show(ship, planetId
+                    ? { gameData: simulationData, planetId } : undefined);
             } finally {
                 opening = false;
             }
