@@ -51,6 +51,16 @@ export interface TradeGood {
     canBuy: boolean;
     /** Whether the player may sell it here (jünk: only at BoughtAt). */
     canSell: boolean;
+    /**
+     * Set when an öops price event is active on this commodity: `price`
+     * already includes the event's delta, and `direction` selects the
+     * "Lower"/"Higher" tier word shown in place of Low/Med/High. `name`
+     * is the event's description sentence. See price_events.ts.
+     */
+    event?: {
+        name: string;
+        direction: 'lower' | 'higher';
+    };
 }
 
 /**

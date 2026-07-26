@@ -1,4 +1,5 @@
 import { JunkData } from 'novadatainterface/junk_data';
+import { OopsData } from 'novadatainterface/oops_data';
 import { PlanetData } from 'novadatainterface/planet_data';
 import { Entity } from 'nova_ecs/entity';
 import * as PIXI from 'pixi.js';
@@ -8,7 +9,9 @@ import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_
 import { CargoComponent } from '../nova_plugin/cargo_plugin.js';
 import { ControlEvent } from '../nova_plugin/controls_plugin.js';
 import { ControlBitsComponent } from '../nova_plugin/ncb_plugin.js';
-import { CreditsComponent } from '../nova_plugin/player_state_plugin.js';
+import { dayNumber } from '../nova_plugin/calendar.js';
+import { CreditsComponent, GameDateComponent } from '../nova_plugin/player_state_plugin.js';
+import { activePriceEvents, applyPriceEvents } from '../nova_plugin/price_events.js';
 import {
     buyGood,
     buyGoodQuantity,
@@ -66,6 +69,8 @@ const RIGHT_FONT: Partial<PIXI.ITextStyle> =
 export class TradeCenter extends Menu<Entity> {
     private planet?: PlanetData;
     private junks: JunkData[] = [];
+    /** All öops price-event resources, matched against this stellar. */
+    private oopses: OopsData[] = [];
     /** Standard cargo names (STR# 4000), loaded from any chär. */
     private cargoNames: string[] = [];
     private goods: TradeGood[] = [];
@@ -89,8 +94,13 @@ export class TradeCenter extends Menu<Entity> {
         headerPrice: new PIXI.Text('Price:', RIGHT_FONT),
         otherCargo: new PIXI.Text('', LIST_FONT),
         freeSpace: new PIXI.Text('', LIST_FONT),
+        // The active price-event description line ("An enormous food
+        // surplus has lowered the price of food."), shown persistently.
+        event: new PIXI.Text('', LIST_FONT),
         status: new PIXI.Text('', LIST_FONT),
     };
+    /** The active price-event description(s), the default status text. */
+    private eventText = '';
 
     constructor(displayAssets: DisplayAssetDataInterface,
         simulationData: SimulationGameDataInterface,
@@ -120,7 +130,11 @@ export class TradeCenter extends Menu<Entity> {
         this.text.headerPrice.position.set(PRICE_RIGHT, PANE_TOP);
         this.text.otherCargo.position.set(PANE_LEFT + 4, SUMMARY_TOP);
         this.text.freeSpace.position.set(PANE_LEFT + 4, SUMMARY_TOP + 16);
-        this.text.status.position.set(PANE_LEFT + 4, STATUS_TOP);
+        // The event line sits in the strip below the pane (the reference
+        // screenshot's "food surplus" position); transaction feedback
+        // shows just under it.
+        this.text.event.position.set(PANE_LEFT + 4, STATUS_TOP);
+        this.text.status.position.set(PANE_LEFT + 4, STATUS_TOP + 13);
 
         this.container.addChild(this.highlight, this.listContainer);
         for (const t of Object.values(this.text)) {
@@ -154,6 +168,8 @@ export class TradeCenter extends Menu<Entity> {
             this.planet = planet;
             this.junks = await Promise.all(ids.Junk.map(
                 id => this.simulationData.data.Junk.get(id)));
+            this.oopses = await Promise.all(ids.Oops.map(
+                id => this.simulationData.data.Oops.get(id)));
             // Standard commodity names (STR# 4000) ride on every chär.
             try {
                 if (ids.PlayerStart[0]) {
@@ -194,7 +210,20 @@ export class TradeCenter extends Menu<Entity> {
                 this.goods.push(row);
             }
         }
+        // Apply any active öops price events to the standard commodities.
+        // Prices are keyed to the player's own game date, so this stays a
+        // deterministic per-player computation (no shared state, no RNG).
+        const date = input.components.get(GameDateComponent);
+        if (date) {
+            const events = activePriceEvents(
+                this.oopses, this.planetId, dayNumber(date), bits);
+            this.goods = applyPriceEvents(this.goods, events);
+            this.eventText = events.map(e => e.name).join(' ');
+        } else {
+            this.eventText = '';
+        }
         this.selectedIndex = 0;
+        this.text.event.text = this.eventText;
         this.text.status.text = '';
         this.refresh();
         return super.show(input);
@@ -330,10 +359,15 @@ export class TradeCenter extends Menu<Entity> {
                     .endFill();
             }
             const held = this.state.cargo.get(good.key) ?? 0;
+            // A price event replaces the Low/Med/High word with the
+            // comparative "Lower"/"Higher", as in the reference.
+            const tierWord = good.event
+                ? (good.event.direction === 'lower' ? 'Lower' : 'Higher')
+                : tierLabel[good.tier];
             const columns: [string, number, number][] = [
                 [good.name, PANE_LEFT + 4, 0],
                 [held > 0 ? `${held}` : '', HOLD_RIGHT, 1],
-                [tierLabel[good.tier], TIER_LEFT, 0],
+                [tierWord, TIER_LEFT, 0],
                 [`${good.price.toLocaleString()}`, PRICE_RIGHT, 1],
             ];
             for (const [label, x, anchor] of columns) {
