@@ -186,6 +186,80 @@ export const scenarios = [
         ],
     },
     {
+        id: 'earth_trade_center',
+        title: 'Earth trade center — commodity dialog',
+        description: 'The Trade Center opened from the Earth spaceport '
+            + '(a sub-dialog over the still-visible spaceport). Compare the '
+            + 'dialog\'s top metal border and the Buy/Sell/Done button row '
+            + 'against trade_center/earth_trade_center.png. The commodity '
+            + 'list, prices and cargo lines legitimately differ (dynamic '
+            + 'economy/cargo state); the compared regions are static chrome.',
+        params: { ship: 'nova:164', system: 'nova:130' },
+        hideDebug: true,
+        setup: async (page, driver) => {
+            await driver.landAt(page, 'planet nova:128');
+            await driver.clickContainer(page, 'Button:Trade Center');
+            await driver.waitForContainer(page, 'TradeCenter');
+            await driver.sleep(1200);
+        },
+        references: [
+            { name: 'earth_trade_center', file: 'trade_center/earth_trade_center.png' },
+        ],
+        regions: [
+            region('trade_top_border', 'Trade dialog top metal border', 768, 414, 388, 14),
+            region('trade_button_row', 'Buy / Sell / Done button row', 806, 636, 308, 22),
+        ],
+    },
+    {
+        id: 'earth_mission_bbs',
+        title: 'Earth mission BBS — mission board dialog',
+        description: 'The Mission BBS opened from the Earth spaceport. '
+            + 'Compare the dialog\'s top metal border and the Accept/Leave '
+            + 'button row against mission_bbs/earth_mission_bbs.png. The '
+            + 'available-mission list and the selected description '
+            + 'legitimately differ (mission generation is stateful); the '
+            + 'compared regions are static chrome.',
+        params: { ship: 'nova:164', system: 'nova:130' },
+        hideDebug: true,
+        setup: async (page, driver) => {
+            await driver.landAt(page, 'planet nova:128');
+            await driver.clickContainer(page, 'Button:Mission BBS');
+            await driver.waitForContainer(page, 'MissionBoard-Mission BBS');
+            await driver.sleep(1200);
+        },
+        references: [
+            { name: 'earth_mission_bbs', file: 'mission_bbs/earth_mission_bbs.png' },
+        ],
+        regions: [
+            region('mission_top_border', 'Mission dialog top metal border', 703, 438, 510, 14),
+            region('mission_button_row', 'Accept / Leave button row', 970, 611, 200, 22),
+        ],
+    },
+    {
+        id: 'earth_bar',
+        title: 'Earth bar — spaceport bar dialog',
+        description: 'The Bar opened from the Earth spaceport. Compare the '
+            + 'dialog\'s top metal border and the 2x2 button grid '
+            + '(Hire Escort / Gamble / Holovid / Leave) against '
+            + 'bar/bar_earth.png. The bar description text legitimately '
+            + 'differs; the compared regions are static chrome.',
+        params: { ship: 'nova:164', system: 'nova:130' },
+        hideDebug: true,
+        setup: async (page, driver) => {
+            await driver.landAt(page, 'planet nova:128');
+            await driver.clickContainer(page, 'Button:Bar');
+            await driver.waitForContainer(page, 'Bar');
+            await driver.sleep(1200);
+        },
+        references: [
+            { name: 'bar_earth', file: 'bar/bar_earth.png' },
+        ],
+        regions: [
+            region('bar_top_border', 'Bar dialog top metal border', 773, 448, 340, 14),
+            region('bar_button_grid', 'Hire/Gamble/Holovid/Leave button grid', 812, 576, 308, 54),
+        ],
+    },
+    {
         id: 'title_screen',
         title: 'Title screen — layout, logo & buttons',
         description: 'The game entry screen (before the world is joined), '
