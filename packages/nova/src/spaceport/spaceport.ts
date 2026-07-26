@@ -42,7 +42,11 @@ import { TradeCenter } from './trade_center.js';
 // (spaceport/earth.png): the first button row's center sits 88px below
 // the frame's center, rows are 41px apart, and Leave occupies the
 // fourth slot.
-const LEFT_BUTTON_X = -296;
+// Left/right column x, measured against spaceport/earth.png: the left
+// column's red pill spans screen x 661-787 and the right column's 1129-1255.
+// With the frame centered on x=960 these offsets land our pills on the same
+// rectangles (the left column was previously 10px too far right).
+const LEFT_BUTTON_X = -306;
 const RIGHT_BUTTON_X = 162;
 const BUTTON_TOP = 75;
 const BUTTON_SPACING = 41;

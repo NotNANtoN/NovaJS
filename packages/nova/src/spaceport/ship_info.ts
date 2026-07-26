@@ -32,7 +32,11 @@ const MID_VALUE_X = ORIGIN_X + 200;
 const WEAPONS_X = ORIGIN_X + 268;
 const WEAPONS_WIDTH = 260;
 const DONE_Y = ORIGIN_Y + 508;
-const DONE_X = ORIGIN_X + 532;
+// Measured against shipyard/shuttle_info.png: the reference Done pill spans
+// screen x 1163-1243 (an 80px-wide button, wider than the default caption
+// width). ORIGIN_X + 503 with width 74 lands our pill on the same rectangle.
+const DONE_X = ORIGIN_X + 503;
+const DONE_WIDTH = 74;
 
 const NAME_FONT: Partial<PIXI.ITextStyle> = {
     fontFamily: 'Geneva', fontSize: 14, fill: 0xffffff, align: 'center',
@@ -119,7 +123,7 @@ export class ShipInfoDialog {
         this.container.addChild(this.pictContainer, this.nameText,
             this.content);
 
-        const done = new Button(displayAssets, 'Done', 60,
+        const done = new Button(displayAssets, 'Done', DONE_WIDTH,
             { x: DONE_X, y: DONE_Y });
         done.click.subscribe(() => this.closed.next());
         this.container.addChild(done.container);
