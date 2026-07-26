@@ -7,7 +7,8 @@ import { SimulationGameDataResource } from "../nova_plugin/game_data_resource.js
 import { GameDateComponent } from "../nova_plugin/player_state_plugin.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 import { SystemIdResource } from "../nova_plugin/system_id_resource.js";
-import { jumpArrivalMessage } from "./status_bar_content.js";
+import { jumpArrivalMessage, landingBlockedMessage } from "./status_bar_content.js";
+import { LandingBlockedEvent } from "../nova_plugin/planet_plugin.js";
 import { ResizeEvent, ScreenSize } from "./screen_size_plugin.js";
 import { Stage } from "./stage_resource.js";
 
@@ -104,6 +105,21 @@ const DrawStatusMessage = new System({
     },
 });
 
+// Shows the original's too-far / too-fast land feedback on the bottom-left
+// status line. LandingBlockedEvent is emitted in the simulation targeted at
+// the player's ship and re-emitted here (via the simulation bridge), so the
+// PlayerShipSelector arg fires it only on the local player's client — the
+// same targeting the arrival line and player sounds use.
+const ShowLandingBlockedMessage = new System({
+    name: 'ShowLandingBlockedMessage',
+    events: [LandingBlockedEvent],
+    args: [LandingBlockedEvent, StatusLineResource, TimeResource,
+        PlayerShipSelector] as const,
+    step({ reason, isStation }, statusLine, { time }) {
+        statusLine.setMessage(landingBlockedMessage(reason, isStation), time);
+    },
+});
+
 export const StatusMessagePlugin: Plugin = {
     name: 'StatusMessage',
     async build(world) {
@@ -140,10 +156,12 @@ export const StatusMessagePlugin: Plugin = {
 
         world.addSystem(StatusLineResize);
         world.addSystem(DrawStatusMessage);
+        world.addSystem(ShowLandingBlockedMessage);
     },
     remove(world) {
         world.removeSystem(StatusLineResize);
         world.removeSystem(DrawStatusMessage);
+        world.removeSystem(ShowLandingBlockedMessage);
         const stage = world.resources.get(Stage);
         const statusLine = world.resources.get(StatusLineResource);
         if (stage && statusLine) {

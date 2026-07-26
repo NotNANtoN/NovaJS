@@ -6,8 +6,30 @@ import { Vector, VectorLike } from './vector.js';
 
 export const BOUNDARY = 10000;
 
+/** The full toroidal world extent on each axis (positions wrap over this). */
+export const WORLD_SIZE = BOUNDARY * 2;
+
 function wrap(n: number): number {
-    return mod((n + BOUNDARY), (BOUNDARY * 2)) - BOUNDARY;
+    return mod((n + BOUNDARY), WORLD_SIZE) - BOUNDARY;
+}
+
+/**
+ * A signed coordinate difference re-expressed as the shortest toroidal delta:
+ * the value in `(-BOUNDARY, BOUNDARY]` that maps to the same wrapped point.
+ * Branch-light (two comparisons) for the hot display paths that draw an
+ * entity at the wrapped copy nearest the camera; correct whenever the inputs
+ * are within one wrap of each other (|delta| < 3·BOUNDARY, which always holds
+ * for two wrapped positions plus a viewport offset). Pure math — it never
+ * touches or mutates any Position, so it is safe for display-only use.
+ */
+export function wrapNearestDelta(delta: number): number {
+    if (delta > BOUNDARY) {
+        return delta - WORLD_SIZE;
+    }
+    if (delta < -BOUNDARY) {
+        return delta + WORLD_SIZE;
+    }
+    return delta;
 }
 
 export const PositionType = new t.Type<Position, VectorLike>(

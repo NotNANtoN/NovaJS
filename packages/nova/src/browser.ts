@@ -1250,7 +1250,13 @@ async function startGame() {
         getWorld: () => displayWorld,
         getMyPeerId: () => communicator.uuid ?? undefined,
         targetShip: uuid => void simulationBridge?.setTarget(uuid),
-        navigateToPlanet: uuid => localAutopilot.navigateTo(uuid),
+        navigateToPlanet: uuid => {
+            // Select the stellar (so the land handshake acts on THIS planet
+            // even if another was already picked, and the nav readout lights
+            // up immediately), then autopilot to it.
+            void simulationBridge?.setPlanetTarget(uuid);
+            localAutopilot.navigateTo(uuid);
+        },
     });
 
     async function pumpSimulationFrame() {

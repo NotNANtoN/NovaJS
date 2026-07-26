@@ -23,7 +23,7 @@ import { ScreenSizePlugin } from "./screen_size_plugin.js";
 import { ShipAnimationPlugin } from "./ship_animation_plugin.js";
 import { SoundPlugin } from "./sound_plugin.js";
 import { SpaceportPlugin } from "./spaceport_plugin.js";
-import { Space } from "./space_resource.js";
+import { CameraFocus, Space } from "./space_resource.js";
 import { Stage } from "./stage_resource.js";
 import { starfield } from "./starfield_plugin.js";
 import { SystemEnvironmentPlugin } from "./system_environment_plugin.js";
@@ -35,12 +35,17 @@ import { TargetCornersPlugin } from "./target_corners_plugin.js";
 
 const CenterShipSystem = new System({
     name: 'CenterShipPlugin',
-    args: [Space, MovementStateComponent, Optional(StatusBarResource),
+    args: [Space, CameraFocus, MovementStateComponent, Optional(StatusBarResource),
         PlayerShipSelector] as const,
-    step(space, movementState, statusBar) {
+    step(space, cameraFocus, movementState, statusBar) {
         space.position.x = -movementState.position.x +
             (window.innerWidth - (statusBar?.width ?? 0)) / 2;
         space.position.y = -movementState.position.y + window.innerHeight / 2;
+        // Publish the camera focus so per-entity draw systems can pick the
+        // toroidal copy of each position nearest the player (loop-boundary
+        // rendering). Reuse the object to avoid per-frame allocation.
+        cameraFocus.x = movementState.position.x;
+        cameraFocus.y = movementState.position.y;
     }
 });
 
@@ -57,6 +62,9 @@ export const Display: Plugin = {
         stage.addChild(space);
         world.resources.set(Stage, stage);
         world.resources.set(Space, space);
+        // Seeded before AnimationGraphicPlugin/StatusBarPlugin add the draw
+        // systems that read it; CenterShipSystem refreshes it each frame.
+        world.resources.set(CameraFocus, { x: 0, y: 0 });
         await world.addPlugin(ScreenSizePlugin);
         await world.addPlugin(starfieldPlugin);
         // After the starfield so it can hide it on negative murk.
@@ -128,5 +136,6 @@ export const Display: Plugin = {
 
         world.resources.delete(Stage);
         world.resources.delete(Space);
+        world.resources.delete(CameraFocus);
     }
 };

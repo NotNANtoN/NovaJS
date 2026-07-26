@@ -2,6 +2,7 @@ import 'jasmine';
 import {
     formatCredits, navReadout, abbreviateCargoName, specialCargoSummary,
     standardCargoIndex, ordinal, formatLongDate, jumpArrivalMessage,
+    landingBlockedMessage,
 } from './status_bar_content.js';
 
 describe('formatCredits', () => {
@@ -74,5 +75,20 @@ describe('date formatting', () => {
         expect(jumpArrivalMessage('Sanddown',
             { day: 21, month: 11, year: 1177 }, ' NC'))
             .toBe('Jumping into the Sanddown system on November 21st, 1177 NC.');
+    });
+});
+
+describe('landingBlockedMessage', () => {
+    it('matches the original planet strings', () => {
+        expect(landingBlockedMessage('tooFar', false))
+            .toBe("You're too far away to land on this planet.");
+        expect(landingBlockedMessage('tooFast', false))
+            .toBe("You're moving too fast to land on this planet.");
+    });
+    it('says "dock at this station" for stations', () => {
+        expect(landingBlockedMessage('tooFar', true))
+            .toBe("You're too far away to dock at this station.");
+        expect(landingBlockedMessage('tooFast', true))
+            .toBe("You're moving too fast to dock at this station.");
     });
 });

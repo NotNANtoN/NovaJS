@@ -3,11 +3,13 @@ import { PlanetData } from "novadatainterface/planet_data";
 import { Emit, Entities, UUID } from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
 import { EcsEvent } from 'nova_ecs/events';
+import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
 import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import { passthroughType, SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
 import { Provide } from 'nova_ecs/provide';
+import { World } from 'nova_ecs/world';
 import { ProvideFromCache } from './provide_from_cache.js';
 import { registerEntityDeriver } from './entity_factory.js';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
@@ -16,7 +18,7 @@ import { System } from 'nova_ecs/system';
 import { registerSimulationBridgeEvent } from '../communication/simulation_bridge_events.js';
 import { AnimationComponent } from './animation_plugin.js';
 import { ControlAction } from './controls.js';
-import { ShipControlEvent, ShipControlStateComponent } from './ship_control.js';
+import { findControlledEntity, ShipControlEvent, ShipControlStateComponent } from './ship_control.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { SystemIdResource } from './system_id_resource.js';
 import { PlayerShipSelector } from './player_ship_plugin.js';
@@ -60,38 +62,120 @@ export const LandEventType = t.type({
 
 registerSimulationBridgeEvent({ event: LandEvent });
 
+/**
+ * Emitted (targeted at the player's ship) when the player presses 'land'
+ * with a stellar already selected but the ship is out of the landing
+ * window. The reason drives the original's on-screen feedback:
+ * "You're too far away to..." or "You're moving too fast to...". Consumed
+ * display-side by the status line (status_message_plugin.ts). Never mutates
+ * the simulation.
+ */
+export const LandingBlockedEvent =
+    new EcsEvent<{ reason: 'tooFar' | 'tooFast', isStation: boolean }>(
+        'LandingBlockedEvent');
+export const LandingBlockedEventType = t.type({
+    reason: t.union([t.literal('tooFar'), t.literal('tooFast')]),
+    isStation: t.boolean,
+});
+
+registerSimulationBridgeEvent({ event: LandingBlockedEvent });
+
+/** Landing window: within 100 units (dist²) and slower than ~54.8 (speed²). */
+export const LAND_DISTANCE_SQUARED = 10_000;
+export const LAND_SPEED_SQUARED = 3_000;
+
+const LandablePlanetsQuery = new Query(
+    [UUID, MovementStateComponent, PlanetComponent,
+        Optional(PlanetDataComponent)] as const);
 const AttemptLandingSystem = new System({
     name: 'AttemptLandingSystem',
     events: [ShipControlEvent] as const,
-    args: [new Query([UUID, MovementStateComponent, PlanetComponent] as const), UUID,
+    args: [LandablePlanetsQuery, UUID,
         MovementStateComponent, PlanetTargetComponent,
         ShipControlStateComponent, Emit] as const,
     step(planets, playerUuid, { position, velocity }, planetTarget, controls, emit) {
-        if (controls.get('land') === 'start') {
-            let minSquared = Infinity;
-            let closestUuid: string | undefined = undefined;
-            let planetId: string | undefined = undefined;
-            for (const [uuid, { position: planetPosition }, { id }] of planets) {
-                const distance = planetPosition.subtract(position).lengthSquared;
-                if (distance < minSquared) {
-                    closestUuid = uuid;
-                    minSquared = distance;
-                    planetId = id;
-                }
-            }
-
-            if (planetTarget.target === closestUuid) {
-                // Try to land
-                if (minSquared < 10_000 && velocity.lengthSquared < 3000
-                    && planetId && closestUuid) {
-                    emit(LandEvent, { id: planetId, uuid: closestUuid }, [playerUuid]);
-                }
-            }
-
-            planetTarget.target = closestUuid;
+        if (controls.get('land') !== 'start') {
+            return;
         }
+
+        // With a stellar ALREADY selected, 'land' acts on THAT target: it
+        // never retargets to whatever happens to be nearest. Land if inside
+        // the window; otherwise give the original's too-far / too-fast
+        // feedback. Only when nothing (still in this system) is selected does
+        // 'land' pick the nearest stellar (the first press of the two-press
+        // land-nearest flow).
+        if (planetTarget.target !== undefined) {
+            for (const [uuid, { position: planetPosition }, { id }, planetData]
+                of planets) {
+                if (uuid !== planetTarget.target) {
+                    continue;
+                }
+                const distanceSquared =
+                    planetPosition.subtract(position).lengthSquared;
+                const isStation = planetData?.flags.isStation ?? false;
+                if (distanceSquared >= LAND_DISTANCE_SQUARED) {
+                    emit(LandingBlockedEvent, { reason: 'tooFar', isStation },
+                        [playerUuid]);
+                } else if (velocity.lengthSquared >= LAND_SPEED_SQUARED) {
+                    emit(LandingBlockedEvent, { reason: 'tooFast', isStation },
+                        [playerUuid]);
+                } else {
+                    emit(LandEvent, { id, uuid }, [playerUuid]);
+                }
+                return;
+            }
+            // The selection is no longer a stellar in this system (jumped
+            // away, etc.); fall through and pick the nearest as if unset.
+        }
+
+        // No stellar selected: target the nearest one. Ties break on the
+        // lexicographically smaller uuid so every peer picks the same stellar
+        // regardless of entity-map iteration order (see ChooseTargetSystem).
+        let closestUuid: string | undefined = undefined;
+        let minSquared = Infinity;
+        for (const [uuid, { position: planetPosition }] of planets) {
+            const distanceSquared =
+                planetPosition.subtract(position).lengthSquared;
+            if (distanceSquared < minSquared
+                || (distanceSquared === minSquared
+                    && closestUuid !== undefined && uuid < closestUuid)) {
+                closestUuid = uuid;
+                minSquared = distanceSquared;
+            }
+        }
+        planetTarget.target = closestUuid;
     }
 });
+
+/**
+ * Applies a peer's explicit stellar selection (a tap/click that starts an
+ * autopilot to a planet) to the ship it controls, mirroring applySetTarget
+ * for ships. Selecting the stellar keeps the land handshake acting on the
+ * autopilot's destination even when another stellar was already picked, and
+ * lights up the "Stellar Navigation" readout the moment you tap. An invalid
+ * choice (not a stellar in this world) is dropped so every peer resolves the
+ * input identically. `null` clears the selection.
+ */
+export function applySetPlanetTarget(world: World, peerId: string | undefined,
+    targetUuid: string | null) {
+    const found = findControlledEntity(world, peerId);
+    if (!found) {
+        return;
+    }
+    const planetTarget = found.entity.components.get(PlanetTargetComponent);
+    if (!planetTarget) {
+        return;
+    }
+    if (targetUuid === null) {
+        planetTarget.target = undefined;
+        return;
+    }
+    const targetEntity = world.entities.get(targetUuid);
+    if (!targetEntity || !targetEntity.components.has(PlanetComponent)) {
+        return;
+    }
+    planetTarget.target = targetUuid;
+}
 
 // Stellar-body hotkeys (controls_nits.txt): number keys 1..9 select the
 // Nth stellar body in the current system, and resetNav (tilde/backquote)
@@ -184,6 +268,8 @@ export const PlanetPlugin: Plugin = {
         world.resources.get(SerializerResource)?.addComponent(
             PlanetDataComponent, passthroughType<PlanetData>('PlanetDataComponentType'));
         world.resources.get(SerializerResource)?.addEvent(LandEvent, LandEventType);
+        world.resources.get(SerializerResource)?.addEvent(
+            LandingBlockedEvent, LandingBlockedEventType);
         deltaMaker.addComponent(PlanetComponent, {
             componentType: PlanetType,
         });

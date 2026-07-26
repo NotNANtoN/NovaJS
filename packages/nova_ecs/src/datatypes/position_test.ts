@@ -1,6 +1,6 @@
 import { isLeft } from 'fp-ts/lib/Either.js';
 import 'jasmine';
-import { Position, PositionType } from './position.js';
+import { BOUNDARY, Position, PositionType, WORLD_SIZE, wrapNearestDelta } from './position.js';
 
 describe('Position', () => {
     it('adds positions', () => {
@@ -33,4 +33,27 @@ describe('Position', () => {
         const pos = new Position(1, 2);
         expect(pos.scale(1)).toBeInstanceOf(Position);
     })
+});
+
+describe('wrapNearestDelta', () => {
+    it('leaves small deltas unchanged', () => {
+        expect(wrapNearestDelta(0)).toBe(0);
+        expect(wrapNearestDelta(500)).toBe(500);
+        expect(wrapNearestDelta(-500)).toBe(-500);
+    });
+
+    it('wraps a delta larger than the boundary to the near side', () => {
+        // Two wrapped positions near opposite seams: the raw delta is almost a
+        // whole world, but the toroidal-nearest delta is small.
+        const a = BOUNDARY - 100;   // 9900: just inside the +x edge
+        const b = -(BOUNDARY - 100); // -9900: just inside the -x edge
+        // Raw delta 19800, but they are only 200 apart across the seam.
+        expect(wrapNearestDelta(a - b)).toBe(-200);
+        expect(wrapNearestDelta(b - a)).toBe(200);
+    });
+
+    it('is antisymmetric across the seam', () => {
+        expect(wrapNearestDelta(BOUNDARY + 1)).toBe(BOUNDARY + 1 - WORLD_SIZE);
+        expect(wrapNearestDelta(-BOUNDARY - 1)).toBe(-BOUNDARY - 1 + WORLD_SIZE);
+    });
 });

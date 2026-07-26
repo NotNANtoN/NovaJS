@@ -1,4 +1,5 @@
 import { Entity } from 'nova_ecs/entity';
+import { wrapNearestDelta } from 'nova_ecs/datatypes/position';
 import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import { World } from 'nova_ecs/world';
 import { Space } from './display/space_resource.js';
@@ -52,8 +53,11 @@ export function pickNearest(entities: Iterable<[string, Entity]>,
             === myPeerId && myPeerId !== undefined) {
             continue; // Don't target your own ship.
         }
-        const distance = Math.hypot(movement.position.x - worldX,
-            movement.position.y - worldY);
+        // Hit-test against the toroidal-nearest copy of the entity so a click
+        // on an object drawn across the loop-boundary seam still selects it.
+        const distance = Math.hypot(
+            wrapNearestDelta(movement.position.x - worldX),
+            wrapNearestDelta(movement.position.y - worldY));
         if (isShip && distance <= SHIP_PICK_RADIUS
             && (!bestShip || distance < bestShip.distance)) {
             bestShip = { uuid, distance };

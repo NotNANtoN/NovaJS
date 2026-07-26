@@ -126,3 +126,18 @@ export function jumpArrivalMessage(systemName: string,
     date: { day: number, month: number, year: number }, suffix = ''): string {
     return `Jumping into the ${systemName} system on ${formatLongDate(date, suffix)}.`;
 }
+
+/**
+ * The original's on-screen feedback when a land attempt is rejected because
+ * the ship is out of the landing window, e.g.
+ * "You're too far away to land on this planet." — worded "land on this
+ * planet" for a planet and "dock at this station" for a station (spöb flag
+ * 0x10), matching stock Nova's strings verbatim.
+ */
+export function landingBlockedMessage(reason: 'tooFar' | 'tooFast',
+    isStation: boolean): string {
+    const place = isStation ? 'dock at this station' : 'land on this planet';
+    const cause = reason === 'tooFar'
+        ? "You're too far away to" : "You're moving too fast to";
+    return `${cause} ${place}.`;
+}

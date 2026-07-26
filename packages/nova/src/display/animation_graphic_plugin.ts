@@ -17,9 +17,10 @@ import { PlanetComponent } from "../nova_plugin/planet_plugin.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 import { ProjectileComponent } from "../nova_plugin/projectile_data.js";
 import { ShipComponent } from "../nova_plugin/ship_plugin.js";
+import { wrapNearestDelta } from "nova_ecs/datatypes/position";
 import { AnimationGraphic } from "./animation_graphic.js";
 import { AnimationGraphicPool, AnimationGraphicPoolResource } from "./animation_graphic_pool.js";
-import { Space } from "./space_resource.js";
+import { CameraFocus, Space } from "./space_resource.js";
 
 export const AnimationGraphicComponent = new Component<AnimationGraphic>('AnimationGraphic');
 const AnimationGraphicLoadedComponent = new Component<AnimationGraphic>('AnimationGraphicLoaded');
@@ -108,8 +109,8 @@ export const AnimationGraphicProvider = Provide({
 
 export const ObjectDrawSystem = new System({
     name: "ObjectDrawSystem",
-    args: [MovementStateComponent, AnimationGraphicComponent] as const,
-    step: (movementState, graphic) => {
+    args: [MovementStateComponent, AnimationGraphicComponent, CameraFocus] as const,
+    step: (movementState, graphic, cameraFocus) => {
         if (movementState.turning < 0) {
             graphic.setFramesToUse('left');
         } else if (movementState.turning > 0) {
@@ -121,8 +122,14 @@ export const ObjectDrawSystem = new System({
         graphic.glowAlpha = movementState.accelerating *
             (1 - (Math.random() * 0.2));
 
-        graphic.container.position.x = movementState.position.x;
-        graphic.container.position.y = movementState.position.y;
+        // Draw at the toroidal copy of the position nearest the camera, so an
+        // object just across the loop boundary (e.g. the Sol wormhole) is
+        // drawn on the near side of the seam rather than a world away. The
+        // player's own ship (the focus) resolves to its literal position.
+        graphic.container.position.x = cameraFocus.x
+            + wrapNearestDelta(movementState.position.x - cameraFocus.x);
+        graphic.container.position.y = cameraFocus.y
+            + wrapNearestDelta(movementState.position.y - cameraFocus.y);
         graphic.rotation = movementState.rotation.angle;
     },
     after: [MovementSystem],
