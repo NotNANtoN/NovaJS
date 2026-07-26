@@ -1,5 +1,5 @@
 import 'jasmine';
-import { displayName } from './display_name.js';
+import { displayName, govtTargetName } from './display_name.js';
 
 describe('displayName', () => {
     it('drops the "; developer note" suffix', () => {
@@ -31,5 +31,38 @@ describe('displayName', () => {
 
     it('yields an empty string when the note is the whole name', () => {
         expect(displayName(';dev-only')).toEqual('');
+    });
+});
+
+describe('govtTargetName', () => {
+    it('prefers the short Target Code over the full name', () => {
+        // Real gövt data: Pyrogenesis Skymining (nova:173).
+        expect(govtTargetName({
+            targetCode: 'Pyro', name: 'Pyrogenesis Skymining',
+        })).toEqual('Pyro');
+    });
+
+    it('trims the Target Code\'s leading padding', () => {
+        // Several stock target codes are space-padded in the data.
+        expect(govtTargetName({ targetCode: ' Fed.', name: 'Federation' }))
+            .toEqual('Fed.');
+        expect(govtTargetName({ targetCode: ' Vell-os', name: 'Vell-os' }))
+            .toEqual('Vell-os');
+    });
+
+    it('strips a "; note" suffix from either field', () => {
+        expect(govtTargetName({
+            targetCode: 'Pyro;internal', name: 'Pyrogenesis',
+        })).toEqual('Pyro');
+        expect(govtTargetName({
+            targetCode: '', name: 'Federation;hates Temmin Shard',
+        })).toEqual('Federation');
+    });
+
+    it('falls back to the full name when the code is empty or blank', () => {
+        expect(govtTargetName({ targetCode: '', name: 'Rebel Alliance' }))
+            .toEqual('Rebel Alliance');
+        expect(govtTargetName({ targetCode: '   ', name: 'Rebel Alliance' }))
+            .toEqual('Rebel Alliance');
     });
 });

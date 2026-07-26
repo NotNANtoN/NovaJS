@@ -6,6 +6,9 @@ import {
 } from '../communication/simulation_test_fixture.js';
 import { IdFactory } from './id_factory.js';
 import { PersComponent } from './pers_plugin.js';
+import { DisabledComponent } from './disabled_component.js';
+import { ArmorComponent, ShieldComponent } from './health_plugin.js';
+import { ShipDataComponent } from './ship_plugin.js';
 import {
     buildPersSpawnTable,
     PersSpawnEntry,
@@ -117,4 +120,53 @@ describe('përs spawning against real Nova data', () => {
             const ids = peopleA.map(([, id]) => id);
             expect(new Set(ids).size).toBe(ids.length);
         }, 240_000);
+
+    it('spawns Drifting Derelicts already disabled', async () => {
+        const harness = await makeSimulationBridgeHarness();
+        const gameData = await getIntegrationGameData();
+        const systemData = await gameData.data.System.get('nova:130');
+
+        // The Drifting Derelict përs nova:156 is bound to sÿst nova:130
+        // and belongs to the derelict govt (nova:160), whose gövt Flags1
+        // 0x0800 ("Ships start disabled") makes its ships spawn disabled.
+        const table = await buildPersSpawnTable(
+            harness.world, 'nova:130', systemData);
+        const derelict = table.find(entry => entry.id === 'nova:156');
+        expect(derelict).toEqual(jasmine.objectContaining({
+            name: 'Drifting Derelict',
+            ship: 'nova:129',
+            govt: 'nova:160',
+        }));
+
+        // Spawn from a single-entry derelict table until the 5% roll
+        // fires (deterministic seed, so this is stable and repeatable).
+        const random = new Random(1234);
+        const ids = new IdFactory();
+        for (let i = 0; i < 200; i++) {
+            spawnNpc(harness.world, gameData, ids, random, [], true,
+                [derelict!]);
+        }
+        const hulks = [...harness.world.entities.values()].filter(
+            entity => entity.components.get(PersComponent)?.id === 'nova:156');
+        expect(hulks.length).toBeGreaterThan(0);
+
+        for (const hulk of hulks) {
+            // Disabled from spawn, with no self-repair scheduled.
+            const disabled = hulk.components.get(DisabledComponent);
+            expect(disabled).toBeDefined();
+            expect(disabled!.repairAt).toBeNull();
+
+            // Armor pinned at/below the disable threshold so the existing
+            // ShipDisableSystem keeps the ship disabled; shields dropped.
+            const shipData = hulk.components.get(ShipDataComponent);
+            const armor = hulk.components.get(ArmorComponent);
+            const shield = hulk.components.get(ShieldComponent);
+            expect(shipData).toBeDefined();
+            expect(armor).toBeDefined();
+            expect(armor!.current).toBeLessThanOrEqual(
+                shipData!.disableArmorFraction * armor!.max);
+            expect(armor!.current).toBeGreaterThan(0);
+            expect(shield!.current).toBe(0);
+        }
+    }, 120_000);
 });

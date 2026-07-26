@@ -28,7 +28,7 @@ import { PlanetDataComponent, PlanetTargetComponent } from "../nova_plugin/plane
 import { JumpRouteComponent } from "../nova_plugin/jump_plugin.js";
 import { CargoComponent, cargoUsed } from "../nova_plugin/cargo_plugin.js";
 import { CreditsComponent } from "../nova_plugin/player_state_plugin.js";
-import { displayName } from "../nova_plugin/display_name.js";
+import { displayName, govtTargetName } from "../nova_plugin/display_name.js";
 import { STANDARD_CARGO_NAMES } from "../nova_plugin/mission_logic.js";
 import { ShipComponent } from "../nova_plugin/ship_plugin.js";
 import {
@@ -741,12 +741,15 @@ const DrawStatusBarSecondaryWeapon = new System({
             return;
         }
         const { ammoType } = weapon;
+        // Strip the "; note" author suffix ("Wraith Cannon;fire whilst
+        // cloaked" -> "Wraith Cannon") the original never shows.
+        const weaponName = displayName(weapon.name);
         if (outfits && ammoType instanceof Array && ammoType[0] === 'weapon') {
             // "Weapon Name - 37"; weapons without ammo show the bare name.
             statusBar.drawSecondary(
-                `${weapon.name} - ${countAmmo(ammoType[1], outfits, gameData)}`);
+                `${weaponName} - ${countAmmo(ammoType[1], outfits, gameData)}`);
         } else {
-            statusBar.drawSecondary(weapon.name);
+            statusBar.drawSecondary(weaponName);
         }
     }
 });
@@ -768,10 +771,16 @@ const DrawStatusBarTarget = new System({
         if (result) {
             const [shipData, shield, armor, shipGraphic, pers, disabled, govt] =
                 result;
-            // The government name shown lower-right of the target pane. Cached
-            // lookup: undefined until the govt data loads, then it appears.
-            const government = govt
-                ? (gameData.data.Govt.getCached(govt.id)?.name ?? "") : "";
+            // The government shown lower-right of the target pane. The original
+            // shows the gövt's short Target Code (gövt TMPL offset 68) — "Pyro"
+            // for "Pyrogenesis Skymining", " Fed." for "Federation" — rather
+            // than the overflow-prone full name. displayName trims the code's
+            // leading padding and strips any "; note" author suffix; a govt
+            // with no target code falls back to its (also cleaned) full name.
+            // Cached lookup: undefined until the govt data loads, then appears.
+            const govtData = govt
+                ? gameData.data.Govt.getCached(govt.id) : undefined;
+            const government = govtData ? govtTargetName(govtData) : "";
             // A përs person's name and subtitle replace the ship class name
             // and subtitle on the target display (EVN Bible, përs section).
             const subtitle = (pers?.subtitle || shipData.subtitle);
