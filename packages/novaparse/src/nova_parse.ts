@@ -7,6 +7,7 @@ import { GameDataInterface } from "novadatainterface/game_data_interface";
 import { Gettable } from "novadatainterface/gettable";
 import { CronData } from "novadatainterface/cron_data";
 import { JunkData } from "novadatainterface/junk_data";
+import { OopsData } from "novadatainterface/oops_data";
 import { GovtData } from "novadatainterface/govt_data";
 import { MissionData } from "novadatainterface/mission_data";
 import { NovaDataInterface, NovaIDNotFoundError } from "novadatainterface/nova_data_interface";
@@ -33,6 +34,7 @@ import { FleetParse } from "./parsers/fleet_parse.js";
 import { CharParse } from "./parsers/char_parse.js";
 import { CronParse } from "./parsers/cron_parse.js";
 import { JunkParse } from "./parsers/junk_parse.js";
+import { OopsParse } from "./parsers/oops_parse.js";
 import { GovtParse } from "./parsers/govt_parse.js";
 import { MisnParse } from "./parsers/misn_parse.js";
 import { OutfitParse } from "./parsers/outfit_parse.js";
@@ -56,6 +58,7 @@ import { FletResource } from "./resource_parsers/flet_resource.js";
 import { CharResource } from "./resource_parsers/char_resource.js";
 import { CronResource } from "./resource_parsers/cron_resource.js";
 import { JunkResource } from "./resource_parsers/junk_resource.js";
+import { OopsResource } from "./resource_parsers/oops_resource.js";
 import { GovtResource } from "./resource_parsers/govt_resource.js";
 import { IntfResource } from "./resource_parsers/intf_resource.js";
 import { MisnResource } from "./resource_parsers/misn_resource.js";
@@ -209,6 +212,7 @@ export class NovaParse implements GameDataInterface {
             Dude: this.buildIDsForResource(idSpace.düde),
             Fleet: this.buildIDsForResource(idSpace.flët),
             Junk: this.buildIDsForResource(idSpace.jünk),
+            Oops: this.buildIDsForResource(idSpace.öops),
             Mission: this.buildIDsForResource(idSpace.mïsn),
             Pers: this.buildIDsForResource(idSpace.përs),
             Cron: this.buildIDsForResource(idSpace.crön),
@@ -242,6 +246,7 @@ export class NovaParse implements GameDataInterface {
             Dude: this.makeGettable<DudeResource, DudeData>(NovaResourceType.düde, DudeParse),
             Fleet: this.makeGettable<FletResource, FleetData>(NovaResourceType.flët, FleetParse),
             Junk: this.makeGettable<JunkResource, JunkData>(NovaResourceType.jünk, JunkParse),
+            Oops: this.makeGettable<OopsResource, OopsData>(NovaResourceType.öops, OopsParse),
             Mission: this.makeGettable<MisnResource, MissionData>(NovaResourceType.mïsn, MisnParse),
             Pers: this.makeGettable<PersResource, PersData>(NovaResourceType.përs, PersParse),
             Cron: this.makeGettable<CronResource, CronData>(NovaResourceType.crön, CronParse),
