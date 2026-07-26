@@ -28,6 +28,7 @@ import { PlanetDataComponent, PlanetTargetComponent } from "../nova_plugin/plane
 import { JumpRouteComponent } from "../nova_plugin/jump_plugin.js";
 import { CargoComponent, cargoUsed } from "../nova_plugin/cargo_plugin.js";
 import { CreditsComponent } from "../nova_plugin/player_state_plugin.js";
+import { displayName } from "../nova_plugin/display_name.js";
 import { STANDARD_CARGO_NAMES } from "../nova_plugin/mission_logic.js";
 import { ShipComponent } from "../nova_plugin/ship_plugin.js";
 import {
@@ -116,7 +117,9 @@ class StatusBar {
         this.container.name = 'StatusBar';
         this.addEnemyButton = new Button(displayAssets, 'Add Enemy', 60);
         this.addEnemyButton.container.position.x = 65;
-        this.addEnemyButton.container.position.y = 530;
+        // One full button height (25px) below its old spot, clear of the
+        // status bar's credits readout it used to clip over.
+        this.addEnemyButton.container.position.y = 555;
         this.addEnemy = this.addEnemyButton.click;
     }
 
@@ -772,7 +775,9 @@ const DrawStatusBarTarget = new System({
             // A përs person's name and subtitle replace the ship class name
             // and subtitle on the target display (EVN Bible, përs section).
             const subtitle = (pers?.subtitle || shipData.subtitle);
-            statusBar.drawTarget(pers?.name ?? shipData.name,
+            // Hide the "; developer note" suffix authors append to ship
+            // (and përs) names — the original never shows it in the target box.
+            statusBar.drawTarget(displayName(pers?.name ?? shipData.name),
                 shield?.percent, armor?.percent, shipGraphic,
                 disabled !== undefined, subtitle, government);
         }

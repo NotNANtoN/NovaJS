@@ -7,6 +7,8 @@
  * (<PN>, <PSN>, ranks, ...) fall back to placeholders until player
  * naming exists.
  */
+import { displayName } from './display_name.js';
+
 export interface MissionTextSubstitutions {
     /** <DST> destination stellar name. */
     destinationStellar?: string;
@@ -35,11 +37,11 @@ export interface MissionTextSubstitutions {
 /**
  * The displayable part of a mïsn resource name: scenario authors
  * append "; comment" annotations (e.g. "Delivery to Earth; Vellos1")
- * that the game hides.
+ * that the game hides. Thin alias of the shared {@link displayName}
+ * helper, kept for the mission-specific call sites.
  */
 export function missionDisplayName(name: string): string {
-    const semicolon = name.indexOf(';');
-    return (semicolon === -1 ? name : name.slice(0, semicolon)).trim();
+    return displayName(name);
 }
 
 export function expandMissionText(text: string,
