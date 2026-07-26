@@ -19,6 +19,9 @@ import {
     expandRoute, formatMapDate, hazardDescription, reconcileRouteState,
     RouteState,
 } from "./route.js";
+import {
+    clickRadiusWorld, DragTracker, nearestTargetIndex, screenToWorld,
+} from "./starmap_hit.js";
 
 
 const GREY = 0x666666;
@@ -66,6 +69,14 @@ const CLICK_RADIUS = 12;
 // thread long enough to desync the simulation) the first time the map
 // rendered.
 function installLabelFont(systems: SystemData[]) {
+    // BitmapFont rasterizes glyphs through a DOM canvas. In a headless
+    // context (Node unit/integration tests) there's no document, so skip the
+    // atlas; label BitmapText is likewise skipped when the font is absent.
+    // Clicks resolve from clickTargets' coordinates, not the labels, so
+    // hit-testing is unaffected.
+    if (typeof document === 'undefined') {
+        return;
+    }
     const chars = new Set<string>([' ']);
     for (const system of systems) {
         for (const char of system.name) {
@@ -218,14 +229,13 @@ export class SystemGraph {
     // Zoom is a transform applied on top of BASE_SCALE. Panning and zooming
     // never redraw the systems; they only move/scale mapContainer.
     private zoom = 1;
-    private dragData?: {
-        pointerId: number,
-        // Pointer position (screen space) at the previous move event.
-        last: PIXI.Point,
-    }
-    // Whether the most recent pointer gesture moved the map, so the tap
-    // handler can tell a click apart from the end of a pan.
-    private draggedSinceDown = false;
+    // The click-vs-drag state machine (starmap_hit.ts). Decides when a pointer
+    // gesture has moved far enough to be a pan rather than a click, so the tap
+    // handler can tell a click apart from the end of a pan. A physical click
+    // jitters a pixel or two between press and release; treating that as a
+    // drag used to swallow the tap (click once, nothing; click again without
+    // moving, it registers), which the tracker's deadzone fixes.
+    private readonly drag = new DragTracker();
     // Route mode state (see route.ts): pinned multi-jump waypoints, the
     // single-jump destination, and the system whose properties are shown.
     private pinned: string[] = [];
@@ -347,17 +357,22 @@ export class SystemGraph {
         // textures. Pan and zoom are transforms on mapContainer, so nothing
         // here is ever redrawn per frame.
         installLabelFont(this.clickTargets.map(t => t.system));
+        // Labels render only when the bitmap font is available (i.e. not in a
+        // headless test context, where installLabelFont is a no-op).
+        const fontReady = !!PIXI.BitmapFont.available[LABEL_FONT_NAME];
         const circleGraphics = new PIXI.Graphics();
         const labelContainer = new PIXI.Container();
         for (const { system, x, y } of this.clickTargets) {
             drawSystem(system, circleGraphics, x, y);
-            const label = new PIXI.BitmapText(system.name, {
-                fontName: LABEL_FONT_NAME,
-                fontSize: LABEL_FONT_SIZE,
-            });
-            label.position.set(x + 10, y);
-            label.anchor.set(0, 0.5);
-            labelContainer.addChild(label);
+            if (fontReady) {
+                const label = new PIXI.BitmapText(system.name, {
+                    fontName: LABEL_FONT_NAME,
+                    fontSize: LABEL_FONT_SIZE,
+                });
+                label.position.set(x + 10, y);
+                label.anchor.set(0, 0.5);
+                labelContainer.addChild(label);
+            }
         }
         this.mapContainer.addChild(circleGraphics);
         this.mapContainer.addChild(labelContainer);
@@ -570,34 +585,22 @@ export class SystemGraph {
     }
 
     private onDragStart(event: PIXI.FederatedPointerEvent) {
-        this.draggedSinceDown = false;
-        this.dragData = {
-            pointerId: event.pointerId,
-            last: event.global.clone(),
-        };
+        this.drag.down(event.pointerId, event.global.x, event.global.y);
     }
 
     private onDragMove(event: PIXI.FederatedPointerEvent) {
-        if (!this.dragData || event.pointerId !== this.dragData.pointerId) {
-            return;
+        const delta =
+            this.drag.move(event.pointerId, event.global.x, event.global.y);
+        if (delta) {
+            this.pan(delta.dx, delta.dy);
         }
-        const dx = event.global.x - this.dragData.last.x;
-        const dy = event.global.y - this.dragData.last.y;
-        if (dx !== 0 || dy !== 0) {
-            this.draggedSinceDown = true;
-        }
-        this.dragData.last.copyFrom(event.global);
-        this.pan(dx, dy);
     }
 
     private onDragEnd(event: PIXI.FederatedPointerEvent) {
-        if (this.dragData && event.pointerId !== this.dragData.pointerId) {
-            return;
-        }
-        this.dragData = undefined;
-        // `draggedSinceDown` is intentionally left set until the next
-        // pointerdown so the system tap handler (which fires right after
-        // pointerup) can tell a click apart from a drag.
+        // The tracker keeps its `dragged` flag set until the next pointerdown
+        // so onTap (which fires right after pointerup) can tell a click apart
+        // from the end of a pan.
+        this.drag.up(event.pointerId);
     }
 
     private onWheel(event: PIXI.FederatedWheelEvent) {
@@ -608,7 +611,7 @@ export class SystemGraph {
 
     private onTap(event: PIXI.FederatedPointerEvent) {
         // Ignore taps that were actually the end of a drag.
-        if (this.draggedSinceDown) {
+        if (this.drag.dragged) {
             return;
         }
         const local = event.getLocalPosition(this.container);
@@ -624,23 +627,13 @@ export class SystemGraph {
      */
     private systemAt(viewX: number, viewY: number): SystemData | undefined {
         const pos = this.mapContainer.position;
-        const worldX = (viewX - pos.x) / this.zoom;
-        const worldY = (viewY - pos.y) / this.zoom;
+        const [worldX, worldY] =
+            screenToWorld(viewX, viewY, pos.x, pos.y, this.zoom);
         // Accept clicks within CLICK_RADIUS on screen, but never make the
         // target smaller than the drawn circle.
-        const radius = Math.max(SYSTEM_RADIUS, CLICK_RADIUS / this.zoom);
-        let best: SystemData | undefined;
-        let bestDistSq = radius * radius;
-        for (const { system, x, y } of this.clickTargets) {
-            const dx = x - worldX;
-            const dy = y - worldY;
-            const distSq = dx * dx + dy * dy;
-            if (distSq <= bestDistSq) {
-                best = system;
-                bestDistSq = distSq;
-            }
-        }
-        return best;
+        const radius = clickRadiusWorld(this.zoom, SYSTEM_RADIUS, CLICK_RADIUS);
+        const i = nearestTargetIndex(this.clickTargets, worldX, worldY, radius);
+        return i < 0 ? undefined : this.clickTargets[i].system;
     }
 
     private selectForInfo(system: string) {
