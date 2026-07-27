@@ -23,6 +23,8 @@ export interface OutfitterContext {
     getWeapon(id: string): WeaponData | undefined;
     /** The player's control bits. */
     bits: ReadonlySet<number>;
+    /** The player's current credits (the working copy while docked). */
+    credits: number;
     /** Maps resource ids in NCB expressions (e.g. O142) to global ids. */
     resolveId?(id: number): string;
 }
@@ -35,9 +37,26 @@ export type BuyDenialReason =
     | 'gunHardpoints'
     | 'turretHardpoints'
     | 'mass'
-    | 'cargo';
+    | 'cargo'
+    | 'credits';
 
 export type SellDenialReason = 'notOwned' | 'cantSell';
+
+/**
+ * The fraction of an outfit's purchase price the player recovers when
+ * selling it back. The EVN Bible gives no explicit outfit-resale field;
+ * it states only for ships that a trade-in credits "25% of the original
+ * cost of your current ship and upgrades" (Bible, shïp Cost field). We
+ * apply that same 25% convention — the original EV Nova's known
+ * behaviour — to standalone outfit sales. Floored so the player never
+ * recovers more than a quarter of the price.
+ */
+export const OUTFIT_RESALE_FRACTION = 0.25;
+
+/** Credits recovered for selling one unit of this outfit (25% of price). */
+export function outfitResaleValue(outfit: OutfitData): number {
+    return Math.floor(outfit.price * OUTFIT_RESALE_FRACTION);
+}
 
 export type OutfitterCheck<Reason> =
     | { allowed: true }
@@ -247,6 +266,12 @@ export function canBuyOutfit(outfit: OutfitData,
         return denied('cargo', 'You don\'t have enough cargo space.');
     }
 
+    // Checked last: structural denials (mass, hardpoints, Max) are
+    // permanent, but "can't afford" just means come back with money.
+    if (outfit.price > context.credits) {
+        return denied('credits', 'You can\'t afford this item.');
+    }
+
     return { allowed: true };
 }
 
@@ -272,14 +297,23 @@ export const BULK_BUY_LIMIT = 9999;
  * working copy of the outfit list until one fails a check in
  * canBuyOutfit (mass, Max, hardpoints, ammo capacity, availability).
  * OnPurchase side effects aren't simulated; the real purchase loop
- * still applies them (and re-checks) per unit.
+ * still applies them (and re-checks) per unit. Affordability bounds the
+ * count too: each simulated unit spends the outfit's price, so the loop
+ * stops once the remaining credits can't cover another (the
+ * floor(credits/price) bound, alongside the space/Max/hardpoint ones).
  */
 export function maxBuyCount(outfit: OutfitData, context: OutfitterContext,
     limit = BULK_BUY_LIMIT): number {
     const working = new Map(context.outfits);
-    const simulated: OutfitterContext = { ...context, outfits: working };
     let count = 0;
-    while (count < limit && canBuyOutfit(outfit, simulated).allowed) {
+    while (count < limit) {
+        const simulated: OutfitterContext = {
+            ...context, outfits: working,
+            credits: context.credits - count * outfit.price,
+        };
+        if (!canBuyOutfit(outfit, simulated).allowed) {
+            break;
+        }
         working.set(outfit.id, (working.get(outfit.id) ?? 0) + 1);
         count++;
     }

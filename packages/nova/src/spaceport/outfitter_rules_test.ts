@@ -12,6 +12,8 @@ import {
     freeMass,
     maxBuyCount,
     maxSellCount,
+    OUTFIT_RESALE_FRACTION,
+    outfitResaleValue,
     OutfitterContext,
     playerContribute,
 } from './outfitter_rules.js';
@@ -37,12 +39,13 @@ function makeWeapon(id: string, weapon: Partial<WeaponData> = {}): WeaponData {
     return { ...getDefaultProjectileWeaponData(), id, ...weapon } as WeaponData;
 }
 
-function makeContext({ ship, outfits, weapons, owned, bits }: {
+function makeContext({ ship, outfits, weapons, owned, bits, credits }: {
     ship?: ShipData,
     outfits?: OutfitData[],
     weapons?: WeaponData[],
     owned?: [string, number][],
     bits?: number[],
+    credits?: number,
 } = {}): OutfitterContext {
     const outfitMap = new Map((outfits ?? []).map(o => [o.id, o]));
     const weaponMap = new Map((weapons ?? []).map(w => [w.id, w]));
@@ -52,6 +55,9 @@ function makeContext({ ship, outfits, weapons, owned, bits }: {
         getOutfit: id => outfitMap.get(id),
         getWeapon: id => weaponMap.get(id),
         bits: new Set(bits ?? []),
+        // Default to effectively unlimited so tests that don't care about
+        // money aren't gated by it (stock default outfit price is 0).
+        credits: credits ?? Infinity,
     };
 }
 
@@ -305,6 +311,35 @@ describe('canBuyOutfit', () => {
             ship: makeShip({ freeCargo: 20 }),
         }))).toEqual({ allowed: true });
     });
+
+    it('requires enough credits to afford the item', () => {
+        const outfit = makeOutfit('nova:200', { price: 5000 });
+        expect(canBuyOutfit(outfit, makeContext({ credits: 4999 })))
+            .toEqual(jasmine.objectContaining(
+                { allowed: false, reason: 'credits' }));
+        // Exactly the price is affordable.
+        expect(canBuyOutfit(outfit, makeContext({ credits: 5000 })))
+            .toEqual({ allowed: true });
+    });
+
+    it('lets a free outfit be bought with zero credits', () => {
+        const free = makeOutfit('nova:200', { price: 0 });
+        expect(canBuyOutfit(free, makeContext({ credits: 0 })))
+            .toEqual({ allowed: true });
+    });
+});
+
+describe('outfitResaleValue', () => {
+    it('is 25% of the outfit price', () => {
+        expect(OUTFIT_RESALE_FRACTION).toBe(0.25);
+        expect(outfitResaleValue(makeOutfit('nova:200', { price: 5000 })))
+            .toBe(1250);
+    });
+
+    it('floors fractional quarters', () => {
+        expect(outfitResaleValue(makeOutfit('nova:200', { price: 4002 })))
+            .toBe(1000); // 1000.5 floored.
+    });
 });
 
 describe('canSellOutfit', () => {
@@ -364,6 +399,30 @@ describe('maxBuyCount', () => {
         const context = makeContext({ outfits: [outfit] });
         expect(maxBuyCount(outfit, context)).toBe(BULK_BUY_LIMIT);
         expect(maxBuyCount(outfit, context, 25)).toBe(25);
+    });
+
+    it('is limited by affordability (floor(credits/price))', () => {
+        const outfit = makeOutfit('nova:200', { price: 1000 });
+        // 3500 credits / 1000 each = 3 affordable.
+        expect(maxBuyCount(outfit, makeContext({
+            outfits: [outfit], credits: 3500,
+        }))).toBe(3);
+        // Exactly enough for 4.
+        expect(maxBuyCount(outfit, makeContext({
+            outfits: [outfit], credits: 4000,
+        }))).toBe(4);
+        // Can't afford even one.
+        expect(maxBuyCount(outfit, makeContext({
+            outfits: [outfit], credits: 999,
+        }))).toBe(0);
+    });
+
+    it('takes the tighter of the mass and affordability bounds', () => {
+        const outfit = makeOutfit('nova:200', { price: 1000 }, { freeMass: 30 });
+        // Mass allows 3 (100/30), but credits only cover 2.
+        expect(maxBuyCount(outfit, makeContext({
+            outfits: [outfit], credits: 2500,
+        }))).toBe(2);
     });
 
     it('is limited by launcher ammo capacity', () => {
