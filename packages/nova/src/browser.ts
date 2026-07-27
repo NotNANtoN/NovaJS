@@ -35,7 +35,7 @@ import { SetJumpRouteEvent } from "./display/starmap_plugin.js";
 import { HailEscortCommandEvent, HailRequestEvent } from "./display/hail_dialog_plugin.js";
 import { LeaveSpaceportEvent, OpenSpaceportEvent } from "./display/spaceport_plugin.js";
 import { Stage } from "./display/stage_resource.js";
-import { AddEnemyEvent } from "./display/status_bar.js";
+import { AddEnemyEvent, DebugActionEvent } from "./display/status_bar.js";
 import { PlunderActionEvent } from "./display/boarding_plugin.js";
 import { daysPerJump } from "./nova_plugin/calendar.js";
 import { ControlEvent, ControlsSubject, EcsControlEvent } from "./nova_plugin/controls_plugin.js";
@@ -700,6 +700,14 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
     // action system (BoardingActionSystem) once, replayed on every peer.
     // Idempotency lives in the sim (per-action flags / capture state).
     newDisplayWorld.events.get(PlunderActionEvent).subscribe(({ data }) => {
+        void newSimulationBridge.controlEvents([
+            { action: data.action, state: 'start' }]);
+    });
+    // Debug-button cheats (status_bar.ts): forwarded on the same
+    // control-event input path as the plunder actions, so the +credits /
+    // clear-record edge fires DebugCheatSystem once, replayed on every
+    // peer.
+    newDisplayWorld.events.get(DebugActionEvent).subscribe(({ data }) => {
         void newSimulationBridge.controlEvents([
             { action: data.action, state: 'start' }]);
     });

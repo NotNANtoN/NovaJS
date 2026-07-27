@@ -28,6 +28,7 @@ import { PlanetDataComponent, PlanetTargetComponent } from "../nova_plugin/plane
 import { JumpRouteComponent } from "../nova_plugin/jump_plugin.js";
 import { CargoComponent, cargoUsed } from "../nova_plugin/cargo_plugin.js";
 import { CreditsComponent } from "../nova_plugin/player_state_plugin.js";
+import { ControlAction } from "../nova_plugin/controls.js";
 import { displayName, govtTargetName } from "../nova_plugin/display_name.js";
 import { STANDARD_CARGO_NAMES } from "../nova_plugin/mission_logic.js";
 import { ShipComponent } from "../nova_plugin/ship_plugin.js";
@@ -112,7 +113,13 @@ class StatusBar {
     private cargoContainer?: PIXI.Container;
     private static readonly MAX_CARGO_LINES = 6;
     private addEnemyButton: Button;
+    private giveCreditsButton: Button;
+    private clearRecordButton: Button;
     readonly addEnemy: Subject<ButtonClick>;
+    /** "Give 1M Credits" debug cheat. */
+    readonly giveCredits: Subject<ButtonClick>;
+    /** "Clear Legal Record" debug cheat. */
+    readonly clearRecord: Subject<ButtonClick>;
 
     constructor(private statusBarData: StatusBarData, private displayAssets: DisplayAssetDataInterface,
                 private renderer: PIXI.Renderer | PIXI.IRenderer) {
@@ -124,6 +131,19 @@ class StatusBar {
         // status bar's credits readout it used to clip over.
         this.addEnemyButton.container.position.y = 555;
         this.addEnemy = this.addEnemyButton.click;
+
+        // The two cheat buttons stacked one button height (25px) apart
+        // directly under Add Enemy, at the same x. Named for scene-graph
+        // queries and hidden by the visual-compare harness.
+        this.giveCreditsButton = new Button(displayAssets, 'Give 1M Credits', 100);
+        this.giveCreditsButton.container.position.x = 65;
+        this.giveCreditsButton.container.position.y = 580;
+        this.giveCredits = this.giveCreditsButton.click;
+
+        this.clearRecordButton = new Button(displayAssets, 'Clear Legal Record', 110);
+        this.clearRecordButton.container.position.x = 65;
+        this.clearRecordButton.container.position.y = 605;
+        this.clearRecord = this.clearRecordButton.click;
     }
 
     private async build() {
@@ -149,6 +169,8 @@ class StatusBar {
 
         this.makeText();
         this.container.addChild(this.addEnemyButton.container);
+        this.container.addChild(this.giveCreditsButton.container);
+        this.container.addChild(this.clearRecordButton.container);
         this.built = true;
     }
 
@@ -706,6 +728,13 @@ class StatusBar {
 
 export const StatusBarResource = new Resource<StatusBar>('StatusBar');
 export const AddEnemyEvent = new EcsEvent<{ shipId: string }>('AddEnemyEvent');
+/**
+ * A debug-button cheat (status_bar.ts), forwarded by browser.ts to the
+ * sim as a synthetic control-event input on the player's ship so it
+ * rides input records and replays deterministically (DebugCheatSystem).
+ */
+export const DebugActionEvent =
+    new EcsEvent<{ action: ControlAction }>('DebugActionEvent');
 
 const StatusBarResize = new System({
     name: 'StatusBarResize',
@@ -1034,6 +1063,15 @@ export const StatusBarPlugin: Plugin = {
             const randomIndex = Math.floor(Math.random() * (await simulationData.ids).Ship.length);
             const randomShipId = (await simulationData.ids).Ship[randomIndex];
             world.emit(AddEnemyEvent, { shipId: randomShipId });
+        });
+        // Debug cheats: each becomes a synthetic control edge that
+        // browser.ts forwards into the sim (DebugCheatSystem), so the
+        // effect rides input records like any other control input.
+        statusBar.giveCredits.subscribe(() => {
+            world.emit(DebugActionEvent, { action: 'debugGiveCredits' });
+        });
+        statusBar.clearRecord.subscribe(() => {
+            world.emit(DebugActionEvent, { action: 'debugClearRecord' });
         });
 
         world.resources.set(StatusBarResource, statusBar);

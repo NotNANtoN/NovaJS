@@ -12,6 +12,7 @@ import { BoardingPlugin } from "./boarding_plugin.js";
 import { BeamPlugin } from "./beam_plugin.js";
 import { BlastPlugin } from "./blast_plugin.js";
 import { CloakPlugin } from "./cloak_plugin.js";
+import { DebugCheatPlugin } from "./debug_cheat_plugin.js";
 import { IffPlugin } from "./iff_plugin.js";
 import { CollisionsPlugin } from './collisions_plugin.js';
 import { ControlsPlugin } from "./controls_plugin.js";
@@ -68,6 +69,10 @@ export const SystemPlugin: Plugin = {
         world.addPlugin(NCBPlugin);
         world.addPlugin(PlayerStatePlugin);
         world.addPlugin(ReputationPlugin);
+        // Debug cheat buttons (status_bar.ts). After PlayerState and
+        // Reputation: the cheats mutate the Credits / LegalRecords those
+        // plugins own.
+        world.addPlugin(DebugCheatPlugin);
         world.addPlugin(JammingPlugin);
         world.addPlugin(CollisionsPlugin);
         world.addPlugin(HealthPlugin);

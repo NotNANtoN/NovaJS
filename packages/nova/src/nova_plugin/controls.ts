@@ -51,6 +51,14 @@ const SavedControlsPartialObject = t.partial({
     'plunderCapture': ControlInputs,
     'plunderCaptureEscort': ControlInputs,
     'plunderDone': ControlInputs,
+    // Debug cheat actions (status_bar.ts debug buttons). Like the
+    // plunder actions, these have NO default keybind in controls.json:
+    // the debug buttons drive them programmatically through the
+    // control-event input path (DebugCheatSystem), so the cheat rides
+    // input records and replays identically on every peer. Listed here
+    // only so they are valid ControlAction values.
+    'debugGiveCredits': ControlInputs,
+    'debugClearRecord': ControlInputs,
     'escorts': ControlInputs,
     'holdPosition': ControlInputs,
     'attack': ControlInputs,

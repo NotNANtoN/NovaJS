@@ -331,8 +331,9 @@ export async function landAt(page, planetUuid, { timeout = 90000 } = {}) {
 /**
  * Hide developer-only overlays that a shipping build would not show, so the
  * chrome comparison is not swamped by them: the stats.js FPS panel (a fixed
- * DOM div) and the debug "Add Enemy" button (a PIXI container in the status
- * bar). Documented as a harness caveat in README.md.
+ * DOM div) and the debug buttons ("Add Enemy", "Give 1M Credits", "Clear
+ * Legal Record" — PIXI containers stacked in the status bar). Documented as
+ * a harness caveat in README.md.
  */
 export async function hideDebugOverlays(page) {
     await page.evaluate(() => {
@@ -343,10 +344,14 @@ export async function hideDebugOverlays(page) {
                 d.style.display = 'none';
             }
         }
-        // Debug "Add Enemy" button lives inside the status bar container.
+        // The debug buttons live inside the status bar container.
+        const debugButtons = new Set([
+            'Button:Add Enemy', 'Button:Give 1M Credits',
+            'Button:Clear Legal Record',
+        ]);
         (function walk(n) {
             if (!n) return;
-            if (n.name === 'Button:Add Enemy') { n.visible = false; return; }
+            if (debugButtons.has(n.name)) { n.visible = false; return; }
             (n.children || []).forEach(walk);
         })(window.app.stage);
     });
