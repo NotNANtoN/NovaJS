@@ -1,11 +1,41 @@
+import { Sound } from '@pixi/sound';
 import * as PIXI from 'pixi.js';
 import { Subject } from 'rxjs';
 import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data.js';
 import { texturesFromFrames } from '../display/textures_from_frames.js';
+import { isTextEntryActive } from '../input_focus.js';
 
 /** The six title-screen commands, one per corner button. */
 export type TitleAction =
     'newPilot' | 'openPilot' | 'quit' | 'enterShip' | 'setPrefs' | 'about';
+
+/** Single-letter hotkeys for the six commands, matching the original
+ * EV Nova title screen. Active only while the title owns the keyboard
+ * (see `onKeyDown`). */
+const HOTKEYS: { readonly [key: string]: TitleAction } = {
+    n: 'newPilot',
+    o: 'openPilot',
+    q: 'quit',
+    e: 'enterShip',
+    p: 'setPrefs',
+    a: 'about',
+};
+
+/**
+ * The title command a bare key press maps to, or undefined for keys that
+ * aren't hotkeys. Case-insensitive. A held modifier (Cmd/Ctrl/Alt) is not
+ * a hotkey, so browser shortcuts like Cmd+Q keep working. Pure (no DOM),
+ * so the mapping and modifier rule are unit-testable; the enabled /
+ * text-entry gating that guards it lives in `onKeyDown`.
+ */
+export function hotkeyActionFor(
+    event: { key: string; metaKey?: boolean; ctrlKey?: boolean; altKey?: boolean },
+): TitleAction | undefined {
+    if (event.metaKey || event.ctrlKey || event.altKey) {
+        return undefined;
+    }
+    return HOTKEYS[event.key.toLowerCase()];
+}
 
 /** One line of the bottom status readout (label + value). */
 export interface TitleStatus {
@@ -63,6 +93,15 @@ const TITLE_FRAME_W = 654;
 const TITLE_FRAME_H = 209;
 const TITLE_FRAMES = 7;
 
+/** Button-feedback snds (the original's title UI): 600 on press, 601 on
+ * release. (602/603 drive the button ANIMATIONS, which aren't built yet —
+ * deferred.) */
+const SOUND_DOWN = 'nova:600';
+const SOUND_UP = 'nova:601';
+/** UI click volume. The in-game SFX bus runs hot (~0.045); a click needs
+ * to register over it without being harsh. */
+const UI_SOUND_VOLUME = 0.2;
+
 interface TitleButton {
     spec: ButtonSpec;
     container: PIXI.Container;
@@ -97,6 +136,8 @@ export class TitleScreen {
     private titleTextures: PIXI.Texture[] = [];
     private leftStatus = new PIXI.Text('');
     private rightStatus = new PIXI.Text('');
+    private downSound?: Sound;
+    private upSound?: Sound;
 
     private hovered?: TitleButton;
     /** Keyboard selection index into `buttons` (column-major order). */
@@ -116,6 +157,7 @@ export class TitleScreen {
         this.container.addChild(this.frame);
         this.buildPromise = this.build();
         document.addEventListener('keydown', this.onKeyDown);
+        document.addEventListener('keyup', this.onKeyUp);
     }
 
     private statusStyle(): Partial<PIXI.ITextStyle> {
@@ -127,6 +169,17 @@ export class TitleScreen {
 
     private async build() {
         const assets = this.displayAssets;
+
+        // Button-feedback snds. Load them up front (the first click is a
+        // user gesture, so playback is allowed then), but never let a
+        // missing/failed snd break the title — some plug-in scenarios may
+        // not ship 600/601.
+        void assets.data.Sound.get(SOUND_DOWN)
+            .then(sound => { this.downSound = sound; })
+            .catch(e => console.warn(`Title down sound ${SOUND_DOWN}:`, e));
+        void assets.data.Sound.get(SOUND_UP)
+            .then(sound => { this.upSound = sound; })
+            .catch(e => console.warn(`Title up sound ${SOUND_UP}:`, e));
 
         // Background frame (PICT 8000), drawn at native size, centered.
         const bgTexture = await assets.textureFromPictAsync('nova:8000');
@@ -182,13 +235,26 @@ export class TitleScreen {
                 normal: textures[0], pressed: textures[1] ?? textures[0],
             };
             container.on('pointerover', () => this.setHover(button));
-            container.on('pointerout', () => this.clearHover(button));
-            container.on('pointerdown', () => {
-                button.sprite.texture = button.pressed;
+            container.on('pointerout', () => {
+                // Leaving clears the hover (emblem) AND any in-progress
+                // press frame (a press-then-drag-off must not stick). Not
+                // a release, so no up sound here.
+                this.setPressed(button, false);
+                this.clearHover(button);
             });
-            container.on('pointerup', () => this.activate(button));
+            container.on('pointerdown', () => {
+                this.setPressed(button, true);
+                this.playSound(this.downSound);
+            });
+            container.on('pointerup', () => {
+                this.playSound(this.upSound);
+                this.activate(button);
+            });
             container.on('pointerupoutside', () => {
-                this.refreshButton(button);
+                // Released off the button (press-then-drag-off): the button
+                // still went down and up, so play the up snd and revert.
+                this.setPressed(button, false);
+                this.playSound(this.upSound);
             });
             this.frame.addChild(container);
             this.buttons.push(button);
@@ -214,52 +280,102 @@ export class TitleScreen {
         return texturesFromFrames(framesData.frames);
     }
 
+    /** Swaps a button between its normal (frame 0) and pressed (frame 1)
+     * art. The second frame is the PRESSED state — shown only while the
+     * pointer is actually down on the button, never for hover or keyboard
+     * selection (those change only the center emblem). */
+    private setPressed(button: TitleButton, pressed: boolean) {
+        button.sprite.texture = pressed ? button.pressed : button.normal;
+    }
+
+    /** Fires a one-shot UI snd. Each play() spawns its own instance, so
+     * rapid clicks overlap cleanly. No-op if the snd never loaded. */
+    private playSound(sound?: Sound) {
+        if (!sound) {
+            return;
+        }
+        sound.volume = UI_SOUND_VOLUME;
+        try {
+            sound.play();
+        } catch (e) {
+            console.warn('Title sound play failed:', e);
+        }
+    }
+
     private setHover(button: TitleButton) {
         this.hovered = button;
         this.selected = this.buttons.indexOf(button);
-        this.updateEmblemAndButtons();
+        this.updateEmblem();
     }
 
     private clearHover(button: TitleButton) {
+        // Moving the mouse off a button returns to rest. `setHover` also
+        // set `selected` (so Enter activates the hovered button), so
+        // clearing only `hovered` would leave the emblem lit via the
+        // keyboard-selection fallback in updateEmblem. Drop the selection
+        // too. Keyboard navigation is unaffected: it leaves `hovered`
+        // undefined, so this guard never fires for it.
         if (this.hovered === button) {
             this.hovered = undefined;
-            this.updateEmblemAndButtons();
+            this.selected = -1;
+            this.updateEmblem();
         }
     }
 
-    /** Lights the hovered/selected button and shows its rollover emblem;
-     * everything else is at rest (dim button, ATMOS emblem). */
-    private updateEmblemAndButtons() {
+    /** Shows the hovered/selected button's rollover emblem in the center
+     * (the ATMOS logo at rest). The button ART never changes here: its
+     * second frame is the PRESSED state (see setPressed), not a hover
+     * highlight, so hover and keyboard selection swap only the emblem. */
+    private updateEmblem() {
         const active = this.hovered
             ?? (this.selected >= 0 ? this.buttons[this.selected] : undefined);
-        for (const button of this.buttons) {
-            button.sprite.texture =
-                button === active ? button.pressed : button.normal;
-        }
         const frame = active?.spec.rollover ?? IDLE_ROLLOVER_FRAME;
         if (this.emblemTextures[frame]) {
             this.emblem.texture = this.emblemTextures[frame];
         }
     }
 
-    private refreshButton(button: TitleButton) {
-        const active = this.hovered
-            ?? (this.selected >= 0 ? this.buttons[this.selected] : undefined);
-        button.sprite.texture =
-            button === active ? button.pressed : button.normal;
-    }
-
     private activate(button: TitleButton) {
         if (!this.enabled) {
             return;
         }
-        this.refreshButton(button);
+        this.setPressed(button, false);
         this.action.next(button.spec.action);
     }
 
+    /** Keys that "press" a title command: Enter/Space activate the current
+     * selection, and the six letter hotkeys. These get the button-down /
+     * button-up snds, mirroring a mouse press. */
+    private isActivationKey(event: KeyboardEvent): boolean {
+        return event.key === 'Enter' || event.key === ' '
+            || hotkeyActionFor(event) !== undefined;
+    }
+
     private onKeyDown = (event: KeyboardEvent) => {
-        if (!this.enabled) {
+        // Ignore keys while the title is disabled (a dialog is open, or the
+        // game is running) or while any text field owns the keyboard (e.g.
+        // typing a pilot name into the New Pilot dialog): the letter
+        // hotkeys below must never fire mid-typing.
+        if (!this.enabled || isTextEntryActive()) {
             return;
+        }
+        // Button-down snd on the initial press of an activation key (not on
+        // auto-repeat). The matching up snd fires from onKeyUp.
+        if (!event.repeat && this.isActivationKey(event)) {
+            this.playSound(this.downSound);
+        }
+        // Letter hotkeys for the six commands (n/o/q/e/p/a).
+        const action = hotkeyActionFor(event);
+        if (action) {
+            const button = this.buttons.find(b => b.spec.action === action);
+            if (button) {
+                this.selected = this.buttons.indexOf(button);
+                this.hovered = undefined;
+                this.updateEmblem();
+                this.activate(button);
+                event.preventDefault();
+                return;
+            }
         }
         // Column-major grid: indices 0/1 top row, 2/3 middle, 4/5 bottom.
         // Even indices are the left column, odd the right.
@@ -292,6 +408,18 @@ export class TitleScreen {
         }
     };
 
+    private onKeyUp = (event: KeyboardEvent) => {
+        // Button-up snd on release of an activation key, mirroring a mouse
+        // release. Gated like onKeyDown so a release into a text field (or
+        // once the title stops owning the keyboard) stays silent.
+        if (!this.enabled || isTextEntryActive()) {
+            return;
+        }
+        if (this.isActivationKey(event)) {
+            this.playSound(this.upSound);
+        }
+    };
+
     private moveSelection(delta: number) {
         const count = this.buttons.length;
         if (this.selected < 0) {
@@ -300,7 +428,7 @@ export class TitleScreen {
             this.selected = (this.selected + delta + count) % count;
         }
         this.hovered = undefined;
-        this.updateEmblemAndButtons();
+        this.updateEmblem();
     }
 
     /** Fills the bottom status columns from the current pilot/save. */
@@ -320,7 +448,7 @@ export class TitleScreen {
     show() {
         this.container.visible = true;
         this.enabled = true;
-        this.updateEmblemAndButtons();
+        this.updateEmblem();
     }
 
     /** Hides the title (e.g. once the game world is entered). */
@@ -339,7 +467,11 @@ export class TitleScreen {
         if (!enabled) {
             this.hovered = undefined;
             this.selected = -1;
-            this.updateEmblemAndButtons();
+            // Clear the emblem and drop any stuck pressed frame.
+            for (const button of this.buttons) {
+                this.setPressed(button, false);
+            }
+            this.updateEmblem();
         }
     }
 
@@ -377,6 +509,7 @@ export class TitleScreen {
 
     destroy() {
         document.removeEventListener('keydown', this.onKeyDown);
+        document.removeEventListener('keyup', this.onKeyUp);
         this.container.destroy({ children: true });
     }
 }
