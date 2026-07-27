@@ -2,10 +2,39 @@ import * as PIXI from 'pixi.js';
 import { Subject } from 'rxjs';
 import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data.js';
 import { texturesFromFrames } from '../display/textures_from_frames.js';
+import { isTextEntryActive } from '../input_focus.js';
 
 /** The six title-screen commands, one per corner button. */
 export type TitleAction =
     'newPilot' | 'openPilot' | 'quit' | 'enterShip' | 'setPrefs' | 'about';
+
+/** Single-letter hotkeys for the six commands, matching the original
+ * EV Nova title screen. Active only while the title owns the keyboard
+ * (see `onKeyDown`). */
+const HOTKEYS: { readonly [key: string]: TitleAction } = {
+    n: 'newPilot',
+    o: 'openPilot',
+    q: 'quit',
+    e: 'enterShip',
+    p: 'setPrefs',
+    a: 'about',
+};
+
+/**
+ * The title command a bare key press maps to, or undefined for keys that
+ * aren't hotkeys. Case-insensitive. A held modifier (Cmd/Ctrl/Alt) is not
+ * a hotkey, so browser shortcuts like Cmd+Q keep working. Pure (no DOM),
+ * so the mapping and modifier rule are unit-testable; the enabled /
+ * text-entry gating that guards it lives in `onKeyDown`.
+ */
+export function hotkeyActionFor(
+    event: { key: string; metaKey?: boolean; ctrlKey?: boolean; altKey?: boolean },
+): TitleAction | undefined {
+    if (event.metaKey || event.ctrlKey || event.altKey) {
+        return undefined;
+    }
+    return HOTKEYS[event.key.toLowerCase()];
+}
 
 /** One line of the bottom status readout (label + value). */
 export interface TitleStatus {
@@ -182,14 +211,16 @@ export class TitleScreen {
                 normal: textures[0], pressed: textures[1] ?? textures[0],
             };
             container.on('pointerover', () => this.setHover(button));
-            container.on('pointerout', () => this.clearHover(button));
-            container.on('pointerdown', () => {
-                button.sprite.texture = button.pressed;
+            container.on('pointerout', () => {
+                // Leaving clears the hover (emblem) AND any in-progress
+                // press frame (a press-then-drag-off must not stick).
+                this.setPressed(button, false);
+                this.clearHover(button);
             });
+            container.on('pointerdown', () => this.setPressed(button, true));
             container.on('pointerup', () => this.activate(button));
-            container.on('pointerupoutside', () => {
-                this.refreshButton(button);
-            });
+            container.on('pointerupoutside',
+                () => this.setPressed(button, false));
             this.frame.addChild(container);
             this.buttons.push(button);
         }
@@ -214,52 +245,75 @@ export class TitleScreen {
         return texturesFromFrames(framesData.frames);
     }
 
+    /** Swaps a button between its normal (frame 0) and pressed (frame 1)
+     * art. The second frame is the PRESSED state — shown only while the
+     * pointer is actually down on the button, never for hover or keyboard
+     * selection (those change only the center emblem). */
+    private setPressed(button: TitleButton, pressed: boolean) {
+        button.sprite.texture = pressed ? button.pressed : button.normal;
+    }
+
     private setHover(button: TitleButton) {
         this.hovered = button;
         this.selected = this.buttons.indexOf(button);
-        this.updateEmblemAndButtons();
+        this.updateEmblem();
     }
 
     private clearHover(button: TitleButton) {
+        // Moving the mouse off a button returns to rest. `setHover` also
+        // set `selected` (so Enter activates the hovered button), so
+        // clearing only `hovered` would leave the emblem lit via the
+        // keyboard-selection fallback in updateEmblem. Drop the selection
+        // too. Keyboard navigation is unaffected: it leaves `hovered`
+        // undefined, so this guard never fires for it.
         if (this.hovered === button) {
             this.hovered = undefined;
-            this.updateEmblemAndButtons();
+            this.selected = -1;
+            this.updateEmblem();
         }
     }
 
-    /** Lights the hovered/selected button and shows its rollover emblem;
-     * everything else is at rest (dim button, ATMOS emblem). */
-    private updateEmblemAndButtons() {
+    /** Shows the hovered/selected button's rollover emblem in the center
+     * (the ATMOS logo at rest). The button ART never changes here: its
+     * second frame is the PRESSED state (see setPressed), not a hover
+     * highlight, so hover and keyboard selection swap only the emblem. */
+    private updateEmblem() {
         const active = this.hovered
             ?? (this.selected >= 0 ? this.buttons[this.selected] : undefined);
-        for (const button of this.buttons) {
-            button.sprite.texture =
-                button === active ? button.pressed : button.normal;
-        }
         const frame = active?.spec.rollover ?? IDLE_ROLLOVER_FRAME;
         if (this.emblemTextures[frame]) {
             this.emblem.texture = this.emblemTextures[frame];
         }
     }
 
-    private refreshButton(button: TitleButton) {
-        const active = this.hovered
-            ?? (this.selected >= 0 ? this.buttons[this.selected] : undefined);
-        button.sprite.texture =
-            button === active ? button.pressed : button.normal;
-    }
-
     private activate(button: TitleButton) {
         if (!this.enabled) {
             return;
         }
-        this.refreshButton(button);
+        this.setPressed(button, false);
         this.action.next(button.spec.action);
     }
 
     private onKeyDown = (event: KeyboardEvent) => {
-        if (!this.enabled) {
+        // Ignore keys while the title is disabled (a dialog is open, or the
+        // game is running) or while any text field owns the keyboard (e.g.
+        // typing a pilot name into the New Pilot dialog): the letter
+        // hotkeys below must never fire mid-typing.
+        if (!this.enabled || isTextEntryActive()) {
             return;
+        }
+        // Letter hotkeys for the six commands (n/o/q/e/p/a).
+        const action = hotkeyActionFor(event);
+        if (action) {
+            const button = this.buttons.find(b => b.spec.action === action);
+            if (button) {
+                this.selected = this.buttons.indexOf(button);
+                this.hovered = undefined;
+                this.updateEmblem();
+                this.activate(button);
+                event.preventDefault();
+                return;
+            }
         }
         // Column-major grid: indices 0/1 top row, 2/3 middle, 4/5 bottom.
         // Even indices are the left column, odd the right.
@@ -300,7 +354,7 @@ export class TitleScreen {
             this.selected = (this.selected + delta + count) % count;
         }
         this.hovered = undefined;
-        this.updateEmblemAndButtons();
+        this.updateEmblem();
     }
 
     /** Fills the bottom status columns from the current pilot/save. */
@@ -320,7 +374,7 @@ export class TitleScreen {
     show() {
         this.container.visible = true;
         this.enabled = true;
-        this.updateEmblemAndButtons();
+        this.updateEmblem();
     }
 
     /** Hides the title (e.g. once the game world is entered). */
@@ -339,7 +393,11 @@ export class TitleScreen {
         if (!enabled) {
             this.hovered = undefined;
             this.selected = -1;
-            this.updateEmblemAndButtons();
+            // Clear the emblem and drop any stuck pressed frame.
+            for (const button of this.buttons) {
+                this.setPressed(button, false);
+            }
+            this.updateEmblem();
         }
     }
 
