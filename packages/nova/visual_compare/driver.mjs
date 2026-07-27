@@ -353,6 +353,69 @@ export async function hideDebugOverlays(page) {
     await sleep(400); // let the continuously-running ticker repaint
 }
 
+/**
+ * Opens the boarding plunder dialog (PICT 8515), or the capture-assignment
+ * dialog (PICT 8516) when `capture: 'succeeded'` is passed.
+ *
+ * Boarding is normally reached by disabling a ship, pulling alongside
+ * (close / speed-matched / axis-aligned) and pressing 'b' — a physics setup
+ * that is slow and non-deterministic headless. The dialogs themselves are
+ * pure display slaves of the synced BoardingComponent on the player's ship
+ * (display/boarding_plugin.ts), so — exactly like showHail drives the comm
+ * dialog directly — we spawn a shuttle to act as the boarded victim, then
+ * inject the BoardingComponent on the display player. The rendered dialog is
+ * pixel-identical to one reached through the real gate; only the state's
+ * provenance differs. The Boarding component singleton is reached through
+ * window.novaSimSerializer (the sim serializer's componentsByName registry),
+ * the only in-page handle on the synced-component instances.
+ */
+export async function openBoarding(page, { capture = 'none', cargo = 9 } = {}) {
+    // Spawn a shuttle to be the boarded victim (has Cargo + Fuel components
+    // the plunder dialog reads).
+    await page.evaluate(() => {
+        const dw = window.displayWorld;
+        for (const [k] of dw.events) {
+            if (k.name === 'AddEnemyEvent') {
+                dw.emit(k, { shipId: 'nova:128' });
+                break;
+            }
+        }
+    });
+    await sleep(4000);
+    const ok = await page.evaluate((capture, cargo) => {
+        const dw = window.displayWorld;
+        const Boarding = window.novaSimSerializer?.componentsByName?.get('Boarding');
+        if (!Boarding) return false;
+        let playerId, player;
+        for (const [id, e] of dw.entities) {
+            if ([...e.components.keys()].some(c => c.name === 'ShipControl')) {
+                playerId = id; player = e; break;
+            }
+        }
+        let targetId, target;
+        for (const [id, e] of dw.entities) {
+            if (id === playerId) continue;
+            const names = [...e.components.keys()].map(c => c.name);
+            if (names.includes('ShipData') && names.includes('Cargo')) {
+                targetId = id; target = e; break;
+            }
+        }
+        if (!player || !targetId) return false;
+        const Cargo = [...target.components.keys()].find(c => c.name === 'Cargo');
+        if (Cargo && cargo > 0) target.components.get(Cargo).set('Metal', cargo);
+        player.components.set(Boarding, {
+            target: targetId, creditsAvailable: 1000,
+            cargoTaken: false, creditsTaken: false, fuelTaken: false,
+            capture, crimeApplied: false,
+        });
+        return true;
+    }, capture, cargo);
+    if (!ok) throw new Error('openBoarding: could not inject BoardingComponent');
+    await waitForContainer(page,
+        capture === 'succeeded' ? 'CaptureAssignment' : 'PlunderDialog');
+    await sleep(800);
+}
+
 export async function capture(page, filepath) {
     await page.screenshot({ path: filepath, clip: { x: 0, y: 0, width: 1920, height: 1080 } });
 }
