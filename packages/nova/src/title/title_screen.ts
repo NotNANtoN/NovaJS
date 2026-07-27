@@ -1,3 +1,4 @@
+import { Sound } from '@pixi/sound';
 import * as PIXI from 'pixi.js';
 import { Subject } from 'rxjs';
 import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data.js';
@@ -92,6 +93,15 @@ const TITLE_FRAME_W = 654;
 const TITLE_FRAME_H = 209;
 const TITLE_FRAMES = 7;
 
+/** Button-feedback snds (the original's title UI): 600 on press, 601 on
+ * release. (602/603 drive the button ANIMATIONS, which aren't built yet —
+ * deferred.) */
+const SOUND_DOWN = 'nova:600';
+const SOUND_UP = 'nova:601';
+/** UI click volume. The in-game SFX bus runs hot (~0.045); a click needs
+ * to register over it without being harsh. */
+const UI_SOUND_VOLUME = 0.2;
+
 interface TitleButton {
     spec: ButtonSpec;
     container: PIXI.Container;
@@ -126,6 +136,8 @@ export class TitleScreen {
     private titleTextures: PIXI.Texture[] = [];
     private leftStatus = new PIXI.Text('');
     private rightStatus = new PIXI.Text('');
+    private downSound?: Sound;
+    private upSound?: Sound;
 
     private hovered?: TitleButton;
     /** Keyboard selection index into `buttons` (column-major order). */
@@ -145,6 +157,7 @@ export class TitleScreen {
         this.container.addChild(this.frame);
         this.buildPromise = this.build();
         document.addEventListener('keydown', this.onKeyDown);
+        document.addEventListener('keyup', this.onKeyUp);
     }
 
     private statusStyle(): Partial<PIXI.ITextStyle> {
@@ -156,6 +169,17 @@ export class TitleScreen {
 
     private async build() {
         const assets = this.displayAssets;
+
+        // Button-feedback snds. Load them up front (the first click is a
+        // user gesture, so playback is allowed then), but never let a
+        // missing/failed snd break the title — some plug-in scenarios may
+        // not ship 600/601.
+        void assets.data.Sound.get(SOUND_DOWN)
+            .then(sound => { this.downSound = sound; })
+            .catch(e => console.warn(`Title down sound ${SOUND_DOWN}:`, e));
+        void assets.data.Sound.get(SOUND_UP)
+            .then(sound => { this.upSound = sound; })
+            .catch(e => console.warn(`Title up sound ${SOUND_UP}:`, e));
 
         // Background frame (PICT 8000), drawn at native size, centered.
         const bgTexture = await assets.textureFromPictAsync('nova:8000');
@@ -213,14 +237,25 @@ export class TitleScreen {
             container.on('pointerover', () => this.setHover(button));
             container.on('pointerout', () => {
                 // Leaving clears the hover (emblem) AND any in-progress
-                // press frame (a press-then-drag-off must not stick).
+                // press frame (a press-then-drag-off must not stick). Not
+                // a release, so no up sound here.
                 this.setPressed(button, false);
                 this.clearHover(button);
             });
-            container.on('pointerdown', () => this.setPressed(button, true));
-            container.on('pointerup', () => this.activate(button));
-            container.on('pointerupoutside',
-                () => this.setPressed(button, false));
+            container.on('pointerdown', () => {
+                this.setPressed(button, true);
+                this.playSound(this.downSound);
+            });
+            container.on('pointerup', () => {
+                this.playSound(this.upSound);
+                this.activate(button);
+            });
+            container.on('pointerupoutside', () => {
+                // Released off the button (press-then-drag-off): the button
+                // still went down and up, so play the up snd and revert.
+                this.setPressed(button, false);
+                this.playSound(this.upSound);
+            });
             this.frame.addChild(container);
             this.buttons.push(button);
         }
@@ -251,6 +286,20 @@ export class TitleScreen {
      * selection (those change only the center emblem). */
     private setPressed(button: TitleButton, pressed: boolean) {
         button.sprite.texture = pressed ? button.pressed : button.normal;
+    }
+
+    /** Fires a one-shot UI snd. Each play() spawns its own instance, so
+     * rapid clicks overlap cleanly. No-op if the snd never loaded. */
+    private playSound(sound?: Sound) {
+        if (!sound) {
+            return;
+        }
+        sound.volume = UI_SOUND_VOLUME;
+        try {
+            sound.play();
+        } catch (e) {
+            console.warn('Title sound play failed:', e);
+        }
     }
 
     private setHover(button: TitleButton) {
@@ -294,6 +343,14 @@ export class TitleScreen {
         this.action.next(button.spec.action);
     }
 
+    /** Keys that "press" a title command: Enter/Space activate the current
+     * selection, and the six letter hotkeys. These get the button-down /
+     * button-up snds, mirroring a mouse press. */
+    private isActivationKey(event: KeyboardEvent): boolean {
+        return event.key === 'Enter' || event.key === ' '
+            || hotkeyActionFor(event) !== undefined;
+    }
+
     private onKeyDown = (event: KeyboardEvent) => {
         // Ignore keys while the title is disabled (a dialog is open, or the
         // game is running) or while any text field owns the keyboard (e.g.
@@ -301,6 +358,11 @@ export class TitleScreen {
         // hotkeys below must never fire mid-typing.
         if (!this.enabled || isTextEntryActive()) {
             return;
+        }
+        // Button-down snd on the initial press of an activation key (not on
+        // auto-repeat). The matching up snd fires from onKeyUp.
+        if (!event.repeat && this.isActivationKey(event)) {
+            this.playSound(this.downSound);
         }
         // Letter hotkeys for the six commands (n/o/q/e/p/a).
         const action = hotkeyActionFor(event);
@@ -343,6 +405,18 @@ export class TitleScreen {
                 break;
             default:
                 break;
+        }
+    };
+
+    private onKeyUp = (event: KeyboardEvent) => {
+        // Button-up snd on release of an activation key, mirroring a mouse
+        // release. Gated like onKeyDown so a release into a text field (or
+        // once the title stops owning the keyboard) stays silent.
+        if (!this.enabled || isTextEntryActive()) {
+            return;
+        }
+        if (this.isActivationKey(event)) {
+            this.playSound(this.upSound);
         }
     };
 
@@ -435,6 +509,7 @@ export class TitleScreen {
 
     destroy() {
         document.removeEventListener('keydown', this.onKeyDown);
+        document.removeEventListener('keyup', this.onKeyUp);
         this.container.destroy({ children: true });
     }
 }
