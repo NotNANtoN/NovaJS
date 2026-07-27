@@ -42,19 +42,19 @@ const BG_CY = BG_H / 2;
 // The corner buttons: sheet id -> label/action/rollover-frame, with the
 // art's top-left in background-local coords.
 const BUTTONS: ButtonSpec[] = [
-    { sheet: 'nova:8050', label: 'New Pilot', action: 'newPilot', rollover: 0, x: 348, y: 413 },
-    { sheet: 'nova:8053', label: 'Enter Ship', action: 'enterShip', rollover: 3, x: 557, y: 413 },
-    { sheet: 'nova:8051', label: 'Open Pilot', action: 'openPilot', rollover: 1, x: 335, y: 480 },
-    { sheet: 'nova:8054', label: 'Set Prefs', action: 'setPrefs', rollover: 4, x: 588, y: 481 },
-    { sheet: 'nova:8052', label: 'Quit Nova', action: 'quit', rollover: 2, x: 368, y: 546 },
-    { sheet: 'nova:8055', label: 'About Nova', action: 'about', rollover: 5, x: 564, y: 546 },
+    { sheet: 'nova:8050', label: 'New Pilot', action: 'newPilot', rollover: 0, x: 349, y: 400 },
+    { sheet: 'nova:8053', label: 'Enter Ship', action: 'enterShip', rollover: 3, x: 555, y: 401 },
+    { sheet: 'nova:8051', label: 'Open Pilot', action: 'openPilot', rollover: 1, x: 344, y: 464 },
+    { sheet: 'nova:8054', label: 'Set Prefs', action: 'setPrefs', rollover: 4, x: 581, y: 464 },
+    { sheet: 'nova:8052', label: 'Quit Nova', action: 'quit', rollover: 2, x: 345, y: 528 },
+    { sheet: 'nova:8055', label: 'About Nova', action: 'about', rollover: 5, x: 580, y: 528 },
 ];
 
 /** Rollover frame shown in the center emblem when nothing is hovered. */
 const IDLE_ROLLOVER_FRAME = 6;
 /** Center emblem (rollover sheet 8020) art top-left in bg-local coords. */
-const EMBLEM_X = 452;
-const EMBLEM_Y = 466;
+const EMBLEM_X = 444;
+const EMBLEM_Y = 465;
 /** Title animation (PICT 8010) center in bg-local coords, and its
  * per-frame height (the PICT is a vertical 7-frame filmstrip). */
 const TITLE_CX = 518;

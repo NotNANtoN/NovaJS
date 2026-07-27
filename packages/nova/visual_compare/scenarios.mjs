@@ -586,7 +586,23 @@ export const scenarios = [
             // Frame origin in the reference is screen (448,157); the art is
             // drawn at native 1024x768 centered, so the same rectangles
             // apply to our capture.
-            region('title_button_cluster', 'Six corner buttons + emblem', 783, 565, 375, 210),
+            //
+            // PER-BUTTON regions: the six corner button pills (rlëD
+            // 8050-8055) and the center ATMOS emblem (rlëD 8020) each get
+            // their own rect so the density metric pins each button
+            // individually — a single misplaced pill can no longer hide in a
+            // coarse cluster average. Rects were measured off the reference
+            // pill art (screen coords); each snugly bounds one pill + its
+            // label with a ~3px margin. Left column x<915, right column
+            // x>1001, emblem column x900-1035. After the layout fix each of
+            // our pills registers onto the reference within ~1px.
+            region('title_btn_new_pilot', 'New Pilot button (top-left)', 799, 549, 116, 67),
+            region('title_btn_enter_ship', 'Enter Ship button (top-right)', 1001, 549, 119, 67),
+            region('title_btn_open_pilot', 'Open Pilot button (mid-left)', 795, 617, 103, 63),
+            region('title_btn_set_prefs', 'Set Prefs button (mid-right)', 1027, 617, 99, 63),
+            region('title_btn_quit_nova', 'Quit Nova button (bottom-left)', 799, 682, 96, 61),
+            region('title_btn_about_nova', 'About Nova button (bottom-right)', 1026, 682, 96, 61),
+            region('title_emblem', 'Center ATMOS emblem', 897, 628, 126, 131),
             region('title_logo', 'Flaming NOVA title logo', 636, 305, 660, 220),
             region('title_left_fan', 'Left fan chrome (text-free)', 890, 300, 130, 260),
             region('title_right_fan', 'Right fan chrome (text-free)', 900, 300, 130, 260),
