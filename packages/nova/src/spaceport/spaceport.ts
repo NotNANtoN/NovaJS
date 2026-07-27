@@ -18,7 +18,7 @@ import { ShipPhysicsComponent } from '../nova_plugin/ship_plugin.js';
 import { SystemIdResource } from '../nova_plugin/system_id_resource.js';
 import { SystemPlugin } from '../nova_plugin/system_plugin.js';
 import { WeaponsStateComponent } from '../nova_plugin/weapons_state.js';
-import { LOCATION_MISSION_COMPUTER, MissionEvent, MissionMapMark, missionMapMarks } from '../nova_plugin/mission_logic.js';
+import { LOCATION_MAIN_SPACEPORT, LOCATION_MISSION_COMPUTER, MissionEvent, MissionMapMark, missionMapMarks } from '../nova_plugin/mission_logic.js';
 import { missionDisplayName } from '../nova_plugin/mission_text.js';
 import { CreditsComponent, GameDateComponent, MissionsComponent } from '../nova_plugin/player_state_plugin.js';
 import { Bar } from './bar.js';
@@ -26,7 +26,9 @@ import { Button } from './button.js';
 import { Menu } from './menu.js';
 import { MenuControls } from './menu_controls.js';
 import { MissionBoard } from './mission_board.js';
-import { processEntityLanding } from './mission_session.js';
+import { OfferPopup, presentOffers } from './offer_popup.js';
+import { MissionSession, processEntityLanding } from './mission_session.js';
+import { rollOffers } from './mission_offers.js';
 import { MissionUniverse } from './mission_universe.js';
 import { Outfitter } from './outfitter.js';
 import { Shipyard } from './shipyard.js';
@@ -69,6 +71,12 @@ export class Spaceport extends Menu<Entity> {
     private bar: Bar;
     private tradeCenter: TradeCenter;
     private universe: MissionUniverse;
+    /** Landing mission-offer / completion popups, shown over the
+     * spaceport before it becomes interactive. */
+    private offerPopup: OfferPopup;
+    /** Holds keyboard focus (and mutes the global map key) while the
+     * pointer-only landing popups are up. */
+    private popupBlocker: MenuControls;
     private buttons: {
         bar: Button, missions: Button, tradeCenter: Button,
         shipyard: Button, outfitter: Button, refuel: Button,
@@ -161,6 +169,8 @@ export class Spaceport extends Menu<Entity> {
         buttons.outfitter.click.subscribe(showOutfitter);
 
         this.universe = MissionUniverse.shared(simulationData);
+        this.offerPopup = new OfferPopup(displayAssets);
+        this.popupBlocker = new MenuControls(controlEvents);
         this.missionComputer = new MissionBoard(displayAssets, simulationData,
             controlEvents, this.universe, id, LOCATION_MISSION_COMPUTER,
             "nova:8505", "Mission BBS", this.openStarmap);
@@ -297,15 +307,81 @@ export class Spaceport extends Menu<Entity> {
         // docked entity to player info) work during the gap too.
         this.setInput(input);
         this.controls.bind();
+        let events: MissionEvent[] = [];
         try {
-            const events = await processEntityLanding(input,
+            events = await processEntityLanding(input,
                 this.simulationData, this.universe, this.id);
             this.setNotices(events);
         } catch (e) {
             console.warn('Mission landing processing failed:', e);
         }
         this.refreshRefuelButton(input);
-        return super.show(input);
+
+        // The spaceport is shown (super.show binds controls + reveals the
+        // frame); its returned promise resolves only when the player
+        // departs. Before it becomes interactive, the original presents —
+        // over the spaceport — any mission completion/failure text and
+        // then any main-spaceport (AvailLoc 3) offers, exactly as the
+        // bar presents its offers on entry. The blocker holds keyboard
+        // focus (and mutes the global map key) while the pointer-only
+        // popups are up.
+        const result = super.show(input);
+        try {
+            await this.buildPromise;
+            this.controls.unbind();
+            this.popupBlocker.bind();
+            try {
+                await this.presentLandingPopups(input, events);
+            } finally {
+                this.popupBlocker.unbind();
+                this.controls.bind();
+            }
+        } catch (e) {
+            console.warn('Spaceport landing popups failed:', e);
+        }
+        return result;
+    }
+
+    /**
+     * The on-landing popup sequence, over the already-visible spaceport:
+     * first each mission completion/failure text (the completion dësc,
+     * per the "_succeed" references — the notices line stays as the
+     * summary afterward), then the main-spaceport (AvailLoc 3) mission
+     * offers, each with its custom accept/refuse buttons and continuation
+     * pages for long text (the kont-probe reference).
+     */
+    private async presentLandingPopups(entity: Entity,
+        events: MissionEvent[]) {
+        // Completion / failure text as popups (the completion dësc).
+        for (const event of events) {
+            if (!event.text) {
+                continue;
+            }
+            if (event.type === 'completed' || event.type === 'failed'
+                || event.type === 'autoAborted' || event.type === 'shipDone') {
+                await this.offerPopup.show(event.text, { accept: 'Okay' },
+                    { style: 'briefing' });
+            }
+        }
+
+        // Main-spaceport mission offers. A fresh session over the
+        // (post-landing) entity rolls and, on accept, commits the mission
+        // back — the standard docked commit pattern.
+        let session: MissionSession;
+        try {
+            session = await MissionSession.create(entity,
+                this.simulationData, this.universe, this.id);
+        } catch (e) {
+            console.warn('Spaceport offer session failed to load:', e);
+            return;
+        }
+        const offers = rollOffers(session, this.universe,
+            LOCATION_MAIN_SPACEPORT).filter(offer => offer.acceptable);
+        if (offers.length === 0) {
+            return;
+        }
+        await presentOffers(this.offerPopup, session, this.universe, offers);
+        session.commit();
     }
 
     private setNotices(events: MissionEvent[]) {
@@ -428,6 +504,8 @@ export class Spaceport extends Menu<Entity> {
         this.container.addChild(this.tradeCenter.container);
         this.container.addChild(this.missionComputer.container);
         this.container.addChild(this.bar.container);
+        // The landing popups render over everything else on the spaceport.
+        this.container.addChild(this.offerPopup.container);
     }
 
     protected override done() {

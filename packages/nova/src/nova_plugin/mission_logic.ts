@@ -310,9 +310,19 @@ export interface MissionOffer {
     reason?: string;
 }
 
-/** AvailLoc values (see mission_data.ts). */
+/**
+ * AvailLoc values — where on a stellar a mission is offered (EVN Bible,
+ * "AvailLoc"): 0 mission computer, 1 bar, 2 offered from a ship (përs),
+ * 3 the main spaceport dialog (offered on landing), 4 trading, 5
+ * shipyard, 6 outfitter. See mission_data.ts.
+ */
 export const LOCATION_MISSION_COMPUTER = 0;
 export const LOCATION_BAR = 1;
+export const LOCATION_SHIP = 2;
+export const LOCATION_MAIN_SPACEPORT = 3;
+export const LOCATION_TRADING = 4;
+export const LOCATION_SHIPYARD = 5;
+export const LOCATION_OUTFIT = 6;
 
 /**
  * Whether the mission should appear at this stellar/location for this
