@@ -30,9 +30,10 @@ const RACE_DURATION_MS = 3500;
 /**
  * The bar's gambling minigame, the Galactic Racing Network: pick a
  * racer, place a bet (the original's fixed Bet 1000 / Bet 5000
- * stakes, STR# 150), and watch the race. A win pays 3-to-1 profit —
- * fair odds for four racers; the exact payout is not documented in
- * the Bible, so this is an assumption.
+ * stakes, STR# 150), and watch the race. The stake is deducted when
+ * the bet is placed and a win pays back 4x the stake (3-to-1 profit) —
+ * verified against the original game (Matthew, 2026-07-27: bet 1000,
+ * deducted immediately; the win then paid 4000).
  *
  * Bets settle into the caller's credits working copy (the bar
  * session), which commits on leaving the bar — the outfitter pattern.
@@ -216,7 +217,7 @@ export class GambleDialog {
             this.credits.credits += amount * 4;
         }
         this.setStatus(won
-            ? `Your racer wins! You collect ${(amount * 3).toLocaleString()} `
+            ? `Your racer wins! You collect ${(amount * 4).toLocaleString()} `
             + `credits. You now have ${this.credits.credits.toLocaleString()} cr.`
             : `Racer ${winner + 1} takes the race. You lose your `
             + `${amount.toLocaleString()} credit bet. You now have `
