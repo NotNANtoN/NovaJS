@@ -65,6 +65,8 @@ export const ShipObjectiveLiveType = t.partial({
     observed: t.boolean,
     /** The ship has been disabled (GOAL_DISABLE). */
     disabled: t.boolean,
+    /** The ship has been boarded (GOAL_BOARD seam; see shipBoarded). */
+    boarded: t.boolean,
 });
 export type ShipObjectiveLive = t.TypeOf<typeof ShipObjectiveLiveType>;
 
@@ -104,7 +106,18 @@ export const ShipObjectiveType = t.type({
 });
 export type ShipObjective = t.TypeOf<typeof ShipObjectiveType>;
 
-/** Goals the engine can evaluate; the rest stay unofferable. */
+/**
+ * Goals the engine can evaluate; the rest stay unofferable.
+ *
+ * SEAM: player boarding now exists (boarding_plugin.ts), and the goal
+ * state machine already tracks it (shipBoarded, below, and GOAL_BOARD in
+ * countsDown). Board (2) missions remain UNOFFERED here on purpose: the
+ * remaining step is to have MissionShipTrackSystem detect the shared
+ * BoardedComponent and call shipBoarded, then flip GOAL_BOARD to
+ * supported and update mission_ship_state_test / mission_logic_test.
+ * Rescue (5) additionally needs the "spawn disabled and stay disabled"
+ * mechanic, which is not built.
+ */
 export function goalSupported(goal: number): boolean {
     return goal === GOAL_NONE || goal === GOAL_DESTROY
         || goal === GOAL_DISABLE || goal === GOAL_ESCORT
@@ -115,7 +128,8 @@ export function goalSupported(goal: number): boolean {
  * owner's client spawns total - satisfied on each system entry). */
 function countsDown(goal: number): boolean {
     return goal === GOAL_DESTROY || goal === GOAL_DISABLE
-        || goal === GOAL_OBSERVE || goal === GOAL_CHASE_OFF;
+        || goal === GOAL_OBSERVE || goal === GOAL_CHASE_OFF
+        || goal === GOAL_BOARD;
 }
 
 /** How many ships the owner's client should spawn on system entry. */
@@ -195,6 +209,24 @@ export function shipDisabled(objective: ShipObjective, uuid: string): void {
     }
     flags.disabled = true;
     if (objective.goal === GOAL_DISABLE) {
+        objective.satisfied++;
+        updateCompletion(objective);
+    }
+}
+
+/**
+ * A tracked ship has been boarded by the owner (GOAL_BOARD). Mirrors
+ * shipDisabled: one board counts once. This is the mission-side hook for
+ * boarding_plugin.ts; it is dormant until GOAL_BOARD is made offerable
+ * (see goalSupported), but is unit-tested so the seam stays correct.
+ */
+export function shipBoarded(objective: ShipObjective, uuid: string): void {
+    const flags = objective.live.get(uuid);
+    if (!flags || flags.boarded) {
+        return;
+    }
+    flags.boarded = true;
+    if (objective.goal === GOAL_BOARD) {
         objective.satisfied++;
         updateCompletion(objective);
     }

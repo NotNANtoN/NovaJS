@@ -39,6 +39,18 @@ const SavedControlsPartialObject = t.partial({
     'selfDestruct': ControlInputs,
     'hail': ControlInputs,
     'board': ControlInputs,
+    // Plunder-dialog actions (boarding_plugin.ts). These have no default
+    // keybind in controls.json: the plunder/capture dialogs drive them
+    // programmatically through the control-event input path (button
+    // clicks and the dialog's own MenuControls), so every peer replays
+    // the same take/capture at the same tick. Listed here so they are
+    // valid ControlAction values for those synthetic ControlEvents.
+    'plunderCargo': ControlInputs,
+    'plunderCredits': ControlInputs,
+    'plunderFuel': ControlInputs,
+    'plunderCapture': ControlInputs,
+    'plunderCaptureEscort': ControlInputs,
+    'plunderDone': ControlInputs,
     'escorts': ControlInputs,
     'holdPosition': ControlInputs,
     'attack': ControlInputs,

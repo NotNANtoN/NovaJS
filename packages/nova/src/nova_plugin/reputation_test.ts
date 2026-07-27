@@ -12,6 +12,7 @@ import {
     compRewardDelta,
     crimePenalty,
     decodePayVal,
+    DEFAULT_BOARD_PENALTY,
     DEFAULT_DISABLE_PENALTY,
     DEFAULT_KILL_PENALTY,
     initialRecordsFromGovtStatuses,
@@ -73,6 +74,12 @@ describe('crimePenalty', () => {
         const stock = makeGovt('nova:130');
         expect(crimePenalty(stock, 'kill')).toBe(DEFAULT_KILL_PENALTY);
         expect(crimePenalty(stock, 'disable')).toBe(DEFAULT_DISABLE_PENALTY);
+        expect(crimePenalty(stock, 'board')).toBe(DEFAULT_BOARD_PENALTY);
+    });
+
+    it('uses the govt BoardPenalty field for pirating when set', () => {
+        const pirateHater = makeGovt('nova:131', { boardPenalty: 20 });
+        expect(crimePenalty(pirateHater, 'board')).toBe(20);
     });
 });
 

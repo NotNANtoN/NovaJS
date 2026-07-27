@@ -36,6 +36,7 @@ import { HailEscortCommandEvent, HailRequestEvent } from "./display/hail_dialog_
 import { LeaveSpaceportEvent, OpenSpaceportEvent } from "./display/spaceport_plugin.js";
 import { Stage } from "./display/stage_resource.js";
 import { AddEnemyEvent } from "./display/status_bar.js";
+import { PlunderActionEvent } from "./display/boarding_plugin.js";
 import { daysPerJump } from "./nova_plugin/calendar.js";
 import { ControlEvent, ControlsSubject, EcsControlEvent } from "./nova_plugin/controls_plugin.js";
 import { Controls, getActions, SavedControls } from "./nova_plugin/controls.js";
@@ -693,6 +694,14 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
         const { shipId } = data;
         await simulationGameData.data.Ship.get(shipId);
         await newSimulationBridge.spawnNpc(shipId);
+    });
+    // Plunder/capture dialog buttons drive the sim through the control
+    // input path: a single 'start' edge fires the edge-triggered boarding
+    // action system (BoardingActionSystem) once, replayed on every peer.
+    // Idempotency lives in the sim (per-action flags / capture state).
+    newDisplayWorld.events.get(PlunderActionEvent).subscribe(({ data }) => {
+        void newSimulationBridge.controlEvents([
+            { action: data.action, state: 'start' }]);
     });
     newDisplayWorld.events.get(SetJumpRouteEvent).subscribe(({ data }) => {
         syncedPlayerJumpRoute = data.route.slice();

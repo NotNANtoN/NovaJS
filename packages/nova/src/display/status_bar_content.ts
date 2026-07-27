@@ -141,3 +141,28 @@ export function landingBlockedMessage(reason: 'tooFar' | 'tooFast',
         ? "You're too far away to" : "You're moving too fast to";
     return `${cause} ${place}.`;
 }
+
+/**
+ * On-screen feedback when a board attempt is rejected. Mirrors
+ * landingBlockedMessage: the boarding ship must have a DISABLED target
+ * with crew, and must be close, matched in speed, and axis-aligned
+ * (parallel or anti-parallel) with the hulk (boarding_component.ts).
+ */
+export function boardingBlockedMessage(reason:
+    'noTarget' | 'notDisabled' | 'noCrew' | 'tooFar' | 'tooFast'
+    | 'notAligned'): string {
+    switch (reason) {
+        case 'noTarget':
+            return 'You have no ship targeted to board.';
+        case 'notDisabled':
+            return 'You can only board a disabled ship.';
+        case 'noCrew':
+            return 'There is no one left aboard to board.';
+        case 'tooFar':
+            return "You're too far away to board this ship.";
+        case 'tooFast':
+            return "You're moving too fast to board this ship.";
+        case 'notAligned':
+            return 'Line up alongside the ship before boarding.';
+    }
+}
