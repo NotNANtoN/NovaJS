@@ -9,6 +9,7 @@ import { makeShip } from './make_ship.js';
 import {
     acceptOffer,
     LOCATION_BAR,
+    LOCATION_MAIN_SPACEPORT,
     LOCATION_MISSION_COMPUTER,
     makeMissionOffer,
     matchesStellarRef,
@@ -16,6 +17,7 @@ import {
     missionMatchesLocation,
     stellarVisible,
 } from './mission_logic.js';
+import { rollOffers } from '../spaceport/mission_offers.js';
 import { GOAL_DESTROY } from './mission_ship_state.js';
 import { ControlBitsComponent } from './ncb_plugin.js';
 import { CombatRatingComponent } from './reputation_plugin.js';
@@ -136,6 +138,113 @@ describe('missions against real Nova data', () => {
             .has('mission:nova:128')).toBe(false);
         expect(dayNumber(entity.components.get(GameDateComponent)!))
             .toBe(startDay + 2);
+    });
+
+    /**
+     * The kont-probe mission the reference screenshots show being offered
+     * on landing at Kiniké (spaceport/kiniké_kont_probe_mission_offer_in_
+     * spaceport*.png) is nova:830 "Launch Exploration Probe". Its AvailLoc
+     * is 1 (the BAR), not the main spaceport — so our bar already offers
+     * it; the reference documents the original presenting a bar offer as a
+     * popup on landing. Pinned so a data change that moves it is caught.
+     */
+    it('pins the kont-probe reference mission (nova:830) as a bar offer',
+        async () => {
+            const gameData = await getIntegrationGameData();
+            const misn = await gameData.data.Mission.get('nova:830');
+            expect(misn.name).toContain('Launch Exploration Probe');
+            expect(misn.availLoc).toBe(LOCATION_BAR);
+            expect(misn.payVal).toBe(50000);
+            expect(misn.returnStelId).toBe('nova:128');
+            expect(misn.offerText).toContain('probe launch');
+        });
+
+    /**
+     * The main-spaceport (AvailLoc 3) offers the spaceport now presents on
+     * landing. nova:251 "Head to Sol" (Tutorial 001) is an AvailLoc-3
+     * mission available at any Federation stellar (AvailStel 10000) to a
+     * fresh pilot (AvailBits !(b9200|b9215), AvailRandom 100), so it rolls
+     * at Earth. It must roll for the SPACEPORT location and not for the
+     * mission computer; the mission-computer delivery (nova:128) must not
+     * roll for the spaceport; and accepting commits the mission.
+     */
+    it('rolls AvailLoc-3 offers on landing, not on the BBS, and commits '
+        + 'an accept', async () => {
+        const gameData = await getIntegrationGameData();
+        const universe = MissionUniverse.shared(gameData);
+        await universe.load();
+
+        const tutorial = await gameData.data.Mission.get('nova:251');
+        expect(tutorial.availLoc).toBe(LOCATION_MAIN_SPACEPORT);
+
+        // A fresh default pilot, docked at Earth (a Federation stellar).
+        const start = await gameData.data.PlayerStart.get('nova:128');
+        const shipData = await gameData.data.Ship.get(start.ship);
+        const entity = makeShip(shipData);
+        entity.components.set(GameDateComponent, { ...start.date });
+        entity.components.set(CreditsComponent, { credits: start.credits });
+        entity.components.set(ControlBitsComponent, new Set());
+
+        const session = await MissionSession.create(
+            entity, gameData, universe, 'nova:128');
+
+        const spaceportOffers = rollOffers(
+            session, universe, LOCATION_MAIN_SPACEPORT);
+        const computerOffers = rollOffers(
+            session, universe, LOCATION_MISSION_COMPUTER);
+
+        // The tutorial mission rolls at the spaceport, never on the BBS.
+        expect(spaceportOffers.some(o => o.data.id === 'nova:251')).toBe(true);
+        expect(computerOffers.some(o => o.data.id === 'nova:251')).toBe(false);
+        // The mission-computer delivery (nova:128) never rolls at the
+        // spaceport — the locations are disjoint.
+        expect(spaceportOffers.some(o => o.data.id === 'nova:128'))
+            .toBe(false);
+
+        // Accepting a spaceport offer commits the mission to the entity.
+        const offer = spaceportOffers.find(o => o.data.id === 'nova:251')!;
+        expect(offer.acceptable).toBe(true);
+        acceptOffer(session.machinery, offer, session.outfits);
+        session.commit();
+        expect(entity.components.get(MissionsComponent)!.has('nova:251'))
+            .toBe(true);
+    });
+
+    /**
+     * The completion popup the "_succeed" references show is driven by the
+     * completion event's dësc text. The end-to-end delivery (nova:128)
+     * completes on landing at Earth; its completion event must carry the
+     * completion dësc so the popup (and the notices summary) have content.
+     */
+    it('surfaces a completion event with dësc text on landing', async () => {
+        const gameData = await getIntegrationGameData();
+        const universe = MissionUniverse.shared(gameData);
+        await universe.load();
+
+        const start = await gameData.data.PlayerStart.get('nova:128');
+        const shipData = await gameData.data.Ship.get(start.ship);
+        const entity = makeShip(shipData);
+        entity.components.set(GameDateComponent, { ...start.date });
+        entity.components.set(CreditsComponent, { credits: start.credits });
+        entity.components.set(ControlBitsComponent, new Set());
+
+        const dockedAt = universe.stellarCandidates.find(
+            s => !s.uninhabited && s.canLand && s.id !== 'nova:128')!;
+        const session = await MissionSession.create(
+            entity, gameData, universe, dockedAt.id);
+        const offer = makeMissionOffer(universe.getMission('nova:128')!,
+            session.machinery.offerContext())!;
+        acceptOffer(session.machinery, offer, session.outfits);
+        session.commit();
+
+        await advanceEntityDate(entity,
+            daysPerJump(shipData.physics.mass), universe);
+        const events = await processEntityLanding(
+            entity, gameData, universe, 'nova:128');
+        const completed = events.find(e => e.type === 'completed');
+        expect(completed).toBeDefined();
+        // The dësc text that the popup renders (the completion frame).
+        expect(completed!.text.length).toBeGreaterThan(0);
     });
 
     /**

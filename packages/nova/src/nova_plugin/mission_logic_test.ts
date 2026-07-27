@@ -14,6 +14,7 @@ import {
     missionMatchesLocation,
     MissionWorkingState,
     LOCATION_BAR,
+    LOCATION_MAIN_SPACEPORT,
     LOCATION_MISSION_COMPUTER,
     processLanding,
     runMissionSetString,
@@ -226,6 +227,18 @@ describe('missionMatchesLocation', () => {
         expect(missionMatchesLocation(mission, LOCATION_BAR, ctx)).toBe(true);
         expect(missionMatchesLocation(mission, LOCATION_MISSION_COMPUTER, ctx))
             .toBe(false);
+    });
+
+    it('matches the main-spaceport location distinctly (AvailLoc 3)', () => {
+        // A main-spaceport (AvailLoc 3) mission is offered on landing,
+        // not on the mission computer or in the bar.
+        const mission = makeMission({ availLoc: LOCATION_MAIN_SPACEPORT });
+        const ctx = makeContext();
+        expect(missionMatchesLocation(mission, LOCATION_MAIN_SPACEPORT, ctx))
+            .toBe(true);
+        expect(missionMatchesLocation(mission, LOCATION_MISSION_COMPUTER, ctx))
+            .toBe(false);
+        expect(missionMatchesLocation(mission, LOCATION_BAR, ctx)).toBe(false);
     });
 
     it('evaluates AvailBits against the real player bits', () => {
