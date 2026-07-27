@@ -99,10 +99,17 @@ export class FindDialog {
         this.container.addChild(this.valueText);
 
         const buttonY = top + PANEL_HEIGHT - BUTTON_HEIGHT - 10;
+        // The original's Find sheet groups Cancel and Find together at the
+        // bottom, adjacent and slightly right of center, with the primary
+        // (Find) rightmost (map/find_system.png) — not spread to opposite
+        // corners. Match that grouping.
+        const gap = 8;
+        const groupWidth = 2 * BUTTON_WIDTH + gap;
+        const cancelX = -groupWidth / 2 + 18;
         const cancel = new SystemButton('Cancel',
-            left + 14, buttonY, () => this.close(undefined));
+            cancelX, buttonY, () => this.close(undefined));
         const find = new SystemButton('Find',
-            left + PANEL_WIDTH - BUTTON_WIDTH - 14, buttonY,
+            cancelX + BUTTON_WIDTH + gap, buttonY,
             () => this.close(this.text));
         this.container.addChild(cancel.container, find.container);
 
