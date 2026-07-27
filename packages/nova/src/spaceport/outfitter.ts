@@ -11,6 +11,7 @@ import { ControlEvent } from "../nova_plugin/controls_plugin.js";
 import { makeControlBitHooks, NCBParseError, runNCBSet } from "../nova_plugin/ncb.js";
 import { ControlBits, ControlBitsComponent } from "../nova_plugin/ncb_plugin.js";
 import { OutfitsStateComponent } from "../nova_plugin/outfit_plugin.js";
+import { CreditsComponent } from "../nova_plugin/player_state_plugin.js";
 import { cleanRecords, LegalRecords } from "../nova_plugin/reputation.js";
 import { LegalRecordsComponent } from "../nova_plugin/reputation_plugin.js";
 import { ShipComponent } from "../nova_plugin/ship_plugin.js";
@@ -20,7 +21,7 @@ import { ItemGrid, ItemTile } from "./item_grid.js";
 import { Menu } from "./menu.js";
 import { MissionSession } from "./mission_session.js";
 import { MissionUniverse } from "./mission_universe.js";
-import { BuyDenialReason, canBuyOutfit, canSellOutfit, freeCargo, freeMass, maxBuyCount, maxSellCount, OutfitterContext } from "./outfitter_rules.js";
+import { BuyDenialReason, canBuyOutfit, canSellOutfit, freeCargo, freeMass, maxBuyCount, maxSellCount, outfitResaleValue, OutfitterContext } from "./outfitter_rules.js";
 import { QuantityDialog } from "./quantity_dialog.js";
 
 
@@ -97,6 +98,15 @@ export class Outfitter extends Menu<Entity> {
     private outfits: DefaultMap<string, number>;
     private controlBits: ControlBits = new Set();
     private records: LegalRecords = new Map();
+    /**
+     * The player's working credit balance. Buys deduct the outfit price
+     * and sells credit 25% of it (see outfitResaleValue). In the mission
+     * session path this is the SAME object as the session's working
+     * credits, so session.commit() persists it (and a mission set string
+     * that pays out is reflected here); in the fallback path done()
+     * writes it to the entity's CreditsComponent directly.
+     */
+    private credits: { credits: number } = { credits: 0 };
     /** Every govt, sorted by id, loaded in build() for ModType 21. */
     private govts: (readonly [string, GovtData])[] = [];
     private shipData?: ShipData;
@@ -113,7 +123,7 @@ export class Outfitter extends Menu<Entity> {
         itemPrice: new PIXI.Text("Item Price:", FONT.normal),
         price: new PIXI.Text("5,000 cr", FONT.normal),
         youHave: new PIXI.Text("You Have:", FONT.normal),
-        count: new PIXI.Text("∞ cr", FONT.normal),
+        count: new PIXI.Text("0 cr", FONT.normal),
         itemMass: new PIXI.Text("Item Mass:", FONT.normal),
         mass: new PIXI.Text("3", FONT.normal),
         availableMass: new PIXI.Text("Available:", FONT.normal),
@@ -296,6 +306,7 @@ export class Outfitter extends Menu<Entity> {
             getOutfit: id => this.simulationData.data.Outfit.getCached(id),
             getWeapon: id => this.simulationData.data.Weapon.getCached(id),
             bits: this.controlBits,
+            credits: this.credits.credits,
         };
     }
 
@@ -358,8 +369,11 @@ export class Outfitter extends Menu<Entity> {
         }
     }
 
-    /** Applies one unit's purchase: count, ModType 21, OnPurchase. */
+    /** Applies one unit's purchase: charge, count, ModType 21, OnPurchase. */
     private applyBuy(outfit: OutfitData) {
+        // Charge the item's price. Callers gate on canBuyOutfit (which
+        // includes affordability), so this never drives credits negative.
+        this.credits.credits -= outfit.price;
         this.outfits.set(outfit.id, this.outfits.get(outfit.id) + 1);
         // ModType 21: buying the outfit cleans (raises to at least 0)
         // the player's legal record with the ModVal govt, or with every
@@ -377,8 +391,9 @@ export class Outfitter extends Menu<Entity> {
         this.runSetString(outfit.onPurchase, idPrefix(outfit.id));
     }
 
-    /** Applies one unit's sale: count and OnSell. */
+    /** Applies one unit's sale: credit 25% of price, count, and OnSell. */
     private applySell(outfit: OutfitData) {
+        this.credits.credits += outfitResaleValue(outfit);
         this.outfits.set(outfit.id, Math.max(0, this.outfits.get(outfit.id) - 1));
         if (this.outfits.get(outfit.id) === 0) {
             this.outfits.delete(outfit.id);
@@ -407,6 +422,10 @@ export class Outfitter extends Menu<Entity> {
                 return owned > 0
                     ? "Can't hold any more of this item!"
                     : "Can't hold any of this item!";
+            case 'credits':
+                // The Bible/STR# have no dedicated outfitter money
+                // caption; this matches the existing captions' style.
+                return "Can't afford this item!";
             default:
                 // Hardpoint / launcher denials keep the descriptive
                 // rule message (the references don't show them).
@@ -418,7 +437,13 @@ export class Outfitter extends Menu<Entity> {
      * Recomputes the Buy/Sell button states and the persistent denial
      * caption for the current selection, as the original does.
      */
+    /** Refreshes the "You Have:" line from the working credit balance. */
+    private updateCreditsText() {
+        this.text.count.text = formatPrice(this.credits.credits);
+    }
+
     private refreshTradeState() {
+        this.updateCreditsText();
         const outfit = this.itemGrid?.selection;
         const context = this.makeContext();
         if (!outfit || !context) {
@@ -633,6 +658,11 @@ export class Outfitter extends Menu<Entity> {
             this.outfits = new DefaultMap(() => 0, [...session.outfits]);
             this.controlBits = session.state.bits;
             this.records = session.state.records ?? new Map();
+            // Share the session's working credits so buys/sells and any
+            // mission-set payout mutate the same balance session.commit()
+            // persists (mirrors the outfits/bits sharing above).
+            this.credits = session.state.credits;
+            this.updateCreditsText();
             this.shipData = undefined;
             const shipId = input.components.get(ShipComponent)?.id;
             if (shipId) {
@@ -656,6 +686,10 @@ export class Outfitter extends Menu<Entity> {
             input.components.get(ControlBitsComponent) ?? []);
         this.records = new Map(
             input.components.get(LegalRecordsComponent) ?? []);
+        this.credits = {
+            credits: input.components.get(CreditsComponent)?.credits ?? 0,
+        };
+        this.updateCreditsText();
         this.text.status.text = "";
 
         this.shipData = undefined;
@@ -694,6 +728,8 @@ export class Outfitter extends Menu<Entity> {
                 .map(([id, count]) => [id, { count }])));
         this.input.components.set(ControlBitsComponent, this.controlBits);
         this.input.components.set(LegalRecordsComponent, this.records);
+        this.input.components.set(CreditsComponent,
+            { credits: this.credits.credits });
         super.done();
     }
 }
