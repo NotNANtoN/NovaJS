@@ -9,6 +9,7 @@ import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 import { applyAnalogControl, applyControlEvents, ControlledByComponent } from "../nova_plugin/ship_control.js";
 import { applySetTarget } from "../nova_plugin/target_plugin.js";
 import { applySetPlanetTarget } from "../nova_plugin/planet_plugin.js";
+import { applyHail, HailAction } from "../nova_plugin/hail_plugin.js";
 
 /**
  * Everything that changes the simulation from outside is an input,
@@ -32,6 +33,9 @@ export type SimulationInput =
     | { kind: 'setTarget', target: string | null }
     /** Explicit stellar selection (tap/click on a planet); null clears. */
     | { kind: 'setPlanetTarget', target: string | null }
+    /** A hail dialog action (request assistance / bribe) against a ship. The
+     * effect (repair, credit change, pacify) is recomputed sim-side. */
+    | { kind: 'hail', action: HailAction }
     | { kind: 'addEntity', uuid: string, entity: EncodedEntity }
     | { kind: 'removeEntity', uuid: string }
     | { kind: 'setJumpRoute', route: string[] }
@@ -131,6 +135,10 @@ export function applySimulationInputs(world: World, inputs: SimulationInput[],
             }
             case 'setPlanetTarget': {
                 applySetPlanetTarget(world, peerId, input.target);
+                break;
+            }
+            case 'hail': {
+                applyHail(world, peerId, input.action);
                 break;
             }
             case 'addEntity': {

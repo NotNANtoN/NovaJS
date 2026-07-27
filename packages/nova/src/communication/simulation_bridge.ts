@@ -12,6 +12,7 @@ import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_
 import { loadEntityGameData, loadWireSnapshotGameData } from "../nova_plugin/entity_data_loader.js";
 import { deriveEntityComponents } from "../nova_plugin/entity_factory.js";
 import { applyInputRecords, InputRecord, loadInputRecordsGameData, SimulationInput } from "./simulation_input.js";
+import { HailAction } from "../nova_plugin/hail_plugin.js";
 import { ArchiveBaseline, canonicalDesyncHash, DesyncDump, RollbackLogEntry, STATE_HASH_INTERVAL, unwrapRollbackMessage, wrapRollbackMessage } from "./rollback_protocol.js";
 import { makeNpc } from "../nova_plugin/npc_plugin.js";
 import { SIMULATION_STEP_MS } from "../nova_plugin/make_system.js";
@@ -134,6 +135,7 @@ export interface SimulationBridgeHostApi {
     analogControl(control: AnalogControlState): void;
     setTarget(target: string | null): void;
     setPlanetTarget(target: string | null): void;
+    hail(action: HailAction): void;
     step(count?: number): void;
     snapshot(): SimulationFrame;
     addEntity(uuid: string, entity: EncodedEntity): void | Promise<void>;
@@ -165,6 +167,7 @@ export interface AsyncSimulationBridgeHostApi {
     analogControl(control: AnalogControlState): Promise<void>;
     setTarget(target: string | null): Promise<void>;
     setPlanetTarget(target: string | null): Promise<void>;
+    hail(action: HailAction): Promise<void>;
     step(count?: number): Promise<void>;
     snapshot(): Promise<SimulationFrame>;
     addEntity(uuid: string, entity: EncodedEntity): Promise<void>;
@@ -950,6 +953,10 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
         this.schedule({ kind: 'setPlanetTarget', target });
     }
 
+    hail(action: HailAction) {
+        this.schedule({ kind: 'hail', action });
+    }
+
     /**
      * How this peer's clock should slew to track the room's: a rate
      * factor proportional to the drift between the local tick and the
@@ -1163,6 +1170,10 @@ export class SimulationBridgeClient {
         this.host.setPlanetTarget(target);
     }
 
+    hail(action: HailAction) {
+        this.host.hail(structuredClone(action));
+    }
+
     addEntity(uuid: string, entity: Entity) {
         return this.host.addEntity(uuid, structuredClone(this.serializer.encode(entity)) as EncodedEntity);
     }
@@ -1278,6 +1289,10 @@ export class AsyncSimulationBridgeClient {
 
     async setPlanetTarget(target: string | null) {
         await this.guard(() => this.host.setPlanetTarget(target));
+    }
+
+    async hail(action: HailAction) {
+        await this.guard(() => this.host.hail(action));
     }
 
     async addEntity(uuid: string, entity: Entity) {

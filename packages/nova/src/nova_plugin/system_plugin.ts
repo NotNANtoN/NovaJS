@@ -17,6 +17,7 @@ import { ControlsPlugin } from "./controls_plugin.js";
 import { CreateTimePlugin } from "./create_time.js";
 import { DeathPlugin } from "./death_plugin.js";
 import { EscortCommandPlugin } from "./escort_command_plugin.js";
+import { HailPlugin } from "./hail_plugin.js";
 import { FireWeaponPlugin } from "./fire_weapon_plugin.js";
 import { HealthPlugin } from "./health_plugin.js";
 import { IonizedPlugin } from "./ionization_plugin.js";
@@ -80,6 +81,7 @@ export const SystemPlugin: Plugin = {
         world.addPlugin(GateTransitPlugin);
         world.addPlugin(NpcPlugin);
         world.addPlugin(NpcAiPlugin);
+        world.addPlugin(HailPlugin);
         world.addPlugin(PersPlugin);
         world.addPlugin(NpcSpawnPlugin);
         world.addPlugin(MissionShipPlugin);

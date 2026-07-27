@@ -20,6 +20,7 @@ import { DisabledComponent } from './disabled_component.js';
 import { EscortCommandComponent } from './escort_command.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { GovtComponent } from './govt_component.js';
+import { AssistingComponent } from './hail_component.js';
 import { govtDispositionTo, effectiveStrength, oddsFavorable } from './govt_disposition.js';
 import { ArmorComponent, ShieldComponent } from './health_plugin.js';
 import { JUMP_DISTANCE, JUMP_ARRIVAL_MARGIN_S } from './jump_plugin.js';
@@ -208,6 +209,12 @@ export const NpcState = t.intersection([t.type({
     aggressor: t.string,
     /** Sim time (ms) after which the NPC heads for a jump-out. */
     departAt: t.number,
+    /** Uuid of a ship this NPC has been bribed to leave alone (hail bribe /
+     * beg-for-mercy). While `pacifiedUntil` has not lapsed, this ship is
+     * skipped as a hostile and forgotten as an aggressor. */
+    pacifiedFrom: t.string,
+    /** Sim time (ms) until which `pacifiedFrom` is ignored. */
+    pacifiedUntil: t.number,
 })]);
 export type NpcState = t.TypeOf<typeof NpcState>;
 export const NpcComponent = new Component<NpcState>('NpcComponent');
@@ -467,15 +474,21 @@ const NpcDecisionSystem = new System({
     args: [NpcComponent, MovementStateComponent, TargetComponent,
         Optional(GovtComponent), Optional(ShieldComponent),
         ShipDataComponent, Optional(FormationComponent),
-        Optional(EscortCommandComponent), NpcTargetsQuery,
+        Optional(EscortCommandComponent), Optional(AssistingComponent),
+        NpcTargetsQuery,
         PlanetsQuery, TimeResource, RandomResource, Entities, UUID,
         SimulationGameDataResource] as const,
     step(npc, movement, target, govt, shield, shipData, formation,
-        escortCommand, ships, planets, time, random, entities, uuid,
+        escortCommand, assisting, ships, planets, time, random, entities, uuid,
         gameData) {
         if (escortCommand) {
             // A player-commanded escort: its brain is the escort
             // command framework (escort_command_plugin), not NPC AI.
+            return;
+        }
+        if (assisting) {
+            // A ship coming to the player's aid (hail request-assistance):
+            // AssistBehaviorSystem owns its steering until it has helped.
             return;
         }
         if (npc.mode === 'depart') {
@@ -496,6 +509,18 @@ const NpcDecisionSystem = new System({
         if (npc.aggressor && !entities.has(npc.aggressor)) {
             npc.aggressor = undefined;
         }
+        // A bribe (hail beg-for-mercy) buys a reprieve: while it holds, the
+        // briber is skipped as a hostile below and forgotten as an
+        // aggressor; when it lapses, the ship resumes hunting a criminal.
+        if (npc.pacifiedUntil !== undefined && time.time >= npc.pacifiedUntil) {
+            npc.pacifiedFrom = undefined;
+            npc.pacifiedUntil = undefined;
+        }
+        const pacifiedFrom = npc.pacifiedUntil !== undefined
+            ? npc.pacifiedFrom : undefined;
+        if (pacifiedFrom && npc.aggressor === pacifiedFrom) {
+            npc.aggressor = undefined;
+        }
 
         const position = Position.fromVectorLike(movement.position);
         const myStrength = effectiveStrength(
@@ -513,6 +538,10 @@ const NpcDecisionSystem = new System({
         for (const [otherUuid, otherMovement, , otherData, otherGovt,
             otherShield, cloak, otherDisabled, otherRecords] of ships) {
             if (otherUuid === uuid || !isTargetable(cloak) || otherDisabled) {
+                continue;
+            }
+            if (otherUuid === pacifiedFrom) {
+                // Bribed to leave this ship alone (reprieve still active).
                 continue;
             }
             const distanceSquared = otherMovement.position
