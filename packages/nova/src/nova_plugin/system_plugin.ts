@@ -8,6 +8,7 @@ import { DisabledPlugin } from "./disabled_plugin.js";
 import { AsteroidPlugin } from "./asteroid_plugin.js";
 import { BayPlugin } from "./bay_plugin.js";
 import { CargoPlugin } from "./cargo_plugin.js";
+import { BoardingPlugin } from "./boarding_plugin.js";
 import { BeamPlugin } from "./beam_plugin.js";
 import { BlastPlugin } from "./blast_plugin.js";
 import { CloakPlugin } from "./cloak_plugin.js";
@@ -91,6 +92,10 @@ export const SystemPlugin: Plugin = {
         world.addPlugin(DisabledPlugin);
         world.addPlugin(BlastPlugin);
         world.addPlugin(CargoPlugin);
+        // After Cargo/Disabled/Reputation/EscortCommand: boarding reads
+        // cargo, requires the disabled gate, charges legal-record crimes,
+        // and converts captures into escorts.
+        world.addPlugin(BoardingPlugin);
         world.addPlugin(AsteroidPlugin);
     }
 };

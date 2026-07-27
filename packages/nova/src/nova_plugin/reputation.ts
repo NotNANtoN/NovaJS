@@ -55,7 +55,8 @@ export type LegalRecords = Map<string, number>;
  */
 export const DEFAULT_KILL_PENALTY = 5;
 export const DEFAULT_DISABLE_PENALTY = 2;
-/** Reserved for boarding (piracy), which is not wired yet. */
+/** Boarding/pirating a ship (boarding_plugin.ts) when the govt leaves
+ * BoardPenalty at 0 (as stock data does). */
 export const DEFAULT_BOARD_PENALTY = 3;
 
 /**
@@ -94,12 +95,17 @@ function intersects(a: readonly number[], b: readonly number[]): boolean {
     return a.some(x => b.includes(x));
 }
 
+/** The kind of crime a legal-record penalty is charged for. */
+export type Crime = 'kill' | 'disable' | 'board';
+
 /** A crime's base penalty: the govt's field, or the engine default. */
-export function crimePenalty(govt: GovtData,
-    crime: 'kill' | 'disable'): number {
-    const field = crime === 'kill' ? govt.killPenalty : govt.disablePenalty;
-    const fallback = crime === 'kill'
-        ? DEFAULT_KILL_PENALTY : DEFAULT_DISABLE_PENALTY;
+export function crimePenalty(govt: GovtData, crime: Crime): number {
+    const field = crime === 'kill' ? govt.killPenalty
+        : crime === 'disable' ? govt.disablePenalty
+            : govt.boardPenalty;
+    const fallback = crime === 'kill' ? DEFAULT_KILL_PENALTY
+        : crime === 'disable' ? DEFAULT_DISABLE_PENALTY
+            : DEFAULT_BOARD_PENALTY;
     return field !== 0 ? field : fallback;
 }
 
@@ -112,7 +118,7 @@ export function crimePenalty(govt: GovtData,
  * collection when this runs in the simulation.
  */
 export function applyCrime(records: LegalRecords, victimGovt: GovtData,
-    crime: 'kill' | 'disable',
+    crime: Crime,
     allGovts: Iterable<readonly [string, GovtData]>): void {
     const penalty = crimePenalty(victimGovt, crime);
     addRecord(records, victimGovt.id, victimGovt, -penalty);

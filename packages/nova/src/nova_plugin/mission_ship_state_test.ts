@@ -11,6 +11,7 @@ import {
     goalSupported,
     objectiveAllowsCompletion,
     registerShip,
+    shipBoarded,
     shipDeparted,
     shipDied,
     shipDisabled,
@@ -112,6 +113,26 @@ describe('mission ship goal state machine', () => {
             shipDied(objective, 'a');
             expect(objective.failed).toBe(true);
             expect(objectiveAllowsCompletion(objective)).toBe(false);
+        });
+    });
+
+    describe('board (seam)', () => {
+        it('counts each ship the moment it is boarded', () => {
+            const objective = makeObjective(GOAL_BOARD);
+            registerShip(objective, 'a');
+            registerShip(objective, 'b');
+            shipBoarded(objective, 'a');
+            shipBoarded(objective, 'a'); // idempotent
+            expect(objective.satisfied).toBe(1);
+            shipBoarded(objective, 'b');
+            expect(objective.complete).toBe(true);
+        });
+
+        it('ignores boarding on non-board goals', () => {
+            const objective = makeObjective(GOAL_DESTROY);
+            registerShip(objective, 'a');
+            shipBoarded(objective, 'a');
+            expect(objective.satisfied).toBe(0);
         });
     });
 

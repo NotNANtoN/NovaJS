@@ -7,8 +7,9 @@ import { SimulationGameDataResource } from "../nova_plugin/game_data_resource.js
 import { GameDateComponent } from "../nova_plugin/player_state_plugin.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 import { SystemIdResource } from "../nova_plugin/system_id_resource.js";
-import { jumpArrivalMessage, landingBlockedMessage } from "./status_bar_content.js";
+import { boardingBlockedMessage, jumpArrivalMessage, landingBlockedMessage } from "./status_bar_content.js";
 import { LandingBlockedEvent } from "../nova_plugin/planet_plugin.js";
+import { BoardingBlockedEvent } from "../nova_plugin/boarding_plugin.js";
 import { ResizeEvent, ScreenSize } from "./screen_size_plugin.js";
 import { Stage } from "./stage_resource.js";
 
@@ -120,6 +121,19 @@ const ShowLandingBlockedMessage = new System({
     },
 });
 
+// The boarding-gate feedback, mirroring the landing one: emitted in the
+// sim targeted at the boarding ship, re-emitted here, shown only on the
+// local player's client (PlayerShipSelector).
+const ShowBoardingBlockedMessage = new System({
+    name: 'ShowBoardingBlockedMessage',
+    events: [BoardingBlockedEvent],
+    args: [BoardingBlockedEvent, StatusLineResource, TimeResource,
+        PlayerShipSelector] as const,
+    step({ reason }, statusLine, { time }) {
+        statusLine.setMessage(boardingBlockedMessage(reason), time);
+    },
+});
+
 export const StatusMessagePlugin: Plugin = {
     name: 'StatusMessage',
     async build(world) {
@@ -157,11 +171,13 @@ export const StatusMessagePlugin: Plugin = {
         world.addSystem(StatusLineResize);
         world.addSystem(DrawStatusMessage);
         world.addSystem(ShowLandingBlockedMessage);
+        world.addSystem(ShowBoardingBlockedMessage);
     },
     remove(world) {
         world.removeSystem(StatusLineResize);
         world.removeSystem(DrawStatusMessage);
         world.removeSystem(ShowLandingBlockedMessage);
+        world.removeSystem(ShowBoardingBlockedMessage);
         const stage = world.resources.get(Stage);
         const statusLine = world.resources.get(StatusLineResource);
         if (stage && statusLine) {

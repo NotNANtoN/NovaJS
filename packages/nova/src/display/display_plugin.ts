@@ -23,6 +23,7 @@ import { ScreenSizePlugin } from "./screen_size_plugin.js";
 import { ShipAnimationPlugin } from "./ship_animation_plugin.js";
 import { SoundPlugin } from "./sound_plugin.js";
 import { SpaceportPlugin } from "./spaceport_plugin.js";
+import { BoardingDisplayPlugin } from "./boarding_plugin.js";
 import { CameraFocus, Space } from "./space_resource.js";
 import { Stage } from "./stage_resource.js";
 import { starfield } from "./starfield_plugin.js";
@@ -89,6 +90,9 @@ export const Display: Plugin = {
         await world.addPlugin(PlayerInfoPlugin);
         await world.addPlugin(MissionInfoPlugin);
         await world.addPlugin(SpaceportPlugin);
+        // After the spaceport so the plunder/capture dialogs render over
+        // the in-flight view; driven by the synced BoardingComponent.
+        await world.addPlugin(BoardingDisplayPlugin);
         await world.addPlugin(GateMapPlugin);
         await world.addPlugin(GateAnimationPlugin);
         await world.addPlugin(SoundPlugin);
@@ -107,6 +111,7 @@ export const Display: Plugin = {
         await world.removePlugin(SystemEnvironmentPlugin);
         await world.removePlugin(GateAnimationPlugin);
         await world.removePlugin(GateMapPlugin);
+        await world.removePlugin(BoardingDisplayPlugin);
         await world.removePlugin(SpaceportPlugin);
         await world.removePlugin(MissionInfoPlugin);
         await world.removePlugin(PlayerInfoPlugin);
