@@ -750,4 +750,162 @@ export const scenarios = [
             region('offer_right_border', 'Right metal frame border (vertical centre)', 1165, 500, 16, 80),
         ],
     },
+
+    // ========================================================================
+    // HAIL SWEEP — the communications (hail) dialogs (PICTs 8511-8514).
+    // Merged in a5b7adc1; the layout was eyeballed. All comm backgrounds share
+    // one structure in the references: two stacked text boxes top-LEFT, a
+    // vertical red-button column under them, and the target image filling a box
+    // on the RIGHT. Driven deterministically via window.novaHailDialog.show()
+    // with a crafted context (centered like the plugin's own control path).
+    // The image CONTENT (which ship/planet) legitimately differs; the frame,
+    // its image box, the left text boxes and the button column are the
+    // positionable chrome. Escort-comm button SEMANTICS diverge (ours offers
+    // fleet commands, the original manages a hired escort) and the haggle
+    // popup differs structurally — classified content, not MOVE.
+    // ========================================================================
+
+    {
+        id: 'hail_ship',
+        title: 'Hail — ship comm (8511)',
+        description: 'The ship communications dialog (greeting + Request '
+            + 'Assistance). Compares the 8511 frame, its left text/button '
+            + 'column and the right image box against hail/hail.png, '
+            + 'greetings.png and request_assistance.png (all the same 8511 '
+            + 'layout, different greeting text / target).',
+        params: { ship: 'nova:164', system: 'nova:130' },
+        hideDebug: true,
+        setup: async (page, driver) => {
+            await driver.showHail(page, {
+                variant: 'ship', heading: 'Class: Terrapin',
+                image: 'nova:5003', body: 'Channel open.',
+                assist: { free: false },
+            });
+            await driver.sleep(1200);
+        },
+        references: [
+            { name: 'hail', file: 'hail/hail.png' },
+            { name: 'greetings', file: 'hail/greetings.png' },
+            { name: 'request_assistance', file: 'hail/request_assistance.png' },
+        ],
+        regions: [
+            region('hail_frame', 'Whole comm frame', 748, 433, 423, 215),
+            region('hail_left_col', 'Left text boxes + button column', 756, 440, 182, 200),
+            region('hail_image_box', 'Right image box (border chrome)', 950, 435, 222, 208),
+        ],
+    },
+
+    {
+        id: 'hail_hostile',
+        title: 'Hail — hostile ship (8511 + bribe)',
+        description: 'A hostile ship comm: the hostile line plus a Beg for '
+            + 'Mercy (bribe) button above Close Channel. Compares the 8511 '
+            + 'frame, left column and image box against hail/hail_hostile.png.',
+        params: { ship: 'nova:164', system: 'nova:130' },
+        hideDebug: true,
+        setup: async (page, driver) => {
+            await driver.showHail(page, {
+                variant: 'ship', heading: 'Class: Fed Destroyer',
+                image: 'nova:5003',
+                body: 'You are scum, and we will destroy you.',
+                bribe: { amount: 20000, canAfford: true },
+            });
+            await driver.sleep(1200);
+        },
+        references: [
+            { name: 'hail_hostile', file: 'hail/hail_hostile.png' },
+        ],
+        regions: [
+            region('hail_frame', 'Whole comm frame', 748, 433, 423, 215),
+            region('hail_left_col', 'Left text boxes + button column', 756, 440, 182, 200),
+            region('hail_image_box', 'Right image box (border chrome)', 950, 435, 222, 208),
+        ],
+    },
+
+    {
+        id: 'hail_planet',
+        title: 'Hail — planet comm (8512)',
+        description: 'The planet communications dialog (larger 8512 frame). '
+            + 'Compares the frame, left text/button column and right image box '
+            + 'against hail/hail_planet.png. Our planet comm lacks the '
+            + 'Demand Tribute button (content gap); Close Channel and the '
+            + 'layout are compared.',
+        params: { ship: 'nova:164', system: 'nova:130' },
+        hideDebug: true,
+        setup: async (page, driver) => {
+            await driver.showHail(page, {
+                variant: 'planet', heading: 'Earth',
+                image: 'nova:10059',
+                body: 'Channel open to Earth.\n[Earth/Luna System]',
+            });
+            await driver.sleep(1200);
+        },
+        references: [
+            { name: 'hail_planet', file: 'hail/hail_planet.png' },
+        ],
+        regions: [
+            region('hailp_frame', 'Whole planet comm frame', 690, 392, 540, 295),
+            region('hailp_left_col', 'Left text boxes + button column', 698, 400, 210, 250),
+            region('hailp_image_box', 'Right image box (border chrome)', 905, 398, 330, 285),
+        ],
+    },
+
+    {
+        id: 'hail_escort',
+        title: 'Hail — escort comm (8513)',
+        description: 'The escort communications dialog (8513). Our escort '
+            + 'comm offers fleet commands (Attack/Defend/Formation/Hold/'
+            + 'Return); the original manages a hired escort (Upgrade/Sell/'
+            + 'Release) — a documented feature divergence, so the button '
+            + 'CONTENT differs. Compares the frame, left column and image box '
+            + 'against hail/hail_escort.png.',
+        params: { ship: 'nova:164', system: 'nova:130' },
+        hideDebug: true,
+        setup: async (page, driver) => {
+            await driver.showHail(page, {
+                variant: 'escort', heading: 'Hired Escort:',
+                image: 'nova:5003', body: 'Terrapin\nStandard',
+                escortCommands: true,
+            });
+            await driver.sleep(1200);
+        },
+        references: [
+            { name: 'hail_escort', file: 'hail/hail_escort.png' },
+        ],
+        regions: [
+            region('haile_frame', 'Whole escort comm frame', 748, 410, 424, 259),
+            region('haile_left_col', 'Left text boxes + button column', 756, 418, 182, 240),
+            region('haile_image_box', 'Right image box (border chrome)', 950, 418, 222, 245),
+        ],
+    },
+
+    {
+        id: 'hail_haggle',
+        title: 'Hail — beg for mercy / haggle (8514)',
+        description: 'The bribe-haggle screen reached from a hostile ship\'s '
+            + 'Beg for Mercy. The original shows a small 8514 popup ("Pay me X '
+            + 'credits" / Lower Price / Accept Price) OVER the hostile dialog; '
+            + 'ours replaces the dialog with the 8514 background and offers '
+            + 'Pay / Never Mind — a documented structural divergence. Compared '
+            + 'against hail/beg_mercy.png (frame position).',
+        params: { ship: 'nova:164', system: 'nova:130' },
+        hideDebug: true,
+        setup: async (page, driver) => {
+            await driver.showHail(page, {
+                variant: 'ship', heading: 'Class: Fed Destroyer',
+                image: 'nova:5003',
+                body: 'I\'m in a bad mood today, so it\'s going to cost extra.',
+                bribe: { amount: 20000, canAfford: true },
+            });
+            await driver.sleep(800);
+            await driver.clickContainer(page, 'Button:Beg for Mercy');
+            await driver.sleep(900);
+        },
+        references: [
+            { name: 'beg_mercy', file: 'hail/beg_mercy.png' },
+        ],
+        regions: [
+            region('haggle_frame', 'Haggle popup frame', 810, 462, 300, 156),
+        ],
+    },
 ];

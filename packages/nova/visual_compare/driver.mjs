@@ -205,6 +205,22 @@ async function firstVisibleButton(page, names) {
     return null;
 }
 
+/**
+ * Render the hail/comms dialog for a crafted HailContext, centered on
+ * screen. The plugin only centers the dialog on the real 'y' control
+ * path, so we position its container ourselves before show(); show()
+ * blocks on dismissal, so it's fired without awaiting. Deterministic —
+ * no ship spawning / targeting needed — which is what the chrome
+ * measurement wants.
+ */
+export async function showHail(page, context) {
+    await page.evaluate((ctx) => {
+        const dialog = window.novaHailDialog;
+        dialog.container.position.set(960, 540);
+        void dialog.show(ctx);
+    }, context);
+}
+
 /** Open the player-info dialog (control 'properties' = KeyP). */
 export async function openPlayerInfo(page) {
     await pressKey(page, 'KeyP');

@@ -152,91 +152,101 @@ export class HailDialog {
 
     private async renderMain(context: HailContext, originX: number,
         originY: number, width: number, height: number) {
-        // Target image on the left, per the reference screenshots.
+        // Layout measured against the hail/*.png references (all comm
+        // backgrounds share it): two stacked text boxes on the LEFT, a
+        // vertical column of red buttons under them, and the target image
+        // filling a framed box on the RIGHT. Offsets are proportional to
+        // the (per-PICT) frame size, calibrated on the 423x215 ship frame.
+        const leftX = originX + Math.round(width * 0.026);   // ~11 on ship
+        const leftWidth = Math.round(width * 0.44);          // left column
+        const buttonWidth = Math.round(width * 0.38);        // ~160 on ship
+
+        // Target image on the RIGHT, filling the frame's image box.
         if (context.image) {
             try {
                 const image = await this.displayAssets
                     .spriteFromPictAsync(context.image);
                 image.anchor.set(0.5);
-                const maxDim = Math.min(96, height - 90);
+                const maxDim = Math.min(width * 0.46, height * 0.92);
                 const scale = image.width > 0
                     ? Math.min(1, maxDim / Math.max(image.width, image.height))
                     : 1;
                 image.scale.set(scale);
-                image.position.set(originX + 60, originY + 60);
+                image.position.set(originX + Math.round(width * 0.74),
+                    originY + Math.round(height * 0.5));
                 this.content.addChild(image);
             } catch {
                 // Missing pict: skip the image, keep the text.
             }
         }
 
-        const textX = originX + 120;
         const heading = new PIXI.Text(context.heading, HEADING_FONT);
-        heading.position.set(textX, originY + 14);
+        heading.position.set(leftX, originY + Math.round(height * 0.06));
         this.content.addChild(heading);
 
         const body = new PIXI.Text(context.body,
-            { ...BODY_FONT, wordWrapWidth: width - 130 });
-        body.position.set(textX, originY + 36);
+            { ...BODY_FONT, wordWrapWidth: leftWidth });
+        body.position.set(leftX, originY + Math.round(height * 0.19));
         this.content.addChild(body);
 
-        // Buttons along the bottom.
-        const buttonY = originY + height - 30;
-        let bx = originX + 16;
-        const place = (button: Button) => {
-            button.container.position.set(bx, buttonY);
+        // Buttons: a bottom-anchored vertical column on the left, so
+        // Close Channel sits on the reference's bottom row and any
+        // Request Aid / Beg for Mercy stack above it.
+        const buttonSpacing = 28;
+        let buttonY = originY + height - 24;
+
+        // Close Channel (the original's label for the dismiss button).
+        const close = new Button(this.displayAssets, 'Close Channel',
+            buttonWidth, { x: leftX, y: buttonY });
+        close.click.subscribe(() => this.close());
+        this.content.addChild(close.container);
+        buttonY -= buttonSpacing;
+
+        if (context.bribe) {
+            const beg = new Button(this.displayAssets, 'Beg for Mercy',
+                buttonWidth, { x: leftX, y: buttonY });
+            beg.click.subscribe(() => {
+                this.phase = 'haggle';
+                void this.render();
+            });
+            this.content.addChild(beg.container);
+            buttonY -= buttonSpacing;
+        }
+
+        if (context.assist) {
+            const label = context.assist.free
+                ? 'Request Aid (free)' : 'Request Assistance';
+            const button = new Button(this.displayAssets, label, buttonWidth,
+                { x: leftX, y: buttonY });
+            button.click.subscribe(() => {
+                this.callbacks.requestAssistance();
+                this.close();
+            });
             this.content.addChild(button.container);
-            bx += 96;
-        };
+            buttonY -= buttonSpacing;
+        }
 
         if (context.escortCommands) {
+            // Our escort comm offers fleet commands (the original's escort
+            // comm instead manages a hired escort — upgrade/sell/release; a
+            // documented feature divergence). Stack them in the same left
+            // column above Close Channel.
             const commands: [EscortCommandName, string][] = [
                 ['attack', 'Attack'], ['defend', 'Defend'],
                 ['formation', 'Formation'], ['holdPosition', 'Hold'],
                 ['returnToBay', 'Return'],
             ];
-            // Two rows of command buttons to fit the escort frame.
-            commands.forEach(([command, label], i) => {
-                const button = new Button(this.displayAssets, label, 78);
-                const row = Math.floor(i / 3);
-                const col = i % 3;
-                button.container.position.set(originX + 16 + col * 84,
-                    buttonY - (1 - row) * 30);
+            for (const [command, label] of commands) {
+                const button = new Button(this.displayAssets, label,
+                    buttonWidth, { x: leftX, y: buttonY });
                 button.click.subscribe(() => {
                     this.callbacks.escortCommand(command);
                     this.close();
                 });
                 this.content.addChild(button.container);
-            });
+                buttonY -= buttonSpacing;
+            }
         }
-
-        if (context.assist) {
-            const label = context.assist.free
-                ? 'Request Aid (free)' : 'Request Aid';
-            const button = new Button(this.displayAssets, label, 130);
-            button.click.subscribe(() => {
-                this.callbacks.requestAssistance();
-                this.close();
-            });
-            place(button);
-            bx += 40;
-        }
-
-        if (context.bribe) {
-            const beg = new Button(this.displayAssets, 'Beg for Mercy', 110);
-            beg.click.subscribe(() => {
-                this.phase = 'haggle';
-                void this.render();
-            });
-            place(beg);
-            bx += 20;
-        }
-
-        // Done button, right-aligned.
-        const done = new Button(this.displayAssets, 'Done', 70,
-            { x: originX + width - 86, y: buttonY });
-        done.click.subscribe(() => this.close());
-        this.content.addChild(done.container);
     }
 
     private renderHaggle(originX: number, originY: number, width: number,
