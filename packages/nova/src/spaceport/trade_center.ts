@@ -111,10 +111,15 @@ export class TradeCenter extends Menu<Entity> {
         super(displayAssets, simulationData, 'nova:8510', controlEvents);
         this.container.name = 'TradeCenter';
 
+        // Measured against trade_center/*.png (1920x1080): the reference
+        // Buy/Sell/Done pill centers sit ~106px apart (screen x 853/959/1066),
+        // not the 120px this row used before — Buy already matched, but Sell
+        // and Done drifted right by ~14 and ~28px. -150/-44/+62 lands all
+        // three on the reference centers.
         this.buttons = {
             buy: new Button(displayAssets, 'Buy', 60, { x: -150, y: BUTTON_Y }),
-            sell: new Button(displayAssets, 'Sell', 60, { x: -30, y: BUTTON_Y }),
-            done: new Button(displayAssets, 'Done', 60, { x: 90, y: BUTTON_Y }),
+            sell: new Button(displayAssets, 'Sell', 60, { x: -44, y: BUTTON_Y }),
+            done: new Button(displayAssets, 'Done', 60, { x: 62, y: BUTTON_Y }),
         };
         // Option+click opens the bulk quantity dialog, as the
         // original's exchange does.

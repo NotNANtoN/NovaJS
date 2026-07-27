@@ -346,4 +346,408 @@ export const scenarios = [
             region('missioninfo_button_row', 'Abort / Done row', 731, 592, 460, 28),
         ],
     },
+
+    // ========================================================================
+    // DIALOG SWEEP — landed/dialog UI variants (dialog-sweep agent).
+    // Extends coverage to every remaining landed/dialog reference. Shared
+    // frames (trade 8510, bar 8503, mission BBS 8505, player-info
+    // 8518-8520, ship-info 8507, outfitter 8502) reuse the already-proven
+    // frame coordinates; the point is to measure each reference and surface
+    // any content/positioning drift, not to re-derive the chrome.
+    // ========================================================================
+
+    {
+        id: 'port_kane_bar',
+        title: 'Port Kane bar — second bar layout',
+        description: 'The Bar at Port Kane (a second stellar\'s bar). Any '
+            + 'entry mission-offer popup is dismissed first so the bar\'s own '
+            + '2x2 button grid shows. Compares the 8503 top border and the '
+            + 'Hire/Gamble/Holovid/Leave grid against bar/bar_port_kane.png; '
+            + 'same chrome as the Earth bar, different description text.',
+        params: { ship: 'nova:164', system: 'nova:128' },
+        hideDebug: true,
+        setup: async (page, driver) => {
+            await driver.landAt(page, 'planet nova:137');
+            await driver.clickContainer(page, 'Button:Bar');
+            await driver.waitForContainer(page, 'Bar');
+            await driver.sleep(800);
+            await driver.dismissOfferPopup(page);
+            await driver.sleep(600);
+        },
+        references: [
+            { name: 'bar_port_kane', file: 'bar/bar_port_kane.png' },
+        ],
+        regions: [
+            region('bar_top_border', 'Bar dialog top metal border', 773, 448, 340, 14),
+            region('bar_button_grid', 'Hire/Gamble/Holovid/Leave button grid', 812, 576, 308, 54),
+        ],
+    },
+
+    {
+        id: 'port_kane_trade',
+        title: 'Port Kane trade — price event + mission cargo',
+        description: 'The Trade Center at Port Kane. The reference shows a '
+            + 'deterministic food-surplus öops price event and a mission-cargo '
+            + 'line; those are content. Compares the 8510 frame top border, '
+            + 'the Buy/Sell/Done row and the price-event line position against '
+            + 'trade_center/trade_center_port_kane_with_mission_cargo_and_'
+            + 'lower_cost_food_event.png.',
+        // A save so a mission-cargo line and a stocked economy exist; the
+        // öops event is date-driven, so the default Jan 1 1177 date is kept.
+        save: {
+            ship: 'nova:164', outfits: [], system: 'nova:128',
+            credits: 600000,
+            cargo: [['mission:nova:700', 5]],
+        },
+        hideDebug: true,
+        setup: async (page, driver) => {
+            await driver.landAt(page, 'planet nova:137');
+            await driver.clickContainer(page, 'Button:Trade Center');
+            await driver.waitForContainer(page, 'TradeCenter');
+            await driver.sleep(1000);
+        },
+        references: [
+            { name: 'port_kane_trade', file: 'trade_center/trade_center_port_kane_with_mission_cargo_and_lower_cost_food_event.png' },
+        ],
+        regions: [
+            region('trade_top_border', 'Trade dialog top metal border', 768, 414, 388, 14),
+            region('trade_button_row', 'Buy / Sell / Done button row', 806, 636, 308, 22),
+            region('trade_list_header', 'Commodity / In Hold / Price header', 790, 428, 340, 12),
+        ],
+    },
+
+    {
+        id: 'earth_trade_variants',
+        title: 'Earth trade — content variants (chrome)',
+        description: 'Our Earth Trade Center captured once, its static chrome '
+            + '(8510 top border + Buy/Sell/Done row) compared against three '
+            + 'content variants of the same fixed frame: the plain board, the '
+            + 'Medical-Supplies selection, and a large cargo buy. Commodity '
+            + 'rows / prices / selection legitimately differ; the frame does '
+            + 'not.',
+        save: {
+            ship: 'nova:164', outfits: [], system: 'nova:130', credits: 5000000,
+        },
+        hideDebug: true,
+        setup: async (page, driver) => {
+            await driver.landAt(page, 'planet nova:128');
+            await driver.clickContainer(page, 'Button:Trade Center');
+            await driver.waitForContainer(page, 'TradeCenter');
+            await driver.sleep(900);
+        },
+        references: [
+            { name: 'earth_trade_center', file: 'trade_center/earth_trade_center.png' },
+            { name: 'medical_390', file: 'trade_center/390_medical_supplies.png' },
+            { name: 'buy_lots', file: 'trade_center/buy_lots_of_cargo.png' },
+        ],
+        regions: [
+            region('trade_top_border', 'Trade dialog top metal border', 768, 414, 388, 14),
+            region('trade_button_row', 'Buy / Sell / Done button row', 806, 636, 308, 22),
+        ],
+    },
+
+    {
+        id: 'trade_buy_quantity',
+        title: 'Trade buy — bulk quantity dialog',
+        description: 'Option-clicking Buy in the Trade Center opens the bulk '
+            + 'quantity dialog. The reference (buy_quantity.png) is the '
+            + 'original\'s NATIVE macOS dialog (blue default Buy button); ours '
+            + 'is a drawn grey-bevel panel — an intentional ART difference. '
+            + 'The measured region is the panel position, not its styling.',
+        save: {
+            ship: 'nova:164', outfits: [], system: 'nova:130', credits: 5000000,
+        },
+        hideDebug: true,
+        setup: async (page, driver) => {
+            await driver.landAt(page, 'planet nova:128');
+            await driver.clickContainer(page, 'Button:Trade Center');
+            await driver.waitForContainer(page, 'TradeCenter');
+            await driver.sleep(900);
+            // Medical Supplies (row 2) — matches the reference selection.
+            await driver.pressKeyN(page, 'ArrowDown', 2);
+            await driver.optionClick(page, 'Button:Buy');
+            await driver.waitForContainer(page, 'QuantityDialog');
+            await driver.sleep(500);
+        },
+        references: [
+            { name: 'buy_quantity', file: 'trade_center/buy_quantity.png' },
+        ],
+        regions: [
+            region('quantity_panel', 'Quantity dialog panel (position; ART styling)', 846, 486, 240, 104),
+        ],
+    },
+
+    {
+        id: 'earth_player_info_extras',
+        title: "Player info — Extras page",
+        description: 'The Extras page of the player-info dialog (KeyP → '
+            + 'Extras tab): owned outfits and ship trade-in value. Compares '
+            + 'the 8518-8520 frame, tab row (Extras greyed) and Done row '
+            + 'against p_properties/extras.png. Listed outfits / values '
+            + 'legitimately differ.',
+        params: { ship: 'nova:164', system: 'nova:130' },
+        hideDebug: true,
+        setup: async (page, driver) => {
+            await driver.openPlayerInfo(page);
+            await driver.clickContainer(page, 'Button:Extras');
+            await driver.sleep(400);
+        },
+        references: [
+            { name: 'extras', file: 'p_properties/extras.png' },
+        ],
+        regions: [
+            region('pinfo_frame', 'Whole dialog frame', 753, 425, 414, 231),
+            region('pinfo_tab_row', 'Tab row (Extras greyed)', 757, 429, 406, 36),
+            region('pinfo_done_row', 'Bottom strip with Done', 757, 615, 406, 37),
+        ],
+    },
+
+    {
+        id: 'earth_player_info_honors',
+        title: "Player info — Honors page",
+        description: 'The Honors page (KeyP → Honors tab). Ranks/honors are '
+            + 'not parsed yet (shows "None."), a documented content gap. '
+            + 'Compares the 8518-8520 frame, tab row (Honors greyed) and Done '
+            + 'row against p_properties/honors.png.',
+        params: { ship: 'nova:164', system: 'nova:130' },
+        hideDebug: true,
+        setup: async (page, driver) => {
+            await driver.openPlayerInfo(page);
+            await driver.clickContainer(page, 'Button:Honors');
+            await driver.sleep(400);
+        },
+        references: [
+            { name: 'honors', file: 'p_properties/honors.png' },
+        ],
+        regions: [
+            region('pinfo_frame', 'Whole dialog frame', 753, 425, 414, 231),
+            region('pinfo_tab_row', 'Tab row (Honors greyed)', 757, 429, 406, 36),
+            region('pinfo_done_row', 'Bottom strip with Done', 757, 615, 406, 37),
+        ],
+    },
+
+    {
+        id: 'earth_player_info_cargo_stuff',
+        title: "Player info — Cargo page with cargo aboard",
+        description: 'The Cargo page with cargo actually in the hold (a save '
+            + 'seeds Food + Medical Supplies), so the Jettison Cargo button '
+            + 'shows (greyed) beside Done — unlike the empty-hold cargo page. '
+            + 'Compares the frame, tab row and the Jettison/Done bottom row '
+            + 'against p_properties/cargo_with_stuff.png.',
+        save: {
+            ship: 'nova:164', outfits: [], system: 'nova:130', credits: 200000,
+            cargo: [['cargo:0', 30], ['cargo:2', 20]],
+        },
+        hideDebug: true,
+        setup: async (page, driver) => {
+            await driver.openPlayerInfo(page);
+            await driver.clickContainer(page, 'Button:Cargo');
+            await driver.sleep(400);
+        },
+        references: [
+            { name: 'cargo_with_stuff', file: 'p_properties/cargo_with_stuff.png' },
+        ],
+        regions: [
+            region('pinfo_frame', 'Whole dialog frame', 753, 425, 414, 231),
+            region('pinfo_tab_row', 'Tab row (Cargo greyed)', 757, 429, 406, 36),
+            region('pinfo_bottom_row', 'Jettison Cargo + Done row', 757, 615, 406, 37),
+        ],
+    },
+
+    {
+        id: 'heavy_shuttle_info',
+        title: 'Shipyard ship info — Heavy Shuttle',
+        description: 'The shipyard Info dialog for the Heavy Shuttle (a '
+            + 'different ship than the base ship_info scenario). Compares the '
+            + '8507 frame, name strip and Done button against '
+            + 'shipyard/heavy_shuttle_info.png. Ship PICT/stats differ from '
+            + 'the retail capture; the frame chrome should match.',
+        params: { ship: 'nova:164', system: 'nova:130' },
+        hideDebug: true,
+        setup: async (page, driver) => {
+            await driver.landAt(page, 'planet nova:128');
+            await driver.clickContainer(page, 'Button:Shipyard');
+            await driver.waitForContainer(page, 'Shipyard');
+            await driver.sleep(400);
+            // Grid is displayWeight-sorted; Heavy Shuttle is 19 steps in.
+            await driver.pressKeyN(page, 'ArrowRight', 19);
+            await driver.clickContainer(page, 'Button:Info');
+            await driver.waitForContainer(page, 'ShipInfo');
+            await driver.sleep(1000);
+        },
+        references: [
+            { name: 'heavy_shuttle_info', file: 'shipyard/heavy_shuttle_info.png' },
+        ],
+        regions: [
+            region('shipinfo_frame', 'Whole dialog frame', 653, 271, 614, 537),
+            region('shipinfo_name_strip', 'Ship name strip', 655, 682, 610, 30),
+            region('shipinfo_done', 'Done button', 1168, 780, 90, 24),
+        ],
+    },
+
+    {
+        id: 'ida_frigate_info',
+        title: 'Shipyard ship info — IDA Frigate',
+        description: 'The shipyard Info dialog for the IDA Frigate. Compares '
+            + 'the 8507 frame, name strip and Done button against '
+            + 'shipyard/ida_frigate_info.png.',
+        params: { ship: 'nova:164', system: 'nova:130' },
+        hideDebug: true,
+        setup: async (page, driver) => {
+            await driver.landAt(page, 'planet nova:128');
+            await driver.clickContainer(page, 'Button:Shipyard');
+            await driver.waitForContainer(page, 'Shipyard');
+            await driver.sleep(400);
+            await driver.pressKeyN(page, 'ArrowRight', 8);
+            await driver.clickContainer(page, 'Button:Info');
+            await driver.waitForContainer(page, 'ShipInfo');
+            await driver.sleep(1000);
+        },
+        references: [
+            { name: 'ida_frigate_info', file: 'shipyard/ida_frigate_info.png' },
+        ],
+        regions: [
+            region('shipinfo_frame', 'Whole dialog frame', 653, 271, 614, 537),
+            region('shipinfo_name_strip', 'Ship name strip', 655, 682, 610, 30),
+            region('shipinfo_done', 'Done button', 1168, 780, 90, 24),
+        ],
+    },
+
+    {
+        id: 'earth_mission_bbs_selected',
+        title: 'Mission BBS — selected mission',
+        description: 'The Mission BBS with a mission selected (highlighted in '
+            + 'the list, its brief shown in the right pane). Compares the 8505 '
+            + 'top border, list pane, description pane and Accept/Leave row '
+            + 'against mission_bbs/un_shipping_mission.png. Which mission is '
+            + 'offered/selected legitimately differs (random generation); the '
+            + 'panes and chrome do not.',
+        params: { ship: 'nova:164', system: 'nova:130' },
+        hideDebug: true,
+        setup: async (page, driver) => {
+            await driver.landAt(page, 'planet nova:128');
+            await driver.clickContainer(page, 'Button:Mission BBS');
+            await driver.waitForContainer(page, 'MissionBoard-Mission BBS');
+            await driver.sleep(800);
+            // Select the last offer, as the reference selects the bottom row.
+            await driver.pressKeyN(page, 'ArrowDown', 4);
+            await driver.sleep(400);
+        },
+        references: [
+            { name: 'un_shipping_mission', file: 'mission_bbs/un_shipping_mission.png' },
+        ],
+        regions: [
+            region('mission_top_border', 'Mission dialog top metal border', 703, 438, 510, 14),
+            region('mission_button_row', 'Accept / Leave button row', 970, 611, 200, 22),
+            region('mission_list_pane', 'Left mission-list pane', 712, 468, 205, 140),
+            region('mission_desc_pane', 'Right description pane', 928, 478, 262, 120),
+        ],
+    },
+
+    {
+        id: 'earth_mission_bbs_accepted',
+        title: 'Mission BBS — after accepting',
+        description: 'The Mission BBS after accepting an offer: it moves under '
+            + 'the "Active missions" header and the status line confirms it. '
+            + 'Compares the 8505 top border, list pane and Accept/Leave row '
+            + 'against mission_bbs/accepted_un_mission.png. The specific '
+            + 'mission differs; the layout does not.',
+        params: { ship: 'nova:164', system: 'nova:130' },
+        hideDebug: true,
+        setup: async (page, driver) => {
+            await driver.landAt(page, 'planet nova:128');
+            await driver.clickContainer(page, 'Button:Mission BBS');
+            await driver.waitForContainer(page, 'MissionBoard-Mission BBS');
+            await driver.sleep(800);
+            // Accept the first acceptable listing (KeyA = accept control).
+            await driver.pressKey(page, 'KeyA');
+            await driver.sleep(600);
+        },
+        references: [
+            { name: 'accepted_un_mission', file: 'mission_bbs/accepted_un_mission.png' },
+        ],
+        regions: [
+            region('mission_top_border', 'Mission dialog top metal border', 703, 438, 510, 14),
+            region('mission_button_row', 'Accept / Leave button row', 970, 611, 200, 22),
+            region('mission_list_pane', 'Left mission-list pane', 712, 468, 205, 140),
+        ],
+    },
+
+    {
+        id: 'earth_outfitter_denial',
+        title: 'Outfitter — denial caption + greyed Buy',
+        description: 'The outfitter driven into a purchase-denial state '
+            + '(mass/hold filled by bulk buys, then a further buy attempted): '
+            + 'the right info pane shows a persistent "Can\'t ..." caption and '
+            + 'the Buy button greys. The four denial references differ only in '
+            + 'the caption WORDING (content) and which button greys; the '
+            + 'measured chrome — info-pane block, caption line position and '
+            + 'button row — is identical across all of them.',
+        params: { ship: 'nova:164', system: 'nova:130' },
+        hideDebug: true,
+        setup: async (page, driver) => {
+            await driver.landAt(page, 'planet nova:128');
+            await driver.clickContainer(page, 'Button:Outfitter');
+            await driver.waitForContainer(page, 'Outfitter');
+            await driver.sleep(1500);
+            // Fill the ship's outfit mass with bulk buys of several grid
+            // outfits (the outfitter ignores credits), then a further buy
+            // trips the "Can't hold ..." denial. Skip the first tile
+            // (a mission-granting Trainee Program).
+            for (let i = 0; i < 6; i++) {
+                await driver.pressKey(page, 'ArrowRight');
+                await driver.sleep(150);
+                await driver.optionClick(page, 'Button:Buy');
+                await driver.sleep(400);
+                // Confirm the bulk quantity (fills to the max allowed).
+                await driver.pressKey(page, 'Enter');
+                await driver.sleep(300);
+            }
+            // A final plain buy on the current selection surfaces the
+            // persistent denial caption + greys Buy.
+            await driver.clickContainer(page, 'Button:Buy');
+            await driver.sleep(400);
+        },
+        references: [
+            { name: 'cant_have_any', file: 'outfitter/earth_outfitter_cant_have_any.png' },
+            { name: 'cant_have_any_more', file: 'outfitter/earth_outfitter_cant_have_any_more.png' },
+            { name: 'cant_hold_any', file: 'outfitter/earth_outfitter_cant_hold_any.png' },
+            { name: 'cant_hold_any_more', file: 'outfitter/earth_outfitter_cant_hold_any_more.png' },
+            { name: 'carbon_fiber_cant_hold_any_more', file: 'outfitter/earth_outfitter_carbon_fiber_cant_hold_any_more.png' },
+        ],
+        regions: [
+            region('outfitter_frame', 'Whole dialog frame', 578, 380, 765, 321),
+            region('outfitter_button_row', 'Buy/Sell/Done button row', 660, 668, 520, 30),
+            region('outfitter_info_block', 'Right info pane (Price/Mass/caption)', 1188, 594, 148, 92),
+        ],
+    },
+
+    {
+        id: 'bar_offer_popup',
+        title: 'Mission-offer popup (8521-8523) — frame & buttons',
+        description: 'The mission-offer popup chrome. Our spaceport does not '
+            + 'present offer popups on landing (only the bar and BBS surface '
+            + 'missions), so this drives the Earth bar\'s entry offer to raise '
+            + 'the same 8521-8523 offer frame, and measures its centered frame '
+            + 'borders against spaceport/kiniké_kont_probe_mission_offer_in_'
+            + 'spaceport.png. The popup is vertically CENTERED and its height '
+            + 'tracks the (differing) text length, so only the vertical-centre '
+            + 'border bands are position-comparable; the button-row Y and the '
+            + 'text/background legitimately differ.',
+        params: { ship: 'nova:164', system: 'nova:130' },
+        hideDebug: true,
+        setup: async (page, driver) => {
+            await driver.landAt(page, 'planet nova:128');
+            await driver.clickContainer(page, 'Button:Bar');
+            await driver.waitForContainer(page, 'OfferPopup');
+            await driver.sleep(1000);
+        },
+        references: [
+            { name: 'kinike_offer', file: 'spaceport/kiniké_kont_probe_mission_offer_in_spaceport.png' },
+        ],
+        regions: [
+            region('offer_left_border', 'Left metal frame border (vertical centre)', 740, 500, 16, 80),
+            region('offer_right_border', 'Right metal frame border (vertical centre)', 1165, 500, 16, 80),
+        ],
+    },
 ];
