@@ -44,6 +44,69 @@ const STATUSBAR_REGIONS = [
     region('statusbar_bottom_chrome', 'Lower metal chrome (text-free)', 1726, 620, 194, 145),
 ];
 
+// --- Star-map dialog chrome (the nova:8509 frame, centered) ------------------
+// Identical positionable chrome across every map variant: the frame border,
+// the bottom button row, the right properties column and the Ports/Hazards/
+// date line. Validated against map_single_jump_route.png by the `starmap`
+// scenario; reused so every map reference re-measures the same coordinates.
+// (The map graph, route lines, borders and mission marks inside the frame are
+// dynamic/overlay content, compared only where a scenario adds an explicit
+// overlay region.)
+const MAP_FRAME = region('map_frame', 'Whole dialog frame', 659, 281, 603, 517);
+const MAP_BUTTON_ROW =
+    region('map_button_row', 'Bottom button row', 660, 750, 601, 48);
+const MAP_INFO_PANEL =
+    region('map_info_panel', 'Right info panel (Destination/Govt/...)',
+        1140, 300, 122, 420);
+const MAP_BOTTOM_INFO =
+    region('map_bottom_info', 'Ports / Nav hazards / date line', 668, 718, 470, 44);
+
+// The five Preferences tabs (set_pref_1..5), captured one per scenario. The
+// original's Preferences is a native macOS window placed upper-center; ours is
+// a centered HTML modal with the same tab bar (Game Settings + four control
+// groups) and the same toggles/bindings. The tab order matches the reference
+// captures left-to-right. Placement (centered vs upper-center) and native-vs-
+// HTML rendering differ — CONTENT; the structure (tabs, two-column toggles,
+// binding rows, Cancel/OK) is the faithful part we verify by eye.
+const PREFS_TABS = [
+    { file: 'set_pref_1', label: 'Game Settings' },
+    { file: 'set_pref_2', label: 'Navigation Controls' },
+    { file: 'set_pref_3', label: 'Battle Controls' },
+    { file: 'set_pref_4', label: 'Escort Controls' },
+    { file: 'set_pref_5', label: 'Misc Controls' },
+];
+
+function prefsScenarios() {
+    return PREFS_TABS.map((tab, index) => ({
+        id: `title_prefs_${index + 1}`,
+        title: `Title — Preferences tab: ${tab.label}`,
+        description: `The Preferences dialog (novaTitle action "setPrefs") on `
+            + `the "${tab.label}" tab, vs title_screen/${tab.file}.png. Native `
+            + `macOS window (upper-center) vs our centered HTML modal — `
+            + `CONTENT. The tab bar, two-column layout and Cancel/OK are the `
+            + `structural match we care about.`,
+        entry: 'title',
+        params: {},
+        hideDebug: false,
+        setup: async (page, driver) => {
+            await driver.fireTitleAction(page, 'setPrefs');
+            await driver.waitForTestId(page, 'preferences-dialog');
+            if (index > 0) {
+                await page.click(`[data-testid="prefs-tab-${index}"]`);
+            }
+            await driver.sleep(400);
+        },
+        references: [
+            { name: tab.file, file: `title_screen/${tab.file}.png` },
+        ],
+        regions: [
+            // Reference window: x628-1291, y195-498 (measured on set_pref_1);
+            // ours is a centered HTML modal (minWidth 560).
+            region('prefs_modal', 'Preferences dialog area', 640, 360, 640, 360),
+        ],
+    }));
+}
+
 export const scenarios = [
     {
         id: 'in_space',
@@ -58,6 +121,14 @@ export const scenarios = [
             { name: 'in_space', file: 'space/in_space.png' },
             { name: 'in_space_2', file: 'space/in_space_2.png' },
             { name: 'in_space_3', file: 'space/in_space_3.png' },
+            // space/board_ship.png is a flight capture with the (unimplemented)
+            // boarding-plunder dialog floating over the center — we skip that
+            // dialog and only compare the right status-bar column, whose chrome
+            // is the same right-anchored panel as the other in-space frames.
+            // Dynamic content there (target ship name, cargo readout, credits)
+            // legitimately differs; the radar box / bars / metal chrome should
+            // not.
+            { name: 'board_ship', file: 'space/board_ship.png' },
         ],
         regions: STATUSBAR_REGIONS,
     },
@@ -73,12 +144,247 @@ export const scenarios = [
         references: [
             { name: 'map', file: 'map/map_single_jump_route.png' },
         ],
-        regions: [
-            region('map_frame', 'Whole dialog frame', 659, 281, 603, 517),
-            region('map_button_row', 'Bottom button row', 660, 750, 601, 48),
-            region('map_info_panel', 'Right info panel (Destination/Govt/...)', 1140, 300, 122, 420),
-            region('map_bottom_info', 'Ports / Nav hazards / date line', 668, 718, 470, 44),
+        regions: [MAP_FRAME, MAP_BUTTON_ROW, MAP_INFO_PANEL, MAP_BOTTOM_INFO],
+    },
+    {
+        id: 'map_multi_jump_route',
+        title: 'Star map — multi-jump route',
+        description: 'A pinned multi-jump route (shift-click waypoints, driven '
+            + 'through SystemGraph.onClickSystem). Compare the same dialog '
+            + 'chrome against map_multi_jump_route.png, plus a region over the '
+            + 'route-line area: the multi-jump route must render as the '
+            + 'STRONGER green line (map/notes.txt). The exact pinned systems '
+            + 'and the Destination readout legitimately differ from the '
+            + 'reference (route lines are dynamic overlay content).',
+        params: { ship: 'nova:164', system: 'nova:130' },
+        hideDebug: true,
+        setup: async (page, driver) => {
+            await driver.openStarmap(page);
+            // Pin a waypoint a few hops out; expandRoute fills the gap from
+            // Sol with the shortest path, drawing the strong multi-jump line.
+            await driver.plotRoute(page, { hops: 3 });
+            await driver.sleep(400);
+        },
+        references: [
+            { name: 'map_multi', file: 'map/map_multi_jump_route.png' },
         ],
+        regions: [
+            MAP_FRAME, MAP_BUTTON_ROW,
+            // The route-line band around the current system (Sol) — a
+            // full-frame-style overlay check, not chrome. Route geometry is
+            // dynamic; classified by eye, not by threshold.
+            region('map_route_band', 'Route-line band around Sol',
+                820, 470, 220, 160),
+        ],
+    },
+    {
+        id: 'map_multi_and_normal',
+        title: 'Star map — multi-jump + single-jump route',
+        description: 'A pinned multi-jump route AND a single-jump pick set at '
+            + 'once (map/notes.txt: both may be selected; the multi route takes '
+            + 'precedence and renders stronger). Compare the dialog chrome '
+            + 'against multi_jump_route_and_normal_route_set.png and eyeball the '
+            + 'strong-vs-weak line rendering in the route band.',
+        params: { ship: 'nova:164', system: 'nova:130' },
+        hideDebug: true,
+        setup: async (page, driver) => {
+            await driver.openStarmap(page);
+            // Pin a multi-jump waypoint AND set a single-jump adjacent pick.
+            await driver.plotRoute(page, { hops: 3, alsoSingle: true });
+            await driver.sleep(400);
+        },
+        references: [
+            { name: 'map_multi_normal',
+              file: 'map/multi_jump_route_and_normal_route_set.png' },
+        ],
+        regions: [
+            MAP_FRAME, MAP_BUTTON_ROW,
+            region('map_route_band', 'Route-line band around Sol',
+                820, 470, 220, 160),
+        ],
+    },
+    {
+        id: 'map_find_system',
+        title: 'Star map — Find dialog',
+        description: 'The Find dialog opened from the map (map/find_system.png). '
+            + 'It is drawn with Graphics (not a game PICT frame), centered on '
+            + "the map like the original's native Find sheet. Compare the "
+            + 'panel frame and the Cancel/Find button row. Known CONTENT '
+            + "differences: the original's sheet carries the NOVA app icon at "
+            + 'left and a wider field; ours omits the icon. Text is HTML/Pixi '
+            + 'vs the OS sheet.',
+        params: { ship: 'nova:164', system: 'nova:130' },
+        hideDebug: true,
+        setup: async (page, driver) => {
+            await driver.openStarmap(page);
+            await driver.clickStarmapButton(page, 'Find');
+            await driver.waitForContainer(page, 'FindDialog');
+            await driver.sleep(500);
+        },
+        references: [
+            { name: 'find_system', file: 'map/find_system.png' },
+        ],
+        regions: [
+            // Reference white panel interior spans x818-1102, y488-592
+            // (measured); the outer frame + icon column start ~x800. Ours is
+            // the 300x104 panel centered on screen (x810-1110, y488-592).
+            region('find_panel', 'Find dialog panel frame', 803, 484, 312, 114),
+            region('find_button_row', 'Cancel / Find button row',
+                820, 556, 300, 34),
+        ],
+    },
+    {
+        id: 'map_borders_off',
+        title: 'Star map — borders off (baseline)',
+        description: 'The map with government borders OFF (the default). The '
+            + 'left button reads "Show Borders". Compare the dialog chrome '
+            + 'against map/borders_off.png. The info panel / route legitimately '
+            + 'differ (fresh unexplored pilot vs the reference capture).',
+        params: { ship: 'nova:164', system: 'nova:130' },
+        hideDebug: true,
+        setup: async (page, driver) => { await driver.openStarmap(page); },
+        references: [
+            { name: 'borders_off', file: 'map/borders_off.png' },
+        ],
+        regions: [MAP_FRAME, MAP_BUTTON_ROW],
+    },
+    {
+        id: 'map_govt_borders',
+        title: 'Star map — government borders on',
+        description: 'The map with Show Borders toggled ON (button relabels to '
+            + '"Hide Borders"). Compare the dialog chrome against '
+            + 'map/govt_borders.png, plus a border-blob region. Our borders are '
+            + 'known-approximate translucent blobs (two concentric circles per '
+            + "governed system), not the original's soft territory shading — "
+            + 'classified ART.',
+        params: { ship: 'nova:164', system: 'nova:130' },
+        hideDebug: true,
+        setup: async (page, driver) => {
+            await driver.openStarmap(page);
+            await driver.clickStarmapButton(page, 'Show Borders');
+            await driver.sleep(500);
+        },
+        references: [
+            { name: 'govt_borders', file: 'map/govt_borders.png' },
+        ],
+        regions: [
+            MAP_FRAME, MAP_BUTTON_ROW,
+            // The button relabels to "Hide Borders" — measured on the same
+            // left button as "Show Borders".
+            region('map_borders_button', 'Left button ("Hide Borders")',
+                668, 768, 138, 26),
+            // Border-blob fill around the Sol cluster (ART, not chrome).
+            region('map_border_blob', 'Government border blob (approximate ART)',
+                760, 430, 260, 200),
+        ],
+    },
+    {
+        id: 'map_zoomed_out',
+        title: 'Star map — zoomed out',
+        description: 'The map zoomed out (the "-" button) to show a wider view, '
+            + 'like map/map_zoomed_out_showing_far_away_mission.png. Compare the '
+            + 'dialog chrome. The zoom-level pills and the far-away mission mark '
+            + 'are dynamic/overlay content; the pill styling is a known ART gap '
+            + '(skipped).',
+        params: { ship: 'nova:164', system: 'nova:130' },
+        hideDebug: true,
+        setup: async (page, driver) => {
+            await driver.openStarmap(page);
+            await driver.clickStarmapButton(page, '-');
+            await driver.clickStarmapButton(page, '-');
+            await driver.sleep(500);
+        },
+        references: [
+            { name: 'map_zoomed_out',
+              file: 'map/map_zoomed_out_showing_far_away_mission.png' },
+        ],
+        regions: [MAP_FRAME, MAP_BUTTON_ROW],
+    },
+    {
+        id: 'map_over_spaceport',
+        title: 'Star map — opened over the spaceport',
+        description: 'The map opened with KeyM while docked at Earth '
+            + '(map/map_open_over_spaceport.png). The spaceport forwards the '
+            + 'map key; the starmap re-adds itself to the top of the stage so '
+            + 'it draws over the docked spaceport. Compare the dialog chrome — '
+            + 'it sits at the same centered position as the in-flight map. The '
+            + 'status bar shows the docked state (empty radar, Stellar '
+            + 'Navigation: Earth) — dynamic content.',
+        params: { ship: 'nova:164', system: 'nova:130' },
+        hideDebug: true,
+        setup: async (page, driver) => {
+            await driver.landAt(page, 'planet nova:128');
+            await driver.openStarmap(page);
+        },
+        references: [
+            { name: 'map_over_spaceport', file: 'map/map_open_over_spaceport.png' },
+        ],
+        regions: [MAP_FRAME, MAP_BUTTON_ROW],
+    },
+    {
+        id: 'bbs_map_green_mark',
+        title: 'Star map from BBS — selected mission (green mark)',
+        description: 'The map opened (KeyM) from the Mission BBS with a mission '
+            + 'selected: the original marks the selected listing\'s destination '
+            + 'GREEN (cicn 15001) — mission_bbs/notes.txt. The BBS auto-selects '
+            + 'the first offer, so opening the map draws the green viewed mark '
+            + 'at that mission\'s destination. Compared against the '
+            + 'green-mark references; the marked SYSTEM legitimately differs '
+            + '(our first Earth offer vs the reference capture\'s), so the mark '
+            + 'placement is a rendering check (arrow anchored above-right of the '
+            + 'system dot), not a coordinate match — CONTENT. The dialog chrome '
+            + 'is the measured signal.',
+        params: { ship: 'nova:164', system: 'nova:130' },
+        hideDebug: true,
+        setup: async (page, driver) => {
+            await driver.landAt(page, 'planet nova:128');
+            await driver.clickContainer(page, 'Button:Mission BBS');
+            await driver.waitForContainer(page, 'MissionBoard-Mission BBS');
+            await driver.sleep(1000);
+            // The BBS forwards 'm' to open the map with the selected
+            // listing's green viewed marks.
+            await driver.pressKey(page, 'KeyM');
+            await driver.waitForContainer(page, 'StarMap');
+            await driver.sleep(1200);
+        },
+        references: [
+            { name: 'green_mark',
+              file: 'mission_bbs/selected_mission_destination_green_mark.png' },
+            { name: 'un_shipping_green',
+              file: 'mission_bbs/un_shipping_mission_selected_destination_green_mark.png' },
+        ],
+        regions: [MAP_FRAME, MAP_BUTTON_ROW],
+    },
+    {
+        id: 'bbs_map_orange_green_mark',
+        title: 'Star map from BBS — accepted (orange) + selected (green)',
+        description: 'A mission accepted (its destination marked ORANGE, cicn '
+            + '15000) plus a still-selected listing marked GREEN — both may '
+            + 'coexist on the map (mission_bbs/notes.txt). Driven by accepting '
+            + 'the first BBS offer, then opening the map (which rides the active '
+            + 'orange marks alongside the selected green ones). Marked systems '
+            + 'differ from the reference capture (CONTENT); the chrome is the '
+            + 'measured signal and the check is that both mark colors render.',
+        params: { ship: 'nova:164', system: 'nova:130' },
+        hideDebug: true,
+        setup: async (page, driver) => {
+            await driver.landAt(page, 'planet nova:128');
+            await driver.clickContainer(page, 'Button:Mission BBS');
+            await driver.waitForContainer(page, 'MissionBoard-Mission BBS');
+            await driver.sleep(1000);
+            // Accept the auto-selected first offer (adds an active mission ->
+            // orange mark), then open the map.
+            await driver.clickContainer(page, 'Button:Accept');
+            await driver.sleep(800);
+            await driver.pressKey(page, 'KeyM');
+            await driver.waitForContainer(page, 'StarMap');
+            await driver.sleep(1200);
+        },
+        references: [
+            { name: 'orange_green',
+              file: 'mission_bbs/accepted_un_mission_orange_mark_and_selected_mission_green_mark.png' },
+        ],
+        regions: [MAP_FRAME, MAP_BUTTON_ROW],
     },
     {
         id: 'earth_spaceport',
@@ -287,6 +593,92 @@ export const scenarios = [
             region('title_top_frame', 'Top metal frame band', 620, 165, 680, 90),
         ],
     },
+    // ------------------------------------------------------------------------
+    // Title-screen modal dialogs (HTML overlays over the Pixi title). Captured
+    // full-page (Puppeteer grabs the DOM overlay and the canvas together).
+    // These are DELIBERATELY different rendering tech from the originals: the
+    // retail dialogs are native OS sheets/windows (an in-frame credits panel,
+    // Aqua alert sheets, a Finder file picker) placed upper-/mid-screen, while
+    // ours are custom HTML modals rendered screen-centered. The regions below
+    // sit over OUR centered modal so the report captures our chrome; the diff
+    // vs the reference is expected to be large and is classified CONTENT
+    // (different dialog implementation + HTML vs bitmap fonts). What we check
+    // by eye is that our modal is structurally faithful (right fields, tabs,
+    // buttons) — not pixel parity with a native OS dialog.
+    {
+        id: 'title_about',
+        title: 'Title — About dialog (HTML modal)',
+        description: 'The About panel (novaTitle action "about"). The original '
+            + 'draws its credits in a black panel embedded in the title frame '
+            + 'with a red "Okay"; ours is a centered HTML modal with a dark '
+            + 'credits body and an "Okay" button. Structural match, different '
+            + 'rendering tech / placement — CONTENT.',
+        entry: 'title',
+        params: {},
+        hideDebug: false,
+        setup: async (page, driver) => {
+            await driver.fireTitleAction(page, 'about');
+            await driver.waitForTestId(page, 'about-dialog');
+            await driver.sleep(400);
+        },
+        references: [
+            { name: 'about', file: 'title_screen/about.png' },
+        ],
+        regions: [
+            region('about_modal', 'About dialog area (centered HTML modal)',
+                640, 340, 640, 400),
+        ],
+    },
+    {
+        id: 'title_new_pilot',
+        title: 'Title — New Pilot dialog (HTML modal)',
+        description: 'The New Pilot dialog (novaTitle action "newPilot"). Both '
+            + 'the original (a native Aqua sheet) and ours (HTML modal) carry '
+            + 'the same fields — Full Name "Shane Merrol", Nickname "Hawkeye", '
+            + 'Gender, Strict Play, Cancel/OK. Structure matches closely; '
+            + 'placement (centered vs the sheet position) and native-vs-HTML '
+            + 'rendering differ — CONTENT.',
+        entry: 'title',
+        params: {},
+        hideDebug: false,
+        setup: async (page, driver) => {
+            await driver.fireTitleAction(page, 'newPilot');
+            await driver.waitForTestId(page, 'new-pilot-dialog');
+            await driver.sleep(400);
+        },
+        references: [
+            { name: 'new_pilot', file: 'title_screen/new_pilot.png' },
+        ],
+        regions: [
+            // Reference Aqua sheet: x797-1123, y434-646 (measured). Ours is a
+            // centered HTML modal at roughly the same center.
+            region('new_pilot_modal', 'New Pilot dialog area', 760, 420, 400, 250),
+        ],
+    },
+    {
+        id: 'title_open_pilot',
+        title: 'Title — Open Pilot dialog (HTML modal)',
+        description: 'The Open Pilot dialog (novaTitle action "openPilot"). The '
+            + 'original is the native macOS file picker (Finder column view); '
+            + 'ours is a custom HTML pilot list with Cancel/Open. Fundamentally '
+            + 'different surfaces — CONTENT. With a reset pilot our list is '
+            + 'empty ("no saved pilots").',
+        entry: 'title',
+        params: {},
+        hideDebug: false,
+        setup: async (page, driver) => {
+            await driver.fireTitleAction(page, 'openPilot');
+            await driver.waitForTestId(page, 'open-pilot-dialog');
+            await driver.sleep(400);
+        },
+        references: [
+            { name: 'open_pilot', file: 'title_screen/open_pilot.png' },
+        ],
+        regions: [
+            region('open_pilot_modal', 'Open Pilot dialog area', 700, 360, 520, 340),
+        ],
+    },
+    ...prefsScenarios(),
     {
         id: 'ship_info',
         title: 'Shipyard ship info dialog (8507)',
