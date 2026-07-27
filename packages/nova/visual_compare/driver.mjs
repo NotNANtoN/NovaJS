@@ -129,6 +129,74 @@ export async function openStarmap(page) {
     await sleep(1500);
 }
 
+/** Clicks a starmap button by its Button container name (e.g.
+ * 'Button:Show Borders'), routing through the same pointer path. */
+export async function clickStarmapButton(page, label) {
+    await clickContainer(page, `Button:${label}`);
+}
+
+/**
+ * Plots a route in the open starmap by reading the graph's own shortest-path
+ * table (SystemGraph.routes, keyed by system id -> path from the current
+ * system) so the driven systems are guaranteed reachable regardless of which
+ * stock system names happen to sit near Sol. Pins the first system exactly
+ * `hops` jumps away as a multi-jump waypoint; when `alsoSingle` is set, also
+ * plain-clicks an adjacent system to set the weaker single-jump line.
+ * Returns the picked system names for logging.
+ */
+export async function plotRoute(page, { hops = 3, alsoSingle = false } = {}) {
+    const picked = await page.evaluate((hops, alsoSingle) => {
+        const graph = window.novaStarmap?.systemGraph;
+        if (!graph) {
+            return null;
+        }
+        let multiId;
+        let singleId;
+        for (const [id, path] of graph.routes) {
+            if (!multiId && path.length === hops) {
+                multiId = id;
+            }
+            if (!singleId && path.length === 1) {
+                singleId = id;
+            }
+        }
+        // Fall back to any multi-hop system if none is exactly `hops` away.
+        if (!multiId) {
+            for (const [id, path] of graph.routes) {
+                if (path.length >= 2) {
+                    multiId = id;
+                    break;
+                }
+            }
+        }
+        if (multiId) {
+            graph.onClickSystem(multiId, true);
+        }
+        if (alsoSingle && singleId) {
+            graph.onClickSystem(singleId, false);
+        }
+        const nameOf = (id) => graph.systems.get(id)?.name;
+        return { multi: nameOf(multiId), single: alsoSingle ? nameOf(singleId) : undefined };
+    }, hops, alsoSingle);
+    await sleep(300);
+    return picked;
+}
+
+/** Fires a title-screen action (about / newPilot / openPilot / setPrefs)
+ * through the TitleScreen's action subject, which the browser.ts
+ * orchestrator subscribes to open the corresponding HTML dialog. */
+export async function fireTitleAction(page, action) {
+    await page.evaluate((a) => {
+        window.novaTitle?.action.next(a);
+    }, action);
+    await sleep(600);
+}
+
+/** Waits for a DOM element (title dialogs are HTML overlays) by testid. */
+export async function waitForTestId(page, testid, { timeout = 8000 } = {}) {
+    await page.waitForSelector(`[data-testid="${testid}"]`, { timeout });
+}
+
 /** Autopilot to a planet uuid and wait until docked (body.nova-docked +
  * visible Spaceport container). */
 export async function landAt(page, planetUuid, { timeout = 90000 } = {}) {
