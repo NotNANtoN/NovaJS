@@ -1300,4 +1300,74 @@ export const scenarios = [
             region('haggle_frame', 'Haggle popup frame', 810, 462, 300, 156),
         ],
     },
+
+    // ========================================================================
+    // BOARDING SWEEP — the plunder (PICT 8515) and capture-assignment
+    // (PICT 8516) dialogs. Merged in 1c600426; the layout was eyeballed.
+    // Both are display slaves of the synced BoardingComponent on the player's
+    // ship (display/boarding_plugin.ts); driver.openBoarding spawns a shuttle
+    // victim and injects that component (the showHail pattern) rather than
+    // fighting the physics gate. The frames are the game PICTs, centered.
+    // Known CONTENT divergences (not MOVE): our button labels ("Take Cargo",
+    // "Attempt Capture", "Done") and action set differ from the original's
+    // ("Energy", "Cargo", "Ammo", "Credits", "Capture Ship", "Abort" — we do
+    // not model Ammo booty), and the capture-assignment dialog is drawn as a
+    // standalone 8516 frame with "Keep as Escort" / "Release" rather than the
+    // original's escort-question inset over the plunder dialog with a
+    // "Use As My Ship" swap seam. What we measure/fix (MOVE) is the frame,
+    // title, body and button-block PLACEMENT within the frame.
+    // ========================================================================
+    {
+        id: 'boarding_plunder',
+        title: 'Boarding — plunder dialog (8515)',
+        description: 'The plunder dialog opened over a disabled, crewed '
+            + 'victim. Compares the 8515 frame, the title/booty text block '
+            + 'and the button grid against space/board_ship.png. The title '
+            + 'wording, the booty readout format and the button labels/action '
+            + 'set legitimately differ (CONTENT); the frame is the same PICT '
+            + 'and the text/buttons are placed to mirror the original grid.',
+        params: { ship: 'nova:164', system: 'nova:130' },
+        hideDebug: true,
+        setup: async (page, driver) => { await driver.openBoarding(page); },
+        references: [
+            { name: 'board_ship', file: 'space/board_ship.png' },
+        ],
+        regions: [
+            // Frame renders at screen 806,441 309x198 (measured), centered.
+            region('plunder_frame', 'Whole plunder frame', 806, 441, 309, 198),
+            region('plunder_title', 'Title line', 810, 448, 270, 16),
+            region('plunder_body', 'Booty readout block', 809, 468, 220, 54),
+            region('plunder_buttons', 'Button grid (metal lower third)',
+                808, 550, 308, 88),
+        ],
+    },
+    {
+        id: 'boarding_capture_assignment',
+        title: 'Boarding — capture-assignment dialog (8516)',
+        description: 'The capture-assignment dialog after a successful capture '
+            + 'roll (injected capture:"succeeded"). Compares the 8516 frame, '
+            + 'the "You have captured the ship!" title and the '
+            + 'Keep as Escort / Release buttons against '
+            + 'space/capture_assignment.png. The original composites an escort '
+            + 'question INSET over the still-visible plunder dialog with a '
+            + 'ship-swap option; ours is a standalone 8516 frame with two '
+            + 'buttons — a documented structural/CONTENT divergence. The MOVE '
+            + 'signal is that the title and buttons sit INSIDE the 8516 frame.',
+        params: { ship: 'nova:164', system: 'nova:130' },
+        hideDebug: true,
+        setup: async (page, driver) => {
+            await driver.openBoarding(page, { capture: 'succeeded' });
+        },
+        references: [
+            { name: 'capture_assignment', file: 'space/capture_assignment.png' },
+        ],
+        regions: [
+            // 8516 frame renders at screen 827,476 267x128 (measured).
+            region('assign_frame', 'Whole capture-assignment frame',
+                827, 476, 267, 128),
+            region('assign_title', 'Title line', 835, 484, 262, 18),
+            region('assign_buttons', 'Escort / Release buttons',
+                868, 520, 190, 80),
+        ],
+    },
 ];

@@ -622,6 +622,13 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
         throw new Error('Expected simulation serializer resource to exist');
     }
     simulationSerializer = serializer;
+    // Test/driving lever (see visual_compare/driver.mjs, and the
+    // window.nova* levers below): the simulation serializer's
+    // componentsByName registry is the only in-page handle on the
+    // synced-component singletons (e.g. the Boarding component), which the
+    // headless harness needs to inject dialog state the way novaHailDialog
+    // drives the comm dialog. Not used by gameplay.
+    (window as any).novaSimSerializer = serializer;
 
     const worker = new Worker("/simulation_bridge_browser_worker_bundle.js", {
         type: "module",

@@ -62,6 +62,30 @@ const BODY_FONT: Partial<PIXI.ITextStyle> = {
     wordWrap: true, wordWrapWidth: WIDTH - 24,
 };
 
+// Plunder button grid (PICT 8515). Measured against space/board_ship.png:
+// the original packs its plunder actions into a compact grid that lives in
+// the metal lower third of the frame (button rows at screen y ~555/583/611
+// with the centered "Abort" last), not a full-width single column. We keep
+// our action labels but mirror that geometry: two columns of take-actions,
+// then a centered final row. A Button's pill width excludes its two end
+// caps (LEFT_POS px each), so the rendered width is BTN_W + 2*LEFT_POS.
+const BTN_LEFT_POS = 13.2;                    // Button end-cap width
+const BTN_W = 116;                            // pill width (fits our labels)
+const BTN_RENDERED = BTN_W + 2 * BTN_LEFT_POS;
+const BTN_COL_X = [ORIGIN_X + 12, ORIGIN_X + 166]; // left / right column
+const BTN_ROW_Y = (row: number) => ORIGIN_Y + 115 + row * 28;
+
+// Capture-assignment frame (PICT 8516) is a distinct, smaller sprite than
+// the plunder frame (measured 267x128, centered). Positioning its title and
+// buttons off the plunder ORIGIN left the title floating above the frame, so
+// this dialog anchors its own elements to the 8516 geometry.
+const CAP_W = 267;
+const CAP_H = 128;
+const CAP_ORIGIN_X = -CAP_W / 2;
+const CAP_ORIGIN_Y = -CAP_H / 2;
+const CAP_BTN_W = 150;
+const CAP_BTN_X = -(CAP_BTN_W + 2 * BTN_LEFT_POS) / 2; // centered
+
 /** One selectable action row. */
 interface Row {
     action: ControlAction;
@@ -102,17 +126,19 @@ class PlunderDialog {
         this.body.position.set(ORIGIN_X + 12, ORIGIN_Y + 30);
         this.container.addChild(this.highlight, this.title, this.body);
 
-        // Action rows: take cargo, credits, fuel, attempt capture, done.
-        const specs: [ControlAction, string][] = [
-            ['plunderCargo', 'Take Cargo'],
-            ['plunderCredits', 'Take Credits'],
-            ['plunderFuel', 'Take Fuel'],
-            ['plunderCapture', 'Attempt Capture'],
-            ['plunderDone', 'Done'],
+        // Action grid (mirrors the original's 8515 button block): two
+        // columns of take-actions over two rows, then a centered final row.
+        const specs: [ControlAction, string, { x: number, y: number }][] = [
+            ['plunderCargo', 'Take Cargo', { x: BTN_COL_X[0], y: BTN_ROW_Y(0) }],
+            ['plunderCredits', 'Take Credits', { x: BTN_COL_X[1], y: BTN_ROW_Y(0) }],
+            ['plunderFuel', 'Take Fuel', { x: BTN_COL_X[0], y: BTN_ROW_Y(1) }],
+            ['plunderCapture', 'Attempt Capture',
+                { x: BTN_COL_X[1], y: BTN_ROW_Y(1) }],
+            ['plunderDone', 'Done',
+                { x: -BTN_RENDERED / 2, y: BTN_ROW_Y(2) }],
         ];
-        specs.forEach(([action, label], i) => {
-            const button = new Button(this.displayAssets, label, 140,
-                { x: ORIGIN_X + 90, y: ORIGIN_Y + 84 + i * 22 });
+        specs.forEach(([action, label, pos]) => {
+            const button = new Button(this.displayAssets, label, BTN_W, pos);
             button.click.subscribe(() => this.activate(action));
             this.container.addChild(button.container);
             this.rows.push({ action, button, enabled: true });
@@ -236,9 +262,9 @@ class PlunderDialog {
         if (!row || !row.enabled) {
             return;
         }
+        const pos = row.button.container.position;
         this.highlight.beginFill(0x8b0000, 0.4)
-            .drawRect(ORIGIN_X + 88, row.button.container.position.y - 1,
-                144, 22).endFill();
+            .drawRect(pos.x - 2, pos.y - 2, BTN_RENDERED + 4, 29).endFill();
     }
 }
 
@@ -276,14 +302,14 @@ class CaptureAssignmentDialog {
         this.container.addChild(background);
 
         const title = new PIXI.Text('You have captured the ship!', TITLE_FONT);
-        title.position.set(ORIGIN_X + 12, ORIGIN_Y + 12);
+        title.position.set(CAP_ORIGIN_X + 14, CAP_ORIGIN_Y + 12);
         this.container.addChild(title);
 
-        const escort = new Button(displayAssets, 'Keep as Escort', 160,
-            { x: ORIGIN_X + 80, y: ORIGIN_Y + 90 });
+        const escort = new Button(displayAssets, 'Keep as Escort', CAP_BTN_W,
+            { x: CAP_BTN_X, y: CAP_ORIGIN_Y + 54 });
         escort.click.subscribe(() => send('plunderCaptureEscort'));
-        const release = new Button(displayAssets, 'Release', 160,
-            { x: ORIGIN_X + 80, y: ORIGIN_Y + 120 });
+        const release = new Button(displayAssets, 'Release', CAP_BTN_W,
+            { x: CAP_BTN_X, y: CAP_ORIGIN_Y + 88 });
         release.click.subscribe(() => send('plunderDone'));
         this.container.addChild(escort.container, release.container);
 
