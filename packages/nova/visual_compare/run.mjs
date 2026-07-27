@@ -52,7 +52,13 @@ async function ensureServer() {
 
 async function run() {
     ensureOutputDir();
-    const { scenarios } = await import('./scenarios.mjs');
+    const { scenarios: allScenarios } = await import('./scenarios.mjs');
+    // Optional comma-separated id filter for fast iteration.
+    const filter = process.env.SCENARIO_FILTER
+        ? new Set(process.env.SCENARIO_FILTER.split(',').map(s => s.trim()))
+        : null;
+    const scenarios = filter
+        ? allScenarios.filter(s => filter.has(s.id)) : allScenarios;
 
     if (!fs.existsSync(REFERENCE_DIR)) {
         throw new Error(`Reference dir not found: ${REFERENCE_DIR}\n`
@@ -66,8 +72,10 @@ async function run() {
     try {
         for (const scenario of scenarios) {
             console.log(`\n=== Scenario: ${scenario.id} ===`);
-            const page = await driver.openGame(browser, scenario.params,
-                { entry: scenario.entry ?? 'game' });
+            const page = scenario.save
+                ? await driver.openGameWithSave(browser, scenario.save)
+                : await driver.openGame(browser, scenario.params,
+                    { entry: scenario.entry ?? 'game' });
             try {
                 if (scenario.setup) await scenario.setup(page, driver);
                 if (scenario.hideDebug) await driver.hideDebugOverlays(page);

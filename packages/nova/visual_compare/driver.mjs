@@ -50,6 +50,38 @@ export async function openGame(browser, params = {}, { settleMs = 6000, entry = 
     return page;
 }
 
+/**
+ * Open the game restoring a crafted localStorage save (novajs:save v1),
+ * so scenarios can start with credits, cargo, active missions and outfits
+ * the default fresh pilot lacks. The save is injected before any page
+ * script runs (evaluateOnNewDocument) and the URL omits ?reset (which
+ * would wipe it). `save` is the SaveData payload (ship/outfits/system
+ * required; credits/cargo/missions/... optional — see save_game.ts).
+ */
+export async function openGameWithSave(browser, save, { settleMs = 6000 } = {}) {
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+    page.on('pageerror', e => errors.push(String(e)));
+
+    const envelope = JSON.stringify({ version: 1, data: save });
+    await page.evaluateOnNewDocument((key, val) => {
+        try { window.localStorage.setItem(key, val); } catch { /* ignore */ }
+    }, 'novajs:save', envelope);
+
+    // No ?reset — that wipes the save before it is read. ?enter skips the
+    // title screen and boots straight into the game using the save's
+    // ship/system (browser.ts autoEnter), without overriding them.
+    await page.goto(`${BASE_URL}/?enter=1`,
+        { waitUntil: 'networkidle2', timeout: 60000 });
+    await page.waitForFunction(
+        () => window.displayWorld && window.app && window.communicator?.uuid,
+        { timeout: 60000 });
+    await sleep(settleMs);
+    page._vcErrors = errors;
+    return page;
+}
+
 /** Dispatch a keydown/keyup for a control `code` on document (where the
  * game's control listeners live). */
 export async function pressKey(page, code, { holdMs = 60 } = {}) {
@@ -64,15 +96,23 @@ export async function pressKey(page, code, { holdMs = 60 } = {}) {
     }, code);
 }
 
-/** BFS the PIXI stage for a container by name; returns {visible,bounds} or null. */
+/** BFS the PIXI stage for a container by name; returns {visible,bounds} or
+ * null. Several menus (outfitter/shipyard/trade) each own a 'Button:Buy',
+ * most of them hidden — so prefer a worldVisible match, falling back to the
+ * first match only when none is visible. */
 export function findContainer(page, name) {
     return page.evaluate((n) => {
         let hit = null;
+        let firstAny = null;
         (function walk(node) {
             if (!node || hit) return;
-            if (node.name === n) { hit = node; return; }
+            if (node.name === n) {
+                if (!firstAny) firstAny = node;
+                if (node.worldVisible) { hit = node; return; }
+            }
             (node.children || []).forEach(walk);
         })(window.app.stage);
+        hit = hit || firstAny;
         if (!hit) return null;
         const b = hit.getBounds();
         return {
@@ -105,6 +145,80 @@ export async function clickContainer(page, name) {
     const { x, y, width, height } = info.bounds;
     await page.mouse.click(x + width / 2, y + height / 2);
     await sleep(300);
+}
+
+/** Option/Alt-click a named container — the bulk-quantity trigger for
+ * the outfitter's and trade center's Buy/Sell buttons. */
+export async function optionClick(page, name) {
+    const info = await findContainer(page, name);
+    if (!info) {
+        throw new Error(`Container not found: ${name}`);
+    }
+    const { x, y, width, height } = info.bounds;
+    await page.keyboard.down('Alt');
+    await page.mouse.click(x + width / 2, y + height / 2);
+    await page.keyboard.up('Alt');
+    await sleep(300);
+}
+
+/** Press a control key N times, spaced far enough apart for edge-triggered
+ * grid navigation to register each press as distinct. */
+export async function pressKeyN(page, code, n, { gapMs = 140 } = {}) {
+    for (let i = 0; i < n; i++) {
+        await pressKey(page, code);
+        await sleep(gapMs);
+    }
+}
+
+/** If a mission-offer popup (bar entry) is up, dismiss it so the surface
+ * behind it (the bar's own buttons) is visible. Clicks Refuse when
+ * present, otherwise Accept/OK, until no OfferPopup is worldVisible. */
+export async function dismissOfferPopup(page, { max = 6 } = {}) {
+    for (let i = 0; i < max; i++) {
+        const popup = await findContainer(page, 'OfferPopup');
+        if (!popup || !popup.worldVisible) {
+            return;
+        }
+        // Prefer Refuse (leaves no follow-on briefing accept chain);
+        // fall back to the accept/OK button label.
+        const refuse = await findContainer(page, 'Button:Refuse');
+        const target = (refuse && refuse.worldVisible)
+            ? refuse : await firstVisibleButton(page,
+                ['Button:No', 'Button:OK', 'Button:Okay', 'Button:Accept',
+                    'Button:Yes']);
+        if (!target) {
+            return;
+        }
+        const { x, y, width, height } = target.bounds;
+        await page.mouse.click(x + width / 2, y + height / 2);
+        await sleep(500);
+    }
+}
+
+async function firstVisibleButton(page, names) {
+    for (const name of names) {
+        const info = await findContainer(page, name);
+        if (info && info.worldVisible) {
+            return info;
+        }
+    }
+    return null;
+}
+
+/**
+ * Render the hail/comms dialog for a crafted HailContext, centered on
+ * screen. The plugin only centers the dialog on the real 'y' control
+ * path, so we position its container ourselves before show(); show()
+ * blocks on dismissal, so it's fired without awaiting. Deterministic —
+ * no ship spawning / targeting needed — which is what the chrome
+ * measurement wants.
+ */
+export async function showHail(page, context) {
+    await page.evaluate((ctx) => {
+        const dialog = window.novaHailDialog;
+        dialog.container.position.set(960, 540);
+        void dialog.show(ctx);
+    }, context);
 }
 
 /** Open the player-info dialog (control 'properties' = KeyP). */
