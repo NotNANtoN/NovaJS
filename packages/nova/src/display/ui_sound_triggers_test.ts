@@ -194,4 +194,39 @@ describe('UI sound triggers (audio-layer spy)', () => {
         world.step();
         expect(played).not.toContain('nova:153');
     });
+
+    it('beeps 153 when a jump is refused inside the no-jump zone', async () => {
+        const { world, played, controls, player } = await makeWorld();
+        player.components.set(MovementStateComponent,
+            { position: new Position(100, 0) } as never);
+        player.components.set(ShipPhysicsComponent,
+            { jumpDistanceMod: 0 } as never);
+        player.components.set(FuelComponent, { current: 100, max: 100 } as never);
+        player.components.set(JumpRouteComponent, { route: ['nova:129'] });
+        world.step();
+        controls.next({ action: 'hyperjump', state: 'start' });
+        world.step();
+        expect(played).toContain('nova:153');
+    });
+
+    it('does NOT beep 153 on an eligible jump or with no route', async () => {
+        const { world, played, controls, player } = await makeWorld();
+        player.components.set(MovementStateComponent,
+            { position: new Position(1200, 0) } as never);
+        player.components.set(ShipPhysicsComponent,
+            { jumpDistanceMod: 0 } as never);
+        player.components.set(FuelComponent, { current: 100, max: 100 } as never);
+        // Eligible jump: no refusal beep.
+        player.components.set(JumpRouteComponent, { route: ['nova:129'] });
+        world.step();
+        controls.next({ action: 'hyperjump', state: 'start' });
+        world.step();
+        expect(played).not.toContain('nova:153');
+        // No route: the key is a no-op, not a refusal.
+        player.components.set(JumpRouteComponent, { route: [] });
+        world.step();
+        controls.next({ action: 'hyperjump', state: 'start' });
+        world.step();
+        expect(played).not.toContain('nova:153');
+    });
 });

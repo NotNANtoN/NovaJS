@@ -152,6 +152,34 @@ function playerWeapons(world: World) {
     return undefined;
 }
 
+/**
+ * True when the player pressed hyperjump with a route selected but the
+ * jump gate refuses it (inside the no-jump zone or under a jump's worth
+ * of fuel) — the same conditions JumpReadyBeepSystem mirrors from
+ * PlayerJumpControl. Undefined route or no player ship → no beep (the
+ * key is a no-op, not a refusal).
+ */
+function playerJumpRefused(world: World): boolean {
+    for (const entity of world.entities.values()) {
+        if (!entity.components.has(PlayerShipSelector)) {
+            continue;
+        }
+        const route = entity.components.get(JumpRouteComponent);
+        const movement = entity.components.get(MovementStateComponent);
+        const physics = entity.components.get(ShipPhysicsComponent);
+        const fuel = entity.components.get(FuelComponent);
+        if (!route || route.route.length === 0 || !movement || !physics
+            || !fuel) {
+            return false;
+        }
+        const jumpRadius = Math.max(0,
+            JUMP_DISTANCE + physics.jumpDistanceMod);
+        return movement.position.length < jumpRadius
+            || fuel.current < FUEL_PER_JUMP;
+    }
+    return false;
+}
+
 const SecondaryControlSubscription =
     new Resource<Subscription>('UiSoundSecondaryControlSubscription');
 
@@ -183,12 +211,22 @@ export const UiSoundTriggersPlugin: Plugin = {
                     if (state !== 'start') {
                         return;
                     }
+                    if (MenuControls.focused) {
+                        return;
+                    }
+                    // Jump refused: hyperjump pressed with a route
+                    // selected but inside the no-jump zone / out of
+                    // fuel (per the snd-153 research: the natural
+                    // negative counterpart of 154's jump-ready).
+                    if (action === 'hyperjump') {
+                        if (playerJumpRefused(world)) {
+                            playUiSound(world, { id: BEEP_CANT_DO });
+                        }
+                        return;
+                    }
                     if (action !== 'nextSecondary'
                         && action !== 'previousSecondary'
                         && action !== 'resetSecondary') {
-                        return;
-                    }
-                    if (MenuControls.focused) {
                         return;
                     }
                     const weapons = playerWeapons(world);
