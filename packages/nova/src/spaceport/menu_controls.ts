@@ -14,9 +14,12 @@ import { ControlEvent } from "../nova_plugin/controls_plugin.js";
  * outside the menu system (e.g. the in-flight starmap toggle) should
  * check `MenuControls.focused` and stand down while any menu is bound.
  */
-/** Actions that repeat while their key is held: list/grid navigation.
- * Everything else (buy, hire, accept, depart...) fires once per
- * press, so holding a key can't e.g. hire a bar full of escorts. */
+/** Actions that repeat while their key is held by default: list/grid
+ * navigation. Everything else (buy, hire, accept, depart...) fires once
+ * per press, so holding a key can't e.g. hire a bar full of escorts. An
+ * individual surface may opt extra actions in via `repeatableActions`
+ * (the outfitter does this for buy/sell) — scoped to that surface only,
+ * so global controls (jump, land, fire) never gain repeat behavior. */
 const REPEATABLE = new Set<ControlAction>(['up', 'down', 'left', 'right']);
 
 export class MenuControls {
@@ -26,6 +29,13 @@ export class MenuControls {
     static get focused(): MenuControls | undefined {
         return MenuControls.stack[MenuControls.stack.length - 1];
     }
+
+    /**
+     * The actions that repeat while their key is held on THIS surface.
+     * Seeded with the navigation defaults; a surface may add its own
+     * (e.g. the outfitter adds buy/sell) without affecting other menus.
+     */
+    readonly repeatableActions = new Set<ControlAction>(REPEATABLE);
 
     private controlsSubscription: Subscription | undefined;
     constructor(private controlEvents: Observable<ControlEvent>,
@@ -37,7 +47,8 @@ export class MenuControls {
         this.controlsSubscription =
             this.controlEvents.subscribe(({ action, state }) => {
                 if (state === false
-                    || (state === 'repeat' && !REPEATABLE.has(action))) {
+                    || (state === 'repeat'
+                        && !this.repeatableActions.has(action))) {
                     return;
                 }
                 if (MenuControls.focused !== this) {

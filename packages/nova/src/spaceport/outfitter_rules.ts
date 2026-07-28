@@ -44,18 +44,37 @@ export type SellDenialReason = 'notOwned' | 'cantSell';
 
 /**
  * The fraction of an outfit's purchase price the player recovers when
- * selling it back. The EVN Bible gives no explicit outfit-resale field;
- * it states only for ships that a trade-in credits "25% of the original
- * cost of your current ship and upgrades" (Bible, shïp Cost field). We
- * apply that same 25% convention — the original EV Nova's known
- * behaviour — to standalone outfit sales. Floored so the player never
- * recovers more than a quarter of the price.
+ * selling back a pre-owned unit. The EVN Bible gives no explicit
+ * outfit-resale field, and its 25% figure is specifically the *ship*
+ * trade-in ("25% of the original cost of your current ship and
+ * upgrades", Bible shïp Cost field). Per Matthew's rule, standalone
+ * outfit resale is 50% of the price, floored. (A unit bought and sold
+ * within the same outfitter visit is refunded in full — that same-visit
+ * accounting lives in the Outfitter menu, not here.)
  */
-export const OUTFIT_RESALE_FRACTION = 0.25;
+export const OUTFIT_RESALE_FRACTION = 0.5;
 
-/** Credits recovered for selling one unit of this outfit (25% of price). */
+/** Credits recovered for selling one pre-owned unit (50% of price). */
 export function outfitResaleValue(outfit: OutfitData): number {
     return Math.floor(outfit.price * OUTFIT_RESALE_FRACTION);
+}
+
+/**
+ * The credits refunded for selling one unit of an outfit, given how many
+ * units of it were bought during the current outfitter visit. A unit
+ * bought this visit refunds the full price (you get back exactly what
+ * you just paid); once those are exhausted, further sells are pre-owned
+ * stock at outfitResaleValue (50%). Returns the amount to credit and the
+ * remaining same-visit purchase count after this unit — call it once per
+ * unit in a bulk sell and the full/half split falls out naturally (buy 3
+ * this visit, sell 5 -> 3 full + 2 half).
+ */
+export function sellRefund(outfit: OutfitData, boughtThisVisit: number):
+    { credited: number, boughtThisVisit: number } {
+    if (boughtThisVisit > 0) {
+        return { credited: outfit.price, boughtThisVisit: boughtThisVisit - 1 };
+    }
+    return { credited: outfitResaleValue(outfit), boughtThisVisit };
 }
 
 export type OutfitterCheck<Reason> =
