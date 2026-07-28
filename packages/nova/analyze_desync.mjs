@@ -57,10 +57,10 @@ const log = await readJson('log.json');
 const clientFiles = (await fs.readdir(dir))
     .filter(name => name.startsWith('client_') && name.endsWith('.json'));
 if (clientFiles.length === 0) {
-    console.error('No client_<peer>.json in the incident directory: the '
-        + 'convicted peer\'s upload never arrived. Only the server side '
-        + '(baseline + log) is recorded, so there is nothing to diff.');
-    process.exit(1);
+    // The verdict and archive-state passes below run from the server
+    // side alone; only the per-dump checkpoint analysis needs uploads.
+    console.log('(no client dumps in this incident — the convicted '
+        + 'peer\'s upload never arrived; running server-side passes only)');
 }
 
 console.log(`Incident: room ${desync.roomId}, convicted checkpoint tick `

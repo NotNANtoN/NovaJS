@@ -17,6 +17,17 @@ export interface ArchiveBaseline {
 export const STATE_HASH_INTERVAL = 60;
 
 /**
+ * Bumped whenever the rollback protocol or the simulation's
+ * determinism-relevant behavior changes. A peer joining with a
+ * different version (or none — a build predating versioning, e.g. a
+ * browser serving a stale cached bundle against a new server) WILL
+ * desync no matter how healthy the netcode is; the relay logs the
+ * mismatch and incident records carry every reporter's version, so
+ * "stale client build" stops masquerading as a netcode mystery.
+ */
+export const PROTOCOL_VERSION = 1;
+
+/**
  * One notable event in a peer's rollback machinery, for the black-box
  * ring included in desync dumps: state alone shows *what* diverged,
  * the rollback log shows *how the peer got there* (late records,
@@ -68,7 +79,7 @@ export type RollbackProtocolMessage =
      * NOW instead of the last periodic one: a resync replaying a
      * ~30s-stale baseline's log tail costs 1-2s of blocked rebuild,
      * while a fresh baseline's tail is just the transit window. */
-    | { kind: 'joinRequest', fresh?: boolean }
+    | { kind: 'joinRequest', fresh?: boolean, protocol?: number }
     | {
         kind: 'catchUp', tick: number, records: InputRecord[],
         baseline?: ArchiveBaseline,
