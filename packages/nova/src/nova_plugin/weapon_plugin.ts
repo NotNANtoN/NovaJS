@@ -242,7 +242,16 @@ const ControlPlayerWeapons = new System({
         let secondary: WeaponState | undefined;
         let secondaryIndex = 0;
         if (activeSecondary.secondary) {
-            secondary = weaponsState.get(activeSecondary.secondary);
+            // has-guarded: WeaponsState is a DefaultMap, and a bare
+            // get() for a STALE active secondary (a saved selection
+            // for a weapon this loadout no longer owns) would CREATE
+            // a phantom hashed entry. Worlds that later wire-restore
+            // re-derive WeaponsState phantom-free, but a world that
+            // never restores (the server's archive) keeps it forever
+            // — the archive-vs-everyone desync class, finally caught
+            // by the archive_state instrumentation.
+            secondary = weaponsState.has(activeSecondary.secondary)
+                ? weaponsState.get(activeSecondary.secondary) : undefined;
             secondaryIndex = secondaryWeapons.indexOf(activeSecondary.secondary);
         }
 
@@ -271,7 +280,9 @@ const ControlPlayerWeapons = new System({
         }
 
         if (activeSecondary.secondary) {
-            secondary = weaponsState.get(activeSecondary.secondary);
+            // Same has-guard as above: never create entries here.
+            secondary = weaponsState.has(activeSecondary.secondary)
+                ? weaponsState.get(activeSecondary.secondary) : undefined;
         }
 
         if (secondary) {
