@@ -167,6 +167,7 @@ async function ProjectileWeaponParse(weap: WeapResource, notFoundFunction: (m: s
                 exitPoints: getDefaultExitPoints(),
                 blink: null, // Weapon graphics have no running lights.
                 animationMode: null, // Weapon spin is a wëap flag, not shän.
+                weapDecay: 0, // No weapon overlay outside shän ships.
                 id: baseWeapon.id,
                 name: baseWeapon.name,
                 prefix: baseWeapon.prefix,

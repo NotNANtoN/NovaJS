@@ -250,6 +250,7 @@ describe("NovaParse", () => {
                 exitPoints: getDefaultExitPoints(),
                 blink: null,
                 animationMode: null,
+                weapDecay: 0,
                 id: w132.id,
                 name: w132.name,
                 prefix: w132.prefix,

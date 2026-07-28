@@ -101,6 +101,7 @@ export async function PlanetParse(spob: SpobResource, notFoundFunction: (m: stri
         exitPoints: getDefaultExitPoints(),
         blink: null, // Planets have no running lights.
         animationMode: null, // Planets have no shän extra-frame animation.
+        weapDecay: 0, // No weapon overlay outside shän ships.
         id: base.id,
         name: base.name,
         prefix: base.prefix,

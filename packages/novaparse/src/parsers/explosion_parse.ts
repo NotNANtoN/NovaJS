@@ -42,6 +42,7 @@ export async function ExplosionParse(boom: BoomResource, notFoundFunction: (m: s
         exitPoints: getDefaultExitPoints(), // Unused. Refactor???
         blink: null, // Explosions have no running lights.
         animationMode: null, // Explosions have no shän extra-frame animation.
+        weapDecay: 0, // No weapon overlay outside shän ships.
         ...base
     };
 

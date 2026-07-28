@@ -1,7 +1,9 @@
 import "jasmine";
 import { readResourceFork, ResourceMap } from "resource_fork";
 import { ShanResource } from "../../src/resource_parsers/shan_resource.js";
-import { blinkPattern, shipAnimationMode } from "../../src/parsers/shan_parse.js";
+import { BLEND_MODES } from "novadatainterface/blend_modes";
+import { NovaDataType } from "novadatainterface/nova_data_interface";
+import { ShanParse, blinkPattern, shipAnimationMode } from "../../src/parsers/shan_parse.js";
 import { defaultIDSpace } from "../resource_parsers/default_id_space.js";
 import { resolveFixture } from "../../test/fixtures.js";
 
@@ -114,5 +116,76 @@ describe("ShanParse animationMode projection", () => {
         expect(mode?.purpose).toEqual("continuous");
         expect(mode?.unfoldWhenFiring).toBe(false);
         expect(mode?.setsPerSecond).toEqual(6);
+    });
+});
+
+// An id space whose rlëD lookups always succeed, so ShanParse can resolve
+// every image slot without a real sprite-sheet fixture.
+function idSpaceWithAllSprites() {
+    return {
+        ...defaultIDSpace,
+        rlëD: new Proxy({}, {
+            get: (_t, id: string) => ({ globalID: `nova:${id}` }),
+        }),
+    } as typeof defaultIDSpace;
+}
+
+// The weapon-effect overlay (shän WeapImage + WeapDecay) has to reach the
+// display layer through Animation, alongside the other image slots.
+describe("ShanParse weapImage / weapDecay plumbing", () => {
+    let rf: ResourceMap;
+    const notFound = () => { };
+
+    beforeEach(async () => {
+        rf = await readResourceFork(
+            resolveFixture("resource_examples/shan.ndat"), false);
+    });
+
+    function parse(shanId: number) {
+        const shan = new ShanResource(
+            rf.shän[shanId], idSpaceWithAllSprites());
+        // Normally stamped on by IDSpaceHandler while building the id space.
+        shan.globalID = `nova:${shanId}`;
+        shan.prefix = "nova";
+        return ShanParse(shan, notFound);
+    }
+
+    it("emits the weapImage as an ADDITIVE overlay with the base image's rotation frames", async () => {
+        // shän 380 (Aurora Thunderforge): WeapImageID 1930, 64 frames per
+        // rotation. The overlay shares the base image's frame structure so
+        // it stays aligned with the hull's heading.
+        const animation = await parse(380);
+        expect(animation.images.weapImage).toEqual({
+            id: "nova:1930",
+            dataType: NovaDataType.SpriteSheetImage,
+            blendMode: BLEND_MODES.ADD,
+            frames: { normal: { start: 0, length: 64 } },
+        });
+        expect(animation.images.weapImage!.frames)
+            .toEqual(animation.images.baseImage.frames);
+    });
+
+    it("carries WeapDecay onto the Animation", async () => {
+        // shän 380's WeapDecay is 50, the Bible's "good median" rate.
+        expect((await parse(380)).weapDecay).toEqual(50);
+    });
+
+    it("omits the weapImage and reports decay 0 for a ship without one", async () => {
+        // shän 128 (Shuttle) and 379 (Asteroid Miner) have no WeapImageID.
+        const shuttle = await parse(128);
+        expect(shuttle.images.weapImage).toBeUndefined();
+        expect(shuttle.weapDecay).toEqual(0);
+        expect((await parse(379)).images.weapImage).toBeUndefined();
+    });
+
+    it("gives a banking ship's weapImage the same left/right ranges as the hull", async () => {
+        // Banking (0x0001) splits the extra sets into level/left/right, and
+        // the overlay must follow the hull into the banked sets.
+        const shuttle = await parse(128);
+        expect(shuttle.animationMode).toBeNull();
+        expect(shuttle.images.glowImage?.frames)
+            .toEqual(shuttle.images.baseImage.frames);
+        expect(shuttle.images.baseImage.frames.left).toBeDefined();
+        expect(shuttle.images.baseImage.frames.right).toBeDefined();
     });
 });

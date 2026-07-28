@@ -83,6 +83,9 @@ export async function ShanParse(shan: ShanResource, notFoundFunction: (message: 
         exitPoints: shan.exitPoints,
         blink: blinkPattern(shan.blink),
         animationMode,
+        // WeapDecay drives how the weapImage overlay fades after firing.
+        // Negative values (a few plug-ins use -1 as "unset") read as 0.
+        weapDecay: Math.max(0, shan.weapDecay),
     }
 }
 

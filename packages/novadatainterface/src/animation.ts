@@ -102,9 +102,11 @@ export type BlinkPattern =
  *   `setsPerSecond` sets per second, like the alt-image overlay. A
  *   spinning ring (Leviathan, Manticore).
  * - `folding` (0x0002): the sets are a fold/unfold sequence played on
- *   hyperspace entry/exit (and landing/takeoff). Set 0 is the folded
- *   rest pose; the last set is fully unfolded. The Argosy's expanding
- *   segments.
+ *   hyperspace entry/exit (and landing/takeoff). In the stock art the
+ *   sequence runs DEPLOYED -> FOLDED: set 0 is the fully unfolded pose
+ *   and the LAST set is the folded rest pose (verified frame-by-frame
+ *   against the Argosy's and asteroid miner's rlëD sets; the Bible does
+ *   not specify which end is which). The Argosy's expanding segments.
  * - `keyCarried` (0x0004): set 1 is shown instead of set 0 while the
  *   ship carries at least one of its KeyCarried outfit type.
  *
@@ -171,6 +173,19 @@ export interface Animation extends BaseData {
      * See ShipAnimationMode.
      */
     animationMode: ShipAnimationMode | null;
+    /**
+     * shän WeapDecay: how fast the `weapImage` weapon-effect overlay fades
+     * back to transparent once the ship stops firing. Bible: "The rate at
+     * which the weapon glow sprite fades out to transparency, if
+     * applicable. 50 is a good median number - lower numbers yield slower
+     * decays." Stock values run 0..100, so it is read as PERCENT OF FULL
+     * ALPHA PER ANIMATION FRAME (a frame being 1/30 s, the unit every
+     * other shän timing field uses) — 100 fades in exactly one frame,
+     * 5 (the most common stock value, incl. the Fed Destroyer family)
+     * takes 20 frames ≈ 0.67 s. 0 means no fade: the overlay snaps off.
+     * Display-only.
+     */
+    weapDecay: number;
 }
 
 export function getDefaultAnimation(): Animation {
@@ -181,6 +196,7 @@ export function getDefaultAnimation(): Animation {
         exitPoints: getDefaultExitPoints(),
         blink: null,
         animationMode: null,
+        weapDecay: 0,
         ...getDefaultBaseData()
     }
 }

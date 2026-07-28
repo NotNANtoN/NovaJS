@@ -44,6 +44,7 @@ function animationFromSpin(idSpace: NovaResources, spinId: number,
         exitPoints: getDefaultExitPoints(),
         blink: null, // Asteroids have no running lights.
         animationMode: null, // Asteroid tumble is a röid SpinRate, not shän.
+        weapDecay: 0, // No weapon overlay outside shän ships.
     };
 }
 

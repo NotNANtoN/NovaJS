@@ -75,6 +75,45 @@ export function shouldShowFiringAnimation(
     return false;
 }
 
+/** shän animation timings are in 30ths of a second (Bible: AnimDelay "in
+ * 30ths of a second"); WeapDecay shares that frame unit. */
+const SHAN_FRAMES_PER_SECOND = 30;
+
+/**
+ * How much weapon-overlay alpha the shän's WeapDecay burns per second.
+ *
+ * Bible (shän WeapDecay): "The rate at which the weapon glow sprite fades
+ * out to transparency, if applicable. 50 is a good median number - lower
+ * numbers yield slower decays." It says nothing about units, but stock
+ * values span exactly 0..100 (histogram over all 111 stock shäns with a
+ * weapImage: 0x3 3x3 5x35 10x19 25x1 30x9 50x17 75x18 100x6), so it reads
+ * as percent of full alpha per animation frame: 100 fades in one frame
+ * (~33 ms), the Bible's median 50 in two (~67 ms), and the most common
+ * stock value 5 — the whole Fed Destroyer family, the Fed Carrier included
+ * — in twenty (~0.67 s). WeapDecay 0 means no fade at all; the overlay
+ * snaps off when firing stops (the behaviour before decay existed).
+ */
+export function weapDecayAlphaPerSecond(weapDecay: number): number {
+    return Math.max(0, weapDecay) / 100 * SHAN_FRAMES_PER_SECOND;
+}
+
+/**
+ * Advances the weapon-effect overlay's alpha one display frame: firing
+ * snaps it to fully opaque, and otherwise it decays linearly toward
+ * transparent at `alphaPerSecond`. An alphaPerSecond of 0 (WeapDecay 0)
+ * means "no fade", i.e. straight to 0.
+ */
+export function advanceWeaponFlash(alpha: number, firing: boolean,
+    alphaPerSecond: number, deltaS: number): number {
+    if (firing) {
+        return 1;
+    }
+    if (alphaPerSecond <= 0) {
+        return 0;
+    }
+    return Math.max(0, alpha - alphaPerSecond * deltaS);
+}
+
 export const ShipAnimationSystem = new System({
     name: "ShipAnimationSystem",
     args: [ShipComponent, WeaponsStateComponent, SimulationGameDataResource,
@@ -91,13 +130,22 @@ export const ShipAnimationSystem = new System({
             shield.pixiSprite.visible = false;
         }
 
-        // Show the ship's weapon image iff a weapon is firing.
-        const weaponImage = animation.sprites.get('weapImage');
-        if (weaponImage) {
-            weaponImage.pixiSprite.visible = shouldShowFiringAnimation(
+        // Draw the ship's weapon-effect overlay (shän WeapImage: the Fed
+        // Destroyer's muzzle flashes) on top of the hull while it fires,
+        // then fade it back out at the shän's WeapDecay rate. The overlay
+        // is an additive sprite in the same graphic as the base image, so
+        // ObjectDrawSystem's rotation write and (for multi-set ships like
+        // the Manticore) ShipBaseSetAnimationSystem's selectBaseSet keep
+        // it frame-aligned with the hull for free.
+        if (animation.sprites.has('weapImage')) {
+            const firing = shouldShowFiringAnimation(
                 uuid, weaponStates,
                 id => gameData.data.Weapon.getCached(id)?.useFiringAnimation,
                 activeBeams);
+            animation.weaponFlashAlpha = advanceWeaponFlash(
+                animation.weaponFlashAlpha, firing,
+                weapDecayAlphaPerSecond(animation.weapDecay), time.delta_s);
+            animation.weapAlpha = animation.weaponFlashAlpha;
         }
 
         // Flash the running lights per the ship's shän blink pattern (steady,
@@ -157,13 +205,34 @@ export function continuousRawSet(timeMs: number, setsPerSecond: number): number 
 
 /**
  * Which base sprite set a folding ship (shän 0x0002) shows at fold
- * `progress` in [0, 1]: set 0 is folded/rest, the last set fully unfolded,
- * mapped linearly and clamped.
+ * `progress` in [0, 1], mapped linearly and clamped.
+ *
+ * The stock fold art runs UNFOLDED -> FOLDED, i.e. **set 0 is the fully
+ * DEPLOYED pose and the LAST set is the folded rest pose**, so progress
+ * (0 = folded, 1 = unfolded — the FoldStateComponent's meaning, which the
+ * WeaponsSystem fire gate depends on) maps to the sets in REVERSE. The
+ * Bible never states which end of the sequence is which (see 0x0002: the
+ * extra frames "are used for animated ship parts such as for
+ * folding/unfolding wings", and "will be cycled" on landing/takeoff and
+ * hyperspace, with no start/end frame specified), so this is pinned to the
+ * actual rlëD art instead:
+ *
+ * - Argosy (nova:138, shän base rlëD nova:1020, 6 sets of 36): set 0 has
+ *   the side nacelles splayed OUT away from the hull; set 5 has them
+ *   tucked flush IN against it. The Argosy sits with its nacelles in and
+ *   spreads them for hyperspace, so rest = set 5.
+ * - Asteroid Miner (extra-outfits:807, base rlëD nova:1128, 6 sets of 36):
+ *   set 0 has the claws swept wide OPEN, set 5 has them wrapped tight
+ *   against the body. The miner rests wrapped and unwraps to fire, so
+ *   rest = set 5 and the fire gate's "fully unfolded" = set 0.
+ *
+ * See ship_animation_test.ts, which pins both of these.
  */
 export function foldSetIndex(progress: number, baseSetCount: number): number {
+    const lastSet = Math.max(0, baseSetCount - 1);
     const clampedProgress = Math.min(1, Math.max(0, progress));
-    const index = Math.round(clampedProgress * (baseSetCount - 1));
-    return Math.min(baseSetCount - 1, Math.max(0, index));
+    const index = Math.round((1 - clampedProgress) * lastSet);
+    return Math.min(lastSet, Math.max(0, index));
 }
 
 /**
@@ -189,10 +258,12 @@ export function advanceJumpFold(graphic: AnimationGraphic,
  *
  *  - continuous (0x0008): the sets (and the alt-image overlay) cycle on
  *    logical time — spinning rings (Leviathan, Manticore, Thunderforge).
- *  - folding (0x0002): the sets are a fold sequence. Miner claws
- *    (unfoldWhenFiring) read the synced sim FoldStateComponent so the
- *    graphic matches the fire gate exactly; every other folding ship
- *    (the Argosy) folds display-side off its jump state.
+ *  - folding (0x0002): the sets are a fold sequence, running DEPLOYED
+ *    (set 0) -> FOLDED (last set) in the stock art; see foldSetIndex.
+ *    Miner claws (unfoldWhenFiring) read the synced sim
+ *    FoldStateComponent so the graphic matches the fire gate exactly;
+ *    every other folding ship (the Argosy) folds display-side off its
+ *    jump state.
  *
  * Disabled honoring: stopWhenDisabled freezes a continuous animation at
  * its rest set; hideAltWhenDisabled hides the alt overlay.
