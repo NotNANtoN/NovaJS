@@ -1,7 +1,7 @@
 import "jasmine";
 import { readResourceFork, ResourceMap } from "resource_fork";
 import { ShanResource } from "../../src/resource_parsers/shan_resource.js";
-import { blinkPattern } from "../../src/parsers/shan_parse.js";
+import { blinkPattern, shipAnimationMode } from "../../src/parsers/shan_parse.js";
 import { defaultIDSpace } from "../resource_parsers/default_id_space.js";
 import { resolveFixture } from "../../test/fixtures.js";
 
@@ -68,5 +68,51 @@ describe("ShanParse blink projection", () => {
         expect(blinkPattern({
             mode: "unknown", a: 1, b: 2, c: 3, d: 4,
         })).toBeNull();
+    });
+});
+
+// Projection tests for the shän extra-frame Flags into the display-layer
+// ShipAnimationMode, pinned against real stock ships in the fixture.
+describe("ShanParse animationMode projection", () => {
+    const idSpace = defaultIDSpace;
+    let rf: ResourceMap;
+    let shuttle: ShanResource;       // banking (0x0001)
+    let asteroidMiner: ShanResource; // folding + unfoldWhenFiring (0x0082)
+    let thunderforge: ShanResource;  // continuous (0x0008) + alt overlay
+
+    beforeEach(async () => {
+        const dataPath = resolveFixture("resource_examples/shan.ndat");
+        rf = await readResourceFork(dataPath, false);
+        const shans = rf.shän;
+        shuttle = new ShanResource(shans[128], idSpace);
+        asteroidMiner = new ShanResource(shans[379], idSpace);
+        thunderforge = new ShanResource(shans[380], idSpace);
+    });
+
+    it("returns null for a banking ship (banking rides the left/right ranges)", () => {
+        expect(shuttle.flags.extraFramePurpose).toEqual("banking");
+        expect(shipAnimationMode(shuttle)).toBeNull();
+    });
+
+    it("emits the folding + unfoldWhenFiring mode for the asteroid miner", () => {
+        // shän 379: 6 base sets of 36 frames, AnimDelay 5, unfolds to fire.
+        expect(shipAnimationMode(asteroidMiner)).toEqual({
+            purpose: "folding",
+            baseSetCount: 6,
+            framesPer: 36,
+            setsPerSecond: 6, // 30 / AnimDelay(5)
+            unfoldWhenFiring: true,
+            stopWhenDisabled: false,
+            hideAltWhenDisabled: false,
+            hideLightsWhenDisabled: true,
+        });
+    });
+
+    it("emits the continuous mode for a sequence-animated ship", () => {
+        // shän 380 (Aurora Thunderforge): 0x0008 shown-in-sequence.
+        const mode = shipAnimationMode(thunderforge);
+        expect(mode?.purpose).toEqual("continuous");
+        expect(mode?.unfoldWhenFiring).toBe(false);
+        expect(mode?.setsPerSecond).toEqual(6);
     });
 });

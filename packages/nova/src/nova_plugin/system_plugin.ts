@@ -44,6 +44,7 @@ import { ShipPlugin } from "./ship_plugin.js";
 import { SoundEventPlugin } from "./sound_plugin.js";
 import { TargetPlugin } from "./target_plugin.js";
 import { WeaponPlugin } from "./weapon_plugin.js";
+import { FoldPlugin } from "./fold_plugin.js";
 
 // Users must add the multiplayer plugin and a display plugin.
 // Users must also add the NovaData resource.
@@ -65,6 +66,9 @@ export const SystemPlugin: Plugin = {
         world.addPlugin(FireWeaponPlugin);
         world.addPlugin(ProjectilePlugin);
         world.addPlugin(WeaponPlugin);
+        // After WeaponPlugin: the fold gate orders before WeaponsSystem and
+        // its state is read by the miner firing gate there.
+        world.addPlugin(FoldPlugin);
         world.addPlugin(OutfitPlugin);
         world.addPlugin(NCBPlugin);
         world.addPlugin(PlayerStatePlugin);

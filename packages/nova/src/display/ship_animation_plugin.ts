@@ -4,17 +4,23 @@ import { Plugin } from "nova_ecs/plugin";
 import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { Query } from "nova_ecs/query";
 import { System } from "nova_ecs/system";
+import { ShipAnimationMode } from "novadatainterface/animation";
+import { AnimationComponent } from "../nova_plugin/animation_plugin.js";
 import { BeamDataComponent } from "../nova_plugin/beam_plugin.js";
 import { SourceComponent } from "../nova_plugin/fire_weapon_plugin.js";
 import { SimulationGameDataResource } from "../nova_plugin/game_data_resource.js";
 import { CloakActiveComponent, CloakScannerComponent } from "../nova_plugin/cloak_plugin.js";
 import { DisabledComponent } from "../nova_plugin/disabled_component.js";
+import { FoldStateComponent } from "../nova_plugin/fold_state.js";
+import { foldRatePerSecond, moveToward } from "../nova_plugin/fold_state.js";
 import { IonizationColorComponent } from "../nova_plugin/health_plugin.js";
 import { IsIonizedComponent } from "../nova_plugin/ionization_plugin.js";
+import { JumpComponent } from "../nova_plugin/jump_plugin.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 import { ShipComponent } from "../nova_plugin/ship_plugin.js";
 import { WeaponsStateComponent } from "../nova_plugin/weapons_state.js";
-import { AnimationGraphicComponent } from "./animation_graphic_plugin.js";
+import { AnimationGraphic } from "./animation_graphic.js";
+import { AnimationGraphicComponent, ObjectDrawSystem } from "./animation_graphic_plugin.js";
 import { blinkPhaseFromUuid, runningLightState } from "./running_light_blink.js";
 
 // How visible a ship is while cloaked. Other ships fade to nearly
@@ -138,9 +144,132 @@ export const ShipAnimationSystem = new System({
     },
 });
 
+/**
+ * Which base sprite set a continuously-animating ship (shän 0x0008) shows
+ * at time `timeMs`: the sets advance `setsPerSecond` per second and wrap.
+ * Returned UNwrapped (a monotonically increasing raw index); the caller
+ * mods it by each sprite sheet's own set count, so the base image and the
+ * alt-image overlay each cycle through however many sets they hold.
+ */
+export function continuousRawSet(timeMs: number, setsPerSecond: number): number {
+    return Math.floor((timeMs / 1000) * setsPerSecond);
+}
+
+/**
+ * Which base sprite set a folding ship (shän 0x0002) shows at fold
+ * `progress` in [0, 1]: set 0 is folded/rest, the last set fully unfolded,
+ * mapped linearly and clamped.
+ */
+export function foldSetIndex(progress: number, baseSetCount: number): number {
+    const clampedProgress = Math.min(1, Math.max(0, progress));
+    const index = Math.round(clampedProgress * (baseSetCount - 1));
+    return Math.min(baseSetCount - 1, Math.max(0, index));
+}
+
+/**
+ * Advances an Argosy-style jump-folding ship's DISPLAY fold progress toward
+ * unfolded while it is in a hyperspace jump and back toward folded
+ * otherwise, at the shän AnimDelay rate. Display-only (jump folding gates
+ * nothing); miner claws use the sim FoldStateComponent instead.
+ */
+export function advanceJumpFold(graphic: AnimationGraphic,
+    mode: ShipAnimationMode, jumping: boolean, deltaS: number): number {
+    const target = jumping ? 1 : 0;
+    graphic.foldProgress = moveToward(graphic.foldProgress, target,
+        foldRatePerSecond(mode) * deltaS);
+    return graphic.foldProgress;
+}
+
+/**
+ * Drives the ship base-set animation — the third and last write to a ship
+ * graphic's frames each display tick, after ObjectDrawSystem has set the
+ * heading (rotation) and normal/left/right set. It composes the animation
+ * SET with that heading: every base set is a full FramesPer-frame rotation
+ * set, so selectBaseSet() picks the set and re-derives the frame within it.
+ *
+ *  - continuous (0x0008): the sets (and the alt-image overlay) cycle on
+ *    logical time — spinning rings (Leviathan, Manticore, Thunderforge).
+ *  - folding (0x0002): the sets are a fold sequence. Miner claws
+ *    (unfoldWhenFiring) read the synced sim FoldStateComponent so the
+ *    graphic matches the fire gate exactly; every other folding ship
+ *    (the Argosy) folds display-side off its jump state.
+ *
+ * Disabled honoring: stopWhenDisabled freezes a continuous animation at
+ * its rest set; hideAltWhenDisabled hides the alt overlay.
+ *
+ * Documented seams (checked against ALL stock shäns):
+ * - Landing/takeoff folding: the Bible also cycles the fold on landing
+ *   and takeoff, but NovaJS's landing is instant (no takeoff sequence),
+ *   so the fold keys only off the hyperspace jump state. N/A until a
+ *   takeoff sequence exists.
+ * - Inherent alt-overlay cycling WITHOUT 0x0008: the Bible says the alt
+ *   image always cycles at AnimDelay. The only stock ship with an alt
+ *   image (Aurora Thunderforge, shän 380) is ALSO 0x0008, which this
+ *   system's continuous path covers (it cycles every multi-set sprite,
+ *   the alt overlay included), so no stock content exercises a
+ *   non-0x0008 overlay and that path is deliberately not built.
+ * - keyCarried (0x0004): no stock shän sets it; the parse emits the
+ *   mode but no display consumer exists. Wiring it up means reading the
+ *   synced outfit/bay state for the shïp's KeyCarried type and calling
+ *   selectBaseSet(1) here.
+ */
+export const ShipBaseSetAnimationSystem = new System({
+    name: "ShipBaseSetAnimationSystem",
+    args: [ShipComponent, AnimationComponent, AnimationGraphicComponent,
+        TimeResource, Optional(JumpComponent), Optional(FoldStateComponent),
+        Optional(DisabledComponent)] as const,
+    step(_ship, animation, graphic, time, jump, foldState, disabled) {
+        const mode = animation.animationMode;
+        if (!mode) {
+            return; // Plain rotation-only or banking ship: nothing to do.
+        }
+
+        if (mode.purpose === 'continuous') {
+            const frozen = !!disabled && mode.stopWhenDisabled;
+            const rawSet = frozen
+                ? 0 : continuousRawSet(time.time, mode.setsPerSecond);
+            for (const sprite of graphic.sprites.values()) {
+                const sets = sprite.setCountForFramesPer(mode.framesPer);
+                if (sets <= 1) {
+                    continue; // Single-set sprite: leave rotation as-is.
+                }
+                sprite.selectBaseSet(rawSet % sets, mode.framesPer);
+            }
+        } else if (mode.purpose === 'folding') {
+            // Miner claws are sim-gated; other folding ships fold on jump.
+            const progress = mode.unfoldWhenFiring
+                ? (foldState?.progress ?? 0)
+                : advanceJumpFold(graphic, mode, jump !== undefined,
+                    time.delta_s);
+            const setIndex = foldSetIndex(progress, mode.baseSetCount);
+            for (const sprite of graphic.sprites.values()) {
+                if (sprite.setCountForFramesPer(mode.framesPer) <= 1) {
+                    continue;
+                }
+                sprite.selectBaseSet(setIndex, mode.framesPer);
+            }
+        }
+        // keyCarried (0x0004) is a documented seam (see plugin docs).
+
+        // Hide the alt-image overlay while disabled, if the ship asks for it.
+        if (mode.hideAltWhenDisabled) {
+            const alt = graphic.sprites.get('altImage');
+            if (alt) {
+                alt.pixiSprite.visible = !disabled;
+            }
+        }
+    },
+    after: [ObjectDrawSystem],
+});
+
 export const ShipAnimationPlugin: Plugin = {
     name: "ShipAnimationPlugin",
     build(world) {
         world.addSystem(ShipAnimationSystem);
+        world.addSystem(ShipBaseSetAnimationSystem);
+    },
+    remove(world) {
+        world.removeSystem(ShipAnimationSystem);
+        world.removeSystem(ShipBaseSetAnimationSystem);
     }
 }

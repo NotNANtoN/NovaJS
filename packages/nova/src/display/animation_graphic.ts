@@ -15,6 +15,13 @@ export class AnimationGraphic {
     readonly sprites = new Map<string, SpriteSheetSprite>();
     private wrappedProgress = 0;
     private wrappedRotation = 0;
+    /**
+     * Display-only fold animation progress in [0, 1] (0 = folded/rest, 1 =
+     * fully unfolded), advanced by ShipFoldAnimationSystem for jump-folding
+     * ships (the Argosy's expanding segments). Miner claws use the SIM-side
+     * FoldStateComponent instead, since their fold gates weapon fire.
+     */
+    foldProgress = 0;
     private animation: Animation | Promise<Animation>;
     readonly buildPromise: Promise<AnimationGraphic>;
     built = false;
@@ -71,6 +78,7 @@ export class AnimationGraphic {
         this.container.alpha = 1;
         this.container.scale.set(1);
         this.wrappedProgress = 0;
+        this.foldProgress = 0;
         this.rotation = 0;
     }
 

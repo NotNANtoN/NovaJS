@@ -43,6 +43,7 @@ function animationFromSpin(idSpace: NovaResources, spinId: number,
         images: { baseImage: animationImage },
         exitPoints: getDefaultExitPoints(),
         blink: null, // Asteroids have no running lights.
+        animationMode: null, // Asteroid tumble is a röid SpinRate, not shän.
     };
 }
 
