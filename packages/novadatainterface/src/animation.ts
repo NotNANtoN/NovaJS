@@ -87,6 +87,53 @@ export type BlinkPattern =
         changeDelayFrames: number;
     };
 
+/**
+ * How a ship's EXTRA base sprite sets (beyond the first rotation set)
+ * are used, decoded from the shän Flags word (EVN Bible pp. 15-16).
+ * Present only for ships that use their extra sets for something other
+ * than banking (banking stays expressed as the `left`/`right` frame
+ * ranges the rotation path already consumes). Every base set is a full
+ * `framesPer`-frame rotation set, so the displayed frame composes as
+ * `setIndex * framesPer + rotationFrame` — the animation picks the
+ * SET, the ship's heading picks the frame WITHIN it.
+ *
+ * Purpose (mutually exclusive, per the Bible):
+ * - `continuous` (0x0008): the sets cycle in sequence on logical time,
+ *   `setsPerSecond` sets per second, like the alt-image overlay. A
+ *   spinning ring (Leviathan, Manticore).
+ * - `folding` (0x0002): the sets are a fold/unfold sequence played on
+ *   hyperspace entry/exit (and landing/takeoff). Set 0 is the folded
+ *   rest pose; the last set is fully unfolded. The Argosy's expanding
+ *   segments.
+ * - `keyCarried` (0x0004): set 1 is shown instead of set 0 while the
+ *   ship carries at least one of its KeyCarried outfit type.
+ *
+ * Display-only metadata (it rides on the shared, static Animation), EXCEPT
+ * that a folding ship with `unfoldWhenFiring` (0x0080) gates weapon fire
+ * on being fully unfolded — that fold progress is real simulation state
+ * (see FoldStateComponent); this record only tells the engine the flag is
+ * set and how fast to fold.
+ */
+export interface ShipAnimationMode {
+    purpose: 'continuous' | 'folding' | 'keyCarried';
+    /** Number of base sprite sets (each `framesPer` frames). */
+    baseSetCount: number;
+    /** Frames for one rotation, i.e. the size of one base set. */
+    framesPer: number;
+    /** Sets advanced per second (30 / AnimDelay). */
+    setsPerSecond: number;
+    /** shän 0x0080: a folding ship unfolds while firing and cannot fire
+     * until fully unfolded (asteroid-miner claws). Only meaningful for
+     * `folding`. */
+    unfoldWhenFiring: boolean;
+    /** shän 0x0010: freeze the animation while the ship is disabled. */
+    stopWhenDisabled: boolean;
+    /** shän 0x0020: hide the alt-image overlay while disabled. */
+    hideAltWhenDisabled: boolean;
+    /** shän 0x0040: hide the running lights while disabled. */
+    hideLightsWhenDisabled: boolean;
+}
+
 export type ExitPoint = Array<[number, number, number]>;
 export interface ExitPoints {
     gun: ExitPoint;
@@ -117,6 +164,13 @@ export interface Animation extends BaseData {
      * (non-blinking) light. Display-only; has no effect on simulation.
      */
     blink: BlinkPattern | null;
+    /**
+     * How the ship's extra base sprite sets animate (continuous spin,
+     * folding wings, key-carried appearance), or `null` when the ship has
+     * only the plain rotation set (or uses its extra sets for banking).
+     * See ShipAnimationMode.
+     */
+    animationMode: ShipAnimationMode | null;
 }
 
 export function getDefaultAnimation(): Animation {
@@ -126,6 +180,7 @@ export function getDefaultAnimation(): Animation {
         },
         exitPoints: getDefaultExitPoints(),
         blink: null,
+        animationMode: null,
         ...getDefaultBaseData()
     }
 }

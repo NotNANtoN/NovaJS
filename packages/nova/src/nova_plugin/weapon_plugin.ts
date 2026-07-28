@@ -16,6 +16,7 @@ import { registerSimulationBridgeEvent } from '../communication/simulation_bridg
 import { mod } from '../util/mod.js';
 import { ControlledByComponent, ShipControlEvent, ShipControlStateComponent } from './ship_control.js';
 import { DisabledComponent } from './disabled_component.js';
+import { FoldStateComponent, foldBlocksFiring } from './fold_state.js';
 import { WeaponEntries, WeaponLocalState, WeaponsComponent } from './fire_weapon_plugin.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { FuelComponent } from './health_plugin.js';
@@ -108,14 +109,26 @@ export const WeaponsSystem = new System({
     name: 'WeaponsSystem',
     args: [WeaponsStateComponent, WeaponsComponent, TimeResource, UUID,
         WeaponEntries, Optional(OutfitsStateComponent), Optional(FuelComponent),
-        SimulationGameDataResource, Optional(DisabledComponent)] as const,
+        SimulationGameDataResource, Optional(DisabledComponent),
+        Optional(FoldStateComponent)] as const,
     step(weaponsState, weaponsLocalState, time, uuid, weaponEntries,
-        outfits, fuel, gameData, disabled) {
+        outfits, fuel, gameData, disabled, foldState) {
         // A disabled ship cannot fire anything — held triggers, NPC fire
         // control, and even automatic point defense are all suspended.
         // (Safe to gate before the localState touch: DisabledComponent
         // is deterministic simulation state, identical on every peer.)
         if (disabled) {
+            return;
+        }
+        // An asteroid miner (folding + unfoldWhenFiring) cannot fire until
+        // its claws are fully unfolded. Blocks EVERY weapon slot — primary,
+        // secondary (the miner's Mining Blaster is one), and point defense —
+        // matching the Bible's unqualified "unfolds when firing weapons".
+        // FoldStateComponent is present only on such ships, and it is
+        // deterministic sim state, so gating on it is identical on every
+        // peer. The firing INTENT stays set on the weapon states, so
+        // FoldAdvanceSystem keeps the claws opening.
+        if (foldBlocksFiring(foldState)) {
             return;
         }
         for (const [id, state] of weaponsState) {
@@ -229,7 +242,16 @@ const ControlPlayerWeapons = new System({
         let secondary: WeaponState | undefined;
         let secondaryIndex = 0;
         if (activeSecondary.secondary) {
-            secondary = weaponsState.get(activeSecondary.secondary);
+            // has-guarded: WeaponsState is a DefaultMap, and a bare
+            // get() for a STALE active secondary (a saved selection
+            // for a weapon this loadout no longer owns) would CREATE
+            // a phantom hashed entry. Worlds that later wire-restore
+            // re-derive WeaponsState phantom-free, but a world that
+            // never restores (the server's archive) keeps it forever
+            // — the archive-vs-everyone desync class, finally caught
+            // by the archive_state instrumentation.
+            secondary = weaponsState.has(activeSecondary.secondary)
+                ? weaponsState.get(activeSecondary.secondary) : undefined;
             secondaryIndex = secondaryWeapons.indexOf(activeSecondary.secondary);
         }
 
@@ -258,7 +280,9 @@ const ControlPlayerWeapons = new System({
         }
 
         if (activeSecondary.secondary) {
-            secondary = weaponsState.get(activeSecondary.secondary);
+            // Same has-guard as above: never create entries here.
+            secondary = weaponsState.has(activeSecondary.secondary)
+                ? weaponsState.get(activeSecondary.secondary) : undefined;
         }
 
         if (secondary) {

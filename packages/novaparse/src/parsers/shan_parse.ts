@@ -1,4 +1,4 @@
-import { Animation, AnimationFrames, AnimationImages, BlinkPattern, getDefaultAnimationImage } from "novadatainterface/animation";
+import { Animation, AnimationFrames, AnimationImages, BlinkPattern, ShipAnimationMode, getDefaultAnimationImage } from "novadatainterface/animation";
 import { BaseData } from "novadatainterface/base_data";
 import { NovaDataType } from "novadatainterface/nova_data_interface";
 import { NovaIDNotFoundError } from "novadatainterface/nova_data_interface";
@@ -13,6 +13,12 @@ export async function ShanParse(shan: ShanResource, notFoundFunction: (message: 
     var images: AnimationImages = {
         baseImage: getDefaultAnimationImage()
     };
+
+    // Decode how the ship's EXTRA base sprite sets animate. Banking
+    // (0x0001) stays expressed as the left/right rotation ranges below;
+    // the other three purposes ride on a ShipAnimationMode the display
+    // composes with rotation (setIndex * framesPer + rotationFrame).
+    const animationMode = shipAnimationMode(shan);
 
     for (const [imageName, imageInfo] of Object.entries(shan.images)) {
         if (!imageInfo) {
@@ -43,14 +49,6 @@ export async function ShanParse(shan: ShanResource, notFoundFunction: (message: 
                     start: shan.framesPer * 2,
                     length: shan.framesPer
                 };
-                break;
-            case ('animation'):
-                frames.animation = {
-                    start: shan.framesPer,
-                    // The rest of the frames are for the animation
-                    length: shan.framesPer *
-                        ((imageInfo.setCount || shan.images.baseImage.setCount) - 1)
-                }
                 break;
         }
 
@@ -84,7 +82,43 @@ export async function ShanParse(shan: ShanResource, notFoundFunction: (message: 
         images,
         exitPoints: shan.exitPoints,
         blink: blinkPattern(shan.blink),
+        animationMode,
     }
+}
+
+/**
+ * Projects the shän Flags word + timing fields into the display layer's
+ * ShipAnimationMode, or null for a plain (rotation-only) or purely
+ * banking ship. `extraFramePurpose` is already decoded by the resource
+ * parser: 'folding' (0x0002), 'keyCarried' (0x0004), and 'animation'
+ * (0x0008, "shown in sequence like the alt image" -> `continuous`).
+ * Banking returns null here; it is carried by the left/right ranges.
+ *
+ * setsPerSecond = 30 / AnimDelay (AnimDelay is the inter-frame delay in
+ * 30ths of a second, per the Bible). AnimDelay 0 would divide by zero;
+ * it falls back to one set per frame-tick (30/s).
+ */
+export function shipAnimationMode(
+    shan: ShanResource): ShipAnimationMode | null {
+    const purposeMap: { [k: string]: ShipAnimationMode["purpose"] } = {
+        folding: 'folding',
+        keyCarried: 'keyCarried',
+        animation: 'continuous',
+    };
+    const purpose = purposeMap[shan.flags.extraFramePurpose];
+    if (!purpose) {
+        return null;
+    }
+    return {
+        purpose,
+        baseSetCount: shan.images.baseImage.setCount,
+        framesPer: shan.framesPer,
+        setsPerSecond: 30 / (shan.animDelay || 1),
+        unfoldWhenFiring: shan.flags.unfoldWhenFiring,
+        stopWhenDisabled: shan.flags.stopAnimationWhenDisabled,
+        hideAltWhenDisabled: shan.flags.hideAltSpritesWhenDisabled,
+        hideLightsWhenDisabled: shan.flags.hideLightsWhenDisabled,
+    };
 }
 
 /**

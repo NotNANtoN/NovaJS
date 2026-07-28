@@ -86,7 +86,18 @@ describe('Input-driven rooms', () => {
         const peerB = await makePeer('b');
 
         // Each peer inserts its own ship (an input record, relayed).
-        await peerA.client.addEntity('ship a', await makePeerShip('a', peerA.world));
+        // Ship a carries a STALE saved secondary selection (a weapon
+        // its loadout does not own): looking it up must never create
+        // a phantom WeaponsState entry — WeaponsState is a DefaultMap,
+        // and a created-on-lookup entry is hashed state that survives
+        // only on worlds that never wire-restore (the archive), the
+        // archive-vs-everyone desync class.
+        const shipA = await makePeerShip('a', peerA.world);
+        const { ActiveSecondaryWeapon } =
+            await import('../nova_plugin/weapon_plugin.js');
+        shipA.components.set(ActiveSecondaryWeapon,
+            { secondary: 'bogus:999' });
+        await peerA.client.addEntity('ship a', shipA);
         await peerB.client.addEntity('ship b', await makePeerShip('b', peerB.world));
 
         for (let tick = 1; tick <= 120; tick++) {
@@ -113,6 +124,14 @@ describe('Input-driven rooms', () => {
         const hashA = hashWorld(peerA.world, PEER_LOCAL_COMPONENTS);
         const hashB = hashWorld(peerB.world, PEER_LOCAL_COMPONENTS);
         expect(hashA.hash).toEqual(hashB.hash);
+        // The stale secondary created no phantom weapon entry.
+        const { WeaponsStateComponent } =
+            await import('../nova_plugin/weapons_state.js');
+        for (const peer of [peerA, peerB]) {
+            const weapons = peer.world.entities.get('ship a')!
+                .components.get(WeaponsStateComponent)!;
+            expect(weapons.has('bogus:999')).toBeFalse();
+        }
         // Both worlds contain both ships.
         expect(peerA.world.entities.has('ship a')).toBeTrue();
         expect(peerA.world.entities.has('ship b')).toBeTrue();
