@@ -166,6 +166,7 @@ async function ProjectileWeaponParse(weap: WeapResource, notFoundFunction: (m: s
             animation = {
                 exitPoints: getDefaultExitPoints(),
                 blink: null, // Weapon graphics have no running lights.
+                animationMode: null, // Weapon spin is a wëap flag, not shän.
                 id: baseWeapon.id,
                 name: baseWeapon.name,
                 prefix: baseWeapon.prefix,
