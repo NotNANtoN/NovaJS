@@ -9,9 +9,9 @@ import { SimulationGameDataResource } from "../nova_plugin/game_data_resource.js
 import { GameDateComponent } from "../nova_plugin/player_state_plugin.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 import { SystemIdResource } from "../nova_plugin/system_id_resource.js";
-import { boardingBlockedMessage, jumpArrivalMessage, landingBlockedMessage } from "./status_bar_content.js";
+import { boardingBlockedMessage, escortRepairedMessage, jumpArrivalMessage, landingBlockedMessage } from "./status_bar_content.js";
 import { LandingBlockedEvent } from "../nova_plugin/planet_plugin.js";
-import { BoardingBlockedEvent } from "../nova_plugin/boarding_plugin.js";
+import { BoardingBlockedEvent, EscortRepairedEvent } from "../nova_plugin/boarding_plugin.js";
 import { ResizeEvent, ScreenSize } from "./screen_size_plugin.js";
 import { Stage } from "./stage_resource.js";
 
@@ -138,6 +138,20 @@ const ShowBoardingBlockedMessage = new System({
     },
 });
 
+// Success feedback when boarding repairs one of your own disabled flock
+// members (EscortRepairedEvent from the boarding gate). Like the blocked
+// messages it is emitted in the sim targeted at the boarding ship and
+// shown only on the local player's client (PlayerShipSelector) — but it
+// is a success, so no cant-do beep.
+const ShowEscortRepairedMessage = new System({
+    name: 'ShowEscortRepairedMessage',
+    events: [EscortRepairedEvent],
+    args: [StatusLineResource, TimeResource, PlayerShipSelector] as const,
+    step(statusLine, { time }) {
+        statusLine.setMessage(escortRepairedMessage(), time);
+    },
+});
+
 export const StatusMessagePlugin: Plugin = {
     name: 'StatusMessage',
     async build(world) {
@@ -176,12 +190,14 @@ export const StatusMessagePlugin: Plugin = {
         world.addSystem(DrawStatusMessage);
         world.addSystem(ShowLandingBlockedMessage);
         world.addSystem(ShowBoardingBlockedMessage);
+        world.addSystem(ShowEscortRepairedMessage);
     },
     remove(world) {
         world.removeSystem(StatusLineResize);
         world.removeSystem(DrawStatusMessage);
         world.removeSystem(ShowLandingBlockedMessage);
         world.removeSystem(ShowBoardingBlockedMessage);
+        world.removeSystem(ShowEscortRepairedMessage);
         const stage = world.resources.get(Stage);
         const statusLine = world.resources.get(StatusLineResource);
         if (stage && statusLine) {

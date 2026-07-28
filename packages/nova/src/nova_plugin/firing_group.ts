@@ -75,10 +75,22 @@ export const SAME_GOVT_FIRING_IMMUNITY = false;
  * wire/legacy entities might) is never immune to anything: with
  * undefined on both sides an ownerless weapon would otherwise match
  * every group-less victim and sail through e.g. asteroids.
+ *
+ * `victimDisabled` cancels immunity entirely: a DISABLED ship is dead in
+ * space and loses its fleet/carrier friendly-fire protection, so a
+ * fleetmate's — and the player's own — shots connect (to finish it off,
+ * or to keep it soft for boarding). The collision callers pass the
+ * victim's DisabledComponent presence; other callers (e.g. the
+ * guided-lock provocation in flock.ts) leave it at its false default so
+ * their group semantics are unchanged.
  */
 export function firingImmune(
     weaponGroup: string | undefined, victimGroup: string | undefined,
-    weaponGovt: string | undefined, victimGovt: string | undefined): boolean {
+    weaponGovt: string | undefined, victimGovt: string | undefined,
+    victimDisabled = false): boolean {
+    if (victimDisabled) {
+        return false;
+    }
     if (weaponGroup !== undefined && weaponGroup === victimGroup) {
         return true;
     }

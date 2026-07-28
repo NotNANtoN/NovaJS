@@ -29,6 +29,7 @@ import { FiringGroupComponent, firingImmune, victimFiringGroup } from './firing_
 import { provokeGuidedLock } from './flock.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { GovtComponent } from './govt_component.js';
+import { DisabledComponent } from './disabled_component.js';
 import { guidanceAngle, Guidance, GuidanceComponent, MissileGuidanceResource } from './guidance.js';
 import { JamSteerComponent, MissileJammingSystem } from './jamming_plugin.js';
 import { ArmorComponent, ShieldComponent } from './health_plugin.js';
@@ -328,7 +329,8 @@ export const ProjectileCollisionSystem = new System({
             other.components.get(OwnerComponent)?.owner,
             collision.other);
         if (firingImmune(firingGroup?.group ?? owner?.owner, victimGroup,
-            firingGroup?.govt, other.components.get(GovtComponent)?.id)) {
+            firingGroup?.govt, other.components.get(GovtComponent)?.id,
+            other.components.has(DisabledComponent))) {
             return;
         }
 

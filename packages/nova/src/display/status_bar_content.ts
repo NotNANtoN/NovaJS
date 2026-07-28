@@ -166,3 +166,12 @@ export function boardingBlockedMessage(reason:
             return 'Line up alongside the ship before boarding.';
     }
 }
+
+/**
+ * Status-line feedback when the player boards one of their OWN disabled
+ * flock members (a hired/captured escort or bay fighter): rather than
+ * plundering it, the boarding party repairs it and it rejoins formation.
+ */
+export function escortRepairedMessage(): string {
+    return 'Your ship has been repaired and rejoins your formation.';
+}

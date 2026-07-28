@@ -4,11 +4,14 @@ import { getDefaultShipData } from 'novadatainterface/ship_data';
 import { Position } from 'nova_ecs/datatypes/position';
 import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import { World } from 'nova_ecs/world';
+import { DisabledComponent } from './disabled_component.js';
 import { ExplodingComponent } from './death_plugin.js';
 import { completeEntity } from './entity_data_loader.js';
 import { makeShip } from './make_ship.js';
 import { makeSystem } from './make_system.js';
+import { ArmorComponent } from './health_plugin.js';
 import { FormationComponent } from './npc_ai_plugin.js';
+import { ShipDataComponent } from './ship_plugin.js';
 import { applyControlEvents, ControlledByComponent } from './ship_control.js';
 import { applySetTarget } from './target_plugin.js';
 import { TargetComponent } from './target_component.js';
@@ -134,6 +137,68 @@ describe('escort targeting', () => {
         applySetTarget(world, PEER, null);
         expect(playerTarget(world)).toBeUndefined();
     });
+});
+
+describe('a DISABLED flock member rejoins the normal cycle', () => {
+    function disable(world: World, uuid: string) {
+        // Drop armor below the disable threshold; ShipDisableSystem then
+        // attaches DisabledComponent on the next step (armor stays > 0 so
+        // the ship isn't destroyed).
+        const entity = world.entities.get(uuid)!;
+        const armor = entity.components.get(ArmorComponent)!;
+        const fraction = entity.components
+            .get(ShipDataComponent)!.disableArmorFraction;
+        armor.current = Math.max(1, fraction * armor.max * 0.5);
+        world.step();
+        if (!entity.components.has(DisabledComponent)) {
+            throw new Error(`${uuid} did not become disabled`);
+        }
+    }
+
+    it('nearest-target (r) picks the disabled escort over the enemy',
+        async () => {
+            // The escort sits at x=50 (nearer than the enemy at x=400);
+            // disabled, it is no longer skipped, so it wins on distance.
+            const world = await makeTargetingWorld();
+            disable(world, 'escort');
+            press(world, 'nearestTarget');
+            expect(playerTarget(world)).toBe('escort');
+        });
+
+    it('tab cycling now lands on the disabled escort', async () => {
+        const world = await makeTargetingWorld();
+        disable(world, 'escort');
+        const seen = new Set<string | undefined>();
+        for (let i = 0; i < 8; i++) {
+            press(world, 'nextTarget');
+            seen.add(playerTarget(world));
+        }
+        expect(seen.has('escort')).toBeTrue();
+        // The still-healthy fighter stays excluded from the normal cycle.
+        expect(seen.has('fighter')).toBeFalse();
+        expect(seen.has('enemy')).toBeTrue();
+    });
+
+    it('a healthy escort is still excluded from tab cycling', async () => {
+        // Regression guard: only the disabled exception opens the cycle.
+        const world = await makeTargetingWorld();
+        const seen = new Set<string | undefined>();
+        for (let i = 0; i < 8; i++) {
+            press(world, 'nextTarget');
+            seen.add(playerTarget(world));
+        }
+        expect(seen.has('escort')).toBeFalse();
+    });
+
+    it('the disabled escort stays in the option+tab escort cycle too',
+        async () => {
+            const world = await makeTargetingWorld();
+            disable(world, 'escort');
+            press(world, 'escortTarget');
+            expect(playerTarget(world)).toBe('escort');
+            press(world, 'escortTarget');
+            expect(playerTarget(world)).toBe('fighter');
+        });
 });
 
 describe('exploding ships are untargetable', () => {

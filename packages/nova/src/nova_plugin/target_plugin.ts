@@ -12,6 +12,7 @@ import { World } from "nova_ecs/world";
 import { ExplodingComponent } from "./death_plugin.js";
 import { findControlledEntity, ShipControlEvent, ShipControlStateComponent } from "./ship_control.js";
 import { CloakActiveComponent, CloakScannerComponent, isTargetable } from "./cloak_plugin.js";
+import { DisabledComponent } from "./disabled_component.js";
 import { OwnerComponent } from "./fire_weapon_plugin.js";
 import { isInFlock } from "./flock.js";
 import { PlayerShipSelector } from "./player_ship_plugin.js";
@@ -48,6 +49,19 @@ const ChooseTargetSystem = new System({
         // (applySetTarget below).
         const getEntity = (u: string) => entities.get(u);
 
+        // Whether a candidate is hidden from the NORMAL (tab / r) cycle
+        // because it is the ship's own flock member (owned fighter or
+        // transitive escort). A DISABLED flock member is the exception:
+        // dead in space, it rejoins the normal cycle so the player can
+        // target it to board and repair it. It stays in the escortTarget
+        // cycle regardless (that cycle keeps every flock member).
+        const hiddenFromCycle = (u: string, ownerUuid: string | undefined) => {
+            if (getEntity(u)?.components.has(DisabledComponent)) {
+                return false;
+            }
+            return ownerUuid === uuid || isInFlock(u, uuid, getEntity);
+        };
+
         if (controlState.get('escortTarget') === 'start') {
             // Cycle the flock in uuid order (deterministic regardless
             // of entity-map iteration order), starting after the
@@ -74,8 +88,7 @@ const ChooseTargetSystem = new System({
                 .map(([a, b, c, d, e, f], index) =>
                     [a, b, c, d, e, f, index] as const)
                 .filter(([otherUuid, _, owner, __, cloak, exploding]) => {
-                    if (owner?.owner === uuid
-                        || isInFlock(otherUuid, uuid, getEntity)) {
+                    if (hiddenFromCycle(otherUuid, owner?.owner)) {
                         return false;
                     }
                     // Cloaked ships are untargetable unless this ship has
@@ -131,11 +144,12 @@ const ChooseTargetSystem = new System({
                 const [targetUuid, _targetMovement, targetOwner, _targetShip,
                     targetCloak, targetExploding] = ships[index.index];
                 // Don't target yourself
-                // Don't target your flock (escorts and their spawn)
+                // Don't target your flock (escorts and their spawn),
+                //   UNLESS a flock member is disabled (hiddenFromCycle)
                 // Don't target cloaked ships (unless a cloak scanner allows it)
                 // Don't target exploding ships (death sequence started)
-                if (targetUuid !== uuid && targetOwner?.owner !== uuid
-                    && !isInFlock(targetUuid, uuid, getEntity)
+                if (targetUuid !== uuid
+                    && !hiddenFromCycle(targetUuid, targetOwner?.owner)
                     && isTargetable(targetCloak, myScanner)
                     && targetExploding === undefined) {
                     break;

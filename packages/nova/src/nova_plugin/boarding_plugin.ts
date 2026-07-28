@@ -25,9 +25,11 @@ import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_
 import { DisabledComponent, isBelowDisableThreshold, repairedArmor } from './disabled_component.js';
 import { EscortCommandComponent } from './escort_command.js';
 import { FiringGroupComponent } from './firing_group.js';
+import { isInFlock } from './flock.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { GovtComponent } from './govt_component.js';
 import { ArmorComponent } from './health_plugin.js';
+import { ShieldComponent } from './health_plugin.js';
 import { FuelComponent } from './health_plugin.js';
 import { FormationComponent, NpcComponent } from './npc_ai_plugin.js';
 import { CreditsComponent } from './player_state_plugin.js';
@@ -78,6 +80,17 @@ export const BoardingBlockedEventType = t.type({
         t.literal('tooFar'), t.literal('tooFast'), t.literal('notAligned')]),
 });
 registerSimulationBridgeEvent({ event: BoardingBlockedEvent });
+
+/**
+ * Emitted (targeted at the boarding ship) when boarding one of your OWN
+ * disabled flock members repairs it in place instead of opening a
+ * plunder session. Consumed display-side by the status line
+ * (status_message_plugin.ts); never mutates the simulation.
+ */
+export const EscortRepairedEvent =
+    new EcsEvent<Record<string, never>>('EscortRepairedEvent');
+export const EscortRepairedEventType = t.type({});
+registerSimulationBridgeEvent({ event: EscortRepairedEvent });
 
 /**
  * Builds the planAmmoPlunder inputs from live entities + game data: the
@@ -180,6 +193,31 @@ const BoardingGateSystem = new System({
         });
         if (reason) {
             emit(BoardingBlockedEvent, { reason }, [uuid]);
+            return;
+        }
+
+        // Boarding your OWN disabled flock member (a hired or captured
+        // escort, or one of your bay fighters) does NOT plunder it: it
+        // repairs it in place. The boarding gate above still applies
+        // (close, slow, axis-aligned). Restore armor just above the
+        // disable threshold — ShipDisableSystem then lifts
+        // DisabledComponent, so the escort resumes formation — and
+        // shields to full, matching the hail-assist repair
+        // (hail_plugin.ts). Report it on the status line; no plunder
+        // session opens.
+        if (isInFlock(targetUuid!, uuid, u => entities.get(u))) {
+            const targetArmor = targetEntity!.components.get(ArmorComponent);
+            if (targetArmor && isBelowDisableThreshold(
+                targetArmor, targetShipData!.disableArmorFraction)) {
+                targetArmor.current = repairedArmor(
+                    targetArmor.max, targetShipData!.disableArmorFraction);
+            }
+            const targetShield = targetEntity!.components.get(ShieldComponent);
+            if (targetShield) {
+                targetShield.current = targetShield.max;
+            }
+            targetEntity!.components.delete(DisabledComponent);
+            emit(EscortRepairedEvent, {}, [uuid]);
             return;
         }
 
@@ -415,6 +453,8 @@ export const BoardingPlugin: Plugin = {
         });
         world.resources.get(SerializerResource)?.addEvent(
             BoardingBlockedEvent, BoardingBlockedEventType);
+        world.resources.get(SerializerResource)?.addEvent(
+            EscortRepairedEvent, EscortRepairedEventType);
 
         world.addSystem(BoardingGateSystem);
         world.addSystem(BoardingActionSystem);

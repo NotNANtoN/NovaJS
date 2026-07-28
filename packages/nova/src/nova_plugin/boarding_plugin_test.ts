@@ -4,8 +4,12 @@ import { Position } from 'nova_ecs/datatypes/position';
 import { Entity } from 'nova_ecs/entity';
 import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import { World } from 'nova_ecs/world';
+import { UUID } from 'nova_ecs/arg_types';
+import { System } from 'nova_ecs/system';
 import { getIntegrationGameData } from '../communication/simulation_test_fixture.js';
+import { EscortRepairedEvent } from './boarding_plugin.js';
 import { BoardedComponent, BoardingComponent } from './boarding_component.js';
+import { isBelowDisableThreshold } from './disabled_component.js';
 import { CargoComponent } from './cargo_plugin.js';
 import { DisabledComponent } from './disabled_component.js';
 import { completeEntity } from './entity_data_loader.js';
@@ -200,6 +204,66 @@ describe('boarding in a live world', () => {
         expect(target.components.has(DisabledComponent)).toBeFalse();
         // Session ended.
         expect(boarder.components.has(BoardingComponent)).toBeFalse();
+    });
+
+    describe('boarding your OWN disabled flock member repairs it', () => {
+        // Records EscortRepairedEvent so the sim-side status feedback is
+        // observable (the event is targeted at the boarder).
+        function recordRepairs(world: World): string[] {
+            const seen: string[] = [];
+            world.addSystem(new System({
+                name: 'RepairRecorder',
+                events: [EscortRepairedEvent],
+                args: [UUID] as const,
+                step(uuid) { seen.push(uuid); },
+            }));
+            return seen;
+        }
+
+        async function ownEscortWorld() {
+            const ctx = await boardingWorld();
+            // Make the disabled target the boarder's escort (flock member).
+            ctx.target.components.set(FormationComponent,
+                { leader: BOARDER, slot: 0 });
+            ctx.world.step();
+            return ctx;
+        }
+
+        it('repairs the escort and opens NO plunder session', async () => {
+            const { world, boarder, target } = await ownEscortWorld();
+            const repairs = recordRepairs(world);
+            const shipData = target.components.get(ShipDataComponent)!;
+
+            press(world, BOARDER, 'board');
+
+            // No plunder session on either side.
+            expect(boarder.components.has(BoardingComponent)).toBeFalse();
+            expect(target.components.has(BoardedComponent)).toBeFalse();
+            // Repaired: no longer disabled, armor lifted above threshold,
+            // shields restored to full (hail-assist convention).
+            expect(target.components.has(DisabledComponent)).toBeFalse();
+            const armor = target.components.get(ArmorComponent)!;
+            expect(isBelowDisableThreshold(armor, shipData.disableArmorFraction))
+                .toBeFalse();
+            const shield = target.components.get(ShieldComponent)!;
+            expect(shield.current).toEqual(shield.max);
+            // Status feedback fired at the boarder.
+            expect(repairs).toEqual([BOARDER]);
+        });
+
+        it('a HOSTILE disabled ship (not your flock) still opens plunder',
+            async () => {
+                // Contrast case: no flock link, so the normal plunder gate
+                // runs and no repair happens.
+                const { world, boarder, target } = await boardingWorld();
+                const repairs = recordRepairs(world);
+                press(world, BOARDER, 'board');
+                expect(boarder.components.get(BoardingComponent)?.target)
+                    .toEqual(TARGET);
+                expect(target.components.has(BoardedComponent)).toBeTrue();
+                expect(target.components.has(DisabledComponent)).toBeTrue();
+                expect(repairs).toEqual([]);
+            });
     });
 
     it('rolls the capture identically for the same seed', async () => {

@@ -18,6 +18,7 @@ import { CollisionEvent } from './collision_interaction.js';
 import { CompositeHull, HitboxHullComponent } from './collisions_plugin.js';
 import { CreateTime } from './create_time.js';
 import { DamagedEvent } from './death_plugin.js';
+import { DisabledComponent } from './disabled_component.js';
 import { FireSubs, OwnerComponent } from './fire_weapon_plugin.js';
 import { FiringGroupComponent, firingImmune, victimFiringGroup } from './firing_group.js';
 import { GovtComponent } from './govt_component.js';
@@ -42,6 +43,19 @@ describe('firingImmune (pair-immunity predicate)', () => {
             .toBeFalse();
         expect(firingImmune(undefined, 'ship-1', undefined, undefined))
             .toBeFalse();
+    });
+
+    it('cancels immunity when the victim is disabled', () => {
+        // A DISABLED ship forfeits its friendly-fire protection even
+        // against its own group; once repaired (not disabled) it is
+        // immune again.
+        expect(firingImmune('fleet-1', 'fleet-1', undefined, undefined, true))
+            .toBeFalse();
+        expect(firingImmune('fleet-1', 'fleet-1', undefined, undefined, false))
+            .toBeTrue();
+        // The default (omitted) is "not disabled".
+        expect(firingImmune('fleet-1', 'fleet-1', undefined, undefined))
+            .toBeTrue();
     });
 
     it('keeps the same-govt clause DISABLED (pending research)', () => {
@@ -172,6 +186,29 @@ describe('ProjectileCollisionSystem filtering', () => {
             expect(damaged).toEqual([]);
         });
 
+        it('hits a same-group victim once it is DISABLED', () => {
+            // A disabled fleetmate loses immunity: your shot connects.
+            const leader = addShip('leader');
+            leader.components.set(FiringGroupComponent, { group: 'leader' });
+            leader.components.set(DisabledComponent, { repairAt: null });
+            addProjectile('shot', {}).components
+                .set(FiringGroupComponent, { group: 'leader' });
+            collide('shot', 'leader');
+            expect(hits('leader').length).toBe(1);
+        });
+
+        it('re-immunizes a same-group victim once repaired (not disabled)',
+            () => {
+                // Same setup without DisabledComponent: back to passing
+                // through — the cancellation is scoped to the disabled state.
+                addShip('leader').components
+                    .set(FiringGroupComponent, { group: 'leader' });
+                addProjectile('shot', {}).components
+                    .set(FiringGroupComponent, { group: 'leader' });
+                collide('shot', 'leader');
+                expect(hits('leader')).toEqual([]);
+            });
+
         it('same govt does NOT confer immunity while the clause is off', () => {
             addShip('same-govt-ship').components
                 .set(GovtComponent, { id: 'nova:200' });
@@ -301,6 +338,15 @@ describe('ProjectileCollisionSystem filtering', () => {
                 collide('blast', 'member');
                 expect(hits('member').length).toBe(1);
             });
+
+        it('damages a DISABLED group member', () => {
+            const member = addShip('member');
+            member.components.set(FiringGroupComponent, { group: 'fleet-1' });
+            member.components.set(DisabledComponent, { repairAt: null });
+            addBlast('blast', 'fleet-1');
+            collide('blast', 'member');
+            expect(hits('member').length).toBe(1);
+        });
     });
 
     describe('beam group immunity', () => {
@@ -343,6 +389,16 @@ describe('ProjectileCollisionSystem filtering', () => {
             collide('beam', 'outsider');
             expect(beam.components.get(BeamStateComponent)?.targetHit)
                 .toBe('outsider');
+        });
+
+        it('hits a DISABLED member of its firing group', () => {
+            const member = addHullShip('member');
+            member.components.set(FiringGroupComponent, { group: 'fleet-1' });
+            member.components.set(DisabledComponent, { repairAt: null });
+            const beam = addBeam('beam', 'fleet-1');
+            collide('beam', 'member');
+            expect(beam.components.get(BeamStateComponent)?.targetHit)
+                .toBe('member');
         });
     });
 });

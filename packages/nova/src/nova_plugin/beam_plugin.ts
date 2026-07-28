@@ -22,6 +22,7 @@ import { applyExitPoint, ExitPointData } from './exit_point.js';
 import { FireSubs, OwnerComponent, sampleInaccuracy, SourceComponent, WeaponConstructors, WeaponEntry } from './fire_weapon_plugin.js';
 import { FiringGroupComponent, firingImmune, victimFiringGroup } from './firing_group.js';
 import { GovtComponent } from './govt_component.js';
+import { DisabledComponent } from './disabled_component.js';
 import { zeroOrderGuidance } from './guidance.js';
 import { SoundEvent } from './sound_plugin.js';
 import { TargetComponent } from './target_component.js';
@@ -318,7 +319,8 @@ export const BeamCollisionSystem = new System({
                 other.components.get(OwnerComponent)?.owner,
                 collision.other),
             firingGroup?.govt,
-            other.components.get(GovtComponent)?.id)) {
+            other.components.get(GovtComponent)?.id,
+            other.components.has(DisabledComponent))) {
             return;
         }
 

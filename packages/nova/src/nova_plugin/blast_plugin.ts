@@ -12,6 +12,7 @@ import { DamagedEvent } from './death_plugin.js';
 import { OwnerComponent } from './fire_weapon_plugin.js';
 import { FiringGroupComponent, firingImmune, victimFiringGroup } from './firing_group.js';
 import { GovtComponent } from './govt_component.js';
+import { DisabledComponent } from './disabled_component.js';
 
 
 export { BlastDamageComponent, BlastIgnoreComponent } from './blast_data.js';
@@ -36,7 +37,8 @@ export const BlastCollisionSystem = new System({
                 other.components.get(OwnerComponent)?.owner,
                 collision.other),
             firingGroup?.govt,
-            other.components.get(GovtComponent)?.id)) {
+            other.components.get(GovtComponent)?.id,
+            other.components.has(DisabledComponent))) {
             return;
         }
         emitNow(DamagedEvent, { damage, damager: uuid }, [collision.other])
