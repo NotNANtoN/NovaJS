@@ -148,6 +148,23 @@ export async function PlanetParse(spob: SpobResource, notFoundFunction: (m: stri
     const barPict = barGraphic >= 0
         ? (spob.idSpace.PICT[barGraphic]?.globalID ?? null) : null;
 
+    // The spöb CustSndID (parsed as `ambientSound`) is the ambient snd
+    // resource looped while the player is on this stellar's spaceport main
+    // screen (EVN Bible p. 60). It is only an ambient sound for a normal
+    // stellar: hypergates and wormholes repurpose the same field as the
+    // emergence angle (resolved into `gate.emergenceAngle` above), so a gate
+    // never carries a spaceport ambient. Ambient snd ids are real 'snd '
+    // resources (128+, mirroring the CustPicID "< 128 = none" convention);
+    // -1/absent/sub-128 means no ambient sound.
+    let spaceportSound: string | null = null;
+    if (!gate && spob.ambientSound >= 128) {
+        spaceportSound = spob.idSpace["snd "][spob.ambientSound]?.globalID ?? null;
+        if (!spaceportSound) {
+            notFoundFunction("No matching snd " + spob.ambientSound
+                + " for spöb ambient sound of id " + base.id);
+        }
+    }
+
     return {
         ...base,
         landingDesc: desc,
@@ -169,6 +186,7 @@ export async function PlanetParse(spob: SpobResource, notFoundFunction: (m: stri
         barDesc,
         barPict,
         animationDelay: spob.animationDelay,
+        spaceportSound,
         vulnerableTo: <Array<DamageType>>["planetBuster"],
         physics: {
             shield: 1000,

@@ -109,6 +109,16 @@ export interface PlanetData extends SpaceObjectData {
      * such as wormholes.
      */
     animationDelay: number;
+
+    /**
+     * Global id of the ambient snd resource played on a loop while the
+     * player is on this stellar's main spaceport screen (the spöb CustSndID
+     * field, EVN Bible p. 60: "Which ambient sound to play"; -1 = none).
+     * null when the stellar has no ambient sound. Note: for hypergates and
+     * wormholes CustSndID is repurposed as the emergence angle (see `gate`),
+     * so those never carry a spaceport ambient sound.
+     */
+    spaceportSound: string | null;
 }
 
 export function getDefaultPlanetFlags(): PlanetFlags {
@@ -140,5 +150,6 @@ export function getDefaultPlanetData(): PlanetData {
         barDesc: "",
         barPict: null,
         animationDelay: 0,
+        spaceportSound: null,
     };
 }

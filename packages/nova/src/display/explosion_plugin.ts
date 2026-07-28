@@ -19,6 +19,8 @@ import { AnimationGraphicComponent } from "./animation_graphic_plugin.js";
 import { DeathEvent, PlayerDeathSystem, ZeroArmorEvent } from "../nova_plugin/death_plugin.js";
 import { ShipComponent, ShipDataComponent } from "../nova_plugin/ship_plugin.js";
 import { DeathAISystem } from "../nova_plugin/npc_plugin.js";
+import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
+import { SOUND_EXPLOSION_LOOP, UiSoundEvent } from "./ui_sound.js";
 
 
 const ExplosionState = new Component<{
@@ -182,6 +184,31 @@ const ShipSecondaryExplosionDoneSystem = new System({
     }
 });
 
+// Loops the death sound (snd 371) for the whole duration of the LOCAL
+// player's own explosion sequence. Both events are targeted at the ship
+// that zeroed / died, so the PlayerShipSelector arg fires these only on
+// the local player's ship. ZeroArmorEvent can re-fire while armor stays
+// at zero, but starting a loop already in LoopingSounds is a no-op
+// (playSound), so no debounce is needed; DeathEvent ends the sequence
+// (and respawns), stopping the loop.
+const PlayerExplosionSoundStartSystem = new System({
+    name: 'PlayerExplosionSoundStart',
+    events: [ZeroArmorEvent],
+    args: [PlayerShipSelector, Emit] as const,
+    step(_player, emit) {
+        emit(UiSoundEvent, { id: SOUND_EXPLOSION_LOOP, loop: true });
+    }
+});
+
+const PlayerExplosionSoundStopSystem = new System({
+    name: 'PlayerExplosionSoundStop',
+    events: [DeathEvent],
+    args: [PlayerShipSelector, Emit] as const,
+    step(_player, emit) {
+        emit(UiSoundEvent, { id: SOUND_EXPLOSION_LOOP, stop: true });
+    }
+});
+
 export function makeExplosion(explosionData: ExplosionData, position: Position,
     secondaryExplosionData?: ExplosionData) {
     const explosion = new Entity()
@@ -213,6 +240,8 @@ export const ExplosionPlugin: Plugin = {
         world.addSystem(ShipFinalExplosionSystem);
         world.addSystem(ShipSecondaryExplosionSystem);
         world.addSystem(ShipSecondaryExplosionDoneSystem);
+        world.addSystem(PlayerExplosionSoundStartSystem);
+        world.addSystem(PlayerExplosionSoundStopSystem);
     },
     remove(world) {
         world.removeSystem(ExplosionSystem);
@@ -221,5 +250,7 @@ export const ExplosionPlugin: Plugin = {
         world.removeSystem(ShipFinalExplosionSystem);
         world.removeSystem(ShipSecondaryExplosionSystem);
         world.removeSystem(ShipSecondaryExplosionDoneSystem);
+        world.removeSystem(PlayerExplosionSoundStartSystem);
+        world.removeSystem(PlayerExplosionSoundStopSystem);
     }
 }

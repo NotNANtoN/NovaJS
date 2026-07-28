@@ -20,6 +20,7 @@ import { emptyRouteState } from '../spaceport/route.js';
 import { OpenStarmapOptions, RouteStateStore, Starmap } from '../spaceport/starmap.js';
 import { ScreenSize } from './screen_size_plugin.js';
 import { Stage } from './stage_resource.js';
+import { BEEP_MAP_CLOSE, BEEP_MAP_OPEN, playUiSound } from './ui_sound.js';
 
 const StarmapResource = new Resource<Starmap>("Starmap");
 const StarmapControlsSubscription = new Resource<Subscription>('StarmapControlsSubscription');
@@ -160,7 +161,15 @@ export const StarmapPlugin: Plugin = {
             if (MenuControls.focused) {
                 return;
             }
-            void openStarmap();
+            // This branch runs only in space (no menu focused), so the
+            // map-open/close beeps here are the in-space cues only — a
+            // docked map (opened by the spaceport) never reaches here.
+            // Once the map is open it binds its own MenuControls, so a
+            // second 'm' is handled there (and re-blocked above), leaving
+            // this as a clean single open per in-space press.
+            playUiSound(world, { id: BEEP_MAP_OPEN });
+            void openStarmap().then(
+                () => playUiSound(world, { id: BEEP_MAP_CLOSE }));
         }));
     },
     remove(world) {

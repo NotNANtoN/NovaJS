@@ -7,6 +7,7 @@ import { DisplayAssetDataResource } from '../nova_plugin/game_data_resource.js';
 import { PlayerSoundEvent, SoundEvent, SoundEventData } from '../nova_plugin/sound_plugin.js';
 import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin.js';
 import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data.js';
+import { PREWARM_UI_SOUNDS, UiSoundEvent } from './ui_sound.js';
 
 const LoopingSounds = new Resource<Map<string, Sound>>('LoopingSounds');
 const VolumeResource = new Resource<{volume: number}>('VolumeResource');
@@ -67,6 +68,23 @@ export const PlayerSoundSystem = new System({
     }
 });
 
+/**
+ * Plays the local UI/space sounds (interface beeps, first-hostile, the
+ * explosion loop, boarding). UiSoundEvent is a display-only channel — never
+ * bridged to peers — so this is the single place those client-local cues are
+ * turned into audio, reusing the same loop/stop/volume machinery as the
+ * networked channels. Exported for tests.
+ */
+export const UiSoundSystem = new System({
+    name: 'UiSoundSystem',
+    events: [UiSoundEvent],
+    args: [UiSoundEvent, DisplayAssetDataResource, LoopingSounds, VolumeResource,
+           SingletonComponent] as const,
+    step(sound, displayAssets, loopingSounds, {volume}) {
+        playSound(sound, displayAssets, loopingSounds, volume);
+    }
+});
+
 export const SoundPlugin: Plugin = {
     name: 'SoundPlugin',
     build(world) {
@@ -74,8 +92,17 @@ export const SoundPlugin: Plugin = {
         world.resources.set(VolumeResource, {volume: 0.045});
         world.addSystem(SoundSystem);
         world.addSystem(PlayerSoundSystem);
+        world.addSystem(UiSoundSystem);
+
+        // Pre-warm the static UI/space sounds so the first beep/cue isn't
+        // silent while the asset streams in (playSound reads getCached).
+        const displayAssets = world.resources.get(DisplayAssetDataResource);
+        for (const id of PREWARM_UI_SOUNDS) {
+            displayAssets?.data.Sound.get(id);
+        }
     },
     remove(world) {
+        world.removeSystem(UiSoundSystem);
         world.removeSystem(PlayerSoundSystem);
         world.removeSystem(SoundSystem);
         world.resources.delete(VolumeResource);

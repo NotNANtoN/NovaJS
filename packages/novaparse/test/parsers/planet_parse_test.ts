@@ -190,6 +190,50 @@ describe("PlanetParse stellar graphic (spïn -> rlëD resolution)", () => {
         });
 });
 
+describe("PlanetParse spaceport ambient sound (CustSndID)", () => {
+    let idSpace: ReturnType<typeof getEmptyNovaResources>;
+    const snd = (globalID: string) => ({ globalID }) as never;
+
+    beforeEach(() => {
+        idSpace = getEmptyNovaResources();
+    });
+
+    it("resolves CustSndID to the ambient snd global id for a normal stellar",
+        async () => {
+            // Port Kane (spöb nova:137) carries CustSndID 10032 in the stock
+            // data; the ambient is the snd resource of that id.
+            idSpace["snd "][10032] = snd("nova:10032");
+            const spob = new SpobResource(
+                buildSpob({
+                    flags2: 0, hyperlinks: [], ambientSound: 10032, fee: 0,
+                }).resource("spöb", 200), idSpace);
+            const planet = await parse(spob);
+            expect(planet.spaceportSound).toBe("nova:10032");
+        });
+
+    it("leaves spaceportSound null when CustSndID is -1 (no ambient)",
+        async () => {
+            const spob = new SpobResource(
+                buildSpob({ flags2: 0, hyperlinks: [], ambientSound: -1, fee: 0 })
+                    .resource("spöb", 200), idSpace);
+            const planet = await parse(spob);
+            expect(planet.spaceportSound).toBeNull();
+        });
+
+    it("never sets spaceportSound for a gate/wormhole (CustSndID is the" +
+        " emergence angle there)", async () => {
+            // flags2 0x2000 = wormhole; CustSndID 200 is an emergence angle,
+            // not a snd id, so it must not become an ambient sound.
+            idSpace["snd "][200] = snd("nova:200");
+            const spob = new SpobResource(
+                buildSpob({ flags2: 0x2000, hyperlinks: [], ambientSound: 200, fee: 0 })
+                    .resource("spöb", 200), idSpace);
+            const planet = await parse(spob);
+            expect(planet.gate).not.toBeNull();
+            expect(planet.spaceportSound).toBeNull();
+        });
+});
+
 describe("PlanetParse landing picture", () => {
     let idSpace: ReturnType<typeof getEmptyNovaResources>;
     const stub = (globalID: string) => ({ globalID }) as never;

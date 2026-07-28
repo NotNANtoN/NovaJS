@@ -24,6 +24,10 @@ async function makeSoundWorld() {
                         stop() { stopped.push(id); },
                     };
                 },
+                // SoundPlugin pre-warms the UI sounds via get().
+                get(id: string) {
+                    return Promise.resolve(this.getCached(id));
+                },
             },
         },
     } as unknown as DisplayAssetDataInterface;

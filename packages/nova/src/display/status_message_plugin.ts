@@ -1,7 +1,9 @@
+import { Emit } from "nova_ecs/arg_types";
 import { Plugin } from "nova_ecs/plugin";
 import { Resource } from "nova_ecs/resource";
 import { System } from "nova_ecs/system";
 import { TimeResource } from "nova_ecs/plugins/time_plugin";
+import { BEEP_CANT_DO, UiSoundEvent } from "./ui_sound.js";
 import * as PIXI from "pixi.js";
 import { SimulationGameDataResource } from "../nova_plugin/game_data_resource.js";
 import { GameDateComponent } from "../nova_plugin/player_state_plugin.js";
@@ -115,9 +117,10 @@ const ShowLandingBlockedMessage = new System({
     name: 'ShowLandingBlockedMessage',
     events: [LandingBlockedEvent],
     args: [LandingBlockedEvent, StatusLineResource, TimeResource,
-        PlayerShipSelector] as const,
-    step({ reason, isStation }, statusLine, { time }) {
+        PlayerShipSelector, Emit] as const,
+    step({ reason, isStation }, statusLine, { time }, _player, emit) {
         statusLine.setMessage(landingBlockedMessage(reason, isStation), time);
+        emit(UiSoundEvent, { id: BEEP_CANT_DO });
     },
 });
 
@@ -128,9 +131,10 @@ const ShowBoardingBlockedMessage = new System({
     name: 'ShowBoardingBlockedMessage',
     events: [BoardingBlockedEvent],
     args: [BoardingBlockedEvent, StatusLineResource, TimeResource,
-        PlayerShipSelector] as const,
-    step({ reason }, statusLine, { time }) {
+        PlayerShipSelector, Emit] as const,
+    step({ reason }, statusLine, { time }, _player, emit) {
         statusLine.setMessage(boardingBlockedMessage(reason), time);
+        emit(UiSoundEvent, { id: BEEP_CANT_DO });
     },
 });
 

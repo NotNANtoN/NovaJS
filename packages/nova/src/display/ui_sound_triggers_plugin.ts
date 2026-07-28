@@ -1,0 +1,221 @@
+import { Emit, Entities, GetEntity, UUID } from 'nova_ecs/arg_types';
+import { Optional } from 'nova_ecs/optional';
+import { Plugin } from 'nova_ecs/plugin';
+import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
+import { Resource } from 'nova_ecs/resource';
+import { System } from 'nova_ecs/system';
+import { World } from 'nova_ecs/world';
+import { Subscription } from 'rxjs';
+import { ControlsSubject } from '../nova_plugin/controls_plugin.js';
+import { DisabledComponent } from '../nova_plugin/disabled_component.js';
+import { SimulationGameDataResource } from '../nova_plugin/game_data_resource.js';
+import { FuelComponent, FUEL_PER_JUMP } from '../nova_plugin/health_plugin.js';
+import { JumpRouteComponent, JUMP_DISTANCE } from '../nova_plugin/jump_plugin.js';
+import { PlanetTargetComponent } from '../nova_plugin/planet_plugin.js';
+import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin.js';
+import { ShipComponent, ShipPhysicsComponent } from '../nova_plugin/ship_plugin.js';
+import { TargetComponent } from '../nova_plugin/target_component.js';
+import { WeaponsStateComponent } from '../nova_plugin/weapons_state.js';
+import { MenuControls } from '../spaceport/menu_controls.js';
+import { styleForTarget } from './target_corners_plugin.js';
+import {
+    BEEP_CANT_DO, BEEP_DISABLED, BEEP_JUMP_READY, BEEP_TARGET_PLANET,
+    BEEP_TARGET_SHIP, playUiSound, SOUND_FIRST_HOSTILE, UiSoundEvent,
+} from './ui_sound.js';
+import {
+    firstHostileEdge, initialJumpReadyState, JumpReadyState, jumpReadyEdge,
+    risingEdge, targetChangedEdge,
+} from './ui_sound_logic.js';
+
+/**
+ * Per-local-player edge-trigger state for the display-detected UI/space
+ * sounds. All of these fire off state that already crosses to the display
+ * world; nothing here touches the simulation. The display world is rebuilt
+ * on every system transit, so this resets to a clean baseline at each jump —
+ * exactly the re-arm the jump-ready and first-hostile cues want.
+ */
+interface UiSoundTriggerState {
+    prevShipTarget: string | undefined;
+    prevPlanetTarget: string | undefined;
+    disabled: boolean;
+    jumpReady: JumpReadyState;
+    anyHostile: boolean;
+}
+const UiSoundTriggerStateResource =
+    new Resource<UiSoundTriggerState>('UiSoundTriggerState');
+
+// A ship was targeted by any means (tab, click, escort cycle, hail
+// auto-target all write TargetComponent). Runs only for the local player's
+// ship (PlayerShipSelector); a change to a new, non-empty target beeps.
+const TargetShipBeepSystem = new System({
+    name: 'TargetShipBeep',
+    args: [TargetComponent, UiSoundTriggerStateResource, Emit,
+        PlayerShipSelector] as const,
+    step({ target }, state, emit) {
+        const { beep, next } = targetChangedEdge(state.prevShipTarget, target);
+        if (beep) {
+            emit(UiSoundEvent, { id: BEEP_TARGET_SHIP });
+        }
+        state.prevShipTarget = next;
+    },
+});
+
+// A planet/stellar was selected (number keys, click, nav all write
+// PlanetTargetComponent).
+const TargetPlanetBeepSystem = new System({
+    name: 'TargetPlanetBeep',
+    args: [PlanetTargetComponent, UiSoundTriggerStateResource, Emit,
+        PlayerShipSelector] as const,
+    step({ target }, state, emit) {
+        const { beep, next } = targetChangedEdge(state.prevPlanetTarget, target);
+        if (beep) {
+            emit(UiSoundEvent, { id: BEEP_TARGET_PLANET });
+        }
+        state.prevPlanetTarget = next;
+    },
+});
+
+// Your own ship became disabled (DisabledComponent appears). Optional so the
+// system still runs to keep the edge state fresh while not disabled.
+const DisabledBeepSystem = new System({
+    name: 'DisabledBeep',
+    args: [Optional(DisabledComponent), UiSoundTriggerStateResource, Emit,
+        PlayerShipSelector] as const,
+    step(disabled, state, emit) {
+        const { beep, next } = risingEdge(state.disabled, disabled !== undefined);
+        if (beep) {
+            emit(UiSoundEvent, { id: BEEP_DISABLED });
+        }
+        state.disabled = next;
+    },
+});
+
+// The moment a jump becomes possible (route selected + outside the no-jump
+// zone + enough fuel). Mirrors PlayerJumpControl's gate (jump_plugin.ts)
+// display-side; edge-triggered and re-armed on route change / after jumping.
+const JumpReadyBeepSystem = new System({
+    name: 'JumpReadyBeep',
+    args: [JumpRouteComponent, MovementStateComponent, ShipPhysicsComponent,
+        FuelComponent, UiSoundTriggerStateResource, Emit,
+        PlayerShipSelector] as const,
+    step(jumpRoute, movement, shipPhysics, fuel, state, emit) {
+        const { beep, next } = jumpReadyEdge(state.jumpReady, {
+            hasRoute: jumpRoute.route.length > 0,
+            distance: movement.position.length,
+            jumpRadius: Math.max(0, JUMP_DISTANCE + shipPhysics.jumpDistanceMod),
+            fuel: fuel.current,
+            fuelPerJump: FUEL_PER_JUMP,
+            routeHead: jumpRoute.route[0],
+        });
+        if (beep) {
+            emit(UiSoundEvent, { id: BEEP_JUMP_READY });
+        }
+        state.jumpReady = next;
+    },
+});
+
+// A ship turned hostile to you while none was hostile before. Reuses the
+// exact hostility rule the target corners use (styleForTarget), evaluated
+// over every ship in the system, so the cue flips hostile exactly when the
+// corners would.
+const FirstHostileBeepSystem = new System({
+    name: 'FirstHostileBeep',
+    args: [Entities, SimulationGameDataResource, UiSoundTriggerStateResource,
+        UUID, GetEntity, Emit, PlayerShipSelector] as const,
+    step(entities, gameData, state, playerUuid, playerEntity, emit) {
+        let anyHostile = false;
+        for (const [uuid, entity] of entities) {
+            if (uuid === playerUuid || !entity.components.has(ShipComponent)) {
+                continue;
+            }
+            if (styleForTarget(uuid, entity, playerUuid, playerEntity,
+                gameData, u => entities.get(u)) === 'hostile') {
+                anyHostile = true;
+                break;
+            }
+        }
+        const { beep, next } = firstHostileEdge(state.anyHostile, anyHostile);
+        if (beep) {
+            emit(UiSoundEvent, { id: SOUND_FIRST_HOSTILE });
+        }
+        state.anyHostile = next;
+    },
+});
+
+/** The local player's ship's weapon state, or undefined while docked. */
+function playerWeapons(world: World) {
+    for (const entity of world.entities.values()) {
+        if (entity.components.has(PlayerShipSelector)) {
+            return entity.components.get(WeaponsStateComponent);
+        }
+    }
+    return undefined;
+}
+
+const SecondaryControlSubscription =
+    new Resource<Subscription>('UiSoundSecondaryControlSubscription');
+
+export const UiSoundTriggersPlugin: Plugin = {
+    name: 'UiSoundTriggersPlugin',
+    build(world) {
+        world.resources.set(UiSoundTriggerStateResource, {
+            prevShipTarget: undefined,
+            prevPlanetTarget: undefined,
+            disabled: false,
+            jumpReady: initialJumpReadyState(),
+            anyHostile: false,
+        });
+        world.addSystem(TargetShipBeepSystem);
+        world.addSystem(TargetPlanetBeepSystem);
+        world.addSystem(DisabledBeepSystem);
+        world.addSystem(JumpReadyBeepSystem);
+        world.addSystem(FirstHostileBeepSystem);
+
+        // "Can't do that" when switching secondary weapons with none
+        // available. The switch itself is a sim control; here we only need
+        // the local feedback, so detect it display-side off ControlsSubject
+        // + the synced WeaponsStateComponent. Suppressed while a menu owns
+        // the keyboard (the key does nothing docked).
+        const controls = world.resources.get(ControlsSubject);
+        if (controls) {
+            world.resources.set(SecondaryControlSubscription,
+                controls.subscribe(({ action, state }) => {
+                    if (state !== 'start') {
+                        return;
+                    }
+                    if (action !== 'nextSecondary'
+                        && action !== 'previousSecondary'
+                        && action !== 'resetSecondary') {
+                        return;
+                    }
+                    if (MenuControls.focused) {
+                        return;
+                    }
+                    const weapons = playerWeapons(world);
+                    if (!weapons) {
+                        return;
+                    }
+                    let hasSecondary = false;
+                    for (const [, w] of weapons) {
+                        if (w.fireGroup === 'secondary') {
+                            hasSecondary = true;
+                            break;
+                        }
+                    }
+                    if (!hasSecondary) {
+                        playUiSound(world, { id: BEEP_CANT_DO });
+                    }
+                }));
+        }
+    },
+    remove(world) {
+        world.resources.get(SecondaryControlSubscription)?.unsubscribe();
+        world.resources.delete(SecondaryControlSubscription);
+        world.removeSystem(FirstHostileBeepSystem);
+        world.removeSystem(JumpReadyBeepSystem);
+        world.removeSystem(DisabledBeepSystem);
+        world.removeSystem(TargetPlanetBeepSystem);
+        world.removeSystem(TargetShipBeepSystem);
+        world.resources.delete(UiSoundTriggerStateResource);
+    },
+};
