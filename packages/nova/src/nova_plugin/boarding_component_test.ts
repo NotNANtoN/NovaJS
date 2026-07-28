@@ -13,6 +13,8 @@ import {
     CREDIT_BOOTY_FRACTION,
     fuelTransferAmount,
     planCargoPlunder,
+    planAmmoPlunder,
+    AmmoOutfitInfo,
 } from './boarding_component.js';
 
 describe('axis alignment gate (Matthew\'s spec)', () => {
@@ -129,5 +131,39 @@ describe('booty math', () => {
             ['cargo:2', 5], ['junk:9', 3]]);
         // No free space takes nothing.
         expect(planCargoPlunder(cargo, 0)).toEqual([]);
+    });
+});
+
+describe('planAmmoPlunder', () => {
+    // Two ammo outfits feed weapon w1 (capacity 10), one feeds w2 (cap 4),
+    // and one is ammo for a weapon the boarder doesn't mount (undefined).
+    const info = (id: string): AmmoOutfitInfo | undefined => ({
+        'ammo:a': { ammoFor: 'w1', capacity: 10 },
+        'ammo:b': { ammoFor: 'w1', capacity: 10 },
+        'ammo:c': { ammoFor: 'w2', capacity: 4 },
+    }[id]);
+
+    it('takes compatible ammo up to remaining capacity, sorted', () => {
+        const victim = new Map([['ammo:a', 6], ['ammo:c', 9], ['junk:x', 3]]);
+        // Boarder already holds 2 rounds of w1 (cap 10 -> 8 room) and 0 of w2.
+        const boarderRounds = new Map([['w1', 2]]);
+        expect(planAmmoPlunder(victim, boarderRounds, info))
+            // ammo:a: min(6, 10-2)=6; ammo:c: min(9, 4-0)=4; junk:x skipped.
+            .toEqual([['ammo:a', 6], ['ammo:c', 4]]);
+    });
+
+    it('shares capacity across outfits feeding the same weapon', () => {
+        // Both ammo:a and ammo:b feed w1 (cap 10), boarder holds none. First
+        // takes 7, leaving only 3 room for the second even though 8 available.
+        const victim = new Map([['ammo:a', 7], ['ammo:b', 8]]);
+        expect(planAmmoPlunder(victim, new Map(), info))
+            .toEqual([['ammo:a', 7], ['ammo:b', 3]]);
+    });
+
+    it('takes nothing when the boarder is already full or has no launcher', () => {
+        // w1 already full (10/10) and ammo:d has no matching launcher.
+        const victim = new Map([['ammo:a', 5], ['ammo:d', 5]]);
+        expect(planAmmoPlunder(victim, new Map([['w1', 10]]), info))
+            .toEqual([]);
     });
 });

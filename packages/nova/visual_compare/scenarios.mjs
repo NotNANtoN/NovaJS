@@ -1261,24 +1261,36 @@ export const scenarios = [
     {
         id: 'hail_escort',
         title: 'Hail — escort comm (8513)',
-        description: 'The escort communications dialog (8513). Our escort '
-            + 'comm offers fleet commands (Attack/Defend/Formation/Hold/'
-            + 'Return); the original manages a hired escort (Upgrade/Sell/'
-            + 'Release) — a documented feature divergence, so the button '
-            + 'CONTENT differs. Compares the frame, left column and image box '
-            + 'against hail/hail_escort.png.',
+        description: 'The escort communications dialog (8513): a hired-escort '
+            + 'MANAGEMENT panel (Upgrade Escort / Sell Escort / Release / Close '
+            + 'Channel), not a fleet-command panel — commanding escorts is the '
+            + 'keyboard escort-controls\' job. Upgrade / Sell / Release render '
+            + 'GREYED (they need unmodeled state: shipyard upgrade transfer, '
+            + 'escort resale, per-escort release); only Close Channel is live. '
+            + 'The 8513 frame is shared by every escort reference, so this one '
+            + 'scenario compares our single escort dialog against all four — '
+            + 'the normal hired escort (hail_escort.png), the upgrading state '
+            + '(hail_escort_upgrading.png: "Cancel Upgrade"), and the captured '
+            + 'variants (hail_captured_escort / sell_captured_escort: Sell '
+            + 'Escort ACTIVE). The frame / left column / image box are the '
+            + 'positionable chrome; the button labels and upper info box '
+            + '(Upgrade Cost / Pay / Sell Price — states we don\'t model) '
+            + 'legitimately differ (CONTENT).',
         params: { ship: 'nova:164', system: 'nova:130' },
         hideDebug: true,
         setup: async (page, driver) => {
             await driver.showHail(page, {
                 variant: 'escort', heading: 'Hired Escort:',
                 image: 'nova:5003', body: 'Terrapin\nStandard',
-                escortCommands: true,
+                escort: true,
             });
             await driver.sleep(1200);
         },
         references: [
             { name: 'hail_escort', file: 'hail/hail_escort.png' },
+            { name: 'hail_escort_upgrading', file: 'hail/hail_escort_upgrading.png' },
+            { name: 'hail_captured_escort', file: 'hail/hail_captured_escort.png' },
+            { name: 'sell_captured_escort', file: 'hail/sell_captured_escort.png' },
         ],
         regions: [
             region('haile_frame', 'Whole escort comm frame', 748, 410, 424, 259),
@@ -1324,24 +1336,27 @@ export const scenarios = [
     // ship (display/boarding_plugin.ts); driver.openBoarding spawns a shuttle
     // victim and injects that component (the showHail pattern) rather than
     // fighting the physics gate. The frames are the game PICTs, centered.
-    // Known CONTENT divergences (not MOVE): our button labels ("Take Cargo",
-    // "Attempt Capture", "Done") and action set differ from the original's
-    // ("Energy", "Cargo", "Ammo", "Credits", "Capture Ship", "Abort" — we do
-    // not model Ammo booty), and the capture-assignment dialog is drawn as a
-    // standalone 8516 frame with "Keep as Escort" / "Release" rather than the
-    // original's escort-question inset over the plunder dialog with a
-    // "Use As My Ship" swap seam. What we measure/fix (MOVE) is the frame,
-    // title, body and button-block PLACEMENT within the frame.
+    // The plunder button SET now matches the original: Energy / Cargo / Ammo
+    // (top row), Credits / Capture Ship (second row), Abort (centered) — the
+    // Ammo action transfers the victim's compatible ammunition. Remaining
+    // CONTENT divergences (not MOVE): the booty-readout formatting, and the
+    // capture-assignment dialog is drawn as a standalone 8516 frame with
+    // "Keep as Escort" / "Release" rather than the original's escort-question
+    // inset over the plunder dialog with a "Use As My Ship" swap seam. What we
+    // measure/fix (MOVE) is the frame, title, body and button-block PLACEMENT
+    // within the frame.
     // ========================================================================
     {
         id: 'boarding_plunder',
         title: 'Boarding — plunder dialog (8515)',
         description: 'The plunder dialog opened over a disabled, crewed '
             + 'victim. Compares the 8515 frame, the title/booty text block '
-            + 'and the button grid against space/board_ship.png. The title '
-            + 'wording, the booty readout format and the button labels/action '
-            + 'set legitimately differ (CONTENT); the frame is the same PICT '
-            + 'and the text/buttons are placed to mirror the original grid.',
+            + 'and the button grid against space/board_ship.png. The button '
+            + 'set/order/placement now matches the original (Energy / Cargo / '
+            + 'Ammo top row, Credits / Capture Ship, then centered Abort; Ammo '
+            + 'greyed here since the injected victim carries no compatible '
+            + 'ammo, as in the reference). The title wording and booty-readout '
+            + 'format still differ (CONTENT); the frame is the same PICT.',
         params: { ship: 'nova:164', system: 'nova:130' },
         hideDebug: true,
         setup: async (page, driver) => { await driver.openBoarding(page); },

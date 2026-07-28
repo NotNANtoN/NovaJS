@@ -12,11 +12,12 @@ import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data
 import { ControlAction } from '../nova_plugin/controls.js';
 import { ControlEvent, ControlsSubject } from '../nova_plugin/controls_plugin.js';
 import {
-    BoardingComponent, BoardingState,
+    BoardingComponent, BoardingState, captureChance,
 } from '../nova_plugin/boarding_component.js';
 import { CargoComponent } from '../nova_plugin/cargo_plugin.js';
 import { FuelComponent } from '../nova_plugin/health_plugin.js';
 import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin.js';
+import { ShipDataComponent } from '../nova_plugin/ship_plugin.js';
 import { DisplayAssetDataResource } from '../nova_plugin/game_data_resource.js';
 import { formatCredits } from './status_bar_content.js';
 import { Button } from '../spaceport/button.js';
@@ -62,18 +63,23 @@ const BODY_FONT: Partial<PIXI.ITextStyle> = {
     wordWrap: true, wordWrapWidth: WIDTH - 24,
 };
 
-// Plunder button grid (PICT 8515). Measured against space/board_ship.png:
-// the original packs its plunder actions into a compact grid that lives in
-// the metal lower third of the frame (button rows at screen y ~555/583/611
-// with the centered "Abort" last), not a full-width single column. We keep
-// our action labels but mirror that geometry: two columns of take-actions,
-// then a centered final row. A Button's pill width excludes its two end
-// caps (LEFT_POS px each), so the rendered width is BTN_W + 2*LEFT_POS.
+// Plunder button grid (PICT 8515), measured against space/board_ship.png.
+// The original's layout, matched here: three narrow buttons on the top row
+// (Energy / Cargo / Ammo), two below (Credits + the wider Capture Ship), then
+// a centered Abort — all in the metal lower third of the frame. Coordinates
+// are LOCAL to the frame centre (button centres at screen x 864/958/1052 etc.,
+// frame centred at 960). A Button's pill width excludes its two ~13.2px end
+// caps, so its rendered width is pill + 2*BTN_LEFT_POS; the left edge we pass
+// as position.x is centre - rendered/2.
 const BTN_LEFT_POS = 13.2;                    // Button end-cap width
-const BTN_W = 116;                            // pill width (fits our labels)
-const BTN_RENDERED = BTN_W + 2 * BTN_LEFT_POS;
-const BTN_COL_X = [ORIGIN_X + 12, ORIGIN_X + 166]; // left / right column
-const BTN_ROW_Y = (row: number) => ORIGIN_Y + 115 + row * 28;
+const btnRendered = (pill: number) => pill + 2 * BTN_LEFT_POS;
+const btnLeft = (centre: number, pill: number) =>
+    centre - btnRendered(pill) / 2;
+const PILL_SMALL = 60;                        // Energy/Cargo/Ammo/Credits
+const PILL_WIDE = 118;                        // Capture Ship (double-ish)
+const PILL_ABORT = 84;                        // centered Abort
+// Row top-Y (button height 25); rows land at screen y ~567/595/611.
+const BTN_ROW_Y = [ORIGIN_Y + 115, ORIGIN_Y + 143, ORIGIN_Y + 171];
 
 // Capture-assignment frame (PICT 8516) is a distinct, smaller sprite than
 // the plunder frame (measured 267x128, centered). Positioning its title and
@@ -90,6 +96,8 @@ const CAP_BTN_X = -(CAP_BTN_W + 2 * BTN_LEFT_POS) / 2; // centered
 interface Row {
     action: ControlAction;
     button: Button;
+    /** Rendered width (pill + caps), for the selection highlight. */
+    rendered: number;
     /** Whether the row is currently actionable (else greyed/skipped). */
     enabled: boolean;
 }
@@ -121,27 +129,33 @@ class PlunderDialog {
         background.interactive = true;
         this.container.addChild(background);
 
-        this.title.text = 'Boarding disabled ship';
+        // The original's title line (space/board_ship.png).
+        this.title.text = 'Select what to plunder from this ship:';
         this.title.position.set(ORIGIN_X + 12, ORIGIN_Y + 10);
         this.body.position.set(ORIGIN_X + 12, ORIGIN_Y + 30);
         this.container.addChild(this.highlight, this.title, this.body);
 
-        // Action grid (mirrors the original's 8515 button block): two
-        // columns of take-actions over two rows, then a centered final row.
-        const specs: [ControlAction, string, { x: number, y: number }][] = [
-            ['plunderCargo', 'Take Cargo', { x: BTN_COL_X[0], y: BTN_ROW_Y(0) }],
-            ['plunderCredits', 'Take Credits', { x: BTN_COL_X[1], y: BTN_ROW_Y(0) }],
-            ['plunderFuel', 'Take Fuel', { x: BTN_COL_X[0], y: BTN_ROW_Y(1) }],
-            ['plunderCapture', 'Attempt Capture',
-                { x: BTN_COL_X[1], y: BTN_ROW_Y(1) }],
-            ['plunderDone', 'Done',
-                { x: -BTN_RENDERED / 2, y: BTN_ROW_Y(2) }],
+        // Action grid mirroring the original 8515 button block: Energy /
+        // Cargo / Ammo across the top, Credits + the wider Capture Ship below,
+        // then a centered Abort. "Energy" is the victim's fuel transfer; the
+        // labels/order/placement follow board_ship.png.
+        const specs: [ControlAction, string, number, number, number][] = [
+            // action, label, centreX, rowIndex, pillWidth
+            ['plunderFuel', 'Energy', -94, 0, PILL_SMALL],
+            ['plunderCargo', 'Cargo', 0, 0, PILL_SMALL],
+            ['plunderAmmo', 'Ammo', 94, 0, PILL_SMALL],
+            ['plunderCredits', 'Credits', -76, 1, PILL_SMALL],
+            ['plunderCapture', 'Capture Ship', 47, 1, PILL_WIDE],
+            ['plunderDone', 'Abort', 0, 2, PILL_ABORT],
         ];
-        specs.forEach(([action, label, pos]) => {
-            const button = new Button(this.displayAssets, label, BTN_W, pos);
+        specs.forEach(([action, label, centreX, row, pill]) => {
+            const pos = { x: btnLeft(centreX, pill), y: BTN_ROW_Y[row] };
+            const button = new Button(this.displayAssets, label, pill, pos);
             button.click.subscribe(() => this.activate(action));
             this.container.addChild(button.container);
-            this.rows.push({ action, button, enabled: true });
+            this.rows.push({
+                action, button, rendered: btnRendered(pill), enabled: true,
+            });
         });
 
         this.controls = new MenuControls(controlEvents, {
@@ -211,26 +225,35 @@ class PlunderDialog {
     }
 
     /** Refreshes button enable/label state and the booty summary from
-     * the synced boarding + victim state. */
-    refresh(boarding: BoardingState, target: Entity | undefined) {
+     * the synced boarding + victim state. `playerCrew` is the boarder's
+     * crew, for the capture-odds readout. */
+    refresh(boarding: BoardingState, target: Entity | undefined,
+        playerCrew: number) {
         const cargo = target?.components.get(CargoComponent);
         const cargoTons = cargo
             ? [...cargo.values()].reduce((a, b) => a + b, 0) : 0;
         const fuel = target?.components.get(FuelComponent);
+        const targetCrew =
+            target?.components.get(ShipDataComponent)?.crew ?? 0;
 
-        const lines: string[] = [];
-        if (cargoTons > 0 && cargo) {
-            lines.push('Cargo aboard:');
-            for (const key of [...cargo.keys()].sort()) {
-                lines.push(`  ${key}: ${cargo.get(key)} tons`);
-            }
-        } else {
-            lines.push('No cargo aboard.');
-        }
-        lines.push(`Money: ${formatCredits(boarding.creditsAvailable)}`);
-        if (fuel) {
-            lines.push(`Fuel aboard: ${Math.floor(fuel.current)}`);
-        }
+        // Booty readout mirroring board_ship.png: Cargo / Credits / Ammo /
+        // Energy, with capture odds inline. Cargo is summarised on one line
+        // ("N tons of X" when a single commodity, else "N tons").
+        const cargoKeys = cargo ? [...cargo.keys()].sort() : [];
+        const cargoText = cargoTons <= 0 ? 'None'
+            : cargoKeys.length === 1
+                ? `${cargoTons} tons of ${cargoKeys[0]}`
+                : `${cargoTons} tons`;
+        const odds = boarding.capture === 'succeeded' ? null
+            : Math.round(captureChance(playerCrew, targetCrew) * 100);
+        const lines = [
+            `Cargo:    ${cargoText}`,
+            `Credits:  ${formatCredits(boarding.creditsAvailable)}`,
+            `Ammo:     ${boarding.ammoAvailable > 0
+                ? `${boarding.ammoAvailable}` : 'None'}`,
+            `Energy:   ${fuel ? Math.floor(fuel.current) : 0}`
+                + (odds === null ? '' : `        Capture Odds:  ${odds}%`),
+        ];
         if (boarding.capture === 'failed') {
             lines.push('You were repelled while attempting to capture!');
         }
@@ -241,6 +264,7 @@ class PlunderDialog {
             plunderCredits: !boarding.creditsTaken
                 && boarding.creditsAvailable > 0,
             plunderFuel: !boarding.fuelTaken && !!fuel && fuel.current > 0,
+            plunderAmmo: !boarding.ammoTaken && boarding.ammoAvailable > 0,
             plunderCapture: boarding.capture !== 'succeeded',
             plunderDone: true,
         };
@@ -264,7 +288,7 @@ class PlunderDialog {
         }
         const pos = row.button.container.position;
         this.highlight.beginFill(0x8b0000, 0.4)
-            .drawRect(pos.x - 2, pos.y - 2, BTN_RENDERED + 4, 29).endFill();
+            .drawRect(pos.x - 2, pos.y - 2, row.rendered + 4, 29).endFill();
     }
 }
 
@@ -357,7 +381,8 @@ class BoardingUi {
         this.assignment.container.position.set(x, y);
     }
 
-    update(boarding: BoardingState | undefined, target: Entity | undefined) {
+    update(boarding: BoardingState | undefined, target: Entity | undefined,
+        playerCrew: number) {
         this.reposition();
         if (!boarding) {
             this.plunder.close();
@@ -370,7 +395,7 @@ class BoardingUi {
         } else {
             this.assignment.close();
             this.plunder.open();
-            this.plunder.refresh(boarding, target);
+            this.plunder.refresh(boarding, target, playerCrew);
         }
     }
 }
@@ -382,15 +407,17 @@ const BoardingUiResource = new Resource<BoardingUi>('BoardingUi');
 // BoardingComponent. Optional so it still runs (to close the dialogs)
 // when no boarding is in progress.
 const PlayerBoardingQuery = new Query(
-    [PlayerShipSelector, Optional(BoardingComponent)] as const);
+    [PlayerShipSelector, Optional(BoardingComponent),
+        Optional(ShipDataComponent)] as const);
 const BoardingUiSystem = new System({
     name: 'BoardingUiSystem',
     args: [BoardingUiResource, PlayerBoardingQuery, Entities] as const,
     step(ui, players, entities) {
         const boarding = players[0]?.[1] ?? undefined;
+        const playerCrew = players[0]?.[2]?.crew ?? 0;
         const target = boarding
             ? entities.get(boarding.target) : undefined;
-        ui.update(boarding ?? undefined, target);
+        ui.update(boarding ?? undefined, target, playerCrew);
     },
 });
 
