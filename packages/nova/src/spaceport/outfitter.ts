@@ -3,6 +3,7 @@ import { OutfitData } from "novadatainterface/outfit_data";
 import { ShipData } from "novadatainterface/ship_data";
 import { Entity } from "nova_ecs/entity";
 import { DefaultMap } from "nova_ecs/utils";
+import { DockedLiveStatus } from "../display/docked_ship.js";
 import * as PIXI from 'pixi.js';
 import { Observable, Subject } from "rxjs";
 import { DisplayAssetDataInterface } from "../client/gamedata/display_asset_data.js";
@@ -705,6 +706,16 @@ export class Outfitter extends Menu<Entity> {
             });
         }
         this.itemGrid?.setCounts(this.outfits);
+    }
+
+    /**
+     * The live working state for the docked status bar: the not-yet-committed
+     * credit balance, so the bar's Credits readout follows each buy/sell
+     * before Done commits it. (Cargo capacity can shift with a freeCargo
+     * outfit, but that is left to the entity baseline.)
+     */
+    dockedStatus(): DockedLiveStatus {
+        return { credits: this.credits.credits };
     }
 
     protected override done() {

@@ -1,6 +1,7 @@
 import { Entity } from 'nova_ecs/entity';
 import * as PIXI from 'pixi.js';
 import { Observable } from 'rxjs';
+import { DockedLiveStatus } from '../display/docked_ship.js';
 import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data.js';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { ControlEvent } from '../nova_plugin/controls_plugin.js';
@@ -226,6 +227,15 @@ export class Bar extends Menu<Entity> {
         this.controls.unbind();
         await this.hireEscort.show(this.session.state.credits, this.hired);
         this.controls.bind();
+    }
+
+    /**
+     * The live working credit balance for the docked status bar: gambling and
+     * hire fees settle into the bar session's working credits, so the Credits
+     * readout follows them before Leave commits the session.
+     */
+    dockedStatus(): DockedLiveStatus {
+        return { credits: this.session?.state.credits.credits };
     }
 
     protected override done() {

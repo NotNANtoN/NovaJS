@@ -26,8 +26,12 @@ import { PersComponent } from "../nova_plugin/pers_plugin.js";
 import { DisabledComponent } from "../nova_plugin/disabled_component.js";
 import { PlanetDataComponent, PlanetTargetComponent } from "../nova_plugin/planet_plugin.js";
 import { JumpRouteComponent } from "../nova_plugin/jump_plugin.js";
-import { CargoComponent, cargoUsed } from "../nova_plugin/cargo_plugin.js";
+import { CargoComponent } from "../nova_plugin/cargo_plugin.js";
 import { CreditsComponent } from "../nova_plugin/player_state_plugin.js";
+import { OutfitsState } from "../nova_plugin/outfit_plugin.js";
+import { DockedShipResource } from "./docked_ship.js";
+import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
+import { SingletonComponent } from "nova_ecs/world";
 import { ControlAction } from "../nova_plugin/controls.js";
 import { displayName, govtTargetName } from "../nova_plugin/display_name.js";
 import { STANDARD_CARGO_NAMES } from "../nova_plugin/mission_logic.js";
@@ -53,6 +57,16 @@ import { Stage } from "./stage_resource.js";
 
 /** Full on+off period of the blinking system-center radar arrow, in ms. */
 const CENTER_ARROW_BLINK_MS = 700;
+
+/**
+ * Left edge (StatusBar-container x) of the debug-button stack (Add Enemy /
+ * Give 1M Credits / Clear Legal Record). Pulled left of its old x=65 by about
+ * half an Add Enemy button width so the widest button (Clear Legal Record)
+ * stays inside the 194px status-bar background: at x=65 it overflowed the
+ * right edge, inflating the container's bounds so StatusBarResize shoved the
+ * whole bar left of its intended x=1726 at 1920x1080.
+ */
+const DEBUG_BUTTON_X = 35;
 
 class StatusBar {
     readonly container = new PIXI.Container();
@@ -126,7 +140,7 @@ class StatusBar {
         this.buildPromise = this.build();
         this.container.name = 'StatusBar';
         this.addEnemyButton = new Button(displayAssets, 'Add Enemy', 60);
-        this.addEnemyButton.container.position.x = 65;
+        this.addEnemyButton.container.position.x = DEBUG_BUTTON_X;
         // One full button height (25px) below its old spot, clear of the
         // status bar's credits readout it used to clip over.
         this.addEnemyButton.container.position.y = 555;
@@ -136,12 +150,12 @@ class StatusBar {
         // directly under Add Enemy, at the same x. Named for scene-graph
         // queries and hidden by the visual-compare harness.
         this.giveCreditsButton = new Button(displayAssets, 'Give 1M Credits', 100);
-        this.giveCreditsButton.container.position.x = 65;
+        this.giveCreditsButton.container.position.x = DEBUG_BUTTON_X;
         this.giveCreditsButton.container.position.y = 580;
         this.giveCredits = this.giveCreditsButton.click;
 
         this.clearRecordButton = new Button(displayAssets, 'Clear Legal Record', 110);
-        this.clearRecordButton.container.position.x = 65;
+        this.clearRecordButton.container.position.x = DEBUG_BUTTON_X;
         this.clearRecordButton.container.position.y = 605;
         this.clearRecord = this.clearRecordButton.click;
     }
@@ -522,7 +536,8 @@ class StatusBar {
         this.statsGraphics.lineTo(pos[0] + size[0] * fullness, pos[1]);
     }
 
-    drawStats(shield: Stat, armor: Stat, fuel?: Stat) {
+    drawStats(shield: Stat, armor: Stat,
+        fuel?: { current: number, max: number }) {
         this.statsGraphics.clear();
 
         const shieldFullness = Math.max(0, shield.current / shield.max);
@@ -959,57 +974,132 @@ const DrawStatusBarNavigation = new System({
     }
 });
 
+/**
+ * Total cargo capacity in tons for a ship + its owned outfits, or undefined
+ * if the ship or an outfit's data hasn't cached yet (getCached kicks off the
+ * load). Shared by the in-flight and docked cargo readouts.
+ */
+export function cargoCapacityOf(shipId: string, outfits: OutfitsState | undefined,
+    gameData: SimulationGameDataInterface): number | undefined {
+    const shipData = gameData.data.Ship.getCached(shipId);
+    if (!shipData) {
+        return undefined;
+    }
+    let capacity = shipData.physics.freeCargo;
+    if (outfits) {
+        const outfitCargo = sumOutfitField(
+            outfits, gameData, o => o.physics.freeCargo ?? 0);
+        if (outfitCargo === undefined) {
+            return undefined; // An outfit's data isn't cached yet.
+        }
+        capacity += outfitCargo;
+    }
+    return capacity;
+}
+
+/**
+ * The cargo panel's readout values (free space, manifest lines, and the
+ * mission-cargo "Special:" summary) for a cargo hold and capacity. Undefined
+ * if a jünk name isn't cached yet. Shared by the in-flight and docked paths.
+ */
+export function cargoDisplayOf(cargo: ReadonlyMap<string, number> | undefined,
+    capacity: number, gameData: SimulationGameDataInterface):
+    { free: number, lines: CargoLine[], special: string | null } {
+    const lines: CargoLine[] = [];
+    const specialNames: string[] = [];
+    if (cargo) {
+        for (const [key, quantity] of cargo) {
+            if (quantity <= 0) {
+                continue;
+            }
+            const stdIndex = standardCargoIndex(key);
+            if (stdIndex !== null) {
+                lines.push({
+                    name: abbreviateCargoName(
+                        STANDARD_CARGO_NAMES[stdIndex] ?? `Cargo ${stdIndex}`),
+                    quantity,
+                });
+            } else if (key.startsWith('junk:')) {
+                const junk = gameData.data.Junk.getCached(key.slice(5));
+                lines.push({
+                    name: abbreviateCargoName(junk?.abbrev || 'Cargo'),
+                    quantity,
+                });
+            } else if (key.startsWith('mission:')) {
+                specialNames.push('Cargo');
+            }
+        }
+    }
+    let used = 0;
+    if (cargo) {
+        for (const quantity of cargo.values()) {
+            used += quantity;
+        }
+    }
+    const free = Math.max(0, capacity - used);
+    return { free, lines, special: specialCargoSummary(specialNames) };
+}
+
 const DrawStatusBarCargo = new System({
     name: 'DrawStatusBarCargo',
     args: [StatusBarResource, Optional(CargoComponent), Optional(CreditsComponent),
         ShipComponent, Optional(OutfitsStateComponent),
         SimulationGameDataResource, PlayerShipSelector] as const,
     step(statusBar, cargo, credits, ship, outfits, gameData) {
-        const shipData = gameData.data.Ship.getCached(ship.id);
-        if (!shipData) {
-            // Not cached yet; getCached kicked off the load.
+        const capacity = cargoCapacityOf(ship.id, outfits, gameData);
+        if (capacity === undefined) {
+            return; // Ship/outfit data not cached yet.
+        }
+        const { free, lines, special } = cargoDisplayOf(cargo, capacity, gameData);
+        statusBar.drawCargo(free, credits?.credits ?? 0, lines, special);
+    }
+});
+
+/**
+ * The docked counterpart of the stats + cargo + credits readouts. While the
+ * player is docked the ship is out of the display world (held by the spaceport
+ * menu), so PlayerShipSelector matches nothing and the per-entity draw systems
+ * above go quiet. This runs once per step from the DockedShipResource instead,
+ * reading the held entity's components — or, while a venue is open, that
+ * venue's live working state (credits/cargo/fuel before it commits) — so the
+ * bar keeps tracking trades, outfit buys, refuels, and bar gambling live.
+ */
+const DrawDockedStatus = new System({
+    name: 'DrawDockedStatus',
+    args: [StatusBarResource, DockedShipResource, SimulationGameDataResource,
+        SingletonComponent] as const,
+    step(statusBar, dockedHolder, gameData) {
+        const docked = dockedHolder.current;
+        if (!docked) {
             return;
         }
-        let capacity = shipData.physics.freeCargo;
-        if (outfits) {
-            const outfitCargo = sumOutfitField(
-                outfits, gameData, o => o.physics.freeCargo ?? 0);
-            if (outfitCargo === undefined) {
-                return; // An outfit's data isn't cached yet.
-            }
-            capacity += outfitCargo;
+        const entity = docked.entity;
+        const live = docked.liveStatus?.() ?? {};
+
+        // Shield/armor/fuel bars off the held entity; a venue may override fuel.
+        const shield = entity.components.get(ShieldComponent);
+        const armor = entity.components.get(ArmorComponent);
+        if (shield && armor) {
+            const fuel = live.fuel ?? entity.components.get(FuelComponent);
+            statusBar.drawStats(shield, armor, fuel ?? undefined);
         }
 
-        const lines: CargoLine[] = [];
-        const specialNames: string[] = [];
-        if (cargo) {
-            for (const [key, quantity] of cargo) {
-                if (quantity <= 0) {
-                    continue;
-                }
-                const stdIndex = standardCargoIndex(key);
-                if (stdIndex !== null) {
-                    lines.push({
-                        name: abbreviateCargoName(
-                            STANDARD_CARGO_NAMES[stdIndex] ?? `Cargo ${stdIndex}`),
-                        quantity,
-                    });
-                } else if (key.startsWith('junk:')) {
-                    const junk = gameData.data.Junk.getCached(key.slice(5));
-                    lines.push({
-                        name: abbreviateCargoName(junk?.abbrev || 'Cargo'),
-                        quantity,
-                    });
-                } else if (key.startsWith('mission:')) {
-                    specialNames.push('Cargo');
-                }
-            }
+        // Credits + cargo: the open venue's working values win over the
+        // (not-yet-committed) entity components.
+        const credits = live.credits
+            ?? entity.components.get(CreditsComponent)?.credits ?? 0;
+        const ship = entity.components.get(ShipComponent);
+        if (!ship) {
+            return;
         }
-
-        const used = cargo ? cargoUsed(cargo) : 0;
-        const free = Math.max(0, capacity - used);
-        statusBar.drawCargo(free, credits?.credits ?? 0, lines,
-            specialCargoSummary(specialNames));
+        const cargo = live.cargo ?? entity.components.get(CargoComponent);
+        const capacity = live.cargoCapacity ?? cargoCapacityOf(
+            ship.id, entity.components.get(OutfitsStateComponent), gameData);
+        if (capacity === undefined) {
+            return; // Ship/outfit data not cached yet.
+        }
+        const { free, lines, special } = cargoDisplayOf(cargo, capacity, gameData);
+        statusBar.drawCargo(free, credits, lines, special);
     }
 });
 
@@ -1075,6 +1165,11 @@ export const StatusBarPlugin: Plugin = {
         });
 
         world.resources.set(StatusBarResource, statusBar);
+        // The docked-ship holder is created here if the spaceport plugin
+        // hasn't already; both plugins set-if-absent so build order is moot.
+        if (!world.resources.get(DockedShipResource)) {
+            world.resources.set(DockedShipResource, {});
+        }
 
         world.addSystem(DrawRadar);
         world.addSystem(StatusBarResize);
@@ -1084,6 +1179,7 @@ export const StatusBarPlugin: Plugin = {
         world.addSystem(DrawStatusBarInterference);
         world.addSystem(DrawStatusBarNavigation);
         world.addSystem(DrawStatusBarCargo);
+        world.addSystem(DrawDockedStatus);
     },
     remove(world) {
         world.removeSystem(DrawRadar);
@@ -1094,6 +1190,7 @@ export const StatusBarPlugin: Plugin = {
         world.removeSystem(DrawStatusBarInterference);
         world.removeSystem(DrawStatusBarNavigation);
         world.removeSystem(DrawStatusBarCargo);
+        world.removeSystem(DrawDockedStatus);
 
         const stage = world.resources.get(Stage);
         const statusBar = world.resources.get(StatusBarResource);
