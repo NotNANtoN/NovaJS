@@ -13,7 +13,7 @@ import { loadEntityGameData, loadWireSnapshotGameData } from "../nova_plugin/ent
 import { deriveEntityComponents } from "../nova_plugin/entity_factory.js";
 import { applyInputRecords, InputRecord, loadInputRecordsGameData, SimulationInput } from "./simulation_input.js";
 import { HailAction } from "../nova_plugin/hail_plugin.js";
-import { ArchiveBaseline, canonicalDesyncHash, DesyncDump, RollbackLogEntry, STATE_HASH_INTERVAL, unwrapRollbackMessage, wrapRollbackMessage } from "./rollback_protocol.js";
+import { ArchiveBaseline, canonicalDesyncHash, DesyncDump, PROTOCOL_VERSION, RollbackLogEntry, STATE_HASH_INTERVAL, unwrapRollbackMessage, wrapRollbackMessage } from "./rollback_protocol.js";
 import { makeNpc } from "../nova_plugin/npc_plugin.js";
 import { SIMULATION_STEP_MS } from "../nova_plugin/make_system.js";
 import { PEER_LOCAL_COMPONENTS } from "../nova_plugin/ship_control.js";
@@ -230,6 +230,9 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
     private nextSeq = 0;
     /** Where each published record was applied locally, by seq. */
     private sentRecords = new Map<number, number>();
+    /** Tick of the last uploaded dump, for deduping the relay's
+     * request fallback against our own unprompted push. */
+    private lastDumpTick = -Infinity;
     /** Desync notifications received (own divergence or another peer's). */
     desyncCount = 0;
     private lastJoinSucceeded?: boolean;
@@ -475,9 +478,11 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
                     // tail over a fresh baseline is just the transit
                     // window, so recovery costs ~200ms instead of the
                     // 1-2s rebuild of an up-to-30s-old baseline's tail.
-                    communicator.sendMessage(wrapRollbackMessage(
-                        { kind: 'joinRequest', ...(fresh ? { fresh } : {}) }),
-                        server);
+                    communicator.sendMessage(wrapRollbackMessage({
+                        kind: 'joinRequest',
+                        protocol: PROTOCOL_VERSION,
+                        ...(fresh ? { fresh } : {}),
+                    }), server);
                 }
             };
             // The relay may not exist yet when the first peer joins.
@@ -811,6 +816,12 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
         if (!communicator || !server) {
             return;
         }
+        // The relay requests a dump from every convicted peer as a
+        // fallback for lost pushes; having just pushed, skip the echo.
+        if (this.rollback.tick - this.lastDumpTick < STATE_HASH_INTERVAL * 2) {
+            return;
+        }
+        this.lastDumpTick = this.rollback.tick;
         const checkpoints = [...this.checkpointSnapshots]
             .sort(([a], [b]) => a - b)
             .map(([tick, snapshot]) => ({

@@ -22,6 +22,7 @@ describe('DesyncRecorder', () => {
         canonical: 'h1',
         convicted: ['b'],
         archiveOutvoted: false,
+        peerProtocols: { a: 1, b: 0 },
     };
     const dump: DesyncDump = {
         tick: 210,

@@ -209,7 +209,10 @@ describe('RollbackRelay', () => {
             canonical: 'aaaaaaaa',
         };
         expect(received(peerA)).toEqual([expected]);
-        expect(received(peerB)).toEqual([expected]);
+        // The convicted peer also gets a dump request: the fallback
+        // for a lost unprompted push (dedupe suppresses doubles).
+        expect(received(peerB)).toEqual([expected,
+            { kind: 'desyncDumpRequest' }]);
     });
 
     it('a stale reporter cannot vote but can be convicted', () => {
