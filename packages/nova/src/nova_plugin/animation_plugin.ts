@@ -22,10 +22,12 @@ export const AnimationComponent = new Component<Animation>('AnimationComponent')
  * - Future: "always spin" projectiles — wëap Flags 0x0001 "Spin the
  *   weapon's graphic continuously", frame interval in the BeamWidth
  *   field, in 30ths of a second (frameRate = 30 / BeamWidth).
- * - Future: ships with sequenced base frames — shän Flags 0x0008
- *   "Extra frames in base image are shown in sequence", frame interval
- *   in AnimDelay, in 30ths of a second (frameRate = 30 / AnimDelay).
- *   (shän 0x0001 banking and 0x0002 folding are different mechanisms.)
+ * - NOT ships: shän 0x0008 sequenced base frames looked like a fit,
+ *   but ships still rotate — their extra sets are full rotation sets,
+ *   so the time-advanced sequence picks the SET and the heading picks
+ *   the frame within it (ShipBaseSetAnimationSystem, the ship
+ *   counterpart of TumbleDrawSystem in ship_animation_plugin.ts),
+ *   whereas this mode deliberately ignores the sim rotation entirely.
  */
 export const TumbleAnimation = t.type({
     /**

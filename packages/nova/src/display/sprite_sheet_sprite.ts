@@ -49,6 +49,33 @@ export class SpriteSheetSprite {
         }
     }
 
+    /**
+     * How many full `framesPer`-frame rotation sets this sprite sheet holds
+     * (its BaseSetCount / AltSetCount). At least 1 while textures are still
+     * loading (this.frames === 0).
+     */
+    setCountForFramesPer(framesPer: number): number {
+        return framesPer > 0 ? Math.max(1, Math.floor(this.frames / framesPer)) : 1;
+    }
+
+    /**
+     * Selects base sprite set `setIndex` (clamped to what the sheet holds)
+     * as the active rotation set and recomputes the displayed frame from the
+     * current heading. This is how the ship base-set animation (continuous
+     * spin, folding wings, the alt-image overlay) composes with rotation:
+     * the animation picks the SET, the heading picks the frame within it.
+     */
+    selectBaseSet(setIndex: number, framesPer: number) {
+        if (!this.textures || framesPer <= 0) {
+            return;
+        }
+        const sets = this.setCountForFramesPer(framesPer);
+        const clamped = Math.max(0, Math.min(sets - 1, Math.floor(setIndex)));
+        this.textureSet = { start: clamped * framesPer, length: framesPer };
+        // Re-apply the stored heading so the frame recomputes within the set.
+        this.rotation = this.wrappedRotation;
+    }
+
     get frame() {
         return this.wrappedFrame;
     }
