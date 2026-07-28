@@ -297,6 +297,21 @@ export interface ProjectileWeaponData extends SpaceObjectData, NotBayWeaponData 
     jamVulnerabilities: JammingVulnerabilities,
     /** Decoded Seeker flags affecting jamming/guidance behaviour. */
     seeker: SeekerFlags,
+    /**
+     * wëap "Decay" field (read from the wëap.Projectile2 template): the
+     * number of frames of flight after which the shot loses one point
+     * each of mass (armor) and energy (shield) damage. EVN Bible (wëap
+     * Decay): "Remove one point of mass & energy damage every time this
+     * number of frames goes by" (1 frame = 1/30 sec); "-1 or 0: Ignored".
+     * The parser clamps negatives to 0, so 0 means no decay.
+     *
+     * Projectile-only: beams read the same byte but use it for the visual
+     * "shrink before disappearing" effect (a different Bible field), so
+     * this is not plumbed onto BeamWeaponData. The sim applies it from
+     * the shot's elapsed flight time in ProjectileCollisionSystem and
+     * ProjectileBlastSystem (see decayDamage).
+     */
+    decay: number,
 }
 
 // This extends SpaceObjectData since projectiles use sprites
@@ -314,6 +329,7 @@ export function getDefaultProjectileWeaponData(): ProjectileWeaponData {
         hitParticles: getDefaultParticles(),
         jamVulnerabilities: getDefaultJammingVulnerabilities(),
         seeker: getDefaultSeekerFlags(),
+        decay: 0,
     };
 }
 
