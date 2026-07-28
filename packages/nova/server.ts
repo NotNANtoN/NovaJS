@@ -55,6 +55,21 @@ console.log(novaDataPath);
 const app = express();
 const httpServer = http.createServer(app);
 
+// The title screen streams the original's theme, `Nova Music.mp3`, straight
+// from the game data. It's a plain ~9 MB mp3 (not a `snd` resource), so it
+// deliberately skips the parsed-resource pipeline: one whitelisted static
+// route, NOT the whole data directory. Registered here (before setupRoutes'
+// catch-all `/` handler) so it wins, and served with `sendFile` so the
+// browser gets Range support (streaming + looping) and a cache header.
+const novaMusicPath = path.join(novaDataPath, "Nova Files", "Nova Music.mp3");
+app.get("/title_music.mp3", (_req, res) => {
+    res.sendFile(novaMusicPath, { maxAge: "1d" }, (err) => {
+        if (err && !res.headersSent) {
+            res.status(404).end();
+        }
+    });
+});
+
 const filesystemDataPath = path.join(__dirname, "../objects");
 const filesystemData = new FilesystemData(filesystemDataPath);
 

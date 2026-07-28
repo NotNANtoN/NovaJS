@@ -76,6 +76,7 @@ import { Autopilot, ControlSinks } from "./autopilot.js";
 import { installTapTargeting } from "./tap_targeting.js";
 import { installTouchControls, wantsTouchControls } from "./touch_controls.js";
 import { TitleScreen, TitleStatus } from "./title/title_screen.js";
+import { TitleMusic } from "./title/title_music.js";
 import {
     showAboutDialog, showNewPilotDialog, showOpenPilotDialog,
     showPreferencesDialog, PilotEntry,
@@ -1652,6 +1653,12 @@ async function computeTitleStatus(): Promise<TitleStatus> {
 async function runTitle() {
     const title = new TitleScreen(displayAssetData);
     (window as any).novaTitle = title;
+    // The original's looping title theme. A single streaming element reused
+    // across the whole title lifetime (shown, entered, Esc'd back to). It
+    // attempts autoplay now and, when the browser blocks that (no gesture
+    // yet), starts on the player's first pointerdown / keydown.
+    const music = new TitleMusic();
+    (window as any).novaTitleMusic = music;
     await title.buildPromise;
 
     // While the title (not a game world) is on screen, IT owns renderer
@@ -1696,6 +1703,9 @@ async function runTitle() {
         lastTitleTick = performance.now();
         onResize();
         title.show();
+        // Start (initial boot) or restart (after Esc back from the game) the
+        // looping theme.
+        music.play();
         void refreshStatus();
     };
 
@@ -1705,6 +1715,9 @@ async function runTitle() {
         }
         entering = true;
         title.hide();
+        // Cut the theme as the game world takes over (it restarts from the
+        // top if the player Escapes back to the title).
+        music.stop();
         app.ticker.remove(titleTicker);
         app.stage.removeChild(title.container);
         try {
