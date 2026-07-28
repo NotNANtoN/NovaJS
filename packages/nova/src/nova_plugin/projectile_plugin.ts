@@ -1,5 +1,5 @@
 import * as t from 'io-ts';
-import { ProjectileWeaponData, WeaponData } from 'novadatainterface/weapon_data';
+import { ProjectileWeaponData, WeaponData, WeaponDamage } from 'novadatainterface/weapon_data';
 import { Emit, EmitNow, Entities, GetEntity, RunQueryFunction, UUID } from 'nova_ecs/arg_types';
 import { Angle } from 'nova_ecs/datatypes/angle';
 import { Position, PositionType } from 'nova_ecs/datatypes/position';
@@ -37,6 +37,47 @@ import { ProjectileBlastHull, ProjectileComponent, ProjectileDataComponent } fro
 import { SoundEvent } from './sound_plugin.js';
 import { Stat } from './stat.js';
 import { TargetComponent } from './target_component.js';
+
+
+/**
+ * Apply the wëap "Decay" field to a shot's damage based on how long it
+ * has been flying. The EVN Bible (wëap Decay) says: "Remove one point of
+ * mass & energy damage every time this number of frames goes by" (1 frame
+ * = 1/30 sec), with 0 or negative meaning no decay. Both the mass (armor)
+ * and energy (shield) damage drop by the same integer amount, clamped at
+ * zero; ionization, knockback and the shield-passthrough factor are
+ * unchanged (the Bible names only mass & energy damage).
+ *
+ * Determinism: a pure function of its arguments. `elapsedMs` comes from
+ * the sim clock (time.time - createTime), never wall-clock, and the only
+ * math is floor/arithmetic — no randomness, no trig — so every peer
+ * computes the identical decayed damage for the same flight time.
+ */
+export function decayDamage(damage: WeaponDamage, decay: number,
+    elapsedMs: number): WeaponDamage {
+    // `!(decay > 0)` rather than `decay <= 0` so a missing/NaN decay
+    // (e.g. a deserialized snapshot from before this field existed,
+    // which the passthrough codec would not catch) falls back to "no
+    // decay" instead of propagating NaN into the damage numbers — a
+    // NaN would desync the deterministic sim.
+    if (!(decay > 0)) {
+        return damage;
+    }
+    // 1 frame = 1/30 sec. Convert ms to frames with the same 30/1000
+    // factor BeamDamageSystem uses; clamp a negative (impossible in
+    // practice — time.time >= createTime — but defensive) to zero so a
+    // timing hiccup can never ADD damage.
+    const elapsedFrames = Math.max(0, elapsedMs) * 30 / 1000;
+    const lost = Math.floor(elapsedFrames / decay);
+    if (lost <= 0) {
+        return damage;
+    }
+    return {
+        ...damage,
+        shield: Math.max(0, damage.shield - lost),
+        armor: Math.max(0, damage.armor - lost),
+    };
+}
 
 
 class ProjectileWeaponEntry extends WeaponEntry {
@@ -364,7 +405,11 @@ export const ProjectileCollisionSystem = new System({
             return;
         }
 
-        emitNow(DamagedEvent, { damage: projectileData.damage, damager: uuid }, [collision.other]);
+        emitNow(DamagedEvent, {
+            damage: decayDamage(projectileData.damage, projectileData.decay,
+                time.time - createTime),
+            damager: uuid,
+        }, [collision.other]);
 
         if (!collision.initiator) {
             // We are hit by point defense
@@ -433,9 +478,9 @@ const ProjectileBlastSystem = new System({
     args: [ProjectileDataComponent, ProjectileBlastHull, CollisionHitterComponent,
         MovementStateComponent, Optional(OwnerComponent),
         Optional(FiringGroupComponent), Entities,
-        IdFactoryResource, ProjectileExplodeEvent] as const,
+        IdFactoryResource, ProjectileExplodeEvent, CreateTime, TimeResource] as const,
     step(projectileData, blastHull, hitter, movement, owner, firingGroup,
-        entities, ids, explosion) {
+        entities, ids, explosion, createTime, time) {
         const blastIgnore = new Set<string>();
         // TODO: Tag ship that was hit as immune to explosion, since it's already hit.
 
@@ -445,7 +490,14 @@ const ProjectileBlastSystem = new System({
             blastIgnore.add(explosion.otherUuid);
         }
 
-        const damage = projectileData.damage;
+        // A blast carries the shot's remaining power at the moment it
+        // detonates, so the wëap Decay that erodes the shot in flight
+        // erodes the blast too. This runs in the same step (and thus at
+        // the same time.time) as the direct ProjectileCollisionSystem
+        // hit, so the directly-struck ship and its neighbours in the
+        // blast radius take consistently-decayed damage.
+        const damage = decayDamage(projectileData.damage, projectileData.decay,
+            time.time - createTime);
         const blast = new Entity(`${projectileData.name} Blast`)
             .addComponent(BlastDamageComponent, damage)
             .addComponent(BlastIgnoreComponent, blastIgnore)

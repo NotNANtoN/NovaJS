@@ -240,6 +240,10 @@ async function ProjectileWeaponParse(weap: WeapResource, notFoundFunction: (m: s
             turnsAwayIfJammed: weap.turnsAwayIfJammed,
             attackParentIfJammed: weap.attackParentIfJammed,
         },
+        // wëap Decay: frames of flight per point of mass & energy damage
+        // lost. The Bible treats -1 and 0 identically ("Ignored"), so clamp
+        // negatives to 0; the sim applies it from the shot's flight time.
+        decay: Math.max(weap.decay, 0),
         physics: {
             acceleration: 0,
             armorRecharge: 0,
