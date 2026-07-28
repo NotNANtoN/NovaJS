@@ -32,7 +32,10 @@ export async function openGame(browser, params = {}, { settleMs = 6000, entry = 
     page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
     page.on('pageerror', e => errors.push(String(e)));
 
-    const qs = new URLSearchParams({ reset: '1', ...params }).toString();
+    // mute=1: harness runs never play the title theme / sfx (audio
+    // escapes Chrome's "new" headless mode). Scenarios can override.
+    const qs = new URLSearchParams(
+        { reset: '1', mute: '1', ...params }).toString();
     await page.goto(`${BASE_URL}/?${qs}`, { waitUntil: 'networkidle2', timeout: 60000 });
     if (entry === 'title') {
         // The title screen shows before the game world is joined; wait for

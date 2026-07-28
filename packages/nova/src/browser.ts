@@ -1,4 +1,6 @@
 import * as Comlink from "comlink";
+import { sound as pixiSoundLibrary } from "@pixi/sound";
+import { isMuted } from "./client/mute.js";
 import { isLeft } from "fp-ts/lib/Either.js";
 import { UnknownComponent } from "nova_ecs/component";
 import { Entity } from "nova_ecs/entity";
@@ -1704,8 +1706,10 @@ async function runTitle() {
         onResize();
         title.show();
         // Start (initial boot) or restart (after Esc back from the game) the
-        // looping theme.
-        music.play();
+        // looping theme. `?mute` (preview panels / harness runs) skips it.
+        if (!isMuted()) {
+            music.play();
+        }
         void refreshStatus();
     };
 
@@ -1852,6 +1856,13 @@ async function runTitle() {
                 break;
         }
     });
+}
+
+// `?mute` silences everything played through the pixi sound layer
+// (UI beeps, weapons, ambient) in addition to the title music gated
+// above — one switch for preview panels and automated loads.
+if (isMuted()) {
+    pixiSoundLibrary.volumeAll = 0;
 }
 
 // A bare load shows the title screen first. A deep-link that names a
