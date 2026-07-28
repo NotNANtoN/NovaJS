@@ -21,6 +21,7 @@ import { WeaponsStateComponent } from '../nova_plugin/weapons_state.js';
 import { LOCATION_MAIN_SPACEPORT, LOCATION_MISSION_COMPUTER, MissionEvent, MissionMapMark, missionMapMarks } from '../nova_plugin/mission_logic.js';
 import { missionDisplayName } from '../nova_plugin/mission_text.js';
 import { CreditsComponent, GameDateComponent, MissionsComponent } from '../nova_plugin/player_state_plugin.js';
+import { DockedLiveStatus, DockedShip } from '../display/docked_ship.js';
 import { Bar } from './bar.js';
 import { Button } from './button.js';
 import { Menu } from './menu.js';
@@ -83,6 +84,12 @@ export class Spaceport extends Menu<Entity> {
         leave: Button,
     };
     private data?: PlanetData;
+    /**
+     * The docked-ship handle the status bar reads while docked. The spaceport
+     * points its `liveStatus` at whichever venue is open so the bar tracks a
+     * transaction's working credits/cargo before it commits to the entity.
+     */
+    private dockedShip?: DockedShip;
     private notices = new PIXI.Text('', {
         fontFamily: 'Geneva', fontSize: 10, fill: 0xffff88,
         align: 'left', wordWrap: true, wordWrapWidth: 301,
@@ -156,7 +163,9 @@ export class Spaceport extends Menu<Entity> {
             this.controls.unbind();
             // The outfitter mutates the ship's outfits and the
             // player's control bits.
+            this.setLiveStatus(() => this.outfitter.dockedStatus());
             this.input = await this.outfitter.show(this.input);
+            this.setLiveStatus(undefined);
             // Delete these so they are re-created with the new outfits.
             // TODO: Find a better way to do this.
             this.input.components.delete(WeaponsStateComponent);
@@ -193,7 +202,9 @@ export class Spaceport extends Menu<Entity> {
             this.controls.unbind();
             // The bar mutates missions, credits (gambling, hire fees),
             // cargo, bits, and records hired escorts.
+            this.setLiveStatus(() => this.bar.dockedStatus());
             this.input = await this.bar.show(this.input);
+            this.setLiveStatus(undefined);
             this.refreshRefuelButton();
             this.controls.bind();
         };
@@ -207,7 +218,9 @@ export class Spaceport extends Menu<Entity> {
             }
             this.controls.unbind();
             // The trade center mutates cargo and credits.
+            this.setLiveStatus(() => this.tradeCenter.dockedStatus());
             this.input = await this.tradeCenter.show(this.input);
+            this.setLiveStatus(undefined);
             this.refreshRefuelButton();
             this.controls.bind();
         };
@@ -406,6 +419,23 @@ export class Spaceport extends Menu<Entity> {
             }
         }
         this.notices.text = lines.join('\n\n');
+    }
+
+    /** Points the status bar at the docked ship for this landing. */
+    setDockedShip(dockedShip: DockedShip) {
+        this.dockedShip = dockedShip;
+    }
+
+    /**
+     * Routes an open venue's live working state to the status bar (or clears
+     * it, so the bar falls back to the docked entity's own components). A
+     * venue's `dockedStatus()` reads its working copy, so the credits/cargo
+     * readouts follow each transaction before Done commits it.
+     */
+    private setLiveStatus(source?: () => DockedLiveStatus) {
+        if (this.dockedShip) {
+            this.dockedShip.liveStatus = source;
+        }
     }
 
     /**

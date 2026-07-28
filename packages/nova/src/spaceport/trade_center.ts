@@ -4,6 +4,7 @@ import { PlanetData } from 'novadatainterface/planet_data';
 import { Entity } from 'nova_ecs/entity';
 import * as PIXI from 'pixi.js';
 import { Observable } from 'rxjs';
+import { DockedLiveStatus } from '../display/docked_ship.js';
 import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data.js';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { CargoComponent } from '../nova_plugin/cargo_plugin.js';
@@ -425,6 +426,19 @@ export class TradeCenter extends Menu<Entity> {
 
         this.buttons.buy.state = this.canBuySelected() ? 'normal' : 'grey';
         this.buttons.sell.state = this.canSellSelected() ? 'normal' : 'grey';
+    }
+
+    /**
+     * The live working state for the docked status bar: the not-yet-committed
+     * cargo hold, capacity, and credit balance, so the bar's Free and Credits
+     * readouts follow each buy/sell before Done commits them.
+     */
+    dockedStatus(): DockedLiveStatus {
+        return {
+            credits: this.state.credits.credits,
+            cargo: this.state.cargo,
+            cargoCapacity: this.state.cargoCapacity,
+        };
     }
 
     /** Commits the working cargo and credits back onto the entity. */
