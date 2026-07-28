@@ -148,24 +148,32 @@ class GameDataServer {
         //        const staticPath = path.join(this.appRoot, "build", "static");
         //        this.app.use("/static", express.static(staticPath));
 
+        // no-cache = revalidate every load (a 304 keeps it fast).
+        // Without it, browsers cache heuristically for hours and a
+        // STALE CLIENT BUILD joins a new server: it desyncs no matter
+        // how healthy the netcode is, uploads no dumps, and reads as
+        // an unsolvable netcode mystery (the 2026-07-26 session).
+        const noCache = (res: express.Response) =>
+            res.set('Cache-Control', 'no-cache');
+
         this.app.use("/browser_bundle.js", (_req: express.Request, res: express.Response) => {
-            res.sendFile(this.bundlePath);
+            noCache(res).sendFile(this.bundlePath);
         });
 
         this.app.use("/browser_bundle.js.map", (_req: express.Request, res: express.Response) => {
-            res.sendFile(this.bundleMapPath);
+            noCache(res).sendFile(this.bundleMapPath);
         });
 
         this.app.use("/simulation_bridge_browser_worker_bundle.js", (_req: express.Request, res: express.Response) => {
-            res.sendFile(this.simulationWorkerBundlePath);
+            noCache(res).sendFile(this.simulationWorkerBundlePath);
         });
 
         this.app.use("/simulation_bridge_browser_worker_bundle.js.map", (_req: express.Request, res: express.Response) => {
-            res.sendFile(this.simulationWorkerBundleMapPath);
+            noCache(res).sendFile(this.simulationWorkerBundleMapPath);
         });
 
         this.app.use("/", (_req: express.Request, res: express.Response) => {
-            res.sendFile(this.htmlPath);
+            noCache(res).sendFile(this.htmlPath);
         });
     }
 

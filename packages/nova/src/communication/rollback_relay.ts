@@ -1,7 +1,7 @@
 import { Communicator } from "nova_ecs/plugins/multiplayer_plugin";
 import { Subscription } from "rxjs";
 import { SIMULATION_STEP_MS } from "../nova_plugin/make_system.js";
-import { ArchiveBaseline, canonicalDesyncHash, DesyncDump, InputRecord, unwrapRollbackMessage, wrapRollbackMessage } from "./rollback_protocol.js";
+import { ArchiveBaseline, canonicalDesyncHash, DesyncDump, InputRecord, PROTOCOL_VERSION, unwrapRollbackMessage, wrapRollbackMessage } from "./rollback_protocol.js";
 
 /** Everything the relay knows about a convicted desync, for the
  * incident recorder. */
@@ -13,6 +13,10 @@ export interface DesyncInfo {
     convicted: string[];
     /** True when the timely majority outvoted the archive's hash. */
     archiveOutvoted: boolean;
+    /** Each reporter's protocol version from its join request; 0 for
+     * peers that never sent one (a build predating versioning — the
+     * stale-cached-bundle signature). */
+    peerProtocols: Record<string, number>;
 }
 
 /**
@@ -66,6 +70,8 @@ export class RollbackRelay {
     private onDesyncDump?: (peerId: string, dump: DesyncDump) => void;
     /** Consecutive mismatched checkpoints per reporter. */
     private mismatchStreaks = new Map<string, number>();
+    /** Protocol versions peers declared at join (0 = never declared). */
+    private peerProtocols = new Map<string, number>();
     private readonly subscription: Subscription;
     private clockInterval?: ReturnType<typeof setInterval>;
     private syncInterval?: ReturnType<typeof setInterval>;
@@ -291,10 +297,24 @@ export class RollbackRelay {
         }
         this.onDesync?.({
             tick, hashes: allHashes, canonical, convicted, archiveOutvoted,
+            peerProtocols: Object.fromEntries(allHashes.map(([peerId]) =>
+                [peerId, this.peerProtocols.get(peerId)
+                    ?? (peerId === this.room.uuid ? PROTOCOL_VERSION : 0)])),
         });
         this.room.sendMessage(wrapRollbackMessage({
             kind: 'desync', tick, hashes: allHashes, canonical,
         }));
+        // Fallback for lost dump pushes: convicted peers upload
+        // unprompted on seeing the desync, but if that push never
+        // arrives (it happened for a whole session), the incident is
+        // evidence-free. An explicit request costs one message; peers
+        // that just pushed ignore it (dump dedupe).
+        for (const peerId of convicted) {
+            if (peerId !== this.room.uuid) {
+                this.room.sendMessage(wrapRollbackMessage(
+                    { kind: 'desyncDumpRequest' }), peerId);
+            }
+        }
     }
 
     private handleMessage(source: string, raw: unknown) {
@@ -331,6 +351,17 @@ export class RollbackRelay {
                 break;
             }
             case 'joinRequest': {
+                const protocol = message.protocol ?? 0;
+                this.peerProtocols.set(source, protocol);
+                if (protocol !== PROTOCOL_VERSION) {
+                    // A version-mismatched peer WILL desync no matter
+                    // how healthy the netcode is. Loud, and stamped
+                    // into any incident this peer causes.
+                    console.warn(`Peer ${source} joined with protocol `
+                        + `${protocol || 'none (pre-versioning build — '
+                        + 'stale cached bundle?)'}; server has `
+                        + `${PROTOCOL_VERSION}`);
+                }
                 // With an archived baseline, reconstruction starts
                 // there: only the log tail after it is needed. A
                 // fresh request (resync) gets a baseline captured
