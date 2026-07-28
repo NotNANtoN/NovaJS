@@ -10,9 +10,28 @@ import { BaseParse } from "./base_parse.js";
  * flag words into named booleans) and verifies its layout against the gövt
  * TMPL, so this is a straight projection plus the shared BaseData fields.
  */
+/**
+ * Generic comms-dialog greetings live in one STR# resource per government,
+ * ten alternative lines each, starting at STR# 7000 for the first government
+ * (local id 128): strnId = GREETING_STRN_BASE + (govtLocalId - FIRST_GOVT_ID).
+ * (The Bible's Appendix III 'STR ' patch range 10000+ — "first 10 for govt -1,
+ * second 10 for govt 0, ..." — is an indirection over these resources; the
+ * stock scenario leaves 10000+ empty and stores the data here. STR# 6999 holds
+ * the independent/no-government greetings, unreachable through a real gövt.)
+ * Governments with no greeting resource (many mission-only ones) resolve to an
+ * empty list, and the hail dialog falls back to a synthetic line.
+ */
+const GREETING_STRN_BASE = 7000;
+const FIRST_GOVT_ID = 128;
+
 export async function GovtParse(govt: GovtResource,
     notFoundFunction: (m: string) => void): Promise<GovtData> {
     const base: BaseData = await BaseParse(govt, notFoundFunction);
+
+    const greetingStrn = GREETING_STRN_BASE + (govt.id - FIRST_GOVT_ID);
+    // Drop blank and "*" entries — Nova's convention for an unused STR# slot.
+    const commGreetings = [...(govt.idSpace["STR#"][greetingStrn]?.strings ?? [])]
+        .filter(line => line.trim() !== "" && line.trim() !== "*");
 
     return {
         ...base,
@@ -74,5 +93,6 @@ export async function GovtParse(govt: GovtResource,
         newsPic: govt.newsPic >= 128
             ? govt.idSpace.PICT[govt.newsPic]?.globalID ?? null
             : null,
+        commGreetings,
     };
 }

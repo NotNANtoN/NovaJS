@@ -22,10 +22,16 @@ import { MenuControls } from './menu_controls.js';
  * which routes it through the deterministic input path (bridge.hail /
  * escort-command control events). The dialog never mutates the sim directly.
  *
- * Escort-capture screens (hail_escort_upgrading / captured / sell) depend on
- * boarding, which a sibling agent owns (PICTs 8515-8516) — the escort variant
- * here builds only the command buttons and leaves those options out; see the
- * plugin for the documented seam.
+ * The ESCORT comm dialog (PICT 8513) manages a hired escort — it does NOT
+ * issue fleet commands (Attack / Defend / Formation / ...); commanding escorts
+ * is the keyboard escort-controls' job. Per the reference screenshots
+ * (hail/hail_escort.png and the upgrading/captured/sell variants) the button
+ * column is, top to bottom: Upgrade Escort, Sell Escort, Release, Close
+ * Channel. All three management actions depend on state NovaJS does not model
+ * yet — a shipyard upgrade-transfer, an escort resale value, and per-escort
+ * release (a future per-escort-control feature Matthew will spec separately) —
+ * so they render as GREYED seams; only Close Channel is live. See the plugin
+ * for the documented seams.
  */
 
 /** Comms-dialog background PICT ids (see novajs-spaceport-ui memory map). */
@@ -34,9 +40,12 @@ export const HAIL_PICT_PLANET = 'nova:8512';
 export const HAIL_PICT_ESCORT = 'nova:8513';
 export const HAIL_PICT_HAGGLE = 'nova:8514';
 
-/** An escort command offered as a button in the escort comm dialog. */
-export type EscortCommandName =
-    'attack' | 'defend' | 'formation' | 'holdPosition' | 'returnToBay';
+/** Interface beeps (snd resources) for the comm dialog: open, close, and a
+ * generic button press. Local client UI sounds — routed through the display
+ * audio path via the playSound callback, never the simulation. */
+export const HAIL_SND_OPEN = 'nova:154';
+export const HAIL_SND_CLOSE = 'nova:152';
+export const HAIL_SND_BUTTON = 'nova:151';
 
 /** What the plugin tells the dialog to display. Pure data, no world refs. */
 export interface HailContext {
@@ -53,15 +62,18 @@ export interface HailContext {
     assist?: { free: boolean };
     /** Bribe / beg-for-mercy offer against a hostile ship, when eligible. */
     bribe?: { amount: number, canAfford: boolean };
-    /** Escort command buttons (escort variant only). */
-    escortCommands?: boolean;
+    /** Escort-management dialog (escort variant only): show the Upgrade
+     * Escort / Sell Escort / Release seam buttons above Close Channel. */
+    escort?: boolean;
 }
 
-/** Callbacks the dialog fires; each routes to the deterministic input path. */
+/** Callbacks the dialog fires. `requestAssistance`/`bribe` route to the
+ * deterministic input path; `playSound` plays a local client UI beep through
+ * the display audio path (no simulation involvement). */
 export interface HailCallbacks {
     requestAssistance(): void;
     bribe(): void;
-    escortCommand(command: EscortCommandName): void;
+    playSound(id: string): void;
 }
 
 const HEADING_FONT: Partial<PIXI.ITextStyle> = {
@@ -109,14 +121,22 @@ export class HailDialog {
         this.phase = 'main';
         await this.render();
         this.container.visible = true;
+        this.callbacks.playSound(HAIL_SND_OPEN);
         this.controls.bind();
         await firstValueFrom(this.closed);
+        this.callbacks.playSound(HAIL_SND_CLOSE);
         this.controls.unbind();
         this.container.visible = false;
     }
 
     private close() {
         this.closed.next();
+    }
+
+    /** Local UI beep for a button press (not the closing "Close Channel",
+     * whose close beep already covers it). */
+    private beep() {
+        this.callbacks.playSound(HAIL_SND_BUTTON);
     }
 
     /** Rebuilds the scene graph for the current phase/context. */
@@ -206,6 +226,7 @@ export class HailDialog {
             const beg = new Button(this.displayAssets, 'Beg for Mercy',
                 buttonWidth, { x: leftX, y: buttonY });
             beg.click.subscribe(() => {
+                this.beep();
                 this.phase = 'haggle';
                 void this.render();
             });
@@ -219,6 +240,7 @@ export class HailDialog {
             const button = new Button(this.displayAssets, label, buttonWidth,
                 { x: leftX, y: buttonY });
             button.click.subscribe(() => {
+                this.beep();
                 this.callbacks.requestAssistance();
                 this.close();
             });
@@ -226,23 +248,22 @@ export class HailDialog {
             buttonY -= buttonSpacing;
         }
 
-        if (context.escortCommands) {
-            // Our escort comm offers fleet commands (the original's escort
-            // comm instead manages a hired escort — upgrade/sell/release; a
-            // documented feature divergence). Stack them in the same left
-            // column above Close Channel.
-            const commands: [EscortCommandName, string][] = [
-                ['attack', 'Attack'], ['defend', 'Defend'],
-                ['formation', 'Formation'], ['holdPosition', 'Hold'],
-                ['returnToBay', 'Return'],
-            ];
-            for (const [command, label] of commands) {
+        if (context.escort) {
+            // The original's escort comm MANAGES a hired escort; it does not
+            // issue fleet commands (that's the keyboard escort-controls'
+            // job). Per hail/hail_escort.png the column reads, top to bottom,
+            // Upgrade Escort / Sell Escort / Release / Close Channel. Close
+            // Channel is already placed at the bottom above; stack the three
+            // management options over it (bottom-up: Release, then Sell
+            // Escort, then Upgrade Escort). All three depend on state NovaJS
+            // does not model yet — shipyard upgrade transfer, escort resale
+            // value, and per-escort release (a future per-escort-control
+            // feature) — so they render GREYED with no handler (seams).
+            const seams = ['Release', 'Sell Escort', 'Upgrade Escort'];
+            for (const label of seams) {
                 const button = new Button(this.displayAssets, label,
                     buttonWidth, { x: leftX, y: buttonY });
-                button.click.subscribe(() => {
-                    this.callbacks.escortCommand(command);
-                    this.close();
-                });
+                button.state = 'grey';
                 this.content.addChild(button.container);
                 buttonY -= buttonSpacing;
             }
@@ -272,6 +293,7 @@ export class HailDialog {
                 `Pay ${bribe.amount.toLocaleString()} cr`, 140,
                 { x: originX + 16, y: buttonY });
             pay.click.subscribe(() => {
+                this.beep();
                 this.callbacks.bribe();
                 this.close();
             });
@@ -280,6 +302,7 @@ export class HailDialog {
         const cancel = new Button(this.displayAssets, 'Never Mind', 100,
             { x: originX + width - 116, y: buttonY });
         cancel.click.subscribe(() => {
+            this.beep();
             this.phase = 'main';
             void this.render();
         });

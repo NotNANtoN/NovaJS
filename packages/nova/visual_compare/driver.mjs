@@ -374,7 +374,8 @@ export async function hideDebugOverlays(page) {
  * window.novaSimSerializer (the sim serializer's componentsByName registry),
  * the only in-page handle on the synced-component instances.
  */
-export async function openBoarding(page, { capture = 'none', cargo = 9 } = {}) {
+export async function openBoarding(page,
+    { capture = 'none', cargo = 9, ammo = 0 } = {}) {
     // Spawn a shuttle to be the boarded victim (has Cargo + Fuel components
     // the plunder dialog reads).
     await page.evaluate(() => {
@@ -387,7 +388,7 @@ export async function openBoarding(page, { capture = 'none', cargo = 9 } = {}) {
         }
     });
     await sleep(4000);
-    const ok = await page.evaluate((capture, cargo) => {
+    const ok = await page.evaluate((capture, cargo, ammo) => {
         const dw = window.displayWorld;
         const Boarding = window.novaSimSerializer?.componentsByName?.get('Boarding');
         if (!Boarding) return false;
@@ -409,12 +410,12 @@ export async function openBoarding(page, { capture = 'none', cargo = 9 } = {}) {
         const Cargo = [...target.components.keys()].find(c => c.name === 'Cargo');
         if (Cargo && cargo > 0) target.components.get(Cargo).set('Metal', cargo);
         player.components.set(Boarding, {
-            target: targetId, creditsAvailable: 1000,
+            target: targetId, creditsAvailable: 1000, ammoAvailable: ammo,
             cargoTaken: false, creditsTaken: false, fuelTaken: false,
-            capture, crimeApplied: false,
+            ammoTaken: false, capture, crimeApplied: false,
         });
         return true;
-    }, capture, cargo);
+    }, capture, cargo, ammo);
     if (!ok) throw new Error('openBoarding: could not inject BoardingComponent');
     await waitForContainer(page,
         capture === 'succeeded' ? 'CaptureAssignment' : 'PlunderDialog');

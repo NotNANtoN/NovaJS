@@ -7,6 +7,7 @@ import {
     BRIBE_MINIMUM,
     canRequestAssistance,
     greetingText,
+    hashString,
     planetTakesBribes,
     shipHailResponse,
     shipTakesBribes,
@@ -148,16 +149,50 @@ describe('planetTakesBribes', () => {
 });
 
 describe('greetingText', () => {
-    it('prefers a pers CommQuote', () => {
+    const greetings = ['Alpha', 'Bravo', 'Charlie'];
+    it('prefers a pers CommQuote over a govt greeting', () => {
         expect(greetingText({ persCommQuote: 'Hello there!',
-            govtCommName: 'Fed', talkative: true })).toBe('Hello there!');
+            govtGreetings: greetings, govtCommName: 'Fed', talkative: true }))
+            .toBe('Hello there!');
     });
-    it('synthesizes a govt line when there is no pers quote', () => {
-        expect(greetingText({ govtCommName: 'the Federation',
+    it('picks a real govt greeting when there is no pers quote', () => {
+        // seed 4 % 3 = 1 -> the second greeting.
+        expect(greetingText({ govtGreetings: greetings, seed: 4,
+            talkative: true })).toBe('Bravo');
+    });
+    it('picks the govt greeting deterministically by seed', () => {
+        // Same seed -> same line every time (no Math.random).
+        const first = greetingText({ govtGreetings: greetings, seed: 7,
+            talkative: true });
+        const again = greetingText({ govtGreetings: greetings, seed: 7,
+            talkative: true });
+        expect(first).toBe(again);
+        expect(greetings).toContain(first);
+        // A different seed can select a different line (8 % 3 = 2).
+        expect(greetingText({ govtGreetings: greetings, seed: 8,
+            talkative: true })).toBe('Charlie');
+    });
+    it('falls back to a synthetic line with no greeting resource', () => {
+        expect(greetingText({ govtGreetings: [], govtCommName: 'the Federation',
             talkative: true })).toContain('the Federation');
     });
     it('is empty when the govt is not talkative', () => {
         expect(greetingText({ persCommQuote: 'Hi', talkative: false }))
             .toBe('');
+    });
+});
+
+describe('hashString', () => {
+    it('is stable and deterministic for the same input', () => {
+        expect(hashString('abc')).toBe(hashString('abc'));
+    });
+    it('produces an unsigned 32-bit integer', () => {
+        const h = hashString('some-ship-uuid');
+        expect(h).toBeGreaterThanOrEqual(0);
+        expect(h).toBeLessThanOrEqual(0xffffffff);
+        expect(Number.isInteger(h)).toBeTrue();
+    });
+    it('differs for different inputs (no trivial collisions)', () => {
+        expect(hashString('uuid-a')).not.toBe(hashString('uuid-b'));
     });
 });

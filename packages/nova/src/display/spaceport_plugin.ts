@@ -12,6 +12,7 @@ import { ControlsSubject } from '../nova_plugin/controls_plugin.js';
 import { DisplayAssetDataResource, SimulationGameDataResource } from '../nova_plugin/game_data_resource.js';
 import { PlanetComponent, PlanetDataComponent } from '../nova_plugin/planet_plugin.js';
 import { Spaceport } from '../spaceport/spaceport.js';
+import { DockedShip, DockedShipResource } from './docked_ship.js';
 import { OpenMissionInfoResource } from './mission_info_plugin.js';
 import { OpenPlayerInfoResource } from './player_info_plugin.js';
 import { ResizeEvent, ScreenSize } from './screen_size_plugin.js';
@@ -41,17 +42,35 @@ export const LeaveSpaceportEvent = new EcsEvent<Entity>('LeaveSpaceportEvent');
 const OpenSpaceportSystem = new System({
     name: 'OpenSpaceportSystem',
     events: [OpenSpaceportEvent],
-    args: [OpenSpaceportEvent, RunQuery, ScreenSize, Emit, SingletonComponent] as const,
-    step({ planetId, ship }, runQuery, { x, y }, emit) {
+    args: [OpenSpaceportEvent, RunQuery, ScreenSize, Emit,
+        DockedShipResource, SingletonComponent] as const,
+    step({ planetId, ship }, runQuery, { x, y }, emit, dockedHolder) {
         const spaceport = runQuery(SpaceportQuery)
             .find(([, { id }]) => id === planetId)?.[0];
         if (!spaceport) {
             return;
         }
 
+        // Publish the held ship so the status bar (out-of-world while docked)
+        // keeps drawing its credits/fuel/cargo, and let the spaceport push
+        // each venue's live working state through it per-transaction.
+        const dockedShip = new DockedShip(ship);
+        dockedHolder.current = dockedShip;
+        spaceport.setDockedShip(dockedShip);
+
         spaceport.container.position.x = x / 2;
         spaceport.container.position.y = y / 2;
         spaceport.show(ship).then(newShip => emit(LeaveSpaceportEvent, newShip));
+    }
+});
+
+const CloseSpaceportSystem = new System({
+    name: 'CloseSpaceportSystem',
+    events: [LeaveSpaceportEvent],
+    args: [DockedShipResource, SingletonComponent] as const,
+    step(dockedHolder) {
+        // Back in flight: the in-world PlayerShipSelector systems take over.
+        dockedHolder.current = undefined;
     }
 });
 
@@ -113,14 +132,21 @@ export const SpaceportPlugin: Plugin = {
     name: 'SpaceportPlugin',
     build(world) {
         world.resources.set(SpaceportAmbientState, { currentId: null });
+        // Created here if the status bar plugin hasn't already; both
+        // set-if-absent so build order is moot.
+        if (!world.resources.get(DockedShipResource)) {
+            world.resources.set(DockedShipResource, {});
+        }
         world.addSystem(SpaceportProvider);
         world.addSystem(OpenSpaceportSystem);
+        world.addSystem(CloseSpaceportSystem);
         world.addSystem(SpaceportResizeSystem);
         world.addSystem(SpaceportAmbientSystem);
     },
     remove(world) {
         world.removeSystem(SpaceportProvider);
         world.removeSystem(OpenSpaceportSystem);
+        world.removeSystem(CloseSpaceportSystem);
         world.removeSystem(SpaceportResizeSystem);
         world.removeSystem(SpaceportAmbientSystem);
         world.resources.delete(SpaceportAmbientState);

@@ -32,7 +32,7 @@ import { SimulationTimeResource } from "./display/simulation_time.js";
 import { PixiAppResource } from "./display/pixi_app_resource.js";
 import { ResizeEvent } from "./display/screen_size_plugin.js";
 import { SetJumpRouteEvent } from "./display/starmap_plugin.js";
-import { HailEscortCommandEvent, HailRequestEvent } from "./display/hail_dialog_plugin.js";
+import { HailRequestEvent } from "./display/hail_dialog_plugin.js";
 import { LeaveSpaceportEvent, OpenSpaceportEvent } from "./display/spaceport_plugin.js";
 import { Stage } from "./display/stage_resource.js";
 import { AddEnemyEvent, DebugActionEvent } from "./display/status_bar.js";
@@ -147,6 +147,16 @@ let autopilot: Autopilot | undefined;
 let simulationTickInFlight = false;
 let lastPumpDone: number | undefined;
 let syncedPlayerJumpRoute: string[] | undefined;
+// Cleanups for everything a single game session (startGame) registers on
+// shared, session-independent surfaces — document/window listeners, the
+// PIXI ticker, the frame-pump worker, the stats overlay. Run (and cleared)
+// when the player leaves the game back to the title, so re-entering doesn't
+// stack duplicate listeners/tickers/workers.
+let sessionDisposers: Array<() => void> = [];
+// Tap/click targeting lives on the persistent canvas and reads live module
+// state, so it is installed exactly once (not per session).
+let tapTargetingInstalled = false;
+let touchControlsInstalled = false;
 
 // Fixed-timestep bookkeeping: real elapsed ms not yet simulated.
 const MAX_CATCHUP_STEPS = 6;
@@ -570,16 +580,15 @@ async function makeDisplayWorld(systemId: string) {
     return displayWorld;
 }
 
-async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: string }) {
-    autopilot?.cancel();
-    document.body.classList.remove('nova-docked');
-    pendingDockedShip = undefined;
-    dockedShip = undefined;
-    pendingLaunchedShip = undefined;
-    pendingGateShip = undefined;
-    gateDockedShip = undefined;
-    pendingGateLaunch = undefined;
-    syncedPlayerJumpRoute = undefined;
+/**
+ * Tears down the currently active system: detaches and closes the
+ * simulation bridge (optionally removing an entity first so peers see it
+ * vanish), unsubscribes the room forwarders, removes the display stage,
+ * leaves the system room, drops the Display plugin, and clears the synced
+ * entities. Shared by a system transition (jumpTo, which then joins the
+ * next system) and by leaving the game entirely (exit-to-title).
+ */
+async function teardownActiveSystem(removeUuid?: string) {
     if (simulationBridge) {
         // Detach the bridge from the pump BEFORE tearing it down, so
         // no new pump frame starts a call against the dying worker. A
@@ -589,8 +598,8 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
         const oldBridge = simulationBridge;
         simulationBridge = undefined;
         simulationPacing = undefined;
-        if (uuid) {
-            await oldBridge.removeEntity(uuid);
+        if (removeUuid) {
+            await oldBridge.removeEntity(removeUuid);
         }
         await oldBridge.close();
     }
@@ -613,6 +622,19 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
         }
         syncedComponents.clear();
     }
+}
+
+async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: string }) {
+    autopilot?.cancel();
+    document.body.classList.remove('nova-docked');
+    pendingDockedShip = undefined;
+    dockedShip = undefined;
+    pendingLaunchedShip = undefined;
+    pendingGateShip = undefined;
+    gateDockedShip = undefined;
+    pendingGateLaunch = undefined;
+    syncedPlayerJumpRoute = undefined;
+    await teardownActiveSystem(uuid);
     activeSystemId = to;
 
     const room = multiRoom.join(to);
@@ -723,14 +745,11 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
         void newSimulationBridge.setPlayerJumpRoute(data.route);
     });
     // Hail dialog actions become deterministic input records: assist/bribe go
-    // through bridge.hail; escort orders reuse the escort-command control
-    // path (bridge.controlEvents), exactly as the keyboard escort keys do.
+    // through bridge.hail. (The escort comm dialog is management-only and
+    // issues no simulation effect — commanding escorts is the keyboard
+    // escort-controls' job.)
     newDisplayWorld.events.get(HailRequestEvent).subscribe(({ data }) => {
         void newSimulationBridge.hail(data.action);
-    });
-    newDisplayWorld.events.get(HailEscortCommandEvent).subscribe(({ data }) => {
-        void newSimulationBridge.controlEvents(
-            [{ action: data.command, state: 'start' }]);
     });
     newDisplayWorld.events.get(LandEvent).subscribe(({ data, entities }) => {
         if (pendingDockedShip || dockedShip || pendingGateShip || gateDockedShip) {
@@ -1160,6 +1179,7 @@ async function startGame() {
 
     const stats = new Stats();
     document.body.appendChild(stats.dom);
+    sessionDisposers.push(() => stats.dom.remove());
 
     //(window as any).novaDebug = new DebugSettings(activeSystem);
 
@@ -1271,28 +1291,41 @@ async function startGame() {
     }
     document.addEventListener('keydown', handleControlEvent);
     document.addEventListener('keyup', handleControlEvent);
+    sessionDisposers.push(() => {
+        document.removeEventListener('keydown', handleControlEvent);
+        document.removeEventListener('keyup', handleControlEvent);
+    });
 
-    if (wantsTouchControls()) {
+    // Like tap targeting: the on-screen touch controls live on the
+    // persistent body and drive live module state, so install them once.
+    if (wantsTouchControls() && !touchControlsInstalled) {
+        touchControlsInstalled = true;
         installTouchControls({
             sinks: controlSinks,
-            onMovementInput: () => localAutopilot.cancel(),
+            onMovementInput: () => autopilot?.cancel(),
         });
     }
 
     // Tap or click on a ship to target it; on a planet to autopilot
-    // there and land.
-    installTapTargeting(app.view as unknown as HTMLElement, {
-        getWorld: () => displayWorld,
-        getMyPeerId: () => communicator.uuid ?? undefined,
-        targetShip: uuid => void simulationBridge?.setTarget(uuid),
-        navigateToPlanet: uuid => {
-            // Select the stellar (so the land handshake acts on THIS planet
-            // even if another was already picked, and the nav readout lights
-            // up immediately), then autopilot to it.
-            void simulationBridge?.setPlanetTarget(uuid);
-            localAutopilot.navigateTo(uuid);
-        },
-    });
+    // there and land. Installed once on the persistent canvas (never torn
+    // down): it reads the live world / bridge / autopilot through module
+    // state, so it keeps working across re-entries without stacking
+    // duplicate listeners.
+    if (!tapTargetingInstalled) {
+        tapTargetingInstalled = true;
+        installTapTargeting(app.view as unknown as HTMLElement, {
+            getWorld: () => displayWorld,
+            getMyPeerId: () => communicator.uuid ?? undefined,
+            targetShip: uuid => void simulationBridge?.setTarget(uuid),
+            navigateToPlanet: uuid => {
+                // Select the stellar (so the land handshake acts on THIS
+                // planet even if another was already picked, and the nav
+                // readout lights up immediately), then autopilot to it.
+                void simulationBridge?.setPlanetTarget(uuid);
+                autopilot?.navigateTo(uuid);
+            },
+        });
+    }
 
     async function pumpSimulationFrame() {
         if (simulationTickInFlight) {
@@ -1461,9 +1494,11 @@ async function startGame() {
         }
     }
 
-    app.ticker.add(() => {
+    const pumpTick = () => {
         void pumpSimulationFrame();
-    });
+    };
+    app.ticker.add(pumpTick);
+    sessionDisposers.push(() => app.ticker.remove(pumpTick));
 
     // A fully backgrounded (or occluded) window gets zero rAF, so the
     // ticker — and with it the frame pump — freezes: the peer stays in
@@ -1474,7 +1509,11 @@ async function startGame() {
     // covers occluded-but-not-hidden windows, and keeps the heartbeat
     // from stacking on healthy rAF (which would run the sim fast).
     let lastAnimationFrame = performance.now();
+    let heartbeatAlive = true;
     const animationFrameAlive = () => {
+        if (!heartbeatAlive) {
+            return;
+        }
         lastAnimationFrame = performance.now();
         requestAnimationFrame(animationFrameAlive);
     };
@@ -1483,10 +1522,79 @@ async function startGame() {
         ['setInterval(() => postMessage(0), 16)'],
         { type: 'text/javascript' })));
     pumpWorker.onmessage = () => {
+        if (!heartbeatAlive) {
+            return;
+        }
         if (document.hidden
             || performance.now() - lastAnimationFrame > 100) {
             app.ticker.update(performance.now());
         }
+    };
+    sessionDisposers.push(() => {
+        heartbeatAlive = false;
+        pumpWorker.terminate();
+    });
+
+    // The teardown returned to the title orchestrator: reverse everything
+    // this session set up, so the player can be dropped back on the title
+    // screen and re-enter cleanly (enter -> esc -> enter -> esc ...).
+    return async function teardownGame() {
+        // Persist first: a pure read of the display world, still intact.
+        try {
+            saveNow();
+        } catch (e) {
+            console.warn('Failed to save on exit to title:', e);
+        }
+        // Stop the pump, heartbeat and input listeners BEFORE closing the
+        // bridge, so no frame pumps against a dying worker and no stray
+        // keypress reaches a torn-down world.
+        for (const dispose of sessionDisposers) {
+            try {
+                dispose();
+            } catch (e) {
+                console.warn('Session teardown step failed:', e);
+            }
+        }
+        sessionDisposers = [];
+        // Remove the local player's ship from the sim so every other peer
+        // sees it disappear (the same removeEntity broadcast a jump uses),
+        // then tear down the system room + bridge + display world.
+        let playerUuid: string | undefined;
+        if (displayWorld) {
+            for (const [uuid, entity] of displayWorld.entities) {
+                if (entity.components.has(PlayerShipSelector)) {
+                    playerUuid = uuid;
+                    break;
+                }
+            }
+        }
+        await teardownActiveSystem(playerUuid);
+        // Leave the top-level lobby room too and drop the sim world.
+        multiRoom.leave('main room');
+
+        // Reset the session state so the next entry starts clean.
+        displayWorld = undefined;
+        simulationWorker = undefined;
+        simulationSerializer = undefined;
+        activeSystemId = undefined;
+        syncedPlayerJumpRoute = undefined;
+        pendingDockedShip = undefined;
+        dockedShip = undefined;
+        pendingLaunchedShip = undefined;
+        pendingGateShip = undefined;
+        gateDockedShip = undefined;
+        pendingGateLaunch = undefined;
+        pendingGateArrivalSpob = undefined;
+        simulationTickInFlight = false;
+        lastPumpTime = undefined;
+        lastPumpDone = undefined;
+        simulationTimeDebt = 0;
+        simulationPacing = undefined;
+        warnedUnsyncableEntities.clear();
+        autopilot?.cancel();
+        autopilot = undefined;
+        document.body.classList.remove('nova-docked');
+        window.onresize = null;
     };
 }
 
@@ -1544,41 +1652,111 @@ async function computeTitleStatus(): Promise<TitleStatus> {
 async function runTitle() {
     const title = new TitleScreen(displayAssetData);
     (window as any).novaTitle = title;
-    app.stage.addChild(title.container);
     await title.buildPromise;
-    title.resize(window.innerWidth, window.innerHeight);
-    window.addEventListener('resize', () =>
-        title.resize(window.innerWidth, window.innerHeight));
-    // Drive the title's flame animation until the game is entered.
+
+    // While the title (not a game world) is on screen, IT owns renderer
+    // sizing: without resizing the renderer here, a window widened after
+    // load keeps its construction-time canvas size, leaving a black bar
+    // on the wide side and shoving the re-centred art off-canvas. Resize
+    // the renderer first, then re-centre the 1024x768 art within it, so
+    // letterboxing stays symmetric at any aspect ratio.
+    const onResize = () => {
+        app.renderer.resize(window.innerWidth, window.innerHeight);
+        title.resize(window.innerWidth, window.innerHeight);
+    };
+    window.addEventListener('resize', onResize);
+
+    // Drive the title's flame animation while the title is visible.
     let lastTitleTick = performance.now();
     const titleTicker = () => {
         const now = performance.now();
         title.tick(now - lastTitleTick);
         lastTitleTick = now;
     };
-    app.ticker.add(titleTicker);
 
-    try {
-        title.setStatus(await computeTitleStatus());
-    } catch (e) {
-        console.warn('Failed to compute title status:', e);
-    }
+    const refreshStatus = async () => {
+        try {
+            title.setStatus(await computeTitleStatus());
+        } catch (e) {
+            console.warn('Failed to compute title status:', e);
+        }
+    };
 
     let entering = false;
+    let inGame = false;
+    let teardownGame: (() => Promise<void>) | undefined;
+
+    // Put the title back on screen (initial boot, and after leaving the
+    // game): re-add its container/ticker, re-size to the current window
+    // (the game may have resized the renderer), and refresh the status
+    // readout from the freshly saved game.
+    const showTitle = () => {
+        app.stage.addChild(title.container);
+        app.ticker.add(titleTicker);
+        lastTitleTick = performance.now();
+        onResize();
+        title.show();
+        void refreshStatus();
+    };
+
     const enterGame = async () => {
-        if (entering) {
+        if (entering || inGame) {
             return;
         }
         entering = true;
         title.hide();
         app.ticker.remove(titleTicker);
         app.stage.removeChild(title.container);
-        await startGame();
+        try {
+            teardownGame = await startGame();
+            inGame = true;
+        } catch (e) {
+            console.error('Failed to enter game:', e);
+            showTitle();
+        } finally {
+            entering = false;
+        }
     };
 
-    title.show();
+    // Escape while flying leaves the game and returns to the title: save,
+    // remove the player's ship for every peer, tear the game session down,
+    // and re-show the title. Re-entry (Enter Ship) then works again.
+    const exitToTitle = async () => {
+        if (!inGame || entering) {
+            return;
+        }
+        entering = true;
+        try {
+            await teardownGame?.();
+        } catch (e) {
+            console.error('Failed to exit to title:', e);
+        }
+        teardownGame = undefined;
+        inGame = false;
+        entering = false;
+        showTitle();
+    };
+
+    // Escape returns to the title, but ONLY while actually flying: a
+    // landed menu / dialog / text field owns (or reserves) Escape, so
+    // stand down whenever one is up. The spaceport sets `nova-docked`;
+    // starmap/gate map/player info/hail/boarding set MenuControls.focused;
+    // text inputs are caught by isTextEntryActive.
+    document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape' || !inGame || entering) {
+            return;
+        }
+        if (MenuControls.focused || isTextEntryActive()
+            || document.body.classList.contains('nova-docked')) {
+            return;
+        }
+        event.preventDefault();
+        void exitToTitle();
+    });
+
+    showTitle();
     title.action.subscribe(async (action) => {
-        if (entering) {
+        if (entering || inGame) {
             return;
         }
         switch (action) {
