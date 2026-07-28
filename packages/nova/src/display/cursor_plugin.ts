@@ -22,9 +22,10 @@ import { texturesFromFrames } from './textures_from_frames.js';
  * idle over empty space, ANIMATES through the frames while hovering over
  * something selectable (a ship or a planet — exactly what tap targeting
  * would pick), and FADES into the background once the mouse has sat still
- * for a while. Over UI dialogs (starmap, spaceport, hypergate map, player
- * info) and while docked, the sprite hides and the normal OS cursor comes
- * back.
+ * for a while. Over ANY visible modal dialog (starmap, spaceport, hypergate
+ * map, player info, mission info, the hail comm dialog, the boarding/plunder
+ * and capture-assignment dialogs) and while docked, the sprite hides and the
+ * normal OS cursor comes back.
  *
  * Purely display-side and player-local: it never touches simulation state.
  */
@@ -37,10 +38,41 @@ const FADE_DELAY_MS = 2500;
 /** ...and how long the fade to invisible takes from there. */
 const FADE_MS = 1000;
 
-/** Stage containers that count as "a dialog is open" while in flight (each
- * is a direct Stage child that keeps its container when hidden). */
+/** Full-screen menu containers that count as "a dialog is open" while in
+ * flight (each is a direct Stage child that keeps its container when hidden).
+ * These fill the frame rather than carrying a modal shield, so they're matched
+ * by name; every OTHER modal is detected generically via its shield (see
+ * hasModalShield). */
 const MENU_CONTAINER_NAMES = new Set(
     ['Spaceport', 'StarMap', 'GateMap', 'PlayerInfo']);
+
+/** Minimum local-bounds extent (px) that marks a container's child as a
+ * full-screen modal shield. Every in-flight dialog (hail, plunder, capture
+ * assignment, mission info, ship info, player info) lays a giant interactive
+ * Graphics (8000x8000) behind its content to swallow clicks; nothing else on
+ * the stage is remotely this large, so a child at/above this size uniquely
+ * identifies "a modal overlay is open". */
+const MODAL_SHIELD_MIN_EXTENT = 6000;
+
+/** Whether a visible stage child is a modal dialog: it carries a screen-
+ * covering interactive shield. Detecting the shield rather than enumerating
+ * dialog names keeps the rule general — any current or future shielded dialog
+ * reverts the OS cursor without being listed here. */
+function hasModalShield(container: PIXI.DisplayObject): boolean {
+    if (!(container instanceof PIXI.Container)) {
+        return false;
+    }
+    for (const child of container.children) {
+        if (child instanceof PIXI.Graphics) {
+            const bounds = child.getLocalBounds();
+            if (bounds.width >= MODAL_SHIELD_MIN_EXTENT
+                && bounds.height >= MODAL_SHIELD_MIN_EXTENT) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
 
 export class GameCursor {
     readonly container = new PIXI.Container();
@@ -98,7 +130,8 @@ function menuOpen(stage: PIXI.Container): boolean {
         return true;
     }
     return stage.children.some(child => child.visible
-        && child.name !== null && MENU_CONTAINER_NAMES.has(child.name));
+        && ((child.name !== null && MENU_CONTAINER_NAMES.has(child.name))
+            || hasModalShield(child)));
 }
 
 /** Entities the cursor considers hover-selectable: everything tap targeting

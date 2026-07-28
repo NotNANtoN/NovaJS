@@ -32,7 +32,7 @@ import { SimulationTimeResource } from "./display/simulation_time.js";
 import { PixiAppResource } from "./display/pixi_app_resource.js";
 import { ResizeEvent } from "./display/screen_size_plugin.js";
 import { SetJumpRouteEvent } from "./display/starmap_plugin.js";
-import { HailEscortCommandEvent, HailRequestEvent } from "./display/hail_dialog_plugin.js";
+import { HailRequestEvent } from "./display/hail_dialog_plugin.js";
 import { LeaveSpaceportEvent, OpenSpaceportEvent } from "./display/spaceport_plugin.js";
 import { Stage } from "./display/stage_resource.js";
 import { AddEnemyEvent, DebugActionEvent } from "./display/status_bar.js";
@@ -723,14 +723,11 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
         void newSimulationBridge.setPlayerJumpRoute(data.route);
     });
     // Hail dialog actions become deterministic input records: assist/bribe go
-    // through bridge.hail; escort orders reuse the escort-command control
-    // path (bridge.controlEvents), exactly as the keyboard escort keys do.
+    // through bridge.hail. (The escort comm dialog is management-only and
+    // issues no simulation effect — commanding escorts is the keyboard
+    // escort-controls' job.)
     newDisplayWorld.events.get(HailRequestEvent).subscribe(({ data }) => {
         void newSimulationBridge.hail(data.action);
-    });
-    newDisplayWorld.events.get(HailEscortCommandEvent).subscribe(({ data }) => {
-        void newSimulationBridge.controlEvents(
-            [{ action: data.command, state: 'start' }]);
     });
     newDisplayWorld.events.get(LandEvent).subscribe(({ data, entities }) => {
         if (pendingDockedShip || dockedShip || pendingGateShip || gateDockedShip) {

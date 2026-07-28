@@ -27,10 +27,21 @@ import { Angle } from 'nova_ecs/datatypes/vector';
  *  - Booty flags are not modeled per-dude yet. A boarded ship instead
  *    yields the cargo it is actually carrying (its CargoComponent, up to
  *    the boarder's free hold), a money booty derived from its purchase
- *    price (CREDIT_BOOTY_FRACTION), and its remaining fuel. This reuses
- *    the live cargo/fuel/price data every ship already has; wiring the
+ *    price (CREDIT_BOOTY_FRACTION), its remaining fuel (the plunder
+ *    dialog's "Energy"), and its AMMUNITION. This reuses the live
+ *    cargo/fuel/price/outfit data every ship already has; wiring the
  *    dude Booty-flag table (and the "repelled, nothing to take" case) is
  *    a documented follow-up.
+ *  - AMMO (planAmmoPlunder): the Bible has no explicit "ammo" Booty flag
+ *    — the plunder dialog's Ammo action lets the boarder restock the
+ *    disabled ship's ammunition for weapons the boarder ALSO mounts.
+ *    NovaJS rule: for each ammo outfit the victim carries (an outfit with
+ *    a non-null ammoFor) whose weapon the boarder currently mounts (a
+ *    launcher, WeaponsState count > 0), move rounds of that SAME outfit
+ *    into the boarder's stock, up to the boarder's remaining capacity for
+ *    that weapon (weapon MaxAmmo x launcher count, or the ammo outfit's
+ *    Max when MaxAmmo is 0). Deterministic: victim outfit ids visited in
+ *    sorted order, capacity shared across outfits feeding one weapon.
  *  - Capture odds use a crew-ratio formula (captureChance) with no
  *    marines term, because ModType 25 is not parsed yet. The marines
  *    additive is a documented seam in captureChance's caller.
@@ -63,9 +74,14 @@ export const BoardingState = t.type({
      * purchase price (the victim is a live entity that could be
      * destroyed mid-session, so the amount must not be re-derived). */
     creditsAvailable: t.number,
+    /** Compatible ammo rounds the boarder could take, frozen at board time
+     * (the boarder's launchers and the victim's ammo don't change mid-
+     * session): the sum of planAmmoPlunder. 0 hides/greys the Ammo action. */
+    ammoAvailable: t.number,
     cargoTaken: t.boolean,
     creditsTaken: t.boolean,
     fuelTaken: t.boolean,
+    ammoTaken: t.boolean,
     /**
      * Capture-attempt state, driving the capture-assignment dialog:
      *  'none'      no attempt yet (or the last attempt was repelled and
@@ -224,4 +240,64 @@ export function planCargoPlunder(
 export function fuelTransferAmount(victimFuel: number, boarderFuel: number,
     boarderFuelMax: number): number {
     return Math.max(0, Math.min(victimFuel, boarderFuelMax - boarderFuel));
+}
+
+/**
+ * What the boarder needs to know about one of the victim's ammo outfits to
+ * decide the plunder: the weapon it supplies and the boarder's total capacity
+ * for that weapon's ammo. The sim resolves this from game data (an outfit's
+ * ammoFor, the weapon's MaxAmmo, the outfit's Max, and how many launchers the
+ * boarder mounts); it is `undefined` when the outfit is not ammo the boarder
+ * can use (not an ammo outfit, or the boarder mounts no matching launcher).
+ */
+export interface AmmoOutfitInfo {
+    /** Weapon global id this outfit supplies ammo for (OutfitData.ammoFor). */
+    ammoFor: string;
+    /** Total rounds the boarder can hold for that weapon (MaxAmmo x launcher
+     * count, or the ammo outfit's Max when MaxAmmo is 0); Infinity if
+     * uncapped. */
+    capacity: number;
+}
+
+/**
+ * Plans an ammo plunder: for each ammo outfit the victim carries whose weapon
+ * the boarder also mounts, how many rounds move into the boarder's stock,
+ * capped by the boarder's remaining capacity for that weapon. Deterministic:
+ * victim outfit ids are visited in sorted order, and capacity is SHARED across
+ * outfits that feed the same weapon (two ammo outfits for one launcher can't
+ * each fill it). Returns [outfitId, rounds] entries with rounds > 0.
+ *
+ * `boarderRoundsByWeapon` is the boarder's current rounds keyed by weapon id;
+ * `info(outfitId)` resolves the weapon + capacity (see AmmoOutfitInfo),
+ * returning undefined to skip an outfit.
+ */
+export function planAmmoPlunder(
+    victimOutfits: ReadonlyMap<string, number>,
+    boarderRoundsByWeapon: ReadonlyMap<string, number>,
+    info: (outfitId: string) => AmmoOutfitInfo | undefined,
+): [string, number][] {
+    const plan: [string, number][] = [];
+    // Rounds already committed this plan, per weapon, so shared capacity is
+    // respected across multiple ammo outfits feeding the same launcher.
+    const committed = new Map<string, number>();
+    for (const outfitId of [...victimOutfits.keys()].sort()) {
+        const available = Math.max(0, Math.floor(victimOutfits.get(outfitId) ?? 0));
+        if (available <= 0) {
+            continue;
+        }
+        const meta = info(outfitId);
+        if (!meta) {
+            continue;
+        }
+        const already = (boarderRoundsByWeapon.get(meta.ammoFor) ?? 0)
+            + (committed.get(meta.ammoFor) ?? 0);
+        const room = Math.max(0, meta.capacity - already);
+        const take = Math.min(available, room);
+        if (take > 0) {
+            plan.push([outfitId, take]);
+            committed.set(meta.ammoFor,
+                (committed.get(meta.ammoFor) ?? 0) + take);
+        }
+    }
+    return plan;
 }

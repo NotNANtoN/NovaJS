@@ -115,6 +115,19 @@ export interface GovtData extends BaseData {
      * independent news background.
      */
     newsPic: string | null;
+
+    /**
+     * The generic comms-dialog greetings shown when a non-përs ship of this
+     * government is hailed and answers with a greeting. Resolved at parse time
+     * from the government's greeting STR# (id 7000 + (govtId - 128), one
+     * resource of up to ten alternative lines per government; EVN Bible
+     * Appendix III maps the 'STR ' patch range 10000+ onto these). Empty when
+     * the government has no greeting resource (many mission-only governments
+     * don't); the caller then falls back to a synthetic line. A ship picks one
+     * line deterministically (a hash of stable ids) so every peer and every
+     * re-hail of the same ship shows the same greeting.
+     */
+    commGreetings: string[];
 }
 
 /** gövt Flags1, decoded to named booleans. */
@@ -227,5 +240,6 @@ export function getDefaultGovtData(): GovtData {
         require: "0",
         voiceType: -1,
         newsPic: null,
+        commGreetings: [],
     };
 }

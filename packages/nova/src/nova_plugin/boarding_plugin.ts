@@ -13,11 +13,15 @@ import { SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
 import { System } from 'nova_ecs/system';
 import { registerSimulationBridgeEvent } from '../communication/simulation_bridge_events.js';
 import {
-    axesAligned, BoardBlockReason, BoardedComponent, BoardedState,
-    boardingBlockedReason, BoardingComponent, BoardingState, captureChance,
-    creditBooty, fuelTransferAmount, planCargoPlunder,
+    AmmoOutfitInfo, axesAligned, BoardBlockReason, BoardedComponent,
+    BoardedState, boardingBlockedReason, BoardingComponent, BoardingState,
+    captureChance, creditBooty, fuelTransferAmount, planAmmoPlunder,
+    planCargoPlunder,
 } from './boarding_component.js';
 import { CargoComponent, cargoUsed } from './cargo_plugin.js';
+import { OutfitsState, OutfitsStateComponent } from './outfit_plugin.js';
+import { WeaponsState, WeaponsStateComponent } from './weapons_state.js';
+import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { DisabledComponent, isBelowDisableThreshold, repairedArmor } from './disabled_component.js';
 import { EscortCommandComponent } from './escort_command.js';
 import { FiringGroupComponent } from './firing_group.js';
@@ -31,7 +35,12 @@ import { applyCrime } from './reputation.js';
 import { GovtsResource, LegalRecordsComponent } from './reputation_plugin.js';
 import { ShipControlEvent, ShipControlStateComponent } from './ship_control.js';
 import { ShipDataComponent, ShipPhysicsComponent } from './ship_plugin.js';
+import { PlayerSoundEvent } from './sound_plugin.js';
 import { TargetComponent } from './target_component.js';
+
+/** Interface beep when a plunder session opens (snd nova:390), heard only
+ * by the boarding player (emitted targeted at the boarder). */
+const BOARD_SOUND = 'nova:390';
 
 /**
  * Player-initiated boarding and plundering of disabled ships. See
@@ -71,6 +80,49 @@ export const BoardingBlockedEventType = t.type({
 registerSimulationBridgeEvent({ event: BoardingBlockedEvent });
 
 /**
+ * Builds the planAmmoPlunder inputs from live entities + game data: the
+ * victim's outfit counts, the boarder's ammo rounds keyed by weapon, and the
+ * ammo-outfit resolver (weapon + capacity, gated on the boarder mounting a
+ * launcher for that weapon). Shared by the gate (to freeze ammoAvailable) and
+ * the plunder action (to move the rounds), so both agree on what is takeable.
+ */
+function ammoPlunderInputs(boarderOutfits: OutfitsState | undefined,
+    boarderWeapons: WeaponsState | undefined,
+    victimOutfits: OutfitsState | undefined,
+    gameData: SimulationGameDataInterface) {
+    const victim = new Map<string, number>();
+    for (const [id, state] of victimOutfits ?? []) {
+        victim.set(id, state.count);
+    }
+    const boarderRoundsByWeapon = new Map<string, number>();
+    for (const [id, state] of boarderOutfits ?? []) {
+        const weaponId = gameData.data.Outfit.getCached(id)?.ammoFor;
+        if (weaponId) {
+            boarderRoundsByWeapon.set(weaponId,
+                (boarderRoundsByWeapon.get(weaponId) ?? 0) + state.count);
+        }
+    }
+    const info = (outfitId: string): AmmoOutfitInfo | undefined => {
+        const outfit = gameData.data.Outfit.getCached(outfitId);
+        const weaponId = outfit?.ammoFor;
+        if (!weaponId) {
+            return undefined;
+        }
+        // The boarder must mount a launcher for this weapon to hold its ammo.
+        const launcher = boarderWeapons?.get(weaponId);
+        if (!launcher || launcher.count <= 0) {
+            return undefined;
+        }
+        const weapon = gameData.data.Weapon.getCached(weaponId);
+        const capacity = weapon && weapon.maxAmmo > 0
+            ? weapon.maxAmmo * launcher.count
+            : (outfit.max > 0 ? outfit.max : Infinity);
+        return { ammoFor: weaponId, capacity };
+    };
+    return { victim, boarderRoundsByWeapon, info };
+}
+
+/**
  * The 'board' key. With a disabled ship selected and the boarder pulled
  * alongside (close, matched speed, axis-aligned), opens a plunder
  * session; otherwise reports why on the status line. A session already
@@ -81,9 +133,10 @@ const BoardingGateSystem = new System({
     events: [ShipControlEvent] as const,
     args: [ShipControlStateComponent, MovementStateComponent,
         ShipDataComponent, TargetComponent, Optional(BoardingComponent),
-        GetEntity, UUID, Entities, Emit] as const,
-    step(controls, movement, _shipData, target, boarding, entity, uuid,
-        entities, emit) {
+        Optional(OutfitsStateComponent), Optional(WeaponsStateComponent),
+        GetEntity, UUID, Entities, SimulationGameDataResource, Emit] as const,
+    step(controls, movement, _shipData, target, boarding, boarderOutfits,
+        boarderWeapons, entity, uuid, entities, gameData, emit) {
         if (controls.get('board') !== 'start') {
             return;
         }
@@ -130,16 +183,28 @@ const BoardingGateSystem = new System({
             return;
         }
 
+        // Freeze the compatible ammo the boarder could take (same inputs the
+        // plunderAmmo action uses), so the dialog can show/grey Ammo.
+        const { victim, boarderRoundsByWeapon, info } = ammoPlunderInputs(
+            boarderOutfits, boarderWeapons,
+            targetEntity!.components.get(OutfitsStateComponent), gameData);
+        const ammoAvailable = planAmmoPlunder(victim, boarderRoundsByWeapon, info)
+            .reduce((sum, [, rounds]) => sum + rounds, 0);
+
         entity.components.set(BoardingComponent, {
             target: targetUuid!,
             creditsAvailable: creditBooty(targetShipData!.price),
+            ammoAvailable,
             cargoTaken: false,
             creditsTaken: false,
             fuelTaken: false,
+            ammoTaken: false,
             capture: 'none',
             crimeApplied: false,
         });
         targetEntity!.components.set(BoardedComponent, { boarder: uuid });
+        // Local boarding beep for the boarding player only.
+        emit(PlayerSoundEvent, { id: BOARD_SOUND }, [uuid]);
     },
 });
 
@@ -202,11 +267,13 @@ const BoardingActionSystem = new System({
     events: [ShipControlEvent] as const,
     args: [ShipControlStateComponent, BoardingComponent, ShipDataComponent,
         CargoComponent, ShipPhysicsComponent, CreditsComponent, FuelComponent,
-        Optional(LegalRecordsComponent), GetEntity, UUID, Entities,
+        Optional(LegalRecordsComponent), Optional(OutfitsStateComponent),
+        Optional(WeaponsStateComponent), GetEntity, UUID, Entities,
         RandomResource, Optional(GovtsResource), SimulationGameDataResource,
         Emit] as const,
     step(controls, boarding, shipData, cargo, physics, credits, fuel, records,
-        entity, uuid, entities, random, govts, gameData) {
+        boarderOutfits, boarderWeapons, entity, uuid, entities, random, govts,
+        gameData) {
         const target = entities.get(boarding.target);
 
         // Charges the BoardPenalty crime once per session, the first
@@ -282,6 +349,35 @@ const BoardingActionSystem = new System({
                     targetFuel.current, fuel.current, fuel.max);
                 fuel.current += moved;
                 targetFuel.current -= moved;
+            }
+            chargeCrime();
+        }
+
+        if (controls.get('plunderAmmo') === 'start' && !boarding.ammoTaken) {
+            boarding.ammoTaken = true;
+            const targetOutfits = target.components.get(OutfitsStateComponent);
+            if (boarderOutfits && targetOutfits) {
+                const { victim, boarderRoundsByWeapon, info } = ammoPlunderInputs(
+                    boarderOutfits, boarderWeapons, targetOutfits, gameData);
+                for (const [outfitId, rounds] of
+                    planAmmoPlunder(victim, boarderRoundsByWeapon, info)) {
+                    // Move rounds of the SAME ammo outfit: remove from the
+                    // victim, add to the boarder's stock (in-place count
+                    // edits, like weapon_plugin's consumeAmmo).
+                    const victimState = targetOutfits.get(outfitId);
+                    if (victimState) {
+                        victimState.count -= rounds;
+                        if (victimState.count <= 0) {
+                            targetOutfits.delete(outfitId);
+                        }
+                    }
+                    const boarderState = boarderOutfits.get(outfitId);
+                    if (boarderState) {
+                        boarderState.count += rounds;
+                    } else {
+                        boarderOutfits.set(outfitId, { count: rounds });
+                    }
+                }
             }
             chargeCrime();
         }

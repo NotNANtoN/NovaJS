@@ -31,10 +31,15 @@ import { LegalRecords } from './reputation.js';
  *    repair or refuel the player for free" (allied-repair): not applied here
  *    because per-player rank state is not yet modelled — a documented seam
  *    (see assistIsFree).
- *  - shïp/pers CommQuote (STR# 7100) is the comms-dialog greeting; a pers
- *    ship's is resolved into PersData.commQuote. Generic govt greetings
- *    (dude InfoTypes 0x8000 → STR# resources) are not parsed, so a synthetic
- *    govt-appropriate line stands in (greetingText) — a documented gap.
+ *  - përs CommQuote (STR# 7100) is the comms-dialog greeting for a named
+ *    person; resolved into PersData.commQuote and taking precedence.
+ *  - Generic (non-përs) ships greet with a random line from their
+ *    government's greeting STR# (id 7000 + (govtId - 128), ten lines each;
+ *    EVN Bible Appendix III), resolved at parse time into
+ *    GovtData.commGreetings. greetingText picks one DETERMINISTICALLY (a hash
+ *    of the encounter's stable id, never Math.random) so the client-side
+ *    dialog agrees across peers and re-hails. A government with no greeting
+ *    resource falls back to a synthetic govt-appropriate line.
  */
 
 /** Which of the two AI-type bribe flags applies to a ship of this aiType. */
@@ -154,22 +159,47 @@ export function planetTakesBribes(govt: GovtData | undefined): boolean {
 }
 
 /**
- * The greeting line shown in the comms dialog. A pers ship's resolved
- * CommQuote (STR# 7100) wins when present; otherwise a synthetic
- * govt-appropriate line stands in for the unparsed generic govt greetings
- * (dude InfoTypes 0x8000). Returns '' when the govt is not talkative
- * (noDistressMessages / noAssistOrMercy) — the caller shows "no response".
+ * A stable 32-bit hash of a string (FNV-1a). Used to pick a government
+ * greeting deterministically from a ship's uuid, so the client-side dialog
+ * chooses the same line on every peer and every re-hail (never Math.random).
+ */
+export function hashString(value: string): number {
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < value.length; i++) {
+        hash ^= value.charCodeAt(i);
+        // 32-bit FNV prime multiply, kept in the unsigned 32-bit range.
+        hash = Math.imul(hash, 0x01000193) >>> 0;
+    }
+    return hash >>> 0;
+}
+
+/**
+ * The greeting line shown in the comms dialog. Precedence: a përs ship's
+ * resolved CommQuote (STR# 7100) wins; then a real line from the government's
+ * greeting STR# (GovtData.commGreetings), chosen deterministically by `seed`
+ * (a hash of the ship's uuid) so every peer agrees; then, only when the govt
+ * has no greeting resource, a synthetic govt-appropriate line. Returns '' when
+ * the govt is not talkative (noDistressMessages / noAssistOrMercy) — the caller
+ * shows "no response".
  */
 export function greetingText(opts: {
     persCommQuote?: string,
+    govtGreetings?: readonly string[],
     govtCommName?: string,
     talkative: boolean,
+    seed?: number,
 }): string {
     if (!opts.talkative) {
         return '';
     }
     if (opts.persCommQuote && opts.persCommQuote.trim() !== '') {
         return opts.persCommQuote;
+    }
+    const greetings = (opts.govtGreetings ?? [])
+        .filter(line => line.trim() !== '');
+    if (greetings.length > 0) {
+        const index = (opts.seed ?? 0) % greetings.length;
+        return greetings[index];
     }
     const who = opts.govtCommName && opts.govtCommName.trim() !== ''
         ? opts.govtCommName

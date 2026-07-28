@@ -48,6 +48,7 @@ const SavedControlsPartialObject = t.partial({
     'plunderCargo': ControlInputs,
     'plunderCredits': ControlInputs,
     'plunderFuel': ControlInputs,
+    'plunderAmmo': ControlInputs,
     'plunderCapture': ControlInputs,
     'plunderCaptureEscort': ControlInputs,
     'plunderDone': ControlInputs,
