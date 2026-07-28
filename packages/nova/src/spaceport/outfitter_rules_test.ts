@@ -16,6 +16,7 @@ import {
     outfitResaleValue,
     OutfitterContext,
     playerContribute,
+    sellRefund,
 } from './outfitter_rules.js';
 
 function makeShip(physics: Partial<ShipData['physics']> = {},
@@ -330,15 +331,48 @@ describe('canBuyOutfit', () => {
 });
 
 describe('outfitResaleValue', () => {
-    it('is 25% of the outfit price', () => {
-        expect(OUTFIT_RESALE_FRACTION).toBe(0.25);
+    it('is 50% of the outfit price (Matthew\'s rule)', () => {
+        expect(OUTFIT_RESALE_FRACTION).toBe(0.5);
         expect(outfitResaleValue(makeOutfit('nova:200', { price: 5000 })))
-            .toBe(1250);
+            .toBe(2500);
     });
 
-    it('floors fractional quarters', () => {
-        expect(outfitResaleValue(makeOutfit('nova:200', { price: 4002 })))
-            .toBe(1000); // 1000.5 floored.
+    it('floors fractional halves', () => {
+        expect(outfitResaleValue(makeOutfit('nova:200', { price: 4001 })))
+            .toBe(2000); // 2000.5 floored.
+    });
+});
+
+describe('sellRefund (same-visit full refund)', () => {
+    const outfit = makeOutfit('nova:200', { price: 5000 });
+
+    it('refunds the full price for a unit bought this visit', () => {
+        expect(sellRefund(outfit, 1))
+            .toEqual({ credited: 5000, boughtThisVisit: 0 });
+    });
+
+    it('falls back to the 50% resale for a pre-owned unit', () => {
+        expect(sellRefund(outfit, 0))
+            .toEqual({ credited: 2500, boughtThisVisit: 0 });
+    });
+
+    it('drains same-visit purchases first, then pre-owned (bulk split)', () => {
+        // Bought 3 this visit, selling 5: 3 full refunds then 2 at 50%.
+        let boughtThisVisit = 3;
+        const credited: number[] = [];
+        for (let i = 0; i < 5; i++) {
+            const refund = sellRefund(outfit, boughtThisVisit);
+            credited.push(refund.credited);
+            boughtThisVisit = refund.boughtThisVisit;
+        }
+        expect(credited).toEqual([5000, 5000, 5000, 2500, 2500]);
+        expect(boughtThisVisit).toBe(0);
+    });
+
+    it('treats a reset visit (count 0) as entirely pre-owned', () => {
+        // After the outfitter closes, visitPurchases resets to 0, so a
+        // later re-entry sells everything at the 50% resale value.
+        expect(sellRefund(outfit, 0).credited).toBe(2500);
     });
 });
 

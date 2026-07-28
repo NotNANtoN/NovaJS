@@ -109,6 +109,27 @@ describe('MenuControls focus stack', () => {
         expect(calls).toEqual(['a:up', 'a:up', 'a:buy']);
     });
 
+    it('repeats an action a surface opts into (outfitter buy/sell)', () => {
+        const calls: string[] = [];
+        const controls = makeControls(calls, 'a', ['buy', 'up']);
+        // The outfitter opts buy (and sell) into key-repeat.
+        controls.repeatableActions.add('buy');
+        controls.bind();
+        press('buy', 'start');
+        press('buy', 'repeat'); // Now honored: held 'b' buys again.
+        press('up', 'repeat');
+        expect(calls).toEqual(['a:buy', 'a:buy', 'a:up']);
+    });
+
+    it('scopes opted-in repeats to the surface that added them', () => {
+        const calls: string[] = [];
+        const outfitter = makeControls(calls, 'outfitter', ['buy']);
+        outfitter.repeatableActions.add('buy');
+        const other = makeControls(calls, 'other', ['buy']);
+        // A different surface never gained buy-repeat.
+        expect(other.repeatableActions.has('buy')).toBe(false);
+    });
+
     it('reports no focus once everything is unbound', () => {
         const controls = makeControls([], 'a', ['buy']);
         controls.bind();

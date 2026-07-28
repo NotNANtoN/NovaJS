@@ -22,7 +22,7 @@ import { ItemGrid, ItemTile } from "./item_grid.js";
 import { Menu } from "./menu.js";
 import { MissionSession } from "./mission_session.js";
 import { MissionUniverse } from "./mission_universe.js";
-import { BuyDenialReason, canBuyOutfit, canSellOutfit, freeCargo, freeMass, maxBuyCount, maxSellCount, outfitResaleValue, OutfitterContext } from "./outfitter_rules.js";
+import { BuyDenialReason, canBuyOutfit, canSellOutfit, freeCargo, freeMass, maxBuyCount, maxSellCount, sellRefund, OutfitterContext } from "./outfitter_rules.js";
 import { QuantityDialog } from "./quantity_dialog.js";
 
 
@@ -97,11 +97,21 @@ export class Outfitter extends Menu<Entity> {
     private pictContainer = new PIXI.Container();
     /** Working copies, committed to the ship entity on done. */
     private outfits: DefaultMap<string, number>;
+    /**
+     * How many units of each outfit id were BOUGHT during the current
+     * outfitter visit (per outfit id). Selling drains these first at a
+     * full refund (you get back exactly what you just paid); once the
+     * same-visit purchases are used up, further sells fall back to the
+     * 50% pre-owned resale value. Reset to empty on every show() — each
+     * visit starts with a clean slate (see setInput).
+     */
+    private visitPurchases = new DefaultMap<string, number>(() => 0);
     private controlBits: ControlBits = new Set();
     private records: LegalRecords = new Map();
     /**
-     * The player's working credit balance. Buys deduct the outfit price
-     * and sells credit 25% of it (see outfitResaleValue). In the mission
+     * The player's working credit balance. Buys deduct the outfit price;
+     * sells refund the full price for a unit bought this same visit, else
+     * 50% of it (see applySell / outfitResaleValue). In the mission
      * session path this is the SAME object as the session's working
      * credits, so session.commit() persists it (and a mission set string
      * that pays out is reflected here); in the fallback path done()
@@ -254,6 +264,12 @@ export class Outfitter extends Menu<Entity> {
             sell: this.sellOutfit.bind(this),
             depart: this.done.bind(this),
         };
+        // OS key-repeat should repeat buys/sells (each re-checked by the
+        // handler, so denials still apply). Scoped to this menu's
+        // controls so global actions (jump, land, fire) keep firing once
+        // per press. Nav keys already repeat via the default set.
+        this.controls.repeatableActions.add('buy');
+        this.controls.repeatableActions.add('sell');
     }
 
     /**
@@ -376,6 +392,9 @@ export class Outfitter extends Menu<Entity> {
         // includes affordability), so this never drives credits negative.
         this.credits.credits -= outfit.price;
         this.outfits.set(outfit.id, this.outfits.get(outfit.id) + 1);
+        // Record the same-visit purchase so selling it back before
+        // leaving refunds the full price (see applySell).
+        this.visitPurchases.set(outfit.id, this.visitPurchases.get(outfit.id) + 1);
         // ModType 21: buying the outfit cleans (raises to at least 0)
         // the player's legal record with the ModVal govt, or with every
         // govt when ModVal is -1. Applies once, at purchase.
@@ -392,9 +411,18 @@ export class Outfitter extends Menu<Entity> {
         this.runSetString(outfit.onPurchase, idPrefix(outfit.id));
     }
 
-    /** Applies one unit's sale: credit 25% of price, count, and OnSell. */
+    /**
+     * Applies one unit's sale, count, and OnSell. A unit bought earlier
+     * this same visit is refunded in full (100% of the price paid);
+     * otherwise the player recovers the 50% pre-owned resale value.
+     * Same-visit purchases drain first, so a bulk sell that spans both
+     * (e.g. 3 bought this visit + 2 pre-owned) splits automatically as
+     * the per-unit loop calls this repeatedly.
+     */
     private applySell(outfit: OutfitData) {
-        this.credits.credits += outfitResaleValue(outfit);
+        const refund = sellRefund(outfit, this.visitPurchases.get(outfit.id));
+        this.credits.credits += refund.credited;
+        this.visitPurchases.set(outfit.id, refund.boughtThisVisit);
         this.outfits.set(outfit.id, Math.max(0, this.outfits.get(outfit.id) - 1));
         if (this.outfits.get(outfit.id) === 0) {
             this.outfits.delete(outfit.id);
@@ -652,6 +680,9 @@ export class Outfitter extends Menu<Entity> {
 
     protected override setInput(input: Entity) {
         super.setInput(input);
+        // A fresh visit: clear same-visit purchase tracking so no prior
+        // visit's purchases still qualify for the full refund.
+        this.visitPurchases.clear();
         // Share the mission session's working copies so purchases and
         // mission set strings mutate the same bits/outfits/records.
         if (this.missionSession) {

@@ -47,19 +47,19 @@ describe('outfitter credits against real Nova data', () => {
             .toEqual({ count: 1 });
     });
 
-    it('credits 25% of the price on sell', async () => {
+    it('credits 50% of the price on sell', async () => {
         const { gameData, entity, session } = await dockedPilot(0);
         const outfitId = (await gameData.ids).Outfit[0];
         const outfit = await gameData.data.Outfit.get(outfitId);
         session.outfits.set(outfitId, 1);
 
-        // applySell: credit the resale value, drop the unit.
+        // applySell for a pre-owned unit: credit the resale value, drop it.
         session.state.credits.credits += outfitResaleValue(outfit);
         session.outfits.delete(outfitId);
         session.commit();
 
         expect(entity.components.get(CreditsComponent)!.credits)
-            .toBe(Math.floor(outfit.price * 0.25));
+            .toBe(Math.floor(outfit.price * 0.5));
         expect(entity.components.get(OutfitsStateComponent)!.has(outfitId))
             .toBe(false);
     });
