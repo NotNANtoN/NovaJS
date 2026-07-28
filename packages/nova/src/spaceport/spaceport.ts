@@ -284,6 +284,20 @@ export class Spaceport extends Menu<Entity> {
     }
 
     /**
+     * True while the player is on the spaceport's own main screen — i.e.
+     * docked here AND no venue (outfitter/shipyard/trade/bar/BBS) or overlay
+     * (starmap/player-info/mission-info/landing popup) is on top. Each venue
+     * unbinds the spaceport's controls and binds its own on top of the
+     * MenuControls focus stack (and overlays do the same), so the spaceport's
+     * controls are only the focused ones on the bare main screen. Used by the
+     * display's spaceport-ambient-sound system to play the ambient only on the
+     * main screen and pause it inside a venue.
+     */
+    get onMainScreen(): boolean {
+        return this.container.visible && MenuControls.focused === this.controls;
+    }
+
+    /**
      * The orange active-mission map marks for the docked ship (the
      * entity is out of the display world while docked, so the starmap
      * plugin can't derive these itself).

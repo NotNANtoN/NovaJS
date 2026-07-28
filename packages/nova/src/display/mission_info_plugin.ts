@@ -11,6 +11,7 @@ import { MissionInfoDialog } from '../spaceport/mission_info.js';
 import { MissionUniverse } from '../spaceport/mission_universe.js';
 import { ScreenSize } from './screen_size_plugin.js';
 import { Stage } from './stage_resource.js';
+import { BEEP_MISSION_CLOSE, BEEP_MISSION_OPEN, playUiSound } from './ui_sound.js';
 
 const MissionInfoResource = new Resource<MissionInfoDialog>('MissionInfo');
 const MissionInfoControlsSubscription =
@@ -86,10 +87,13 @@ export const MissionInfoPlugin: Plugin = {
                 stage.addChild(dialog.container);
                 dialog.container.position.set(
                     screenSize.x / 2, screenSize.y / 2);
+                playUiSound(world, { id: BEEP_MISSION_OPEN });
                 await dialog.show(ship, planetId
                     ? { gameData: simulationData, planetId } : undefined);
             } finally {
                 opening = false;
+                // dialog.show resolves when the dialog closes.
+                playUiSound(world, { id: BEEP_MISSION_CLOSE });
             }
         };
         world.resources.set(OpenMissionInfoResource, openMissionInfo);

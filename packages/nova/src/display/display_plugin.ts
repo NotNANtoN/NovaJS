@@ -33,6 +33,7 @@ import { StarmapPlugin } from "./starmap_plugin.js";
 import { StatusBarResource, StatusBarPlugin } from "./status_bar.js";
 import { StatusMessagePlugin } from "./status_message_plugin.js";
 import { TargetCornersPlugin } from "./target_corners_plugin.js";
+import { UiSoundTriggersPlugin } from "./ui_sound_triggers_plugin.js";
 
 
 const CenterShipSystem = new System({
@@ -99,6 +100,9 @@ export const Display: Plugin = {
         await world.addPlugin(GateAnimationPlugin);
         await world.addPlugin(SoundPlugin);
         await world.addPlugin(CloakSoundPlugin);
+        // After SoundPlugin so UiSoundSystem is present to play what these
+        // triggers emit.
+        await world.addPlugin(UiSoundTriggersPlugin);
         await world.addPlugin(ShipAnimationPlugin);
         await world.addPlugin(JumpFadePlugin);
         // Last, so the cursor's container sits on top of the whole view.
@@ -108,6 +112,7 @@ export const Display: Plugin = {
         await world.removePlugin(CursorPlugin);
         await world.removePlugin(JumpFadePlugin);
         await world.removePlugin(ShipAnimationPlugin);
+        await world.removePlugin(UiSoundTriggersPlugin);
         await world.removePlugin(CloakSoundPlugin);
         await world.removePlugin(SoundPlugin);
         await world.removePlugin(SystemEnvironmentPlugin);
