@@ -6,7 +6,7 @@ import { Subscription } from 'rxjs';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { ControlsSubject } from '../nova_plugin/controls_plugin.js';
 import { DisabledComponent } from '../nova_plugin/disabled_component.js';
-import { OwnerComponent } from '../nova_plugin/fire_weapon_plugin.js';
+import { OwnerComponent, SourceComponent } from '../nova_plugin/fire_weapon_plugin.js';
 import { DisplayAssetDataResource, SimulationGameDataResource } from '../nova_plugin/game_data_resource.js';
 import { GovtComponent } from '../nova_plugin/govt_component.js';
 import {
@@ -23,6 +23,7 @@ import { SoundEvent } from '../nova_plugin/sound_plugin.js';
 import { FuelComponent } from '../nova_plugin/health_plugin.js';
 import { shipDisposition } from '../nova_plugin/iff_plugin.js';
 import { FormationComponent, NpcComponent } from '../nova_plugin/npc_ai_plugin.js';
+import { ShootAllWeaponsComponent } from '../nova_plugin/npc_plugin.js';
 import { PersComponent } from '../nova_plugin/pers_plugin.js';
 import { PlanetDataComponent, PlanetTargetComponent } from '../nova_plugin/planet_plugin.js';
 import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin.js';
@@ -90,7 +91,7 @@ function playerNeedsHelp(entity: ReturnType<typeof getPlayerShip>): boolean {
  * ship is targeted, the selected planet). Returns undefined when there is
  * nothing to hail. Async: loads govt / pers game data.
  */
-async function computeContext(world: World,
+export async function computeContext(world: World,
     gameData: SimulationGameDataInterface):
     Promise<{ context: HailContext, target: string, isEscort: boolean }
         | undefined> {
@@ -122,18 +123,52 @@ async function computeContext(world: World,
             : undefined;
         const aiType = shipTarget.components.get(NpcComponent)?.aiType;
         const disposition = shipDisposition(govt, playerGovt, playerRecords);
+        // Behavioral hostility: a ship whose AI is attacking the player is
+        // hostile regardless of politics — the same rule the target corners
+        // use (iff_plugin's targetCornerStyle), including the legacy dev-enemy
+        // ShootAllWeapons marker. Read from the same synced components the sim
+        // reads so the dialog and applyHail agree on the outcome.
+        const targetsPlayer = shipTarget.components
+            .get(TargetComponent)?.target === player.uuid;
+        const shipNpcMode = shipTarget.components.get(NpcComponent)?.mode;
+        const attackingPlayer = targetsPlayer && (shipNpcMode === 'attack'
+            || shipTarget.components.has(ShootAllWeaponsComponent));
 
         const shipData = shipTarget.components.get(ShipDataComponent);
-        const image = pers?.hailPict
-            ? `nova:${pers.hailPict}`
-            : shipData?.pict ?? null;
+        // pers.hailPict is ALREADY a global id (the parser emits e.g.
+        // "nova:4001"), so it must NOT be re-prefixed. Fall back to the ship's
+        // own pict when the pers has no custom portrait.
+        const image = pers?.hailPict ?? shipData?.pict ?? null;
         const heading = persComponent?.name
             || govt?.commName || shipData?.name || 'Unidentified ship';
 
-        // Is this the player's own direct escort? (one parent hop)
+        // Is this the player's own direct escort? (one parent hop) Carrier-bay
+        // fighters ALSO carry FormationComponent.leader / OwnerComponent.owner
+        // pointed at the player, so they'd match here too — but they are NOT
+        // hired escorts and have no management dialog. The discriminator is
+        // SourceComponent: bay fighters set it (bay_plugin), hired escorts
+        // (spawnHiredEscorts) and captures (convertToEscort) do not.
         const parent = shipTarget.components.get(FormationComponent)?.leader
             ?? shipTarget.components.get(OwnerComponent)?.owner;
-        const isEscort = parent === player.uuid;
+        const isOwnFlock = parent === player.uuid;
+        const isBayFighter = shipTarget.components.has(SourceComponent);
+        const isEscort = isOwnFlock && !isBayFighter;
+
+        if (isOwnFlock && isBayFighter) {
+            // A carrier-launched fighter from the player's own bay: label it as
+            // such (not "Hired Escort:") and show no management buttons — a bay
+            // fighter has no salary, upgrade price, or resale value to manage.
+            const fighterName = shipData?.name || 'Fighter';
+            const fighterClass = shipData?.subtitle?.trim();
+            return {
+                context: {
+                    variant: 'escort', heading: 'Fighter:', image,
+                    body: fighterClass ? `${fighterName}\n${fighterClass}`
+                        : fighterName,
+                },
+                target: shipTargetUuid, isEscort: false,
+            };
+        }
 
         if (isEscort) {
             // Hired-escort management box (hail/hail_escort.png): the header
@@ -155,7 +190,8 @@ async function computeContext(world: World,
             };
         }
 
-        const response = shipHailResponse(govt, disposition, aiType);
+        const response = shipHailResponse(govt, disposition, aiType,
+            attackingPlayer);
         if (response.kind === 'cantHail') {
             return {
                 context: {
@@ -193,6 +229,7 @@ async function computeContext(world: World,
         }) || 'There is no response.';
         const assist = canRequestAssistance({
             disposition, playerNeedsHelp: playerNeedsHelp(player), govt,
+            attackingPlayer,
         }) ? { free: !!govt?.flags2.roadsideAssistance } : undefined;
         return {
             context: {

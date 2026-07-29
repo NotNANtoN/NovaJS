@@ -98,6 +98,20 @@ describe('shipHailResponse', () => {
         expect(shipHailResponse(undefined, 'neutral', undefined))
             .toEqual({ kind: 'greeting', talkative: true });
     });
+    it('a neutral-govt ship ATTACKING the player answers with hostility', () => {
+        // Behavioral hostility: a ship the player provoked is hostile in the
+        // dialog regardless of its politics, and a bribing govt still bargains.
+        expect(shipHailResponse(withFlags({ warshipsTakeBribes: true }),
+            'neutral', 3, /*attackingPlayer=*/true))
+            .toEqual({ kind: 'hostile', canBribe: true });
+        expect(shipHailResponse(govt(), 'neutral', 3, true))
+            .toEqual({ kind: 'hostile', canBribe: false });
+    });
+    it('a cantBeHailed ship stays silent even while attacking the player',
+        () => {
+            expect(shipHailResponse(withFlags({ cantBeHailed: true }),
+                'neutral', 3, true)).toEqual({ kind: 'cantHail' });
+        });
 });
 
 describe('canRequestAssistance', () => {
@@ -125,6 +139,18 @@ describe('canRequestAssistance', () => {
                 playerNeedsHelp: true,
                 govt: withFlags2({ roadsideAssistance: true }) })).toBe(true);
         });
+    it('is refused by a neutral-govt ship attacking the player', () => {
+        // The assistance exploit: a neutral warship shooting a disabled player
+        // must not also offer to fly over and repair them.
+        expect(canRequestAssistance({ disposition: 'neutral',
+            playerNeedsHelp: true, govt: govt(),
+            attackingPlayer: true })).toBe(false);
+        // Even a Roadside-Assistance govt refuses while attacking.
+        expect(canRequestAssistance({ disposition: 'neutral',
+            playerNeedsHelp: true,
+            govt: withFlags2({ roadsideAssistance: true }),
+            attackingPlayer: true })).toBe(false);
+    });
 });
 
 describe('assistIsFree', () => {

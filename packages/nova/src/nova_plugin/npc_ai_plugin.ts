@@ -401,6 +401,14 @@ const NpcAggressionSystem = new System({
         if (source && source !== uuid) {
             npc.aggressor = source;
             // React at the next think, not next frame: reaction time.
+            // A bribe (hail beg-for-mercy) only lasts "until the player
+            // provokes them again": if the briber is the one now shooting
+            // us, the reprieve is void — clear it so NpcDecisionSystem stops
+            // skipping them and resumes hostility.
+            if (npc.pacifiedFrom === source) {
+                npc.pacifiedFrom = undefined;
+                npc.pacifiedUntil = undefined;
+            }
         }
     },
 });
