@@ -376,21 +376,25 @@ interface SettingToggle {
 const GAME_SETTINGS: SettingToggle[][] = [
     // Left column.
     [
-        { label: 'Ship Animations', key: 'shipAnimations', applicable: true, defaultOn: true },
-        { label: 'Engine Glows', key: 'engineGlows', applicable: true, defaultOn: true },
-        { label: 'Running Lights', key: 'runningLights', applicable: true, defaultOn: true },
-        { label: 'Weapon Effects', key: 'weaponEffects', applicable: true, defaultOn: true },
-        { label: 'Smoke Trails', key: 'smokeTrails', applicable: true, defaultOn: true },
-        { label: 'Parallax Starfield', key: 'parallaxStarfield', applicable: true, defaultOn: true },
+        // These toggles persist to localStorage but are not yet wired to any
+        // graphics/sound effect, so they are shown greyed-out (applicable:
+        // false) rather than promising behavior the game does not deliver.
+        // Flip back to applicable: true as each effect gets wired up.
+        { label: 'Ship Animations', key: 'shipAnimations', applicable: false, defaultOn: true },
+        { label: 'Engine Glows', key: 'engineGlows', applicable: false, defaultOn: true },
+        { label: 'Running Lights', key: 'runningLights', applicable: false, defaultOn: true },
+        { label: 'Weapon Effects', key: 'weaponEffects', applicable: false, defaultOn: true },
+        { label: 'Smoke Trails', key: 'smokeTrails', applicable: false, defaultOn: true },
+        { label: 'Parallax Starfield', key: 'parallaxStarfield', applicable: false, defaultOn: true },
         { label: 'Check For Updates', applicable: false, defaultOn: false },
     ],
     // Right column.
     [
-        { label: 'Intro Music', key: 'introMusic', applicable: true, defaultOn: true },
+        { label: 'Intro Music', key: 'introMusic', applicable: false, defaultOn: true },
         { label: 'Run in a window', applicable: false, defaultOn: false },
         { label: 'QuickTime Movies', applicable: false, defaultOn: true },
-        { label: 'Ambient Sounds', key: 'ambientSounds', applicable: true, defaultOn: true },
-        { label: 'Hyperspace Effects', key: 'hyperspaceEffects', applicable: true, defaultOn: false },
+        { label: 'Ambient Sounds', key: 'ambientSounds', applicable: false, defaultOn: true },
+        { label: 'Hyperspace Effects', key: 'hyperspaceEffects', applicable: false, defaultOn: false },
     ],
 ];
 
@@ -609,14 +613,16 @@ function buildGameSettings(settings: GameSettingsOverride): HTMLElement {
         }
         wrap.appendChild(col);
     }
-    // Sound Volume selector.
+    // Sound Volume selector. Persisted but not yet wired to the audio engine,
+    // so it is shown greyed-out/disabled like the other unwired toggles.
     const volRow = document.createElement('div');
     Object.assign(volRow.style, {
-        marginTop: '12px', paddingLeft: '8px',
+        marginTop: '12px', paddingLeft: '8px', color: '#aaa',
     } as Partial<CSSStyleDeclaration>);
     volRow.appendChild(document.createTextNode('Sound Volume: '));
     const vol = document.createElement('select');
     vol.dataset.testid = 'prefs-sound-volume';
+    vol.disabled = true;
     for (const [value, label] of [['muted', 'Muted'], ['quiet', 'Quiet'],
     ['normal', 'Normal'], ['loud', 'Loud']]) {
         const opt = document.createElement('option');
@@ -634,7 +640,7 @@ function buildGameSettings(settings: GameSettingsOverride): HTMLElement {
 
 function buildControlTab(tab: { name: string, rows: ControlRow[] },
     baseControls: Record<string, unknown>, override: ControlsOverride,
-    setCapture: (release: () => void) => void): HTMLElement {
+    setCapture: (release: (() => void) | undefined) => void): HTMLElement {
     const grid = document.createElement('div');
     Object.assign(grid.style, {
         display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 24px',
@@ -691,7 +697,9 @@ function buildControlTab(tab: { name: string, rows: ControlRow[] },
                 document.removeEventListener('keydown', onCapture, true);
                 capture.style.background = '#fff';
                 render();
-                setCapture(() => { /* already released */ });
+                // Clear the active capture (not a truthy no-op) so the dialog's
+                // key handler resumes handling Enter/Escape immediately.
+                setCapture(undefined);
             };
             document.addEventListener('keydown', onCapture, true);
             setCapture(release);
