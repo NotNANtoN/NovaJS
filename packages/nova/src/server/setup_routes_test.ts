@@ -1,7 +1,10 @@
 import 'jasmine';
+import express from 'express';
+import * as http from 'http';
+import { AddressInfo } from 'net';
 import { Gettable } from 'novadatainterface/gettable';
 import { GameDataInterface } from 'novadatainterface/game_data_interface';
-import { resolveBatch, BatchResponse } from './setup_routes.js';
+import { resolveBatch, BatchResponse, setupRoutes } from './setup_routes.js';
 
 // A minimal GameDataInterface whose gettables are backed by the maps
 // passed in. A `null` value for an id means "throw when fetched".
@@ -132,5 +135,103 @@ describe('resolveBatch', () => {
         expect(entry(resp, 'Ship', 'good')).toEqual({ data: { ok: true } });
         expect('error' in entry(resp, 'Outfit', 'missing')).toBe(true);
         expect('error' in entry(resp, 'Bogus', 'z')).toBe(true);
+    });
+
+    it('reports inherited object keys (constructor) as unknown types', async () => {
+        const gameData = makeGameData({ Ship: { 'a': {} } });
+
+        const resp = await resolveBatch(gameData, {
+            constructor: ['x'],
+        });
+
+        const e = entry(resp, 'constructor', 'x');
+        expect('error' in e).toBe(true);
+        if ('error' in e) {
+            expect(e.error).toContain('Unknown data type');
+        }
+    });
+});
+
+describe('GameDataServer request routes', () => {
+    let server: http.Server;
+    let baseUrl: string;
+
+    beforeAll(async () => {
+        const gameData = makeGameData({
+            Ship: { 'a': { name: 'ShipA' } },
+        });
+        // The ids promise rejects to prove the ids route can't leak an
+        // unhandled rejection (which kills the process on modern Node).
+        const rejectingIds = Promise.reject(new Error('ids boom'));
+        rejectingIds.catch(() => { });  // Mark handled at creation.
+        (gameData as { ids: unknown }).ids = rejectingIds;
+
+        const app = express();
+        setupRoutes(
+            gameData, app,
+            '/nonexistent/html', '/nonexistent/bundle',
+            '/nonexistent/bundle.map', '/nonexistent/worker',
+            '/nonexistent/worker.map', '/nonexistent/settings');
+
+        server = await new Promise<http.Server>(resolve => {
+            const s = app.listen(0, () => resolve(s));
+        });
+        const address = server.address() as AddressInfo;
+        baseUrl = `http://127.0.0.1:${address.port}`;
+    });
+
+    afterAll(async () => {
+        await new Promise<void>((resolve, reject) =>
+            server.close(err => err ? reject(err) : resolve()));
+    });
+
+    it('serves known data', async () => {
+        const resp = await fetch(`${baseUrl}/gameData/data/Ship/a`);
+        expect(resp.status).toBe(200);
+        expect(await resp.json()).toEqual({ name: 'ShipA' });
+    });
+
+    it('404s inherited object keys instead of crashing the process', async () => {
+        // Before validation with Object.hasOwn, 'constructor' passed the
+        // truthy check, `.get` was undefined, and the resulting async
+        // rejection escaped Express 4 — killing the whole process under
+        // Node's default --unhandled-rejections=throw.
+        const resp = await fetch(`${baseUrl}/gameData/data/constructor/x`);
+        expect(resp.status).toBe(404);
+        expect(await resp.text()).toContain('Unknown data type');
+    });
+
+    it('404s bogus data types', async () => {
+        const resp = await fetch(`${baseUrl}/gameData/data/NotARealType/x`);
+        expect(resp.status).toBe(404);
+        expect(await resp.text()).toContain('Unknown data type');
+    });
+
+    it('500s when a gettable rejects instead of crashing the process', async () => {
+        const resp = await fetch(`${baseUrl}/gameData/data/Ship/missing`);
+        expect(resp.status).toBe(500);
+    });
+
+    it('500s when the ids promise rejects', async () => {
+        const resp = await fetch(`${baseUrl}/gameData/ids.json`);
+        expect(resp.status).toBe(500);
+    });
+
+    it('survives the error requests above and keeps serving', async () => {
+        // Every error case in this suite ran before this spec touches
+        // the server again; a still-working response proves no handler
+        // let a rejection escape and take the process down.
+        for (const path of [
+            '/gameData/data/constructor/x',
+            '/gameData/data/NotARealType/x',
+            '/gameData/data/Ship/missing',
+            '/gameData/ids.json',
+        ]) {
+            const errResp = await fetch(`${baseUrl}${path}`);
+            expect(errResp.status).toBeGreaterThanOrEqual(400);
+        }
+        const resp = await fetch(`${baseUrl}/gameData/data/Ship/a`);
+        expect(resp.status).toBe(200);
+        expect(await resp.json()).toEqual({ name: 'ShipA' });
     });
 });

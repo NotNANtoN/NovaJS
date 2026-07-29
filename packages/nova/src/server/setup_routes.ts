@@ -44,7 +44,10 @@ export async function resolveBatch(
         const typeResult: { [id: string]: BatchResponseEntry } = {};
         result[name] = typeResult;
 
-        const dataGettable = gameData.data[name as NovaDataType];
+        // Object.hasOwn keeps inherited keys such as 'constructor' from
+        // passing the check and yielding a non-Gettable value.
+        const dataGettable = Object.hasOwn(gameData.data, name)
+            ? gameData.data[name as NovaDataType] : undefined;
         if (!dataGettable) {
             for (const id of ids ?? []) {
                 typeResult[id] = { error: 'Unknown data type ' + name };
@@ -136,7 +139,15 @@ class GameDataServer {
         this.app.get(idsPath + ".json", this.idRequestFulfiller.bind(this));
 
         this.app.use('/preloadData.json', async (_req, res) => {
-            res.send(this.gameData.preloadData ? await this.gameData.preloadData : {});
+            // Express 4 does not catch async rejections; see
+            // requestFulfiller.
+            try {
+                res.send(this.gameData.preloadData ? await this.gameData.preloadData : {});
+            } catch (e) {
+                if (!res.headersSent) {
+                    res.status(500).send({ error: 'Failed to get preload data' });
+                }
+            }
         });
 
         // Serves every client settings file in the settings directory
@@ -181,18 +192,32 @@ class GameDataServer {
         const name: string = req.params.name;
         const item: string = req.params.item;
 
-        // TODO: Replace with protobufs
-        var dataGettable = this.gameData.data[name as NovaDataType];
+        // Express 4 does not catch async rejections, and an escaped
+        // rejection kills the process on modern Node
+        // (--unhandled-rejections=throw is the default). Nothing in this
+        // handler may throw past the try/catch below.
+        try {
+            // Object.hasOwn keeps inherited keys such as 'constructor'
+            // (reachable straight from the URL path) from passing the
+            // check and yielding a non-Gettable value.
+            // TODO: Replace with protobufs
+            const dataGettable = Object.hasOwn(this.gameData.data, name)
+                ? this.gameData.data[name as NovaDataType] : undefined;
 
-        if (dataGettable) {
+            if (!dataGettable) {
+                res.status(404).send("Unknown data type " + name);
+                return;
+            }
+
             let data = await dataGettable.get(item);
             if (data instanceof ArrayBuffer) {
                 data = Buffer.from(data) as unknown as ArrayBuffer;
             }
             res.send(data);
-        }
-        else {
-            res.send("Unknown data type " + name);
+        } catch (e) {
+            if (!res.headersSent) {
+                res.status(500).send("Failed to get " + name + "/" + item);
+            }
         }
     }
 
@@ -211,10 +236,24 @@ class GameDataServer {
             res.status(400).send({ error: 'Batch request body must be a { dataType: id[] } object' });
             return;
         }
-        res.send(await resolveBatch(this.gameData, body));
+        // Express 4 does not catch async rejections; see requestFulfiller.
+        try {
+            res.send(await resolveBatch(this.gameData, body));
+        } catch (e) {
+            if (!res.headersSent) {
+                res.status(500).send({ error: 'Failed to resolve batch request' });
+            }
+        }
     }
 
     private async idRequestFulfiller(_req: express.Request, res: express.Response): Promise<void> {
-        res.send(await this.gameData.ids);
+        // Express 4 does not catch async rejections; see requestFulfiller.
+        try {
+            res.send(await this.gameData.ids);
+        } catch (e) {
+            if (!res.headersSent) {
+                res.status(500).send("Failed to get ids");
+            }
+        }
     }
 }
