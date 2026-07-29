@@ -1,6 +1,8 @@
 import "jasmine";
 import { GovtResource } from "../../src/resource_parsers/govt_resource.js";
 import { GovtParse } from "../../src/parsers/govt_parse.js";
+import { StrNResource } from "../../src/resource_parsers/strn_resource.js";
+import { getEmptyNovaResources, NovaResources } from "../../src/resource_parsers/resource_holder_base.js";
 import { defaultIDSpace } from "../resource_parsers/default_id_space.js";
 import { ResourceBuilder } from "../resource_parsers/resource_builder.js";
 
@@ -49,6 +51,73 @@ function parseGovt() {
     resource.prefix = "nova";
     return GovtParse(resource, () => { });
 }
+
+/** Builds a STR# resource holding the given strings. */
+function makeStrN(idSpace: NovaResources, id: number, strings: string[]) {
+    const b = new ResourceBuilder();
+    b.uint16(strings.length);
+    for (const s of strings) {
+        b.pstring(s);
+    }
+    idSpace["STR#"][id] = new StrNResource(
+        b.resource("STR#", id, `strings ${id}`), idSpace);
+}
+
+/**
+ * Parses a gövt of the given local id against a FRESH id space (the shared
+ * defaultIDSpace is module-global; greeting fixtures must not leak into the
+ * other suites), optionally seeded with one STR# resource.
+ */
+function parseGovtWithGreetings(govtId: number,
+    strn?: { id: number, strings: string[] }) {
+    const idSpace = getEmptyNovaResources();
+    if (strn) {
+        makeStrN(idSpace, strn.id, strn.strings);
+    }
+    const resource = new GovtResource(
+        buildGovt().resource("gövt", govtId, "Vell-os"), idSpace);
+    resource.globalID = `nova:${govtId}`;
+    resource.prefix = "nova";
+    return GovtParse(resource, () => { });
+}
+
+describe("GovtParse comm greetings (STR# 7000 + govt offset)", () => {
+    it("reads the greetings of the first government from STR# 7000",
+        async () => {
+            const govt = await parseGovtWithGreetings(128,
+                { id: 7000, strings: ["Greetings, pilot.", "State your business."] });
+            expect(govt.commGreetings)
+                .toEqual(["Greetings, pilot.", "State your business."]);
+        });
+
+    it("offsets the STR# id by the government's local id (gövt 130 -> 7002)",
+        async () => {
+            const govt = await parseGovtWithGreetings(130,
+                { id: 7002, strings: ["We are the Vell-os."] });
+            expect(govt.commGreetings).toEqual(["We are the Vell-os."]);
+        });
+
+    it("ignores a STR# at the wrong offset for this government", async () => {
+        // 7000 belongs to gövt 128, not to gövt 130.
+        const govt = await parseGovtWithGreetings(130,
+            { id: 7000, strings: ["Wrong government."] });
+        expect(govt.commGreetings).toEqual([]);
+    });
+
+    it("filters blank and \"*\" placeholder entries", async () => {
+        const govt = await parseGovtWithGreetings(128, {
+            id: 7000,
+            strings: ["Hello.", "", "*", "   ", " * ", "Goodbye."],
+        });
+        expect(govt.commGreetings).toEqual(["Hello.", "Goodbye."]);
+    });
+
+    it("resolves to an empty list when the government has no STR#",
+        async () => {
+            const govt = await parseGovtWithGreetings(128);
+            expect(govt.commGreetings).toEqual([]);
+        });
+});
 
 describe("GovtParse", () => {
     it("carries the BaseData fields", async () => {

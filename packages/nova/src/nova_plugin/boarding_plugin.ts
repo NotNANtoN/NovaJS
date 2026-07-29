@@ -31,7 +31,9 @@ import { GovtComponent } from './govt_component.js';
 import { ArmorComponent } from './health_plugin.js';
 import { ShieldComponent } from './health_plugin.js';
 import { FuelComponent } from './health_plugin.js';
-import { FormationComponent, NpcComponent } from './npc_ai_plugin.js';
+import {
+    formationsIn, FormationComponent, nextFormationSlot, NpcComponent,
+} from './npc_ai_plugin.js';
 import { CreditsComponent } from './player_state_plugin.js';
 import { applyCrime } from './reputation.js';
 import { GovtsResource, LegalRecordsComponent } from './reputation_plugin.js';
@@ -258,12 +260,7 @@ const BoardingGateSystem = new System({
 function convertToEscort(target: Entity,
     leaderUuid: string, leaderOwner: string | undefined,
     entities: EntityMap): void {
-    let slot = 0;
-    for (const [, e] of entities) {
-        if (e.components.get(FormationComponent)?.leader === leaderUuid) {
-            slot++;
-        }
-    }
+    const slot = nextFormationSlot(formationsIn(entities), leaderUuid);
     target.components.set(FormationComponent, { leader: leaderUuid, slot });
     target.components.set(EscortCommandComponent, { command: 'formation' });
     target.components.set(FiringGroupComponent, { group: leaderUuid });

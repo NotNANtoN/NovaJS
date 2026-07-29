@@ -177,6 +177,43 @@ describe('boarding in a live world', () => {
             .toEqual(2);
     });
 
+    /** Runs the whole capture flow and takes the prize as an escort. */
+    function captureAsEscort(world: World, boarder: Entity) {
+        press(world, BOARDER, 'board');
+        // Attempt capture until it lands (chance is clamped to 0.95).
+        for (let i = 0; i < 20
+            && boarder.components.get(BoardingComponent)?.capture
+            !== 'succeeded'; i++) {
+            press(world, BOARDER, 'plunderCapture');
+        }
+        expect(boarder.components.get(BoardingComponent)?.capture)
+            .toEqual('succeeded');
+        press(world, BOARDER, 'plunderCaptureEscort');
+    }
+
+    it('gives a captured prize a slot past the highest live one, not the'
+        + ' sibling count (regression: a mid-formation death made two'
+        + ' escorts share a station)', async () => {
+            const { world, boarder, target } = await boardingWorld({
+                boarderCrew: 500, targetCrew: 1,
+            });
+            // The boarder already leads slots 0, 1, 2 — then slot 1 dies.
+            for (const slot of [0, 2]) {
+                const escort = new Entity();
+                escort.components.set(FormationComponent,
+                    { leader: BOARDER, slot });
+                world.entities.set(`escort${slot}`, escort);
+            }
+            world.step();
+
+            captureAsEscort(world, boarder);
+
+            const formation = target.components.get(FormationComponent)!;
+            expect(formation.leader).toEqual(BOARDER);
+            // Counting siblings would hand out 2, colliding with escort2.
+            expect(formation.slot).toEqual(3);
+        });
+
     it('captures and assigns the ship as an escort', async () => {
         const { world, boarder, target } = await boardingWorld({
             boarderCrew: 500, targetCrew: 1,

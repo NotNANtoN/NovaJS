@@ -9,7 +9,7 @@ import {
     chaserBlocksJump, chooseNearest, Formation, formationOffset,
     formationSlotPosition, FLEE_JUMP_BLOCK_RANGE,
     FORMATION_LATERAL_SPACING, FORMATION_ROW_SPACING,
-    landingDestinations, PlanetEntry,
+    landingDestinations, nextFormationSlot, PlanetEntry,
     RCS_ACCEL_FRACTION, RCS_DISENGAGE_SPEED, RCS_ENGAGE_SPEED,
     steerFormation,
 } from './npc_ai_plugin.js';
@@ -114,6 +114,42 @@ describe('chooseNearest', () => {
 
     it('returns undefined for no candidates', () => {
         expect(chooseNearest([])).toBeUndefined();
+    });
+});
+
+describe('nextFormationSlot', () => {
+    const f = (leader: string, slot: number): Formation => ({ leader, slot });
+
+    it('starts at 0 when the leader has no followers', () => {
+        expect(nextFormationSlot([], 'leader')).toBe(0);
+        expect(nextFormationSlot([f('other', 0), f('other', 1)], 'leader'))
+            .toBe(0);
+    });
+
+    it('appends past the highest slot of a contiguous formation', () => {
+        expect(nextFormationSlot(
+            [f('leader', 0), f('leader', 1), f('leader', 2)], 'leader'))
+            .toBe(3);
+    });
+
+    it('does not reuse a live slot after a mid-formation death', () => {
+        // Slots {0, 1, 2} lose slot 1. Counting siblings would return 2 —
+        // a slot a live escort still holds, which FormationSystem's
+        // rank-by-slot lookup would collapse onto one station.
+        expect(nextFormationSlot([f('leader', 0), f('leader', 2)], 'leader'))
+            .toBe(3);
+    });
+
+    it('ignores followers of other leaders', () => {
+        expect(nextFormationSlot(
+            [f('leader', 0), f('other', 7), f('leader', 1)], 'leader'))
+            .toBe(2);
+    });
+
+    it('is independent of iteration order', () => {
+        const slots = [f('leader', 3), f('leader', 0), f('leader', 2)];
+        expect(nextFormationSlot(slots, 'leader')).toBe(4);
+        expect(nextFormationSlot([...slots].reverse(), 'leader')).toBe(4);
     });
 });
 
