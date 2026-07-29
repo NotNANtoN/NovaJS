@@ -1,9 +1,15 @@
 import 'jasmine';
+import { isLeft } from 'fp-ts/lib/Either.js';
 import * as PIXI from 'pixi.js';
+import { UnknownComponent } from 'nova_ecs/component';
 import { Entity } from 'nova_ecs/entity';
+import {
+    EncodedEntity, Serializer, SerializerResource,
+} from 'nova_ecs/plugins/serializer_plugin';
 import { World } from 'nova_ecs/world';
 import { ProjectileWeaponData } from 'novadatainterface/weapon_data';
 import { CreateTime } from '../nova_plugin/create_time.js';
+import { makeSystem } from '../nova_plugin/make_system.js';
 import { ProjectileComponent, ProjectileDataComponent } from '../nova_plugin/projectile_data.js';
 import { getIntegrationGameData } from '../communication/simulation_test_fixture.js';
 import { AnimationGraphic } from './animation_graphic.js';
@@ -342,4 +348,90 @@ describe('ProjectileFadeSystem', () => {
         world.step();
         expect(spriteAlpha(graphic)).toEqual(1);
     });
+});
+
+/**
+ * The tests above hand ProjectileFadeSystem an entity that already
+ * carries CreateTime. In the real game nothing does that: display
+ * entities are MIRRORED from the simulation world, and only
+ * serializer-registered components survive that trip
+ * (SimulationBridgeHost.snapshot skips the rest, silently). CreateTime
+ * was not registered, so live shots reached the display world without a
+ * ProjectileFireTime, ProjectileFadeSystem's query matched nothing, and
+ * every fading weapon rendered at alpha 1 for its whole flight and
+ * popped out at expiry — with all the unit tests above passing.
+ *
+ * These tests pin that wiring instead of the arithmetic.
+ */
+describe('projectile fade sim -> display wiring', () => {
+    let simWorld: World;
+    let serializer: Serializer;
+
+    beforeAll(async () => {
+        const gameData = await getIntegrationGameData();
+        const ids = await gameData.ids;
+        const systemId = [...ids.System].sort()[0]!;
+        // A real simulation world, built the way every simulating
+        // context builds one (browser worker, server archive, tests).
+        simWorld = await makeSystem(systemId, gameData, undefined,
+            { npcs: false });
+        serializer = simWorld.resources.get(SerializerResource)!;
+    });
+
+    it('registers CreateTime with the simulation serializer', () => {
+        // Without this, the component never enters a simulation frame.
+        expect(serializer).toBeDefined();
+        expect(serializer.hasComponent(CreateTime as UnknownComponent))
+            .toBeTrue();
+    });
+
+    it('encodes ProjectileFireTime into a mirrored projectile', () => {
+        const shot = new Entity('projectile')
+            .addComponent(ProjectileComponent, { id: 'nova:156' })
+            .addComponent(CreateTime, 1234);
+        const encoded = serializer.encode(shot) as EncodedEntity;
+        const names = encoded.components.map(([name]) => name);
+        // 'ProjectileFireTime' is CreateTime's wire name.
+        expect(names).toContain('ProjectileFireTime');
+    });
+
+    it('fades a projectile rebuilt from the wire, as the mirror builds it',
+        async () => {
+            const gameData = await getIntegrationGameData();
+            const railgun = await gameData.data.Weapon.get('nova:156');
+            expect(railgun.type).toEqual('ProjectileWeaponData');
+            const data = railgun as ProjectileWeaponData;
+
+            // Encode a projectile in the simulation world, then decode it
+            // exactly as browser.ts's syncEntityToDisplay does. Anything
+            // the serializer drops is simply absent here, so a
+            // regression that unregisters CreateTime fails this test.
+            const simShot = new Entity('projectile')
+                .addComponent(ProjectileComponent, { id: 'nova:156' })
+                .addComponent(ProjectileDataComponent, data)
+                .addComponent(CreateTime, 1000);
+            const decoded = serializer.decode(serializer.encode(simShot));
+            expect(isLeft(decoded)).toBeFalse();
+            if (isLeft(decoded)) {
+                return;
+            }
+            const displayShot = decoded.right;
+
+            // AnimationGraphic is display-local: the graphic provider adds
+            // it on top of the mirrored components.
+            const graphic = fakeGraphic();
+            displayShot.components.set(AnimationGraphicComponent, graphic);
+
+            const fadeMs = falloffFadeFrames(data.falloff) * FRAME_MS;
+            // Halfway through the fade window -> alpha 0.5.
+            const simTime = 1000 + data.shotDuration - fadeMs / 2;
+            const displayWorld = new World('mirror-fade-test');
+            displayWorld.resources.set(SimulationTimeResource,
+                { ...defaultSimulationTime(), time: simTime });
+            displayWorld.addSystem(ProjectileFadeSystem);
+            displayWorld.entities.set('shot', displayShot);
+            displayWorld.step();
+
+            expect(spriteAlpha(graphic)).toBeCloseTo(0.5, 6);
+        });
 });
