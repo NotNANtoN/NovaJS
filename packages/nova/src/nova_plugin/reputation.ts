@@ -25,12 +25,19 @@ import { GovtData } from 'novadatainterface/govt_data';
  * you too." The Bible does not give the ally/enemy fractions; NovaJS
  * uses half the penalty, truncated (see PROPAGATION_DIVISOR).
  *
- * Stock Nova's gövt resources leave every penalty field ZERO (only
- * plug-ins set them — verified against the real data), yet the real
- * engine clearly penalizes kills, so it must have built-in defaults.
- * Those defaults are undocumented; NovaJS substitutes the DEFAULT_*
- * constants below whenever a govt's field is 0. Plug-in govts with
- * explicit penalties (ARPIA's Kill 25, etc.) are used as written.
+ * Most stock gövts DO set their penalty fields (57 of the 68 stock
+ * govts carry a non-zero KillPenalty — the Federation's is 5, the
+ * Vell-os' 40), and those values are used as written. A minority
+ * (11 stock govts, e.g. Spanner and the Derelicts) leave them at
+ * zero, yet the real engine still penalizes crimes against them, so
+ * it must have built-in defaults. Those defaults are undocumented;
+ * NovaJS substitutes the DEFAULT_* constants below whenever a govt's
+ * field is 0.
+ *
+ * (An earlier revision of this comment claimed stock data leaves
+ * EVERY penalty field zero. That was wrong: it was measured with
+ * plug-ins loaded, and a plug-in had overwritten the stock gövts.
+ * Tests now parse base "Nova Files" only.)
  *
  * HOSTILITY (Bible, gövt CrimeTol): "the maximum amount of evilness
  * the player can accumulate before warships of this govt start to
@@ -48,15 +55,15 @@ import { GovtData } from 'novadatainterface/govt_data';
 export type LegalRecords = Map<string, number>;
 
 /**
- * Engine-default penalties, used when a govt's field is 0 (see the
- * module comment: stock data leaves them all zero). Calibrated so a
- * typical CrimeTol-10 govt (the Federation) turns hostile on the
- * third kill, matching the plug-in govts' penalty-to-CrimeTol ratios.
+ * Engine-default penalties, used only when a govt's field is 0 (see
+ * the module comment). Chosen to sit in the middle of the stock
+ * govts' own values — the stock Federation's KillPenalty is likewise
+ * 5, so a govt that omits the field behaves like a typical one.
  */
 export const DEFAULT_KILL_PENALTY = 5;
 export const DEFAULT_DISABLE_PENALTY = 2;
 /** Boarding/pirating a ship (boarding_plugin.ts) when the govt leaves
- * BoardPenalty at 0 (as stock data does). */
+ * BoardPenalty at 0. */
 export const DEFAULT_BOARD_PENALTY = 3;
 
 /**

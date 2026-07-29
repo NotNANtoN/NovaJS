@@ -10,9 +10,17 @@ import { makeShip } from './make_ship.js';
 import { makeSystem } from './make_system.js';
 import { NpcComponent } from './npc_ai_plugin.js';
 import { CombatRatingComponent, DamageAttributionComponent, LegalRecordsComponent } from './reputation_plugin.js';
-import { DEFAULT_DISABLE_PENALTY, DEFAULT_KILL_PENALTY } from './reputation.js';
 import { TargetComponent } from './target_component.js';
 import { ArmorComponent, ShieldComponent } from './health_plugin.js';
+
+/**
+ * The victim throughout is a Federation (gövt nova:128) ship, so the
+ * penalties charged are the stock Federation's OWN fields, not the
+ * DEFAULT_* engine fallbacks: KillPenalty 5, DisabPenalty 1
+ * (pinned in reputation_integration_test.ts).
+ */
+const FED_KILL_PENALTY = 5;
+const FED_DISABLE_PENALTY = 1;
 
 /**
  * The reputation pipeline in a LIVE world (real game data, the full
@@ -29,7 +37,8 @@ describe('reputation in a live world', () => {
 
     async function makeWorld() {
         const gameData = await getIntegrationGameData();
-        // nova:226: asteroid-free plugin system; NPCs off for control.
+        // nova:226 (Ver'ashan): stock system with Asteroids 0; NPCs
+        // off for control.
         const world = await makeSystem('nova:226', gameData, 'worker',
             { npcs: false });
         return { gameData, world };
@@ -79,12 +88,12 @@ describe('reputation in a live world', () => {
         expect(victim.components.get(DamageAttributionComponent))
             .toEqual({ root: PLAYER, killCredited: true });
         const records = player.components.get(LegalRecordsComponent)!;
-        expect(records.get('nova:128')).toBe(-DEFAULT_KILL_PENALTY);
+        expect(records.get('nova:128')).toBe(-FED_KILL_PENALTY);
         // Ally (Bureau) and enemy (Auroran) propagation, real map.
         expect(records.get('nova:153'))
-            .toBe(-Math.trunc(DEFAULT_KILL_PENALTY / 2));
+            .toBe(-Math.trunc(FED_KILL_PENALTY / 2));
         expect(records.get('nova:129'))
-            .toBe(Math.trunc(DEFAULT_KILL_PENALTY / 2));
+            .toBe(Math.trunc(FED_KILL_PENALTY / 2));
         expect(player.components.get(CombatRatingComponent)!.kills)
             .toBe(victimData.strength);
 
@@ -97,7 +106,7 @@ describe('reputation in a live world', () => {
             damager: SHOT,
         }, [VICTIM]);
         world.step();
-        expect(records.get('nova:128')).toBe(-DEFAULT_KILL_PENALTY);
+        expect(records.get('nova:128')).toBe(-FED_KILL_PENALTY);
     });
 
     it('credits a disable: the disable penalty, once, and not on kill',
@@ -131,17 +140,17 @@ describe('reputation in a live world', () => {
             }
             expect(victim.components.has(DisabledComponent)).toBeTrue();
             const records = player.components.get(LegalRecordsComponent)!;
-            expect(records.get('nova:128')).toBe(-DEFAULT_DISABLE_PENALTY);
+            expect(records.get('nova:128')).toBe(-FED_DISABLE_PENALTY);
             // Steps while it stays disabled do not re-charge.
             world.step();
-            expect(records.get('nova:128')).toBe(-DEFAULT_DISABLE_PENALTY);
+            expect(records.get('nova:128')).toBe(-FED_DISABLE_PENALTY);
         });
 
     it('a Federation warship hunts a player with a criminal Fed record',
         async () => {
             const { gameData, world } = await makeWorld();
             const player = await addPlayer(world, gameData);
-            // Deep in criminal territory (CrimeTol is 10).
+            // Deep in criminal territory (Fed CrimeTol is 6).
             player.components.set(LegalRecordsComponent,
                 new Map([['nova:128', -100]]));
 

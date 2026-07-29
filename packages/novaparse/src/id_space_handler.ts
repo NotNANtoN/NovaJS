@@ -8,6 +8,20 @@ class BadDirectoryStructureError extends Error { };
 //const log = console.log;
 const log = (_m: string) => { };
 
+// Where the core data and (optionally) the plug-ins live, relative to the
+// Nova_Data root. `novaPlugins: null` means "load no plug-ins at all" — used
+// by tests so that results don't depend on which plug-ins happen to be
+// installed in the developer's Nova_Data/Plug-ins directory.
+export interface NovaSubPaths {
+    novaFiles: string;
+    novaPlugins: string | null;
+}
+
+export const DEFAULT_SUB_PATHS: NovaSubPaths = {
+    novaFiles: "Nova\ Files",
+    novaPlugins: "Plug-ins",
+};
+
 // Parses Nova Files and Plug-ins into resources
 // without dealing with the interactions that resources might
 // have with one another. A resource that references another resource
@@ -19,15 +33,15 @@ class IDSpaceHandler {
     private globalResources: Promise<NovaResources | Error>;
     private tmpBuildingResources: NovaResources;
     private novaFilesPath: string;
-    private novaPluginsPath: string;
+    // null when plug-in loading is explicitly disabled.
+    private novaPluginsPath: string | null;
 
     constructor(novaPath: string,
-        { novaFiles, novaPlugins }:
-            { novaFiles: string, novaPlugins: string } =
-            { novaFiles: "Nova\ Files", novaPlugins: "Plug-ins" }) {
+        { novaFiles, novaPlugins }: NovaSubPaths = DEFAULT_SUB_PATHS) {
 
         this.novaFilesPath = path.join(novaPath, novaFiles);
-        this.novaPluginsPath = path.join(novaPath, novaPlugins);
+        this.novaPluginsPath = novaPlugins === null
+            ? null : path.join(novaPath, novaPlugins);
         this.tmpBuildingResources = getEmptyNovaResources();
         this.globalResources = this.build().catch((e: Error) => {
             // Catch all promise rejections. They are instead handled when getting ID spaces.
@@ -37,7 +51,11 @@ class IDSpaceHandler {
 
     private async build() {
         await this.addNovaFilesDirectory(this.novaFilesPath);
-        await this.addNovaPluginsDirectory(this.novaPluginsPath);
+        // A null plug-ins path is an explicit opt-out, not an error: the
+        // caller wants base "Nova Files" data only.
+        if (this.novaPluginsPath !== null) {
+            await this.addNovaPluginsDirectory(this.novaPluginsPath);
+        }
         return this.tmpBuildingResources;
     }
 

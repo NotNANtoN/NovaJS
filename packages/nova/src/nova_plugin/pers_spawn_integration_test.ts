@@ -32,10 +32,17 @@ describe('përs spawning against real Nova data', () => {
         expect(jack.ship).toBe('nova:279');
         expect(jack.govt).toBe('nova:149');
         expect(jack.aiType).toBe(3);
-        // Kestra's Gamble roams anywhere.
-        const kestra = await gameData.data.Pers.get('nova:128');
-        expect(kestra.name).toBe("Kestra's Gamble");
-        expect(kestra.linkSyst).toEqual({ type: 'any' });
+        // Matt Burch (the game's author, a stock easter-egg përs)
+        // roams anywhere.
+        const burch = await gameData.data.Pers.get('nova:161');
+        expect(burch.name).toBe('Matt Burch');
+        expect(burch.subtitle).toBe('31337');
+        expect(burch.linkSyst).toEqual({ type: 'any' });
+        // nova:128, by contrast, is bound away from one govt's space.
+        const terrapin = await gameData.data.Pers.get('nova:128');
+        expect(terrapin.name).toBe('Terrapin');
+        expect(terrapin.linkSyst)
+            .toEqual({ type: 'notGovtSystems', govt: 'nova:135' });
     }, 30_000);
 
     it('builds a deterministic table that honors LinkSyst and ActiveOn',
@@ -59,7 +66,9 @@ describe('përs spawning against real Nova data', () => {
                 govt: 'nova:157',
                 aiType: 2,
             }));
-            // ...and roam-anywhere people are eligible too.
+            // ...and people not bound to a single system are eligible
+            // too (nova:128 is "anywhere except gövt nova:135 space",
+            // and Kerella is not in it).
             expect(table.some(entry => entry.id === 'nova:128')).toBeTrue();
             // People bound to other systems are not.
             for (const entry of table) {

@@ -22,7 +22,14 @@ let gameDataPromise: Promise<GameDataAggregator> | undefined;
 
 export async function getIntegrationGameData() {
     if (!gameDataPromise) {
-        const novaParse = new NovaParse(path.join(packageRoot, "Nova_Data"), false);
+        // Base "Nova Files" data ONLY (novaPlugins: null). Tests must not
+        // depend on which plug-ins happen to be installed in the developer's
+        // Nova_Data/Plug-ins directory — otherwise ids, ship/system/outfit
+        // stats and even sorted-first ids change from machine to machine.
+        // The dev server (server.ts / nova_parse_worker.ts) still loads
+        // plug-ins as usual; only tests opt out.
+        const novaParse = new NovaParse(path.join(packageRoot, "Nova_Data"), false,
+            { novaFiles: "Nova Files", novaPlugins: null });
         novaParse.resourceNotFoundFunction = () => { };
         const aggregator = new GameDataAggregator([
             new FilesystemData(path.join(packageRoot, "objects")),
@@ -52,8 +59,11 @@ export async function makeSimulationBridgeHarness() {
         throw new Error("Expected at least one ship id");
     }
 
-    // No NPC traffic: this harness is a controlled battlefield (the
-    // sorted-first system is a plugin system with a large AvgShips).
+    // No NPC traffic: this harness is a controlled battlefield. With
+    // base data only, the sorted-first ids are the stock sÿst nova:1124
+    // (Procyon, AvgShips 1) and shïp nova:128 (the Shuttle); ambient
+    // spawns would still make the battlefield nondeterministic to
+    // reason about, so they stay off.
     const world = await makeSystem(systemId, gameData, undefined,
         { npcs: false });
     const communicator = new MockCommunicator("server");

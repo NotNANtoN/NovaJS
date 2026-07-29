@@ -54,9 +54,12 @@ describe('missions against real Nova data', () => {
     it('exposes mission, cron, and player-start ids', async () => {
         const gameData = await getIntegrationGameData();
         const ids = await gameData.ids;
-        expect(ids.Mission.length).toBeGreaterThan(1000);
-        expect(ids.Cron.length).toBeGreaterThan(300);
-        expect(ids.PlayerStart).toContain('nova:128');
+        // Exact stock counts: tests parse base "Nova Files" only, so
+        // these are fixed. (They read far higher with plug-ins loaded,
+        // which is exactly the portability problem the fixture avoids.)
+        expect(ids.Mission.length).toBe(791);
+        expect(ids.Cron.length).toBe(125);
+        expect(ids.PlayerStart).toEqual(['nova:128']);
     });
 
     it('parses the default chär (nova:128) player start', async () => {

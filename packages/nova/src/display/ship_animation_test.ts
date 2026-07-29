@@ -1,9 +1,11 @@
 import 'jasmine';
 import { advanceWeaponFlash, continuousRawSet, foldSetIndex, weapDecayAlphaPerSecond } from './ship_animation_plugin.js';
 
-// Both stock folding ships have SIX base sets of 36 frames (Argosy
-// nova:138 -> rlëD nova:1020; Asteroid Miner extra-outfits:807 -> rlëD
-// nova:1128).
+// The stock folding ship (Argosy nova:138 -> rlëD nova:1020) has SIX
+// base sets of 36 frames, as does the Asteroid Miner from the
+// extra-outfits plug-in (extra-outfits:807 -> rlëD nova:1128). These
+// are pure-math specs, so they take the set count as a literal rather
+// than reading game data.
 const STOCK_FOLD_SETS = 6;
 
 describe('foldSetIndex (fold progress -> base sprite set)', () => {

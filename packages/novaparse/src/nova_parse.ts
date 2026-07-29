@@ -26,7 +26,7 @@ import { StatusBarData } from "novadatainterface/status_bar_data";
 import { SystemData } from "novadatainterface/system_data";
 import { TargetCornersData } from "novadatainterface/target_corners_data";
 import { WeaponData } from "novadatainterface/weapon_data";
-import { IDSpaceHandler } from "./id_space_handler.js";
+import { DEFAULT_SUB_PATHS, IDSpaceHandler, NovaSubPaths } from "./id_space_handler.js";
 import { AsteroidParse } from "./parsers/asteroid_parse.js";
 import { DudeParse } from "./parsers/dude_parse.js";
 import { ExplosionParse } from "./parsers/explosion_parse.js";
@@ -110,10 +110,11 @@ export class NovaParse implements GameDataInterface {
     public readonly ids: Promise<NovaIDs>;
     public readonly idSpace: Promise<NovaResources | Error>;
 
+    // subPaths.novaPlugins may be set to null to parse the base "Nova Files"
+    // data only, ignoring the Plug-ins directory entirely. The default keeps
+    // plug-ins loading, so the game/dev server behaviour is unchanged.
     constructor(dataPath: string, strict: boolean = true,
-        subPaths:
-            { novaFiles: string, novaPlugins: string } =
-            { novaFiles: "Nova\ Files", novaPlugins: "Plug-ins" }) {
+        subPaths: NovaSubPaths = DEFAULT_SUB_PATHS) {
 
         // Strict will throw an error if any resource is not found.
         // Otherwise, it will try to substitute default resources whenever possible (success may vary).

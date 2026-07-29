@@ -22,7 +22,7 @@ describe('GovtData against real Nova data', () => {
         expect(fed.classes).toEqual([1]);
         expect(fed.maxOdds).toBe(200);
         expect(fed.skillMult).toBe(100);
-        expect(fed.crimeTol).toBe(10);
+        expect(fed.crimeTol).toBe(6);
         expect(fed.inhJam).toEqual([7, 5, 0, 0]);
         // require is a JSON-safe decimal string, not a bigint.
         expect(typeof fed.require).toBe('string');

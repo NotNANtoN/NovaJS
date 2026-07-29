@@ -126,7 +126,12 @@ describe('NPC spawning in a real system', () => {
             world.step();
         }
         expect(npcs(world).length).toBe(before.length - 1);
-        // Fast-forward the timer: the spawner refills.
+        // Fast-forward the timer: the spawner refills. The refill is
+        // gated on population < targetCount, and the rolled target can
+        // legitimately sit at or below the spawned population (fleet
+        // rolls bring escorts along, overshooting the target), so set
+        // the target explicitly rather than relying on the roll.
+        spawner.targetCount = before.length + 1;
         spawner.nextSpawn = 0;
         for (let i = 0; i < 5; i++) {
             world.step();
