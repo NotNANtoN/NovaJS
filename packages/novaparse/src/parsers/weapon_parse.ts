@@ -245,6 +245,11 @@ async function ProjectileWeaponParse(weap: WeapResource, notFoundFunction: (m: s
         // lost. The Bible treats -1 and 0 identically ("Ignored"), so clamp
         // negatives to 0; the sim applies it from the shot's flight time.
         decay: Math.max(weap.decay, 0),
+        // wëap Falloff (sprite-based): the same byte as beam coronaFalloff,
+        // repurposed per the Bible's Falloff sprite note to fade the shot's
+        // sprite out over the final 32/falloff frames of its life. 0/negative
+        // means no fade; clamp negatives so 0 is the "no fade" sentinel.
+        falloff: Math.max(weap.coronaFalloff, 0),
         physics: {
             acceleration: 0,
             armorRecharge: 0,

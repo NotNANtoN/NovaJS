@@ -1,6 +1,7 @@
 import "jasmine";
 import { readResourceFork, Resource, ResourceMap } from "resource_fork";
 import { WeapResource } from "../../src/resource_parsers/weap_resource.js";
+import { WeaponParse } from "../../src/parsers/weapon_parse.js";
 import { defaultIDSpace } from "./default_id_space.js";
 import { ResourceBuilder } from "./resource_builder.js";
 
@@ -787,5 +788,42 @@ describe("WeapResource builder-based", () => {
         expect(w.maxAmmo).toEqual(0);
         expect(w.submunition).toBeNull();
         expect(w.recoil).toEqual(0);
+    });
+
+    /**
+     * Builds a guided (projectile) wëap with `coronaFalloff` at offset 52
+     * overridden, stamped with a globalID/prefix (which IDSpaceHandler
+     * would normally set) so WeaponParse can run. Missing graphic/sound/
+     * explosion fall back gracefully via the no-op notFoundFunction.
+     */
+    async function parseProjectile(coronaFalloff: number) {
+        const dv = buildWeap().dataView();
+        dv.setInt16(52, coronaFalloff); // 52 coronaFalloff / sprite Falloff
+        const resource = new Resource("wëap", 128, "Test Projectile", dv);
+        const w = new WeapResource(resource, idSpace);
+        w.globalID = "nova:128";
+        w.prefix = "nova:";
+        return WeaponParse(w, () => { });
+    }
+
+    it("plumbs the wëap Falloff (coronaFalloff byte) onto ProjectileWeaponData.falloff", async () => {
+        // The same byte beams use for coronaFalloff is repurposed for
+        // sprite fade per the Bible's Falloff sprite note. A Falloff of 2
+        // (Fusion Pulse Cannon / railguns) comes through verbatim.
+        const w = await parseProjectile(2);
+        expect(w.type).toEqual("ProjectileWeaponData");
+        if (w.type === "ProjectileWeaponData") {
+            expect(w.falloff).toEqual(2);
+        }
+    });
+
+    it("clamps a negative Falloff to 0 (no fade)", async () => {
+        // The Bible's sprite range starts at 1; 0/negative means no fade.
+        // Clamp so 0 is the "no fade" sentinel (mirrors the Decay clamp).
+        const w = await parseProjectile(-3);
+        expect(w.type).toEqual("ProjectileWeaponData");
+        if (w.type === "ProjectileWeaponData") {
+            expect(w.falloff).toEqual(0);
+        }
     });
 });

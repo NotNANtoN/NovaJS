@@ -17,6 +17,7 @@ import { GateMapPlugin } from "./gate_map_plugin.js";
 import { JumpFadePlugin } from "./jump_fade_plugin.js";
 import { ParticlesPlugin } from "./particles_plugin.js";
 import { PlanetCornersPlugin } from "./planet_corners_plugin.js";
+import { ProjectileFadePlugin } from "./projectile_fade_plugin.js";
 import { MissionInfoPlugin } from "./mission_info_plugin.js";
 import { HailDialogPlugin } from "./hail_dialog_plugin.js";
 import { PlayerInfoPlugin } from "./player_info_plugin.js";
@@ -84,6 +85,12 @@ export const Display: Plugin = {
         await world.addPlugin(AsteroidDisplayPlugin);
         await world.addPlugin(BeamDisplayPlugin);
         await world.addPlugin(PlanetCornersPlugin);
+        // Fades projectile sprites over the final 32/falloff frames of
+        // their flight (wëap Falloff). After AsteroidDisplayPlugin since
+        // both read the mirrored SimulationTimeResource for a sim-clock
+        // fade; needs AnimationGraphicPlugin (added above) for the
+        // graphic component and ObjectDrawSystem.
+        await world.addPlugin(ProjectileFadePlugin);
         // The starmap, player info, and mission info must precede the
         // spaceport: SpaceportProvider consumes their OpenStarmapResource
         // / OpenPlayerInfoResource / OpenMissionInfoResource (the docked
@@ -126,6 +133,7 @@ export const Display: Plugin = {
         await world.removePlugin(StarmapPlugin);
         await world.removePlugin(PlanetCornersPlugin);
         await world.removePlugin(BeamDisplayPlugin);
+        await world.removePlugin(ProjectileFadePlugin);
         await world.removePlugin(AsteroidDisplayPlugin);
         await world.removePlugin(ExplosionPlugin);
         await world.removePlugin(FullscreenPlugin);

@@ -312,6 +312,28 @@ export interface ProjectileWeaponData extends SpaceObjectData, NotBayWeaponData 
      * ProjectileBlastSystem (see decayDamage).
      */
     decay: number,
+    /**
+     * wëap "Falloff" field for sprite-based (projectile) weapons: the
+     * rate at which the shot's sprite fades to transparency at the end
+     * of its life. Read from the SAME byte the engine uses for beam
+     * `coronaFalloff` (wëap offset 52), but repurposed for sprites per
+     * the EVN Bible's Falloff note (Errata: "wëap Falloff field — Added
+     * note about sprite-based weapons"):
+     *
+     *   "For sprite-based weapons, setting this field to a value of 1
+     *    will cause the sprite to fade out over the final 32 frames of
+     *    its life. Higher values will fade out faster."
+     *
+     * So a value of N > 0 fades the shot out over the final 32/N frames
+     * of its flight (1 -> 32 frames, 2 -> 16, 3 -> ~10.7); 0 or negative
+     * means no fade and the sprite renders at full alpha until it
+     * expires. This is DISPLAY-ONLY (see ProjectileFadeSystem); it is
+     * unrelated to `decay`, which erodes damage and not opacity —
+     * stock Wraithii (nova:145) has decay 10 but falloff 0 (no fade),
+     * and the Fusion Pulse Cannon / all railguns have falloff 2-3.
+     * The parser clamps negatives to 0, so 0 means "no fade".
+     */
+    falloff: number,
 }
 
 // This extends SpaceObjectData since projectiles use sprites
@@ -330,6 +352,7 @@ export function getDefaultProjectileWeaponData(): ProjectileWeaponData {
         jamVulnerabilities: getDefaultJammingVulnerabilities(),
         seeker: getDefaultSeekerFlags(),
         decay: 0,
+        falloff: 0,
     };
 }
 
