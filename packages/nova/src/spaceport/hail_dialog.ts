@@ -53,8 +53,10 @@ export interface HailContext {
     variant: 'ship' | 'planet' | 'escort';
     /** Header line: govt comm name, person name, or planet name. */
     heading: string;
-    /** PICT id for the target image (e.g. 'nova:3001' ship pict, a pers
-     * hailPict, or a planet pict), or null for no image. */
+    /** A fully-qualified PICT global id for the target image (e.g. a ship's
+     * 'nova:3001' pict, a pers hailPict which the parser already emits as
+     * 'nova:4001', or a planet pict), or null for no image. Already prefixed —
+     * the caller must NOT add another 'nova:'. */
     image: string | null;
     /** Body: greeting, hostile line, or planet/escort status text. */
     body: string;

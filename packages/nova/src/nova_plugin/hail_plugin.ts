@@ -21,6 +21,7 @@ import {
 } from './hail.js';
 import { shipDisposition } from './iff_plugin.js';
 import { NpcComponent, NpcSteeringSystem } from './npc_ai_plugin.js';
+import { ShootAllWeaponsComponent } from './npc_plugin.js';
 import { CreditsComponent } from './player_state_plugin.js';
 import { GovtsResource, LegalRecordsComponent } from './reputation_plugin.js';
 import { findControlledEntity } from './ship_control.js';
@@ -127,11 +128,23 @@ export function applyHail(world: World, peerId: string | undefined,
     const playerRecords = player.components.get(LegalRecordsComponent);
     const disposition = shipDisposition(targetGovt, playerGovt, playerRecords);
 
+    // Behavioral hostility: a ship whose AI is attacking the player (mode
+    // 'attack' with its target pointed at the player) is hostile regardless
+    // of politics — the same rule the target corners use (iff_plugin's
+    // targetCornerStyle), including the legacy dev-enemy ShootAllWeapons
+    // marker. Computed from synced state so it matches the display dialog.
+    const targetsPlayer =
+        target.components.get(TargetComponent)?.target === found.uuid;
+    const targetNpcMode = target.components.get(NpcComponent)?.mode;
+    const attackingPlayer = targetsPlayer && (targetNpcMode === 'attack'
+        || target.components.has(ShootAllWeaponsComponent));
+
     if (action.kind === 'requestAssistance') {
         if (!canRequestAssistance({
             disposition,
             playerNeedsHelp: playerNeedsHelp(player),
             govt: targetGovt,
+            attackingPlayer,
         })) {
             return;
         }
@@ -142,8 +155,11 @@ export function applyHail(world: World, peerId: string | undefined,
         return;
     }
 
-    // Bribe / beg for mercy: only a hostile, bribe-taking ship bargains.
-    if (disposition !== 'hostile') {
+    // Bribe / beg for mercy: only a hostile, bribe-taking ship bargains. A
+    // ship actively attacking the player counts as hostile here even if its
+    // politics are neutral (behavioral hostility), so the player can buy it
+    // off just like a politically hostile one.
+    if (disposition !== 'hostile' && !attackingPlayer) {
         return;
     }
     const aiType = target.components.get(NpcComponent)?.aiType;

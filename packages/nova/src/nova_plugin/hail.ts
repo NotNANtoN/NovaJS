@@ -99,13 +99,19 @@ export type ShipHailResponse =
  * disposition. `disposition` is the same reading the radar/target-corners
  * use (shipDisposition). `aiType` selects the bribe flag; `takesBribes` is
  * exposed so the caller need not re-derive it.
+ *
+ * `attackingPlayer` is BEHAVIORAL hostility — a ship currently attacking the
+ * player is hostile regardless of politics (the same rule targetCornerStyle
+ * uses in iff_plugin), so a neutral-govt warship the player provoked greets
+ * with hostility and a Beg for Mercy / bribe offer, not a friendly hello.
  */
 export function shipHailResponse(govt: GovtData | undefined,
-    disposition: Disposition, aiType: number | undefined): ShipHailResponse {
+    disposition: Disposition, aiType: number | undefined,
+    attackingPlayer = false): ShipHailResponse {
     if (govt?.flags.cantBeHailed) {
         return { kind: 'cantHail' };
     }
-    if (disposition === 'hostile') {
+    if (attackingPlayer || disposition === 'hostile') {
         // Beg for mercy / bribe is offered only when the govt bargains and
         // is not the silent, un-negotiable type (Flags2 noAssistOrMercy).
         const canBribe = !govt?.flags2.noAssistOrMercy
@@ -125,13 +131,20 @@ export function shipHailResponse(govt: GovtData | undefined,
  * the ship is not hostile, and the govt is talkative (not Flags2
  * noAssistOrMercy). Roadside-Assistance govts still gate on player need —
  * they repair/refuel, they don't hand out charity to a healthy ship.
+ *
+ * `attackingPlayer` is behavioral hostility (see shipHailResponse): a ship
+ * actively attacking the player refuses assistance even if its politics are
+ * neutral — otherwise a neutral-govt warship shooting a disabled player would
+ * still offer to fly over and fully repair them (the assistance exploit).
  */
 export function canRequestAssistance(opts: {
     disposition: Disposition,
     playerNeedsHelp: boolean,
     govt: GovtData | undefined,
+    attackingPlayer?: boolean,
 }): boolean {
-    if (!opts.playerNeedsHelp || opts.disposition === 'hostile') {
+    if (!opts.playerNeedsHelp || opts.disposition === 'hostile'
+        || opts.attackingPlayer) {
         return false;
     }
     if (opts.govt?.flags.cantBeHailed || opts.govt?.flags2.noAssistOrMercy) {

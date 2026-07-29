@@ -2,12 +2,16 @@ import 'jasmine';
 import { getDefaultGovtData } from 'novadatainterface/govt_data';
 import { MockGameData } from 'novadatainterface/mock_game_data';
 import { getDefaultShipData } from 'novadatainterface/ship_data';
+import { WeaponDamage } from 'novadatainterface/weapon_data';
 import { Angle } from 'nova_ecs/datatypes/angle';
 import { Position } from 'nova_ecs/datatypes/position';
 import { Vector } from 'nova_ecs/datatypes/vector';
+import { Entity } from 'nova_ecs/entity';
 import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import { World } from 'nova_ecs/world';
+import { DamagedEvent } from './death_plugin.js';
 import { DisabledComponent } from './disabled_component.js';
+import { SourceComponent } from './fire_weapon_plugin.js';
 import { completeEntity } from './entity_data_loader.js';
 import { GovtComponent } from './govt_component.js';
 import { AssistingComponent } from './hail_component.js';
@@ -39,8 +43,16 @@ async function makeWorld() {
     const meek = getDefaultGovtData();
     meek.id = 'test:meek';
     gameData.data.Govt.map.set('test:meek', meek);
+    // A politically NEUTRAL govt whose warships take bribes — used to test
+    // behavioral hostility: only "currently attacking the player" makes one of
+    // its ships bargain / refuse assistance, not its (neutral) politics.
+    const armed = getDefaultGovtData();
+    armed.id = 'test:armed';
+    armed.flags.warshipsTakeBribes = true;
+    gameData.data.Govt.map.set('test:armed', armed);
     await gameData.data.Govt.get('test:pirate');
     await gameData.data.Govt.get('test:meek');
+    await gameData.data.Govt.get('test:armed');
 
     const world = await makeSystem('test:system', gameData);
 
@@ -99,15 +111,39 @@ describe('applyHail: bribe / beg for mercy', () => {
                 .toBeUndefined();
         });
 
-    it('does nothing to a non-hostile ship', async () => {
+    it('does nothing to a non-hostile ship the player is not fighting',
+        async () => {
+            // Neutral politics AND not attacking the player: no bribe to make.
+            const { world, addShip } = await makeWorld();
+            await addShip('target', 500, 0, ship => {
+                ship.components.set(GovtComponent, { id: 'test:meek' });
+                ship.components.set(NpcComponent, { aiType: 3 });
+            });
+            applyHail(world, PEER, { kind: 'bribe', target: 'target' });
+            expect(player(world).components.get(CreditsComponent)!.credits)
+                .toBe(100_000);
+        });
+
+    it('bribes a NEUTRAL-govt ship that is attacking the player', async () => {
+        // Behavioral hostility: a bribe-taking neutral warship the player
+        // provoked (mode 'attack' aimed at the player) bargains just like a
+        // politically hostile pirate — credits deducted, attack dropped.
         const { world, addShip } = await makeWorld();
         await addShip('target', 500, 0, ship => {
-            ship.components.set(GovtComponent, { id: 'test:meek' });
-            ship.components.set(NpcComponent, { aiType: 3 });
+            ship.components.set(GovtComponent, { id: 'test:armed' });
+            ship.components.set(NpcComponent,
+                { aiType: 3, mode: 'attack', aggressor: 'player' });
+            ship.components.set(TargetComponent, { target: 'player' });
         });
         applyHail(world, PEER, { kind: 'bribe', target: 'target' });
+        // 10% of 100k (armed is not a largerBribes govt).
         expect(player(world).components.get(CreditsComponent)!.credits)
-            .toBe(100_000);
+            .toBe(90_000);
+        const npc = target(world).components.get(NpcComponent)!;
+        expect(npc.pacifiedFrom).toBe('player');
+        expect(npc.pacifiedUntil).toBeGreaterThan(0);
+        expect(target(world).components.get(TargetComponent)!.target)
+            .toBeUndefined();
     });
 
     it('the pacify reprieve lapses after BRIBE_PACIFY_MS', async () => {
@@ -120,6 +156,40 @@ describe('applyHail: bribe / beg for mercy', () => {
         const npc = target(world).components.get(NpcComponent)!;
         expect(npc.pacifiedUntil).toBeGreaterThanOrEqual(BRIBE_PACIFY_MS);
     });
+
+    it('the reprieve is voided when the briber shoots the ship again',
+        async () => {
+            // A bribe lasts only "until the player provokes them again": once
+            // the briber damages the pacified ship, NpcAggressionSystem clears
+            // the reprieve so the ship resumes hostility.
+            const { world, addShip } = await makeWorld();
+            await addShip('target', 500, 0, ship => {
+                ship.components.set(GovtComponent, { id: 'test:pirate' });
+                ship.components.set(NpcComponent, { aiType: 3 });
+            });
+            applyHail(world, PEER, { kind: 'bribe', target: 'target' });
+            const npc = target(world).components.get(NpcComponent)!;
+            expect(npc.pacifiedFrom).toBe('player');
+            expect(npc.pacifiedUntil).toBeGreaterThan(0);
+
+            // A projectile fired by the player (its SourceComponent) hits the
+            // pacified ship. NpcAggressionSystem reads the source off the
+            // damager entity, so add the shot as a real entity.
+            const zeroDamage: WeaponDamage = {
+                shield: 0, armor: 0, ionization: 0, ionizationColor: 0,
+                passThroughShield: 0, knockback: 0,
+            };
+            world.entities.set('playerShot',
+                new Entity().addComponent(SourceComponent, 'player'));
+            world.emit(DamagedEvent,
+                { damage: zeroDamage, damager: 'playerShot' }, ['target']);
+            world.step();
+
+            const after = target(world).components.get(NpcComponent)!;
+            expect(after.aggressor).toBe('player');
+            expect(after.pacifiedFrom).toBeUndefined();
+            expect(after.pacifiedUntil).toBeUndefined();
+        });
 });
 
 describe('applyHail: request assistance', () => {
@@ -142,6 +212,23 @@ describe('applyHail: request assistance', () => {
         await addShip('target', 150, 0, ship => {
             ship.components.set(GovtComponent, { id: 'test:meek' });
             ship.components.set(NpcComponent, { aiType: 3 });
+        });
+        applyHail(world, PEER,
+            { kind: 'requestAssistance', target: 'target' });
+        expect(target(world).components.has(AssistingComponent)).toBeFalse();
+    });
+
+    it('refuses a neutral-govt ship ATTACKING the disabled player', async () => {
+        // The assistance exploit: a neutral warship the player provoked is
+        // shooting the disabled player — it must not also be able to fly over
+        // and fully repair them. Behavioral hostility bars the request.
+        const { world, addShip } = await makeWorld();
+        player(world).components.set(DisabledComponent, { repairAt: null });
+        await addShip('target', 150, 0, ship => {
+            ship.components.set(GovtComponent, { id: 'test:meek' });
+            ship.components.set(NpcComponent,
+                { aiType: 3, mode: 'attack' });
+            ship.components.set(TargetComponent, { target: 'player' });
         });
         applyHail(world, PEER,
             { kind: 'requestAssistance', target: 'target' });
