@@ -665,6 +665,13 @@ export interface MissionEvent {
         | 'shipDone';
     /** The mission's dësc text for this event ('' if none). */
     text: string;
+    /**
+     * The global PICT id of the dësc Graphic paired with `text`, shown
+     * beside it in the result popup (completion/fail/shipDone), or absent
+     * when that dësc has no graphic. Already a resolved global id from the
+     * misn parser (misn_parse.ts descGraphic), so it needs no prefixing.
+     */
+    pict?: string | null;
     /** Credits paid (positive) with this event, if any. */
     payment?: number;
 }
@@ -864,6 +871,10 @@ export function acceptOffer(machinery: MissionMachineryContext,
             missionName: mission.name,
             type: 'autoAborted',
             text: mission.briefText,
+            // The autoAborted popup shows briefText, so pair it with the
+            // briefing dësc's graphic (not failPict) to keep the picture
+            // consistent with the text beside it.
+            pict: mission.briefPict,
             payment,
         });
         return { accepted: true };
@@ -1000,6 +1011,7 @@ export function failMission(machinery: MissionMachineryContext,
         missionName: mission?.name ?? missionId,
         type: 'failed',
         text: mission?.failText ?? '',
+        pict: mission?.failPict ?? null,
     });
 }
 
@@ -1034,6 +1046,7 @@ function completeMission(machinery: MissionMachineryContext,
         missionName: mission.name,
         type: 'completed',
         text: mission.completionText,
+        pict: mission.completionPict,
         payment,
     });
 }
@@ -1062,6 +1075,7 @@ function runShipDoneIfPending(machinery: MissionMachineryContext,
             missionName: mission.name,
             type: 'shipDone',
             text: mission.shipDoneText,
+            pict: mission.shipDonePict,
         });
     }
 }
@@ -1078,6 +1092,16 @@ export function runPendingShipDone(machinery: MissionMachineryContext,
     const { state } = machinery;
     let ran = 0;
     for (const active of [...state.missions.values()]) {
+        // The loop iterates a snapshot; an earlier mission's OnShipDone
+        // can abort/fail a later one via an Axxx/Fxxx set string, removing
+        // it from state.missions mid-loop (abort/fail leave shipDonePending
+        // untouched). Skip any mission that is no longer active so a dead
+        // mission's OnShipDone (and shipDone event) never runs, mirroring
+        // the guard failExpiredMissions gets for free from failMission's
+        // early return. See mission_logic_test.ts (self/sibling abort).
+        if (!state.missions.has(active.id)) {
+            continue;
+        }
         if (!active.shipObjective?.shipDonePending) {
             continue;
         }
@@ -1167,6 +1191,15 @@ export function processLanding(machinery: MissionMachineryContext,
         // landing) the moment the goal completed; this catches the case
         // where the goal completed at this very landing's date advance.
         runShipDoneIfPending(machinery, active, mission, outfits);
+        // OnShipDone's set string can abort/fail THIS mission (an Axxx/Fxxx
+        // naming itself, which the abort/fail hooks allow since it is still
+        // active at that point). Re-check membership before falling through
+        // to completion so a self-aborted mission isn't also completed —
+        // which would pay PayVal and push a 'completed' event for a mission
+        // that was just aborted. See mission_logic_test.ts (self-abort).
+        if (!state.missions.has(active.id)) {
+            continue;
+        }
         if (landedAt(active.travelPlanet) && !active.travelDone) {
             let transferred = true;
             if (mission.pickupMode === 1) {

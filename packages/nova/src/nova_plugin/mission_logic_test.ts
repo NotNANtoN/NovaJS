@@ -894,6 +894,89 @@ describe('accept / landing / completion flow', () => {
         expect(runPendingShipDone(machinery)).toBe(0);
     });
 
+    // M5(b): runPendingShipDone iterates a snapshot of state.missions. If
+    // one mission's OnShipDone aborts a sibling, the sibling is gone from
+    // state.missions but its shipDonePending flag is untouched, so without
+    // a loop-top membership guard the snapshot would still run the dead
+    // sibling's OnShipDone and fire a shipDone event for it.
+    it('runPendingShipDone skips a sibling aborted by an earlier '
+        + 'mission\'s OnShipDone', () => {
+        const a = makeMission({
+            id: 'nova:230',
+            shipGoal: 0, shipCount: 1, shipDudeId: 'nova:240',
+            onShipDone: 'a231', // A's OnShipDone aborts sibling B.
+            shipDoneText: 'A done.',
+        });
+        const b = makeMission({
+            id: 'nova:231',
+            shipGoal: 0, shipCount: 1, shipDudeId: 'nova:240',
+            onShipDone: 'b99', // Must NOT run: B is aborted first.
+            onAbort: 'b70', // Proves B was aborted.
+            shipDoneText: 'B done.',
+        });
+        const state = makeState();
+        const machinery = makeMachinery(state, [a, b], {
+            systems: [{ id: 'nova:200', govt: null, links: [] }],
+            systemIdOfStellar: () => 'nova:200',
+        });
+        acceptOffer(machinery, makeMissionOffer(a, machinery.offerContext())!);
+        acceptOffer(machinery, makeMissionOffer(b, machinery.offerContext())!);
+        for (const id of ['nova:230', 'nova:231']) {
+            const obj = state.missions.get(id)!.shipObjective!;
+            obj.complete = true;
+            obj.shipDonePending = true;
+        }
+        // Only A's OnShipDone runs; it aborts B before the snapshot reaches
+        // it, so B's OnShipDone never fires.
+        expect(runPendingShipDone(machinery)).toBe(1);
+        expect(state.bits.has(70)).toBe(true); // B was aborted.
+        expect(state.bits.has(99)).toBe(false); // B's OnShipDone did NOT run.
+        expect(state.missions.has('nova:231')).toBe(false);
+        const shipDoneEvents = state.events.filter(e => e.type === 'shipDone');
+        expect(shipDoneEvents.length).toBe(1);
+        expect(shipDoneEvents[0].missionId).toBe('nova:230');
+    });
+
+    // M5(a): in processLanding, OnShipDone runs before the completion
+    // check. Its set string can abort THIS mission (Axxx naming itself);
+    // without a membership re-check the mission would then also be
+    // completed — paying PayVal and pushing a 'completed' event for a
+    // mission that was just aborted.
+    it('processLanding does not complete a mission whose OnShipDone '
+        + 'aborts itself', () => {
+        const mission = makeMission({
+            id: 'nova:232',
+            payVal: 1000,
+            shipGoal: 0, shipCount: 1, shipDudeId: 'nova:240',
+            // Completes at the landed stellar (no travel leg).
+            returnStel: 128, returnStelId: 'nova:128',
+            onShipDone: 'a232', // OnShipDone aborts THIS mission.
+            onAbort: 'b71',
+            shipDoneText: 'Goal done.',
+            completionText: 'Paid in full.',
+        });
+        const state = makeState();
+        const machinery = makeMachinery(state, [mission], {
+            systems: [{ id: 'nova:200', govt: null, links: [] }],
+            systemIdOfStellar: () => 'nova:200',
+        });
+        acceptOffer(machinery,
+            makeMissionOffer(mission, machinery.offerContext())!);
+        const obj = state.missions.get('nova:232')!.shipObjective!;
+        obj.complete = true;
+        obj.shipDonePending = true;
+        const creditsBefore = state.credits.credits;
+
+        processLanding(machinery, 'nova:128', 1000);
+
+        expect(state.missions.has('nova:232')).toBe(false);
+        expect(state.bits.has(71)).toBe(true); // Aborted (OnAbort ran).
+        // Not completed: PayVal not paid, no 'completed' event.
+        expect(state.credits.credits).toBe(creditsBefore);
+        expect(state.events.some(e => e.type === 'completed')).toBe(false);
+        expect(state.events.some(e => e.type === 'aborted')).toBe(true);
+    });
+
     it('freezes failIfPlayerDisabledOrDestroyed onto the active mission', () => {
         const flagged = makeMission({ id: 'nova:206' });
         flagged.flags = {

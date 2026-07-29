@@ -386,8 +386,12 @@ export class Spaceport extends Menu<Entity> {
             }
             if (event.type === 'completed' || event.type === 'failed'
                 || event.type === 'autoAborted' || event.type === 'shipDone') {
+                // Show the result dësc's graphic beside the text when the
+                // mission set one (completion/fail/shipDone/brief pict);
+                // OfferPopup falls back to the plain briefing frame when
+                // pict is absent.
                 await this.offerPopup.show(event.text, { accept: 'Okay' },
-                    { style: 'briefing' });
+                    { pict: event.pict, style: 'briefing' });
             }
         }
 
