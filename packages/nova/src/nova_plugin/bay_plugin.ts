@@ -17,7 +17,7 @@ import { EscortCommandComponent } from './escort_command.js';
 import { ExitPointData } from './exit_point.js';
 import { OwnerComponent, SourceComponent, WeaponConstructors, WeaponEntry } from './fire_weapon_plugin.js';
 import { DeathAIComponent } from './npc_plugin.js';
-import { FormationComponent } from './npc_ai_plugin.js';
+import { FormationComponent, nextFormationSlot } from './npc_ai_plugin.js';
 import { ShipComponent } from './ship_plugin.js';
 import { TargetComponent } from './target_component.js';
 import { WeaponsStateComponent } from './weapons_state.js';
@@ -115,10 +115,10 @@ class BayWeaponEntry extends WeaponEntry {
         // launch straight at the carrier's target — attacking is the
         // 'attack' escort command's job (escort_command_plugin), so a
         // launch needs no target at all.
-        const followers = this.runQuery(BayFormationQuery)
-            .filter(([formation]) => formation.leader === source).length;
-        ship.components.set(FormationComponent,
-            { leader: source, slot: followers });
+        const slot = nextFormationSlot(
+            this.runQuery(BayFormationQuery).map(([formation]) => formation),
+            source);
+        ship.components.set(FormationComponent, { leader: source, slot });
         ship.components.set(EscortCommandComponent,
             { command: 'formation' });
 

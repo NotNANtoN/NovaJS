@@ -1,6 +1,7 @@
 import * as t from 'io-ts';
 import { Entities, GetEntity, UUID } from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
+import { EntityMap } from 'nova_ecs/entity_map';
 import { Angle } from 'nova_ecs/datatypes/angle';
 import { Position } from 'nova_ecs/datatypes/position';
 import { Vector } from 'nova_ecs/datatypes/vector';
@@ -241,6 +242,47 @@ export const Formation = t.intersection([t.type({
 })]);
 export type Formation = t.TypeOf<typeof Formation>;
 export const FormationComponent = new Component<Formation>('FormationComponent');
+
+/**
+ * The first free formation slot on `leaderUuid`: one past the highest
+ * slot number any live sibling holds (0 when the leader has no
+ * followers yet).
+ *
+ * COUNTING siblings instead would collide after a mid-formation death:
+ * a leader holding slots {0, 1, 2} that loses slot 1 has a sibling
+ * count of 2, which is still a live escort's slot, and FormationSystem
+ * ranks stations by `siblingSlots.indexOf(slot)` — the two duplicates
+ * would resolve to the same rank and stack on one station while
+ * another sits empty.
+ *
+ * Taking a MAX (rather than accumulating) makes the result independent
+ * of iteration order, so this is safe to run over an unordered entity
+ * map in the deterministic simulation.
+ */
+export function nextFormationSlot(formations: Iterable<Formation>,
+    leaderUuid: string): number {
+    let slot = 0;
+    for (const formation of formations) {
+        if (formation.leader === leaderUuid) {
+            slot = Math.max(slot, formation.slot + 1);
+        }
+    }
+    return slot;
+}
+
+/**
+ * Every formation present in `entities` — the adapter for sim systems
+ * that hold an EntityMap rather than a formation query result, so they
+ * can feed `nextFormationSlot`.
+ */
+export function* formationsIn(entities: EntityMap): Iterable<Formation> {
+    for (const [, entity] of entities) {
+        const formation = entity.components.get(FormationComponent);
+        if (formation) {
+            yield formation;
+        }
+    }
+}
 
 /**
  * Formation slot geometry: the LEADER is the apex of the triangle, and

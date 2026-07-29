@@ -9,6 +9,13 @@ import { SpobResource } from "../resource_parsers/spob_resource.js";
 import { BaseParse } from "./base_parse.js";
 
 
+/** Resource ids below 128 are reserved by the system; a CustPicID in that
+ * range means "no custom landscape" (EVN Bible p. 60). */
+const MIN_RESOURCE_ID = 128;
+/** CustPicID is parsed as a uint16 (spob_resource.ts), so the usual
+ * "omitted" encoding of -1 arrives as 65535 rather than a negative. */
+const NO_CUSTOM_LANDING_PICT = 65535;
+
 export async function PlanetParse(spob: SpobResource, notFoundFunction: (m: string) => void): Promise<PlanetData> {
     var base: BaseData = await BaseParse(spob, notFoundFunction);
 
@@ -33,9 +40,23 @@ export async function PlanetParse(spob: SpobResource, notFoundFunction: (m: stri
     // Kane (Type 34, CustPicID -1) renders exactly PICT 10034. Hypergates,
     // wormholes, and unlandable stellars have no standard landscape PICT in
     // the game data; only those fall through to the default placeholder.
+    //
+    // The range test is explicit rather than "whatever the lookup misses":
+    // a CustPicID that IS set to a real id but fails to resolve is a data
+    // error worth reporting, and must not be silently swallowed by the
+    // standard-landscape fallback.
     var pictID: string;
-    var pict = spob.idSpace.PICT[spob.landingPictID]
-        ?? spob.idSpace.PICT[10000 + spob.type];
+    const customPictSet = spob.landingPictID >= MIN_RESOURCE_ID
+        && spob.landingPictID !== NO_CUSTOM_LANDING_PICT;
+    var pict = customPictSet
+        ? spob.idSpace.PICT[spob.landingPictID]
+        : undefined;
+    if (customPictSet && !pict) {
+        notFoundFunction("No matching custom landing PICT of id "
+            + spob.landingPictID + " for spöb of id " + base.id
+            + "; falling back to the standard landscape");
+    }
+    pict = pict ?? spob.idSpace.PICT[10000 + spob.type];
     if (pict) {
         pictID = pict.globalID;
     }

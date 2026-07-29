@@ -269,6 +269,46 @@ describe("PlanetParse landing picture", () => {
         expect(planet.landingPict).toBe("nova:10034");
     });
 
+    it("warns when an in-range CustPicID does not resolve, then falls back" +
+        " to the standard landscape", async () => {
+        // CustPicID 11000 IS set (>= 128) but no such PICT exists: a data
+        // error. It must be reported, not silently swallowed by the
+        // standard-landscape fallback, which still supplies the render.
+        const notFound: string[] = [];
+        idSpace.PICT[10034] = stub("nova:10034");
+        const spob = new SpobResource(
+            buildSpob({
+                flags2: 0, hyperlinks: [], ambientSound: -1, fee: 0,
+                type: 34, landingPictID: 11000,
+            }).resource("spöb", 200), idSpace);
+        spob.globalID = "nova:200";
+        spob.prefix = "nova";
+        const planet = await PlanetParse(spob, m => notFound.push(m));
+        expect(planet.landingPict).toBe("nova:10034");
+        expect(notFound.some(m => m.includes("custom landing PICT")
+            && m.includes("11000"))).toBeTrue();
+    });
+
+    it("does not warn about a custom landscape when CustPicID is omitted",
+        async () => {
+            // -1 (reads 65535 through the uint16 field) and any id below 128
+            // both mean "no custom landscape" — an expected, silent path.
+            for (const landingPictID of [-1, 0, 127]) {
+                const notFound: string[] = [];
+                idSpace.PICT[10034] = stub("nova:10034");
+                const spob = new SpobResource(
+                    buildSpob({
+                        flags2: 0, hyperlinks: [], ambientSound: -1, fee: 0,
+                        type: 34, landingPictID,
+                    }).resource("spöb", 200), idSpace);
+                spob.globalID = "nova:200";
+                spob.prefix = "nova";
+                const planet = await PlanetParse(spob, m => notFound.push(m));
+                expect(planet.landingPict).toBe("nova:10034");
+                expect(notFound.some(m => m.includes("PICT"))).toBeFalse();
+            }
+        });
+
     it("keeps the default placeholder when neither a custom nor a standard" +
         " landscape PICT exists (hypergates, unlandable stellars)", async () => {
         const notFound: string[] = [];
