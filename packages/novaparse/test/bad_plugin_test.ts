@@ -118,8 +118,13 @@ describe("NovaParse id-space failure policy", () => {
         const loggedText = errorSpy.calls.allArgs()
             .map(args => args.map(String).join(" "))
             .join("\n");
-        // The underlying ENOENT (missing resource fork) is surfaced.
-        expect(loggedText).toContain("ENOENT");
+        // The underlying missing-resource-fork error is surfaced. The errno
+        // is platform-dependent: on macOS opening "..namedfork/rsrc" on a
+        // regular file yields ENOENT (the named fork simply doesn't exist),
+        // while on Linux the path traversal fails at the regular-file
+        // component and yields ENOTDIR instead. Either way the parser must
+        // surface the underlying error rather than silently swallowing it.
+        expect(loggedText).toMatch(/ENOENT|ENOTDIR/);
     });
 
     it("warns loudly (mentioning the xattr/resource-fork gotcha) for a plug-in that parses to zero resources", async () => {

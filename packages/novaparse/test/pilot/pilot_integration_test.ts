@@ -119,7 +119,14 @@ describe("readPilot on real EV Nova saves", () => {
         if (!stockDataPresent()) {
             return;
         }
-        idSpace = await new IDSpaceHandler(NOVA_DATA_PATH).getIDSpace();
+        // Base "Nova Files" data ONLY (novaPlugins: null). Pilot parsing only
+        // needs the stock idSpace, and on some machines Nova_Data is a symlink
+        // to read-only canonical data with no Plug-ins directory — requiring
+        // one here would hard-fail the beforeAll instead of letting the specs
+        // pending() out when the pilot fixtures are absent. See
+        // simulation_test_fixture.ts for the same opt-out.
+        idSpace = await new IDSpaceHandler(NOVA_DATA_PATH,
+            { novaFiles: "Nova Files", novaPlugins: null }).getIDSpace();
     });
 
     function requireFixtures(pilotPath: string, mac: boolean):
