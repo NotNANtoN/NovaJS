@@ -921,6 +921,11 @@ const DrawStatusBarTarget = new System({
             statusBar.drawTarget(displayName(pers?.name ?? shipData.name),
                 shield?.percent, armor?.percent, shipGraphic,
                 disabled !== undefined, subtitle, government);
+        } else {
+            // The target exists but the query missed — e.g. a just-replicated
+            // ship whose ShipDataComponent isn't in the display world yet. Clear
+            // the panel so it doesn't keep showing the previous target's data.
+            statusBar.clearTarget();
         }
     }
 })
