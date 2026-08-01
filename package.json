@@ -15,7 +15,6 @@
   },
   "devDependencies": {
     "@pixi/filter-color-matrix": "^7.4.3",
-    "@pixi/particle-emitter": "^5.0.8",
     "@pixi/sound": "^5.2.3",
     "@types/argparse": "^2.0.10",
     "@types/express": "^4.17.17",

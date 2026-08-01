@@ -1,7 +1,5 @@
 import { ParticleConfig } from "novadatainterface/weapon_data";
-import { GetEntity } from "nova_ecs/arg_types";
 import { Component } from "nova_ecs/component";
-import { DeleteEvent } from "nova_ecs/events";
 import { Plugin } from "nova_ecs/plugin";
 import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
 import { TimeResource } from "nova_ecs/plugins/time_plugin";
@@ -9,16 +7,41 @@ import { Provide } from "nova_ecs/provide";
 import { Resource } from "nova_ecs/resource";
 import { System } from "nova_ecs/system";
 import { SingletonComponent } from "nova_ecs/world";
-import * as particles from "@pixi/particle-emitter";
-import * as PIXI from "pixi.js";
-import { ProjectileDataComponent } from "../nova_plugin/projectile_data.js";
 import { AsteroidBreakEvent } from "../nova_plugin/asteroid_plugin.js";
 import { ProjectileCollisionEvent } from "../nova_plugin/projectile_plugin.js";
-import { PixiAppResource } from "./pixi_app_resource.js";
-import { Space } from "./space_resource.js";
+import { ProjectileDataComponent } from "../nova_plugin/projectile_data.js";
+import { GpuParticleSystem, PARTICLE_CAPACITY } from "./gpu_particles.js";
+import {
+    advanceEmission, BurstConfig, dustBurst, spawnBurst, spawnTrailSegment,
+    TRAIL_EMIT_HZ, weaponBurst,
+} from "./particle_effects.js";
+import { CameraFocus, Space } from "./space_resource.js";
 
+/**
+ * Weapon trails, hit sparks and asteroid breakup dust, all drawn by one
+ * GPU-resident particle system (see gpu_particles.ts).
+ *
+ * This plugin owns only the bridge from simulation events to birth
+ * records: nothing here allocates per particle, and nothing steps a
+ * particle. A projectile's trail is one small number per ENTITY (the
+ * emission accumulator); a hit or a breakup is a single call that writes
+ * N slots into the ring buffer. Particles outlive the entity that
+ * emitted them for free, because they are just records in the ring with
+ * a birth time — there is nothing to orphan and nothing to destroy.
+ */
 
-const ParticleContainerResource = new Resource<PIXI.Container>('ParticleContainerResource');
+export const ParticleSystemResource =
+    new Resource<GpuParticleSystem>('ParticleSystemResource');
+
+/**
+ * The wall-clock instant the particle clock counts from, captured on the
+ * first frame. Birth times and the shader's `uTime` are seconds since
+ * this instant because epoch milliseconds (~1.7e12) lose all sub-second
+ * precision once they are narrowed to the float32 a uniform carries.
+ */
+const ParticleTimeOriginResource =
+    new Resource<{ epochMs?: number }>('ParticleTimeOrigin');
+
 export const TrailParticlesComponent =
     new Component<ParticleConfig>('TrailParticlesComponent');
 
@@ -43,276 +66,152 @@ const HitParticlesProvider = Provide({
     }
 });
 
-const TrailEmitterComponent =
-    new Component<particles.Emitter>('TrailEmitterComponent');
-
-function makeEmitter(container: PIXI.Container, texture: PIXI.Texture,
-    fps: number, particleConfig: ParticleConfig): particles.Emitter {
-    return new particles.Emitter(container, particles.upgradeConfig({
-        alpha: {
-            start: 1,
-            end: 0,
-        },
-        scale: {
-            start: 1,
-            end: 1,
-            minimumScaleMultiplier: 1,
-        },
-        color: {
-            start: particleConfig.color.toString(16),
-            end: particleConfig.color.toString(16),
-        },
-        speed: {
-            start: particleConfig.velocity / 2,
-            end: particleConfig.velocity / 2,
-            minimumSpeedMultiplier: 1,
-        },
-        acceleration: {
-            x: 0,
-            y: 0,
-        },
-        maxSpeed: 0,
-        startRotation: {
-            min: 0,
-            max: 360
-        },
-        noRotation: true,
-        rotationSpeed: {
-            min: 0,
-            max: 0,
-        },
-        lifetime: {
-            min: particleConfig.lifeMin / 30,
-            max: particleConfig.lifeMax / 30,
-        },
-        blendMode: "add",
-        frequency: 1 / fps,
-        emitterLifetime: -1,
-        maxParticles: 1000,
-        pos: {
-            x: 0,
-            y: 0
-        },
-        addAtBack: false,
-        spawnType: "burst",
-        particlesPerWave: particleConfig.count,
-        particleSpacing: 0,
-        angleStart: 0,
-    }, [texture]));
+/**
+ * A projectile's trail state: its translated burst config, the fraction
+ * of a particle it owed at the end of the last step, and where it was
+ * then (so this step's particles can be laid along the segment it
+ * actually covered). Three numbers and one shared config object per
+ * projectile — the whole per-entity cost of a trail.
+ */
+interface TrailEmission {
+    config: BurstConfig;
+    /** Particles per second this projectile emits. */
+    rate: number;
+    accumulator: number;
+    lastX: number;
+    lastY: number;
 }
 
-const ParticleTextureResource = new Resource<PIXI.Texture>('ParticleTexture');
-const TrailEmitterProvider = Provide({
-    name: "TrailEmitterProvider",
-    provided: TrailEmitterComponent,
-    args: [TrailParticlesComponent, PixiAppResource,
-        ParticleContainerResource, ParticleTextureResource] as const,
-    factory(particleConfig, app, particleContainer, texture) {
-        const emitter = makeEmitter(particleContainer, texture, app.ticker.FPS,
-            particleConfig);
-        emitter.emit = true;
-        return emitter;
+const TrailEmissionComponent =
+    new Component<TrailEmission>('TrailEmissionComponent');
+
+const TrailEmissionProvider = Provide({
+    name: "TrailEmissionProvider",
+    provided: TrailEmissionComponent,
+    args: [TrailParticlesComponent, MovementStateComponent] as const,
+    factory(particleConfig, movementState): TrailEmission {
+        return {
+            config: weaponBurst(particleConfig),
+            rate: particleConfig.count * TRAIL_EMIT_HZ,
+            accumulator: 0,
+            lastX: movementState.position.x,
+            lastY: movementState.position.y,
+        };
     }
 });
-
-// Particle emitters waiting to be destroyed
-const OrphanParticleEmitters =
-    new Resource<Map<particles.Emitter, number>>('OrphanParticleEmitters');
-
-const OrphanEmittersSystem = new System({
-    name: 'OrphanParticleEmittersSystem',
-    args: [OrphanParticleEmitters, TimeResource, SingletonComponent] as const,
-    step(emitters, time) {
-        for (const [emitter, deleteTime] of emitters) {
-            emitter.update(time.delta_s);
-            if (time.time > deleteTime) {
-                emitter.destroy();
-                emitters.delete(emitter);
-            }
-        }
-    }
-});
-
-const TrailEmitterCleanup = new System({
-    name: 'TrailEmitterCleanup',
-    events: [DeleteEvent],
-    args: [TrailEmitterComponent, OrphanParticleEmitters, TimeResource, GetEntity] as const,
-    step(emitter, orphanEmitters, time, entity) {
-        emitter.emit = false;
-        orphanEmitters.set(emitter, time.time + emitter.maxLifetime * 1000);
-        entity.components.delete(TrailEmitterComponent);
-    }
-});
-
-const TrailEmitterSystem = new System({
-    name: "TrailEmitterSystem",
-    args: [MovementStateComponent, TrailEmitterComponent, TimeResource] as const,
-    step({ position }, emitter, time) {
-        emitter.updateOwnerPos(position.x, position.y);
-        emitter.update(time.delta_s);
-    }
-});
-
-/** How fast breakup dust drifts, px/s (the resource boxes drift 2.5-10). */
-const DUST_SPEED_START = 12;
-const DUST_SPEED_END = 3;
-/** How long a dust mote lingers before fading out completely, seconds. */
-const DUST_LIFE_MIN_S = 1.5;
-const DUST_LIFE_MAX_S = 3;
 
 /**
- * A dust cloud for an asteroid breakup: the röid's PartCount motes in
- * its PartColor, already spread across the asteroid's radius, drifting
- * slowly in the same speed regime as the resource boxes and fading
- * out. Deliberately NOT makeEmitter: that burst (point spawn, additive
- * blend, sub-0.05s lifetimes) reads as a firework, and the original
- * engine's effect reads as dust.
+ * Advances the one uniform the whole system runs on. Time is the display
+ * world's wall clock (the same clock every other display plugin renders
+ * against, so a paused or hidden tab freezes particles exactly like it
+ * freezes animations), rebased to seconds since the first frame: epoch
+ * milliseconds do not survive the float32 trip to the GPU.
  */
-function makeDustEmitter(container: PIXI.Container, texture: PIXI.Texture,
-    breakEvent: { particleCount: number, particleColor: number, radius: number }): particles.Emitter {
-    return new particles.Emitter(container, particles.upgradeConfig({
-        alpha: {
-            start: 0.9,
-            end: 0,
-        },
-        scale: {
-            start: 2,
-            end: 1,
-            minimumScaleMultiplier: 0.5,
-        },
-        color: {
-            start: breakEvent.particleColor.toString(16),
-            end: breakEvent.particleColor.toString(16),
-        },
-        speed: {
-            start: DUST_SPEED_START,
-            end: DUST_SPEED_END,
-            minimumSpeedMultiplier: 0.3,
-        },
-        acceleration: { x: 0, y: 0 },
-        maxSpeed: 0,
-        startRotation: { min: 0, max: 360 },
-        noRotation: true,
-        rotationSpeed: { min: 0, max: 0 },
-        lifetime: {
-            min: DUST_LIFE_MIN_S,
-            max: DUST_LIFE_MAX_S,
-        },
-        // Dust obscures; additive blending would glow like sparks.
-        blendMode: "normal",
-        frequency: 1,
-        emitterLifetime: -1,
-        maxParticles: 1000,
-        pos: { x: 0, y: 0 },
-        addAtBack: false,
-        spawnType: "circle",
-        particlesPerWave: breakEvent.particleCount,
-        spawnCircle: {
-            x: 0,
-            y: 0,
-            r: breakEvent.radius,
-        },
-    }, [texture]));
-}
+const ParticleTimeSystem = new System({
+    name: "ParticleTimeSystem",
+    args: [ParticleSystemResource, ParticleTimeOriginResource, TimeResource,
+        CameraFocus, SingletonComponent] as const,
+    step(particles, origin, time, cameraFocus) {
+        if (origin.epochMs === undefined) {
+            origin.epochMs = time.time;
+        }
+        particles.update((time.time - origin.epochMs) / 1000,
+            cameraFocus.x, cameraFocus.y);
+    }
+});
 
-const AsteroidBreakEmitterSystem = new System({
-    name: "AsteroidBreakEmitterSystem",
+const TrailEmissionSystem = new System({
+    name: "TrailEmissionSystem",
+    args: [MovementStateComponent, TrailEmissionComponent,
+        ParticleSystemResource, TimeResource] as const,
+    // So this frame's particles are stamped with this frame's clock.
+    after: [ParticleTimeSystem],
+    step({ position }, trail, particles, time) {
+        const { count, accumulator } = advanceEmission(
+            trail.accumulator, trail.rate, time.delta_s);
+        trail.accumulator = accumulator;
+        if (count > 0) {
+            spawnTrailSegment(particles, trail.config, count,
+                trail.lastX, trail.lastY, position.x, position.y);
+        }
+        trail.lastX = position.x;
+        trail.lastY = position.y;
+    }
+});
+
+const HitParticlesSystem = new System({
+    name: "HitParticlesSystem",
+    events: [ProjectileCollisionEvent],
+    args: [ProjectileCollisionEvent, ParticleSystemResource,
+        SingletonComponent] as const,
+    step(collision, particles) {
+        const particleConfig = collision.projectileData.hitParticles;
+        const position = collision.position;
+        if (!particleConfig?.count || !position) {
+            return;
+        }
+        spawnBurst(particles, weaponBurst(particleConfig),
+            position.x, position.y);
+    }
+});
+
+const AsteroidBreakParticlesSystem = new System({
+    name: "AsteroidBreakParticlesSystem",
     events: [AsteroidBreakEvent],
-    args: [AsteroidBreakEvent, Space, ParticleTextureResource,
-        OrphanParticleEmitters, TimeResource, SingletonComponent] as const,
-    step(breakEvent, space, texture, orphanEmitters, time) {
+    args: [AsteroidBreakEvent, ParticleSystemResource,
+        SingletonComponent] as const,
+    step(breakEvent, particles) {
         if (!breakEvent.particleCount) {
             return;
         }
-        const emitter = makeDustEmitter(space, texture, breakEvent);
-        emitter.updateOwnerPos(breakEvent.position.x, breakEvent.position.y);
-        emitter.emit = true;
-        // A tiny step spawns exactly one wave (the spawn timer starts
-        // due) without pre-aging the motes, whose lifetime is seconds —
-        // update(1) would burn a third of it before the first render.
-        emitter.update(0.001);
-        emitter.emit = false;
-        orphanEmitters.set(emitter, time.time + emitter.maxLifetime * 1000);
-    }
-});
-
-const HitEmitterSystem = new System({
-    name: "HitEmitterSystem",
-    events: [ProjectileCollisionEvent],
-    args: [ProjectileCollisionEvent, Space, ParticleTextureResource,
-        OrphanParticleEmitters, TimeResource, SingletonComponent] as const,
-    step(collision, space, texture, orphanEmitters, time) {
-        const particleConfig = collision.projectileData.hitParticles;
-        const position = collision.position;
-        if (!particleConfig || !position) {
-            return;
-        }
-        const emitter = makeEmitter(space, texture, 1 /* fps */, particleConfig);
-
-        emitter.updateOwnerPos(position.x, position.y);
-        emitter.emit = true;
-        // One single frame
-        emitter.update(1)
-        emitter.emit = false;
-        orphanEmitters.set(emitter, time.time + emitter.maxLifetime * 1000);
+        spawnBurst(particles, dustBurst(breakEvent),
+            breakEvent.position.x, breakEvent.position.y);
     }
 });
 
 export const ParticlesPlugin: Plugin = {
     name: "ParticlesPlugin",
     build(world) {
-        const app = world.resources.get(PixiAppResource);
-        if (!app) {
-            throw new Error('Expected world to have pixi app resource');
-        }
-
-        const graphics = new PIXI.Graphics();
-        graphics.lineStyle(1, 0xFFFFFF, 1, 0);
-        graphics.moveTo(0, 0);
-        graphics.lineTo(1, 0);
-        const texture = app.renderer.generateTexture(graphics);
-        world.resources.set(ParticleTextureResource, texture);
-        world.resources.set(OrphanParticleEmitters, new Map());
-
         const space = world.resources.get(Space);
         if (!space) {
             throw new Error('Expected world to have Space resource');
         }
-        const particleContainer = new PIXI.ParticleContainer(20_000, {
-            alpha: false,
-            position: true,
-            rotation: false,
-            scale: false,
-            tint: false,
-            uvs: false,
-            vertices: false,
-        });
-        particleContainer.autoResize = true;
-        particleContainer.baseTexture = texture.baseTexture;
 
-        space.addChild(particleContainer);
-        world.resources.set(ParticleContainerResource, particleContainer);
+        const particles = new GpuParticleSystem(PARTICLE_CAPACITY);
+        space.addChild(particles);
+        world.resources.set(ParticleSystemResource, particles);
+        world.resources.set(ParticleTimeOriginResource, {});
+
+        // Test lever, matching the other window handles the game exposes
+        // (novaSim, novaAutopilot, ...): live budget counters.
+        if (typeof window !== 'undefined') {
+            (window as any).novaParticleStats = () => particles.stats();
+        }
 
         world.addSystem(TrailParticlesProvider);
         world.addSystem(HitParticlesProvider);
-        world.addSystem(TrailEmitterProvider);
-        world.addSystem(TrailEmitterSystem);
-        world.addSystem(TrailEmitterCleanup);
-        world.addSystem(OrphanEmittersSystem);
-        world.addSystem(HitEmitterSystem);
-        world.addSystem(AsteroidBreakEmitterSystem);
+        world.addSystem(TrailEmissionProvider);
+        world.addSystem(ParticleTimeSystem);
+        world.addSystem(TrailEmissionSystem);
+        world.addSystem(HitParticlesSystem);
+        world.addSystem(AsteroidBreakParticlesSystem);
     },
     remove(world) {
         world.removeSystem(TrailParticlesProvider);
         world.removeSystem(HitParticlesProvider);
-        world.removeSystem(TrailEmitterProvider);
-        world.removeSystem(TrailEmitterSystem);
-        world.removeSystem(TrailEmitterCleanup);
-        world.removeSystem(OrphanEmittersSystem);
-        world.removeSystem(HitEmitterSystem);
-        world.removeSystem(AsteroidBreakEmitterSystem);
+        world.removeSystem(TrailEmissionProvider);
+        world.removeSystem(ParticleTimeSystem);
+        world.removeSystem(TrailEmissionSystem);
+        world.removeSystem(HitParticlesSystem);
+        world.removeSystem(AsteroidBreakParticlesSystem);
 
-        world.resources.delete(ParticleTextureResource);
-        world.resources.delete(OrphanParticleEmitters);
+        const particles = world.resources.get(ParticleSystemResource);
+        const space = world.resources.get(Space);
+        if (particles) {
+            space?.removeChild(particles);
+            particles.destroy();
+        }
+        world.resources.delete(ParticleSystemResource);
+        world.resources.delete(ParticleTimeOriginResource);
     }
 };
