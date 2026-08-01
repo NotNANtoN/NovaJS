@@ -17,6 +17,7 @@ import {
     AsteroidFieldComponent,
     AsteroidPlugin,
     DebrisComponent,
+    MAX_ASTEROID_SPEED,
     spawnAsteroids,
 } from './asteroid_plugin.js';
 import { TumbleAnimationComponent } from './animation_plugin.js';
@@ -221,6 +222,30 @@ describe('AsteroidDamageSystem', () => {
         world.step();
     }
 
+    /**
+     * Fires a knockback-only DamagedEvent at the rock. Non-blast
+     * knockback pushes along the damager's rotation, so `direction`
+     * aims the shove.
+     */
+    function knock(world: World, knockback: number, direction = new Angle(1)) {
+        const shot = world.entities.get('shot')!
+            .components.get(MovementStateComponent)!;
+        shot.rotation = direction;
+        world.emit(DamagedEvent, {
+            damage: {
+                armor: 0, shield: 0, ionization: 0, ionizationColor: 0,
+                passThroughShield: 0, knockback,
+            },
+            damager: 'shot',
+        }, ['rock']);
+        world.step();
+    }
+
+    function rockVelocity(world: World) {
+        return Vector.fromVectorLike(world.entities.get('rock')!
+            .components.get(MovementStateComponent)!.velocity);
+    }
+
     it('applies mass (armor) damage against the röid strength', async () => {
         const world = await makeBreakupWorld(5);
         hit(world, 30);
@@ -293,6 +318,60 @@ describe('AsteroidDamageSystem', () => {
             world.step();
         }
         expect(debrisEntities(world).length).toBe(0);
+    });
+
+    it('caps a huge knockback impulse, preserving its direction', async () => {
+        const world = await makeBreakupWorld(5);
+        const direction = new Angle(1);
+        // impact 1e6 on a mass-300 röid: 1e6 * 5 / 300 ~ 16667 px/s.
+        knock(world, 1e6, direction);
+
+        const velocity = rockVelocity(world);
+        expect(velocity.length).toBeCloseTo(MAX_ASTEROID_SPEED, 9);
+        const expected = direction.getUnitVector().scale(MAX_ASTEROID_SPEED);
+        expect(velocity.x).toBeCloseTo(expected.x, 9);
+        expect(velocity.y).toBeCloseTo(expected.y, 9);
+    });
+
+    it('stays at the cap however many impulses land', async () => {
+        const world = await makeBreakupWorld(5);
+        for (let i = 0; i < 200; i++) {
+            // Shoved from slightly different angles, as a real fight
+            // would; nothing bleeds the accumulated speed off between
+            // hits, which is what made asteroids run away.
+            knock(world, 20_000, new Angle(1 + (i % 3) * 0.1));
+            expect(rockVelocity(world).length)
+                .toBeLessThanOrEqual(MAX_ASTEROID_SPEED + 1e-9);
+        }
+        expect(rockVelocity(world).length).toBeCloseTo(MAX_ASTEROID_SPEED, 9);
+    });
+
+    it('leaves ordinary knockback alone', async () => {
+        const world = await makeBreakupWorld(5);
+        // A Hellhound Missile's impact (100) against the Big Test Rock
+        // (mass 300) is 100 * 5 / 300 px/s, nowhere near the cap.
+        knock(world, 100);
+        expect(rockVelocity(world).length).toBeCloseTo(100 * 5 / 300, 9);
+    });
+
+    it('caps fragments that inherit a fast parent velocity', async () => {
+        const world = await makeBreakupWorld(5);
+        const movement = world.entities.get('rock')!
+            .components.get(MovementStateComponent)!;
+        // A parent already at the cap; fragments add an ejection speed
+        // on top of the inherited velocity.
+        movement.velocity = new Angle(1).getUnitVector()
+            .scale(MAX_ASTEROID_SPEED);
+        hit(world, BIG_ROID.strength);
+
+        const fragments = asteroidEntities(world);
+        expect(fragments.length).toBeGreaterThan(0);
+        for (const [, entity] of fragments) {
+            const velocity = Vector.fromVectorLike(entity.components
+                .get(MovementStateComponent)!.velocity);
+            expect(velocity.length)
+                .toBeLessThanOrEqual(MAX_ASTEROID_SPEED + 1e-9);
+        }
     });
 });
 

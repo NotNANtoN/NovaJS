@@ -71,6 +71,46 @@ const RESPAWN_INTERVAL_MS = 5000;
 /** Asteroid drift speed range, px/s. */
 const ASTEROID_MIN_SPEED = 10;
 const ASTEROID_MAX_SPEED = 50;
+/**
+ * Ceiling on an asteroid's speed, px/s.
+ *
+ * Why one is needed: an asteroid has no MovementPhysicsComponent, so
+ * MovementSystem's `shortenToLength(maxVelocity)` — the thing that stops
+ * a knocked-around *ship* from running away — never applies to it, and
+ * AsteroidMotionSystem's drift has no drag. Every knockback impulse
+ * (AsteroidDamageSystem below) therefore accumulates forever. A beam is
+ * the worst case, because BeamDamageSystem re-emits DamagedEvent every
+ * step the beam dwells on its target: a Thunderhead Lance (wëap
+ * nova:166, impact 50) held on a Dust Small (röid nova:136, mass 100)
+ * adds 50 * 30 * 5 / 100 = 75 px/s for every second of contact, with
+ * nothing to bound it. Fragments inherit their parent's velocity, so a
+ * runaway rock also breaks into runaway fragments.
+ *
+ * The value: the top speed of the fastest ship in the stock game, so a
+ * capped asteroid can always be outrun. Excluding the Escape Pod (shïp
+ * nova:895, Speed 2000 -> 600 px/s; not a ship anyone flies), the
+ * fastest of the 288 stock shïp resources is the Manta (shïp nova:315,
+ * Speed 660). shïp Speed is pixels/frame * 100 at the original engine's
+ * 30 fps, which ship_parse converts with ShipSpeedConversionFactor =
+ * FPS / 100 = 0.3 into the px/s that MovementState.velocity and
+ * asteroid drift both use: 660 * 0.3 = 198 px/s.
+ *
+ * Hardcoded rather than derived at runtime: the sim must not vary with
+ * which plug-ins happen to be installed (see the fixture note in
+ * simulation_test_fixture.ts). asteroid_plugin_test.ts pins the
+ * derivation against real Nova Files data.
+ */
+export const MAX_ASTEROID_SPEED = 198;
+
+/**
+ * Clamps an asteroid velocity to MAX_ASTEROID_SPEED, preserving
+ * direction. Pure and allocation-free below the cap: Vector's
+ * shortenToLength returns the receiver untouched when it is already
+ * short enough, and only rescales (one new Vector) when it is not.
+ */
+function capAsteroidSpeed(velocity: Vector): Vector {
+    return velocity.shortenToLength(MAX_ASTEROID_SPEED);
+}
 /** Fragment ejection speed range, px/s (added to the parent velocity). */
 const FRAGMENT_MIN_SPEED = 15;
 const FRAGMENT_MAX_SPEED = 60;
@@ -297,7 +337,11 @@ export function makeAsteroid(gameData: SimulationGameDataInterface,
         .addComponent(TumbleAnimationComponent, tumbleFor(data.frameRate, random))
         .addComponent(MovementStateComponent, {
             position,
-            velocity,
+            // Every construction path goes through here (field spawn,
+            // respawn, breakup fragments that inherit a parent's
+            // velocity), so this is the one place a new asteroid can be
+            // born over the cap.
+            velocity: capAsteroidSpeed(velocity),
             // Fixed: the visible tumble is TumbleAnimationComponent,
             // not a sim rotation.
             rotation: new Angle(0),
@@ -518,9 +562,12 @@ const AsteroidDamageSystem = new System({
         // Knockback, scaled by the röid's mass.
         const damagerMovement = damagerParts?.[2];
         if (damage.knockback && damagerMovement && data.mass > 0) {
-            movement.velocity = movement.velocity.add(
+            // Capped: nothing else bounds an asteroid's speed (no
+            // MovementPhysicsComponent, no drag), so without this the
+            // impulses accumulate without limit. See MAX_ASTEROID_SPEED.
+            movement.velocity = capAsteroidSpeed(movement.velocity.add(
                 damagerMovement.rotation.getUnitVector()
-                    .scale(damage.knockback * scale * 5 / data.mass));
+                    .scale(damage.knockback * scale * 5 / data.mass)));
         }
 
         if (armorDamage <= 0) {
