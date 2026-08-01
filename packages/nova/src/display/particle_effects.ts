@@ -52,7 +52,7 @@ export interface BurstConfig {
  * pixel because the disc's feathered rim gives away a little of the
  * emitter sprite's hard edge.
  */
-export const SPARK_HALF_SIZE = 1.25;
+export const SPARK_HALF_SIZE = 0.625;
 
 /**
  * How much of a weapon's stored particle velocity becomes world speed.
@@ -91,8 +91,8 @@ const DUST_SPEED_END = 3;
 const DUST_LIFE_MIN_S = 1.5;
 const DUST_LIFE_MAX_S = 3;
 /** Dust motes start about this big and shrink as they fade, world px. */
-const DUST_HALF_SIZE_START = 1.5;
-const DUST_HALF_SIZE_END = 0.75;
+const DUST_HALF_SIZE_START = 0.75;
+const DUST_HALF_SIZE_END = 0.375;
 
 /**
  * A weapon's trail or hit particles as a burst. Both wëap particle
