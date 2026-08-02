@@ -1,7 +1,8 @@
 import 'jasmine';
 import { ParticleConfig } from 'novadatainterface/weapon_data';
 import {
-    FRAMES_PER_SECOND, PARTICLE_STRIDE_BYTES, ParticleRing, ParticleSpawn,
+    FRAMES_PER_SECOND, PARTICLE_BLOCK_SIZE, PARTICLE_STRIDE_BYTES,
+    ParticleBudget, ParticleRing, ParticleSpawn,
 } from './gpu_particles.js';
 import {
     advanceEmission, BurstConfig, dustBurst, MAX_TRAIL_PARTICLES_PER_STEP,
@@ -118,6 +119,134 @@ describe('ParticleRing', () => {
         ring.spawn(spawnRecord(), 0);
         ring.spawn(spawnRecord(), 0);
         expect(ring.takeDirtyRange()).toEqual({ start: 0, count: 4 });
+    });
+});
+
+/**
+ * The budget half of GpuParticleSystem: which blocks are worth drawing.
+ *
+ * Exercised through ParticleBudget rather than GpuParticleSystem itself
+ * because the latter's constructor calls PIXI.Shader.from, which reaches
+ * for a canvas to probe the GL precision and throws under node. The
+ * display object owns one of these and does nothing else with the
+ * expiry table: `spawn` and `stats` forward to it verbatim, and `update`
+ * only assigns `time` (plus the shader uniforms).
+ */
+describe('ParticleBudget', () => {
+    // Three blocks rather than the shipped 32: the draw-culling rules
+    // are per block, so the smallest ring that can wrap exercises them.
+    const CAPACITY = PARTICLE_BLOCK_SIZE * 3;
+
+    /** Spawns `count` particles of lifetime `life` at the current clock. */
+    function fill(system: ParticleBudget, count: number, life: number) {
+        for (let i = 0; i < count; i++) {
+            system.spawn(spawnRecord({ life }));
+        }
+    }
+
+    it('draws nothing before anything has spawned', () => {
+        const system = new ParticleBudget(CAPACITY);
+        system.time = 0;
+        expect(system.stats().liveBlocks).toEqual(0);
+        expect(system.stats().drawnInstances).toEqual(0);
+    });
+
+    it('lights up one more block per block the spawns reach into', () => {
+        const system = new ParticleBudget(CAPACITY);
+        system.time = 0;
+
+        fill(system, 1, 10);
+        expect(system.stats().liveBlocks).toEqual(1);
+
+        // Up to the last slot of block 0: still one block.
+        fill(system, PARTICLE_BLOCK_SIZE - 1, 10);
+        expect(system.stats().liveBlocks).toEqual(1);
+
+        // One slot into block 1.
+        fill(system, 1, 10);
+        expect(system.stats().liveBlocks).toEqual(2);
+    });
+
+    it('draws a whole block per live block', () => {
+        const system = new ParticleBudget(CAPACITY);
+        system.time = 0;
+        fill(system, PARTICLE_BLOCK_SIZE + 1, 10);
+        const stats = system.stats();
+        expect(stats.liveBlocks).toEqual(2);
+        expect(stats.drawnInstances).toEqual(stats.liveBlocks * PARTICLE_BLOCK_SIZE);
+        expect(stats.drawnInstances).toEqual(2 * PARTICLE_BLOCK_SIZE);
+    });
+
+    it('stops drawing once every particle has expired', () => {
+        const system = new ParticleBudget(CAPACITY);
+        system.time = 0;
+        fill(system, PARTICLE_BLOCK_SIZE + 1, 1);
+        expect(system.stats().liveBlocks).toEqual(2);
+
+        // Still inside the lifetime.
+        system.time = 0.9;
+        expect(system.stats().liveBlocks).toEqual(2);
+
+        system.time = 1.5;
+        expect(system.stats().liveBlocks).toEqual(0);
+        expect(system.stats().drawnInstances).toEqual(0);
+    });
+
+    it('keeps a block alive for its longest-lived particle', () => {
+        const system = new ParticleBudget(CAPACITY);
+        system.time = 0;
+        // The long-lived one is not the last written, so this is the
+        // `death > blockExpiry[block]` maximum rule and not "latest wins".
+        fill(system, 1, 10);
+        fill(system, 3, 0.5);
+        system.time = 1;
+        expect(system.stats().liveBlocks).toEqual(1);
+        system.time = 11;
+        expect(system.stats().liveBlocks).toEqual(0);
+    });
+
+    it('resets a block`s expiry when the ring wraps back onto its slot 0', () => {
+        const system = new ParticleBudget(CAPACITY);
+        system.time = 0;
+        // Fill the whole ring with long-lived particles, leaving the
+        // cursor back at slot 0.
+        fill(system, CAPACITY, 1000);
+        expect(system.stats().nextSlot).toEqual(0);
+        expect(system.stats().liveBlocks).toEqual(3);
+
+        // One short-lived particle lands on block 0's slot 0. That
+        // starts a fresh pass, so block 0's expiry RESTARTS from this
+        // particle rather than keeping the old pass's 1000 — the
+        // designed budget-overrun degradation: once spawning outruns
+        // capacity, the particles being overwritten stop being drawn.
+        system.time = 10;
+        system.spawn(spawnRecord({ life: 1 }));
+        expect(system.stats().overwritten).toEqual(1);
+
+        // At t = 11.5 block 0 is dark even though its (overwritten)
+        // original particles would still have had ~989s to live; the
+        // other two blocks are untouched.
+        system.time = 11.5;
+        const stats = system.stats();
+        expect(stats.liveBlocks).toEqual(2);
+        expect(stats.drawnInstances).toEqual(2 * PARTICLE_BLOCK_SIZE);
+    });
+
+    it('only resets on slot 0, not on every overwrite', () => {
+        const system = new ParticleBudget(CAPACITY);
+        system.time = 0;
+        fill(system, CAPACITY, 1000);
+
+        // Wrap onto slot 0 (reset to death 11), then onto slot 1 with a
+        // shorter life: the maximum rule keeps the block's expiry at 11.
+        system.time = 10;
+        system.spawn(spawnRecord({ life: 1 }));
+        system.spawn(spawnRecord({ life: 0.5 }));
+
+        system.time = 10.9;
+        expect(system.stats().liveBlocks).toEqual(3);
+        system.time = 11.5;
+        expect(system.stats().liveBlocks).toEqual(2);
     });
 });
 

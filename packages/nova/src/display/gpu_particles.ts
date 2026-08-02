@@ -306,6 +306,77 @@ export class ParticleRing {
 }
 
 /**
+ * The budget bookkeeping: a ParticleRing plus the clock and the per-block
+ * expiry table that decide which blocks are worth drawing. PIXI-free, so
+ * it can be exercised (and tested) without a GL context; GpuParticleSystem
+ * owns one and delegates `spawn`/`stats` to it.
+ */
+export class ParticleBudget {
+    readonly ring: ParticleRing;
+    /**
+     * When the newest particle written into each block dies. A block is
+     * drawn only while that instant is still in the future.
+     */
+    private readonly blockExpiry: Float64Array;
+    /** Seconds since this system was created; the shader's clock. */
+    time = 0;
+
+    constructor(capacity = PARTICLE_CAPACITY) {
+        this.ring = new ParticleRing(capacity);
+        this.blockExpiry =
+            new Float64Array(Math.ceil(capacity / PARTICLE_BLOCK_SIZE));
+    }
+
+    get blockCount(): number {
+        return this.blockExpiry.length;
+    }
+
+    /** Writes one birth record, stamped with the current clock. */
+    spawn(p: ParticleSpawn): number {
+        const slot = this.ring.spawn(p, this.time);
+        const block = (slot / PARTICLE_BLOCK_SIZE) | 0;
+        const death = this.time + p.life;
+        // Landing on a block's first slot starts a fresh pass over that
+        // block, so its expiry restarts from this particle instead of
+        // inheriting the previous pass's (which is being overwritten).
+        if (slot % PARTICLE_BLOCK_SIZE === 0 || death > this.blockExpiry[block]) {
+            this.blockExpiry[block] = death;
+        }
+        return slot;
+    }
+
+    /** Whether this block still holds an unexpired particle. */
+    isBlockLive(block: number): boolean {
+        return this.blockExpiry[block] > this.time;
+    }
+
+    /** Blocks still holding at least one unexpired particle. */
+    liveBlocks(): number {
+        let live = 0;
+        for (let block = 0; block < this.blockExpiry.length; block++) {
+            if (this.blockExpiry[block] > this.time) {
+                live++;
+            }
+        }
+        return live;
+    }
+
+    /** Live counters, for debugging and for the verification harness. */
+    stats() {
+        const liveBlocks = this.liveBlocks();
+        return {
+            capacity: this.ring.capacity,
+            totalSpawned: this.ring.totalSpawned,
+            overwritten: this.ring.overwritten,
+            nextSlot: this.ring.nextSlot,
+            liveBlocks,
+            /** Upper bound on live particles: what a frame actually draws. */
+            drawnInstances: liveBlocks * PARTICLE_BLOCK_SIZE,
+        };
+    }
+}
+
+/**
  * The drawable half: a PIXI display object that renders a ParticleRing
  * as one instanced draw call.
  *
@@ -316,24 +387,19 @@ export class ParticleRing {
  * is what `_render` does here.
  */
 export class GpuParticleSystem extends PIXI.Container {
+    readonly budget: ParticleBudget;
     readonly ring: ParticleRing;
     /** One geometry per block, all aliasing the same instance buffer. */
     private readonly blocks: PIXI.Geometry[] = [];
-    /**
-     * When the newest particle written into each block dies. A block is
-     * drawn only while that instant is still in the future.
-     */
-    private readonly blockExpiry: Float64Array;
     private readonly instanceBuffer: PIXI.Buffer;
     private readonly shader: PIXI.Shader;
     private readonly state: PIXI.State;
-    /** Seconds since this system was created; the shader's clock. */
-    private time = 0;
 
     constructor(capacity = PARTICLE_CAPACITY) {
         super();
         this.name = 'GpuParticles';
-        this.ring = new ParticleRing(capacity);
+        this.budget = new ParticleBudget(capacity);
+        this.ring = this.budget.ring;
 
         // A unit quad and its indices, shared by every instance.
         const quad = pixiBuffer(
@@ -343,8 +409,7 @@ export class GpuParticleSystem extends PIXI.Container {
         this.instanceBuffer = pixiBuffer(this.ring.floats, false, false);
 
         const stride = PARTICLE_STRIDE_BYTES;
-        const blockCount = Math.ceil(capacity / PARTICLE_BLOCK_SIZE);
-        this.blockExpiry = new Float64Array(blockCount);
+        const blockCount = this.budget.blockCount;
         for (let block = 0; block < blockCount; block++) {
             // Every block reads the same buffer from its own base byte
             // offset, so a block draws on its own with nothing duplicated.
@@ -381,7 +446,7 @@ export class GpuParticleSystem extends PIXI.Container {
 
     /** The clock birth times are measured against, in seconds. */
     get currentTime(): number {
-        return this.time;
+        return this.budget.time;
     }
 
     /**
@@ -391,7 +456,7 @@ export class GpuParticleSystem extends PIXI.Container {
      * plugin.
      */
     update(timeSeconds: number, cameraX: number, cameraY: number) {
-        this.time = timeSeconds;
+        this.budget.time = timeSeconds;
         this.shader.uniforms.uTime = timeSeconds;
         const camera = this.shader.uniforms.uCamera as Float32Array;
         camera[0] = cameraX;
@@ -400,41 +465,12 @@ export class GpuParticleSystem extends PIXI.Container {
 
     /** Writes one birth record, stamped with the current clock. */
     spawn(p: ParticleSpawn): number {
-        const slot = this.ring.spawn(p, this.time);
-        const block = (slot / PARTICLE_BLOCK_SIZE) | 0;
-        const death = this.time + p.life;
-        // Landing on a block's first slot starts a fresh pass over that
-        // block, so its expiry restarts from this particle instead of
-        // inheriting the previous pass's (which is being overwritten).
-        if (slot % PARTICLE_BLOCK_SIZE === 0 || death > this.blockExpiry[block]) {
-            this.blockExpiry[block] = death;
-        }
-        return slot;
-    }
-
-    /** Blocks still holding at least one unexpired particle. */
-    private liveBlocks(): number {
-        let live = 0;
-        for (let block = 0; block < this.blockExpiry.length; block++) {
-            if (this.blockExpiry[block] > this.time) {
-                live++;
-            }
-        }
-        return live;
+        return this.budget.spawn(p);
     }
 
     /** Live counters, for debugging and for the verification harness. */
     stats() {
-        const liveBlocks = this.liveBlocks();
-        return {
-            capacity: this.ring.capacity,
-            totalSpawned: this.ring.totalSpawned,
-            overwritten: this.ring.overwritten,
-            nextSlot: this.ring.nextSlot,
-            liveBlocks,
-            /** Upper bound on live particles: what a frame actually draws. */
-            drawnInstances: liveBlocks * PARTICLE_BLOCK_SIZE,
-        };
+        return this.budget.stats();
     }
 
     /**
@@ -467,7 +503,7 @@ export class GpuParticleSystem extends PIXI.Container {
 
     protected override _render(renderer: PIXI.Renderer) {
         this.flush(renderer);
-        if (this.liveBlocks() === 0) {
+        if (this.budget.liveBlocks() === 0) {
             return; // Nothing alive: not even a state change.
         }
         // Sprites batched before us must land underneath the particles.
@@ -477,7 +513,7 @@ export class GpuParticleSystem extends PIXI.Container {
         renderer.shader.bind(this.shader);
         renderer.state.set(this.state);
         for (let block = 0; block < this.blocks.length; block++) {
-            if (this.blockExpiry[block] <= this.time) {
+            if (!this.budget.isBlockLive(block)) {
                 continue;
             }
             const geometry = this.blocks[block];

@@ -2,7 +2,7 @@ import { ParticleConfig } from "novadatainterface/weapon_data";
 import { Component } from "nova_ecs/component";
 import { Plugin } from "nova_ecs/plugin";
 import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
-import { TimeResource } from "nova_ecs/plugins/time_plugin";
+import { TimeResource, TimeSystem } from "nova_ecs/plugins/time_plugin";
 import { Provide } from "nova_ecs/provide";
 import { Resource } from "nova_ecs/resource";
 import { System } from "nova_ecs/system";
@@ -112,6 +112,9 @@ const ParticleTimeSystem = new System({
     name: "ParticleTimeSystem",
     args: [ParticleSystemResource, ParticleTimeOriginResource, TimeResource,
         CameraFocus, SingletonComponent] as const,
+    // So the clock this system reads is this frame's, not the last
+    // frame's, no matter what order the plugins were added in.
+    after: [TimeSystem],
     step(particles, origin, time, cameraFocus) {
         if (origin.epochMs === undefined) {
             origin.epochMs = time.time;

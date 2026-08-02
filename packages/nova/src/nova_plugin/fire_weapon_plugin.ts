@@ -91,7 +91,7 @@ export const WeaponsComponentProvider = Provide({
  * flag, and they are beamTurrets), and the selected target is
  * replicated either way, so this stays deterministic.
  */
-function getNextExitpoint(sourceMovement: MovementState, sourceAnimation: Animation,
+export function getNextExitpoint(sourceMovement: MovementState, sourceAnimation: Animation,
     weapon: WeaponData, localState: WeaponLocalState,
     targetPosition?: Position) {
     let exitPoint = sourceMovement.position;
@@ -103,20 +103,29 @@ function getNextExitpoint(sourceMovement: MovementState, sourceAnimation: Animat
     if (weapon.exitType !== "center") {
         const exitPoints = sourceAnimation.exitPoints;
         const offset = exitPoints[weapon.exitType];
-        if (weapon.firesFromClosestToTarget && targetPosition
-            && offset.length > 0) {
-            localState.exitIndex = closestExitPointIndex(
-                offset, exitPoints, sourceMovement.position,
-                sourceMovement.rotation, targetPosition);
-        } else {
-            localState.exitIndex =
-                ((localState.exitIndex ?? 0) + 1) % offset.length;
-        }
+        // A shän can define no exit points at all for this weapon's
+        // class, in which case there is nothing to pick from and the
+        // shot leaves from the ship's centre. Skipping the whole block
+        // (rather than falling through it) is what keeps `% 0` from
+        // writing NaN into exitIndex: that cursor is replicated,
+        // wire-serialized state, and JSON turns NaN into null, so a
+        // peer restoring the snapshot would not agree with the
+        // incumbents about it.
+        if (offset.length > 0) {
+            if (weapon.firesFromClosestToTarget && targetPosition) {
+                localState.exitIndex = closestExitPointIndex(
+                    offset, exitPoints, sourceMovement.position,
+                    sourceMovement.rotation, targetPosition);
+            } else {
+                localState.exitIndex =
+                    ((localState.exitIndex ?? 0) + 1) % offset.length;
+            }
 
-        exitPointData = getExitPointData(sourceAnimation, weapon, localState);
-        exitPoint = exitPoint.add(
-            applyExitPoint(exitPointData, sourceMovement.rotation)
-        ) as Position;
+            exitPointData = getExitPointData(sourceAnimation, weapon, localState);
+            exitPoint = exitPoint.add(
+                applyExitPoint(exitPointData, sourceMovement.rotation)
+            ) as Position;
+        }
     }
 
     return { exitPoint, exitPointData };
