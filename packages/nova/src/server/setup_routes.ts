@@ -23,6 +23,41 @@ export type BatchResponse = {
 };
 
 /**
+ * True iff `id` is a safe resource id to feed to the filesystem-backed
+ * data layer.
+ *
+ * Resource ids are opaque keys such as `nova:128`, `Starbridge Bay:500`,
+ * `Star Wars Mod:1000`, `extra-outfits:200`, `planetNeutral`, or
+ * `HypergatePassv1.0:128`. Their namespace prefix comes from a plug-in
+ * filename, so a legitimate id may contain letters, digits, spaces, and
+ * the punctuation `: . - _`. A legitimate id NEVER contains a path
+ * separator or a `..` path component.
+ *
+ * The id flows (unescaped) into `path.join(rootPath, type, id + '.' +
+ * ext)` in the filesystem data layer, so an id like `../../package`
+ * escapes the objects directory and reads an arbitrary file. Rejecting
+ * path separators, NUL, and `..` path components blocks every traversal
+ * vector while admitting every legitimate id (none of which contain
+ * those characters). This is a route-layer allowlist; the filesystem
+ * layer additionally re-checks path containment as defense in depth.
+ */
+export function isValidResourceId(id: unknown): id is string {
+    if (typeof id !== 'string' || id.length === 0) {
+        return false;
+    }
+    // Reject path separators (either OS) and NUL outright.
+    if (/[/\\\0]/.test(id)) {
+        return false;
+    }
+    // Reject a bare `..` component. (Any embedded `..` can only reach a
+    // parent directory via a separator, which is already rejected above.)
+    if (id === '..') {
+        return false;
+    }
+    return true;
+}
+
+/**
  * Resolves every (dataType, id) in `body` against `gameData`, returning
  * a per-id success/error map. Pure and transport-agnostic so it can be
  * unit tested without an HTTP server.
@@ -61,6 +96,13 @@ export async function resolveBatch(
         // Resolve every id concurrently; one rejection only affects its
         // own entry.
         await Promise.all(ids.map(async (id) => {
+            // Reject traversal ids before they reach the filesystem. A
+            // malformed id is per-id input, so it becomes that id's error
+            // entry rather than failing the batch.
+            if (!isValidResourceId(id)) {
+                typeResult[String(id)] = { error: 'Invalid id ' + String(id) };
+                return;
+            }
             try {
                 const data = await dataGettable.get(id);
                 if (data instanceof ArrayBuffer) {
@@ -192,6 +234,13 @@ class GameDataServer {
         const name: string = req.params.name;
         const item: string = req.params.item;
 
+        // Reject path-traversal ids before they can reach the filesystem
+        // data layer, which joins the id straight into a file path.
+        if (!isValidResourceId(item)) {
+            res.status(400).send("Invalid id");
+            return;
+        }
+
         // Express 4 does not catch async rejections, and an escaped
         // rejection kills the process on modern Node
         // (--unhandled-rejections=throw is the default). Nothing in this
@@ -235,6 +284,16 @@ class GameDataServer {
         if (!body || typeof body !== 'object' || Array.isArray(body)) {
             res.status(400).send({ error: 'Batch request body must be a { dataType: id[] } object' });
             return;
+        }
+        // A traversal id is malformed input, not a missing resource, so
+        // reject the whole request with a 400 (like a malformed body)
+        // rather than silently degrading it to a per-id error. Missing
+        // but well-formed ids still get their per-id error entry.
+        for (const ids of Object.values(body)) {
+            if (Array.isArray(ids) && ids.some((id) => !isValidResourceId(id))) {
+                res.status(400).send({ error: 'Batch request contains an invalid id' });
+                return;
+            }
         }
         // Express 4 does not catch async rejections; see requestFulfiller.
         try {

@@ -4,7 +4,7 @@ import * as http from 'http';
 import { AddressInfo } from 'net';
 import { Gettable } from 'novadatainterface/gettable';
 import { GameDataInterface } from 'novadatainterface/game_data_interface';
-import { resolveBatch, BatchResponse, setupRoutes } from './setup_routes.js';
+import { resolveBatch, BatchResponse, setupRoutes, isValidResourceId } from './setup_routes.js';
 
 // A minimal GameDataInterface whose gettables are backed by the maps
 // passed in. A `null` value for an id means "throw when fetched".
@@ -33,6 +33,36 @@ function makeGameData(tables: {
 function entry(resp: BatchResponse, type: string, id: string) {
     return resp[type][id];
 }
+
+describe('isValidResourceId', () => {
+    it('admits real namespaced and built-in ids', () => {
+        for (const id of [
+            'nova:128', 'cargo:3', 'nova:8500',
+            'Starbridge Bay:500', 'Star Wars Mod:1000',
+            'extra-outfits:200', 'HypergatePassv1.0:128',
+            'planetNeutral', 'targetDisabled', 'civilian', 'planetCorners',
+        ]) {
+            expect(isValidResourceId(id)).withContext(id).toBe(true);
+        }
+    });
+
+    it('rejects traversal ids and path separators', () => {
+        // Express percent-decodes %2F to '/' before the handler sees the
+        // param, so the predicate only ever meets the decoded (slash) form.
+        for (const id of [
+            '../../package', '../../../etc/passwd', '..',
+            'a/b', 'a\\b', '/etc/passwd', 'x\0y', '',
+        ]) {
+            expect(isValidResourceId(id)).withContext(JSON.stringify(id)).toBe(false);
+        }
+    });
+
+    it('rejects non-string inputs', () => {
+        for (const id of [undefined, null, 42, {}, []]) {
+            expect(isValidResourceId(id)).toBe(false);
+        }
+    });
+});
 
 describe('resolveBatch', () => {
     it('resolves multiple ids across multiple types in one call', async () => {
@@ -137,6 +167,26 @@ describe('resolveBatch', () => {
         expect('error' in entry(resp, 'Bogus', 'z')).toBe(true);
     });
 
+    it('rejects a traversal id as a per-id error without touching the filesystem', async () => {
+        // A null value means "throw if fetched", so a per-id error entry
+        // whose message is our validation message (not the gettable's
+        // throw) proves the id never reached the data layer.
+        const gameData = makeGameData({
+            Ship: { 'present': { name: 'Here' } },
+        });
+
+        const resp = await resolveBatch(gameData, {
+            Ship: ['present', '../../package'],
+        });
+
+        expect(entry(resp, 'Ship', 'present')).toEqual({ data: { name: 'Here' } });
+        const bad = entry(resp, 'Ship', '../../package');
+        expect('error' in bad).toBe(true);
+        if ('error' in bad) {
+            expect(bad.error).toContain('Invalid id');
+        }
+    });
+
     it('reports inherited object keys (constructor) as unknown types', async () => {
         const gameData = makeGameData({ Ship: { 'a': {} } });
 
@@ -189,6 +239,33 @@ describe('GameDataServer request routes', () => {
         const resp = await fetch(`${baseUrl}/gameData/data/Ship/a`);
         expect(resp.status).toBe(200);
         expect(await resp.json()).toEqual({ name: 'ShipA' });
+    });
+
+    it('400s path-traversal ids on the GET route without leaking files', async () => {
+        // Both the percent-encoded and the literal traversal vectors that
+        // were confirmed to leak packages/nova/package.json must now be
+        // rejected before reaching the filesystem.
+        for (const vector of [
+            '/gameData/data/Ship/..%2F..%2Fpackage.json',
+            '/gameData/data/Ship/..%2F..%2Fpackage',
+        ]) {
+            const resp = await fetch(`${baseUrl}${vector}`);
+            expect(resp.status).withContext(vector).toBe(400);
+            const text = await resp.text();
+            expect(text).not.toContain('"dependencies"');
+            expect(text).not.toContain('"name"');
+        }
+    });
+
+    it('400s a batch request that contains a traversal id without leaking files', async () => {
+        const resp = await fetch(`${baseUrl}/gameData/data/batch`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ Ship: ['../../package'] }),
+        });
+        expect(resp.status).toBe(400);
+        const text = await resp.text();
+        expect(text).not.toContain('"dependencies"');
     });
 
     it('404s inherited object keys instead of crashing the process', async () => {

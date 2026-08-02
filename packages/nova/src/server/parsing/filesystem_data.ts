@@ -106,9 +106,21 @@ class FilesystemData implements GameDataInterface {
 
     getFunction<T extends BaseData | PictImageData | SpriteSheetFramesData>(p: PathInfo): Gettable<T> {
         // Returns a gettable that loads the resource from a file
+        const typeDir = path.resolve(this.rootPath, p.path);
         return new Gettable<T>((id: string) => {
             return new Promise<T>((fulfill, reject) => {
-                fs.readFile(path.join(this.rootPath, p.path, id + "." + p.extension),
+                // Defense in depth: the id is validated at the route layer,
+                // but re-check here so this sink is safe even if a future
+                // caller forgets to. The resolved path must stay inside the
+                // resource type's directory; a trailing separator on the
+                // prefix stops a sibling dir that merely shares the prefix
+                // (e.g. "Ship" vs "Ship2") from slipping through.
+                const filePath = path.resolve(typeDir, id + "." + p.extension);
+                if (filePath !== typeDir && !filePath.startsWith(typeDir + path.sep)) {
+                    reject(new Error("Invalid resource id"));
+                    return;
+                }
+                fs.readFile(filePath,
                     function(err, contents) {
                         if (err) {
                             reject(err);
