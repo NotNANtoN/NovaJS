@@ -22,6 +22,7 @@ import {
 } from './asteroid_plugin.js';
 import { TumbleAnimationComponent } from './animation_plugin.js';
 import { CargoComponent } from './cargo_plugin.js';
+import { BlastDamageComponent } from './blast_data.js';
 import { CollisionEvent } from './collision_interaction.js';
 import { DamagedEvent } from './death_plugin.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
@@ -241,6 +242,29 @@ describe('AsteroidDamageSystem', () => {
         world.step();
     }
 
+    /**
+     * Fires a knockback-only DamagedEvent at the rock from a *blast*
+     * entity placed at `position`. Blast knockback is radial — along
+     * the rock's position minus the blast's — so `position` aims the
+     * shove and `rotation` is deliberately misleading: it must not
+     * affect the result.
+     */
+    function boom(world: World, knockback: number, position: Position,
+        rotation = new Angle(Math.PI / 2)) {
+        const damage = {
+            armor: 0, shield: 0, ionization: 0, ionizationColor: 0,
+            passThroughShield: 0, knockback,
+        };
+        world.entities.set('blast', new Entity('blast')
+            .addComponent(BlastDamageComponent, damage)
+            .addComponent(MovementStateComponent, {
+                position, velocity: new Vector(0, 0), rotation,
+                accelerating: 0, turning: 0, turnBack: false,
+            }));
+        world.emit(DamagedEvent, { damage, damager: 'blast' }, ['rock']);
+        world.step();
+    }
+
     function rockVelocity(world: World) {
         return Vector.fromVectorLike(world.entities.get('rock')!
             .components.get(MovementStateComponent)!.velocity);
@@ -352,6 +376,71 @@ describe('AsteroidDamageSystem', () => {
         // (mass 300) is 100 * 5 / 300 px/s, nowhere near the cap.
         knock(world, 100);
         expect(rockVelocity(world).length).toBeCloseTo(100 * 5 / 300, 9);
+    });
+
+    it('shoves the rock radially away from a blast', async () => {
+        const world = await makeBreakupWorld(5);
+        // The rock is at (10, 20). Put the blast 100 px due north of it
+        // (screen coords: north is -y) and point it *east*, so a shove
+        // along the blast's facing would be plainly visible. Radially
+        // outward from the blast is due south.
+        boom(world, 100, new Position(10, -80), new Angle(Math.PI / 2));
+
+        const velocity = rockVelocity(world);
+        const speed = 100 * 5 / 300; // impact 100 on a mass-300 röid.
+        expect(velocity.x).toBeCloseTo(0, 9);
+        expect(velocity.y).toBeCloseTo(speed, 9);
+    });
+
+    it('ignores the blast entity\'s rotation entirely', async () => {
+        // The same blast, aimed four different ways, must shove the
+        // rock identically.
+        const shove = async (rotation: Angle) => {
+            const world = await makeBreakupWorld(5);
+            boom(world, 100, new Position(10, -80), rotation);
+            return rockVelocity(world);
+        };
+        const expected = await shove(new Angle(0));
+        for (const angle of [1, 2, 3]) {
+            const velocity = await shove(new Angle(angle));
+            expect(velocity.x).toBeCloseTo(expected.x, 12);
+            expect(velocity.y).toBeCloseTo(expected.y, 12);
+        }
+    });
+
+    it('still caps a huge blast impulse', async () => {
+        const world = await makeBreakupWorld(5);
+        boom(world, 1e6, new Position(10, -80));
+        const velocity = rockVelocity(world);
+        expect(velocity.length).toBeCloseTo(MAX_ASTEROID_SPEED, 9);
+        expect(velocity.x).toBeCloseTo(0, 9);
+        expect(velocity.y).toBeCloseTo(MAX_ASTEROID_SPEED, 9);
+    });
+
+    it('pushes along the damager\'s facing for a non-blast hit', async () => {
+        const world = await makeBreakupWorld(5);
+        // The shot is at the origin and the rock at (10, 20), so a
+        // radial shove would head down and to the right; a projectile
+        // instead pushes along its own facing, here due east.
+        knock(world, 100, new Angle(Math.PI / 2));
+
+        const velocity = rockVelocity(world);
+        const speed = 100 * 5 / 300;
+        expect(velocity.x).toBeCloseTo(speed, 9);
+        expect(velocity.y).toBeCloseTo(0, 9);
+    });
+
+    it('gives no impulse for a blast exactly on the rock', async () => {
+        const world = await makeBreakupWorld(5);
+        // Zero distance has no direction to normalize; the rock must
+        // come out untouched rather than with a NaN velocity.
+        boom(world, 100, new Position(10, 20));
+
+        const velocity = rockVelocity(world);
+        expect(Number.isNaN(velocity.x)).toBeFalse();
+        expect(Number.isNaN(velocity.y)).toBeFalse();
+        expect(velocity.x).toBe(0);
+        expect(velocity.y).toBe(0);
     });
 
     it('caps fragments that inherit a fast parent velocity', async () => {

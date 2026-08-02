@@ -22,11 +22,12 @@ import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_
 import { registerSimulationBridgeEvent } from '../communication/simulation_bridge_events.js';
 import { AnimationComponent, TumbleAnimation, TumbleAnimationComponent } from './animation_plugin.js';
 import { BeamDataComponent } from './beam_plugin.js';
+import { BlastDamageComponent } from './blast_data.js';
 import { CargoComponent, cargoUsed } from './cargo_plugin.js';
 import { loadWithRetries } from './load_retry.js';
 import { CollisionEvent, CollisionHitterComponent, CollisionVulnerabilityComponent } from './collision_interaction.js';
 import { CompositeHull, HitboxHullComponent, HurtboxHullComponent, UpdateHitboxHullSystem, UpdateHurtboxHullSystem } from './collisions_plugin.js';
-import { DamagedEvent } from './death_plugin.js';
+import { DamagedEvent, knockbackDirection } from './death_plugin.js';
 import { registerEntityDeriver } from './entity_factory.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { IdFactory, IdFactoryResource } from './id_factory.js';
@@ -530,7 +531,8 @@ const AsteroidRespawnSystem = new System({
 });
 
 const DamagerQuery = new Query([Optional(ProjectileDataComponent),
-    Optional(BeamDataComponent), Optional(MovementStateComponent)] as const);
+    Optional(BeamDataComponent), Optional(MovementStateComponent),
+    Optional(BlastDamageComponent)] as const);
 
 /**
  * Applies weapon damage to asteroids and breaks them apart. Asteroids
@@ -559,15 +561,25 @@ const AsteroidDamageSystem = new System({
             armorDamage *= 10;
         }
 
-        // Knockback, scaled by the röid's mass.
+        // Knockback, scaled by the röid's mass. Aimed by the same rule
+        // ships use (knockbackDirection): a blast shoves the rock
+        // radially away from the explosion, anything else along the
+        // damager's own heading. A blast sitting exactly on the rock
+        // has no direction, and yields no impulse.
         const damagerMovement = damagerParts?.[2];
         if (damage.knockback && damagerMovement && data.mass > 0) {
-            // Capped: nothing else bounds an asteroid's speed (no
-            // MovementPhysicsComponent, no drag), so without this the
-            // impulses accumulate without limit. See MAX_ASTEROID_SPEED.
-            movement.velocity = capAsteroidSpeed(movement.velocity.add(
-                damagerMovement.rotation.getUnitVector()
-                    .scale(damage.knockback * scale * 5 / data.mass)));
+            const direction = knockbackDirection(
+                movement.position, damagerMovement,
+                Boolean(damagerParts?.[3]));
+            if (direction) {
+                // Capped: nothing else bounds an asteroid's speed (no
+                // MovementPhysicsComponent, no drag), so without this
+                // the impulses accumulate without limit. See
+                // MAX_ASTEROID_SPEED.
+                movement.velocity = capAsteroidSpeed(movement.velocity.add(
+                    direction.scale(
+                        damage.knockback * scale * 5 / data.mass)));
+            }
         }
 
         if (armorDamage <= 0) {

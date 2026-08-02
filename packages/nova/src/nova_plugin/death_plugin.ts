@@ -121,6 +121,46 @@ const ExplodingFinishedSystem = new System({
     after: [TimeSystem],
 });
 
+/**
+ * The unit direction a knockback impulse shoves a target in, given the
+ * damager that hit it.
+ *
+ * A blast pushes *radially outward from its center* — along the
+ * difference between the target's position and the blast's — so an
+ * explosion scatters what it catches away from itself. Every other
+ * damager (projectile, beam) pushes along its own facing, which is the
+ * direction it was travelling when it landed. A blast entity has a
+ * rotation too, but it is meaningless (inherited from whatever spawned
+ * the blast), so using it would fling targets off in an arbitrary
+ * shared direction instead of outward.
+ *
+ * Returns null when a blast sits exactly on top of its target: the
+ * position difference has no direction to normalize (Vector.normalize
+ * throws on a zero-length vector), and "no impulse" is the only
+ * well-defined answer. Callers skip the knockback.
+ *
+ * Deterministic: the degenerate test is an exact zero compare, and the
+ * normalize is a correctly-rounded sqrt.
+ */
+export function knockbackDirection(targetPosition: Position,
+    damagerMovement: MovementState, isBlast: boolean): Vector | null {
+    if (!isBlast) {
+        return damagerMovement.rotation.getUnitVector();
+    }
+    // Subtract as Positions — that wraps the delta to the shortest way
+    // around the toroidal world — but drop to a plain Vector before
+    // normalizing. Position's arithmetic re-wraps every result, so a
+    // Position direction would silently wrap the caller's `.scale()`
+    // once the impulse exceeded BOUNDARY, flipping a big shove around
+    // to point back the way it came.
+    const difference = Vector.fromVectorLike(
+        targetPosition.subtract(damagerMovement.position));
+    if (difference.lengthSquared === 0) {
+        return null;
+    }
+    return difference.normalize();
+}
+
 const MovementQuery = new Query([MovementStateComponent, Optional(BlastDamageComponent)] as const);
 const KnockbackSystem = new System({
     name: 'KnockbackSystem',
@@ -139,11 +179,10 @@ const KnockbackSystem = new System({
             targetMass = shipPhysics.mass || 1;
         }
 
-        let direction: Vector;
-        if (isBlast) {
-            direction = movementState.position.subtract(otherMovement.position).normalize();
-        } else {
-            direction = otherMovement.rotation.getUnitVector();
+        const direction = knockbackDirection(
+            movementState.position, otherMovement, Boolean(isBlast));
+        if (!direction) {
+            return;
         }
         movementState.velocity = movementState.velocity.add(
             direction.scale(damage.knockback * scale / targetMass * 5));
