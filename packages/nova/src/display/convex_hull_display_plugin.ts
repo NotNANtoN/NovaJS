@@ -9,6 +9,7 @@ import * as PIXI from "pixi.js";
 import SAT from "sat";
 import { HitboxHullComponent, HurtboxHullComponent, UpdateHitboxHullSystem, UpdateHurtboxHullSystem } from "../nova_plugin/collisions_plugin.js";
 import { Space } from "./space_resource.js";
+import { ZIndex } from "./z_index.js";
 
 
 const HitboxHullGraphicsComponent = new Component<PIXI.Graphics>('HitboxHullGraphics');
@@ -20,7 +21,7 @@ const HitboxGraphicsProvider = Provide({
     args: [Space, HitboxHullComponent] as const,
     factory: (space) => {
         const graphics = new PIXI.Graphics();
-        graphics.zIndex = 1000;
+        graphics.zIndex = ZIndex.OVERLAY;
         space.addChild(graphics);
         return graphics;
     }
@@ -42,7 +43,7 @@ const HurtboxGraphicsProvider = Provide({
     args: [Space, HurtboxHullComponent] as const,
     factory: (space) => {
         const graphics = new PIXI.Graphics();
-        graphics.zIndex = 1000;
+        graphics.zIndex = ZIndex.OVERLAY;
         space.addChild(graphics);
         return graphics;
     }

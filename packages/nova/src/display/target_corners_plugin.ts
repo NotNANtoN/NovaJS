@@ -20,6 +20,7 @@ import { TargetComponent } from "../nova_plugin/target_component.js";
 import { mod } from "../util/mod.js";
 import { AnimationGraphicComponent, ObjectDrawSystem } from "./animation_graphic_plugin.js";
 import { Space } from "./space_resource.js";
+import { ZIndex } from "./z_index.js";
 
 
 const NUM_CORNERS = 4;
@@ -35,7 +36,7 @@ export class TargetCorners {
 
     constructor(displayAssets: DisplayAssetDataInterface, id = 'targetCorners') {
         this.visible = false;
-        this.container.zIndex = 1000;
+        this.container.zIndex = ZIndex.OVERLAY;
         this.built = this.build(displayAssets, id);
 
         for (let i = 0; i < NUM_CORNERS; i++) {

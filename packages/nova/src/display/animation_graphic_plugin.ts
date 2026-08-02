@@ -21,6 +21,7 @@ import { wrapNearestDelta } from "nova_ecs/datatypes/position";
 import { AnimationGraphic } from "./animation_graphic.js";
 import { AnimationGraphicPool, AnimationGraphicPoolResource } from "./animation_graphic_pool.js";
 import { CameraFocus, Space } from "./space_resource.js";
+import { ZIndex } from "./z_index.js";
 
 export const AnimationGraphicComponent = new Component<AnimationGraphic>('AnimationGraphic');
 const AnimationGraphicLoadedComponent = new Component<AnimationGraphic>('AnimationGraphicLoaded');
@@ -56,20 +57,21 @@ const AnimationGraphicLoader = ProvideAsync({
             graphic.rotation = movement.rotation.angle;
         }
 
-        // Order sprites
-        if (entity.components.has(PlayerShipSelector)) {
-            graphic.container.zIndex = 10;
-        } else if (entity.components.has(ProjectileComponent)) {
-            // TODO: Support projectiles above and below ships.
-            graphic.container.zIndex = 9;
+        // Order sprites. Projectiles are checked FIRST: a shot draws
+        // above every ship, the firer's own included, so it is not
+        // swallowed by the hull it leaves from (see ZIndex).
+        if (entity.components.has(ProjectileComponent)) {
+            graphic.container.zIndex = ZIndex.PROJECTILE;
+        } else if (entity.components.has(PlayerShipSelector)) {
+            graphic.container.zIndex = ZIndex.PLAYER_SHIP;
         } else if (entity.components.has(ShipComponent)) {
-            graphic.container.zIndex = 8;
+            graphic.container.zIndex = ZIndex.SHIP;
         } else if (entity.components.has(AsteroidComponent)) {
-            graphic.container.zIndex = 7;
+            graphic.container.zIndex = ZIndex.ASTEROID;
         } else if (entity.components.has(DebrisComponent)) {
-            graphic.container.zIndex = 6;
+            graphic.container.zIndex = ZIndex.DEBRIS;
         } else if (entity.components.has(PlanetComponent)) {
-            graphic.container.zIndex = -10;
+            graphic.container.zIndex = ZIndex.PLANET;
         }
 
         return graphic;

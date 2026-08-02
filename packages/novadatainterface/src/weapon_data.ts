@@ -140,6 +140,16 @@ export interface BaseWeaponData extends BaseData {
     useFiringAnimation: boolean;
     fireSimultaneously: boolean;
     destroyShipWhenFiring: boolean;
+    /**
+     * wëap Flags3 0x0010: "Weapon fires from whatever weapon exit point
+     * is closest to the target". Otherwise the ship cycles through the
+     * exit points of this weapon's `exitType` round-robin. Only two stock
+     * weapons set it — nova:142 Ion Cannon and nova:201 "Ion
+     * Cannon;non-weapon glow", both `exitType: "beam"` beam turrets.
+     * Simulation state: the chosen exit point is where the shot/beam
+     * spawns, so the selection must be deterministic on every peer.
+     */
+    firesFromClosestToTarget: boolean;
     sound?: string;
     loopSound: boolean;
 }
@@ -159,6 +169,7 @@ export function getDefaultBaseWeaponData(): BaseWeaponData {
         useFiringAnimation: true,
         fireSimultaneously: false,
         destroyShipWhenFiring: false,
+        firesFromClosestToTarget: false,
         loopSound: false,
     };
 }

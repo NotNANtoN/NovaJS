@@ -62,6 +62,12 @@ export class AnimationGraphic {
         this.weapDecay = (await this.animation).weapDecay;
         for (const imageName in (await this.animation).images) {
             const image = (await this.animation).images[imageName];
+            if (!image) {
+                // A sprite layer the shän does not define (most ships
+                // have no weapImage / altImage / shieldImage). Draw
+                // NOTHING for it — never fall back to a default sheet.
+                continue;
+            }
             const sprite = new SpriteSheetSprite({
                 image,
                 displayAssets: this.displayAssets

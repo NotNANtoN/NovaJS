@@ -7,6 +7,7 @@ import * as PIXI from "pixi.js";
 import { BeamDataComponent, BeamStateComponent, BeamSystem } from "../nova_plugin/beam_plugin.js";
 import { CollisionSystem } from "../nova_plugin/collisions_plugin.js";
 import { Space } from "./space_resource.js";
+import { ZIndex } from "./z_index.js";
 
 
 const BeamGraphicsResource = new Resource<PIXI.Graphics>('BeamGraphics');
@@ -92,6 +93,11 @@ export const BeamDisplayPlugin: Plugin = {
         }
         const beamGraphics = new PIXI.Graphics();
         beamGraphics.name = 'BeamGraphics';
+        // Above every ship: a beam's origin is an exit point ON the
+        // firing hull, so at the default zIndex of 0 the whole first
+        // stretch of the beam was hidden under the ship that fired it
+        // (very visible on the Fed Carrier's ion cannons).
+        beamGraphics.zIndex = ZIndex.BEAM;
         world.resources.set(BeamGraphicsResource, beamGraphics);
         space.addChild(beamGraphics);
         world.addSystem(ClearBeams);

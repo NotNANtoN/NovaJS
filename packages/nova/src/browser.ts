@@ -361,12 +361,12 @@ function prefetchJumpDestination(displayWorld: World) {
                             await simulationGameData.data.Planet.get(planetId);
                         await Promise.all(
                             Object.values(planet.animation.images).flatMap(
-                                image => [
+                                image => image ? [
                                     displayAssetData.data.SpriteSheetFrames
                                         .get(image.id),
                                     displayAssetData.data.SpriteSheetImage
                                         .get(image.id),
-                                ]));
+                                ] : []));
                     }),
                 ]);
             } catch (e) {
