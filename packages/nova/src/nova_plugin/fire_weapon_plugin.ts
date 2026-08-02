@@ -22,7 +22,7 @@ import { Resource } from 'nova_ecs/resource';
 import { DefaultMap } from 'nova_ecs/utils';
 import { SingletonComponent } from 'nova_ecs/world';
 import { AnimationComponent } from './animation_plugin.js';
-import { applyExitPoint, ExitPointData, getExitPointData } from './exit_point.js';
+import { applyExitPoint, closestExitPointIndex, ExitPointData, getExitPointData } from './exit_point.js';
 import { FiringGroup, FiringGroupComponent } from './firing_group.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { GovtComponent } from './govt_component.js';
@@ -69,8 +69,31 @@ export const WeaponsComponentProvider = Provide({
     }
 });
 
+/**
+ * Picks the exit point this shot leaves the ship from, and advances the
+ * weapon's round-robin cursor.
+ *
+ * Normally a ship cycles through the exit points of the weapon's
+ * `exitType` one shot at a time. A weapon with wëap Flags3 0x0010
+ * (`firesFromClosestToTarget` — the Ion Cannons) instead fires from
+ * whichever exit point is closest to the target, when it has one; with
+ * no target it falls back to the round-robin cursor.
+ *
+ * `targetPosition` is the firer's current target's position, or
+ * undefined when it has none. All of this is simulation state (the
+ * spawned shot's position), so the choice is pure geometry over
+ * replicated state — see closestExitPointIndex.
+ *
+ * Seam: a point-defense weapon picks its own victim later in
+ * fireFromEntity, so a PD weapon carrying the flag would aim from the
+ * exit point nearest the ship's SELECTED target rather than the PD
+ * victim. No stock weapon is both (only the two Ion Cannons set the
+ * flag, and they are beamTurrets), and the selected target is
+ * replicated either way, so this stays deterministic.
+ */
 function getNextExitpoint(sourceMovement: MovementState, sourceAnimation: Animation,
-    weapon: WeaponData, localState: WeaponLocalState) {
+    weapon: WeaponData, localState: WeaponLocalState,
+    targetPosition?: Position) {
     let exitPoint = sourceMovement.position;
     let exitPointData: ExitPointData = {
         position: [0, 0, 0],
@@ -78,9 +101,17 @@ function getNextExitpoint(sourceMovement: MovementState, sourceAnimation: Animat
         downCompress: [0, 0],
     }
     if (weapon.exitType !== "center") {
-        const offset = sourceAnimation.exitPoints[weapon.exitType];
-        localState.exitIndex =
-            ((localState.exitIndex ?? 0) + 1) % offset.length;
+        const exitPoints = sourceAnimation.exitPoints;
+        const offset = exitPoints[weapon.exitType];
+        if (weapon.firesFromClosestToTarget && targetPosition
+            && offset.length > 0) {
+            localState.exitIndex = closestExitPointIndex(
+                offset, exitPoints, sourceMovement.position,
+                sourceMovement.rotation, targetPosition);
+        } else {
+            localState.exitIndex =
+                ((localState.exitIndex ?? 0) + 1) % offset.length;
+        }
 
         exitPointData = getExitPointData(sourceAnimation, weapon, localState);
         exitPoint = exitPoint.add(
@@ -229,14 +260,17 @@ export abstract class WeaponEntry {
         }
 
         const weapon = weapons.get(this.data.id);
-        const { exitPoint, exitPointData } = getNextExitpoint(
-            movement, animation, this.data, weapon);
 
+        // Resolved BEFORE the exit point is chosen: a weapon with wëap
+        // Flags3 0x0010 fires from the exit point nearest the target.
         let targetMovement: MovementState | undefined;
         if (target) {
             targetMovement = entities.get(target)?.components
                 .get(MovementStateComponent);
         }
+
+        const { exitPoint, exitPointData } = getNextExitpoint(
+            movement, animation, this.data, weapon, targetMovement?.position);
 
         let angle = movement.rotation;
         if ('guidance' in this.data) {

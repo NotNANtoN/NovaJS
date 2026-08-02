@@ -297,6 +297,21 @@ describe("NovaParse", () => {
         }
     });
 
+    it("Should plumb the closest-exit-point flag into WeaponData", async () => {
+        // wëap Flags3 0x0010: "Weapon fires from whatever weapon exit
+        // point is closest to the target" (the stock Ion Cannons). The
+        // firing code needs it on WeaponData, not just on the raw
+        // resource, to pick the exit point — so it must reach BOTH
+        // weapon shapes, not only projectiles. Neither fixture weapon
+        // sets the flag; the bit itself is covered by
+        // weap_resource_test, and the true case on real stock data by
+        // nova's weapon_exit_point_integration_test.
+        const projectile = await np.data.Weapon.get("nova:132");
+        const beam = await np.data.Weapon.get("nova:133");
+        expect(projectile.firesFromClosestToTarget).toBeFalse();
+        expect(beam.firesFromClosestToTarget).toBeFalse();
+    });
+
     it("Should parse PictImage", async () => {
         const p700: PictImageData = await np.data.PictImage.get("nova:700");
         const statusBarPath = resolveFixture("resource_examples/picts/statusBar.png");

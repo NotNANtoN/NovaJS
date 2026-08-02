@@ -89,9 +89,16 @@ const SHAN_FRAMES_PER_SECOND = 30;
  * weapImage: 0x3 3x3 5x35 10x19 25x1 30x9 50x17 75x18 100x6), so it reads
  * as percent of full alpha per animation frame: 100 fades in one frame
  * (~33 ms), the Bible's median 50 in two (~67 ms), and the most common
- * stock value 5 — the whole Fed Destroyer family, the Fed Carrier included
- * — in twenty (~0.67 s). WeapDecay 0 means no fade at all; the overlay
- * snaps off when firing stops (the behaviour before decay existed).
+ * stock value 5 — the Fed Destroyer family, shäns nova:141 and nova:214
+ * ("Fed Destroyer; Carrier") — in twenty (~0.67 s). WeapDecay 0 means no
+ * fade at all; the overlay snaps off when firing stops (the behaviour
+ * before decay existed).
+ *
+ * NOT the Fed Carrier: shäns nova:143 and nova:218-222 ("Fed Carrier",
+ * base rlëD nova:1030) define no WeapImage at all and carry WeapDecay 0,
+ * so that ship has no weapon-effect overlay to fade — see
+ * shouldShowFiringAnimation's caller, which is gated on the sprite
+ * existing, and the ShanParse regression spec that pins it.
  */
 export function weapDecayAlphaPerSecond(weapDecay: number): number {
     return Math.max(0, weapDecay) / 100 * SHAN_FRAMES_PER_SECOND;

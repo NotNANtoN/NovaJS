@@ -601,6 +601,16 @@ describe("WeapResource", () => {
         expect(turret.translucent).toEqual(true);
     });
 
+    // Bible, wëap Flags3: "0x0010 Weapon fires from whatever weapon exit
+    // point is closest to the target". In Nova's own data only the two
+    // Ion Cannons (nova:142, nova:201) set it.
+    it("should parse firesFromClosestToTarget", () => {
+        expect(unguided.firesFromClosestToTarget).toEqual(false);
+        expect(beam.firesFromClosestToTarget).toEqual(false);
+        expect(missile.firesFromClosestToTarget).toEqual(true);
+        expect(turret.firesFromClosestToTarget).toEqual(false);
+    });
+
     // prevents other weaps from firing
     it("should parse exclusive", () => {
         expect(unguided.exclusive).toEqual(false);

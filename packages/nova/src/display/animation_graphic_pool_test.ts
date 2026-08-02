@@ -36,6 +36,30 @@ describe('animationPoolKey', () => {
         expect(animationPoolKey(makeAnimation('a', 'image1')))
             .not.toEqual(animationPoolKey(makeAnimation('a', 'image2')));
     });
+
+    it('treats an undefined image slot as absent', () => {
+        // Most shäns define no weapon-effect overlay at all (the Fed
+        // Carrier among them). Such a slot must key exactly like a
+        // missing key, and must never contribute a default sprite.
+        const absent = makeAnimation('a');
+        const explicitlyUndefined = makeAnimation('a');
+        explicitlyUndefined.images.weapImage = undefined;
+
+        expect(animationPoolKey(explicitlyUndefined))
+            .toEqual(animationPoolKey(absent));
+        expect(animationPoolKey(explicitlyUndefined))
+            .not.toContain('weapImage');
+    });
+
+    it('differs from an animation that does have an overlay', () => {
+        const withOverlay = makeAnimation('a');
+        withOverlay.images.weapImage = {
+            ...getDefaultAnimationImage(),
+            id: 'weap sheet',
+        };
+        expect(animationPoolKey(withOverlay))
+            .not.toEqual(animationPoolKey(makeAnimation('a')));
+    });
 });
 
 describe('AnimationGraphicPool', () => {

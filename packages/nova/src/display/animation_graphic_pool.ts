@@ -1,4 +1,4 @@
-import { Animation } from "novadatainterface/animation";
+import { Animation, AnimationImage } from "novadatainterface/animation";
 import { Resource } from "nova_ecs/resource";
 import { AnimationGraphic } from "./animation_graphic.js";
 
@@ -9,6 +9,10 @@ import { AnimationGraphic } from "./animation_graphic.js";
  */
 export function animationPoolKey(animation: Animation): string {
     const images = Object.entries(animation.images)
+        // Undefined slots (a shän with no weapImage, say) contribute
+        // nothing, exactly like an absent key — a graphic built without
+        // an overlay must never be reused for one that needs it.
+        .filter((entry): entry is [string, AnimationImage] => Boolean(entry[1]))
         .map(([name, image]) => `${name}=${image.id}/${image.blendMode}`)
         .sort()
         .join(',');

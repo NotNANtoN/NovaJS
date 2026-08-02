@@ -63,6 +63,9 @@ async function BaseWeaponParse(weap: WeapResource, notFoundFunction: (m: string)
         sound,
         loopSound: weap.loopSound,
         useFiringAnimation: weap.useFiringAnimation,
+        // wëap Flags3 0x0010 (the Ion Cannons): fire from the exit point
+        // closest to the target instead of cycling round-robin.
+        firesFromClosestToTarget: weap.firesFromClosestToTarget,
     }
 }
 

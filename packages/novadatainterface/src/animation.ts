@@ -43,8 +43,21 @@ export function getDefaultAnimationImage(): AnimationImage {
     };
 }
 
+/**
+ * The sprite layers of one animation, keyed by the shän image slot name
+ * (`baseImage`, `altImage`, `glowImage`, `lightImage`, `weapImage`,
+ * `shieldImage`).
+ *
+ * Only `baseImage` is guaranteed. Every OTHER slot is genuinely optional
+ * — a shän whose WeapImageID is <= 0 has no weapon-effect art at all and
+ * the key is simply absent (the Fed Carrier, shäns nova:143 and
+ * nova:218-222). The index signature includes `undefined` so that
+ * absence is visible to the type checker rather than silently reading as
+ * a present `AnimationImage`: nothing may substitute a default sprite
+ * for a layer the ship does not have.
+ */
 export type AnimationImages = {
-    [index: string]: AnimationImage,
+    [index: string]: AnimationImage | undefined,
     baseImage: AnimationImage
 }
 

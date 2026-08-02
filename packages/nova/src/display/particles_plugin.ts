@@ -16,6 +16,7 @@ import {
     TRAIL_EMIT_HZ, weaponBurst,
 } from "./particle_effects.js";
 import { CameraFocus, Space } from "./space_resource.js";
+import { ZIndex } from "./z_index.js";
 
 /**
  * Weapon trails, hit sparks and asteroid breakup dust, all drawn by one
@@ -178,6 +179,12 @@ export const ParticlesPlugin: Plugin = {
         }
 
         const particles = new GpuParticleSystem(PARTICLE_CAPACITY);
+        // One shared mesh for every particle effect, so it gets ONE
+        // layer. Deliberately the backdrop layer (below ships, where it
+        // has always been): engine trails belong under the hull that
+        // emits them, and raising the whole mesh to put hit sparks over
+        // ships would drag the trails up with them.
+        particles.zIndex = ZIndex.BACKDROP;
         space.addChild(particles);
         world.resources.set(ParticleSystemResource, particles);
         world.resources.set(ParticleTimeOriginResource, {});
