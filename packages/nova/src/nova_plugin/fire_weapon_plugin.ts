@@ -15,7 +15,7 @@ import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
 import { MovementState, MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
-import { markerType } from 'nova_ecs/plugins/serializer_plugin';
+import { markerType, SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
 import { Provide } from 'nova_ecs/provide';
 import { Query } from 'nova_ecs/query';
 import { Resource } from 'nova_ecs/resource';
@@ -436,6 +436,43 @@ export const FireWeaponPlugin: Plugin = {
         deltaMaker.addComponent(FiringGroupComponent, {
             componentType: FiringGroup,
         });
+
+        // SourceComponent must be serializer-registered to reach the
+        // DISPLAY world at all. SimulationBridgeHost.snapshot() encodes
+        // only the components the serializer knows
+        // (`serializer.hasComponent`), so an unregistered component is
+        // silently dropped from every simulation frame — and a display
+        // system that queries it then matches NOTHING, with no error
+        // anywhere. This is the same class of bug CreateTime had (see
+        // create_time.ts); here it broke two display consumers:
+        //   - hail_dialog_plugin's bay-fighter test
+        //     (`components.has(SourceComponent)`) was always false, so a
+        //     player-launched bay fighter was mislabelled "Hired Escort:"
+        //     with escort-management buttons it has no state for.
+        //   - ship_animation_plugin's ActiveBeamsQuery
+        //     ([SourceComponent, BeamDataComponent]) could never match,
+        //     so a ship's weapon glow dropped as soon as the fire key was
+        //     released instead of lasting the beam's shot duration.
+        // It is NOT registered through deltaMaker: DeltaMaker's default
+        // delta path drafts component data with immer, which needs an
+        // objectish value, and this component holds a bare string.
+        // Serializer registration is all the bridge (and the wire/hash
+        // paths) needs.
+        //
+        // Registration does not change rollback-snapshot or wire-snapshot
+        // behaviour: configureSnapshotPolicies sets SourceComponent's
+        // policy ('share') and wire codec (passthroughWire<string>())
+        // explicitly, and explicit entries are consulted BEFORE the
+        // serializer-registered default (snapshot_plugin's
+        // snapshotComponents / wireSnapshotComponents).
+        //
+        // The serializer resource is guaranteed here: DeltaResource above
+        // is required, and DeltaPlugin builds SerializerPlugin.
+        const serializer = world.resources.get(SerializerResource);
+        if (!serializer) {
+            throw new Error('Expected a serializer to register SourceComponent');
+        }
+        serializer.addComponent(SourceComponent, t.string);
 
         world.addSystem(WeaponsComponentProvider);
         world.addComponent(WeaponsComponent);

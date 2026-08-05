@@ -148,6 +148,10 @@ export async function computeContext(world: World,
         // hired escorts and have no management dialog. The discriminator is
         // SourceComponent: bay fighters set it (bay_plugin), hired escorts
         // (spawnHiredEscorts) and captures (convertToEscort) do not.
+        // This reads the DISPLAY world, so SourceComponent has to be
+        // serializer-registered (fire_weapon_plugin's build) to be here at
+        // all — the bridge mirrors nothing else. Unregistered, this test
+        // was always false and every bay fighter came back "Hired Escort:".
         const parent = shipTarget.components.get(FormationComponent)?.leader
             ?? shipTarget.components.get(OwnerComponent)?.owner;
         const isOwnFlock = parent === player.uuid;

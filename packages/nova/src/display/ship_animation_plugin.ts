@@ -42,7 +42,16 @@ const PlayerScannerQuery = new Query(
 // All beams currently being emitted, along with the uuid of the ship that
 // fired each one. Used to keep a ship's firing animation on for as long as
 // the beam is actually firing, not just while the fire key is held.
-const ActiveBeamsQuery = new Query(
+//
+// This runs in the DISPLAY world, whose entities are mirrored from the
+// simulation by SimulationBridgeHost.snapshot() — which carries only
+// serializer-registered components. BOTH halves of this query must
+// therefore stay serializer-registered (SourceComponent in
+// fire_weapon_plugin's build, BeamDataComponent in beam_plugin's), or
+// the query silently matches nothing and beam-sustained firing
+// animations stop working with no error anywhere. Exported so
+// source_component_bridge_test can run it against mirrored entities.
+export const ActiveBeamsQuery = new Query(
     [SourceComponent, BeamDataComponent] as const, 'ActiveBeamsQuery');
 
 /**
