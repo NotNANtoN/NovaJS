@@ -12,7 +12,9 @@ import { getDefaultProjectileWeaponData, getDefaultSeekerFlags, SeekerFlags }
 import { getDefaultOutfitData } from 'novadatainterface/outfit_data';
 import { getDefaultGovtData, GovtData } from 'novadatainterface/govt_data';
 import {
+    ATTACK_PARENT_IF_JAMMED_PROBABILITY,
     decideJamReaction,
+    DECOY_RETARGET_PROBABILITY,
     deriveJamming,
     DecoyTargetComponent,
     effectiveJamming,
@@ -221,40 +223,64 @@ describe('jamLoseLockProbability (vulnerability application per type)', () => {
     });
 });
 
-describe('decideJamReaction (seeker-flag precedence)', () => {
+describe('decideJamReaction (seeker-flag reaction slices)', () => {
     const flags = (over: Partial<SeekerFlags>): SeekerFlags =>
         ({ ...getDefaultSeekerFlags(), ...over });
+    // A reaction roll inside the first (parent) slice / just past each slice.
+    const inFirstSlice = ATTACK_PARENT_IF_JAMMED_PROBABILITY / 2;
+    const pastParent = ATTACK_PARENT_IF_JAMMED_PROBABILITY
+        + DECOY_RETARGET_PROBABILITY / 2;
+    const pastBoth = ATTACK_PARENT_IF_JAMMED_PROBABILITY
+        + DECOY_RETARGET_PROBABILITY;
 
     it('returns none when the roll does not beat the probability', () => {
-        expect(decideJamReaction(0.3, 0.5, flags({})).kind).toEqual('none');
+        expect(decideJamReaction(0.3, 0.5, 0, flags({})).kind).toEqual('none');
         // Boundary: roll == probability is NOT a lose (roll >= p).
-        expect(decideJamReaction(0.3, 0.3, flags({})).kind).toEqual('none');
+        expect(decideJamReaction(0.3, 0.3, 0, flags({})).kind).toEqual('none');
     });
 
     it('flies straight by default when jammed with no special seeker flags', () => {
-        expect(decideJamReaction(0.5, 0.1, flags({})).kind).toEqual('flyStraight');
+        expect(decideJamReaction(0.5, 0.1, 0, flags({})).kind)
+            .toEqual('flyStraight');
     });
 
-    it('prefers retargeting the parent over all other reactions', () => {
-        const r = decideJamReaction(0.5, 0.1, flags({
+    it('retargets the parent only when the reaction roll is in its slice', () => {
+        const all = flags({
             attackParentIfJammed: true,
             decoyedByAsteroids: true,
             turnsAwayIfJammed: true,
-        }));
-        expect(r.kind).toEqual('retargetParent');
+        });
+        expect(decideJamReaction(0.5, 0.1, inFirstSlice, all).kind)
+            .toEqual('retargetParent');
+        // Past the parent slice but inside the decoy slice.
+        expect(decideJamReaction(0.5, 0.1, pastParent, all).kind)
+            .toEqual('retargetDecoy');
+        // Past both retarget slices: falls through to veer.
+        expect(decideJamReaction(0.5, 0.1, pastBoth, all).kind)
+            .toEqual('veerAway');
     });
 
-    it('prefers decoy over veer when both are set (and no parent flag)', () => {
-        const r = decideJamReaction(0.5, 0.1, flags({
+    it('gives decoy the first slice when the parent flag is unset', () => {
+        const decoyVeer = flags({
             decoyedByAsteroids: true,
             turnsAwayIfJammed: true,
-        }));
-        expect(r.kind).toEqual('retargetDecoy');
+        });
+        expect(decideJamReaction(0.5, 0.1, DECOY_RETARGET_PROBABILITY / 2,
+            decoyVeer).kind).toEqual('retargetDecoy');
+        expect(decideJamReaction(0.5, 0.1, DECOY_RETARGET_PROBABILITY,
+            decoyVeer).kind).toEqual('veerAway');
     });
 
-    it('veers away when only turnsAwayIfJammed is set', () => {
-        expect(decideJamReaction(0.5, 0.1, flags({ turnsAwayIfJammed: true })).kind)
-            .toEqual('veerAway');
+    it('flies straight when a retarget slice misses and turnsAway is unset', () => {
+        expect(decideJamReaction(0.5, 0.1, 0.99,
+            flags({ decoyedByAsteroids: true })).kind).toEqual('flyStraight');
+    });
+
+    it('veers away when only turnsAwayIfJammed is set, whatever the reaction roll', () => {
+        expect(decideJamReaction(0.5, 0.1, 0, flags({ turnsAwayIfJammed: true }))
+            .kind).toEqual('veerAway');
+        expect(decideJamReaction(0.5, 0.1, 0.99,
+            flags({ turnsAwayIfJammed: true })).kind).toEqual('veerAway');
     });
 });
 
@@ -404,8 +430,10 @@ describe('MissileJammingSystem (deterministic integration)', () => {
         world.entities.set('missile',
             makeMissile('ship', [100, 0, 0, 0], { decoyedByAsteroids: true }));
 
+        // Retargets are gated at DECOY_RETARGET_PROBABILITY per jam event, so
+        // give the loop enough steps to make a miss astronomically unlikely.
         let retargeted = false;
-        for (let i = 0; i < 50 && !retargeted; i++) {
+        for (let i = 0; i < 500 && !retargeted; i++) {
             world.step();
             const target = world.entities.get('missile')!
                 .components.get(TargetComponent)!.target;
@@ -425,8 +453,10 @@ describe('MissileJammingSystem (deterministic integration)', () => {
         missile.components.set(SourceComponent, 'parent');
         world.entities.set('missile', missile);
 
+        // Gated at ATTACK_PARENT_IF_JAMMED_PROBABILITY per jam event; as above,
+        // run long enough that a miss is astronomically unlikely.
         let attackedParent = false;
-        for (let i = 0; i < 50 && !attackedParent; i++) {
+        for (let i = 0; i < 500 && !attackedParent; i++) {
             world.step();
             if (world.entities.get('missile')!
                 .components.get(TargetComponent)!.target === 'parent') {

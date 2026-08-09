@@ -63,10 +63,16 @@ import { TargetComponent } from './target_component.js';
  *     This is scaled by JAM_FRAME_RATE so the *per-second* aggression is stable
  *     regardless of the 60 Hz tick (see JAM_FRAME_RATE).
  *
- *  3. A single deterministic PRNG draw decides whether the missile loses lock
- *     this frame. On a lose-lock result, the missile reacts per its Seeker
- *     flags:
- *       - attackParentIfJammed: retarget the ship that fired it (if known).
+ *  3. A deterministic PRNG draw decides whether the missile loses lock this
+ *     frame. On a lose-lock result, a second draw (the "reaction roll") decides
+ *     how it reacts. The retargeting flags are treated as *eligibility*, not
+ *     certainty -- the Bible's only rate language is the word "may" ("May
+ *     attack parent ship if jammed"), and in the original game clearly not
+ *     every jammed missile attacks an asteroid:
+ *       - attackParentIfJammed: with probability
+ *         ATTACK_PARENT_IF_JAMMED_PROBABILITY, retarget the firing ship.
+ *       - decoyedByAsteroids: with probability DECOY_RETARGET_PROBABILITY,
+ *         retarget a nearby decoy (asteroid).
  *       - turnsAwayIfJammed: mark it to veer away from its target this frame.
  *       - otherwise: drop guidance for the frame (fly straight ahead).
  *
@@ -86,6 +92,21 @@ import { TargetComponent } from './target_component.js';
  * make up one Nova frame.
  */
 export const JAM_FRAME_RATE = 0.5;
+
+/**
+ * Given a lose-lock event, the probability that a missile whose Seeker flag
+ * makes it *eligible* for a special retarget reaction actually takes it
+ * (instead of falling through to veer/fly-straight). Without a gate, the
+ * retargets are absorbing states -- veer/straight last one frame but a
+ * retarget permanently rewrites TargetComponent -- so over many jam events
+ * every decoy-vulnerable missile would end up attacking an asteroid.
+ * JUDGMENT CALL: the Bible gives no rate (its only hint is the word "may" in
+ * "May attack parent ship if jammed"); 10% is an eyeballed starting point.
+ * Tune freely.
+ */
+export const ATTACK_PARENT_IF_JAMMED_PROBABILITY = 0.1;
+/** See ATTACK_PARENT_IF_JAMMED_PROBABILITY. */
+export const DECOY_RETARGET_PROBABILITY = 0.1;
 
 /**
  * A ship's accumulated jamming strength for each of the four jamming types,
@@ -268,24 +289,37 @@ export type JamReaction =
 
 /**
  * Decides, deterministically, whether and how a missile loses lock this frame.
- * `roll` must be a fresh draw from the deterministic PRNG in [0, 1).
+ * `roll` and `reactionRoll` must each be a fresh draw from the deterministic
+ * PRNG in [0, 1).
  *
- * The precedence for the reaction when jammed is:
- *   attackParentIfJammed > decoyedByAsteroids > turnsAwayIfJammed > flyStraight
+ * The retargeting flags gate on `reactionRoll`: each eligible retarget owns its
+ * own slice of the unit interval (parent first, then decoy), so with both flags
+ * set the outcomes are ATTACK_PARENT_IF_JAMMED_PROBABILITY parent,
+ * DECOY_RETARGET_PROBABILITY decoy, remainder veer/straight -- and setting one
+ * flag never changes the other's odds. When no retarget slice is hit, the
+ * precedence is turnsAwayIfJammed > flyStraight.
  * (The caller is responsible for finding a decoy for `retargetDecoy`; if none is
  * nearby it should fall back to veer/straight, so decoy vulnerability never
  * makes a missile *more* accurate.)
  */
 export function decideJamReaction(
-    probability: number, roll: number, seeker: SeekerFlags): JamReaction {
+    probability: number, roll: number, reactionRoll: number,
+    seeker: SeekerFlags): JamReaction {
     if (roll >= probability) {
         return { kind: 'none' };
     }
+    let threshold = 0;
     if (seeker.attackParentIfJammed) {
-        return { kind: 'retargetParent' };
+        threshold += ATTACK_PARENT_IF_JAMMED_PROBABILITY;
+        if (reactionRoll < threshold) {
+            return { kind: 'retargetParent' };
+        }
     }
     if (seeker.decoyedByAsteroids) {
-        return { kind: 'retargetDecoy' };
+        threshold += DECOY_RETARGET_PROBABILITY;
+        if (reactionRoll < threshold) {
+            return { kind: 'retargetDecoy' };
+        }
     }
     if (seeker.turnsAwayIfJammed) {
         return { kind: 'veerAway' };
@@ -397,16 +431,19 @@ export const MissileJammingSystem = new System({
             systemInterference.interference);
         const probability = jamLoseLockProbability(
             projectileData.jamVulnerabilities, effJam);
-        // Draw exactly once per missile per frame for determinism, even if
+        // Draw exactly twice per missile per frame for determinism, even if
         // probability is 0 (so the PRNG sequence is independent of jamming
         // state -- adding/removing a jammer never shifts other missiles' rolls
-        // for a given tick). Guard the common no-jam case after the draw.
+        // for a given tick). The second draw gates which reaction a jammed
+        // missile takes. Guard the common no-jam case after the draws.
         const roll = random.next();
+        const reactionRoll = random.next();
         if (probability <= 0) {
             return;
         }
 
-        const reaction = decideJamReaction(probability, roll, seeker);
+        const reaction = decideJamReaction(probability, roll, reactionRoll,
+            seeker);
         applyJamReaction(reaction, self, uuid, movement, entities);
     }
 });
