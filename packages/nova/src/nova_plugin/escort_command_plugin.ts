@@ -22,6 +22,7 @@ import { shipDisposition } from './iff_plugin.js';
 import { chooseNearest, FormationComponent, NpcComponent, RCS_ACCEL_FRACTION } from './npc_ai_plugin.js';
 import { ShootAllWeaponsComponent } from './npc_plugin.js';
 import { LegalRecordsComponent, LegalRecordsState } from './reputation_plugin.js';
+import { EscortLandingComponent } from './player_escort.js';
 import { ShipComponent, ShipPhysicsComponent } from './ship_plugin.js';
 import { ShipControlEvent, ShipControlStateComponent } from './ship_control.js';
 import { TargetComponent } from './target_component.js';
@@ -290,9 +291,18 @@ export const EscortCommandBehaviorSystem = new System({
     args: [EscortCommandComponent, MovementStateComponent,
         ShipPhysicsComponent, WeaponsStateComponent, TargetComponent,
         UUID, GetEntity, Entities, HostileCandidatesQuery, TimeResource,
-        SimulationGameDataResource] as const,
+        SimulationGameDataResource, Optional(EscortLandingComponent)] as const,
     step(command, movement, physics, weapons, target, uuid, entity,
-        entities, candidates, time, gameData) {
+        entities, candidates, time, gameData, landing) {
+        if (landing) {
+            // Following the player down to a planet: EscortLandingSystem
+            // owns the steering, and an escort on final approach holds
+            // its fire.
+            for (const [, weapon] of weapons) {
+                weapon.firing = false;
+            }
+            return;
+        }
         const ceaseFire = () => {
             for (const [, weapon] of weapons) {
                 weapon.firing = false;

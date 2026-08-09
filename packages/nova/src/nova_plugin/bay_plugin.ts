@@ -6,6 +6,7 @@ import { Position } from 'nova_ecs/datatypes/position';
 import { Vector } from 'nova_ecs/datatypes/vector';
 import { Entity } from 'nova_ecs/entity';
 import { Plugin } from 'nova_ecs/plugin';
+import { Optional } from 'nova_ecs/optional';
 import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import { CommunicatorResource, MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
 import { markerType, SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
@@ -18,12 +19,16 @@ import { ExitPointData } from './exit_point.js';
 import { OwnerComponent, SourceComponent, WeaponConstructors, WeaponEntry } from './fire_weapon_plugin.js';
 import { DeathAIComponent } from './npc_plugin.js';
 import { FormationComponent, nextFormationSlot } from './npc_ai_plugin.js';
+import { EscortLandingComponent } from './player_escort.js';
 import { ShipComponent } from './ship_plugin.js';
 import { TargetComponent } from './target_component.js';
 import { WeaponsStateComponent } from './weapons_state.js';
 
-const CollectableEscortComponent = new Component<undefined>('CollectableEscort');
-const ReturnComponent = new Component<undefined>('ReturnComponent');
+/** Exported so a landing order can cancel an in-progress return
+ * (player_escort_plugin): a fighter whose carrier is leaving the system
+ * lands on the planet instead of chasing a bay that is about to vanish. */
+export const CollectableEscortComponent = new Component<undefined>('CollectableEscort');
+export const ReturnComponent = new Component<undefined>('ReturnComponent');
 /**
  * Marks a bay-launched fighter — the ships that CAN return to a bay.
  * (Historical name: it once triggered auto-return when the fighter's
@@ -161,8 +166,14 @@ export function startReturnHome(entity: Entity) {
 
 export const ReturnAI = new System({
     name: 'ReturnToBase',
-    args: [OwnerComponent, MovementStateComponent, ReturnComponent] as const,
-    step(owner, movementState) {
+    args: [OwnerComponent, MovementStateComponent, ReturnComponent,
+        Optional(EscortLandingComponent)] as const,
+    step(owner, movementState, _return, landing) {
+        if (landing) {
+            // Landing with the player wins over flying home to the bay
+            // (player_escort_plugin steers this ship).
+            return;
+        }
         movementState.turnTo = owner.owner;
         movementState.accelerating = 1;
     }

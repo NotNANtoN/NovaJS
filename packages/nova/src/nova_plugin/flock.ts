@@ -30,7 +30,19 @@ import { FormationComponent, NpcComponent } from './npc_ai_plugin.js';
  * MAX_FLOCK_DEPTH plus a visited set guards against pathological
  * leader cycles (a following b following a).
  */
-const MAX_FLOCK_DEPTH = 8;
+export const MAX_FLOCK_DEPTH = 8;
+
+/**
+ * One hop up the flock chain: who this ship follows, in the priority
+ * order documented above (formation leader, then bay owner, then firing
+ * group). The single definition of the chain edge, shared by isInFlock
+ * and by the player-escort ownership walk (player_escort_plugin).
+ */
+export function flockParent(entity: Entity): string | undefined {
+    return entity.components.get(FormationComponent)?.leader
+        ?? entity.components.get(OwnerComponent)?.owner
+        ?? entity.components.get(FiringGroupComponent)?.group;
+}
 
 /**
  * Whether the ship `uuid` belongs to `rootUuid`'s flock: following its
@@ -53,9 +65,7 @@ export function isInFlock(uuid: string, rootUuid: string,
         if (!entity) {
             return false;
         }
-        const parent = entity.components.get(FormationComponent)?.leader
-            ?? entity.components.get(OwnerComponent)?.owner
-            ?? entity.components.get(FiringGroupComponent)?.group;
+        const parent = flockParent(entity);
         if (parent === undefined || parent === current) {
             return false;
         }

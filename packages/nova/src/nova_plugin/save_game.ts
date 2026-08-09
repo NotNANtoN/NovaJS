@@ -29,6 +29,22 @@ import { ShipComponent } from './ship_plugin.js';
  * a stored save can't be decoded (corrupt, or written by a newer/older
  * version whose shape we don't understand), it is moved to a quarantine key
  * rather than deleted, and the game falls back to its defaults.
+ *
+ * DOCUMENTED SEAM — escorts are not persisted. Escorts now follow the
+ * player's whole lifecycle in a session (landing, departure, hyperspace
+ * jumps; see nova_plugin/player_escort_plugin.ts), but none of that reaches
+ * the save: a reload starts with no escorts, and a pilot who saves while
+ * docked with a landed escort roster (spaceport/landed_escorts.ts) loses it.
+ *
+ * Persisting them means persisting whole ENTITIES, not component fields:
+ * their value is their damage, outfits, cargo, and bay identity, which is
+ * exactly what the roster carries and what a ship-id list would throw away.
+ * The shape that fits this schema is a `t.partial` array of
+ * serializer-`EncodedEntity` blobs plus each escort's PlayerEscort marker,
+ * written from the landed roster at saveNow() time and re-inserted through
+ * the same addEntity path liftoff uses. That drags the save's versioning
+ * into the entity serializer's wire compatibility, which is why it is left
+ * as a seam rather than done here.
  */
 
 /** Bump when the shape of `SaveData` changes incompatibly. */

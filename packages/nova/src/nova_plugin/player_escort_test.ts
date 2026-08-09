@@ -1,0 +1,523 @@
+import 'jasmine';
+import { MockGameData } from 'novadatainterface/mock_game_data';
+import { getDefaultPlanetData } from 'novadatainterface/planet_data';
+import { getDefaultShipData } from 'novadatainterface/ship_data';
+import { Angle } from 'nova_ecs/datatypes/angle';
+import { Position } from 'nova_ecs/datatypes/position';
+import { Vector } from 'nova_ecs/datatypes/vector';
+import { Entity } from 'nova_ecs/entity';
+import {
+    MovementState, MovementStateComponent,
+} from 'nova_ecs/plugins/movement_plugin';
+import { World } from 'nova_ecs/world';
+import {
+    CollectableEscortComponent, ReturnComponent,
+    ReturnWhenTargetRemovedComponent,
+} from './bay_plugin.js';
+import { completeEntity } from './entity_data_loader.js';
+import { EscortCommandComponent } from './escort_command.js';
+import { OwnerComponent, SourceComponent } from './fire_weapon_plugin.js';
+import { FiringGroupComponent } from './firing_group.js';
+import { ArmorComponent, FuelComponent } from './health_plugin.js';
+import { InitiateJumpEvent } from './jump_plugin.js';
+import { makeShip } from './make_ship.js';
+import { makeSystem } from './make_system.js';
+import { MissionShipComponent } from './mission_ship_plugin.js';
+import { FormationComponent } from './npc_ai_plugin.js';
+import { LandEvent, PlanetComponent, PlanetDataComponent } from './planet_plugin.js';
+import { EscortLandingComponent, PlayerEscortComponent } from './player_escort.js';
+import {
+    EscortJump, EscortJumpEvent, EscortLanded, EscortLandedEvent,
+    ESCORT_LAND_DISTANCE_SQUARED, playerEscortLink, steerToStellar,
+} from './player_escort_plugin.js';
+import { ControlledByComponent } from './ship_control.js';
+
+const PEER = 'test peer';
+const PLAYER = 'player';
+const PLANET = 'planet test:planet';
+const SHIP_ID = 'test:ship';
+/** A hull with no energy capacity at all: no hyperdrive, cannot follow. */
+const NO_ENERGY_SHIP_ID = 'test:noEnergy';
+
+async function makeWorld({ planetGate = false } = {}) {
+    const gameData = new MockGameData();
+    gameData.data.Ship.map.set(SHIP_ID, {
+        ...getDefaultShipData(),
+        id: SHIP_ID,
+    });
+    const noEnergy = getDefaultShipData();
+    noEnergy.id = NO_ENERGY_SHIP_ID;
+    noEnergy.physics = { ...noEnergy.physics, energy: 0 };
+    gameData.data.Ship.map.set(NO_ENERGY_SHIP_ID, noEnergy);
+    await gameData.data.Ship.get(SHIP_ID);
+    await gameData.data.Ship.get(NO_ENERGY_SHIP_ID);
+
+    const world = await makeSystem('test:system', gameData, undefined,
+        { npcs: false });
+
+    async function addShip(uuid: string, x: number, y: number,
+        setup: (ship: Entity) => void = () => { },
+        shipId = SHIP_ID) {
+        const ship = makeShip(gameData.data.Ship.map.get(shipId)!);
+        ship.components.set(MovementStateComponent, {
+            accelerating: 0,
+            position: new Position(x, y),
+            rotation: new Angle(Math.PI / 2),
+            turnBack: false,
+            turning: 0,
+            velocity: new Vector(0, 0),
+        });
+        setup(ship);
+        await completeEntity(world, ship);
+        world.entities.set(uuid, ship);
+        return ship;
+    }
+
+    // A stellar to land on. A bare planet entity is enough for the
+    // landing systems (they only read its position and gate kind).
+    const planet = new Entity();
+    planet.components.set(PlanetComponent, { id: 'test:planet' });
+    planet.components.set(PlanetDataComponent, {
+        ...getDefaultPlanetData(),
+        id: 'test:planet',
+        ...(planetGate
+            ? { gate: { kind: 'hypergate' as const, links: [] } }
+            : {}),
+    });
+    planet.components.set(MovementStateComponent, {
+        accelerating: 0,
+        position: new Position(2000, 0),
+        rotation: new Angle(0),
+        turnBack: false,
+        turning: 0,
+        velocity: new Vector(0, 0),
+    });
+    world.entities.set(PLANET, planet);
+
+    const player = await addShip(PLAYER, 0, 0, ship => {
+        ship.components.set(ControlledByComponent, { peerId: PEER });
+    });
+
+    async function addEscort(uuid: string, x = 0, y = 200,
+        setup: (ship: Entity) => void = () => { }, shipId = SHIP_ID) {
+        return addShip(uuid, x, y, ship => {
+            ship.components.set(FormationComponent,
+                { leader: PLAYER, slot: 0 });
+            ship.components.set(EscortCommandComponent,
+                { command: 'formation' });
+            ship.components.set(FiringGroupComponent, { group: PLAYER });
+            setup(ship);
+        }, shipId);
+    }
+
+    return { world, gameData, addShip, addEscort, player, planet };
+}
+
+/** Steps until the predicate holds; returns the number of steps taken. */
+function stepUntil(world: World, predicate: () => boolean, maxSteps = 4000) {
+    for (let i = 0; i < maxSteps; i++) {
+        if (predicate()) {
+            return i;
+        }
+        world.step();
+    }
+    throw new Error(`Condition not met within ${maxSteps} steps`);
+}
+
+describe('player escort ownership', () => {
+    it('marks an escort of a controlled ship', async () => {
+        const { world, addEscort } = await makeWorld();
+        const escort = await addEscort('escort');
+        world.step();
+        expect(escort.components.get(PlayerEscortComponent))
+            .toEqual({ player: PLAYER, parent: PLAYER });
+    });
+
+    it('does not mark an escort of an NPC leader', async () => {
+        const { world, addShip } = await makeWorld();
+        await addShip('npc leader', 500, 0);
+        const wing = await addShip('npc wing', 500, 200, ship => {
+            ship.components.set(FormationComponent,
+                { leader: 'npc leader', slot: 0 });
+        });
+        world.step();
+        expect(wing.components.has(PlayerEscortComponent)).toBeFalse();
+    });
+
+    it('does not mark mission ships (they have their own respawn flow)',
+        async () => {
+            const { world, addEscort } = await makeWorld();
+            const missionShip = await addEscort('mission', 0, 300, ship => {
+                ship.components.set(MissionShipComponent,
+                    { mission: 'test:mission', owner: PLAYER });
+            });
+            world.step();
+            expect(missionShip.components.has(PlayerEscortComponent))
+                .toBeFalse();
+        });
+
+    it('marks a fighter launched from an escort with the escort as parent',
+        async () => {
+            const { world, addEscort, addShip } = await makeWorld();
+            await addEscort('carrier');
+            const fighter = await addShip('fighter', 0, 400, ship => {
+                ship.components.set(OwnerComponent, { owner: 'carrier' });
+                ship.components.set(SourceComponent, 'carrier');
+                ship.components.set(EscortCommandComponent,
+                    { command: 'formation' });
+            });
+            world.step();
+            expect(fighter.components.get(PlayerEscortComponent))
+                .toEqual({ player: PLAYER, parent: 'carrier' });
+        });
+
+    it('keeps the marker when the player leaves the world', async () => {
+        const { world, addEscort } = await makeWorld();
+        const escort = await addEscort('escort');
+        world.step();
+        world.entities.delete(PLAYER);
+        world.step();
+        world.step();
+        // The formation link is allowed to lapse (FormationSystem's
+        // unchanged leader-gone rule) but ownership is not.
+        expect(escort.components.has(FormationComponent)).toBeFalse();
+        expect(escort.components.get(PlayerEscortComponent)?.player)
+            .toEqual(PLAYER);
+    });
+
+    it('reports no link while the player is out of the world', async () => {
+        const { world, addEscort } = await makeWorld();
+        await addEscort('escort');
+        world.step();
+        world.entities.delete(PLAYER);
+        expect(playerEscortLink('escort', uuid => world.entities.get(uuid)))
+            .toBeUndefined();
+    });
+});
+
+describe('escort re-attachment', () => {
+    it('restores formation and resets the command when the player returns',
+        async () => {
+            const { world, addEscort } = await makeWorld();
+            const escort = await addEscort('escort');
+            world.step();
+            const player = world.entities.get(PLAYER)!;
+            world.entities.delete(PLAYER);
+            world.step();
+            expect(escort.components.has(FormationComponent)).toBeFalse();
+            expect(escort.components.get(PlayerEscortComponent)?.detached)
+                .toBeTrue();
+
+            // The player lifts off again under the SAME uuid.
+            world.entities.set(PLAYER, player);
+            world.step();
+            expect(escort.components.get(FormationComponent)?.leader)
+                .toEqual(PLAYER);
+            expect(escort.components.get(EscortCommandComponent))
+                .toEqual({ command: 'formation' });
+            expect(escort.components.get(FiringGroupComponent))
+                .toEqual({ group: PLAYER });
+            expect(escort.components.get(PlayerEscortComponent)?.detached)
+                .toBeFalse();
+        });
+
+    it('resets a holdPosition escort that kept its formation link',
+        async () => {
+            // FormationSystem yields for non-formation commands, so this
+            // escort's formation link never lapses: the reset has to come
+            // from the explicit detached flag, not from a missing link.
+            const { world, addEscort } = await makeWorld();
+            const escort = await addEscort('escort');
+            world.step();
+            escort.components.set(EscortCommandComponent,
+                { command: 'holdPosition' });
+            const player = world.entities.get(PLAYER)!;
+            world.entities.delete(PLAYER);
+            world.step();
+            expect(escort.components.get(FormationComponent)?.leader)
+                .toEqual(PLAYER);
+
+            world.entities.set(PLAYER, player);
+            world.step();
+            expect(escort.components.get(EscortCommandComponent))
+                .toEqual({ command: 'formation' });
+        });
+
+    it('does not yank a returning bay fighter back into formation',
+        async () => {
+            const { world, addShip } = await makeWorld();
+            const fighter = await addShip('fighter', 0, 200, ship => {
+                ship.components.set(OwnerComponent, { owner: PLAYER });
+                ship.components.set(SourceComponent, PLAYER);
+                ship.components.set(ReturnWhenTargetRemovedComponent,
+                    undefined);
+                ship.components.set(EscortCommandComponent,
+                    { command: 'returnToBay' });
+                ship.components.set(ReturnComponent, undefined);
+            });
+            world.step();
+            // Detach and return: the fighter must not be pulled back into
+            // formation by the player's reappearance.
+            const player = world.entities.get(PLAYER)!;
+            world.entities.delete(PLAYER);
+            world.step();
+            world.entities.set(PLAYER, player);
+            world.step();
+            expect(fighter.components.get(PlayerEscortComponent)?.player)
+                .toEqual(PLAYER);
+            expect(fighter.components.has(FormationComponent)).toBeFalse();
+            expect(fighter.components.get(EscortCommandComponent))
+                .toEqual({ command: 'returnToBay' });
+        });
+});
+
+describe('escorts landing with the player', () => {
+    it('orders owned escorts to the stellar and lands them', async () => {
+        const { world, addEscort } = await makeWorld();
+        const escort = await addEscort('escort');
+        const landed: EscortLanded[] = [];
+        world.events.get(EscortLandedEvent).subscribe(
+            ({ data }) => landed.push(data));
+        world.step();
+        // Damage the escort so we can prove the captured entity is the
+        // real one rather than a rebuild from its ship id.
+        escort.components.get(ArmorComponent)!.current = 42;
+
+        world.emit(LandEvent, { id: 'test:planet', uuid: PLANET }, [PLAYER]);
+        world.step();
+        expect(escort.components.get(EscortLandingComponent))
+            .toEqual({ planet: PLANET });
+
+        // The player docks: its entity leaves the simulation.
+        world.entities.delete(PLAYER);
+        stepUntil(world, () => landed.length > 0);
+        expect(world.entities.has('escort')).toBeFalse();
+        expect(landed.length).toEqual(1);
+        expect(landed[0].player).toEqual(PLAYER);
+        expect(landed[0].planet).toEqual(PLANET);
+        // Captured with its state intact and no stale landing order.
+        expect(landed[0].entity.components.get(ArmorComponent)?.current)
+            .toEqual(42);
+        expect(landed[0].entity.components.has(EscortLandingComponent))
+            .toBeFalse();
+        expect(landed[0].entity.components.get(PlayerEscortComponent)?.player)
+            .toEqual(PLAYER);
+    });
+
+    it('lands inside the escort landing window', async () => {
+        const { world, addEscort, planet } = await makeWorld();
+        await addEscort('escort');
+        const landed: EscortLanded[] = [];
+        world.events.get(EscortLandedEvent).subscribe(
+            ({ data }) => landed.push(data));
+        world.step();
+        world.emit(LandEvent, { id: 'test:planet', uuid: PLANET }, [PLAYER]);
+        world.step();
+        world.entities.delete(PLAYER);
+        const steps = stepUntil(world, () => landed.length > 0);
+        // A 2000px approach at 300px/s takes ~485 steps (~8s of sim time).
+        // The bound is a regression guard on the approach controller: a
+        // change that makes escorts dawdle or orbit the stellar fails here.
+        expect(steps).toBeLessThan(900);
+        const movement =
+            landed[0].entity.components.get(MovementStateComponent)!;
+        const planetPosition =
+            planet.components.get(MovementStateComponent)!.position;
+        expect(Position.fromVectorLike(planetPosition)
+            .subtract(movement.position).lengthSquared)
+            .toBeLessThanOrEqual(ESCORT_LAND_DISTANCE_SQUARED);
+    });
+
+    it('cancels a bay fighter\'s return home so it lands instead',
+        async () => {
+            const { world, addShip } = await makeWorld();
+            const fighter = await addShip('fighter', 0, 200, ship => {
+                ship.components.set(OwnerComponent, { owner: PLAYER });
+                ship.components.set(SourceComponent, PLAYER);
+                ship.components.set(ReturnWhenTargetRemovedComponent,
+                    undefined);
+                ship.components.set(EscortCommandComponent,
+                    { command: 'returnToBay' });
+                ship.components.set(ReturnComponent, undefined);
+                ship.components.set(CollectableEscortComponent, undefined);
+            });
+            world.step();
+            world.emit(LandEvent, { id: 'test:planet', uuid: PLANET },
+                [PLAYER]);
+            world.step();
+            expect(fighter.components.has(EscortLandingComponent)).toBeTrue();
+            expect(fighter.components.has(ReturnComponent)).toBeFalse();
+            expect(fighter.components.has(CollectableEscortComponent))
+                .toBeFalse();
+        });
+
+    it('does not order a landing at a gate stellar', async () => {
+        const { world, addEscort } = await makeWorld({ planetGate: true });
+        const escort = await addEscort('escort');
+        world.step();
+        world.emit(LandEvent, { id: 'test:planet', uuid: PLANET }, [PLAYER]);
+        world.step();
+        expect(escort.components.has(EscortLandingComponent)).toBeFalse();
+    });
+
+    it('does not land an escort in the tick the player returns', async () => {
+        // The stranding race: an escort can drift into the landing window
+        // on the same tick the player's relaunch record is applied (the
+        // record lands before the tick's systems run). EscortLandingSystem
+        // is ordered AFTER EscortReattachSystem so the order is cleared
+        // first — otherwise the escort despawns and its capture arrives
+        // after the client already consumed and re-inserted its roster.
+        //
+        // The state below is the start of exactly that tick: inside the
+        // window, order still pending, player back, detached still set.
+        const { world, addEscort, planet } = await makeWorld();
+        const planetPosition =
+            planet.components.get(MovementStateComponent)!.position;
+        const escort = await addEscort('escort',
+            planetPosition.x, planetPosition.y);
+        const landed: EscortLanded[] = [];
+        world.events.get(EscortLandedEvent).subscribe(
+            ({ data }) => landed.push(data));
+        escort.components.set(PlayerEscortComponent,
+            { player: PLAYER, parent: PLAYER, detached: true });
+        escort.components.set(EscortLandingComponent, { planet: PLANET });
+
+        world.step();
+
+        expect(landed.length).toEqual(0);
+        expect(world.entities.has('escort')).toBeTrue();
+        expect(escort.components.has(EscortLandingComponent)).toBeFalse();
+        expect(escort.components.get(FormationComponent)?.leader)
+            .toEqual(PLAYER);
+    });
+
+    it('re-attaches an escort still flying to the planet at liftoff',
+        async () => {
+            const { world, addEscort } = await makeWorld();
+            const escort = await addEscort('escort');
+            world.step();
+            world.emit(LandEvent, { id: 'test:planet', uuid: PLANET },
+                [PLAYER]);
+            world.step();
+            const player = world.entities.get(PLAYER)!;
+            world.entities.delete(PLAYER);
+            // Part-way to the planet, still in the air.
+            for (let i = 0; i < 20; i++) {
+                world.step();
+            }
+            expect(world.entities.has('escort')).toBeTrue();
+            expect(escort.components.has(EscortLandingComponent)).toBeTrue();
+
+            world.entities.set(PLAYER, player);
+            world.step();
+            expect(escort.components.has(EscortLandingComponent)).toBeFalse();
+            expect(escort.components.get(FormationComponent)?.leader)
+                .toEqual(PLAYER);
+            expect(escort.components.get(EscortCommandComponent))
+                .toEqual({ command: 'formation' });
+        });
+});
+
+describe('escorts following a jump', () => {
+    it('carries owned escorts out of the system for free', async () => {
+        const { world, addEscort } = await makeWorld();
+        const escort = await addEscort('escort');
+        const jumps: EscortJump[] = [];
+        world.events.get(EscortJumpEvent).subscribe(
+            ({ data }) => jumps.push(data));
+        world.step();
+        const fuelBefore = escort.components.get(FuelComponent)!.current;
+
+        world.emit(InitiateJumpEvent, { to: 'test:destination' }, [PLAYER]);
+        world.step();
+
+        expect(world.entities.has('escort')).toBeFalse();
+        expect(jumps.length).toEqual(1);
+        expect(jumps[0].to).toEqual('test:destination');
+        expect(jumps[0].player).toEqual(PLAYER);
+        expect(jumps[0].uuid).toEqual('escort');
+        // Escorts jump for free: no fuel is deducted.
+        expect(jumps[0].entity.components.get(FuelComponent)?.current)
+            .toEqual(fuelBefore);
+        expect(jumps[0].entity.components.get(PlayerEscortComponent)?.player)
+            .toEqual(PLAYER);
+    });
+
+    it('leaves a zero-energy escort behind, still owned', async () => {
+        const { world, addEscort } = await makeWorld();
+        const stranded = await addEscort('stranded', 0, 300, () => { },
+            NO_ENERGY_SHIP_ID);
+        const jumps: EscortJump[] = [];
+        world.events.get(EscortJumpEvent).subscribe(
+            ({ data }) => jumps.push(data));
+        world.step();
+        expect(stranded.components.get(FuelComponent)?.max).toEqual(0);
+
+        world.emit(InitiateJumpEvent, { to: 'test:destination' }, [PLAYER]);
+        world.step();
+
+        expect(jumps.length).toEqual(0);
+        expect(world.entities.has('stranded')).toBeTrue();
+        expect(stranded.components.get(PlayerEscortComponent)?.player)
+            .toEqual(PLAYER);
+    });
+
+    it('does not carry another ship\'s escorts', async () => {
+        const { world, addShip } = await makeWorld();
+        await addShip('other player', 1000, 0, ship => {
+            ship.components.set(ControlledByComponent,
+                { peerId: 'other peer' });
+        });
+        const theirs = await addShip('their escort', 1000, 200, ship => {
+            ship.components.set(FormationComponent,
+                { leader: 'other player', slot: 0 });
+            ship.components.set(EscortCommandComponent,
+                { command: 'formation' });
+        });
+        const jumps: EscortJump[] = [];
+        world.events.get(EscortJumpEvent).subscribe(
+            ({ data }) => jumps.push(data));
+        world.step();
+        expect(theirs.components.get(PlayerEscortComponent)?.player)
+            .toEqual('other player');
+
+        world.emit(InitiateJumpEvent, { to: 'test:destination' }, [PLAYER]);
+        world.step();
+        expect(jumps.length).toEqual(0);
+        expect(world.entities.has('their escort')).toBeTrue();
+    });
+});
+
+describe('steerToStellar', () => {
+    it('converges on the target and comes to rest', () => {
+        const movement: MovementState = {
+            accelerating: 0,
+            position: new Position(0, 0),
+            rotation: new Angle(0),
+            turnBack: false,
+            turning: 0,
+            velocity: new Vector(0, 0),
+        };
+        const target = new Position(1500, 0);
+        // Kinematics only (no MovementSystem): integrate the controller's
+        // own velocity writes plus a perfect thrust response.
+        const delta_s = 1 / 60;
+        for (let i = 0; i < 4000; i++) {
+            steerToStellar(movement, target, 300, 300, delta_s);
+            if (movement.accelerating > 0) {
+                movement.velocity = movement.velocity.add(
+                    (movement.turnTo instanceof Angle
+                        ? movement.turnTo : movement.rotation)
+                        .getUnitVector().scale(300 * delta_s));
+            }
+            if (movement.turnTo instanceof Angle) {
+                movement.rotation = movement.turnTo;
+            }
+            movement.position = Position.fromVectorLike(
+                movement.position.add(movement.velocity.scale(delta_s)));
+        }
+        expect(target.subtract(movement.position).length)
+            .toBeLessThan(50);
+        expect(movement.velocity.length).toBeLessThan(20);
+    });
+});

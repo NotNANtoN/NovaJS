@@ -35,6 +35,7 @@ import { NpcSpawnPlugin } from "./npc_spawn_plugin.js";
 import { OutfitPlugin } from "./outfit_plugin.js";
 import { PlanetPlugin } from "./planet_plugin.js";
 import { PlatformPlugin } from "./platform_plugin.js";
+import { PlayerEscortPlugin } from "./player_escort_plugin.js";
 import { PlayerStatePlugin } from "./player_state_plugin.js";
 import { ProjectilePlugin } from "./projectile_plugin.js";
 import { ReputationPlugin } from "./reputation_plugin.js";
@@ -95,6 +96,10 @@ export const SystemPlugin: Plugin = {
         world.addPlugin(PersPlugin);
         world.addPlugin(NpcSpawnPlugin);
         world.addPlugin(MissionShipPlugin);
+        // After NpcAiPlugin (orders against FormationSystem), JumpPlugin
+        // (orders against JumpFromSystem) and MissionShipPlugin (whose
+        // MissionShipComponent it excludes from player-escort ownership).
+        world.addPlugin(PlayerEscortPlugin);
         world.addPlugin(IonizedPlugin);
         world.addPlugin(AfterburnerPlugin);
         // After every plugin whose systems it orders against (controls,
