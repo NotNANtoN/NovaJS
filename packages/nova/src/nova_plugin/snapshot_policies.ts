@@ -21,7 +21,7 @@ import { IdFactoryResource } from "./id_factory.js";
 import { PlanetDataComponent } from "./planet_plugin.js";
 import { ProjectileBlastHull, ProjectileDataComponent } from "./projectile_data.js";
 import { ShipDataComponent } from "./ship_plugin.js";
-import { ReturnWhenTargetRemovedComponent } from "./bay_plugin.js";
+import { BayFighterComponent, ReturnWhenTargetRemovedComponent } from "./bay_plugin.js";
 import { ExplodingComponent } from "./death_plugin.js";
 import { ChooseRandomTargetComponent, DeathAIComponent, FollowComponent, ShootAllWeaponsComponent } from "./npc_plugin.js";
 import { ReturnToQueueComponent } from "./return_to_queue_plugin.js";
@@ -160,6 +160,12 @@ export function configureSnapshotPolicies(world: World) {
         policy: 'clone',
         clone: data => ({ ...data }),
     });
+    // Which bay launched this fighter. Cloned, not shared: it is an
+    // object, and the snapshot must not alias the live world's copy.
+    policies.set(BayFighterComponent, {
+        policy: 'clone',
+        clone: data => ({ ...data }),
+    });
     policies.set(BlastDoneComponent, {
         policy: 'clone',
         clone: data => ({ ...data }),
@@ -208,6 +214,8 @@ export function configureSnapshotPolicies(world: World) {
     policies.setWire(ExplodingComponent, passthroughWire<number>());
     policies.setWire(TargetIndexComponent, passthroughWire());
     policies.setWire(BlastDoneComponent, passthroughWire());
+    // {bayWeaponId: string} — already JSON.
+    policies.setWire(BayFighterComponent, passthroughWire());
     policies.setWire(ReturnWhenTargetRemovedComponent, {
         encode: () => null,
         decode: () => undefined,

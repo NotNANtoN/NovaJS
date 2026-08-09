@@ -22,6 +22,7 @@ import { ItemGrid, ItemTile } from "./item_grid.js";
 import { Menu } from "./menu.js";
 import { MissionSession } from "./mission_session.js";
 import { MissionUniverse } from "./mission_universe.js";
+import { DeployedOutfitCounts } from "./deployed_outfits.js";
 import { BuyDenialReason, canBuyOutfit, canSellOutfit, freeCargo, freeMass, maxBuyCount, maxSellCount, sellRefund, OutfitterContext } from "./outfitter_rules.js";
 import { QuantityDialog } from "./quantity_dialog.js";
 
@@ -128,6 +129,15 @@ export class Outfitter extends Menu<Entity> {
      * the build failed — then set strings fall back to bit-only hooks).
      */
     private missionSession?: MissionSession;
+    /**
+     * Owned-but-not-aboard units for this landing (bay fighters still in
+     * flight), supplied by the display side via
+     * Spaceport.setDeployedOutfitCounts. Called fresh on every context
+     * build, so a fighter destroyed mid-visit stops counting. Undefined
+     * means "everything owned is aboard" — the case for every headless
+     * test and for a landing with no fighters out.
+     */
+    private deployedOutfitCounts?: DeployedOutfitCounts;
 
     private text = {
         description: new PIXI.Text("", FONT.normal),
@@ -313,6 +323,11 @@ export class Outfitter extends Menu<Entity> {
         return itemGrid;
     }
 
+    /** See the deployedOutfitCounts field. */
+    setDeployedOutfitCounts(counts?: DeployedOutfitCounts) {
+        this.deployedOutfitCounts = counts;
+    }
+
     private makeContext(): OutfitterContext | undefined {
         if (!this.shipData) {
             return undefined;
@@ -324,6 +339,10 @@ export class Outfitter extends Menu<Entity> {
             getWeapon: id => this.simulationData.data.Weapon.getCached(id),
             bits: this.controlBits,
             credits: this.credits.credits,
+            // Resolved against the outfits the player owns, because a
+            // deployed fighter names only its bay weapon and has to be
+            // attributed back to one of the player's ammo outfits.
+            deployedCounts: this.deployedOutfitCounts?.(this.outfits.keys()),
         };
     }
 

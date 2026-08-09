@@ -24,6 +24,7 @@ import { CreditsComponent, GameDateComponent, MissionsComponent } from '../nova_
 import { DockedLiveStatus, DockedShip } from '../display/docked_ship.js';
 import { Bar } from './bar.js';
 import { Button } from './button.js';
+import { DeployedOutfitCounts } from './deployed_outfits.js';
 import { Menu } from './menu.js';
 import { MenuControls } from './menu_controls.js';
 import { MissionBoard } from './mission_board.js';
@@ -442,6 +443,17 @@ export class Spaceport extends Menu<Entity> {
     /** Points the status bar at the docked ship for this landing. */
     setDockedShip(dockedShip: DockedShip) {
         this.dockedShip = dockedShip;
+    }
+
+    /**
+     * Tells the outfitter which owned outfits are NOT aboard for this
+     * landing — bay fighters still in flight (see
+     * spaceport/deployed_outfits.ts). Set per-landing, like
+     * setDockedShip, because it closes over the docked ship's uuid.
+     * Left unset, the outfitter assumes everything owned is aboard.
+     */
+    setDeployedOutfitCounts(counts?: DeployedOutfitCounts) {
+        this.outfitter.setDeployedOutfitCounts(counts);
     }
 
     /**

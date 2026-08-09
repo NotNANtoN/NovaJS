@@ -1,4 +1,4 @@
-import { Emit, RunQuery } from 'nova_ecs/arg_types';
+import { Emit, Entities, RunQuery } from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
 import { Entity } from 'nova_ecs/entity';
 import { Plugin } from 'nova_ecs/plugin';
@@ -11,6 +11,7 @@ import { SingletonComponent } from 'nova_ecs/world';
 import { ControlsSubject } from '../nova_plugin/controls_plugin.js';
 import { DisplayAssetDataResource, SimulationGameDataResource } from '../nova_plugin/game_data_resource.js';
 import { PlanetComponent, PlanetDataComponent } from '../nova_plugin/planet_plugin.js';
+import { countDeployedFighters } from '../spaceport/deployed_outfits.js';
 import { Spaceport } from '../spaceport/spaceport.js';
 import { DockedShip, DockedShipResource } from './docked_ship.js';
 import { OpenMissionInfoResource } from './mission_info_plugin.js';
@@ -36,20 +37,42 @@ const SpaceportProvider = Provide({
 
 const SpaceportQuery = new Query([SpaceportComponent, PlanetComponent] as const);
 
-export const OpenSpaceportEvent = new EcsEvent<{ planetId: string, ship: Entity }>('OpenSpaceportEvent');
+/**
+ * `uuid` is the docked ship's uuid in the display world. It is optional
+ * because the ship is REMOVED from that world before this fires, so
+ * nothing can look it up afterwards — but entities it launched (bay
+ * fighters) still reference it, which is how the outfitter counts
+ * fighters that are still deployed. Omitted, the outfitter simply
+ * assumes everything the player owns is aboard.
+ */
+export const OpenSpaceportEvent = new EcsEvent<{
+    planetId: string, ship: Entity, uuid?: string,
+}>('OpenSpaceportEvent');
 export const LeaveSpaceportEvent = new EcsEvent<Entity>('LeaveSpaceportEvent');
 
 const OpenSpaceportSystem = new System({
     name: 'OpenSpaceportSystem',
     events: [OpenSpaceportEvent],
     args: [OpenSpaceportEvent, RunQuery, ScreenSize, Emit,
-        DockedShipResource, SingletonComponent] as const,
-    step({ planetId, ship }, runQuery, { x, y }, emit, dockedHolder) {
+        DockedShipResource, Entities, SimulationGameDataResource,
+        SingletonComponent] as const,
+    step({ planetId, ship, uuid }, runQuery, { x, y }, emit, dockedHolder,
+        entities, gameData) {
         const spaceport = runQuery(SpaceportQuery)
             .find(([, { id }]) => id === planetId)?.[0];
         if (!spaceport) {
             return;
         }
+
+        // Owned-but-not-aboard outfits for this landing. A closure over
+        // the live EntityMap, not a snapshot: the display world keeps
+        // stepping while docked, so a fighter shot down mid-visit stops
+        // counting against the buy cap. Compose further providers here
+        // with mergeDeployedCounts (see deployed_outfits.ts) — that is
+        // the hook for the landed-escort roster.
+        spaceport.setDeployedOutfitCounts(uuid === undefined ? undefined
+            : countDeployedFighters(entities, uuid,
+                id => gameData.data.Outfit.getCached(id)));
 
         // Publish the held ship so the status bar (out-of-world while docked)
         // keeps drawing its credits/fuel/cargo, and let the spaceport push

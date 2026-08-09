@@ -1,3 +1,4 @@
+import * as t from 'io-ts';
 import { BayWeaponData, WeaponData } from 'novadatainterface/weapon_data';
 import { Entities, GetEntity, RunQueryFunction, UUID } from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
@@ -6,11 +7,16 @@ import { Position } from 'nova_ecs/datatypes/position';
 import { Vector } from 'nova_ecs/datatypes/vector';
 import { Entity } from 'nova_ecs/entity';
 import { Plugin } from 'nova_ecs/plugin';
+import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
 import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import { CommunicatorResource, MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
 import { markerType, SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
+import { Optional } from 'nova_ecs/optional';
 import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
+import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
+import { SimulationGameDataResource } from './game_data_resource.js';
+import { OutfitsStateComponent } from './outfit_plugin.js';
 import { HitboxHullComponent, HurtboxHullComponent } from './collisions_plugin.js';
 import { CollisionEvent, CollisionHitterComponent, CollisionVulnerabilityComponent } from './collision_interaction.js';
 import { EscortCommandComponent } from './escort_command.js';
@@ -33,6 +39,99 @@ const ReturnComponent = new Component<undefined>('ReturnComponent');
  * behavior change.)
  */
 export const ReturnWhenTargetRemovedComponent = new Component<undefined>('ReturnWhenTargetRemoved');
+
+/**
+ * Links a launched fighter back to the bay weapon that launched it, so
+ * docking can refund a round of ammo to the carrier's magazine and so
+ * the outfitter can count still-deployed fighters against buy caps.
+ *
+ * A separate component rather than data folded into
+ * ReturnWhenTargetRemovedComponent: that one is a registered marker
+ * (markerType / `encode: () => null`) on the wire, and giving it a
+ * payload would change its codec, so old and new peers would disagree
+ * about the shape of an existing component. A NEW component is additive
+ * — peers that don't know it ignore the extra key.
+ */
+const BayFighter = t.type({
+    /** Global id of the bay wëap this fighter launched from. */
+    bayWeaponId: t.string,
+});
+export type BayFighter = t.TypeOf<typeof BayFighter>;
+export const BayFighterComponent =
+    new Component<BayFighter>('BayFighterComponent');
+
+/**
+ * Credits one round of `bayWeaponId` ammo back to `carrier`'s magazine,
+ * for a fighter that just docked. Returns whether a round was actually
+ * refunded.
+ *
+ * Policy (deliberately the mirror image of weapon_plugin's
+ * consumeAmmo): the round goes to the LOWEST-sorted outfit id that
+ * supplies this weapon, so every peer picks the same outfit. Two
+ * further rules:
+ *
+ *  - The count is bumped IN PLACE on an existing OutfitsState entry
+ *    rather than reassigning OutfitsStateComponent. Provide's change
+ *    detection only fires on component reassignment (see
+ *    nova_ecs/provide.ts), so an in-place bump — exactly what
+ *    consumeAmmo does — leaves WeaponsStateComponent and the
+ *    WeaponsComponent local state (reload timers, burst counters)
+ *    alone. Reassigning would re-derive both and reset every weapon's
+ *    reload clock mid-flight, which is the live TODO at
+ *    fire_weapon_plugin.ts WeaponsComponentProvider.
+ *  - It never pushes the magazine past capacity (the bay's MaxAmmo
+ *    times the number of bays the carrier mounts), so a carrier that
+ *    somehow restocked while its fighters were out cannot end up
+ *    over-full. In normal play the deployed-fighter accounting in the
+ *    outfitter (outfitter_rules deployedCounts) keeps this from ever
+ *    biting.
+ *
+ * A carrier with no entry at all for any supplying outfit gets no
+ * refund: consumeAmmo decrements existing entries and leaves them at
+ * zero rather than deleting them, so the entry is there in every path
+ * that launched the fighter in the first place. Nothing here can
+ * invent an outfit id, since finding one would need an async scan of
+ * every outfit in the game data.
+ */
+export function refundFighterToBay(carrier: Entity, bayWeaponId: string,
+    gameData: SimulationGameDataInterface): boolean {
+    const outfits = carrier.components.get(OutfitsStateComponent);
+    if (!outfits) {
+        return false;
+    }
+    const supplying = [...outfits.keys()]
+        .filter(id => gameData.data.Outfit.getCached(id)?.ammoFor
+            === bayWeaponId)
+        .sort();
+    if (supplying.length === 0) {
+        return false;
+    }
+
+    // Capacity: MaxAmmo per bay times the bays mounted. MaxAmmo <= 0
+    // means the bay defers to the outfit's Max field (matching
+    // outfitter_rules ammoCapacity), which is not simulation state, so
+    // treat it as uncapped here.
+    const bay = gameData.data.Weapon.getCached(bayWeaponId);
+    const bays = carrier.components.get(WeaponsStateComponent)
+        ?.get(bayWeaponId)?.count ?? 0;
+    if (bay && bay.maxAmmo > 0) {
+        const capacity = bay.maxAmmo * bays;
+        let held = 0;
+        for (const id of supplying) {
+            held += outfits.get(id)!.count;
+        }
+        if (held >= capacity) {
+            return false;
+        }
+    }
+
+    outfits.get(supplying[0])!.count++;
+    return true;
+}
+
+/** Speed, in px/s, a fighter is pushed out of the bay at, on top of
+ * the carrier's own velocity. */
+export const EXIT_KICK = 10;
 
 class BayWeaponEntry extends WeaponEntry {
     declare data: BayWeaponData;
@@ -89,15 +188,21 @@ class BayWeaponEntry extends WeaponEntry {
         const q = this.runQuery(new Query([MultiplayerData] as const), source);
         const multiplayerOwner = q[0]?.[0]?.owner ?? 'sim';
 
+        // Vector is immutable: add() RETURNS the sum, so these must be
+        // chained. They used to be called for effect, which threw both
+        // terms away and launched every fighter at a dead stop next to
+        // a carrier at full speed.
         let velocity = new Vector(0, 0);
         if (sourceVelocity) {
-            velocity.add(sourceVelocity);
+            velocity = velocity.add(sourceVelocity);
         }
         // TODO: Add exit velocity to bay weapons.
-        velocity.add(angle.getUnitVector().scale(10));
+        velocity = velocity.add(angle.getUnitVector().scale(EXIT_KICK));
 
         const ship = this.makeShip();
         ship.components.set(OwnerComponent, {owner});
+        ship.components.set(BayFighterComponent,
+            { bayWeaponId: this.data.id });
         ship.components.set(SourceComponent, source);
         ship.components.set(TargetComponent, { target: undefined });
         ship.components.set(MovementStateComponent, {
@@ -136,11 +241,24 @@ const BayFormationQuery = new Query([FormationComponent] as const);
 const CollectableEscortAI = new System({
     name: 'CollectableEscortAI',
     events: [CollisionEvent],
-    args: [CollisionEvent, SourceComponent, Entities, UUID, CollectableEscortComponent] as const,
-    step(collision, source, entities, uuid) {
-        if (collision.other === source) {
-            entities.delete(uuid);
+    args: [CollisionEvent, SourceComponent, Entities, UUID,
+        Optional(BayFighterComponent), SimulationGameDataResource,
+        CollectableEscortComponent] as const,
+    step(collision, source, entities, uuid, bayFighter, gameData) {
+        if (collision.other !== source) {
+            return;
         }
+        // Docking restocks the bay: credit the round back BEFORE the
+        // fighter is deleted, while its link to the launching bay is
+        // still readable. A fighter with no BayFighterComponent (state
+        // from a peer that predates it, or a collectable escort that a
+        // bay never launched) just docks and vanishes, exactly as
+        // before.
+        const carrier = entities.get(source);
+        if (bayFighter && carrier) {
+            refundFighterToBay(carrier, bayFighter.bayWeaponId, gameData);
+        }
+        entities.delete(uuid);
     },
 });
 
@@ -185,6 +303,23 @@ export const BayPlugin: Plugin = {
         serializer?.addComponent(ReturnComponent, markerType);
         serializer?.addComponent(CollectableEscortComponent, markerType);
         serializer?.addComponent(ReturnWhenTargetRemovedComponent, markerType);
+
+        // Which bay a fighter came from is simulation state (docking
+        // refunds ammo to that bay) AND display-world state (the
+        // outfitter counts deployed fighters against buy caps). Going
+        // through the delta maker registers it with the serializer too,
+        // so it survives rollback snapshots, desync hashes, resync
+        // baselines, and the display bridge — which drops components
+        // the serializer doesn't know (SimulationBridgeHost.snapshot).
+        const deltaMaker = world.resources.get(DeltaResource);
+        if (!deltaMaker) {
+            throw new Error('Expected delta maker resource to exist');
+        }
+        world.addComponent(BayFighterComponent);
+        deltaMaker.addComponent(BayFighterComponent, {
+            componentType: BayFighter,
+        });
+
         world.addSystem(ReturnAI);
         world.addSystem(CollectableEscortAI);
     }

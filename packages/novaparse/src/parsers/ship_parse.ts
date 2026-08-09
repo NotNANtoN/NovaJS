@@ -156,7 +156,10 @@ export async function ShipParse(ship: ShipResource,
 
         // The stock ammo load (AmmoLoad) becomes that many of the
         // weapon's ammo outfit. It is ignored for weapons that don't
-        // draw ammo from an outfit.
+        // draw ammo from an outfit. Bay weapons DO draw from one (their
+        // fighters — see AmmoTypeParse), so a bay with an AmmoLoad and
+        // no fighter oütf is a genuine data gap and warns like the
+        // rest; no stock or bundled-plugin bay hits that path.
         if (w.ammo > 0) {
             var ammoOutfitID = (await ammoOutfitMap)[globalID];
             if (ammoOutfitID) {
@@ -165,8 +168,8 @@ export async function ShipParse(ship: ShipResource,
                 }
                 outfits[ammoOutfitID] += w.ammo;
             }
-            else if (weapon.ammoType >= 0 && weapon.ammoType <= 255
-                && !BayGuidanceSet.has(weapon.guidance)) {
+            else if (BayGuidanceSet.has(weapon.guidance)
+                || (weapon.ammoType >= 0 && weapon.ammoType <= 255)) {
                 notFoundFunction("No ammo oütf for weapon of id "
                     + weapon.globalID + " on ship of id " + base.id);
             }

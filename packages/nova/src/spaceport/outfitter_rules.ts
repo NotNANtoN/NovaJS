@@ -27,6 +27,20 @@ export interface OutfitterContext {
     credits: number;
     /** Maps resource ids in NCB expressions (e.g. O142) to global ids. */
     resolveId?(id: number): string;
+    /**
+     * Outfit id -> units the player owns that are NOT installed on the
+     * docked ship: today, bay fighters still flying after the carrier
+     * landed (see deployed_outfits.ts). They count against the outfit's
+     * Max and against its launcher's ammo capacity, so landing with
+     * fighters out cannot be used to buy past the cap. Absent or empty
+     * means everything owned is aboard.
+     *
+     * They deliberately do NOT count towards mass, cargo, hardpoints,
+     * Contribute, or what may be SOLD — a fighter in flight is not on
+     * the ship to sell. See deployed_outfits.ts for the rationale and
+     * for how to add further sources of deployed units.
+     */
+    deployedCounts?: ReadonlyMap<string, number>;
 }
 
 export type BuyDenialReason =
@@ -202,11 +216,29 @@ export function ammoCapacity(outfit: OutfitData,
     return capacity;
 }
 
-/** The total owned ammo units drawing from the same weapon's supply. */
+/** Units of this outfit the player owns but that are not aboard (bay
+ * fighters still in flight). See OutfitterContext.deployedCounts. */
+function deployedCount(outfitId: string, context: OutfitterContext): number {
+    return context.deployedCounts?.get(outfitId) ?? 0;
+}
+
+/**
+ * The total owned ammo units drawing from the same weapon's supply,
+ * counting rounds that are currently deployed rather than in the
+ * magazine — a launched fighter still occupies its slot in the bay.
+ */
 function ownedAmmoCount(ammoFor: string, context: OutfitterContext): number {
     let owned = 0;
     for (const [outfit, count] of ownedOutfits(context)) {
         if (outfit.ammoFor === ammoFor) {
+            owned += count;
+        }
+    }
+    // Deployed units are gone from context.outfits, so ownedOutfits
+    // cannot see them; add them separately. A fully-launched magazine
+    // has a zero (or missing) count and only deployed units.
+    for (const [id, count] of context.deployedCounts ?? []) {
+        if (context.getOutfit(id)?.ammoFor === ammoFor) {
             owned += count;
         }
     }
@@ -247,7 +279,11 @@ export function canBuyOutfit(outfit: OutfitData,
         return denied('require', 'You lack something this requires.');
     }
 
-    const owned = context.outfits.get(outfit.id) ?? 0;
+    // Deployed units (fighters still in flight) count as owned: they
+    // come back, and the Max is a limit on how many the player HAS,
+    // not on how many happen to be sitting in the bay right now.
+    const owned = (context.outfits.get(outfit.id) ?? 0)
+        + deployedCount(outfit.id, context);
     if (owned >= effectiveMax(outfit, context)) {
         return denied('maxCount', 'You can\'t carry any more of these.');
     }

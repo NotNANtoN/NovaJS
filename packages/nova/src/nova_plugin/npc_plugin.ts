@@ -122,7 +122,13 @@ const ShootAllWeaponsAI = new System({
         for (const [id, weapon] of weapons) {
             const weaponType = gameData.data.Weapon.getCached(id)?.type;
             if (weaponType == null || weaponType === 'BayWeaponData') {
-                // do not use bay weapons yet since there is no ammo limit.
+                // NPCs still don't launch fighters. Bays now DO consume
+                // ammo (a bay's ammo is its fighters — see
+                // weapon_parse's AmmoTypeParse), so the original
+                // "there is no ammo limit" reason is gone; what's
+                // missing is NPC fighter handling itself (recall,
+                // rearming on respawn, fleet accounting). Deliberately
+                // out of scope, so the exclusion stays.
                 continue;
             };
             weapon.target = target;

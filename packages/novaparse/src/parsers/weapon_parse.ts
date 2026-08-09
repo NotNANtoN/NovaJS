@@ -11,10 +11,17 @@ import { FPS, ShipTurnRateConversionFactor } from "./constants.js";
 export const WEAP_SPEED_FACTOR = 3 / 10;
 
 function AmmoTypeParse(weap: WeapResource, notFoundFunction: (m: string) => void, base: BaseData): AmmoType {
-    // For bay weapons, the AmmoType field is the carried ship's id
-    // (parsed in BayWeaponParse), not an ammo source.
+    // For bay weapons the AmmoType field is the carried ship's id
+    // (parsed into shipID by BayWeaponParse), so it names no ammo
+    // source of its own. A bay's ammo is its FIGHTERS, and every stock
+    // bay ships with an ammo oütf whose `ammoFor` is the bay weapon
+    // itself (e.g. the "Viper" outfit for the "Viper Bay" weapon), so
+    // point the bay at its own supply and the generic ammo machinery
+    // (weapon_plugin hasAmmo/consumeAmmo, outfitter ammoCapacity)
+    // handles fighters like any other magazine. MaxAmmo is the number
+    // of fighters one bay holds.
     if (BayGuidanceSet.has(weap.guidance)) {
-        return "unlimited";
+        return ["weapon", base.id];
     }
     if (weap.ammoType >= 0 && weap.ammoType <= 255) {
         // Draws ammo from the supply of wëap id 128 + AmmoType (usually

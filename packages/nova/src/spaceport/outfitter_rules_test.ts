@@ -40,14 +40,17 @@ function makeWeapon(id: string, weapon: Partial<WeaponData> = {}): WeaponData {
     return { ...getDefaultProjectileWeaponData(), id, ...weapon } as WeaponData;
 }
 
-function makeContext({ ship, outfits, weapons, owned, bits, credits }: {
-    ship?: ShipData,
-    outfits?: OutfitData[],
-    weapons?: WeaponData[],
-    owned?: [string, number][],
-    bits?: number[],
-    credits?: number,
-} = {}): OutfitterContext {
+function makeContext({ ship, outfits, weapons, owned, bits, credits,
+    deployed }: {
+        ship?: ShipData,
+        outfits?: OutfitData[],
+        weapons?: WeaponData[],
+        owned?: [string, number][],
+        bits?: number[],
+        credits?: number,
+        /** Owned but not aboard — bay fighters still in flight. */
+        deployed?: [string, number][],
+    } = {}): OutfitterContext {
     const outfitMap = new Map((outfits ?? []).map(o => [o.id, o]));
     const weaponMap = new Map((weapons ?? []).map(w => [w.id, w]));
     return {
@@ -59,6 +62,7 @@ function makeContext({ ship, outfits, weapons, owned, bits, credits }: {
         // Default to effectively unlimited so tests that don't care about
         // money aren't gated by it (stock default outfit price is 0).
         credits: credits ?? Infinity,
+        ...(deployed ? { deployedCounts: new Map(deployed) } : {}),
     };
 }
 
@@ -284,6 +288,152 @@ describe('canBuyOutfit', () => {
             expect(ammoCapacity(ammo, twoLaunchers)).toBe(30);
             expect(canBuyOutfit(ammo, twoLaunchers))
                 .toEqual({ allowed: true });
+        });
+
+        describe('deployed bay fighters', () => {
+            // A bay holding 4 fighters, the outfit granting it, and the
+            // fighter outfit that is its ammo. This is exactly how a
+            // stock Viper Bay parses now: the bay's ammoType points at
+            // itself and its MaxAmmo is the fighters one bay holds.
+            const bayWeapon = makeWeapon('nova:149', {
+                ammoType: ['weapon', 'nova:149'],
+                maxAmmo: 4,
+            });
+            const bayOutfit = makeOutfit('nova:157', {
+                weapons: { 'nova:149': 1 },
+            });
+            const fighter = makeOutfit('nova:158', {
+                max: 9999,
+                ammoFor: 'nova:149',
+            });
+
+            it('counts fighters in flight against the bay\'s capacity, '
+                + 'so landing with them out cannot buy past the cap', () => {
+                    // 4 aboard = full, obviously denied.
+                    const aboard = makeContext({
+                        outfits: [bayOutfit, fighter],
+                        weapons: [bayWeapon],
+                        owned: [['nova:157', 1], ['nova:158', 4]],
+                    });
+                    expect(canBuyOutfit(fighter, aboard)).toEqual(
+                        jasmine.objectContaining(
+                            { allowed: false, reason: 'needsLauncher' }));
+
+                    // All 4 LAUNCHED: consumeAmmo has already emptied
+                    // the magazine, so without deployed accounting the
+                    // outfitter would happily sell 4 more.
+                    const allDeployed = makeContext({
+                        outfits: [bayOutfit, fighter],
+                        weapons: [bayWeapon],
+                        owned: [['nova:157', 1], ['nova:158', 0]],
+                        deployed: [['nova:158', 4]],
+                    });
+                    expect(canBuyOutfit(fighter, allDeployed)).toEqual(
+                        jasmine.objectContaining(
+                            { allowed: false, reason: 'needsLauncher' }));
+                    expect(maxBuyCount(fighter, allDeployed)).toBe(0);
+                });
+
+            it('mixes deployed and aboard fighters against one capacity',
+                () => {
+                    // 1 aboard + 2 flying = 3 of 4; room for exactly 1.
+                    const mixed = makeContext({
+                        outfits: [bayOutfit, fighter],
+                        weapons: [bayWeapon],
+                        owned: [['nova:157', 1], ['nova:158', 1]],
+                        deployed: [['nova:158', 2]],
+                    });
+                    expect(ammoCapacity(fighter, mixed)).toBe(4);
+                    expect(canBuyOutfit(fighter, mixed))
+                        .toEqual({ allowed: true });
+                    expect(maxBuyCount(fighter, mixed)).toBe(1);
+                });
+
+            it('still allows buying up to the capacity that is left',
+                () => {
+                    // 2 flying, none aboard: 2 of 4 used.
+                    const context = makeContext({
+                        outfits: [bayOutfit, fighter],
+                        weapons: [bayWeapon],
+                        owned: [['nova:157', 1], ['nova:158', 0]],
+                        deployed: [['nova:158', 2]],
+                    });
+                    expect(maxBuyCount(fighter, context)).toBe(2);
+                });
+
+            it('counts deployed units against the outfit\'s Max too',
+                () => {
+                    // Max 2, no launcher restriction (MaxAmmo 0), one
+                    // unit flying: only one more may be bought.
+                    const freeBay = makeWeapon('nova:149', {
+                        ammoType: ['weapon', 'nova:149'],
+                        maxAmmo: 0,
+                    });
+                    const capped = makeOutfit('nova:158', {
+                        max: 2,
+                        ammoFor: 'nova:149',
+                    });
+                    const context = makeContext({
+                        outfits: [bayOutfit, capped],
+                        weapons: [freeBay],
+                        owned: [['nova:157', 1]],
+                        deployed: [['nova:158', 1]],
+                    });
+                    expect(effectiveMax(capped, context)).toBe(2);
+                    expect(maxBuyCount(capped, context)).toBe(1);
+
+                    const atMax = makeContext({
+                        outfits: [bayOutfit, capped],
+                        weapons: [freeBay],
+                        owned: [['nova:157', 1]],
+                        deployed: [['nova:158', 2]],
+                    });
+                    expect(canBuyOutfit(capped, atMax)).toEqual(
+                        jasmine.objectContaining(
+                            { allowed: false, reason: 'maxCount' }));
+                });
+
+            it('sells only fighters physically aboard', () => {
+                // 1 aboard, 3 flying: a fighter in flight is not on the
+                // ship to sell.
+                const context = makeContext({
+                    outfits: [bayOutfit, fighter],
+                    weapons: [bayWeapon],
+                    owned: [['nova:157', 1], ['nova:158', 1]],
+                    deployed: [['nova:158', 3]],
+                });
+                expect(canSellOutfit(fighter, context))
+                    .toEqual({ allowed: true });
+                expect(maxSellCount(fighter, context)).toBe(1);
+
+                // All of them out: nothing to sell at all.
+                const allOut = makeContext({
+                    outfits: [bayOutfit, fighter],
+                    weapons: [bayWeapon],
+                    owned: [['nova:157', 1], ['nova:158', 0]],
+                    deployed: [['nova:158', 4]],
+                });
+                expect(canSellOutfit(fighter, allOut)).toEqual(
+                    jasmine.objectContaining(
+                        { allowed: false, reason: 'notOwned' }));
+                expect(maxSellCount(fighter, allOut)).toBe(0);
+            });
+
+            it('leaves mass, cargo and hardpoints reading only what is '
+                + 'installed', () => {
+                    // A deliberate boundary (see deployed_outfits.ts):
+                    // a fighter in flight really is off the ship, so its
+                    // tonnage is not charged while it is away.
+                    const heavy = makeOutfit('nova:158',
+                        { max: 9999, ammoFor: 'nova:149' }, { freeMass: 10 });
+                    const context = makeContext({
+                        outfits: [bayOutfit, heavy],
+                        weapons: [bayWeapon],
+                        owned: [['nova:157', 1], ['nova:158', 1]],
+                        deployed: [['nova:158', 3]],
+                    });
+                    expect(freeMass(context)).toBe(90);
+                });
         });
 
         it('freely sells ammo whose weapon has no maxAmmo', () => {

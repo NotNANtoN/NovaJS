@@ -1350,6 +1350,10 @@ async function startGame() {
                 currentDisplayWorld.emit(OpenSpaceportEvent, {
                     planetId: pendingDockedShip.planetId,
                     ship: pendingDockedShip.entity,
+                    // The ship has just been pulled out of the world,
+                    // but things it launched (bay fighters) still point
+                    // at this uuid, so the outfitter can find them.
+                    uuid: pendingDockedShip.uuid,
                 });
                 // Hide the touch controls under the spaceport UI.
                 document.body.classList.add('nova-docked');
