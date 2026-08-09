@@ -6,6 +6,7 @@ import { Entity } from 'nova_ecs/entity';
 import { MovementStateComponent }
     from 'nova_ecs/plugins/movement_plugin';
 import { Random, RandomResource } from 'nova_ecs/plugins/random_plugin';
+import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { World } from 'nova_ecs/world';
 import { getDefaultProjectileWeaponData, getDefaultSeekerFlags, SeekerFlags }
     from 'novadatainterface/weapon_data';
@@ -22,8 +23,9 @@ import {
     Jamming,
     JammingComponent,
     JamSteerComponent,
-    JAM_FRAME_RATE,
+    JAM_LIFETIME_FRACTION,
     jamLoseLockProbability,
+    jamSingleShotProbability,
     MissileJammingSystem,
     RADAR_JAM_INDEX,
     SystemInterferenceResource,
@@ -190,36 +192,71 @@ describe('effectiveJamming', () => {
     });
 });
 
-describe('jamLoseLockProbability (vulnerability application per type)', () => {
+describe('jamSingleShotProbability (vulnerability application per type)', () => {
     it('is zero when the missile has no vulnerability, however strong the jamming', () => {
-        expect(jamLoseLockProbability([0, 0, 0, 0], [100, 100, 100, 100])).toEqual(0);
+        expect(jamSingleShotProbability([0, 0, 0, 0], [100, 100, 100, 100]))
+            .toEqual(0);
     });
 
     it('is zero when the ship has no jamming, however vulnerable the missile', () => {
-        expect(jamLoseLockProbability([100, 100, 100, 100], [0, 0, 0, 0])).toEqual(0);
+        expect(jamSingleShotProbability([100, 100, 100, 100], [0, 0, 0, 0]))
+            .toEqual(0);
     });
 
-    it('scales a single matching type by vuln * jam * JAM_FRAME_RATE', () => {
-        // 100% vuln vs 100% jam on one type => 1.0, times JAM_FRAME_RATE.
-        expect(jamLoseLockProbability([100, 0, 0, 0], [100, 0, 0, 0]))
-            .toBeCloseTo(JAM_FRAME_RATE, 10);
-        // 50% vuln vs 50% jam => 0.25, times JAM_FRAME_RATE.
-        expect(jamLoseLockProbability([50, 0, 0, 0], [50, 0, 0, 0]))
-            .toBeCloseTo(0.25 * JAM_FRAME_RATE, 10);
+    it('scales a single matching type by vuln * jam', () => {
+        expect(jamSingleShotProbability([100, 0, 0, 0], [100, 0, 0, 0]))
+            .toBeCloseTo(1, 10);
+        // 50% vuln vs 50% jam => 0.25.
+        expect(jamSingleShotProbability([50, 0, 0, 0], [50, 0, 0, 0]))
+            .toBeCloseTo(0.25, 10);
     });
 
     it('combines independent types as 1 - product(1 - p_k)', () => {
-        // Two types each at 100%/100% => keep = 0 => lose 1.0 * rate.
-        expect(jamLoseLockProbability([100, 100, 0, 0], [100, 100, 0, 0]))
-            .toBeCloseTo(JAM_FRAME_RATE, 10);
         // Two types each at 50%/50% (p=0.25 each): 1 - 0.75*0.75 = 0.4375.
-        expect(jamLoseLockProbability([50, 50, 0, 0], [50, 50, 0, 0]))
-            .toBeCloseTo((1 - 0.75 * 0.75) * JAM_FRAME_RATE, 10);
+        expect(jamSingleShotProbability([50, 50, 0, 0], [50, 50, 0, 0]))
+            .toBeCloseTo(1 - 0.75 * 0.75, 10);
     });
 
     it('only counts matching type indices (IR jammer vs radar missile does nothing)', () => {
         // Missile vulnerable only to radar (index 1); ship jams only IR (index 0).
-        expect(jamLoseLockProbability([0, 100, 0, 0], [100, 0, 0, 0])).toEqual(0);
+        expect(jamSingleShotProbability([0, 100, 0, 0], [100, 0, 0, 0]))
+            .toEqual(0);
+    });
+});
+
+describe('jamLoseLockProbability (single-shot probability over the lifetime)', () => {
+    // A 1-second missile: the distribution window is the first 800 ms.
+    const DURATION_MS = 1000;
+    const WINDOW_MS = JAM_LIFETIME_FRACTION * DURATION_MS;
+    const VULN: [number, number, number, number] = [50, 0, 0, 0];
+    const JAM: [number, number, number, number] = [50, 0, 0, 0];
+    const SINGLE = 0.25; // 50% vuln * 50% jam
+
+    it('equals the single-shot probability when one tick spans the window', () => {
+        expect(jamLoseLockProbability(VULN, JAM, WINDOW_MS, DURATION_MS))
+            .toBeCloseTo(SINGLE, 10);
+    });
+
+    it('compounds across the window to the single-shot probability', () => {
+        // 48 ticks (~60 Hz over 800 ms): 1 - (1 - q)^48 == SINGLE.
+        const q = jamLoseLockProbability(VULN, JAM, WINDOW_MS / 48, DURATION_MS);
+        expect(q).toBeLessThan(SINGLE);
+        expect(1 - Math.pow(1 - q, 48)).toBeCloseTo(SINGLE, 10);
+    });
+
+    it('jams on the first tick when the single-shot probability is certain', () => {
+        expect(jamLoseLockProbability([100, 0, 0, 0], [100, 0, 0, 0],
+            1e-9, DURATION_MS)).toEqual(1);
+    });
+
+    it('is zero when the single-shot probability is zero', () => {
+        expect(jamLoseLockProbability([0, 100, 0, 0], [100, 0, 0, 0],
+            WINDOW_MS, DURATION_MS)).toEqual(0);
+    });
+
+    it('falls back to the single-shot probability per tick for a non-positive duration', () => {
+        expect(jamLoseLockProbability(VULN, JAM, 16, 0)).toEqual(SINGLE);
+        expect(jamLoseLockProbability(VULN, JAM, 16, -5)).toEqual(SINGLE);
     });
 });
 
@@ -341,6 +378,10 @@ function makeJammingWorld(seed: number, interference = 0) {
     const world = new World('jamming-test');
     world.resources.set(RandomResource, new Random(seed));
     world.resources.set(SystemInterferenceResource, { interference });
+    // A fixed 60 Hz tick; the jamming system reads delta_ms to distribute the
+    // jam probability over the missile's lifetime.
+    world.resources.set(TimeResource,
+        { time: 0, delta_s: 1 / 60, delta_ms: 1000 / 60, frame: 0 });
     world.addSystem(MissileJammingSystem);
     return world;
 }

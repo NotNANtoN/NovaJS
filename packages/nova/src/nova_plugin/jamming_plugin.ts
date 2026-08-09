@@ -8,6 +8,7 @@ import { Entity } from 'nova_ecs/entity';
 import { EntityMap } from 'nova_ecs/entity_map';
 import { Plugin } from 'nova_ecs/plugin';
 import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
+import { TimeResource, TimeSystem } from 'nova_ecs/plugins/time_plugin';
 import { Optional } from 'nova_ecs/optional';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
 import { RandomResource } from 'nova_ecs/plugins/random_plugin';
@@ -55,13 +56,18 @@ import { TargetComponent } from './target_component.js';
  *     weapon's Seeker `confusedByInterference` flag is set, the current
  *     system's Interference value (see judgment call #3).
  *
- *  2. Per-type per-frame lose-lock probability is the product of the missile's
- *     vulnerability and the effective jamming for that type:
- *         p_k = (vuln_k / 100) * (effJam_k / 100)
- *     The four types are independent, so the frame's overall lose-lock chance is
- *         pLose = 1 - Π_k (1 - p_k)
- *     This is scaled by JAM_FRAME_RATE so the *per-second* aggression is stable
- *     regardless of the 60 Hz tick (see JAM_FRAME_RATE).
+ *  2. The vuln/jam products define a SINGLE-SHOT lose-lock probability -- the
+ *     chance the missile would be jammed if the roll were applied exactly once
+ *     at launch. Per type, p_k = (vuln_k / 100) * (effJam_k / 100); the four
+ *     types are independent, so
+ *         P = 1 - Π_k (1 - p_k)
+ *     That single-shot probability is then DISTRIBUTED over the first
+ *     JAM_LIFETIME_FRACTION of the missile's flight: each tick rolls
+ *         q = 1 - (1 - P)^(delta_ms / (JAM_LIFETIME_FRACTION * shotDuration))
+ *     which compounds to exactly P across that window regardless of tick rate
+ *     (so an IR missile vs. a 7%-jamming ship is jammed on ~7% of flights, not
+ *     with certainty). Rolls continue at the same rate for the remainder of
+ *     the flight, adding slightly to the total; see jamLoseLockProbability.
  *
  *  3. A deterministic PRNG draw decides whether the missile loses lock this
  *     frame. On a lose-lock result, a second draw (the "reaction roll") decides
@@ -83,15 +89,16 @@ import { TargetComponent } from './target_component.js';
  */
 
 /**
- * The per-frame jamming is scaled by this factor so the *aggregate* jamming
- * pressure is expressed per (1/30 s) "Nova frame" rather than per 60 Hz
- * simulation tick. Nova's own timings are in 30ths of a second, and the sim
- * runs at 60 Hz, so a raw per-tick roll would jam twice as fast as the data
- * intends. JUDGMENT CALL: the Bible gives no per-frame rate, so we anchor the
- * probability to Nova's 30 Hz frame and split it across the two sim ticks that
- * make up one Nova frame.
+ * The fraction of a missile's flight time (shotDuration) over which its
+ * single-shot jam probability is distributed: the per-tick roll compounds to
+ * the full vuln*jam probability across this fraction of the lifetime.
+ * JUDGMENT CALL: the Bible gives no rate at all, so we anchor to "the data's
+ * percentage is the chance this missile gets jammed, period" and spread it
+ * over most of the flight. Less than 1 so the probability is mostly spent
+ * while jamming still matters -- a lock lost in the final moments of a
+ * missile's fuel is behaviorally irrelevant. Tune freely.
  */
-export const JAM_FRAME_RATE = 0.5;
+export const JAM_LIFETIME_FRACTION = 0.8;
 
 /**
  * Given a lose-lock event, the probability that a missile whose Seeker flag
@@ -257,14 +264,14 @@ export function effectiveJamming(
 }
 
 /**
- * The per-frame probability that a missile with the given vulnerabilities loses
- * lock, given the effective jamming it experiences. Pure; does not roll.
+ * The probability that a missile with the given vulnerabilities would lose lock
+ * if the jam roll were applied exactly once (e.g. right at launch), given the
+ * effective jamming it experiences. Pure; does not roll.
  *
  * Each jamming type independently contributes p_k = vuln_k * effJam_k (as
- * fractions); the combined lose chance is 1 - Π(1 - p_k), scaled by
- * JAM_FRAME_RATE to normalize per-tick aggression to Nova's 30 Hz frame.
+ * fractions); the combined chance is 1 - Π(1 - p_k).
  */
-export function jamLoseLockProbability(
+export function jamSingleShotProbability(
     vulnerabilities: JammingVulnerabilities,
     effectiveJam: readonly [number, number, number, number]): number {
     let keep = 1;
@@ -273,7 +280,37 @@ export function jamLoseLockProbability(
         const jam = Math.max(0, Math.min(100, effectiveJam[i] ?? 0)) / 100;
         keep *= (1 - vuln * jam);
     }
-    return (1 - keep) * JAM_FRAME_RATE;
+    return 1 - keep;
+}
+
+/**
+ * The per-tick probability that a missile loses lock, distributing its
+ * single-shot probability over JAM_LIFETIME_FRACTION of its flight time:
+ *     q = 1 - (1 - P)^(deltaMs / (JAM_LIFETIME_FRACTION * shotDurationMs))
+ * Compounding q across that window yields exactly P, whatever the tick rate.
+ * Rolls past the window keep the same rate (the missile is about to expire, so
+ * the small extra total is behaviorally irrelevant). Pure; does not roll.
+ *
+ * Edge cases: P = 1 jams on the first tick (matching a certain single-shot
+ * roll); a non-positive shotDuration falls back to the raw single-shot
+ * probability per tick.
+ */
+export function jamLoseLockProbability(
+    vulnerabilities: JammingVulnerabilities,
+    effectiveJam: readonly [number, number, number, number],
+    deltaMs: number, shotDurationMs: number): number {
+    const single = jamSingleShotProbability(vulnerabilities, effectiveJam);
+    if (single <= 0) {
+        return 0;
+    }
+    if (single >= 1) {
+        return 1;
+    }
+    const windowMs = JAM_LIFETIME_FRACTION * shotDurationMs;
+    if (!(windowMs > 0)) {
+        return single;
+    }
+    return 1 - Math.pow(1 - single, deltaMs / windowMs);
 }
 
 /**
@@ -407,9 +444,12 @@ export const MissileJammingSystem = new System({
     name: 'MissileJammingSystem',
     args: [MovementStateComponent, TargetComponent, ProjectileDataComponent,
         GetEntity, UUID, Entities, RandomResource, SystemInterferenceResource,
-        ] as const,
+        TimeResource] as const,
+    // Determinism rule 4: reads TimeResource (delta_ms), so it must run after
+    // TimeSystem.
+    after: [TimeSystem],
     step(movement, targetRef, projectileData, self, uuid, entities, random,
-        systemInterference) {
+        systemInterference, time) {
         // Clear last frame's steer override up front so it never lingers.
         self.components.delete(JamSteerComponent);
 
@@ -430,7 +470,8 @@ export const MissileJammingSystem = new System({
         const effJam = effectiveJamming(targetJamming, seeker,
             systemInterference.interference);
         const probability = jamLoseLockProbability(
-            projectileData.jamVulnerabilities, effJam);
+            projectileData.jamVulnerabilities, effJam, time.delta_ms,
+            projectileData.shotDuration);
         // Draw exactly twice per missile per frame for determinism, even if
         // probability is 0 (so the PRNG sequence is independent of jamming
         // state -- adding/removing a jammer never shifts other missiles' rolls
