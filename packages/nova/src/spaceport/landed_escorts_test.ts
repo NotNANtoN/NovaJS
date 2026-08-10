@@ -38,6 +38,21 @@ import {
     multiJumpChainContinues, multiJumpChainSettled, prepareCarriedEscort,
     prepareCarriedEscorts, takeCarriedEscorts,
 } from './landed_escorts.js';
+import { World } from 'nova_ecs/world';
+import { getDefaultOutfitData } from 'novadatainterface/outfit_data';
+import {
+    getDefaultShipPhysics, ShipData,
+} from 'novadatainterface/ship_data';
+import {
+    BayWeaponData, getDefaultBayWeaponData,
+} from 'novadatainterface/weapon_data';
+import { BayFighterComponent, startReturnHome } from '../nova_plugin/bay_plugin.js';
+import { CollisionEvent } from '../nova_plugin/collision_interaction.js';
+import { OutfitsStateComponent } from '../nova_plugin/outfit_plugin.js';
+import { WeaponsStateComponent } from '../nova_plugin/weapons_state.js';
+import {
+    extractSavedEscorts, restoreSavedEscorts,
+} from '../nova_plugin/save_game.js';
 
 const PLAYER = 'player';
 const SHIP_ID = 'test:ship';
@@ -481,4 +496,149 @@ describe('escort convergence invariant', () => {
         expect(audit.stranded).toEqual([]);
         expect(audit.inRoster).toEqual(['flyer', 'noEnergy']);
     });
+});
+
+/**
+ * The RESTORE remap gap. Within a session the player keeps its uuid, so a
+ * fighter it launched from its own bays comes back beside the same player
+ * it left. A SAVE breaks that: the restored player is a brand-new entity
+ * under a brand-new uuid, while the fighter's blob still names the
+ * pre-save one in OwnerComponent (what ReturnAI steers at) and
+ * SourceComponent (what CollectableEscortAI matches the docking collision
+ * against). Un-remapped, the fighter chases a ghost and its round can
+ * never come home.
+ *
+ * Driven end to end against the real bay: launch, save, restore under a
+ * different player uuid, dock.
+ */
+describe('a player-launched fighter across a save restore', () => {
+    const BAY_ID = 'save:bay';
+    const BAY_OUTFIT_ID = 'save:bayOutfit';
+    const FIGHTER_OUTFIT_ID = 'save:fighterOutfit';
+    const FIGHTER_SHIP_ID = 'save:fighterShip';
+    const CARRIER_ID = 'save:carrierShip';
+    const OLD_PLAYER = 'the player uuid before the save';
+    const NEW_PLAYER = 'the player uuid after the restore';
+
+    /** A world with one player ship whose single bay holds two fighters. */
+    async function bayWorld() {
+        const gameData = new MockGameData();
+        gameData.data.Weapon.map.set(BAY_ID, {
+            ...getDefaultBayWeaponData(),
+            id: BAY_ID,
+            shipID: FIGHTER_SHIP_ID,
+            ammoType: ['weapon', BAY_ID],
+            maxAmmo: 4,
+            fireGroup: 'secondary',
+            reload: 1,
+        } as BayWeaponData);
+        gameData.data.Outfit.map.set(BAY_OUTFIT_ID, {
+            ...getDefaultOutfitData(), id: BAY_OUTFIT_ID,
+            weapons: { [BAY_ID]: 1 },
+        });
+        gameData.data.Outfit.map.set(FIGHTER_OUTFIT_ID, {
+            ...getDefaultOutfitData(), id: FIGHTER_OUTFIT_ID, ammoFor: BAY_ID,
+        });
+        gameData.data.Ship.map.set(FIGHTER_SHIP_ID, {
+            ...getDefaultShipData(), id: FIGHTER_SHIP_ID,
+        });
+        const carrierData: ShipData = {
+            ...getDefaultShipData(),
+            id: CARRIER_ID,
+            outfits: { [BAY_OUTFIT_ID]: 1, [FIGHTER_OUTFIT_ID]: 2 },
+            physics: { ...getDefaultShipPhysics() },
+        };
+        gameData.data.Ship.map.set(CARRIER_ID, carrierData);
+
+        const world = await makeSystem('test:system', gameData, undefined,
+            { npcs: false });
+        const player = makeShip(carrierData);
+        player.components.set(MovementStateComponent, movement(0, 0));
+        await completeEntity(world, player);
+        return { world, gameData, player, carrierData };
+    }
+
+    async function step(world: World, steps: number) {
+        for (let i = 0; i < steps; i++) {
+            world.step();
+            await new Promise(resolve => setImmediate(resolve));
+        }
+    }
+
+    function liveFighters(world: World): [string, Entity][] {
+        return [...world.entities]
+            .filter(([, entity]) => entity.components.has(BayFighterComponent));
+    }
+
+    function fighterRounds(carrier: Entity): number {
+        return carrier.components.get(OutfitsStateComponent)
+            ?.get(FIGHTER_OUTFIT_ID)?.count ?? 0;
+    }
+
+    it('comes back pointing at the NEW player, and docks its round home',
+        async () => {
+            // --- Before the save: the player launches one fighter. ---
+            const before = await bayWorld();
+            before.world.entities.set(OLD_PLAYER, before.player);
+            await step(before.world, 2);
+            expect(fighterRounds(before.player)).toEqual(2);
+            before.player.components.get(WeaponsStateComponent)!
+                .get(BAY_ID)!.firing = true;
+            await step(before.world, 1);
+            before.player.components.get(WeaponsStateComponent)!
+                .get(BAY_ID)!.firing = false;
+
+            const launched = liveFighters(before.world);
+            expect(launched.length).toEqual(1);
+            const [fighterUuid, fighter] = launched[0];
+            expect(fighterRounds(before.player)).toEqual(1);
+            // The bay stamps the launching player on both references.
+            expect(fighter.components.get(SourceComponent)).toEqual(OLD_PLAYER);
+            expect(fighter.components.get(OwnerComponent))
+                .toEqual({ owner: OLD_PLAYER });
+
+            // --- The save. ---
+            const saved = extractSavedEscorts([
+                { uuid: fighterUuid, entity: fighter },
+            ], before.world.resources.get(SerializerResource)!);
+            expect(saved.length).toEqual(1);
+
+            // --- The restore, into a fresh world under a FRESH player
+            // uuid (which is exactly what browser.ts's restore path
+            // mints). ---
+            const after = await bayWorld();
+            const restored = restoreSavedEscorts(saved,
+                after.world.resources.get(SerializerResource)!);
+            expect(restored.length).toEqual(1);
+            const prepared = prepareCarriedEscorts(
+                restored.map(escort => ({
+                    ...escort, player: NEW_PLAYER, priorPlayer: OLD_PLAYER,
+                })),
+                NEW_PLAYER, after.player, 0, () => 'restored fighter');
+            expect(prepared.length).toEqual(1);
+
+            // THE FIX: both bay references name the live player, not the
+            // uuid that died with the previous session.
+            const back = prepared[0].entity;
+            expect(back.components.get(SourceComponent)).toEqual(NEW_PLAYER);
+            expect(back.components.get(OwnerComponent))
+                .toEqual({ owner: NEW_PLAYER });
+
+            // --- returnToBay: the dock refunds the round. ---
+            after.world.entities.set(NEW_PLAYER, after.player);
+            await step(after.world, 2);
+            const spent = after.player.components
+                .get(OutfitsStateComponent)!.get(FIGHTER_OUTFIT_ID)!;
+            spent.count = 1; // The restored fighter is the deployed one.
+            deriveEntityComponents(after.world, back);
+            after.world.entities.set(prepared[0].uuid, back);
+            await step(after.world, 1);
+            startReturnHome(after.world.entities.get(prepared[0].uuid)!);
+            after.world.emit(CollisionEvent,
+                { other: NEW_PLAYER, initiator: true }, [prepared[0].uuid]);
+            await step(after.world, 1);
+
+            expect(after.world.entities.has(prepared[0].uuid)).toBeFalse();
+            expect(fighterRounds(after.player)).toEqual(2);
+        });
 });

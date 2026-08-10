@@ -15,11 +15,12 @@ import {
     JumpComponent, MultiJumpContinueComponent,
 } from '../nova_plugin/jump_plugin.js';
 import {
-    FormationComponent, formationSlotPosition,
+    FormationComponent, formationSlotPosition, NpcComponent,
 } from '../nova_plugin/npc_ai_plugin.js';
 import {
     EscortLandingComponent, PlayerEscortComponent,
 } from '../nova_plugin/player_escort.js';
+import { TargetComponent } from '../nova_plugin/target_component.js';
 
 /**
  * ============================================================================
@@ -57,6 +58,26 @@ export interface CarriedEscort {
     uuid: string;
     /** The escort's full entity, as decoded from its carry event. */
     entity: Entity;
+    /**
+     * The uuid the PLAYER SHIP had when this entry's entity was encoded,
+     * when that is not the uuid it will be re-inserted under.
+     *
+     * Only a SAVE crosses that boundary: within a session the player keeps
+     * its uuid across landings and jumps, so a carry event's escort comes
+     * back beside the same player it left. A restore re-mints the player,
+     * and an escort the player launched from its own bays carries
+     * OwnerComponent/SourceComponent naming the PRE-SAVE player — the two
+     * references ReturnAI steers at and CollectableEscortAI matches the
+     * docking collision against. Recorded here so prepareCarriedEscorts
+     * can remap them onto the live player exactly as it remaps a fighter's
+     * reference to a carrier that came back in the same batch.
+     *
+     * Rides the entry rather than being a batch parameter deliberately:
+     * restored escorts can be held (a multi-jump chain, a gate arrival) or
+     * handed back by a failed transition, and they must still carry the
+     * remap whenever they are finally put down.
+     */
+    priorPlayer?: string;
 }
 
 /**
@@ -282,10 +303,25 @@ const MAX_CARRY_DEPTH = 8;
  * the durable ownership marker.
  *
  * Every other component is left exactly as it came out of the simulation,
- * except that intra-batch uuid references (a fighter's OwnerComponent /
- * SourceComponent naming its carrier) are rewritten through `remap` — the
- * batch comes back under fresh uuids, so an un-remapped fighter could
- * never find its bay again.
+ * except that uuid references (a fighter's OwnerComponent /
+ * SourceComponent naming its carrier, or naming the player itself across a
+ * save restore) are rewritten through `remap` — the batch comes back under
+ * fresh uuids, so an un-remapped fighter could never find its bay again.
+ *
+ * THE UUID-BEARING COMPONENTS ON A CARRIED ESCORT, and what happens to
+ * each here:
+ *  - FormationComponent.leader     rewritten to `attachTo`.
+ *  - PlayerEscortComponent         rewritten to {player, parent}.
+ *  - FiringGroupComponent.group    rewritten to the flock root (`player`).
+ *  - OwnerComponent.owner          remapped (carrier, or the pre-save
+ *    SourceComponent                player — see CarriedEscort.priorPlayer).
+ *  - TargetComponent.target        remapped when it names something in the
+ *  - NpcComponent.aggressor        batch, otherwise LEFT AS IT WAS. An
+ *    out-of-batch uuid is either still live (a landed escort relaunching
+ *    into the system it left) or names an entity that no longer exists,
+ *    and every consumer of these two already fails open on a uuid that is
+ *    not in the entity map. The command is reset to 'formation' regardless,
+ *    so a stale target changes no behaviour.
  *
  * Velocity is copied from the station so a batch arriving from hyperspace
  * coasts in with the player (who arrives at top speed) instead of hanging
@@ -329,6 +365,23 @@ function placeCarriedEscort(escort: CarriedEscort, player: string,
         ? remap.get(source) : undefined;
     if (remappedSource) {
         escort.entity.components.set(SourceComponent, remappedSource);
+    }
+    // Targeting and hostility follow the same rule as the bay links: a
+    // reference INTO the batch is rewritten to the new uuid, anything else
+    // is left alone (see the component audit above).
+    const target = escort.entity.components.get(TargetComponent);
+    const remappedTarget = target?.target !== undefined
+        ? remap.get(target.target) : undefined;
+    if (target && remappedTarget) {
+        escort.entity.components.set(TargetComponent,
+            { ...target, target: remappedTarget });
+    }
+    const npc = escort.entity.components.get(NpcComponent);
+    const remappedAggressor = npc?.aggressor !== undefined
+        ? remap.get(npc.aggressor) : undefined;
+    if (npc && remappedAggressor) {
+        escort.entity.components.set(NpcComponent,
+            { ...npc, aggressor: remappedAggressor });
     }
     if (ownerUuid !== undefined) {
         escort.entity.components.set(MultiplayerData, { owner: ownerUuid });
@@ -376,6 +429,16 @@ export function prepareCarriedEscorts(escorts: readonly CarriedEscort[],
         return [];
     }
     const remap = new Map<string, string>();
+    // A restored batch's references to the player it was saved beside:
+    // the player is re-minted on restore, so its PRE-SAVE uuid resolves to
+    // the live leader. Seeded first so a (impossible in practice) clash
+    // with an escort's own uuid resolves in the escort's favour.
+    for (const escort of escorts) {
+        if (escort.priorPlayer !== undefined
+            && escort.priorPlayer !== leaderUuid) {
+            remap.set(escort.priorPlayer, leaderUuid);
+        }
+    }
     for (const escort of escorts) {
         remap.set(escort.uuid, mintUuid());
     }

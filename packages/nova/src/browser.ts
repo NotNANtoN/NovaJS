@@ -192,6 +192,17 @@ let landedEscorts: CarriedEscort[] = [];
  */
 let restoredSaveEscorts: SavedEscort[] | undefined;
 /**
+ * The player ship uuid the loaded save was written under, paired with
+ * `restoredSaveEscorts` and drained with it.
+ *
+ * The restored player is a NEW entity under a NEW uuid, so every reference
+ * the saved escorts hold to their player is stale. Carried onto each
+ * restored entry as CarriedEscort.priorPlayer, which is what lets
+ * prepareCarriedEscorts rewrite a player-launched fighter's
+ * OwnerComponent/SourceComponent onto the live player.
+ */
+let restoredSavePlayerUuid: string | undefined;
+/**
  * The end of the formation-slot run the client has already handed out for a
  * player, so a later insertion in the same session cannot reuse those slots.
  * The display world is not a safe floor on its own: it does not see a
@@ -796,6 +807,12 @@ function saveNow() {
         // pilot's save stays exactly the payload a v1 build wrote.
         if (escorts.length > 0) {
             data.escorts = escorts;
+            // The player's own uuid goes with them. Restoring re-mints
+            // the player, and a fighter launched from the player's OWN
+            // bays names it in OwnerComponent/SourceComponent; without
+            // this the restored fighter chases a dead uuid and can never
+            // dock (see SaveData.playerUuid).
+            data.playerUuid = player;
         }
     }
     writeSave(data);
@@ -994,10 +1011,17 @@ async function enterSystem({ entity, to, uuid }:
     // cannot drop them.
     if (restoredSaveEscorts) {
         const blobs = restoredSaveEscorts;
+        const priorPlayer = restoredSavePlayerUuid;
         restoredSaveEscorts = undefined; // One-shot: the startup jump.
+        restoredSavePlayerUuid = undefined;
         const restored = restoreSavedEscorts(blobs, serializer);
+        // `priorPlayer` rides each entry so a fighter the player had
+        // launched from its own bays comes back pointing at the LIVE
+        // player rather than the pre-save uuid. Absent in a save written
+        // before the field existed, in which case nothing is remapped and
+        // the behaviour is exactly what it was.
         jumpEscorts.push(...restored.map(escort => ({
-            ...escort, player: uuid,
+            ...escort, player: uuid, priorPlayer,
         })));
         if (restored.length > 0) {
             console.info(`Restored ${restored.length} escort(s) from the `
@@ -1422,6 +1446,7 @@ async function startGame() {
     // their own and belong to the pilot, not to the hull they were flying
     // beside, so a ?ship= override keeps them.
     restoredSaveEscorts = save?.escorts;
+    restoredSavePlayerUuid = save?.playerUuid;
 
     // A fresh pilot starts from a chär "player start": ship, credits,
     // date, systems, and its OnStart control bits. ?char=nova:129
@@ -2127,6 +2152,7 @@ async function startGame() {
         // Any stash the last session never got to spend. Leaving it would
         // deal a dead save's escorts into the NEXT pilot's first system.
         restoredSaveEscorts = undefined;
+        restoredSavePlayerUuid = undefined;
         clientSlotFloor = undefined;
         simulationTickInFlight = false;
         lastPumpTime = undefined;

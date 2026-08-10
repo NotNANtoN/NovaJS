@@ -177,6 +177,28 @@ export const SaveData = t.intersection([
         // while docked, or riding a jump. Absent in a v1 save and in any
         // save written by a pilot with no escorts; both read as "none".
         escorts: t.array(SavedEscort),
+        // The uuid the PLAYER SHIP itself had when the save was written,
+        // written only when `escorts` is.
+        //
+        // Restoring re-mints the player under a fresh uuid, so an escort
+        // blob's references to its player are stale on the way back in.
+        // For a fighter the player launched from its OWN bays that is not
+        // cosmetic: OwnerComponent/SourceComponent name the carrier, and
+        // they are what ReturnAI steers at and what CollectableEscortAI
+        // matches the docking collision against. Left stale, the fighter
+        // flies at a ghost and can never dock or refund its round.
+        // prepareCarriedEscorts already rewrites intra-batch references
+        // through its uuid remap; this is the entry that lets the PLAYER
+        // be remapped the same way (browser.ts threads it in as
+        // CarriedEscort.priorPlayer).
+        //
+        // Additive and optional, so this is not a schema break: a save
+        // without it (v1, v2-before-this-field, or an escortless pilot)
+        // decodes exactly as before and simply carries no remap entry.
+        // SAVE_VERSION deliberately does NOT move — bumping it would make
+        // every OLDER build quarantine saves written by this one, whereas
+        // an unknown field is ignored by the non-exact codec.
+        playerUuid: t.string,
     }),
 ]);
 export type SaveData = t.TypeOf<typeof SaveData>;
