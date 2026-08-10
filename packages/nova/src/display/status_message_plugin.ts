@@ -9,9 +9,9 @@ import { SimulationGameDataResource } from "../nova_plugin/game_data_resource.js
 import { GameDateComponent } from "../nova_plugin/player_state_plugin.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 import { SystemIdResource } from "../nova_plugin/system_id_resource.js";
-import { boardingBlockedMessage, escortRepairedMessage, jumpArrivalMessage, landingBlockedMessage } from "./status_bar_content.js";
+import { bayCaptureMessage, boardingBlockedMessage, escortRepairedMessage, jumpArrivalMessage, landingBlockedMessage } from "./status_bar_content.js";
 import { LandingBlockedEvent } from "../nova_plugin/planet_plugin.js";
-import { BoardingBlockedEvent, EscortRepairedEvent } from "../nova_plugin/boarding_plugin.js";
+import { BayCaptureEvent, BoardingBlockedEvent, EscortRepairedEvent } from "../nova_plugin/boarding_plugin.js";
 import { ResizeEvent, ScreenSize } from "./screen_size_plugin.js";
 import { Stage } from "./stage_resource.js";
 
@@ -152,6 +152,23 @@ const ShowEscortRepairedMessage = new System({
     },
 });
 
+// The bay-capture shortcut's only feedback: no dialog opens, so this line
+// is how the player learns the hulk is now one of their fighters. Same
+// targeting as the other boarding messages (emitted at the boarder,
+// re-emitted here, shown on the local player's client only), and a success,
+// so no cant-do beep. The ship class name is resolved from game data.
+const ShowBayCaptureMessage = new System({
+    name: 'ShowBayCaptureMessage',
+    events: [BayCaptureEvent],
+    args: [BayCaptureEvent, StatusLineResource, TimeResource,
+        SimulationGameDataResource, PlayerShipSelector] as const,
+    step({ shipId }, statusLine, { time }, gameData) {
+        statusLine.setMessage(
+            bayCaptureMessage(gameData.data.Ship.getCached(shipId)?.name),
+            time);
+    },
+});
+
 export const StatusMessagePlugin: Plugin = {
     name: 'StatusMessage',
     async build(world) {
@@ -191,6 +208,7 @@ export const StatusMessagePlugin: Plugin = {
         world.addSystem(ShowLandingBlockedMessage);
         world.addSystem(ShowBoardingBlockedMessage);
         world.addSystem(ShowEscortRepairedMessage);
+        world.addSystem(ShowBayCaptureMessage);
     },
     remove(world) {
         world.removeSystem(StatusLineResize);
@@ -198,6 +216,7 @@ export const StatusMessagePlugin: Plugin = {
         world.removeSystem(ShowLandingBlockedMessage);
         world.removeSystem(ShowBoardingBlockedMessage);
         world.removeSystem(ShowEscortRepairedMessage);
+        world.removeSystem(ShowBayCaptureMessage);
         const stage = world.resources.get(Stage);
         const statusLine = world.resources.get(StatusLineResource);
         if (stage && statusLine) {

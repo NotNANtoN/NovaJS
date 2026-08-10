@@ -2,7 +2,7 @@ import 'jasmine';
 import {
     formatCredits, navReadout, abbreviateCargoName, specialCargoSummary,
     standardCargoIndex, ordinal, formatLongDate, jumpArrivalMessage,
-    landingBlockedMessage,
+    landingBlockedMessage, bayCaptureMessage,
 } from './status_bar_content.js';
 
 describe('formatCredits', () => {
@@ -90,5 +90,18 @@ describe('landingBlockedMessage', () => {
             .toBe("You're too far away to dock at this station.");
         expect(landingBlockedMessage('tooFast', true))
             .toBe("You're moving too fast to dock at this station.");
+    });
+});
+
+describe('bayCaptureMessage', () => {
+    it('names the captured ship class', () => {
+        expect(bayCaptureMessage('Viper'))
+            .toBe('Captured the Viper into your fighter bay.');
+    });
+    it('falls back when the ship name is not available', () => {
+        // The bay capture opens no dialog, so this line is the player's
+        // only notice: it must still say something with a cold cache.
+        expect(bayCaptureMessage(undefined))
+            .toBe('Captured the ship into your fighter bay.');
     });
 });

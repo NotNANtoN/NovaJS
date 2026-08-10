@@ -15,6 +15,9 @@ import {
     planCargoPlunder,
     planAmmoPlunder,
     AmmoOutfitInfo,
+    bayCaptureRoom,
+    CaptureBayCandidate,
+    chooseCaptureBay,
 } from './boarding_component.js';
 
 describe('axis alignment gate (Matthew\'s spec)', () => {
@@ -165,5 +168,81 @@ describe('planAmmoPlunder', () => {
         const victim = new Map([['ammo:a', 5], ['ammo:d', 5]]);
         expect(planAmmoPlunder(victim, new Map([['w1', 10]]), info))
             .toEqual([]);
+    });
+});
+
+describe('bay-capture shortcut gate', () => {
+    function bay(overrides: Partial<CaptureBayCandidate> = {}):
+        CaptureBayCandidate {
+        return {
+            bayWeaponId: 'weap:bay',
+            shipId: 'ship:fighter',
+            maxAmmo: 2,
+            mounted: 1,
+            held: 0,
+            deployed: 0,
+            ...overrides,
+        };
+    }
+
+    it('has room while magazine plus deployed is under capacity', () => {
+        expect(bayCaptureRoom(bay({ held: 0, deployed: 0 }))).toBeTrue();
+        expect(bayCaptureRoom(bay({ held: 1, deployed: 0 }))).toBeTrue();
+        // 1 aboard + 1 out = 2 = MaxAmmo x 1 bay: full.
+        expect(bayCaptureRoom(bay({ held: 1, deployed: 1 }))).toBeFalse();
+        expect(bayCaptureRoom(bay({ held: 2 }))).toBeFalse();
+        expect(bayCaptureRoom(bay({ deployed: 2 }))).toBeFalse();
+    });
+
+    it('counts capacity per mounted bay', () => {
+        // 2 bays x MaxAmmo 2 = 4.
+        expect(bayCaptureRoom(bay({ mounted: 2, held: 2, deployed: 1 })))
+            .toBeTrue();
+        expect(bayCaptureRoom(bay({ mounted: 2, held: 2, deployed: 2 })))
+            .toBeFalse();
+    });
+
+    it('treats MaxAmmo <= 0 as unbounded, like refundFighterToBay', () => {
+        expect(bayCaptureRoom(bay({ maxAmmo: 0, held: 99, deployed: 99 })))
+            .toBeTrue();
+    });
+
+    it('never fits a bay the boarder does not mount', () => {
+        expect(bayCaptureRoom(bay({ mounted: 0 }))).toBeFalse();
+    });
+
+    it('picks no bay when none launches that ship class', () => {
+        expect(chooseCaptureBay('ship:cruiser', [bay()])).toBeUndefined();
+    });
+
+    it('picks no bay when the only matching one is full', () => {
+        expect(chooseCaptureBay('ship:fighter', [bay({ held: 2 })]))
+            .toBeUndefined();
+    });
+
+    it('prefers the lowest-sorted bay weapon id among bays that fit', () => {
+        // Deliberately supplied out of order: the pick must not depend on
+        // iteration order of the boarder's weapons.
+        expect(chooseCaptureBay('ship:fighter', [
+            bay({ bayWeaponId: 'weap:b' }),
+            bay({ bayWeaponId: 'weap:a' }),
+            bay({ bayWeaponId: 'weap:c' }),
+        ])).toEqual('weap:a');
+    });
+
+    it('skips a full bay in favor of one with room', () => {
+        // A full bay is not a reason to ignore an empty one, even when it
+        // sorts first.
+        expect(chooseCaptureBay('ship:fighter', [
+            bay({ bayWeaponId: 'weap:a', held: 2 }),
+            bay({ bayWeaponId: 'weap:b' }),
+        ])).toEqual('weap:b');
+    });
+
+    it('ignores bays that launch a different ship class', () => {
+        expect(chooseCaptureBay('ship:fighter', [
+            bay({ bayWeaponId: 'weap:a', shipId: 'ship:drone' }),
+            bay({ bayWeaponId: 'weap:b' }),
+        ])).toEqual('weap:b');
     });
 });

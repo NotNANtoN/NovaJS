@@ -175,3 +175,16 @@ export function boardingBlockedMessage(reason:
 export function escortRepairedMessage(): string {
     return 'Your ship has been repaired and rejoins your formation.';
 }
+
+/**
+ * Status-line feedback for the bay-capture shortcut: a disabled ship that
+ * fits one of your bays is captured outright, with no plunder dialog and
+ * no boarding contest, so this line is the ONLY notice the player gets.
+ * The ship class name comes from game data; it falls back to a generic
+ * wording when the name is not (yet) cached.
+ */
+export function bayCaptureMessage(shipName: string | undefined): string {
+    return shipName
+        ? `Captured the ${shipName} into your fighter bay.`
+        : 'Captured the ship into your fighter bay.';
+}

@@ -1,4 +1,5 @@
 import * as t from 'io-ts';
+import { GovtData } from 'novadatainterface/govt_data';
 import { Emit, Entities, GetEntity, UUID } from 'nova_ecs/arg_types';
 import { Entity } from 'nova_ecs/entity';
 import { EntityMap } from 'nova_ecs/entity_map';
@@ -15,15 +16,20 @@ import { registerSimulationBridgeEvent } from '../communication/simulation_bridg
 import {
     AmmoOutfitInfo, axesAligned, BoardBlockReason, BoardedComponent,
     BoardedState, boardingBlockedReason, BoardingComponent, BoardingState,
-    captureChance, creditBooty, fuelTransferAmount, planAmmoPlunder,
-    planCargoPlunder,
+    captureChance, CaptureBayCandidate, chooseCaptureBay, creditBooty,
+    fuelTransferAmount, planAmmoPlunder, planCargoPlunder,
 } from './boarding_component.js';
 import { CargoComponent, cargoUsed } from './cargo_plugin.js';
 import { OutfitsState, OutfitsStateComponent } from './outfit_plugin.js';
 import { WeaponsState, WeaponsStateComponent } from './weapons_state.js';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
+import {
+    BayFighterComponent, ReturnWhenTargetRemovedComponent,
+} from './bay_plugin.js';
+import { CollisionVulnerabilityComponent } from './collision_interaction.js';
 import { DisabledComponent, isBelowDisableThreshold, repairedArmor } from './disabled_component.js';
 import { EscortCommandComponent } from './escort_command.js';
+import { OwnerComponent, SourceComponent } from './fire_weapon_plugin.js';
 import { FiringGroupComponent } from './firing_group.js';
 import { isInFlock } from './flock.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
@@ -34,11 +40,18 @@ import { FuelComponent } from './health_plugin.js';
 import {
     formationsIn, FormationComponent, nextFormationSlot, NpcComponent,
 } from './npc_ai_plugin.js';
+import {
+    EscortLandingComponent, PlayerEscortComponent,
+} from './player_escort.js';
 import { CreditsComponent } from './player_state_plugin.js';
-import { applyCrime } from './reputation.js';
+import { applyCrime, LegalRecords } from './reputation.js';
 import { GovtsResource, LegalRecordsComponent } from './reputation_plugin.js';
-import { ShipControlEvent, ShipControlStateComponent } from './ship_control.js';
-import { ShipDataComponent, ShipPhysicsComponent } from './ship_plugin.js';
+import {
+    ControlledByComponent, ShipControlEvent, ShipControlStateComponent,
+} from './ship_control.js';
+import {
+    ShipComponent, ShipDataComponent, ShipPhysicsComponent,
+} from './ship_plugin.js';
 import { PlayerSoundEvent } from './sound_plugin.js';
 import { TargetComponent } from './target_component.js';
 
@@ -95,6 +108,20 @@ export const EscortRepairedEventType = t.type({});
 registerSimulationBridgeEvent({ event: EscortRepairedEvent });
 
 /**
+ * Emitted (targeted at the boarding ship) when the bay-capture shortcut
+ * takes a disabled ship straight into one of the boarder's fighter bays:
+ * no plunder session, no capture contest, no dialog — so this event is
+ * the ONLY feedback the player gets. Carries the captured ship's class id
+ * so the display can name it ("Captured the Viper into your fighter
+ * bay."); the sim never reads it back. Consumed display-side by the
+ * status line (status_message_plugin.ts).
+ */
+export const BayCaptureEvent =
+    new EcsEvent<{ shipId: string }>('BayCaptureEvent');
+export const BayCaptureEventType = t.type({ shipId: t.string });
+registerSimulationBridgeEvent({ event: BayCaptureEvent });
+
+/**
  * Builds the planAmmoPlunder inputs from live entities + game data: the
  * victim's outfit counts, the boarder's ammo rounds keyed by weapon, and the
  * ammo-outfit resolver (weapon + capacity, gated on the boarder mounting a
@@ -138,10 +165,269 @@ function ammoPlunderInputs(boarderOutfits: OutfitsState | undefined,
 }
 
 /**
+ * Charges the BoardPenalty crime ("board") against the victim's
+ * government. Shared by the plunder session's once-per-session charge and
+ * by the bay-capture shortcut, so a capture carries exactly the same legal
+ * consequence however it happened. A victim with no government (your own
+ * escorts, and anything already stripped of its GovtComponent) is a no-op.
+ */
+function applyBoardCrime(records: LegalRecords | undefined,
+    govtId: string | undefined, gameData: SimulationGameDataInterface,
+    govts: Iterable<readonly [string, GovtData]> | undefined): void {
+    if (!records || !govtId) {
+        return;
+    }
+    const govtData = gameData.data.Govt.getCached(govtId);
+    if (govtData) {
+        applyCrime(records, govtData, 'board', govts ?? []);
+    }
+}
+
+/**
+ * Brings a disabled hulk back online: armor to just above its disable
+ * threshold (`repairedArmor`, the established threshold + 10% margin used
+ * by self-repair, the hail assist, and capture), shields to full, and
+ * DisabledComponent dropped so DisabledMovementSystem stops braking it and
+ * the formation/escort brains can steer it again.
+ *
+ * Matthew's spec words item 5 as "its minimum un-disabled armor value",
+ * which taken literally is the threshold itself with no margin. The margin
+ * is kept deliberately: a ship parked exactly AT the threshold satisfies
+ * `isBelowDisableThreshold` (the comparison is <=), so it would be
+ * re-disabled by ShipDisableSystem on the next tick, and every other
+ * repair path in the game already uses the margin.
+ */
+function repairHulk(target: Entity): void {
+    const shipData = target.components.get(ShipDataComponent);
+    const armor = target.components.get(ArmorComponent);
+    if (armor && shipData
+        && isBelowDisableThreshold(armor, shipData.disableArmorFraction)) {
+        armor.current = repairedArmor(armor.max, shipData.disableArmorFraction);
+    }
+    const shield = target.components.get(ShieldComponent);
+    if (shield) {
+        shield.current = shield.max;
+    }
+    target.components.delete(DisabledComponent);
+}
+
+/**
+ * The boarder's mounted bay weapons, described for the bay-capture
+ * shortcut (see CaptureBayCandidate). Everything here is read off synced
+ * simulation state — the boarder's WeaponsState and magazine, and the live
+ * entity map — plus static game data, so every peer builds the same list.
+ *
+ * Deployed fighters are counted straight from the entity map: a live
+ * entity is one of this bay's deployed fighters when its
+ * BayFighterComponent names this bay AND its SourceComponent is the
+ * boarder. That is a count, so entity iteration order cannot change it.
+ *
+ * The `getCached` reads are legitimate under the determinism rule (a
+ * getCached MISS must never change what the simulation does): entity
+ * staging loads a ship's outfits, those outfits' weapons — bays included,
+ * recursively with the fighter ship classes they launch — and the outfit
+ * data itself before the entity is ever inserted (loadEntityGameData /
+ * loadShipGameData), so on every peer a MOUNTED bay's wëap and its ammo
+ * outfits are already cached. This is the same staging guarantee
+ * ammoPlunderInputs relies on.
+ */
+function captureBayCandidates(boarderUuid: string,
+    boarderWeapons: WeaponsState | undefined,
+    boarderOutfits: OutfitsState | undefined,
+    entities: EntityMap,
+    gameData: SimulationGameDataInterface): CaptureBayCandidate[] {
+    if (!boarderWeapons) {
+        return [];
+    }
+    const candidates: CaptureBayCandidate[] = [];
+    for (const [weaponId, state] of boarderWeapons) {
+        if (state.count <= 0) {
+            continue;
+        }
+        const weapon = gameData.data.Weapon.getCached(weaponId);
+        if (weapon?.type !== 'BayWeaponData') {
+            continue;
+        }
+        let held = 0;
+        for (const [outfitId, outfitState] of boarderOutfits ?? []) {
+            if (gameData.data.Outfit.getCached(outfitId)?.ammoFor
+                === weaponId) {
+                held += outfitState.count;
+            }
+        }
+        let deployed = 0;
+        for (const [, other] of entities) {
+            if (other.components.get(BayFighterComponent)?.bayWeaponId
+                === weaponId
+                && other.components.get(SourceComponent) === boarderUuid) {
+                deployed++;
+            }
+        }
+        candidates.push({
+            bayWeaponId: weaponId,
+            shipId: weapon.shipID,
+            maxAmmo: weapon.maxAmmo,
+            mounted: state.count,
+            held,
+            deployed,
+        });
+    }
+    return candidates;
+}
+
+/**
+ * Who a repaired former escort should hold formation on: its own live
+ * leader if it still has one, else the carrier it was last attached to
+ * (PlayerEscort.parent — so a carrier escort's wing goes back to the
+ * carrier rather than being promoted to a direct escort), else the boarder.
+ * Every candidate must be a live ship that is the boarder or inside the
+ * boarder's flock, so a stale link can never re-attach the ship to
+ * somebody else's leader.
+ */
+function escortLeaderFor(target: Entity, targetUuid: string,
+    boarderUuid: string, entities: EntityMap): string {
+    const usable = (candidate: string | undefined): candidate is string =>
+        candidate !== undefined && candidate !== targetUuid
+        && entities.has(candidate)
+        && (candidate === boarderUuid
+            || isInFlock(candidate, boarderUuid, u => entities.get(u)));
+    const leader = target.components.get(FormationComponent)?.leader;
+    if (usable(leader)) {
+        return leader;
+    }
+    const parent = target.components.get(PlayerEscortComponent)?.parent;
+    if (usable(parent)) {
+        return parent;
+    }
+    return boarderUuid;
+}
+
+/**
+ * Puts a repaired escort back to work: formation link, the default
+ * 'formation' command, and the player's firing group — the same stamps
+ * EscortReattachSystem applies when a player returns to the world, and the
+ * same set convertToEscort applies to a fresh capture.
+ *
+ * Needed because a FORMER escort's live chain can have lapsed in ways
+ * EscortReattachSystem will not fix on its own: it only re-attaches an
+ * escort whose `detached` flag is set (i.e. one whose player left the
+ * world). A fighter orphaned by its carrier escort dying, with the player
+ * present the whole time, keeps its durable PlayerEscortComponent but
+ * never gets a new formation link.
+ *
+ * An existing link to the SAME leader keeps its slot (no free station
+ * shuffle); anything else gets the next free slot.
+ */
+function reattachEscort(target: Entity, leaderUuid: string,
+    playerUuid: string, entities: EntityMap): void {
+    const formation = target.components.get(FormationComponent);
+    target.components.set(FormationComponent, {
+        leader: leaderUuid,
+        slot: formation?.leader === leaderUuid ? formation.slot
+            : nextFormationSlot(formationsIn(entities), leaderUuid),
+    });
+    target.components.set(EscortCommandComponent, { command: 'formation' });
+    target.components.set(FiringGroupComponent, { group: playerUuid });
+    // A landing order aimed at a stellar is meaningless now that the ship
+    // is back in formation (EscortReattachSystem drops it for the same
+    // reason).
+    target.components.delete(EscortLandingComponent);
+    const owned = target.components.get(PlayerEscortComponent);
+    if (owned?.detached) {
+        owned.detached = false;
+    }
+}
+
+/**
+ * The bay-capture shortcut's effect: the disabled hulk becomes one of the
+ * boarder's DEPLOYED bay fighters, stamped exactly like one the bay had
+ * launched itself (BayWeaponEntry.fire) — so every downstream system
+ * (escort commands, the returnToBay flow, CollectableEscortAI's docking
+ * refund, the outfitter's deployed-fighter accounting, the landed roster)
+ * treats it as native.
+ *
+ * The magazine is deliberately NOT credited here: the fighter is deployed,
+ * not stowed. Docking it later runs refundFighterToBay, and the room check
+ * in the gate (chooseCaptureBay) is what guarantees that refund will fit —
+ * which is what makes the capture permanent.
+ */
+function captureIntoBay(target: Entity, bayWeaponId: string,
+    boarder: Entity, boarderUuid: string, entities: EntityMap): void {
+    repairHulk(target);
+
+    // The owner-chain root, derived the way a bay launch derives it
+    // (fire_weapon_plugin's fireFromEntity: the firer's OwnerComponent,
+    // falling back to the firer itself).
+    const ownerRoot =
+        boarder.components.get(OwnerComponent)?.owner ?? boarderUuid;
+    target.components.set(OwnerComponent, { owner: ownerRoot });
+    target.components.set(SourceComponent, boarderUuid);
+    target.components.set(BayFighterComponent, { bayWeaponId });
+    target.components.set(ReturnWhenTargetRemovedComponent, undefined);
+
+    // Escort stamps. FiringGroup follows stampFiringGroup: the boarder's
+    // own group if it has one, else the owner-chain root. The govt half of
+    // that helper is deliberately skipped — it rides WEAPON entities only,
+    // and this is a ship (see firing_group.ts).
+    target.components.set(FormationComponent, {
+        leader: boarderUuid,
+        slot: nextFormationSlot(formationsIn(entities), boarderUuid),
+    });
+    target.components.set(EscortCommandComponent, { command: 'formation' });
+    target.components.set(FiringGroupComponent, {
+        group: boarder.components.get(FiringGroupComponent)?.group ?? ownerRoot,
+    });
+    target.components.delete(GovtComponent);
+    target.components.delete(BoardedComponent);
+    target.components.delete(EscortLandingComponent);
+    const owner = boarder.components.get(MultiplayerData)?.owner;
+    if (owner !== undefined) {
+        target.components.set(MultiplayerData, { owner });
+    }
+    // Durable ownership, stamped here rather than waiting for
+    // MarkPlayerEscortsSystem's next pass (which would reach the same
+    // answer off the chain above). Only a player-controlled boarder can
+    // name a player: for anything else the marking system decides.
+    if (boarder.components.has(ControlledByComponent)) {
+        target.components.set(PlayerEscortComponent,
+            { player: boarderUuid, parent: boarderUuid });
+    }
+    // Clear leftover hostility and targeting, exactly as convertToEscort
+    // does, so the new fighter isn't still gunning for its captor.
+    const npc = target.components.get(NpcComponent);
+    if (npc) {
+        npc.aggressor = undefined;
+    }
+    const targetTarget = target.components.get(TargetComponent);
+    if (targetTarget) {
+        targetTarget.target = undefined;
+    }
+
+    // The carrier must be dockable, or the new fighter could never come
+    // home and bank itself (bay_plugin's fire does the same).
+    boarder.components.get(CollisionVulnerabilityComponent)
+        ?.vulnerableTo.add('return_escorts');
+}
+
+/**
  * The 'board' key. With a disabled ship selected and the boarder pulled
- * alongside (close, matched speed, axis-aligned), opens a plunder
- * session; otherwise reports why on the status line. A session already
- * open, or a target already being boarded, is left alone.
+ * alongside (close, matched speed, axis-aligned), one of three things
+ * happens, in this precedence order:
+ *
+ *  1. BAY CAPTURE (Matthew's item 6). The hulk is a ship class one of the
+ *     boarder's bays launches, and that bay has room: it is captured
+ *     instantly into the bay as a deployed fighter — no session, no
+ *     contest, no dialog, no PRNG draw. This deliberately OVERRIDES the
+ *     repair path below, so a disabled fighter of your own that fits with
+ *     room is re-adopted by the bay rather than merely patched up.
+ *  2. OWN-ESCORT REPAIR (item 5). The hulk is in the boarder's live flock
+ *     OR durably marked as the boarder's escort (PlayerEscortComponent —
+ *     the "former escort" case, whose live chain lapsed while it was
+ *     disabled, landed, or orphaned): it is repaired in place and put back
+ *     to work in formation. No plunder session.
+ *  3. PLUNDER. Anything else opens the normal plunder session.
+ *
+ * A session already open, or a target already being boarded, is left alone.
  */
 const BoardingGateSystem = new System({
     name: 'BoardingGateSystem',
@@ -149,9 +435,11 @@ const BoardingGateSystem = new System({
     args: [ShipControlStateComponent, MovementStateComponent,
         ShipDataComponent, TargetComponent, Optional(BoardingComponent),
         Optional(OutfitsStateComponent), Optional(WeaponsStateComponent),
+        Optional(LegalRecordsComponent), Optional(GovtsResource),
         GetEntity, UUID, Entities, SimulationGameDataResource, Emit] as const,
     step(controls, movement, _shipData, target, boarding, boarderOutfits,
-        boarderWeapons, entity, uuid, entities, gameData, emit) {
+        boarderWeapons, records, govts, entity, uuid, entities, gameData,
+        emit) {
         if (controls.get('board') !== 'start') {
             return;
         }
@@ -198,27 +486,56 @@ const BoardingGateSystem = new System({
             return;
         }
 
-        // Boarding your OWN disabled flock member (a hired or captured
-        // escort, or one of your bay fighters) does NOT plunder it: it
-        // repairs it in place. The boarding gate above still applies
-        // (close, slow, axis-aligned). Restore armor just above the
-        // disable threshold — ShipDisableSystem then lifts
-        // DisabledComponent, so the escort resumes formation — and
-        // shields to full, matching the hail-assist repair
-        // (hail_plugin.ts). Report it on the status line; no plunder
-        // session opens.
-        if (isInFlock(targetUuid!, uuid, u => entities.get(u))) {
-            const targetArmor = targetEntity!.components.get(ArmorComponent);
-            if (targetArmor && isBelowDisableThreshold(
-                targetArmor, targetShipData!.disableArmorFraction)) {
-                targetArmor.current = repairedArmor(
-                    targetArmor.max, targetShipData!.disableArmorFraction);
-            }
-            const targetShield = targetEntity!.components.get(ShieldComponent);
-            if (targetShield) {
-                targetShield.current = targetShield.max;
-            }
-            targetEntity!.components.delete(DisabledComponent);
+        // 1. BAY CAPTURE. A hulk of a ship class one of the boarder's bays
+        // launches, with room for it, is taken straight into that bay as a
+        // deployed fighter: no session, no contest, no dialog, and — note
+        // for the rollback/replay discipline — no draw from the seeded
+        // RandomResource, so pressing 'board' on a bay-capturable hulk
+        // never shifts the PRNG sequence for anything else.
+        const targetShipId =
+            targetEntity!.components.get(ShipComponent)?.id;
+        const captureBay = targetShipId === undefined ? undefined
+            : chooseCaptureBay(targetShipId, captureBayCandidates(
+                uuid, boarderWeapons, boarderOutfits, entities, gameData));
+        if (captureBay !== undefined) {
+            // The same crime the plunder session charges for a capture,
+            // read BEFORE the hulk sheds its government.
+            applyBoardCrime(records,
+                targetEntity!.components.get(GovtComponent)?.id, gameData,
+                govts);
+            captureIntoBay(targetEntity!, captureBay, entity, uuid, entities);
+            emit(BayCaptureEvent, { shipId: targetShipId! }, [uuid]);
+            return;
+        }
+
+        // 2. Boarding your OWN disabled escort (a hired or captured escort,
+        // or one of your bay fighters) does NOT plunder it: it repairs it
+        // in place and puts it back to work. The boarding gate above still
+        // applies (close, slow, axis-aligned).
+        //
+        // Two ways to qualify, deliberately belt-and-braces: the live flock
+        // chain reaches the boarder (isInFlock), or the durable ownership
+        // marker names the boarder (PlayerEscortComponent — a FORMER
+        // escort, whose live chain lapsed while it sat disabled through a
+        // landing round trip, a jump it could not follow, or the death of
+        // the carrier escort it flew from).
+        //
+        // A fighter boarding on the player's behalf is NOT covered: only
+        // the boarder itself is compared against, never the boarder's flock
+        // root. Boarding is player-initiated (this system only ever runs
+        // off a player's control events), so the boarder IS the player
+        // ship; widening it would need a flock-root walk for a case that
+        // cannot arise today.
+        const owned = targetEntity!.components.get(PlayerEscortComponent);
+        if (isInFlock(targetUuid!, uuid, u => entities.get(u))
+            || owned?.player === uuid) {
+            repairHulk(targetEntity!);
+            // It was an escort, so it goes back to being one: formation
+            // link, default command, player's firing group. Cheap and
+            // idempotent for a ship whose links never lapsed.
+            reattachEscort(targetEntity!,
+                escortLeaderFor(targetEntity!, targetUuid!, uuid, entities),
+                uuid, entities);
             emit(EscortRepairedEvent, {}, [uuid]);
             return;
         }
@@ -318,13 +635,8 @@ const BoardingActionSystem = new System({
                 return;
             }
             boarding.crimeApplied = true;
-            const govtId = target?.components.get(GovtComponent)?.id;
-            if (records && govtId) {
-                const govtData = gameData.data.Govt.getCached(govtId);
-                if (govtData) {
-                    applyCrime(records, govtData, 'board', govts ?? []);
-                }
-            }
+            applyBoardCrime(records,
+                target?.components.get(GovtComponent)?.id, gameData, govts);
         };
 
         // Done, or the target vanished: end the session.
@@ -452,6 +764,8 @@ export const BoardingPlugin: Plugin = {
             BoardingBlockedEvent, BoardingBlockedEventType);
         world.resources.get(SerializerResource)?.addEvent(
             EscortRepairedEvent, EscortRepairedEventType);
+        world.resources.get(SerializerResource)?.addEvent(
+            BayCaptureEvent, BayCaptureEventType);
 
         world.addSystem(BoardingGateSystem);
         world.addSystem(BoardingActionSystem);

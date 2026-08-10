@@ -260,6 +260,69 @@ export interface AmmoOutfitInfo {
 }
 
 /**
+ * One of the boarder's MOUNTED bay weapons, as the bay-capture shortcut
+ * needs to see it. Resolved by the gate from the boarder's
+ * WeaponsStateComponent plus game data (the bay wëap's ShipID and
+ * MaxAmmo), its magazine, and the live entity map.
+ */
+export interface CaptureBayCandidate {
+    /** Global id of the bay wëap. */
+    bayWeaponId: string;
+    /** The ship class this bay launches (BayWeaponData.shipID). */
+    shipId: string;
+    /** The bay's MaxAmmo; <= 0 means "no simulation-side cap" (see
+     * refundFighterToBay, which reads the same field the same way). */
+    maxAmmo: number;
+    /** How many of this bay the boarder mounts (WeaponState.count). */
+    mounted: number;
+    /** Fighter rounds for this bay currently in the boarder's magazine. */
+    held: number;
+    /** This bay's fighters currently deployed from the boarder. */
+    deployed: number;
+}
+
+/**
+ * Whether a captured fighter would fit in this bay: its magazine rounds
+ * plus its already-deployed fighters must be under the bay's capacity
+ * (MaxAmmo per bay times the bays mounted).
+ *
+ * MaxAmmo <= 0 is treated as UNBOUNDED, matching refundFighterToBay: a
+ * bay with no MaxAmmo defers to the ammo outfit's Max field, which is
+ * game data rather than simulation state, so the sim does not cap it.
+ * Counting deployed fighters (not just the magazine) is what makes the
+ * capture safe to bank later: the docking refund is guaranteed to have
+ * room, so the capture becomes permanent.
+ */
+export function bayCaptureRoom(bay: CaptureBayCandidate): boolean {
+    if (bay.mounted <= 0) {
+        return false;
+    }
+    if (bay.maxAmmo <= 0) {
+        return true;
+    }
+    return bay.held + bay.deployed < bay.maxAmmo * bay.mounted;
+}
+
+/**
+ * The bay a boarded ship is captured into, or undefined when none of the
+ * boarder's bays takes that ship class with room to spare.
+ *
+ * A candidate must launch exactly this ship class and have room. When
+ * several qualify the LOWEST-SORTED bay weapon id wins, so every peer
+ * picks the same bay from the same synced state (the same tie-break
+ * refundFighterToBay and weapon_plugin's consumeAmmo use for outfits).
+ * Bays that fit but are full are skipped rather than blocking the
+ * shortcut — a full bay is not a reason to ignore an empty one.
+ */
+export function chooseCaptureBay(targetShipId: string,
+    candidates: Iterable<CaptureBayCandidate>): string | undefined {
+    return [...candidates]
+        .filter(bay => bay.shipId === targetShipId && bayCaptureRoom(bay))
+        .map(bay => bay.bayWeaponId)
+        .sort()[0];
+}
+
+/**
  * Plans an ammo plunder: for each ammo outfit the victim carries whose weapon
  * the boarder also mounts, how many rounds move into the boarder's stock,
  * capped by the boarder's remaining capacity for that weapon. Deterministic:
