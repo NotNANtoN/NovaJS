@@ -128,7 +128,11 @@ import { ShipComponent, ShipPhysicsComponent } from './ship_plugin.js';
  *    the chain (browser.ts): escorts are absent from the intermediate
  *    systems the chain passes through and appear at the final destination.
  *    See multiJumpChainContinues / multiJumpChainSettled.
- *  - Escorts are not saved (see save_game.ts).
+ *  - Escorts ARE saved, as whole serialized entities, and come back
+ *    through this same carried-batch path on the first system entry after
+ *    a load (save_game.ts, browser.ts). What a save cannot bring back is
+ *    an escort left behind in ANOTHER system by the zero-energy jump
+ *    exclusion below: it is in no system the client holds state for.
  */
 
 // --- Tuning constants ---

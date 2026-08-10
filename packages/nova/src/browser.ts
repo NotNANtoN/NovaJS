@@ -59,7 +59,11 @@ import { PlayerShipSelector } from "./nova_plugin/player_ship_plugin.js";
 import { CreditsComponent, GameDateComponent } from "./nova_plugin/player_state_plugin.js";
 import { initialRecordsFromGovtStatuses } from "./nova_plugin/reputation.js";
 import { CombatRatingComponent, LegalRecordsComponent } from "./nova_plugin/reputation_plugin.js";
-import { extractSaveData, loadSave, resetSave, restorePlayerState, writeSave } from "./nova_plugin/save_game.js";
+import {
+    EscortToSave, SavedEscort, collectEscortsToSave, extractSaveData,
+    extractSavedEscorts, loadSave, resetSave, restorePlayerState,
+    restoreSavedEscorts, writeSave,
+} from "./nova_plugin/save_game.js";
 import { ControlledByComponent } from "./nova_plugin/ship_control.js";
 import { ShipComponent, ShipPhysicsComponent } from "./nova_plugin/ship_plugin.js";
 import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
@@ -174,6 +178,18 @@ let carriedJumpEscorts: CarriedEscort[] = [];
  * landing split, exactly like dockedShip.
  */
 let landedEscorts: CarriedEscort[] = [];
+/**
+ * The escorts a loaded save is still holding, as ENCODED blobs.
+ *
+ * They cannot be decoded when the save is read: startGame reads it before
+ * any system world exists, and the entity serializer comes out of that
+ * world. So the blobs wait here and are drained by the first enterSystem —
+ * which, for a session that loaded a save, is the startup jumpTo. Draining
+ * makes it one-shot, and the escorts join that transition's ordinary
+ * carried batch, so they re-enter through the same prepareCarriedEscorts /
+ * addEntity path a liftoff or a jump uses rather than a second pipeline.
+ */
+let restoredSaveEscorts: SavedEscort[] | undefined;
 /**
  * The end of the formation-slot run the client has already handed out for a
  * player, so a later insertion in the same session cannot reuse those slots.
@@ -682,6 +698,43 @@ function getPlayerShipEntity(displayWorld: World): Entity | undefined {
 }
 
 /**
+ * The uuid the local player's escorts are filed under, wherever the player
+ * currently is. It is the same uuid across a landing (dockedShip keeps the
+ * ship's in-world uuid), which is exactly why the rosters can be keyed by
+ * it while the player is out of the world.
+ *
+ * Undefined only in the narrow windows between states (mid-relaunch,
+ * mid-jump). Callers must treat that as "don't know", never as "no
+ * escorts": in multiplayer the rosters can hold other peers' entries, and
+ * saving those would hand this pilot someone else's ships.
+ */
+function localPlayerUuid(): string | undefined {
+    return dockedShip?.uuid ?? pendingDockedShip?.uuid
+        ?? gateDockedShip?.uuid ?? pendingGateShip?.uuid
+        ?? (displayWorld ? localPlayerShipUuid(displayWorld) : undefined);
+}
+
+/**
+ * Every escort belonging to `player` that this client can still account
+ * for, as the save wants them: the ones live in the system (in flight),
+ * the landed roster held while docked, and any batch riding a jump. The
+ * three are disjoint in practice but unioned by uuid anyway, because the
+ * landing window overlaps them — an escort still flying to the planet is
+ * in the world while its already-landed wingmates are on the roster.
+ *
+ * Sorted by uuid so a save's escort order does not depend on entity-map
+ * iteration or on which roster an escort happened to be in.
+ *
+ * ESCORTS IN OTHER SYSTEMS ARE NOT HERE, by construction: this reads the
+ * active system and the client's own rosters, and a ship left behind by
+ * the zero-energy jump exclusion is in neither. See save_game.ts.
+ */
+function escortsToSave(player: string): EscortToSave[] {
+    return collectEscortsToSave(player, displayWorld?.entities ?? [],
+        [landedEscorts, carriedJumpEscorts]);
+}
+
+/**
  * Serializes the local player's current state to localStorage. A pure
  * read of the display world's player entity (which mirrors the simulation),
  * so it's a safe observer that never mutates sim state. No-op if there's no
@@ -704,6 +757,22 @@ function saveNow() {
     const data = extractSaveData(playerShip, activeSystemId);
     if (!data) {
         return;
+    }
+    // Escorts, as whole serialized entities. Needs the simulation's
+    // serializer, which exists for as long as there is a system; if it
+    // somehow doesn't, the rest of the save is still worth writing.
+    // Likewise a player uuid: without one we cannot tell this pilot's
+    // escorts from a peer's, and writing none beats writing someone
+    // else's (the next save, ~10s later, has one).
+    const player = localPlayerUuid();
+    if (simulationSerializer && player) {
+        const escorts = extractSavedEscorts(escortsToSave(player),
+            simulationSerializer);
+        // Left absent rather than written as `[]`, so an escortless
+        // pilot's save stays exactly the payload a v1 build wrote.
+        if (escorts.length > 0) {
+            data.escorts = escorts;
+        }
     }
     writeSave(data);
 }
@@ -884,6 +953,27 @@ async function enterSystem({ entity, to, uuid }:
     // headless harness needs to inject dialog state the way novaHailDialog
     // drives the comm dialog. Not used by gameplay.
     (window as any).novaSimSerializer = serializer;
+
+    // A loaded save's escorts decode HERE, at the first moment in a
+    // session that a serializer exists. They are pushed into this
+    // transition's carried batch, which the insertion below already
+    // handles — fresh uuids, intra-batch carrier remapping, formation
+    // stations, commands reset to 'formation'. Pushing (rather than
+    // reassigning) also means jumpTo's failure path hands them back to
+    // carriedJumpEscorts with the rest, so a failed startup transition
+    // cannot drop them.
+    if (restoredSaveEscorts) {
+        const blobs = restoredSaveEscorts;
+        restoredSaveEscorts = undefined; // One-shot: the startup jump.
+        const restored = restoreSavedEscorts(blobs, serializer);
+        jumpEscorts.push(...restored.map(escort => ({
+            ...escort, player: uuid,
+        })));
+        if (restored.length > 0) {
+            console.info(`Restored ${restored.length} escort(s) from the `
+                + `saved game.`);
+        }
+    }
 
     const worker = new Worker("/simulation_bridge_browser_worker_bundle.js", {
         type: "module",
@@ -1295,6 +1385,12 @@ async function startGame() {
     // override it. A corrupt or old-version save is quarantined by
     // loadSave and we fall back to defaults.
     const save = loadSave();
+    // Hand the saved escorts to the first system entry, which is the only
+    // place with a serializer to decode them (see restoredSaveEscorts).
+    // Deliberately NOT gated on `usingSavedShip`: escorts are ships of
+    // their own and belong to the pilot, not to the hull they were flying
+    // beside, so a ?ship= override keeps them.
+    restoredSaveEscorts = save?.escorts;
 
     // A fresh pilot starts from a chär "player start": ship, credits,
     // date, systems, and its OnStart control bits. ?char=nova:129
@@ -1999,6 +2095,9 @@ async function startGame() {
         pendingGateArrivalSpob = undefined;
         carriedJumpEscorts = [];
         landedEscorts = [];
+        // Any stash the last session never got to spend. Leaving it would
+        // deal a dead save's escorts into the NEXT pilot's first system.
+        restoredSaveEscorts = undefined;
         clientSlotFloor = undefined;
         simulationTickInFlight = false;
         lastPumpTime = undefined;

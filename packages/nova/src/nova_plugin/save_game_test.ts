@@ -1,6 +1,26 @@
 import 'jasmine';
+import { MockGameData } from 'novadatainterface/mock_game_data';
+import { getDefaultShipData } from 'novadatainterface/ship_data';
+import { Angle } from 'nova_ecs/datatypes/angle';
+import { Position } from 'nova_ecs/datatypes/position';
+import { Vector } from 'nova_ecs/datatypes/vector';
 import { Entity } from 'nova_ecs/entity';
+import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
+import {
+    Serializer, SerializerResource,
+} from 'nova_ecs/plugins/serializer_plugin';
+import { prepareCarriedEscorts } from '../spaceport/landed_escorts.js';
+import { BayFighterComponent, ReturnWhenTargetRemovedComponent } from './bay_plugin.js';
 import { CargoComponent } from './cargo_plugin.js';
+import { completeEntity } from './entity_data_loader.js';
+import { EscortCommandComponent } from './escort_command.js';
+import { OwnerComponent, SourceComponent } from './fire_weapon_plugin.js';
+import { ArmorComponent } from './health_plugin.js';
+import { makeShip } from './make_ship.js';
+import { makeSystem } from './make_system.js';
+import { FormationComponent } from './npc_ai_plugin.js';
+import { PlayerEscortComponent } from './player_escort.js';
+import { Stat } from './stat.js';
 import { ControlBitsComponent } from './ncb_plugin.js';
 import { OutfitsState, OutfitsStateComponent } from './outfit_plugin.js';
 import { CombatRatingComponent, LegalRecordsComponent } from './reputation_plugin.js';
@@ -11,14 +31,20 @@ import {
     MissionsComponent,
 } from './player_state_plugin.js';
 import {
+    collectEscortsToSave,
     decodeSave,
     encodeSave,
     extractSaveData,
+    extractSavedEscorts,
     loadSave,
     resetSave,
     restorePlayerState,
+    restoreSavedEscorts,
+    RosterEscort,
     SaveData,
+    SavedEscort,
     SaveStorage,
+    MIN_READABLE_SAVE_VERSION,
     SAVE_KEY,
     SAVE_QUARANTINE_KEY,
     SAVE_VERSION,
@@ -224,5 +250,316 @@ describe('save_game storage', () => {
 
     it('returns undefined when there is no save', () => {
         expect(loadSave(new FakeStorage())).toBeUndefined();
+    });
+});
+
+/**
+ * Escort persistence.
+ *
+ * These go through the REAL entity serializer (the one a system world
+ * builds), because the whole point of storing escorts as encoded entities
+ * rather than ship ids is that every registered component survives. A
+ * hand-rolled fake codec would assert nothing about that.
+ */
+const PLAYER = 'player-uuid';
+const SHIP_ID = 'test:ship';
+
+function movement(x: number, y: number) {
+    return {
+        accelerating: 0,
+        position: new Position(x, y),
+        rotation: new Angle(0),
+        turnBack: false,
+        turning: 0,
+        velocity: new Vector(0, 0),
+    };
+}
+
+async function makeEscortFixture() {
+    const gameData = new MockGameData();
+    gameData.data.Ship.map.set(SHIP_ID, {
+        ...getDefaultShipData(),
+        id: SHIP_ID,
+    });
+    await gameData.data.Ship.get(SHIP_ID);
+    const world = await makeSystem('test:system', gameData, undefined,
+        { npcs: false });
+    const serializer = world.resources.get(SerializerResource)!;
+
+    async function makeEscort(setup: (ship: Entity) => void = () => { }) {
+        const ship = makeShip(gameData.data.Ship.map.get(SHIP_ID)!);
+        ship.components.set(MovementStateComponent, movement(500, 500));
+        setup(ship);
+        await completeEntity(world, ship);
+        return ship;
+    }
+
+    return { world, serializer, makeEscort };
+}
+
+/** The save round trip, end to end, as a helper. */
+function saveAndLoad(escorts: SavedEscort[], serializer: Serializer) {
+    const stored = encodeSave({ ...SAMPLE, escorts });
+    const decoded = decodeSave(stored);
+    expect(decoded).toBeDefined();
+    return restoreSavedEscorts(decoded!.escorts, serializer);
+}
+
+describe('save_game escorts', () => {
+    let fixture: Awaited<ReturnType<typeof makeEscortFixture>>;
+    beforeAll(async () => {
+        fixture = await makeEscortFixture();
+    });
+
+    it('round-trips an escort that was IN FLIGHT with the player', async () => {
+        const { serializer, makeEscort } = fixture;
+        const escort = await makeEscort(ship => {
+            ship.components.set(PlayerEscortComponent,
+                { player: PLAYER, parent: PLAYER });
+            // Battle damage and cargo: the state a ship-id list would lose.
+            ship.components.set(ArmorComponent, new Stat({
+                current: 23, max: 100, min: 0, recharge: 0,
+            }));
+            ship.components.set(CargoComponent, new Map([['cargo:2', 5]]));
+        });
+
+        // In flight, escorts are live entities in the display world and
+        // the client's rosters are empty.
+        const toSave = collectEscortsToSave(PLAYER,
+            [['escort-1', escort]], []);
+        expect(toSave.map(({ uuid }) => uuid)).toEqual(['escort-1']);
+
+        const restored = saveAndLoad(
+            extractSavedEscorts(toSave, serializer), serializer);
+        expect(restored.length).toBe(1);
+        expect(restored[0].uuid).toBe('escort-1');
+        expect(restored[0].entity.components.get(ArmorComponent)?.current)
+            .toBe(23);
+        expect(restored[0].entity.components.get(CargoComponent))
+            .toEqual(new Map([['cargo:2', 5]]));
+        expect(restored[0].entity.components.get(PlayerEscortComponent))
+            .toEqual({ player: PLAYER, parent: PLAYER });
+    });
+
+    it('round-trips an escort held on the DOCKED landed roster', async () => {
+        const { serializer, makeEscort } = fixture;
+        const escort = await makeEscort(ship => {
+            ship.components.set(PlayerEscortComponent,
+                { player: PLAYER, parent: PLAYER, detached: true });
+            ship.components.set(ArmorComponent, new Stat({
+                current: 41, max: 100, min: 0, recharge: 0,
+            }));
+        });
+        const landed: RosterEscort[] = [
+            { player: PLAYER, uuid: 'landed-1', entity: escort },
+        ];
+
+        // Docked: the player and its escorts are out of the world
+        // entirely, so the roster is the only source.
+        const toSave = collectEscortsToSave(PLAYER, [], [landed]);
+        expect(toSave.map(({ uuid }) => uuid)).toEqual(['landed-1']);
+
+        const restored = saveAndLoad(
+            extractSavedEscorts(toSave, serializer), serializer);
+        expect(restored.length).toBe(1);
+        expect(restored[0].entity.components.get(ArmorComponent)?.current)
+            .toBe(41);
+    });
+
+    it('includes a batch waiting on a carried jump', async () => {
+        const { serializer, makeEscort } = fixture;
+        const inWorld = await makeEscort(ship => ship.components.set(
+            PlayerEscortComponent, { player: PLAYER, parent: PLAYER }));
+        const jumping = await makeEscort(ship => ship.components.set(
+            PlayerEscortComponent, { player: PLAYER, parent: PLAYER }));
+        const carriedJump: RosterEscort[] = [
+            { player: PLAYER, uuid: 'jumping-1', entity: jumping },
+        ];
+
+        const toSave = collectEscortsToSave(PLAYER, [['in-world-1', inWorld]],
+            [[], carriedJump]);
+        expect(toSave.map(({ uuid }) => uuid))
+            .toEqual(['in-world-1', 'jumping-1']);
+
+        const restored = saveAndLoad(
+            extractSavedEscorts(toSave, serializer), serializer);
+        expect(restored.map(({ uuid }) => uuid))
+            .toEqual(['in-world-1', 'jumping-1']);
+    });
+
+    it('writes an escort caught in the landing overlap exactly once',
+        async () => {
+            const { serializer, makeEscort } = fixture;
+            // Mid-landing an escort is on the roster while still present
+            // in the world it is flying down through.
+            const escort = await makeEscort(ship => ship.components.set(
+                PlayerEscortComponent, { player: PLAYER, parent: PLAYER }));
+            const roster: RosterEscort[] = [
+                { player: PLAYER, uuid: 'both', entity: escort },
+            ];
+            const toSave = collectEscortsToSave(PLAYER, [['both', escort]],
+                [roster]);
+            expect(toSave.map(({ uuid }) => uuid)).toEqual(['both']);
+            expect(extractSavedEscorts(toSave, serializer).length).toBe(1);
+        });
+
+    it('ignores escorts belonging to another player', async () => {
+        const { makeEscort } = fixture;
+        const mine = await makeEscort(ship => ship.components.set(
+            PlayerEscortComponent, { player: PLAYER, parent: PLAYER }));
+        const theirs = await makeEscort(ship => ship.components.set(
+            PlayerEscortComponent, { player: 'someone-else', parent: 'x' }));
+        const roster: RosterEscort[] = [
+            { player: 'someone-else', uuid: 'peer-roster', entity: theirs },
+        ];
+        const toSave = collectEscortsToSave(PLAYER,
+            [['mine', mine], ['theirs', theirs]], [roster]);
+        expect(toSave.map(({ uuid }) => uuid)).toEqual(['mine']);
+    });
+
+    it('keeps a deployed bay fighter\'s identity, and re-links it to its '
+        + 'carrier under fresh uuids', async () => {
+            const { serializer, makeEscort } = fixture;
+            const carrier = await makeEscort(ship => ship.components.set(
+                PlayerEscortComponent, { player: PLAYER, parent: PLAYER }));
+            const fighter = await makeEscort(ship => {
+                // A launched fighter's whole bay identity.
+                ship.components.set(BayFighterComponent,
+                    { bayWeaponId: 'test:bay' });
+                ship.components.set(ReturnWhenTargetRemovedComponent,
+                    undefined);
+                ship.components.set(OwnerComponent, { owner: 'carrier-uuid' });
+                ship.components.set(SourceComponent, 'carrier-uuid');
+                ship.components.set(PlayerEscortComponent,
+                    { player: PLAYER, parent: 'carrier-uuid' });
+            });
+
+            const toSave = collectEscortsToSave(PLAYER, [
+                ['carrier-uuid', carrier], ['fighter-uuid', fighter],
+            ], []);
+            const restored = saveAndLoad(
+                extractSavedEscorts(toSave, serializer), serializer);
+            expect(restored.length).toBe(2);
+            const restoredFighter = restored
+                .find(({ uuid }) => uuid === 'fighter-uuid')!;
+            expect(restoredFighter.entity.components
+                .get(BayFighterComponent)).toEqual({ bayWeaponId: 'test:bay' });
+            expect(restoredFighter.entity.components
+                .has(ReturnWhenTargetRemovedComponent)).toBeTrue();
+
+            // The restore path is the ordinary carried-batch one, so the
+            // fighter must come back attached to its carrier's NEW uuid
+            // rather than to the dead pre-save one.
+            const leader = new Entity();
+            leader.components.set(MovementStateComponent, movement(0, 0));
+            let next = 0;
+            const prepared = prepareCarriedEscorts(
+                restored.map(escort => ({ ...escort, player: PLAYER })),
+                PLAYER, leader, 0, () => `fresh-${next++}`);
+            expect(prepared.length).toBe(2);
+            const newCarrierUuid = prepared
+                .find(({ entity }) => entity === restored
+                    .find(e => e.uuid === 'carrier-uuid')!.entity)!.uuid;
+            const preparedFighter = prepared
+                .find(({ entity }) => entity === restoredFighter.entity)!
+                .entity;
+            expect(newCarrierUuid).not.toBe('carrier-uuid');
+            expect(preparedFighter.components.get(SourceComponent))
+                .toBe(newCarrierUuid);
+            expect(preparedFighter.components.get(OwnerComponent))
+                .toEqual({ owner: newCarrierUuid });
+            expect(preparedFighter.components.get(FormationComponent)?.leader)
+                .toBe(newCarrierUuid);
+            // Commands are reset to formation by the same machinery.
+            expect(preparedFighter.components.get(EscortCommandComponent))
+                .toEqual({ command: 'formation' });
+        });
+
+    it('drops only the escort whose entity no longer decodes', async () => {
+        const { serializer, makeEscort } = fixture;
+        const good = await makeEscort(ship => ship.components.set(
+            PlayerEscortComponent, { player: PLAYER, parent: PLAYER }));
+        const encoded = extractSavedEscorts(
+            collectEscortsToSave(PLAYER, [['good', good]], []), serializer);
+        // Structurally a valid blob (EncodedEntity says nothing about a
+        // component's payload), but PlayerEscort.player is not a number.
+        // This is the entity-codec drift the module comment warns about.
+        const rotten: SavedEscort = {
+            uuid: 'rotten',
+            entity: { components: [['PlayerEscort', { player: 42 }]] },
+        };
+
+        const restored = saveAndLoad([...encoded, rotten], serializer);
+        expect(restored.map(({ uuid }) => uuid)).toEqual(['good']);
+    });
+
+    it('reads a save with no escorts field as zero escorts', () => {
+        const { serializer } = fixture;
+        const decoded = decodeSave(encodeSave(SAMPLE))!;
+        expect(decoded.escorts).toBeUndefined();
+        expect(restoreSavedEscorts(decoded.escorts, serializer)).toEqual([]);
+    });
+});
+
+describe('save_game escort version skew', () => {
+    it('loads a v1 save (written before escorts existed) with no escorts',
+        () => {
+            // Byte for byte what the previous build wrote.
+            const v1 = JSON.stringify({
+                version: MIN_READABLE_SAVE_VERSION,
+                data: SAMPLE,
+            });
+            expect(MIN_READABLE_SAVE_VERSION).toBeLessThan(SAVE_VERSION);
+            const decoded = decodeSave(v1);
+            expect(decoded).toEqual(SAMPLE);
+            expect(decoded!.escorts).toBeUndefined();
+        });
+
+    it('does not quarantine a v1 save', () => {
+        const storage = new FakeStorage();
+        storage.setItem(SAVE_KEY, JSON.stringify({
+            version: MIN_READABLE_SAVE_VERSION,
+            data: SAMPLE,
+        }));
+        expect(loadSave(storage)).toEqual(SAMPLE);
+        expect(storage.getItem(SAVE_QUARANTINE_KEY)).toBeNull();
+    });
+
+    it('quarantines a save whose escorts are structurally corrupt', () => {
+        const storage = new FakeStorage();
+        // `escorts` is present but is not an array of {uuid, entity}: the
+        // envelope no longer decodes at all, so the WHOLE save is parked
+        // rather than dropped, and the game starts from defaults.
+        const bad = JSON.stringify({
+            version: SAVE_VERSION,
+            data: { ...SAMPLE, escorts: [{ uuid: 5, entity: 'nonsense' }] },
+        });
+        storage.setItem(SAVE_KEY, bad);
+
+        expect(decodeSave(bad)).toBeUndefined();
+        expect(loadSave(storage)).toBeUndefined();
+        expect(storage.getItem(SAVE_QUARANTINE_KEY)).toBe(bad);
+        expect(storage.getItem(SAVE_KEY)).toBeNull();
+    });
+
+    it('still quarantines a save from a FUTURE version', () => {
+        const storage = new FakeStorage();
+        const future = JSON.stringify({
+            version: SAVE_VERSION + 1,
+            data: SAMPLE,
+        });
+        storage.setItem(SAVE_KEY, future);
+        expect(loadSave(storage)).toBeUndefined();
+        expect(storage.getItem(SAVE_QUARANTINE_KEY)).toBe(future);
+    });
+
+    it('round-trips escorts through the storage layer', () => {
+        const storage = new FakeStorage();
+        const escorts: SavedEscort[] = [{
+            uuid: 'e1',
+            entity: { components: [['Armor', { current: 3 }]], name: 'esc' },
+        }];
+        writeSave({ ...SAMPLE, escorts }, storage);
+        expect(loadSave(storage)?.escorts).toEqual(escorts);
     });
 });

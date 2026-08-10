@@ -1,6 +1,9 @@
 import { isLeft } from 'fp-ts/lib/Either.js';
 import * as t from 'io-ts';
 import { Entity } from 'nova_ecs/entity';
+import {
+    EncodedEntity, Serializer,
+} from 'nova_ecs/plugins/serializer_plugin';
 import { CargoComponent } from './cargo_plugin.js';
 import { ControlBitsComponent } from './ncb_plugin.js';
 import { OutfitsStateComponent } from './outfit_plugin.js';
@@ -13,6 +16,7 @@ import {
     GameDateType,
     MissionsComponent,
 } from './player_state_plugin.js';
+import { PlayerEscortComponent } from './player_escort.js';
 import { CombatRatingComponent, LegalRecordsComponent } from './reputation_plugin.js';
 import { ShipComponent } from './ship_plugin.js';
 
@@ -30,25 +34,56 @@ import { ShipComponent } from './ship_plugin.js';
  * version whose shape we don't understand), it is moved to a quarantine key
  * rather than deleted, and the game falls back to its defaults.
  *
- * DOCUMENTED SEAM — escorts are not persisted. Escorts now follow the
- * player's whole lifecycle in a session (landing, departure, hyperspace
- * jumps; see nova_plugin/player_escort_plugin.ts), but none of that reaches
- * the save: a reload starts with no escorts, and a pilot who saves while
- * docked with a landed escort roster (spaceport/landed_escorts.ts) loses it.
+ * ESCORTS are persisted, as whole ENTITIES rather than component fields:
+ * an escort's value is its damage, outfits, cargo, and bay identity, all of
+ * which a ship-id list would throw away. Each saved escort is one
+ * serializer-`EncodedEntity` blob plus the uuid it had when the save was
+ * written; see `SavedEscort` for why the uuid is the only thing kept
+ * alongside the blob. Restoring re-inserts them through the very same
+ * prepareCarriedEscorts/insertCarriedEscorts path a liftoff or a jump uses
+ * (browser.ts), so there is exactly one insertion pipeline.
  *
- * Persisting them means persisting whole ENTITIES, not component fields:
- * their value is their damage, outfits, cargo, and bay identity, which is
- * exactly what the roster carries and what a ship-id list would throw away.
- * The shape that fits this schema is a `t.partial` array of
- * serializer-`EncodedEntity` blobs plus each escort's PlayerEscort marker,
- * written from the landed roster at saveNow() time and re-inserted through
- * the same addEntity path liftoff uses. That drags the save's versioning
- * into the entity serializer's wire compatibility, which is why it is left
- * as a seam rather than done here.
+ * WIRE COMPATIBILITY. Because the blobs are produced by the entity
+ * serializer, this schema's versioning is now downstream of the ENTITY
+ * CODECS: changing how any registered component encodes can invalidate the
+ * escorts inside an existing save even though `SAVE_VERSION` did not move.
+ * That is a deliberate trade for keeping every component the serializer
+ * knows about, including ones this module has never heard of. The failure
+ * is contained: a blob whose shape no longer decodes is skipped (see
+ * `restoreSavedEscorts`) or, if the array itself no longer matches, the
+ * whole save is quarantined rather than deleted. A pilot can lose escorts
+ * across such a change; they never lose the save.
+ *
+ * WHAT IS NOT SAVED. Only escorts that are WITH the player are: the ones
+ * in the player's own system, the landed roster held while docked, and a
+ * batch riding a jump. An escort deliberately left behind in another
+ * system — the zero-energy hyperspace-jump exclusion (escortFollows in
+ * player_escort_plugin.ts) leaves such ships where they are — is in no
+ * system this client is holding state for, so it is not written and does
+ * not come back. That loss is intended and matches what a jump already
+ * does within a session.
  */
 
-/** Bump when the shape of `SaveData` changes incompatibly. */
-export const SAVE_VERSION = 1;
+/**
+ * Bump when the shape of `SaveData` changes incompatibly.
+ *
+ * 1 -> 2 added `escorts`. That was a purely additive, optional field, so a
+ * v1 payload still satisfies the v2 codec; see MIN_READABLE_SAVE_VERSION.
+ */
+export const SAVE_VERSION = 2;
+
+/**
+ * The oldest schema version this build can still read.
+ *
+ * Every version from here to `SAVE_VERSION` decodes with the current codec
+ * because the changes between them only ADDED optional (`t.partial`)
+ * fields — an older payload is simply one with those fields absent, which
+ * is exactly what a pilot who never had escorts writes today. Bump this to
+ * `SAVE_VERSION` on the first change that is not additive; anything outside
+ * the range (including a NEWER save this build cannot understand) is
+ * treated as unreadable and quarantined.
+ */
+export const MIN_READABLE_SAVE_VERSION = 1;
 
 /** Stable localStorage key holding the current save. */
 export const SAVE_KEY = 'novajs:save';
@@ -66,6 +101,36 @@ export const SavedOutfit = t.tuple([
     t.number, // Count.
 ]);
 export type SavedOutfit = t.TypeOf<typeof SavedOutfit>;
+
+/**
+ * One escort, as a whole serialized entity.
+ *
+ * `entity` is exactly what the entity serializer produces for a live
+ * escort, so it carries every component the serializer knows about —
+ * damage, outfits, cargo, ionization, and a launched fighter's bay
+ * identity (OwnerComponent / SourceComponent /
+ * ReturnWhenTargetRemovedComponent / BayFighterComponent) — including
+ * components this module has never heard of.
+ *
+ * `uuid` is the ONLY thing kept beside the blob, and it is not
+ * redundant: it is the escort's uuid from before the save, which is the
+ * key prepareCarriedEscorts remaps carrier references through. Without it
+ * a fighter's SourceComponent could not be matched to the carrier it was
+ * launched from when both come back under fresh uuids, and the wing would
+ * return orphaned from its bay.
+ *
+ * Note what is deliberately NOT stored alongside: the PlayerEscort marker
+ * itself. PlayerEscortComponent is serializer-registered (see
+ * player_escort.ts), so it already rides inside `entity`; storing it twice
+ * would create two sources of truth that could disagree.
+ */
+export const SavedEscort = t.type({
+    /** The uuid this escort had when the save was written. */
+    uuid: t.string,
+    /** The escort's whole entity, as the entity serializer encodes it. */
+    entity: EncodedEntity,
+});
+export type SavedEscort = t.TypeOf<typeof SavedEscort>;
 
 /**
  * The player state we persist.
@@ -107,6 +172,11 @@ export const SaveData = t.intersection([
         // Combat ratings, keyed by category; 'kills' holds the
         // Appendix I kill points.
         combatRatings: t.array(t.tuple([t.string, t.number])),
+        // The escorts that were with the player when the save was
+        // written — in the system with them, held on the landed roster
+        // while docked, or riding a jump. Absent in a v1 save and in any
+        // save written by a pilot with no escorts; both read as "none".
+        escorts: t.array(SavedEscort),
     }),
 ]);
 export type SaveData = t.TypeOf<typeof SaveData>;
@@ -217,6 +287,114 @@ export function restorePlayerState(entity: Entity, save: SaveData): void {
     }
 }
 
+/**
+ * An escort as the client's rosters and the display world hold it: the
+ * uuid it is filed under, and its entity. Structurally the part of
+ * spaceport/landed_escorts.ts's CarriedEscort that a save needs — the
+ * owning player is implicit, because a save only ever holds the local
+ * player's escorts.
+ */
+export interface EscortToSave {
+    readonly uuid: string;
+    readonly entity: Entity;
+}
+
+/**
+ * A client roster entry, structurally. Matches
+ * spaceport/landed_escorts.ts's CarriedEscort without importing it, so the
+ * save schema stays independent of the spaceport.
+ */
+export interface RosterEscort extends EscortToSave {
+    readonly player: string;
+}
+
+/**
+ * Every escort belonging to `player` that a client can account for, from
+ * the two places one can be: live in the system (the player is IN FLIGHT)
+ * and held on a client roster (the player is DOCKED, or a batch is riding
+ * a jump). Callers pass both, because the two overlap during a landing —
+ * an escort still flying down to the planet is in the world while its
+ * already-landed wingmates are on the roster — and an escort must be
+ * written exactly once either way.
+ *
+ * Unioned by uuid, then sorted by uuid, so the saved order depends on
+ * neither entity-map iteration order nor which roster an escort was in.
+ * Entries for other players are ignored: in multiplayer the rosters hold
+ * peers' escorts too, and those are not this pilot's to save.
+ */
+export function collectEscortsToSave(player: string,
+    inWorld: Iterable<[string, Entity]>,
+    rosters: Iterable<readonly RosterEscort[]>): EscortToSave[] {
+    const found = new Map<string, Entity>();
+    for (const [uuid, entity] of inWorld) {
+        if (entity.components.get(PlayerEscortComponent)?.player === player) {
+            found.set(uuid, entity);
+        }
+    }
+    for (const roster of rosters) {
+        for (const carried of roster) {
+            if (carried.player === player) {
+                found.set(carried.uuid, carried.entity);
+            }
+        }
+    }
+    return [...found]
+        .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
+        .map(([uuid, entity]) => ({ uuid, entity }));
+}
+
+/**
+ * Encodes escorts for the save. One blob per escort, in the order given
+ * (the caller's order is already deterministic — uuid-sorted rosters and
+ * entity-map iteration; see prepareCarriedEscorts).
+ *
+ * An escort the serializer cannot encode is skipped with a warning rather
+ * than failing the whole save: losing one escort is a far better outcome
+ * than losing the pilot's credits, missions, and reputation because of it.
+ */
+export function extractSavedEscorts(escorts: Iterable<EscortToSave>,
+    serializer: Serializer): SavedEscort[] {
+    const saved: SavedEscort[] = [];
+    for (const { uuid, entity } of escorts) {
+        try {
+            saved.push({ uuid, entity: serializer.encode(entity) });
+        } catch (e) {
+            console.warn(`Skipping escort ${uuid} in the save; `
+                + `it could not be serialized:`, e);
+        }
+    }
+    return saved;
+}
+
+/**
+ * Decodes a save's escorts back into entities, ready to be handed to
+ * prepareCarriedEscorts under their OLD uuids (which is what makes the
+ * intra-batch carrier remapping work — see SavedEscort).
+ *
+ * A blob that no longer decodes is skipped with a warning, not thrown:
+ * this is the containment for the entity-codec wire-compatibility risk in
+ * the module comment. The rest of the batch, and the whole of the rest of
+ * the save, still load. A save whose `escorts` field is structurally wrong
+ * never reaches here at all — `decodeSave` rejects it and `loadSave`
+ * quarantines the file.
+ */
+export function restoreSavedEscorts(
+    escorts: readonly SavedEscort[] | undefined, serializer: Serializer):
+    Array<{ uuid: string, entity: Entity }> {
+    const restored: Array<{ uuid: string, entity: Entity }> = [];
+    for (const { uuid, entity } of escorts ?? []) {
+        const decoded = serializer.decode(entity);
+        if (isLeft(decoded)) {
+            console.warn(`Dropping saved escort ${uuid}; its entity no `
+                + `longer decodes: `
+                + serializer.describeDecodeFailure(entity, decoded.left));
+            continue;
+        }
+        restored.push({ uuid, entity: decoded.right });
+    }
+    return restored;
+}
+
 /** Wraps a payload in the current versioned envelope. */
 export function makeEnvelope(data: SaveData): SaveEnvelope {
     return { version: SAVE_VERSION, data };
@@ -249,12 +427,17 @@ export function decodeSave(raw: string | null | undefined):
     if (isLeft(envelope)) {
         return undefined;
     }
-    if (envelope.right.version !== SAVE_VERSION) {
-        // A save from a different (older or newer) schema version. We only
-        // know how to read the current one; treat anything else as
-        // unreadable so it gets quarantined rather than misinterpreted.
+    const { version } = envelope.right;
+    if (version < MIN_READABLE_SAVE_VERSION || version > SAVE_VERSION) {
+        // A save this build cannot read: either older than the oldest
+        // shape we still understand, or newer than anything we know
+        // about. Treat it as unreadable so it gets quarantined rather
+        // than misinterpreted.
         return undefined;
     }
+    // Versions inside the range decode with the current codec because
+    // every step between them only added optional fields; the envelope
+    // above has already validated that. Nothing to migrate.
     return envelope.right.data;
 }
 
