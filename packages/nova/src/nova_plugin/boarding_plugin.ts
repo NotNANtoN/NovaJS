@@ -597,9 +597,48 @@ const BoardingGateSystem = new System({
 });
 
 /**
+ * Records a booty action on the HULK's durable BoardedComponent at the
+ * moment that action applies, rather than when the session ends.
+ *
+ * WHY AT ACTION TIME. The durable flags are what stop a booty being taken
+ * twice, and credits are the only booty that is not physically removed
+ * from the victim (`creditsAvailable` is re-derived from the ship class
+ * price by creditBooty on every board). Accumulating the flags only in
+ * `endBoardingSession` meant every UNGRACEFUL end — the boarder is
+ * destroyed, jumps out, or lands mid-session — left the hulk's
+ * `creditsTaken` false while the credits were already banked. The stale-
+ * boarder corroboration in BoardingGateSystem then re-opens boarding on
+ * that hulk, and the money booty comes back: an unbounded credit farm of
+ * "take credits, die/jump/land, board again". Writing the flag as the
+ * transfer happens closes that for all four booties.
+ *
+ * The boarder's session-side flag is still set by the caller: it drives
+ * the dialog's greying and the per-action idempotency under replayed
+ * inputs. This is the DURABLE half.
+ *
+ * A hulk with no BoardedComponent (it should always have one — the gate
+ * sets it when the session opens) gets a fresh one rather than silently
+ * dropping the record.
+ */
+function markBootyTaken(target: Entity, boarderUuid: string,
+    flag: 'cargoTaken' | 'creditsTaken' | 'fuelTaken' | 'ammoTaken'): void {
+    const boarded = target.components.get(BoardedComponent);
+    if (boarded) {
+        boarded[flag] = true;
+        return;
+    }
+    target.components.set(BoardedComponent,
+        { boarder: boarderUuid, active: true, [flag]: true });
+}
+
+/**
  * Closes a plunder session without capturing: the boarder drops its
- * BoardingComponent, and the hulk's BoardedComponent goes INACTIVE while
- * keeping (and accumulating) the record of what it has already given up.
+ * BoardingComponent and the hulk's BoardedComponent goes INACTIVE.
+ *
+ * The booty record is NOT written here — `markBootyTaken` has already
+ * stamped each booty on the hulk as it was taken, so an ungraceful end
+ * (boarder destroyed, jumped, or landed) loses nothing. All this path
+ * still owns is releasing the mutual-exclusion lock.
  *
  * The hulk stays MARKED as boarded — the mission-goal seam
  * (mission_ship_state.ts shipBoarded) reads presence, not activity — but
@@ -607,21 +646,14 @@ const BoardingGateSystem = new System({
  * retryable. See BoardedState for why the booty flags must survive and
  * the capture state must not.
  */
-function endBoardingSession(entity: Entity, target: Entity | undefined,
-    boarding: BoardingState): void {
+function endBoardingSession(entity: Entity,
+    target: Entity | undefined): void {
     entity.components.delete(BoardingComponent);
     const boarded = target?.components.get(BoardedComponent);
     if (!target || !boarded) {
         return;
     }
-    target.components.set(BoardedComponent, {
-        ...boarded,
-        active: false,
-        cargoTaken: boarded.cargoTaken || boarding.cargoTaken,
-        creditsTaken: boarded.creditsTaken || boarding.creditsTaken,
-        fuelTaken: boarded.fuelTaken || boarding.fuelTaken,
-        ammoTaken: boarded.ammoTaken || boarding.ammoTaken,
-    });
+    target.components.set(BoardedComponent, { ...boarded, active: false });
 }
 
 /**
@@ -700,7 +732,7 @@ const BoardingActionSystem = new System({
 
         // Done, or the target vanished: end the session.
         if (controls.get('plunderDone') === 'start' || !target) {
-            endBoardingSession(entity, target, boarding);
+            endBoardingSession(entity, target);
             return;
         }
 
@@ -718,12 +750,13 @@ const BoardingActionSystem = new System({
         // The remaining actions need the victim to still be a boardable
         // hulk; a repair or a stray killing blow ends the session.
         if (!target.components.has(DisabledComponent)) {
-            endBoardingSession(entity, target, boarding);
+            endBoardingSession(entity, target);
             return;
         }
 
         if (controls.get('plunderCargo') === 'start' && !boarding.cargoTaken) {
             boarding.cargoTaken = true;
+            markBootyTaken(target, uuid, 'cargoTaken');
             const targetCargo = target.components.get(CargoComponent);
             if (targetCargo) {
                 const free = physics.freeCargo - cargoUsed(cargo);
@@ -743,12 +776,14 @@ const BoardingActionSystem = new System({
         if (controls.get('plunderCredits') === 'start'
             && !boarding.creditsTaken) {
             boarding.creditsTaken = true;
+            markBootyTaken(target, uuid, 'creditsTaken');
             credits.credits += boarding.creditsAvailable;
             chargeCrime();
         }
 
         if (controls.get('plunderFuel') === 'start' && !boarding.fuelTaken) {
             boarding.fuelTaken = true;
+            markBootyTaken(target, uuid, 'fuelTaken');
             const targetFuel = target.components.get(FuelComponent);
             if (targetFuel) {
                 const moved = fuelTransferAmount(
@@ -761,6 +796,7 @@ const BoardingActionSystem = new System({
 
         if (controls.get('plunderAmmo') === 'start' && !boarding.ammoTaken) {
             boarding.ammoTaken = true;
+            markBootyTaken(target, uuid, 'ammoTaken');
             const targetOutfits = target.components.get(OutfitsStateComponent);
             if (boarderOutfits && targetOutfits) {
                 const { victim, boarderRoundsByWeapon, info } = ammoPlunderInputs(

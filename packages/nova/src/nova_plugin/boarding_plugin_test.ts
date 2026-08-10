@@ -46,6 +46,7 @@ import { ShipDataComponent } from './ship_plugin.js';
 import { TargetComponent } from './target_component.js';
 
 const BOARDER = 'boarder';
+const SECOND_BOARDER = 'boarder2';
 const TARGET = 'target';
 
 /**
@@ -521,6 +522,63 @@ describe('boarding in a live world', () => {
             expect(boarder.components.get(CreditsComponent)!.credits)
                 .toEqual(booty);
         });
+
+        it('keeps the credit booty spent when the session ends UNGRACEFULLY',
+            async () => {
+                // The re-farm this pins shut: the durable *Taken flags used
+                // to be written onto the hulk only by the session-end path,
+                // which an abandoned session never runs. Take the credits,
+                // die (or jump, or land) without pressing done, come back
+                // with a new boarder — and creditBooty re-derived the money
+                // from the ship price all over again, forever.
+                const { world, boarder, target, gameData } =
+                    await boardingWorld();
+                const price = target.components.get(ShipDataComponent)!.price;
+                const booty = Math.floor(price * 0.10);
+
+                press(world, BOARDER, 'board');
+                press(world, BOARDER, 'plunderCredits');
+                expect(boarder.components.get(CreditsComponent)!.credits)
+                    .toEqual(booty);
+
+                // UNGRACEFUL end: the boarder is destroyed mid-session, so
+                // no session-end path ever runs on it.
+                world.entities.delete(BOARDER);
+                world.step();
+
+                // The HULK is what has to remember, and it must remember
+                // straight away — not at some session end that never comes.
+                expect(target.components.get(BoardedComponent)?.creditsTaken)
+                    .toBeTrue();
+
+                // A brand-new boarder takes over the same hulk.
+                const shipData = (await gameData.data.Ship.get('nova:128'))!;
+                const second = makeShip(shipData);
+                second.components.set(MovementStateComponent, {
+                    position: new Position(0, 0), velocity: new Vector(0, 0),
+                    rotation: new Angle(0), turning: 0, turnBack: false,
+                    accelerating: 0,
+                });
+                second.components.set(CreditsComponent, { credits: 0 });
+                await completeEntity(world, second);
+                world.entities.set(SECOND_BOARDER, second);
+                world.step();
+                second.components.set(ShipDataComponent, {
+                    ...second.components.get(ShipDataComponent)!, crew: 200,
+                });
+                second.components.set(CreditsComponent, { credits: 0 });
+                second.components.get(TargetComponent)!.target = TARGET;
+                world.step();
+
+                press(world, SECOND_BOARDER, 'board');
+                const resumed = second.components.get(BoardingComponent)!;
+                expect(resumed.target).toEqual(TARGET);
+                expect(resumed.creditsTaken).toBeTrue();
+
+                press(world, SECOND_BOARDER, 'plunderCredits');
+                expect(second.components.get(CreditsComponent)!.credits)
+                    .toEqual(0);
+            });
     });
 });
 
