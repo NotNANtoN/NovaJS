@@ -10,6 +10,24 @@ import { ItemGrid, ItemTile } from './item_grid.js';
 import { MenuControls } from './menu_controls.js';
 import { FONT } from './outfitter.js';
 
+/**
+ * What the bar says when the day's hire pool comes up empty.
+ *
+ * This is stock Nova's own wording, verbatim: STR# 2002 ("misc strings")
+ * index 223 (0-based) in Nova Data 5.ndat — the direct sibling of the
+ * shipyard's "There are no ships available for purchase here." at index
+ * 222. Note the hire string has no trailing "here".
+ *
+ * SEAM: it is hardcoded rather than read from the resource because there
+ * is no generic STR# accessor on the data interface yet — string tables
+ * reach the game only when a parser folds them into a specific resource
+ * (STR# 4000 rides on chär, for instance). That is the established
+ * convention for one-off UI strings here: gamble.ts cites STR# 150 and
+ * reputation.ts cites STR# 138 the same way. When a string-table
+ * accessor lands, source this from STR# 2002 index 223.
+ */
+export const NO_SHIPS_FOR_HIRE = 'There are no ships available for hire.';
+
 /** The one-time fee to hire an escort: 10% of the ship's price.
  * Matches the original's observed behavior (a 300,000 cr Thunderhead
  * hires for 30,000 cr); the exact rule is not in the Bible. */
@@ -174,9 +192,15 @@ export class HireEscortDialog {
     /**
      * Shows the dialog. Hire fees settle into `credits` (a working
      * copy the caller commits); hired ship ids append to `hired`.
+     *
+     * Returns 'empty' WITHOUT opening the shipyard frame when the day's
+     * roll turns up no pilots: an empty grid is not what the original
+     * shows, it just says so and stays in the bar. The caller presents
+     * NO_SHIPS_FOR_HIRE (see bar.ts) rather than this dialog doing it,
+     * so the message uses the bar's own popup machinery.
      */
     async show(credits: { credits: number },
-        hired: string[]): Promise<void> {
+        hired: string[]): Promise<'closed' | 'empty'> {
         this.credits = credits;
         this.hired = hired;
         try {
@@ -185,15 +209,18 @@ export class HireEscortDialog {
             console.warn('Hire escort dialog failed to load:', e);
         }
 
-        this.gridContainer.removeChildren();
         const pool = this.rollPool();
+        if (pool.length === 0) {
+            return 'empty';
+        }
+
+        this.gridContainer.removeChildren();
         this.itemGrid = new ItemGrid(this.displayAssets, pool);
         this.gridContainer.addChild(this.itemGrid.container);
         this.itemGrid.activeTile.subscribe(this.setShipSelected.bind(this));
         this.itemGrid.drawGrid();
 
-        this.text.status.text = pool.length === 0
-            ? 'No pilots are looking for work today.' : '';
+        this.text.status.text = '';
         this.setShipSelected(undefined);
 
         this.container.visible = true;
@@ -201,6 +228,7 @@ export class HireEscortDialog {
         await firstValueFrom(this.closed);
         this.controls.unbind();
         this.container.visible = false;
+        return 'closed';
     }
 }
 

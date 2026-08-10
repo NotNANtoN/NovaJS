@@ -99,10 +99,47 @@ export const BoardingState = t.type({
 export type BoardingState = t.TypeOf<typeof BoardingState>;
 export const BoardingComponent = new Component<BoardingState>('Boarding');
 
-/** Present on a ship while/after it is boarded, naming the boarder.
- * Blocks a second boarding and marks the ship for mission-goal
- * tracking (mission_ship_state.ts shipBoarded seam). */
-export const BoardedState = t.type({ boarder: t.string });
+/**
+ * Present on a ship from the moment it is first boarded, naming the most
+ * recent boarder, and marking the ship for mission-goal tracking
+ * (mission_ship_state.ts shipBoarded seam).
+ *
+ * TWO DIFFERENT JOBS, which this component used to conflate into bare
+ * presence — and that conflation is what made Drifting Derelicts
+ * impossible to capture:
+ *
+ *  - `active` is MUTUAL EXCLUSION. Only while a plunder session is
+ *    actually open is a second boarding refused. It is cleared when the
+ *    session ends, so a hulk can be boarded again — which is the whole
+ *    point for a derelict: capture odds are a per-attempt roll (5-95%,
+ *    and only 9% for a starting Shuttle's crew of 1 against an Argosy's
+ *    10), so capturing one is meant to take repeated tries. Before this
+ *    split, the component was set at board time and removed ONLY on a
+ *    successful capture, so the first repelled attempt locked the hulk
+ *    out of every future boarding for the rest of the game.
+ *
+ *  - The `*Taken` flags are the BOOTY MEMORY, and they persist across
+ *    sessions. Cargo, fuel and ammo are physically removed from the
+ *    victim, so re-boarding could never duplicate them; CREDITS are the
+ *    exception — `creditsAvailable` is re-derived from the victim's ship
+ *    class price on every board (creditBooty), so without a durable flag
+ *    a player could re-board the same hulk indefinitely to farm money.
+ *    Seeding a new session from these flags closes that.
+ *
+ * Capture state deliberately does NOT persist here: it lives on the
+ * boarder's BoardingComponent, so every new session starts at 'none' and
+ * the player may try again.
+ */
+export const BoardedState = t.intersection([t.type({
+    boarder: t.string,
+}), t.partial({
+    /** Whether a plunder session is open against this ship right now. */
+    active: t.boolean,
+    cargoTaken: t.boolean,
+    creditsTaken: t.boolean,
+    fuelTaken: t.boolean,
+    ammoTaken: t.boolean,
+})]);
 export type BoardedState = t.TypeOf<typeof BoardedState>;
 export const BoardedComponent = new Component<BoardedState>('Boarded');
 

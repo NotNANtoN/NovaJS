@@ -8,7 +8,7 @@ import { ControlEvent } from '../nova_plugin/controls_plugin.js';
 import { LOCATION_BAR } from '../nova_plugin/mission_logic.js';
 import { Button } from './button.js';
 import { GambleDialog } from './gamble.js';
-import { HireEscortDialog } from './hire_escort.js';
+import { HireEscortDialog, NO_SHIPS_FOR_HIRE } from './hire_escort.js';
 import { Menu } from './menu.js';
 import { MenuControls } from './menu_controls.js';
 import { OfferPopup, presentOffers } from './offer_popup.js';
@@ -225,7 +225,15 @@ export class Bar extends Menu<Entity> {
             return;
         }
         this.controls.unbind();
-        await this.hireEscort.show(this.session.state.credits, this.hired);
+        const result =
+            await this.hireEscort.show(this.session.state.credits, this.hired);
+        if (result === 'empty') {
+            // No pilots today: the original says so in a plain popup rather
+            // than opening an empty shipyard grid (STR# 2002 index 223 —
+            // see NO_SHIPS_FOR_HIRE).
+            await this.offerPopup.show(NO_SHIPS_FOR_HIRE, { accept: 'OK' },
+                { style: 'briefing' });
+        }
         this.controls.bind();
     }
 

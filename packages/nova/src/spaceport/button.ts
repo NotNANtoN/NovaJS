@@ -34,6 +34,8 @@ export class Button {
     readonly click = new Subject<ButtonClick>();
     private text: PIXI.Text;
     private wrappedState = 'normal';
+    /** The state to restore if this press is cancelled off the button. */
+    private pressedFrom?: string;
     private width: number;
 
     // See colr resource                                                              
@@ -78,12 +80,28 @@ export class Button {
         this.container.interactive = true;
         this.container.cursor = 'pointer';
         this.container.on('pointerdown', () => {
+            this.pressedFrom = this.wrappedState;
             this.state = 'clicked';
         });
 
         this.container.on('pointerup', (event: PIXI.FederatedPointerEvent) => {
+            this.pressedFrom = undefined;
             this.state = 'normal';
             this.click.next({ option: event.altKey });
+        });
+
+        // Releasing the pointer OFF the button cancels the press. Without
+        // this the button stays stuck in 'clicked' forever: 'clicked' draws
+        // the pressed sprite with grey text, so it is indistinguishable
+        // from a disabled button, and refresh loops that skip repainting a
+        // 'clicked' row (see the plunder dialog) never recover it. Dialogs
+        // are built once per world, so one stray drag-off used to leave a
+        // permanently "greyed" button for the rest of the session. Restores
+        // the state the button had BEFORE the press, so a genuinely grey
+        // button does not come back looking enabled, and fires no click.
+        this.container.on('pointerupoutside', () => {
+            this.state = this.pressedFrom ?? 'normal';
+            this.pressedFrom = undefined;
         });
 
         for (const [name, { left, middle, right }] of this.buttonIds) {

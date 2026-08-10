@@ -409,6 +409,119 @@ describe('boarding in a live world', () => {
         expect(a.boarder.components.get(BoardingComponent)?.capture)
             .toEqual(b.boarder.components.get(BoardingComponent)?.capture);
     });
+
+    /**
+     * Matthew's item 1: a Drifting Derelict could never be captured. Its
+     * capture odds are a per-attempt roll (a starting Shuttle's crew of 1
+     * against the derelict Argosy's 10 is 9%), so capturing one is meant
+     * to take several tries — but ending the first session used to leave
+     * BoardedComponent on the hulk forever, and the board gate refused
+     * every later attempt. One repelled roll locked the ship out for good.
+     */
+    describe('a hulk can be boarded again after a session ends', () => {
+        it('re-opens a session after the player closes the last one',
+            async () => {
+                const { world, boarder, target } = await boardingWorld();
+                press(world, BOARDER, 'board');
+                expect(boarder.components.has(BoardingComponent)).toBeTrue();
+
+                press(world, BOARDER, 'plunderDone');
+                expect(boarder.components.has(BoardingComponent)).toBeFalse();
+                // Still marked as boarded (the mission-goal seam reads
+                // presence) but no longer an open session.
+                expect(target.components.has(BoardedComponent)).toBeTrue();
+                expect(target.components.get(BoardedComponent)?.active)
+                    .toBeFalsy();
+
+                press(world, BOARDER, 'board');
+                expect(boarder.components.get(BoardingComponent)?.target)
+                    .toEqual(TARGET);
+            });
+
+        it('lets a repelled capture be retried in a later session',
+            async () => {
+                // 1 vs 400 crew is clamped to the 5% floor, so the first
+                // roll is overwhelmingly a failure; the point is that the
+                // hulk is still boardable afterwards.
+                const { world, boarder, target } = await boardingWorld(
+                    { boarderCrew: 1, targetCrew: 400 });
+                press(world, BOARDER, 'board');
+                press(world, BOARDER, 'plunderCapture');
+                press(world, BOARDER, 'plunderDone');
+
+                // Keep boarding and rolling; with a live 5% chance this
+                // must eventually succeed rather than being locked out.
+                let captured = false;
+                for (let i = 0; i < 400 && !captured; i++) {
+                    press(world, BOARDER, 'board');
+                    expect(boarder.components.has(BoardingComponent))
+                        .withContext(`board attempt ${i} was refused`)
+                        .toBeTrue();
+                    press(world, BOARDER, 'plunderCapture');
+                    captured = boarder.components.get(BoardingComponent)
+                        ?.capture === 'succeeded';
+                    if (!captured) {
+                        press(world, BOARDER, 'plunderDone');
+                    }
+                }
+                expect(captured).toBeTrue();
+                expect(target.components.has(DisabledComponent)).toBeTrue();
+            });
+
+        it('blocks a second boarding only while a session is OPEN',
+            async () => {
+                const { world, boarder, target } = await boardingWorld();
+                press(world, BOARDER, 'board');
+                expect(target.components.get(BoardedComponent)?.active)
+                    .toBeTrue();
+                // Pressing board again mid-session changes nothing.
+                press(world, BOARDER, 'board');
+                expect(boarder.components.get(BoardingComponent)?.target)
+                    .toEqual(TARGET);
+            });
+
+        it('frees a hulk whose boarder left without ending the session',
+            async () => {
+                // A boarder that is destroyed / jumps out / lands never
+                // runs its session-end path, so the hulk keeps active:true.
+                // Trusting that flag alone would strand it unboardable for
+                // the rest of the game.
+                const { world, boarder, target } = await boardingWorld();
+                press(world, BOARDER, 'board');
+                expect(target.components.get(BoardedComponent)?.active)
+                    .toBeTrue();
+
+                // The boarder abandons the session without pressing done.
+                boarder.components.delete(BoardingComponent);
+                world.step();
+
+                press(world, BOARDER, 'board');
+                expect(boarder.components.get(BoardingComponent)?.target)
+                    .toEqual(TARGET);
+            });
+
+        it('does not let booty be taken twice across sessions', async () => {
+            const { world, boarder, target } = await boardingWorld();
+            const price = target.components.get(ShipDataComponent)!.price;
+            const booty = Math.floor(price * 0.10);
+            press(world, BOARDER, 'board');
+            press(world, BOARDER, 'plunderCredits');
+            press(world, BOARDER, 'plunderCargo');
+            expect(boarder.components.get(CreditsComponent)!.credits)
+                .toEqual(booty);
+            press(world, BOARDER, 'plunderDone');
+
+            // Credits are re-derived from the ship price on every board,
+            // so without the durable flag this would farm money forever.
+            press(world, BOARDER, 'board');
+            const resumed = boarder.components.get(BoardingComponent)!;
+            expect(resumed.creditsTaken).toBeTrue();
+            expect(resumed.cargoTaken).toBeTrue();
+            press(world, BOARDER, 'plunderCredits');
+            expect(boarder.components.get(CreditsComponent)!.credits)
+                .toEqual(booty);
+        });
+    });
 });
 
 /**
