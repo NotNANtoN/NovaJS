@@ -14,6 +14,14 @@ import {
     GateArrivalComponent, GateTransit, GateTransitEvent, GATE_EMERGENCE_DISTANCE,
 } from "./gate_transit_plugin.js";
 import { GateDestinationResolver } from "./gate_destination_resolver.js";
+import { EscortCommandComponent } from "./escort_command.js";
+import { FiringGroupComponent } from "./firing_group.js";
+import { FormationComponent } from "./npc_ai_plugin.js";
+import { PlayerEscortComponent } from "./player_escort.js";
+import {
+    EscortLanded, EscortLandedEvent,
+} from "./player_escort_plugin.js";
+import { ControlledByComponent } from "./ship_control.js";
 
 // Stock EV Nova hypergate pair (see the spöb scan): HG-V01 (spöb nova:1400) in
 // system VNP-001 (nova:427) links to HG-V02 (spöb nova:1401) in VNP-002
@@ -36,10 +44,26 @@ async function makeGateHarness(systemId: string) {
     const shipData = await gameData.data.Ship.get(shipId);
     const ship = makeShip(shipData);
     ship.components.set(PlayerShipSelector, undefined);
+    // A gate transit carries the pilot's escorts (EscortFollowGateSystem),
+    // which only acts on a player-CONTROLLED ship.
+    ship.components.set(ControlledByComponent, { peerId: 'test peer' });
     await completeEntity(world, ship);
     world.entities.set(SHIP_UUID, ship);
 
-    return { gameData, world, ship };
+    /** An escort of the harness ship, in formation on it. */
+    async function addEscort(uuid: string) {
+        const escort = makeShip(shipData);
+        escort.components.set(FormationComponent,
+            { leader: SHIP_UUID, slot: 0 });
+        escort.components.set(EscortCommandComponent,
+            { command: 'formation' });
+        escort.components.set(FiringGroupComponent, { group: SHIP_UUID });
+        await completeEntity(world, escort);
+        world.entities.set(uuid, escort);
+        return escort;
+    }
+
+    return { gameData, world, ship, addEscort };
 }
 
 function stepUntil(world: World, predicate: () => boolean, maxSteps = 600) {
@@ -182,6 +206,76 @@ describe('gate transit', () => {
         // And the reverse link resolves back to system A.
         const backSystem = await resolver.systemOf(GATE_A_SPOB);
         expect([SYSTEM_A, 'nova:621']).toContain(backSystem!);
+    }, 30_000);
+});
+
+describe('escorts following a real gate', () => {
+    it('carries the flock through a stock hypergate on the land event',
+        async () => {
+            const { world, addEscort } = await makeGateHarness(SYSTEM_A);
+            await addEscort('escort a');
+            await addEscort('escort b');
+            // MarkPlayerEscortsSystem stamps ownership from the live chain.
+            world.step();
+            expect(world.entities.get('escort a')!.components
+                .get(PlayerEscortComponent)?.player).toEqual(SHIP_UUID);
+
+            const landed: EscortLanded[] = [];
+            world.events.get(EscortLandedEvent).subscribe(
+                ({ data }) => landed.push(data));
+            world.emit(LandEvent,
+                { id: GATE_A_SPOB, uuid: `planet ${GATE_A_SPOB}` },
+                [SHIP_UUID]);
+            world.step();
+
+            expect(landed.map(({ uuid }) => uuid))
+                .toEqual(['escort a', 'escort b']);
+            expect(world.entities.has('escort a')).toBeFalse();
+            expect(world.entities.has('escort b')).toBeFalse();
+            // The hypergate flow docks the PLAYER a frame later (the browser
+            // removes it and opens the map); the sim leaves it in place.
+            expect(world.entities.has(SHIP_UUID)).toBeTrue();
+        }, 30_000);
+
+    it('hands the flock over before the wormhole carries the player away',
+        async () => {
+            // The ordering guarantee: EscortFollowGateSystem is ordered
+            // before GateDepartureSystem, so the client has collected the
+            // batch by the time it follows the transit and tears the origin
+            // system down.
+            const { world, addEscort } = await makeGateHarness(WORMHOLE_SYSTEM);
+            await addEscort('escort a');
+            world.step();
+
+            const order: string[] = [];
+            world.events.get(EscortLandedEvent).subscribe(
+                ({ data }) => order.push(`escort ${data.uuid}`));
+            world.events.get(GateTransitEvent).subscribe(
+                () => order.push('player transit'));
+            world.emit(LandEvent,
+                { id: WORMHOLE_SPOB, uuid: `planet ${WORMHOLE_SPOB}` },
+                [SHIP_UUID]);
+            stepUntil(world, () => order.includes('player transit'));
+
+            expect(order).toEqual(['escort escort a', 'player transit']);
+            expect(world.entities.has('escort a')).toBeFalse();
+            expect(world.entities.has(SHIP_UUID)).toBeFalse();
+        }, 30_000);
+
+    it('leaves the flock alone at an ordinary stock planet', async () => {
+        const { world, addEscort } = await makeGateHarness(SYSTEM_A);
+        await addEscort('escort a');
+        world.step();
+
+        const landed: EscortLanded[] = [];
+        world.events.get(EscortLandedEvent).subscribe(
+            ({ data }) => landed.push(data));
+        world.emit(LandEvent, { id: 'nova:128', uuid: 'planet nova:128' },
+            [SHIP_UUID]);
+        world.step();
+
+        expect(landed.length).toEqual(0);
+        expect(world.entities.has('escort a')).toBeTrue();
     }, 30_000);
 });
 
