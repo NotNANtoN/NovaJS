@@ -27,6 +27,7 @@ import { ArmorComponent, ShieldComponent } from './health_plugin.js';
 import { JUMP_DISTANCE, JUMP_ARRIVAL_MARGIN_S } from './jump_plugin.js';
 import { PlanetData } from 'novadatainterface/planet_data';
 import { PlanetComponent, PlanetDataComponent } from './planet_plugin.js';
+import { EscortLandingComponent } from './player_escort.js';
 import { LegalRecordsComponent } from './reputation_plugin.js';
 import { SourceComponent } from './fire_weapon_plugin.js';
 import { ShipComponent, ShipDataComponent, ShipPhysicsComponent } from './ship_plugin.js';
@@ -877,10 +878,16 @@ export const NpcSteeringSystem = new System({
     name: 'NpcSteeringSystem',
     args: [NpcComponent, MovementStateComponent, ShipPhysicsComponent,
         TargetComponent, Optional(FormationComponent),
-        Optional(EscortCommandComponent), TimeResource,
-        Entities, UUID] as const,
-    step(npc, movement, physics, target, formation, escortCommand, time,
-        entities, uuid) {
+        Optional(EscortCommandComponent), Optional(EscortLandingComponent),
+        TimeResource, Entities, UUID] as const,
+    step(npc, movement, physics, target, formation, escortCommand, landing,
+        time, entities, uuid) {
+        if (landing) {
+            // Following the player down to a planet (player_escort_plugin
+            // steers this ship). Checked before the escort-command bail so
+            // an escort without command state still yields.
+            return;
+        }
         if (escortCommand) {
             return; // Player-commanded: see escort_command_plugin.
         }
@@ -1094,10 +1101,16 @@ export const FormationSystem = new System({
     name: 'FormationSystem',
     args: [FormationComponent, MovementStateComponent, ShipPhysicsComponent,
         Optional(NpcComponent), Optional(EscortCommandComponent),
+        Optional(EscortLandingComponent),
         AllFormationsQuery, TimeResource, Entities, GetEntity,
         UUID] as const,
-    step(formation, movement, physics, npc, escortCommand, allFormations,
-        time, entities, entity) {
+    step(formation, movement, physics, npc, escortCommand, landing,
+        allFormations, time, entities, entity) {
+        if (landing) {
+            // Following the player down to a planet: EscortLandingSystem
+            // owns this ship's steering until it lands.
+            return;
+        }
         // Engaged escorts fight; FormationSystem only holds station.
         if (npc && !escortCommand && (npc.mode === 'attack'
             || npc.mode === 'flee' || npc.mode === 'depart')) {

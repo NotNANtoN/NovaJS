@@ -196,7 +196,13 @@ registerSimulationBridgeEvent({
     event: FinishJumpEvent,
 });
 
-const JumpFromSystem = new System({
+/**
+ * Exported so EscortFollowJumpSystem (player_escort_plugin) can order
+ * itself BEFORE the departing ship is deleted and its FinishJumpEvent
+ * emitted: the escorts' carry events must reach the client's frame event
+ * list ahead of the jump the client follows.
+ */
+export const JumpFromSystem = new System({
     name: 'JumpFromSystem',
     events: [InitiateJumpEvent],
     args: [GetEntity, UUID, Entities, InitiateJumpEvent, Emit] as const,
