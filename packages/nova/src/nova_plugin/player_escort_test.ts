@@ -28,7 +28,7 @@ import { LandEvent, PlanetComponent, PlanetDataComponent } from './planet_plugin
 import { EscortLandingComponent, PlayerEscortComponent } from './player_escort.js';
 import {
     escortFollows, EscortJump, EscortJumpEvent, EscortLanded,
-    EscortLandedEvent, ESCORT_LAND_DISTANCE_SQUARED, ownedEscortsInUuidOrder,
+    EscortLandedEvent, ESCORT_LAND_DISTANCE_SQUARED, sweepableEscorts,
     playerEscortLink, steerToStellar,
 } from './player_escort_plugin.js';
 import { ControlledByComponent } from './ship_control.js';
@@ -695,17 +695,22 @@ describe('escortFollows', () => {
             expect(world.entities.has('normal')).toBeTrue();
         });
 
-    it('excludes a ship with no fuel component from a jump', async () => {
-        const { world, addEscort } = await makeWorld();
-        const escort = await addEscort('escort');
-        world.step();
-        escort.components.delete(FuelComponent);
-        expect(escortFollows('jump', escort)).toBeFalse();
-        expect(escortFollows('gate', escort)).toBeTrue();
-    });
+    it('carries a ship whose fuel component has not been provided yet',
+        async () => {
+            // The exclusion needs positive evidence of a zero-energy hull.
+            // FuelComponent comes from a per-tick provider, so "not there
+            // yet" must not be read as "no hyperdrive" — that would strand
+            // an escort inserted on the same tick as the jump.
+            const { world, addEscort } = await makeWorld();
+            const escort = await addEscort('escort');
+            world.step();
+            escort.components.delete(FuelComponent);
+            expect(escortFollows('jump', escort)).toBeTrue();
+            expect(escortFollows('gate', escort)).toBeTrue();
+        });
 });
 
-describe('ownedEscortsInUuidOrder', () => {
+describe('sweepableEscorts', () => {
     it('returns the player\'s followers in uuid order, filtered by rule',
         async () => {
             const { world, addEscort } = await makeWorld();
@@ -715,12 +720,55 @@ describe('ownedEscortsInUuidOrder', () => {
                 NO_ENERGY_SHIP_ID);
             world.step();
 
-            expect(ownedEscortsInUuidOrder(world.entities, PLAYER, 'gate'))
+            expect(sweepableEscorts(world.entities, PLAYER, 'gate'))
                 .toEqual(['a', 'b noEnergy', 'c']);
             // The jump rule drops the hull with no hyperdrive.
-            expect(ownedEscortsInUuidOrder(world.entities, PLAYER, 'jump'))
+            expect(sweepableEscorts(world.entities, PLAYER, 'jump'))
                 .toEqual(['a', 'c']);
-            expect(ownedEscortsInUuidOrder(world.entities, 'nobody', 'gate'))
+            expect(sweepableEscorts(world.entities, 'nobody', 'gate'))
+                .toEqual([]);
+        });
+
+    it('sweeps a ship that joined the flock before it has been marked',
+        async () => {
+            // MarkPlayerEscortsSystem declares no ordering against the
+            // departure events, so a fighter launched (or a hulk captured)
+            // on the very tick the player leaves may not carry the marker
+            // yet. The live chain is consulted so it is not left behind.
+            const { world, addShip } = await makeWorld();
+            const fresh = await addShip('fresh', 0, 200, ship => {
+                ship.components.set(FormationComponent,
+                    { leader: PLAYER, slot: 0 });
+                ship.components.set(EscortCommandComponent,
+                    { command: 'formation' });
+            });
+            // No world.step(), so nothing has stamped ownership.
+            expect(fresh.components.has(PlayerEscortComponent)).toBeFalse();
+
+            expect(sweepableEscorts(world.entities, PLAYER, 'gate'))
+                .toEqual(['fresh']);
+            // And the marker is back-filled, so the carried entity knows
+            // its own parent for re-attachment.
+            expect(fresh.components.get(PlayerEscortComponent))
+                .toEqual({ player: PLAYER, parent: PLAYER });
+        });
+
+    it('does not sweep the player, a mission ship, or an NPC\'s wing',
+        async () => {
+            const { world, addShip } = await makeWorld();
+            await addShip('mission', 0, 300, ship => {
+                ship.components.set(FormationComponent,
+                    { leader: PLAYER, slot: 1 });
+                ship.components.set(MissionShipComponent,
+                    { mission: 'test:mission', owner: PLAYER });
+            });
+            await addShip('npc leader', 500, 0);
+            await addShip('npc wing', 500, 200, ship => {
+                ship.components.set(FormationComponent,
+                    { leader: 'npc leader', slot: 0 });
+            });
+
+            expect(sweepableEscorts(world.entities, PLAYER, 'gate'))
                 .toEqual([]);
         });
 });

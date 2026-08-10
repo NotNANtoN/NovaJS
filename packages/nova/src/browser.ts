@@ -806,11 +806,23 @@ async function teardownActiveSystem(removeUuid?: string) {
     }
 }
 
-async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: string }) {
-    autopilot?.cancel();
+/**
+ * Moves the player to another system: a hyperspace jump, a wormhole, or a
+ * hypergate pick. Takes the escorts riding along out of the client's
+ * rosters first, and — whatever happens — never drops them on the floor.
+ *
+ * The batch has to be taken BEFORE the teardown inside, but everything
+ * after that point awaits a world build, a worker, and a room join, any of
+ * which can reject. A local variable would take the batch with it, so a
+ * failed transition hands it back to the carried roster instead, where the
+ * standing flush picks it up as soon as there is a player ship to put it
+ * beside. (The ship itself is the caller's problem: gate transits recover
+ * through abortGateTransit.)
+ */
+async function jumpTo(args: { entity: Entity, to: string, uuid: string }) {
     // Take the escorts that left this system with the player BEFORE the
-    // teardown below drops the old system's state. Anything left over
-    // belongs to another peer's player, whose own client carries it.
+    // teardown drops the old system's state. Anything left over belongs to
+    // another peer's player, whose own client carries it.
     //
     // A landed roster is taken along too rather than discarded: this path
     // also serves a hypergate/wormhole transit, where the player can dock
@@ -822,11 +834,23 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
     // see EscortFollowGateSystem), so this one take covers hyperspace
     // jumps, hypergates and wormholes alike.
     const jumpEscorts = [
-        ...takeCarriedEscorts(carriedJumpEscorts, uuid),
-        ...takeCarriedEscorts(landedEscorts, uuid),
+        ...takeCarriedEscorts(carriedJumpEscorts, args.uuid),
+        ...takeCarriedEscorts(landedEscorts, args.uuid),
     ];
     carriedJumpEscorts.length = 0;
     landedEscorts.length = 0;
+    try {
+        await enterSystem(args, jumpEscorts);
+    } catch (e) {
+        carriedJumpEscorts.push(...jumpEscorts);
+        throw e;
+    }
+}
+
+async function enterSystem({ entity, to, uuid }:
+    { entity: Entity, to: string, uuid: string },
+    jumpEscorts: CarriedEscort[]) {
+    autopilot?.cancel();
     // A multi-jump chain (ModType 32) is about to auto-continue out of the
     // system we are arriving in. Hold the batch rather than inserting it
     // there: an insertion record that lands after the chain has moved on
@@ -1067,7 +1091,14 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
         if (!data.entity.components.has(PlayerShipSelector)) {
             return;
         }
-        void gateTransit(data);
+        // A rejection here would leave the ship and its flock deleted with
+        // nothing to put them back (the sim removed them as the transit
+        // began), so failures land on the same return-to-the-gate recovery
+        // as an unresolvable destination.
+        void gateTransit(data).catch(e => {
+            console.warn('Gate transit failed:', e);
+            abortGateTransit(data, 'Gate transit failed.');
+        });
     });
     newDisplayWorld.events.get(LeaveGateMapEvent).subscribe(({ data }) => {
         // The hypergate map closed. With a destination picked, ride the jump
@@ -1154,6 +1185,34 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
 }
 
 /**
+ * Puts a ship back into the system it just tried to leave through a gate,
+ * after the transit turned out to have nowhere to go.
+ *
+ * By the time we get here the SIM HAS ALREADY REMOVED the ship
+ * (GateDepartureSystem deletes it and hands it over on the GateTransitEvent),
+ * and EscortFollowGateSystem has already handed over the flock with it, so
+ * simply returning would delete the player's ship and every escort from the
+ * game — the "staying put" this used to claim was never true.
+ *
+ * Recovery reuses the hypergate lift-off machinery rather than re-adding the
+ * ship by hand: setting the docked/launch pair makes the pump's
+ * `pendingGateLaunch && gateDockedShip` block re-add the ship at the gate,
+ * re-insert the landed roster (which is where the swept flock is waiting),
+ * and respawn mission ships, with the slot bookkeeping already right. That
+ * is exactly the path a player takes when they open a hypergate map and
+ * close it without picking anything.
+ */
+function abortGateTransit(
+    data: { entity: Entity, uuid: string, fromSpob: string }, reason: string) {
+    console.warn(`${reason} Returning the ship to the origin gate.`);
+    data.entity.components.delete(GateArrivalComponent);
+    gateDockedShip = {
+        uuid: data.uuid, entity: data.entity, planetId: data.fromSpob,
+    };
+    pendingGateLaunch = data.entity;
+}
+
+/**
  * Follows a hypergate/wormhole transit to its destination system. The sim
  * already chose the exit spöb (or a random draw for a link-less wormhole) and
  * tagged the ship with a GateArrivalComponent; here we resolve that spöb to its
@@ -1181,16 +1240,14 @@ async function gateTransit(data: {
         }
     }
     if (!destinationSpob) {
-        console.warn(`Gate transit from ${data.fromSpob} had no resolvable `
-            + `destination; staying put.`);
-        data.entity.components.delete(GateArrivalComponent);
+        abortGateTransit(data, `Gate transit from ${data.fromSpob} had no `
+            + `resolvable destination.`);
         return;
     }
     const to = await gateDestinationResolver.systemOf(destinationSpob);
     if (!to) {
-        console.warn(`Gate destination spöb ${destinationSpob} is not in any `
-            + `system; staying put.`);
-        data.entity.components.delete(GateArrivalComponent);
+        abortGateTransit(data, `Gate destination spöb ${destinationSpob} is `
+            + `not in any system.`);
         return;
     }
     pendingGateArrivalSpob = destinationSpob;
@@ -1493,14 +1550,19 @@ async function startGame() {
         })),
     });
     /**
-     * Console lever: the same-system convergence invariant, live. Reports
-     * where the local player's escorts are and, crucially, whether any are
-     * stranded — `stranded` must always be empty (the zero-energy
-     * hyperspace exclusion aside, whose ships never leave the system and so
-     * are never expected elsewhere). `expected` is every escort the client
-     * knows this player owns: the ones in the world plus the ones it holds.
+     * Console lever: the same-system convergence invariant, live.
+     *
+     * Called with no argument it is a REPORT — where the local player's
+     * escorts are right now, split into the ones in the system with them
+     * and the ones the client is holding for them. Called with a list of
+     * uuids it is a CHECK: those are the escorts the caller knows the
+     * player owns, and `stranded` is the ones that are in neither place,
+     * which must be empty. A headless harness that knows what it spawned
+     * (see visual_compare/driver.mjs) is the caller that can supply real
+     * ground truth; the client itself cannot, because an escort it has
+     * lost track of is exactly the thing it cannot enumerate.
      */
-    (window as any).novaEscortAudit = () => {
+    (window as any).novaEscortAudit = (expected?: string[]) => {
         const current = displayWorld;
         if (!current) {
             return null;
@@ -1517,15 +1579,10 @@ async function startGame() {
             }
         }
         const rosters = [landedEscorts, carriedJumpEscorts];
-        const expected = [...inWorld];
-        for (const roster of rosters) {
-            for (const carried of roster) {
-                if (carried.player === playerUuid) {
-                    expected.push(carried.uuid);
-                }
-            }
-        }
-        return escortsAccountedFor(playerUuid, expected, inWorld, rosters);
+        const known = expected ?? [...inWorld, ...rosters.flatMap(roster =>
+            roster.filter(({ player }) => player === playerUuid)
+                .map(({ uuid }) => uuid))];
+        return escortsAccountedFor(playerUuid, known, inWorld, rosters);
     };
 
     // User movement input cancels the autopilot (the autopilot's own

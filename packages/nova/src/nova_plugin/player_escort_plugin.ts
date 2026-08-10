@@ -229,13 +229,31 @@ export function escortFollows(kind: EscortTransition, escort: Entity):
     if (kind === 'gate') {
         return true;
     }
+    // The exclusion has to be POSITIVELY established: only a hull we can
+    // see has no energy capacity is left behind. FuelComponent is supplied
+    // by a per-tick provider (ShipFuelProvider), not by the insertion
+    // deriver, so an escort inserted on the same tick as the jump can be
+    // momentarily without one — and "we have not looked yet" is not the
+    // same thing as "it has no hyperdrive". Convergence wins the tie.
     const fuel = escort.components.get(FuelComponent);
-    return fuel !== undefined && fuel.max > 0;
+    return fuel === undefined || fuel.max > 0;
 }
 
 /**
  * The uuids of `player`'s escorts that follow them through a `kind`
  * transition, in uuid order.
+ *
+ * Ownership is read from the durable marker OR, failing that, from the
+ * live escort chain. The fallback closes a tick race in the sweep's
+ * precondition: MarkPlayerEscortsSystem is what stamps the marker, and it
+ * declares no ordering against the departure events, so a ship that joined
+ * the flock on this very tick — a fighter just launched from a bay, a hulk
+ * just captured — may not carry the marker yet and would be silently left
+ * behind. Both sweeps run while the player is still in the world (they are
+ * ordered before the system that removes it), so the chain always resolves
+ * here. The same two exclusions MarkPlayerEscortsSystem applies are
+ * repeated: player ships are not their own escorts, and mission ships have
+ * their own respawn-with-the-player flow.
  *
  * Sorted for the same reason EscortReattachSystem sorts: the sweep order
  * becomes the client roster's order, which becomes the order
@@ -248,13 +266,34 @@ export function escortFollows(kind: EscortTransition, escort: Entity):
  * Collected before anything is deleted: mutating the map mid-iteration is
  * what the two-pass shape in the callers avoids.
  */
-export function ownedEscortsInUuidOrder(
-    entities: { [Symbol.iterator](): Iterator<[string, Entity]> },
+export interface EscortSweepEntities {
+    [Symbol.iterator](): Iterator<[string, Entity]>;
+    get(uuid: string): Entity | undefined;
+}
+
+export function sweepableEscorts(entities: EscortSweepEntities,
     player: string, kind: EscortTransition): string[] {
     const following: string[] = [];
     for (const [escortUuid, escort] of entities) {
         if (escort.components.get(PlayerEscortComponent)?.player !== player) {
-            continue;
+            if (!escort.components.has(ShipComponent)
+                || escort.components.has(ControlledByComponent)
+                || escort.components.has(MissionShipComponent)) {
+                continue;
+            }
+            const link = playerEscortLink(escortUuid,
+                other => entities.get(other));
+            if (link?.player !== player) {
+                continue;
+            }
+            // Back-fill the marker MarkPlayerEscortsSystem would have
+            // written a tick later. Writing the same value it would have
+            // written keeps this deterministic and idempotent, and it means
+            // the entity we are about to serialize carries its own
+            // `parent`, so prepareCarriedEscorts can put a just-launched
+            // fighter back on its carrier instead of flattening it onto the
+            // player.
+            escort.components.set(PlayerEscortComponent, link);
         }
         if (!escortFollows(kind, escort)) {
             continue;
@@ -579,7 +618,7 @@ export const EscortFollowJumpSystem = new System({
         Emit] as const,
     step(playerUuid, { to }, _controlledBy, entities, emit) {
         const following =
-            ownedEscortsInUuidOrder(entities, playerUuid, 'jump');
+            sweepableEscorts(entities, playerUuid, 'jump');
         for (const escortUuid of following) {
             const escort = entities.get(escortUuid);
             if (!escort) {
@@ -640,7 +679,7 @@ export const EscortFollowGateSystem = new System({
             return; // An ordinary stellar: EscortLandOrderSystem's job.
         }
         const following =
-            ownedEscortsInUuidOrder(entities, playerUuid, 'gate');
+            sweepableEscorts(entities, playerUuid, 'gate');
         for (const escortUuid of following) {
             const escort = entities.get(escortUuid);
             if (!escort) {
