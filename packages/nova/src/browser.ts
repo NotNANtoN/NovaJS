@@ -166,6 +166,16 @@ let carriedJumpEscorts: CarriedEscort[] = [];
  * landing split, exactly like dockedShip.
  */
 let landedEscorts: CarriedEscort[] = [];
+/**
+ * The end of the formation-slot run the client has already handed out for a
+ * player, so a later insertion in the same session cannot reuse those slots.
+ * The display world is not a safe floor on its own: it does not see a
+ * launch's own batches until a later frame, and an insertion record can land
+ * beyond the ticks a frame stepped (see SimulationBridgeClient.schedule), so
+ * a late flush could otherwise duplicate the launch's slots and stack two
+ * escorts on one station.
+ */
+let clientSlotFloor: { player: string, next: number } | undefined;
 let controls: Controls | undefined;
 const controlsSubject = new Subject<ControlEvent>();
 let autopilot: Autopilot | undefined;
@@ -447,7 +457,8 @@ async function spawnHiredEscorts(
     // caller that inserts several batches in one launch (returning
     // escorts, then new hires) keep their slots distinct — the display
     // world does not see the earlier batch until a later frame.
-    let slot = firstSlot ?? nextFormationSlot(displayWorld, leaderUuid);
+    let slot = firstSlot ?? nextClientSlot(displayWorld, leaderUuid);
+    noteSlotsUsed(leaderUuid, slot + shipIds.length);
     for (const shipId of shipIds) {
         try {
             const shipData = await simulationGameData.data.Ship.get(shipId);
@@ -497,9 +508,10 @@ async function insertCarriedEscorts(
     bridge: AsyncSimulationBridgeClient, displayWorld: World,
     leaderUuid: string, leader: Entity, escorts: CarriedEscort[],
     ownerUuid?: string, firstSlot?: number): Promise<void> {
-    const prepared = prepareCarriedEscorts(escorts, leaderUuid, leader,
-        firstSlot ?? nextFormationSlot(displayWorld, leaderUuid), v4,
-        ownerUuid);
+    const base = firstSlot ?? nextClientSlot(displayWorld, leaderUuid);
+    const prepared = prepareCarriedEscorts(escorts, leaderUuid, leader, base,
+        v4, ownerUuid);
+    noteSlotsUsed(leaderUuid, base + escorts.length);
     for (const { uuid, entity } of prepared) {
         try {
             await bridge.addEntity(uuid, entity);
@@ -517,6 +529,41 @@ function localPlayerShipUuid(displayWorld: World): string | undefined {
         }
     }
     return undefined;
+}
+
+/**
+ * Records that this client has handed out formation slots up to (but not
+ * including) `next` for `player`. See clientSlotFloor.
+ */
+function noteSlotsUsed(player: string, next: number) {
+    clientSlotFloor = clientSlotFloor?.player === player
+        ? { player, next: Math.max(clientSlotFloor.next, next) }
+        : { player, next };
+}
+
+/** The first slot a fresh insertion for `player` may use. */
+function nextClientSlot(displayWorld: World, player: string): number {
+    const floor = clientSlotFloor?.player === player
+        ? clientSlotFloor.next : 0;
+    return Math.max(nextFormationSlot(displayWorld, player), floor);
+}
+
+/**
+ * Whether a carry event belongs to the LOCAL player, so other peers'
+ * escorts are never added to this client's rosters (it would never respawn
+ * them, and in a busy room the arrays would grow all session). While the
+ * local player is out of the world — landed or mid-jump, which is exactly
+ * when its own escorts are handed over — there is no local ship to compare
+ * against, so an unattributable event is accepted and pruned at consume
+ * time.
+ */
+function isLocalCarriedEscort(displayWorld: World, player: string): boolean {
+    if (dockedShip?.uuid === player || pendingDockedShip?.uuid === player
+        || gateDockedShip?.uuid === player || pendingGateShip?.uuid === player) {
+        return true;
+    }
+    const local = localPlayerShipUuid(displayWorld);
+    return local === undefined || local === player;
 }
 
 /**
@@ -725,11 +772,18 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
     // Take the escorts that left this system with the player BEFORE the
     // teardown below drops the old system's state. Anything left over
     // belongs to another peer's player, whose own client carries it.
-    const jumpEscorts = takeCarriedEscorts(carriedJumpEscorts, uuid);
+    //
+    // A landed roster is taken along too rather than discarded: this path
+    // also serves a hypergate/wormhole transit, where the player can dock
+    // at the gate holding escorts that already left the simulation. They
+    // ride to the destination instead of being lost.
+    const jumpEscorts = [
+        ...takeCarriedEscorts(carriedJumpEscorts, uuid),
+        ...takeCarriedEscorts(landedEscorts, uuid),
+    ];
     carriedJumpEscorts.length = 0;
-    // A landed roster cannot survive a system change: the player is in
-    // flight by the time they jump, so anything still here is stale.
     landedEscorts.length = 0;
+    clientSlotFloor = undefined; // Fresh world, fresh slot run.
     document.body.classList.remove('nova-docked');
     pendingDockedShip = undefined;
     dockedShip = undefined;
@@ -899,11 +953,17 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
     // flushLandedEscorts). Entries for other peers' players are dropped
     // when a batch is consumed — only the owning client respawns them.
     newDisplayWorld.events.get(EscortJumpEvent).subscribe(({ data }) => {
+        if (!isLocalCarriedEscort(newDisplayWorld, data.player)) {
+            return;
+        }
         carriedJumpEscorts.push({
             player: data.player, uuid: data.uuid, entity: data.entity,
         });
     });
     newDisplayWorld.events.get(EscortLandedEvent).subscribe(({ data }) => {
+        if (!isLocalCarriedEscort(newDisplayWorld, data.player)) {
+            return;
+        }
         landedEscorts.push({
             player: data.player, uuid: data.uuid, entity: data.entity,
         });
@@ -1361,6 +1421,16 @@ async function startGame() {
         await spawnHiredEscorts(simulationBridge, displayWorld, playerUuid,
             player, shipIds, communicator.uuid ?? undefined);
     };
+    // Console lever for tests/debugging: what the client is currently
+    // holding for its escorts (see spaceport/landed_escorts.ts). `landed`
+    // is the roster held while docked; `jumping` is the batch waiting for
+    // the destination system's world to be built.
+    (window as any).novaEscortRosters = () => ({
+        landed: landedEscorts.map(({ player, uuid }) => ({ player, uuid })),
+        jumping: carriedJumpEscorts.map(({ player, uuid }) => ({
+            player, uuid,
+        })),
+    });
 
     // User movement input cancels the autopilot (the autopilot's own
     // inputs go through controlSinks directly and don't loop back
@@ -1512,7 +1582,7 @@ async function startGame() {
                 // launch: the display world does not see any of them until a
                 // later frame, so each batch must be told where to start.
                 const launchBaseSlot =
-                    nextFormationSlot(currentDisplayWorld, dockedShip.uuid);
+                    nextClientSlot(currentDisplayWorld, dockedShip.uuid);
                 const hireBaseSlot = launchBaseSlot + returningEscorts.length;
                 // Mission ships spawn alongside the relaunch; prepared
                 // before the player entity is encoded (see
@@ -1557,15 +1627,29 @@ async function startGame() {
             // The map closed without a destination: lift back off from the
             // gate into the origin system (nothing strands the ship).
             if (pendingGateLaunch && gateDockedShip) {
+                // Any escorts that had already landed also lift off here,
+                // exactly as at a spaceport — otherwise a roster captured
+                // before the gate dock would be stranded out of the world.
+                const gateEscorts =
+                    takeCarriedEscorts(landedEscorts, gateDockedShip.uuid);
+                landedEscorts.length = 0;
+                const gateBaseSlot = nextClientSlot(
+                    currentDisplayWorld, gateDockedShip.uuid);
                 // Mission ships despawned while gate-docked; respawn
                 // them with the lift-off (same shape as the spaceport
                 // launch above).
                 const gateMissionShips = await prepareMissionShips(
                     pendingGateLaunch, gateDockedShip.uuid,
-                    activeSystemId ?? '', nextFormationSlot(
-                        currentDisplayWorld, gateDockedShip.uuid));
+                    activeSystemId ?? '',
+                    gateBaseSlot + gateEscorts.length);
                 await currentBridge.addEntity(
                     gateDockedShip.uuid, pendingGateLaunch);
+                if (gateEscorts.length > 0) {
+                    await insertCarriedEscorts(currentBridge,
+                        currentDisplayWorld, gateDockedShip.uuid,
+                        pendingGateLaunch, gateEscorts,
+                        communicator.uuid ?? undefined, gateBaseSlot);
+                }
                 await insertMissionShips(currentBridge, gateMissionShips,
                     communicator.uuid ?? undefined);
                 if (pendingGateLaunch.components.has(PlayerShipSelector)) {
@@ -1744,6 +1828,7 @@ async function startGame() {
         pendingGateArrivalSpob = undefined;
         carriedJumpEscorts = [];
         landedEscorts = [];
+        clientSlotFloor = undefined;
         simulationTickInFlight = false;
         lastPumpTime = undefined;
         lastPumpDone = undefined;

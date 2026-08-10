@@ -243,6 +243,30 @@ describe('escort re-attachment', () => {
                 .toEqual({ command: 'formation' });
         });
 
+    it('gives several re-attaching escorts distinct slots in uuid order',
+        async () => {
+            // Slot numbers are hashed simulation state, so a batch
+            // re-attaching on one tick must be assigned in an order that
+            // does not depend on entity-map iteration: uuid order.
+            const { world, addEscort } = await makeWorld();
+            const b = await addEscort('escort-b', 0, 200);
+            const a = await addEscort('escort-a', 0, 300);
+            const c = await addEscort('escort-c', 0, 400);
+            world.step();
+            const player = world.entities.get(PLAYER)!;
+            world.entities.delete(PLAYER);
+            world.step();
+            world.entities.set(PLAYER, player);
+            world.step();
+
+            const slots = [a, b, c].map(escort =>
+                escort.components.get(FormationComponent)?.slot);
+            expect(new Set(slots).size).toEqual(3);
+            // uuid order is escort-a < escort-b < escort-c, and the batch
+            // starts from the first free slot.
+            expect(slots).toEqual([...slots].sort((x, y) => x! - y!));
+        });
+
     it('does not yank a returning bay fighter back into formation',
         async () => {
             const { world, addShip } = await makeWorld();

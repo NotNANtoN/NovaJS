@@ -13,7 +13,9 @@ import {
     EncodedEntity, Serializer, SerializerResource,
 } from 'nova_ecs/plugins/serializer_plugin';
 import { TimeResource, TimeSystem } from 'nova_ecs/plugins/time_plugin';
+import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
+import { SingletonComponent } from 'nova_ecs/world';
 import { registerSimulationBridgeEvent } from '../communication/simulation_bridge_events.js';
 import { deImmerify } from '../util/deimmerify.js';
 import { CollectableEscortComponent, ReturnComponent } from './bay_plugin.js';
@@ -91,13 +93,15 @@ import { ShipComponent, ShipPhysicsComponent } from './ship_plugin.js';
  *    than each playing the departure/arrival sequence. Giving them a real
  *    sequence means running JumpComponent state machines on non-player
  *    ships and delaying the carry until each finishes.
- *  - Gate transit (hypergates and wormholes) does not carry escorts. Gate
- *    departures run through GateDepartureSystem / GateTransitEvent rather
- *    than InitiateJumpEvent, so escorts are left in the origin system,
- *    still owned. Landing at a gate likewise issues no landing orders.
- *    (Docking at a hypergate and lifting back off DOES work: the player's
- *    entity returns under the same uuid, so EscortReattachSystem picks the
- *    escorts back up.)
+ *  - Gate transit (hypergates and wormholes) does not carry escorts that
+ *    are still FLYING. Gate departures run through GateDepartureSystem /
+ *    GateTransitEvent rather than InitiateJumpEvent, so those escorts are
+ *    left in the origin system, still owned, and landing at a gate issues
+ *    no landing orders. Two related cases DO work: docking at a hypergate
+ *    and lifting back off (the player's entity returns under the same uuid,
+ *    so EscortReattachSystem picks the escorts back up), and a transit made
+ *    while already holding a landed roster (the client carries that roster
+ *    to the destination rather than dropping it).
  *  - A "multi-jump" outfit chain (ModType 32) can out-run the carry: the
  *    escorts are re-inserted through an input record, so if the player
  *    auto-continues the next jump before that record lands, the escorts
@@ -395,53 +399,78 @@ export const EscortLandOrderSystem = new System({
  *
  * A fighter under the 'returnToBay' command is left alone: it is already
  * flying home and must not be yanked back into formation.
+ *
+ * Runs ONCE per tick over the whole escort set (on the singleton entity)
+ * rather than per escort, and walks it in uuid order. Slot allocation is
+ * the reason: nextFormationSlot takes a max over the LIVE entity map, and
+ * this system writes FormationComponent as it goes, so two escorts
+ * re-attaching on the same tick — the ordinary case when a player lands
+ * with a wing and lifts off again — would be handed slots in entity-map
+ * iteration order. That is not a deterministic order across peers (a
+ * world rebuilt from a wire baseline can iterate differently), and slot
+ * numbers are hashed simulation state that drives station geometry, so
+ * per-entity allocation would desync. A fixed uuid sort makes the batch's
+ * assignment identical everywhere.
  */
+const PlayerEscortsQuery = new Query(
+    [UUID, GetEntity, PlayerEscortComponent] as const);
+
 export const EscortReattachSystem = new System({
     name: 'EscortReattach',
-    args: [PlayerEscortComponent, UUID, GetEntity, Entities] as const,
-    step(owned, uuid, entity, entities) {
-        if (!entities.has(owned.player)) {
-            // Landed, jumped, or otherwise out of the world. Ownership
-            // waits; note the absence so the return is a real boundary.
-            // Written once, not every tick: an idempotent re-write would
-            // churn the component (and its hash) for the whole landing.
-            if (!owned.detached) {
-                owned.detached = true;
+    args: [PlayerEscortsQuery, Entities, SingletonComponent] as const,
+    step(escorts, entities) {
+        const inUuidOrder = [...escorts].sort(
+            ([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+        for (const [uuid, entity, owned] of inUuidOrder) {
+            if (!entities.has(owned.player)) {
+                // Landed, jumped, or otherwise out of the world. Ownership
+                // waits; note the absence so the return is a real
+                // boundary. Written once, not every tick: an idempotent
+                // re-write would churn the component (and its hash) for
+                // the whole landing.
+                if (!owned.detached) {
+                    owned.detached = true;
+                }
+                continue;
             }
-            return;
-        }
-        if (!owned.detached) {
-            return; // Steady state: no per-tick writes at all.
-        }
-        if (entity.components.get(EscortCommandComponent)?.command
-            === 'returnToBay') {
-            // Flying home to a bay: leave it be, but stop treating the
-            // player's return as pending.
+            if (!owned.detached) {
+                continue; // Steady state: no per-tick writes at all.
+            }
+            if (entity.components.get(EscortCommandComponent)?.command
+                === 'returnToBay') {
+                // Flying home to a bay: leave it be, but stop treating the
+                // player's return as pending. Any landing order is dropped
+                // all the same — the player is back, so nothing should
+                // still be flying down to a planet.
+                entity.components.delete(EscortLandingComponent);
+                owned.detached = false;
+                continue;
+            }
+            // Prefer the escort's own carrier (a fighter launched from an
+            // escort's bays), falling back to the player.
+            const leaderUuid = owned.parent !== undefined
+                && owned.parent !== uuid && entities.has(owned.parent)
+                ? owned.parent : owned.player;
+            if (leaderUuid === uuid) {
+                owned.detached = false;
+                continue;
+            }
+            const formation = entity.components.get(FormationComponent);
+            entity.components.set(FormationComponent, {
+                leader: leaderUuid,
+                slot: formation?.leader === leaderUuid ? formation.slot
+                    : nextFormationSlot(formationsIn(entities), leaderUuid),
+            });
+            // Explicit command reset at a lifecycle boundary (see the
+            // module comment): a re-attached escort always starts from
+            // formation.
+            entity.components.set(EscortCommandComponent,
+                { command: 'formation' });
+            entity.components.set(FiringGroupComponent,
+                { group: owned.player });
+            entity.components.delete(EscortLandingComponent);
             owned.detached = false;
-            return;
         }
-        // Prefer the escort's own carrier (a fighter launched from an
-        // escort's bays), falling back to the player.
-        const leaderUuid = owned.parent !== undefined
-            && owned.parent !== uuid && entities.has(owned.parent)
-            ? owned.parent : owned.player;
-        if (leaderUuid === uuid) {
-            owned.detached = false;
-            return;
-        }
-        const formation = entity.components.get(FormationComponent);
-        entity.components.set(FormationComponent, {
-            leader: leaderUuid,
-            slot: formation?.leader === leaderUuid ? formation.slot
-                : nextFormationSlot(formationsIn(entities), leaderUuid),
-        });
-        // Explicit command reset at a lifecycle boundary (see the module
-        // comment): a re-attached escort always starts from formation.
-        entity.components.set(EscortCommandComponent,
-            { command: 'formation' });
-        entity.components.set(FiringGroupComponent, { group: owned.player });
-        entity.components.delete(EscortLandingComponent);
-        owned.detached = false;
     },
     before: [FormationSystem],
 });
