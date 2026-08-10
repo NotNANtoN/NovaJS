@@ -32,6 +32,7 @@ import {
     playerEscortLink, steerToStellar,
 } from './player_escort_plugin.js';
 import { ControlledByComponent } from './ship_control.js';
+import { prepareCarriedEscort } from '../spaceport/landed_escorts.js';
 
 const PEER = 'test peer';
 const PLAYER = 'player';
@@ -659,6 +660,40 @@ describe('escorts following a gate transit', () => {
         expect(landed.length).toEqual(0);
         expect(world.entities.has('their escort')).toBeTrue();
     });
+
+    it('comes back out of the roster in formation, command reset',
+        async () => {
+            // End to end across the split: the sim sweeps the escort at the
+            // gate, and the client puts the very same carried entity back
+            // beside the player in the destination system. An escort that
+            // went through the gate under orders arrives in formation, the
+            // explicit lifecycle-boundary reset.
+            const { world, addEscort, player } = await makeWorld(
+                { planetGate: true });
+            const escort = await addEscort('escort');
+            world.step();
+            escort.components.set(EscortCommandComponent,
+                { command: 'holdPosition' });
+            const landed: EscortLanded[] = [];
+            world.events.get(EscortLandedEvent).subscribe(
+                ({ data }) => landed.push(data));
+
+            await transit(world, landed);
+            expect(landed.length).toEqual(1);
+
+            const prepared = prepareCarriedEscort(
+                {
+                    player: PLAYER, uuid: landed[0].uuid,
+                    entity: landed[0].entity,
+                }, PLAYER, player, 0);
+            expect(prepared).toBeDefined();
+            expect(prepared!.components.get(EscortCommandComponent))
+                .toEqual({ command: 'formation' });
+            expect(prepared!.components.get(FormationComponent))
+                .toEqual({ leader: PLAYER, slot: 0 });
+            expect(prepared!.components.get(PlayerEscortComponent))
+                .toEqual({ player: PLAYER, parent: PLAYER });
+        });
 
     it('does not carry anything at an ordinary stellar', async () => {
         // The two LandEvent systems split on `gate` and never both act: an
