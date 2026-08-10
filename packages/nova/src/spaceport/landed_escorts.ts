@@ -11,6 +11,9 @@ import {
 } from '../nova_plugin/fire_weapon_plugin.js';
 import { FiringGroupComponent } from '../nova_plugin/firing_group.js';
 import {
+    JumpComponent, MultiJumpContinueComponent,
+} from '../nova_plugin/jump_plugin.js';
+import {
     FormationComponent, formationSlotPosition,
 } from '../nova_plugin/npc_ai_plugin.js';
 import {
@@ -53,6 +56,106 @@ export interface CarriedEscort {
     uuid: string;
     /** The escort's full entity, as decoded from its carry event. */
     entity: Entity;
+}
+
+/**
+ * ----------------------------------------------------------------------
+ * Multi-jump chains
+ * ----------------------------------------------------------------------
+ *
+ * A "multi-jump" outfit (ModType 32) auto-continues a routed jump the tick
+ * after each arrival (MultiJumpContinueSystem), so a chain crosses several
+ * systems from one key press. Escorts are re-inserted through input
+ * records, and a record that lands after the chain has already left the
+ * intermediate system strands its escort there.
+ *
+ * The client closes that seam by NOT putting the batch back down until the
+ * chain finishes: `multiJumpChainContinues` says a carried batch must be
+ * held (asked of the player entity as it leaves a system), and
+ * `multiJumpChainSettled` says a held batch may be released (asked of the
+ * player entity in the world it arrived in).
+ *
+ * ORDERING GUARANTEE. The two are read off the player's own entity — the
+ * same entity the carry rode with — so no clock, timeout, or round trip is
+ * involved and there is nothing to race. At departure the entity's
+ * JumpComponent still holds the budget the destination world is about to
+ * act on (JumpSequenceSystem's 'arriving' case turns `autoJumpsLeft` into
+ * the MultiJumpContinueComponent marker), so "will there be another hop?"
+ * is known before the batch would have been inserted. On arrival exactly
+ * one of JumpComponent / MultiJumpContinueComponent is present at every
+ * step boundary for as long as the chain runs (the arriving step swaps the
+ * first for the second; the continuing step swaps back), so their joint
+ * absence is an unambiguous "the chain is over" — including when it ended
+ * early because the route ran out or the fuel did. Both components
+ * serialize, so the display world sees them.
+ *
+ * The batch is therefore absent from the systems a chain passes through
+ * and appears at the final destination with the player. That is the
+ * documented cost; it adds no delay, touches no simulation state, and
+ * needs no agreement between peers, because a roster is client state.
+ */
+
+/**
+ * Whether the player entity leaving a system will auto-continue into
+ * another jump, so a batch carried with it must be held rather than
+ * inserted at this hop.
+ */
+export function multiJumpChainContinues(player: Entity): boolean {
+    return (player.components.get(JumpComponent)?.autoJumpsLeft ?? 0) > 0;
+}
+
+/**
+ * Whether the player entity has come to rest between jumps, so a held
+ * batch may be put back down beside it.
+ */
+export function multiJumpChainSettled(player: Entity): boolean {
+    return !player.components.has(JumpComponent)
+        && !player.components.has(MultiJumpContinueComponent);
+}
+
+/**
+ * The same-system convergence invariant, as a predicate.
+ *
+ * `expected` is every escort the player owns (or owned as it left);
+ * `inWorld` is what is in the system with them right now; `rosters` are the
+ * client's held batches, each of which is on its way back to the player.
+ * `stranded` is what is in none of those — an escort that will never rejoin
+ * its player without them flying back for it. The invariant is
+ * `stranded.length === 0`, with the single deliberate exception of the
+ * zero-energy hyperspace-jump exclusion, whose ships the caller leaves out
+ * of `expected` (see escortFollows in player_escort_plugin.ts).
+ */
+export interface EscortAccounting {
+    inWorld: string[];
+    inRoster: string[];
+    stranded: string[];
+}
+
+export function escortsAccountedFor(player: string,
+    expected: Iterable<string>, inWorld: Iterable<string>,
+    rosters: Iterable<readonly CarriedEscort[]>): EscortAccounting {
+    const present = new Set(inWorld);
+    const held = new Set<string>();
+    for (const roster of rosters) {
+        for (const carried of roster) {
+            if (carried.player === player) {
+                held.add(carried.uuid);
+            }
+        }
+    }
+    const accounting: EscortAccounting = {
+        inWorld: [], inRoster: [], stranded: [],
+    };
+    for (const uuid of expected) {
+        if (present.has(uuid)) {
+            accounting.inWorld.push(uuid);
+        } else if (held.has(uuid)) {
+            accounting.inRoster.push(uuid);
+        } else {
+            accounting.stranded.push(uuid);
+        }
+    }
+    return accounting;
 }
 
 /**

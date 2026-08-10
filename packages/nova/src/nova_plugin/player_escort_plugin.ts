@@ -22,6 +22,7 @@ import { CollectableEscortComponent, ReturnComponent } from './bay_plugin.js';
 import { EscortCommandComponent } from './escort_command.js';
 import { FiringGroupComponent } from './firing_group.js';
 import { flockParent, MAX_FLOCK_DEPTH } from './flock.js';
+import { GateDepartureSystem } from './gate_transit_plugin.js';
 import { FuelComponent } from './health_plugin.js';
 import { InitiateJumpEvent, JumpFromSystem } from './jump_plugin.js';
 import { MissionShipComponent } from './mission_ship_plugin.js';
@@ -80,6 +81,25 @@ import { ShipComponent, ShipPhysicsComponent } from './ship_plugin.js';
  *    i.e. FuelComponent.max === 0) — it has no hyperdrive, so it stays
  *    behind, still owned, and is only recovered if the player comes back.
  *
+ *  - GATE TRANSIT. EscortFollowGateSystem does the same for a hypergate or
+ *    wormhole, on the player's LandEvent at the gate. A gate carries
+ *    ANYTHING (EVN Bible p. 61: the gate moves the ship, the ship's own
+ *    hyperdrive is not involved), so the zero-energy exclusion above does
+ *    NOT apply here — that exclusion is a rule about hyperspace jumps only.
+ *    See {@link escortFollows}, which is the single place both rules live.
+ *
+ *    Gate-swept escorts ride the LANDED roster (EscortLandedEvent) rather
+ *    than the jump roster, because at sweep time there is no destination
+ *    system to name: a hypergate's destination is still unpicked (the map
+ *    has not even opened) and a wormhole's is a spöb the client resolves to
+ *    a system afterwards. EscortJumpEvent's `to` could only be a lie.
+ *    Using the landed roster also means all three of its consumers already
+ *    exist and need no new pipeline: `jumpTo` carries it to the destination,
+ *    the gate lift-off path puts it back when the map is closed without a
+ *    pick (spaceport-liftoff parity, for free), and flushLandedEscorts is a
+ *    standing safety net that re-inserts the batch beside the player if the
+ *    transit never actually happens.
+ *
  * COMMAND RESET. Escorts used to reset to the 'formation' command purely
  * by accident (they were rebuilt from scratch at every boundary). Now
  * that they persist, the reset is explicit at both boundaries: the client
@@ -87,25 +107,27 @@ import { ShipComponent, ShipPhysicsComponent } from './ship_plugin.js';
  * liftoff), and EscortReattachSystem stamps it on every escort it
  * re-attaches.
  *
+ * THE CONVERGENCE INVARIANT. An escort always ends up in the same system as
+ * its player. At rest, every PlayerEscortComponent-marked escort of the
+ * local player is either in the player's system, in a client roster
+ * destined for it, or — only for the zero-energy hyperspace-jump exclusion
+ * above — deliberately left behind. `escortsAccountedFor`
+ * (spaceport/landed_escorts.ts) is that invariant as a predicate, exercised
+ * by the tests and exposed live as `window.novaEscortAudit()`.
+ *
  * DOCUMENTED SEAMS (deliberate v1 limits):
  *  - No warp animation for a following escort. They are carried instantly
  *    and simply appear at their station beside the arriving player, rather
  *    than each playing the departure/arrival sequence. Giving them a real
  *    sequence means running JumpComponent state machines on non-player
- *    ships and delaying the carry until each finishes.
- *  - Gate transit (hypergates and wormholes) does not carry escorts that
- *    are still FLYING. Gate departures run through GateDepartureSystem /
- *    GateTransitEvent rather than InitiateJumpEvent, so those escorts are
- *    left in the origin system, still owned, and landing at a gate issues
- *    no landing orders. Two related cases DO work: docking at a hypergate
- *    and lifting back off (the player's entity returns under the same uuid,
- *    so EscortReattachSystem picks the escorts back up), and a transit made
- *    while already holding a landed roster (the client carries that roster
- *    to the destination rather than dropping it).
- *  - A "multi-jump" outfit chain (ModType 32) can out-run the carry: the
- *    escorts are re-inserted through an input record, so if the player
- *    auto-continues the next jump before that record lands, the escorts
- *    are left in the intermediate system.
+ *    ships and delaying the carry until each finishes. The gate carry
+ *    inherits this: escorts leave with the player at the gate instead of
+ *    each flying down to it, which is why gates need no landing orders.
+ *  - A "multi-jump" outfit chain (ModType 32) no longer out-runs the carry,
+ *    but it does so by HOLDING the batch out of the world for the length of
+ *    the chain (browser.ts): escorts are absent from the intermediate
+ *    systems the chain passes through and appear at the final destination.
+ *    See multiJumpChainContinues / multiJumpChainSettled.
  *  - Escorts are not saved (see save_game.ts).
  */
 
@@ -183,6 +205,63 @@ export function playerEscortLink(uuid: string,
         current = next;
     }
     return undefined;
+}
+
+/**
+ * The two ways a player leaves a system taking their flock with them. They
+ * differ in exactly one rule, so they share one predicate.
+ */
+export type EscortTransition = 'jump' | 'gate';
+
+/**
+ * Whether `escort` follows its player through a `kind` transition —
+ * Matthew's ruling, in one place, so the jump sweep and the gate sweep
+ * cannot drift apart.
+ *
+ * A hyperspace JUMP needs a hyperdrive of the escort's own: a hull with no
+ * energy capacity at all (shïp "energy" 0, i.e. FuelComponent.max === 0)
+ * has none and is left behind, still owned. A GATE carries anything (EVN
+ * Bible p. 61) — the gate does the moving, so there is nothing for the
+ * escort to lack, and the exclusion deliberately does not apply.
+ */
+export function escortFollows(kind: EscortTransition, escort: Entity):
+    boolean {
+    if (kind === 'gate') {
+        return true;
+    }
+    const fuel = escort.components.get(FuelComponent);
+    return fuel !== undefined && fuel.max > 0;
+}
+
+/**
+ * The uuids of `player`'s escorts that follow them through a `kind`
+ * transition, in uuid order.
+ *
+ * Sorted for the same reason EscortReattachSystem sorts: the sweep order
+ * becomes the client roster's order, which becomes the order
+ * prepareCarriedEscorts hands out formation slots in. Entity-map iteration
+ * order is not stable across peers (a world rebuilt from a wire baseline
+ * can iterate differently), and the resulting slots are hashed simulation
+ * state once the insertion records land, so the batch's order has to be
+ * fixed here rather than left to the map.
+ *
+ * Collected before anything is deleted: mutating the map mid-iteration is
+ * what the two-pass shape in the callers avoids.
+ */
+export function ownedEscortsInUuidOrder(
+    entities: { [Symbol.iterator](): Iterator<[string, Entity]> },
+    player: string, kind: EscortTransition): string[] {
+    const following: string[] = [];
+    for (const [escortUuid, escort] of entities) {
+        if (escort.components.get(PlayerEscortComponent)?.player !== player) {
+            continue;
+        }
+        if (!escortFollows(kind, escort)) {
+            continue;
+        }
+        following.push(escortUuid);
+    }
+    return following.sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
 }
 
 /**
@@ -348,9 +427,10 @@ export const MarkPlayerEscortsSystem = new System({
  *
  * Runs on the landing ship (LandEvent is targeted at it) on every peer,
  * so every peer stamps the same orders. Gates (hypergates and wormholes)
- * are skipped: those move the player to another system through the gate
- * flow, which has no escort carry yet (documented seam) — the escorts
- * stay in this system, still owned.
+ * are skipped, and still are: an escort has no reason to fly down to a
+ * gate, because EscortFollowGateSystem takes the whole flock through it
+ * with the player on this very event. The two systems split the same
+ * LandEvent on `gate` and never both act.
  */
 export const EscortLandOrderSystem = new System({
     name: 'EscortLandOrder',
@@ -498,18 +578,8 @@ export const EscortFollowJumpSystem = new System({
     args: [UUID, InitiateJumpEvent, ControlledByComponent, Entities,
         Emit] as const,
     step(playerUuid, { to }, _controlledBy, entities, emit) {
-        const following: string[] = [];
-        for (const [escortUuid, escort] of entities) {
-            if (escort.components.get(PlayerEscortComponent)?.player
-                !== playerUuid) {
-                continue;
-            }
-            const fuel = escort.components.get(FuelComponent);
-            if (!fuel || fuel.max <= 0) {
-                continue;
-            }
-            following.push(escortUuid);
-        }
+        const following =
+            ownedEscortsInUuidOrder(entities, playerUuid, 'jump');
         for (const escortUuid of following) {
             const escort = entities.get(escortUuid);
             if (!escort) {
@@ -526,6 +596,68 @@ export const EscortFollowJumpSystem = new System({
         }
     },
     before: [JumpFromSystem],
+});
+
+/**
+ * The player is entering a hypergate or a wormhole: their escorts go
+ * through it with them.
+ *
+ * Fires on the player's LandEvent at the gate — the one moment both gate
+ * flows share. A wormhole transits from that same event (GateDepartureSystem
+ * removes the ship and emits GateTransitEvent); a hypergate docks the ship
+ * a frame later and opens the map. Sweeping at the LandEvent therefore puts
+ * the whole flock in the client's hands BEFORE either flow can start
+ * tearing the origin system down, with no new client -> sim command path and
+ * no waiting on a destination that, for a hypergate, the player has not
+ * picked yet.
+ *
+ * Ordered BEFORE GateDepartureSystem for the same reason
+ * EscortFollowJumpSystem is ordered before JumpFromSystem: the escorts'
+ * carry events must precede the player's own departure event in the frame's
+ * event list, so the client has collected them before it follows the
+ * transit.
+ *
+ * Escorts ride the LANDED roster (see the module comment): a gate sweep has
+ * no destination system to name, and the landed roster's consumers already
+ * cover every outcome — the transit, the map-closed lift-off, and the
+ * transit that never happens.
+ *
+ * No fuel rule: a gate carries anything, so a zero-energy hull that would
+ * be left behind by a hyperspace jump follows through a gate
+ * ({@link escortFollows}).
+ *
+ * Runs on every peer (LandEvent is replicated and targeted at the landing
+ * ship), so the despawn is shared simulation state; only the owning client
+ * keeps the roster, exactly as with a landing or a jump.
+ */
+export const EscortFollowGateSystem = new System({
+    name: 'EscortFollowGate',
+    events: [LandEvent],
+    args: [UUID, LandEvent, ControlledByComponent, Entities, Emit] as const,
+    step(playerUuid, land, _controlledBy, entities, emit) {
+        if (!entities.get(land.uuid)?.components
+            .get(PlanetDataComponent)?.gate) {
+            return; // An ordinary stellar: EscortLandOrderSystem's job.
+        }
+        const following =
+            ownedEscortsInUuidOrder(entities, playerUuid, 'gate');
+        for (const escortUuid of following) {
+            const escort = entities.get(escortUuid);
+            if (!escort) {
+                continue;
+            }
+            // A landing order does not survive the transit: the stellar it
+            // named is in the system being left behind.
+            escort.components.delete(EscortLandingComponent);
+            entities.delete(escortUuid);
+            deImmerify(escort);
+            emit(EscortLandedEvent, {
+                entity: escort, uuid: escortUuid, player: playerUuid,
+                planet: land.uuid,
+            }, [escortUuid]);
+        }
+    },
+    before: [GateDepartureSystem],
 });
 
 /**
@@ -600,6 +732,7 @@ export const PlayerEscortPlugin: Plugin = {
         world.addSystem(EscortLandOrderSystem);
         world.addSystem(EscortLandingSystem);
         world.addSystem(EscortFollowJumpSystem);
+        world.addSystem(EscortFollowGateSystem);
         world.addSystem(EscortReattachSystem);
     },
 };

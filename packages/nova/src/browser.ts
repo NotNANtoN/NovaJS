@@ -72,7 +72,8 @@ import { buildMissionShipSpawns } from "./nova_plugin/mission_ship_spawn.js";
 import { advanceEntityDate, ensurePlayerStateComponents } from "./spaceport/mission_session.js";
 import { PendingEscortsComponent } from "./spaceport/pending_escorts.js";
 import {
-    CarriedEscort, prepareCarriedEscorts, takeCarriedEscorts,
+    CarriedEscort, escortsAccountedFor, multiJumpChainContinues,
+    multiJumpChainSettled, prepareCarriedEscorts, takeCarriedEscorts,
 } from "./spaceport/landed_escorts.js";
 import {
     EscortJumpEvent, EscortLandedEvent,
@@ -158,6 +159,13 @@ let pendingGateArrivalSpob: string | undefined;
  * later, because the FinishJumpEvent handler awaits the date advance before
  * calling it. That is the ordering guarantee that keeps the carry ahead of
  * teardownActiveSystem's entity purge.
+ *
+ * Also where a batch WAITS OUT a multi-jump chain. jumpTo hands the batch
+ * back to this array instead of inserting it whenever the arriving player
+ * is going to auto-continue (multiJumpChainContinues), so each further hop
+ * simply picks it up again; flushCarriedJumpEscorts puts it down once the
+ * chain settles. That is what stops the chain out-running the insertion
+ * records and stranding escorts in an intermediate system.
  */
 let carriedJumpEscorts: CarriedEscort[] = [];
 /**
@@ -594,6 +602,37 @@ async function flushLandedEscorts(bridge: AsyncSimulationBridgeClient,
 }
 
 /**
+ * Puts down a batch that has been riding along with a multi-jump chain,
+ * once the chain has settled (the player is in flight with no jump in
+ * progress and no auto-continue pending — multiJumpChainSettled).
+ *
+ * Runs every frame the player is in flight and not docked, so it is also
+ * the recovery path for a chain that ended early (route exhausted, fuel
+ * out) and for the ordinary case of a batch that somehow outlived its
+ * jumpTo. While the player is between simulations there is no display
+ * entity to ask, so the batch is simply kept: dropping it is the one thing
+ * that must never happen.
+ */
+async function flushCarriedJumpEscorts(bridge: AsyncSimulationBridgeClient,
+    displayWorld: World): Promise<void> {
+    const playerUuid = localPlayerShipUuid(displayWorld);
+    if (!playerUuid) {
+        return; // Mid-transition; keep holding the batch.
+    }
+    const leader = displayWorld.entities.get(playerUuid);
+    if (!leader || !multiJumpChainSettled(leader)) {
+        return; // Still chaining (or nothing to read): hold.
+    }
+    const mine = takeCarriedEscorts(carriedJumpEscorts, playerUuid);
+    carriedJumpEscorts.length = 0;
+    if (mine.length === 0) {
+        return;
+    }
+    await insertCarriedEscorts(bridge, displayWorld, playerUuid, leader, mine,
+        communicator.uuid ?? undefined);
+}
+
+/**
  * Mission special/aux ships entering with the player — the owning
  * client's half of the multiplayer design in mission_ship_plugin.ts.
  * `prepareMissionShips` must run BEFORE the player entity is encoded
@@ -777,12 +816,24 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
     // also serves a hypergate/wormhole transit, where the player can dock
     // at the gate holding escorts that already left the simulation. They
     // ride to the destination instead of being lost.
+    //
+    // A gate transit's escorts arrive on the LANDED roster too (they are
+    // swept at the gate, where no destination system exists to name yet —
+    // see EscortFollowGateSystem), so this one take covers hyperspace
+    // jumps, hypergates and wormholes alike.
     const jumpEscorts = [
         ...takeCarriedEscorts(carriedJumpEscorts, uuid),
         ...takeCarriedEscorts(landedEscorts, uuid),
     ];
     carriedJumpEscorts.length = 0;
     landedEscorts.length = 0;
+    // A multi-jump chain (ModType 32) is about to auto-continue out of the
+    // system we are arriving in. Hold the batch rather than inserting it
+    // there: an insertion record that lands after the chain has moved on
+    // would strand its escort. Read off the player's own entity, before it
+    // is re-inserted and the destination world turns the budget into its
+    // continue marker (see multiJumpChainContinues).
+    const holdForChain = multiJumpChainContinues(entity);
     clientSlotFloor = undefined; // Fresh world, fresh slot run.
     document.body.classList.remove('nova-docked');
     pendingDockedShip = undefined;
@@ -1061,7 +1112,8 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
     // player) jump in with the player. Prepared before the player
     // entity is encoded into its insertion record.
     const missionShips = entity.components.has(PlayerShipSelector)
-        ? await prepareMissionShips(entity, uuid, to, jumpEscorts.length) : [];
+        ? await prepareMissionShips(entity, uuid, to,
+            holdForChain ? 0 : jumpEscorts.length) : [];
     await newSimulationBridge.addEntity(uuid, entity);
     if (entity.components.has(PlayerShipSelector)) {
         (window as any).myShip = entity;
@@ -1074,8 +1126,16 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
     // prepareCarriedEscorts, which also keeps any carrier-and-wing
     // relationships inside the batch intact.
     if (jumpEscorts.length > 0) {
-        await insertCarriedEscorts(newSimulationBridge, newDisplayWorld, uuid,
-            entity, jumpEscorts, communicator.uuid ?? undefined);
+        if (holdForChain) {
+            // Another hop is coming: the batch rides on rather than being
+            // put down here. The next jumpTo takes it straight back out of
+            // this array (same player uuid), and flushCarriedJumpEscorts
+            // puts it down at whichever system the chain actually ends in.
+            carriedJumpEscorts.push(...jumpEscorts);
+        } else {
+            await insertCarriedEscorts(newSimulationBridge, newDisplayWorld,
+                uuid, entity, jumpEscorts, communicator.uuid ?? undefined);
+        }
     }
     await insertMissionShips(newSimulationBridge, missionShips,
         communicator.uuid ?? undefined);
@@ -1423,14 +1483,50 @@ async function startGame() {
     };
     // Console lever for tests/debugging: what the client is currently
     // holding for its escorts (see spaceport/landed_escorts.ts). `landed`
-    // is the roster held while docked; `jumping` is the batch waiting for
-    // the destination system's world to be built.
+    // is the roster held while docked or swept at a gate; `jumping` is the
+    // batch waiting for the destination system's world to be built — or
+    // riding out a multi-jump chain.
     (window as any).novaEscortRosters = () => ({
         landed: landedEscorts.map(({ player, uuid }) => ({ player, uuid })),
         jumping: carriedJumpEscorts.map(({ player, uuid }) => ({
             player, uuid,
         })),
     });
+    /**
+     * Console lever: the same-system convergence invariant, live. Reports
+     * where the local player's escorts are and, crucially, whether any are
+     * stranded — `stranded` must always be empty (the zero-energy
+     * hyperspace exclusion aside, whose ships never leave the system and so
+     * are never expected elsewhere). `expected` is every escort the client
+     * knows this player owns: the ones in the world plus the ones it holds.
+     */
+    (window as any).novaEscortAudit = () => {
+        const current = displayWorld;
+        if (!current) {
+            return null;
+        }
+        const playerUuid = localPlayerShipUuid(current);
+        if (!playerUuid) {
+            return null;
+        }
+        const inWorld: string[] = [];
+        for (const [entityUuid, entity] of current.entities) {
+            if (entity.components.get(PlayerEscortComponent)?.player
+                === playerUuid) {
+                inWorld.push(entityUuid);
+            }
+        }
+        const rosters = [landedEscorts, carriedJumpEscorts];
+        const expected = [...inWorld];
+        for (const roster of rosters) {
+            for (const carried of roster) {
+                if (carried.player === playerUuid) {
+                    expected.push(carried.uuid);
+                }
+            }
+        }
+        return escortsAccountedFor(playerUuid, expected, inWorld, rosters);
+    };
 
     // User movement input cancels the autopilot (the autopilot's own
     // inputs go through controlSinks directly and don't loop back
@@ -1673,6 +1769,16 @@ async function startGame() {
             if (landedEscorts.length > 0 && !pendingDockedShip && !dockedShip
                 && !pendingGateShip && !gateDockedShip) {
                 await flushLandedEscorts(currentBridge, currentDisplayWorld);
+            }
+            // A batch riding out a multi-jump chain is put back down once
+            // the chain settles. Same in-flight, not-docked guard: the
+            // dock/launch blocks above have already run this frame, so a
+            // player who is on their way into a spaceport or a gate map
+            // keeps holding until they are back in space.
+            if (carriedJumpEscorts.length > 0 && !pendingDockedShip
+                && !dockedShip && !pendingGateShip && !gateDockedShip) {
+                await flushCarriedJumpEscorts(currentBridge,
+                    currentDisplayWorld);
             }
             // The simulation runs on a fixed timestep, so convert real
             // elapsed time into a whole number of simulation steps and

@@ -27,8 +27,9 @@ import { FormationComponent } from './npc_ai_plugin.js';
 import { LandEvent, PlanetComponent, PlanetDataComponent } from './planet_plugin.js';
 import { EscortLandingComponent, PlayerEscortComponent } from './player_escort.js';
 import {
-    EscortJump, EscortJumpEvent, EscortLanded, EscortLandedEvent,
-    ESCORT_LAND_DISTANCE_SQUARED, playerEscortLink, steerToStellar,
+    escortFollows, EscortJump, EscortJumpEvent, EscortLanded,
+    EscortLandedEvent, ESCORT_LAND_DISTANCE_SQUARED, ownedEscortsInUuidOrder,
+    playerEscortLink, steerToStellar,
 } from './player_escort_plugin.js';
 import { ControlledByComponent } from './ship_control.js';
 
@@ -39,7 +40,10 @@ const SHIP_ID = 'test:ship';
 /** A hull with no energy capacity at all: no hyperdrive, cannot follow. */
 const NO_ENERGY_SHIP_ID = 'test:noEnergy';
 
-async function makeWorld({ planetGate = false } = {}) {
+type GateKind = 'hypergate' | 'wormhole';
+
+async function makeWorld({ planetGate = false, gateKind = 'hypergate' }:
+    { planetGate?: boolean, gateKind?: GateKind } = {}) {
     const gameData = new MockGameData();
     gameData.data.Ship.map.set(SHIP_ID, {
         ...getDefaultShipData(),
@@ -81,7 +85,16 @@ async function makeWorld({ planetGate = false } = {}) {
         ...getDefaultPlanetData(),
         id: 'test:planet',
         ...(planetGate
-            ? { gate: { kind: 'hypergate' as const, links: [] } }
+            ? {
+                gate: {
+                    kind: gateKind,
+                    // A wormhole needs a real exit so GateDepartureSystem
+                    // picks one instead of the random-wormhole path.
+                    destinations: gateKind === 'wormhole'
+                        ? ['test:exit'] : [],
+                    emergenceAngle: null,
+                },
+            }
             : {}),
     });
     planet.components.set(MovementStateComponent, {
@@ -376,12 +389,16 @@ describe('escorts landing with the player', () => {
         });
 
     it('does not order a landing at a gate stellar', async () => {
+        // An escort has no reason to fly down to a gate: the transit takes
+        // the whole flock on this same event (EscortFollowGateSystem), so
+        // the escort leaves the system rather than being given an order.
         const { world, addEscort } = await makeWorld({ planetGate: true });
         const escort = await addEscort('escort');
         world.step();
         world.emit(LandEvent, { id: 'test:planet', uuid: PLANET }, [PLAYER]);
         world.step();
         expect(escort.components.has(EscortLandingComponent)).toBeFalse();
+        expect(world.entities.has('escort')).toBeFalse();
     });
 
     it('does not land an escort in the tick the player returns', async () => {
@@ -510,6 +527,202 @@ describe('escorts following a jump', () => {
         expect(jumps.length).toEqual(0);
         expect(world.entities.has('their escort')).toBeTrue();
     });
+});
+
+describe('escorts following a gate transit', () => {
+    /** Sweeps the flock through a gate and returns the carry events. */
+    async function transit(world: World, landed: EscortLanded[]) {
+        world.emit(LandEvent, { id: 'test:planet', uuid: PLANET }, [PLAYER]);
+        world.step();
+        return landed;
+    }
+
+    it('carries owned escorts through a hypergate', async () => {
+        const { world, addEscort } = await makeWorld({ planetGate: true });
+        const escort = await addEscort('escort');
+        const landed: EscortLanded[] = [];
+        world.events.get(EscortLandedEvent).subscribe(
+            ({ data }) => landed.push(data));
+        world.step();
+
+        await transit(world, landed);
+
+        expect(world.entities.has('escort')).toBeFalse();
+        expect(landed.length).toEqual(1);
+        expect(landed[0].uuid).toEqual('escort');
+        expect(landed[0].player).toEqual(PLAYER);
+        // The gate the flock went through, so the batch is attributable the
+        // same way a landing's is.
+        expect(landed[0].planet).toEqual(PLANET);
+        expect(landed[0].entity.components.get(PlayerEscortComponent)?.player)
+            .toEqual(PLAYER);
+        expect(escort.components.has(EscortLandingComponent)).toBeFalse();
+    });
+
+    it('carries owned escorts through a wormhole', async () => {
+        const { world, addEscort } = await makeWorld(
+            { planetGate: true, gateKind: 'wormhole' });
+        await addEscort('escort');
+        const landed: EscortLanded[] = [];
+        world.events.get(EscortLandedEvent).subscribe(
+            ({ data }) => landed.push(data));
+        world.step();
+
+        await transit(world, landed);
+
+        // The player transits from the same event (GateDepartureSystem);
+        // the flock must leave with them, not be left behind.
+        expect(world.entities.has(PLAYER)).toBeFalse();
+        expect(world.entities.has('escort')).toBeFalse();
+        expect(landed.map(({ uuid }) => uuid)).toEqual(['escort']);
+    });
+
+    it('carries a zero-energy escort through a gate (gates carry anything)',
+        async () => {
+            // The mirror image of the jump rule: a hull with no hyperdrive
+            // is left behind by a JUMP but goes through a GATE, which does
+            // the moving for it.
+            const { world, addEscort } = await makeWorld({ planetGate: true });
+            const stranded = await addEscort('noEnergy', 0, 300, () => { },
+                NO_ENERGY_SHIP_ID);
+            const landed: EscortLanded[] = [];
+            world.events.get(EscortLandedEvent).subscribe(
+                ({ data }) => landed.push(data));
+            world.step();
+            expect(stranded.components.get(FuelComponent)?.max).toEqual(0);
+
+            await transit(world, landed);
+
+            expect(world.entities.has('noEnergy')).toBeFalse();
+            expect(landed.map(({ uuid }) => uuid)).toEqual(['noEnergy']);
+        });
+
+    it('carries a flying escort and a zero-energy escort together',
+        async () => {
+            const { world, addEscort } = await makeWorld({ planetGate: true });
+            await addEscort('a flyer');
+            await addEscort('b noEnergy', 0, 300, () => { },
+                NO_ENERGY_SHIP_ID);
+            const landed: EscortLanded[] = [];
+            world.events.get(EscortLandedEvent).subscribe(
+                ({ data }) => landed.push(data));
+            world.step();
+
+            await transit(world, landed);
+
+            // Swept in uuid order, so the batch's formation slots come out
+            // the same on every peer and in every replay.
+            expect(landed.map(({ uuid }) => uuid))
+                .toEqual(['a flyer', 'b noEnergy']);
+            expect(world.entities.has('a flyer')).toBeFalse();
+            expect(world.entities.has('b noEnergy')).toBeFalse();
+        });
+
+    it('drops a pending landing order as it carries', async () => {
+        // The order names a stellar in the system being left behind. The
+        // escort must come back out of the roster clean, or it would fly at
+        // a planet uuid that means nothing in the destination system.
+        const { world, addEscort } = await makeWorld({ planetGate: true });
+        const escort = await addEscort('escort');
+        escort.components.set(EscortLandingComponent, { planet: PLANET });
+        const landed: EscortLanded[] = [];
+        world.events.get(EscortLandedEvent).subscribe(
+            ({ data }) => landed.push(data));
+        world.step();
+
+        await transit(world, landed);
+
+        expect(landed.length).toEqual(1);
+        expect(landed[0].entity.components.has(EscortLandingComponent))
+            .toBeFalse();
+    });
+
+    it('does not carry another player\'s escorts through a gate', async () => {
+        const { world, addShip } = await makeWorld({ planetGate: true });
+        await addShip('other player', 1000, 0, ship => {
+            ship.components.set(ControlledByComponent,
+                { peerId: 'other peer' });
+        });
+        await addShip('their escort', 1000, 200, ship => {
+            ship.components.set(FormationComponent,
+                { leader: 'other player', slot: 0 });
+            ship.components.set(EscortCommandComponent,
+                { command: 'formation' });
+        });
+        const landed: EscortLanded[] = [];
+        world.events.get(EscortLandedEvent).subscribe(
+            ({ data }) => landed.push(data));
+        world.step();
+
+        await transit(world, landed);
+
+        expect(landed.length).toEqual(0);
+        expect(world.entities.has('their escort')).toBeTrue();
+    });
+
+    it('does not carry anything at an ordinary stellar', async () => {
+        // The two LandEvent systems split on `gate` and never both act: an
+        // ordinary landing issues orders and sweeps nothing.
+        const { world, addEscort } = await makeWorld();
+        const escort = await addEscort('escort');
+        const landed: EscortLanded[] = [];
+        world.events.get(EscortLandedEvent).subscribe(
+            ({ data }) => landed.push(data));
+        world.step();
+
+        world.emit(LandEvent, { id: 'test:planet', uuid: PLANET }, [PLAYER]);
+        world.step();
+
+        expect(landed.length).toEqual(0);
+        expect(world.entities.has('escort')).toBeTrue();
+        expect(escort.components.has(EscortLandingComponent)).toBeTrue();
+    });
+});
+
+describe('escortFollows', () => {
+    it('excludes a zero-energy hull from a jump but not from a gate',
+        async () => {
+            const { world, addEscort } = await makeWorld();
+            const noEnergy = await addEscort('noEnergy', 0, 300, () => { },
+                NO_ENERGY_SHIP_ID);
+            const normal = await addEscort('normal');
+            world.step();
+
+            expect(escortFollows('jump', noEnergy)).toBeFalse();
+            expect(escortFollows('gate', noEnergy)).toBeTrue();
+            expect(escortFollows('jump', normal)).toBeTrue();
+            expect(escortFollows('gate', normal)).toBeTrue();
+            expect(world.entities.has('normal')).toBeTrue();
+        });
+
+    it('excludes a ship with no fuel component from a jump', async () => {
+        const { world, addEscort } = await makeWorld();
+        const escort = await addEscort('escort');
+        world.step();
+        escort.components.delete(FuelComponent);
+        expect(escortFollows('jump', escort)).toBeFalse();
+        expect(escortFollows('gate', escort)).toBeTrue();
+    });
+});
+
+describe('ownedEscortsInUuidOrder', () => {
+    it('returns the player\'s followers in uuid order, filtered by rule',
+        async () => {
+            const { world, addEscort } = await makeWorld();
+            await addEscort('c');
+            await addEscort('a');
+            await addEscort('b noEnergy', 0, 300, () => { },
+                NO_ENERGY_SHIP_ID);
+            world.step();
+
+            expect(ownedEscortsInUuidOrder(world.entities, PLAYER, 'gate'))
+                .toEqual(['a', 'b noEnergy', 'c']);
+            // The jump rule drops the hull with no hyperdrive.
+            expect(ownedEscortsInUuidOrder(world.entities, PLAYER, 'jump'))
+                .toEqual(['a', 'c']);
+            expect(ownedEscortsInUuidOrder(world.entities, 'nobody', 'gate'))
+                .toEqual([]);
+        });
 });
 
 describe('steerToStellar', () => {

@@ -29,7 +29,11 @@ import { deriveEntityComponents } from '../nova_plugin/entity_factory.js';
 import { ShipPhysicsComponent } from '../nova_plugin/ship_plugin.js';
 import { Stat } from '../nova_plugin/stat.js';
 import {
-    CarriedEscort, deployedFightersBySource, prepareCarriedEscort,
+    JumpComponent, MultiJumpContinueComponent,
+} from '../nova_plugin/jump_plugin.js';
+import {
+    CarriedEscort, deployedFightersBySource, escortsAccountedFor,
+    multiJumpChainContinues, multiJumpChainSettled, prepareCarriedEscort,
     prepareCarriedEscorts, takeCarriedEscorts,
 } from './landed_escorts.js';
 
@@ -279,5 +283,139 @@ describe('carried escort round trip', () => {
         expect(prepareCarriedEscort(
             { player: PLAYER, uuid: '1', entity: new Entity() },
             PLAYER, leader, 0)).toBeUndefined();
+    });
+});
+
+describe('multi-jump chain roster policy', () => {
+    /** A player entity mid-jump with `autoJumpsLeft` budget remaining. */
+    function jumping(autoJumpsLeft?: number) {
+        const player = new Entity();
+        player.components.set(JumpComponent, {
+            to: 'test:destination',
+            stage: 'arriving',
+            direction: 0,
+            ...(autoJumpsLeft === undefined ? {} : { autoJumpsLeft }),
+        });
+        return player;
+    }
+
+    it('holds a batch while the chain has budget left', () => {
+        expect(multiJumpChainContinues(jumping(2))).toBeTrue();
+        expect(multiJumpChainContinues(jumping(1))).toBeTrue();
+    });
+
+    it('releases a batch on the last hop of a chain', () => {
+        expect(multiJumpChainContinues(jumping(0))).toBeFalse();
+        expect(multiJumpChainContinues(jumping())).toBeFalse();
+        // An ordinary single jump, and a gate transit (no JumpComponent at
+        // all — jumpTo serves both).
+        expect(multiJumpChainContinues(new Entity())).toBeFalse();
+    });
+
+    it('calls the chain settled only when neither jump component is set',
+        () => {
+            expect(multiJumpChainSettled(new Entity())).toBeTrue();
+            // Mid-sequence in the origin system.
+            expect(multiJumpChainSettled(jumping(1))).toBeFalse();
+            // The one step between arriving and the next hop beginning.
+            const continuing = new Entity();
+            continuing.components.set(MultiJumpContinueComponent, { left: 1 });
+            expect(multiJumpChainSettled(continuing)).toBeFalse();
+        });
+
+    it('ends a chain that ran out of route or fuel', () => {
+        // MultiJumpContinueSystem consumes its marker whatever the outcome,
+        // so a blocked continuation leaves the player with neither
+        // component — which is exactly the release signal.
+        const blocked = new Entity();
+        blocked.components.set(MultiJumpContinueComponent, { left: 3 });
+        expect(multiJumpChainSettled(blocked)).toBeFalse();
+        blocked.components.delete(MultiJumpContinueComponent);
+        expect(multiJumpChainSettled(blocked)).toBeTrue();
+    });
+
+    /**
+     * The client's take/hold/insert decision, as jumpTo and
+     * flushCarriedJumpEscorts make it (browser.ts), run headlessly over a
+     * whole chain. The point under test is that the batch is never put down
+     * in a system the chain is about to leave, and is put down exactly once
+     * in the one it ends in.
+     */
+    it('lands the batch in the final system of a chain, and only there',
+        () => {
+            let held: CarriedEscort[] = [
+                { player: PLAYER, uuid: 'e1', entity: new Entity() },
+                { player: PLAYER, uuid: 'e2', entity: new Entity() },
+            ];
+            const insertedIn: string[] = [];
+
+            // Three hops of a two-extra-jump chain: budget 2 -> 1 -> 0.
+            for (const [system, budget] of
+                [['mid a', 2], ['mid b', 1], ['final', 0]] as const) {
+                const arriving = jumping(budget);
+                const taken = takeCarriedEscorts(held, PLAYER);
+                held = [];
+                if (multiJumpChainContinues(arriving)) {
+                    held = taken; // Rides on to the next hop.
+                } else if (taken.length > 0) {
+                    insertedIn.push(system);
+                }
+            }
+
+            expect(insertedIn).toEqual(['final']);
+            expect(held.length).toEqual(0);
+        });
+
+    it('releases a held batch when the chain ends early', () => {
+        // The chain claimed more hops but the next one was blocked, so the
+        // player settles where it is. The standing flush is what puts the
+        // batch down: settled player, batch taken, roster emptied.
+        const held: CarriedEscort[] = [
+            { player: PLAYER, uuid: 'e1', entity: new Entity() },
+        ];
+        expect(multiJumpChainSettled(new Entity())).toBeTrue();
+        const taken = takeCarriedEscorts(held, PLAYER);
+        expect(taken.map(({ uuid }) => uuid)).toEqual(['e1']);
+        expect(held.length).toEqual(0);
+    });
+});
+
+describe('escort convergence invariant', () => {
+    function carried(uuid: string, player = PLAYER): CarriedEscort {
+        return { player, uuid, entity: new Entity() };
+    }
+
+    it('accounts for escorts in the world and in rosters', () => {
+        const landed = [carried('a')];
+        const jumpingRoster = [carried('b')];
+        const audit = escortsAccountedFor(PLAYER, ['a', 'b', 'c'], ['c'],
+            [landed, jumpingRoster]);
+        expect(audit.inWorld).toEqual(['c']);
+        expect(audit.inRoster).toEqual(['a', 'b']);
+        expect(audit.stranded).toEqual([]);
+    });
+
+    it('reports an escort that is in neither as stranded', () => {
+        const audit = escortsAccountedFor(PLAYER, ['a', 'lost'], ['a'], []);
+        expect(audit.stranded).toEqual(['lost']);
+    });
+
+    it('does not count another player\'s roster entries', () => {
+        // A shared roster's other-peer entries must never make this
+        // player's missing escort look accounted for.
+        const shared = [carried('theirs', 'other player'),
+            carried('lost', 'other player')];
+        const audit = escortsAccountedFor(PLAYER, ['lost'], [], [shared]);
+        expect(audit.stranded).toEqual(['lost']);
+    });
+
+    it('holds across a gate transit: the whole flock is in the roster', () => {
+        // EscortFollowGateSystem sweeps everything, including a zero-energy
+        // hull, so nothing is left behind in the origin system.
+        const roster = [carried('flyer'), carried('noEnergy')];
+        const audit = escortsAccountedFor(PLAYER, ['flyer', 'noEnergy'], [],
+            [roster]);
+        expect(audit.stranded).toEqual([]);
+        expect(audit.inRoster).toEqual(['flyer', 'noEnergy']);
     });
 });
