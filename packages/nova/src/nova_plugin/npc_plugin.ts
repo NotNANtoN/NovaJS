@@ -117,20 +117,27 @@ export const FollowAI = new System({
 export const ShootAllWeaponsComponent = new Component<undefined>('ShootAllWeaponsComponent');
 const ShootAllWeaponsAI = new System({
     name: 'ShootAllWeaponsAI',
-    args: [WeaponsStateComponent, SimulationGameDataResource, TargetComponent, ShootAllWeaponsComponent] as const,
-    step(weapons, gameData, { target }) {
+    args: [WeaponsStateComponent, SimulationGameDataResource, TargetComponent,
+        Entities, ShootAllWeaponsComponent] as const,
+    step(weapons, gameData, { target }, entities) {
+        // Bays fire like any other weapon now that a bay's ammo is its
+        // fighters (weapon_parse's AmmoTypeParse), so the magazine and
+        // the reload clock bound how many launch — but ONLY at a live
+        // target. This AI holds `firing` on every weapon whether or not
+        // it has something to shoot at, which is harmless for a gun and
+        // ruinous for a bay: a carrier with no target would empty its
+        // hangar into open space, one fighter per reload, and each
+        // launch spends a fighter outfit that only docking refunds.
+        const hasLiveTarget = target !== undefined && entities.has(target);
         for (const [id, weapon] of weapons) {
             const weaponType = gameData.data.Weapon.getCached(id)?.type;
-            if (weaponType == null || weaponType === 'BayWeaponData') {
-                // NPCs still don't launch fighters. Bays now DO consume
-                // ammo (a bay's ammo is its fighters — see
-                // weapon_parse's AmmoTypeParse), so the original
-                // "there is no ammo limit" reason is gone; what's
-                // missing is NPC fighter handling itself (recall,
-                // rearming on respawn, fleet accounting). Deliberately
-                // out of scope, so the exclusion stays.
+            if (weaponType == null) {
                 continue;
-            };
+            }
+            if (weaponType === 'BayWeaponData' && !hasLiveTarget) {
+                weapon.firing = false;
+                continue;
+            }
             weapon.target = target;
             weapon.firing = true;
         }

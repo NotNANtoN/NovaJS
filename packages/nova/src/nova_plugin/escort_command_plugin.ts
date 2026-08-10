@@ -11,7 +11,7 @@ import { TimeResource, TimeSystem } from 'nova_ecs/plugins/time_plugin';
 import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
-import { ReturnWhenTargetRemovedComponent, startReturnHome } from './bay_plugin.js';
+import { BayFighterComponent, ReturnWhenTargetRemovedComponent, startReturnHome } from './bay_plugin.js';
 import { DisabledComponent } from './disabled_component.js';
 import { EscortCommandComponent, EscortCommandState, EscortOrders, EscortOrdersComponent } from './escort_command.js';
 import { OwnerComponent } from './fire_weapon_plugin.js';
@@ -19,10 +19,10 @@ import { SimulationGameDataResource } from './game_data_resource.js';
 import { ExplodingComponent } from './death_plugin.js';
 import { GovtComponent } from './govt_component.js';
 import { shipDisposition } from './iff_plugin.js';
-import { chooseNearest, FormationComponent, NpcComponent, RCS_ACCEL_FRACTION } from './npc_ai_plugin.js';
+import { chooseNearest, FormationComponent, NpcComponent, NpcSteeringSystem, RCS_ACCEL_FRACTION } from './npc_ai_plugin.js';
 import { ShootAllWeaponsComponent } from './npc_plugin.js';
 import { LegalRecordsComponent, LegalRecordsState } from './reputation_plugin.js';
-import { EscortLandingComponent } from './player_escort.js';
+import { EscortLandingComponent, PlayerEscortComponent } from './player_escort.js';
 import { ShipComponent, ShipPhysicsComponent } from './ship_plugin.js';
 import { ShipControlEvent, ShipControlStateComponent } from './ship_control.js';
 import { TargetComponent } from './target_component.js';
@@ -173,6 +173,95 @@ const EscortCommandPropagationSystem = new System({
         }
     },
     after: [TimeSystem],
+    before: [MovementSystem],
+});
+
+/**
+ * NPC CARRIERS command their own wings: the NPC-side counterpart of
+ * EscortCommandPropagationSystem.
+ *
+ * That system covers carriers that are themselves player ESCORTS (they
+ * carry EscortCommandComponent and mirror their own command down). An
+ * NPC warship has no command to mirror — its intent lives in
+ * NpcComponent.mode plus TargetComponent — so without this its fighters
+ * would launch into formation and sit there firing front-quadrant
+ * turrets while the carrier fought.
+ *
+ * The rule is a MIRROR, not a one-shot order at launch, and that single
+ * choice covers three of the four cases the feature needs:
+ *
+ *  - launch: the tick after a fighter appears it is already idle
+ *    ('formation'), so it is ordered onto the carrier's victim;
+ *  - re-engage: a fighter that killed its victim is reverted to
+ *    'formation' by EscortCommandBehaviorSystem, and is re-ordered here
+ *    on the next tick while the carrier is still fighting;
+ *  - recall to station: when the carrier stops attacking (victim dead,
+ *    fled, or the NPC AI dropped it), the mirror writes 'formation' and
+ *    the wings fall back into their slots.
+ *
+ * (The fourth, carrier death, is OrphanedBayFighterSystem in
+ * bay_plugin: this system stops running the moment the carrier entity
+ * is gone.)
+ *
+ * DETERMINISM: the value written depends only on the carrier's own
+ * synced state, never on iteration order, and the write is idempotent
+ * (skipped when it would not change anything), so every peer converges
+ * on the same commands regardless of entity-map order. It consumes no
+ * randomness and no clock.
+ *
+ * PLAYER-LAUNCHED FIGHTERS ARE NEVER TOUCHED, structurally rather than
+ * by convention: this system only visits entities with NpcComponent (a
+ * player's ship has none), it bails on carriers that carry an escort
+ * command of their own (a hired carrier escort — the propagation system
+ * owns those), and it skips any wing marked PlayerEscortComponent,
+ * which is stamped whenever the escort chain tops out at a player and
+ * is never cleared.
+ */
+const NpcWingCommandSystem = new System({
+    name: 'NpcWingCommand',
+    args: [NpcComponent, TargetComponent, UUID, Entities,
+        Optional(EscortCommandComponent)] as const,
+    step(npc, target, uuid, entities, escortCommand) {
+        if (escortCommand) {
+            // A carrier that is itself a player escort: its wings mirror
+            // ITS command (EscortCommandPropagationSystem), not the NPC
+            // AI's opinion.
+            return;
+        }
+        // Only a live victim counts: a stale uuid would leave the wings
+        // chasing a ship that no longer exists.
+        const victim = npc.mode === 'attack' && target.target !== undefined
+            && entities.has(target.target) ? target.target : undefined;
+        const desired: EscortCommandState = victim !== undefined
+            ? { command: 'attack', target: victim }
+            : { command: 'formation' };
+
+        for (const [otherUuid, other] of entities) {
+            if (otherUuid === uuid) {
+                continue;
+            }
+            const otherCommand = other.components.get(EscortCommandComponent);
+            // Bay-launched wings of THIS carrier only. Fleet escorts
+            // holding formation on an NPC carrier have no escort command
+            // and run their own NPC AI; they are deliberately left alone.
+            if (!otherCommand
+                || !other.components.has(BayFighterComponent)
+                || other.components.has(PlayerEscortComponent)
+                || escortParent(other) !== uuid) {
+                continue;
+            }
+            if (otherCommand.command !== desired.command
+                || otherCommand.target !== desired.target) {
+                other.components.set(EscortCommandComponent, { ...desired });
+            }
+        }
+    },
+    // The carrier's mode/target are settled by the NPC decision system
+    // (which NpcSteeringSystem already runs after) before the wings are
+    // told what to do; EscortCommandBehaviorSystem then executes the
+    // commands later in the same tick (it lists this system in its
+    // `after`).
+    after: [TimeSystem, NpcSteeringSystem],
     before: [MovementSystem],
 });
 
@@ -480,7 +569,7 @@ export const EscortCommandBehaviorSystem = new System({
             weapon.firing = chosen !== undefined;
         }
     },
-    after: [TimeSystem, EscortCommandPropagationSystem],
+    after: [TimeSystem, EscortCommandPropagationSystem, NpcWingCommandSystem],
     before: [MovementSystem],
 });
 
@@ -492,6 +581,7 @@ export const EscortCommandPlugin: Plugin = {
         serializer?.addComponent(EscortOrdersComponent, EscortOrders);
         world.addSystem(EscortCommandInputSystem);
         world.addSystem(EscortCommandPropagationSystem);
+        world.addSystem(NpcWingCommandSystem);
         world.addSystem(EscortCommandBehaviorSystem);
     },
 };
