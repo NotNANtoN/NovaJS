@@ -13,10 +13,11 @@
  *
  * Deliberately NOT folded in: free mass, cargo, hardpoints, and
  * Contribute flags all keep reading only what is physically installed
- * (outfitter_rules' ownedOutfits). A deployed fighter's tonnage really
- * is off the ship, so a player CAN currently buy into mass that a
- * returning fighter then wants back. Widening ownedOutfits would change
- * every one of those five rules at once, so it is left alone here.
+ * (outfitter_rules' ownedOutfits). RULING (Matthew, 2026-08-09): this is
+ * correct by design — fighters don't have mass; the mass cost is paid by
+ * installing the BAY. Verified against stock data + every bundled
+ * plugin: all 48 fighter ammo outfits have mass 0, so a deployed
+ * fighter never represents tonnage the ship gets back on docking.
  *
  * ---------------------------------------------------------------------
  * EXTENSION SEAM for the landed-escort roster
