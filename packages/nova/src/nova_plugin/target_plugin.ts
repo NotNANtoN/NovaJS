@@ -76,9 +76,17 @@ const ChooseTargetSystem = new System({
             if (flock.length === 0) {
                 return;
             }
+            // The cycle carries a "no target" step at the end, exactly
+            // like the normal (tab) cycle below: index -1 means no
+            // target, so the sequence is escort1 -> escort2 -> ... ->
+            // no target -> escort1. A target that is NOT a flock member
+            // (a normal target picked with tab/r) reads as -1 too, so
+            // the first press enters the flock at its first member
+            // rather than clearing the target.
             const currentIndex = target.target
                 ? flock.indexOf(target.target) : -1;
-            target.target = flock[(currentIndex + 1) % flock.length];
+            const nextIndex = (currentIndex + 2) % (flock.length + 1) - 1;
+            target.target = nextIndex === -1 ? undefined : flock[nextIndex];
             emit(CycleTargetEvent, target);
             return;
         }

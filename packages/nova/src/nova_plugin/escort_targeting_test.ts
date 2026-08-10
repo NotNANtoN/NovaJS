@@ -109,6 +109,44 @@ describe('escort targeting', () => {
             expect(playerTarget(world)).toBe('escort');
             press(world, 'escortTarget');
             expect(playerTarget(world)).toBe('fighter');
+            // A "no target" step closes the cycle before it wraps.
+            press(world, 'escortTarget');
+            expect(playerTarget(world)).toBeUndefined();
+            press(world, 'escortTarget');
+            expect(playerTarget(world)).toBe('escort');
+        });
+
+    it('the escort cycle passes through a no-target step every lap',
+        async () => {
+            const world = await makeTargetingWorld();
+            const seen: (string | undefined)[] = [];
+            for (let i = 0; i < 6; i++) {
+                press(world, 'escortTarget');
+                seen.push(playerTarget(world));
+            }
+            expect(seen).toEqual(['escort', 'fighter', undefined,
+                'escort', 'fighter', undefined]);
+        });
+
+    it('a single escort alternates with the no-target step', async () => {
+        const world = await makeTargetingWorld();
+        world.entities.delete('fighter');
+        world.step();
+        press(world, 'escortTarget');
+        expect(playerTarget(world)).toBe('escort');
+        press(world, 'escortTarget');
+        expect(playerTarget(world)).toBeUndefined();
+        press(world, 'escortTarget');
+        expect(playerTarget(world)).toBe('escort');
+    });
+
+    it('entering the escort cycle from a normal target picks the first ' +
+        'escort rather than clearing', async () => {
+            // A non-flock target reads as "not in the cycle", so the
+            // first press must enter the flock, not land on no-target.
+            const world = await makeTargetingWorld();
+            applySetTarget(world, PEER, 'enemy');
+            expect(playerTarget(world)).toBe('enemy');
             press(world, 'escortTarget');
             expect(playerTarget(world)).toBe('escort');
         });
@@ -251,6 +289,10 @@ describe('exploding ships are untargetable', () => {
             world.step();
             press(world, 'escortTarget');
             expect(playerTarget(world)).toBe('fighter');
+            // Only the fighter is left in the cycle, so it alternates
+            // with the no-target step.
+            press(world, 'escortTarget');
+            expect(playerTarget(world)).toBeUndefined();
             press(world, 'escortTarget');
             expect(playerTarget(world)).toBe('fighter');
         });

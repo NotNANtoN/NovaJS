@@ -31,8 +31,10 @@ import { Stat } from '../nova_plugin/stat.js';
 import {
     JumpComponent, MultiJumpContinueComponent,
 } from '../nova_plugin/jump_plugin.js';
+import { GateArrivalComponent } from '../nova_plugin/gate_transit_plugin.js';
 import {
     CarriedEscort, deployedFightersBySource, escortsAccountedFor,
+    carriedBatchMustHold, carriedBatchSettled, gateArrivalPending,
     multiJumpChainContinues, multiJumpChainSettled, prepareCarriedEscort,
     prepareCarriedEscorts, takeCarriedEscorts,
 } from './landed_escorts.js';
@@ -322,6 +324,67 @@ describe('multi-jump chain roster policy', () => {
             continuing.components.set(MultiJumpContinueComponent, { left: 1 });
             expect(multiJumpChainSettled(continuing)).toBeFalse();
         });
+
+    /**
+     * Matthew's item 2: escorts must come out of a wormhole/hypergate IN
+     * FORMATION with the player.
+     *
+     * A hyperspace jump sets its arrival kinematics at DEPARTURE, so the
+     * player entity already holds its destination station when a batch is
+     * placed on it. A GATE arrival cannot — the exit is the destination
+     * gate's spöb, which only exists once the destination world is up, so
+     * GateArrivalSystem teleports the player on its first tick there.
+     * Placing a batch before that put the escorts in formation around the
+     * player's ORIGIN-system position. The batch is therefore held over a
+     * pending gate arrival exactly as it is over a multi-jump chain.
+     */
+    describe('gate arrivals hold the batch until the player is placed', () => {
+        /** A player entity still carrying its gate arrival marker. */
+        function arrivingAtGate() {
+            const player = new Entity();
+            player.components.set(GateArrivalComponent, {
+                destinationSpob: 'nova:1', emergenceAngle: null,
+                randomDraw: 0.25,
+            });
+            return player;
+        }
+
+        it('recognizes a pending gate arrival', () => {
+            expect(gateArrivalPending(arrivingAtGate())).toBeTrue();
+            expect(gateArrivalPending(new Entity())).toBeFalse();
+        });
+
+        it('holds a batch entering a system through a gate', () => {
+            expect(carriedBatchMustHold(arrivingAtGate())).toBeTrue();
+        });
+
+        it('does not release the batch until the marker clears', () => {
+            const player = arrivingAtGate();
+            expect(carriedBatchSettled(player)).toBeFalse();
+            // GateArrivalSystem deletes the marker on the tick it
+            // teleports the ship to the gate's emergence point.
+            player.components.delete(GateArrivalComponent);
+            expect(carriedBatchSettled(player)).toBeTrue();
+        });
+
+        it('leaves the ordinary hyperspace arrival alone (no regression)',
+            () => {
+                // No gate marker: a plain jump arrival is released at once,
+                // because its station is already correct.
+                expect(carriedBatchMustHold(new Entity())).toBeFalse();
+                expect(carriedBatchSettled(new Entity())).toBeTrue();
+            });
+
+        it('holds for a chain and a gate independently', () => {
+            const both = arrivingAtGate();
+            both.components.set(MultiJumpContinueComponent, { left: 1 });
+            expect(carriedBatchSettled(both)).toBeFalse();
+            both.components.delete(MultiJumpContinueComponent);
+            expect(carriedBatchSettled(both)).toBeFalse();
+            both.components.delete(GateArrivalComponent);
+            expect(carriedBatchSettled(both)).toBeTrue();
+        });
+    });
 
     it('ends a chain that ran out of route or fuel', () => {
         // MultiJumpContinueSystem consumes its marker whatever the outcome,

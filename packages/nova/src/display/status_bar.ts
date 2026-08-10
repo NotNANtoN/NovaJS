@@ -38,8 +38,9 @@ import { STANDARD_CARGO_NAMES } from "../nova_plugin/mission_logic.js";
 import { ShipComponent } from "../nova_plugin/ship_plugin.js";
 import {
     formatCredits, navReadout, NavReadout, CargoLine, abbreviateCargoName,
-    specialCargoSummary, standardCargoIndex,
+    specialCargoSummary, standardCargoIndex, targetGovtLabel,
 } from "./status_bar_content.js";
+import { PlayerEscortComponent } from "../nova_plugin/player_escort.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 import { ShipDataComponent } from "../nova_plugin/ship_plugin.js";
 import { SystemIdResource } from "../nova_plugin/system_id_resource.js";
@@ -889,20 +890,20 @@ const DrawStatusBarSecondaryWeapon = new System({
 const TargetQuery = new Query([ShipDataComponent, Optional(ShieldComponent),
     Optional(ArmorComponent), Optional(AnimationGraphicComponent),
     Optional(PersComponent), Optional(DisabledComponent),
-    Optional(GovtComponent)] as const);
+    Optional(GovtComponent), Optional(PlayerEscortComponent)] as const);
 const DrawStatusBarTarget = new System({
     name: 'DrawStatusBarTarget',
     args: [StatusBarResource, TargetComponent, RunQuery,
-        SimulationGameDataResource, PlayerShipSelector] as const,
-    step(statusBar, { target }, runQuery, gameData) {
+        SimulationGameDataResource, UUID, PlayerShipSelector] as const,
+    step(statusBar, { target }, runQuery, gameData, playerUuid) {
         if (!target) {
             statusBar.clearTarget();
             return;
         }
         const result = runQuery(TargetQuery, target)[0];
         if (result) {
-            const [shipData, shield, armor, shipGraphic, pers, disabled, govt] =
-                result;
+            const [shipData, shield, armor, shipGraphic, pers, disabled, govt,
+                playerEscort] = result;
             // The government shown lower-right of the target pane. The original
             // shows the gövt's short Target Code (gövt TMPL offset 68) — "Pyro"
             // for "Pyrogenesis Skymining", " Fed." for "Federation" — rather
@@ -912,7 +913,14 @@ const DrawStatusBarTarget = new System({
             // Cached lookup: undefined until the govt data loads, then appears.
             const govtData = govt
                 ? gameData.data.Govt.getCached(govt.id) : undefined;
-            const government = govtData ? govtTargetName(govtData) : "";
+            // ...except for the local player's OWN escorts, which read
+            // "Escort" instead of their government. Per-player and
+            // display-only: `playerUuid` is this client's ship, so a peer
+            // targeting the same ship still sees its real government
+            // (targetGovtLabel).
+            const government = targetGovtLabel(
+                govtData ? govtTargetName(govtData) : "",
+                playerEscort?.player, playerUuid);
             // A përs person's name and subtitle replace the ship class name
             // and subtitle on the target display (EVN Bible, përs section).
             const subtitle = (pers?.subtitle || shipData.subtitle);

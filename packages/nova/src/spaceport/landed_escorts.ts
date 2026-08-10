@@ -10,6 +10,7 @@ import {
     OwnerComponent, SourceComponent,
 } from '../nova_plugin/fire_weapon_plugin.js';
 import { FiringGroupComponent } from '../nova_plugin/firing_group.js';
+import { GateArrivalComponent } from '../nova_plugin/gate_transit_plugin.js';
 import {
     JumpComponent, MultiJumpContinueComponent,
 } from '../nova_plugin/jump_plugin.js';
@@ -111,6 +112,57 @@ export function multiJumpChainContinues(player: Entity): boolean {
 export function multiJumpChainSettled(player: Entity): boolean {
     return !player.components.has(JumpComponent)
         && !player.components.has(MultiJumpContinueComponent);
+}
+
+/**
+ * ----------------------------------------------------------------------
+ * Gate arrivals are positioned a tick LATE
+ * ----------------------------------------------------------------------
+ *
+ * A hyperspace jump sets its arrival kinematics at DEPARTURE, in the origin
+ * system (JumpSequenceSystem's 'accelerating' case teleports the ship to the
+ * far side of the destination before handing it over), so a jumping player
+ * entity already carries its destination position/rotation/velocity by the
+ * time the client re-inserts a batch around it.
+ *
+ * A GATE arrival cannot: the exit point is the destination gate's spöb
+ * position, which only exists once the destination system world is up, so
+ * GateArrivalSystem teleports the ship on its FIRST TICK there. Until that
+ * tick the player entity still holds its ORIGIN-system station — so a batch
+ * placed on it lands in formation around where the player used to be,
+ * arbitrarily far from the gate they just came out of.
+ *
+ * The fix reuses the multi-jump hold: a batch arriving with a gate transit
+ * is held exactly as a chained batch is, and released once the marker is
+ * gone — which is precisely the moment GateArrivalSystem has finished
+ * positioning the player. The escorts then take formation stations on the
+ * gate exit, coasting outward at the player's emergence velocity.
+ * GateArrivalComponent is serializer-registered (gate_transit_plugin), so
+ * the display world the client asks sees it appear and disappear.
+ */
+export function gateArrivalPending(player: Entity): boolean {
+    return player.components.has(GateArrivalComponent);
+}
+
+/**
+ * Whether a batch arriving with this player entity must be HELD rather
+ * than put down beside it: another jump is coming (a multi-jump chain), or
+ * the player has not been placed at its arrival gate yet. Asked of the
+ * player entity as it enters a system.
+ */
+export function carriedBatchMustHold(player: Entity): boolean {
+    return multiJumpChainContinues(player) || gateArrivalPending(player);
+}
+
+/**
+ * Whether a held batch may now be put down: the exact complement of
+ * {@link carriedBatchMustHold}, asked of the player entity in the world it
+ * arrived in. Both conditions must have cleared — the chain has settled AND
+ * the gate arrival has been positioned — or the batch takes formation on a
+ * station the player is about to leave.
+ */
+export function carriedBatchSettled(player: Entity): boolean {
+    return multiJumpChainSettled(player) && !gateArrivalPending(player);
 }
 
 /**

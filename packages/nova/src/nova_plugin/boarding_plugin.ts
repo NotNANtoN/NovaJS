@@ -456,10 +456,22 @@ const BoardingGateSystem = new System({
         const targetMovement =
             targetEntity?.components.get(MovementStateComponent);
 
-        // A ship someone is already plundering can't be boarded again
-        // (it has already yielded its booty). Treated as "nothing to
-        // board" for feedback purposes.
-        if (targetEntity?.components.has(BoardedComponent)) {
+        // A ship someone is plundering RIGHT NOW can't be boarded on top
+        // of them. Treated as "nothing to board" for feedback purposes.
+        // A hulk whose previous session has ended is boardable again —
+        // that is what lets a repelled capture be retried (see
+        // BoardedState); what it already gave up stays given up.
+        //
+        // The `active` flag is corroborated against the named boarder
+        // rather than trusted on its own, so the lock is self-healing: a
+        // boarder that was destroyed, jumped out, or landed mid-session
+        // never runs its session-end path, and a bare flag would strand
+        // the hulk unboardable for the rest of the game.
+        const boarded = targetEntity?.components.get(BoardedComponent);
+        const boarderStillAboard = boarded !== undefined
+            && entities.get(boarded.boarder)?.components
+                .get(BoardingComponent)?.target === targetUuid;
+        if (boarded?.active && boarderStillAboard) {
             emit(BoardingBlockedEvent, { reason: 'notDisabled' }, [uuid]);
             return;
         }
@@ -548,22 +560,69 @@ const BoardingGateSystem = new System({
         const ammoAvailable = planAmmoPlunder(victim, boarderRoundsByWeapon, info)
             .reduce((sum, [, rounds]) => sum + rounds, 0);
 
+        // SEAM: boarding-mission offers are not implemented. Several përs
+        // ships — the Drifting Derelicts among them — are authored to
+        // offer a mission when boarded (mïsn AvailLoc "boarding ship"),
+        // and nothing here consults the mission universe, so that offer
+        // never appears. Capture is deliberately independent of it: a
+        // derelict that fails to offer its mission (or whose mission the
+        // player already holds) must still be capturable, which is what
+        // the session bookkeeping below guarantees.
+        //
+        // Re-boarding a hulk resumes from what it has already given up:
+        // the booty flags carry over so nothing can be taken twice (the
+        // credits booty in particular is re-derived from the ship price
+        // every time, so only this flag stops it being farmed). Capture
+        // starts fresh at 'none' — that is the retry.
+        const priorBoarded = boarded;
         entity.components.set(BoardingComponent, {
             target: targetUuid!,
             creditsAvailable: creditBooty(targetShipData!.price),
             ammoAvailable,
-            cargoTaken: false,
-            creditsTaken: false,
-            fuelTaken: false,
-            ammoTaken: false,
+            cargoTaken: priorBoarded?.cargoTaken ?? false,
+            creditsTaken: priorBoarded?.creditsTaken ?? false,
+            fuelTaken: priorBoarded?.fuelTaken ?? false,
+            ammoTaken: priorBoarded?.ammoTaken ?? false,
             capture: 'none',
+            // Piracy is charged per session: a fresh boarding that takes
+            // booty or tries a capture earns the BoardPenalty again.
             crimeApplied: false,
         });
-        targetEntity!.components.set(BoardedComponent, { boarder: uuid });
+        targetEntity!.components.set(BoardedComponent, {
+            ...priorBoarded, boarder: uuid, active: true,
+        });
         // Local boarding beep for the boarding player only.
         emit(PlayerSoundEvent, { id: BOARD_SOUND }, [uuid]);
     },
 });
+
+/**
+ * Closes a plunder session without capturing: the boarder drops its
+ * BoardingComponent, and the hulk's BoardedComponent goes INACTIVE while
+ * keeping (and accumulating) the record of what it has already given up.
+ *
+ * The hulk stays MARKED as boarded — the mission-goal seam
+ * (mission_ship_state.ts shipBoarded) reads presence, not activity — but
+ * it becomes boardable again, which is what makes a repelled capture
+ * retryable. See BoardedState for why the booty flags must survive and
+ * the capture state must not.
+ */
+function endBoardingSession(entity: Entity, target: Entity | undefined,
+    boarding: BoardingState): void {
+    entity.components.delete(BoardingComponent);
+    const boarded = target?.components.get(BoardedComponent);
+    if (!target || !boarded) {
+        return;
+    }
+    target.components.set(BoardedComponent, {
+        ...boarded,
+        active: false,
+        cargoTaken: boarded.cargoTaken || boarding.cargoTaken,
+        creditsTaken: boarded.creditsTaken || boarding.creditsTaken,
+        fuelTaken: boarded.fuelTaken || boarding.fuelTaken,
+        ammoTaken: boarded.ammoTaken || boarding.ammoTaken,
+    });
+}
 
 /**
  * Turns a captured disabled hulk into the boarder's escort: it joins
@@ -641,7 +700,7 @@ const BoardingActionSystem = new System({
 
         // Done, or the target vanished: end the session.
         if (controls.get('plunderDone') === 'start' || !target) {
-            entity.components.delete(BoardingComponent);
+            endBoardingSession(entity, target, boarding);
             return;
         }
 
@@ -659,7 +718,7 @@ const BoardingActionSystem = new System({
         // The remaining actions need the victim to still be a boardable
         // hulk; a repair or a stray killing blow ends the session.
         if (!target.components.has(DisabledComponent)) {
-            entity.components.delete(BoardingComponent);
+            endBoardingSession(entity, target, boarding);
             return;
         }
 

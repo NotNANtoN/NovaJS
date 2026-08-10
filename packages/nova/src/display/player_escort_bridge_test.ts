@@ -134,4 +134,52 @@ describe('player escort sim -> client wiring', () => {
             expect(received[0].entity.components.has(EscortLandingComponent))
                 .toBeFalse();
         });
+
+    /**
+     * Matthew's item 4 depends on a path the specs above do NOT cover: the
+     * status bar reads PlayerEscortComponent off a LIVE, in-world escort in
+     * the display world, which arrives through ordinary entity mirroring
+     * (snapshot's added/changed), not through a carry event's serialized
+     * entity. A component can be registered well enough for the event path
+     * and still be missing here, and the failure is silent — the govt line
+     * would simply never say "Escort".
+     */
+    it('mirrors a live escort\'s ownership to the client every frame',
+        async () => {
+            const { client, world, gameData, shipId, shipUuid } =
+                await makeSimulationBridgeHarness();
+
+            const escort = makeShip(await gameData.data.Ship.get(shipId));
+            escort.components.set(MovementStateComponent, {
+                accelerating: 0,
+                position: new Position(200, 0),
+                rotation: new Angle(0),
+                turnBack: false,
+                turning: 0,
+                velocity: new Vector(0, 0),
+            });
+            escort.components.set(FormationComponent,
+                { leader: shipUuid, slot: 0 });
+            escort.components.set(PlayerEscortComponent,
+                { player: shipUuid, parent: shipUuid });
+            await completeEntity(world, escort);
+            world.entities.set('live escort', escort);
+
+            world.step();
+            // Still flying: this is the in-world case, not a carry.
+            expect(world.entities.has('live escort')).toBeTrue();
+
+            const frame = client.snapshot();
+            const mirrored = frame.added.find(
+                ([uuid]) => uuid === 'live escort');
+            expect(mirrored)
+                .withContext('the escort never reached the client at all')
+                .toBeDefined();
+            const componentNames =
+                mirrored![1].components.map(([name]) => name);
+            expect(componentNames)
+                .withContext('PlayerEscortComponent was dropped by the '
+                    + 'bridge, so the status bar can never tag an escort')
+                .toContain('PlayerEscort');
+        });
 });

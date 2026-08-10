@@ -168,6 +168,42 @@ export function boardingBlockedMessage(reason:
 }
 
 /**
+ * What the target pane's government line reads for a ship belonging to
+ * the player looking at it.
+ *
+ * Stock data does carry "Hired Escort" (STR# 2002 index 165), but that
+ * is the player-info roster wording; the target pane's line is the
+ * narrow lower-right govt slot, so the short form is what fits.
+ */
+export const ESCORT_GOVT_LABEL = 'Escort';
+
+/**
+ * The government shown in the target pane, which reads "Escort" for the
+ * LOCAL player's own escorts instead of their real government.
+ *
+ * This is a PER-PLAYER tag, and deliberately display-side only: the tag
+ * depends on WHO IS LOOKING, so it can never live in simulation state.
+ * `escortOf` is the targeted ship's PlayerEscortComponent.player (the
+ * player ship uuid that owns it, durable across landings and jumps);
+ * `localPlayerUuid` is the uuid of the ship this client controls. They
+ * match only for your own escorts, so another peer targeting the same
+ * ship still sees its real government.
+ *
+ * Nothing here consults DisabledComponent: a disabled escort re-enters
+ * the normal target cycle (target_plugin), and it is still yours, so it
+ * still reads "Escort".
+ */
+export function targetGovtLabel(government: string,
+    escortOf: string | undefined,
+    localPlayerUuid: string | undefined): string {
+    if (escortOf !== undefined && localPlayerUuid !== undefined
+        && escortOf === localPlayerUuid) {
+        return ESCORT_GOVT_LABEL;
+    }
+    return government;
+}
+
+/**
  * Status-line feedback when the player boards one of their OWN disabled
  * flock members (a hired/captured escort or bay fighter): rather than
  * plundering it, the boarding party repairs it and it rejoins formation.
