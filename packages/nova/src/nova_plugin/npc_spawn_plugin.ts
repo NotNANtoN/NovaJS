@@ -456,7 +456,7 @@ export async function buildPersSpawnTable(world: World, systemId: string,
     // Stage each distinct ship-class/govt pair once.
     const staged = new Map<string, Promise<boolean>>();
     const stageOnce = (ship: string, govt: string | null) => {
-        const key = `${ship} ${govt ?? ''}`;
+        const key = `${ship}\0${govt ?? ''}`;
         let promise = staged.get(key);
         if (!promise) {
             promise = stageShip(world, ship, govt)
