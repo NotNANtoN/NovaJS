@@ -1551,6 +1551,10 @@ async function startGame() {
                     // but things it launched (bay fighters) still point
                     // at this uuid, so the outfitter can find them.
                     uuid: pendingDockedShip.uuid,
+                    // Live getter, not a snapshot: fighters keep landing
+                    // into the roster while the player shops, and each
+                    // one still counts against the outfitter's buy caps.
+                    landedEscorts: () => landedEscorts,
                 });
                 // Hide the touch controls under the spaceport UI.
                 document.body.classList.add('nova-docked');

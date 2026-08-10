@@ -141,3 +141,58 @@ export function countDeployedFighters(
         return counts;
     };
 }
+
+/**
+ * Counts the docked player's bay fighters that LANDED with them (the
+ * landed-escort roster, spaceport/landed_escorts.ts) — a landed fighter
+ * is still deployed (landing does not stow it back into its bay), so it
+ * still occupies its magazine slot exactly like one that stayed in
+ * flight.
+ *
+ * Attribution mirrors countDeployedFighters: the fighter names its bay
+ * weapon (BayFighterComponent) and is charged to the lowest-sorted owned
+ * outfit whose `ammoFor` is that bay — the same outfit consumeAmmo spent
+ * and refundFighterToBay would credit.
+ *
+ * Only fighters launched from the PLAYER'S OWN bays count
+ * (SourceComponent === the docked ship's uuid): a fighter from a carrier
+ * ESCORT's bays draws on that escort's outfits, which travel inside the
+ * escort's own carried entity and never appear in the player's outfitter.
+ *
+ * `roster` is a getter, not a snapshot: escorts keep landing while the
+ * player shops, so the roster grows mid-visit as in-flight fighters
+ * (counted by countDeployedFighters) touch down and move over to it —
+ * the composed total stays constant.
+ */
+export function countLandedFighters(
+    roster: () => readonly { player: string, entity: Entity }[],
+    carrierUuid: string,
+    getOutfit: (id: string) => OutfitData | undefined): DeployedOutfitCounts {
+    return ownedOutfitIds => {
+        const ammoOutfitFor = new Map<string, string>();
+        for (const id of [...ownedOutfitIds].sort()) {
+            const ammoFor = getOutfit(id)?.ammoFor;
+            if (ammoFor && !ammoOutfitFor.has(ammoFor)) {
+                ammoOutfitFor.set(ammoFor, id);
+            }
+        }
+
+        const counts = new Map<string, number>();
+        for (const { player, entity } of roster()) {
+            if (player !== carrierUuid) {
+                continue;
+            }
+            const fighter = entity.components.get(BayFighterComponent);
+            if (!fighter
+                || entity.components.get(SourceComponent) !== carrierUuid) {
+                continue;
+            }
+            const outfitId = ammoOutfitFor.get(fighter.bayWeaponId);
+            if (outfitId === undefined) {
+                continue;
+            }
+            counts.set(outfitId, (counts.get(outfitId) ?? 0) + 1);
+        }
+        return counts;
+    };
+}
