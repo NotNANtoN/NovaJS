@@ -21,10 +21,11 @@ import { HitboxHullComponent, HurtboxHullComponent } from './collisions_plugin.j
 import { CollisionEvent, CollisionHitterComponent, CollisionVulnerabilityComponent } from './collision_interaction.js';
 import { EscortCommandComponent } from './escort_command.js';
 import { ExitPointData } from './exit_point.js';
+import { GovtComponent } from './govt_component.js';
 import { OwnerComponent, SourceComponent, WeaponConstructors, WeaponEntry } from './fire_weapon_plugin.js';
 import { DeathAIComponent } from './npc_plugin.js';
-import { FormationComponent, nextFormationSlot } from './npc_ai_plugin.js';
-import { EscortLandingComponent } from './player_escort.js';
+import { FormationComponent, NpcComponent, NpcSteeringSystem, nextFormationSlot } from './npc_ai_plugin.js';
+import { EscortLandingComponent, PlayerEscortComponent } from './player_escort.js';
 import { ShipComponent } from './ship_plugin.js';
 import { TargetComponent } from './target_component.js';
 import { WeaponsStateComponent } from './weapons_state.js';
@@ -189,8 +190,9 @@ class BayWeaponEntry extends WeaponEntry {
     fire(position: Position, angle: Angle, owner: string, target = undefined, source: string, sourceVelocity?: Vector, exitPointData?: ExitPointData): Entity | undefined {
         // In input-driven multiplayer every peer simulates every bay
         // deterministically; ownership tags along for identity only.
-        const q = this.runQuery(new Query([MultiplayerData] as const), source);
-        const multiplayerOwner = q[0]?.[0]?.owner ?? 'sim';
+        const q = this.runQuery(BaySourceQuery, source)[0];
+        const multiplayerOwner = q?.[0]?.owner ?? 'sim';
+        const sourceGovt = q?.[1];
 
         // Vector is immutable: add() RETURNS the sum, so these must be
         // chained. They used to be called for effect, which threw both
@@ -209,6 +211,23 @@ class BayWeaponEntry extends WeaponEntry {
             { bayWeaponId: this.data.id });
         ship.components.set(SourceComponent, source);
         ship.components.set(TargetComponent, { target: undefined });
+        if (sourceGovt) {
+            // A fighter flies its carrier's flag. Without this it is a
+            // govt-less independent, and a XENOPHOBIC carrier — pirates,
+            // and the stock Pirate Carrier is one — reads "hostile" off
+            // its own wing the instant it launches: govtDisposition puts
+            // xenophobes at war with independents, and the new fighter is
+            // sitting at range ~0, so chooseNearest hands the carrier its
+            // own fighter as the nearest enemy. Inheriting the govt makes
+            // the wing an ALLY of its carrier, and makes the carrier's
+            // enemies willing to engage it.
+            //
+            // A no-op for player-launched fighters, which is why player
+            // behavior is untouched: a player's ship carries no
+            // GovtComponent, so there is nothing to copy. Fighters from a
+            // player's hired carrier ESCORT do inherit that escort's govt.
+            ship.components.set(GovtComponent, { ...sourceGovt });
+        }
         ship.components.set(MovementStateComponent, {
             accelerating: 0,
             position: Position.fromVectorLike(position),
@@ -242,6 +261,11 @@ class BayWeaponEntry extends WeaponEntry {
 
 const BayFormationQuery = new Query([FormationComponent] as const);
 
+/** The launching carrier's identity bits: its multiplayer owner (for the
+ * fighter's entity id) and its government (which the fighter inherits). */
+const BaySourceQuery = new Query(
+    [Optional(MultiplayerData), Optional(GovtComponent)] as const);
+
 const CollectableEscortAI = new System({
     name: 'CollectableEscortAI',
     events: [CollisionEvent],
@@ -264,6 +288,66 @@ const CollectableEscortAI = new System({
         }
         entities.delete(uuid);
     },
+});
+
+/**
+ * An NPC carrier's fighters go home to nothing when the carrier dies:
+ * this hands them a graceful exit.
+ *
+ * WHAT HAPPENED BEFORE (the state this fixes): a bay fighter is steered
+ * entirely by escort machinery, and every piece of it fails open when
+ * the carrier entity vanishes. FormationSystem sees the leader is gone
+ * and drops FormationComponent, so nothing station-keeps it — but only
+ * when it runs at all, which it does not while the fighter is under a
+ * non-formation command. EscortCommandBehaviorSystem keeps running with
+ * a missing root: 'attack' still works while the victim lives, and the
+ * moment it reverts to 'formation' the fighter has no leader to form on
+ * and only the opportunistic front-quadrant-turret rule left. Meanwhile
+ * NpcDecisionSystem and NpcSteeringSystem both bail on any ship holding
+ * an EscortCommandComponent, and a bay fighter has no NpcComponent to
+ * fall back to anyway. Net result: the fighter drifted forever on its
+ * launch velocity, occasionally firing a turret, and never despawned.
+ *
+ * WHAT IT DOES NOW: converts the orphan into a plain NPC in 'depart'
+ * mode. NpcSteeringSystem then flies it out of the system and deletes
+ * it at NPC_DEPART_RADIUS — the same simplified "jump out" every other
+ * NPC uses — once EscortCommandComponent is gone and the AI stops
+ * yielding to it. It withdraws rather than finishing its current fight:
+ * with the carrier dead there is no hangar to dock in, no ammo to
+ * refund, and no one left to command it.
+ *
+ * DETERMINISM: 'depart' is set explicitly, so NpcDecisionSystem returns
+ * at its `mode === 'depart'` guard BEFORE rolling `departAt`. That
+ * matters — the roll draws from the shared seeded RandomResource, and a
+ * draw whose count depended on how many carriers happened to die would
+ * shift every later draw on that peer. This path consumes no randomness
+ * at all. aiType 3 (warship) is a sane resting value that nothing reads
+ * while the mode stays 'depart'.
+ *
+ * PLAYER-LAUNCHED FIGHTERS ARE EXEMPT: PlayerEscortComponent is stamped
+ * whenever the escort chain tops out at a player ship and is NEVER
+ * cleared (that is the whole point of it — see player_escort.ts), so it
+ * still marks a player's fighter after the carrier escort it flew from
+ * has died. Those keep their existing re-attachment behavior.
+ */
+export const OrphanedBayFighterSystem = new System({
+    name: 'OrphanedBayFighterAI',
+    args: [BayFighterComponent, SourceComponent, Entities, GetEntity,
+        Optional(PlayerEscortComponent), Optional(NpcComponent)] as const,
+    step(_bayFighter, source, entities, entity, playerEscort, npc) {
+        if (playerEscort || npc) {
+            // Not ours to retire, or already retired (idempotent: the
+            // NpcComponent it gains below stops it running again).
+            return;
+        }
+        if (entities.has(source)) {
+            return; // Carrier still alive.
+        }
+        entity.components.delete(EscortCommandComponent);
+        entity.components.delete(FormationComponent);
+        entity.components.set(NpcComponent, { aiType: 3, mode: 'depart' });
+    },
+    before: [NpcSteeringSystem],
 });
 
 /** Flips a fighter into the return-and-collect flow: fly home and be
@@ -332,5 +416,6 @@ export const BayPlugin: Plugin = {
 
         world.addSystem(ReturnAI);
         world.addSystem(CollectableEscortAI);
+        world.addSystem(OrphanedBayFighterSystem);
     }
 }

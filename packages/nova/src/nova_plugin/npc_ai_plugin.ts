@@ -993,9 +993,16 @@ export const NpcSteeringSystem = new System({
 });
 
 /**
- * Fires every non-bay weapon at the NPC's target while attacking and
- * in range; ceases fire otherwise. (Same bay exclusion as the legacy
- * ShootAllWeaponsAI: bays have no ammo limit yet.)
+ * Fires every weapon at the NPC's target while attacking and in range;
+ * ceases fire otherwise.
+ *
+ * BAYS INCLUDED: a bay's ammo is its fighters (weapon_parse's
+ * AmmoTypeParse), so the magazine bounds the total and the reload clock
+ * paces the launches. No separate "has a target" gate is needed here —
+ * `inRange` is already false unless the NPC is in attack mode with a
+ * LIVE target entity, so an idle carrier never opens its hangar.
+ * Launched fighters are pointed at the carrier's victim by
+ * NpcWingCommandSystem (escort_command_plugin).
  */
 const NpcFireControlSystem = new System({
     name: 'NpcFireControlSystem',
@@ -1016,7 +1023,7 @@ const NpcFireControlSystem = new System({
                 continue;
             }
             const weaponType = gameData.data.Weapon.getCached(id)?.type;
-            if (weaponType == null || weaponType === 'BayWeaponData') {
+            if (weaponType == null) {
                 continue;
             }
             weapon.target = target.target;
