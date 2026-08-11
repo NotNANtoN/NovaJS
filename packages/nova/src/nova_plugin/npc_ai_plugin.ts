@@ -1,6 +1,7 @@
 import * as t from 'io-ts';
 import { Entities, GetEntity, UUID } from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
+import { Entity } from 'nova_ecs/entity';
 import { EntityMap } from 'nova_ecs/entity_map';
 import { Angle } from 'nova_ecs/datatypes/angle';
 import { Position } from 'nova_ecs/datatypes/position';
@@ -17,15 +18,16 @@ import { System } from 'nova_ecs/system';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { CloakActiveComponent, isTargetable } from './cloak_plugin.js';
 import { DamagedEvent, ExplodingComponent } from './death_plugin.js';
-import { DisabledComponent } from './disabled_component.js';
+import { DisabledComponent, DisabledState } from './disabled_component.js';
 import { EscortCommandComponent } from './escort_command.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { GovtComponent } from './govt_component.js';
 import { AssistingComponent } from './hail_component.js';
 import { govtDispositionTo, effectiveStrength, oddsFavorable } from './govt_disposition.js';
 import { ArmorComponent, ShieldComponent } from './health_plugin.js';
-import { JUMP_DISTANCE, JUMP_ARRIVAL_MARGIN_S } from './jump_plugin.js';
+import { beginDepartureJump, JumpComponent, JumpSequenceSystem, JUMP_DISTANCE, JUMP_ARRIVAL_MARGIN_S } from './jump_plugin.js';
 import { PlanetData } from 'novadatainterface/planet_data';
+import { ShipPhysics } from 'novadatainterface/ship_data';
 import { PlanetComponent, PlanetDataComponent } from './planet_plugin.js';
 import { EscortLandingComponent } from './player_escort.js';
 import { LegalRecordsComponent } from './reputation_plugin.js';
@@ -67,13 +69,25 @@ import { WeaponsStateComponent } from './weapons_state.js';
  *                   are not modeled: scanning and boarding don't exist
  *                   in the sim yet.)
  *
- * NPC departure is a simplified "depart at the edge": the ship flies
- * beyond the no-jump radius plus the same arrival margin jump_plugin
- * uses and is deleted, standing in for a hyperspace exit. It does NOT
- * reuse the JumpComponent state machine: that machine ends by emitting
- * FinishJumpEvent, which carries the serialized entity to a concrete
- * destination world — machinery (and cost) that only matters for ships
- * a player is aboard. A visible NPC warp-out flash is future polish.
+ * NPC DEPARTURE runs the real hyperspace jump sequence. A ship that is
+ * departing or fleeing enters jump_plugin's JumpComponent state machine
+ * (beginDepartureJump) and plays every visible stage a player's ship
+ * plays — coming to a stop, turning onto its jump heading, spinning up
+ * the hyperdrive, then the departure burn — and only leaves the world
+ * at the end of it. Big slow-turning ships are the case that motivated
+ * this: they used to pop out of existence mid-turn.
+ *
+ * The stage machine is REUSED, not duplicated. The only thing that
+ * differs from a player's jump is the terminal: an NPC has no route and
+ * no destination room to be carried to, so its JumpComponent carries no
+ * `to` and departure simply deletes it (see JumpStateType). That also
+ * keeps NPC jumps clear of the player-only machinery hanging off
+ * InitiateJumpEvent — the entity serialize-and-carry in JumpFromSystem,
+ * and EscortFollowJumpSystem, which would otherwise be the thing that
+ * swept a player's escorts along behind a passing NPC.
+ *
+ * Deleting at NPC_DEPART_RADIUS survives only as the fallback for a
+ * ship that cannot jump at all: see NpcSteeringSystem.
  */
 
 // --- Tuning constants ---
@@ -526,12 +540,12 @@ const NpcDecisionSystem = new System({
         Optional(GovtComponent), Optional(ShieldComponent),
         ShipDataComponent, Optional(FormationComponent),
         Optional(EscortCommandComponent), Optional(AssistingComponent),
-        NpcTargetsQuery,
+        Optional(JumpComponent), NpcTargetsQuery,
         PlanetsQuery, TimeResource, RandomResource, Entities, UUID,
         SimulationGameDataResource] as const,
     step(npc, movement, target, govt, shield, shipData, formation,
-        escortCommand, assisting, ships, planets, time, random, entities, uuid,
-        gameData) {
+        escortCommand, assisting, jump, ships, planets, time, random, entities,
+        uuid, gameData) {
         if (escortCommand) {
             // A player-commanded escort: its brain is the escort
             // command framework (escort_command_plugin), not NPC AI.
@@ -543,6 +557,21 @@ const NpcDecisionSystem = new System({
             return;
         }
         if (npc.mode === 'depart') {
+            return;
+        }
+        if (jump) {
+            // Already warping out: the decision is made and the ship is
+            // committed, so it must not talk itself back into a fight
+            // (a warship in 'flee' would otherwise re-target and start
+            // shooting from inside its own departure burn).
+            //
+            // SEQUENCE-NEUTRAL: this bails alongside the 'depart' bail,
+            // above every draw site, and costs no draws that would
+            // otherwise happen. The only unconditional draw is
+            // rollDepartureTime below, and it has provably already
+            // happened for any ship that is jumping: 'flee' and 'depart'
+            // are only ever set further down this same step, past that
+            // line. So no other NPC's roll shifts.
             return;
         }
         const govtData = lookupGovt(gameData, govt);
@@ -856,7 +885,32 @@ export function steerArrive(movement: MovementState, physics: {
     return false;
 }
 
-/** Fly outward and report whether the ship has left the system. */
+/**
+ * Hands a departing or fleeing NPC to the hyperspace jump sequence,
+ * which owns it from here (NpcSteeringSystem bails while a
+ * JumpComponent is present) until it warps out of the world.
+ *
+ * Returns false only when the ship CANNOT jump, which is the one case
+ * the old delete-at-the-radius exit still has to cover. That is
+ * exactly: the ship is disabled — dead in space, unable to turn onto a
+ * jump heading or run its hyperdrive, the same reason PlayerJumpControl
+ * refuses a disabled player. Nothing else can refuse: unlike a player's
+ * jump this needs no route, no destination system data, and no fuel.
+ * A ship disabled on its way out therefore keeps drifting and is
+ * deleted at NPC_DEPART_RADIUS as before; if it is repaired first, it
+ * jumps normally.
+ */
+function departByJump(entity: Entity, movement: MovementState,
+    physics: ShipPhysics, disabled: DisabledState | undefined): boolean {
+    if (disabled) {
+        return false;
+    }
+    beginDepartureJump(entity, movement, physics);
+    return true;
+}
+
+/** Fly outward and report whether the ship has reached the radius at
+ * which a ship that never managed to jump is removed anyway. */
 function steerOutward(movement: MovementState, away: Vector): boolean {
     if (movement.position.length > NPC_DEPART_RADIUS) {
         return true;
@@ -871,17 +925,33 @@ function steerOutward(movement: MovementState, away: Vector): boolean {
 }
 
 /**
- * Executes the NPC's current mode every tick. Deleting at the depart
- * radius stands in for jumping out (see the module comment).
+ * Executes the NPC's current mode every tick. Departing and fleeing
+ * ships hand themselves to the hyperspace jump sequence (see the module
+ * comment); everything else steers here.
  */
 export const NpcSteeringSystem = new System({
     name: 'NpcSteeringSystem',
     args: [NpcComponent, MovementStateComponent, ShipPhysicsComponent,
         TargetComponent, Optional(FormationComponent),
         Optional(EscortCommandComponent), Optional(EscortLandingComponent),
-        TimeResource, Entities, UUID] as const,
+        Optional(DisabledComponent), Optional(JumpComponent),
+        TimeResource, Entities, GetEntity, UUID] as const,
     step(npc, movement, physics, target, formation, escortCommand, landing,
-        time, entities, uuid) {
+        disabled, jump, time, entities, entity, uuid) {
+        if (jump) {
+            // Committed to the hyperspace jump: JumpSequenceSystem owns
+            // this ship's controls until it leaves (it overrides them
+            // anyway). One exception — a ship that is disabled mid-
+            // sequence can no longer turn or thrust, so its hyperdrive
+            // spin-up is broken off rather than left stalled forever
+            // waiting for an alignment that DisabledMovementSystem is
+            // erasing every tick. It re-enters the sequence below once
+            // it is repaired.
+            if (disabled && jump.to === undefined) {
+                entity.components.delete(JumpComponent);
+            }
+            return;
+        }
         if (landing) {
             // Following the player down to a planet (player_escort_plugin
             // steers this ship). Checked before the escort-command bail so
@@ -959,13 +1029,17 @@ export const NpcSteeringSystem = new System({
                     ? entities.get(npc.aggressor)?.components
                         .get(MovementStateComponent)
                     : undefined;
-                // Far enough from the center to jump: jump away
-                // (simplified NPC depart, same as 'depart') — unless
-                // the chaser is right behind (see chaserBlocksJump).
+                // Far enough from the center to jump: start the jump
+                // sequence (same exit as 'depart') — unless the chaser
+                // is right behind (see chaserBlocksJump). The decision
+                // is unchanged; only the exit is, so a fleeing ship is
+                // now seen to align and warp out rather than blink away
+                // — and it stays shootable, and interruptible by being
+                // disabled, for the length of the sequence.
                 if (movement.position.length > JUMP_DISTANCE
                     && !(aggressor
-                        && chaserBlocksJump(movement, aggressor))) {
-                    entities.delete(uuid);
+                        && chaserBlocksJump(movement, aggressor))
+                    && departByJump(entity, movement, physics, disabled)) {
                     break;
                 }
                 // Run from the attacker; with no attacker position,
@@ -973,14 +1047,30 @@ export const NpcSteeringSystem = new System({
                 const away = aggressor
                     ? movement.position.subtract(aggressor.position)
                     : new Vector(movement.position.x, movement.position.y);
-                if (steerOutward(movement, away)) {
+                // At the depart radius the ship is off the edge of the
+                // playfield, so a chaser on its tail no longer holds it
+                // here: it jumps anyway, and is deleted outright only if
+                // it cannot (disabled). See departByJump.
+                if (steerOutward(movement, away)
+                    && !departByJump(entity, movement, physics, disabled)) {
                     entities.delete(uuid);
                 }
                 break;
             }
             case 'depart': {
+                // Fly outward until clear of the no-jump zone (the same
+                // threshold the flee exit uses), then jump out.
+                if (movement.position.length > JUMP_DISTANCE
+                    && departByJump(entity, movement, physics, disabled)) {
+                    break;
+                }
                 const away = new Vector(
                     movement.position.x, movement.position.y);
+                // Only a ship that could not jump at all reaches the
+                // depart radius (it is well outside the no-jump zone, so
+                // the branch above already tried and was refused): the
+                // old delete-at-the-edge exit, now the disabled-ship
+                // fallback. See departByJump.
                 if (steerOutward(movement, away)) {
                     entities.delete(uuid);
                 }
@@ -989,7 +1079,12 @@ export const NpcSteeringSystem = new System({
         }
     },
     after: [TimeSystem, NpcDecisionSystem],
-    before: [MovementSystem],
+    // Explicit edge rather than a toposort accident: a ship that decides
+    // to leave this tick enters the sequence and starts stopping on the
+    // same tick, and the ordering is stable across a snapshot restore
+    // (determinism rule 4). The reverse edge would be a cycle via
+    // DisabledMovementSystem, which is after both.
+    before: [MovementSystem, JumpSequenceSystem],
 });
 
 /**

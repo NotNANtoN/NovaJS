@@ -414,14 +414,18 @@ function prefetchJumpDestination(displayWorld: World) {
             continue;
         }
         const jump = entity.components.get(JumpComponent);
-        if (!jump || jump.stage === 'arriving'
-            || prefetchedSystemId === jump.to) {
+        // A jump with no destination is a ship leaving the world, not
+        // travelling (see JumpStateType). The player never has one, but
+        // there is nothing to prefetch either way.
+        const destination = jump?.to;
+        if (!jump || !destination || jump.stage === 'arriving'
+            || prefetchedSystemId === destination) {
             return;
         }
-        prefetchedSystemId = jump.to;
+        prefetchedSystemId = destination;
         void (async () => {
             try {
-                const system = await simulationGameData.data.System.get(jump.to);
+                const system = await simulationGameData.data.System.get(destination);
                 await Promise.all([
                     ...system.links.map(link =>
                         simulationGameData.data.System.get(link)),

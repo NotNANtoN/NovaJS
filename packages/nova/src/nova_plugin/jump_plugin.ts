@@ -105,8 +105,6 @@ const JumpRouteProvider = Provide({
  * in rollback snapshots via the default codec policy.
  */
 export const JumpStateType = t.intersection([t.type({
-    /** Destination system uuid. */
-    to: t.string,
     stage: t.union([
         t.literal('stopping'),
         t.literal('aligning'),
@@ -118,6 +116,24 @@ export const JumpStateType = t.intersection([t.type({
      * origin system to the destination system. */
     direction: t.number,
 }), t.partial({
+    /**
+     * Destination system uuid — and the choice of TERMINAL for the
+     * sequence, which is the only thing that differs between a player's
+     * jump and an NPC's departure. Every stage before departure is
+     * shared.
+     *
+     * Present: the ship is bound for a concrete destination world. At
+     * departure it is deleted here and carried there by
+     * JumpFromSystem/FinishJumpEvent, crossing with stage 'arriving'.
+     *
+     * ABSENT: the ship leaves the game world entirely (an NPC departing
+     * or fleeing the system — see beginDepartureJump). There is no
+     * destination room to carry it to, so departure simply deletes it:
+     * no InitiateJumpEvent, no FinishJumpEvent, no arrival kinematics.
+     * Encoding the terminal as "has a destination or doesn't" rather
+     * than a separate flag keeps the two from contradicting each other.
+     */
+    to: t.string,
     /** Logical time (TimeResource ms) when the current timed stage
      * (spinup, accelerating) began. Cleared at departure: logical time
      * differs between systems. */
@@ -253,6 +269,45 @@ function beginJump(entity: Entity, systemId: string, destination: string,
 }
 
 /**
+ * Attaches the jump sequence to a ship that is LEAVING THE GAME WORLD
+ * rather than travelling to another system: an NPC departing or fleeing
+ * (npc_ai_plugin). It runs exactly the same visible stages a player
+ * gets — stop, align, spin up, accelerate — and ends by deleting the
+ * ship instead of carrying it anywhere (the absent `to`; see
+ * JumpStateType).
+ *
+ * DIRECTION. NPCs have no route, so there is no map-space heading to
+ * resolve. They jump straight out along the radius they are already
+ * leaving by: the outward direction from the system center to the
+ * ship's own position, sampled once when the sequence begins. That is
+ * deterministic (a pure function of synced movement state, no PRNG, no
+ * game-data lookup), it is where "depart" was already flying them, and
+ * it never points back through the system. Degenerate case: a ship
+ * exactly at the center has no outward direction, so it keeps its
+ * current heading.
+ *
+ * Deliberately UNGATED on fuel. NPCs don't track jump fuel, and a
+ * fleeing ship must always be able to leave — the same free-jump rule
+ * escorts get. The caller owns the other preconditions (a disabled ship
+ * cannot spin up a hyperdrive; npc_ai_plugin checks that).
+ *
+ * No PRNG is drawn here or anywhere else on the jump path, so entering
+ * the sequence does not shift any NPC's decision rolls.
+ */
+export function beginDepartureJump(entity: Entity, movement: MovementState,
+    shipPhysics: ShipPhysics): void {
+    const outward = new Vector(movement.position.x, movement.position.y);
+    const direction = outward.lengthSquared > 1e-12
+        ? outward.angle
+        : Angle.fromAngleLike(movement.rotation);
+    entity.components.set(JumpComponent, {
+        // No `to`: this ship's terminal is to vanish, not to arrive.
+        stage: shipPhysics.canJumpWithoutSlowing ? 'aligning' : 'stopping',
+        direction: direction.angle,
+    });
+}
+
+/**
  * Starts the jump sequence while a peer holds hyperjump: checks the
  * no-jump zone, resolves the travel heading from the systems' map
  * positions (staged at world genesis in makeSystem, so the cache read
@@ -367,14 +422,26 @@ function overrideControls(movement: MovementState) {
  * stopping -> aligning -> spinup -> accelerating happen in the origin
  * system; the ship then crosses to the destination system carrying
  * stage 'arriving'.
+ *
+ * NOT PLAYER-ONLY. Nothing here is gated on the player: NPCs leaving
+ * the system run these same stages (beginDepartureJump), which is why a
+ * big slow-turning freighter is now seen to stop and swing onto its
+ * jump heading instead of popping out of existence mid-turn. The two
+ * flows differ only in the terminal — see JumpStateType's `to`.
+ *
+ * SOUNDS are self-only: the warp-up/warp-out PlayerSoundEvents below are
+ * targeted at the jumping ship, and the display's PlayerSoundSystem
+ * requires PlayerShipSelector, which only ever sits on the local
+ * player's own ship. An NPC's jump is therefore silent for everyone,
+ * on every peer.
  */
 export const JumpSequenceSystem = new System({
     name: 'JumpSequenceSystem',
     args: [JumpComponent, MovementStateComponent, ShipPhysicsComponent,
         Optional(FuelComponent), Optional(JumpRouteComponent), TimeResource,
-        GetEntity, UUID, Emit] as const,
+        GetEntity, UUID, Entities, Emit] as const,
     step(jump, movement, shipPhysics, fuel, jumpRoute, time, entity, uuid,
-        emit) {
+        entities, emit) {
         overrideControls(movement);
         const target = new Angle(jump.direction);
 
@@ -448,6 +515,18 @@ export const JumpSequenceSystem = new System({
                 // runs after this system and reads the jump stage.
                 if (time.time - (jump.stageStart ?? time.time)
                     >= JUMP_DEPART_DELAY_MS) {
+                    const destination = jump.to;
+                    if (destination === undefined) {
+                        // VANISH TERMINAL (an NPC departure). There is no
+                        // destination world to carry this ship to, so it
+                        // simply leaves: no InitiateJumpEvent (which would
+                        // put it through JumpFromSystem's serialize-and-
+                        // carry path, and past EscortFollowJumpSystem), no
+                        // FinishJumpEvent, no arrival kinematics. Every
+                        // stage up to this point was the shared one.
+                        entities.delete(uuid);
+                        break;
+                    }
                     // Depart. Set the arrival kinematics the destination
                     // system will see: the ship jumps in on the side of
                     // the system facing where it came from, coasting
@@ -477,7 +556,7 @@ export const JumpSequenceSystem = new System({
                         fuel.current = Math.max(
                             fuel.min, fuel.current - FUEL_PER_JUMP);
                     }
-                    emit(InitiateJumpEvent, { to: jump.to }, [uuid]);
+                    emit(InitiateJumpEvent, { to: destination }, [uuid]);
                 }
                 break;
             }
