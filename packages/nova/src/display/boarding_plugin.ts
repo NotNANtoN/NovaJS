@@ -12,7 +12,7 @@ import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data
 import { ControlAction } from '../nova_plugin/controls.js';
 import { ControlEvent, ControlsSubject } from '../nova_plugin/controls_plugin.js';
 import {
-    BoardingComponent, BoardingState, captureChance,
+    BoardingComponent, BoardingState, capturable, captureChance,
 } from '../nova_plugin/boarding_component.js';
 import { CargoComponent } from '../nova_plugin/cargo_plugin.js';
 import { FuelComponent } from '../nova_plugin/health_plugin.js';
@@ -91,6 +91,72 @@ const CAP_ORIGIN_X = -CAP_W / 2;
 const CAP_ORIGIN_Y = -CAP_H / 2;
 const CAP_BTN_W = 150;
 const CAP_BTN_X = -(CAP_BTN_W + 2 * BTN_LEFT_POS) / 2; // centered
+
+/**
+ * The plunder dialog's whole readable state — the booty summary lines and
+ * which actions are actionable — derived from the SYNCED boarding state
+ * and victim entity. Pure, and separated from the PIXI widget so the rules
+ * can be pinned directly (the same split hail_dialog_plugin's
+ * computeContext uses).
+ *
+ * CAPTURE is greyed for a victim somebody is flying (`capturable`). That
+ * predicate is simulation state — serializer-registered, forwarded to this
+ * world by the bridge with every other synced component, and not in
+ * PEER_LOCAL_COMPONENTS — so every peer looking at the same victim greys
+ * the same button, and it is the SAME predicate the sim's capture roll
+ * consults: the dialog can never offer an action the simulation would
+ * refuse. The odds readout goes with it (there are no odds), replaced by a
+ * line saying why.
+ */
+export function plunderDialogContent(boarding: BoardingState,
+    target: Entity | undefined, playerCrew: number): {
+        lines: string[], enabledByAction: Record<string, boolean>
+    } {
+    const cargo = target?.components.get(CargoComponent);
+    const cargoTons = cargo
+        ? [...cargo.values()].reduce((a, b) => a + b, 0) : 0;
+    const fuel = target?.components.get(FuelComponent);
+    const targetCrew = target?.components.get(ShipDataComponent)?.crew ?? 0;
+    const captureBlocked = target !== undefined && !capturable(target);
+
+    // Booty readout mirroring board_ship.png: Cargo / Credits / Ammo /
+    // Energy, with capture odds inline. Cargo is summarised on one line
+    // ("N tons of X" when a single commodity, else "N tons").
+    const cargoKeys = cargo ? [...cargo.keys()].sort() : [];
+    const cargoText = cargoTons <= 0 ? 'None'
+        : cargoKeys.length === 1
+            ? `${cargoTons} tons of ${cargoKeys[0]}`
+            : `${cargoTons} tons`;
+    const odds = boarding.capture === 'succeeded' || captureBlocked
+        ? null : Math.round(captureChance(playerCrew, targetCrew) * 100);
+    const lines = [
+        `Cargo:    ${cargoText}`,
+        `Credits:  ${formatCredits(boarding.creditsAvailable)}`,
+        `Ammo:     ${boarding.ammoAvailable > 0
+            ? `${boarding.ammoAvailable}` : 'None'}`,
+        `Energy:   ${fuel ? Math.floor(fuel.current) : 0}`
+            + (odds === null ? '' : `        Capture Odds:  ${odds}%`),
+    ];
+    if (captureBlocked) {
+        lines.push('Her captain still holds the bridge: cannot capture.');
+    } else if (boarding.capture === 'failed') {
+        lines.push('You were repelled while attempting to capture!');
+    }
+
+    return {
+        lines,
+        enabledByAction: {
+            plunderCargo: !boarding.cargoTaken && cargoTons > 0,
+            plunderCredits: !boarding.creditsTaken
+                && boarding.creditsAvailable > 0,
+            plunderFuel: !boarding.fuelTaken && !!fuel && fuel.current > 0,
+            plunderAmmo: !boarding.ammoTaken && boarding.ammoAvailable > 0,
+            plunderCapture: boarding.capture !== 'succeeded'
+                && !captureBlocked,
+            plunderDone: true,
+        },
+    };
+}
 
 /** One selectable action row. */
 interface Row {
@@ -229,45 +295,10 @@ class PlunderDialog {
      * crew, for the capture-odds readout. */
     refresh(boarding: BoardingState, target: Entity | undefined,
         playerCrew: number) {
-        const cargo = target?.components.get(CargoComponent);
-        const cargoTons = cargo
-            ? [...cargo.values()].reduce((a, b) => a + b, 0) : 0;
-        const fuel = target?.components.get(FuelComponent);
-        const targetCrew =
-            target?.components.get(ShipDataComponent)?.crew ?? 0;
-
-        // Booty readout mirroring board_ship.png: Cargo / Credits / Ammo /
-        // Energy, with capture odds inline. Cargo is summarised on one line
-        // ("N tons of X" when a single commodity, else "N tons").
-        const cargoKeys = cargo ? [...cargo.keys()].sort() : [];
-        const cargoText = cargoTons <= 0 ? 'None'
-            : cargoKeys.length === 1
-                ? `${cargoTons} tons of ${cargoKeys[0]}`
-                : `${cargoTons} tons`;
-        const odds = boarding.capture === 'succeeded' ? null
-            : Math.round(captureChance(playerCrew, targetCrew) * 100);
-        const lines = [
-            `Cargo:    ${cargoText}`,
-            `Credits:  ${formatCredits(boarding.creditsAvailable)}`,
-            `Ammo:     ${boarding.ammoAvailable > 0
-                ? `${boarding.ammoAvailable}` : 'None'}`,
-            `Energy:   ${fuel ? Math.floor(fuel.current) : 0}`
-                + (odds === null ? '' : `        Capture Odds:  ${odds}%`),
-        ];
-        if (boarding.capture === 'failed') {
-            lines.push('You were repelled while attempting to capture!');
-        }
+        const { lines, enabledByAction } =
+            plunderDialogContent(boarding, target, playerCrew);
         this.body.text = lines.join('\n');
 
-        const enabledByAction: Record<string, boolean> = {
-            plunderCargo: !boarding.cargoTaken && cargoTons > 0,
-            plunderCredits: !boarding.creditsTaken
-                && boarding.creditsAvailable > 0,
-            plunderFuel: !boarding.fuelTaken && !!fuel && fuel.current > 0,
-            plunderAmmo: !boarding.ammoTaken && boarding.ammoAvailable > 0,
-            plunderCapture: boarding.capture !== 'succeeded',
-            plunderDone: true,
-        };
         for (const row of this.rows) {
             row.enabled = enabledByAction[row.action] ?? true;
             if (row.button.state !== 'clicked') {

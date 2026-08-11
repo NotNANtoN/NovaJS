@@ -81,12 +81,32 @@ export const HOLD_STOPPED_SPEED = 5;
  * The one-hop parent link used for command targeting: who this ship
  * directly follows. Formation leader first (hired escorts, idle
  * fighters), else the bay owner (fighters that are mid-fight when the
- * old formation component was replaced). One HOP only — command
- * addressing is deliberately not transitive (see the module comment).
+ * old formation component was replaced), else the DURABLE ownership
+ * marker. One HOP only — command addressing is deliberately not
+ * transitive (see the module comment).
+ *
+ * WHY THE DURABLE FALLBACK. Both live links can lapse while the ship is
+ * still, unambiguously, the player's: returnToBay deletes the formation
+ * link, FormationSystem drops it when the leader is briefly out of the
+ * world, and a captured prize has no bay owner at all. When they lapse,
+ * every other "is this my escort" predicate (the target-cycle exclusion,
+ * the hail dialog, the target pane's label) can answer differently from
+ * this one, and the player gets a ship that says it is an escort but
+ * takes no orders — the playtest report this fallback closes together
+ * with the component scrub in boarding_plugin's convertToEscort.
+ *
+ * PlayerEscort.parent comes first so the one-hop rule survives: a
+ * fighter launched from a CARRIER ESCORT's bays falls back to that
+ * carrier (which mirrors its own command down to it), not to the player,
+ * so the player still never commands an indirect wing directly. NPC
+ * fleets are untouched — nothing outside the player's flock ever carries
+ * PlayerEscortComponent.
  */
 export function escortParent(entity: Entity): string | undefined {
+    const owned = entity.components.get(PlayerEscortComponent);
     return entity.components.get(FormationComponent)?.leader
-        ?? entity.components.get(OwnerComponent)?.owner;
+        ?? entity.components.get(OwnerComponent)?.owner
+        ?? owned?.parent ?? owned?.player;
 }
 
 const EscortsQuery = new Query([UUID, GetEntity, ShipComponent,
@@ -132,9 +152,11 @@ const EscortCommandInputSystem = new System({
         if (action === 'attack' && !target.target) {
             return;
         }
-        for (const [, escortEntity, , formation, owner] of escorts) {
-            const parent = formation?.leader ?? owner?.owner;
-            if (parent !== uuid) {
+        for (const [, escortEntity] of escorts) {
+            // One shared definition of the parent link (escortParent),
+            // rather than a second inline copy of the same chain that
+            // could drift from it.
+            if (escortParent(escortEntity) !== uuid) {
                 continue; // Not a DIRECT escort of the commander.
             }
             const state: EscortCommandState = action === 'attack'

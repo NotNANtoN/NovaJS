@@ -2,6 +2,7 @@ import { Entity } from 'nova_ecs/entity';
 import { FiringGroupComponent, firingImmune, victimFiringGroup } from './firing_group.js';
 import { OwnerComponent } from './fire_weapon_plugin.js';
 import { FormationComponent, NpcComponent } from './npc_ai_plugin.js';
+import { PlayerEscortComponent } from './player_escort.js';
 
 /**
  * ============================================================================
@@ -24,6 +25,17 @@ import { FormationComponent, NpcComponent } from './npc_ai_plugin.js';
  *     (victimFiringGroup's ownerRoot fallback), so "belongs to the
  *     player's flock" and "can't friendly-fire the player" cannot
  *     drift apart: the group id IS a precomputed chain root.
+ *  4. PlayerEscortComponent.player — the DURABLE ownership marker, as a
+ *     last resort. Every link above is live state that can lapse while
+ *     the ship is still the player's (a command that drops the formation
+ *     link, a leader briefly out of the world), and when they lapse the
+ *     ship falls back into the general target cycle and out of the escort
+ *     cycle even though the game still calls it an escort everywhere
+ *     else. The marker is stamped only when the chain topped out at a
+ *     player and is never cleared, so nothing outside the player's flock
+ *     is reached by this step and no NPC fleet is affected. Membership is
+ *     transitive, so hopping straight to the player root is the same
+ *     answer the (lapsed) chain would have given.
  *
  * The walk is over synced, serializer-registered components only, so
  * every peer (and the display world) computes the same answer.
@@ -41,7 +53,8 @@ export const MAX_FLOCK_DEPTH = 8;
 export function flockParent(entity: Entity): string | undefined {
     return entity.components.get(FormationComponent)?.leader
         ?? entity.components.get(OwnerComponent)?.owner
-        ?? entity.components.get(FiringGroupComponent)?.group;
+        ?? entity.components.get(FiringGroupComponent)?.group
+        ?? entity.components.get(PlayerEscortComponent)?.player;
 }
 
 /**

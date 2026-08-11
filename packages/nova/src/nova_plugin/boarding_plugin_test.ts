@@ -28,13 +28,15 @@ import {
 import { DisabledComponent } from './disabled_component.js';
 import { completeEntity } from './entity_data_loader.js';
 import { EscortCommandComponent } from './escort_command.js';
+import { escortParent } from './escort_command_plugin.js';
 import { OwnerComponent, SourceComponent } from './fire_weapon_plugin.js';
 import { FiringGroupComponent } from './firing_group.js';
+import { isInFlock } from './flock.js';
 import { GovtComponent } from './govt_component.js';
 import { ArmorComponent, FuelComponent, ShieldComponent } from './health_plugin.js';
 import { makeShip } from './make_ship.js';
 import { makeSystem } from './make_system.js';
-import { FormationComponent } from './npc_ai_plugin.js';
+import { FormationComponent, NpcComponent } from './npc_ai_plugin.js';
 import { OutfitsStateComponent } from './outfit_plugin.js';
 import { PlayerEscortComponent } from './player_escort.js';
 import { CreditsComponent } from './player_state_plugin.js';
@@ -42,8 +44,9 @@ import { LegalRecordsComponent } from './reputation_plugin.js';
 import {
     ControlledByComponent, ShipControlEvent, ShipControlStateComponent,
 } from './ship_control.js';
-import { ShipDataComponent } from './ship_plugin.js';
+import { ShipComponent, ShipDataComponent } from './ship_plugin.js';
 import { TargetComponent } from './target_component.js';
+import { WeaponsStateComponent } from './weapons_state.js';
 
 const BOARDER = 'boarder';
 const SECOND_BOARDER = 'boarder2';
@@ -210,6 +213,177 @@ describe('boarding in a live world', () => {
             .toEqual('succeeded');
         press(world, BOARDER, 'plunderCaptureEscort');
     }
+
+    /**
+     * Matthew's LAN playtest, bug 3: "I captured a ship that I didn't have
+     * space for in my bay ... normal capture dialogue ... but then when I
+     * commanded it, it became not my escort anymore. Says it is and hails
+     * like it is, but I can't command it, and it targets like a normal
+     * ship. Can't hit them with my weapons, though."
+     *
+     * The prize in that story was a ship of a class his bay launches — i.e.
+     * an NPC carrier's WING — taken through the plunder dialog because the
+     * bay had no room. convertToEscort stamped the escort set on top of the
+     * hull's still-live bay identity, and the escort commands then acted on
+     * the stale half: returnToBay believed the ship was bay-launched, so it
+     * deleted the formation link and flew the prize home to its old
+     * carrier. With the formation link gone, both one-hop parent lookups
+     * fell through to the stale OwnerComponent (the old carrier), which is
+     * simultaneously why the player could not command it (escortParent) and
+     * why the target cycle stopped hiding it (flockParent — OwnerComponent
+     * shadows the firing group) — while the firing group still named the
+     * player, so the player's shots kept passing through.
+     *
+     * These specs pin all four "is this my escort" predicates together
+     * after EVERY command, since the bug was precisely them disagreeing.
+     */
+    describe('a captured wing stays a whole escort under every command',
+        () => {
+            const OLD_CARRIER = 'old carrier';
+            const VICTIM = 'some third party';
+
+            /**
+             * A disabled NPC ship wearing a bay fighter's full identity
+             * (launch link, owner chain, return-home marker), captured
+             * through the plunder dialog.
+             */
+            async function capturedWingWorld({ carrierAlive = true } = {}) {
+                const ctx = await boardingWorld({ boarderCrew: 500,
+                    targetCrew: 1 });
+                const { world, boarder, target } = ctx;
+                // A player-controlled captor, as any real boarding is.
+                boarder.components.set(ControlledByComponent,
+                    { peerId: 'test peer' });
+                if (carrierAlive) {
+                    const carrier = new Entity();
+                    carrier.components.set(ShipComponent, { id: 'nova:128' });
+                    world.entities.set(OLD_CARRIER, carrier);
+                }
+                // Something for an 'attack' order to be aimed at.
+                const victim = new Entity();
+                victim.components.set(ShipComponent, { id: 'nova:128' });
+                victim.components.set(MovementStateComponent, {
+                    position: new Position(3000, 0), velocity: new Vector(0, 0),
+                    rotation: new Angle(0), turning: 0, turnBack: false,
+                    accelerating: 0,
+                });
+                world.entities.set(VICTIM, victim);
+                // The hull's bay identity, exactly as bay_plugin's launch
+                // stamps it.
+                target.components.set(OwnerComponent, { owner: OLD_CARRIER });
+                target.components.set(SourceComponent, OLD_CARRIER);
+                target.components.set(BayFighterComponent,
+                    { bayWeaponId: 'nova:some bay' });
+                target.components.set(ReturnWhenTargetRemovedComponent,
+                    undefined);
+                world.step();
+
+                captureAsEscort(world, boarder);
+                return ctx;
+            }
+
+            /** Every "is this my escort" predicate, read at once. */
+            function escortPredicates(world: World, target: Entity) {
+                const getEntity = (u: string) => world.entities.get(u);
+                return {
+                    // Commandable by the player (escort_command_plugin).
+                    commandableBy: escortParent(target),
+                    // Flock membership: the target-cycle exclusion, the
+                    // escort cycle, and the friendly corners (flock.ts).
+                    inFlock: isInFlock(TARGET, BOARDER, getEntity),
+                    // Friendly fire passes through (firing_group.ts).
+                    firingGroup:
+                        target.components.get(FiringGroupComponent)?.group,
+                    // The hail dialog's one-hop predicate.
+                    hailsAsEscort:
+                        (target.components.get(FormationComponent)?.leader
+                            ?? target.components.get(OwnerComponent)?.owner)
+                        === BOARDER,
+                };
+            }
+
+            it('is a consistent escort the moment it is captured',
+                async () => {
+                    const { world, target } = await capturedWingWorld();
+                    expect(escortPredicates(world, target)).toEqual({
+                        commandableBy: BOARDER, inFlock: true,
+                        firingGroup: BOARDER, hailsAsEscort: true,
+                    });
+                    // The old owner's identity is gone, not layered under
+                    // the new one.
+                    expect(target.components.has(OwnerComponent)).toBeFalse();
+                    expect(target.components.has(SourceComponent)).toBeFalse();
+                    expect(target.components.has(BayFighterComponent))
+                        .toBeFalse();
+                    expect(target.components
+                        .has(ReturnWhenTargetRemovedComponent)).toBeFalse();
+                    // Durable ownership is stamped at once, not a tick
+                    // later, so nothing can retire it in between.
+                    expect(target.components.get(PlayerEscortComponent))
+                        .toEqual({ player: BOARDER, parent: BOARDER });
+                });
+
+            for (const command of ['attack', 'defend', 'formation',
+                'holdPosition', 'returnToBay']) {
+                it(`stays a consistent escort after '${command}'`,
+                    async () => {
+                        const { world, boarder, target } =
+                            await capturedWingWorld();
+                        boarder.components.get(TargetComponent)!.target =
+                            VICTIM;
+
+                        press(world, BOARDER, command);
+                        world.step();
+                        world.step();
+
+                        expect(escortPredicates(world, target)).toEqual({
+                            commandableBy: BOARDER, inFlock: true,
+                            firingGroup: BOARDER, hailsAsEscort: true,
+                        });
+                    });
+            }
+
+            it('stays out of the normal target cycle after returnToBay',
+                async () => {
+                    // The symptom that made the divergence visible: the
+                    // prize reappeared in the tab cycle.
+                    const { world, boarder, target } =
+                        await capturedWingWorld();
+                    expect(target.components.has(DisabledComponent))
+                        .toBeFalse();
+
+                    press(world, BOARDER, 'returnToBay');
+                    world.step();
+                    boarder.components.get(TargetComponent)!.target =
+                        undefined;
+                    press(world, BOARDER, 'nearestTarget');
+
+                    expect(boarder.components.get(TargetComponent)!.target)
+                        .not.toEqual(TARGET);
+                });
+
+            it('is not retired by the orphan sweep when its old carrier is '
+                + 'already dead', async () => {
+                    // The other half of the stale identity: with no live
+                    // carrier, OrphanedBayFighterSystem used to delete the
+                    // prize's escort command and formation link and send it
+                    // departing, in the tick before the durable marker
+                    // landed.
+                    const { world, target } =
+                        await capturedWingWorld({ carrierAlive: false });
+                    world.step();
+                    world.step();
+
+                    expect(escortPredicates(world, target)).toEqual({
+                        commandableBy: BOARDER, inFlock: true,
+                        firingGroup: BOARDER, hailsAsEscort: true,
+                    });
+                    expect(target.components.get(EscortCommandComponent)
+                        ?.command).toEqual('formation');
+                    expect(target.components.get(NpcComponent)?.mode)
+                        .not.toEqual('depart');
+                });
+        });
 
     it('gives a captured prize a slot past the highest live one, not the'
         + ' sibling count (regression: a mid-formation death made two'
@@ -400,6 +574,90 @@ describe('boarding in a live world', () => {
             });
     });
 
+    /**
+     * Matthew's LAN playtest, bug 1: "Can capture player ships. Player
+     * still controls them but you can kinda tell them to fire weapons at
+     * other ships." Capture of a ship somebody is FLYING is impossible by
+     * either route; PLUNDER of it stays legal (PvP piracy).
+     *
+     * Pinned at the system level with ControlledByComponent on the victim,
+     * which is exactly what a remote peer's ship looks like in every
+     * peer's simulation: the component is serializer-registered and is not
+     * in PEER_LOCAL_COMPONENTS, so it is part of the shared state each
+     * peer hashes for desync detection and reads identically. A two-peer
+     * harness would exercise the same predicate on the same state.
+     */
+    describe('a ship somebody is flying can be robbed but not taken', () => {
+        async function pvpWorld() {
+            // ControlledBy is stamped AFTER the setup disable, so the
+            // victim's repair roll (which reads it) is unaffected and the
+            // hulk stays disabled for the whole spec.
+            const ctx = await boardingWorld({ boarderCrew: 500,
+                targetCrew: 1 });
+            ctx.target.components.set(ControlledByComponent,
+                { peerId: 'the other peer' });
+            ctx.world.step();
+            return ctx;
+        }
+
+        it('opens the plunder session and lets the booty be taken',
+            async () => {
+                const { world, boarder, target } = await pvpWorld();
+                press(world, BOARDER, 'board');
+                expect(boarder.components.get(BoardingComponent)?.target)
+                    .toEqual(TARGET);
+
+                press(world, BOARDER, 'plunderCargo');
+                press(world, BOARDER, 'plunderCredits');
+                expect(boarder.components.get(CargoComponent)!.get('cargo:0'))
+                    .toEqual(2);
+                expect(boarder.components.get(CreditsComponent)!.credits)
+                    .toBeGreaterThan(0);
+                // Still theirs, still disabled, still flown by them.
+                expect(target.components.has(ControlledByComponent)).toBeTrue();
+            });
+
+        it('never lets the capture roll succeed, and never draws for it',
+            async () => {
+                const { world, boarder } = await pvpWorld();
+                press(world, BOARDER, 'board');
+                const random = world.resources.get(RandomResource)!;
+                const before = random.getState();
+
+                for (let i = 0; i < 20; i++) {
+                    press(world, BOARDER, 'plunderCapture');
+                }
+
+                // Capture stays at its opening value, and the seeded PRNG
+                // is untouched: a skipped roll must not shift the draw
+                // sequence, or peers replaying this press would diverge.
+                expect(boarder.components.get(BoardingComponent)?.capture)
+                    .toEqual('none');
+                expect(random.getState()).toEqual(before);
+            });
+
+        it('refuses the escort conversion even if capture is forced',
+            async () => {
+                // Belt-and-braces: 'succeeded' is unreachable above, so
+                // this hand-writes it to prove the second gate holds.
+                const { world, boarder, target } = await pvpWorld();
+                press(world, BOARDER, 'board');
+                boarder.components.get(BoardingComponent)!.capture =
+                    'succeeded';
+
+                press(world, BOARDER, 'plunderCaptureEscort');
+
+                expect(target.components.has(FormationComponent)).toBeFalse();
+                expect(target.components.has(EscortCommandComponent))
+                    .toBeFalse();
+                expect(target.components.has(FiringGroupComponent)).toBeFalse();
+                expect(target.components.has(PlayerEscortComponent))
+                    .toBeFalse();
+                // Its own government (and its own captain) intact.
+                expect(target.components.has(GovtComponent)).toBeTrue();
+            });
+    });
+
     it('rolls the capture identically for the same seed', async () => {
         const a = await boardingWorld({ boarderCrew: 10, targetCrew: 10 });
         const b = await boardingWorld({ boarderCrew: 10, targetCrew: 10 });
@@ -585,8 +843,10 @@ describe('boarding in a live world', () => {
 /**
  * Matthew's item 6: boarding a disabled ship that FITS ONE OF YOUR BAYS
  * and has room captures it outright — no plunder session, no capture
- * contest, no dialog — as a deployed bay fighter that can dock later and
- * bank itself into the magazine.
+ * contest, no dialog — STOWED straight into the magazine, exactly as the
+ * status message has always claimed ("Captured the X into your fighter
+ * bay"). The prize leaves the world; launching it again mints a fresh
+ * fighter from the bay's ship class.
  *
  * Built on a MockGameData world (like bay_plugin_test) rather than the
  * stock scenario, because the shortcut needs a carrier whose bay launches
@@ -764,12 +1024,11 @@ describe('bay-capture shortcut', () => {
         world.step();
     }
 
-    it('captures the hulk into the bay as a deployed fighter, with no '
+    it('stows the hulk in the bay — magazine credited, ship gone, with no '
         + 'session, dialog, or contest', async () => {
             const { world, boarder, target } = await bayWorld();
             const captures = recordCaptures(world);
             const repairs = recordRepairs(world);
-            const shipData = target.components.get(ShipDataComponent)!;
 
             press(world, BOARDER, 'board');
 
@@ -778,61 +1037,51 @@ describe('bay-capture shortcut', () => {
             expect(boarder.components.has(BoardingComponent)).toBeFalse();
             expect(target.components.has(BoardedComponent)).toBeFalse();
             expect(repairs).toEqual([]);
-            // Stamped exactly like a bay-launched fighter.
-            expect(target.components.get(BayFighterComponent))
-                .toEqual({ bayWeaponId: BAY_A });
-            expect(target.components.get(SourceComponent)).toEqual(BOARDER);
-            expect(target.components.get(OwnerComponent))
-                .toEqual({ owner: BOARDER });
-            expect(target.components.has(ReturnWhenTargetRemovedComponent))
-                .toBeTrue();
-            expect(target.components.get(FormationComponent))
-                .toEqual({ leader: BOARDER, slot: 0 });
-            expect(target.components.get(EscortCommandComponent)?.command)
-                .toEqual('formation');
-            expect(target.components.get(FiringGroupComponent)?.group)
-                .toEqual(BOARDER);
-            expect(target.components.get(PlayerEscortComponent))
-                .toEqual({ player: BOARDER, parent: BOARDER });
-            expect(target.components.has(GovtComponent)).toBeFalse();
-            expect(target.components.get(TargetComponent)?.target)
+            // The prize is IN the bay: one round credited, and the ship
+            // itself is out of the world — no deployed fighter left flying
+            // around to contradict the status message.
+            expect(rounds(boarder, ROUNDS_A)).toEqual(1);
+            expect(world.entities.has(TARGET)).toBeFalse();
+            // Nothing was stamped on the hulk on the way out.
+            expect(target.components.has(BayFighterComponent)).toBeFalse();
+            expect(target.components.has(FormationComponent)).toBeFalse();
+            expect(target.components.has(EscortCommandComponent)).toBeFalse();
+            expect(target.components.has(PlayerEscortComponent)).toBeFalse();
+            // The boarder is no longer pointed at a ship that is gone.
+            expect(boarder.components.get(TargetComponent)?.target)
                 .toBeUndefined();
-            // Repaired: flying again, armor at the established margin above
-            // the disable threshold, shields full.
-            expect(target.components.has(DisabledComponent)).toBeFalse();
-            const armor = target.components.get(ArmorComponent)!;
-            expect(armor.current).toEqual(
-                (shipData.disableArmorFraction + 0.10) * armor.max);
-            const shield = target.components.get(ShieldComponent)!;
-            expect(shield.current).toEqual(shield.max);
-            // The carrier can be docked with.
-            expect(boarder.components.get(CollisionVulnerabilityComponent)!
-                .vulnerableTo.has('return_escorts')).toBeTrue();
-            // The magazine is NOT credited at capture time: the fighter is
-            // deployed, not stowed.
-            expect(rounds(boarder, ROUNDS_A)).toEqual(0);
             // The player gets the only feedback there is.
             expect(captures).toEqual([{ uuid: BOARDER,
                 shipId: FIGHTER_SHIP }]);
         });
 
-    it('banks the capture when the new fighter docks (refund path)',
+    it('credits exactly one round however many bays are mounted',
         async () => {
-            const { world, boarder, target } = await bayWorld();
+            const { world, boarder } = await bayWorld({ bays: 2, maxAmmo: 4 });
             press(world, BOARDER, 'board');
-            expect(rounds(boarder, ROUNDS_A)).toEqual(0);
-
-            // Order it home, then let it touch its carrier:
-            // CollectableEscortAI credits the round and removes it.
-            target.components.set(EscortCommandComponent,
-                { command: 'returnToBay' });
-            await stepWorld(world, 1);
-            world.emit(CollisionEvent, { other: BOARDER, initiator: true },
-                [TARGET]);
-            await stepWorld(world, 1);
-
-            expect(world.entities.has(TARGET)).toBeFalse();
             expect(rounds(boarder, ROUNDS_A)).toEqual(1);
+            expect(world.entities.has(TARGET)).toBeFalse();
+        });
+
+    it('re-launches the stowed prize as a fresh fighter of the bay\'s '
+        + 'ship class', async () => {
+            // The round banked by a capture is an ordinary round: firing
+            // the bay spends it and puts a fighter back in the sky.
+            const { world, boarder } = await bayWorld();
+            press(world, BOARDER, 'board');
+            expect(rounds(boarder, ROUNDS_A)).toEqual(1);
+
+            const weapons = boarder.components.get(WeaponsStateComponent)!;
+            weapons.get(BAY_A)!.firing = true;
+            await stepWorld(world, 2);
+
+            expect(rounds(boarder, ROUNDS_A)).toEqual(0);
+            const launched = [...world.entities].filter(([, entity]) =>
+                entity.components.get(BayFighterComponent)?.bayWeaponId
+                === BAY_A);
+            expect(launched.length).toEqual(1);
+            expect(launched[0][1].components.get(ShipComponent)?.id)
+                .toEqual(FIGHTER_SHIP);
         });
 
     it('falls through to normal boarding when the magazine is full',
@@ -865,36 +1114,76 @@ describe('bay-capture shortcut', () => {
 
     it('ignores another bay\'s deployed fighters in the room check',
         async () => {
-            const { world, target } = await bayWorld({ maxAmmo: 1 });
+            const { world, boarder } = await bayWorld({ maxAmmo: 1 });
             addDeployedFighter(world, 'test:someOtherBay', 'other fighter');
             press(world, BOARDER, 'board');
-            expect(target.components.get(BayFighterComponent))
-                .toEqual({ bayWeaponId: BAY_A });
+            expect(rounds(boarder, ROUNDS_A)).toEqual(1);
+            expect(world.entities.has(TARGET)).toBeFalse();
         });
 
     it('treats MaxAmmo 0 as unbounded room', async () => {
-        const { world, target } = await bayWorld({ maxAmmo: 0, roundsA: 99 });
+        const { world, boarder } = await bayWorld({ maxAmmo: 0, roundsA: 99 });
         press(world, BOARDER, 'board');
-        expect(target.components.get(BayFighterComponent))
-            .toEqual({ bayWeaponId: BAY_A });
+        expect(rounds(boarder, ROUNDS_A)).toEqual(100);
+        expect(world.entities.has(TARGET)).toBeFalse();
     });
 
     it('captures into the lowest-sorted bay id when two bays fit',
         async () => {
-            const { world, target } = await bayWorld({ secondBay: true });
+            const { world, boarder } = await bayWorld({ secondBay: true });
             press(world, BOARDER, 'board');
-            expect(target.components.get(BayFighterComponent))
-                .toEqual({ bayWeaponId: BAY_A });
+            expect(rounds(boarder, ROUNDS_A)).toEqual(1);
+            expect(rounds(boarder, ROUNDS_B)).toEqual(0);
+            expect(world.entities.has(TARGET)).toBeFalse();
         });
 
     it('uses the other bay when the lowest-sorted one is full', async () => {
-        const { world, target } = await bayWorld({
+        const { world, boarder } = await bayWorld({
             maxAmmo: 1, roundsA: 1, secondBay: true, roundsB: 0,
         });
         press(world, BOARDER, 'board');
-        expect(target.components.get(BayFighterComponent))
-            .toEqual({ bayWeaponId: BAY_B });
+        expect(rounds(boarder, ROUNDS_A)).toEqual(1);
+        expect(rounds(boarder, ROUNDS_B)).toEqual(1);
+        expect(world.entities.has(TARGET)).toBeFalse();
     });
+
+    it('never stows a ship somebody is flying, whatever class it is',
+        async () => {
+            // Bug 1's other route: the instant bay capture would have
+            // swallowed a peer's disabled fighter whole. It falls through
+            // to the ordinary plunder session instead.
+            const { world, boarder, target } = await bayWorld();
+            target.components.set(ControlledByComponent,
+                { peerId: 'the other peer' });
+            const captures = recordCaptures(world);
+
+            press(world, BOARDER, 'board');
+
+            expect(captures).toEqual([]);
+            expect(world.entities.has(TARGET)).toBeTrue();
+            expect(rounds(boarder, ROUNDS_A)).toEqual(0);
+            expect(boarder.components.get(BoardingComponent)?.target)
+                .toEqual(TARGET);
+        });
+
+    it('leaves the hulk alone when there is no magazine to credit',
+        async () => {
+            // The boarder mounts the bay but has never owned a round of
+            // its ammo, so there is no supplying outfit to credit. Better
+            // to fall through to a plunder session than to delete a ship
+            // and bank nothing.
+            const { world, boarder, target } = await bayWorld();
+            boarder.components.get(OutfitsStateComponent)!.delete(ROUNDS_A);
+            const captures = recordCaptures(world);
+
+            press(world, BOARDER, 'board');
+
+            expect(captures).toEqual([]);
+            expect(world.entities.has(TARGET)).toBeTrue();
+            expect(target.components.has(DisabledComponent)).toBeTrue();
+            expect(boarder.components.get(BoardingComponent)?.target)
+                .toEqual(TARGET);
+        });
 
     it('leaves a ship class no bay launches to normal boarding', async () => {
         const { world, boarder, target } = await bayWorld({
@@ -919,11 +1208,11 @@ describe('bay-capture shortcut', () => {
         // The shortcut must not shift the random sequence: with rollback
         // resimulation, a press that consumed a draw on some peers only
         // (or in some replays) would desync everything downstream of it.
-        const { world, target } = await bayWorld();
+        const { world } = await bayWorld();
         const random = world.resources.get(RandomResource)!;
         const before = random.getState();
         press(world, BOARDER, 'board');
-        expect(target.components.has(BayFighterComponent)).toBeTrue();
+        expect(world.entities.has(TARGET)).toBeFalse();
         expect(random.getState()).toEqual(before);
     });
 
@@ -935,15 +1224,15 @@ describe('bay-capture shortcut', () => {
         }
 
         it('bay-captures a former escort that fits with room', async () => {
-            const { world, target } = await bayWorld();
+            const { world, boarder, target } = await bayWorld();
             markFormerEscort(world, target);
             const repairs = recordRepairs(world);
             const captures = recordCaptures(world);
 
             press(world, BOARDER, 'board');
 
-            expect(target.components.get(BayFighterComponent))
-                .toEqual({ bayWeaponId: BAY_A });
+            expect(rounds(boarder, ROUNDS_A)).toEqual(1);
+            expect(world.entities.has(TARGET)).toBeFalse();
             expect(captures.length).toEqual(1);
             expect(repairs).toEqual([]);
         });
