@@ -7,8 +7,12 @@ import { Entity } from 'nova_ecs/entity';
 import {
     BayFighterComponent, ReturnWhenTargetRemovedComponent,
 } from '../nova_plugin/bay_plugin.js';
+import { DisabledComponent } from '../nova_plugin/disabled_component.js';
 import { SourceComponent } from '../nova_plugin/fire_weapon_plugin.js';
-import { FuelComponent } from '../nova_plugin/health_plugin.js';
+import {
+    ArmorComponent, FuelComponent, IonizationComponent, ShieldComponent,
+} from '../nova_plugin/health_plugin.js';
+import { IsIonizedComponent } from '../nova_plugin/ionization_plugin.js';
 import {
     OutfitsState, OutfitsStateComponent,
 } from '../nova_plugin/outfit_plugin.js';
@@ -60,6 +64,80 @@ describe('escort restock', () => {
         const entity = escortEntity(new Map());
         await restockEscortEntity(entity, gameDataOf([], []));
         expect(entity.components.has(FuelComponent)).toBeFalse();
+    });
+
+    /**
+     * Matthew's playtest ruling: "escorts should repair and deionize when
+     * landed." Free, for the same reason the fuel and ammo are (the hire
+     * fee covers the pilot's own upkeep).
+     */
+    describe('the hull half of a port visit', () => {
+        it('repairs armor and shields to full', async () => {
+            const entity = escortEntity(new Map());
+            entity.components.set(ArmorComponent, stat(12, 300));
+            entity.components.set(ShieldComponent, stat(5, 120));
+
+            await restockEscortEntity(entity, gameDataOf([], []));
+
+            expect(entity.components.get(ArmorComponent)!.current)
+                .toEqual(300);
+            expect(entity.components.get(ShieldComponent)!.current)
+                .toEqual(120);
+        });
+
+        it('bleeds off ionization and drops its derived flag', async () => {
+            const entity = escortEntity(new Map());
+            entity.components.set(IonizationComponent, stat(90, 100));
+            entity.components.set(IsIonizedComponent, true);
+
+            await restockEscortEntity(entity, gameDataOf([], []));
+
+            expect(entity.components.get(IonizationComponent)!.current)
+                .toEqual(0);
+            // Deleted, not set: IonizedSystem owns that derived value and
+            // recomputes it (and re-emits its event) from the zeroed stat.
+            expect(entity.components.has(IsIonizedComponent)).toBeFalse();
+        });
+
+        it('brings a disabled escort back online', async () => {
+            // A disabled escort should never reach a pad, but the roster
+            // is durable state and a stray shot can land in the same tick
+            // it is swept up. Coming back up disabled would strand it.
+            const entity = escortEntity(new Map());
+            entity.components.set(ArmorComponent, stat(1, 300));
+            entity.components.set(DisabledComponent, { repairAt: null });
+
+            await restockEscortEntity(entity, gameDataOf([], []));
+
+            expect(entity.components.has(DisabledComponent)).toBeFalse();
+            expect(entity.components.get(ArmorComponent)!.current)
+                .toEqual(300);
+        });
+
+        it('leaves an entity with no health stats alone', async () => {
+            const entity = escortEntity(new Map());
+            await restockEscortEntity(entity, gameDataOf([], []));
+            expect(entity.components.has(ArmorComponent)).toBeFalse();
+            expect(entity.components.has(ShieldComponent)).toBeFalse();
+            expect(entity.components.has(IonizationComponent)).toBeFalse();
+        });
+
+        it('repairs every escort in a landed batch', async () => {
+            const first = escortEntity(new Map());
+            first.components.set(ArmorComponent, stat(3, 100));
+            const second = escortEntity(new Map());
+            second.components.set(IonizationComponent, stat(50, 60));
+            second.components.set(DisabledComponent, { repairAt: null });
+
+            await restockCarriedEscorts(
+                [{ uuid: 'a', entity: first }, { uuid: 'b', entity: second }],
+                gameDataOf([], []));
+
+            expect(first.components.get(ArmorComponent)!.current).toEqual(100);
+            expect(second.components.get(IonizationComponent)!.current)
+                .toEqual(0);
+            expect(second.components.has(DisabledComponent)).toBeFalse();
+        });
     });
 
     it('restocks ammo to launcher maxAmmo times the launcher count',

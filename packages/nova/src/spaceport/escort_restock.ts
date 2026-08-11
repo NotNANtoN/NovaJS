@@ -1,7 +1,11 @@
 import { OutfitData } from 'novadatainterface/outfit_data';
 import { WeaponData } from 'novadatainterface/weapon_data';
 import { Entity } from 'nova_ecs/entity';
-import { FuelComponent } from '../nova_plugin/health_plugin.js';
+import { DisabledComponent } from '../nova_plugin/disabled_component.js';
+import {
+    ArmorComponent, FuelComponent, IonizationComponent, ShieldComponent,
+} from '../nova_plugin/health_plugin.js';
+import { IsIonizedComponent } from '../nova_plugin/ionization_plugin.js';
 import {
     OutfitsState, OutfitsStateComponent,
 } from '../nova_plugin/outfit_plugin.js';
@@ -23,14 +27,21 @@ import { deployedFightersByBay } from './landed_escorts.js';
  * deliberately NOT symmetric with the player, and the asymmetry is the
  * design, not an oversight.
  *
- * WHAT IS RESTOCKED: fuel (FuelComponent.current -> max) and ammunition
- * (every owned outfit with an `ammoFor` goes back to capacity). Bay
+ * WHAT IS RESTOCKED: fuel (FuelComponent.current -> max), ammunition
+ * (every owned outfit with an `ammoFor` goes back to capacity), and — since
+ * Matthew's playtest ("escorts should repair and deionize when landed") —
+ * the HULL: armor and shields to full, any lingering ionization cleared,
+ * and DisabledComponent dropped if one somehow rode the landing down. Bay
  * fighters ARE ammo outfits in this data model, so a carrier escort's
- * fighter complement is restored by the same rule, with no special case.
+ * fighter complement is restored by the same ammo rule, with no special
+ * case.
  *
- * WHAT IS NOT: armor and shields. Those regenerate on their own (or are
- * repaired by boarding a disabled escort), and Matthew scoped this nit to
- * ammo and energy only — a landing must not be a free hull repair.
+ * The hull work is free for the same reason the fuel and ammo are: the
+ * hire fee is the whole commercial relationship, and an escort pilot
+ * maintains their own ship out of it (Matthew's ruling). It stays
+ * deliberately asymmetric with the player, who pays their own yard bill.
+ * A ship that never lands still repairs only by the slow in-flight rules —
+ * this is a PORT VISIT, not a free repair beam.
  *
  * WHERE IT RUNS: on the LANDED roster as a LIFT-OFF consumes it
  * (browser.ts's takeLandedEscortsRestocked — the spaceport launch, the
@@ -141,8 +152,43 @@ async function ammoCeiling(outfit: OutfitData, owned: OutfitsState,
 }
 
 /**
- * Refuels and rearms one carried escort entity in place. Safe to call on
- * an entity with no fuel stat or no outfits — it simply does less.
+ * The hull half of a port visit: armor and shields to full, ionization
+ * bled off, and any DisabledComponent removed.
+ *
+ * WHY THE DISABLED DROP IS NOT DEAD CODE. A disabled escort normally
+ * cannot fly itself down to a pad, so it should never be on a landed
+ * roster — but the roster is durable state that survives a landing, a
+ * lift-off and a jump, and an escort can be disabled by a stray shot in
+ * the same tick it is swept up. Coming back up still disabled would strand
+ * it on the pad forever: DisabledMovementSystem brakes it, and the repair
+ * paths (boarding it, the hail assist) all need it to be somewhere the
+ * player can reach. It costs one delete to make that unreachable.
+ *
+ * IsIonizedComponent is deleted rather than set: it is IonizedSystem's
+ * derived cache, and deleting it makes that system recompute (and re-emit
+ * its event) from the zeroed stat on the next step, instead of two places
+ * writing the same derived answer.
+ */
+function repairEscortHull(entity: Entity): void {
+    const armor = entity.components.get(ArmorComponent);
+    if (armor) {
+        armor.current = armor.max;
+    }
+    const shield = entity.components.get(ShieldComponent);
+    if (shield) {
+        shield.current = shield.max;
+    }
+    const ionization = entity.components.get(IonizationComponent);
+    if (ionization) {
+        ionization.current = ionization.min;
+    }
+    entity.components.delete(IsIonizedComponent);
+    entity.components.delete(DisabledComponent);
+}
+
+/**
+ * Repairs, refuels and rearms one carried escort entity in place. Safe to
+ * call on an entity with no fuel stat or no outfits — it simply does less.
  *
  * `deployedByWeapon` is this escort's OWN fighters that are still out of
  * their bays, keyed by bay weapon id: a launched fighter still occupies
@@ -161,6 +207,8 @@ async function ammoCeiling(outfit: OutfitData, owned: OutfitsState,
 export async function restockEscortEntity(entity: Entity,
     gameData: RestockGameData,
     deployedByWeapon?: ReadonlyMap<string, number>): Promise<void> {
+    repairEscortHull(entity);
+
     const fuel = entity.components.get(FuelComponent);
     if (fuel) {
         fuel.current = fuel.max;
