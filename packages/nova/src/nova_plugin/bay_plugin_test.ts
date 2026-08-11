@@ -8,7 +8,10 @@ import { Position } from 'nova_ecs/datatypes/position';
 import { Vector } from 'nova_ecs/datatypes/vector';
 import { Entity } from 'nova_ecs/entity';
 import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
+import { RandomResource } from 'nova_ecs/plugins/random_plugin';
 import { World } from 'nova_ecs/world';
+import { EscortCommandComponent } from './escort_command.js';
+import { FormationComponent, NpcComponent } from './npc_ai_plugin.js';
 import { BayFighterComponent, EXIT_KICK, startReturnHome } from './bay_plugin.js';
 import { CollisionEvent } from './collision_interaction.js';
 import { completeEntity } from './entity_data_loader.js';
@@ -330,5 +333,68 @@ describe('bay weapons', () => {
             // The bay is still mounted, with its count intact.
             expect(carrier.components.get(WeaponsStateComponent)!
                 .get(BAY_ID)!.count).toBe(1);
+        });
+
+    /**
+     * OrphanedBayFighterSystem's DEPART path: a bay fighter whose carrier
+     * has been destroyed is handed a graceful exit instead of being left
+     * steered by escort machinery that has no leader left.
+     *
+     * Three things about it were unpinned. It must actually retire the
+     * fighter (drop the escort wiring, hand it the departing NPC brain).
+     * It must NOT refund the round — the bay it came from no longer
+     * exists, and crediting a dead carrier's magazine would resurrect
+     * ammo that the docking path is the only legitimate source of. And it
+     * must draw NOTHING from the seeded RandomResource: it runs off entity
+     * state alone, so a carrier dying must not shift the PRNG stream for
+     * everything else on that tick.
+     */
+    it('retires an orphaned fighter with no refund and no PRNG draw',
+        async () => {
+            const { world, carrier } = await makeTestWorld();
+            const [, fighter] = await launchOne(world, carrier);
+            expect(outfitCount(carrier, FIGHTER_A_ID)).toBe(1);
+
+            // The escort wiring an NPC carrier's fighter flies under (the
+            // bay launch itself stamps only the bay identity; the carrier's
+            // command layer adds these). Stamped explicitly so the
+            // assertions below that it is STRIPPED are not vacuous.
+            fighter.components.set(FormationComponent,
+                { leader: CARRIER_UUID, slot: 0 });
+            fighter.components.set(EscortCommandComponent,
+                { command: 'formation' });
+
+            // The carrier is destroyed. `carrier` is still a live object,
+            // so its magazine stays readable after it leaves the world.
+            world.entities.delete(CARRIER_UUID);
+
+            const random = world.resources.get(RandomResource)!;
+            const stateBefore = random.getState();
+            await stepWorld(world, 1);
+
+            // Retired: escort wiring gone, departing NPC brain in place.
+            expect(fighter.components.get(NpcComponent))
+                .toEqual({ aiType: 3, mode: 'depart' });
+            expect(fighter.components.has(EscortCommandComponent)).toBeFalse();
+            expect(fighter.components.has(FormationComponent)).toBeFalse();
+            // The round is NOT banked back into the dead carrier.
+            expect(outfitCount(carrier, FIGHTER_A_ID)).toBe(1);
+            // The seeded sequence is exactly where it was.
+            expect(random.getState()).toEqual(stateBefore);
+        });
+
+    it('leaves an orphaned fighter alone once it has already been retired',
+        async () => {
+            // Idempotent: the NpcComponent it gains is what stops it
+            // running again, so later ticks must add no further draws.
+            const { world, carrier } = await makeTestWorld();
+            await launchOne(world, carrier);
+            world.entities.delete(CARRIER_UUID);
+            await stepWorld(world, 1);
+
+            const random = world.resources.get(RandomResource)!;
+            const stateBefore = random.getState();
+            await stepWorld(world, 3);
+            expect(random.getState()).toEqual(stateBefore);
         });
 });

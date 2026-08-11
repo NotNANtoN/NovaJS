@@ -538,4 +538,71 @@ describe('MissileJammingSystem (deterministic integration)', () => {
         expect(world.entities.get('missile')!
             .components.get(JamSteerComponent)).toBeUndefined();
     });
+
+    /**
+     * PRNG-STREAM INDEPENDENCE, the reason MissileJammingSystem draws
+     * twice per guided missile per frame even when the jam probability is
+     * zero. Every other integration spec here flies a single missile, so
+     * nothing pinned the property the unconditional draws exist for: one
+     * missile's rolls must not move when a DIFFERENT missile's jamming
+     * situation changes.
+     *
+     * Two worlds, same seed, two missiles each. Missile A's target either
+     * can or cannot jam it; missile B's situation is identical in both.
+     * If the draws were conditional, A would consume zero numbers in the
+     * no-jam world, shifting every one of B's rolls — and a player adding
+     * or removing a jammer anywhere in the system would silently rewrite
+     * unrelated missiles' outcomes (a rollback/replay desync waiting to
+     * happen).
+     */
+    it('keeps one missile\'s rolls independent of another\'s jamming',
+        () => {
+            // 'missile a' sorts before 'missile b', so A's draws come
+            // first and any shift in the stream lands on B.
+            const outcomes = (aCanBeJammed: boolean) => {
+                const world = makeJammingWorld(7);
+                world.entities.set('ship a', makeShip(0, 100,
+                    aCanBeJammed ? [100, 0, 0, 0] : [0, 0, 0, 0]));
+                world.entities.set('ship b', makeShip(0, 200,
+                    [50, 0, 0, 0]));
+                world.entities.set('missile a',
+                    makeMissile('ship a', [100, 0, 0, 0]));
+                world.entities.set('missile b',
+                    makeMissile('ship b', [50, 0, 0, 0]));
+                const seq: (string | undefined)[] = [];
+                for (let i = 0; i < 120; i++) {
+                    world.step();
+                    seq.push(world.entities.get('missile b')!
+                        .components.get(JamSteerComponent));
+                }
+                return seq;
+            };
+
+            const withJammer = outcomes(true);
+            const withoutJammer = outcomes(false);
+            // Not vacuous: B really is being jammed some of the time, so
+            // the comparison is over a sequence with structure in it.
+            expect(withJammer.some(state => state !== undefined)).toBeTrue();
+            // Byte-identical either way. This is what the two
+            // unconditional draws buy.
+            expect(withoutJammer).toEqual(withJammer);
+
+            // And A itself really did behave differently between the two
+            // worlds, so the setups are genuinely distinct.
+            const aOutcomes = (aCanBeJammed: boolean) => {
+                const world = makeJammingWorld(7);
+                world.entities.set('ship a', makeShip(0, 100,
+                    aCanBeJammed ? [100, 0, 0, 0] : [0, 0, 0, 0]));
+                world.entities.set('missile a',
+                    makeMissile('ship a', [100, 0, 0, 0]));
+                const seq: (string | undefined)[] = [];
+                for (let i = 0; i < 120; i++) {
+                    world.step();
+                    seq.push(world.entities.get('missile a')!
+                        .components.get(JamSteerComponent));
+                }
+                return seq;
+            };
+            expect(aOutcomes(true)).not.toEqual(aOutcomes(false));
+        });
 });
