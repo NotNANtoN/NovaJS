@@ -1,7 +1,6 @@
 import { Entities, GetEntity, UUID } from "nova_ecs/arg_types";
 import { Component } from "nova_ecs/component";
 import { AddEvent, DeleteEvent } from "nova_ecs/events";
-import { Optional } from "nova_ecs/optional";
 import { Plugin } from "nova_ecs/plugin";
 import { MovementStateComponent, MovementSystem } from "nova_ecs/plugins/movement_plugin";
 import { Provide } from "nova_ecs/provide";
@@ -172,10 +171,13 @@ export const TumbleDrawSystem = new System({
 const AnimationGraphicCleanup = new System({
     name: 'AnimationGraphicCleanup',
     events: [DeleteEvent],
-    args: [AnimationGraphicComponent, Optional(AnimationComponent),
-        AnimationGraphicPoolResource, Space] as const,
-    step: (graphic, animation, pool, space) => {
-        if (animation && pool.release(currentIfDraft(animation), graphic)) {
+    args: [AnimationGraphicComponent, AnimationGraphicPoolResource,
+        Space] as const,
+    step: (graphic, pool, space) => {
+        // The pool keys the graphic by what it was BUILT from, not by the
+        // entity's current AnimationComponent — those can differ (see
+        // AnimationGraphicPool.release).
+        if (pool.release(graphic)) {
             // Keep the graphic attached to the space container but hidden so
             // that reusing it does not pay for removeChild / addChild, which
             // splice the container's children array.

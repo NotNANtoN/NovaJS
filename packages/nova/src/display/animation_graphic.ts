@@ -33,6 +33,20 @@ export class AnimationGraphic {
      */
     weaponFlashAlpha = 0;
     private animation: Animation | Promise<Animation>;
+    /**
+     * The animation this graphic's sprites were actually BUILT from,
+     * resolved once `build()` gets past awaiting `animation`.
+     *
+     * This is the only trustworthy identity of what the graphic draws. The
+     * sprite sheets, blend modes and frame ranges in `sprites` are captured
+     * from this animation at construction and are never re-read afterwards,
+     * so an entity whose `AnimationComponent` is later reassigned (a
+     * `Provide` with an `update:` list replaces it; AnimationGraphicLoader
+     * has no `update:` and so never rebuilds) keeps drawing THIS animation.
+     * The pool therefore keys graphics by this, never by whatever animation
+     * the entity happens to carry at release time.
+     */
+    builtAnimation?: Animation;
     readonly buildPromise: Promise<AnimationGraphic>;
     built = false;
     size = { x: 0, y: 0 }
@@ -58,6 +72,9 @@ export class AnimationGraphic {
 
     private async build(): Promise<AnimationGraphic> {
         var promises: Promise<unknown>[] = [];
+        // Record what we are building from BEFORE any sprite is made, so the
+        // graphic's identity always matches the sheets it actually holds.
+        this.builtAnimation = await this.animation;
         this.blink = (await this.animation).blink;
         this.weapDecay = (await this.animation).weapDecay;
         for (const imageName in (await this.animation).images) {

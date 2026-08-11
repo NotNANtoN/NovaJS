@@ -38,10 +38,30 @@ export class AnimationGraphicPool {
 
     /**
      * Returns true if the graphic was accepted into the pool. If it was not
-     * (the pool for this animation is full), the caller should detach the
-     * graphic so it can be garbage collected.
+     * (the pool for this animation is full, or the graphic never finished
+     * building), the caller should detach the graphic so it can be garbage
+     * collected.
+     *
+     * The key comes from the graphic's OWN `builtAnimation` and deliberately
+     * cannot be supplied by the caller. Filing a graphic under the animation
+     * its entity happened to carry at death was the source of cross-weapon
+     * sprite corruption: an entity's `AnimationComponent` can be reassigned
+     * after its graphic is built (any `Provide` with an `update:` list does
+     * this, e.g. ProjectileAnimationProvider when ProjectileDataComponent
+     * changes), but AnimationGraphicLoader declares no `update:`, so the
+     * graphic is never rebuilt and still holds the ORIGINAL weapon's sprite
+     * sheets. Releasing it under the new animation's key put a graphic
+     * drawing weapon A into weapon B's pool, and the next B projectile to
+     * acquire it drew A's shot. Keying off what the graphic actually holds
+     * makes that misfiling unrepresentable.
      */
-    release(animation: Animation, graphic: AnimationGraphic): boolean {
+    release(graphic: AnimationGraphic): boolean {
+        const animation = graphic.builtAnimation;
+        if (!animation) {
+            // Still loading its sheets: it has no settled identity, so it
+            // cannot be filed. The caller detaches it instead.
+            return false;
+        }
         const key = animationPoolKey(animation);
         let pool = this.pools.get(key);
         if (!pool) {
