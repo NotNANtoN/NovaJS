@@ -16,17 +16,17 @@ import { registerSimulationBridgeEvent } from '../communication/simulation_bridg
 import {
     AmmoOutfitInfo, axesAligned, BoardBlockReason, BoardedComponent,
     BoardedState, boardingBlockedReason, BoardingComponent, BoardingState,
-    captureChance, CaptureBayCandidate, chooseCaptureBay, creditBooty,
-    fuelTransferAmount, planAmmoPlunder, planCargoPlunder,
+    capturable, captureChance, CaptureBayCandidate, chooseCaptureBay,
+    creditBooty, fuelTransferAmount, planAmmoPlunder, planCargoPlunder,
 } from './boarding_component.js';
 import { CargoComponent, cargoUsed } from './cargo_plugin.js';
 import { OutfitsState, OutfitsStateComponent } from './outfit_plugin.js';
 import { WeaponsState, WeaponsStateComponent } from './weapons_state.js';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import {
-    BayFighterComponent, ReturnWhenTargetRemovedComponent,
+    BayFighterComponent, CollectableEscortComponent, refundFighterToBay,
+    ReturnComponent, ReturnWhenTargetRemovedComponent,
 } from './bay_plugin.js';
-import { CollisionVulnerabilityComponent } from './collision_interaction.js';
 import { DisabledComponent, isBelowDisableThreshold, repairedArmor } from './disabled_component.js';
 import { EscortCommandComponent } from './escort_command.js';
 import { OwnerComponent, SourceComponent } from './fire_weapon_plugin.js';
@@ -339,74 +339,41 @@ function reattachEscort(target: Entity, leaderUuid: string,
 }
 
 /**
- * The bay-capture shortcut's effect: the disabled hulk becomes one of the
- * boarder's DEPLOYED bay fighters, stamped exactly like one the bay had
- * launched itself (BayWeaponEntry.fire) — so every downstream system
- * (escort commands, the returnToBay flow, CollectableEscortAI's docking
- * refund, the outfitter's deployed-fighter accounting, the landed roster)
- * treats it as native.
+ * The bay-capture shortcut's effect: the disabled hulk is STOWED in the
+ * boarder's bay. One round is credited to the magazine — the same credit
+ * refundFighterToBay gives a fighter that docks — and the hulk's entity is
+ * removed from the world.
  *
- * The magazine is deliberately NOT credited here: the fighter is deployed,
- * not stowed. Docking it later runs refundFighterToBay, and the room check
- * in the gate (chooseCaptureBay) is what guarantees that refund will fit —
- * which is what makes the capture permanent.
+ * WHY STOWED RATHER THAN DEPLOYED (Matthew's playtest ruling; the status
+ * message has always said "Captured the X into your fighter bay"): the
+ * shortcut used to mint the hulk into a DEPLOYED fighter flying formation
+ * on its captor, which read to the player as "it just flies around" —
+ * nothing was in the bay, and the ship the message named was still out
+ * there. Stowing makes the message literally true, and it sidesteps the
+ * stale-identity hazards a converted hulk carried (see convertToEscort).
+ * Launching it again mints a fresh fighter from the bay's ship class, the
+ * same as any other round in the magazine.
+ *
+ * WHAT IS LOST, inherently: the hulk's damage, outfits, cargo and name.
+ * A bay round is not a ship — it is an ammo count — and a launched fighter
+ * is built from the bay weapon's shipID with that class's stock loadout.
+ * There is nowhere in the data model to keep a stowed ship's individual
+ * state, so a captured fighter re-launches as a factory-fresh one.
+ *
+ * Returns false when the credit could not be made (the boarder holds no
+ * ammo outfit that supplies this bay, so there is no magazine to credit).
+ * The caller then leaves the hulk alone and falls through to the ordinary
+ * boarding paths rather than deleting a ship for nothing. The gate's room
+ * check (chooseCaptureBay) already guarantees the capacity half.
  */
-function captureIntoBay(target: Entity, bayWeaponId: string,
-    boarder: Entity, boarderUuid: string, entities: EntityMap): void {
-    repairHulk(target);
-
-    // The owner-chain root, derived the way a bay launch derives it
-    // (fire_weapon_plugin's fireFromEntity: the firer's OwnerComponent,
-    // falling back to the firer itself).
-    const ownerRoot =
-        boarder.components.get(OwnerComponent)?.owner ?? boarderUuid;
-    target.components.set(OwnerComponent, { owner: ownerRoot });
-    target.components.set(SourceComponent, boarderUuid);
-    target.components.set(BayFighterComponent, { bayWeaponId });
-    target.components.set(ReturnWhenTargetRemovedComponent, undefined);
-
-    // Escort stamps. FiringGroup follows stampFiringGroup: the boarder's
-    // own group if it has one, else the owner-chain root. The govt half of
-    // that helper is deliberately skipped — it rides WEAPON entities only,
-    // and this is a ship (see firing_group.ts).
-    target.components.set(FormationComponent, {
-        leader: boarderUuid,
-        slot: nextFormationSlot(formationsIn(entities), boarderUuid),
-    });
-    target.components.set(EscortCommandComponent, { command: 'formation' });
-    target.components.set(FiringGroupComponent, {
-        group: boarder.components.get(FiringGroupComponent)?.group ?? ownerRoot,
-    });
-    target.components.delete(GovtComponent);
-    target.components.delete(BoardedComponent);
-    target.components.delete(EscortLandingComponent);
-    const owner = boarder.components.get(MultiplayerData)?.owner;
-    if (owner !== undefined) {
-        target.components.set(MultiplayerData, { owner });
+function stowCaptureIntoBay(targetUuid: string, bayWeaponId: string,
+    boarder: Entity, entities: EntityMap,
+    gameData: SimulationGameDataInterface): boolean {
+    if (!refundFighterToBay(boarder, bayWeaponId, gameData)) {
+        return false;
     }
-    // Durable ownership, stamped here rather than waiting for
-    // MarkPlayerEscortsSystem's next pass (which would reach the same
-    // answer off the chain above). Only a player-controlled boarder can
-    // name a player: for anything else the marking system decides.
-    if (boarder.components.has(ControlledByComponent)) {
-        target.components.set(PlayerEscortComponent,
-            { player: boarderUuid, parent: boarderUuid });
-    }
-    // Clear leftover hostility and targeting, exactly as convertToEscort
-    // does, so the new fighter isn't still gunning for its captor.
-    const npc = target.components.get(NpcComponent);
-    if (npc) {
-        npc.aggressor = undefined;
-    }
-    const targetTarget = target.components.get(TargetComponent);
-    if (targetTarget) {
-        targetTarget.target = undefined;
-    }
-
-    // The carrier must be dockable, or the new fighter could never come
-    // home and bank itself (bay_plugin's fire does the same).
-    boarder.components.get(CollisionVulnerabilityComponent)
-        ?.vulnerableTo.add('return_escorts');
+    entities.delete(targetUuid);
+    return true;
 }
 
 /**
@@ -498,24 +465,32 @@ const BoardingGateSystem = new System({
             return;
         }
 
+        // A ship somebody is FLYING is never captured, by either route
+        // (see capturable). Its pilot keeps command of it; the plunder
+        // session below is still open to a pirate.
+        const capturableTarget = capturable(targetEntity!);
+
         // 1. BAY CAPTURE. A hulk of a ship class one of the boarder's bays
-        // launches, with room for it, is taken straight into that bay as a
-        // deployed fighter: no session, no contest, no dialog, and — note
-        // for the rollback/replay discipline — no draw from the seeded
-        // RandomResource, so pressing 'board' on a bay-capturable hulk
-        // never shifts the PRNG sequence for anything else.
+        // launches, with room for it, is STOWED straight into that bay: no
+        // session, no contest, no dialog, and — note for the rollback/replay
+        // discipline — no draw from the seeded RandomResource, so pressing
+        // 'board' on a bay-capturable hulk never shifts the PRNG sequence
+        // for anything else.
         const targetShipId =
             targetEntity!.components.get(ShipComponent)?.id;
-        const captureBay = targetShipId === undefined ? undefined
+        const captureBay = targetShipId === undefined || !capturableTarget
+            ? undefined
             : chooseCaptureBay(targetShipId, captureBayCandidates(
                 uuid, boarderWeapons, boarderOutfits, entities, gameData));
-        if (captureBay !== undefined) {
-            // The same crime the plunder session charges for a capture,
-            // read BEFORE the hulk sheds its government.
-            applyBoardCrime(records,
-                targetEntity!.components.get(GovtComponent)?.id, gameData,
-                govts);
-            captureIntoBay(targetEntity!, captureBay, entity, uuid, entities);
+        // The crime is read BEFORE the hulk leaves the world, and charged
+        // only once the stow actually happened.
+        const targetGovtId = targetEntity!.components.get(GovtComponent)?.id;
+        if (captureBay !== undefined && stowCaptureIntoBay(
+            targetUuid!, captureBay, entity, entities, gameData)) {
+            applyBoardCrime(records, targetGovtId, gameData, govts);
+            // The prize is gone from the world; leaving it selected would
+            // point the HUD at an entity that no longer exists.
+            target.target = undefined;
             emit(BayCaptureEvent, { shipId: targetShipId! }, [uuid]);
             return;
         }
@@ -664,24 +639,87 @@ function endBoardingSession(entity: Entity,
  * like a hired escort), and is patched back above its disable threshold
  * so it can fly. Mirrors the component set spawnHiredEscorts stamps
  * (browser.ts), applied to a live entity rather than a fresh one.
+ *
+ * IT MUST ALSO SHED THE HULL'S PREVIOUS IDENTITY, which is what the
+ * playtest caught. Capture a ship that was itself somebody's BAY FIGHTER
+ * — an NPC carrier's wing, the very class a player with a bay is likely
+ * to be boarding — and the stamps above land on top of a live set of bay
+ * components pointing at the OLD carrier. The result was a ship that was
+ * an escort by some predicates and not by others:
+ *
+ *  - the returnToBay escort command believed the ship was bay-launched
+ *    (stale ReturnWhenTargetRemovedComponent) and so DELETED its
+ *    FormationComponent and flew it home to its old carrier
+ *    (escort_command_plugin's returnToBay case, via startReturnHome);
+ *  - with the formation link gone, both one-hop parent lookups fell
+ *    through to the stale OwnerComponent — the old carrier — so the
+ *    player could no longer command it (escortParent) and the target
+ *    cycle stopped hiding it (flock.ts's flockParent, where
+ *    OwnerComponent SHADOWS the firing group);
+ *  - meanwhile FiringGroupComponent still named the player, so the
+ *    player's own shots kept passing through it, and the durable
+ *    PlayerEscort marker still labelled it an escort in the target pane.
+ *    Exactly the "says it is my escort, but I can't command it and my
+ *    weapons can't hit it" report.
+ *  - a captured wing whose old carrier was already dead could also be
+ *    retired out from under the player by OrphanedBayFighterSystem
+ *    (bay_plugin), which deletes EscortCommandComponent and
+ *    FormationComponent and sets the ship departing — it exempts ships
+ *    marked PlayerEscortComponent, which is why that marker is now
+ *    stamped HERE rather than a tick later by MarkPlayerEscortsSystem.
+ *
+ * So the bay identity is removed wholesale: the launch link
+ * (BayFighterComponent / SourceComponent / OwnerComponent /
+ * ReturnWhenTargetRemovedComponent) and any in-progress return home
+ * (ReturnComponent / CollectableEscortComponent, which would otherwise
+ * fly the prize back to its old carrier and let it be scooped up).
+ * captureIntoBay's sibling path always overwrote these; this one used to
+ * leave them.
  */
 function convertToEscort(target: Entity,
     leaderUuid: string, leaderOwner: string | undefined,
-    entities: EntityMap): void {
+    leaderControlled: boolean, entities: EntityMap): void {
     const slot = nextFormationSlot(formationsIn(entities), leaderUuid);
     target.components.set(FormationComponent, { leader: leaderUuid, slot });
     target.components.set(EscortCommandComponent, { command: 'formation' });
     target.components.set(FiringGroupComponent, { group: leaderUuid });
     target.components.delete(GovtComponent);
     target.components.delete(BoardedComponent);
+    // The old owner's bay identity, in full.
+    target.components.delete(BayFighterComponent);
+    target.components.delete(SourceComponent);
+    target.components.delete(OwnerComponent);
+    target.components.delete(ReturnWhenTargetRemovedComponent);
+    target.components.delete(ReturnComponent);
+    target.components.delete(CollectableEscortComponent);
+    // A landing order aimed at its old owner's stellar is meaningless now.
+    target.components.delete(EscortLandingComponent);
     if (leaderOwner !== undefined) {
         target.components.set(MultiplayerData, { owner: leaderOwner });
     }
+    // Durable ownership, stamped immediately (as captureIntoBay always
+    // did) rather than waiting for MarkPlayerEscortsSystem's next pass:
+    // the one-tick window where the prize carried no marker is the window
+    // OrphanedBayFighterSystem used to retire it in. Only a
+    // player-controlled captor can name a player; for anything else the
+    // marking system decides.
+    if (leaderControlled) {
+        target.components.set(PlayerEscortComponent,
+            { player: leaderUuid, parent: leaderUuid });
+    }
     // Clear leftover hostility so a reverted-to-NPC escort (leader lost)
-    // isn't still gunning for the ex-owner.
+    // isn't still gunning for the ex-owner. The MODE goes with it: a
+    // prize whose old carrier died was already retired to 'depart' by
+    // OrphanedBayFighterSystem, and an escort that inherited that mode
+    // would fly itself out of the system the moment its escort command
+    // ever lapsed. Cleared (rather than set to some other mode) is the
+    // resting value a freshly spawned NPC has; nothing rolls a new one
+    // while the ship holds an EscortCommandComponent, so this consumes no
+    // randomness.
     const npc = target.components.get(NpcComponent);
     if (npc) {
         npc.aggressor = undefined;
+        npc.mode = undefined;
     }
     const targetTarget = target.components.get(TargetComponent);
     if (targetTarget) {
@@ -737,11 +775,16 @@ const BoardingActionSystem = new System({
         }
 
         // Take the captured ship as an escort (capture-assignment
-        // dialog). Ends the session.
+        // dialog). Ends the session. The `capturable` re-check is
+        // belt-and-braces: capture can never REACH 'succeeded' against a
+        // flown ship, but a hull that somehow became controlled between
+        // the roll and the assignment must not be converted either — that
+        // half-owned chimera is the whole bug.
         if (controls.get('plunderCaptureEscort') === 'start'
-            && boarding.capture === 'succeeded') {
+            && boarding.capture === 'succeeded' && capturable(target)) {
             const owner = entity.components.get(MultiplayerData)?.owner;
-            convertToEscort(target, uuid, owner, entities);
+            convertToEscort(target, uuid, owner,
+                entity.components.has(ControlledByComponent), entities);
             boarding.capture = 'assigned';
             entity.components.delete(BoardingComponent);
             return;
@@ -824,8 +867,15 @@ const BoardingActionSystem = new System({
             chargeCrime();
         }
 
+        // The capture contest. A ship somebody is flying is never
+        // capturable (see `capturable`), and the roll is skipped ENTIRELY
+        // for one — no draw from the seeded RandomResource, so the draw
+        // count stays identical on every peer and across resimulation
+        // (the predicate is synced state, so every peer skips together).
+        // The dialog greys the button off the same predicate, so pressing
+        // it is only reachable by a hand-sent control input.
         if (controls.get('plunderCapture') === 'start'
-            && boarding.capture !== 'succeeded') {
+            && boarding.capture !== 'succeeded' && capturable(target)) {
             const targetCrew =
                 target.components.get(ShipDataComponent)?.crew ?? 0;
             // Bible: a 0-crew boarder can't capture. Marines (ModType 25)

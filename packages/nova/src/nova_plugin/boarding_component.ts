@@ -1,6 +1,8 @@
 import * as t from 'io-ts';
 import { Component } from 'nova_ecs/component';
 import { Angle } from 'nova_ecs/datatypes/vector';
+import { Entity } from 'nova_ecs/entity';
+import { ControlledByComponent } from './ship_control.js';
 
 /**
  * ============================================================================
@@ -228,6 +230,42 @@ export function boardingBlockedReason(input: {
 /** Money booty from a victim's purchase price (floored, non-negative). */
 export function creditBooty(price: number): number {
     return Math.max(0, Math.floor(price * CREDIT_BOOTY_FRACTION));
+}
+
+/**
+ * Whether a boarded ship may be CAPTURED at all. A ship somebody is
+ * FLYING — any peer's player ship, marked ControlledByComponent — never
+ * can be. PLUNDER of it is untouched: robbing a disabled rival is PvP
+ * piracy and stays legal.
+ *
+ * WHY (Matthew's LAN playtest, his ruling): capture used to stamp the
+ * escort set (formation link, escort command, the captor's firing group)
+ * onto a hull that still had ControlledByComponent, so the victim kept
+ * flying it under their own input while the captor's escort commands
+ * partly drove it — the ships answered weapon orders from a captain who
+ * was not aboard. There is no half-owned ship in this model, so capture
+ * of a crewed ship is simply impossible.
+ *
+ * WHY ControlledByComponent IS THE RIGHT DISCRIMINATOR IN MULTIPLAYER.
+ * It is what makes a ship a player's ship in the first place (ship_control
+ * .ts: it names the peer whose inputs steer this hull), it is
+ * serializer-registered (ShipController's build), and it is NOT in
+ * PEER_LOCAL_COMPONENTS — the set of components allowed to differ between
+ * peers. So it rides wire snapshots, rollback snapshots and the display
+ * bridge, is part of the hashed shared state every desync check compares,
+ * and reads identically on every peer and in the display world. The
+ * peer-local marker PlayerShipSelector would have been the wrong choice
+ * for exactly the opposite reason: it exists only on the local peer, so
+ * gating on it would let peer A capture peer B's ship while peer B's own
+ * simulation refused — a guaranteed desync.
+ *
+ * Both capture routes consult this: the instant bay-capture gate and the
+ * plunder session's capture roll (which then never draws from the seeded
+ * PRNG, so the draw count stays agreed), and the dialog greys its Capture
+ * Ship button off the same predicate.
+ */
+export function capturable(target: Entity): boolean {
+    return !target.components.has(ControlledByComponent);
 }
 
 /**

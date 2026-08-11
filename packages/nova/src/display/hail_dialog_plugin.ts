@@ -6,7 +6,8 @@ import { Subscription } from 'rxjs';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { ControlsSubject } from '../nova_plugin/controls_plugin.js';
 import { DisabledComponent } from '../nova_plugin/disabled_component.js';
-import { OwnerComponent, SourceComponent } from '../nova_plugin/fire_weapon_plugin.js';
+import { escortParent } from '../nova_plugin/escort_command_plugin.js';
+import { SourceComponent } from '../nova_plugin/fire_weapon_plugin.js';
 import { DisplayAssetDataResource, SimulationGameDataResource } from '../nova_plugin/game_data_resource.js';
 import { GovtComponent } from '../nova_plugin/govt_component.js';
 import {
@@ -22,7 +23,7 @@ import { HailAction } from '../nova_plugin/hail_plugin.js';
 import { SoundEvent } from '../nova_plugin/sound_plugin.js';
 import { FuelComponent } from '../nova_plugin/health_plugin.js';
 import { shipDisposition } from '../nova_plugin/iff_plugin.js';
-import { FormationComponent, NpcComponent } from '../nova_plugin/npc_ai_plugin.js';
+import { NpcComponent } from '../nova_plugin/npc_ai_plugin.js';
 import { ShootAllWeaponsComponent } from '../nova_plugin/npc_plugin.js';
 import { PersComponent } from '../nova_plugin/pers_plugin.js';
 import { PlanetDataComponent, PlanetTargetComponent } from '../nova_plugin/planet_plugin.js';
@@ -143,8 +144,8 @@ export async function computeContext(world: World,
             || govt?.commName || shipData?.name || 'Unidentified ship';
 
         // Is this the player's own direct escort? (one parent hop) Carrier-bay
-        // fighters ALSO carry FormationComponent.leader / OwnerComponent.owner
-        // pointed at the player, so they'd match here too — but they are NOT
+        // fighters ALSO have a parent link pointed at the player, so they'd
+        // match here too — but they are NOT
         // hired escorts and have no management dialog. The discriminator is
         // SourceComponent: bay fighters set it (bay_plugin), hired escorts
         // (spawnHiredEscorts) and captures (convertToEscort) do not.
@@ -152,9 +153,11 @@ export async function computeContext(world: World,
         // serializer-registered (fire_weapon_plugin's build) to be here at
         // all — the bridge mirrors nothing else. Unregistered, this test
         // was always false and every bay fighter came back "Hired Escort:".
-        const parent = shipTarget.components.get(FormationComponent)?.leader
-            ?? shipTarget.components.get(OwnerComponent)?.owner;
-        const isOwnFlock = parent === player.uuid;
+        // escortParent, not a fourth private copy of the parent chain: the
+        // playtest bug where a captured prize "says it is my escort" but
+        // took no orders was exactly these predicates disagreeing, so the
+        // hail dialog asks the same question the command system does.
+        const isOwnFlock = escortParent(shipTarget) === player.uuid;
         const isBayFighter = shipTarget.components.has(SourceComponent);
         const isEscort = isOwnFlock && !isBayFighter;
 
