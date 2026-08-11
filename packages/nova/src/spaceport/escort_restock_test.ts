@@ -4,6 +4,10 @@ import {
     getDefaultProjectileWeaponData, WeaponData,
 } from 'novadatainterface/weapon_data';
 import { Entity } from 'nova_ecs/entity';
+import {
+    BayFighterComponent, ReturnWhenTargetRemovedComponent,
+} from '../nova_plugin/bay_plugin.js';
+import { SourceComponent } from '../nova_plugin/fire_weapon_plugin.js';
 import { FuelComponent } from '../nova_plugin/health_plugin.js';
 import {
     OutfitsState, OutfitsStateComponent,
@@ -144,6 +148,112 @@ describe('escort restock', () => {
         expect(outfits.get('plate')!.count).toEqual(1);
     });
 
+    /**
+     * Two ammo outfits can supply ONE launcher — the bay data model does
+     * exactly this, with several fighter outfits whose ammoFor is the same
+     * bay. The launcher capacity is a single pool shared between them (the
+     * outfitter gates the SUM; see ammoCapacity/ownedAmmoCount in
+     * outfitter_rules.ts), so topping each supplying outfit to the full
+     * capacity on its own fills the launcher twice over.
+     */
+    it('shares one launcher capacity across every supplying outfit',
+        async () => {
+            const ammoA = outfit({ id: 'ammoA', ammoFor: 'launcher' });
+            const ammoB = outfit({ id: 'ammoB', ammoFor: 'launcher' });
+            const launcherOutfit = outfit({
+                id: 'launcherOutfit', weapons: { launcher: 1 },
+            });
+            const weapon = launcherWeapon({
+                id: 'launcher', maxAmmo: 10, ammoType: ['weapon', 'launcher'],
+            });
+            const outfits: OutfitsState = new Map([
+                ['ammoA', { count: 3 }],
+                ['ammoB', { count: 2 }],
+                ['launcherOutfit', { count: 1 }],
+            ]);
+            await restockEscortEntity(escortEntity(outfits),
+                gameDataOf([ammoA, ammoB, launcherOutfit], [weapon]));
+            // 10 rounds TOTAL, not 10 of each. The free space goes to the
+            // lowest-sorted supplying outfit, matching the bay's own
+            // consume/refund policy (bay_plugin).
+            expect(outfits.get('ammoA')!.count).toEqual(8);
+            expect(outfits.get('ammoB')!.count).toEqual(2);
+        });
+
+    it('adds nothing when the supplying outfits already fill the pool',
+        async () => {
+            const ammoA = outfit({ id: 'ammoA', ammoFor: 'launcher' });
+            const ammoB = outfit({ id: 'ammoB', ammoFor: 'launcher' });
+            const launcherOutfit = outfit({
+                id: 'launcherOutfit', weapons: { launcher: 1 },
+            });
+            const weapon = launcherWeapon({
+                id: 'launcher', maxAmmo: 6, ammoType: ['weapon', 'launcher'],
+            });
+            const outfits: OutfitsState = new Map([
+                ['ammoA', { count: 4 }],
+                ['ammoB', { count: 4 }],
+                ['launcherOutfit', { count: 1 }],
+            ]);
+            await restockEscortEntity(escortEntity(outfits),
+                gameDataOf([ammoA, ammoB, launcherOutfit], [weapon]));
+            // Overfull already: a restock tops up, it never trims.
+            expect(outfits.get('ammoA')!.count).toEqual(4);
+            expect(outfits.get('ammoB')!.count).toEqual(4);
+        });
+
+    /**
+     * A carrier escort that lands with its own fighters STILL DEPLOYED
+     * (landing does not stow them — see landed_escorts.ts) used to be
+     * restocked to full capacity, and the landed fighters then redeployed
+     * on top of the fresh ones. A launched fighter still occupies its bay
+     * slot, exactly as the outfitter's deployedCounts hook models it.
+     */
+    it('subtracts a carrier\'s still-deployed fighters from its bay ceiling',
+        async () => {
+            const fighters = outfit({ id: 'fighters', ammoFor: 'bay' });
+            const bayOutfit = outfit({ id: 'bayOutfit', weapons: { bay: 1 } });
+            const bay = launcherWeapon({
+                id: 'bay', maxAmmo: 4, ammoType: ['weapon', 'bay'],
+            });
+            const outfits: OutfitsState = new Map([
+                ['fighters', { count: 1 }], ['bayOutfit', { count: 1 }],
+            ]);
+            await restockEscortEntity(escortEntity(outfits),
+                gameDataOf([fighters, bayOutfit], [bay]),
+                new Map([['bay', 2]]));
+            // Capacity 4, two fighters out: only two slots to fill.
+            expect(outfits.get('fighters')!.count).toEqual(2);
+        });
+
+    it('charges deployed fighters only against the bay they came out of',
+        async () => {
+            const alpha = outfit({ id: 'alpha', ammoFor: 'bayA' });
+            const beta = outfit({ id: 'beta', ammoFor: 'bayB' });
+            const bayAOutfit = outfit({
+                id: 'bayAOutfit', weapons: { bayA: 1 },
+            });
+            const bayBOutfit = outfit({
+                id: 'bayBOutfit', weapons: { bayB: 1 },
+            });
+            const bayA = launcherWeapon({
+                id: 'bayA', maxAmmo: 4, ammoType: ['weapon', 'bayA'],
+            });
+            const bayB = launcherWeapon({
+                id: 'bayB', maxAmmo: 4, ammoType: ['weapon', 'bayB'],
+            });
+            const outfits: OutfitsState = new Map([
+                ['alpha', { count: 0 }], ['beta', { count: 0 }],
+                ['bayAOutfit', { count: 1 }], ['bayBOutfit', { count: 1 }],
+            ]);
+            await restockEscortEntity(escortEntity(outfits),
+                gameDataOf([alpha, beta, bayAOutfit, bayBOutfit],
+                    [bayA, bayB]),
+                new Map([['bayA', 3]]));
+            expect(outfits.get('alpha')!.count).toEqual(1);
+            expect(outfits.get('beta')!.count).toEqual(4);
+        });
+
     it('restocks a whole batch', async () => {
         const ammo = outfit({ id: 'ammo', ammoFor: 'gun', max: 9 });
         const weapon = launcherWeapon({ id: 'gun', maxAmmo: 0 });
@@ -160,4 +270,45 @@ describe('escort restock', () => {
             expect(entity.components.get(FuelComponent)!.current).toEqual(300);
         }
     });
+
+    /**
+     * The batch-level half of the deployed-fighter ceiling: the roster
+     * being restocked is where the still-deployed fighters are counted
+     * from, because a landed roster is the complete set of ships that came
+     * down together (a carrier escort's launched fighters land as roster
+     * entries in their own right).
+     */
+    it('counts a landed roster\'s own deployed fighters against its carrier',
+        async () => {
+            const fighters = outfit({ id: 'fighters', ammoFor: 'bay' });
+            const bayOutfit = outfit({ id: 'bayOutfit', weapons: { bay: 1 } });
+            const bay = launcherWeapon({
+                id: 'bay', maxAmmo: 4, ammoType: ['weapon', 'bay'],
+            });
+            const carrierOutfits: OutfitsState = new Map([
+                ['fighters', { count: 0 }], ['bayOutfit', { count: 1 }],
+            ]);
+            const fighterEntry = (source: string) => {
+                const entity = new Entity('fighter');
+                entity.components.set(SourceComponent, source);
+                entity.components.set(ReturnWhenTargetRemovedComponent,
+                    undefined);
+                entity.components.set(BayFighterComponent,
+                    { bayWeaponId: 'bay' });
+                return entity;
+            };
+            const batch = [
+                { uuid: 'carrier', entity: escortEntity(carrierOutfits) },
+                { uuid: 'f1', entity: fighterEntry('carrier') },
+                { uuid: 'f2', entity: fighterEntry('carrier') },
+                // Another carrier's fighter must not shrink this bay.
+                { uuid: 'f3', entity: fighterEntry('somebody else') },
+            ];
+            await restockCarriedEscorts(batch,
+                gameDataOf([fighters, bayOutfit], [bay]));
+            // Capacity 4 minus the carrier's own two still-deployed
+            // fighters. Restocking to 4 would put it 2 over capacity the
+            // moment those two came back out with it.
+            expect(carrierOutfits.get('fighters')!.count).toEqual(2);
+        });
 });

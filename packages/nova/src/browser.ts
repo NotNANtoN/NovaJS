@@ -77,7 +77,8 @@ import { advanceEntityDate, ensurePlayerStateComponents } from "./spaceport/miss
 import { PendingEscortsComponent } from "./spaceport/pending_escorts.js";
 import {
     carriedBatchMustHold, carriedBatchSettled, CarriedEscort,
-    escortsAccountedFor, prepareCarriedEscorts, takeCarriedEscorts,
+    escortsAccountedFor, prepareCarriedEscorts, restoreFailedTransitionBatch,
+    takeCarriedEscorts, takeEscortsForTransition,
 } from "./spaceport/landed_escorts.js";
 import { restockCarriedEscorts } from "./spaceport/escort_restock.js";
 import {
@@ -558,20 +559,35 @@ async function insertCarriedEscorts(
 }
 
 /**
+ * Takes the landed roster for `player`, dropping other peers' entries
+ * (this client would never respawn them). No restock: the callers that
+ * are a lift-off use `takeLandedEscortsRestocked`.
+ */
+function takeLandedEscorts(player: string): CarriedEscort[] {
+    const taken = takeCarriedEscorts(landedEscorts, player);
+    landedEscorts.length = 0;
+    return taken;
+}
+
+/**
  * Takes the landed roster for `player` and hands it back refuelled and
  * rearmed: an escort that put down with its player leaves the pad with
  * full fuel and full magazines, free of charge (escort_restock.ts explains
  * why that differs from the player's own PAID refuel).
  *
- * Every drain of `landedEscorts` goes through here, which is what keeps
- * the service to escorts that actually LANDED — the jump roster
- * (carriedJumpEscorts) is drained separately and gets nothing.
+ * ONLY THE LIFT-OFF PATHS USE THIS. The service is for escorts that
+ * actually spent time at a port: the spaceport launch, the gate lift-off
+ * that puts the player back in the system it docked from, and the late
+ * flush that catches an escort which landed just after one of those. The
+ * jump roster (carriedJumpEscorts) never gets it, and neither does
+ * jumpTo's drain of the landed roster — a hypergate or wormhole transit
+ * taken while docked AT the gate carries the landed escorts through to
+ * another system, and passing through a gate is not a port visit. That
+ * drain uses `takeLandedEscorts`.
  */
 async function takeLandedEscortsRestocked(player: string):
     Promise<CarriedEscort[]> {
-    const taken = takeCarriedEscorts(landedEscorts, player);
-    // Other peers' entries are this client's business to drop, not respawn.
-    landedEscorts.length = 0;
+    const taken = takeLandedEscorts(player);
     await restockCarriedEscorts(taken, {
         getOutfit: id => simulationGameData.data.Outfit.get(id),
         getWeapon: id => simulationGameData.data.Weapon.get(id),
@@ -943,16 +959,22 @@ async function jumpTo(args: { entity: Entity, to: string, uuid: string }) {
     // swept at the gate, where no destination system exists to name yet —
     // see EscortFollowGateSystem), so this one take covers hyperspace
     // jumps, hypergates and wormholes alike.
-    const jumpEscorts = [
-        ...takeCarriedEscorts(carriedJumpEscorts, args.uuid),
-        // The landed half is restocked; the hyperspace half is not.
-        ...await takeLandedEscortsRestocked(args.uuid),
-    ];
-    carriedJumpEscorts.length = 0;
+    // NEITHER HALF IS RESTOCKED HERE. The service belongs to escorts that
+    // visited a port, and a transit taken while docked AT a gate is not a
+    // visit — the player never lifts off into the origin system. The
+    // restock lives on the lift-off drains
+    // (takeLandedEscortsRestocked). See takeEscortsForTransition.
+    const { batch: jumpEscorts, fromLanded } = takeEscortsForTransition(
+        carriedJumpEscorts, landedEscorts, args.uuid);
     try {
         await enterSystem(args, jumpEscorts);
     } catch (e) {
-        carriedJumpEscorts.push(...jumpEscorts);
+        // Never drop a single escort — but put each one back on the roster
+        // it came from, so a landed escort keeps its landed bookkeeping
+        // instead of being quietly reclassified as mid-jump.
+        const back = restoreFailedTransitionBatch(jumpEscorts, fromLanded);
+        landedEscorts.push(...back.landed);
+        carriedJumpEscorts.push(...back.jumping);
         throw e;
     }
 }

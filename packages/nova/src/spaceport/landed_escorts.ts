@@ -4,7 +4,9 @@ import { Position } from 'nova_ecs/datatypes/position';
 import { Vector } from 'nova_ecs/datatypes/vector';
 import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import { MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
-import { ReturnWhenTargetRemovedComponent } from '../nova_plugin/bay_plugin.js';
+import {
+    BayFighterComponent, ReturnWhenTargetRemovedComponent,
+} from '../nova_plugin/bay_plugin.js';
 import { EscortCommandComponent } from '../nova_plugin/escort_command.js';
 import {
     OwnerComponent, SourceComponent,
@@ -249,6 +251,62 @@ export function takeCarriedEscorts(roster: CarriedEscort[], player: string):
 }
 
 /**
+ * Both of a player's rosters, drained for a system transition (browser.ts's
+ * jumpTo): the escorts already riding a jump, followed by any that had
+ * LANDED — the hypergate/wormhole case, where the player docks at the gate
+ * holding escorts that were swept up there and transits without ever
+ * lifting off into the origin system.
+ *
+ * NOTHING IS RESTOCKED HERE, and that is the decision this function exists
+ * to hold: the free refuel-and-rearm belongs to escorts that visited a
+ * port, and passing through a gate is not a visit (escort_restock.ts). The
+ * restock lives on the lift-off drains instead.
+ *
+ * `fromLanded` is the landed half, by identity, so a transition that fails
+ * can hand each escort back to the roster it came from —
+ * `restoreFailedTransitionBatch`.
+ *
+ * Both rosters are emptied of everyone else's entries too: this client
+ * would never respawn another peer's escorts.
+ */
+export function takeEscortsForTransition(jumpRoster: CarriedEscort[],
+    landedRoster: CarriedEscort[], player: string):
+    { batch: CarriedEscort[], fromLanded: CarriedEscort[] } {
+    const jumping = takeCarriedEscorts(jumpRoster, player);
+    jumpRoster.length = 0;
+    const fromLanded = takeCarriedEscorts(landedRoster, player);
+    landedRoster.length = 0;
+    return { batch: [...jumping, ...fromLanded], fromLanded };
+}
+
+/**
+ * Sorts a batch a FAILED system transition is handing back into the two
+ * rosters it must return to.
+ *
+ * The never-drop guarantee is absolute: every entry in `batch` comes out
+ * in exactly one of the two halves. A landed escort goes back to the
+ * LANDED roster rather than being reclassified as mid-jump, so it keeps
+ * its landed bookkeeping — the lift-off restock and the landing-order
+ * handling that only the landed roster carries.
+ *
+ * Anything not recognised as having come from the landed roster joins the
+ * jump half. That deliberately includes escorts the failed transition
+ * PUSHED onto the batch on its way (a save's restored escorts enter
+ * exactly this way), which have no landed context to preserve.
+ */
+export function restoreFailedTransitionBatch(batch: readonly CarriedEscort[],
+    fromLanded: readonly CarriedEscort[]):
+    { landed: CarriedEscort[], jumping: CarriedEscort[] } {
+    const landedSet = new Set(fromLanded);
+    const landed: CarriedEscort[] = [];
+    const jumping: CarriedEscort[] = [];
+    for (const escort of batch) {
+        (landedSet.has(escort) ? landed : jumping).push(escort);
+    }
+    return { landed, jumping };
+}
+
+/**
  * The still-deployed bay fighters in a roster, grouped by the carrier
  * (SourceComponent) that launched them. The hook for bay ammo accounting:
  * a fighter that landed with the player is still deployed, so an
@@ -266,6 +324,40 @@ export function deployedFightersBySource(roster: readonly CarriedEscort[]):
             continue;
         }
         counts.set(source, (counts.get(source) ?? 0) + 1);
+    }
+    return counts;
+}
+
+/**
+ * The same still-deployed fighters as `deployedFightersBySource`, split by
+ * the BAY they were launched from: carrier uuid -> bay weapon id -> count.
+ *
+ * That is the granularity an ammo ceiling needs. A bay's capacity belongs
+ * to the bay weapon, and a deployed fighter occupies a slot in the
+ * specific bay it came out of, so a carrier with two different bays must
+ * not have one bay's launched fighters charged against the other's.
+ *
+ * A fighter with no BayFighterComponent cannot be attributed to a bay and
+ * is left out: it is state from a build that predates that component (or a
+ * collectable escort no bay launched), and guessing a bay for it would
+ * wrongly shrink a real bay's ceiling.
+ */
+export function deployedFightersByBay(
+    roster: readonly { entity: Entity }[]):
+    Map<string, Map<string, number>> {
+    const counts = new Map<string, Map<string, number>>();
+    for (const { entity } of roster) {
+        if (!entity.components.has(ReturnWhenTargetRemovedComponent)) {
+            continue;
+        }
+        const source = entity.components.get(SourceComponent);
+        const bay = entity.components.get(BayFighterComponent)?.bayWeaponId;
+        if (source === undefined || bay === undefined) {
+            continue;
+        }
+        const byBay = counts.get(source) ?? new Map<string, number>();
+        byBay.set(bay, (byBay.get(bay) ?? 0) + 1);
+        counts.set(source, byBay);
     }
     return counts;
 }

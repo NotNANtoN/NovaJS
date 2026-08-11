@@ -5,6 +5,7 @@ import { FuelComponent } from '../nova_plugin/health_plugin.js';
 import {
     OutfitsState, OutfitsStateComponent,
 } from '../nova_plugin/outfit_plugin.js';
+import { deployedFightersByBay } from './landed_escorts.js';
 
 /**
  * ============================================================================
@@ -31,12 +32,18 @@ import {
  * repaired by boarding a disabled escort), and Matthew scoped this nit to
  * ammo and energy only — a landing must not be a free hull repair.
  *
- * WHERE IT RUNS: on the LANDED roster as it is consumed (browser.ts), not
- * on the jump roster. An escort that merely rode along through hyperspace
- * never touched a pad and gets nothing. Capture time would be the other
- * candidate single point, but by consumption time the two rosters have
- * already been concatenated in one place (jumpTo), so applying it to the
- * landed half at each drain site is what keeps the two cases apart.
+ * WHERE IT RUNS: on the LANDED roster as a LIFT-OFF consumes it
+ * (browser.ts's takeLandedEscortsRestocked — the spaceport launch, the
+ * gate lift-off back into the system the player docked from, and the late
+ * flush that catches an escort which landed just after one of those).
+ *
+ * Two drains deliberately get nothing. The jump roster is one: an escort
+ * that merely rode along through hyperspace never touched a pad. The
+ * other is jumpTo's drain of the LANDED roster, which happens when a
+ * player docked at a hypergate or wormhole transits to another system
+ * carrying escorts that had already been swept up at the gate. Passing
+ * through a gate is not a port visit, so that batch travels un-restocked
+ * and is serviced by whatever lift-off eventually puts it back down.
  */
 
 /** The data lookups the restock needs, narrowed for testability. */
@@ -46,26 +53,48 @@ export interface RestockGameData {
 }
 
 /**
+ * A ceiling to fill an ammo outfit up to.
+ *
+ *  - `shared` is the launcher-derived capacity, and it belongs to the
+ *    WEAPON, not to any one outfit: every outfit whose `ammoFor` names
+ *    that weapon draws from the same pool. This is the outfitter's model —
+ *    ammoCapacity (outfitter_rules.ts) is compared against the SUM of
+ *    every supplying outfit's count, not against each one separately.
+ *  - `perOutfit` is the Max-field fallback, which genuinely is per outfit
+ *    (its `increasesMax` multiplier is keyed on that outfit's id). An
+ *    absent capacity there means UNLIMITED — no ceiling to fill to, so the
+ *    outfit keeps whatever count it had.
+ *
+ * Which of the two applies depends only on the supplied weapon and on the
+ * launchers aboard, so it is the same answer for every outfit supplying
+ * one weapon; only the `perOutfit` VALUE varies between them.
+ */
+type AmmoCeiling =
+    | { kind: 'shared', capacity: number }
+    | { kind: 'perOutfit', capacity?: number };
+
+/**
  * The most of `outfit` this ship can hold, mirroring the outfitter's
  * ammoCapacity/effectiveMax pair (outfitter_rules.ts) so a restocked
  * escort ends up exactly where a player buying to the cap would:
  *
  *  - Ammo whose weapon has MaxAmmo > 0 is capped at MaxAmmo per owned
  *    launcher instance (summed over every launcher outfit that fires it,
- *    weighted by how many of each the ship carries).
+ *    weighted by how many of each the ship carries), SHARED across every
+ *    outfit that supplies that weapon.
  *  - Ammo whose weapon has MaxAmmo <= 0 defers to the outfit's own Max
  *    field, multiplied by any owned "increases max" items pointing at it.
  *  - A Max of <= 0 there means UNLIMITED, which has no ceiling to fill to,
  *    so such an outfit is left at whatever count it already had.
  *
- * Returns undefined when there is no finite ceiling.
+ * Returns undefined only when the outfit is not ammunition at all.
  */
 async function ammoCeiling(outfit: OutfitData, owned: OutfitsState,
     ownedData: ReadonlyMap<string, OutfitData>,
-    gameData: RestockGameData): Promise<number | undefined> {
-    const byOutfitMax = () => {
+    gameData: RestockGameData): Promise<AmmoCeiling | undefined> {
+    const byOutfitMax = (): AmmoCeiling => {
         if (outfit.max <= 0) {
-            return undefined; // Unlimited: nothing to fill to.
+            return { kind: 'perOutfit' }; // Unlimited: nothing to fill to.
         }
         let multiplier = 0;
         for (const [id, data] of ownedData) {
@@ -73,7 +102,10 @@ async function ammoCeiling(outfit: OutfitData, owned: OutfitsState,
                 multiplier += owned.get(id)?.count ?? 0;
             }
         }
-        return outfit.max * Math.max(1, multiplier);
+        return {
+            kind: 'perOutfit',
+            capacity: outfit.max * Math.max(1, multiplier),
+        };
     };
 
     if (!outfit.ammoFor) {
@@ -105,23 +137,30 @@ async function ammoCeiling(outfit: OutfitData, owned: OutfitsState,
             capacity += launcher.maxAmmo * weaponCount * outfitCount;
         }
     }
-    return capacity;
+    return { kind: 'shared', capacity };
 }
 
 /**
  * Refuels and rearms one carried escort entity in place. Safe to call on
  * an entity with no fuel stat or no outfits — it simply does less.
  *
- * SEAM: a bay fighter that landed still deployed (it is on the roster in
- * its own right — see deployedFightersBySource in landed_escorts.ts) is
- * NOT subtracted from its carrier's restocked bay capacity, so such a
- * carrier can briefly hold capacity + the already-launched fighter. The
- * outfitter models this properly through its deployedCounts hook; wiring
- * that same hook through the escort restock is left for when bay
- * accounting for escorts is done as a whole.
+ * `deployedByWeapon` is this escort's OWN fighters that are still out of
+ * their bays, keyed by bay weapon id: a launched fighter still occupies
+ * its slot, so it comes off the bay's ceiling. Without it a carrier that
+ * lands with fighters deployed is topped back up to FULL capacity and
+ * those fighters redeploy on top of the restocked ones, briefly putting it
+ * over capacity. This mirrors the outfitter's deployedCounts hook
+ * (ownedAmmoCount in outfitter_rules.ts counts deployed rounds into the
+ * total the capacity gates).
+ *
+ * Deployed counts apply only to the SHARED launcher-derived ceiling, which
+ * is the case every bay falls into (a bay's MaxAmmo is its capacity). The
+ * per-outfit Max fallback has no launcher-slot notion to occupy, and the
+ * outfitter does not gate that case either.
  */
 export async function restockEscortEntity(entity: Entity,
-    gameData: RestockGameData): Promise<void> {
+    gameData: RestockGameData,
+    deployedByWeapon?: ReadonlyMap<string, number>): Promise<void> {
     const fuel = entity.components.get(FuelComponent);
     if (fuel) {
         fuel.current = fuel.max;
@@ -141,27 +180,95 @@ export async function restockEscortEntity(entity: Entity,
         }
     }
 
+    // Ammo outfits grouped by the weapon they supply. TWO OUTFITS CAN FEED
+    // ONE LAUNCHER (the bay data model does exactly this: several fighter
+    // outfits whose ammoFor is the same bay), and the capacity is a single
+    // pool shared between them — topping each one to the full capacity
+    // separately would fill the bay twice over.
+    const supplying = new Map<string, string[]>();
     for (const [id, data] of ownedData) {
         if (!data.ammoFor) {
             continue;
         }
-        const ceiling = await ammoCeiling(data, owned, ownedData, gameData);
+        const group = supplying.get(data.ammoFor);
+        if (group) {
+            group.push(id);
+        } else {
+            supplying.set(data.ammoFor, [id]);
+        }
+    }
+
+    // Sorted weapon ids, and sorted outfit ids inside each group, so the
+    // fill order is the id order the bay's own consume/refund policy uses
+    // (bay_plugin spends and refunds the lowest-sorted supplying outfit).
+    for (const weaponId of [...supplying.keys()].sort()) {
+        const group = supplying.get(weaponId)!.sort();
+        const ceiling = await ammoCeiling(ownedData.get(group[0])!, owned,
+            ownedData, gameData);
         if (ceiling === undefined) {
             continue;
         }
-        const state = owned.get(id);
-        if (state && state.count < ceiling) {
-            // Never trims an overfull magazine — a restock tops up.
-            state.count = ceiling;
+        if (ceiling.kind === 'perOutfit') {
+            // Genuinely per outfit: each has its own Max and its own
+            // increasesMax multiplier, so each is topped up on its own.
+            for (const id of group) {
+                const own = await ammoCeiling(ownedData.get(id)!, owned,
+                    ownedData, gameData);
+                const capacity = own?.kind === 'perOutfit'
+                    ? own.capacity : undefined;
+                const state = owned.get(id);
+                if (capacity !== undefined && state
+                    && state.count < capacity) {
+                    // Never trims an overfull magazine — a restock tops up.
+                    state.count = capacity;
+                }
+            }
+            continue;
+        }
+
+        // One shared pool. Everything already aboard, plus everything
+        // still deployed from this weapon's bays, occupies it.
+        let free = ceiling.capacity - (deployedByWeapon?.get(weaponId) ?? 0);
+        for (const id of group) {
+            free -= owned.get(id)?.count ?? 0;
+        }
+        for (const id of group) {
+            if (free <= 0) {
+                break; // Full (or overfull: a restock never trims).
+            }
+            const state = owned.get(id);
+            if (!state) {
+                continue;
+            }
+            state.count += free;
+            free = 0;
         }
     }
 }
 
-/** Refuels and rearms a whole landed batch, in roster order. */
+/**
+ * Refuels and rearms a whole landed batch, in roster order.
+ *
+ * WHAT COUNTS AS DEPLOYED, at this application point: the fighters IN THIS
+ * BATCH. A landed roster is the complete set of ships that came down with
+ * the player, so a carrier escort's still-launched fighters are on it too
+ * (see the module comment in landed_escorts.ts — landing does not stow a
+ * deployed fighter). That makes the batch a self-contained, synchronous,
+ * order-independent thing to count, which is what a ceiling wants.
+ *
+ * Fighters still IN FLIGHT are deliberately not counted. Reaching them
+ * would mean reading the live display world from inside the restock — a
+ * client-side, best-effort, mid-frame read — to cover a case the landing
+ * itself does not produce. The narrowed seam: an escort whose fighter is
+ * somehow still airborne when its carrier's roster is drained can still be
+ * restocked past that fighter's slot.
+ */
 export async function restockCarriedEscorts(
-    escorts: readonly { entity: Entity }[],
+    escorts: readonly { uuid?: string, entity: Entity }[],
     gameData: RestockGameData): Promise<void> {
-    for (const { entity } of escorts) {
-        await restockEscortEntity(entity, gameData);
+    const deployed = deployedFightersByBay(escorts);
+    for (const { uuid, entity } of escorts) {
+        await restockEscortEntity(entity, gameData,
+            uuid === undefined ? undefined : deployed.get(uuid));
     }
 }

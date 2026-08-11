@@ -36,8 +36,10 @@ import {
     CarriedEscort, deployedFightersBySource, escortsAccountedFor,
     carriedBatchMustHold, carriedBatchSettled, gateArrivalPending,
     multiJumpChainContinues, multiJumpChainSettled, prepareCarriedEscort,
-    prepareCarriedEscorts, takeCarriedEscorts,
+    prepareCarriedEscorts, restoreFailedTransitionBatch, takeCarriedEscorts,
+    takeEscortsForTransition,
 } from './landed_escorts.js';
+import { restockCarriedEscorts } from './escort_restock.js';
 import { World } from 'nova_ecs/world';
 import { getDefaultOutfitData } from 'novadatainterface/outfit_data';
 import {
@@ -641,4 +643,86 @@ describe('a player-launched fighter across a save restore', () => {
             expect(after.world.entities.has(prepared[0].uuid)).toBeFalse();
             expect(fighterRounds(after.player)).toEqual(2);
         });
+});
+
+/**
+ * jumpTo's roster policy (browser.ts), as the two helpers it is built from.
+ *
+ * Two things were wrong here. The landed half was RESTOCKED on the way
+ * out, which contradicted the design that only escorts which visited a
+ * port get the free refuel-and-rearm — a transit taken while docked at a
+ * hypergate never lifts off into the origin system. And a failed
+ * transition pushed the whole batch, landed entries included, onto the
+ * JUMP roster, losing the landed bookkeeping.
+ */
+describe('the roster drain a system transition performs', () => {
+    function entry(uuid: string, player = PLAYER): CarriedEscort {
+        return { player, uuid, entity: new Entity() };
+    }
+
+    it('empties both rosters and reports which half had landed', () => {
+        const jumping = [entry('j1'), entry('j2', 'someone else')];
+        const landed = [entry('l1'), entry('l2')];
+        const { batch, fromLanded } =
+            takeEscortsForTransition(jumping, landed, PLAYER);
+
+        // The player's jump half first, then the landed half.
+        expect(batch.map(({ uuid }) => uuid)).toEqual(['j1', 'l1', 'l2']);
+        expect(fromLanded.map(({ uuid }) => uuid)).toEqual(['l1', 'l2']);
+        // Other peers' entries are dropped, not carried or respawned.
+        expect(jumping).toEqual([]);
+        expect(landed).toEqual([]);
+    });
+
+    it('does not restock the landed half on the way out', async () => {
+        // A gate transit is not a port visit. The escort keeps the empty
+        // magazine it was carrying; only a lift-off refills it.
+        const ammoOutfit = {
+            ...getDefaultOutfitData(), id: 'ammo', ammoFor: 'gun', max: 40,
+        };
+        const escort = new Entity();
+        const outfits = new Map([['ammo', { count: 3 }]]);
+        escort.components.set(OutfitsStateComponent, outfits);
+        const landed: CarriedEscort[] = [
+            { player: PLAYER, uuid: 'l1', entity: escort },
+        ];
+        const { batch } = takeEscortsForTransition([], landed, PLAYER);
+        expect(batch.length).toEqual(1);
+        expect(outfits.get('ammo')!.count).toEqual(3);
+
+        // The same escort DOES get the service from a lift-off drain, so
+        // the assertion above is about WHERE the restock runs, not about
+        // whether it works.
+        await restockCarriedEscorts(batch, {
+            getOutfit: async id => id === 'ammo' ? ammoOutfit : undefined,
+            getWeapon: async () => undefined,
+        });
+        expect(outfits.get('ammo')!.count).toEqual(40);
+    });
+
+    it('hands a failed transition back to the rosters each escort came from',
+        () => {
+            const jumping = [entry('j1')];
+            const landed = [entry('l1'), entry('l2')];
+            const { batch, fromLanded } =
+                takeEscortsForTransition(jumping, landed, PLAYER);
+            // enterSystem pushes a save's restored escorts onto the batch
+            // before it can throw; those have no landed context.
+            batch.push(entry('restored'));
+
+            const back = restoreFailedTransitionBatch(batch, fromLanded);
+            expect(back.landed.map(({ uuid }) => uuid)).toEqual(['l1', 'l2']);
+            expect(back.jumping.map(({ uuid }) => uuid))
+                .toEqual(['j1', 'restored']);
+            // Never drop one: the two halves partition the batch exactly.
+            expect(back.landed.length + back.jumping.length)
+                .toEqual(batch.length);
+        });
+
+    it('keeps the whole batch when none of it had landed', () => {
+        const batch = [entry('j1'), entry('j2')];
+        const back = restoreFailedTransitionBatch(batch, []);
+        expect(back.landed).toEqual([]);
+        expect(back.jumping.map(({ uuid }) => uuid)).toEqual(['j1', 'j2']);
+    });
 });
