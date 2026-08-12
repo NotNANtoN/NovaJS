@@ -20,6 +20,8 @@ import {
     creditBooty, fuelTransferAmount, planAmmoPlunder, planCargoPlunder,
 } from './boarding_component.js';
 import { CargoComponent, cargoUsed } from './cargo_plugin.js';
+import { CollisionHitterComponent } from './collision_interaction.js';
+import { HurtboxHullComponent } from './collisions_plugin.js';
 import { OutfitsState, OutfitsStateComponent } from './outfit_plugin.js';
 import { WeaponsState, WeaponsStateComponent } from './weapons_state.js';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
@@ -672,7 +674,9 @@ function endBoardingSession(entity: Entity,
  * (BayFighterComponent / SourceComponent / OwnerComponent /
  * ReturnWhenTargetRemovedComponent) and any in-progress return home
  * (ReturnComponent / CollectableEscortComponent, which would otherwise
- * fly the prize back to its old carrier and let it be scooped up).
+ * fly the prize back to its old carrier and let it be scooped up,
+ * together with the CollisionHitter / HurtboxHull docking plumbing that
+ * makes the scoop-up contact happen).
  * captureIntoBay's sibling path always overwrote these; this one used to
  * leave them.
  */
@@ -692,6 +696,23 @@ function convertToEscort(target: Entity,
     target.components.delete(ReturnWhenTargetRemovedComponent);
     target.components.delete(ReturnComponent);
     target.components.delete(CollectableEscortComponent);
+    // ...including the DOCKING PLUMBING startReturnHome stamps alongside
+    // those two. A returning fighter is made to physically hit its carrier
+    // (CollisionHitter `return_escorts`, plus a Hurtbox hull copied from
+    // its hitbox) so that the contact fires CollectableEscortAI. Neither
+    // belongs on a captured prize.
+    //
+    // SAFE TO SHED WHOLESALE on a ship: an ordinary ship is the VICTIM
+    // side of a collision, carrying HitboxHull + CollisionVulnerability
+    // (ship_plugin/collisions_plugin provide those and will re-provide
+    // them). The hitter side is for things that DO the hitting —
+    // projectiles, beams, asteroids, and a fighter flying home — and on a
+    // ship hull startReturnHome is the only thing that stamps it. Note
+    // this is the returning-fighter role only: a captured CARRIER's own
+    // CollisionVulnerability may legitimately list `return_escorts` (its
+    // own wing has to be able to dock), and that is left alone.
+    target.components.delete(CollisionHitterComponent);
+    target.components.delete(HurtboxHullComponent);
     // A landing order aimed at its old owner's stellar is meaningless now.
     target.components.delete(EscortLandingComponent);
     if (leaderOwner !== undefined) {

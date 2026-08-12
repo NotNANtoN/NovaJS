@@ -18,8 +18,11 @@ import { getIntegrationGameData } from '../communication/simulation_test_fixture
 import { BayCaptureEvent, EscortRepairedEvent } from './boarding_plugin.js';
 import { BoardedComponent, BoardingComponent } from './boarding_component.js';
 import {
-    BayFighterComponent, ReturnWhenTargetRemovedComponent,
+    BayFighterComponent, CollectableEscortComponent, ReturnComponent,
+    ReturnWhenTargetRemovedComponent, startReturnHome,
 } from './bay_plugin.js';
+import { CollisionHitterComponent } from './collision_interaction.js';
+import { HurtboxHullComponent } from './collisions_plugin.js';
 import { isBelowDisableThreshold } from './disabled_component.js';
 import { CargoComponent } from './cargo_plugin.js';
 import {
@@ -1256,5 +1259,141 @@ describe('bay-capture shortcut', () => {
                     .toEqual(BOARDER);
                 expect(boarder.components.has(BoardingComponent)).toBeFalse();
             });
+    });
+
+    /**
+     * PLUNDER specs that need no Nova_Data. The plunder flow's own suite
+     * runs on getIntegrationGameData, so on a checkout without the game
+     * files (data-less CI, review machines) it is skipped wholesale —
+     * including the HIGH-severity credit-farm regression. These are twins
+     * of the ones worth pinning everywhere, built on the mock world above.
+     *
+     * OTHER_SHIP is deliberately a class no bay here launches, so the
+     * bay-capture shortcut does not fire and boarding falls through to the
+     * ordinary plunder session.
+     */
+    describe('plunder, on mock game data', () => {
+        const PRICE = 10_000;
+
+        /** A mock world whose hulk is worth plundering: not bay-capturable,
+         * and priced, since the credit booty is a fraction of ship price
+         * (the stock default price is 0, which would make it vacuous). */
+        async function plunderWorld() {
+            const ctx = await bayWorld({ targetShip: OTHER_SHIP });
+            const { world, target } = ctx;
+            // Applied after the provide step, as the crew overrides in the
+            // live-world suite are, so ShipDataProvider does not undo it.
+            target.components.set(ShipDataComponent, {
+                ...target.components.get(ShipDataComponent)!, price: PRICE,
+            });
+            world.step();
+            return ctx;
+        }
+
+        it('keeps the credit booty spent when the session ends '
+            + 'UNGRACEFULLY', async () => {
+                // The re-farm this pins shut: the durable *Taken flags used
+                // to be written onto the hulk only by the session-end path,
+                // which an abandoned session never runs. Take the credits,
+                // die (or jump, or land) without pressing done, come back
+                // with a new boarder — and creditsAvailable was re-derived
+                // from the ship price all over again, forever.
+                const { world, boarder, target, gameData } =
+                    await plunderWorld();
+                const booty = Math.floor(PRICE * 0.10);
+                expect(booty).toBeGreaterThan(0);
+
+                press(world, BOARDER, 'board');
+                expect(boarder.components.get(BoardingComponent)?.target)
+                    .toEqual(TARGET);
+                press(world, BOARDER, 'plunderCredits');
+                expect(boarder.components.get(CreditsComponent)!.credits)
+                    .toEqual(booty);
+
+                // UNGRACEFUL end: the boarder is destroyed mid-session, so
+                // no session-end path ever runs on it.
+                world.entities.delete(BOARDER);
+                world.step();
+
+                // The HULK is what has to remember, and it must remember
+                // straight away — not at some session end that never comes.
+                expect(target.components.get(BoardedComponent)?.creditsTaken)
+                    .toBeTrue();
+
+                // A brand-new boarder takes over the same hulk.
+                const second = makeShip(
+                    gameData.data.Ship.map.get(CARRIER_SHIP)!);
+                second.components.set(MovementStateComponent, {
+                    accelerating: 0, position: new Position(0, 0),
+                    rotation: new Angle(0), turnBack: false, turning: 0,
+                    velocity: new Vector(0, 0),
+                });
+                second.components.set(ControlledByComponent,
+                    { peerId: 'second peer' });
+                second.components.set(CreditsComponent, { credits: 0 });
+                second.components.set(LegalRecordsComponent, new Map());
+                await completeEntity(world, second);
+                world.entities.set(SECOND_BOARDER, second);
+                await stepWorld(world, 2);
+                second.components.set(CreditsComponent, { credits: 0 });
+                second.components.get(TargetComponent)!.target = TARGET;
+                world.step();
+
+                press(world, SECOND_BOARDER, 'board');
+                const resumed = second.components.get(BoardingComponent)!;
+                expect(resumed.target).toEqual(TARGET);
+                expect(resumed.creditsTaken).toBeTrue();
+
+                press(world, SECOND_BOARDER, 'plunderCredits');
+                expect(second.components.get(CreditsComponent)!.credits)
+                    .toEqual(0);
+            });
+
+        it('a captured prize sheds the bay DOCKING PLUMBING, not just the '
+            + 'launch link', async () => {
+                // startReturnHome makes a fighter physically hit its carrier
+                // so the contact fires CollectableEscortAI and it is scooped
+                // up: a CollisionHitter for `return_escorts` plus a Hurtbox
+                // hull copied from its hitbox. Capture a wing that was
+                // already on its way home and that plumbing used to survive
+                // onto the player's new escort — inert only for as long as
+                // its consumer stays gated on CollectableEscortComponent,
+                // and stale bay identity on a prize is precisely what caused
+                // the half-escort bug.
+                const { world, boarder, target } = await plunderWorld();
+                startReturnHome(target);
+                world.step();
+                // Precondition: the plumbing really is on the hull.
+                expect(target.components.get(CollisionHitterComponent)
+                    ?.hitTypes.has('return_escorts')).toBeTrue();
+                expect(target.components.has(HurtboxHullComponent)).toBeTrue();
+
+                captureAsEscort(world, boarder);
+
+                expect(target.components.has(CollisionHitterComponent))
+                    .toBeFalse();
+                expect(target.components.has(HurtboxHullComponent))
+                    .toBeFalse();
+                // The rest of the return-home state goes too, as before.
+                expect(target.components.has(ReturnComponent)).toBeFalse();
+                expect(target.components.has(CollectableEscortComponent))
+                    .toBeFalse();
+                // And it is a real escort of the captor.
+                expect(target.components.get(FormationComponent)?.leader)
+                    .toEqual(BOARDER);
+            });
+
+        /** The capture flow, pressed until the roll lands. */
+        function captureAsEscort(world: World, boarder: Entity) {
+            press(world, BOARDER, 'board');
+            for (let i = 0; i < 40
+                && boarder.components.get(BoardingComponent)?.capture
+                !== 'succeeded'; i++) {
+                press(world, BOARDER, 'plunderCapture');
+            }
+            expect(boarder.components.get(BoardingComponent)?.capture)
+                .toEqual('succeeded');
+            press(world, BOARDER, 'plunderCaptureEscort');
+        }
     });
 });
