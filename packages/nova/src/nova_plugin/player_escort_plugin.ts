@@ -701,9 +701,10 @@ export const EscortFollowJumpBeginSystem = new System({
     name: 'EscortFollowJumpBegin',
     args: [JumpComponent, ControlledByComponent, UUID, Entities] as const,
     step(playerJump, _controlledBy, playerUuid, entities) {
-        if (playerJump.to === undefined || playerJump.follows !== undefined) {
-            // Not a jump anyone can follow: a vanishing NPC's departure has
-            // no destination, and a follower leads nobody.
+        if (playerJump.vanish || playerJump.follows !== undefined) {
+            // Not a jump anyone can follow: a vanishing ship's departure
+            // arrives nowhere to be followed to (its `to` is the sentinel,
+            // not a system), and a follower leads nobody.
             return;
         }
         for (const escortUuid of sweepableEscorts(entities, playerUuid,

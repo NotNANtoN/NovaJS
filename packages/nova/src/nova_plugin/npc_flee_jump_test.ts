@@ -1,4 +1,6 @@
 import 'jasmine';
+import * as t from 'io-ts';
+import { isLeft, isRight } from 'fp-ts/lib/Either.js';
 import { MockGameData } from 'novadatainterface/mock_game_data';
 import { getDefaultShipData } from 'novadatainterface/ship_data';
 import { Angle } from 'nova_ecs/datatypes/angle';
@@ -11,7 +13,7 @@ import { DisabledComponent } from './disabled_component.js';
 import { completeEntity } from './entity_data_loader.js';
 import { ArmorComponent } from './health_plugin.js';
 import { Stat } from './stat.js';
-import { FinishJumpEvent, InitiateJumpEvent, JumpComponent, JumpState, JUMP_DEPART_DELAY_MS, JUMP_DISTANCE, JUMP_SPINUP_DELAY_MS } from './jump_plugin.js';
+import { FinishJumpEvent, InitiateJumpEvent, JumpComponent, JumpState, JumpStateType, VANISH_DESTINATION, JUMP_DEPART_DELAY_MS, JUMP_DISTANCE, JUMP_SPINUP_DELAY_MS } from './jump_plugin.js';
 import { makeShip } from './make_ship.js';
 import { makeSystem, SIMULATION_STEP_MS } from './make_system.js';
 import { FLEE_JUMP_BLOCK_RANGE, NpcComponent, NPC_DEPART_RADIUS } from './npc_ai_plugin.js';
@@ -319,6 +321,105 @@ describe('NPCs jump out with the full sequence', () => {
         // draws, so no other NPC's decision rolls shift.
         expect(draws).toEqual(0);
     });
+});
+
+/**
+ * The wire shape of a vanishing jump.
+ *
+ * JumpComponent is registered with the serializer, so its codec crosses to
+ * other peers and feeds the shared desync hash. Peers can be running
+ * different builds, so the shape may only ever change ADDITIVELY: an OLDER
+ * peer must still decode a NEWER peer's state. A vanishing NPC departure
+ * therefore keeps `to` present (the VANISH_DESTINATION sentinel) and marks
+ * its terminal with an additive optional flag, rather than expressing
+ * "vanishes" by dropping the required field — which an older decoder would
+ * reject outright.
+ */
+describe('a vanishing jump keeps a wire-compatible shape', () => {
+    /** The codec as it stood BEFORE the vanish flag existed: `to`
+     * required, and no knowledge of `vanish` at all. Standing in for a
+     * peer running an older build. */
+    const OldJumpStateType = t.intersection([t.type({
+        stage: t.union([
+            t.literal('stopping'), t.literal('aligning'),
+            t.literal('spinup'), t.literal('accelerating'),
+            t.literal('arriving'),
+        ]),
+        direction: t.number,
+        to: t.string,
+    }), t.partial({
+        follows: t.string,
+        stageStart: t.number,
+        autoJumpsLeft: t.number,
+    })]);
+
+    async function vanishingJump() {
+        const { world } = await makeFleeWorld(null, JUMP_DISTANCE + 500,
+            { mode: 'depart' });
+        world.step();
+        const jump = jumpOf(world);
+        expect(jump).toBeDefined();
+        return { world, jump: jump! };
+    }
+
+    it('marks the terminal with a flag and carries the sentinel `to`',
+        async () => {
+            const { jump } = await vanishingJump();
+            expect(jump.vanish).toBeTrue();
+            // Present, not omitted — and not a real system id.
+            expect(jump.to).toEqual(VANISH_DESTINATION);
+        });
+
+    it('an OLDER peer still decodes it', async () => {
+        const { jump } = await vanishingJump();
+        const encoded = JumpStateType.encode(jump);
+        // The current codec, obviously.
+        expect(isRight(JumpStateType.decode(encoded))).toBeTrue();
+        // And the one that predates the flag: the unknown `vanish` key is
+        // ignored, and the required `to` it demands is there. This is the
+        // property that makes the change additive.
+        expect(isRight(OldJumpStateType.decode(encoded))).toBeTrue();
+    });
+
+    it('and would NOT have, had the terminal been an absent `to`',
+        async () => {
+            // The shape this fix replaced: `to` moved into t.partial and
+            // omitted for a vanishing jump. Pinned as a regression so the
+            // field is never optionalised again — an older peer rejects
+            // the state outright, taking the desync hash with it.
+            const { jump } = await vanishingJump();
+            const withoutTo: Record<string, unknown> = {
+                ...JumpStateType.encode(jump),
+            };
+            delete withoutTo['to'];
+            expect(isLeft(OldJumpStateType.decode(withoutTo))).toBeTrue();
+        });
+
+    it('an older peer that treats the sentinel as a destination still ' +
+        'ends the burn with the ship gone', async () => {
+            // What an older peer's simulation does with a new vanishing
+            // jump: not recognising the flag, it takes its ordinary depart
+            // path and emits InitiateJumpEvent carrying the sentinel. Run
+            // that event against this build to show where it lands — the
+            // ship leaves the world, with no destination system named, so
+            // the two builds agree on the outcome instead of desyncing.
+            const { world } = await vanishingJump();
+            const finishes: unknown[] = [];
+            world.events.get(FinishJumpEvent).subscribe(
+                ({ data }) => finishes.push(data));
+
+            // The NPC is still early in its sequence (it has not reached
+            // its own burn end), so the deletion below can only come from
+            // the event.
+            expect(jumpOf(world)!.stage).not.toEqual('accelerating');
+            world.emit(InitiateJumpEvent, { to: VANISH_DESTINATION },
+                ['npc']);
+            world.step();
+
+            expect(stillThere(world)).toBeFalse();
+            // No carry to a destination world: there is no such system.
+            expect(finishes).toEqual([]);
+        });
 });
 
 describe('fleeing ships jump away', () => {

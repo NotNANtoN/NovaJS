@@ -414,11 +414,15 @@ function prefetchJumpDestination(displayWorld: World) {
             continue;
         }
         const jump = entity.components.get(JumpComponent);
-        // A jump with no destination is a ship leaving the world, not
-        // travelling (see JumpStateType). The player never has one, but
-        // there is nothing to prefetch either way.
+        // A VANISHING jump is a ship leaving the world, not travelling
+        // (see JumpStateType): its `to` is the VANISH_DESTINATION sentinel
+        // and names no system to load. The player never has one, but there
+        // would be nothing to prefetch either way. The `!destination` half
+        // also catches the sentinel on its own, which is why it is falsy —
+        // it stays as the belt-and-braces guard against ever asking the
+        // game data for the empty system id.
         const destination = jump?.to;
-        if (!jump || !destination || jump.stage === 'arriving'
+        if (!jump || jump.vanish || !destination || jump.stage === 'arriving'
             || prefetchedSystemId === destination) {
             return;
         }

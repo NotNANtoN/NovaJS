@@ -79,6 +79,18 @@ export function warpUpSound(shipPhysics: { jumpSpeedMult: number }) {
         ? WARP_UP_FAST_SOUND : WARP_UP_SOUND;
 }
 
+/**
+ * The `to` a VANISHING jump carries (see JumpStateType's `vanish`): a ship
+ * that leaves the game world rather than arriving anywhere still has to
+ * name a destination, because `to` is a required wire field.
+ *
+ * The empty string is used because it is not a legal system uuid and it is
+ * FALSY, so the display-side guards that were already asking "is there a
+ * destination worth loading?" keep answering no without having to learn
+ * about the flag. Simulation code decides the terminal on `vanish` alone.
+ */
+export const VANISH_DESTINATION = '';
+
 export interface InitiateJump {
     to: string /* system uuid */,
 }
@@ -117,25 +129,49 @@ export const JumpStateType = t.intersection([t.type({
     /** Travel heading (radians): the map-space direction from the
      * origin system to the destination system. */
     direction: t.number,
-}), t.partial({
     /**
-     * Destination system uuid — and the choice of TERMINAL for the
-     * sequence, which is the only thing that differs between a player's
-     * jump and an NPC's departure. Every stage before departure is
-     * shared.
+     * Destination system uuid. REQUIRED, and it must stay required: this
+     * codec is registered with the serializer, so it crosses the wire to
+     * other peers and feeds the shared desync hash. Peers may run
+     * different builds, and a serializer-registered shape may therefore
+     * only ever change ADDITIVELY — an older peer must still decode a
+     * newer peer's state. Moving a required field into t.partial is not
+     * additive in the direction that matters: the older peer's decoder
+     * still demands it and REJECTS the state outright.
      *
-     * Present: the ship is bound for a concrete destination world. At
-     * departure it is deleted here and carried there by
-     * JumpFromSystem/FinishJumpEvent, crossing with stage 'arriving'.
-     *
-     * ABSENT: the ship leaves the game world entirely (an NPC departing
-     * or fleeing the system — see beginDepartureJump). There is no
-     * destination room to carry it to, so departure simply deletes it:
-     * no InitiateJumpEvent, no FinishJumpEvent, no arrival kinematics.
-     * Encoding the terminal as "has a destination or doesn't" rather
-     * than a separate flag keeps the two from contradicting each other.
+     * A vanishing jump (see `vanish`) has no destination world, so it
+     * carries the sentinel {@link VANISH_DESTINATION} — the empty string,
+     * which is not a legal system uuid — rather than omitting the field.
      */
     to: t.string,
+}), t.partial({
+    /**
+     * TERMINAL SELECTOR: set (always to `true`) on a ship that leaves the
+     * game world entirely rather than travelling anywhere — an NPC
+     * departing or fleeing the system (see beginDepartureJump). There is
+     * no destination room to carry it to, so departure simply deletes it:
+     * no InitiateJumpEvent, no FinishJumpEvent, no arrival kinematics.
+     * Such a jump's `to` is {@link VANISH_DESTINATION}.
+     *
+     * ADDITIVE, which is the whole point of spelling the terminal as a
+     * flag rather than as "the destination is missing". An OLD peer that
+     * predates this field decodes a new vanishing jump fine (it ignores
+     * the unknown key), simulates the identical stopping/aligning/spinup/
+     * accelerating stages off the fields it does know, and at burn end
+     * takes its ordinary depart path: it emits InitiateJumpEvent with the
+     * sentinel `to` and its own JumpFromSystem deletes the ship from the
+     * world. Both peers therefore end the burn with the ship gone from
+     * this system — mixed versions CONVERGE instead of desyncing. (The
+     * stray FinishJumpEvent the old peer emits is targeted at the NPC,
+     * and only the local player's own ship is ever followed out of a
+     * system, so nothing acts on it.)
+     *
+     * Read through an EXPLICIT check for this flag, never through the
+     * falsiness of `to`: the sentinel is falsy on purpose (so a guard that
+     * was already asking "is there a destination to load?" still answers
+     * no), but the flag is what decides the terminal.
+     */
+    vanish: t.literal(true),
     /**
      * Set on a ship that is following ANOTHER ship's jump out of the
      * system — the uuid of the ship it is following (in practice a player
@@ -266,8 +302,20 @@ export const JumpFromSystem = new System({
         // question ("is there still a ship here to carry?") and immune to
         // that ordering. The marker check stays as the backstop for a
         // follower whose sweep did not happen at all.
-        if (!entities.has(uuid)
-            || entity.components.get(JumpComponent)?.follows !== undefined) {
+        const jump = entity.components.get(JumpComponent);
+        if (!entities.has(uuid) || jump?.follows !== undefined) {
+            return;
+        }
+        // VANISH TERMINAL. A vanishing ship never reaches this system on a
+        // peer that understands the flag — JumpSequenceSystem deletes it
+        // at burn end without emitting InitiateJumpEvent at all. The guard
+        // is here for the state that arrives from a peer that does not:
+        // the sentinel names no destination world, so the ship leaves the
+        // world rather than being serialized and carried to one. Either
+        // way the ship is gone from this system at burn end, which is the
+        // convergence the sentinel buys.
+        if (jump?.vanish || to === VANISH_DESTINATION) {
+            entities.delete(uuid);
             return;
         }
         entities.delete(uuid);
@@ -320,7 +368,7 @@ function beginJump(entity: Entity, systemId: string, destination: string,
  * rather than travelling to another system: an NPC departing or fleeing
  * (npc_ai_plugin). It runs exactly the same visible stages a player
  * gets — stop, align, spin up, accelerate — and ends by deleting the
- * ship instead of carrying it anywhere (the absent `to`; see
+ * ship instead of carrying it anywhere (the `vanish` flag; see
  * JumpStateType).
  *
  * DIRECTION. NPCs have no route, so there is no map-space heading to
@@ -348,7 +396,11 @@ export function beginDepartureJump(entity: Entity, movement: MovementState,
         ? outward.angle
         : Angle.fromAngleLike(movement.rotation);
     entity.components.set(JumpComponent, {
-        // No `to`: this ship's terminal is to vanish, not to arrive.
+        // This ship's terminal is to vanish, not to arrive. The flag is
+        // what selects that terminal; the sentinel `to` is only there
+        // because the field is required on the wire (see JumpStateType).
+        vanish: true,
+        to: VANISH_DESTINATION,
         stage: shipPhysics.canJumpWithoutSlowing ? 'aligning' : 'stopping',
         direction: direction.angle,
     });
@@ -382,6 +434,10 @@ export function beginDepartureJump(entity: Entity, movement: MovementState,
 export function beginFollowJump(entity: Entity, leader: string,
     leaderJump: JumpState, shipPhysics: ShipPhysics): void {
     entity.components.set(JumpComponent, {
+        // The leader's REAL destination, never the vanish sentinel: a
+        // follower is swept to a concrete system, and the caller only ever
+        // offers a leader whose jump arrives somewhere
+        // (EscortFollowJumpBeginSystem refuses a vanishing leader).
         to: leaderJump.to,
         follows: leader,
         stage: shipPhysics.canJumpWithoutSlowing ? 'aligning' : 'stopping',
@@ -517,7 +573,7 @@ function overrideControls(movement: MovementState) {
  * the system run these same stages (beginDepartureJump), which is why a
  * big slow-turning freighter is now seen to stop and swing onto its
  * jump heading instead of popping out of existence mid-turn. The two
- * flows differ only in the terminal — see JumpStateType's `to`.
+ * flows differ only in the terminal — see JumpStateType's `vanish`.
  *
  * SOUNDS are self-only: the warp-up/warp-out PlayerSoundEvents below are
  * targeted at the jumping ship, and the display's PlayerSoundSystem
@@ -628,7 +684,7 @@ export const JumpSequenceSystem = new System({
                 if (time.time - (jump.stageStart ?? time.time)
                     >= JUMP_DEPART_DELAY_MS) {
                     const destination = jump.to;
-                    if (destination === undefined) {
+                    if (jump.vanish) {
                         // VANISH TERMINAL (an NPC departure). There is no
                         // destination world to carry this ship to, so it
                         // simply leaves: no InitiateJumpEvent (which would
@@ -636,6 +692,13 @@ export const JumpSequenceSystem = new System({
                         // carry path, and past EscortFollowJumpSystem), no
                         // FinishJumpEvent, no arrival kinematics. Every
                         // stage up to this point was the shared one.
+                        //
+                        // Keyed on the FLAG, not on the sentinel `to` and
+                        // not on its falsiness: the terminal is a decision
+                        // the sequence records explicitly, so that a
+                        // destination that somehow arrived empty is a bug
+                        // in whoever wrote it rather than a silent
+                        // reinterpretation of the ship's fate here.
                         entities.delete(uuid);
                         break;
                     }
