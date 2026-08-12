@@ -72,7 +72,9 @@ export const WARP_UP_SOUND = 'nova:128';
 export const WARP_UP_FAST_SOUND = 'nova:129';
 export const WARP_OUT_SOUND = 'nova:130';
 
-function warpUpSound(shipPhysics: { jumpSpeedMult: number }) {
+/** The warp-up sound this ship uses, exported so the cancel path
+ * (disabled_plugin) can clip the same one the sequence started. */
+export function warpUpSound(shipPhysics: { jumpSpeedMult: number }) {
     return shipPhysics.jumpSpeedMult > 1
         ? WARP_UP_FAST_SOUND : WARP_UP_SOUND;
 }
@@ -134,6 +136,32 @@ export const JumpStateType = t.intersection([t.type({
      * than a separate flag keeps the two from contradicting each other.
      */
     to: t.string,
+    /**
+     * Set on a ship that is following ANOTHER ship's jump out of the
+     * system — the uuid of the ship it is following (in practice a player
+     * ship; its escorts are the only followers there are). Three things
+     * hang off it, and they are what make a follower's sequence differ
+     * from the leader's:
+     *
+     *  - TERMINAL. A follower does not depart through
+     *    JumpFromSystem/FinishJumpEvent (that is the local player's own
+     *    system transition, and the client follows it). It emits the same
+     *    InitiateJumpEvent, but JumpFromSystem skips it and the owning
+     *    module's own listener sweeps it instead — see
+     *    EscortDepartJumpSystem (player_escort_plugin). Reusing the one
+     *    event is what makes "an escort's carry reaches the client before
+     *    the player's FinishJumpEvent" a plain `before: [JumpFromSystem]`
+     *    toposort edge rather than an argument about queue order.
+     *  - FREE. No fuel is deducted (see the departure case): a follower
+     *    must always be able to keep up with the ship it follows.
+     *  - CANCELLED WITH THE LEADER. A follower's sequence is only ever
+     *    valid while the ship it follows is itself mid-jump, so the stage
+     *    machine drops it the moment that stops being true — which is how
+     *    "if the parent ship is disabled mid-jump, escorts should not
+     *    jump" falls out of the general disabled-cancels-jump rule with no
+     *    extra plumbing (see JumpSequenceSystem's leader check).
+     */
+    follows: t.string,
     /** Logical time (TimeResource ms) when the current timed stage
      * (spinup, accelerating) began. Cleared at departure: logical time
      * differs between systems. */
@@ -223,6 +251,25 @@ export const JumpFromSystem = new System({
     events: [InitiateJumpEvent],
     args: [GetEntity, UUID, Entities, InitiateJumpEvent, Emit] as const,
     step(entity, uuid, entities, { to }, emit) {
+        // A FOLLOWER's departure is not a system transition. FinishJumpEvent
+        // is the event the client follows out of this system (it tears the
+        // origin world down and builds the destination one), and only the
+        // ship the client is watching may emit it.
+        //
+        // ALREADY GONE is the guard that matters, not the `follows` marker:
+        // a follower is swept by whoever set it (EscortDepartJumpSystem,
+        // ordered before this system), and that sweep drops the
+        // JumpComponent along with everything else that must not ride to
+        // the destination — so by the time this runs the marker it would
+        // have been recognised by has been removed with it. Asking whether
+        // the entity is still in the world instead is both the honest
+        // question ("is there still a ship here to carry?") and immune to
+        // that ordering. The marker check stays as the backstop for a
+        // follower whose sweep did not happen at all.
+        if (!entities.has(uuid)
+            || entity.components.get(JumpComponent)?.follows !== undefined) {
+            return;
+        }
         entities.delete(uuid);
         deImmerify(entity);
         emit(FinishJumpEvent, { entity, uuid, to }, [uuid]);
@@ -308,6 +355,41 @@ export function beginDepartureJump(entity: Entity, movement: MovementState,
 }
 
 /**
+ * Attaches the jump sequence to a ship that is FOLLOWING another ship's
+ * jump — an escort leaving with its player (player_escort_plugin). It runs
+ * the same visible stages everyone else gets, and differs only in the
+ * three ways {@link JumpStateType}'s `follows` documents: it is swept by
+ * its owner rather than departing through JumpFromSystem, it costs no
+ * fuel, and it is cancelled if the leader's own jump is.
+ *
+ * HEADING. The follower takes the LEADER'S travel heading verbatim, rather
+ * than resolving its own. The two would be the same number anyway — the
+ * heading is the map-space direction from this system to the destination,
+ * a property of the pair of systems and not of the ship — so copying it
+ * avoids a second game-data lookup that could fail where the leader's
+ * succeeded, and it means the flock visibly swings onto one common bearing
+ * and leaves as a formation. It also keeps this function pure: no cache
+ * read, no route, nothing that can refuse.
+ *
+ * Deliberately UNGATED on fuel, exactly as beginDepartureJump is, and for
+ * the same reason: a follower must always be able to keep up. The caller
+ * owns the preconditions that do apply (escortFollows: a hull with a
+ * hyperdrive, not already disabled).
+ *
+ * No PRNG is drawn here, so putting a flock into their sequences shifts no
+ * NPC's decision rolls.
+ */
+export function beginFollowJump(entity: Entity, leader: string,
+    leaderJump: JumpState, shipPhysics: ShipPhysics): void {
+    entity.components.set(JumpComponent, {
+        to: leaderJump.to,
+        follows: leader,
+        stage: shipPhysics.canJumpWithoutSlowing ? 'aligning' : 'stopping',
+        direction: leaderJump.direction,
+    });
+}
+
+/**
  * Starts the jump sequence while a peer holds hyperjump: checks the
  * no-jump zone, resolves the travel heading from the systems' map
  * positions (staged at world genesis in makeSystem, so the cache read
@@ -380,12 +462,20 @@ const MultiJumpContinueSystem = new System({
     name: 'MultiJumpContinueSystem',
     args: [MultiJumpContinueComponent, GetEntity, SystemIdResource,
         JumpRouteComponent, ShipPhysicsComponent, FuelComponent,
-        SimulationGameDataResource] as const,
-    step(cont, entity, systemId, jumpRoute, shipPhysics, fuel, gameData) {
+        SimulationGameDataResource, Optional(DisabledComponent)] as const,
+    step(cont, entity, systemId, jumpRoute, shipPhysics, fuel, gameData,
+        disabled) {
         // Consume the marker regardless of outcome, so a blocked continuation
-        // (no route / no fuel) simply ends the chain.
+        // (no route / no fuel / disabled) simply ends the chain.
         entity.components.delete(MultiJumpContinueComponent);
         if (entity.components.has(JumpComponent)) {
+            return;
+        }
+        // A ship that arrived disabled cannot spin up its hyperdrive, the
+        // same reason PlayerJumpControl refuses. Checked here rather than
+        // left to the disabled-cancels-jump rule so the chain ends without
+        // ever consuming the route hop it could not fly.
+        if (disabled) {
             return;
         }
         const destination = jumpRoute.route[0];
@@ -442,6 +532,28 @@ export const JumpSequenceSystem = new System({
         GetEntity, UUID, Entities, Emit] as const,
     step(jump, movement, shipPhysics, fuel, jumpRoute, time, entity, uuid,
         entities, emit) {
+        if (jump.follows !== undefined
+            && !entities.get(jump.follows)?.components.has(JumpComponent)) {
+            // THE LEADER IS NO LONGER JUMPING. A follower's sequence only
+            // ever existed because the ship it follows was leaving, so it
+            // ends the moment that stops being true — the leader's jump was
+            // cancelled (it was disabled: see the disabled-cancels-jump
+            // rule in disabled_plugin, which runs before this system, so
+            // the whole flock stands down on the SAME tick the leader
+            // does), or the leader is simply not here any more.
+            //
+            // The follower is NOT stopped dead: nothing happened to it. It
+            // is released back to its own steering with its velocity
+            // intact and falls back into formation. A follower that is
+            // itself disabled is stopped dead, but by the general rule
+            // applied to it individually, not by this.
+            //
+            // Returning before overrideControls leaves this tick's steering
+            // to whatever wrote it, rather than blanking the controls of a
+            // ship that is no longer jumping.
+            entity.components.delete(JumpComponent);
+            return;
+        }
         overrideControls(movement);
         const target = new Angle(jump.direction);
 
@@ -525,6 +637,29 @@ export const JumpSequenceSystem = new System({
                         // FinishJumpEvent, no arrival kinematics. Every
                         // stage up to this point was the shared one.
                         entities.delete(uuid);
+                        break;
+                    }
+                    if (jump.follows !== undefined) {
+                        // FOLLOWER TERMINAL (an escort warping out with its
+                        // player). The ship leaves this world, but its
+                        // owner is what takes it — EscortDepartJumpSystem,
+                        // listening on the very same InitiateJumpEvent and
+                        // ordered before JumpFromSystem, which skips it.
+                        //
+                        // No arrival kinematics: a follower is re-inserted
+                        // on a formation station beside its leader, so the
+                        // teleport would only be overwritten (and would
+                        // bump teleportCount, sending a position no peer
+                        // needs). No fuel either — following is free.
+                        //
+                        // The stage still advances to 'arriving' so that a
+                        // sweep that never comes degrades quietly: the next
+                        // tick's 'arriving' case simply ends the sequence
+                        // and leaves the ship in this system, instead of
+                        // this case re-firing every tick.
+                        jump.stage = 'arriving';
+                        jump.stageStart = undefined;
+                        emit(InitiateJumpEvent, { to: destination }, [uuid]);
                         break;
                     }
                     // Depart. Set the arrival kinematics the destination

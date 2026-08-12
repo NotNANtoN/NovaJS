@@ -11,9 +11,11 @@ import { makeSystem, SIMULATION_STEP_MS } from "./make_system.js";
 import { applyControlEvents } from "./ship_control.js";
 import { PlayerShipSelector } from "./player_ship_plugin.js";
 import { ShipPhysicsComponent } from "./ship_plugin.js";
-import { FuelComponent, FUEL_PER_JUMP } from "./health_plugin.js";
+import { ArmorComponent, FuelComponent, FUEL_PER_JUMP } from "./health_plugin.js";
 import { LandEvent } from "./planet_plugin.js";
 import { PlayerSoundEvent } from "./sound_plugin.js";
+import { Entity } from "nova_ecs/entity";
+import { DisabledComponent } from "./disabled_component.js";
 
 const SHIP_UUID = 'jump test ship';
 
@@ -535,4 +537,176 @@ describe('jump sequence', () => {
         expect(ship.components.get(FuelComponent)!.current)
             .toEqual(10);
     }, 30_000);
+});
+
+/**
+ * Matthew's rule, for the player: "if a ship is disabled during any part of
+ * its jump, including accelerating out of the system, it immediately stops
+ * (zero velocity) and the jump is cancelled."
+ *
+ * A disabled player used to STALL instead — the sequence sat waiting for an
+ * alignment DisabledMovementSystem erased every tick, forever.
+ */
+describe('a disabled player\'s jump is cancelled', () => {
+    /** Really disables the ship: DisabledComponent only sticks while armor
+     * is below the threshold, since ShipDisableSystem re-derives it. */
+    function disable(ship: Entity) {
+        const armor = ship.components.get(ArmorComponent)!;
+        armor.current = armor.max * 0.05;
+        armor.recharge = 0;
+        ship.components.set(DisabledComponent, { repairAt: null });
+    }
+
+    function repair(ship: Entity) {
+        const armor = ship.components.get(ArmorComponent)!;
+        armor.current = armor.max;
+        ship.components.delete(DisabledComponent);
+    }
+
+    async function harnessOutsideNoJumpZone() {
+        const harness = await makeJumpHarness();
+        harness.ship.components.get(MovementStateComponent)!.position =
+            new Position(0, -(JUMP_DISTANCE * 2));
+        harness.world.step();
+        return harness;
+    }
+
+    /** Re-read each time rather than held: MovementState is replaced as
+     * the world steps. */
+    function speedOf(ship: Entity) {
+        return ship.components.get(MovementStateComponent)!.velocity.length;
+    }
+
+    it('takes the jump away and stops the ship dead mid-spinup',
+        async () => {
+            const { world, ship } = await harnessOutsideNoJumpZone();
+            pressHyperjump(world);
+            stepUntil(world, () =>
+                ship.components.get(JumpComponent)?.stage === 'spinup');
+            // Something to lose, so "stopped dead" is a real claim.
+            ship.components.get(MovementStateComponent)!.velocity =
+                new Vector(250, 0);
+
+            disable(ship);
+            world.step();
+
+            expect(ship.components.get(JumpComponent)).toBeUndefined();
+            expect(speedOf(ship)).toEqual(0);
+        }, 30_000);
+
+    it('cancels the departure burn too, so the ship cannot still warp out',
+        async () => {
+            // The ordering claim: JumpDisableCancelSystem runs before
+            // JumpSequenceSystem, so a ship disabled on the very tick its
+            // burn would have ended does not leave.
+            const { world, ship } = await harnessOutsideNoJumpZone();
+            let finished = false;
+            world.events.get(FinishJumpEvent).subscribe(
+                () => { finished = true; });
+            pressHyperjump(world);
+            stepUntil(world, () =>
+                ship.components.get(JumpComponent)?.stage === 'accelerating');
+            stepUntil(world, () => speedOf(ship) > 200);
+
+            disable(ship);
+            for (let i = 0; i < ticksFor(JUMP_DEPART_DELAY_MS) * 3; i++) {
+                world.step();
+            }
+
+            expect(finished).toBeFalse();
+            expect(ship.components.get(JumpComponent)).toBeUndefined();
+            expect(speedOf(ship)).toEqual(0);
+            expect(world.entities.has(SHIP_UUID)).toBeTrue();
+        }, 30_000);
+
+    it('gives the route hop back, so a repaired pilot jumps where they '
+        + 'chose', async () => {
+            // beginJump SHIFTS the destination off the route when it
+            // starts. A cancelled jump that kept the shift would silently
+            // skip a hop.
+            const { world, ship, destinationId } =
+                await harnessOutsideNoJumpZone();
+            expect(ship.components.get(JumpRouteComponent)!.route)
+                .toEqual([destinationId]);
+
+            pressHyperjump(world);
+            expect(ship.components.get(JumpRouteComponent)!.route)
+                .toEqual([]);
+            stepUntil(world, () =>
+                ship.components.get(JumpComponent)?.stage === 'spinup');
+
+            disable(ship);
+            world.step();
+            expect(ship.components.get(JumpRouteComponent)!.route)
+                .toEqual([destinationId]);
+        }, 30_000);
+
+    it('lets the pilot jump again once repaired', async () => {
+        const { world, ship, destinationId } =
+            await harnessOutsideNoJumpZone();
+        pressHyperjump(world);
+        stepUntil(world, () =>
+            ship.components.get(JumpComponent)?.stage === 'spinup');
+        disable(ship);
+        world.step();
+        expect(ship.components.get(JumpComponent)).toBeUndefined();
+
+        // A held key must not restart it while the ship is still a hulk.
+        for (let i = 0; i < 30; i++) {
+            pressHyperjump(world);
+            expect(ship.components.get(JumpComponent)).toBeUndefined();
+        }
+
+        repair(ship);
+        pressHyperjump(world);
+        const restarted = ship.components.get(JumpComponent);
+        expect(restarted).toBeDefined();
+        // A fresh sequence to the destination the pilot originally chose,
+        // not the hop after it.
+        expect(restarted!.to).toEqual(destinationId);
+
+        let finishJump: FinishJump | undefined;
+        world.events.get(FinishJumpEvent).subscribe(({ data }) => {
+            finishJump = data;
+        });
+        stepUntil(world, () => finishJump !== undefined);
+        expect(finishJump!.to).toEqual(destinationId);
+    }, 30_000);
+
+    it('clips the warp-up sound instead of leaving it ringing', async () => {
+        const { world, ship } = await harnessOutsideNoJumpZone();
+        pressHyperjump(world);
+        stepUntil(world, () =>
+            ship.components.get(JumpComponent)?.stage === 'spinup');
+
+        // The warp-up starts when the ship finishes aligning and is only
+        // ever stopped by the arrival that now will not happen.
+        const sounds: Array<{ id: string, stop?: boolean }> = [];
+        world.events.get(PlayerSoundEvent).subscribe(
+            ({ data }) => sounds.push(data));
+        disable(ship);
+        world.step();
+
+        const physics = ship.components.get(ShipPhysicsComponent)!;
+        const warpUp = physics.jumpSpeedMult > 1
+            ? WARP_UP_FAST_SOUND : WARP_UP_SOUND;
+        expect(sounds).toContain(
+            jasmine.objectContaining({ id: warpUp, stop: true }));
+        // And the arrival sound is emphatically NOT played: nothing
+        // arrived anywhere.
+        expect(sounds.map(sound => sound.id)).not.toContain(WARP_OUT_SOUND);
+    }, 30_000);
+
+    it('does not start a jump for a ship disabled before it presses',
+        async () => {
+            // The pre-existing refusal, pinned alongside the new rule so
+            // the two cannot drift.
+            const { world, ship } = await harnessOutsideNoJumpZone();
+            disable(ship);
+            world.step();
+            pressHyperjump(world);
+            expect(ship.components.get(JumpComponent)).toBeUndefined();
+            expect(ship.components.get(JumpRouteComponent)!.route.length)
+                .toEqual(1);
+        }, 30_000);
 });

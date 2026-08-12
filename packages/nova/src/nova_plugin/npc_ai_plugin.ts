@@ -899,6 +899,14 @@ export function steerArrive(movement: MovementState, physics: {
  * A ship disabled on its way out therefore keeps drifting and is
  * deleted at NPC_DEPART_RADIUS as before; if it is repaired first, it
  * jumps normally.
+ *
+ * This is the only disabled check the NPC jump path needs. A ship
+ * disabled AFTER the sequence starts is handled by the general
+ * disabled-cancels-jump rule (JumpDisableCancelSystem), which stops it
+ * dead and takes the JumpComponent away; because 'depart' and 'flee'
+ * re-run this on every tick they own the ship, a repair simply lands the
+ * NPC back here and it starts a fresh sequence. There is nothing to
+ * resume, and no resume logic.
  */
 function departByJump(entity: Entity, movement: MovementState,
     physics: ShipPhysics, disabled: DisabledState | undefined): boolean {
@@ -941,15 +949,13 @@ export const NpcSteeringSystem = new System({
         if (jump) {
             // Committed to the hyperspace jump: JumpSequenceSystem owns
             // this ship's controls until it leaves (it overrides them
-            // anyway). One exception — a ship that is disabled mid-
-            // sequence can no longer turn or thrust, so its hyperdrive
-            // spin-up is broken off rather than left stalled forever
-            // waiting for an alignment that DisabledMovementSystem is
-            // erasing every tick. It re-enters the sequence below once
-            // it is repaired.
-            if (disabled && jump.to === undefined) {
-                entity.components.delete(JumpComponent);
-            }
+            // anyway). A ship disabled mid-sequence is no exception here
+            // any more: the general disabled-cancels-jump rule
+            // (JumpDisableCancelSystem) has already taken the
+            // JumpComponent away before this system runs, so a disabled
+            // ship never reaches this branch at all. If it is repaired
+            // later it falls through to the mode switch below and decides
+            // to depart afresh, starting a whole new sequence.
             return;
         }
         if (landing) {
@@ -1203,14 +1209,25 @@ export const FormationSystem = new System({
     name: 'FormationSystem',
     args: [FormationComponent, MovementStateComponent, ShipPhysicsComponent,
         Optional(NpcComponent), Optional(EscortCommandComponent),
-        Optional(EscortLandingComponent),
+        Optional(EscortLandingComponent), Optional(JumpComponent),
         AllFormationsQuery, TimeResource, Entities, GetEntity,
         UUID] as const,
-    step(formation, movement, physics, npc, escortCommand, landing,
+    step(formation, movement, physics, npc, escortCommand, landing, jump,
         allFormations, time, entities, entity) {
         if (landing) {
             // Following the player down to a planet: EscortLandingSystem
             // owns this ship's steering until it lands.
+            return;
+        }
+        if (jump) {
+            // Committed to a hyperspace jump — an escort warping out with
+            // its player, or a formation leader of its own doing so.
+            // JumpSequenceSystem owns the steering until the ship leaves.
+            // Station-keeping must not run alongside it: the RCS regime
+            // nudges velocity DIRECTLY, so ordering alone would not stop a
+            // ship that is supposed to be holding still for its spin-up
+            // from creeping toward its slot. Same bail NpcSteeringSystem
+            // takes, for the same reason.
             return;
         }
         // Engaged escorts fight; FormationSystem only holds station.
