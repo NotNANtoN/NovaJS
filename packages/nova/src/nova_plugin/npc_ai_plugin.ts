@@ -79,8 +79,8 @@ import { WeaponsStateComponent } from './weapons_state.js';
  *
  * The stage machine is REUSED, not duplicated. The only thing that
  * differs from a player's jump is the terminal: an NPC has no route and
- * no destination room to be carried to, so its JumpComponent carries no
- * `to` and departure simply deletes it (see JumpStateType). That also
+ * no destination room to be carried to, so its JumpComponent is marked
+ * `vanish` and departure simply deletes it (see JumpStateType). That also
  * keeps NPC jumps clear of the player-only machinery hanging off
  * InitiateJumpEvent — the entity serialize-and-carry in JumpFromSystem,
  * and EscortFollowJumpSystem, which would otherwise be the thing that
@@ -1104,13 +1104,54 @@ export const NpcSteeringSystem = new System({
  * LIVE target entity, so an idle carrier never opens its hangar.
  * Launched fighters are pointed at the carrier's victim by
  * NpcWingCommandSystem (escort_command_plugin).
+ *
+ * A SHIP IN A JUMP SEQUENCE HOLDS ITS FIRE. NpcDecisionSystem bails on a
+ * jumping ship so it cannot talk itself back into a fight, but bailing
+ * PRESERVES the mode and target it was carrying when the sequence began —
+ * so a ship already in 'attack' with a live victim goes on firing all
+ * through its stop, its turn, its spin-up and its departure burn. That is
+ * exactly the opposite of the "committed, so it disengages" the visible
+ * sequence exists to show.
+ *
+ * WHO ACTUALLY REACHES THAT STATE. Not the NPC departure path:
+ * departByJump is called from NpcSteeringSystem's 'flee' and 'depart'
+ * arms, so the mode at the moment beginDepartureJump attaches the
+ * component is structurally never 'attack'. The reachable case is a
+ * FOLLOW jump. sweepableEscorts keys on the flock chain, not on
+ * EscortCommandComponent, so an NPC FLEET ESCORT whose leader the player
+ * captured (convertToEscort re-parents the leader onto the player; the
+ * leader's own fleet escorts keep formation on it and are marked as the
+ * player's) is swept into beginFollowJump while still running its own NPC
+ * AI — including 'attack' with a live target, since it has no escort
+ * command to make NpcDecisionSystem yield. Hired escorts, bay fighters
+ * and mission ships all avoid it for their own reasons; this one does not.
+ *
+ * GATED, NOT CLEARED. The ship keeps its mode and target and simply does
+ * not shoot while the JumpComponent is there; the weapons are released
+ * (`firing = false`) on the tick the gate takes effect, which is what
+ * stops a beam or a stream weapon that was already firing. Clearing the
+ * target instead would be a one-way door: a sequence CANCELLED by a
+ * disable (JumpDisableCancelSystem deletes the JumpComponent) would leave
+ * the repaired ship blank and unable to defend itself until its next
+ * think tick. With the gate, the same ship resumes firing on the very
+ * tick the component goes, at the target it already had.
  */
 const NpcFireControlSystem = new System({
     name: 'NpcFireControlSystem',
     args: [NpcComponent, WeaponsStateComponent, TargetComponent,
-        MovementStateComponent, Entities,
+        MovementStateComponent, Optional(JumpComponent), Entities,
         SimulationGameDataResource] as const,
-    step(npc, weapons, target, movement, entities, gameData) {
+    step(npc, weapons, target, movement, jump, entities, gameData) {
+        if (jump) {
+            // Committed to leaving: cease fire for the whole sequence.
+            // Falling through with `inRange` false would do the same, but
+            // saying it here keeps the reason legible and skips the range
+            // math for a ship that is not allowed to shoot regardless.
+            for (const [, weapon] of weapons) {
+                weapon.firing = false;
+            }
+            return;
+        }
         const other = npc.mode === 'attack' && target.target
             ? entities.get(target.target)?.components
                 .get(MovementStateComponent)
