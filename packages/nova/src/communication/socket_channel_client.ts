@@ -2,6 +2,9 @@ import { isRight } from "fp-ts/lib/Either.js";
 import { BehaviorSubject, Subject } from "rxjs";
 import { ChannelClient } from "./channel.js";
 import { SocketMessage } from "./socket_message.js";
+import {
+    connectUrlWithVersion, VERSION_MISMATCH_CLOSE_CODE,
+} from "../common/version_handshake.js";
 
 export class SocketChannelClient implements ChannelClient {
     readonly message = new Subject<unknown>();
@@ -14,21 +17,50 @@ export class SocketChannelClient implements ChannelClient {
     private keepaliveTimeout?: NodeJS.Timeout;
     private pingsSentSinceMessage = 0;
     private messageListener: (m: MessageEvent) => void;
+    private closeListener?: (e: CloseEvent) => void;
     private messageQueue: SocketMessage[] = [];
     private maxPings: number
 
-    constructor({ webSocket, warn, timeout, webSocketFactory, maxPings }: {
-        webSocket?: WebSocket,
-        warn?: ((m: string) => void),
-        timeout?: number,
-        webSocketFactory?: () => WebSocket,
-        maxPings?: number,
-    }) {
+    /**
+     * Set once the server has refused this client for a build mismatch.
+     *
+     * Latches the reconnect machinery OFF. Without it the keepalive would
+     * treat the refusal as an ordinary dropped connection and reconnect
+     * every timeout, hammering a server that will refuse it every time --
+     * and the page is on its way to reloading anyway. Only a reload (a
+     * fresh bundle, hence a fresh client) clears this.
+     */
+    private versionRefused = false;
+
+    constructor({ webSocket, warn, timeout, webSocketFactory, maxPings,
+        buildVersion, onVersionMismatch }: {
+            webSocket?: WebSocket,
+            warn?: ((m: string) => void),
+            timeout?: number,
+            webSocketFactory?: () => WebSocket,
+            maxPings?: number,
+            /**
+             * This bundle's build stamp, announced on the connect URL so
+             * the server can refuse a stale client before admitting it.
+             * When omitted no stamp is sent, which a version-checking
+             * server treats as a mismatch.
+             */
+            buildVersion?: string,
+            /**
+             * Called when the server closes the socket with the
+             * version-mismatch code. Opt-in: the close listener is only
+             * registered when this is supplied, so a plain client keeps
+             * exactly the listeners it always had.
+             */
+            onVersionMismatch?: (reason: string) => void,
+        }) {
         this.webSocketFactory = webSocketFactory ?? (() => {
-            if (location.protocol === "https:") {
-                return new WebSocket(`wss://${location.host}`);
+            const protocol = location.protocol === "https:" ? "wss" : "ws";
+            const origin = `${protocol}://${location.host}`;
+            if (buildVersion === undefined) {
+                return new WebSocket(origin);
             }
-            return new WebSocket(`ws://${location.host}`);
+            return new WebSocket(connectUrlWithVersion(origin, buildVersion));
         });
 
         this.webSocket = webSocket ?? this.webSocketFactory();
@@ -36,24 +68,60 @@ export class SocketChannelClient implements ChannelClient {
         this.timeout = timeout ?? 1200;
         this.maxPings = maxPings ?? 3;
 
+        if (onVersionMismatch) {
+            this.closeListener = (event: CloseEvent) => {
+                if (event.code !== VERSION_MISMATCH_CLOSE_CODE) {
+                    return;
+                }
+                this.versionRefused = true;
+                if (this.keepaliveTimeout !== undefined) {
+                    clearTimeout(this.keepaliveTimeout);
+                    this.keepaliveTimeout = undefined;
+                }
+                onVersionMismatch(event.reason);
+            };
+        }
+
         this.messageListener = this.handleMessage.bind(this)
         this.webSocket.addEventListener("message", this.messageListener);
+        this.addCloseListener();
         this.resetTimeout();
     }
 
+    private addCloseListener() {
+        if (this.closeListener) {
+            this.webSocket.addEventListener("close", this.closeListener);
+        }
+    }
+
+    private removeCloseListener() {
+        if (this.closeListener) {
+            this.webSocket.removeEventListener("close", this.closeListener);
+        }
+    }
+
     reconnect() {
+        // A build-mismatched client stays down; see `versionRefused`.
+        if (this.versionRefused) {
+            return;
+        }
         this.webSocket.removeEventListener("message", this.messageListener);
+        this.removeCloseListener();
         if (this.webSocket.readyState === this.webSocket.CONNECTING
             || this.webSocket.readyState === this.webSocket.OPEN) {
             this.disconnect();
         }
         this.webSocket = this.webSocketFactory();
         this.webSocket.addEventListener("message", this.messageListener);
+        this.addCloseListener();
         this.resetTimeout();
         this.sendPing();
     }
 
     reconnectIfClosed() {
+        if (this.versionRefused) {
+            return;
+        }
         if (this.webSocket.readyState === this.webSocket.CLOSED
             || this.webSocket.readyState === this.webSocket.CLOSING) {
             this.reconnect();
@@ -70,6 +138,11 @@ export class SocketChannelClient implements ChannelClient {
     }
 
     private keepaliveTimeoutCallback = () => {
+        // A refused client must not re-arm the keepalive: doing so would
+        // ping and re-time-out forever behind the reload.
+        if (this.versionRefused) {
+            return;
+        }
         if (this.webSocket.readyState === this.webSocket.CLOSED
             || this.webSocket.readyState === this.webSocket.CLOSING
             || this.pingsSentSinceMessage > this.maxPings) {
@@ -91,6 +164,14 @@ export class SocketChannelClient implements ChannelClient {
     }
 
     private sendRaw(message: SocketMessage) {
+        // A refused client has no socket to flush to and will never get
+        // one, so queueing would grow without bound behind the reload (or
+        // behind the persistent error, if the loop guard stopped us).
+        // Drop instead: nothing this client sends can be delivered.
+        if (this.versionRefused) {
+            this.messageQueue.length = 0;
+            return;
+        }
         this.reconnectIfClosed();
         if (this.webSocket.readyState === this.webSocket.OPEN) {
             for (const message of this.messageQueue) {

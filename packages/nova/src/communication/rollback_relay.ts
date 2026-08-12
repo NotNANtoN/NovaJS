@@ -357,6 +357,21 @@ export class RollbackRelay {
                     // A version-mismatched peer WILL desync no matter
                     // how healthy the netcode is. Loud, and stamped
                     // into any incident this peer causes.
+                    //
+                    // This check is FORENSIC and, since the build-version
+                    // handshake landed, should now be unreachable in
+                    // production: a peer only gets here after being
+                    // admitted by SocketChannelServer, which refuses any
+                    // client whose BUILD stamp differs from the server's
+                    // (see src/common/version_handshake.ts). The handshake
+                    // PREVENTS the skew this can only OBSERVE -- by the
+                    // time a joinRequest arrives, a mismatched build has
+                    // already been in a position to desync. Kept anyway:
+                    // it is the last line of defense if a peer reaches the
+                    // relay by some path that bypasses the socket gate,
+                    // and `peerProtocols` still stamps every incident
+                    // record. If this warning ever fires now, the
+                    // handshake itself is the thing to suspect.
                     console.warn(`Peer ${source} joined with protocol `
                         + `${protocol || 'none (pre-versioning build — '
                         + 'stale cached bundle?)'}; server has `

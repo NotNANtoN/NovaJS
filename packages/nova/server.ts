@@ -25,6 +25,8 @@ import { FilesystemData } from "./src/server/parsing/filesystem_data.js";
 import { GameDataAggregator } from "./src/server/parsing/game_data_aggregator.js";
 import { NovaParseWorkerApi } from "./src/server/parsing/nova_parse_worker.js";
 import { setupRoutes } from "./src/server/setup_routes.js";
+import { registerVersionRoute } from "./src/server/version_route.js";
+import { BUILD_VERSION } from "./src/common/generated_build_version.js";
 
 const Settings = t.partial({
     port: t.number,
@@ -55,6 +57,15 @@ console.log(novaDataPath);
 const app = express();
 const httpServer = http.createServer(app);
 
+console.log("build version: " + BUILD_VERSION);
+
+// The client's build-version preflight. Registered here, before
+// setupRoutes' catch-all `/` handler, for the same reason the title-music
+// route below is. This route only REPORTS the build; the enforcement is
+// the websocket admission check in SocketChannelServer, which is given the
+// same stamp.
+registerVersionRoute(app, BUILD_VERSION);
+
 // The title screen streams the original's theme, `Nova Music.mp3`, straight
 // from the game data. It's a plain ~9 MB mp3 (not a `snd` resource), so it
 // deliberately skips the parsed-resource pipeline: one whitelisted static
@@ -81,7 +92,13 @@ const simulationWorkerBundleMapPath = path.join(__dirname, "src/communication/si
 const clientSettingsDir = path.join(__dirname, "../settings");
 
 
-const channel = new SocketChannelServer({ server: httpServer });
+// Passing the build stamp arms the version gate: a client that announces a
+// different build (or none) is closed before it is admitted, so it can
+// never reach a room and desync against updated peers.
+const channel = new SocketChannelServer({
+    server: httpServer,
+    buildVersion: BUILD_VERSION,
+});
 const novaParseWorkerPath = path.join(__dirname, "src/server/parsing/nova_parse_worker_bundle.cjs");
 
 let world: World;

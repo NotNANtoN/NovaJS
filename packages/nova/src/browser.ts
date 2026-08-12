@@ -106,6 +106,8 @@ import { combatRatingName } from "./nova_plugin/reputation.js";
 import { formatDate } from "./nova_plugin/calendar.js";
 import { isTextEntryActive } from "./input_focus.js";
 import { MenuControls } from "./spaceport/menu_controls.js";
+import { BUILD_VERSION } from "./common/generated_build_version.js";
+import { installVersionCheck } from "./client/version_reload.js";
 
 
 const simulationGameData = new SimulationGameData();
@@ -131,7 +133,17 @@ const app = new PIXI.Application({
 (window as any).app = app;
 document.body.appendChild(app.view as any);
 
-const channel = new SocketChannelClient({});
+// The build-version handshake. Every peer in a room must be running the
+// same build of NovaJS -- nothing in the netcode reconciles two builds, so
+// a stale bundle desyncs on contact. `installVersionCheck` runs the
+// `/version` preflight (non-blocking; see its doc), and the callback it
+// returns reacts to the server refusing this socket outright, which is the
+// actual enforcement. Both routes end in at most ONE automatic reload.
+const { onVersionMismatch } = installVersionCheck(BUILD_VERSION);
+const channel = new SocketChannelClient({
+    buildVersion: BUILD_VERSION,
+    onVersionMismatch,
+});
 const communicator = new CommunicatorClient(channel);
 (window as any).communicator = communicator;
 const multiRoom = new MultiRoom(communicator);

@@ -116,6 +116,15 @@ By default the JS release runs on port 8000 but can be changed by editing the `p
 
 ## Deployment
 Deployment for the js release is the same as installation, however, the port used for the server can be changed by editing the `port` variable in `settings/server.json`. For the main branch, build the docker container with `yarn bazelisk build //nova:nova_image.tar` and then deploy the docker container located at `dist/bin/nova/nova_image.tar` to whatever hosing service you want.
+
+### Build version and client force-reload
+Multiplayer assumes every peer runs the **same build** of NovaJS, and the server enforces it. `npm run build` stamps the build (the commit sha, or `<sha>-dirty-<timestamp>` from a dirty tree) into both the server and the browser bundle. A client announces its stamp when it opens its websocket; if it does not match, the server closes the socket before admitting it to any room and the page shows "Game updated — reloading…" and reloads once to pick up the new bundle. So **redeploying force-reloads connected players** — that is intended, and it is what keeps a stale cached bundle from desyncing against updated peers.
+
+Two consequences while developing:
+- The server and the bundle are stamped by the *same* `npm run build`. If you rebuild the client but do not restart the server (or vice versa), connected clients will mismatch. Reloading will not fix it, so after one automatic reload the page shows a persistent "hard-refresh" message instead of looping. Rebuild and restart both, then hard-refresh.
+- Rebuilding a dirty tree always produces a new stamp, so every rebuild disconnects and reloads any client that is connected.
+
+See Phase 3 item 7 of [docs/rollback_multiplayer.md](./docs/rollback_multiplayer.md) for the design.
 ## Contributing
 
 Accepting PRs, but this project is still in early stages. Documentation is poor at best. See the issues tab for good first issues (although there might not be any at the moment).
