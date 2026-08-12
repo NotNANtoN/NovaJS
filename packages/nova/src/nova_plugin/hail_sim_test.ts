@@ -15,6 +15,7 @@ import { SourceComponent } from './fire_weapon_plugin.js';
 import { completeEntity } from './entity_data_loader.js';
 import { GovtComponent } from './govt_component.js';
 import { AssistingComponent } from './hail_component.js';
+import { JumpComponent } from './jump_plugin.js';
 import { applyHail, BRIBE_PACIFY_MS } from './hail_plugin.js';
 import { ArmorComponent, FuelComponent } from './health_plugin.js';
 import { makeShip } from './make_ship.js';
@@ -261,6 +262,50 @@ describe('applyHail: request assistance', () => {
                     .toBe(p.components.get(FuelComponent)!.max);
             }
             // The helper releases back to normal AI once done.
+            expect(target(world).components.has(AssistingComponent))
+                .toBeFalse();
+        });
+
+    it('YIELDS to a jump sequence, and picks the errand back up if the ' +
+        'jump is cancelled', async () => {
+            // AssistBehaviorSystem writes turnTo/accelerating, so it is a
+            // movement writer like FormationSystem, NpcSteeringSystem and
+            // EscortCommandBehaviorSystem — all of which stand down for a
+            // ship committed to a hyperspace jump, which has to hold still
+            // for its spin-up and hold its heading through the burn. This
+            // is the same bail, for the same reason.
+            const { world, addShip } = await makeWorld();
+            const p = player(world);
+            p.components.set(DisabledComponent, { repairAt: null });
+            const armor = p.components.get(ArmorComponent)!;
+            armor.current = 1;
+            // Alongside, so the ONLY thing that can stop it rendering
+            // assistance this tick is the jump.
+            await addShip('target', 150, 0, ship => {
+                ship.components.set(GovtComponent, { id: 'test:meek' });
+                ship.components.set(NpcComponent, { aiType: 3 });
+            });
+            applyHail(world, PEER,
+                { kind: 'requestAssistance', target: 'target' });
+            // A jump held in spin-up: stageStart is absent, so the stage
+            // never times out and the sequence parks there.
+            target(world).components.set(JumpComponent, {
+                stage: 'spinup', direction: 0, to: 'test:elsewhere',
+            });
+            world.step();
+
+            expect(p.components.get(ArmorComponent)!.current).toBe(1);
+            // The errand is KEPT, not abandoned: a cancelled jump must put
+            // the helper straight back to work rather than strand a client
+            // that is still waiting.
+            expect(target(world).components.get(AssistingComponent))
+                .toEqual({ client: 'player' });
+
+            // Cancel the jump the way JumpDisableCancelSystem does.
+            target(world).components.delete(JumpComponent);
+            world.step();
+            expect(p.components.get(ArmorComponent)!.current)
+                .toBe(p.components.get(ArmorComponent)!.max);
             expect(target(world).components.has(AssistingComponent))
                 .toBeFalse();
         });

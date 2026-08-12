@@ -3,6 +3,7 @@ import { GovtData } from 'novadatainterface/govt_data';
 import { Entities, GetEntity } from 'nova_ecs/arg_types';
 import { Vector } from 'nova_ecs/datatypes/vector';
 import { Entity } from 'nova_ecs/entity';
+import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
 import { MovementState, MovementStateComponent, MovementSystem } from 'nova_ecs/plugins/movement_plugin';
 import { SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
@@ -12,6 +13,7 @@ import { World } from 'nova_ecs/world';
 import { DisabledComponent } from './disabled_component.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { GovtComponent } from './govt_component.js';
+import { JumpComponent } from './jump_plugin.js';
 import { AssistingComponent, AssistingType } from './hail_component.js';
 import { ArmorComponent, FuelComponent, ShieldComponent } from './health_plugin.js';
 import {
@@ -211,12 +213,30 @@ function steerToward(movement: MovementState,
  * DisabledComponent automatically next tick, via ShipDisableSystem's
  * armor-above-threshold exit) and releases the helper back to normal AI.
  * Runs after NpcSteeringSystem so its steering wins for the helper this tick.
+ *
+ * YIELDS TO A JUMP SEQUENCE, like every other movement writer in the sim
+ * (FormationSystem, EscortCommandBehaviorSystem, NpcSteeringSystem all take
+ * the same bail). A ship committed to a hyperspace jump is steered by
+ * JumpSequenceSystem alone: it has to hold still for its spin-up and hold
+ * its heading through the burn, and a second writer nudging turnTo and
+ * accelerating would fight it. Theoretical today — an assisting ship has no
+ * path into a jump sequence, since NpcDecisionSystem hands it to this system
+ * and never reaches its depart/flee transitions — so this is consistency
+ * insurance, bought for one Optional arg, against the next thing that can
+ * put a JumpComponent on an arbitrary ship.
  */
 export const AssistBehaviorSystem = new System({
     name: 'AssistBehaviorSystem',
     args: [AssistingComponent, MovementStateComponent, GetEntity,
-        Entities] as const,
-    step(assisting, movement, entity, entities) {
+        Optional(JumpComponent), Entities] as const,
+    step(assisting, movement, entity, jump, entities) {
+        if (jump) {
+            // JumpSequenceSystem owns this ship's steering until it leaves.
+            // The AssistingComponent is deliberately KEPT: a jump that is
+            // cancelled (a disable) puts the helper straight back on its
+            // errand rather than stranding its client waiting.
+            return;
+        }
         const client = entities.get(assisting.client);
         const clientMovement = client?.components.get(MovementStateComponent);
         if (!client || !clientMovement) {
