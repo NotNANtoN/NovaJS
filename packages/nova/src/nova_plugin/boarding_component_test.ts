@@ -1,6 +1,10 @@
 import 'jasmine';
 import { Angle } from 'nova_ecs/datatypes/vector';
+import { Entity } from 'nova_ecs/entity';
+import { ControlledByComponent } from './ship_control.js';
+import { PlayerShipSelector } from './player_ship_plugin.js';
 import {
+    capturable,
     AXIS_ALIGN_TOLERANCE_RAD,
     axesAligned,
     BOARD_DISTANCE_SQUARED,
@@ -19,6 +23,57 @@ import {
     CaptureBayCandidate,
     chooseCaptureBay,
 } from './boarding_component.js';
+
+/**
+ * The one predicate that decides whether a boarded ship can be TAKEN.
+ *
+ * Both capture routes consult it (the instant bay-capture gate and the
+ * plunder session's capture roll) and the dialog greys its Capture Ship
+ * button off it, so it had integration coverage on three sides and no
+ * direct coverage of its own. These are that: the rule stated once,
+ * cheaply, where a change to it fails immediately rather than through
+ * whichever live-world spec happens to notice.
+ */
+describe('capturable', () => {
+    it('a crewless hulk can be taken', () => {
+        expect(capturable(new Entity())).toBeTrue();
+    });
+
+    it('a ship somebody is FLYING can never be taken', () => {
+        // ControlledByComponent is what makes a hull a player's ship. A
+        // captured one would answer escort commands from a captain who is
+        // not aboard while its owner still flew it.
+        const flown = new Entity();
+        flown.components.set(ControlledByComponent, { peerId: 'some peer' });
+        expect(capturable(flown)).toBeFalse();
+    });
+
+    it('is keyed on ControlledBy, NOT on the peer-local ship marker', () => {
+        // PlayerShipSelector exists only on the peer whose player it is, so
+        // gating on it would let peer A capture peer B's ship while B's own
+        // simulation refused — a guaranteed desync. A hull carrying the
+        // local marker but no controller is still capturable...
+        const markedOnly = new Entity();
+        markedOnly.components.set(PlayerShipSelector, undefined);
+        expect(capturable(markedOnly)).toBeTrue();
+
+        // ...and one carrying both is refused for the controller alone.
+        const bothMarkers = new Entity();
+        bothMarkers.components.set(PlayerShipSelector, undefined);
+        bothMarkers.components.set(ControlledByComponent,
+            { peerId: 'some peer' });
+        expect(capturable(bothMarkers)).toBeFalse();
+    });
+
+    it('goes back to capturable if the controller is removed', () => {
+        // Presence, not history: an abandoned hull is a hulk like any other.
+        const ship = new Entity();
+        ship.components.set(ControlledByComponent, { peerId: 'some peer' });
+        expect(capturable(ship)).toBeFalse();
+        ship.components.delete(ControlledByComponent);
+        expect(capturable(ship)).toBeTrue();
+    });
+});
 
 describe('axis alignment gate (Matthew\'s spec)', () => {
     const zero = new Angle(0);
