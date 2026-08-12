@@ -121,6 +121,21 @@ function stillThere(world: World) {
     return world.entities.has('npc');
 }
 
+/** The NPC's CURRENT speed. Re-read every time: MovementState is replaced
+ * as the world steps, so a captured reference goes stale. */
+function speedOf(world: World) {
+    return world.entities.get('npc')!.components
+        .get(MovementStateComponent)!.velocity.length;
+}
+
+/** Steps until the sequence has reached its spin-up hold. */
+function stepWhileAligning(world: World, maxSteps = 3000) {
+    for (let i = 0; i < maxSteps && stillThere(world)
+        && jumpOf(world)?.stage !== 'spinup'; i++) {
+        world.step();
+    }
+}
+
 function jumpOf(world: World): JumpState | undefined {
     return world.entities.get('npc')?.components.get(JumpComponent);
 }
@@ -357,25 +372,63 @@ describe('a ship that cannot jump', () => {
         expect(jumpOf(world)).toBeUndefined();
     });
 
-    it('breaks off a sequence it can no longer fly, and resumes when '
-        + 'repaired', async () => {
-            const { world, npc, disable, repair } = await makeFleeWorld(null,
+    it('has its jump CANCELLED when disabled mid-sequence, and stops dead',
+        async () => {
+            // Matthew's rule, which applies to every ship in the game: "if
+            // a ship is disabled during any part of its jump, including
+            // accelerating out of the system, it immediately stops (zero
+            // velocity) and the jump is cancelled." This replaces the old
+            // break-off-and-resume: there is no suspended sequence to come
+            // back to.
+            const { world, npc, disable } = await makeFleeWorld(null,
                 JUMP_DISTANCE + 500, { mode: 'depart' });
             world.step();
             expect(jumpOf(world)).toBeDefined();
+            // Well into the departure burn, so the ship is genuinely
+            // travelling when it is hit — the case the rule exists for.
+            for (let i = 0; i < 3000 && speedOf(world) < 100; i++) {
+                world.step();
+            }
+            expect(jumpOf(world)?.stage).toEqual('accelerating');
+            expect(speedOf(world)).toBeGreaterThanOrEqual(100);
 
-            // Shot to pieces mid-spinup: a disabled ship cannot hold a
-            // heading, so the hyperdrive is broken off rather than left
-            // stalled forever waiting for an alignment it can never
-            // reach.
+            disable(npc);
+            world.step();
+
+            expect(jumpOf(world)).toBeUndefined();
+            expect(speedOf(world)).toEqual(0);
+            // Cancelled, not departed: it is still sitting there as a
+            // hulk to be boarded.
+            expect(stillThere(world)).toBeTrue();
+        });
+
+    it('decides afresh once repaired, starting a whole new sequence',
+        async () => {
+            // Nothing is resumed. 'depart' re-runs departByJump on every
+            // tick it owns the ship, so a repaired NPC simply arrives back
+            // at the same decision and begins again from the first stage.
+            const { world, npc, disable, repair } = await makeFleeWorld(null,
+                JUMP_DISTANCE + 500, { mode: 'depart' });
+            world.step();
+            stepWhileAligning(world);
+            expect(jumpOf(world)?.stage).toEqual('spinup');
+
             disable(npc);
             world.step();
             expect(jumpOf(world)).toBeUndefined();
-            expect(stillThere(world)).toBeTrue();
+            // It stays cancelled for as long as it stays disabled.
+            for (let i = 0; i < 30; i++) {
+                world.step();
+                expect(jumpOf(world)).toBeUndefined();
+            }
 
             repair(npc);
             world.step();
-            expect(jumpOf(world)).toBeDefined();
+            const restarted = jumpOf(world);
+            expect(restarted).toBeDefined();
+            // From the top — at rest and already aligned, so 'aligning',
+            // not the 'spinup' it was interrupted in.
+            expect(restarted!.stage).toEqual('aligning');
             expect(runUntilGone(world).gone).toBeTrue();
         });
 

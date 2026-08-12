@@ -1,6 +1,8 @@
 import { isLeft } from 'fp-ts/lib/Either.js';
 import * as t from 'io-ts';
-import { Emit, Entities, GetEntity, UUID } from 'nova_ecs/arg_types';
+import {
+    Emit, EmitFunction, Entities, GetEntity, UUID,
+} from 'nova_ecs/arg_types';
 import { Position } from 'nova_ecs/datatypes/position';
 import { Vector } from 'nova_ecs/datatypes/vector';
 import { Entity } from 'nova_ecs/entity';
@@ -22,9 +24,13 @@ import { CollectableEscortComponent, ReturnComponent } from './bay_plugin.js';
 import { EscortCommandComponent } from './escort_command.js';
 import { FiringGroupComponent } from './firing_group.js';
 import { flockParent, MAX_FLOCK_DEPTH } from './flock.js';
+import { DisabledComponent } from './disabled_component.js';
 import { GateDepartureSystem } from './gate_transit_plugin.js';
 import { FuelComponent } from './health_plugin.js';
-import { InitiateJumpEvent, JumpFromSystem } from './jump_plugin.js';
+import {
+    beginFollowJump, InitiateJumpEvent, JumpComponent, JumpFromSystem,
+    JumpSequenceSystem,
+} from './jump_plugin.js';
 import { MissionShipComponent } from './mission_ship_plugin.js';
 import {
     formationsIn, FormationComponent, FormationSystem, nextFormationSlot,
@@ -72,14 +78,35 @@ import { ShipComponent, ShipPhysicsComponent } from './ship_plugin.js';
  *    back in the world, so ownership survives a landing even when an
  *    escort was still mid-approach.
  *
- *  - JUMPING. EscortFollowJumpSystem serializes the player's escorts out
- *    of the origin system as the player departs and hands them to the
- *    client, which inserts them at formation stations around the player's
- *    arrival point in the destination system. Their jumps are FREE (no
- *    fuel deduction): an escort must always be able to follow. The one
- *    exception is a ship with no energy capacity at all (shïp "energy" 0,
- *    i.e. FuelComponent.max === 0) — it has no hyperdrive, so it stays
- *    behind, still owned, and is only recovered if the player comes back.
+ *  - JUMPING. Escorts WARP OUT, visibly, on their own hyperspace jump
+ *    sequences. The moment the player's jump begins, every escort that
+ *    will follow starts a JumpComponent sequence of its own onto the
+ *    player's jump heading (EscortFollowJumpBeginSystem); each is
+ *    serialized out of the origin system and handed to the client at its
+ *    own warp-out (EscortDepartJumpSystem), or — if it is still turning
+ *    when the player goes — swept on the spot by the departure fallback
+ *    (EscortFollowJumpSystem), which is what guarantees a slow ship is
+ *    never left behind. The client inserts them at formation stations
+ *    around the player's arrival point in the destination system.
+ *
+ *    Their jumps are FREE (no fuel deduction): an escort must always be
+ *    able to follow. Two hulls stay behind, still owned, recovered only if
+ *    the player comes back: one with no energy capacity at all (shïp
+ *    "energy" 0, i.e. FuelComponent.max === 0) has no hyperdrive, and one
+ *    that is DISABLED cannot run the hyperdrive it has. Both live in
+ *    {@link escortFollows}.
+ *
+ *    A jump that is CANCELLED takes the whole flock's sequences with it.
+ *    A ship disabled at any stage of a jump stops dead and loses it
+ *    (JumpDisableCancelSystem), and a follower's sequence is only valid
+ *    while its leader is jumping (JumpSequenceSystem), so a player shot
+ *    down mid-spinup drops their escorts back into formation on the same
+ *    tick. Escorts that had already warped out ride the client's carried
+ *    roster and are put back beside the player who never left, by the
+ *    standing flush that exists for multi-jump chains
+ *    (flushCarriedJumpEscorts / carriedBatchSettled, spaceport/
+ *    landed_escorts.ts): the never-drop machinery covers the cancel case
+ *    with nothing added.
  *
  *  - GATE TRANSIT. EscortFollowGateSystem does the same for a hypergate or
  *    wormhole, on the player's LandEvent at the gate. A gate carries
@@ -110,29 +137,39 @@ import { ShipComponent, ShipPhysicsComponent } from './ship_plugin.js';
  * THE CONVERGENCE INVARIANT. An escort always ends up in the same system as
  * its player. At rest, every PlayerEscortComponent-marked escort of the
  * local player is either in the player's system, in a client roster
- * destined for it, or — only for the zero-energy hyperspace-jump exclusion
- * above — deliberately left behind. `escortsAccountedFor`
+ * destined for it, or — only for the two hyperspace-jump exclusions above,
+ * no hyperdrive and disabled — deliberately left behind. `escortsAccountedFor`
  * (spaceport/landed_escorts.ts) is that invariant as a predicate, exercised
  * by the tests and exposed live as `window.novaEscortAudit()`.
  *
  * DOCUMENTED SEAMS (deliberate v1 limits):
- *  - No warp animation for a following escort. They are carried instantly
- *    and simply appear at their station beside the arriving player, rather
- *    than each playing the departure/arrival sequence. Giving them a real
- *    sequence means running JumpComponent state machines on non-player
- *    ships and delaying the carry until each finishes. The gate carry
- *    inherits this: escorts leave with the player at the gate instead of
- *    each flying down to it, which is why gates need no landing orders.
+ *  - No warp-IN animation. Escorts warp out for real now, but they still
+ *    arrive by appearing at their formation station rather than flying in
+ *    from the edge: the client re-inserts them positioned on the player,
+ *    and the arrival kinematics a jumping ship normally sets for itself
+ *    would only be overwritten. Their outbound sequence is dropped at the
+ *    sweep for exactly that reason (sweepJumpingEscort).
+ *  - GATES keep the instant carry. A hypergate or wormhole sweeps the
+ *    whole flock on the player's LandEvent with no sequence at all
+ *    (EscortFollowGateSystem), which is right in kind — the gate does the
+ *    moving and no hyperdrive spins up — and is anyway forced: at sweep
+ *    time there is no destination, so there is no heading to turn onto.
+ *    Escorts leave with the player at the gate instead of each flying down
+ *    to it, which is why gates need no landing orders.
  *  - A "multi-jump" outfit chain (ModType 32) no longer out-runs the carry,
  *    but it does so by HOLDING the batch out of the world for the length of
  *    the chain (browser.ts): escorts are absent from the intermediate
  *    systems the chain passes through and appear at the final destination.
- *    See multiJumpChainContinues / multiJumpChainSettled.
+ *    See multiJumpChainContinues / multiJumpChainSettled. The warp-out
+ *    sequences therefore only ever run in the system a chain STARTS from:
+ *    at every later hop the escorts are in the client's hands and not in
+ *    the world, so EscortFollowJumpBeginSystem finds nobody to start and
+ *    nothing double-triggers.
  *  - Escorts ARE saved, as whole serialized entities, and come back
  *    through this same carried-batch path on the first system entry after
  *    a load (save_game.ts, browser.ts). What a save cannot bring back is
- *    an escort left behind in ANOTHER system by the zero-energy jump
- *    exclusion below: it is in no system the client holds state for.
+ *    an escort left behind in ANOTHER system by a jump exclusion above: it
+ *    is in no system the client holds state for.
  */
 
 // --- Tuning constants ---
@@ -232,6 +269,17 @@ export function escortFollows(kind: EscortTransition, escort: Entity):
     boolean {
     if (kind === 'gate') {
         return true;
+    }
+    // A DISABLED ship cannot run its hyperdrive — the same rule that stops
+    // a disabled player pressing jump (PlayerJumpControl), a disabled NPC
+    // departing (departByJump), and any ship's jump mid-sequence
+    // (JumpDisableCancelSystem). So it neither starts a follow sequence nor
+    // gets swept up at its player's departure: it stops dead where it was
+    // hit and is left behind, still owned, exactly like the zero-energy
+    // hull below. One predicate, so the two sweep sites and the sequence
+    // start cannot disagree about it.
+    if (escort.components.has(DisabledComponent)) {
+        return false;
     }
     // The exclusion has to be POSITIVELY established: only a hull we can
     // see has no energy capacity is left behind. FuelComponent is supplied
@@ -599,7 +647,149 @@ export const EscortReattachSystem = new System({
 });
 
 /**
- * The player is departing into hyperspace: their escorts leave with them.
+ * Hands `escort` to the owning client: strips the state that must not ride
+ * to the destination, removes it from the simulation, and emits its carry
+ * event. The single exit both jump sweeps use, so the early warp-out and
+ * the departure fallback cannot drift apart.
+ *
+ * The JumpComponent goes because the entity is about to be re-inserted in
+ * ANOTHER world. Its stage machine there would resume a sequence whose
+ * leader, heading, and destination all belong to the system just left —
+ * an escort would arrive and immediately start warping out again.
+ */
+function sweepJumpingEscort(escort: Entity, escortUuid: string,
+    to: string, playerUuid: string,
+    entities: { delete(uuid: string): unknown },
+    emit: EmitFunction): void {
+    // A landing order does not survive the jump: the stellar it named is
+    // in the system being left behind.
+    escort.components.delete(EscortLandingComponent);
+    escort.components.delete(JumpComponent);
+    entities.delete(escortUuid);
+    deImmerify(escort);
+    emit(EscortJumpEvent,
+        { entity: escort, uuid: escortUuid, to, player: playerUuid },
+        [escortUuid]);
+}
+
+/**
+ * The player's jump has begun: every escort that will follow starts its
+ * OWN jump sequence, so the flock is seen to stop, swing onto the jump
+ * heading, spin up, and warp out — instead of blinking out of existence
+ * the instant the player does.
+ *
+ * POLLED, not edge-triggered on the player's entry into the sequence. The
+ * condition it enforces is a standing one ("while my player is jumping,
+ * every follower of mine is jumping too"), and polling makes it true of
+ * escorts that were not eligible at the start: a fighter launched from a
+ * bay mid-spinup, a hulk captured mid-spinup, an escort inserted on a
+ * later tick. It is idempotent — an escort that already has a sequence is
+ * left alone — and it cannot fight the cancel rule, because a player whose
+ * jump was cancelled no longer has a JumpComponent for this to read.
+ *
+ * The heading and destination come from the player's own JumpComponent
+ * (see beginFollowJump), so nothing here can refuse for want of game data.
+ * A follower's sequence is otherwise ordinary: it is stopped dead and
+ * cancelled if the escort is disabled, and cancelled if the player's jump
+ * is (JumpSequenceSystem's leader check).
+ *
+ * Runs on every peer, like every other escort lifecycle system: the
+ * sequences are shared simulation state, and only their terminal — the
+ * carry event's roster — is the owning client's business.
+ */
+export const EscortFollowJumpBeginSystem = new System({
+    name: 'EscortFollowJumpBegin',
+    args: [JumpComponent, ControlledByComponent, UUID, Entities] as const,
+    step(playerJump, _controlledBy, playerUuid, entities) {
+        if (playerJump.to === undefined || playerJump.follows !== undefined) {
+            // Not a jump anyone can follow: a vanishing NPC's departure has
+            // no destination, and a follower leads nobody.
+            return;
+        }
+        for (const escortUuid of sweepableEscorts(entities, playerUuid,
+            'jump')) {
+            const escort = entities.get(escortUuid);
+            if (!escort || escort.components.has(JumpComponent)) {
+                continue; // Already under way.
+            }
+            const physics = escort.components.get(ShipPhysicsComponent);
+            if (!physics) {
+                continue; // Not fully built yet; try again next tick.
+            }
+            // A stale landing order would fight the sequence for the
+            // steering (EscortLandingSystem owns a landing escort's
+            // controls), and the stellar it names is in the system being
+            // left. The sweep drops it too; dropping it here means it is
+            // never held alongside a jump.
+            escort.components.delete(EscortLandingComponent);
+            beginFollowJump(escort, playerUuid, playerJump, physics);
+        }
+    },
+    // The sequences it starts are advanced by the stage machine, so it has
+    // to write them before the machine runs. That also puts it before
+    // JumpSequenceSystem's leader check, which is what makes a sequence
+    // started on a tick whose leader is cancelled harmless: it is undone on
+    // that same tick.
+    before: [JumpSequenceSystem],
+});
+
+/**
+ * An escort's OWN departure burn has finished: it warps out ahead of its
+ * player and is handed to the owning client right there.
+ *
+ * This is the ordinary case — an escort that is quicker onto its heading
+ * than its player leaves first, which is exactly what the sequences were
+ * added to show. The carry event names the destination, which a follower
+ * knows because it copied it from the player's jump when the sequence
+ * began.
+ *
+ * THE EVENT IS THE PLAYER'S OWN. A follower emits the same
+ * InitiateJumpEvent every departing ship emits, and the split is by
+ * component, not by event: this system requires a JumpComponent with
+ * `follows`, EscortFollowJumpSystem requires ControlledByComponent, and
+ * JumpFromSystem skips anything with `follows`. Reusing the one event is
+ * what reduces the ordering guarantee below to a toposort edge.
+ *
+ * ORDERING. `before: [JumpFromSystem]` — the same discipline
+ * EscortFollowJumpSystem uses, and for the same reason. FinishJumpEvent is
+ * what the client follows out of the origin system, and it is emitted only
+ * by JumpFromSystem; every escort carry is therefore recorded in the
+ * frame's event list ahead of it, whether the escort left on an earlier
+ * tick, on an earlier event of the same tick, or (the coincidence case) on
+ * the player's very own InitiateJumpEvent via the fallback sweep below.
+ * The client can never tear the origin system down holding an escort it
+ * has not been given.
+ */
+export const EscortDepartJumpSystem = new System({
+    name: 'EscortDepartJump',
+    events: [InitiateJumpEvent],
+    args: [JumpComponent, GetEntity, UUID, InitiateJumpEvent, Entities,
+        Emit] as const,
+    step(jump, escort, escortUuid, { to }, entities, emit) {
+        if (jump.follows === undefined) {
+            return; // A ship jumping on its own account.
+        }
+        sweepJumpingEscort(escort, escortUuid, to, jump.follows, entities,
+            emit);
+    },
+    before: [JumpFromSystem],
+});
+
+/**
+ * The player is departing into hyperspace: any escort still with them
+ * leaves too, on the spot.
+ *
+ * THIS IS THE FALLBACK, and the guarantee that no escort is ever left
+ * behind by slow turning. Escorts normally warp out on their own sequences
+ * (EscortDepartJumpSystem); one that is still stopping, aligning, spinning
+ * up, or burning when its player goes is swept here instead, exactly as
+ * every escort was before the sequences existed. It got its visible stop
+ * and turn — what it loses is the last part of an animation whose whole
+ * point was to leave with the player, who has now left.
+ *
+ * A heavy freighter behind a nimble player is the ordinary case, not a
+ * corner: the alternative to sweeping it would be stranding it, and
+ * convergence wins that tie every time (see THE CONVERGENCE INVARIANT).
  *
  * Each follower is serialized out of this system and handed to the owning
  * client, which inserts it into the destination system beside the player
@@ -613,7 +803,8 @@ export const EscortReattachSystem = new System({
  * always be able to follow. A ship with zero energy capacity
  * (FuelComponent.max === 0, i.e. shïp "energy" 0) has no hyperdrive at
  * all and is left behind — still marked owned, so it is recovered if the
- * player ever returns to this system.
+ * player ever returns to this system. So is one that is DISABLED, which
+ * cannot run a hyperdrive it still has ({@link escortFollows}).
  */
 export const EscortFollowJumpSystem = new System({
     name: 'EscortFollowJump',
@@ -628,14 +819,8 @@ export const EscortFollowJumpSystem = new System({
             if (!escort) {
                 continue;
             }
-            // A landing order does not survive the jump: the stellar it
-            // named is in the system being left behind.
-            escort.components.delete(EscortLandingComponent);
-            entities.delete(escortUuid);
-            deImmerify(escort);
-            emit(EscortJumpEvent,
-                { entity: escort, uuid: escortUuid, to, player: playerUuid },
-                [escortUuid]);
+            sweepJumpingEscort(escort, escortUuid, to, playerUuid, entities,
+                emit);
         }
     },
     before: [JumpFromSystem],
@@ -774,6 +959,8 @@ export const PlayerEscortPlugin: Plugin = {
         world.addSystem(MarkPlayerEscortsSystem);
         world.addSystem(EscortLandOrderSystem);
         world.addSystem(EscortLandingSystem);
+        world.addSystem(EscortFollowJumpBeginSystem);
+        world.addSystem(EscortDepartJumpSystem);
         world.addSystem(EscortFollowJumpSystem);
         world.addSystem(EscortFollowGateSystem);
         world.addSystem(EscortReattachSystem);

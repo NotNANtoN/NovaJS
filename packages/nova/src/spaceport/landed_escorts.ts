@@ -447,6 +447,12 @@ function placeCarriedEscort(escort: CarriedEscort, player: string,
     escort.entity.components.set(PlayerEscortComponent,
         { player, parent: attachTo });
     escort.entity.components.delete(EscortLandingComponent);
+    // Belt and braces against a warp-out sequence riding back into the
+    // world with the escort. The sweep that took it already dropped the
+    // JumpComponent (sweepJumpingEscort); this makes it true of every
+    // entry however it reached a roster — including one restored from a
+    // save written by a build that did not.
+    escort.entity.components.delete(JumpComponent);
     const owner = escort.entity.components.get(OwnerComponent);
     const remappedOwner = owner && remap.get(owner.owner);
     if (remappedOwner) {

@@ -23,8 +23,10 @@ import { OutfitsStateComponent } from './outfit_plugin.js';
 import { ProvideFromCache } from './provide_from_cache.js';
 import { ControlledByComponent, ShipControlEvent, ShipControlStateComponent } from './ship_control.js';
 import { ControlShipSystem } from './ship_controller_plugin.js';
-import { ShipDataComponent } from './ship_plugin.js';
-import { JumpSequenceSystem } from './jump_plugin.js';
+import { ShipDataComponent, ShipPhysicsComponent } from './ship_plugin.js';
+import {
+    JumpComponent, JumpRouteComponent, JumpSequenceSystem, warpUpSound,
+} from './jump_plugin.js';
 import { PlayerSoundEvent } from './sound_plugin.js';
 
 /**
@@ -37,6 +39,9 @@ import { PlayerSoundEvent } from './sound_plugin.js';
  *  - ShipDisableSystem: the enter/leave transitions (threshold entry,
  *    forced decloak, repair-time roll; self-repair and outside-repair
  *    exit).
+ *  - JumpDisableCancelSystem: the disabled-cancels-jump rule — a ship
+ *    disabled at any stage of a hyperspace jump stops dead and loses the
+ *    jump, for every ship in the game.
  *  - DisabledMovementSystem: erases all steering/thrust the control, AI,
  *    formation, jump, and afterburner systems wrote this tick and slows
  *    the hulk to rest.
@@ -117,6 +122,93 @@ export const ShipDisableSystem = new System({
         }
     },
     after: [TimeSystem],
+});
+
+/**
+ * DISABLED CANCELS THE JUMP. Matthew's ruling, which is the original
+ * game's behavior and applies to EVERY ship: "if a ship is disabled during
+ * any part of its jump, including accelerating out of the system, it
+ * immediately stops (zero velocity) and the jump is cancelled."
+ *
+ * So: one rule, stated once, for players, escorts, and NPCs alike, at
+ * every stage of the sequence.
+ *
+ *  - THE JUMP IS GONE, not paused. There is no resume: a repaired ship
+ *    decides again from scratch — a player presses jump (PlayerJumpControl
+ *    polls the held key every tick, so even holding it through the repair
+ *    works), an NPC re-enters through its normal AI (npc_ai_plugin's
+ *    depart/flee modes call departByJump again), an escort re-enters only
+ *    if its player is still mid-jump when it comes back online.
+ *  - IT STOPS DEAD. Zero velocity, on the spot — not the gradual coast
+ *    DisabledMovementSystem gives an ordinary hulk. The original stops the
+ *    ship, and a hyperdrive burn is exactly the case where the difference
+ *    shows: a ship two seconds into its departure acceleration is moving
+ *    far faster than any sane deceleration would bleed off before it left
+ *    the screen. DisabledMovementSystem still runs afterwards and keeps it
+ *    at rest.
+ *  - THE ROUTE IS PUT BACK. beginJump SHIFTS the destination off
+ *    JumpRouteComponent when it starts, so a cancelled jump has to unshift
+ *    it or the repaired ship's next jump would silently skip a hop and fly
+ *    somewhere the pilot never chose. Fuel needs no such care: it is only
+ *    charged at departure, which never happened.
+ *
+ * ORDERING is the substance of the rule. `after: [ShipDisableSystem]` sees
+ * a ship disabled on THIS tick, and `before: [JumpSequenceSystem]` means
+ * the sequence never gets to advance — so a ship disabled on the very tick
+ * its departure burn would have ended cannot still warp out. The two edges
+ * together are what make "at every stage, including accelerating out"
+ * true rather than nearly true.
+ *
+ * WHY HERE. It needs both ends of that ordering, and this module already
+ * owns the disabled state's ordering against every gameplay system it
+ * switches off (see DisabledMovementSystem's `after` list, and the
+ * JumpSequenceSystem import it already carries). jump_plugin cannot hold
+ * it: importing ShipDisableSystem from there would cycle. Its own module
+ * would need its own plugin registration for one small system.
+ *
+ * FOLLOWERS cost nothing here. A ship following this one's jump watches
+ * the leader's JumpComponent (JumpSequenceSystem, which runs after this),
+ * so cancelling a player's jump cancels their whole flock's on the same
+ * tick — "if the parent ship is disabled mid-jump, escorts should not
+ * jump" — with no escort knowledge in this module at all.
+ */
+export const JumpDisableCancelSystem = new System({
+    name: 'JumpDisableCancelSystem',
+    args: [DisabledComponent, JumpComponent, MovementStateComponent,
+        ShipPhysicsComponent, Optional(JumpRouteComponent), GetEntity, UUID,
+        Emit] as const,
+    step(_disabled, jump, movement, shipPhysics, jumpRoute, entity, uuid,
+        emit) {
+        entity.components.delete(JumpComponent);
+        // Stopped dead, exactly as the original does.
+        movement.velocity = new Vector(0, 0);
+        movement.targetSpeed = 0;
+        movement.accelerating = 0;
+        movement.turning = 0;
+        movement.turnTo = null;
+        movement.turnBack = false;
+        // Give the destination back to the route. A FOLLOWER never took
+        // one (beginFollowJump copies the leader's heading and consumes
+        // nothing), and a vanishing NPC has no route at all.
+        if (jump.follows === undefined && jump.to !== undefined && jumpRoute
+            && jumpRoute.route[0] !== jump.to) {
+            jumpRoute.route.unshift(jump.to);
+        }
+        // Clip the warp-up. It starts when the ship finishes aligning and
+        // is only ever stopped by the arrival that now will not happen, so
+        // without this it rings on over a ship that is dead in space.
+        // Self-only, like every warp sound: the display plays it for the
+        // local player's own ship and nobody else's.
+        if (jump.stage === 'spinup' || jump.stage === 'accelerating') {
+            emit(PlayerSoundEvent,
+                { id: warpUpSound(shipPhysics), stop: true }, [uuid]);
+        }
+    },
+    // No TimeSystem edge: this reads no clock. The two edges it does
+    // declare are the rule (see above), and ShipDisableSystem already
+    // carries the ordering against the tick's time advance.
+    after: [ShipDisableSystem],
+    before: [JumpSequenceSystem],
 });
 
 /**
@@ -204,6 +296,7 @@ export const DisabledPlugin: Plugin = {
 
         world.addSystem(RepairProvider);
         world.addSystem(ShipDisableSystem);
+        world.addSystem(JumpDisableCancelSystem);
         world.addSystem(DisabledMovementSystem);
         world.addSystem(SelfDestructSystem);
     },

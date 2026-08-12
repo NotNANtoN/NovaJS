@@ -19,6 +19,7 @@ import { SimulationGameDataResource } from './game_data_resource.js';
 import { ExplodingComponent } from './death_plugin.js';
 import { GovtComponent } from './govt_component.js';
 import { shipDisposition } from './iff_plugin.js';
+import { JumpComponent } from './jump_plugin.js';
 import { chooseNearest, FormationComponent, NpcComponent, NpcSteeringSystem, RCS_ACCEL_FRACTION } from './npc_ai_plugin.js';
 import { ShootAllWeaponsComponent } from './npc_plugin.js';
 import { LegalRecordsComponent, LegalRecordsState } from './reputation_plugin.js';
@@ -380,13 +381,29 @@ export const EscortCommandBehaviorSystem = new System({
     args: [EscortCommandComponent, MovementStateComponent,
         ShipPhysicsComponent, WeaponsStateComponent, TargetComponent,
         UUID, GetEntity, Entities, HostileCandidatesQuery, TimeResource,
-        SimulationGameDataResource, Optional(EscortLandingComponent)] as const,
+        SimulationGameDataResource, Optional(EscortLandingComponent),
+        Optional(JumpComponent)] as const,
     step(command, movement, physics, weapons, target, uuid, entity,
-        entities, candidates, time, gameData, landing) {
+        entities, candidates, time, gameData, landing, jump) {
         if (landing) {
             // Following the player down to a planet: EscortLandingSystem
             // owns the steering, and an escort on final approach holds
             // its fire.
+            for (const [, weapon] of weapons) {
+                weapon.firing = false;
+            }
+            return;
+        }
+        if (jump) {
+            // Warping out with the player (player_escort_plugin):
+            // JumpSequenceSystem owns the steering until the ship leaves,
+            // and a ship spinning up its hyperdrive holds its fire. Bailing
+            // rather than relying on JumpSequenceSystem to overwrite the
+            // steering afterwards, for two reasons: an ordered escort's
+            // `firing` flags are latched state this system rewrites every
+            // tick (an early return without this would freeze them on),
+            // and steerHold nudges velocity directly, which no later
+            // override erases.
             for (const [, weapon] of weapons) {
                 weapon.firing = false;
             }
