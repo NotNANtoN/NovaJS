@@ -6,6 +6,10 @@ import { v4 } from "uuid";
 import { WebSocketServer, WebSocket as NodeWebSocket } from "ws";
 import { ChannelServer, MessageWithSourceType } from "./channel.js";
 import { SocketMessage } from "./socket_message.js";
+import {
+    shouldAdmitClient, truncateCloseReason, VERSION_MISMATCH_CLOSE_CODE,
+    versionFromConnectUrl,
+} from "../common/version_handshake.js";
 
 interface Client {
     socket: NodeWebSocket;
@@ -26,15 +30,28 @@ export class SocketChannelServer implements ChannelServer {
     // If the ping doesn't get back in this much time, disconnect them.
     readonly timeout: number;
 
-    constructor({ server, warn, wss, timeout }: {
+    /**
+     * This server's build stamp. When set, a connecting client must
+     * announce the same stamp or it is refused before it is admitted.
+     *
+     * Optional because the socket layer is also used by tests and tools
+     * that have no build identity; when it is undefined the check is
+     * skipped entirely. Production always sets it (`server.ts`).
+     */
+    private readonly buildVersion?: string;
+
+    constructor({ server, warn, wss, timeout, buildVersion }: {
         server?: http.Server | https.Server,
         warn?: ((m: string) => void),
-        wss?: WebSocketServer, timeout?: number
+        wss?: WebSocketServer, timeout?: number,
+        buildVersion?: string,
     }) {
 
         if (warn) {
             this.warn = warn;
         }
+
+        this.buildVersion = buildVersion;
 
         if (wss) {
             this.wss = wss;
@@ -97,8 +114,36 @@ export class SocketChannelServer implements ChannelServer {
         }, this.timeout);
     }
 
-    /** Handles when a client first connects */
-    private onConnect(webSocket: NodeWebSocket) {
+    /**
+     * Handles when a client first connects.
+     *
+     * `request` is the HTTP upgrade request `ws` hands to the `connection`
+     * listener; the client's build stamp rides on its query string.
+     */
+    private onConnect(webSocket: NodeWebSocket,
+        request?: http.IncomingMessage) {
+
+        // THE VERSION GATE. Everything below this block admits the client:
+        // it lands in `clientMap` and `clientConnect` fires, which is what
+        // lets it join a room. A build-mismatched client must never get
+        // that far -- once it is in a room with updated peers it steps a
+        // different simulation and fails the desync hash, and the rollback
+        // relay can then only report the damage after the fact. So the
+        // refusal happens here, before any client state exists.
+        if (this.buildVersion !== undefined) {
+            const clientVersion = versionFromConnectUrl(request?.url);
+            const decision = shouldAdmitClient(this.buildVersion, clientVersion);
+            if (!decision.admit) {
+                this.warn(`Refusing websocket connection: ${decision.reason}`);
+                // The client reads this code and reloads itself to pick up
+                // the current bundle. The reason carries the server's stamp
+                // so a refusal is diagnosable from a browser console alone.
+                webSocket.close(VERSION_MISMATCH_CLOSE_CODE,
+                    truncateCloseReason(decision.reason));
+                return;
+            }
+        }
+
         const clientUUID = v4();
         // This uuid is used only for communication and
         // has nothing to do with the game engine's uuids

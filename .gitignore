@@ -86,3 +86,8 @@ traces/
 # Claude Code local settings
 .claude/settings.local.json
 desyncs/
+
+# Written by packages/nova/scripts/generate_build_version.mjs at the start
+# of every build. It carries the build stamp the version handshake
+# compares, so it must never be committed.
+packages/nova/src/common/generated_build_version.ts

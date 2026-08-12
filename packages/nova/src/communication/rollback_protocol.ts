@@ -24,6 +24,16 @@ export const STATE_HASH_INTERVAL = 60;
  * desync no matter how healthy the netcode is; the relay logs the
  * mismatch and incident records carry every reporter's version, so
  * "stale client build" stops masquerading as a netcode mystery.
+ *
+ * NOT the same thing as the BUILD version, and not the enforcement
+ * point. This is a hand-maintained number describing the wire protocol,
+ * and it is only read after a peer has already joined. The stale-cached-
+ * bundle case it describes is now caught earlier and automatically, by
+ * the build-version handshake in src/common/version_handshake.ts: the
+ * server refuses any client whose build stamp differs from its own, so
+ * such a client never reaches this code. Keep bumping this when the
+ * protocol changes -- it remains the label on incident records -- but
+ * rely on the handshake, not on this, to keep builds from mixing.
  */
 export const PROTOCOL_VERSION = 1;
 
