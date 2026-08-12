@@ -44,13 +44,38 @@ export interface VersionCheckDeps {
 }
 
 /**
- * Turns a decided action into effects. Idempotent per action value, so
- * calling it again with the same inputs does the same thing -- which is
- * what makes it safe to drive from BOTH the `/version` preflight and the
- * websocket refusal without them fighting each other.
+ * In-memory latch recording that this PAGE has already asked to reload.
+ *
+ * Distinct from the persisted marker, which survives the reload and
+ * answers "did the previous page already try?". This one answers "is a
+ * reload already in flight right now?", and it exists because
+ * `location.reload()` does NOT stop execution -- the navigation is queued
+ * and the document keeps running. Both routes into the check (the
+ * `/version` preflight and the websocket refusal) fire within a few
+ * milliseconds of each other on a real mismatch, so without this latch the
+ * second one reads the marker the first one just persisted, concludes
+ * "already reloaded once", and replaces the correct "reloading…" banner
+ * with the terminal hard-refresh error -- on a reload that is about to
+ * succeed.
+ */
+export interface VersionCheckState { reloadRequested: boolean; }
+
+export function makeVersionCheckState(): VersionCheckState {
+    return { reloadRequested: false };
+}
+
+/**
+ * Turns a decided action into effects.
+ *
+ * `state` makes this idempotent across BOTH routes: pass the same state
+ * object to every call for a given page and at most one reload is ever
+ * requested, and a late `blocked` cannot stomp an in-flight reload. The
+ * default argument is a fresh state, i.e. "this call shares nothing",
+ * which is what a one-off caller wants.
  */
 export function applyVersionAction(
     action: ClientVersionAction, deps: VersionCheckDeps,
+    state: VersionCheckState = makeVersionCheckState(),
 ): void {
     switch (action) {
         case 'ok':
@@ -61,6 +86,10 @@ export function applyVersionAction(
             deps.setAlreadyReloaded(false);
             return;
         case 'reload':
+            if (state.reloadRequested) {
+                return;
+            }
+            state.reloadRequested = true;
             // Set the marker BEFORE reloading. If it were set after, the
             // reload would race it and the fresh page could come up with
             // no record that it had already tried -- which is exactly the
@@ -70,6 +99,13 @@ export function applyVersionAction(
             deps.reload();
             return;
         case 'blocked':
+            // A reload this page already requested is still in flight, so
+            // the mismatch is expected and about to be fixed. Saying
+            // "reloading did not help" here would be both wrong and the
+            // last thing the player sees before the page goes away.
+            if (state.reloadRequested) {
+                return;
+            }
             deps.warn('Build version still mismatched after an automatic '
                 + 'reload; not reloading again.');
             deps.showNotice(BLOCKED_MESSAGE, true);
@@ -87,10 +123,11 @@ export function handleServerVersion(
     serverVersion: string | undefined,
     clientVersion: string | undefined,
     deps: VersionCheckDeps,
+    state: VersionCheckState = makeVersionCheckState(),
 ): ClientVersionAction {
     const action = decideClientAction(
         serverVersion, clientVersion, deps.getAlreadyReloaded());
-    applyVersionAction(action, deps);
+    applyVersionAction(action, deps, state);
     return action;
 }
 
@@ -128,11 +165,16 @@ function showBrowserNotice(message: string, persistent: boolean) {
  *
  * `sessionStorage` (not `localStorage`) because the guard is about THIS
  * tab's one reload attempt; a second tab deserves its own attempt, and the
- * marker should not outlive the browsing session. Access is wrapped
- * because it throws in a partitioned or storage-blocked context -- and a
- * client that cannot persist the marker must be treated as "has not
- * reloaded yet" for the check to still function, with the cost that such a
- * context loses the loop guard.
+ * marker should not outlive the browsing session.
+ *
+ * Access is wrapped because it throws outright in a partitioned or
+ * storage-blocked context. A context that cannot persist the marker
+ * reports "already reloaded" (i.e. FAILS SAFE): it forfeits its automatic
+ * reload and goes straight to the hard-refresh message. Reporting "not yet
+ * reloaded" would read better but is the one genuinely unacceptable
+ * answer -- with no way to remember the attempt, every reloaded page would
+ * decide to reload again, which is an infinite loop rather than a missing
+ * convenience.
  */
 export function browserVersionCheckDeps(): VersionCheckDeps {
     return {
@@ -140,7 +182,7 @@ export function browserVersionCheckDeps(): VersionCheckDeps {
             try {
                 return sessionStorage.getItem(RELOAD_MARKER_KEY) === 'true';
             } catch {
-                return false;
+                return true;
             }
         },
         setAlreadyReloaded: (value: boolean) => {
@@ -175,10 +217,17 @@ export function browserVersionCheckDeps(): VersionCheckDeps {
 export function installVersionCheck(
     clientVersion: string | undefined,
     deps: VersionCheckDeps = browserVersionCheckDeps(),
-): { onVersionMismatch: (reason: string) => void } {
+): {
+    onVersionMismatch: (reason: string) => void,
+    onAdmitted: () => void,
+} {
+    // ONE state shared by both routes, so they cannot fight; see
+    // VersionCheckState.
+    const state = makeVersionCheckState();
+
     void (async () => {
         const serverVersion = await fetchServerVersion();
-        handleServerVersion(serverVersion, clientVersion, deps);
+        handleServerVersion(serverVersion, clientVersion, deps, state);
     })();
 
     return {
@@ -188,7 +237,23 @@ export function installVersionCheck(
         onVersionMismatch: (reason: string) => {
             deps.warn(`Server refused this build: ${reason}`);
             applyVersionAction(
-                deps.getAlreadyReloaded() ? 'blocked' : 'reload', deps);
+                deps.getAlreadyReloaded() ? 'blocked' : 'reload', deps, state);
+        },
+        /**
+         * Called once the server has actually admitted this client, which
+         * it only does for a matching build -- so admission is positive
+         * proof the versions agree, and the strongest re-arm signal there
+         * is. Without it the loop guard's reset would depend entirely on
+         * the `/version` preflight, the route that is NOT the enforcement
+         * point: if that route were persistently unreachable, the marker
+         * would never clear and the next real deploy would skip straight
+         * to the hard-refresh message without spending its one reload.
+         */
+        onAdmitted: () => {
+            if (state.reloadRequested) {
+                return;
+            }
+            deps.setAlreadyReloaded(false);
         },
     };
 }

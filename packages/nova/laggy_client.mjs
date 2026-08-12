@@ -16,12 +16,16 @@ const { CommunicatorResource } = await import('nova_ecs/plugins/multiplayer_plug
 const { makeShip } = await import('./dist/src/nova_plugin/make_ship.js');
 const { ControlledByComponent } = await import('./dist/src/nova_plugin/ship_control.js');
 const { SerializerResource } = await import('nova_ecs/plugins/serializer_plugin');
+// The server refuses any client that does not announce its build stamp.
+const { connectUrlWithVersion } = await import('./dist/src/common/version_handshake.js');
+const { BUILD_VERSION } = await import('./dist/src/common/generated_build_version.js');
 
 const SYSTEM = process.argv[2] ?? 'nova:139';
 const DURATION_MS = Number(process.argv[3] ?? 150_000);
 
 const channel = new SocketChannelClient({
-    webSocketFactory: () => new WebSocket('ws://localhost:8000'),
+    webSocketFactory: () => new WebSocket(
+        connectUrlWithVersion('ws://localhost:8000', BUILD_VERSION)),
 });
 const communicator = new CommunicatorClient(channel);
 const multiRoom = new MultiRoom(communicator);

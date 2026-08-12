@@ -94,19 +94,23 @@ export class SocketChannelClient implements ChannelClient {
         }
     }
 
-    private removeCloseListener() {
-        if (this.closeListener) {
-            this.webSocket.removeEventListener("close", this.closeListener);
-        }
-    }
-
     reconnect() {
         // A build-mismatched client stays down; see `versionRefused`.
         if (this.versionRefused) {
             return;
         }
         this.webSocket.removeEventListener("message", this.messageListener);
-        this.removeCloseListener();
+        // NOTE: the close listener is deliberately NOT removed from the
+        // outgoing socket. A browser sets readyState to CLOSING/CLOSED
+        // synchronously when a close frame arrives but dispatches the
+        // `close` event as a queued task, so a keepalive firing inside
+        // that window sees a dead socket and reconnects while a version
+        // refusal is still pending delivery. Detaching here would drop
+        // that event on the floor, the latch would never engage, and the
+        // client would reconnect-loop forever against a server that
+        // refuses it every time -- silently, with no reload. Leaving it
+        // attached costs nothing (the discarded socket is collected along
+        // with its listener) and lets a late 4001 still latch.
         if (this.webSocket.readyState === this.webSocket.CONNECTING
             || this.webSocket.readyState === this.webSocket.OPEN) {
             this.disconnect();

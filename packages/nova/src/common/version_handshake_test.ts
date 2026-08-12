@@ -1,7 +1,7 @@
 import {
-    connectUrlWithVersion, decideClientAction, shouldAdmitClient,
-    truncateCloseReason, VERSION_MISMATCH_CLOSE_CODE, VERSION_PATH,
-    VERSION_QUERY_PARAM, versionFromConnectUrl,
+    connectUrlWithVersion, decideClientAction, sanitizeReportedVersion,
+    shouldAdmitClient, truncateCloseReason, VERSION_MISMATCH_CLOSE_CODE,
+    VERSION_PATH, VERSION_QUERY_PARAM, versionFromConnectUrl,
 } from './version_handshake.js';
 
 describe('version handshake', () => {
@@ -180,6 +180,46 @@ describe('version handshake', () => {
                 .encode(truncateCloseReason(decision.reason)).length)
                 .toBeLessThanOrEqual(123);
         });
+    });
+
+    describe('sanitizeReportedVersion', () => {
+        // The announced version is unauthenticated query-string input and
+        // ends up in a server log line, so it must not be able to forge
+        // log entries or write unbounded text.
+        it('leaves an ordinary stamp alone', () => {
+            expect(sanitizeReportedVersion('f7397464-dirty-1786501588159'))
+                .toEqual('f7397464-dirty-1786501588159');
+        });
+
+        it('strips newlines that could forge a log line', () => {
+            const forged = 'abc\n2026-01-01 FATAL everything is fine';
+            expect(sanitizeReportedVersion(forged)).not.toContain('\n');
+        });
+
+        it('strips carriage returns and NULs', () => {
+            expect(sanitizeReportedVersion('a\r\0b')).toEqual('ab');
+        });
+
+        it('bounds an enormous announced version', () => {
+            expect(sanitizeReportedVersion('a'.repeat(100000)).length)
+                .toBeLessThan(100);
+        });
+
+        // The comparison must use the raw value; only the echoed copy is
+        // sanitized, or two versions differing solely in stripped
+        // characters would be treated as equal.
+        it('does not let sanitizing make two builds compare equal', () => {
+            expect(shouldAdmitClient('abc', 'a\nbc').admit).toBeFalse();
+        });
+
+        it('keeps a refusal reason bounded for a huge announced version',
+            () => {
+                const decision = shouldAdmitClient('server', 'x'.repeat(50000));
+                if (decision.admit) {
+                    throw new Error('Expected a refusal');
+                }
+                expect(decision.reason.length).toBeLessThan(200);
+            });
     });
 
     describe('wire constants', () => {

@@ -139,10 +139,19 @@ document.body.appendChild(app.view as any);
 // `/version` preflight (non-blocking; see its doc), and the callback it
 // returns reacts to the server refusing this socket outright, which is the
 // actual enforcement. Both routes end in at most ONE automatic reload.
-const { onVersionMismatch } = installVersionCheck(BUILD_VERSION);
+const { onVersionMismatch, onAdmitted } = installVersionCheck(BUILD_VERSION);
 const channel = new SocketChannelClient({
     buildVersion: BUILD_VERSION,
     onVersionMismatch,
+});
+// `connected` flips true on the first message the server sends, which it
+// only sends to a client it has ADMITTED -- and it only admits matching
+// builds. So this is positive proof the versions agree, and it resets the
+// one-automatic-reload guard without depending on the `/version` route.
+channel.connected.subscribe(connected => {
+    if (connected) {
+        onAdmitted();
+    }
 });
 const communicator = new CommunicatorClient(channel);
 (window as any).communicator = communicator;

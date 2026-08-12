@@ -11,11 +11,15 @@ const { SimulationBridgeHost } = await import('./dist/src/communication/simulati
 const { makeSystem } = await import('./dist/src/nova_plugin/make_system.js');
 const { SimulationGameData } = await import('./dist/src/client/gamedata/simulation_game_data.js');
 const { CommunicatorResource } = await import('nova_ecs/plugins/multiplayer_plugin');
+// The server refuses any client that does not announce its build stamp.
+const { connectUrlWithVersion } = await import('./dist/src/common/version_handshake.js');
+const { BUILD_VERSION } = await import('./dist/src/common/generated_build_version.js');
 
 const SYSTEM = process.argv[2] ?? 'nova:131';
 
 const channel = new SocketChannelClient({
-    webSocketFactory: () => new WebSocket('ws://localhost:8000'),
+    webSocketFactory: () => new WebSocket(
+        connectUrlWithVersion('ws://localhost:8000', BUILD_VERSION)),
 });
 const communicator = new CommunicatorClient(channel);
 const multiRoom = new MultiRoom(communicator);

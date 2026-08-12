@@ -1,7 +1,8 @@
 import 'jasmine';
 import {
     applyVersionAction, BLOCKED_MESSAGE, fetchServerVersion,
-    handleServerVersion, RELOADING_MESSAGE, VersionCheckDeps,
+    handleServerVersion, installVersionCheck, makeVersionCheckState,
+    RELOADING_MESSAGE, VersionCheckDeps,
 } from './version_reload.js';
 
 /**
@@ -145,21 +146,47 @@ describe('client version reload', () => {
         });
     });
 
-    describe('applyVersionAction idempotence', () => {
-        // Both the preflight and the socket refusal drive this, so the
-        // same action arriving twice must not compound.
-        it('reloads once for a repeated reload action', () => {
-            applyVersionAction('reload', deps);
+    // `location.reload()` does not stop execution, so both routes into the
+    // check keep running after one of them asks to reload. A shared state
+    // object is what keeps them from fighting.
+    describe('shared state across both routes', () => {
+        it('reloads once when both routes see the mismatch', () => {
+            const state = makeVersionCheckState();
+            applyVersionAction('reload', deps, state);
+            applyVersionAction('reload', deps, state);
             expect(deps.reloads).toEqual(1);
-            // A second `reload` action can only arrive from the other
-            // route before the page has actually torn down.
-            applyVersionAction('reload', deps);
-            expect(deps.reloads).toEqual(2);
-            // ...but routed through the guard, it cannot:
-            const guarded = new FakeDeps();
-            handleServerVersion('s', 'c', guarded);
-            handleServerVersion('s', 'c', guarded);
-            expect(guarded.reloads).toEqual(1);
+        });
+
+        // The bug this guards: route A reloads and persists the marker,
+        // then route B reads that marker, concludes "already tried", and
+        // replaces the correct banner with the terminal error -- on a
+        // reload that is about to succeed.
+        it('does not show the blocked message over an in-flight reload',
+            () => {
+                const state = makeVersionCheckState();
+                applyVersionAction('reload', deps, state);
+                // Route B resolves a moment later and, reading the marker
+                // route A just set, decides `blocked`.
+                applyVersionAction('blocked', deps, state);
+                expect(deps.notices.length).toEqual(1);
+                expect(deps.notices[0].message).toEqual(RELOADING_MESSAGE);
+                expect(deps.notices.some(n => n.persistent)).toBeFalse();
+            });
+
+        it('does not warn about a failed reload over an in-flight one',
+            () => {
+                const state = makeVersionCheckState();
+                applyVersionAction('reload', deps, state);
+                applyVersionAction('blocked', deps, state);
+                expect(deps.warnings).toEqual([]);
+            });
+
+        // Without a shared state the two routes are independent, which is
+        // what the default argument means.
+        it('still blocks when no reload happened on this page', () => {
+            const state = makeVersionCheckState();
+            applyVersionAction('blocked', deps, state);
+            expect(deps.notices[0].message).toEqual(BLOCKED_MESSAGE);
         });
 
         it('does nothing at all for the unknown action', () => {
@@ -167,6 +194,62 @@ describe('client version reload', () => {
             expect(deps.reloads).toEqual(0);
             expect(deps.notices).toEqual([]);
             expect(deps.warnings).toEqual([]);
+        });
+
+        it('reloads once when driven through handleServerVersion twice',
+            () => {
+                const state = makeVersionCheckState();
+                handleServerVersion('s', 'c', deps, state);
+                handleServerVersion('s', 'c', deps, state);
+                expect(deps.reloads).toEqual(1);
+            });
+    });
+
+    // installVersionCheck's own fetch is not injectable, but in node the
+    // relative '/version' URL simply fails, which is the `unknown` path --
+    // so these specs isolate the two callbacks it returns.
+    describe('installVersionCheck callbacks', () => {
+        it('reloads on a websocket refusal', () => {
+            const { onVersionMismatch } = installVersionCheck('client', deps);
+            onVersionMismatch('server build is newer');
+            expect(deps.reloads).toEqual(1);
+        });
+
+        it('blocks instead when it already reloaded once', () => {
+            deps.alreadyReloaded = true;
+            const { onVersionMismatch } = installVersionCheck('client', deps);
+            onVersionMismatch('server build is newer');
+            expect(deps.reloads).toEqual(0);
+            expect(deps.notices[deps.notices.length - 1].persistent)
+                .toBeTrue();
+        });
+
+        it('reloads only once when refused twice', () => {
+            const { onVersionMismatch } = installVersionCheck('client', deps);
+            onVersionMismatch('a');
+            onVersionMismatch('b');
+            expect(deps.reloads).toEqual(1);
+        });
+
+        // Admission is positive proof the builds agree, and is the re-arm
+        // signal that does not depend on the /version route.
+        it('clears the marker when the server admits the client', () => {
+            deps.alreadyReloaded = true;
+            const { onAdmitted } = installVersionCheck('client', deps);
+            onAdmitted();
+            expect(deps.alreadyReloaded).toBeFalse();
+        });
+
+        // A reload is already in flight; the socket that briefly connects
+        // belongs to the outgoing page and must not clear the marker the
+        // reload depends on.
+        it('does not clear the marker once a reload is in flight', () => {
+            const { onVersionMismatch, onAdmitted } =
+                installVersionCheck('client', deps);
+            onVersionMismatch('stale');
+            expect(deps.alreadyReloaded).toBeTrue();
+            onAdmitted();
+            expect(deps.alreadyReloaded).toBeTrue();
         });
     });
 

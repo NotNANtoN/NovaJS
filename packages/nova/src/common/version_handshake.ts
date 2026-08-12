@@ -108,10 +108,34 @@ export function truncateCloseReason(reason: string): string {
     if (encoded.length <= maxBytes) {
         return reason;
     }
-    // `fatal: false` replaces a trailing partial character with U+FFFD;
-    // dropping it keeps the reason valid UTF-8 and within the cap.
+    // A non-fatal decoder (the default) turns a trailing partial
+    // character into U+FFFD; dropping it keeps the reason valid UTF-8 and
+    // within the cap.
     const decoded = new TextDecoder('utf-8').decode(encoded.slice(0, maxBytes));
     return decoded.replace(/�$/, '');
+}
+
+/**
+ * Longest announced version echoed back into a log line or close reason.
+ * Real stamps are ~10-40 characters.
+ */
+const MAX_REPORTED_VERSION_LENGTH = 64;
+
+/**
+ * Makes a client-announced version safe to put in a server log line.
+ *
+ * The value arrives on an unauthenticated query string, so it is wholly
+ * attacker-controlled: without a bound, a client could write megabytes per
+ * connection attempt into the server's log, and newlines would let it
+ * forge whole log entries. Control characters are stripped and the rest is
+ * truncated.
+ */
+export function sanitizeReportedVersion(version: string): string {
+    // eslint-disable-next-line no-control-regex
+    const stripped = version.replace(/[\x00-\x1f\x7f]/g, '');
+    return stripped.length > MAX_REPORTED_VERSION_LENGTH
+        ? stripped.slice(0, MAX_REPORTED_VERSION_LENGTH) + '…'
+        : stripped;
 }
 
 /** Whether a connecting client may be admitted. */
@@ -143,8 +167,12 @@ export function shouldAdmitClient(
     if (clientVersion !== serverVersion) {
         return {
             admit: false,
-            reason: `Client build ${clientVersion} does not match server `
-                + `build ${serverVersion}.`,
+            // The comparison above uses the RAW value; only the reported
+            // copy is sanitized. The reason string is logged server-side
+            // and echoed in the close frame, and clientVersion is
+            // unauthenticated query-string input.
+            reason: `Client build ${sanitizeReportedVersion(clientVersion)} `
+                + `does not match server build ${serverVersion}.`,
         };
     }
     return { admit: true };
