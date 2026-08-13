@@ -144,4 +144,88 @@ describe('query cache', () => {
 
         expect(getArg).toHaveBeenCalledTimes(2);
     });
+
+    // Pins for component-indexed invalidation: component events must
+    // invalidate exactly the queries whose staleness set
+    // (referencedComponents) contains the component.
+    it('does not invalidate when an irrelevant component changes', () => {
+        const query = new Query([FooComponent]);
+        const e1 = new Entity()
+            .addComponent(FooComponent, { x: 123 })
+            .addComponent(BarComponent, { y: 'hello' });
+        entities.set('e1', e1);
+
+        const cached = queryCache.get(query);
+        getArg.and.returnValue(right({ x: 0 }));
+        cached.getResult();
+        expect(getArg).toHaveBeenCalledTimes(1);
+
+        // BarComponent is not in the query's staleness set.
+        e1.components.set(BarComponent, { y: 'changed' });
+        cached.getResult();
+        expect(getArg).toHaveBeenCalledTimes(1);
+    });
+
+    it('invalidates when a required component changes', () => {
+        const query = new Query([FooComponent]);
+        const e1 = new Entity()
+            .addComponent(FooComponent, { x: 123 });
+        entities.set('e1', e1);
+
+        const cached = queryCache.get(query);
+        getArg.and.returnValue(right({ x: 0 }));
+        cached.getResult();
+        expect(getArg).toHaveBeenCalledTimes(1);
+
+        e1.components.set(FooComponent, { x: 456 });
+        cached.getResult();
+        expect(getArg).toHaveBeenCalledTimes(2);
+    });
+
+    it('gains membership when the last required component is added', () => {
+        const query = new Query([FooComponent, BarComponent]);
+        const e1 = new Entity()
+            .addComponent(FooComponent, { x: 123 });
+        entities.set('e1', e1);
+
+        const cached = queryCache.get(query);
+        getArg.and.returnValue(right({ x: 0 }));
+        expect(cached.getResult().length).toBe(0);
+
+        e1.components.set(BarComponent, { y: 'hello' });
+        expect(cached.getResult().length).toBe(1);
+    });
+
+    it('loses membership when a required component is deleted', () => {
+        const query = new Query([FooComponent, BarComponent]);
+        const e1 = new Entity()
+            .addComponent(FooComponent, { x: 123 })
+            .addComponent(BarComponent, { y: 'hello' });
+        entities.set('e1', e1);
+
+        const cached = queryCache.get(query);
+        getArg.and.returnValue(right({ x: 0 }));
+        expect(cached.getResult().length).toBe(1);
+
+        e1.components.delete(BarComponent);
+        expect(cached.getResult().length).toBe(0);
+    });
+
+    it('drops a replaced entity the new object does not support', () => {
+        // Rollback snapshot restore reuses uuids with fresh entity
+        // objects; an entry that held the old object must drop it even
+        // when the replacement does not match the query.
+        const query = new Query([FooComponent]);
+        const e1 = new Entity()
+            .addComponent(FooComponent, { x: 123 });
+        entities.set('e1', e1);
+
+        const cached = queryCache.get(query);
+        getArg.and.returnValue(right({ x: 0 }));
+        expect(cached.getResult().length).toBe(1);
+
+        entities.set('e1', new Entity()
+            .addComponent(BarComponent, { y: 'hello' }));
+        expect(cached.getResult().length).toBe(0);
+    });
 });
