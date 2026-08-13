@@ -19,7 +19,7 @@ import { CollisionEvent, CollisionHitterComponent } from './collision_interactio
 import { CreateTime, CreateTimeArgProvider } from './create_time.js';
 import { DamagedEvent } from './death_plugin.js';
 import { applyExitPoint, ExitPointData } from './exit_point.js';
-import { FireSubs, OwnerComponent, sampleInaccuracy, SourceComponent, WeaponConstructors, WeaponEntry } from './fire_weapon_plugin.js';
+import { FireSubs, liveTargetMovement, OwnerComponent, sampleInaccuracy, SourceComponent, WeaponConstructors, WeaponEntry } from './fire_weapon_plugin.js';
 import { FiringGroupComponent, firingImmune, victimFiringGroup } from './firing_group.js';
 import { GovtComponent } from './govt_component.js';
 import { DisabledComponent } from './disabled_component.js';
@@ -161,12 +161,36 @@ export const BeamSystem = new System({
             }
         }
 
-        if (beamState.pointToTarget && target?.target) {
-            const otherPos = entities.get(target.target)?.components
-                .get(MovementStateComponent)?.position;
-            if (otherPos) {
-                movement.rotation = zeroOrderGuidance(movement.position, otherPos);
+        // A turret beam is a ray held on its target: every tick it is
+        // rebuilt from the firing ship's position/rotation above and then
+        // swung back onto the target here. So when the target stops
+        // existing, the swing does not happen and the beam is left
+        // pointing straight out of the ship's nose — a full-strength beam
+        // firing forward, dealing damage to whatever is ahead, for the
+        // rest of its shot duration. That is the tick after the beam's
+        // own victim dies: the target entity is gone (its uuid outlives
+        // it, see liveTargetMovement) or is exploding, and
+        // DropExplodingTargetSystem/TargetRemovedSystem clear the lock
+        // between one BeamSystem run and the next.
+        //
+        // The ray ends instead. A beam aimed at nothing is not a beam
+        // that fires forward, it is a beam that is over: no entity, so no
+        // collision, no damage, and nothing drawn. Submunitions
+        // deliberately do NOT fire — this is the beam being cut off, not
+        // running its course, and the `sourceExpired` subs above are for
+        // a beam that reached the end of its duration.
+        //
+        // Deleting here (before UpdateHitboxHullSystem and CollisionSystem,
+        // which this system is ordered ahead of) is what keeps the
+        // stray frame from landing damage.
+        if (beamState.pointToTarget) {
+            const targetMovement = liveTargetMovement(entities, target?.target);
+            if (!targetMovement) {
+                entities.delete(uuid);
+                return;
             }
+            movement.rotation = zeroOrderGuidance(movement.position,
+                targetMovement.position);
         }
         movement.rotation = movement.rotation.add(sampleInaccuracy(beamData.accuracy, random));
     }

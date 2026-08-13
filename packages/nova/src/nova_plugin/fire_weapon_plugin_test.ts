@@ -3,9 +3,13 @@ import { WeaponData } from 'novadatainterface/weapon_data';
 import { Angle } from 'nova_ecs/datatypes/angle';
 import { Position } from 'nova_ecs/datatypes/position';
 import { Vector } from 'nova_ecs/datatypes/vector';
-import { MovementState } from 'nova_ecs/plugins/movement_plugin';
+import { Entity } from 'nova_ecs/entity';
+import { EntityMap } from 'nova_ecs/entity_map';
+import { MovementState, MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
+import { ExplodingComponent } from './death_plugin.js';
 import {
     defaultWeaponLocalState, getEvenlySpacedAngles, getNextExitpoint,
+    liveTargetMovement,
 } from './fire_weapon_plugin.js';
 
 describe('getEvenlySpacedAngles', () => {
@@ -27,6 +31,59 @@ describe('getEvenlySpacedAngles', () => {
     it('gets an odd number of evenly spaced angles', () => {
         const actual = getEvenlySpacedAngles(0.6, 5);
         expectAnglesCloseTo(actual, [0, 0.6, -0.6, 1.2, -1.2]);
+    });
+});
+
+describe('liveTargetMovement', () => {
+    function movementAt(x: number): MovementState {
+        return {
+            position: new Position(x, 0),
+            velocity: new Vector(0, 0),
+            rotation: new Angle(0),
+            turning: 0,
+            turnBack: false,
+            accelerating: 0,
+        };
+    }
+
+    function entities(...ships: Array<[string, Entity]>): EntityMap {
+        return new Map(ships) as EntityMap;
+    }
+
+    function ship(x: number) {
+        return new Entity().addComponent(MovementStateComponent, movementAt(x));
+    }
+
+    it('resolves a target that is still there', () => {
+        const target = ship(100);
+        expect(liveTargetMovement(entities(['target', target]), 'target'))
+            .toBe(target.components.get(MovementStateComponent));
+    });
+
+    it('has nothing to aim at with no target set', () => {
+        expect(liveTargetMovement(entities(['target', ship(100)]), undefined))
+            .toBeUndefined();
+    });
+
+    // A uuid outlives the entity it names: DeleteEvent is queued, so
+    // every TargetComponent naming a deleted entity still says so until
+    // the queue is flushed, and a rollback restore drops that event
+    // outright.
+    it('has nothing to aim at when the uuid names nothing', () => {
+        expect(liveTargetMovement(entities(['other', ship(100)]), 'target'))
+            .toBeUndefined();
+    });
+
+    it('has nothing to aim at when the target is exploding', () => {
+        const target = ship(100);
+        target.components.set(ExplodingComponent, 1234);
+        expect(liveTargetMovement(entities(['target', target]), 'target'))
+            .toBeUndefined();
+    });
+
+    it('has nothing to aim at when the target has no position', () => {
+        expect(liveTargetMovement(entities(['target', new Entity()]), 'target'))
+            .toBeUndefined();
     });
 });
 
