@@ -39,6 +39,7 @@ import {
     LegalRecordsComponent,
 } from '../nova_plugin/reputation_plugin.js';
 import { ControlledByComponent } from '../nova_plugin/ship_control.js';
+import { PendingEscortsComponent } from './pending_escorts.js';
 import { ensurePlayerStateComponents } from './mission_session.js';
 
 /**
@@ -274,6 +275,11 @@ export const CARRIED_COMPONENTS: readonly Component<any>[] = [
     PendingMissionNoticesComponent,
     LegalRecordsComponent,
     CombatRatingComponent,
+    // Escorts hired at the bar THIS landing, not yet spawned (they spawn
+    // at liftoff, browser.ts). Buying a ship between hiring and lifting
+    // off must not discard them - the hire fee is already paid. (Review
+    // round 6 finding; the loss predated the shipyard-economy rework.)
+    PendingEscortsComponent,
 ];
 
 /**

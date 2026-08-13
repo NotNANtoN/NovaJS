@@ -6,6 +6,7 @@ import { MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
 import { CargoComponent } from '../nova_plugin/cargo_plugin.js';
 import { makeShip } from '../nova_plugin/make_ship.js';
 import { ControlBitsComponent } from '../nova_plugin/ncb_plugin.js';
+import { PendingEscortsComponent } from './pending_escorts.js';
 import { OutfitsStateComponent } from '../nova_plugin/outfit_plugin.js';
 import {
     CreditsComponent,
@@ -320,6 +321,25 @@ describe('shipyard purchase rules', () => {
         it('flies the new hull', () => {
             const { bought } = purchase();
             expect(bought.components.get(ShipComponent)).toEqual({ id: 'nova:101' });
+        });
+
+        it('carries bar-hired pending escorts across the hull swap', () => {
+            // Review round 6: escorts hired THIS landing (spawned only at
+            // liftoff) were silently dropped by a ship purchase - the fee
+            // was already paid, so they must ride CARRIED_COMPONENTS.
+            const old = oldPlayer();
+            old.components.set(PendingEscortsComponent,
+                ['nova:128', 'nova:129']);
+            const ctx = context({
+                currentShip: ship('nova:100', { price: 40000 }),
+                outfits: [['nova:221', 1], ['nova:200', 2]],
+                catalogue: [beam, cannon],
+                credits: 500000,
+            });
+            const bought = buildPurchasedShip(old,
+                ship('nova:101', { price: 200000 }), ctx);
+            expect(bought.components.get(PendingEscortsComponent))
+                .toEqual(['nova:128', 'nova:129']);
         });
 
         it('carries player state across the hull swap', () => {

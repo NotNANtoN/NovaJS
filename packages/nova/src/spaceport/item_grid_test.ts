@@ -1,6 +1,6 @@
 import 'jasmine';
 import * as PIXI from 'pixi.js';
-import { raiseToTop } from './item_grid.js';
+import { ItemGrid, raiseToTop } from './item_grid.js';
 
 /**
  * The item grid's selection highlight has to paint above the other tiles.
@@ -64,5 +64,32 @@ describe('raiseToTop', () => {
         raiseToTop(container, children[7]);
         raiseToTop(container, children[2]);
         expect(last(container)).toBe(children[2]);
+    });
+});
+
+/**
+ * Selling the last unit of an owned-only outfit empties the grid; the
+ * detail pane subscribes to activeTile and must be told the selection is
+ * gone rather than lingering on the last item (review round 6 finding).
+ * An empty grid builds no ItemTiles (which need a DOM for PIXI.Text), so
+ * the emission rule is pinned headlessly on a real, empty ItemGrid.
+ */
+describe('ItemGrid selection clearing', () => {
+    it('emits undefined when a redraw leaves nothing selected', () => {
+        const grid = new ItemGrid(undefined as any, []);
+        // Simulate the lingering emission a prior selection left behind.
+        grid.activeTile.next({ sentinel: true } as any);
+        grid.setItems([]);
+        expect(grid.activeTile.value).toBeUndefined();
+    });
+
+    it('does not churn the subject when already cleared', () => {
+        const grid = new ItemGrid(undefined as any, []);
+        let emissions = 0;
+        grid.activeTile.subscribe(() => emissions++);
+        const before = emissions;
+        grid.setItems([]);
+        grid.setItems([]);
+        expect(emissions).toBe(before);
     });
 });

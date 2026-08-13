@@ -263,6 +263,13 @@ export class ItemGrid<I extends Item> {
             tile.moveTo(xcount * TILE_SIZE[0], ycount * TILE_SIZE[1])
             tile.draw();
         }
+        // No selection (e.g. setItems emptied the grid, or the selected
+        // item vanished): tell subscribers so detail panes clear instead
+        // of lingering on the last selection. Guarded so redraws with a
+        // live selection don't churn the subject.
+        if (this.selectionIndex === -1 && this.activeTile.value !== undefined) {
+            this.activeTile.next(undefined);
+        }
     }
 
     /** The furthest the grid can scroll: the top row of the last page. */
