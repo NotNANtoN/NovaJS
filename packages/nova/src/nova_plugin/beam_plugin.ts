@@ -65,7 +65,8 @@ class BeamWeaponEntry extends WeaponEntry {
     }
 
     fire(position: Position, angle: Angle, owner?: string, target?: string,
-        source?: string, _sourceVelocity?: Vector, exitPointData?: ExitPointData): Entity {
+        source?: string, _sourceVelocity?: Vector,
+        exitPointData?: ExitPointData, silent = false): Entity {
         const { width, length } = this.data.beamAnimation;
         const beamPoly = new SAT.Polygon(new SAT.Vector(0, 0), [
             new SAT.Vector(-width / 2, 0),
@@ -103,7 +104,9 @@ class BeamWeaponEntry extends WeaponEntry {
             beam.addComponent(SourceComponent, source);
         }
 
-        if (this.data.sound) {
+        // See the projectile path: a submunition burst plays its firing
+        // sound once, not once per child.
+        if (this.data.sound && !silent) {
             this.emit(SoundEvent, {
                 id: this.data.sound,
                 loop: this.data.loopSound,
