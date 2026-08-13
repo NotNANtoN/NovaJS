@@ -32,6 +32,22 @@ export class AnimationGraphic {
      * 0 at the shän's WeapDecay rate afterwards (ShipAnimationSystem).
      */
     weaponFlashAlpha = 0;
+    /**
+     * The `WeaponState.lastFired` this graphic saw on its previous frame —
+     * the simulation time of the last shot its ship actually emitted from
+     * a glow-flagged weapon. ShipAnimationSystem pulses the overlay
+     * whenever this changes, which is what makes a projectile weapon flash
+     * once per real shot instead of glowing for as long as the trigger is
+     * held.
+     *
+     * `weaponFireSeen` separates "this ship has never fired" from "this
+     * graphic has not looked yet": on the first frame the system adopts
+     * whatever the ship has already done as the baseline, so a ship that
+     * fired before it came on screen (or before a pooled graphic was
+     * handed to it) does not flash on arrival.
+     */
+    lastWeaponFired?: number;
+    weaponFireSeen = false;
     private animation: Animation | Promise<Animation>;
     /**
      * The animation this graphic's sprites were actually BUILT from,
@@ -126,6 +142,12 @@ export class AnimationGraphic {
         this.foldProgress = 0;
         this.weaponFlashAlpha = 0;
         this.weapAlpha = 0;
+        // A pooled graphic must not inherit the previous ship's shot
+        // clock, or the new ship flashes on its first frame (or, worse,
+        // misses its first real shot because the stale value happens to
+        // match).
+        this.lastWeaponFired = undefined;
+        this.weaponFireSeen = false;
         this.rotation = 0;
     }
 

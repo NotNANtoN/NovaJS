@@ -221,9 +221,16 @@ export abstract class WeaponEntry {
             target.velocity, this.data.shotSpeed);
     }
 
+    /**
+     * Spawns one shot. `silent` suppresses this shot's firing sound
+     * without changing anything else about it — see fireSubs, which uses
+     * it so a submunition burst is heard once rather than once per child.
+     * Purely an output concern: SoundEvent carries no simulation state,
+     * so silencing a shot cannot move the sim.
+     */
     abstract fire(position: Position, angle: Angle, owner?: string,
         target?: string, source?: string, sourceVelocity?: Vector,
-        exitPointData?: ExitPointData): Entity | undefined;
+        exitPointData?: ExitPointData, silent?: boolean): Entity | undefined;
 
     /**
      * Stamps a spawned weapon entity (projectile, beam, bay fighter,
@@ -386,12 +393,29 @@ export abstract class WeaponEntry {
                 continue;
             }
 
+            // One firing sound for the whole burst, not one per child: a
+            // wëap that submunitions into a dozen rockets stacked a dozen
+            // copies of the same sample on the same frame, which is just
+            // loud. Tracked per SUBMUNITION ENTRY rather than per
+            // fireSubs call so a projectile that subs into two different
+            // weapons still plays each of their sounds once; and kept as
+            // a local, so a sub that itself submunitions gets its own
+            // fresh tracker and each generation is heard once.
+            //
+            // Deliberately NOT hoisted to "once per weapon per frame":
+            // a burst weapon firing N shots over N frames must still be
+            // heard N times, and each of those is a separate fire call.
+            let soundPlayed = false;
             for (let i = 0; i < sub.count; i++) {
                 const angle = angles[i] || new Angle(0);
                 const subEntity = subWeapon.fire(position ?? movement.position,
                     movement.rotation.add(angle), owner.owner,
-                    target?.target, source);
+                    target?.target, source, undefined, undefined,
+                    /* silent */ soundPlayed);
                 if (subEntity) {
+                    // Keyed off an actual spawn, so a first child that
+                    // fails to spawn does not swallow the burst's sound.
+                    soundPlayed = true;
                     subs.push(subEntity);
                     this.stampFiringGroup(subEntity, sourceEntity,
                         owner.owner);

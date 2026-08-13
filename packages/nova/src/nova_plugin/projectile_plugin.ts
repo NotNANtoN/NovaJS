@@ -24,6 +24,7 @@ import { CompositeHull, hullFromAnimation, HurtboxHullComponent } from './collis
 import { CollisionEvent, CollisionHitterComponent, CollisionVulnerabilityComponent } from './collision_interaction.js';
 import { CreateTime } from './create_time.js';
 import { DamagedEvent, ZeroArmorEvent } from './death_plugin.js';
+import { ExitPointData } from './exit_point.js';
 import { FireSubs, OwnerComponent, SourceComponent, SubCounts, VulnerableToPD, WeaponConstructors, WeaponEntry } from './fire_weapon_plugin.js';
 import { FiringGroupComponent, firingImmune, victimFiringGroup } from './firing_group.js';
 import { provokeGuidedLock } from './flock.js';
@@ -167,7 +168,8 @@ class ProjectileWeaponEntry extends WeaponEntry {
     }
 
     fire(position: Position, angle: Angle, owner?: string, target?: string,
-        source?: string, sourceVelocity?: Vector): Entity | undefined {
+        source?: string, sourceVelocity?: Vector,
+        _exitPointData?: ExitPointData, silent = false): Entity | undefined {
 
         let velocity = new Vector(0, 0);
         if (this.data.guidance !== 'guided' && sourceVelocity) {
@@ -227,7 +229,10 @@ class ProjectileWeaponEntry extends WeaponEntry {
         }
 
         this.entities.set(this.ids.next('projectile'), projectile);
-        if (this.data.sound) {
+        // `silent` is set for every child of a submunition burst after the
+        // first, so a dozen-rocket burst is heard once instead of a dozen
+        // copies of the same sample on one frame.
+        if (this.data.sound && !silent) {
             this.emit(SoundEvent, {
                 id: this.data.sound,
                 loop: this.data.loopSound,

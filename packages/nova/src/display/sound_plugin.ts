@@ -8,16 +8,27 @@ import { PlayerSoundEvent, SoundEvent, SoundEventData } from '../nova_plugin/sou
 import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin.js';
 import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data.js';
 import { PREWARM_UI_SOUNDS, UiSoundEvent } from './ui_sound.js';
+import { SoundStartLimiter } from './sound_limiter.js';
+import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 
 const LoopingSounds = new Resource<Map<string, Sound>>('LoopingSounds');
 const VolumeResource = new Resource<{volume: number}>('VolumeResource');
+/**
+ * Caps how many instances of one sound start per frame, shared by all
+ * three channels below so a sound played on two of them in the same
+ * frame still counts once against the cap. See sound_limiter.ts.
+ */
+const SoundLimiterResource =
+    new Resource<SoundStartLimiter>('SoundLimiterResource');
 
 function playSound({ id, loop, stop }: SoundEventData,
     displayAssets: DisplayAssetDataInterface,
-    loopingSounds: Map<string, Sound>, volume: number) {
+    loopingSounds: Map<string, Sound>, volume: number,
+    limiter: SoundStartLimiter, frame: number) {
     if (stop) {
         // Cut the sound off (e.g. the warp-up must not ring out over
-        // the system the ship just jumped into).
+        // the system the ship just jumped into). Never limited: silencing
+        // must always be allowed to happen.
         displayAssets.data.Sound.getCached(id)?.stop();
         loopingSounds.delete(id);
         return;
@@ -28,6 +39,12 @@ function playSound({ id, loop, stop }: SoundEventData,
 
     const maybeSound = displayAssets.data.Sound.getCached(id);
     if (maybeSound) {
+        // Looping sounds are already deduped by loopingSounds above (one
+        // instance per id at a time), so only one-shot starts — the ones
+        // that stack — go through the limiter.
+        if (!loop && !limiter.allow(id, frame)) {
+            return;
+        }
         maybeSound.volume = volume;
         if (loop) {
             loopingSounds.set(id, maybeSound);
@@ -44,9 +61,10 @@ const SoundSystem = new System({
     name: 'SoundSystem',
     events: [SoundEvent],
     args: [SoundEvent, DisplayAssetDataResource, LoopingSounds, VolumeResource,
-           SingletonComponent] as const,
-    step(sound, displayAssets, loopingSounds, {volume}) {
-        playSound(sound, displayAssets, loopingSounds, volume);
+           SoundLimiterResource, TimeResource, SingletonComponent] as const,
+    step(sound, displayAssets, loopingSounds, {volume}, limiter, time) {
+        playSound(sound, displayAssets, loopingSounds, volume, limiter,
+            time.time);
     }
 });
 
@@ -62,9 +80,11 @@ export const PlayerSoundSystem = new System({
     name: 'PlayerSoundSystem',
     events: [PlayerSoundEvent],
     args: [PlayerSoundEvent, DisplayAssetDataResource, LoopingSounds,
-        VolumeResource, PlayerShipSelector] as const,
-    step(sound, displayAssets, loopingSounds, {volume}) {
-        playSound(sound, displayAssets, loopingSounds, volume);
+        VolumeResource, SoundLimiterResource, TimeResource,
+        PlayerShipSelector] as const,
+    step(sound, displayAssets, loopingSounds, {volume}, limiter, time) {
+        playSound(sound, displayAssets, loopingSounds, volume, limiter,
+            time.time);
     }
 });
 
@@ -79,9 +99,10 @@ export const UiSoundSystem = new System({
     name: 'UiSoundSystem',
     events: [UiSoundEvent],
     args: [UiSoundEvent, DisplayAssetDataResource, LoopingSounds, VolumeResource,
-           SingletonComponent] as const,
-    step(sound, displayAssets, loopingSounds, {volume}) {
-        playSound(sound, displayAssets, loopingSounds, volume);
+           SoundLimiterResource, TimeResource, SingletonComponent] as const,
+    step(sound, displayAssets, loopingSounds, {volume}, limiter, time) {
+        playSound(sound, displayAssets, loopingSounds, volume, limiter,
+            time.time);
     }
 });
 
@@ -90,6 +111,7 @@ export const SoundPlugin: Plugin = {
     build(world) {
         world.resources.set(LoopingSounds, new Map());
         world.resources.set(VolumeResource, {volume: 0.045});
+        world.resources.set(SoundLimiterResource, new SoundStartLimiter());
         world.addSystem(SoundSystem);
         world.addSystem(PlayerSoundSystem);
         world.addSystem(UiSoundSystem);
@@ -105,6 +127,7 @@ export const SoundPlugin: Plugin = {
         world.removeSystem(UiSoundSystem);
         world.removeSystem(PlayerSoundSystem);
         world.removeSystem(SoundSystem);
+        world.resources.delete(SoundLimiterResource);
         world.resources.delete(VolumeResource);
         world.resources.delete(LoopingSounds);
     }

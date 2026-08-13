@@ -16,6 +16,30 @@ const WeaponState = t.intersection([t.type({
      * different secondary than the live session.
      */
     fireGroup: t.string,
+    /**
+     * Simulation time of the last shot this weapon ACTUALLY emitted, set
+     * by WeaponsSystem on the same branch that stamps the local
+     * `lastFired` reload clock — i.e. only when `fireFromEntity` really
+     * returned a spawned entity.
+     *
+     * This exists because `firing` above is the held INTENT (the trigger
+     * is down / the NPC wants to shoot), which is emphatically not the
+     * same as a shot leaving the ship: a turret or beamTurret with no
+     * target returns undefined from fireFromEntity, a point-defense
+     * weapon with nothing in range does too, and a weapon out of ammo or
+     * mid-reload never gets that far. The DISPLAY weapon-glow overlay
+     * (shän WeapImage) must track real emission rather than intent, so it
+     * needs a real-emission signal that survives the trip to the display
+     * world — and WeaponsState is already delta-registered and mirrored,
+     * where the per-weapon WeaponsComponent local state that holds the
+     * reload clock is NOT (snapshot_policies calls it "mutable
+     * unregistered simulation state").
+     *
+     * Deterministic: written straight from `time.time` on a branch every
+     * peer takes identically. Optional so snapshots taken before the
+     * field existed still decode.
+     */
+    lastFired: t.number,
 })]);
 export type WeaponState = t.TypeOf<typeof WeaponState>;
 

@@ -55,33 +55,82 @@ export const ActiveBeamsQuery = new Query(
     [SourceComponent, BeamDataComponent] as const, 'ActiveBeamsQuery');
 
 /**
- * Whether the given ship should show its firing animation (weapon image).
+ * Whether any beam fired by this ship is still being emitted.
  *
- * The animation is on while a weapon whose `useFiringAnimation` flag is set is
- * being fired, and also while any beam fired by this ship is still being
- * emitted. Beams keep firing (for their shot duration) after the fire key is
- * released, so we key their part of the animation off the beam entities that
+ * Beams keep firing (for their shot duration) after the fire key is
+ * released, and conversely a beam turret with the trigger held but no
+ * target emits NOTHING, so beam glow keys off the beam entities that
  * actually exist rather than off the fire input.
  */
-export function shouldShowFiringAnimation(
+export function beamActiveFor(
     uuid: string,
-    weaponStates: Iterable<[string, { firing: boolean }]>,
-    useFiringAnimation: (weaponId: string) => boolean | undefined,
     activeBeams: Iterable<readonly [string, unknown]>,
 ): boolean {
-    for (const [id, weaponState] of weaponStates) {
-        if (weaponState.firing && useFiringAnimation(id)) {
-            return true;
-        }
-    }
-
     for (const [source] of activeBeams) {
         if (source === uuid) {
             return true;
         }
     }
-
     return false;
+}
+
+/**
+ * The simulation time of the most recent shot this ship ACTUALLY emitted
+ * from a weapon that drives the glow overlay (wëap Flags2 0x200,
+ * `useFiringAnimation`), or undefined if no such weapon has ever fired.
+ *
+ * Reads WeaponState.lastFired, which WeaponsSystem stamps only on the
+ * branch where a shot really spawned — never on held intent. Weapons
+ * without the flag are skipped here exactly as they were when this was
+ * keyed off `firing`, so a ship whose glow-flagged weapons are all silent
+ * stays dark while its other guns fire.
+ */
+export function latestRealFire(
+    weaponStates: Iterable<[string, { lastFired?: number }]>,
+    useFiringAnimation: (weaponId: string) => boolean | undefined,
+): number | undefined {
+    let latest: number | undefined;
+    for (const [id, weaponState] of weaponStates) {
+        const lastFired = weaponState.lastFired;
+        if (lastFired === undefined || !useFiringAnimation(id)) {
+            continue;
+        }
+        if (latest === undefined || lastFired > latest) {
+            latest = lastFired;
+        }
+    }
+    return latest;
+}
+
+/**
+ * Whether the given ship should show its firing animation (weapon image)
+ * on THIS display frame.
+ *
+ * The glow tracks real emission, never the held trigger: a ship shows it
+ * while a beam it fired still exists, and for one frame each time a
+ * glow-flagged weapon actually emits a shot (`latestRealFire` moved since
+ * `lastSeenFire`, the value this graphic observed last frame). Everything
+ * in between is the WeapDecay fade, so a projectile weapon PULSES per
+ * shot and a held trigger that produces nothing — targetless turret or
+ * beam turret, empty point-defense sweep, dry ammo, mid-reload — produces
+ * no glow at all.
+ *
+ * `lastSeenFire` compares with `!==` rather than `>` so a rollback that
+ * rewinds the simulation clock still re-arms rather than latching the
+ * glow off; the cost is at most one extra frame of glow after a rewind.
+ */
+export function shouldShowFiringAnimation(
+    uuid: string,
+    weaponStates: Iterable<[string, { lastFired?: number }]>,
+    useFiringAnimation: (weaponId: string) => boolean | undefined,
+    activeBeams: Iterable<readonly [string, unknown]>,
+    lastSeenFire?: number,
+): boolean {
+    if (beamActiveFor(uuid, activeBeams)) {
+        return true;
+    }
+    const realFire = latestRealFire(weaponStates, useFiringAnimation);
+    return realFire !== undefined && realFire !== lastSeenFire;
 }
 
 /** shän animation timings are in 30ths of a second (Bible: AnimDelay "in
@@ -147,17 +196,28 @@ export const ShipAnimationSystem = new System({
         }
 
         // Draw the ship's weapon-effect overlay (shän WeapImage: the Fed
-        // Destroyer's muzzle flashes) on top of the hull while it fires,
-        // then fade it back out at the shän's WeapDecay rate. The overlay
+        // Destroyer's muzzle flashes) on top of the hull each time it
+        // ACTUALLY emits a shot, then fade it back out at the shän's
+        // WeapDecay rate. Real emission, never the held trigger: see
+        // shouldShowFiringAnimation. The overlay
         // is an additive sprite in the same graphic as the base image, so
         // ObjectDrawSystem's rotation write and (for multi-set ships like
         // the Manticore) ShipBaseSetAnimationSystem's selectBaseSet keep
         // it frame-aligned with the hull for free.
         if (animation.sprites.has('weapImage')) {
+            const useFiringAnimation = (id: string) =>
+                gameData.data.Weapon.getCached(id)?.useFiringAnimation;
+            const realFire = latestRealFire(weaponStates, useFiringAnimation);
+            // First frame for this graphic: adopt the ship's current shot
+            // clock as the baseline instead of treating it as a new shot,
+            // so a ship that fired before it came on screen arrives dark.
+            const lastSeenFire = animation.weaponFireSeen
+                ? animation.lastWeaponFired : realFire;
             const firing = shouldShowFiringAnimation(
-                uuid, weaponStates,
-                id => gameData.data.Weapon.getCached(id)?.useFiringAnimation,
-                activeBeams);
+                uuid, weaponStates, useFiringAnimation, activeBeams,
+                lastSeenFire);
+            animation.lastWeaponFired = realFire;
+            animation.weaponFireSeen = true;
             animation.weaponFlashAlpha = advanceWeaponFlash(
                 animation.weaponFlashAlpha, firing,
                 weapDecayAlphaPerSecond(animation.weapDecay), time.delta_s);
