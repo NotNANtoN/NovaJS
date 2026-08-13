@@ -30,9 +30,6 @@ class CachedQueryCacheEntry<Args extends readonly ArgTypes[] = readonly ArgTypes
     private resultValid = false;
     unsubscribe: () => void;
 
-    private entitySupportedCacheHit = 0;
-    private entitySupportedCacheMiss = 0;
-
     constructor(private queryCache: QueryCache,
         readonly query: Query,
         private getArg: World['getArg'],
@@ -71,27 +68,25 @@ class CachedQueryCacheEntry<Args extends readonly ArgTypes[] = readonly ArgTypes
         }
     }
 
+    // The former per-(entity, query) `supportedQueries` memo is gone:
+    // supportsEntity is a BinSet subset test (a few integer ops), which
+    // profiles faster than the Map get/set churn the memo cost — the
+    // memo was also cleared on every component add/delete, so churn-
+    // heavy workloads (submunitions) mostly missed it.
     private supported(entity: Entity) {
-        const savedVal = entity.supportedQueries.get(this.query);
-        if (savedVal) {
-            this.entitySupportedCacheHit++;
-            return true;
-        } else if (savedVal === false) {
-            this.entitySupportedCacheHit++;
-            return false;
-        }
-        const newVal = this.query.supportsEntity(entity);
-        entity.supportedQueries.set(this.query, newVal);
-        this.entitySupportedCacheMiss++;
-        return newVal;
+        return this.query.supportsEntity(entity);
     }
 
     onEntitySet(uuid: string, entity: Entity) {
-        if (this.entities.get(uuid) === entity) {
+        const previous = this.entities.get(uuid);
+        if (previous === entity) {
             return;
         }
         if (this.supported(entity)) {
             this.entities.set(uuid, entity);
+        } else if (previous === undefined) {
+            // Was not a member and still is not: nothing changed.
+            return;
         } else {
             this.entities.delete(uuid);
         }
@@ -101,10 +96,12 @@ class CachedQueryCacheEntry<Args extends readonly ArgTypes[] = readonly ArgTypes
 
     onEntityDelete(vals: Iterable<readonly [string, Entity]>) {
         for (const [uuid, entity] of vals) {
-            if (this.supported(entity)) {
+            // Membership is tracked in this.entities, so consulting it
+            // beats re-testing supportsEntity: only a deleted MEMBER
+            // invalidates the cached result list.
+            if (this.entities.delete(uuid)) {
                 this.resultValid = false;
             }
-            this.entities.delete(uuid);
             this.entityResults.delete(entity);
         }
     }
