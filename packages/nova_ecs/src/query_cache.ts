@@ -1,5 +1,6 @@
 import { Either, isLeft, isRight, left, Right, right } from "fp-ts/lib/Either.js";
 import { ArgsToData, ArgTypes, QueryResults } from "./arg_types.js";
+import { UnknownComponent } from "./component.js";
 import { Entity } from "./entity.js";
 import { EntityMapWithEvents } from "./entity_map.js";
 import { DeleteEvent, EcsEvent, StepEvent } from "./events.js";
@@ -33,7 +34,7 @@ class CachedQueryCacheEntry<Args extends readonly ArgTypes[] = readonly ArgTypes
     private entitySupportedCacheMiss = 0;
 
     constructor(private queryCache: QueryCache,
-        private query: Query,
+        readonly query: Query,
         private getArg: World['getArg'],
         entities: EntityMapWithEvents,
         resources: ResourceMapWrapped) {
@@ -42,61 +43,13 @@ class CachedQueryCacheEntry<Args extends readonly ArgTypes[] = readonly ArgTypes
         this.resources = new Map([...resources].filter(
             ([resource]) => query.resources.has(resource)));
 
-        const supported = (query: Query, entity: Entity) => {
-            const savedVal = entity.supportedQueries.get(query);
-            if (savedVal) {
-                this.entitySupportedCacheHit++;
-                return true;
-            } else if (savedVal === false) {
-                this.entitySupportedCacheHit++;
-                return false;
-            }
-            const newVal = query.supportsEntity(entity);
-            entity.supportedQueries.set(query, newVal);
-            this.entitySupportedCacheMiss++;
-            return newVal;
-        }
-
-        const subscriptions = [
-            entities.events.setAlways.subscribe(([uuid, entity]) => {
-                if (this.entities.get(uuid) === entity) {
-                    return;
-                }
-                if (supported(query, entity)) {
-                    this.entities.set(uuid, entity);
-                } else {
-                    this.entities.delete(uuid);
-                }
-                this.entityResults.delete(entity);
-                this.resultValid = false;
-            }),
-            entities.events.delete.subscribe((vals) => {
-                for (const [uuid, entity] of vals) {
-                    if (supported(query, entity)) {
-                        this.resultValid = false;
-                    }
-                    this.entities.delete(uuid);
-                    this.entityResults.delete(entity);
-                }
-            }),
-            entities.events.addComponent.subscribe(([uuid, entity]) => {
-                if (supported(query, entity)) {
-                    this.entities.set(uuid, entity);
-                }
-                this.entityResults.delete(entity); // for `Optional` etc.
-                this.resultValid = false;
-            }),
-            entities.events.changeComponentAlways.subscribe(([, entity]) => {
-                this.entityResults.delete(entity);
-                this.resultValid = false;
-            }),
-            entities.events.deleteComponent.subscribe(([uuid, entity, component]) => {
-                if (query.components.has(component) && !supported(query, entity)) {
-                    this.entities.delete(uuid);
-                }
-                this.entityResults.delete(entity);
-                this.resultValid = false;
-            }),
+        // Entity and component events are dispatched by the QueryCache,
+        // which routes each component event only to the entries whose
+        // staleness set (query.referencedComponents) contains that
+        // component — see QueryCache. Resource events are rare, so each
+        // entry subscribes directly.
+        queryCache.register(this);
+        const resourceSubscription =
             resources.events.setAlways.subscribe(([resource, val]) => {
                 if (!query.resources.has(resource)) {
                     // Don't need to care about or track resources
@@ -110,14 +63,72 @@ class CachedQueryCacheEntry<Args extends readonly ArgTypes[] = readonly ArgTypes
                 // Resources are global, so delete all cached results for entities.
                 this.entityResults.clear();
                 this.resultValid = false;
-            }),
-        ];
+            });
 
         this.unsubscribe = () => {
-            for (const subscription of subscriptions) {
-                subscription.unsubscribe();
-            }
+            this.queryCache.unregister(this);
+            resourceSubscription.unsubscribe();
         }
+    }
+
+    private supported(entity: Entity) {
+        const savedVal = entity.supportedQueries.get(this.query);
+        if (savedVal) {
+            this.entitySupportedCacheHit++;
+            return true;
+        } else if (savedVal === false) {
+            this.entitySupportedCacheHit++;
+            return false;
+        }
+        const newVal = this.query.supportsEntity(entity);
+        entity.supportedQueries.set(this.query, newVal);
+        this.entitySupportedCacheMiss++;
+        return newVal;
+    }
+
+    onEntitySet(uuid: string, entity: Entity) {
+        if (this.entities.get(uuid) === entity) {
+            return;
+        }
+        if (this.supported(entity)) {
+            this.entities.set(uuid, entity);
+        } else {
+            this.entities.delete(uuid);
+        }
+        this.entityResults.delete(entity);
+        this.resultValid = false;
+    }
+
+    onEntityDelete(vals: Iterable<readonly [string, Entity]>) {
+        for (const [uuid, entity] of vals) {
+            if (this.supported(entity)) {
+                this.resultValid = false;
+            }
+            this.entities.delete(uuid);
+            this.entityResults.delete(entity);
+        }
+    }
+
+    onComponentAdded(uuid: string, entity: Entity) {
+        if (this.supported(entity)) {
+            this.entities.set(uuid, entity);
+        }
+        this.entityResults.delete(entity); // for `Optional` etc.
+        this.resultValid = false;
+    }
+
+    onComponentChanged(entity: Entity) {
+        this.entityResults.delete(entity);
+        this.resultValid = false;
+    }
+
+    onComponentDeleted(uuid: string, entity: Entity,
+        component: UnknownComponent) {
+        if (this.query.components.has(component) && !this.supported(entity)) {
+            this.entities.delete(uuid);
+        }
+        this.entityResults.delete(entity);
+        this.resultValid = false;
     }
 
     getResultForEntity(entity: Entity,
@@ -279,8 +290,82 @@ class CachelessQueryCacheEntry<Args extends readonly ArgTypes[] = readonly ArgTy
 
 type QueryArgsList = readonly ArgTypes[];
 export class QueryCache extends DefaultMap<Query, QueryCacheEntry> {
+    /**
+     * Component-indexed event dispatch. Entity-level events (an entity
+     * set or deleted) go to every entry, but component events — by far
+     * the most frequent, since every component write on every entity
+     * emits one — go only to the entries whose staleness set
+     * (query.referencedComponents) contains that component. Entries
+     * with an unknown staleness set (`null`) are wildcards and receive
+     * every component event, preserving the old conservative behavior.
+     * This replaces per-entry subscriptions, which made every component
+     * write cost O(number of cached queries).
+     */
+    private allEntries = new Set<CachedQueryCacheEntry>();
+    private wildcardEntries = new Set<CachedQueryCacheEntry>();
+    private componentEntries =
+        new DefaultMap<UnknownComponent, Set<CachedQueryCacheEntry>>(
+            () => new Set());
+
     constructor(entities: EntityMapWithEvents, resources: ResourceMapWrapped, getArg: World['getArg']) {
         super((query: Query) => new CachedQueryCacheEntry(this, query, getArg, entities, resources));
+        entities.events.setAlways.subscribe(([uuid, entity]) => {
+            for (const entry of this.allEntries) {
+                entry.onEntitySet(uuid, entity);
+            }
+        });
+        entities.events.delete.subscribe(vals => {
+            for (const entry of this.allEntries) {
+                entry.onEntityDelete(vals);
+            }
+        });
+        entities.events.addComponent.subscribe(([uuid, entity, component]) => {
+            for (const entry of this.componentEntries.get(component)) {
+                entry.onComponentAdded(uuid, entity);
+            }
+            for (const entry of this.wildcardEntries) {
+                entry.onComponentAdded(uuid, entity);
+            }
+        });
+        entities.events.changeComponentAlways.subscribe(([, entity, component]) => {
+            for (const entry of this.componentEntries.get(component)) {
+                entry.onComponentChanged(entity);
+            }
+            for (const entry of this.wildcardEntries) {
+                entry.onComponentChanged(entity);
+            }
+        });
+        entities.events.deleteComponent.subscribe(([uuid, entity, component]) => {
+            for (const entry of this.componentEntries.get(component)) {
+                entry.onComponentDeleted(uuid, entity, component);
+            }
+            for (const entry of this.wildcardEntries) {
+                entry.onComponentDeleted(uuid, entity, component);
+            }
+        });
+    }
+
+    register(entry: CachedQueryCacheEntry) {
+        this.allEntries.add(entry);
+        const referenced = entry.query.referencedComponents;
+        if (referenced === null) {
+            this.wildcardEntries.add(entry);
+        } else {
+            for (const component of referenced) {
+                this.componentEntries.get(component).add(entry);
+            }
+        }
+    }
+
+    unregister(entry: CachedQueryCacheEntry) {
+        this.allEntries.delete(entry);
+        this.wildcardEntries.delete(entry);
+        const referenced = entry.query.referencedComponents;
+        if (referenced !== null) {
+            for (const component of referenced) {
+                this.componentEntries.get(component).delete(entry);
+            }
+        }
     }
 
     override get<Args extends QueryArgsList>(query: Query<Args>): QueryCacheEntry<Args> {
