@@ -187,6 +187,13 @@ export const WeaponsSystem = new System({
                     localState.burstCount++;
                 }
                 localState.lastFired = time.time;
+                // The same instant, in SYNCED state, so the display can
+                // tell a shot that actually left the ship from a held
+                // trigger that produced nothing (targetless turret, empty
+                // point-defense sweep, dry ammo). Only the weapon-glow
+                // overlay reads it; the reload clock above stays the
+                // local copy. See WeaponState.lastFired.
+                state.lastFired = time.time;
             }
         }
     },
