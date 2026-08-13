@@ -15,11 +15,14 @@ import { completeEntity } from './entity_data_loader.js';
 import { ArmorComponent } from './health_plugin.js';
 import { EscortCommandComponent, EscortOrdersComponent } from './escort_command.js';
 import { DEFEND_RADIUS, inFrontQuadrant } from './escort_command_plugin.js';
+import { Entity } from 'nova_ecs/entity';
+import { FiringGroupComponent } from './firing_group.js';
 import { OwnerComponent, SourceComponent } from './fire_weapon_plugin.js';
+import { PlayerEscortComponent } from './player_escort.js';
 import { GovtComponent } from './govt_component.js';
 import { makeShip } from './make_ship.js';
 import { makeSystem } from './make_system.js';
-import { FormationComponent } from './npc_ai_plugin.js';
+import { FormationComponent, NpcComponent } from './npc_ai_plugin.js';
 import { applyControlEvents, ControlledByComponent } from './ship_control.js';
 import { TargetComponent } from './target_component.js';
 import { WeaponsStateComponent } from './weapons_state.js';
@@ -119,6 +122,17 @@ function press(world: World, action: string) {
 
 function command(world: World, uuid = 'escort') {
     return world.entities.get(uuid)!.components.get(EscortCommandComponent)!;
+}
+
+/**
+ * Turns the harness escort into what every REAL escort is: an NPC ship
+ * (makeNpcShip stamps NpcComponent) that also carries an escort
+ * command. NpcDecisionSystem yields to the escort framework for these,
+ * so the mode stays whatever it was — never 'attack'.
+ */
+function makeNpcEscort(world: World, uuid = 'escort') {
+    world.entities.get(uuid)!.components
+        .set(NpcComponent, { aiType: 1 });
 }
 
 function setPlayerTarget(world: World, target: string | undefined) {
@@ -411,6 +425,173 @@ describe('escort commands', () => {
                 world.step();
             }
             expect(weapons.get(FQ_WEAPON)!.firing).toBeFalse();
+        });
+
+    // --- Escorts that are also NPC ships -----------------------------
+    //
+    // The specs above build the escort with makeShip, which does NOT
+    // add NpcComponent — but two of the three kinds of escort the game
+    // actually creates DO carry it, and that is what made Matthew's
+    // "escorts sometimes don't fire" report look intermittent:
+    //
+    //   hired    (browser.ts spawnHiredEscorts -> makeNpcShip)  NPC
+    //   captured (boarding_plugin convertToEscort)              NPC
+    //   bay      (bay_plugin BayWeaponEntry.fire -> makeShip)   not NPC
+    //
+    // NpcFireControlSystem used to cease-fire on every NpcComponent
+    // ship whose npc.mode was not 'attack' — which a commanded escort's
+    // never is, since NpcDecisionSystem yields to this framework. So
+    // hired escorts and captured prizes never fired while bay fighters
+    // did. See the bail at the top of NpcFireControlSystem.
+    describe('an escort that is also an NPC ship (hired / captured)',
+        () => {
+            it('attack: opens fire on the commanded victim', async () => {
+                const { world, addShip } = await makeWorld();
+                makeNpcEscort(world);
+                await addShip('enemy', 500, 0);
+                setPlayerTarget(world, 'enemy');
+                press(world, 'attack');
+                world.step();
+                const weapons = world.entities.get('escort')!.components
+                    .get(WeaponsStateComponent)!;
+                expect(world.entities.get('escort')!.components
+                    .get(TargetComponent)!.target).toBe('enemy');
+                expect([...weapons.values()].some(w => w.firing)).toBeTrue();
+            });
+
+            it('attack: keeps firing tick after tick', async () => {
+                const { world, addShip } = await makeWorld();
+                makeNpcEscort(world);
+                await addShip('enemy', 500, 0);
+                setPlayerTarget(world, 'enemy');
+                press(world, 'attack');
+                const weapons = world.entities.get('escort')!.components
+                    .get(WeaponsStateComponent)!;
+                for (let i = 0; i < 10; i++) {
+                    world.step();
+                    expect([...weapons.values()].some(w => w.firing))
+                        .withContext(`tick ${i}`).toBeTrue();
+                }
+            });
+
+            it('defend: opens fire on an intruder', async () => {
+                const { world, addShip } = await makeWorld();
+                makeNpcEscort(world);
+                await addShip('nearPirate', 400, 200, ship => {
+                    ship.components.set(GovtComponent, { id: 'test:pirate' });
+                });
+                press(world, 'defend');
+                world.step();
+                world.step();
+                expect(command(world).target).toBe('nearPirate');
+                const weapons = world.entities.get('escort')!.components
+                    .get(WeaponsStateComponent)!;
+                expect([...weapons.values()].some(w => w.firing)).toBeTrue();
+            });
+
+            it('holdPosition still holds fire', async () => {
+                const { world, addShip } = await makeWorld();
+                makeNpcEscort(world);
+                await addShip('enemy', 500, 0);
+                setPlayerTarget(world, 'enemy');
+                press(world, 'attack');
+                world.step();
+                press(world, 'holdPosition');
+                world.step();
+                const weapons = world.entities.get('escort')!.components
+                    .get(WeaponsStateComponent)!;
+                expect([...weapons.values()].every(w => !w.firing)).toBeTrue();
+            });
+
+            it('formation still restricts opportunistic fire to ' +
+                'front-quadrant turrets', async () => {
+                    const { world, addShip } = await makeWorld();
+                    makeNpcEscort(world);
+                    // A pirate dead ahead of the escort (which faces +x),
+                    // inside front-quadrant reach.
+                    await addShip('pirate', 400, 200, ship => {
+                        ship.components.set(GovtComponent,
+                            { id: 'test:pirate' });
+                    });
+                    press(world, 'formation');
+                    world.step();
+                    const weapons = world.entities.get('escort')!.components
+                        .get(WeaponsStateComponent)!;
+                    // The front-quadrant turret fires; the plain gun does
+                    // not (the formation rule is unchanged for NPC
+                    // escorts).
+                    expect(weapons.get(FQ_WEAPON)!.firing).toBeTrue();
+                    expect(weapons.get(GUN_WEAPON)!.firing).toBeFalse();
+                });
+        });
+
+    // Each real escort kind by its actual component mix, so the fix is
+    // pinned for all three rather than for the NPC case alone.
+    describe('every kind of escort fires when commanded to attack', () => {
+        const kinds: Array<readonly [string, (e: Entity) => void]> = [
+            // spawnHiredEscorts: makeNpcShip + formation + firing group
+            // + durable ownership. No govt (it is passed null).
+            ['hired', escort => {
+                escort.components
+                    .set(NpcComponent, { aiType: 1 })
+                    .set(FiringGroupComponent, { group: 'player' })
+                    .set(PlayerEscortComponent,
+                        { player: 'player', parent: 'player' });
+            }],
+            // convertToEscort: the captured NPC keeps its brain with
+            // mode/aggressor cleared, loses its govt and bay links.
+            ['captured prize', escort => {
+                escort.components
+                    .set(NpcComponent,
+                        { aiType: 1, mode: undefined, aggressor: undefined })
+                    .set(FiringGroupComponent, { group: 'player' })
+                    .set(PlayerEscortComponent,
+                        { player: 'player', parent: 'player' });
+                escort.components.delete(GovtComponent);
+            }],
+            // bay_plugin BayWeaponEntry.fire: makeShip (so NO
+            // NpcComponent) + owner/source back to the carrier.
+            ['bay fighter', escort => {
+                escort.components
+                    .set(OwnerComponent, { owner: 'player' })
+                    .set(SourceComponent, 'player')
+                    .set(ReturnWhenTargetRemovedComponent, undefined);
+            }],
+        ];
+
+        for (const [kind, setup] of kinds) {
+            it(kind, async () => {
+                const { world, addShip } = await makeWorld();
+                setup(world.entities.get('escort')!);
+                await addShip('enemy', 500, 0);
+                setPlayerTarget(world, 'enemy');
+                press(world, 'attack');
+                world.step();
+                const weapons = world.entities.get('escort')!.components
+                    .get(WeaponsStateComponent)!;
+                expect([...weapons.values()].some(w => w.firing))
+                    .withContext(`${kind} escort should fire`).toBeTrue();
+            });
+        }
+    });
+
+    // The `firing` flag is only the intent; WeaponsSystem turns it into
+    // shots a tick later. This is the end-to-end version of Matthew's
+    // report — a commanded hired escort must actually put rounds in the
+    // air, not merely latch a flag.
+    it('a commanded hired escort actually spawns projectiles',
+        async () => {
+            const { world, addShip } = await makeWorld();
+            makeNpcEscort(world);
+            await addShip('enemy', 500, 0);
+            setPlayerTarget(world, 'enemy');
+            press(world, 'attack');
+            for (let i = 0; i < 30; i++) {
+                world.step();
+            }
+            const shots = [...world.entities].filter(([, entity]) =>
+                entity.components.get(SourceComponent) === 'escort').length;
+            expect(shots).toBeGreaterThan(0);
         });
 });
 

@@ -1140,8 +1140,63 @@ const NpcFireControlSystem = new System({
     name: 'NpcFireControlSystem',
     args: [NpcComponent, WeaponsStateComponent, TargetComponent,
         MovementStateComponent, Optional(JumpComponent), Entities,
-        SimulationGameDataResource] as const,
-    step(npc, weapons, target, movement, jump, entities, gameData) {
+        SimulationGameDataResource,
+        Optional(EscortCommandComponent)] as const,
+    step(npc, weapons, target, movement, jump, entities, gameData,
+        escortCommand) {
+        if (escortCommand) {
+            // A player-commanded escort: the escort command framework
+            // (escort_command_plugin) owns its TRIGGERS as well as its
+            // steering. The other two halves of this AI already yield
+            // to it — NpcDecisionSystem and NpcSteeringSystem both bail
+            // on EscortCommandComponent — and fire control not doing so
+            // was Matthew's "escorts sometimes don't fire when
+            // commanded; they just circle the enemy" playtest report.
+            //
+            // THE MECHANISM. Because NpcDecisionSystem bails, a
+            // commanded escort's `npc.mode` is never 'attack', so
+            // `inRange` below is always false and this system used to
+            // clear `firing` on EVERY weapon of EVERY escort that has an
+            // NpcComponent — while EscortCommandBehaviorSystem set those
+            // very same flags in the same tick. Neither system ordered
+            // itself against the other, and this one runs later, so its
+            // cease-fire was the write that survived into the latched
+            // state WeaponsSystem reads.
+            //
+            // WHY IT LOOKED INTERMITTENT RATHER THAN TOTAL. Not
+            // flakiness — system order is deterministic
+            // (topologicalSortList is a stable function of registration
+            // order), so an affected escort NEVER fired. What varied was
+            // WHICH ESCORT, because only some kinds carry NpcComponent
+            // at all:
+            //   - hired escorts (spawnHiredEscorts -> makeNpcShip) and
+            //     captured prizes (convertToEscort keeps the NPC brain,
+            //     only clearing mode/aggressor) HAVE it -> silent;
+            //   - bay-launched fighters do NOT (bay_plugin builds them
+            //     with makeShip) -> they fired correctly all along.
+            // So the same player, in the same session, saw some escorts
+            // shoot and others just circle.
+            //
+            // STEERING NEVER SHOWED IT: EscortCommandBehaviorSystem is
+            // the only writer of a commanded escort's movement, so the
+            // ship orbited its victim at standoff exactly as ordered
+            // while its guns stayed cold — the reported symptom.
+            //
+            // Bailing (rather than ordering the two systems) is what
+            // keeps ALL of the escort framework's firing decisions
+            // intact, not just the attack case: hold-fire while
+            // landing/jumping, holdPosition's cease-fire, and the
+            // formation-time front-quadrant-turret rule are equally
+            // this system's to leave alone.
+            //
+            // NPC-CARRIER WINGS ARE COVERED, NOT ORPHANED. A bay fighter
+            // launched by an NPC carrier carries EscortCommandComponent
+            // too, and NpcWingCommandSystem mirrors the carrier's victim
+            // onto it as an 'attack' command; EscortCommandBehaviorSystem
+            // then fires its weapons. So the wings that reach this bail
+            // have a live trigger-owner either way.
+            return;
+        }
         if (jump) {
             // Committed to leaving: cease fire for the whole sequence.
             // Falling through with `inRange` false would do the same, but
