@@ -22,6 +22,7 @@ import { Resource } from 'nova_ecs/resource';
 import { DefaultMap } from 'nova_ecs/utils';
 import { SingletonComponent } from 'nova_ecs/world';
 import { AnimationComponent } from './animation_plugin.js';
+import { ExplodingComponent } from './death_plugin.js';
 import { applyExitPoint, closestExitPointIndex, ExitPointData, getExitPointData } from './exit_point.js';
 import { FiringGroup, FiringGroupComponent } from './firing_group.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
@@ -129,6 +130,40 @@ export function getNextExitpoint(sourceMovement: MovementState, sourceAnimation:
     }
 
     return { exitPoint, exitPointData };
+}
+
+/**
+ * The movement state of a target that can still be aimed at, or
+ * undefined when there is nothing left to aim at.
+ *
+ * A TargetComponent holds a uuid, and that uuid outlives what it names.
+ * The target's entity can be deleted mid-tick (it jumped out, was
+ * captured, was cleaned up by its own death AI) while every
+ * TargetComponent naming it still says so: DeleteEvent is QUEUED, so
+ * TargetRemovedSystem does not clear those references until the current
+ * event finishes, and a rollback restore drops the queued DeleteEvent
+ * entirely (World.clearEventQueue). An exploding target is the same
+ * situation a beat earlier — it still exists, with a position, but it is
+ * a fireball rather than something to shoot at, and every lock on it
+ * breaks (DropExplodingTargetSystem) on a tick boundary that firing code
+ * must not straddle.
+ *
+ * Resolving through here rather than trusting the uuid means aiming
+ * asks "is there something there?" instead of "was there something
+ * there?". Deterministic: entity existence, ExplodingComponent and
+ * MovementStateComponent are all replicated simulation state, so every
+ * peer answers this identically for a given tick.
+ */
+export function liveTargetMovement(entities: EntityMap,
+    target: string | undefined): MovementState | undefined {
+    if (target === undefined) {
+        return undefined;
+    }
+    const entity = entities.get(target);
+    if (!entity || entity.components.has(ExplodingComponent)) {
+        return undefined;
+    }
+    return entity.components.get(MovementStateComponent);
 }
 
 type Quadrant = 'frontQuadrant' | 'sidesQuadrant' | 'rearQuadrant';
@@ -279,18 +314,22 @@ export abstract class WeaponEntry {
 
         // Resolved BEFORE the exit point is chosen: a weapon with wëap
         // Flags3 0x0010 fires from the exit point nearest the target.
-        let targetMovement: MovementState | undefined;
-        if (target) {
-            targetMovement = entities.get(target)?.components
-                .get(MovementStateComponent);
-        }
+        const targetMovement = liveTargetMovement(entities, target);
 
         const { exitPoint, exitPointData } = getNextExitpoint(
             movement, animation, this.data, weapon, targetMovement?.position);
 
         let angle = movement.rotation;
         if ('guidance' in this.data) {
-            if (!target && (this.data.guidance === 'beamTurret'
+            // Gated on the target STILL BEING THERE, not on the target
+            // uuid being set. A turret aims with targetMovement below and
+            // silently keeps `angle` — the ship's own heading — when it
+            // resolves to nothing, so a lock naming a destroyed ship used
+            // to fire one full-strength shot straight out of the nose:
+            // visible, and damaging whatever happened to be in front.
+            // Nothing to aim at means nothing fires, exactly as if the
+            // ship had never had a target.
+            if (!targetMovement && (this.data.guidance === 'beamTurret'
                 || this.data.guidance === 'turret')) {
                 return undefined;
             }
