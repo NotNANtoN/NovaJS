@@ -349,6 +349,9 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
         require: "0x" + outf.require.toString(16),
         fixedGun: (outf.flags & 0x1) > 0,
         turret: (outf.flags & 0x2) > 0,
+        // 0x4: stays with you when you trade ships (Bible ~:1962).
+        // Read by the shipyard's purchase rules, not the outfitter's.
+        persistent: (outf.flags & 0x4) > 0,
         cantSell: (outf.flags & 0x8) > 0,
         // Outfitter visibility / sellability flags; see outfit_data.ts and
         // spaceport/outfitter_rules.ts for what each one gates.

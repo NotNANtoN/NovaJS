@@ -675,6 +675,10 @@ export function visibleOutfits(outfits: Iterable<OutfitData>,
  * stellar) with the same OutfitterStellar built from the docked PlanetData.
  * What does NOT carry over: the oütf 0x0100/0x0800/0x1000/0x4000 flags and
  * spöb Flags2 0x0400 are outfit-only, and ships have no DispWeight, so
- * there is no exclusion pass to reuse. Deliberately not wired up here — the
- * shipyard has no economy yet.
+ * there is no exclusion pass to reuse.
+ *
+ * The shipyard now has an economy — the trade-up pricing and outfit
+ * persistence rules live in shipyard_rules.ts — but it still stocks every
+ * ship regardless of tech level, so the meetsTechLevel call above remains
+ * unwired. It needs the docked PlanetData plumbed into the Shipyard menu.
  */

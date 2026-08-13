@@ -91,6 +91,18 @@ export interface OutfitData extends BaseData {
     fixedGun: boolean,
     /** This item occupies a turret hardpoint. */
     turret: boolean,
+    /**
+     * oütf flag 0x0004: "This item stays with you when you trade ships"
+     * (Bible ~:1962). On a shipyard purchase these units move onto the new
+     * hull instead of being traded in with the old one, and they are
+     * excluded from the trade-in valuation (you keep them, you don't sell
+     * them). See spaceport/shipyard_rules.ts.
+     *
+     * NOT the same as flag 0x0020, which is persistence across a mission
+     * set operator CHANGING the player's ship; that bit is unrelated to
+     * buying and is deliberately not decoded here.
+     */
+    persistent: boolean,
     /** This item can't be sold. */
     cantSell: boolean,
     /**
@@ -252,6 +264,7 @@ export function getDefaultOutfitData(): OutfitData {
         require: "0x0",
         fixedGun: false,
         turret: false,
+        persistent: false,
         cantSell: false,
         ammoFor: null,
         increasesMax: null,

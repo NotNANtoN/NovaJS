@@ -225,5 +225,11 @@ describe('outfitter visibility against real Nova data', () => {
         expect(count(o => o.sellAnywhere)).toBe(18);
         expect(count(o => o.excludesEqualDisplayWeight)).toBe(4);
         expect(count(o => o.cantSell)).toBe(40);
+        // 0x0004 (stays with you across a ship trade) is the shipyard's
+        // concern rather than the outfitter's, but it belongs in the
+        // same census: 16 Vell-os plot items, 9 licenses, the Fed
+        // Cloaking Device and Drop Bear Repellent. See
+        // shipyard_stock_test.ts for the per-id pin.
+        expect(count(o => o.persistent)).toBe(27);
     });
 });
