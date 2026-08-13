@@ -106,10 +106,12 @@ describe('outfitter visibility against real Nova data', () => {
             expect(visibleOutfits(outfits, contextFor(outfits, sirrusa)))
                 .toEqual([]);
 
-            // But it buys a high-tech outfit it could never stock. Outfit
-            // 137 is tech 7 and sellable; Sirrusa is tech 0.
+            // But it buys an outfit it could never stock: nova:137
+            // "Radar Missile" is tech 5 with no flags at all, and
+            // Sirrusa is tech 0.
             const highTech = outfits.find(o => o.id === 'nova:137')!;
-            expect(highTech.techLevel).toBeGreaterThan(0);
+            expect(highTech.name).toBe('Radar Missile');
+            expect(highTech.techLevel).toBe(5);
             expect(highTech.cantSell).toBeFalse();
             expect(buysBackOutfit(highTech, sirrusa)).toBeTrue();
             expect(visibleOutfits(outfits,
@@ -122,6 +124,69 @@ describe('outfitter visibility against real Nova data', () => {
                 contextFor(outfits, snowmelt, [['nova:137', 1]]))
                 .map(o => o.id)).not.toContain('nova:137');
         });
+
+    describe('the Vell-os powers stay out of a buys-anything shop', () => {
+        // Ground truth (Matthew, from the original): the Vell-os beams and
+        // abilities do NOT appear at Sirrusa, even though its Flags2
+        // 0x0400 makes it buy "any nonpermanent outfits the player owns".
+        // The mechanism is cantSell (oütf 0x0008) — it is set on every one
+        // of them, and "nonpermanent" is exactly what it denies. (The
+        // Ranks flag 0x2000 is NOT the mechanism: no stock outfit sets it
+        // at all, so it is entirely unexercised by shipped data.)
+        const beams = [
+            'nova:221', 'nova:222', 'nova:223', 'nova:224', 'nova:225',
+            'nova:226',
+        ];
+        const abilities = [
+            'nova:249', 'nova:251', 'nova:252', 'nova:253', 'nova:338',
+        ];
+        const powers = [...beams, ...abilities];
+
+        const sirrusa: OutfitterStellar = {
+            techLevel: 0, specialTech: [], buysAnyOutfit: true,
+        };
+
+        it('pins that every Vell-os power is cantSell', async () => {
+            const all = await allOutfits();
+            for (const id of powers) {
+                const outfit = all.find(o => o.id === id);
+                expect(outfit).withContext(id).toBeDefined();
+                expect(outfit!.cantSell).withContext(`${id} cantSell`)
+                    .toBeTrue();
+            }
+            // The four beams, by name, so a data shift is obvious.
+            expect(beams.slice(0, 4).map(id =>
+                all.find(o => o.id === id)!.name)).toEqual([
+                    'Flower Of Spring', 'Summer Bloom', 'Autumn Petal',
+                    'Winter Tempest',
+                ]);
+        });
+
+        it('lists none of them at Sirrusa even when the player owns them',
+            async () => {
+                const all = await allOutfits();
+                const owned = powers.map(id =>
+                    [id, 1] as [string, number]);
+                const listed = visibleOutfits(all,
+                    contextFor(all, sirrusa, owned)).map(o => o.id);
+                for (const id of powers) {
+                    expect(listed).withContext(id).not.toContain(id);
+                }
+                expect(powers.every(id => !buysBackOutfit(
+                    all.find(o => o.id === id)!, sirrusa))).toBeTrue();
+            });
+
+        it('but DOES list a mundane owned outfit at the same shop',
+            async () => {
+                // The contrast that proves the exclusion is the flag and
+                // not some blanket "Sirrusa shows nothing" behaviour.
+                const all = await allOutfits();
+                const owned = [...powers.map(id => [id, 1] as [string, number]),
+                    ['nova:137', 1] as [string, number]];
+                expect(visibleOutfits(all, contextFor(all, sirrusa, owned))
+                    .map(o => o.id)).toEqual(['nova:137']);
+            });
+    });
 
     it('finds every stock 0x1000 outfit already highest at its DispWeight',
         async () => {

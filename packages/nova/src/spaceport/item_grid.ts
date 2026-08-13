@@ -141,6 +141,30 @@ interface Item {
 
 const BOX_COUNT = [4, 5];
 
+/** The parts of a PIXI container raiseToTop needs. */
+export interface LayerContainer<C> {
+    readonly children: readonly C[];
+    addChild(child: C): unknown;
+}
+
+/**
+ * Raises `child` above every other child of `container`, relying on
+ * addChild's move-to-the-end semantics rather than an explicit index.
+ *
+ * Regression guard: this used to be addChildAt(tile, visibleTiles - 1),
+ * which was correct only while the container held exactly one child per
+ * visible tile. Once tiles were pooled by id (so the container keeps
+ * every tile ever built while the visible list is a subset of them), that
+ * index dropped the selected tile near the BOTTOM of the pool, and the
+ * neighbouring tiles' opaque backgrounds painted over its red highlight —
+ * leaving red visible only at the grid's edges, and the whole grid
+ * looking like two misaligned copies. Deriving the position from the
+ * container itself makes that class of bug impossible.
+ */
+export function raiseToTop<C>(container: LayerContainer<C>, child: C): void {
+    container.addChild(child);
+}
+
 export class ItemGrid<I extends Item> {
     public activeTile = new BehaviorSubject<ItemTile<I> | undefined>(undefined);
     public container = new PIXI.Container();
@@ -229,7 +253,7 @@ export class ItemGrid<I extends Item> {
                 this.activeTile.next(tile);
 
                 // Make sure it is above the others
-                this.container.addChildAt(tile.container, this.tiles.length - 1);
+                raiseToTop(this.container, tile.container);
             }
 
             else {

@@ -449,12 +449,16 @@ export function canBuyOutfit(outfit: OutfitData,
  * can't-sell is exactly the "you are stuck with this" property the word
  * permanent describes. So cantSell still wins over 0x0400.
  *
- * JUDGMENT CALL — 0x0800 also says "regardless of requirements, or mission
- * bits", implying Require/Availability normally gate selling too. That is
- * deliberately NOT implemented: an outfit bought while a mission bit was
- * set would become unsellable forever once the bit cleared, stranding it on
- * the ship. Only the tech-level gate is applied, which is what both escape
- * hatches are actually for.
+ * 0x0800 is honoured to the letter: "regardless of tech level,
+ * requirements, or mission bits". Selling never consults Require or
+ * Availability for ANY outfit here — those gate buying, not dumping what
+ * you already carry — so the requirements/mission-bits half of the
+ * guarantee holds unconditionally, and 0x0800's remaining job is to lift
+ * the tech-level gate. That combination is load-bearing for
+ * mission-granted junk (used-up carbon fiber and the like), which is
+ * handed to the player precisely so it can be sold, often at a world that
+ * would never stock it and long after the bit that granted it cleared.
+ * outfitter_visibility_test.ts pins this end to end.
  */
 export function buysBackOutfit(outfit: OutfitData,
     stellar: OutfitterStellar): boolean {

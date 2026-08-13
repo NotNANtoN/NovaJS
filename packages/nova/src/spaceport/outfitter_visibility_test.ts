@@ -525,6 +525,83 @@ describe('canBuyOutfit stocking gate', () => {
     });
 });
 
+describe('0x0800 sells anywhere, regardless of anything', () => {
+    /**
+     * The Bible-literal guarantee (~:1980): a 0x0800 item can be sold
+     * "regardless of tech level, requirements, or mission bits". This is
+     * what makes mission-granted junk (used-up carbon fiber and friends)
+     * dumpable — it is handed to the player to be sold, often long after
+     * the bit that granted it cleared, at a world that would never stock
+     * it.
+     */
+    const junk = makeOutfit('nova:128', {
+        techLevel: 9999,        // no stellar in the game stocks this
+        sellAnywhere: true,
+        availability: 'b100',   // mission bit, never set below
+        require: '0x4',         // Require bits the player cannot meet
+        hideUnlessAvailable: true,
+        hideUnlessRequirementsMet: true,
+    });
+
+    /** Every shape of stellar an outfitter can have. */
+    const everyStellar: [string, OutfitterStellar][] = [
+        ['a tech-0 backwater', stellar(0)],
+        ['the highest-tech stock world', stellar(7)],
+        ['a SpecialTech world', stellar(2, [81])],
+        ['a buys-anything world', stellar(0, [], true)],
+    ];
+
+    for (const [label, planet] of everyStellar) {
+        it(`is sellable at ${label}`, () => {
+            const context = makeContext({
+                outfits: [junk], planet, owned: [['nova:128', 1]],
+            });
+            expect(canSellOutfit(junk, context).allowed).toBeTrue();
+        });
+
+        it(`is visible at ${label}`, () => {
+            const context = makeContext({
+                outfits: [junk], planet, owned: [['nova:128', 1]],
+            });
+            expect(visibleIds([junk], context)).toEqual(['nova:128']);
+        });
+    }
+
+    it('still cannot be BOUGHT there (selling is the only affordance)', () => {
+        const context = makeContext({
+            outfits: [junk], planet: stellar(0), owned: [['nova:128', 1]],
+        });
+        expect(canBuyOutfit(junk, context).allowed).toBeFalse();
+    });
+
+    it('is hidden and unsellable without the flag, all else equal', () => {
+        // The contrast case: identical item minus 0x0800 is stuck aboard.
+        const stuck = makeOutfit('nova:129',
+            { ...junk, id: 'nova:129', sellAnywhere: false });
+        const context = makeContext({
+            outfits: [stuck], planet: stellar(0), owned: [['nova:129', 1]],
+        });
+        const check = canSellOutfit(stuck, context);
+        expect(check.allowed).toBeFalse();
+        // Specifically because the shop won't take it — not because the
+        // test forgot to give the player one.
+        expect(check.allowed === false && check.reason).toBe('notStocked');
+        expect(visibleIds([stuck], context)).toEqual([]);
+    });
+
+    it('does not let 0x0800 override cantSell', () => {
+        const unsellable = makeOutfit('nova:130',
+            { ...junk, id: 'nova:130', cantSell: true });
+        const context = makeContext({
+            outfits: [unsellable], planet: stellar(0),
+            owned: [['nova:130', 1]],
+        });
+        const check = canSellOutfit(unsellable, context);
+        expect(check.allowed).toBeFalse();
+        expect(check.allowed === false && check.reason).toBe('cantSell');
+    });
+});
+
 describe('visibleOutfits owned-item visibility', () => {
     it('shows an owned out-of-stock item when the stellar buys anything',
         () => {
