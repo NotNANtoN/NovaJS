@@ -193,5 +193,48 @@ describe("OutfitParse", () => {
                 expect(outfit.sellAnywhere).toBe(false);
                 expect(outfit.hideUnlessRequirementsMet).toBe(false);
             });
+
+        it("decodes the persistent flag (0x0004)", async () => {
+            // "This item stays with you when you trade ships"
+            // (EVN Bible ~:1962); read by spaceport/shipyard_rules.ts.
+            const outfit = await OutfitParse(techOutf(1, 0x0004), () => { });
+            expect(outfit.persistent).toBe(true);
+        });
+
+        it("leaves persistent false when unset", async () => {
+            const outfit = await OutfitParse(techOutf(1, 0), () => { });
+            expect(outfit.persistent).toBe(false);
+        });
+
+        it("does not confuse persistent with its neighbouring bits",
+            async () => {
+                // 0x0004 sits between turret (0x0002) and cantSell
+                // (0x0008), the two easiest bits to fat-finger it into.
+                const persistent = await OutfitParse(
+                    techOutf(1, 0x0004), () => { });
+                expect(persistent.persistent).toBe(true);
+                expect(persistent.turret).toBe(false);
+                expect(persistent.cantSell).toBe(false);
+                expect(persistent.fixedGun).toBe(false);
+
+                const turret = await OutfitParse(techOutf(1, 0x0002), () => { });
+                expect(turret.turret).toBe(true);
+                expect(turret.persistent).toBe(false);
+
+                const cantSell = await OutfitParse(techOutf(1, 0x0008), () => { });
+                expect(cantSell.cantSell).toBe(true);
+                expect(cantSell.persistent).toBe(false);
+            });
+
+        it("decodes persistent alongside the hardpoint flags", async () => {
+            // The stock Vell-os beams are exactly this combination: a
+            // persistent, unsellable fixed gun (e.g. oütf 221).
+            const outfit = await OutfitParse(
+                techOutf(1, 0x0001 | 0x0004 | 0x0008), () => { });
+            expect(outfit.fixedGun).toBe(true);
+            expect(outfit.persistent).toBe(true);
+            expect(outfit.cantSell).toBe(true);
+            expect(outfit.turret).toBe(false);
+        });
     });
 });
