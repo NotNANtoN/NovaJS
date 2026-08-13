@@ -48,9 +48,12 @@ export class EntityMapWithEvents extends EventMap<string, Entity> implements Ent
         });
         const s3 = componentEvents.set.subscribe(([component]) => {
             this.events.changeComponent.next([uuid, entity, component]);
-            this.events.changeComponentAlways.next([uuid, entity, component]);
         });
 
+        // Every set — silent or not — emits setAlways, so forwarding
+        // changeComponentAlways from here alone covers both cases.
+        // (Forwarding it from the set subscriber too, as this used to,
+        // made every non-silent component write emit it twice.)
         const s4 = componentEvents.setAlways.subscribe(([component]) => {
             this.events.changeComponentAlways.next([uuid, entity, component]);
         });
