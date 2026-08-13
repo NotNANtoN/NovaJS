@@ -17,18 +17,26 @@ function buildSpob(opts: {
     type?: number,
     landingPictID?: number,
     animationDelay?: number,
+    techLevel?: number,
+    /** The eight SpecialTech slots (short lists are padded with -1). */
+    specialTech?: number[],
+    flags?: number,
 }): ResourceBuilder {
     const links = [...opts.hyperlinks];
     while (links.length < 8) {
         links.push(-1);
     }
+    const special = [...(opts.specialTech ?? [])];
+    while (special.length < 8) {
+        special.push(-1);
+    }
     const b = new ResourceBuilder();
     b.int16(100).int16(200)                    // position
         .int16(opts.type ?? 30)                // graphic type
-        .uint32(0)                             // flags
+        .uint32(opts.flags ?? 0)               // flags
         .int16(0)                              // tribute
-        .int16(0)                              // techLevel
-        .array([0, 0, 0], v => b.int16(v))     // specialTech (first 3)
+        .int16(opts.techLevel ?? 0)            // techLevel
+        .array(special.slice(0, 3), v => b.int16(v)) // specialTech (first 3)
         .int16(-1)                             // government
         .int16(0)                              // minStatus
         .int16(opts.landingPictID ?? 0)        // landingPictID (CustPicID)
@@ -50,7 +58,7 @@ function buildSpob(opts: {
         .int16(-1)                             // explosion
         .string("", 0xff)                      // onDestroy
         .string("", 0xff)                      // onRegen
-        .array([0, 0, 0, 0, 0], v => b.int16(v)); // specialTech (last 5)
+        .array(special.slice(3), v => b.int16(v)); // specialTech (last 5)
     return b;
 }
 
@@ -323,4 +331,78 @@ describe("PlanetParse landing picture", () => {
         expect(planet.landingPict).toBe(getDefaultPictData().id);
         expect(notFound.some(m => m.includes("PICT"))).toBeTrue();
     });
+});
+
+describe("PlanetParse outfitter stock fields", () => {
+    let idSpace: ReturnType<typeof getEmptyNovaResources>;
+
+    beforeEach(() => {
+        idSpace = getEmptyNovaResources();
+    });
+
+    function parseWith(opts: {
+        techLevel?: number, specialTech?: number[], flags?: number,
+        flags2?: number,
+    }) {
+        const spob = new SpobResource(
+            buildSpob({
+                flags2: opts.flags2 ?? 0, hyperlinks: [], ambientSound: -1,
+                fee: 0, techLevel: opts.techLevel, specialTech: opts.specialTech,
+                flags: opts.flags,
+            }).resource("sp\u00f6b", 200), idSpace);
+        return parse(spob);
+    }
+
+    it("carries the base tech level through", async () => {
+        const planet = await parseWith({ techLevel: 6 });
+        expect(planet.techLevel).toEqual(6);
+    });
+
+    it("reads all eight SpecialTech slots, both storage runs", async () => {
+        // Three slots live inline early in the resource and the other five
+        // near its end; a parser that only read one run would drop half.
+        const planet = await parseWith({
+            techLevel: 1,
+            specialTech: [101, 102, 103, 201, 202, 203, 204, 205],
+        });
+        expect(planet.specialTech.sort((a, b) => a - b))
+            .toEqual([101, 102, 103, 201, 202, 203, 204, 205]);
+    });
+
+    it("drops unset SpecialTech slots", async () => {
+        const planet = await parseWith({
+            techLevel: 1, specialTech: [-1, 15000, -1, 0, -1, -1, -1, -1],
+        });
+        expect(planet.specialTech).toEqual([15000]);
+    });
+
+    it("leaves specialTech empty for a stellar that uses none", async () => {
+        const planet = await parseWith({ techLevel: 3 });
+        expect(planet.specialTech).toEqual([]);
+    });
+
+    it("decodes the Flags2 0x0400 buys-anything bit", async () => {
+        // NOTE: this is a Flags2 bit, not a Flags bit (EVN Bible ~:2862).
+        const planet = await parseWith({ flags2: 0x0400 });
+        expect(planet.flags.buysAnyOutfit).toBe(true);
+    });
+
+    it("leaves buysAnyOutfit false when the bit is clear", async () => {
+        const planet = await parseWith({ flags2: 0 });
+        expect(planet.flags.buysAnyOutfit).toBe(false);
+    });
+
+    it("does not confuse Flags 0x0400 with the Flags2 bit", async () => {
+        // 0x0400 in the FIRST flags field is an unrelated (unused-by-us)
+        // bit; only the Flags2 one may set buysAnyOutfit.
+        const planet = await parseWith({ flags: 0x0400, flags2: 0 });
+        expect(planet.flags.buysAnyOutfit).toBe(false);
+    });
+
+    it("keeps buysAnyOutfit independent of the gate bits in Flags2",
+        async () => {
+            const planet = await parseWith({ flags2: 0x0400 | 0x1000 });
+            expect(planet.flags.buysAnyOutfit).toBe(true);
+            expect(planet.gate!.kind).toBe("hypergate");
+        });
 });

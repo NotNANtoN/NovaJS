@@ -203,8 +203,18 @@ export async function PlanetParse(spob: SpobResource, notFoundFunction: (m: stri
             uninhabited: Boolean(spob.flags & 0x20),
             hasBar: Boolean(spob.flags & 0x40),
             landOnlyIfDestroyed: Boolean(spob.flags & 0x80),
+            // NOTE: this one is a Flags2 bit, not a Flags bit (EVN Bible's
+            // Flags2 block, ~:2862) — the outfit shop buys back anything
+            // nonpermanent the player owns, ignoring tech level.
+            buysAnyOutfit: Boolean(spob.flags2 & 0x400),
         },
         techLevel: spob.techLevel,
+        // Only meaningful slots: unset SpecialTech entries are -1 (and 0
+        // appears as filler). Dropping them is behaviour-preserving because
+        // the exact-match rule only ever fires for an outfit/ship whose own
+        // TechLevel is that value, and a TechLevel <= 0 item is already
+        // admitted everywhere by the ordinary `spob.techLevel >= x` test.
+        specialTech: spob.specialTech.filter(tech => tech > 0),
         tradeTiers,
         barDesc,
         barPict,

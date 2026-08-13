@@ -149,14 +149,48 @@ export class ItemGrid<I extends Item> {
     private tilesDict = new Map<string, ItemTile<I>>();
     private tiles: ItemTile<I>[];
 
-    constructor(displayAssets: DisplayAssetDataInterface, private items: I[]) {
-        this.tiles = items.map(item => {
-            const tile = new ItemTile(displayAssets, item);
-            this.container.addChild(tile.container);
-            tile.container.on('pointerdown', () => this.tileClicked(tile));
-            this.tilesDict.set(item.id, tile);
-            return tile;
-        });
+    constructor(private displayAssets: DisplayAssetDataInterface,
+        private items: I[]) {
+        this.tiles = items.map(item => this.tileFor(item));
+    }
+
+    /** The tile for an item, built (and cached) on first use. Tiles are
+     * pooled by id so setItems can show a different subset without
+     * rebuilding sprites. */
+    private tileFor(item: I): ItemTile<I> {
+        const existing = this.tilesDict.get(item.id);
+        if (existing) {
+            return existing;
+        }
+        const tile = new ItemTile(this.displayAssets, item);
+        this.container.addChild(tile.container);
+        tile.container.on('pointerdown', () => this.tileClicked(tile));
+        this.tilesDict.set(item.id, tile);
+        return tile;
+    }
+
+    /**
+     * Replaces the displayed items, keeping the selection on the same item
+     * when it survives the change (matched by id, since the caller may pass
+     * freshly-loaded data objects). Tiles for items that dropped out are
+     * hidden but kept in the pool, so toggling an item back in is cheap.
+     * The scroll is clamped so a shorter list can't leave the view past the
+     * end.
+     */
+    setItems(items: I[]) {
+        const selectedId = this.items[this.selectionIndex]?.id;
+        const shown = new Set(items.map(item => item.id));
+        for (const [id, tile] of this.tilesDict) {
+            if (!shown.has(id)) {
+                tile.hide();
+            }
+        }
+        this.items = items;
+        this.tiles = items.map(item => this.tileFor(item));
+        this.selectionIndex = selectedId === undefined ? -1
+            : items.findIndex(item => item.id === selectedId);
+        this.scroll = Math.min(this.scroll, this.maxScroll);
+        this.drawGrid();
     }
 
     get selection() {

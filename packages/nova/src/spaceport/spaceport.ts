@@ -525,6 +525,9 @@ export class Spaceport extends Menu<Entity> {
         await super.build();
         const data = await this.simulationData.data.Planet.get(this.id);
         this.data = data;
+        // The outfitter stocks by this stellar's tech level / SpecialTech
+        // and honours its "buys anything" flag (see outfitter_rules.ts).
+        this.outfitter.setPlanet(data);
         const title = new PIXI.Text(data.name, this.font.title);
         title.anchor.x = 0.5;
         title.position.x = -2;

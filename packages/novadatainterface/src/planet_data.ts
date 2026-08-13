@@ -49,6 +49,23 @@ export interface PlanetFlags {
     hasBar: boolean;
     /** Can only land here once the stellar is destroyed (0x80). */
     landOnlyIfDestroyed: boolean;
+    /**
+     * This stellar's outfit shop "can buy any nonpermanent outfits the
+     * player owns, regardless of tech level" (EVN Bible ~:2862).
+     *
+     * NOTE: this bit lives in the spöb **Flags2** field (0x0400), not the
+     * Flags field the rest of this interface decodes — the Bible block that
+     * documents it is the Flags2 block (the same one carrying hypergate
+     * 0x1000 / wormhole 0x2000). It is surfaced here alongside the other
+     * named booleans because it is a service property of the stellar.
+     *
+     * Without it, an outfitter only buys back what it would itself stock
+     * (see outfitter_rules.ts sellableHere): the existence of this flag and
+     * of the per-outfit 0x0800 "sell anywhere" flag is what establishes that
+     * selling is tech-gated by default. Sirrusa is the canonical stock
+     * example of a stellar that sets it.
+     */
+    buysAnyOutfit: boolean;
 }
 
 /**
@@ -83,6 +100,19 @@ export interface PlanetData extends SpaceObjectData {
     flags: PlanetFlags;
     /** Tech level, controlling default outfit/ship availability. */
     techLevel: number;
+    /**
+     * The stellar's special tech levels (spöb SpecialTech x8, EVN Bible
+     * p. 63). Unlike techLevel, these do NOT admit everything at or below
+     * them: only items and ships whose own TechLevel EXACTLY equals one of
+     * these appear here. That is how a low-tech world stocks a few exotic
+     * items, and how an item given an absurd TechLevel (the Bible's example
+     * is 15000) can be made to appear at exactly one stellar.
+     *
+     * Unset slots are dropped at parse time (see planet_parse.ts), so this
+     * holds only meaningful values and is usually empty. Order is not
+     * significant; membership is all the rules test.
+     */
+    specialTech: number[];
     /**
      * The commodity exchange price tier for each standard commodity
      * (index 0 food, 1 industrial, 2 medical, 3 luxury, 4 metal,
@@ -131,6 +161,7 @@ export function getDefaultPlanetFlags(): PlanetFlags {
         uninhabited: false,
         hasBar: true,
         landOnlyIfDestroyed: false,
+        buysAnyOutfit: false,
     };
 }
 
@@ -146,6 +177,7 @@ export function getDefaultPlanetData(): PlanetData {
         govt: null,
         flags: getDefaultPlanetFlags(),
         techLevel: 0,
+        specialTech: [],
         tradeTiers: [null, null, null, null, null, null],
         barDesc: "",
         barPict: null,

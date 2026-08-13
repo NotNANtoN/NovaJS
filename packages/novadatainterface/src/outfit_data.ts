@@ -36,6 +36,38 @@ export interface OutfitData extends BaseData {
     price: number,
     desc: string,
     displayWeight: number,
+    /**
+     * The item's tech level (oütf TechLevel, EVN Bible ~:1794). The item is
+     * stocked at every spaceport whose own techLevel is >= this, and also at
+     * any stellar listing this exact value in one of its eight SpecialTech
+     * slots. See outfitter_rules.ts meetsTechLevel.
+     */
+    techLevel: number,
+    /**
+     * oütf flag 0x0100: don't show this item unless the player meets the
+     * Require bits, or already has at least one of it (Bible ~:1974).
+     */
+    hideUnlessRequirementsMet: boolean,
+    /**
+     * oütf flag 0x0800: this item "can be sold anywhere, regardless of tech
+     * level, requirements, or mission bits" (Bible ~:1980). Lifts the
+     * stocking (tech level) gate on SELLING an owned unit; it does not
+     * override cantSell (0x0008).
+     */
+    sellAnywhere: boolean,
+    /**
+     * oütf flag 0x1000: while this item is available for sale, it suppresses
+     * all higher-numbered items with an equal DispWeight (Bible ~:1983).
+     * Used in stock data to show only one variant of an item at a time.
+     */
+    excludesEqualDisplayWeight: boolean,
+    /**
+     * oütf flag 0x4000: don't show this item unless its Availability
+     * evaluates to true, or the player already has at least one of it
+     * (Bible ~:1988). Without this flag an item whose Availability is false
+     * is still SHOWN, just not purchasable (Bible ~:1999).
+     */
+    hideUnlessAvailable: boolean,
     /** How many you can have (not counting weapon limitations). 0 = unlimited. */
     max: number,
     /** Control bit test expression gating purchase. Blank = available. */
@@ -207,6 +239,11 @@ export function getDefaultOutfitData(): OutfitData {
         price: 0,
         desc: "default outfit",
         displayWeight: 0,
+        techLevel: 0,
+        hideUnlessRequirementsMet: false,
+        sellAnywhere: false,
+        excludesEqualDisplayWeight: false,
+        hideUnlessAvailable: false,
         max: 0,
         availability: "",
         onPurchase: "",

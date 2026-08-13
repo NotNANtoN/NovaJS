@@ -118,4 +118,80 @@ describe("OutfitParse", () => {
         expect(outfit.map).toBeNull();
         expect(outfit.iffScramblerClass).toBeNull();
     });
+
+    describe("outfitter visibility fields", () => {
+        /** fakeOutf with an explicit TechLevel and Flags word. */
+        function techOutf(techLevel: number, flags: number): OutfResource {
+            return {
+                ...fakeOutf([["shield", 10]]), techLevel, flags,
+            } as unknown as OutfResource;
+        }
+
+        it("carries TechLevel through to the outfit data", async () => {
+            const outfit = await OutfitParse(techOutf(7, 0), () => { });
+            expect(outfit.techLevel).toEqual(7);
+        });
+
+        it("keeps the absurd TechLevels that mark SpecialTech-only items",
+            async () => {
+                // The Bible's own example of the pattern (~:2772): an item
+                // given a huge TechLevel appears only where a stellar names
+                // that exact value in a SpecialTech slot.
+                const outfit = await OutfitParse(techOutf(15000, 0), () => { });
+                expect(outfit.techLevel).toEqual(15000);
+            });
+
+        it("decodes the four outfitter visibility flags", async () => {
+            const outfit = await OutfitParse(
+                techOutf(1, 0x0100 | 0x0800 | 0x1000 | 0x4000), () => { });
+            expect(outfit.hideUnlessRequirementsMet).toBe(true);
+            expect(outfit.sellAnywhere).toBe(true);
+            expect(outfit.excludesEqualDisplayWeight).toBe(true);
+            expect(outfit.hideUnlessAvailable).toBe(true);
+        });
+
+        it("leaves the visibility flags false when unset", async () => {
+            const outfit = await OutfitParse(techOutf(1, 0), () => { });
+            expect(outfit.hideUnlessRequirementsMet).toBe(false);
+            expect(outfit.sellAnywhere).toBe(false);
+            expect(outfit.excludesEqualDisplayWeight).toBe(false);
+            expect(outfit.hideUnlessAvailable).toBe(false);
+        });
+
+        it("decodes each visibility flag independently", async () => {
+            // Guards against a copy-paste mixup between the four bits: each
+            // one alone must light up only its own field.
+            const only = async (flag: number) =>
+                await OutfitParse(techOutf(1, flag), () => { });
+
+            const hideReq = await only(0x0100);
+            expect(hideReq.hideUnlessRequirementsMet).toBe(true);
+            expect(hideReq.sellAnywhere).toBe(false);
+            expect(hideReq.excludesEqualDisplayWeight).toBe(false);
+            expect(hideReq.hideUnlessAvailable).toBe(false);
+
+            const sellAnywhere = await only(0x0800);
+            expect(sellAnywhere.sellAnywhere).toBe(true);
+            expect(sellAnywhere.hideUnlessRequirementsMet).toBe(false);
+            expect(sellAnywhere.excludesEqualDisplayWeight).toBe(false);
+
+            const excludes = await only(0x1000);
+            expect(excludes.excludesEqualDisplayWeight).toBe(true);
+            expect(excludes.sellAnywhere).toBe(false);
+            expect(excludes.hideUnlessAvailable).toBe(false);
+
+            const hideUnavail = await only(0x4000);
+            expect(hideUnavail.hideUnlessAvailable).toBe(true);
+            expect(hideUnavail.excludesEqualDisplayWeight).toBe(false);
+            expect(hideUnavail.hideUnlessRequirementsMet).toBe(false);
+        });
+
+        it("does not confuse the visibility flags with cantSell (0x0008)",
+            async () => {
+                const outfit = await OutfitParse(techOutf(1, 0x0008), () => { });
+                expect(outfit.cantSell).toBe(true);
+                expect(outfit.sellAnywhere).toBe(false);
+                expect(outfit.hideUnlessRequirementsMet).toBe(false);
+            });
+    });
 });

@@ -339,6 +339,7 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
         price: outf.cost,
         desc,
         displayWeight: outf.displayWeight,
+        techLevel: outf.techLevel,
         max: outf.max,
         availability: outf.availability,
         onPurchase: outf.onPurchase,
@@ -349,6 +350,12 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
         fixedGun: (outf.flags & 0x1) > 0,
         turret: (outf.flags & 0x2) > 0,
         cantSell: (outf.flags & 0x8) > 0,
+        // Outfitter visibility / sellability flags; see outfit_data.ts and
+        // spaceport/outfitter_rules.ts for what each one gates.
+        hideUnlessRequirementsMet: (outf.flags & 0x100) > 0,
+        sellAnywhere: (outf.flags & 0x800) > 0,
+        excludesEqualDisplayWeight: (outf.flags & 0x1000) > 0,
+        hideUnlessAvailable: (outf.flags & 0x4000) > 0,
         ammoFor,
         increasesMax,
         miningScoop,

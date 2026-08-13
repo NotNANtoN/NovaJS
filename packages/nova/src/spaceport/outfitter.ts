@@ -23,7 +23,8 @@ import { Menu } from "./menu.js";
 import { MissionSession } from "./mission_session.js";
 import { MissionUniverse } from "./mission_universe.js";
 import { DeployedOutfitCounts } from "./deployed_outfits.js";
-import { BuyDenialReason, canBuyOutfit, canSellOutfit, freeCargo, freeMass, maxBuyCount, maxSellCount, sellRefund, OutfitterContext } from "./outfitter_rules.js";
+import { BuyDenialReason, canBuyOutfit, canSellOutfit, freeCargo, freeMass, maxBuyCount, maxSellCount, sellRefund, OutfitterContext, OutfitterStellar, stellarOf, visibleOutfits } from "./outfitter_rules.js";
+import { PlanetData } from "novadatainterface/planet_data";
 import { QuantityDialog } from "./quantity_dialog.js";
 
 
@@ -94,6 +95,20 @@ class ScrollArrow {
 
 export class Outfitter extends Menu<Entity> {
     private itemGrid?: ItemGrid<OutfitData>;
+    /**
+     * Every outfit in the game data, in display order. The grid shows the
+     * subset visibleOutfits() admits for the docked stellar and the
+     * player's state; this is the pool that subset is drawn from.
+     */
+    private allOutfits: OutfitData[] = [];
+    /**
+     * The stellar being visited, supplying the tech level / SpecialTech /
+     * "buys anything" rules that decide what this outfitter stocks. Set by
+     * the Spaceport once its planet data loads. Absent means "no stellar
+     * context", under which the rules stock everything (see
+     * OutfitterContext.planet).
+     */
+    private planetData?: PlanetData;
     private quantityDialog: QuantityDialog;
     private pictContainer = new PIXI.Container();
     /** Working copies, committed to the ship entity on done. */
@@ -318,9 +333,43 @@ export class Outfitter extends Menu<Entity> {
         await Promise.all([...weaponIds].map(id =>
             this.simulationData.data.Weapon.get(id, 100)));
 
+        this.allOutfits = outfits;
         const itemGrid = new ItemGrid(this.displayAssets, outfits);
         itemGrid.setCounts(this.outfits);
         return itemGrid;
+    }
+
+    /** See the planetData field. Call before showing the outfitter. */
+    setPlanet(planet: PlanetData) {
+        this.planetData = planet;
+        this.refreshGrid();
+    }
+
+    /** The docked stellar's stock rules, or undefined before its data loads. */
+    private stellar(): OutfitterStellar | undefined {
+        return this.planetData && stellarOf(this.planetData);
+    }
+
+    /**
+     * Re-applies the outfitter's visibility rules and the owned-item
+     * counts to the grid. Called whenever something the rules read
+     * changes: a new visit, the ship data arriving, and every buy/sell
+     * (which can add or remove an item that was only visible because the
+     * player owned one, or flip an Availability bit via OnPurchase).
+     *
+     * Deliberately NOT called from refreshTradeState: repopulating the
+     * grid re-emits the active tile, which calls back into
+     * refreshTradeState, and the two would recurse.
+     */
+    private refreshGrid() {
+        if (!this.itemGrid) {
+            return;
+        }
+        const context = this.makeContext();
+        if (context) {
+            this.itemGrid.setItems(visibleOutfits(this.allOutfits, context));
+        }
+        this.itemGrid.setCounts(this.outfits);
     }
 
     /** See the deployedOutfitCounts field. */
@@ -343,6 +392,7 @@ export class Outfitter extends Menu<Entity> {
             // deployed fighter names only its bay weapon and has to be
             // attributed back to one of the player's ammo outfits.
             deployedCounts: this.deployedOutfitCounts?.(this.outfits.keys()),
+            planet: this.stellar(),
         };
     }
 
@@ -527,7 +577,7 @@ export class Outfitter extends Menu<Entity> {
         }
 
         this.applyBuy(outfit);
-        this.itemGrid?.setCounts(this.outfits);
+        this.refreshGrid();
         this.setFreeMassText();
         this.refreshTradeState();
     }
@@ -566,7 +616,7 @@ export class Outfitter extends Menu<Entity> {
             this.applyBuy(outfit);
             bought++;
         }
-        this.itemGrid?.setCounts(this.outfits);
+        this.refreshGrid();
         this.setFreeMassText();
         this.refreshTradeState();
         if (bought > 0 && !this.text.status.text) {
@@ -593,7 +643,7 @@ export class Outfitter extends Menu<Entity> {
         }
 
         this.applySell(outfit);
-        this.itemGrid?.setCounts(this.outfits);
+        this.refreshGrid();
         this.setFreeMassText();
         this.refreshTradeState();
     }
@@ -627,7 +677,7 @@ export class Outfitter extends Menu<Entity> {
             this.applySell(outfit);
             sold++;
         }
-        this.itemGrid?.setCounts(this.outfits);
+        this.refreshGrid();
         this.setFreeMassText();
         this.refreshTradeState();
         if (sold > 0 && !this.text.status.text) {
@@ -720,13 +770,14 @@ export class Outfitter extends Menu<Entity> {
                 this.simulationData.data.Ship.get(shipId).then(shipData => {
                     if (this.input === input) {
                         this.shipData = shipData;
+                        this.refreshGrid();
                         this.setFreeMassText();
                         this.refreshTradeState();
                     }
                 });
             }
             this.text.status.text = "";
-            this.itemGrid?.setCounts(this.outfits);
+            this.refreshGrid();
             return;
         }
         const outfitsState = input.components.get(OutfitsStateComponent)
@@ -750,12 +801,13 @@ export class Outfitter extends Menu<Entity> {
                 // Ignore stale loads after the input changes.
                 if (this.input === input) {
                     this.shipData = shipData;
+                    this.refreshGrid();
                     this.setFreeMassText();
                     this.refreshTradeState();
                 }
             });
         }
-        this.itemGrid?.setCounts(this.outfits);
+        this.refreshGrid();
     }
 
     /**
