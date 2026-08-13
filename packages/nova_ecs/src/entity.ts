@@ -2,7 +2,6 @@ import { BinSet, BinSetC } from "./bin_set.js";
 import { Component, UnknownComponent } from "./component.js";
 import { ComponentMap } from "./component_map.js";
 import { EventMap } from "./event_map.js";
-import { Query } from "./query.js";
 
 export type ComponentTypes = Set<UnknownComponent>;
 
@@ -13,7 +12,6 @@ export type ComponentTypes = Set<UnknownComponent>;
 export class Entity {
     readonly components: ComponentMap;
     readonly componentsBinSet: BinSet<UnknownComponent>;
-    public supportedQueries = new Map<Query, boolean>();
 
     /**
      * Construct a new Entity. A common pattern is to use the chaining api
@@ -33,15 +31,10 @@ export class Entity {
 
         this.componentsBinSet = BinSetC.of(new Set(this.components.keys()));
 
-        const clearSupportedQueries = () => {
-            this.supportedQueries.clear();
-        }
-        this.components.events.add.subscribe(clearSupportedQueries);
         this.components.events.add.subscribe(([component]) => {
             this.componentsBinSet.add(component);
         });
 
-        this.components.events.delete.subscribe(clearSupportedQueries);
         this.components.events.delete.subscribe((deleted) => {
             for (const [component] of deleted) {
                 this.componentsBinSet.delete(component);

@@ -1,5 +1,6 @@
 import { Either, isLeft, isRight, left, Right, right } from "fp-ts/lib/Either.js";
 import { ArgsToData, ArgTypes, QueryResults } from "./arg_types.js";
+import { UnknownComponent } from "./component.js";
 import { Entity } from "./entity.js";
 import { EntityMapWithEvents } from "./entity_map.js";
 import { DeleteEvent, EcsEvent, StepEvent } from "./events.js";
@@ -29,11 +30,8 @@ class CachedQueryCacheEntry<Args extends readonly ArgTypes[] = readonly ArgTypes
     private resultValid = false;
     unsubscribe: () => void;
 
-    private entitySupportedCacheHit = 0;
-    private entitySupportedCacheMiss = 0;
-
     constructor(private queryCache: QueryCache,
-        private query: Query,
+        readonly query: Query,
         private getArg: World['getArg'],
         entities: EntityMapWithEvents,
         resources: ResourceMapWrapped) {
@@ -42,61 +40,13 @@ class CachedQueryCacheEntry<Args extends readonly ArgTypes[] = readonly ArgTypes
         this.resources = new Map([...resources].filter(
             ([resource]) => query.resources.has(resource)));
 
-        const supported = (query: Query, entity: Entity) => {
-            const savedVal = entity.supportedQueries.get(query);
-            if (savedVal) {
-                this.entitySupportedCacheHit++;
-                return true;
-            } else if (savedVal === false) {
-                this.entitySupportedCacheHit++;
-                return false;
-            }
-            const newVal = query.supportsEntity(entity);
-            entity.supportedQueries.set(query, newVal);
-            this.entitySupportedCacheMiss++;
-            return newVal;
-        }
-
-        const subscriptions = [
-            entities.events.setAlways.subscribe(([uuid, entity]) => {
-                if (this.entities.get(uuid) === entity) {
-                    return;
-                }
-                if (supported(query, entity)) {
-                    this.entities.set(uuid, entity);
-                } else {
-                    this.entities.delete(uuid);
-                }
-                this.entityResults.delete(entity);
-                this.resultValid = false;
-            }),
-            entities.events.delete.subscribe((vals) => {
-                for (const [uuid, entity] of vals) {
-                    if (supported(query, entity)) {
-                        this.resultValid = false;
-                    }
-                    this.entities.delete(uuid);
-                    this.entityResults.delete(entity);
-                }
-            }),
-            entities.events.addComponent.subscribe(([uuid, entity]) => {
-                if (supported(query, entity)) {
-                    this.entities.set(uuid, entity);
-                }
-                this.entityResults.delete(entity); // for `Optional` etc.
-                this.resultValid = false;
-            }),
-            entities.events.changeComponentAlways.subscribe(([, entity]) => {
-                this.entityResults.delete(entity);
-                this.resultValid = false;
-            }),
-            entities.events.deleteComponent.subscribe(([uuid, entity, component]) => {
-                if (query.components.has(component) && !supported(query, entity)) {
-                    this.entities.delete(uuid);
-                }
-                this.entityResults.delete(entity);
-                this.resultValid = false;
-            }),
+        // Entity and component events are dispatched by the QueryCache,
+        // which routes each component event only to the entries whose
+        // staleness set (query.referencedComponents) contains that
+        // component — see QueryCache. Resource events are rare, so each
+        // entry subscribes directly.
+        queryCache.register(this);
+        const resourceSubscription =
             resources.events.setAlways.subscribe(([resource, val]) => {
                 if (!query.resources.has(resource)) {
                     // Don't need to care about or track resources
@@ -110,14 +60,67 @@ class CachedQueryCacheEntry<Args extends readonly ArgTypes[] = readonly ArgTypes
                 // Resources are global, so delete all cached results for entities.
                 this.entityResults.clear();
                 this.resultValid = false;
-            }),
-        ];
+            });
 
         this.unsubscribe = () => {
-            for (const subscription of subscriptions) {
-                subscription.unsubscribe();
-            }
+            this.queryCache.unregister(this);
+            resourceSubscription.unsubscribe();
         }
+    }
+
+    // The former per-(entity, query) `supportedQueries` memo is gone:
+    // supportsEntity is a BinSet subset test (a few integer ops), which
+    // profiles faster than the Map get/set churn the memo cost — the
+    // memo was also cleared on every component add/delete, so churn-
+    // heavy workloads (submunitions) mostly missed it.
+    private supported(entity: Entity) {
+        return this.query.supportsEntity(entity);
+    }
+
+    onEntitySet(uuid: string, entity: Entity) {
+        if (this.supported(entity)) {
+            if (this.entities.get(uuid) === entity) {
+                return;
+            }
+            this.entities.set(uuid, entity);
+        } else if (!this.entities.delete(uuid)) {
+            // Was not a member and still is not: nothing changed.
+            return;
+        }
+        this.entityResults.delete(entity);
+        this.resultValid = false;
+    }
+
+    onEntityDeleted(uuid: string, entity: Entity) {
+        // Membership is tracked in this.entities, so consulting it
+        // beats re-testing supportsEntity: only a deleted MEMBER
+        // invalidates the cached result list.
+        if (this.entities.delete(uuid)) {
+            this.resultValid = false;
+        }
+        this.entityResults.delete(entity);
+    }
+
+    onComponentAdded(uuid: string, entity: Entity) {
+        if (this.supported(entity)) {
+            this.entities.set(uuid, entity);
+        }
+        this.entityResults.delete(entity); // for `Optional` etc.
+        this.resultValid = false;
+    }
+
+    onComponentChanged(entity: Entity) {
+        this.entityResults.delete(entity);
+        this.resultValid = false;
+    }
+
+    onComponentDeleted(uuid: string, entity: Entity,
+        component: UnknownComponent) {
+        if (this.query.components.has(component) && !this.supported(entity)) {
+            this.entities.delete(uuid);
+        }
+        this.entityResults.delete(entity);
+        this.resultValid = false;
     }
 
     getResultForEntity(entity: Entity,
@@ -279,8 +282,163 @@ class CachelessQueryCacheEntry<Args extends readonly ArgTypes[] = readonly ArgTy
 
 type QueryArgsList = readonly ArgTypes[];
 export class QueryCache extends DefaultMap<Query, QueryCacheEntry> {
+    /**
+     * Component-indexed event dispatch. Entity-level events (an entity
+     * set or deleted) go to every entry, but component events — by far
+     * the most frequent, since every component write on every entity
+     * emits one — go only to the entries whose staleness set
+     * (query.referencedComponents) contains that component. Entries
+     * with an unknown staleness set (`null`) are wildcards and receive
+     * every component event, preserving the old conservative behavior.
+     * This replaces per-entry subscriptions, which made every component
+     * write cost O(number of cached queries).
+     */
+    /** Entries whose query requires no components: candidates for
+     * every entity set/delete. */
+    private matchAllEntries = new Set<CachedQueryCacheEntry>();
+    /** Non-empty queries, indexed under ONE designated required
+     * component: an entity that lacks it can neither become a member
+     * nor have one of the entry's cached tuples. */
+    private designatedEntries =
+        new Map<UnknownComponent, Set<CachedQueryCacheEntry>>();
+    /** Mirror of the world's entity map, one event behind its own
+     * subscription: gives the setAlways handler the entity object a
+     * uuid previously mapped, which the event does not carry. */
+    private shadowEntities = new Map<string, Entity>();
+    private wildcardEntries = new Set<CachedQueryCacheEntry>();
+    private componentEntries =
+        new DefaultMap<UnknownComponent, Set<CachedQueryCacheEntry>>(
+            () => new Set());
+
     constructor(entities: EntityMapWithEvents, resources: ResourceMapWrapped, getArg: World['getArg']) {
         super((query: Query) => new CachedQueryCacheEntry(this, query, getArg, entities, resources));
+        for (const [uuid, entity] of entities) {
+            this.shadowEntities.set(uuid, entity);
+        }
+        entities.events.setAlways.subscribe(([uuid, entity]) => {
+            const previous = this.shadowEntities.get(uuid);
+            if (previous === entity) {
+                // Same object re-set: membership and cached tuples are
+                // keyed by identity, so nothing can change (every entry
+                // would early-out).
+                return;
+            }
+            this.shadowEntities.set(uuid, entity);
+            for (const entry of this.matchAllEntries) {
+                entry.onEntitySet(uuid, entity);
+            }
+            for (const component of entity.components.keys()) {
+                const bucket = this.designatedEntries.get(component);
+                if (bucket === undefined) continue;
+                for (const entry of bucket) {
+                    entry.onEntitySet(uuid, entity);
+                }
+            }
+            if (previous !== undefined) {
+                // The uuid previously mapped a different entity object
+                // (e.g. a rollback snapshot restore): entries that held
+                // the OLD entity must drop it even though the new one
+                // does not select them. A member always carries all of
+                // its query's components (membership is maintained
+                // eagerly on component deletes), so sweeping the old
+                // entity's current components reaches every such entry.
+                for (const component of previous.components.keys()) {
+                    const bucket = this.designatedEntries.get(component);
+                    if (bucket === undefined) continue;
+                    for (const entry of bucket) {
+                        entry.onEntitySet(uuid, entity);
+                    }
+                }
+            }
+        });
+        entities.events.delete.subscribe(vals => {
+            for (const [uuid, entity] of vals) {
+                this.shadowEntities.delete(uuid);
+                for (const entry of this.matchAllEntries) {
+                    entry.onEntityDeleted(uuid, entity);
+                }
+                for (const component of entity.components.keys()) {
+                    const bucket = this.designatedEntries.get(component);
+                    if (bucket === undefined) continue;
+                    for (const entry of bucket) {
+                        entry.onEntityDeleted(uuid, entity);
+                    }
+                }
+            }
+        });
+        entities.events.addComponent.subscribe(([uuid, entity, component]) => {
+            for (const entry of this.componentEntries.get(component)) {
+                entry.onComponentAdded(uuid, entity);
+            }
+            for (const entry of this.wildcardEntries) {
+                entry.onComponentAdded(uuid, entity);
+            }
+        });
+        entities.events.changeComponentAlways.subscribe(([, entity, component]) => {
+            for (const entry of this.componentEntries.get(component)) {
+                entry.onComponentChanged(entity);
+            }
+            for (const entry of this.wildcardEntries) {
+                entry.onComponentChanged(entity);
+            }
+        });
+        entities.events.deleteComponent.subscribe(([uuid, entity, component]) => {
+            for (const entry of this.componentEntries.get(component)) {
+                entry.onComponentDeleted(uuid, entity, component);
+            }
+            for (const entry of this.wildcardEntries) {
+                entry.onComponentDeleted(uuid, entity, component);
+            }
+        });
+    }
+
+    // Entity set/delete dispatch (see the constructor) sweeps
+    // matchAllEntries plus the designated bucket of each component the
+    // entity carries. Membership needs ALL of a query's required
+    // components, so an entry indexed under a designated component the
+    // entity lacks can neither gain the entity as a member nor hold a
+    // cached tuple for it (tuples only exist for entities that were
+    // members at fill time, and eager maintenance removes both on the
+    // component-indexed delete path).
+    register(entry: CachedQueryCacheEntry) {
+        const components = entry.query.components;
+        if (components.size === 0) {
+            this.matchAllEntries.add(entry);
+        } else {
+            const designated: UnknownComponent =
+                components.values().next().value!;
+            let bucket = this.designatedEntries.get(designated);
+            if (bucket === undefined) {
+                bucket = new Set();
+                this.designatedEntries.set(designated, bucket);
+            }
+            bucket.add(entry);
+        }
+        const referenced = entry.query.referencedComponents;
+        if (referenced === null) {
+            this.wildcardEntries.add(entry);
+        } else {
+            for (const component of referenced) {
+                this.componentEntries.get(component).add(entry);
+            }
+        }
+    }
+
+    unregister(entry: CachedQueryCacheEntry) {
+        this.matchAllEntries.delete(entry);
+        const components = entry.query.components;
+        if (components.size > 0) {
+            const designated: UnknownComponent =
+                components.values().next().value!;
+            this.designatedEntries.get(designated)?.delete(entry);
+        }
+        this.wildcardEntries.delete(entry);
+        const referenced = entry.query.referencedComponents;
+        if (referenced !== null) {
+            for (const component of referenced) {
+                this.componentEntries.get(component).delete(entry);
+            }
+        }
     }
 
     override get<Args extends QueryArgsList>(query: Query<Args>): QueryCacheEntry<Args> {

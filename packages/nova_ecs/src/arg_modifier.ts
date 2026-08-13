@@ -1,5 +1,6 @@
 import { Either } from "fp-ts/lib/Either.js";
-import { ArgData, ArgsToData, ArgTypes } from "./arg_types.js";
+import { ArgData, ArgsToData, ArgTypes, GetArg } from "./arg_types.js";
+import { UnknownComponent } from "./component.js";
 import { Query } from "./query.js";
 
 
@@ -12,10 +13,42 @@ export type AnyArgModifier = ArgModifier<any, any>;
 export class ArgModifier<Args extends readonly ArgTypes[], Result> {
     query: Query<Args>;
     transform: Transform<Args, Result>;
-    constructor({ query, transform }:
-        { query: Query<Args>, transform: Transform<Args, Result> }) {
+    /**
+     * The components whose add / change / delete on an entity can change
+     * what this modifier resolves to for that entity — the modifier's
+     * contribution to its enclosing query's staleness set (see
+     * `Query.referencedComponents`). `null` means unknown: the transform
+     * can read arbitrary args (e.g. it holds a raw `GetArg` and the
+     * factory declared nothing), so the query cache must conservatively
+     * invalidate its results on every component event.
+     *
+     * Factories whose transform resolves args beyond the modifier
+     * query's own (`Optional` fetches its wrapped arg through `GetArg`)
+     * declare them via `extraComponents`. Passing `extraComponents:
+     * null` explicitly marks the modifier as unknown.
+     */
+    readonly referencedComponents: ReadonlySet<UnknownComponent> | null;
+    constructor({ query, transform, extraComponents }: {
+        query: Query<Args>, transform: Transform<Args, Result>,
+        extraComponents?: ReadonlySet<UnknownComponent> | null,
+    }) {
         this.query = query;
         this.transform = transform
+        if (extraComponents === null) {
+            this.referencedComponents = null;
+        } else if (extraComponents === undefined
+            && query.args.includes(GetArg)) {
+            // The transform gets a raw getArg and declared nothing about
+            // what it fetches with it: assume it can read anything.
+            this.referencedComponents = null;
+        } else if (query.referencedComponents === null) {
+            this.referencedComponents = null;
+        } else if (extraComponents === undefined) {
+            this.referencedComponents = query.referencedComponents;
+        } else {
+            this.referencedComponents = new Set(
+                [...query.referencedComponents, ...extraComponents]);
+        }
     }
 }
 

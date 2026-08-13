@@ -1,5 +1,5 @@
 import { ArgModifier, UnknownArgModifier } from "./arg_modifier.js";
-import { ArgTypes } from "./arg_types.js";
+import { ArgTypes, GetArg } from "./arg_types.js";
 import { BinSet, BinSetC } from "./bin_set.js";
 import { Component, UnknownComponent } from "./component.js";
 import { Entity } from "./entity.js";
@@ -65,6 +65,25 @@ export class Query<QueryArgs extends readonly ArgTypes[]
     readonly resources: ReadonlySet<UnknownResource>;
     readonly queries: Query[];
     readonly componentsBinSet: BinSet<UnknownComponent>;
+    /**
+     * The staleness set: every component whose add / change / delete on
+     * an entity can change this query's per-entity results. The query
+     * cache invalidates a cached result only for events on these
+     * components (component-indexed dispatch); `null` means unknown
+     * (some ArgModifier can resolve arbitrary args at transform time),
+     * which makes the cache conservatively invalidate on every
+     * component event.
+     *
+     * This is a superset of `components` (the membership set): it also
+     * carries components resolved through modifiers, e.g. the wrapped
+     * arg of `Optional`, which affects results but not membership.
+     * Args that resolve to live or stable references contribute
+     * nothing: nested Query results (the cache updates the same array
+     * in place), GetEntity, Components, UUID, GetArg (fetches fresh on
+     * every call), EcsEvents (never cached across events), and
+     * Resources (invalidated by the cache's own resource subscription).
+     */
+    readonly referencedComponents: ReadonlySet<UnknownComponent> | null;
 
     constructor(readonly args: QueryArgs, readonly name?: string) {
         const modifiers = args.filter(arg => arg instanceof ArgModifier) as UnknownArgModifier[];
@@ -89,6 +108,24 @@ export class Query<QueryArgs extends readonly ArgTypes[]
             (a): a is Query => (a instanceof Query)))];
 
         this.componentsBinSet = BinSetC.of(this.components);
+
+        // Direct args: only modifiers can hide component reads (their
+        // transform result is cached). A direct GetArg arg resolves to
+        // a closure that fetches fresh on every call, so unlike a
+        // GetArg inside a modifier query it does not poison the set.
+        let referenced: Set<UnknownComponent> | null =
+            new Set(this.components);
+        for (const modifier of modifiers) {
+            const modifierReferenced = modifier.referencedComponents;
+            if (modifierReferenced === null) {
+                referenced = null;
+                break;
+            }
+            for (const component of modifierReferenced) {
+                referenced.add(component);
+            }
+        }
+        this.referencedComponents = referenced;
     }
 
     supportsEntity(entity: Entity) {
@@ -98,4 +135,32 @@ export class Query<QueryArgs extends readonly ArgTypes[]
     toString() {
         return `Query(${this.name ?? 'unnamed'})`;
     }
+}
+
+/**
+ * The components an arg's resolved value can depend on for a given
+ * entity, i.e. the arg's contribution to `Query.referencedComponents`.
+ * `null` means unknown (invalidate on everything). Used by modifier
+ * factories (e.g. `Optional`) to declare the args their transform
+ * resolves dynamically.
+ */
+export function referencedComponentsOfArg(arg: ArgTypes):
+    ReadonlySet<UnknownComponent> | null {
+    if (arg instanceof Component) {
+        return new Set([arg as UnknownComponent]);
+    }
+    if (arg instanceof ArgModifier) {
+        return (arg as UnknownArgModifier).referencedComponents;
+    }
+    if (arg === GetArg) {
+        // A raw getArg baked into a cached result can read anything.
+        // (As a direct system arg it is harmless — it fetches fresh on
+        // every call — and Query's constructor never reaches this case
+        // for direct args; only modifier factories declaring transform
+        // reads do, where the fetched value IS cached.)
+        return null;
+    }
+    // Resources, nested Queries, EcsEvents, GetEntity, Components, UUID:
+    // live/stable references or handled by their own invalidation.
+    return new Set();
 }
