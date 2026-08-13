@@ -53,6 +53,19 @@ export async function ShipParse(ship: ShipResource,
         notFoundFunction(desc);
     }
 
+    // The shipyard "More Info" artwork is the ship dësc's Graphic field —
+    // the same mechanism the spöb bar description uses for its picture, not
+    // a fixed offset from the browse pict. In stock data it resolves to
+    // PICT 20000 + shïp id: a 600x400 painted scene (the ship staged
+    // against a station or planet), against the 200x200 browse render at
+    // 5000 + id - 128 and the 128x64 HUD target render at 3000 + id - 128.
+    // Only 97 of the 288 stock ships resolve one (99 have a dësc, two of
+    // which set graphic <= 0); the rest, and plug-in ships, which
+    // routinely omit it, fall back to the browse pict.
+    const infoGraphic = descResource?.graphic ?? -1;
+    const infoPict = infoGraphic > 0
+        ? (ship.idSpace.PICT[infoGraphic]?.globalID ?? null) : null;
+
     // TODO: Parse Explosions
     var initialExplosionID: string | null = null;
     var finalExplosionID: string | null = null;
@@ -231,6 +244,7 @@ export async function ShipParse(ship: ShipResource,
     return {
         physics,
         pict: pictID,
+        infoPict,
         desc: desc,
         outfits,
         initialExplosion: initialExplosionID,

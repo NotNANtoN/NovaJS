@@ -52,7 +52,21 @@ export function getDefaultShipPhysics(): ShipPhysics {
 
 export interface ShipData extends SpaceObjectData {
     physics: ShipPhysics;
+    /**
+     * The shipyard browse picture: the thumbnail in the ship grid and the
+     * preview beside it. A plain render of the ship.
+     */
     pict: string;
+    /**
+     * The larger painted scene the shipyard's "More Info" dialog shows —
+     * the ship staged against a station, planet or nebula, which is
+     * different art from `pict` rather than a scaled copy of it (see the
+     * shipyard/*_info.png reference screenshots).
+     *
+     * Null when the ship has no dedicated info picture, in which case the
+     * dialog falls back to `pict`. Plug-ins routinely omit it.
+     */
+    infoPict: string | null;
     desc: string;
     outfits: { [index: string]: number }
     initialExplosion: string | null;
@@ -149,6 +163,7 @@ export function getDefaultShipData(): ShipData {
         ...getDefaultSpaceObjectData(),
         physics: getDefaultShipPhysics(),
         pict: "default",
+        infoPict: null,
         desc: "default",
         outfits: {},
         initialExplosion: null,

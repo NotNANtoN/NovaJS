@@ -141,9 +141,12 @@ export class ShipInfoDialog {
         // Strip the "; note" author suffix the original never shows.
         this.nameText.text = displayName(ship.name);
 
-        // The ship's rendered PICT, scaled to fit the picture area.
-        if (ship.pict) {
-            const pict = this.displayAssets.spriteFromPict(ship.pict);
+        // The ship's dedicated info artwork, scaled to fit the picture
+        // area. Falls back to the shipyard browse picture for ships (and
+        // plug-ins) that don't supply one.
+        const infoPict = ship.infoPict ?? ship.pict;
+        if (infoPict) {
+            const pict = this.displayAssets.spriteFromPict(infoPict);
             pict.anchor.set(0.5);
             pict.position.set(PICT_AREA.x, PICT_AREA.y);
             // Scale down to fit, never up (keep small pictures crisp).
