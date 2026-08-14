@@ -2,6 +2,7 @@ import { getDefaultAsteroidData } from "./asteroid_data.js";
 import { getDefaultCicnData } from "./cicn_data.js";
 import { getDefaultExplosionData } from "./explosion_data.js";
 import { getDefaultCronData } from "./cron_data.js";
+import { getDefaultDescriptionData } from "./description_data.js";
 import { GameDataInterface } from "./game_data_interface.js";
 import { getDefaultDudeData } from "./dude_data.js";
 import { getDefaultFleetData } from "./fleet_data.js";
@@ -21,6 +22,7 @@ import { getDefaultShipData } from "./ship_data.js";
 import { getDefaultSoundFile } from "./sound_file.js";
 import { getDefaultSpriteSheetData, getDefaultSpriteSheetFrames } from "./sprite_sheet_data.js";
 import { getDefaultStatusBarData } from "./status_bar_data.js";
+import { getDefaultStringTableData } from "./string_table_data.js";
 import { getDefaultSystemData } from "./system_data.js";
 import { getDefaultTargetCornersData } from "./target_corners_data.js";
 import { getDefaultProjectileWeaponData } from "./weapon_data.js";
@@ -88,6 +90,8 @@ export class MockGameData implements GameDataInterface {
         TargetCorners: new MockGettable(getDefaultTargetCornersData()),
         Weapon: new MockGettable(getDefaultProjectileWeaponData()),
         SoundFile: new MockGettable(getDefaultSoundFile()),
+        StringTable: new MockGettable(getDefaultStringTableData()),
+        Description: new MockGettable(getDefaultDescriptionData()),
     };
     get ids(): Promise<NovaIDs> {
         const ids: NovaIDs = {} as NovaIDs;

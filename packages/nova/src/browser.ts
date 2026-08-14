@@ -95,13 +95,16 @@ import { TitleScreen, TitleStatus } from "./title/title_screen.js";
 import { TitleMusic } from "./title/title_music.js";
 import {
     showAboutDialog, showNewPilotDialog, showOpenPilotDialog,
-    showPreferencesDialog, PilotEntry,
+    showPreferencesDialog, PilotDialogActions, PilotEntry,
 } from "./title/title_dialogs.js";
 import {
-    clearPilotProfile, loadControlsOverride, loadPilotProfile, mergeControls,
-    savePilotProfile,
+    clearPilotProfile, loadPilotProfile, mergeControls, savePilotProfile,
 } from "./title/client_prefs.js";
 // clearPilotProfile is wired into the ?reset path below.
+import {
+    applyActivePilot, createPilot, deletePilot, exportFileName, exportPilot,
+    getActivePilot, importPilot, listPilots, loadPilotControls, selectPilot,
+} from "./title/pilot_registry.js";
 import { combatRatingName } from "./nova_plugin/reputation.js";
 import { formatDate } from "./nova_plugin/calendar.js";
 import { isTextEntryActive } from "./input_focus.js";
@@ -236,6 +239,40 @@ let restoredSavePlayerUuid: string | undefined;
 let clientSlotFloor: { player: string, next: number } | undefined;
 let controls: Controls | undefined;
 const controlsSubject = new Subject<ControlEvent>();
+
+/**
+ * Decodes the served controls.json with the active pilot's rebindings
+ * layered over it. Throws if the result is not a valid control map.
+ */
+function buildControls(baseControlsJson: Record<string, unknown>): Controls {
+    const merged = mergeControls(baseControlsJson, loadPilotControls());
+    const decoded = SavedControls.pipe(Controls).decode(merged);
+    if (isLeft(decoded)) {
+        console.error(decoded.left);
+        throw new Error("Failed to parse controls");
+    }
+    return decoded.right;
+}
+
+/**
+ * Re-reads the active pilot's bindings into the live `controls` map.
+ *
+ * The key handler reads this module-level map on every event, so a
+ * rebinding applies immediately — no reload, and no need to leave and
+ * re-enter the game. Called after the Preferences dialog commits and
+ * whenever the active pilot changes.
+ */
+async function applyControls(): Promise<void> {
+    try {
+        const controlsJson =
+            await simulationGameData.getSettings?.('controls.json');
+        if (controlsJson) {
+            controls = buildControls(controlsJson as Record<string, unknown>);
+        }
+    } catch (e) {
+        console.warn('Failed to apply control bindings:', e);
+    }
+}
 let autopilot: Autopilot | undefined;
 let simulationTickInFlight = false;
 let lastPumpDone: number | undefined;
@@ -1460,17 +1497,10 @@ async function startGame() {
     if (!controlsJson) {
         throw new Error("Expected controls settings to exist");
     }
-    // Layer the player's title-screen "Set Prefs" rebindings (stored in
-    // localStorage; the served controls.json is read-only) over the
-    // defaults before decoding.
-    const mergedControlsJson = mergeControls(
-        controlsJson as Record<string, unknown>, loadControlsOverride());
-    const decodedControls = SavedControls.pipe(Controls).decode(mergedControlsJson);
-    if (isLeft(decodedControls)) {
-        console.error(decodedControls.left);
-        throw new Error("Failed to parse controls");
-    }
-    controls = decodedControls.right;
+    // Layer the ACTIVE PILOT's "Set Prefs" rebindings (stored in the pilot
+    // registry; the served controls.json is read-only) over the defaults
+    // before decoding.
+    controls = buildControls(controlsJson as Record<string, unknown>);
 
     // Make the player's ship
     while (!communicator.uuid) {
@@ -2219,11 +2249,53 @@ async function startGame() {
 }
 
 /**
+ * The dësc resources holding the original's About box text: 32767 is the
+ * credits proper, 32766 the "special thanks" continuation the original
+ * reaches through the box's scroll arrows. The About text is NOT in a
+ * STR# table -- it lives in these two dëscs.
+ */
+const ABOUT_DESC_IDS = ['nova:32767', 'nova:32766'];
+
+/**
+ * Reads the About credits out of the game data. Returns undefined when
+ * the data has no About dësc, so the dialog falls back to its built-in
+ * text rather than showing an empty box.
+ */
+async function loadAboutText(): Promise<string | undefined> {
+    const parts: string[] = [];
+    for (const id of ABOUT_DESC_IDS) {
+        try {
+            const desc = await displayAssetData.data.Description.get(id);
+            if (desc.text.trim()) {
+                parts.push(desc.text.trim());
+            }
+        } catch {
+            // A data set without this dësc: skip it.
+        }
+    }
+    return parts.length ? parts.join('\n\n') : undefined;
+}
+
+/** Saves `text` to the player's downloads as `filename`. */
+function downloadText(text: string, filename: string): void {
+    const blob = new Blob([text], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    // Give the click a turn to start the download before revoking.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+/**
  * Builds the bottom status readout for the title screen from the
  * current save + pilot profile. A pure read; never mutates state.
  */
 async function computeTitleStatus(): Promise<TitleStatus> {
-    const profile = loadPilotProfile();
+    const profile = getActivePilot()?.profile ?? loadPilotProfile();
     const save = loadSave();
     const empty: TitleStatus = {
         pilotName: profile?.name ?? '—',
@@ -2401,14 +2473,21 @@ async function runTitle() {
                 title.setEnabled(false);
                 const profile = await showNewPilotDialog();
                 if (profile) {
-                    // A fresh pilot: wipe the previous save so startGame
-                    // spawns from the scenario's default chär, and record
-                    // the new pilot's profile for the status readout.
-                    resetSave();
-                    savePilotProfile({
+                    const withShip = {
                         ...profile,
                         shipNumber: 100 + Math.floor(Math.random() * 900),
-                    });
+                    };
+                    // Register a NEW pilot file and make it active. Its
+                    // save key is fresh, so startGame spawns from the
+                    // scenario's default chär without disturbing any
+                    // other pilot's save.
+                    createPilot(withShip);
+                    // The exploration record is still client-global; clear
+                    // it so a new pilot starts with an unexplored galaxy.
+                    resetSave();
+                    savePilotProfile(withShip);
+                    // A fresh pilot has no rebindings: back to defaults.
+                    await applyControls();
                     await enterGame();
                 } else {
                     title.setEnabled(true);
@@ -2417,20 +2496,62 @@ async function runTitle() {
             }
             case 'openPilot': {
                 title.setEnabled(false);
-                const save = loadSave();
-                const profile = loadPilotProfile();
-                const entries: PilotEntry[] = save ? [{
-                    id: 'current',
-                    name: profile?.name ?? 'Saved Pilot',
-                    detail: save.date ? formatDate(save.date) : undefined,
-                }] : [];
-                const chosen = await showOpenPilotDialog(entries);
+                const toEntry = (p: ReturnType<typeof listPilots>[number]):
+                    PilotEntry => {
+                    const active = getActivePilot();
+                    const isActive = active?.id === p.id;
+                    const parts: string[] = [];
+                    if (p.profile?.nickname) {
+                        parts.push(`"${p.profile.nickname}"`);
+                    }
+                    if (isActive) {
+                        parts.push('(current)');
+                    }
+                    return {
+                        id: p.id, name: p.name,
+                        detail: parts.join(' ') || undefined,
+                    };
+                };
+                const listEntries = () => listPilots().map(toEntry);
+                const actions: PilotDialogActions = {
+                    refresh: listEntries,
+                    onExport: (id) => {
+                        const text = exportPilot(id);
+                        if (!text) { return; }
+                        const pilot = listPilots().find(p => p.id === id);
+                        downloadText(text,
+                            exportFileName(pilot?.name ?? 'pilot'));
+                    },
+                    onImport: (text) => {
+                        const result = importPilot(text);
+                        if (!result.ok) {
+                            return { ok: false, message: result.reason };
+                        }
+                        return {
+                            ok: true,
+                            message: result.renamed
+                                ? `Imported as "${result.pilot.name}" (a pilot `
+                                + 'with that name already existed).'
+                                : `Imported "${result.pilot.name}".`,
+                        };
+                    },
+                    onDelete: (id) => { deletePilot(id); },
+                };
+                const chosen = await showOpenPilotDialog(listEntries(), actions);
                 if (chosen) {
-                    // Single browser save slot: "opening" it just enters
-                    // the game, which loads that save.
+                    const picked = selectPilot(chosen);
+                    if (picked) {
+                        // Mirror the chosen pilot's profile into the legacy
+                        // slot so the title status readout matches.
+                        if (picked.profile) {
+                            savePilotProfile(picked.profile);
+                        }
+                        await applyControls();
+                    }
                     await enterGame();
                 } else {
                     title.setEnabled(true);
+                    void refreshStatus();
                 }
                 break;
             }
@@ -2440,35 +2561,25 @@ async function runTitle() {
                     await simulationGameData.getSettings?.('controls.json');
                 await showPreferencesDialog(
                     (controlsJson as Record<string, unknown>) ?? {});
+                // Rebindings take effect right away rather than at the
+                // next game entry.
+                await applyControls();
                 title.setEnabled(true);
                 break;
             }
             case 'about':
                 title.setEnabled(false);
-                await showAboutDialog();
+                await showAboutDialog(await loadAboutText());
                 title.setEnabled(true);
                 break;
-            case 'quit': {
-                title.setEnabled(false);
-                // A browser tab can't reliably self-close; show a farewell
-                // and leave the title in place.
-                const farewell = document.createElement('div');
-                farewell.textContent = 'Thanks for playing. '
-                    + 'You may now close this tab.';
-                Object.assign(farewell.style, {
-                    position: 'fixed', inset: '0', display: 'flex',
-                    alignItems: 'center', justifyContent: 'center',
-                    background: 'rgba(0,0,0,0.85)', color: '#c42a1e',
-                    font: '20px Geneva, sans-serif', zIndex: '10000',
-                } as Partial<CSSStyleDeclaration>);
-                farewell.addEventListener('click', () => {
-                    farewell.remove();
-                    title.setEnabled(true);
-                });
-                document.body.appendChild(farewell);
-                try { window.close(); } catch { /* ignore */ }
+            case 'quit':
+                // Deliberately a no-op: a browser tab cannot quit itself
+                // (window.close() is ignored for tabs the script did not
+                // open), and anything else -- reloading, blanking the
+                // page, dropping the sockets -- destroys the session
+                // instead of quitting. The button stays because the
+                // original menu has it.
                 break;
-            }
             default:
                 break;
         }
@@ -2488,6 +2599,11 @@ if (isMuted()) {
 const entryQuery = new URLSearchParams(window.location.search);
 const autoEnter = ['enter', 'ship', 'system', 'char']
     .some(param => entryQuery.has(param));
+
+// Point the save layer at the active pilot BEFORE anything reads a save.
+// On first run this migrates the legacy single slot into the registry as
+// the first pilot, keeping its save exactly where it already is.
+applyActivePilot();
 
 if (autoEnter) {
     startGame().catch((e) => {

@@ -44,11 +44,14 @@ describe('client_prefs', () => {
             expect(base['accelerate']).toBe('ArrowUp');
         });
 
-        it('ignores empty override values', () => {
+        it('treats an empty override value as explicitly unbound', () => {
+            // '' is written when the player moves an action's key onto
+            // another action; the served default must NOT come back, or
+            // the displaced action would keep firing on the stolen key.
             const base = { accelerate: 'ArrowUp' };
             const merged = mergeControls(base,
                 { accelerate: '' } as ControlsOverride);
-            expect(merged['accelerate']).toBe('ArrowUp');
+            expect(merged['accelerate']).toEqual([]);
         });
     });
 

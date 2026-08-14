@@ -88,7 +88,10 @@ export const MIN_READABLE_SAVE_VERSION = 1;
 /** Stable localStorage key holding the current save. */
 export const SAVE_KEY = 'novajs:save';
 
-/** Where an unreadable save is parked instead of being deleted. */
+/**
+ * Where an unreadable save in the legacy slot is parked instead of being
+ * deleted. Per-pilot saves derive theirs the same way (quarantineKeyFor).
+ */
 export const SAVE_QUARANTINE_KEY = 'novajs:save:quarantine';
 
 /**
@@ -473,6 +476,31 @@ export interface SaveStorage {
     removeItem(key: string): void;
 }
 
+/**
+ * Which storage key the load/write/reset functions below act on.
+ *
+ * Multi-pilot support (title/pilot_registry.ts) gives every pilot its own
+ * save key and points this at the active one; the default is the legacy
+ * single slot, which is also the migrated first pilot's key, so nothing
+ * that has not opted in sees a change.
+ */
+let activeSaveKey: string = SAVE_KEY;
+
+/** Points the save functions at `key` (falsy resets to the legacy slot). */
+export function setActiveSaveKey(key: string | null | undefined): void {
+    activeSaveKey = key || SAVE_KEY;
+}
+
+/** The save key currently in use. */
+export function getActiveSaveKey(): string {
+    return activeSaveKey;
+}
+
+/** Where an unreadable save under `key` is parked. */
+export function quarantineKeyFor(key: string): string {
+    return `${key}:quarantine`;
+}
+
 function getStorage(storage?: SaveStorage): SaveStorage | undefined {
     if (storage) {
         return storage;
@@ -495,9 +523,10 @@ export function loadSave(storage?: SaveStorage): SaveData | undefined {
     if (!store) {
         return undefined;
     }
+    const key = activeSaveKey;
     let raw: string | null;
     try {
-        raw = store.getItem(SAVE_KEY);
+        raw = store.getItem(key);
     } catch {
         return undefined;
     }
@@ -507,14 +536,15 @@ export function loadSave(storage?: SaveStorage): SaveData | undefined {
     const data = decodeSave(raw);
     if (data === undefined) {
         // Park the unreadable save instead of dropping it silently.
+        const quarantine = quarantineKeyFor(key);
         try {
-            store.setItem(SAVE_QUARANTINE_KEY, raw);
-            store.removeItem(SAVE_KEY);
+            store.setItem(quarantine, raw);
+            store.removeItem(key);
         } catch {
             // Best effort; ignore storage failures.
         }
         console.warn(
-            `Ignoring an unreadable save (moved to '${SAVE_QUARANTINE_KEY}').`);
+            `Ignoring an unreadable save (moved to '${quarantine}').`);
         return undefined;
     }
     return data;
@@ -527,7 +557,7 @@ export function writeSave(data: SaveData, storage?: SaveStorage): void {
         return;
     }
     try {
-        store.setItem(SAVE_KEY, encodeSave(data));
+        store.setItem(activeSaveKey, encodeSave(data));
     } catch (e) {
         console.warn('Failed to write save', e);
     }
@@ -540,7 +570,7 @@ export function resetSave(storage?: SaveStorage): void {
         return;
     }
     try {
-        store.removeItem(SAVE_KEY);
+        store.removeItem(activeSaveKey);
     } catch {
         // Ignore.
     }

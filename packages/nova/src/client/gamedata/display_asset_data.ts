@@ -9,6 +9,8 @@ import { PpatImageData } from 'novadatainterface/ppat_image';
 import { SoundFile } from 'novadatainterface/sound_file';
 import { SpriteSheetFramesData, SpriteSheetImageData } from 'novadatainterface/sprite_sheet_data';
 import { StatusBarData } from 'novadatainterface/status_bar_data';
+import { StringTableData } from 'novadatainterface/string_table_data';
+import { DescriptionData } from 'novadatainterface/description_data';
 import { TargetCornersData } from 'novadatainterface/target_corners_data';
 import * as PIXI from 'pixi.js';
 import * as sound from '@pixi/sound';
@@ -18,7 +20,8 @@ import { dataPath } from '../../common/game_data_paths.js';
 export type DisplayAssetDataResources = Pick<NovaDataInterface,
     'Pict' | 'PictImage' | 'Cicn' | 'CicnImage' | 'PpatImage' |
     'TargetCorners' | 'SpriteSheetImage' | 'SpriteSheetFrames' |
-    'StatusBar' | 'Explosion' | 'SoundFile'
+    'StatusBar' | 'Explosion' | 'SoundFile' |
+    'StringTable' | 'Description'
 > & {
     Sound: Gettable<sound.Sound>,
 };
@@ -49,6 +52,8 @@ export class DisplayAssetData implements DisplayAssetDataInterface {
             StatusBar: this.addStructuredGettable<StatusBarData>(NovaDataType.StatusBar),
             Explosion: this.addStructuredGettable<ExplosionData>(NovaDataType.Explosion),
             SoundFile: this.addBinaryGettable<SoundFile>(NovaDataType.SoundFile, '.mp3'),
+            StringTable: this.addStructuredGettable<StringTableData>(NovaDataType.StringTable),
+            Description: this.addStructuredGettable<DescriptionData>(NovaDataType.Description),
             Sound: this.addSoundGettable(),
         };
     }

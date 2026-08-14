@@ -18,15 +18,30 @@ import { FONT } from './outfitter.js';
  * shipyard's "There are no ships available for purchase here." at index
  * 222. Note the hire string has no trailing "here".
  *
- * SEAM: it is hardcoded rather than read from the resource because there
- * is no generic STR# accessor on the data interface yet — string tables
- * reach the game only when a parser folds them into a specific resource
- * (STR# 4000 rides on chär, for instance). That is the established
- * convention for one-off UI strings here: gamble.ts cites STR# 150 and
- * reputation.ts cites STR# 138 the same way. When a string-table
- * accessor lands, source this from STR# 2002 index 223.
+ * Kept as the fallback for a data set whose STR# 2002 is missing or too
+ * short; `noShipsForHire()` below reads the real string from the table.
  */
 export const NO_SHIPS_FOR_HIRE = 'There are no ships available for hire.';
+
+/** The STR# table and index the hire message comes from. */
+export const NO_SHIPS_FOR_HIRE_TABLE = 'nova:2002';
+export const NO_SHIPS_FOR_HIRE_INDEX = 223;
+
+/**
+ * The "no pilots for hire today" message, read from STR# 2002 index 223.
+ * Falls back to the constant above when the table is absent.
+ */
+export async function noShipsForHire(
+    displayAssets: DisplayAssetDataInterface): Promise<string> {
+    try {
+        const table = await displayAssets.data.StringTable.get(
+            NO_SHIPS_FOR_HIRE_TABLE);
+        const text = table.strings[NO_SHIPS_FOR_HIRE_INDEX];
+        return text?.trim() ? text : NO_SHIPS_FOR_HIRE;
+    } catch {
+        return NO_SHIPS_FOR_HIRE;
+    }
+}
 
 /** The one-time fee to hire an escort: 10% of the ship's price.
  * Matches the original's observed behavior (a 300,000 cr Thunderhead

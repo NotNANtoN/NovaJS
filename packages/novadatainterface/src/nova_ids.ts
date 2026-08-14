@@ -33,5 +33,7 @@ export function getDefaultNovaIDs(): NovaIDs {
         TargetCorners: [],
         Weapon: [],
         SoundFile: [],
+        StringTable: [],
+        Description: [],
     }
 }

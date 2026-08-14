@@ -6,6 +6,7 @@ import { getDefaultExplosionData } from "./explosion_data.js";
 import { getDefaultDudeData } from "./dude_data.js";
 import { getDefaultFleetData } from "./fleet_data.js";
 import { getDefaultCronData } from "./cron_data.js";
+import { getDefaultDescriptionData } from "./description_data.js";
 import { getDefaultGovtData } from "./govt_data.js";
 import { getDefaultJunkData } from "./junk_data.js";
 import { getDefaultMissionData } from "./mission_data.js";
@@ -21,6 +22,7 @@ import { getDefaultShipData } from "./ship_data.js";
 import { getDefaultSoundFile } from "./sound_file.js";
 import { getDefaultSpriteSheetData, getDefaultSpriteSheetFrames } from "./sprite_sheet_data.js";
 import { getDefaultStatusBarData } from "./status_bar_data.js";
+import { getDefaultStringTableData } from "./string_table_data.js";
 import { getDefaultSystemData } from "./system_data.js";
 import { getDefaultTargetCornersData } from "./target_corners_data.js";
 import { getDefaultProjectileWeaponData } from "./weapon_data.js";
@@ -54,4 +56,6 @@ export const Defaults = {
     get StatusBar() { return getDefaultStatusBarData() },
     get Explosion() { return getDefaultExplosionData() },
     get SoundFile() { return getDefaultSoundFile() },
+    get StringTable() { return getDefaultStringTableData() },
+    get Description() { return getDefaultDescriptionData() },
 }

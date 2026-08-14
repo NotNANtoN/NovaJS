@@ -96,7 +96,13 @@ export function saveGameSettings(settings: GameSettingsOverride,
     writeJson(SETTINGS_OVERRIDE_KEY, settings, storage);
 }
 
-/** Control-binding overrides: action id -> primary event.code. */
+/**
+ * Control-binding overrides: action id -> primary event.code.
+ *
+ * An empty-string value means "explicitly unbound": the player moved this
+ * action's key onto another action, so the served default must NOT come
+ * back. `mergeControls` turns it into an empty binding list.
+ */
 export type ControlsOverride = Record<string, string>;
 
 /** Loads persisted control-binding overrides (empty object if none). */
@@ -121,11 +127,68 @@ export function mergeControls(base: Record<string, unknown>,
     override: ControlsOverride): Record<string, unknown> {
     const merged: Record<string, unknown> = { ...base };
     for (const [action, code] of Object.entries(override)) {
-        if (code) {
-            merged[action] = code;
-        }
+        // '' means the player deliberately unbound this action (its key
+        // was reassigned elsewhere). An empty list is a valid
+        // ControlInputs value, so the action ends up with no key at all
+        // rather than silently reverting to its served default.
+        merged[action] = code ? code : [];
     }
     return merged;
+}
+
+/**
+ * Records "bind `action` to `code`" in an override map, taking the key
+ * away from whichever other rebindable action currently owns it.
+ *
+ * Without this displacement the new binding is unusable: `getActions`
+ * returns every action bound to a code, so e.g. rebinding Fire Secondary
+ * onto the Hyper Jump key made that key both fire and jump. Only actions
+ * the editor itself exposes are displaced — menu/spaceport actions
+ * (up/down/accept, bar/buy/sell, ...) intentionally share keys with
+ * flight controls because they are live in different contexts.
+ *
+ * Returns a new map; the input is not mutated.
+ */
+export function bindControl(base: Record<string, unknown>,
+    override: ControlsOverride, action: string, code: string,
+    rebindableActions: readonly string[]): ControlsOverride {
+    const next: ControlsOverride = { ...override, [action]: code };
+    if (!code) {
+        return next;
+    }
+    for (const other of rebindableActions) {
+        if (other === action) {
+            continue;
+        }
+        if (primaryBinding(other, base, next) === code) {
+            next[other] = '';
+        }
+    }
+    return next;
+}
+
+/**
+ * The event.code an action is currently bound to: the override if it has
+ * one (including '' for explicitly unbound), else the first key of the
+ * served default.
+ */
+export function primaryBinding(action: string, base: Record<string, unknown>,
+    override: ControlsOverride): string {
+    if (Object.prototype.hasOwnProperty.call(override, action)) {
+        return override[action];
+    }
+    const raw = base[action];
+    if (typeof raw === 'string') {
+        return raw;
+    }
+    if (Array.isArray(raw) && typeof raw[0] === 'string') {
+        return raw[0] as string;
+    }
+    if (raw && typeof raw === 'object'
+        && typeof (raw as { key?: string }).key === 'string') {
+        return (raw as { key: string }).key;
+    }
+    return '';
 }
 
 /** A pilot's identity, entered in the "New Pilot" dialog. */

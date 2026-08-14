@@ -14,6 +14,8 @@ import { registerSimulationBridgeEvent } from '../communication/simulation_bridg
 import { ControlAction, Controls, getActions, SavedControls } from './controls.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { PlatformResource } from './platform_plugin.js';
+import { mergeControls } from '../title/client_prefs.js';
+import { loadPilotControls } from '../title/pilot_registry.js';
 
 
 export interface ControlEvent {
@@ -73,7 +75,18 @@ export const ControlsPlugin: Plugin = {
                 throw new Error('Expected simulation game data to provide getSettings');
             }
             const controlsJson = await gameData.getSettings('controls.json');
-            const decoded = SavedControls.pipe(Controls).decode(controlsJson);
+            // On the client, layer the active pilot's rebindings over the
+            // served defaults so this resource agrees with the map
+            // browser.ts matches against; otherwise a world built here
+            // would answer to the stock keys the player rebound away.
+            // Only on 'browser': the worker sim must not read
+            // client-local storage, and it never matches keys itself
+            // (control events reach it as already-resolved actions).
+            const merged = platform === 'browser'
+                ? mergeControls(controlsJson as Record<string, unknown>,
+                    loadPilotControls())
+                : controlsJson;
+            const decoded = SavedControls.pipe(Controls).decode(merged);
             if (isLeft(decoded)) {
                 console.error(decoded.left);
                 throw new Error('Failed to parse controls');

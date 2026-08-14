@@ -21,6 +21,8 @@ import { ShipData } from "novadatainterface/ship_data";
 import { SoundFile } from "novadatainterface/sound_file";
 import { SpriteSheetData, SpriteSheetFramesData, SpriteSheetImageData } from "novadatainterface/sprite_sheet_data";
 import { StatusBarData } from "novadatainterface/status_bar_data";
+import { StringTableData } from "novadatainterface/string_table_data";
+import { DescriptionData } from "novadatainterface/description_data";
 import { SystemData } from "novadatainterface/system_data";
 import { GovtData } from "novadatainterface/govt_data";
 import { DudeData } from "novadatainterface/dude_data";
@@ -65,6 +67,8 @@ const Paths = {
     StatusBar: { path: "StatusBar", extension: "json" } as PathInfo,
     Explosion: { path: "Explosion", extension: "json" } as PathInfo,
     SoundFile: { path: "SoundFile", extension: "mp3" } as PathInfo,
+    StringTable: { path: "StringTable", extension: "json" } as PathInfo,
+    Description: { path: "Description", extension: "json" } as PathInfo,
 };
 
 class FilesystemData implements GameDataInterface {
@@ -100,6 +104,8 @@ class FilesystemData implements GameDataInterface {
             StatusBar: this.getFunction<StatusBarData>(Paths.StatusBar),
             Explosion: this.getFunction<ExplosionData>(Paths.Explosion),
             SoundFile: this.getFunction<SoundFile>(Paths.SoundFile),
+            StringTable: this.getFunction<StringTableData>(Paths.StringTable),
+            Description: this.getFunction<DescriptionData>(Paths.Description),
         }
         this.ids = this.buildIDs();
     }
@@ -170,6 +176,8 @@ class FilesystemData implements GameDataInterface {
             StatusBar: await this.buildIDsForPath(Paths.StatusBar),
             Explosion: await this.buildIDsForPath(Paths.Explosion),
             SoundFile: await this.buildIDsForPath(Paths.SoundFile),
+            StringTable: await this.buildIDsForPath(Paths.StringTable),
+            Description: await this.buildIDsForPath(Paths.Description),
         }
     }
 

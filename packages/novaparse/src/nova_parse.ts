@@ -23,6 +23,8 @@ import { PpatImageData } from "novadatainterface/ppat_image";
 import { ShipData } from "novadatainterface/ship_data";
 import { SpriteSheetData, SpriteSheetFramesData, SpriteSheetImageData } from "novadatainterface/sprite_sheet_data";
 import { StatusBarData } from "novadatainterface/status_bar_data";
+import { StringTableData } from "novadatainterface/string_table_data";
+import { DescriptionData } from "novadatainterface/description_data";
 import { SystemData } from "novadatainterface/system_data";
 import { TargetCornersData } from "novadatainterface/target_corners_data";
 import { WeaponData } from "novadatainterface/weapon_data";
@@ -47,6 +49,8 @@ import { resourceIDNotFoundStrict, resourceIDNotFoundWarn } from "./parsers/reso
 import { AmmoOutfitMap, ShipParseClosure, ShipPictMap, WeaponOutfitMap } from "./parsers/ship_parse.js";
 import { SpriteSheetMulti, SpriteSheetMultiParse } from "./parsers/sprite_sheet_multi_parse.js";
 import { StatusBarParse } from "./parsers/status_bar_parse.js";
+import { StringTableParse } from "./parsers/string_table_parse.js";
+import { DescriptionParse } from "./parsers/description_parse.js";
 import { SystemParse } from "./parsers/system_parse.js";
 import { TargetCornersParse } from "./parsers/target_corners_parse.js";
 import { WeaponParse } from "./parsers/weapon_parse.js";
@@ -71,6 +75,8 @@ import { RledResource } from "./resource_parsers/rled_resource.js";
 import { RoidResource } from "./resource_parsers/roid_resource.js";
 import { ShipResource } from "./resource_parsers/ship_resource.js";
 import { SpobResource } from "./resource_parsers/spob_resource.js";
+import { StrNResource } from "./resource_parsers/strn_resource.js";
+import { DescResource } from "./resource_parsers/desc_resource.js";
 import { SystResource } from "./resource_parsers/syst_resource.js";
 import { WeapResource } from "./resource_parsers/weap_resource.js";
 import { Defaults } from "novadatainterface/defaults";
@@ -225,6 +231,8 @@ export class NovaParse implements GameDataInterface {
             StatusBar: this.buildIDsForResource(idSpace.ïntf),
             Explosion: this.buildIDsForResource(idSpace.bööm),
             SoundFile: this.buildIDsForResource(idSpace["snd "]),
+            StringTable: this.buildIDsForResource(idSpace["STR#"]),
+            Description: this.buildIDsForResource(idSpace.dësc),
         }
     }
 
@@ -259,6 +267,8 @@ export class NovaParse implements GameDataInterface {
             StatusBar: this.makeGettable<IntfResource, StatusBarData>(NovaResourceType.ïntf, StatusBarParse),
             Explosion: this.makeGettable<BoomResource, ExplosionData>(NovaResourceType.bööm, ExplosionParse),
             SoundFile: this.makeGettable<SndResource, SoundFile>(NovaResourceType.snd, SoundFileParse),
+            StringTable: this.makeGettable<StrNResource, StringTableData>(NovaResourceType.STRH, StringTableParse),
+            Description: this.makeGettable<DescResource, DescriptionData>(NovaResourceType.dësc, DescriptionParse),
         }
 
         return data;

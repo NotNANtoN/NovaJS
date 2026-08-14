@@ -2,6 +2,7 @@ import { AsteroidData } from "./asteroid_data.js";
 import { CicnData } from "./cicn_data.js";
 import { CicnImageData } from "./cicn_image.js";
 import { CronData } from "./cron_data.js";
+import { DescriptionData } from "./description_data.js";
 import { ExplosionData } from "./explosion_data.js";
 import { DudeData } from "./dude_data.js";
 import { FleetData } from "./fleet_data.js";
@@ -21,6 +22,7 @@ import { ShipData } from "./ship_data.js";
 import { SoundFile } from "./sound_file.js";
 import { SpriteSheetData, SpriteSheetFramesData, SpriteSheetImageData } from "./sprite_sheet_data.js";
 import { StatusBarData } from "./status_bar_data.js";
+import { StringTableData } from "./string_table_data.js";
 import { SystemData } from "./system_data.js";
 import { TargetCornersData } from "./target_corners_data.js";
 import { WeaponData } from "./weapon_data.js";
@@ -54,6 +56,8 @@ enum NovaDataType {
     StatusBar = "StatusBar",
     Explosion = "Explosion",
     SoundFile = "SoundFile",
+    StringTable = "StringTable",
+    Description = "Description",
 };
 
 // index: NovaDataType
@@ -85,6 +89,8 @@ type NovaDataInterface = {
     StatusBar: Gettable<StatusBarData>,
     Explosion: Gettable<ExplosionData>,
     SoundFile: Gettable<SoundFile>,
+    StringTable: Gettable<StringTableData>,
+    Description: Gettable<DescriptionData>,
 }
 
 class NovaIDNotFoundError extends Error { };

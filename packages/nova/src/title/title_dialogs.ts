@@ -10,10 +10,14 @@
  */
 
 import {
-    ControlsOverride, GameSettingsOverride, loadControlsOverride,
-    loadGameSettings, PilotProfile, saveControlsOverride, saveGameSettings,
+    bindControl, ControlsOverride, GameSettingsOverride, PilotProfile,
+    primaryBinding,
 } from './client_prefs.js';
 import { keyLabel } from './key_labels.js';
+import {
+    loadPilotControls, loadPilotSettings, savePilotControls,
+    savePilotSettings,
+} from './pilot_registry.js';
 
 // ---------------------------------------------------------------------------
 // Shared modal scaffolding.
@@ -85,7 +89,12 @@ function buttonRow(...buttons: HTMLButtonElement[]): HTMLDivElement {
 // About.
 // ---------------------------------------------------------------------------
 
-const ABOUT_TEXT = [
+/**
+ * Fallback credits, used only when the game data has no About text (a
+ * plug-in-only or partial data set). The real text comes from the stock
+ * dësc resources — see ABOUT_DESC_IDS in browser.ts.
+ */
+export const ABOUT_TEXT = [
     'Escape Velocity: Nova',
     '(c) 1996-2008 Ambrosia Software, Inc.',
     '',
@@ -99,8 +108,19 @@ const ABOUT_TEXT = [
     'NovaJS — a browser remake built on the original game resources.',
 ];
 
-/** The "About Nova" panel: the credits, with an Okay button. */
-export function showAboutDialog(): Promise<void> {
+/**
+ * The original's About box prints "Registered to: <REG>", substituting
+ * the registration name at runtime. There is no registration in a
+ * browser build, so the placeholder gets a truthful stand-in rather
+ * than being shown raw.
+ */
+export function fillAboutPlaceholders(text: string): string {
+    return text.replace(/<REG>/g, 'NovaJS (unregistered)');
+}
+
+/** The "About Nova" panel: the credits, with an Okay button.
+ * `text` is the credits sourced from game data; omitted => fallback. */
+export function showAboutDialog(text?: string): Promise<void> {
     return new Promise((resolve) => {
         const modal = makeModal('about-dialog');
         const title = document.createElement('div');
@@ -117,7 +137,8 @@ export function showAboutDialog(): Promise<void> {
             fontSize: '12px', whiteSpace: 'pre-wrap', lineHeight: '1.4',
             maxHeight: '320px', overflowY: 'auto',
         } as Partial<CSSStyleDeclaration>);
-        body.textContent = ABOUT_TEXT.join('\n');
+        body.textContent = fillAboutPlaceholders(
+            text?.trim() ? text : ABOUT_TEXT.join('\n'));
         modal.panel.appendChild(body);
 
         const okay = button('Okay', 'about-okay', true);
@@ -263,12 +284,36 @@ export interface PilotEntry {
     detail?: string;
 }
 
-/** "Open pilot" — lists saved pilots. Resolves the chosen entry id, or
- * null on Cancel. */
-export function showOpenPilotDialog(entries: PilotEntry[]):
-    Promise<string | null> {
+/**
+ * Pilot-file management hooks. The dialog owns no storage: the caller
+ * (browser.ts) wires these to the pilot registry.
+ */
+export interface PilotDialogActions {
+    /** Re-reads the pilot list after a mutating action. */
+    refresh(): PilotEntry[];
+    /** Downloads the pilot as a file. */
+    onExport(id: string): void;
+    /** Validates and adds a pilot file. Returns a message to display. */
+    onImport(text: string): { ok: boolean, message: string };
+    /** Deletes a pilot and its save. */
+    onDelete(id: string): void;
+}
+
+/**
+ * "Open pilot" — the browser stand-in for the original's OS file dialog.
+ *
+ * The original opens a `Pilots` folder through the native Open panel, so
+ * there is no in-game list art to copy; this is a plain list in the
+ * existing title-dialog style, plus the file operations a browser needs
+ * to make pilot files portable at all (import/export).
+ *
+ * Resolves the chosen entry id, or null on Cancel.
+ */
+export function showOpenPilotDialog(entries: PilotEntry[],
+    actions?: PilotDialogActions): Promise<string | null> {
     return new Promise((resolve) => {
         const modal = makeModal('open-pilot-dialog');
+        modal.panel.style.minWidth = '420px';
         const title = document.createElement('div');
         title.textContent = 'Open pilot:';
         Object.assign(title.style, {
@@ -285,31 +330,54 @@ export function showOpenPilotDialog(entries: PilotEntry[]):
         } as Partial<CSSStyleDeclaration>);
         modal.panel.appendChild(list);
 
+        const status = document.createElement('div');
+        status.dataset.testid = 'open-pilot-status';
+        Object.assign(status.style, {
+            minHeight: '16px', margin: '8px 2px 0', fontSize: '11px',
+            color: '#444',
+        } as Partial<CSSStyleDeclaration>);
+        modal.panel.appendChild(status);
+
+        let current: PilotEntry[] = entries;
         let selectedId: string | undefined;
         const rows = new Map<string, HTMLDivElement>();
-        const open = button('Open', 'open-pilot-open', true);
-        open.disabled = true;
-        open.style.opacity = '0.5';
 
-        const select = (id: string) => {
+        const open = button('Open', 'open-pilot-open', true);
+        const cancel = button('Cancel', 'open-pilot-cancel', false);
+        const exportBtn = button('Export', 'open-pilot-export', false);
+        const importBtn = button('Import…', 'open-pilot-import', false);
+        const deleteBtn = button('Delete', 'open-pilot-delete', false);
+
+        const setEnabled = (btn: HTMLButtonElement, on: boolean) => {
+            btn.disabled = !on;
+            btn.style.opacity = on ? '1' : '0.5';
+        };
+
+        const select = (id: string | undefined) => {
             selectedId = id;
             for (const [rid, row] of rows) {
                 row.style.background = rid === id ? '#2b6cff' : 'transparent';
                 row.style.color = rid === id ? '#fff' : '#111';
             }
-            open.disabled = false;
-            open.style.opacity = '1';
+            for (const btn of [open, exportBtn, deleteBtn]) {
+                setEnabled(btn, id !== undefined);
+            }
         };
 
-        if (entries.length === 0) {
-            const empty = document.createElement('div');
-            empty.textContent = '(no saved pilots)';
-            Object.assign(empty.style, {
-                color: '#888', padding: '12px', textAlign: 'center',
-            } as Partial<CSSStyleDeclaration>);
-            list.appendChild(empty);
-        } else {
-            for (const entry of entries) {
+        const renderList = () => {
+            list.innerHTML = '';
+            rows.clear();
+            if (current.length === 0) {
+                const empty = document.createElement('div');
+                empty.textContent = '(no saved pilots)';
+                Object.assign(empty.style, {
+                    color: '#888', padding: '12px', textAlign: 'center',
+                } as Partial<CSSStyleDeclaration>);
+                list.appendChild(empty);
+                select(undefined);
+                return;
+            }
+            for (const entry of current) {
                 const row = document.createElement('div');
                 row.dataset.testid = `open-pilot-entry-${entry.id}`;
                 Object.assign(row.style, {
@@ -327,13 +395,79 @@ export function showOpenPilotDialog(entries: PilotEntry[]):
                     row.appendChild(detail);
                 }
                 row.addEventListener('click', () => select(entry.id));
-                row.addEventListener('dblclick', () => { select(entry.id); confirm(); });
+                row.addEventListener('dblclick',
+                    () => { select(entry.id); confirm(); });
                 rows.set(entry.id, row);
                 list.appendChild(row);
             }
+            // Keep the selection if it survived, else preselect the first.
+            select(current.some(e => e.id === selectedId)
+                ? selectedId : current[0].id);
+        };
+
+        const refresh = (message: string) => {
+            status.textContent = message;
+            if (actions) {
+                current = actions.refresh();
+            }
+            renderList();
+        };
+
+        // A hidden file input is the only way a browser can read a local
+        // file; it is appended so a headless driver can set files on it.
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = '.json,application/json';
+        fileInput.dataset.testid = 'open-pilot-file';
+        fileInput.style.display = 'none';
+        modal.panel.appendChild(fileInput);
+        fileInput.addEventListener('change', () => {
+            const file = fileInput.files?.[0];
+            if (!file || !actions) { return; }
+            const reader = new FileReader();
+            reader.onload = () => {
+                const result = actions.onImport(String(reader.result ?? ''));
+                refresh(result.message);
+            };
+            reader.onerror = () => { status.textContent = 'Could not read that file.'; };
+            reader.readAsText(file);
+            fileInput.value = '';
+        });
+
+        if (actions) {
+            exportBtn.addEventListener('click', () => {
+                if (!selectedId) { return; }
+                actions.onExport(selectedId);
+                status.textContent = 'Exported.';
+            });
+            importBtn.addEventListener('click', () => fileInput.click());
+            deleteBtn.addEventListener('click', () => {
+                if (!selectedId) { return; }
+                const entry = current.find(e => e.id === selectedId);
+                const label = entry ? entry.name : 'this pilot';
+                if (!window.confirm(
+                    `Delete ${label}? This cannot be undone.`)) {
+                    return;
+                }
+                actions.onDelete(selectedId);
+                selectedId = undefined;
+                refresh(`Deleted ${label}.`);
+            });
         }
 
-        const cancel = button('Cancel', 'open-pilot-cancel', false);
+        // File operations only exist when the caller wired them up.
+        const leftRow = document.createElement('div');
+        Object.assign(leftRow.style, {
+            display: 'flex', justifyContent: 'flex-start', marginTop: '12px',
+        } as Partial<CSSStyleDeclaration>);
+        if (actions) {
+            for (const b of [importBtn, exportBtn, deleteBtn]) {
+                b.style.marginLeft = '0';
+                b.style.marginRight = '8px';
+                leftRow.appendChild(b);
+            }
+            modal.panel.appendChild(leftRow);
+        }
         modal.panel.appendChild(buttonRow(cancel, open));
 
         const cleanup = () => {
@@ -353,8 +487,7 @@ export function showOpenPilotDialog(entries: PilotEntry[]):
         open.addEventListener('click', confirm);
         cancel.addEventListener('click', abort);
         document.addEventListener('keydown', onKey);
-        // Preselect the first entry for keyboard users.
-        if (entries.length > 0) { select(entries[0].id); }
+        renderList();
     });
 }
 
@@ -458,25 +591,12 @@ const CONTROL_TABS: { name: string, rows: ControlRow[] }[] = [
     },
 ];
 
-/** The primary bound event.code for an action, override taking priority
- * over the served controls.json base. */
-function currentBinding(action: string, base: Record<string, unknown>,
-    override: ControlsOverride): string {
-    if (override[action]) {
-        return override[action];
-    }
-    const raw = base[action];
-    if (typeof raw === 'string') {
-        return raw;
-    }
-    if (Array.isArray(raw) && typeof raw[0] === 'string') {
-        return raw[0] as string;
-    }
-    if (raw && typeof raw === 'object' && typeof (raw as { key?: string }).key === 'string') {
-        return (raw as { key: string }).key;
-    }
-    return '';
-}
+/** Every action the editor lets the player rebind. Binding one of these
+ * to an occupied key takes that key away from the others (bindControl). */
+const REBINDABLE_ACTIONS: string[] = CONTROL_TABS
+    .flatMap(tab => tab.rows)
+    .map(row => row.action)
+    .filter((a): a is string => typeof a === 'string');
 
 /**
  * The "Set Prefs" panel: Game Settings plus the four control-binding
@@ -497,9 +617,9 @@ export function showPreferencesDialog(baseControls: Record<string, unknown>):
         } as Partial<CSSStyleDeclaration>);
         modal.panel.appendChild(title);
 
-        // Working copies; committed only on OK.
-        const settings: GameSettingsOverride = { ...loadGameSettings() };
-        const controlsOverride: ControlsOverride = { ...loadControlsOverride() };
+        // Working copies of the ACTIVE PILOT's prefs; committed only on OK.
+        const settings: GameSettingsOverride = { ...loadPilotSettings() };
+        const controlsOverride: ControlsOverride = { ...loadPilotControls() };
 
         const tabBar = document.createElement('div');
         Object.assign(tabBar.style, {
@@ -559,9 +679,11 @@ export function showPreferencesDialog(baseControls: Record<string, unknown>):
             modal.close();
         };
         const commit = () => {
-            saveGameSettings(settings);
-            saveControlsOverride(controlsOverride);
+            savePilotSettings(settings);
+            savePilotControls(controlsOverride);
             cleanup();
+            // The caller re-reads the live bindings from here (browser.ts
+            // applyControls), so an edit takes effect without a reload.
             resolve();
         };
         const abort = () => { cleanup(); resolve(); };
@@ -647,6 +769,11 @@ function buildControlTab(tab: { name: string, rows: ControlRow[] },
         padding: '4px 8px',
     } as Partial<CSSStyleDeclaration>);
 
+    // Rebinding can displace another row on this same tab, so every
+    // button re-reads its binding after any capture.
+    const renderers: (() => void)[] = [];
+    const renderAll = () => { for (const r of renderers) { r(); } };
+
     for (const row of tab.rows) {
         const line = document.createElement('div');
         Object.assign(line.style, {
@@ -678,8 +805,10 @@ function buildControlTab(tab: { name: string, rows: ControlRow[] },
         const action = row.action;
         const render = () => {
             capture.textContent =
-                keyLabel(currentBinding(action, baseControls, override)) || '·';
+                keyLabel(primaryBinding(action, baseControls, override))
+                || '·';
         };
+        renderers.push(render);
         render();
 
         capture.addEventListener('click', () => {
@@ -689,14 +818,22 @@ function buildControlTab(tab: { name: string, rows: ControlRow[] },
                 e.preventDefault();
                 e.stopPropagation();
                 if (e.key !== 'Escape') {
-                    override[action] = e.code;
+                    // Take the key away from any other rebindable action
+                    // that owns it, then record the new binding. Copied
+                    // onto the shared working map rather than replacing
+                    // it, so the other tabs see the change too.
+                    const next = bindControl(baseControls, override, action,
+                        e.code, REBINDABLE_ACTIONS);
+                    for (const [k, v] of Object.entries(next)) {
+                        override[k] = v;
+                    }
                 }
                 release();
             };
             const release = () => {
                 document.removeEventListener('keydown', onCapture, true);
                 capture.style.background = '#fff';
-                render();
+                renderAll();
                 // Clear the active capture (not a truthy no-op) so the dialog's
                 // key handler resumes handling Enter/Escape immediately.
                 setCapture(undefined);
