@@ -52,6 +52,83 @@ export const SHIPYARD_PRICE_LABELS = {
 } as const;
 
 /**
+ * The price pane's two columns, in menu-container coordinates. The label
+ * column is the one the outfitter's "Item Price:" uses -- both menus draw
+ * on the 8502 frame, and the reference shots put the label at the same
+ * screen x (1192) in each.
+ */
+export const SHIPYARD_PRICE_COLUMNS = { label: 234, value: 304 } as const;
+
+/**
+ * The y of each price row. Measured at screen y 598 / 610 / 634 / 658 in
+ * earth_spaceport.png: a 12px line pitch with a blank line before "Final
+ * Price:" and another before "You Have:".
+ */
+export const SHIPYARD_PRICE_ROWS = {
+    shipPrice: 58,
+    tradeIn: 70,
+    finalPrice: 94,
+    youHave: 118,
+} as const;
+
+/** One pill in the shipyard's button row. */
+export interface ShipyardButtonSpec {
+    /** The caption the original prints on the pill. */
+    label: string;
+    /**
+     * The width handed to Button: the tiling middle only. The two end
+     * caps add roughly BUTTON_CAP_WIDTH each, so the pill on screen is
+     * wider than this by about 2 * BUTTON_CAP_WIDTH.
+     */
+    width: number;
+    x: number;
+    y: number;
+}
+
+/**
+ * Button.LEFT_POS -- the cap sprites' inset, which stands in for the cap
+ * texture's width (see the TODO in button.ts). Mirrored here so the
+ * layout specs can reason about a pill's rendered extent.
+ */
+export const BUTTON_CAP_WIDTH = 13.2;
+
+/**
+ * The shipyard's button row: "Info", "Buy Ship", "Done", measured off
+ * earth_spaceport.png rather than guessed.
+ *
+ * How the numbers were taken: the pills' red faces sit at screen x
+ * 836-910 / 948-1042 / 1063-1157, all on the same row. Against our own
+ * capture, a pill's red face starts a fixed offset right of the
+ * container's x and runs (width + 12)px, which inverts to the x and
+ * width here (confirmed by sweeping the row horizontally: dx=0 is the
+ * minimum).
+ *
+ * The y is NOT inferrable the same way -- the red face sits low inside
+ * the 25px pill sprite, so matching red-face rows lands the sprite
+ * wrong. It was swept instead, moving the row a pixel at a time in the
+ * live page and diffing the region against the reference
+ * (visual_compare/sweep_button_y.mjs): a clean V with its minimum at
+ * 128, 20.4% against 46-63% for the neighbourhood.
+ *
+ * The original's middle pill says "Buy Ship", not "Buy" -- and it is
+ * visibly wider than the Info pill, which is what gave the old
+ * uniform-60 row away.
+ */
+export const SHIPYARD_BUTTONS = {
+    info: { label: 'Info', width: 63, x: -129, y: 128 },
+    buy: { label: 'Buy Ship', width: 83, x: -17, y: 128 },
+    done: { label: 'Done', width: 83, x: 98, y: 128 },
+} as const satisfies Record<string, ShipyardButtonSpec>;
+
+/**
+ * How far right a pill reaches in container coordinates: its x plus the
+ * tiling middle, plus a cap at each end.
+ */
+export function buttonRightEdge(spec: ShipyardButtonSpec): number {
+    return spec.x + spec.width + 2 * BUTTON_CAP_WIDTH;
+}
+
+/**
  * The price pane for `newShip` given the player's current state, or
  * undefined when there is nothing to price yet -- no selection, or the
  * current hull's ShipData still loading. The menu blanks the pane in

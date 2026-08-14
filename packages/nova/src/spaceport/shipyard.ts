@@ -14,7 +14,11 @@ import { Menu } from './menu.js';
 import { FONT } from './outfitter.js';
 import { ShipInfoDialog } from './ship_info.js';
 import {
+    SHIPYARD_BUTTONS,
+    SHIPYARD_PRICE_COLUMNS,
     SHIPYARD_PRICE_LABELS,
+    SHIPYARD_PRICE_ROWS,
+    ShipyardButtonSpec,
     ShipyardPriceReadout,
     shipyardPriceReadout,
 } from './shipyard_content.js';
@@ -63,10 +67,15 @@ export class Shipyard extends Menu<Entity> {
         controlEvents: Observable<ControlEvent>) {
         super(displayAssets, simulationData, "nova:8502", controlEvents);
         this.container.name = 'Shipyard';
+        // Captions, widths and positions measured against the original
+        // (shipyard_content.ts). The middle pill says "Buy Ship" and is
+        // wider than Info, as the reference shows.
+        const makeButton = (spec: ShipyardButtonSpec) => new Button(
+            displayAssets, spec.label, spec.width, { x: spec.x, y: spec.y });
         const buttons = {
-            info: new Button(displayAssets, "Info", 60, { x: -140, y: 126 }),
-            buy: new Button(displayAssets, "Buy", 60, { x: -20, y: 126 }),
-            done: new Button(displayAssets, "Done", 60, { x: 100, y: 126 }),
+            info: makeButton(SHIPYARD_BUTTONS.info),
+            buy: makeButton(SHIPYARD_BUTTONS.buy),
+            done: makeButton(SHIPYARD_BUTTONS.done),
         };
         this.buttons = buttons;
         this.addButtons(buttons);
@@ -85,21 +94,18 @@ export class Shipyard extends Menu<Entity> {
         this.text.status.position.y = 100;
 
         // The price pane, measured against
-        // shipyard/earth_spaceport.png: labels at the same column the
-        // outfitter's "Item Price:" uses (both menus share the nova:8502
-        // frame), values 70px right of it, and rows on a 12px pitch with
-        // a blank line before "Final Price:" and another before "You
-        // Have:" — 58 / 70 / 94 / 118.
-        const LABEL_X = 234, VALUE_X = 304;
+        // shipyard/earth_spaceport.png (see shipyard_content.ts for the
+        // columns and row rhythm).
         const rows = [
-            [this.text.shipPriceLabel, this.text.shipPrice, 58],
-            [this.text.tradeInLabel, this.text.tradeIn, 70],
-            [this.text.finalPriceLabel, this.text.finalPrice, 94],
-            [this.text.youHaveLabel, this.text.youHave, 118],
+            [this.text.shipPriceLabel, this.text.shipPrice, 'shipPrice'],
+            [this.text.tradeInLabel, this.text.tradeIn, 'tradeIn'],
+            [this.text.finalPriceLabel, this.text.finalPrice, 'finalPrice'],
+            [this.text.youHaveLabel, this.text.youHave, 'youHave'],
         ] as const;
-        for (const [label, value, y] of rows) {
-            label.position.set(LABEL_X, y);
-            value.position.set(VALUE_X, y);
+        for (const [label, value, field] of rows) {
+            const y = SHIPYARD_PRICE_ROWS[field];
+            label.position.set(SHIPYARD_PRICE_COLUMNS.label, y);
+            value.position.set(SHIPYARD_PRICE_COLUMNS.value, y);
         }
 
         for (const t of Object.values(this.text)) {

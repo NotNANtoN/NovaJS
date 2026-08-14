@@ -7,7 +7,11 @@ import { makeShip } from '../nova_plugin/make_ship.js';
 import { OutfitsStateComponent } from '../nova_plugin/outfit_plugin.js';
 import { CreditsComponent } from '../nova_plugin/player_state_plugin.js';
 import {
+    buttonRightEdge,
+    SHIPYARD_BUTTONS,
+    SHIPYARD_PRICE_COLUMNS,
     SHIPYARD_PRICE_LABELS,
+    SHIPYARD_PRICE_ROWS,
     shipyardPriceReadout,
 } from './shipyard_content.js';
 import {
@@ -71,6 +75,66 @@ describe('shipyard price pane', () => {
             finalPrice: 'Final Price:',
             youHave: 'You Have:',
         });
+    });
+
+    describe('button row', () => {
+        it('is Info / Buy Ship / Done, in that order', () => {
+            // earth_spaceport.png: three pills under the browse pane.
+            // The middle one says "Buy Ship", not "Buy". There is no
+            // fourth button in the shipyard — the ship-info dialog owns
+            // its own Done, and there is no confirm dialog in our
+            // shipyard yet (documented seam in shipyard_rules.ts).
+            expect(Object.keys(SHIPYARD_BUTTONS)).toEqual(
+                ['info', 'buy', 'done']);
+            expect(Object.values(SHIPYARD_BUTTONS).map(b => b.label))
+                .toEqual(['Info', 'Buy Ship', 'Done']);
+        });
+
+        it('keeps the measured pill geometry', () => {
+            // Inverted from the reference's red pill faces at screen x
+            // 836-910 / 948-1042 / 1063-1157, all on one row.
+            expect(SHIPYARD_BUTTONS).toEqual({
+                info: { label: 'Info', width: 63, x: -129, y: 128 },
+                buy: { label: 'Buy Ship', width: 83, x: -17, y: 128 },
+                done: { label: 'Done', width: 83, x: 98, y: 128 },
+            });
+            // Buy Ship is wider than Info in the original; a uniform row
+            // is what the unmeasured version got wrong.
+            expect(SHIPYARD_BUTTONS.buy.width)
+                .toBeGreaterThan(SHIPYARD_BUTTONS.info.width);
+        });
+
+        it('lays the pills out left to right without overlapping', () => {
+            const row = [SHIPYARD_BUTTONS.info, SHIPYARD_BUTTONS.buy,
+                SHIPYARD_BUTTONS.done];
+            for (const [a, b] of row.slice(0, -1).map((a, i) => [a, row[i + 1]])) {
+                expect(buttonRightEdge(a!)).toBeLessThan(b!.x);
+            }
+            // One row: all three share a y.
+            expect(new Set(row.map(b => b.y)).size).toBe(1);
+        });
+
+        it('clears the price pane', () => {
+            // The widened row must not run into the price labels to its
+            // right (the reference leaves 35px between the Done pill and
+            // the "Ship Price:" column).
+            expect(buttonRightEdge(SHIPYARD_BUTTONS.done))
+                .toBeLessThan(SHIPYARD_PRICE_COLUMNS.label);
+        });
+    });
+
+    it('places the price rows on the measured 12px pitch', () => {
+        expect(SHIPYARD_PRICE_ROWS).toEqual({
+            shipPrice: 58, tradeIn: 70, finalPrice: 94, youHave: 118,
+        });
+        // A blank line before "Final Price:" and another before "You
+        // Have:", which is what the doubled gaps encode.
+        const { shipPrice, tradeIn, finalPrice, youHave } = SHIPYARD_PRICE_ROWS;
+        expect(tradeIn - shipPrice).toBe(12);
+        expect(finalPrice - tradeIn).toBe(24);
+        expect(youHave - finalPrice).toBe(24);
+        expect(SHIPYARD_PRICE_COLUMNS.value)
+            .toBeGreaterThan(SHIPYARD_PRICE_COLUMNS.label);
     });
 
     it('quotes exactly what the purchase rules compute', () => {
