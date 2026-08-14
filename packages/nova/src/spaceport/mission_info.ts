@@ -7,6 +7,8 @@ import { dayNumber, formatDate } from '../nova_plugin/calendar.js';
 import { ControlEvent } from '../nova_plugin/controls_plugin.js';
 import { abortMission } from '../nova_plugin/mission_logic.js';
 import { expandMissionText, missionDisplayName } from '../nova_plugin/mission_text.js';
+import { makeDescTextContext, playerGender } from '../nova_plugin/desc_text.js';
+import { ControlBitsComponent } from '../nova_plugin/ncb_plugin.js';
 import { ActiveMission, GameDateComponent, MissionsComponent } from '../nova_plugin/player_state_plugin.js';
 import { Button } from './button.js';
 import { MenuControls } from './menu_controls.js';
@@ -192,6 +194,12 @@ export class MissionInfoDialog {
         this.container.visible = false;
     }
 
+    private descContext() {
+        const bits = this.entity
+            ?.components.get(ControlBitsComponent) ?? new Set<number>();
+        return makeDescTextContext(bits, playerGender());
+    }
+
     private missionName(id: string, active: ActiveMission): string {
         const offer = activeAsOffer(this.universe, active);
         if (!offer) {
@@ -199,7 +207,7 @@ export class MissionInfoDialog {
         }
         return expandMissionText(missionDisplayName(offer.data.name),
             offerSubstitutions(this.universe, this.currentDay, offer,
-                active));
+                active), this.descContext());
     }
 
     private refreshList() {
@@ -265,7 +273,7 @@ export class MissionInfoDialog {
             || mission.offerText;
         this.description.text = expandMissionText(brief,
             offerSubstitutions(this.universe, this.currentDay, offer,
-                active));
+                active), this.descContext());
     }
 
     private refreshAbortState() {

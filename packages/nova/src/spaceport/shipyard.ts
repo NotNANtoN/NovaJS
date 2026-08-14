@@ -8,6 +8,9 @@ import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { ControlEvent } from '../nova_plugin/controls_plugin.js';
 import { ShipComponent } from '../nova_plugin/ship_plugin.js';
+import { ControlBitsComponent } from '../nova_plugin/ncb_plugin.js';
+import { makeDescTextContext, playerGender, resolveConditionalBlocks }
+    from '../nova_plugin/desc_text.js';
 import { Button } from './button.js';
 import { ItemGrid, ItemTile } from './item_grid.js';
 import { Menu } from './menu.js';
@@ -242,7 +245,11 @@ export class Shipyard extends Menu<Entity> {
         }
 
         // Set Description
-        this.text.description.text = shipTile.item.desc;
+        this.text.description.text = resolveConditionalBlocks(
+            shipTile.item.desc,
+            makeDescTextContext(
+                this.input.components.get(ControlBitsComponent) ?? [],
+                playerGender()));
         this.refreshTradeState();
     }
 

@@ -8,6 +8,8 @@ import { Random, RandomResource } from 'nova_ecs/plugins/random_plugin';
 import { World } from 'nova_ecs/world';
 import * as PIXI from 'pixi.js';
 import { Observable } from 'rxjs';
+import { makeDescTextContext, playerGender, resolveConditionalBlocks }
+    from '../nova_plugin/desc_text.js';
 import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data.js';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { ControlEvent } from '../nova_plugin/controls_plugin.js';
@@ -534,7 +536,14 @@ export class Spaceport extends Menu<Entity> {
         title.position.y = 39;
         this.container.addChild(title);
 
-        const desc = new PIXI.Text(data.landingDesc, this.font.desc);
+        // Landing descriptions may carry dësc conditionals (e.g. the {G}
+        // gender text in stellar 472). They are rendered once at build time,
+        // before the docked entity is known, so only the pilot profile's gender
+        // drives them (no control bits are read here).
+        const desc = new PIXI.Text(
+            resolveConditionalBlocks(data.landingDesc,
+                makeDescTextContext(new Set(), playerGender())),
+            this.font.desc);
         desc.position.x = -149;
         desc.position.y = 70;
         this.container.addChild(desc);

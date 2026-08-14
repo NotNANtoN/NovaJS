@@ -7,6 +7,7 @@ import {
     refuseOffer,
 } from '../nova_plugin/mission_logic.js';
 import { expandMissionText } from '../nova_plugin/mission_text.js';
+import { makeDescTextContext, playerGender } from '../nova_plugin/desc_text.js';
 import { Button } from './button.js';
 import { offerSubstitutions } from './mission_offers.js';
 import { MissionSession } from './mission_session.js';
@@ -274,7 +275,9 @@ export async function presentOffers(popup: OfferPopup,
         }
         const substitutions =
             offerSubstitutions(universe, session.currentDay, offer);
-        const text = expandMissionText(offer.data.offerText, substitutions);
+        const ctx = makeDescTextContext(session.state.bits,
+            playerGender());
+        const text = expandMissionText(offer.data.offerText, substitutions, ctx);
         if (!text) {
             continue;
         }
@@ -294,7 +297,7 @@ export async function presentOffers(popup: OfferPopup,
                 continue;
             }
             const brief = expandMissionText(offer.data.briefText,
-                substitutions);
+                substitutions, ctx);
             if (brief) {
                 // The briefing (post-accept) text uses the generic
                 // briefing frame, with its own dësc picture when set.
@@ -304,7 +307,7 @@ export async function presentOffers(popup: OfferPopup,
         } else {
             refuseOffer(session.machinery, offer, session.outfits);
             const refuseText = expandMissionText(
-                offer.data.refuseText, substitutions);
+                offer.data.refuseText, substitutions, ctx);
             if (refuseText) {
                 await popup.show(refuseText, { accept: 'OK' },
                     { pict: offer.data.refusePict, style: 'briefing' });

@@ -12,6 +12,7 @@ import {
     MissionOffer,
 } from '../nova_plugin/mission_logic.js';
 import { expandMissionText, missionDisplayName } from '../nova_plugin/mission_text.js';
+import { makeDescTextContext, playerGender } from '../nova_plugin/desc_text.js';
 import { ActiveMission } from '../nova_plugin/player_state_plugin.js';
 import { Button } from './button.js';
 import { Menu } from './menu.js';
@@ -287,7 +288,7 @@ export class MissionBoard extends Menu<Entity> {
                 // Mission names use the same <DST>-style wildcards as
                 // the descriptions.
                 label = expandMissionText(missionDisplayName(row.offer.data.name),
-                    this.substitutionsFor(row.offer));
+                    this.substitutionsFor(row.offer), this.descContext());
                 if (!row.offer.acceptable) {
                     style = LIST_FONT_DIM;
                 }
@@ -295,7 +296,8 @@ export class MissionBoard extends Menu<Entity> {
                 const offer = activeAsOffer(this.universe, row.active);
                 label = offer
                     ? expandMissionText(missionDisplayName(offer.data.name),
-                        this.substitutionsFor(offer, row.active))
+                        this.substitutionsFor(offer, row.active),
+                        this.descContext())
                     : row.active.id;
             } else {
                 label = row.label;
@@ -359,6 +361,11 @@ export class MissionBoard extends Menu<Entity> {
             offer, active);
     }
 
+    /** The real NCB context this board's dësc text renders against. */
+    private descContext() {
+        return makeDescTextContext(this.session!.state.bits, playerGender());
+    }
+
     /** The right pane: expanded text, info line, and button labels. */
     private refreshDescription() {
         const row = this.selectedRow();
@@ -372,7 +379,8 @@ export class MissionBoard extends Menu<Entity> {
         if (row.kind === 'offer') {
             const { offer } = row;
             const subs = this.substitutionsFor(offer);
-            const text = expandMissionText(offer.data.offerText, subs);
+            const text = expandMissionText(offer.data.offerText, subs,
+                this.descContext());
             const extra = offer.acceptable ? '' : `\n\n[${offer.reason}]`;
             this.text.description.text = text + extra;
             this.text.info.text = [
@@ -397,7 +405,7 @@ export class MissionBoard extends Menu<Entity> {
             const brief = mission.quickBrief || mission.briefText
                 || mission.offerText;
             this.text.description.text = expandMissionText(brief,
-                this.substitutionsFor(offer, row.active))
+                this.substitutionsFor(offer, row.active), this.descContext())
                 + (mission.canAbort ? '' : '\n\n[This mission cannot be aborted.]');
             this.buttons.accept.state = 'grey';
         }
@@ -422,11 +430,12 @@ export class MissionBoard extends Menu<Entity> {
             return;
         }
         const subs = this.substitutionsFor(row.offer);
-        const brief = expandMissionText(row.offer.data.briefText, subs);
+        const ctx = this.descContext();
+        const brief = expandMissionText(row.offer.data.briefText, subs, ctx);
         // Mission names carry the same <DST>-style wildcards as the
         // descriptions; expand them in the status line too.
         this.text.status.text = `Accepted: ${expandMissionText(
-            missionDisplayName(row.offer.data.name), subs)}.`;
+            missionDisplayName(row.offer.data.name), subs, ctx)}.`;
         this.buildRows();
         this.selectedIndex = Math.min(this.selectedIndex,
             this.rows.length - 1);

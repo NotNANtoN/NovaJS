@@ -5,6 +5,8 @@ import { firstValueFrom, Observable, Subject } from 'rxjs';
 import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data.js';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { ControlEvent } from '../nova_plugin/controls_plugin.js';
+import { makeDescTextContext, playerGender, resolveConditionalBlocks }
+    from '../nova_plugin/desc_text.js';
 import { Button } from './button.js';
 import { ItemGrid, ItemTile } from './item_grid.js';
 import { MenuControls } from './menu_controls.js';
@@ -78,6 +80,7 @@ export class HireEscortDialog {
     private gridContainer = new PIXI.Container();
     private pictContainer = new PIXI.Container();
     private credits: { credits: number } = { credits: 0 };
+    private bits?: ReadonlySet<number>;
     private hired: string[] = [];
     private loadPromise?: Promise<void>;
 
@@ -173,7 +176,9 @@ export class HireEscortDialog {
         if (tile.largePict) {
             this.pictContainer.addChild(tile.largePict);
         }
-        this.text.description.text = tile.item.pilotDesc || tile.item.desc;
+        this.text.description.text = resolveConditionalBlocks(
+            tile.item.pilotDesc || tile.item.desc,
+            makeDescTextContext(this.bits ?? [], playerGender()));
         this.text.price.text =
             `${hirePrice(tile.item).toLocaleString()} cr`;
         this.refreshButtons();
@@ -215,9 +220,11 @@ export class HireEscortDialog {
      * so the message uses the bar's own popup machinery.
      */
     async show(credits: { credits: number },
-        hired: string[]): Promise<'closed' | 'empty'> {
+        hired: string[],
+        bits?: ReadonlySet<number>): Promise<'closed' | 'empty'> {
         this.credits = credits;
         this.hired = hired;
+        this.bits = bits;
         try {
             await this.load();
         } catch (e) {

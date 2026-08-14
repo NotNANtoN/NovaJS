@@ -69,6 +69,12 @@ export interface NCBTestContext {
     hasExplored?(id: number): boolean;
     /** G: the player's gender. True if male. */
     isMale?: boolean;
+    /**
+     * Pxxx: whether the game is registered ([P]aid for). Defaults to
+     * true (NovaJS has no registration system); dësc rendering pins it to
+     * {@link desc_text.IS_REGISTERED}.
+     */
+    isRegistered?: boolean;
 }
 
 type TestToken =
@@ -208,8 +214,8 @@ export function evaluateParsedNCBTest(expression: NCBTestExpression,
         case 'gender':
             return context.isMale ?? true;
         case 'registered':
-            // NovaJS is always "registered".
-            return true;
+            // NovaJS is always "registered" unless the context overrides it.
+            return context.isRegistered ?? true;
         case 'not':
             return !evaluateParsedNCBTest(expression.operand, context);
         case 'and':

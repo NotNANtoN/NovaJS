@@ -8,6 +8,8 @@
  * naming exists.
  */
 import { displayName } from './display_name.js';
+import { NCBTestContext } from './ncb.js';
+import { resolveConditionalBlocks } from './desc_text.js';
 
 export interface MissionTextSubstitutions {
     /** <DST> destination stellar name. */
@@ -45,7 +47,14 @@ export function missionDisplayName(name: string): string {
 }
 
 export function expandMissionText(text: string,
-    subs: MissionTextSubstitutions): string {
+    subs: MissionTextSubstitutions,
+    ctx?: NCBTestContext): string {
+    // Bible order: resolve dësc conditional blocks first (against the real
+    // player context), then expand mission wildcards. Conditionals and
+    // wildcards are independent, but resolving conditionals first keeps their
+    // quoted strings from confusing the wildcard pass and lets a chosen string
+    // itself contain a wildcard.
+    const conditional = ctx ? resolveConditionalBlocks(text, ctx) : text;
     const replacements: [string, string][] = [
         ['<DSY>', subs.destinationSystem ?? 'an unknown system'],
         ['<DST>', subs.destinationStellar ?? 'an unknown stellar'],
@@ -64,7 +73,7 @@ export function expandMissionText(text: string,
         ['<PRK>', 'captain'],
         ['<SRK>', 'captain'],
     ];
-    let expanded = text;
+    let expanded = conditional;
     for (const [tag, value] of replacements) {
         expanded = expanded.split(tag).join(value);
     }

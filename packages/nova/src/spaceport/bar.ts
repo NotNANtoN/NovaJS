@@ -5,6 +5,8 @@ import { DockedLiveStatus } from '../display/docked_ship.js';
 import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data.js';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { ControlEvent } from '../nova_plugin/controls_plugin.js';
+import { makeDescTextContext, playerGender, resolveConditionalBlocks }
+    from '../nova_plugin/desc_text.js';
 import { LOCATION_BAR } from '../nova_plugin/mission_logic.js';
 import { Button } from './button.js';
 import { GambleDialog } from './gamble.js';
@@ -133,7 +135,10 @@ export class Bar extends Menu<Entity> {
         try {
             const planet = await this.simulationData.data.Planet
                 .get(this.planetId);
-            this.description.text = planet.barDesc || FALLBACK_DESC;
+            this.description.text = resolveConditionalBlocks(
+                planet.barDesc || FALLBACK_DESC,
+                makeDescTextContext(this.session.state.bits,
+                    playerGender()));
             this.setBarPict(planet.barPict);
         } catch {
             this.description.text = FALLBACK_DESC;
@@ -226,7 +231,8 @@ export class Bar extends Menu<Entity> {
         }
         this.controls.unbind();
         const result =
-            await this.hireEscort.show(this.session.state.credits, this.hired);
+            await this.hireEscort.show(this.session.state.credits,
+                this.hired, this.session.state.bits);
         if (result === 'empty') {
             // No pilots today: the original says so in a plain popup rather
             // than opening an empty shipyard grid (STR# 2002 index 223 —

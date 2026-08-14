@@ -14,6 +14,8 @@ import {
     primaryBinding,
 } from './client_prefs.js';
 import { keyLabel } from './key_labels.js';
+import { makeDescTextContext, playerGender, resolveConditionalBlocks }
+    from '../nova_plugin/desc_text.js';
 import {
     loadPilotControls, loadPilotSettings, savePilotControls,
     savePilotSettings,
@@ -115,7 +117,11 @@ export const ABOUT_TEXT = [
  * than being shown raw.
  */
 export function fillAboutPlaceholders(text: string): string {
-    return text.replace(/<REG>/g, 'NovaJS (unregistered)');
+    // Resolve any dësc conditionals first (stock 32766/32767 carry none,
+    // but plugin credits dëscs may; gender comes from the pilot profile).
+    const conditional = resolveConditionalBlocks(text,
+        makeDescTextContext(new Set(), playerGender()));
+    return conditional.replace(/<REG>/g, 'NovaJS (unregistered)');
 }
 
 /** The "About Nova" panel: the credits, with an Okay button.

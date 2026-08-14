@@ -11,6 +11,8 @@ import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_
 import { ControlEvent } from "../nova_plugin/controls_plugin.js";
 import { makeControlBitHooks, NCBParseError, runNCBSet } from "../nova_plugin/ncb.js";
 import { ControlBits, ControlBitsComponent } from "../nova_plugin/ncb_plugin.js";
+import { makeDescTextContext, playerGender, resolveConditionalBlocks }
+    from '../nova_plugin/desc_text.js';
 import { OutfitsStateComponent } from "../nova_plugin/outfit_plugin.js";
 import { CreditsComponent } from "../nova_plugin/player_state_plugin.js";
 import { cleanRecords, LegalRecords } from "../nova_plugin/reputation.js";
@@ -706,7 +708,9 @@ export class Outfitter extends Menu<Entity> {
         }
 
         // Set Description
-        this.text.description.text = outfitTile.item.desc;
+        this.text.description.text = resolveConditionalBlocks(
+            outfitTile.item.desc,
+            makeDescTextContext(this.controlBits, playerGender()));
 
         // Set price text
         this.text.price.text = formatPrice(outfitTile.item.price);
