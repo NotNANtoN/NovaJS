@@ -14,6 +14,15 @@ import { Menu } from './menu.js';
 import { FONT } from './outfitter.js';
 import { ShipInfoDialog } from './ship_info.js';
 import {
+    SHIPYARD_BUTTONS,
+    SHIPYARD_PRICE_COLUMNS,
+    SHIPYARD_PRICE_LABELS,
+    SHIPYARD_PRICE_ROWS,
+    ShipyardButtonSpec,
+    ShipyardPriceReadout,
+    shipyardPriceReadout,
+} from './shipyard_content.js';
+import {
     buildPurchasedShip,
     canBuyShip,
     purchaseContextFrom,
@@ -34,6 +43,20 @@ export class Shipyard extends Menu<Entity> {
     private currentShipData?: ShipData;
     private text = {
         description: new PIXI.Text("", FONT.normal),
+        // The price pane under the ship picture. Labels and values in
+        // two columns, in the original's wording and row order — see
+        // shipyard_content.ts for the reference shot it is measured
+        // against.
+        shipPriceLabel: new PIXI.Text(SHIPYARD_PRICE_LABELS.shipPrice,
+            FONT.normal),
+        shipPrice: new PIXI.Text("", FONT.normal),
+        tradeInLabel: new PIXI.Text(SHIPYARD_PRICE_LABELS.tradeIn, FONT.normal),
+        tradeIn: new PIXI.Text("", FONT.normal),
+        finalPriceLabel: new PIXI.Text(SHIPYARD_PRICE_LABELS.finalPrice,
+            FONT.normal),
+        finalPrice: new PIXI.Text("", FONT.normal),
+        youHaveLabel: new PIXI.Text(SHIPYARD_PRICE_LABELS.youHave, FONT.normal),
+        youHave: new PIXI.Text("", FONT.normal),
         // The denial caption, mirroring the outfitter's status line.
         status: new PIXI.Text("", { ...FONT.normal, wordWrapWidth: 145 }),
     }
@@ -44,10 +67,15 @@ export class Shipyard extends Menu<Entity> {
         controlEvents: Observable<ControlEvent>) {
         super(displayAssets, simulationData, "nova:8502", controlEvents);
         this.container.name = 'Shipyard';
+        // Captions, widths and positions measured against the original
+        // (shipyard_content.ts). The middle pill says "Buy Ship" and is
+        // wider than Info, as the reference shows.
+        const makeButton = (spec: ShipyardButtonSpec) => new Button(
+            displayAssets, spec.label, spec.width, { x: spec.x, y: spec.y });
         const buttons = {
-            info: new Button(displayAssets, "Info", 60, { x: -140, y: 126 }),
-            buy: new Button(displayAssets, "Buy", 60, { x: -20, y: 126 }),
-            done: new Button(displayAssets, "Done", 60, { x: 100, y: 126 }),
+            info: makeButton(SHIPYARD_BUTTONS.info),
+            buy: makeButton(SHIPYARD_BUTTONS.buy),
+            done: makeButton(SHIPYARD_BUTTONS.done),
         };
         this.buttons = buttons;
         this.addButtons(buttons);
@@ -62,10 +90,27 @@ export class Shipyard extends Menu<Entity> {
 
         this.text.description.position.x = -27;
         this.text.description.position.y = -150;
-        this.container.addChild(this.text.description);
         this.text.status.position.x = -27;
         this.text.status.position.y = 100;
-        this.container.addChild(this.text.status);
+
+        // The price pane, measured against
+        // shipyard/earth_spaceport.png (see shipyard_content.ts for the
+        // columns and row rhythm).
+        const rows = [
+            [this.text.shipPriceLabel, this.text.shipPrice, 'shipPrice'],
+            [this.text.tradeInLabel, this.text.tradeIn, 'tradeIn'],
+            [this.text.finalPriceLabel, this.text.finalPrice, 'finalPrice'],
+            [this.text.youHaveLabel, this.text.youHave, 'youHave'],
+        ] as const;
+        for (const [label, value, field] of rows) {
+            const y = SHIPYARD_PRICE_ROWS[field];
+            label.position.set(SHIPYARD_PRICE_COLUMNS.label, y);
+            value.position.set(SHIPYARD_PRICE_COLUMNS.value, y);
+        }
+
+        for (const t of Object.values(this.text)) {
+            this.container.addChild(t);
+        }
         this.pictContainer.position.x = 174;
         this.pictContainer.position.y = -152.5;
         this.container.addChild(this.pictContainer);
@@ -146,12 +191,20 @@ export class Shipyard extends Menu<Entity> {
     }
 
     /**
-     * Greys the Buy button for a ship the player cannot afford and shows
-     * the denial caption, as the outfitter does for outfits.
+     * Re-quotes the price pane, greys the Buy button for a ship the
+     * player cannot afford, and shows the denial caption as the
+     * outfitter does for outfits.
+     *
+     * Every path that can change either the quote or its answer runs
+     * this: a new selection (setShipSelected), a new input entity or its
+     * ShipData arriving (setInput), and a completed purchase (buyShip) —
+     * which is what makes a second trade in the same visit quote against
+     * the hull just bought and the credits just spent.
      */
     private refreshTradeState() {
         const ship = this.itemGrid?.selection;
         const context = this.purchaseContext();
+        this.setPriceText(shipyardPriceReadout(ship, context));
         if (!ship || !context) {
             this.buttons.buy.state = 'grey';
             return;
@@ -161,9 +214,26 @@ export class Shipyard extends Menu<Entity> {
         this.text.status.text = check.allowed ? '' : check.message;
     }
 
+    /**
+     * Writes the price pane, or blanks it (labels and all, as the
+     * original's empty info pane does) when there is nothing to quote.
+     */
+    private setPriceText(readout: ShipyardPriceReadout | undefined) {
+        const fields = ['shipPrice', 'tradeIn', 'finalPrice', 'youHave'] as const;
+        for (const field of fields) {
+            this.text[field].text = readout?.[field] ?? "";
+            this.text[field].visible = readout !== undefined;
+            this.text[`${field}Label` as const].visible = readout !== undefined;
+        }
+    }
+
     private setShipSelected(shipTile: ItemTile<ShipData> | undefined) {
         this.pictContainer.removeChildren();
         if (!shipTile) {
+            // Nothing selected: clear the description and blank the
+            // price pane rather than leave the last ship's quote up.
+            this.text.description.text = "";
+            this.refreshTradeState();
             return;
         }
 

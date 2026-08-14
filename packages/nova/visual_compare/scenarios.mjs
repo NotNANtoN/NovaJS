@@ -492,6 +492,43 @@ export const scenarios = [
         ],
     },
     {
+        id: 'earth_shipyard',
+        title: 'Earth shipyard — browse pane and price readout',
+        description: 'The shipyard opened from the Earth spaceport, with a '
+            + 'ship selected so the price pane under the ship picture is '
+            + 'filled in. Compare the 8502 frame and the price pane against '
+            + 'shipyard/earth_spaceport.png, whose pane reads "Ship Price: / '
+            + 'Trade-In: / Final Price: / You Have:". The label column and '
+            + 'row rhythm should line up; the AMOUNTS legitimately differ '
+            + "(the reference pilot flies a different ship with a different "
+            + 'balance, and the selected ship is whichever tile the grid '
+            + 'lands on here), as does the ship picture and description.',
+        params: { ship: 'nova:164', system: 'nova:130' },
+        hideDebug: true,
+        setup: async (page, driver) => {
+            await driver.landAt(page, 'planet nova:128');
+            // The first landing offers a mission; its popup would sit
+            // over the browse pane.
+            await driver.dismissOfferPopup(page);
+            await driver.clickContainer(page, 'Button:Shipyard');
+            await driver.waitForContainer(page, 'Shipyard');
+            await driver.pressKey(page, 'ArrowRight'); // select a ship
+            await driver.sleep(1500);
+        },
+        references: [
+            { name: 'earth_shipyard', file: 'shipyard/earth_spaceport.png' },
+        ],
+        regions: [
+            region('shipyard_frame', 'Whole dialog frame', 578, 380, 765, 321),
+            region('shipyard_grid', 'Ship grid pane', 585, 388, 335, 278),
+            // The info box under the ship picture: the four price rows.
+            region('shipyard_price_pane', 'Price / trade-in pane',
+                1185, 590, 158, 100),
+            region('shipyard_button_row', 'Info/Buy/Done button row',
+                820, 668, 360, 30),
+        ],
+    },
+    {
         id: 'earth_trade_center',
         title: 'Earth trade center — commodity dialog',
         description: 'The Trade Center opened from the Earth spaceport '

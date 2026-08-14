@@ -43,6 +43,7 @@ Output lands in `visual_compare/output/` (git-ignored):
 | `config.mjs`    | machine-specific paths, port, viewport, Chrome flags. |
 | `driver.mjs`    | Puppeteer glue: launch, `openGame`, `pressKey`, `openStarmap`, `landAt`, `hideDebugOverlays`, `capture`. Drives the game only through the same console levers the project's tests use (`window.displayWorld`, `window.app`, `window.novaAutopilot`, `document` keydown). |
 | `compare.mjs`   | `crop` + `compareRegion` (pngjs + pixelmatch). |
+| `sweep_button_y.mjs` | Positioning aid, not part of a run: nudges the shipyard's button row a pixel at a time **in the live page** and prints the region diff for each offset, so a widget's position can be measured instead of guessed. `AXIS=x` sweeps horizontally, `FIXED_Y=<n>` pins the other axis. Reading a sprite's position out of a screenshot is unreliable when the art is not flush with its bounds (the button pills' red face sits low inside a 25px sprite); sweeping sidesteps that entirely. |
 | `scenarios.mjs` | **the only file you edit to extend coverage** — scenario + region definitions. |
 | `run.mjs`       | orchestrates: ensure server, capture each scenario, diff every region, write crops + `report.html`, print a worst-first summary. |
 | `report.mjs`    | HTML generator. |
