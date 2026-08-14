@@ -14,6 +14,11 @@ import { Menu } from './menu.js';
 import { FONT } from './outfitter.js';
 import { ShipInfoDialog } from './ship_info.js';
 import {
+    SHIPYARD_PRICE_LABELS,
+    ShipyardPriceReadout,
+    shipyardPriceReadout,
+} from './shipyard_content.js';
+import {
     buildPurchasedShip,
     canBuyShip,
     purchaseContextFrom,
@@ -34,6 +39,20 @@ export class Shipyard extends Menu<Entity> {
     private currentShipData?: ShipData;
     private text = {
         description: new PIXI.Text("", FONT.normal),
+        // The price pane under the ship picture. Labels and values in
+        // two columns, in the original's wording and row order — see
+        // shipyard_content.ts for the reference shot it is measured
+        // against.
+        shipPriceLabel: new PIXI.Text(SHIPYARD_PRICE_LABELS.shipPrice,
+            FONT.normal),
+        shipPrice: new PIXI.Text("", FONT.normal),
+        tradeInLabel: new PIXI.Text(SHIPYARD_PRICE_LABELS.tradeIn, FONT.normal),
+        tradeIn: new PIXI.Text("", FONT.normal),
+        finalPriceLabel: new PIXI.Text(SHIPYARD_PRICE_LABELS.finalPrice,
+            FONT.normal),
+        finalPrice: new PIXI.Text("", FONT.normal),
+        youHaveLabel: new PIXI.Text(SHIPYARD_PRICE_LABELS.youHave, FONT.normal),
+        youHave: new PIXI.Text("", FONT.normal),
         // The denial caption, mirroring the outfitter's status line.
         status: new PIXI.Text("", { ...FONT.normal, wordWrapWidth: 145 }),
     }
@@ -62,10 +81,30 @@ export class Shipyard extends Menu<Entity> {
 
         this.text.description.position.x = -27;
         this.text.description.position.y = -150;
-        this.container.addChild(this.text.description);
         this.text.status.position.x = -27;
         this.text.status.position.y = 100;
-        this.container.addChild(this.text.status);
+
+        // The price pane, measured against
+        // shipyard/earth_spaceport.png: labels at the same column the
+        // outfitter's "Item Price:" uses (both menus share the nova:8502
+        // frame), values 70px right of it, and rows on a 12px pitch with
+        // a blank line before "Final Price:" and another before "You
+        // Have:" — 58 / 70 / 94 / 118.
+        const LABEL_X = 234, VALUE_X = 304;
+        const rows = [
+            [this.text.shipPriceLabel, this.text.shipPrice, 58],
+            [this.text.tradeInLabel, this.text.tradeIn, 70],
+            [this.text.finalPriceLabel, this.text.finalPrice, 94],
+            [this.text.youHaveLabel, this.text.youHave, 118],
+        ] as const;
+        for (const [label, value, y] of rows) {
+            label.position.set(LABEL_X, y);
+            value.position.set(VALUE_X, y);
+        }
+
+        for (const t of Object.values(this.text)) {
+            this.container.addChild(t);
+        }
         this.pictContainer.position.x = 174;
         this.pictContainer.position.y = -152.5;
         this.container.addChild(this.pictContainer);
@@ -146,12 +185,20 @@ export class Shipyard extends Menu<Entity> {
     }
 
     /**
-     * Greys the Buy button for a ship the player cannot afford and shows
-     * the denial caption, as the outfitter does for outfits.
+     * Re-quotes the price pane, greys the Buy button for a ship the
+     * player cannot afford, and shows the denial caption as the
+     * outfitter does for outfits.
+     *
+     * Every path that can change either the quote or its answer runs
+     * this: a new selection (setShipSelected), a new input entity or its
+     * ShipData arriving (setInput), and a completed purchase (buyShip) —
+     * which is what makes a second trade in the same visit quote against
+     * the hull just bought and the credits just spent.
      */
     private refreshTradeState() {
         const ship = this.itemGrid?.selection;
         const context = this.purchaseContext();
+        this.setPriceText(shipyardPriceReadout(ship, context));
         if (!ship || !context) {
             this.buttons.buy.state = 'grey';
             return;
@@ -161,9 +208,26 @@ export class Shipyard extends Menu<Entity> {
         this.text.status.text = check.allowed ? '' : check.message;
     }
 
+    /**
+     * Writes the price pane, or blanks it (labels and all, as the
+     * original's empty info pane does) when there is nothing to quote.
+     */
+    private setPriceText(readout: ShipyardPriceReadout | undefined) {
+        const fields = ['shipPrice', 'tradeIn', 'finalPrice', 'youHave'] as const;
+        for (const field of fields) {
+            this.text[field].text = readout?.[field] ?? "";
+            this.text[field].visible = readout !== undefined;
+            this.text[`${field}Label` as const].visible = readout !== undefined;
+        }
+    }
+
     private setShipSelected(shipTile: ItemTile<ShipData> | undefined) {
         this.pictContainer.removeChildren();
         if (!shipTile) {
+            // Nothing selected: clear the description and blank the
+            // price pane rather than leave the last ship's quote up.
+            this.text.description.text = "";
+            this.refreshTradeState();
             return;
         }
 

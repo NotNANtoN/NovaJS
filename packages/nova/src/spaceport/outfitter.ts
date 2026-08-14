@@ -18,6 +18,7 @@ import { LegalRecordsComponent } from "../nova_plugin/reputation_plugin.js";
 import { ShipComponent } from "../nova_plugin/ship_plugin.js";
 import { idPrefix } from "../nova_plugin/mission_logic.js";
 import { Button, ButtonClick } from "./button.js";
+import { formatPrice } from "./format_price.js";
 import { ItemGrid, ItemTile } from "./item_grid.js";
 import { Menu } from "./menu.js";
 import { MissionSession } from "./mission_session.js";
@@ -846,22 +847,6 @@ export class Outfitter extends Menu<Entity> {
         super.done();
     }
 }
-
-function addCommas(p: number) {
-    return p.toLocaleString();
-}
-
-function formatPrice(p: number) {
-    var mil = 1000000;
-    if (p >= mil) {
-        var modmil = String(p % mil).substring(0, 3);
-        modmil += "0".repeat(3 - modmil.length);
-        return addCommas(Math.floor(p / mil)) + "." + modmil + "M cr";
-    }
-    else {
-        return addCommas(p) + " cr";
-    }
-};
 
 function formatMass(m: number) {
     return m.toLocaleString() + " tons";
