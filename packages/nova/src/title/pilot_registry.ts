@@ -64,6 +64,30 @@ const PilotProfileCodec = t.intersection([
     t.partial({ shipNumber: t.number }),
 ]);
 
+/**
+ * A stored control override: action -> the `event.code` it is bound to.
+ *
+ * The list form exists for displacement (client_prefs.bindControl): when
+ * a key is taken from an action that owned several, the survivors are
+ * written out, and one of them may be modifier-gated. It mirrors
+ * controls.json's own grammar so the two stay interchangeable.
+ *
+ * Note this is only ever written when an action keeps 2+ keys, or a
+ * modifier-gated key, after losing one — which the stock controls.json
+ * cannot produce (its one multi-key rebindable action, fireSecondary,
+ * has exactly two bare keys, so a single survivor stays a plain string).
+ */
+const ControlsOverrideCodec = t.record(t.string, t.union([
+    t.string,
+    t.array(t.union([
+        t.string,
+        t.intersection([
+            t.type({ key: t.string }),
+            t.partial({ modifiers: t.array(t.string) }),
+        ]),
+    ])),
+]));
+
 /** One pilot file: identity plus where its save lives. */
 export const PilotRecord = t.intersection([
     t.type({
@@ -77,7 +101,7 @@ export const PilotRecord = t.intersection([
     t.partial({
         profile: PilotProfileCodec,
         /** Per-pilot control bindings (action -> event.code). */
-        controls: t.record(t.string, t.string),
+        controls: ControlsOverrideCodec,
         /** Per-pilot game settings. */
         settings: t.record(t.string, t.union([t.boolean, t.string])),
         created: t.number,
@@ -102,7 +126,7 @@ export const PilotFile = t.intersection([
     }),
     t.partial({
         profile: PilotProfileCodec,
-        controls: t.record(t.string, t.string),
+        controls: ControlsOverrideCodec,
         settings: t.record(t.string, t.union([t.boolean, t.string])),
         /** The pilot's SaveEnvelope, or null for a pilot that never played. */
         save: t.union([SaveEnvelope, t.null]),
@@ -125,8 +149,29 @@ function emptyRegistry(): PilotRegistry {
     return { version: PILOT_REGISTRY_VERSION, activeId: null, pilots: [] };
 }
 
+/**
+ * True when `novajs:save:pilot-<id>`'s slot already holds a save.
+ *
+ * A registry that was quarantined (or never written, after a failed
+ * storage write) leaves saves behind that no record points at. Handing a
+ * new pilot one of those ids would silently adopt a stranger's game —
+ * and the callers that follow a mint with a reset or an import write
+ * would then destroy it.
+ */
+function saveSlotOccupied(id: string, store?: PrefsStorage): boolean {
+    if (!store) {
+        return false;
+    }
+    try {
+        return store.getItem(`${PILOT_SAVE_KEY_PREFIX}${id}`) != null;
+    } catch {
+        return false;
+    }
+}
+
 /** A registry id that is stable, unique, and safe inside a storage key. */
-function makePilotId(existing: readonly PilotRecord[]): string {
+function makePilotId(existing: readonly PilotRecord[],
+    store?: PrefsStorage): string {
     const taken = new Set(existing.map(p => p.id));
     // Deterministic-enough for a client-local registry: time plus a
     // collision-avoiding counter. No Math.random (see determinism rules)
@@ -134,7 +179,7 @@ function makePilotId(existing: readonly PilotRecord[]): string {
     const base = Date.now().toString(36);
     let id = base;
     let n = 1;
-    while (taken.has(id)) {
+    while (taken.has(id) || saveSlotOccupied(id, store)) {
         id = `${base}-${n++}`;
     }
     return id;
@@ -327,7 +372,7 @@ export function applyActivePilot(storage?: PrefsStorage):
 export function createPilot(profile: PilotProfile, storage?: PrefsStorage):
     PilotRecord {
     const registry = loadRegistry(storage);
-    const id = makePilotId(registry.pilots);
+    const id = makePilotId(registry.pilots, getStorage(storage));
     const now = Date.now();
     const record: PilotRecord = {
         id,
@@ -537,7 +582,7 @@ export function importPilot(text: string, storage?: PrefsStorage):
 
     const store = getStorage(storage);
     const registry = loadRegistry(storage);
-    const id = makePilotId(registry.pilots);
+    const id = makePilotId(registry.pilots, store);
     const requested = file.name.trim() || 'Unnamed Pilot';
     const name = uniquePilotName(requested, registry.pilots);
     const now = Date.now();

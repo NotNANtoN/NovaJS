@@ -97,13 +97,31 @@ export function saveGameSettings(settings: GameSettingsOverride,
 }
 
 /**
- * Control-binding overrides: action id -> primary event.code.
+ * One key an action is bound to, in controls.json's own grammar: a bare
+ * `event.code`, or a code gated behind held modifiers.
+ */
+export type ControlBinding = string | { key: string; modifiers?: string[] };
+
+/**
+ * What an override says an action is bound to.
+ *
+ * Normally a single `event.code` — the editor captures one key. It is a
+ * LIST when displacement had to take one key away from an action that
+ * owned several (see bindControl): the survivors are written out so the
+ * untouched ones keep working.
+ *
+ * `''` (and, equivalently, an empty list) means "explicitly unbound".
+ */
+export type ControlsOverrideValue = string | ControlBinding[];
+
+/**
+ * Control-binding overrides: action id -> what it is bound to.
  *
  * An empty-string value means "explicitly unbound": the player moved this
  * action's key onto another action, so the served default must NOT come
  * back. `mergeControls` turns it into an empty binding list.
  */
-export type ControlsOverride = Record<string, string>;
+export type ControlsOverride = Record<string, ControlsOverrideValue>;
 
 /** Loads persisted control-binding overrides (empty object if none). */
 export function loadControlsOverride(storage?: PrefsStorage): ControlsOverride {
@@ -126,14 +144,71 @@ export function saveControlsOverride(controls: ControlsOverride,
 export function mergeControls(base: Record<string, unknown>,
     override: ControlsOverride): Record<string, unknown> {
     const merged: Record<string, unknown> = { ...base };
-    for (const [action, code] of Object.entries(override)) {
+    for (const [action, value] of Object.entries(override)) {
         // '' means the player deliberately unbound this action (its key
         // was reassigned elsewhere). An empty list is a valid
         // ControlInputs value, so the action ends up with no key at all
         // rather than silently reverting to its served default.
-        merged[action] = code ? code : [];
+        const unbound = Array.isArray(value) ? value.length === 0 : !value;
+        merged[action] = unbound ? [] : value;
     }
     return merged;
+}
+
+/** A binding with its modifier list filled in, for comparison. */
+interface NormalizedBinding {
+    key: string;
+    modifiers: string[];
+}
+
+/**
+ * Every key a controls.json value (or an override value) binds, in the
+ * same shapes the SavedControls codec accepts: a bare code, a list, or a
+ * `{key, modifiers}` record. Unparseable / empty values bind nothing.
+ */
+function normalizeBindings(raw: unknown): NormalizedBinding[] {
+    if (typeof raw === 'string') {
+        return raw ? [{ key: raw, modifiers: [] }] : [];
+    }
+    if (Array.isArray(raw)) {
+        return raw.flatMap(normalizeBindings);
+    }
+    if (raw && typeof raw === 'object'
+        && typeof (raw as { key?: unknown }).key === 'string') {
+        const { key, modifiers } = raw as { key: string; modifiers?: unknown };
+        return [{
+            key,
+            modifiers: Array.isArray(modifiers)
+                ? modifiers.filter((m): m is string => typeof m === 'string')
+                : [],
+        }];
+    }
+    return [];
+}
+
+/**
+ * Every key `action` currently owns: its override if it has one
+ * (including '' for explicitly unbound), else its served default.
+ */
+function bindingsFor(action: string, base: Record<string, unknown>,
+    override: ControlsOverride): NormalizedBinding[] {
+    if (Object.prototype.hasOwnProperty.call(override, action)) {
+        return normalizeBindings(override[action]);
+    }
+    return normalizeBindings(base[action]);
+}
+
+/** Writes bindings back in the most compact shape that represents them. */
+function encodeBindings(bindings: readonly NormalizedBinding[]):
+    ControlsOverrideValue {
+    if (bindings.length === 0) {
+        return '';
+    }
+    if (bindings.length === 1 && bindings[0].modifiers.length === 0) {
+        return bindings[0].key;
+    }
+    return bindings.map(({ key, modifiers }) =>
+        modifiers.length ? { key, modifiers } : key);
 }
 
 /**
@@ -146,6 +221,22 @@ export function mergeControls(base: Record<string, unknown>,
  * the editor itself exposes are displaced — menu/spaceport actions
  * (up/down/accept, bar/buy/sell, ...) intentionally share keys with
  * flight controls because they are live in different contexts.
+ *
+ * Two rules make this match what `getActions` actually fires:
+ *
+ *  - EVERY key an action owns counts, not just its first. Stock defaults
+ *    are multi-key (fireSecondary is ControlLeft AND ShiftLeft), so
+ *    checking only the first left the second key firing both actions.
+ *  - Only the stolen key is removed; the action's other keys stay bound.
+ *    Blanking fireSecondary outright because one of its two keys was
+ *    taken punishes a key the player never touched. An action left with
+ *    no keys becomes explicitly unbound ('').
+ *
+ * Collision is modifier-aware: `code` is a bare key (the editor captures
+ * `event.code` with no modifiers), and a modifier-gated binding such as
+ * Alt+Shift+Minus never fires on bare Minus, so a bare bind leaves it
+ * alone. Should the editor ever capture modifiers, this must grow to an
+ * exact code+modifiers match rather than staying bare-only.
  *
  * Returns a new map; the input is not mutated.
  */
@@ -160,8 +251,11 @@ export function bindControl(base: Record<string, unknown>,
         if (other === action) {
             continue;
         }
-        if (primaryBinding(other, base, next) === code) {
-            next[other] = '';
+        const owned = bindingsFor(other, base, next);
+        const kept = owned.filter(
+            binding => !(binding.key === code && !binding.modifiers.length));
+        if (kept.length !== owned.length) {
+            next[other] = encodeBindings(kept);
         }
     }
     return next;
@@ -169,26 +263,13 @@ export function bindControl(base: Record<string, unknown>,
 
 /**
  * The event.code an action is currently bound to: the override if it has
- * one (including '' for explicitly unbound), else the first key of the
- * served default.
+ * one (including '' for explicitly unbound), else the served default.
+ * Multi-key actions report their FIRST key — this is the editor's display
+ * value, not the full binding.
  */
 export function primaryBinding(action: string, base: Record<string, unknown>,
     override: ControlsOverride): string {
-    if (Object.prototype.hasOwnProperty.call(override, action)) {
-        return override[action];
-    }
-    const raw = base[action];
-    if (typeof raw === 'string') {
-        return raw;
-    }
-    if (Array.isArray(raw) && typeof raw[0] === 'string') {
-        return raw[0] as string;
-    }
-    if (raw && typeof raw === 'object'
-        && typeof (raw as { key?: string }).key === 'string') {
-        return (raw as { key: string }).key;
-    }
-    return '';
+    return bindingsFor(action, base, override)[0]?.key ?? '';
 }
 
 /** A pilot's identity, entered in the "New Pilot" dialog. */

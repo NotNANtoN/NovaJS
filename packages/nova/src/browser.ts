@@ -59,6 +59,7 @@ import { PlayerShipSelector } from "./nova_plugin/player_ship_plugin.js";
 import { CreditsComponent, GameDateComponent } from "./nova_plugin/player_state_plugin.js";
 import { initialRecordsFromGovtStatuses } from "./nova_plugin/reputation.js";
 import { CombatRatingComponent, LegalRecordsComponent } from "./nova_plugin/reputation_plugin.js";
+import { resetExplored } from "./nova_plugin/explored_store.js";
 import {
     EscortToSave, SavedEscort, collectEscortsToSave, extractSaveData,
     extractSavedEscorts, loadSave, resetSave, restorePlayerState,
@@ -2478,13 +2479,20 @@ async function runTitle() {
                         shipNumber: 100 + Math.floor(Math.random() * 900),
                     };
                     // Register a NEW pilot file and make it active. Its
-                    // save key is fresh, so startGame spawns from the
-                    // scenario's default chär without disturbing any
-                    // other pilot's save.
+                    // save key is fresh AND unoccupied (createPilot skips
+                    // any id whose slot already holds a save), so startGame
+                    // spawns from the scenario's default chär without
+                    // disturbing any other pilot's save.
                     createPilot(withShip);
-                    // The exploration record is still client-global; clear
-                    // it so a new pilot starts with an unexplored galaxy.
-                    resetSave();
+                    // Deliberately NOT resetSave(): the new pilot's slot is
+                    // empty by construction, so there is nothing of its own
+                    // to clear, and a reset here could only ever delete a
+                    // save belonging to somebody else — the legacy
+                    // `novajs:save` that migration adopts in place, above
+                    // all. Only the exploration record needs clearing: it
+                    // is still client-global, and a new pilot starts with
+                    // an unexplored galaxy.
+                    resetExplored();
                     savePilotProfile(withShip);
                     // A fresh pilot has no rebindings: back to defaults.
                     await applyControls();

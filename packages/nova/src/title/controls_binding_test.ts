@@ -25,14 +25,32 @@ const BASE: Record<string, unknown> = {
     hyperjump: 'KeyJ',
     nextSecondary: 'KeyW',
     fireSecondary: ['ControlLeft', 'ShiftLeft'],
+    // Modifier-gated bindings, verbatim from controls.json. getActions
+    // only fires these when every modifier is held, so a BARE bind of the
+    // same code is not a collision and must not disturb them.
+    selfDestruct: { key: 'Minus', modifiers: ['Alt', 'Shift'] },
+    previousSecondary: { key: 'KeyW', modifiers: ['Alt'] },
+    nextTarget: { key: 'Tab' },
+    // Not in controls.json, but a plugin's controls.json can say this: one
+    // action owning a bare key AND a modifier-gated key. Stealing the bare
+    // one must leave the modifier-gated one bound.
+    mixedBinding: ['KeyQ', { key: 'KeyP', modifiers: ['Alt'] }],
     // A menu action deliberately sharing a key with a flight control:
     // these live in different contexts and must NOT be displaced.
     up: 'ArrowUp',
 };
 
-/** The actions the preferences editor exposes for rebinding. */
+/**
+ * The actions the preferences editor exposes for rebinding.
+ *
+ * `previousSecondary` / `mixedBinding` are not on the editor's tabs today;
+ * they are listed here so the modifier rule is pinned for whatever the
+ * editor exposes next, rather than only for the actions it happens to
+ * expose right now.
+ */
 const REBINDABLE = ['accelerate', 'turnLeft', 'turnRight', 'hyperjump',
-    'nextSecondary', 'fireSecondary'];
+    'nextSecondary', 'fireSecondary', 'selfDestruct', 'previousSecondary',
+    'nextTarget', 'mixedBinding'];
 
 function live(override: ControlsOverride): Controls {
     const decoded = SavedControls.pipe(Controls)
@@ -45,8 +63,16 @@ function live(override: ControlsOverride): Controls {
 
 /** getActions only reads `code` and modifier state. */
 function press(controls: Controls, code: string): string[] {
-    return getActions(controls,
-        { code, getModifierState: () => false } as unknown as KeyboardEvent);
+    return pressWith(controls, code, []);
+}
+
+/** Presses `code` with exactly `held` modifiers down. */
+function pressWith(controls: Controls, code: string,
+    held: readonly string[]): string[] {
+    return getActions(controls, {
+        code,
+        getModifierState: (m: string) => held.includes(m),
+    } as unknown as KeyboardEvent);
 }
 
 describe('control rebinding', () => {
@@ -106,6 +132,45 @@ describe('control rebinding', () => {
             expect(override).toEqual({});
         });
 
+        it('takes a multi-key action\'s SECOND key, keeping the first', () => {
+            // fireSecondary owns ControlLeft AND ShiftLeft. Checking only
+            // its first key left ShiftLeft owned by both actions.
+            const next = bindControl(BASE, {}, 'turnLeft', 'ShiftLeft',
+                REBINDABLE);
+            expect(next['turnLeft']).toBe('ShiftLeft');
+            expect(next['fireSecondary']).toBe('ControlLeft');
+        });
+
+        it('leaves a modifier-gated binding alone on a bare-key bind', () => {
+            // selfDestruct is Alt+Shift+Minus; it never fires on bare
+            // Minus, so binding bare Minus is not a collision at all.
+            const next = bindControl(BASE, {}, 'turnLeft', 'Minus',
+                REBINDABLE);
+            expect(next['turnLeft']).toBe('Minus');
+            expect(next['selfDestruct']).toBeUndefined();
+        });
+
+        it('leaves a modifier-gated sibling on the stolen code', () => {
+            // nextSecondary (bare KeyW) loses the key; previousSecondary
+            // (Alt+KeyW) is a different binding and keeps it.
+            const next = bindControl(BASE, {}, 'turnLeft', 'KeyW',
+                REBINDABLE);
+            expect(next['nextSecondary']).toBe('');
+            expect(next['previousSecondary']).toBeUndefined();
+        });
+
+        it('keeps an action\'s modifier key when its bare key is taken', () => {
+            const next = bindControl(BASE, {}, 'turnLeft', 'KeyQ',
+                REBINDABLE);
+            expect(next['mixedBinding'])
+                .toEqual([{ key: 'KeyP', modifiers: ['Alt'] }]);
+        });
+
+        it('unbinds an action whose only key is taken', () => {
+            const next = bindControl(BASE, {}, 'turnLeft', 'Tab', REBINDABLE);
+            expect(next['nextTarget']).toBe('');
+        });
+
         it('displaces a previously-overridden action too', () => {
             const first = bindControl(BASE, {}, 'turnLeft', 'KeyG',
                 REBINDABLE);
@@ -157,6 +222,38 @@ describe('control rebinding', () => {
             expect(press(controls, 'ControlLeft')).toEqual([]);
             expect(press(controls, 'ShiftLeft')).toEqual([]);
         });
+
+        it('the 2nd key of a multi-key action fires only its new owner',
+            () => {
+                // The double-fire this whole feature exists to prevent:
+                // ShiftLeft used to fire turnLeft AND fireSecondary.
+                const controls = live(bindControl(BASE, {}, 'turnLeft',
+                    'ShiftLeft', REBINDABLE));
+                expect(press(controls, 'ShiftLeft')).toEqual(['turnLeft']);
+                // ...and fireSecondary keeps the key that was NOT taken.
+                expect(press(controls, 'ControlLeft'))
+                    .toEqual(['fireSecondary']);
+            });
+
+        it('keeps self-destruct on Alt+Shift+Minus after a bare Minus bind',
+            () => {
+                const controls = live(bindControl(BASE, {}, 'turnLeft',
+                    'Minus', REBINDABLE));
+                expect(pressWith(controls, 'Minus', ['Alt', 'Shift']))
+                    .toEqual(['selfDestruct']);
+                // Bare Minus is the new binding only: selfDestruct's
+                // modifier gate was never satisfied on a bare press.
+                expect(press(controls, 'Minus')).toEqual(['turnLeft']);
+            });
+
+        it('keeps the Alt binding when its bare-key sibling is displaced',
+            () => {
+                const controls = live(bindControl(BASE, {}, 'turnLeft', 'KeyW',
+                    REBINDABLE));
+                expect(press(controls, 'KeyW')).toEqual(['turnLeft']);
+                expect(pressWith(controls, 'KeyW', ['Alt']))
+                    .toEqual(['previousSecondary']);
+            });
 
         it('an untouched action keeps its served default', () => {
             const controls = live(

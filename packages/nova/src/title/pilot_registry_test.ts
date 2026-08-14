@@ -1,6 +1,7 @@
 import 'jasmine';
 import {
-    encodeSave, getActiveSaveKey, SAVE_KEY, SaveData, setActiveSaveKey,
+    encodeSave, getActiveSaveKey, resetSave, SAVE_KEY, SaveData,
+    setActiveSaveKey,
 } from '../nova_plugin/save_game.js';
 import {
     CONTROLS_OVERRIDE_KEY, PILOT_PROFILE_KEY, PilotProfile, PrefsStorage,
@@ -30,6 +31,14 @@ const SAMPLE_SAVE: SaveData = {
     credits: 12345,
 };
 
+/** A second, distinguishable save payload. */
+const OTHER_SAVE: SaveData = {
+    ship: 'nova:129',
+    outfits: [],
+    system: 'nova:131',
+    credits: 999,
+};
+
 function profile(name: string): PilotProfile {
     return { name, nickname: 'Ace', gender: 'male', strict: false };
 }
@@ -53,6 +62,52 @@ describe('pilot registry', () => {
             expect(pilot.saveKey).toBe(`${PILOT_SAVE_KEY_PREFIX}${pilot.id}`);
             expect(getActivePilot(store)?.id).toBe(pilot.id);
             expect(getActiveSaveKey()).toBe(pilot.saveKey);
+        });
+
+        it('never mints a save key whose slot already holds a save', () => {
+            // A quarantined (or never-written) registry leaves saves behind
+            // that no record points at. Minting that id again would hand
+            // the new pilot a stranger's game — and the new-pilot path
+            // clears the slot it is given.
+            jasmine.clock().install();
+            try {
+                const now = 1_700_000_000_000;
+                jasmine.clock().mockDate(new Date(now));
+                const store = new MemoryStorage();
+                const orphanKey =
+                    `${PILOT_SAVE_KEY_PREFIX}${now.toString(36)}`;
+                store.setItem(orphanKey, encodeSave(SAMPLE_SAVE));
+
+                const pilot = createPilot(profile('New Guy'), store);
+
+                expect(pilot.saveKey).not.toBe(orphanKey);
+                expect(store.raw(orphanKey)).toBe(encodeSave(SAMPLE_SAVE));
+            } finally {
+                jasmine.clock().uninstall();
+            }
+        });
+
+        it('does not import a pilot onto an occupied save slot', () => {
+            jasmine.clock().install();
+            try {
+                const now = 1_700_000_000_001;
+                jasmine.clock().mockDate(new Date(now));
+                const store = new MemoryStorage();
+                const orphanKey =
+                    `${PILOT_SAVE_KEY_PREFIX}${now.toString(36)}`;
+                store.setItem(orphanKey, encodeSave(SAMPLE_SAVE));
+
+                const source = new MemoryStorage();
+                const other = createPilot(profile('Imported'), source);
+                source.setItem(other.saveKey, encodeSave(OTHER_SAVE));
+                const text = exportPilot(other.id, source)!;
+                const result = importPilot(text, store);
+
+                expect(result.ok).toBe(true);
+                expect(store.raw(orphanKey)).toBe(encodeSave(SAMPLE_SAVE));
+            } finally {
+                jasmine.clock().uninstall();
+            }
         });
 
         it('keeps each pilot on a separate save key', () => {
@@ -142,6 +197,31 @@ describe('pilot registry', () => {
             store.setItem(SAVE_KEY, encodeSave(SAMPLE_SAVE));
             expect(listPilots(store)[0].name).toBe('Pilot');
         });
+
+        it('leaves the adopted legacy save alone on the new-pilot path',
+            () => {
+                // The browser's "New Pilot" button runs createPilot and
+                // then clears the fresh pilot's slot. That clear must never
+                // reach the legacy save the migration just adopted in
+                // place, so pin what makes it safe: the new pilot is a
+                // SEPARATE record on its own key, and it — not the legacy
+                // pilot — is what the save layer is pointed at.
+                const store = new MemoryStorage();
+                store.setItem(SAVE_KEY, encodeSave(SAMPLE_SAVE));
+                store.setItem(PILOT_PROFILE_KEY,
+                    JSON.stringify(profile('Old Timer')));
+
+                const created = createPilot(profile('New Guy'), store);
+
+                expect(created.saveKey).not.toBe(SAVE_KEY);
+                expect(getActiveSaveKey()).toBe(created.saveKey);
+                expect(listPilots(store).map(p => p.saveKey))
+                    .toEqual([SAVE_KEY, created.saveKey]);
+                // Clearing the active (new) pilot's save is a no-op here,
+                // and Old Timer's game is still on disk.
+                resetSave(store);
+                expect(store.raw(SAVE_KEY)).toBe(encodeSave(SAMPLE_SAVE));
+            });
 
         it('applyActivePilot points the save layer at the legacy key', () => {
             const store = new MemoryStorage();

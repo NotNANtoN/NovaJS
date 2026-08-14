@@ -100,9 +100,11 @@ export async function pressKey(page, code, { holdMs = 60 } = {}) {
 }
 
 /** BFS the PIXI stage for a container by name; returns {visible,bounds} or
- * null. Several menus (outfitter/shipyard/trade) each own a 'Button:Buy',
- * most of them hidden — so prefer a worldVisible match, falling back to the
- * first match only when none is visible. */
+ * null. Names are not unique: the trade centre's button row and the
+ * outfitter's/trade centre's quantity dialogs each own a 'Button:Buy'
+ * (the shipyard's says 'Buy Ship'), and most are hidden — so prefer a
+ * worldVisible match, falling back to the first match only when none is
+ * visible. */
 export function findContainer(page, name) {
     return page.evaluate((n) => {
         let hit = null;
