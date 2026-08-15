@@ -1,5 +1,4 @@
 import { Entities, GetEntity, UUID } from "nova_ecs/arg_types";
-import { Entity } from "nova_ecs/entity";
 import { Plugin } from 'nova_ecs/plugin';
 import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { Resource } from "nova_ecs/resource";
@@ -7,19 +6,13 @@ import { System } from "nova_ecs/system";
 import { SingletonComponent } from "nova_ecs/world";
 import * as PIXI from "pixi.js";
 import { DisplayAssetDataInterface } from "../client/gamedata/display_asset_data.js";
-import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
 import { DisplayAssetDataResource, SimulationGameDataResource } from "../nova_plugin/game_data_resource.js";
-import { DisabledComponent } from "../nova_plugin/disabled_component.js";
-import { isInFlock } from "../nova_plugin/flock.js";
-import { GovtComponent } from "../nova_plugin/govt_component.js";
-import { shipDisposition, targetCornerStyle } from "../nova_plugin/iff_plugin.js";
-import { LegalRecordsComponent } from "../nova_plugin/reputation_plugin.js";
-import { NpcComponent } from "../nova_plugin/npc_ai_plugin.js";
-import { ShootAllWeaponsComponent } from "../nova_plugin/npc_plugin.js";
+import { styleForTarget } from "../nova_plugin/hostility.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 import { TargetComponent } from "../nova_plugin/target_component.js";
 import { mod } from "../util/mod.js";
 import { AnimationGraphicComponent, ObjectDrawSystem } from "./animation_graphic_plugin.js";
+import { defaultSimulationTime, SimulationTimeResource } from "./simulation_time.js";
 import { Space } from "./space_resource.js";
 import { ZIndex } from "./z_index.js";
 
@@ -120,53 +113,13 @@ export class TargetCorners {
 const TargetCornersResource = new Resource<TargetCorners>('TargetCornersResource');
 
 /**
- * The corner set for the player's current ship target — see
- * targetCornerStyle in iff_plugin.ts for the hostility rule. Derived
- * display-side entirely from state that already crosses to the display
- * world (GovtComponent, NpcComponent, TargetComponent, the Formation/
- * Owner/FiringGroup chain for the flock walk, the legacy
- * ShootAllWeapons marker — all serializer-registered), so no new wire
- * components are needed.
- *
- * The player's OWN FLOCK — hired escorts, idle bay fighters, and
- * anything transitively following them (see flock.ts) — always shows
- * the friendly corners, ahead of every political/behavioral tier:
- * your own ships are yours regardless of government.
+ * The corner set for the player's current ship target. THE HOSTILITY
+ * RULE now lives in nova_plugin/hostility.ts, because the simulation
+ * needs it too (the 'r' key targets the nearest ship this rule calls
+ * hostile); re-exported here so display code and the existing specs can
+ * keep importing it from where it grew up.
  */
-export function styleForTarget(targetUuid: string, targetEntity: Entity,
-    playerUuid: string, playerEntity: Entity,
-    gameData: SimulationGameDataInterface,
-    getEntity: (uuid: string) => Entity | undefined): string {
-    // Disabled beats everything, own flock included: gray corners mean
-    // "dead in space" whoever the hulk belongs to.
-    if (targetEntity.components.has(DisabledComponent)) {
-        return targetCornerStyle('neutral', false, true);
-    }
-    if (isInFlock(targetUuid, playerUuid, getEntity)) {
-        return 'friendly';
-    }
-    const govtId = targetEntity.components.get(GovtComponent)?.id;
-    // Display-side getCached: a cold cache shows neutral corners for a
-    // tick or two while the govt data loads.
-    const targetGovt = govtId
-        ? gameData.data.Govt.getCached(govtId) : undefined;
-    const playerGovtId = playerEntity.components.get(GovtComponent)?.id;
-    const playerGovt = playerGovtId
-        ? gameData.data.Govt.getCached(playerGovtId) : undefined;
-
-    const targetsPlayer = targetEntity.components
-        .get(TargetComponent)?.target === playerUuid;
-    const npcMode = targetEntity.components.get(NpcComponent)?.mode;
-    const attackingPlayer = targetsPlayer && (npcMode === 'attack'
-        || targetEntity.components.has(ShootAllWeaponsComponent));
-
-    // The player's legal records (delta-synced): a govt the player is
-    // criminal with shows hostile corners, same rule as the sim.
-    const playerRecords = playerEntity.components.get(LegalRecordsComponent);
-    return targetCornerStyle(
-        shipDisposition(targetGovt, playerGovt, playerRecords),
-        attackingPlayer);
-}
+export { styleForTarget };
 
 /**
  * Hides a corner set on any step nothing drew it. The drawing systems are
@@ -194,11 +147,11 @@ export function cornersSweepSystem(name: string,
 
 const DrawTargetCornersSystem = new System({
     name: "DrawTargetCornersSystem",
-    args: [TargetComponent, TimeResource, TargetCornersResource, Entities,
-        UUID, GetEntity, SimulationGameDataResource,
-        PlayerShipSelector] as const,
-    step({ target }, time, targetCorners, entities, playerUuid, playerEntity,
-        gameData) {
+    args: [TargetComponent, TimeResource, SimulationTimeResource,
+        TargetCornersResource, Entities, UUID, GetEntity,
+        SimulationGameDataResource, PlayerShipSelector] as const,
+    step({ target }, time, simulationTime, targetCorners, entities, playerUuid,
+        playerEntity, gameData) {
         if (!target) {
             targetCorners.visible = false;
             targetCorners.targetUuid = undefined;
@@ -215,7 +168,8 @@ const DrawTargetCornersSystem = new System({
         }
 
         targetCorners.setStyle(styleForTarget(target, targetEntity,
-            playerUuid, playerEntity, gameData, uuid => entities.get(uuid)));
+            playerUuid, playerEntity, gameData, uuid => entities.get(uuid),
+            simulationTime.time));
         targetCorners.step(time.time, target, targetGraphic.size);
         targetCorners.setPosition(targetGraphic.container.position);
         targetCorners.visible = true;
@@ -238,6 +192,15 @@ export const TargetCornersPlugin: Plugin = {
         const space = world.resources.get(Space);
         if (!space) {
             throw new Error('Expected world to have Space resource');
+        }
+
+        // The corner rule's aggression tier compares against SIM
+        // timestamps, so it reads the mirrored simulation clock rather
+        // than this world's wall-clock TimeResource. Seed it so the
+        // system can run before the first simulation frame arrives.
+        if (!world.resources.has(SimulationTimeResource)) {
+            world.resources.set(SimulationTimeResource,
+                defaultSimulationTime());
         }
 
         const targetCorners = new TargetCorners(displayAssets);

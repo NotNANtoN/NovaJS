@@ -5,6 +5,7 @@ import { Optional } from "nova_ecs/optional";
 import { Plugin } from "nova_ecs/plugin";
 import { DeltaResource } from "nova_ecs/plugins/delta_plugin";
 import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
+import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { Provide } from "nova_ecs/provide";
 import { Query } from "nova_ecs/query";
 import { System } from "nova_ecs/system";
@@ -15,6 +16,8 @@ import { CloakActiveComponent, CloakScannerComponent, isTargetable } from "./clo
 import { DisabledComponent } from "./disabled_component.js";
 import { OwnerComponent } from "./fire_weapon_plugin.js";
 import { isInFlock } from "./flock.js";
+import { SimulationGameDataResource } from "./game_data_resource.js";
+import { selectNearestHostile } from "./hostility.js";
 import { PlayerShipSelector } from "./player_ship_plugin.js";
 import { ShipComponent } from "./ship_plugin.js";
 import { Target, TargetComponent } from "./target_component.js";
@@ -39,9 +42,14 @@ const ChooseTargetSystem = new System({
     events: [ShipControlEvent],
     args: [ShipControlStateComponent, TargetComponent, TargetIndexComponent, UUID,
         TargetsQuery, Emit, MovementStateComponent, Entities,
-        Optional(CloakScannerComponent)] as const,
-    step(controlState, target, index, uuid, ships, emit, movementState,
-        entities, myScanner) {
+        Optional(CloakScannerComponent), SimulationGameDataResource,
+        TimeResource] as const,
+    // MovementStateComponent is kept as a requirement rather than a
+    // value: it gates the system on a ship that is actually in space,
+    // and the nearest-hostile scan reads the position off the entity
+    // itself (selectNearestHostile) so sim and display share one path.
+    step(controlState, target, index, uuid, ships, emit, _movementState,
+        entities, myScanner, gameData, time) {
         // The ship's own flock — escorts and anything transitively
         // following them (see flock.ts) — is excluded from general
         // targeting (tab / r) and cycled by escortTarget instead.
@@ -92,44 +100,38 @@ const ChooseTargetSystem = new System({
         }
 
         if (controlState.get('nearestTarget') === 'start') {
-            const [closestUuid, _distance, newIndex] = ships
-                .map(([a, b, c, d, e, f], index) =>
-                    [a, b, c, d, e, f, index] as const)
-                .filter(([otherUuid, _, owner, __, cloak, exploding]) => {
-                    if (hiddenFromCycle(otherUuid, owner?.owner)) {
-                        return false;
-                    }
-                    // Cloaked ships are untargetable unless this ship has
-                    // a cloak scanner that allows targeting them.
-                    if (!isTargetable(cloak, myScanner)) {
-                        return false;
-                    }
-                    // A ship in its death sequence is already gone.
-                    if (exploding !== undefined) {
-                        return false;
-                    }
-                    return otherUuid !== uuid;
-                })
-                .map(([uuid, { position }, _, __, ___, ____, index]) => [
-                    uuid,
-                    position.subtract(movementState.position).lengthSquared,
-                    index
-                ] as const)
-                .reduce<readonly [string | undefined, number, number]>(
-                    (a, b) => {
-                        if (a[1] !== b[1]) {
-                            return a[1] < b[1] ? a : b;
-                        }
-                        // Exactly equal distances: query iteration order
-                        // can differ between a peer that built its entity
-                        // map by insertion and one restored from a wire
-                        // snapshot, so break the tie deterministically by
-                        // the lexicographically smaller uuid.
-                        return a[0] !== undefined && a[0] < b[0] ? a : b;
-                    },
-                    [undefined, Infinity, -1] as const);
-
-            index.index = newIndex;
+            // 'r' picks the nearest HOSTILE ship, not merely the nearest
+            // ship. "Hostile" is the shared rule the target corners
+            // paint with (hostility.ts), so the key lands on exactly the
+            // ships drawn with red brackets — including another player
+            // who has recently shot at us, which no political layer
+            // could ever call hostile. The rule is behavioral, not
+            // equipment-gated: an IFF radar outfit (IffComponent)
+            // colours blips and has never had anything to do with
+            // targeting, so 'r' works the same with or without one.
+            const self = entities.get(uuid);
+            if (!self) {
+                return;
+            }
+            const closestUuid = selectNearestHostile({
+                viewerUuid: uuid,
+                viewerEntity: self,
+                entities,
+                gameData,
+                now: time.time,
+            });
+            if (closestUuid === undefined) {
+                // Nothing hostile in the system: LEAVE THE TARGET (or
+                // the lack of one) EXACTLY AS IT IS, and emit nothing —
+                // the display plays the "can't do that" beep off this
+                // same predicate. Clearing the lock here would punish
+                // the player for asking a question.
+                return;
+            }
+            // Keep the tab cycle's cursor in step, so the next 'tab'
+            // continues from whatever 'r' just picked.
+            index.index = ships.findIndex(([shipUuid]) =>
+                shipUuid === closestUuid);
             target.target = closestUuid;
             emit(CycleTargetEvent, target);
             return;

@@ -13,6 +13,7 @@ import { BeamPlugin } from "./beam_plugin.js";
 import { BlastPlugin } from "./blast_plugin.js";
 import { CloakPlugin } from "./cloak_plugin.js";
 import { DebugCheatPlugin } from "./debug_cheat_plugin.js";
+import { AggressionPlugin } from "./aggression_plugin.js";
 import { IffPlugin } from "./iff_plugin.js";
 import { CollisionsPlugin } from './collisions_plugin.js';
 import { ControlsPlugin } from "./controls_plugin.js";
@@ -83,6 +84,9 @@ export const SystemPlugin: Plugin = {
         world.addPlugin(HealthPlugin);
         world.addPlugin(CloakPlugin);
         world.addPlugin(IffPlugin);
+        // Before TargetPlugin: the 'r' key's nearest-hostile scan reads
+        // the aggression state this plugin records.
+        world.addPlugin(AggressionPlugin);
         world.addPlugin(TargetPlugin);
         world.addPlugin(SoundEventPlugin);
         world.addPlugin(BeamPlugin);

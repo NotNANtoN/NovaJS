@@ -1,4 +1,5 @@
 import 'jasmine';
+import { getDefaultGovtData } from 'novadatainterface/govt_data';
 import { MockGameData } from 'novadatainterface/mock_game_data';
 import { getDefaultShipData } from 'novadatainterface/ship_data';
 import { Position } from 'nova_ecs/datatypes/position';
@@ -7,6 +8,7 @@ import { World } from 'nova_ecs/world';
 import { DisabledComponent } from './disabled_component.js';
 import { ExplodingComponent } from './death_plugin.js';
 import { completeEntity } from './entity_data_loader.js';
+import { GovtComponent } from './govt_component.js';
 import { makeShip } from './make_ship.js';
 import { makeSystem } from './make_system.js';
 import { ArmorComponent } from './health_plugin.js';
@@ -17,18 +19,27 @@ import { applySetTarget } from './target_plugin.js';
 import { TargetComponent } from './target_component.js';
 
 const PEER = 'test peer';
+const ENEMY_GOVT = 'test:pirates';
 
 /**
  * A world with the player's ship, a hired escort following the player,
  * that escort's own bay fighter (following the escort — the transitive
  * flock case), and one enemy ship. Positions put the ESCORT nearest the
  * player, so nearest-target would pick it if it weren't excluded.
+ *
+ * The enemy flies a xenophobic government, which is what makes it
+ * HOSTILE: 'r' (nearestTarget) takes the nearest hostile ship, so a
+ * politically neutral bystander would not be a valid answer at all
+ * (see hostile_targeting_test for that rule in full).
  */
 async function makeTargetingWorld() {
     const gameData = new MockGameData();
     gameData.data.Ship.map.set('test:ship', {
         ...getDefaultShipData(), id: 'test:ship',
     });
+    const pirates = { ...getDefaultGovtData(), id: ENEMY_GOVT };
+    pirates.flags.xenophobic = true;
+    gameData.data.Govt.map.set(ENEMY_GOVT, pirates);
 
     const world = await makeSystem('test:system', gameData);
 
@@ -62,7 +73,9 @@ async function makeTargetingWorld() {
         // The escort's own launched fighter: follows the ESCORT.
         ship.components.set(FormationComponent, { leader: 'escort', slot: 0 });
     });
-    await addShip('enemy', 400, () => { });
+    await addShip('enemy', 400, ship => {
+        ship.components.set(GovtComponent, { id: ENEMY_GOVT });
+    });
 
     world.step();
     return world;
@@ -193,14 +206,19 @@ describe('a DISABLED flock member rejoins the normal cycle', () => {
         }
     }
 
-    it('nearest-target (r) picks the disabled escort over the enemy',
-        async () => {
-            // The escort sits at x=50 (nearer than the enemy at x=400);
-            // disabled, it is no longer skipped, so it wins on distance.
+    it("nearest-target (r) does NOT pick the disabled escort — 'r' is " +
+        'hostiles only, and a hulk is never hostile', async () => {
+            // The escort sits at x=50, nearer than the enemy at x=400,
+            // and being disabled it is no longer hidden from the normal
+            // cycle. But 'r' selects on HOSTILITY, and a disabled ship
+            // shows the gray 'disabled' corners rather than red, so the
+            // key skips it and lands on the enemy. Tab still reaches it
+            // (next spec), which is the route to boarding and repairing
+            // your own hulk.
             const world = await makeTargetingWorld();
             disable(world, 'escort');
             press(world, 'nearestTarget');
-            expect(playerTarget(world)).toBe('escort');
+            expect(playerTarget(world)).toBe('enemy');
         });
 
     it('tab cycling now lands on the disabled escort', async () => {

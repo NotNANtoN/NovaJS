@@ -16,6 +16,7 @@ import { Plugin } from 'nova_ecs/plugin';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
 import { MovementState, MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import { markerType, SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
+import { Time, TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { Provide } from 'nova_ecs/provide';
 import { Query } from 'nova_ecs/query';
 import { Resource } from 'nova_ecs/resource';
@@ -228,7 +229,8 @@ const SubsQuery = new Query([WeaponEntries, MovementStateComponent, Optional(Sub
     Optional(OwnerComponent), Optional(TargetComponent), GetEntity] as const);
 
 const ConstructorQuery = new Query([Entities, Emit, WeaponEntries,
-    RandomResource, IdFactoryResource, SingletonComponent] as const);
+    RandomResource, IdFactoryResource, TimeResource,
+    SingletonComponent] as const);
 
 export const VulnerableToPD = new Component<undefined>('VulnerableToPD');
 const PointDefenseQuery = new Query([MovementStateComponent, Optional(OwnerComponent),
@@ -239,11 +241,21 @@ export abstract class WeaponEntry {
     protected emit: EmitFunction;
     protected random: Random;
     protected ids: IdFactory;
+    /**
+     * The world's live simulation clock. Held as a reference, exactly
+     * like `entities` and `random` above: TimeSystem mutates the Time
+     * object in place and the snapshot policy restores it with
+     * Object.assign, so the identity never changes and this always
+     * reads the CURRENT tick. Weapon spawning needs it because locking
+     * a guided missile on a ship is a timestamped act of war
+     * (provokeGuidedLock).
+     */
+    protected time: Time;
     protected abstract pointDefenseRangeSquared: number;
     constructor(public data: WeaponData, protected runQuery: RunQueryFunction) {
         let weaponEntries: Gettable<WeaponEntry | undefined>;
-        [this.entities, this.emit, weaponEntries, this.random, this.ids] =
-            runQuery(ConstructorQuery)[0];
+        [this.entities, this.emit, weaponEntries, this.random, this.ids,
+            this.time] = runQuery(ConstructorQuery)[0];
         if ('submunitions' in this.data) {
             for (const sub of this.data.submunitions) {
                 weaponEntries.get(sub.id);
