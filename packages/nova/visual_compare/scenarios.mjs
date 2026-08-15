@@ -34,6 +34,8 @@ import { shopScenarios } from './scenarios_shops.mjs';
 // coverage; run.mjs and report.mjs are generic.
 // ============================================================================
 
+import { hudScenarios } from './scenarios_hud.mjs';
+
 const region = (id, label, x, y, width, height) => ({
     id, label, ref: { x, y, width, height }, ours: { x, y, width, height },
 });
@@ -57,8 +59,12 @@ const STATUSBAR_REGIONS = [
 // dynamic/overlay content, compared only where a scenario adds an explicit
 // overlay region.)
 const MAP_FRAME = region('map_frame', 'Whole dialog frame', 659, 281, 603, 517);
+// Starts BELOW the Navigation Hazards / date line (whose ink reaches y=764
+// on both sides now that the readouts sit on the original's rows): those
+// strings differ by system and by capture date, and letting them into the
+// button region measured text drift as if it were button drift.
 const MAP_BUTTON_ROW =
-    region('map_button_row', 'Bottom button row', 660, 750, 601, 48);
+    region('map_button_row', 'Bottom button row', 660, 765, 601, 33);
 const MAP_INFO_PANEL =
     region('map_info_panel', 'Right info panel (Destination/Govt/...)',
         1140, 300, 122, 420);
@@ -225,8 +231,13 @@ export const scenarios = [
         title: 'In space — status bar chrome',
         description: 'Flying in the Sol system; compare the right status-bar '
             + 'column against three reference frames. Dynamic text (target, '
-            + 'credits, stellar nav) legitimately differs; the chrome should not.',
-        params: { ship: 'nova:164', system: 'nova:130' },
+            + 'credits, stellar nav) legitimately differs; the chrome should not. '
+            + 'The ship is a Starbridge (nova:133) rather than the Raven the '
+            + 'other scenarios fly, because the status bar now follows the '
+            + "player ship's government (EVN Bible gövt Interface; see "
+            + 'scenarios_hud.mjs) and these references show the DEFAULT '
+            + 'civilian bar — a Raven would correctly draw the Polaris one.',
+        params: { ship: 'nova:133', system: 'nova:130' },
         hideDebug: true,
         setup: null,
         references: [
@@ -426,6 +437,10 @@ export const scenarios = [
         hideDebug: true,
         setup: async (page, driver) => {
             await driver.landAt(page, 'planet nova:128');
+            // Landing at Earth offers a mission; its popup owns the keyboard
+            // and would swallow the map key (the scenario used to time out
+            // waiting for a StarMap that never opened).
+            await driver.dismissOfferPopup(page);
             await driver.openStarmap(page);
         },
         references: [
@@ -1611,4 +1626,7 @@ export const scenarios = [
     // reference's shifted one with explicit rects.
     ...sigmaScenarios(),
     ...shopScenarios(),
+    // In-flight HUD coverage (status bar interfaces, cargo/target panels,
+    // star-map properties column, status line) — see scenarios_hud.mjs.
+    ...hudScenarios,
 ];

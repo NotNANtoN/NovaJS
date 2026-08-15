@@ -53,7 +53,7 @@ import { AnimationGraphic } from "./animation_graphic.js";
 import { targetReadout } from "./target_readout.js";
 import { AnimationGraphicComponent } from "./animation_graphic_plugin.js";
 import { PixiAppResource } from "./pixi_app_resource.js";
-import { ResizeEvent } from "./screen_size_plugin.js";
+import { ResizeEvent, ScreenSize } from "./screen_size_plugin.js";
 import { Stage } from "./stage_resource.js";
 
 
@@ -70,9 +70,87 @@ const CENTER_ARROW_BLINK_MS = 700;
  */
 const DEBUG_BUTTON_X = 35;
 
+// ---------------------------------------------------------------------------
+// PANEL TEXT GEOMETRY, measured off the original-hardware captures.
+//
+// Every constant below is an OFFSET INSIDE the ïntf data area it belongs to
+// (the areas themselves come from the resource), read off
+// ui_screenshots/original_macos_screenshots/space/*.png at 1920x1080 with
+// visual_compare/output/probe_band.mjs. The reference status bar occupies
+// x 1726..1919, so a status-bar-local x is (image x - 1726); the y values are
+// image rows, which the bar shares because it is pinned to the top.
+//
+// Ink vs. box: a probe reports where the GLYPHS start, while PIXI positions a
+// text BOX whose top sits ~2px above the cap line at 12px Geneva and whose
+// left edge sits ~1px left of the first glyph. The constants are therefore
+// (measured ink) - (that bearing), and the harness re-measures our render to
+// confirm.
+// ---------------------------------------------------------------------------
+
+/** Ink starts ~2px below a PIXI text box's top at the status bar's 12px. */
+const TEXT_INK_TOP = 2;
+/** ...and ~1px right of its left edge. */
+const TEXT_INK_LEFT = 1;
+
+/**
+ * Navigation pane: "Stellar Navigation" ink at y=257, its value at y=274.
+ * Both centred lines render a pixel lower than the left-aligned panels at the
+ * same nominal offset, so they carry one extra pixel of bearing.
+ */
+const NAV_HEADER_Y = 257 - 254 - TEXT_INK_TOP - 1;
+const NAV_VALUE_Y = 274 - 254 - TEXT_INK_TOP - 1;
+
+/**
+ * Target pane, no target: "No Target" ink centred on y=373.5 (in_space_3),
+ * i.e. 13px below the pane's own centre rather than the 30px above it the
+ * panel used to use.
+ */
+const NO_TARGET_CENTER_BELOW_MIDDLE = 14;
+/** Target pane: the name's ink at y=337 and the class subtitle's at y=351. */
+const TARGET_NAME_Y = 337 - 330 - TEXT_INK_TOP;
+const TARGET_SUBTITLE_Y = 351 - 330 - TEXT_INK_TOP;
+
+/**
+ * The target display draws the locked ship's sprite in RED ONLY: every pixel
+ * in the reference target pane is #RR0000 (probe_colors on in_space.png,
+ * board_ship.png and capture_assignment.png finds no green or blue at all),
+ * which a PIXI tint of 0xFF0000 reproduces exactly — it multiplies the
+ * sprite's channels by (1, 0, 0), keeping the red channel and zeroing the
+ * other two.
+ */
+const TARGET_SPRITE_TINT = 0xFF0000;
+
+// Cargo pane. The original's layout is FIXED, not centred-when-empty: the
+// right column sits at the same x whether or not the hold has anything in it
+// (compare in_space.png's empty hold with board_ship.png's five lines), and
+// each readout is a DIM label plus a BRIGHT value, with no space after the
+// label's colon ("Free:390").
+/** Manifest lines (left column): name ink x=12, quantity ink x=50. */
+const CARGO_NAME_X = 12 - 8 - TEXT_INK_LEFT;
+const CARGO_QUANTITY_X = 50 - 8 - TEXT_INK_LEFT;
+/** ...stacked from ink y=461 at a 14px pitch (board_ship.png). */
+const CARGO_LINE_Y = 461 - 458 - TEXT_INK_TOP;
+const CARGO_LINE_PITCH = 14;
+/** Right column: labels' ink at x=86, the Special/Credits values' at x=96. */
+const CARGO_LABEL_X = 86 - 8 - TEXT_INK_LEFT;
+const CARGO_VALUE_X = 96 - 8 - TEXT_INK_LEFT;
+/** The free-space count follows its label on the same line, ink at x=119. */
+const CARGO_FREE_VALUE_X = 119 - 8 - TEXT_INK_LEFT;
+/**
+ * The right column's five slots are fixed too: whether or not a "Special:"
+ * mission-cargo line is present, "Credits:" stays put (in_space.png and
+ * in_space_3.png put it on the same rows).
+ */
+const CARGO_FREE_Y = 461 - 458 - TEXT_INK_TOP;
+const CARGO_SPECIAL_LABEL_Y = 479 - 458 - TEXT_INK_TOP;
+const CARGO_SPECIAL_VALUE_Y = 495 - 458 - TEXT_INK_TOP;
+const CARGO_CREDITS_LABEL_Y = 515 - 458 - TEXT_INK_TOP;
+const CARGO_CREDITS_VALUE_Y = 531 - 458 - TEXT_INK_TOP;
+
 class StatusBar {
     readonly container = new PIXI.Container();
-    readonly buildPromise: Promise<void>;
+    /** Resolves when the current build (or reload) has finished. */
+    buildPromise: Promise<void>;
     built = false;
     width = 0;
     private radarScale = new Vector(6000, 6000);
@@ -124,8 +202,14 @@ class StatusBar {
     private brightFont!: PIXI.TextStyle;
     private dimFont!: PIXI.TextStyle;
     private subtitleFont!: PIXI.TextStyle;
-    /** Reused text objects for the regular-cargo manifest (left column). */
-    private cargoLineTexts: PIXI.Text[] = [];
+    /**
+     * Reused text objects for the regular-cargo manifest (left column): the
+     * dim commodity name and the bright quantity are separate so the
+     * quantities share one column (CARGO_QUANTITY_X) regardless of how wide
+     * the name is, the way the original stacks "Food: 9 / Ind: 9 / LuxG: 9".
+     */
+    private cargoNameTexts: PIXI.Text[] = [];
+    private cargoQuantityTexts: PIXI.Text[] = [];
     private cargoContainer?: PIXI.Container;
     private static readonly MAX_CARGO_LINES = 6;
     private addEnemyButton: Button;
@@ -178,6 +262,7 @@ class StatusBar {
         this.container.addChild(this.statsGraphics);
         this.targetContainer.addChild(this.targetSprite);
         this.targetSprite.anchor.set(0.5, 0.5);
+        this.targetSprite.tint = TARGET_SPRITE_TINT;
         this.targetSprite.position.x =
             this.statusBarData.dataAreas.targeting.size[0] / 2;
         this.targetSprite.position.y =
@@ -208,11 +293,14 @@ class StatusBar {
             align: 'center',
             fill: this.statusBarData.colors.dimText,
         });
+        // The ship-class subtitle is BRIGHT, not dim: "31d Model" under
+        // "Leviathan" is the same white as the name in in_space.png (its ink
+        // reads 765 on the probe's 0-765 scale, the dim grey reads 408).
         const subtitleFont = new PIXI.TextStyle({
             fontFamily,
             fontSize: subtitleSize,
             align: 'center',
-            fill: this.statusBarData.colors.dimText,
+            fill: this.statusBarData.colors.brightText,
         });
         this.brightFont = font;
         this.dimFont = dimFont;
@@ -285,13 +373,13 @@ class StatusBar {
         this.targetContainer.addChild(this.text.disabled);
 
         const middle = [this.statusBarData.dataAreas.targeting.size[0] / 2,
-        this.statusBarData.dataAreas.targeting.size[1] / 2 - 15];
+        this.statusBarData.dataAreas.targeting.size[1] / 2];
 
         this.text.noTarget = new PIXI.Text("No Target", dimFont);
         this.text.noTarget.anchor.x = 0.5;
         this.text.noTarget.anchor.y = 0.5;
         this.text.noTarget.position.x = middle[0];
-        this.text.noTarget.position.y = middle[1] - 15;
+        this.text.noTarget.position.y = middle[1] - NO_TARGET_CENTER_BELOW_MIDDLE;
 
         this.noTargetContainer.addChild(this.text.noTarget);
 
@@ -299,7 +387,7 @@ class StatusBar {
         this.text.targetName.anchor.x = 0.5;
         this.text.targetName.anchor.y = 0;
         this.text.targetName.position.x = middle[0];
-        this.text.targetName.position.y = 2;
+        this.text.targetName.position.y = TARGET_NAME_Y;
 
         this.targetContainer.addChild(this.text.targetName);
 
@@ -309,7 +397,7 @@ class StatusBar {
         this.text.targetSubtitle.anchor.x = 0.5;
         this.text.targetSubtitle.anchor.y = 0;
         this.text.targetSubtitle.position.x = middle[0];
-        this.text.targetSubtitle.position.y = 2 + fontSize + 1;
+        this.text.targetSubtitle.position.y = TARGET_SUBTITLE_Y;
         this.targetContainer.addChild(this.text.targetSubtitle);
 
         // The target's government, dim, in the lower-right of the pane
@@ -338,17 +426,26 @@ class StatusBar {
         this.text.navHeader.anchor.x = 0.5;
         this.text.navHeader.anchor.y = 0;
         this.text.navHeader.position.x = nav.size[0] / 2;
-        this.text.navHeader.position.y = 2;
+        this.text.navHeader.position.y = NAV_HEADER_Y;
         container.addChild(this.text.navHeader);
 
         this.text.navValue = new PIXI.Text("No Destination", dimFont);
         this.text.navValue.anchor.x = 0.5;
         this.text.navValue.anchor.y = 0;
         this.text.navValue.position.x = nav.size[0] / 2;
-        this.text.navValue.position.y = 2 + (this.statusBarData.fontSize || 12) + 2;
+        this.text.navValue.position.y = NAV_VALUE_Y;
         container.addChild(this.text.navValue);
     }
 
+    /**
+     * The cargo panel: a manifest in the left column and the
+     * Free / Special / Credits readouts in the right one, all at FIXED
+     * positions (see the CARGO_* constants). Every readout is a dim label
+     * plus a bright value, so each is two text objects — the original's
+     * "Free:390" is a grey "Free:" with a white "390" butted against it, and
+     * a manifest line's quantity sits in its own column so the numbers line
+     * up under one another however wide the commodity abbreviations are.
+     */
     private makeCargoText(font: PIXI.TextStyle, dimFont: PIXI.TextStyle) {
         const cargo = this.statusBarData.dataAreas.cargo;
         const container = new PIXI.Container();
@@ -358,41 +455,56 @@ class StatusBar {
 
         // Regular-cargo manifest lines (left column), reused across frames.
         for (let i = 0; i < StatusBar.MAX_CARGO_LINES; i++) {
-            const line = new PIXI.Text("", dimFont);
-            line.anchor.set(0, 0);
-            line.visible = false;
-            container.addChild(line);
-            this.cargoLineTexts.push(line);
+            const y = CARGO_LINE_Y + i * CARGO_LINE_PITCH;
+            const name = new PIXI.Text("", dimFont);
+            name.anchor.set(0, 0);
+            name.position.set(CARGO_NAME_X, y);
+            name.visible = false;
+            container.addChild(name);
+            this.cargoNameTexts.push(name);
+
+            const quantity = new PIXI.Text("", font);
+            quantity.anchor.set(0, 0);
+            quantity.position.set(CARGO_QUANTITY_X, y);
+            quantity.visible = false;
+            container.addChild(quantity);
+            this.cargoQuantityTexts.push(quantity);
         }
 
-        // Initial positions match the empty-hold (centred) layout so the panel
-        // reads sensibly before the first drawCargo, without any overlap.
-        const cx = cargo.size[0] / 2;
-        const lineHeight = (this.statusBarData.fontSize || 12) + 2;
+        this.text.freeLabel = new PIXI.Text("Free:", dimFont);
+        this.text.freeLabel.anchor.set(0, 0);
+        this.text.freeLabel.position.set(CARGO_LABEL_X, CARGO_FREE_Y);
+        container.addChild(this.text.freeLabel);
 
-        this.text.free = new PIXI.Text("Free: 0", font);
-        this.text.free.anchor.set(0.5, 0);
-        this.text.free.position.set(cx, 6);
+        this.text.free = new PIXI.Text("0", font);
+        this.text.free.anchor.set(0, 0);
+        this.text.free.position.set(CARGO_FREE_VALUE_X, CARGO_FREE_Y);
         container.addChild(this.text.free);
 
         this.text.specialLabel = new PIXI.Text("Special:", dimFont);
-        this.text.specialLabel.anchor.y = 0;
+        this.text.specialLabel.anchor.set(0, 0);
+        this.text.specialLabel.position.set(
+            CARGO_LABEL_X, CARGO_SPECIAL_LABEL_Y);
         this.text.specialLabel.visible = false;
         container.addChild(this.text.specialLabel);
 
         this.text.special = new PIXI.Text("", font);
-        this.text.special.anchor.y = 0;
+        this.text.special.anchor.set(0, 0);
+        this.text.special.position.set(
+            CARGO_VALUE_X, CARGO_SPECIAL_VALUE_Y);
         this.text.special.visible = false;
         container.addChild(this.text.special);
 
         this.text.creditsLabel = new PIXI.Text("Credits:", dimFont);
-        this.text.creditsLabel.anchor.set(0.5, 0);
-        this.text.creditsLabel.position.set(cx, 6 + lineHeight * 3);
+        this.text.creditsLabel.anchor.set(0, 0);
+        this.text.creditsLabel.position.set(
+            CARGO_LABEL_X, CARGO_CREDITS_LABEL_Y);
         container.addChild(this.text.creditsLabel);
 
         this.text.credits = new PIXI.Text("0", font);
-        this.text.credits.anchor.set(0.5, 0);
-        this.text.credits.position.set(cx, 6 + lineHeight * 4);
+        this.text.credits.anchor.set(0, 0);
+        this.text.credits.position.set(
+            CARGO_VALUE_X, CARGO_CREDITS_VALUE_Y);
         container.addChild(this.text.credits);
     }
 
@@ -668,18 +780,19 @@ class StatusBar {
 
     private lastCargo?: string;
     /**
-     * Draws the cargo/credits panel. With no regular cargo the Free and Credits
-     * lines centre in the panel (the original's empty-hold look); with cargo
-     * the manifest fills the left column and Free/Special/Credits the right.
+     * Draws the cargo/credits panel. Everything sits at a fixed spot (the
+     * CARGO_* constants): the manifest fills the left column top-down, and
+     * the right column always reads Free / [Special] / Credits at the same
+     * rows whether or not the hold is empty and whether or not the player
+     * carries mission cargo — which is what the original does (in_space.png's
+     * empty hold puts "Free:390" and "Credits:" on exactly the rows
+     * board_ship.png's loaded hold does).
      */
     drawCargo(free: number, credits: number, lines: CargoLine[],
         special: string | null) {
         if (!this.built) {
             return;
         }
-        const cargo = this.statusBarData.dataAreas.cargo;
-        const width = cargo.size[0];
-        const lineHeight = (this.statusBarData.fontSize || 12) + 2;
         const creditsText = formatCredits(credits);
         const key = JSON.stringify([free, creditsText, lines, special]);
         if (key === this.lastCargo) {
@@ -689,20 +802,18 @@ class StatusBar {
 
         // Regular cargo manifest, left column.
         const shown = Math.min(lines.length, StatusBar.MAX_CARGO_LINES);
-        for (let i = 0; i < this.cargoLineTexts.length; i++) {
-            const text = this.cargoLineTexts[i];
+        for (let i = 0; i < this.cargoNameTexts.length; i++) {
+            const name = this.cargoNameTexts[i];
+            const quantity = this.cargoQuantityTexts[i];
             if (i < shown) {
-                const line = lines[i];
-                text.text = `${line.name}: ${line.quantity}`;
-                text.anchor.set(0, 0);
-                text.position.set(6, 6 + i * lineHeight);
-                text.visible = true;
-            } else {
-                text.visible = false;
+                name.text = `${lines[i].name}:`;
+                quantity.text = String(lines[i].quantity);
             }
+            name.visible = i < shown;
+            quantity.visible = i < shown;
         }
 
-        this.text.free.text = `Free: ${free}`;
+        this.text.free.text = String(free);
         this.text.credits.text = creditsText;
         const hasSpecial = special !== null;
         this.text.specialLabel.visible = hasSpecial;
@@ -710,36 +821,47 @@ class StatusBar {
         if (hasSpecial) {
             this.text.special.text = special;
         }
+    }
 
-        if (shown === 0) {
-            // Empty hold: centre Free and the Credits label/value.
-            const cx = width / 2;
-            this.text.free.anchor.x = 0.5;
-            this.text.free.position.set(cx, 6);
-            this.text.creditsLabel.anchor.x = 0.5;
-            this.text.creditsLabel.position.set(cx, 6 + lineHeight * 3);
-            this.text.credits.anchor.x = 0.5;
-            this.text.credits.position.set(cx, 6 + lineHeight * 4);
-            this.text.specialLabel.visible = false;
-            this.text.special.visible = false;
-        } else {
-            // Right column: Free, then Special (label+value), then Credits.
-            const rx = Math.round(width * 0.52);
-            this.text.free.anchor.x = 0;
-            this.text.free.position.set(rx, 6);
-            let y = 6 + lineHeight;
-            if (hasSpecial) {
-                this.text.specialLabel.anchor.x = 0;
-                this.text.specialLabel.position.set(rx, y);
-                this.text.special.anchor.x = 0;
-                this.text.special.position.set(rx, y + lineHeight);
-                y += lineHeight * 2;
-            }
-            this.text.creditsLabel.anchor.x = 0;
-            this.text.creditsLabel.position.set(rx, y);
-            this.text.credits.anchor.x = 0;
-            this.text.credits.position.set(rx, y + lineHeight);
+    /** Set while an interface swap is in flight (SelectStatusBarInterface). */
+    reloading = false;
+
+    /** The ïntf resource this bar is currently drawn from. */
+    get statusBarId(): string {
+        return this.statusBarData.id;
+    }
+
+    /**
+     * Rebuilds the whole bar from a different ïntf resource — the background
+     * PICT, the data-area rectangles, the colours and the fonts all come from
+     * it, so switching status bars means re-running build(). Used when the
+     * player changes ship class into one whose government names another
+     * interface (SelectStatusBarInterface).
+     */
+    async reload(statusBarData: StatusBarData) {
+        this.statusBarData = statusBarData;
+        this.built = false;
+        this.container.removeChildren();
+        // The panes are class-owned containers that build() re-parents; their
+        // children are per-build text objects, so they start empty again.
+        this.targetContainer.removeChildren();
+        this.noTargetContainer.removeChildren();
+        // Each PIXI.Text owns a generated canvas texture, so the outgoing set
+        // is destroyed rather than merely detached. Only the texts are
+        // destroyed: the background sprite shares its texture with the asset
+        // cache, and the debug buttons are re-added by build().
+        for (const text of [...Object.values(this.text),
+            ...this.cargoNameTexts, ...this.cargoQuantityTexts]) {
+            text.destroy();
         }
+        this.text = {};
+        this.cargoNameTexts = [];
+        this.cargoQuantityTexts = [];
+        this.lastNav = undefined;
+        this.lastCargo = undefined;
+        this.lastSecondary = undefined;
+        this.buildPromise = this.build();
+        await this.buildPromise;
     }
 
     /** Releases the cached target RenderTexture (and its base texture). */
@@ -764,7 +886,10 @@ const StatusBarResize = new System({
     events: [ResizeEvent],
     args: [StatusBarResource, ResizeEvent] as const,
     step({ container }, { x }) {
-        container.position.x = x - container.width + 1;
+        // Flush with the right edge. The old `+ 1` pushed the whole bar one
+        // pixel right of the original's (which occupies x 1726..1919 at
+        // 1920x1080) and cropped its rightmost column off the screen.
+        container.position.x = x - container.width;
         container.position.y = 0;
     }
 });
@@ -1167,6 +1292,75 @@ const DrawDockedStatus = new System({
     }
 });
 
+/** The civilian status bar (ïntf 128 / PICT 700), used when nothing else picks. */
+export const DEFAULT_STATUS_BAR_ID = 'nova:128';
+
+/**
+ * Which ïntf resource the status bar should be drawn from while the player
+ * flies `shipId`.
+ *
+ * EVN Bible, gövt section: the Interface field is "ID of an ïntf resource to
+ * use when the player is flying a ship whose inherent attributes govt or
+ * inherent combat govt is equal to this govt type", and the shïp section gives
+ * InherentGovt the three ranges `interfaceGovt` already folds together
+ * (novaparse ship_parse). In stock data this is what puts the Federation bar
+ * (ïntf 130 / PICT 702) under a Fed Viper and the Polaris one (129 / 701)
+ * under a Raven, while the ~93 classes with no inherent government and the
+ * governments whose Interface is below 128 keep the default civilian bar.
+ *
+ * Returns undefined while the ship's or government's data is still loading
+ * (getCached kicks the load off), so the caller can simply try again next
+ * step rather than flashing the default bar in between.
+ */
+export function statusBarIdForShip(shipId: string,
+    gameData: SimulationGameDataInterface): string | undefined {
+    const shipData = gameData.data.Ship.getCached(shipId);
+    if (!shipData) {
+        return undefined;
+    }
+    if (!shipData.interfaceGovt) {
+        return DEFAULT_STATUS_BAR_ID;
+    }
+    const govt = gameData.data.Govt.getCached(shipData.interfaceGovt);
+    if (!govt) {
+        return undefined;
+    }
+    return govt.statusBar ?? DEFAULT_STATUS_BAR_ID;
+}
+
+/**
+ * Keeps the bar's ïntf resource in step with the ship the player flies. It
+ * runs every step (rather than only at build) because the player's ship class
+ * changes at the shipyard, and because the ship/govt data it needs streams in
+ * asynchronously — the bar builds from the default interface and swaps to the
+ * ship's own as soon as both resources are cached.
+ */
+const SelectStatusBarInterface = new System({
+    name: 'SelectStatusBarInterface',
+    args: [StatusBarResource, ShipComponent, SimulationGameDataResource,
+        DisplayAssetDataResource, ScreenSize, PlayerShipSelector] as const,
+    step(statusBar, ship, gameData, displayAssets, screen) {
+        const wanted = statusBarIdForShip(ship.id, gameData);
+        if (wanted === undefined || wanted === statusBar.statusBarId
+            || statusBar.reloading) {
+            return;
+        }
+        statusBar.reloading = true;
+        void (async () => {
+            try {
+                await statusBar.reload(
+                    await displayAssets.data.StatusBar.get(wanted));
+                // A different interface may use a differently sized backdrop.
+                statusBar.container.position.x =
+                    screen.x - statusBar.container.width;
+                statusBar.container.position.y = 0;
+            } finally {
+                statusBar.reloading = false;
+            }
+        })();
+    },
+});
+
 export const StatusBarPlugin: Plugin = {
     name: 'StatusBar',
     async build(world) {
@@ -1189,7 +1383,8 @@ export const StatusBarPlugin: Plugin = {
             throw new Error('Expected PIXI App resource to exist');
         }
 
-        const statusBar = new StatusBar(await displayAssets.data.StatusBar.get("nova:128"),
+        const statusBar = new StatusBar(
+            await displayAssets.data.StatusBar.get(DEFAULT_STATUS_BAR_ID),
             displayAssets, app.renderer);
 
         // Seed the radar's sensor interference from the current system. This is
@@ -1236,6 +1431,7 @@ export const StatusBarPlugin: Plugin = {
         }
 
         world.addSystem(DrawRadar);
+        world.addSystem(SelectStatusBarInterface);
         world.addSystem(StatusBarResize);
         world.addSystem(DrawStatusBarStats);
         world.addSystem(DrawStatusBarSecondaryWeapon);
@@ -1247,6 +1443,7 @@ export const StatusBarPlugin: Plugin = {
     },
     remove(world) {
         world.removeSystem(DrawRadar);
+        world.removeSystem(SelectStatusBarInterface);
         world.removeSystem(StatusBarResize);
         world.removeSystem(DrawStatusBarStats);
         world.removeSystem(DrawStatusBarSecondaryWeapon);

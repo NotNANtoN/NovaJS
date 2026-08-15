@@ -991,10 +991,12 @@ export interface OpenStarmapOptions {
     date?: GameDate;
 }
 
-// Right-column/properties fonts. The label blue-gray matches the original's
-// field captions; values are white.
+// Right-column/properties fonts. Field captions are the light grey the
+// original uses — every caption pixel in the reference panel is exactly
+// #c0c0c0 (probe_colors on map/borders_off.png at 1144,297), not the
+// blue-grey they used to be drawn in; values are white.
 const PROP_LABEL_FONT: Partial<PIXI.ITextStyle> = {
-    fontFamily: 'Geneva', fontSize: 10, fill: 0x8f9fc0,
+    fontFamily: 'Geneva', fontSize: 10, fill: 0xc0c0c0,
     align: 'left', wordWrap: false,
 };
 const PROP_VALUE_FONT: Partial<PIXI.ITextStyle> = {
@@ -1011,11 +1013,38 @@ const DATE_FONT: Partial<PIXI.ITextStyle> = {
 // its right and the Ports/Hazards readouts plus the button row below it,
 // matching map_open_over_spaceport.png.
 const MAP_POS = { x: -290, y: -248 };
-const PROP_X = 178;
-const PROP_TOP = -240;
-const PROP_LINE = 13;
-const PORTS_Y = 182;
-const HAZARDS_Y = 202;
+const PROP_X = 177;
+/**
+ * The properties column's five groups sit at FIXED rows, not stacked one
+ * under the other: measured on map/borders_off.png, map_single_jump_route.png
+ * and map_zoomed_out_showing_far_away_mission.png, whose captions land on the
+ * same screen rows (297 / 360 / 404 / 440 / 535) even though their Goods
+ * Traded lists are six entries long, one entry long and six again. Rows are
+ * container-relative (the dialog is centred on a 1080-tall screen, and text
+ * ink starts ~2px below a PIXI text box).
+ */
+const PROP_TOP = 297 - 540 - 2;
+const PROP_GROUP_Y = [0, 62, 108, 144, 236];
+/** Which of those slots a properties group occupies. */
+const enum PropSlot {
+    System = 0, Government = 1, LegalStatus = 2, Goods = 3, Services = 4,
+}
+/** A group's first value sits 13px under its caption, the rest 12px apart. */
+const PROP_LINE = 12;
+const PROP_FIRST_VALUE = 14;
+/** Values are indented 5px from their caption. */
+const PROP_VALUE_INDENT = 5;
+/**
+ * The Ports / Navigation Hazards readouts under the map pane. Measured on
+ * map/borders_off.png: the two captions' ink starts at x=678 (container -282)
+ * on rows 725 and 749, their values at x=713 and x=778, and the grey date
+ * shares the hazards row.
+ */
+const PORTS_LABEL_X = -282;
+const PORTS_VALUE_X = -247;
+const HAZARDS_VALUE_X = -182;
+const PORTS_Y = 184;
+const HAZARDS_Y = 208;
 const DATE_RIGHT_X = 288;
 // Measured against map_single_jump_route.png at 1920x1080: the reference
 // row's red button core spans y=773..783 (center 778); at BUTTON_Y=220 ours
@@ -1142,10 +1171,10 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
 
         this.propContainer.position.set(0, 0);
         this.container.addChild(this.propContainer);
-        this.portsLabel.position.set(MAP_POS.x, PORTS_Y);
-        this.portsValue.position.set(MAP_POS.x + 42, PORTS_Y);
-        this.hazardsLabel.position.set(MAP_POS.x, HAZARDS_Y);
-        this.hazardsValue.position.set(MAP_POS.x + 118, HAZARDS_Y);
+        this.portsLabel.position.set(PORTS_LABEL_X, PORTS_Y);
+        this.portsValue.position.set(PORTS_VALUE_X, PORTS_Y);
+        this.hazardsLabel.position.set(PORTS_LABEL_X, HAZARDS_Y);
+        this.hazardsValue.position.set(HAZARDS_VALUE_X, HAZARDS_Y);
         this.dateText.anchor.x = 1;
         this.dateText.position.set(DATE_RIGHT_X, HAZARDS_Y);
         this.container.addChild(this.portsLabel, this.portsValue,
@@ -1244,19 +1273,21 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
      */
     private showProperties(systemId: string) {
         this.propContainer.removeChildren();
-        let y = PROP_TOP;
-        const addLine = (label: string, values: string[]) => {
+        // Each group owns one of the column's five fixed slots, so a short
+        // Goods Traded list (or a missing Legal Status, in an ungoverned
+        // system) leaves a gap rather than pulling the rest up — which is
+        // what the original does.
+        const addLine = (slot: PropSlot, label: string, values: string[]) => {
+            const top = PROP_TOP + PROP_GROUP_Y[slot];
             const labelText = new PIXI.Text(label, PROP_LABEL_FONT);
-            labelText.position.set(PROP_X, y);
+            labelText.position.set(PROP_X, top);
             this.propContainer.addChild(labelText);
-            y += PROP_LINE;
-            for (const value of values) {
+            values.forEach((value, i) => {
                 const valueText = new PIXI.Text(value, PROP_VALUE_FONT);
-                valueText.position.set(PROP_X + 6, y);
+                valueText.position.set(PROP_X + PROP_VALUE_INDENT,
+                    top + PROP_FIRST_VALUE + i * PROP_LINE);
                 this.propContainer.addChild(valueText);
-                y += PROP_LINE;
-            }
-            y += 5;
+            });
         };
 
         const isCurrent = systemId === this.systemId;
@@ -1264,24 +1295,25 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
         const system = this.allSystems?.find(s => s.id === systemId);
         const explored = this.isSystemExplored(systemId);
         if (!system || !explored) {
-            addLine(title, [explored && system ? system.name : '<Unknown>']);
+            addLine(PropSlot.System, title,
+                [explored && system ? system.name : '<Unknown>']);
             this.portsValue.text = '<Unknown>';
             this.hazardsValue.text = '<Unknown>';
             return;
         }
 
-        addLine(title, [system.name]);
+        addLine(PropSlot.System, title, [system.name]);
 
         const govt = system.govt
             ? this.universe.getGovt(system.govt) : undefined;
         // Strip the "; note" author suffix ("Federation;hates Temmin
         // Shard" -> "Federation") the original never shows.
-        addLine('Government:',
+        addLine(PropSlot.Government, 'Government:',
             [govt ? displayName(govt.name) : 'Independent']);
 
         if (govt && system.govt) {
             const record = this.getLegalRecords()?.get(system.govt) ?? 0;
-            addLine('Legal Status:',
+            addLine(PropSlot.LegalStatus, 'Legal Status:',
                 [legalStatusName(record, govt.crimeTol)]);
         }
 
@@ -1303,7 +1335,7 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
             outfitting ||= port.flags.hasOutfitter;
             shipyard ||= port.flags.hasShipyard;
         }
-        addLine('Goods Traded:', goods.size > 0
+        addLine(PropSlot.Goods, 'Goods Traded:', goods.size > 0
             ? [...goods].sort((a, b) => a - b)
                 .map(i => STANDARD_CARGO_NAMES[i] ?? `Cargo ${i}`)
             : ['None']);
@@ -1312,7 +1344,8 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
             ...(outfitting ? ['Outfitting'] : []),
             ...(shipyard ? ['Shipyard'] : []),
         ];
-        addLine('Services:', services.length > 0 ? services : ['None']);
+        addLine(PropSlot.Services, 'Services:',
+            services.length > 0 ? services : ['None']);
 
         this.portsValue.text = ports.length > 0
             ? ports.map(p => p.name).join(', ') : 'None';

@@ -93,6 +93,12 @@ export async function GovtParse(govt: GovtResource,
         newsPic: govt.newsPic >= 128
             ? govt.idSpace.PICT[govt.newsPic]?.globalID ?? null
             : null,
+        // gövt Interface: the status bar for a player flying this
+        // government's ships. "Values less than 128 will be interpreted as
+        // 128" (the default bar), which the null stands for.
+        statusBar: govt.interface >= 128
+            ? govt.idSpace.ïntf[govt.interface]?.globalID ?? null
+            : null,
         commGreetings,
     };
 }
