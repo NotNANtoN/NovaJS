@@ -846,6 +846,14 @@ class StatusBar {
         // children are per-build text objects, so they start empty again.
         this.targetContainer.removeChildren();
         this.noTargetContainer.removeChildren();
+        // Each PIXI.Text owns a generated canvas texture, so the outgoing set
+        // is destroyed rather than merely detached. Only the texts are
+        // destroyed: the background sprite shares its texture with the asset
+        // cache, and the debug buttons are re-added by build().
+        for (const text of [...Object.values(this.text),
+            ...this.cargoNameTexts, ...this.cargoQuantityTexts]) {
+            text.destroy();
+        }
         this.text = {};
         this.cargoNameTexts = [];
         this.cargoQuantityTexts = [];
