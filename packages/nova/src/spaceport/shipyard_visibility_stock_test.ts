@@ -2,6 +2,7 @@ import 'jasmine';
 import { ShipData } from 'novadatainterface/ship_data';
 import { getIntegrationGameData } from '../communication/simulation_test_fixture.js';
 import {
+    buyRandomDayRoll,
     shipBuyRandomPasses,
     ShipyardContext,
     visibleShips,
@@ -52,15 +53,22 @@ describe('shipyard stock against real Nova data', () => {
             expect(visibleShips([dart], makeCtx())).not.toContain(dart);
         });
 
-    it('varies by day for a partial BuyRandom stock ship', async () => {
+    it('sells a partial-BuyRandom stock ship every day while the day roll '
+        + 'is off, though its roll still varies', async () => {
         const shuttle = (await byId()).get('nova:128')!; // 35%
         const open = new Set<number>();
+        const rolls = new Set<number>();
         for (let d = 0; d < 100; d++) {
             if (shipBuyRandomPasses(shuttle, makeCtx({ day: d }))) {
                 open.add(d);
             }
+            rolls.add(buyRandomDayRoll(shuttle, makeCtx({ day: d })));
         }
-        expect(open.size).toBeGreaterThan(5);
-        expect(open.size).toBeLessThan(95);
+        // Day roll disabled (BUY_RANDOM_DAY_ROLL_ENABLED): nonzero
+        // BuyRandom is always for sale...
+        expect(open.size).toBe(100);
+        // ...but the underlying roll mechanism still spreads across days,
+        // ready for the eventual hide-on-failed-roll re-enable.
+        expect(rolls.size).toBeGreaterThan(5);
     });
 });

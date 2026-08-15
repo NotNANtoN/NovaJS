@@ -1,6 +1,7 @@
 import 'jasmine';
 import { getDefaultShipData, ShipData } from 'novadatainterface/ship_data';
 import {
+    buyRandomDayRoll,
     canBuyShip,
     compareShipIds,
     playerContribute,
@@ -111,23 +112,37 @@ describe('shipBuyRandomPasses', () => {
             .toBeFalse();
     });
 
-    it('is deterministic: same inputs, same result', () => {
+    it('always passes a partial BuyRandom while the day roll is off', () => {
+        // The day roll is currently disabled (BUY_RANDOM_DAY_ROLL_ENABLED
+        // is false; Matthew 2026-08-14): any nonzero BuyRandom is for sale
+        // every day. Re-enabling the roll should fail this spec so the
+        // flip is a deliberate, test-visible change.
         const ship = makeShip('nova:131', { buyRandom: 45 });
-        const a = shipBuyRandomPasses(ship, makeContext(ship, {
+        for (const day of [0, 1, 100, 4321]) {
+            expect(shipBuyRandomPasses(ship, makeContext(ship, {
+                day, stellarId: 472 }))).toBeTrue();
+        }
+    });
+
+    // The roll mechanism itself stays under test while the switch is off,
+    // via the exported buyRandomDayRoll.
+    it('day roll is deterministic: same inputs, same result', () => {
+        const ship = makeShip('nova:131', { buyRandom: 45 });
+        const a = buyRandomDayRoll(ship, makeContext(ship, {
             day: 200, stellarId: 472 }));
         // Recompute; the hash is pure, so it must agree.
-        const b = shipBuyRandomPasses(ship, makeContext(ship, {
+        const b = buyRandomDayRoll(ship, makeContext(ship, {
             day: 200, stellarId: 472 }));
         expect(a).toBe(b);
     });
 
-    it('varies by day for a partial BuyRandom', () => {
-        // A 45% ship spread over many days must not be available every day.
+    it('day roll varies by day for a partial BuyRandom', () => {
+        // A 45% ship spread over many days must not roll under 45 every day.
         const ship = makeShip('nova:131', { buyRandom: 45 });
         const daysOpen: number[] = [];
         for (let day = 0; day < 500; day++) {
-            if (shipBuyRandomPasses(ship, makeContext(ship, {
-                day, stellarId: 472 }))) {
+            if (buyRandomDayRoll(ship, makeContext(ship, {
+                day, stellarId: 472 })) < 45) {
                 daysOpen.push(day);
             }
         }
@@ -138,13 +153,13 @@ describe('shipBuyRandomPasses', () => {
         expect(daysOpen.length).toBeLessThan(500 * 0.8);
     });
 
-    it('is independent of which player visits', () => {
+    it('day roll is independent of which player visits', () => {
         // The daily roll is a property of ship+shipyard+day, not the
         // player: two contexts that differ only in control bits agree.
         const ship = makeShip('nova:131', { buyRandom: 45 });
-        const plain = shipBuyRandomPasses(ship, makeContext(ship, {
+        const plain = buyRandomDayRoll(ship, makeContext(ship, {
             day: 100, stellarId: 472 }));
-        const rich = shipBuyRandomPasses(ship, makeContext(ship, {
+        const rich = buyRandomDayRoll(ship, makeContext(ship, {
             day: 100, stellarId: 472,
             bits: new Set([1, 2, 3, 4, 5]) }));
         expect(plain).toBe(rich);
@@ -157,6 +172,8 @@ describe('shipBuyRandomPasses', () => {
         const ship = makeShip('nova:131', { buyRandom: 45 });
         for (let day = 0; day < 30; day++) {
             shipBuyRandomPasses(ship, makeContext(ship, {
+                day, stellarId: 472 }));
+            buyRandomDayRoll(ship, makeContext(ship, {
                 day, stellarId: 472 }));
         }
         expect(Math.random).not.toHaveBeenCalled();
@@ -172,6 +189,19 @@ describe('canBuyShip', () => {
         expect(check.allowed).toBeFalse();
         expect(check.allowed ? '' : check.reason).toBe('availability');
     });
+
+    it('refuses a never-sold (BuyRandom 0) ship even with the day roll off',
+        () => {
+            const ship = makeShip('nova:131', { buyRandom: 0 });
+            const check = canBuyShip(ship, makeContext(ship, {
+                planet: STELLAR_TECH_5 }));
+            expect(check.allowed).toBeFalse();
+            expect(check.allowed ? '' : check.reason)
+                .toBe('notAvailableToday');
+            // Permanent "never sold", not a bad day: no "today".
+            expect(check.allowed ? '' : check.message)
+                .toBe('This ship isn\'t for sale.');
+        });
 
     it('refuses when Require is unmet', () => {
         const ship = makeShip('nova:131', { require: '0x10' });

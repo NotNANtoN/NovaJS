@@ -25,6 +25,21 @@ import { ShipData } from 'novadatainterface/ship_data';
 import { meetsTechLevel } from './outfitter_rules.js';
 import { evaluateNCBTest, NCBParseError } from '../nova_plugin/ncb.js';
 
+/**
+ * Master switch for the per-day BuyRandom roll (Matthew, 2026-08-14:
+ * disabled for now). While off, any ship with a NONZERO BuyRandom is for
+ * sale every day; BuyRandom 0 keeps its Bible meaning ("never be made
+ * available for purchase") regardless of the switch, since that's a
+ * permanent property, not the randomized daily part.
+ *
+ * DESIGN RULING (Matthew, 2026-08-14) for when this is re-enabled: the
+ * daily roll applies to BOTH the shipyard and the outfitter, and a failed
+ * roll HIDES the item from the grid entirely (move the roll into
+ * buyVisible) — not the current grey "isn't for sale today" treatment,
+ * which exists only as the purchase-side backstop.
+ */
+export const BUY_RANDOM_DAY_ROLL_ENABLED = false;
+
 export interface ShipyardStellar {
     /** Everything with techLevel <= this is stocked (spöb TechLevel). */
     techLevel: number;
@@ -148,9 +163,21 @@ export function shipBuyRandomPasses(ship: ShipData,
         // for purchase."
         return false;
     }
+    if (!BUY_RANDOM_DAY_ROLL_ENABLED) {
+        return true;
+    }
+    return buyRandomDayRoll(ship, ctx) < ship.buyRandom;
+}
+
+/**
+ * The day's 0-99 roll for this ship at this shipyard — compared against
+ * BuyRandom when {@link BUY_RANDOM_DAY_ROLL_ENABLED}. Exported so the roll
+ * mechanism stays under test while the switch is off.
+ */
+export function buyRandomDayRoll(ship: ShipData,
+    ctx: ShipyardContext): number {
     const shipNum = resourceNumber(ship.id) ?? 0;
-    const hash = fnv1a(`${ctx.day}|${ctx.stellarId ?? 0}|${shipNum}`);
-    return (hash % 100) < ship.buyRandom;
+    return fnv1a(`${ctx.day}|${ctx.stellarId ?? 0}|${shipNum}`) % 100;
 }
 
 /** FNV-1a 32-bit hash of a string (offset basis 2166136261, prime
@@ -225,8 +252,10 @@ export function canBuyShip(ship: ShipData,
         return denied('require', 'You lack something this requires.');
     }
     if (!shipBuyRandomPasses(ship, ctx)) {
-        return denied('notAvailableToday',
-            'This ship isn\'t for sale today.');
+        // BuyRandom 0 is a permanent "never sold", not a bad day.
+        return denied('notAvailableToday', ship.buyRandom <= 0
+            ? 'This ship isn\'t for sale.'
+            : 'This ship isn\'t for sale today.');
     }
     return { allowed: true };
 }
@@ -285,17 +314,14 @@ function buyVisible(ship: ShipData, ctx: ShipyardContext): boolean {
  * shipyard dialog", Bible ~:2451 — with ties broken by ascending id for a
  * deterministic, resource-order list).
  *
- * JUDGMENT CALL — BuyRandom does NOT hide a stocked ship here. The Bible's
- * appearance-hiding language is attached only to Availability ("might appear in
- * the shipyard but not be able to be purchased if its Availability evaluates
- * to false") and Require, and to the two hide-flags 0x0100/0x0200 —
- * never to the day roll. A ship that simply isn't for sale today still
- * SHOWS (greyed), and its Buy is refused by canBuyShip's
- * 'notAvailableToday'. This matches the observable original: the stock ship list
- * is stable across a day, with individual ships greyed/refused, and the
- * day roll affects only which of them can actually be bought. What IS
- * day-sensitive here is the Flags3 0x4000 exclusion below, which keys on
- * "available for sale today".
+ * BuyRandom and visibility: the day roll is currently DISABLED
+ * ({@link BUY_RANDOM_DAY_ROLL_ENABLED}), so only BuyRandom 0 ("never
+ * sold") affects the shop at all, and even that only as a purchase
+ * refusal. Matthew's ruling for the eventual re-enable: a failed day
+ * roll HIDES the ship from this list (and the outfitter gets the same
+ * mechanism) — see the switch's comment. The Flags3 0x4000 exclusion
+ * below keys on "available for sale today", which includes the
+ * BuyRandom gate.
  */
 export function visibleShips(ships: Iterable<ShipData>,
     ctx: ShipyardContext): ShipData[] {
