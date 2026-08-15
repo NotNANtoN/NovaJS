@@ -101,7 +101,7 @@ describe('provokeGuidedLock (guided-missile provocation)', () => {
                     { aiType: 2, mode: 'travel', nextDecision: 99999 });
             const shooter = new Entity('shooter');
             provokeGuidedLock('trader', 'shooter', 'shooter',
-                lookup({ trader, shooter }));
+                lookup({ trader, shooter }), 0);
             const npc = trader.components.get(NpcComponent)!;
             expect(npc.aggressor).toBe('shooter');
             // The think timer is zeroed: no waiting out the interval.
@@ -116,7 +116,7 @@ describe('provokeGuidedLock (guided-missile provocation)', () => {
                     { leader: 'shooter', slot: 0 });
             const shooter = new Entity('shooter');
             provokeGuidedLock('escort', 'shooter', 'shooter',
-                lookup({ escort, shooter }));
+                lookup({ escort, shooter }), 0);
             expect(escort.components.get(NpcComponent)!.aggressor)
                 .toBeUndefined();
         });
@@ -128,15 +128,18 @@ describe('provokeGuidedLock (guided-missile provocation)', () => {
         const shooter = new Entity('shooter')
             .addComponent(FiringGroupComponent, { group: 'fleet leader' });
         provokeGuidedLock('wingman', 'shooter', 'shooter',
-            lookup({ wingman, shooter }));
+            lookup({ wingman, shooter }), 0);
         expect(wingman.components.get(NpcComponent)!.aggressor)
             .toBeUndefined();
     });
 
-    it('non-NPC targets (other players) are unaffected', () => {
-        const player = new Entity('player');
+    it('a target with neither an NPC brain nor a pilot is a no-op', () => {
+        // Nobody to provoke: no NpcComponent to set an aggressor on and
+        // no ControlledByComponent to record player aggression against.
+        // (A PILOTED ship is provoked — see aggression_test.)
+        const hulk = new Entity('hulk');
         const shooter = new Entity('shooter');
-        expect(() => provokeGuidedLock('player', 'shooter', 'shooter',
-            lookup({ player, shooter }))).not.toThrow();
+        expect(() => provokeGuidedLock('hulk', 'shooter', 'shooter',
+            lookup({ hulk, shooter }), 0)).not.toThrow();
     });
 });

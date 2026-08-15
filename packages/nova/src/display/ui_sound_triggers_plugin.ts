@@ -10,6 +10,7 @@ import { ControlsSubject } from '../nova_plugin/controls_plugin.js';
 import { DisabledComponent } from '../nova_plugin/disabled_component.js';
 import { SimulationGameDataResource } from '../nova_plugin/game_data_resource.js';
 import { FuelComponent, FUEL_PER_JUMP } from '../nova_plugin/health_plugin.js';
+import { selectNearestHostile, styleForTarget } from '../nova_plugin/hostility.js';
 import { JumpComponent, JumpRouteComponent, JUMP_DISTANCE } from '../nova_plugin/jump_plugin.js';
 import { jumpBlocker, jumpRadiusFor } from '../nova_plugin/jump_readiness.js';
 import { PlanetTargetComponent } from '../nova_plugin/planet_plugin.js';
@@ -18,7 +19,7 @@ import { ShipComponent, ShipPhysicsComponent } from '../nova_plugin/ship_plugin.
 import { TargetComponent } from '../nova_plugin/target_component.js';
 import { WeaponsStateComponent } from '../nova_plugin/weapons_state.js';
 import { MenuControls } from '../spaceport/menu_controls.js';
-import { styleForTarget } from './target_corners_plugin.js';
+import { defaultSimulationTime, SimulationTimeResource } from './simulation_time.js';
 import {
     BEEP_CANT_DO, BEEP_DISABLED, BEEP_JUMP_READY, BEEP_TARGET_PLANET,
     BEEP_TARGET_SHIP, playUiSound, SOUND_FIRST_HOSTILE, UiSoundEvent,
@@ -126,16 +127,19 @@ const JumpReadyBeepSystem = new System({
 // corners would.
 const FirstHostileBeepSystem = new System({
     name: 'FirstHostileBeep',
-    args: [Entities, SimulationGameDataResource, UiSoundTriggerStateResource,
-        UUID, GetEntity, Emit, PlayerShipSelector] as const,
-    step(entities, gameData, state, playerUuid, playerEntity, emit) {
+    args: [Entities, SimulationGameDataResource, SimulationTimeResource,
+        UiSoundTriggerStateResource, UUID, GetEntity, Emit,
+        PlayerShipSelector] as const,
+    step(entities, gameData, simulationTime, state, playerUuid, playerEntity,
+        emit) {
         let anyHostile = false;
         for (const [uuid, entity] of entities) {
             if (uuid === playerUuid || !entity.components.has(ShipComponent)) {
                 continue;
             }
             if (styleForTarget(uuid, entity, playerUuid, playerEntity,
-                gameData, u => entities.get(u)) === 'hostile') {
+                gameData, u => entities.get(u),
+                simulationTime.time) === 'hostile') {
                 anyHostile = true;
                 break;
             }
@@ -205,12 +209,57 @@ function playerJumpRefused(world: World): boolean {
     return false;
 }
 
+/**
+ * True when the player pressed 'r' (nearestTarget) and there is no
+ * hostile ship for it to land on.
+ *
+ * This is the NEGATION of the very function the simulation's
+ * ChooseTargetSystem uses to retarget (selectNearestHostile), evaluated
+ * over the display world's mirror of the same synced state, so the beep
+ * and the retarget are answering one question with one implementation —
+ * the same discipline the failed-jump beep follows with
+ * jump_readiness's shared predicate. When it returns true the sim
+ * provably left the target alone, so the "can't do that" cue is never
+ * played over a target that actually changed.
+ *
+ * No player ship, or no game data yet: no beep — there is nothing to
+ * refuse.
+ */
+function playerNearestHostileRefused(world: World): boolean {
+    const gameData = world.resources.get(SimulationGameDataResource);
+    if (!gameData) {
+        return false;
+    }
+    const now = (world.resources.get(SimulationTimeResource)
+        ?? defaultSimulationTime()).time;
+    for (const [uuid, entity] of world.entities) {
+        if (!entity.components.has(PlayerShipSelector)) {
+            continue;
+        }
+        return selectNearestHostile({
+            viewerUuid: uuid,
+            viewerEntity: entity,
+            entities: world.entities,
+            gameData,
+            now,
+        }) === undefined;
+    }
+    return false;
+}
+
 const SecondaryControlSubscription =
     new Resource<Subscription>('UiSoundSecondaryControlSubscription');
 
 export const UiSoundTriggersPlugin: Plugin = {
     name: 'UiSoundTriggersPlugin',
     build(world) {
+        // The hostility rule's aggression tier compares against SIM
+        // timestamps, so seed the mirrored simulation clock in case this
+        // plugin runs before the first simulation frame arrives.
+        if (!world.resources.has(SimulationTimeResource)) {
+            world.resources.set(SimulationTimeResource,
+                defaultSimulationTime());
+        }
         world.resources.set(UiSoundTriggerStateResource, {
             prevShipTarget: undefined,
             prevPlanetTarget: undefined,
@@ -248,6 +297,18 @@ export const UiSoundTriggersPlugin: Plugin = {
                     // beeps ONCE per discrete press.
                     if (action === 'hyperjump') {
                         if (playerJumpRefused(world)) {
+                            playUiSound(world, { id: BEEP_CANT_DO });
+                        }
+                        return;
+                    }
+                    // 'r' with nothing hostile in the system: the sim
+                    // leaves the current target (or lack of one) exactly
+                    // as it was, so the key is a refusal, not a no-op,
+                    // and gets the same 153 beep as a refused jump. Only
+                    // 'start' reaches here, so a held key beeps ONCE per
+                    // discrete press.
+                    if (action === 'nearestTarget') {
+                        if (playerNearestHostileRefused(world)) {
                             playUiSound(world, { id: BEEP_CANT_DO });
                         }
                         return;

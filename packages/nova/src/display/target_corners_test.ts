@@ -35,11 +35,15 @@ describe('styleForTarget (target corner selection)', () => {
     });
     const player = new Entity('player');
 
-    /** Runs the rule for `entities[uuid]` with the rest as the world. */
+    /**
+     * Runs the rule for `entities[uuid]` with the rest as the world, at
+     * sim time `now` (the aggression tier's clock; irrelevant to the
+     * political and NPC-posture tiers, so it defaults to 0).
+     */
     function style(uuid: string, entities: { [uuid: string]: Entity },
-        playerEntity = player) {
+        playerEntity = player, now = 0) {
         return styleForTarget(uuid, entities[uuid], PLAYER, playerEntity,
-            gameData, u => entities[u]);
+            gameData, u => entities[u], now);
     }
 
     it('shows neutral corners for a trader going about its business', () => {

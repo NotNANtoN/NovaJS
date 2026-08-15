@@ -1,4 +1,5 @@
 import { Entity } from 'nova_ecs/entity';
+import { applyAggression } from './aggression.js';
 import { FiringGroupComponent, firingImmune, victimFiringGroup } from './firing_group.js';
 import { OwnerComponent } from './fire_weapon_plugin.js';
 import { FormationComponent, NpcComponent } from './npc_ai_plugin.js';
@@ -103,16 +104,20 @@ export function isInFlock(uuid: string, rootUuid: string,
  * the shooter's firing group (fleetmates; the same immunity that
  * makes their shots pass through each other).
  *
- * The effect reuses the NPC aggression channel (npc.aggressor) and
- * zeroes the think timer so the reaction is immediate rather than
- * waiting out the current decision interval.
+ * Against an NPC the effect is the NPC aggression channel
+ * (npc.aggressor), with the think timer zeroed so the reaction is
+ * immediate rather than waiting out the current decision interval.
+ * Against a PLAYER's ship — which has no NPC brain to provoke — it is
+ * trigger (a) of the behavioral aggression rule (aggression.ts): the
+ * shooter is hostile to that player for the next 30 seconds. A ship
+ * can be neither (an unmanned hulk), in which case there is simply
+ * nobody to provoke; `now` is the sim clock in milliseconds.
  */
 export function provokeGuidedLock(target: string, source: string | undefined,
     ownerRoot: string,
-    getEntity: (uuid: string) => Entity | undefined): void {
+    getEntity: (uuid: string) => Entity | undefined, now: number): void {
     const victim = getEntity(target);
-    const npc = victim?.components.get(NpcComponent);
-    if (!victim || !npc) {
+    if (!victim) {
         return;
     }
     if (isInFlock(target, ownerRoot, getEntity)) {
@@ -127,6 +132,15 @@ export function provokeGuidedLock(target: string, source: string | undefined,
     if (firingImmune(shooterGroup, victimGroup, undefined, undefined)) {
         return;
     }
-    npc.aggressor = source ?? ownerRoot;
-    npc.nextDecision = 0;
+    const aggressor = source ?? ownerRoot;
+    const npc = victim.components.get(NpcComponent);
+    if (npc) {
+        npc.aggressor = aggressor;
+        npc.nextDecision = 0;
+    }
+    // A lock draws no blood, but it is hostile on its face, so it flips
+    // the pair hostile outright rather than feeding the damage
+    // accumulator.
+    applyAggression(victim, aggressor, now,
+        { damage: 0, deliberate: true });
 }

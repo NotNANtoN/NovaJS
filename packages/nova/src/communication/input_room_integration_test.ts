@@ -506,12 +506,14 @@ describe('Input-driven rooms', () => {
         };
 
         // Populate the weapons map, acquire a target, cycle to the bay.
+        // The target is set explicitly (the click/tap input record)
+        // rather than with the 'r' key: 'r' takes the nearest HOSTILE
+        // ship, and this spec's choreography needs the raven locked
+        // whatever it thinks of the player.
         peerA.host.controlEvents([{ action: 'firePrimary', state: 'start' }]);
         await step(10);
-        peerA.host.controlEvents([
-            { action: 'firePrimary', state: false },
-            { action: 'nearestTarget', state: 'start' },
-        ]);
+        peerA.host.controlEvents([{ action: 'firePrimary', state: false }]);
+        peerA.host.setTarget('raven');
         await step(5);
         const shipA = () => peerA.world.entities.get('ship a')!;
         const { ActiveSecondaryWeapon } =
@@ -635,7 +637,11 @@ describe('Input-driven rooms', () => {
         const victim = await makePeerShip('b', peerB.world);
         await peerB.client.addEntity('ship b', victim);
         await step(10);
-        peerA.host.controlEvents([{ action: 'nearestTarget', state: 'start' }]);
+        // Lock the other player's ship explicitly: it has done nothing
+        // to us yet, so it is not hostile and 'r' would skip it (that
+        // is the point of the aggression layer — hostility toward
+        // another player has to be earned).
+        peerA.host.setTarget('ship b');
         await step(3);
         // Cycle from the bay back to the guided missile (the first
         // secondary), then hold fire.

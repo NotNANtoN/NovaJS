@@ -225,7 +225,7 @@ class ProjectileWeaponEntry extends WeaponEntry {
         // spawns (see provokeGuidedLock).
         if (this.data.guidance === 'guided' && target) {
             provokeGuidedLock(target, source, owner ?? source ?? target,
-                uuid => this.entities.get(uuid));
+                uuid => this.entities.get(uuid), this.time.time);
         }
 
         this.entities.set(this.ids.next('projectile'), projectile);
