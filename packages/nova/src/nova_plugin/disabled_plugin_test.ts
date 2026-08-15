@@ -1,6 +1,8 @@
 import 'jasmine';
 import { getDefaultOutfitData, OutfitData } from 'novadatainterface/outfit_data';
 import { UUID } from 'nova_ecs/arg_types';
+import { Angle } from 'nova_ecs/datatypes/angle';
+import { Position } from 'nova_ecs/datatypes/position';
 import { Vector } from 'nova_ecs/datatypes/vector';
 import { Entity } from 'nova_ecs/entity';
 import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
@@ -27,6 +29,9 @@ import { SourceComponent } from './fire_weapon_plugin.js';
 import { ArmorComponent, FuelComponent, ShieldComponent } from './health_plugin.js';
 import { makeShip } from './make_ship.js';
 import { makeSystem } from './make_system.js';
+import {
+    FormationComponent, formationSlotPosition,
+} from './npc_ai_plugin.js';
 import { OutfitsState, OutfitsStateComponent } from './outfit_plugin.js';
 import { ControlledByComponent, ShipControlEvent, ShipControlStateComponent } from './ship_control.js';
 import { ShipDataComponent } from './ship_plugin.js';
@@ -582,6 +587,86 @@ describe('ship disabling in a live world', () => {
         expect(warship.components.get(NpcComponent)?.mode)
             .not.toEqual('attack');
     }, 120_000);
+
+    it('a DISABLED escort drifts instead of holding its formation slot',
+        async () => {
+            // The playtest bug: formation keeping's RCS regime writes
+            // movement.velocity DIRECTLY, so DisabledMovementSystem running
+            // afterwards could not undo it and a hulk kept station.
+            const { world, ship: leader } = await shipWorld('nova:128');
+            const gameData = await getIntegrationGameData();
+            const shipData = await gameData.data.Ship.get('nova:128');
+            const follower = makeShip(shipData);
+            await completeEntity(world, follower);
+            world.entities.set('follower', follower);
+
+            const leaderMovement =
+                leader.components.get(MovementStateComponent)!;
+            leaderMovement.position = new Position(0, 0);
+            leaderMovement.velocity = new Vector(0, 0);
+            leaderMovement.rotation = new Angle(0);
+
+            follower.components.set(FormationComponent,
+                { leader: SHIP, slot: 0, rcs: true });
+            // 20px off station with the leader at rest: a small enough
+            // correction that station-keeping uses the RCS nudge (the only
+            // regime that survives the disabled sweep).
+            const slot = formationSlotPosition(new Position(0, 0),
+                new Angle(0), 0, 1);
+            const start = new Position(slot.x + 20, slot.y);
+            const followerMovement =
+                follower.components.get(MovementStateComponent)!;
+            followerMovement.position = start;
+            followerMovement.velocity = new Vector(0, 0);
+            // A hulk: disabled with full armor, so it stays disabled.
+            follower.components.set(DisabledComponent,
+                { repairAt: null, hulk: true });
+
+            for (let i = 0; i < 60; i++) {
+                world.step();
+            }
+
+            expect(follower.components.has(DisabledComponent)).toBeTrue();
+            // Dead in space: not a single pixel of station-keeping.
+            expect(followerMovement.velocity.length).toBe(0);
+            expect(followerMovement.position.x).toBe(start.x);
+            expect(followerMovement.position.y).toBe(start.y);
+        }, 120_000);
+
+    it('an ABLE escort in the same spot does close on its slot',
+        async () => {
+            // The control for the test above: without the disable, station
+            // keeping pulls the escort in, so the assertion there is really
+            // about the disabled gate and not about a dead formation.
+            const { world, ship: leader } = await shipWorld('nova:128');
+            const gameData = await getIntegrationGameData();
+            const shipData = await gameData.data.Ship.get('nova:128');
+            const follower = makeShip(shipData);
+            await completeEntity(world, follower);
+            world.entities.set('follower', follower);
+
+            const leaderMovement =
+                leader.components.get(MovementStateComponent)!;
+            leaderMovement.position = new Position(0, 0);
+            leaderMovement.velocity = new Vector(0, 0);
+            leaderMovement.rotation = new Angle(0);
+
+            follower.components.set(FormationComponent,
+                { leader: SHIP, slot: 0, rcs: true });
+            const slot = formationSlotPosition(new Position(0, 0),
+                new Angle(0), 0, 1);
+            const followerMovement =
+                follower.components.get(MovementStateComponent)!;
+            followerMovement.position = new Position(slot.x + 20, slot.y);
+            followerMovement.velocity = new Vector(0, 0);
+
+            for (let i = 0; i < 60; i++) {
+                world.step();
+            }
+
+            expect(followerMovement.position.subtract(slot).length)
+                .toBeLessThan(20);
+        }, 120_000);
 
     it('self-destruct works while disabled (the escape hatch)',
         async () => {

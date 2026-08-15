@@ -1,12 +1,17 @@
 import { SystemData } from "novadatainterface/system_data";
+import * as PIXI from "pixi.js";
 import { Observable } from "rxjs";
 import { DisplayAssetDataInterface } from "../client/gamedata/display_asset_data.js";
 import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
 import { ControlEvent } from "../nova_plugin/controls_plugin.js";
+import { MissionMapMark } from "../nova_plugin/mission_logic.js";
 import { Button } from "./button.js";
 import { Menu } from "./menu.js";
 import { MenuControls } from "./menu_controls.js";
-import { computeHypergateSystemLinks, SystemGraph } from "./starmap.js";
+import {
+    computeHypergateSystemLinks, MISSION_MARK_ACTIVE_CICN, SystemGraph,
+    SystemGraphOptions,
+} from "./starmap.js";
 
 /**
  * What the hypergate map is asked to pick, and its answer. `destinationSpob`
@@ -20,6 +25,14 @@ export interface GateMapResult {
     systemId: string;
     /** Out: the picked neighbor gate's spöb global id, or null. */
     destinationSpob: string | null;
+    /**
+     * The player's active-mission map marks (the orange arrows the regular
+     * starmap draws). Passed in by the caller because the docked ship — and
+     * with it the Missions component — is out of the display world while the
+     * gate map has it, exactly like the spaceport's OpenStarmapOptions
+     * .missionMarks. Omitted / empty means no marks.
+     */
+    missionMarks?: MissionMapMark[];
 }
 
 /**
@@ -39,6 +52,39 @@ export function computeSelectableSystems(
         }
     }
     return selectable;
+}
+
+/**
+ * The SystemGraph options the hypergate map draws itself with:
+ * destination-PICKER mode (only the gate's neighbors are clickable) with
+ * the hypergate lanes drawn — plus the SAME orange active-mission arrows
+ * the regular starmap shows. A hypergate map is still a map, and choosing
+ * a gate is exactly when the player wants to see where their missions
+ * are; the marks are a decorative overlay that never affects what is
+ * selectable (destinations come from the gate's HyperLinks alone).
+ *
+ * Pure, so the wiring is unit-testable: SystemGraph itself cannot be
+ * constructed headlessly (PIXI.Graphics wants a canvas).
+ */
+export function gateMapGraphOptions(gateLinks: [string, string][],
+    selectable: Set<string>, missionMarks: MissionMapMark[] = [],
+    missionMarkTexture?: PIXI.Texture): SystemGraphOptions {
+    return {
+        gateLinks,
+        selectable,
+        missionMarks,
+        // The map draws active marks only; the green BBS-viewed marks
+        // belong to the mission computer's map. Both slots take the one
+        // texture because SystemGraph asks for the pair, and with no
+        // viewedMarks the second is never used.
+        ...(missionMarkTexture
+            ? {
+                missionMarkTextures: {
+                    active: missionMarkTexture, viewed: missionMarkTexture,
+                },
+            }
+            : {}),
+    };
 }
 
 /**
@@ -64,6 +110,10 @@ export class GateMap extends Menu<GateMapResult> {
     private systemGraph?: SystemGraph;
     /** system global id -> the destination spöb that system represents. */
     private selectableSpobs = new Map<string, string>();
+    /** The original's orange active-mission icon (cicn 15000), loaded once
+     * in build() like the starmap's. Undefined in headless tests, where the
+     * graph then draws no marks. */
+    private missionMarkTexture?: PIXI.Texture;
 
     constructor(displayAssets: DisplayAssetDataInterface,
         simulationData: SimulationGameDataInterface,
@@ -84,6 +134,15 @@ export class GateMap extends Menu<GateMapResult> {
 
     override async build() {
         await super.build();
+        // The active-mission icon, loaded through the same textureFromCicn
+        // path the starmap uses. A missing icon must not take the gate map
+        // down with it — the map's job is picking a destination.
+        try {
+            this.missionMarkTexture = await this.displayAssets
+                .textureFromCicn(MISSION_MARK_ACTIVE_CICN);
+        } catch {
+            this.missionMarkTexture = undefined;
+        }
         const ids = await this.simulationData.ids;
         this.systems = await Promise.all(
             ids.System.map(s => this.simulationData.data.System.get(s)));
@@ -128,10 +187,10 @@ export class GateMap extends Menu<GateMapResult> {
         if (this.systemGraph) {
             this.container.removeChild(this.systemGraph.container);
         }
-        this.systemGraph = new SystemGraph(this.systems, input.systemId, {
-            gateLinks: this.gateLinks,
-            selectable: new Set(this.selectableSpobs.keys()),
-        });
+        this.systemGraph = new SystemGraph(this.systems, input.systemId,
+            gateMapGraphOptions(this.gateLinks,
+                new Set(this.selectableSpobs.keys()), input.missionMarks,
+                this.missionMarkTexture));
         this.systemGraph.container.position.set(-290, -248);
         this.container.addChild(this.systemGraph.container);
         this.systemGraph.center();

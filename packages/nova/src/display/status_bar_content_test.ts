@@ -92,6 +92,34 @@ describe('landingBlockedMessage', () => {
         expect(landingBlockedMessage('tooFast', true))
             .toBe("You're moving too fast to dock at this station.");
     });
+    // The unlandable refusals, assembled from stock STR# 2002 83-89.
+    it('names the planet it cannot land on', () => {
+        expect(landingBlockedMessage('unlandable', false, 'Jupiter'))
+            .toBe('Your ship is unable to land on Jupiter. '
+                + "The planet's environment is too hostile.");
+    });
+    it('names the station it cannot dock at', () => {
+        expect(landingBlockedMessage('unlandable', true, "Kel'a He"))
+            .toBe("Your ship is unable to dock at Kel'a He. "
+                + "The station's hull integrity is too unstable.");
+    });
+    it('reports a destroyed hypergate as offline, naming no stellar', () => {
+        expect(landingBlockedMessage('unlandable', true, 'HG-Vega',
+            'hypergate'))
+            .toBe('Your ship is unable to enter this hypergate - '
+                + 'it is offline.');
+    });
+    it('reports an unusable wormhole as too radioactive', () => {
+        expect(landingBlockedMessage('unlandable', false, 'Wormhole',
+            'wormhole'))
+            .toBe('Your ship is unable to enter this wormhole - the '
+                + 'radiation levels are too extreme.');
+    });
+    it('falls back to the deictic form with no stellar name', () => {
+        expect(landingBlockedMessage('unlandable', false))
+            .toBe('Your ship is unable to land on this planet. '
+                + "The planet's environment is too hostile.");
+    });
 });
 
 describe('bayCaptureMessage', () => {

@@ -533,4 +533,40 @@ describe('landingDestinations', () => {
     it('returns an empty list when every stellar is a wormhole', () => {
         expect(landingDestinations([wormhole])).toEqual([]);
     });
+
+    // Nobody trades with a rock or with a wrecked gate: the AI's
+    // destinations quote the same landable() predicate the player's land
+    // gate does.
+    const jupiter = entry('planet nova:159', {
+        gate: null,
+        flags: { ...getDefaultPlanetData().flags, canLand: false },
+    });
+    // The stock destroyed gates carry no HyperLinks and have the can-land
+    // bit clear; the working gate above keeps it.
+    const deadGate = entry('planet nova:131', {
+        gate: { kind: 'hypergate', destinations: [], emergenceAngle: null },
+        flags: { ...getDefaultPlanetData().flags, canLand: false },
+    });
+    const destroyFirst = entry('planet nova:900', {
+        gate: null,
+        flags: {
+            ...getDefaultPlanetData().flags,
+            canLand: true, landOnlyIfDestroyed: true,
+        },
+    });
+
+    it('excludes stellars that are not ports (Jupiter and friends)', () => {
+        expect(landingDestinations([planet, jupiter]).map(([uuid]) => uuid))
+            .toEqual(['planet nova:128']);
+    });
+
+    it('excludes DESTROYED hypergates, which NPCs used to "trade" with',
+        () => {
+            expect(landingDestinations([hypergate, deadGate])
+                .map(([uuid]) => uuid)).toEqual(['planet nova:130']);
+        });
+
+    it('excludes land-only-if-destroyed stellars', () => {
+        expect(landingDestinations([destroyFirst])).toEqual([]);
+    });
 });

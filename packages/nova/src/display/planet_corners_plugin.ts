@@ -8,7 +8,7 @@ import { PlanetTargetComponent } from '../nova_plugin/planet_plugin.js';
 import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin.js';
 import { AnimationGraphicComponent, ObjectDrawSystem } from './animation_graphic_plugin.js';
 import { Space } from './space_resource.js';
-import { TargetCorners } from "./target_corners_plugin.js";
+import { cornersSweepSystem, TargetCorners } from "./target_corners_plugin.js";
 
 
 const PlanetCornersResource = new Resource<TargetCorners>('PlanetCornersResource');
@@ -35,9 +35,16 @@ const DrawPlanetCornersSystem = new System({
         targetCorners.step(time.time, target, targetGraphic.size);
         targetCorners.setPosition(targetGraphic.container.position);
         targetCorners.visible = true;
+        targetCorners.drawnThisStep = true;
     },
     after: [ObjectDrawSystem],
 });
+
+// Same sweep as the ship corners: the player's entity leaves the display
+// world on landing, so nothing would otherwise take the stellar reticle
+// down (see cornersSweepSystem).
+const SweepPlanetCornersSystem = cornersSweepSystem('SweepPlanetCornersSystem',
+    PlanetCornersResource, DrawPlanetCornersSystem);
 
 export const PlanetCornersPlugin: Plugin = {
     name: 'PlanetCornersPlugin',
@@ -56,6 +63,7 @@ export const PlanetCornersPlugin: Plugin = {
         space.addChild(targetCorners.container);
         world.resources.set(PlanetCornersResource, targetCorners);
         world.addSystem(DrawPlanetCornersSystem);
+        world.addSystem(SweepPlanetCornersSystem);
     },
     remove(world) {
         const targetCorners = world.resources.get(PlanetCornersResource);
@@ -64,6 +72,7 @@ export const PlanetCornersPlugin: Plugin = {
             space?.removeChild(targetCorners.container);
         }
         world.removeSystem(DrawPlanetCornersSystem);
+        world.removeSystem(SweepPlanetCornersSystem);
         world.resources.delete(PlanetCornersResource);
     }
 }

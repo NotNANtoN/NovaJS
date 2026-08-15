@@ -26,6 +26,7 @@ import { AssistingComponent } from './hail_component.js';
 import { govtDispositionTo, effectiveStrength, oddsFavorable } from './govt_disposition.js';
 import { ArmorComponent, ShieldComponent } from './health_plugin.js';
 import { beginDepartureJump, JumpComponent, JumpSequenceSystem, JUMP_DISTANCE, JUMP_ARRIVAL_MARGIN_S } from './jump_plugin.js';
+import { landable } from './landable.js';
 import { PlanetData } from 'novadatainterface/planet_data';
 import { ShipPhysics } from 'novadatainterface/ship_data';
 import { PlanetComponent, PlanetDataComponent } from './planet_plugin.js';
@@ -500,14 +501,24 @@ function shieldFraction(shield: { current: number, max: number } | undefined) {
 export type PlanetEntry = readonly [string, MovementState, unknown, PlanetData];
 
 /**
- * The stellars NPCs treat as landing destinations / patrol homes. Wormholes
- * are excluded: they are transit portals, not places a ship parks (the player
- * can still deliberately fly into one to transit — that path is
- * AttemptLandingSystem, not the AI). Hidden the same way on every peer because
- * PlanetDataComponent is genesis state, so the AI stays deterministic.
+ * The stellars NPCs treat as landing destinations / patrol homes.
+ *
+ *  - Wormholes are excluded: they are transit portals, not places a ship
+ *    parks (the player can still deliberately fly into one to transit —
+ *    that path is AttemptLandingSystem, not the AI).
+ *  - Stellars that are not ports are excluded through the SAME predicate
+ *    the player's land gate uses (landable.ts). That is what stops traders
+ *    from cheerfully hauling cargo to Jupiter and to the destroyed
+ *    hypergates of the collapsed network, which they did because nothing
+ *    in the AI ever looked at the spöb can-land bit.
+ *
+ * Filtered the same way on every peer because PlanetDataComponent is
+ * genesis state, so the AI stays deterministic; and the filter costs no
+ * PRNG draws (pickPlanet always draws exactly once).
  */
 export function landingDestinations(planets: PlanetEntry[]): PlanetEntry[] {
-    return planets.filter(([, , , data]) => data.gate?.kind !== 'wormhole');
+    return planets.filter(([, , , data]) =>
+        data.gate?.kind !== 'wormhole' && landable(data));
 }
 
 /** Picks the next planet a trader heads for (uuid order for
@@ -1306,10 +1317,22 @@ export const FormationSystem = new System({
     args: [FormationComponent, MovementStateComponent, ShipPhysicsComponent,
         Optional(NpcComponent), Optional(EscortCommandComponent),
         Optional(EscortLandingComponent), Optional(JumpComponent),
-        AllFormationsQuery, TimeResource, Entities, GetEntity,
-        UUID] as const,
+        Optional(DisabledComponent), AllFormationsQuery, TimeResource,
+        Entities, GetEntity, UUID] as const,
     step(formation, movement, physics, npc, escortCommand, landing, jump,
-        allFormations, time, entities, entity) {
+        disabled, allFormations, time, entities, entity) {
+        if (disabled) {
+            // A hulk drifts. DisabledMovementSystem runs after this one and
+            // erases steering intent, but the RCS regime writes
+            // movement.velocity DIRECTLY — and all that erasure does to a
+            // direct velocity write is bleed it off at
+            // DISABLED_DECELERATION, which is exactly the station-keeping
+            // nudge again next tick. So a disabled escort held its slot,
+            // matching its leader's course while dead in space. Ordering
+            // cannot fix that (same reason the jump bail below exists); the
+            // gate has to be here, before anything is written.
+            return;
+        }
         if (landing) {
             // Following the player down to a planet: EscortLandingSystem
             // owns this ship's steering until it lands.

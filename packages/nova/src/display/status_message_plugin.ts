@@ -118,8 +118,11 @@ const ShowLandingBlockedMessage = new System({
     events: [LandingBlockedEvent],
     args: [LandingBlockedEvent, StatusLineResource, TimeResource,
         PlayerShipSelector, Emit] as const,
-    step({ reason, isStation }, statusLine, { time }, _player, emit) {
-        statusLine.setMessage(landingBlockedMessage(reason, isStation), time);
+    step({ reason, isStation, stellarName, gateKind }, statusLine, { time },
+        _player, emit) {
+        statusLine.setMessage(
+            landingBlockedMessage(reason, isStation, stellarName, gateKind),
+            time);
         emit(UiSoundEvent, { id: BEEP_CANT_DO });
     },
 });

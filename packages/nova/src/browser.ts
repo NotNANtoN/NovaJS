@@ -54,7 +54,8 @@ import { makeControlBitHooks, NCBParseError, runNCBSet } from "./nova_plugin/ncb
 import { ControlBitsComponent } from "./nova_plugin/ncb_plugin.js";
 import { MultiRoomResource, NovaPlugin } from "./nova_plugin/nova_plugin.js";
 import { OutfitsStateComponent } from "./nova_plugin/outfit_plugin.js";
-import { LandEvent } from "./nova_plugin/planet_plugin.js";
+import { LandEvent, PlanetTargetComponent } from "./nova_plugin/planet_plugin.js";
+import { TargetComponent } from "./nova_plugin/target_component.js";
 import { PlayerShipSelector } from "./nova_plugin/player_ship_plugin.js";
 import { CreditsComponent, GameDateComponent } from "./nova_plugin/player_state_plugin.js";
 import { initialRecordsFromGovtStatuses } from "./nova_plugin/reputation.js";
@@ -199,6 +200,31 @@ let pendingGateArrivalSpob: string | undefined;
  * records and stranding escorts in an intermediate system.
  */
 let carriedJumpEscorts: CarriedEscort[] = [];
+/**
+ * Landing drops your target. In the original you have no reticle while
+ * landed and none when you lift off again — targeting simply does not
+ * survive a landing — so both the ship target and the stellar selection go
+ * as the ship is docked.
+ *
+ * Done HERE, on the entity the browser is holding out of the world, which
+ * is the same commit pattern the spaceport uses for everything else it
+ * changes while docked (fuel, outfits, cargo): the cleared components ride
+ * back into the simulation with the launch's addEntity input record, so
+ * every peer sees the same thing at the same tick and nothing is written
+ * behind the sim's back. The display's own reticles are taken down by the
+ * corner sweep systems (target_corners_plugin), which is what handles the
+ * separate half of this: the drawing systems run on the player's entity,
+ * and a docked player has no entity in the display world at all.
+ */
+function clearTargetsOnLanding(ship: Entity) {
+    if (ship.components.has(TargetComponent)) {
+        ship.components.set(TargetComponent, { target: undefined });
+    }
+    if (ship.components.has(PlanetTargetComponent)) {
+        ship.components.set(PlanetTargetComponent, { target: undefined });
+    }
+}
+
 /**
  * Escorts that landed with the player (EscortLandedEvent), held while the
  * player is docked and respawned on departure. The client-side half of the
@@ -1931,6 +1957,7 @@ async function startGame() {
             localAutopilot.step(displayWorld, communicator.uuid ?? undefined);
             if (pendingDockedShip && !dockedShip) {
                 await currentBridge.removeEntity(pendingDockedShip.uuid);
+                clearTargetsOnLanding(pendingDockedShip.entity);
                 currentDisplayWorld.emit(OpenSpaceportEvent, {
                     planetId: pendingDockedShip.planetId,
                     ship: pendingDockedShip.entity,
@@ -2010,6 +2037,9 @@ async function startGame() {
             // the landed ship from the sim and open the hypergate map.
             if (pendingGateShip && !gateDockedShip) {
                 await currentBridge.removeEntity(pendingGateShip.uuid);
+                // Docking at a gate drops the target too — same rule, and
+                // the ship either transits (new world) or lifts back off.
+                clearTargetsOnLanding(pendingGateShip.entity);
                 currentDisplayWorld.emit(OpenGateMapEvent, {
                     gateSpob: pendingGateShip.planetId,
                     systemId: activeSystemId ?? '',

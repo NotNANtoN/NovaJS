@@ -404,9 +404,20 @@ export const EscortCommandBehaviorSystem = new System({
         ShipPhysicsComponent, WeaponsStateComponent, TargetComponent,
         UUID, GetEntity, Entities, HostileCandidatesQuery, TimeResource,
         SimulationGameDataResource, Optional(EscortLandingComponent),
-        Optional(JumpComponent)] as const,
+        Optional(JumpComponent), Optional(DisabledComponent)] as const,
     step(command, movement, physics, weapons, target, uuid, entity,
-        entities, candidates, time, gameData, landing, jump) {
+        entities, candidates, time, gameData, landing, jump, disabled) {
+        if (disabled) {
+            // A hulk drifts and does not shoot. Same reasoning as the jump
+            // bail below and as FormationSystem's disabled bail: steerHold
+            // nudges velocity DIRECTLY, so DisabledMovementSystem running
+            // afterwards cannot undo it, and the latched `firing` flags
+            // have to be cleared on the way out.
+            for (const [, weapon] of weapons) {
+                weapon.firing = false;
+            }
+            return;
+        }
         if (landing) {
             // Following the player down to a planet: EscortLandingSystem
             // owns the steering, and an escort on final approach holds

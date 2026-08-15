@@ -134,12 +134,51 @@ export function jumpArrivalMessage(systemName: string,
  * planet" for a planet and "dock at this station" for a station (spöb flag
  * 0x10), matching stock Nova's strings verbatim.
  */
-export function landingBlockedMessage(reason: 'tooFar' | 'tooFast',
-    isStation: boolean): string {
+export function landingBlockedMessage(
+    reason: 'tooFar' | 'tooFast' | 'unlandable', isStation: boolean,
+    stellarName?: string, gateKind?: 'hypergate' | 'wormhole'): string {
+    if (reason === 'unlandable') {
+        return unlandableMessage(isStation, stellarName, gateKind);
+    }
     const place = isStation ? 'dock at this station' : 'land on this planet';
     const cause = reason === 'tooFar'
         ? "You're too far away to" : "You're moving too fast to";
     return `${cause} ${place}.`;
+}
+
+/**
+ * The original's refusal when the stellar is not a port at all (spöb
+ * Flags 0x0001 clear — see landable.ts). Assembled from stock STR# 2002
+ * indices 83-89 verbatim, which is why the two gate forms name no
+ * stellar while the planet/station forms do:
+ *
+ *   83 "Your ship is unable to"
+ *   84 "enter this hypergate - it is offline."
+ *   85 "enter this wormhole - the radiation levels are too extreme."
+ *   86 "dock at "        87 "land on "
+ *   88 "The station's hull integrity is too unstable."
+ *   89 "The planet's environment is too hostile."
+ *
+ * The hypergate line is what a destroyed gate says. A stellar whose name
+ * we somehow don't have falls back to the deictic "this station/planet"
+ * so the sentence never reads "dock at ." .
+ */
+function unlandableMessage(isStation: boolean, stellarName?: string,
+    gateKind?: 'hypergate' | 'wormhole'): string {
+    if (gateKind === 'hypergate') {
+        return 'Your ship is unable to enter this hypergate - it is offline.';
+    }
+    if (gateKind === 'wormhole') {
+        return 'Your ship is unable to enter this wormhole - the radiation '
+            + 'levels are too extreme.';
+    }
+    const verb = isStation ? 'dock at' : 'land on';
+    const name = stellarName
+        || (isStation ? 'this station' : 'this planet');
+    const cause = isStation
+        ? "The station's hull integrity is too unstable."
+        : "The planet's environment is too hostile.";
+    return `Your ship is unable to ${verb} ${name}. ${cause}`;
 }
 
 /**
