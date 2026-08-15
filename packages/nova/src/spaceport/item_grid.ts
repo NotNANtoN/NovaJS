@@ -79,14 +79,16 @@ export function captionSegments(
 
 /**
  * The selected-item pict pane budget shared by the shipyard, outfitter,
- * and hire dialogs (pane origin x=175 inside the 618-wide frame leaves
- * ~134px to the frame edge). Stock picts fit 1:1 and are never rescaled
- * (the fit only ever shrinks); PLUGIN picts come in arbitrary sizes that
- * vary by plugin (e.g. 'Nuclear Missile', 'IR type Multi Launcher') and
- * are scaled down to fit the pane. Applies to ship picts through the
- * same tile path.
+ * and hire dialogs. STOCK picts are the reference: every stock outfit
+ * and ship pict is exactly 200x200 (measured across the parsed data —
+ * e.g. oütf 128/131/145 picts 6000/6003/6017, shïp 128 pict 5000), and
+ * they fill the pane 1:1 in the original. The fit only ever SHRINKS, so
+ * stock art keeps rendering exactly as the original does; PLUGIN picts
+ * come in arbitrary sizes that vary by plugin ('missile things' ships
+ * 400x400 — 'Nuclear Missile', 'IR type Multi Launcher') and are scaled
+ * down to the stock budget. Ships ride the same tile path.
  */
-export const LARGE_PICT_FIT = 130;
+export const LARGE_PICT_FIT = 200;
 
 /** The downscale-to-fit factor: never upscales. */
 export function fitScale(width: number, height: number, max: number): number {

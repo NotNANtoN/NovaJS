@@ -95,18 +95,21 @@ describe('ItemGrid selection clearing', () => {
 });
 
 describe('fitScale (plugin pict downscale-to-fit)', () => {
-    it('leaves stock-sized picts at 1:1', () => {
-        expect(fitScale(100, 100, 130)).toBe(1);
-        expect(fitScale(130, 130, 130)).toBe(1);
+    it('leaves the stock 200x200 picts at exactly 1:1', () => {
+        // Every stock outfit/ship pict is 200x200 and fills the pane in
+        // the original — the budget must never shrink them.
+        expect(fitScale(200, 200, 200)).toBe(1);
+        expect(fitScale(100, 100, 200)).toBe(1);
     });
 
-    it('shrinks oversized plugin picts to the pane on the long axis', () => {
-        expect(fitScale(260, 130, 130)).toBe(0.5);
-        expect(fitScale(130, 260, 130)).toBe(0.5);
-        expect(fitScale(200, 200, 130)).toBeCloseTo(130 / 200, 9);
+    it('shrinks oversized plugin picts to the stock budget', () => {
+        // 'missile things' ships 400x400 outfit picts.
+        expect(fitScale(400, 400, 200)).toBe(0.5);
+        expect(fitScale(400, 200, 200)).toBe(0.5);
+        expect(fitScale(200, 400, 200)).toBe(0.5);
     });
 
     it('never upscales a small pict', () => {
-        expect(fitScale(50, 40, 130)).toBe(1);
+        expect(fitScale(50, 40, 200)).toBe(1);
     });
 });
