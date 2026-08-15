@@ -32,20 +32,60 @@ import { QuantityDialog } from "./quantity_dialog.js";
 
 
 const descWidth = 190;
+/**
+ * The body-text line pitch of every spaceport description pane. The
+ * original runs Geneva 10 on a 12px pitch: successive lines' ink tops are
+ * at screen y 392 / 404 / 416 in shipyard/earth_spaceport.png's ship
+ * description, and 503 / 515 / 527 in mission_bbs/un_shipping_mission.png.
+ * PIXI's own default for this font is 13, which by the tenth line has
+ * drifted a whole line down; pinning it here fixes every pane that shares
+ * this style. (Setting lineHeight below PIXI's natural value leaves the
+ * FIRST baseline where it was -- Text.updateText clamps its centring
+ * shift at zero -- so this only tightens the pitch.)
+ */
+export const BODY_LINE_HEIGHT = 12;
 export const FONT = {
     normal: {
         fontFamily: "Geneva", fontSize: 10, fill: 0xffffff,
-        align: 'left', wordWrap: true, wordWrapWidth: descWidth
+        align: 'left', wordWrap: true, wordWrapWidth: descWidth,
+        lineHeight: BODY_LINE_HEIGHT,
     } as const,
     grey: {
         fontFamily: "Geneva", fontSize: 10, fill: 0x262626,
-        align: 'left', wordWrap: true, wordWrapWidth: descWidth
+        align: 'left', wordWrap: true, wordWrapWidth: descWidth,
+        lineHeight: BODY_LINE_HEIGHT,
     } as const,
     count: {
         fontFamily: "Geneva", fontSize: 10, fill: 0xffffff,
-        align: 'right', wordWrap: false, wordWrapWidth: descWidth
+        align: 'right', wordWrap: false, wordWrapWidth: descWidth,
+        lineHeight: BODY_LINE_HEIGHT,
     } as const,
 };
+
+/**
+ * The outfitter's right info pane, in menu-container coordinates (screen
+ * x = 960 + these). Measured on the outfitter reference screenshots:
+ * label ink at screen x 1196, values at 1266, and rows whose ink tops sit
+ * at y 599 / 611 (price, credits), 635 / 647 (mass, available) and 680
+ * (the denial caption) -- our PIXI.Text ink starts at the box's left edge
+ * and 2px below its top, which is what turns those into the numbers here.
+ *
+ * The shipyard's pane is deliberately NOT the same: the original draws it
+ * 4px left and 1px up (see SHIPYARD_PRICE_COLUMNS).
+ */
+const INFO_COLUMN = { label: 236, value: 306 } as const;
+const INFO_ROWS = {
+    itemPrice: 57,
+    youHave: 69,
+    itemMass: 93,
+    available: 105,
+    /**
+     * The denial caption's own row, a wide gap below "Available:" --
+     * ink at screen y 680 in every one of the five
+     * outfitter/earth_outfitter_cant_*.png captures.
+     */
+    status: 138,
+} as const;
 
 /**
  * A small round scroll-arrow button for the item grid (the original's
@@ -56,16 +96,12 @@ export const FONT = {
 class ScrollArrow {
     container = new PIXI.Container();
     readonly click = new Subject<void>();
+    private disc = new PIXI.Graphics();
     private glyph = new PIXI.Graphics();
     private wrappedEnabled = true;
 
     constructor(private direction: 'up' | 'down') {
-        const disc = new PIXI.Graphics()
-            .lineStyle(1, 0x555555)
-            .beginFill(0x181818)
-            .drawCircle(0, 0, 9)
-            .endFill();
-        this.container.addChild(disc, this.glyph);
+        this.container.addChild(this.disc, this.glyph);
         this.container.interactive = true;
         this.container.cursor = 'pointer';
         // An explicit hit area so the whole disc is reliably clickable
@@ -80,8 +116,22 @@ class ScrollArrow {
     }
 
     private draw() {
-        const fill = this.wrappedEnabled ? 0xcc0000 : 0x444444;
-        this.glyph.clear().beginFill(fill);
+        // It is the DISC that carries the state in the original, not the
+        // chevron: in outfitter/earth_outfitter.png the disabled up arrow
+        // is a near-black sphere with a dark chevron, while the enabled
+        // down arrow is a dark-red one (sampled (57,0,0)..(90,8,8)) with a
+        // WHITE chevron. We had it the other way round -- always-black
+        // disc, red-or-grey triangle. The original's spheres are shaded
+        // artwork with a specular highlight, sitting in a socket that the
+        // 8502 frame itself draws (the shipyard shows the same two sockets
+        // with no arrows over them); these flat fills reproduce the
+        // colours and the silhouette, not the gloss.
+        this.disc.clear()
+            .beginFill(this.wrappedEnabled ? 0x4a0000 : 0x0a0a0a)
+            .drawCircle(0, 0, 9)
+            .endFill();
+        this.glyph.clear().beginFill(
+            this.wrappedEnabled ? 0xffffff : 0x1f1f1f);
         if (this.direction === 'up') {
             this.glyph.drawPolygon([0, -4, 4, 3, -4, 3]);
         } else {
@@ -187,8 +237,12 @@ export class Outfitter extends Menu<Entity> {
         super(displayAssets, simulationData, "nova:8502", controlEvents);
         this.container.name = 'Outfitter';
 
-        this.scrollUpArrow.container.position.set(-214, 141);
-        this.scrollDownArrow.container.position.set(-190, 141);
+        // Sphere centres, measured on outfitter/earth_outfitter.png: the
+        // two dark discs span screen x 728-745 and 758-775 on rows
+        // 673-685, i.e. centres (736.5, 679) and (766.5, 679) -- 30px
+        // apart, where ours were 24 apart and up to 9px right.
+        this.scrollUpArrow.container.position.set(-223.5, 139);
+        this.scrollDownArrow.container.position.set(-193.5, 139);
         this.scrollUpArrow.click.subscribe(() => {
             this.itemGrid?.scrollUp();
             this.updateArrows();
@@ -201,13 +255,22 @@ export class Outfitter extends Menu<Entity> {
             this.scrollDownArrow.container);
 
         this.outfits = new DefaultMap(() => 0);
-        // Measured against outfitter/earth_outfitter.png: the pill
-        // centers sit at -48 / +62 / +170 relative to the frame
-        // center, on a row centered 147px below it.
+        // Measured against outfitter/earth_outfitter.png. A Button's red
+        // face starts 5px right of its container x and runs (width + 15)px
+        // -- calibrated on the shipyard row, whose pills land on the
+        // reference to the pixel. The reference outfitter row has its Done
+        // face at screen x 1083-1170 (88 wide) and the two greyed pills'
+        // dark interiors at 876-958 and 982-1064, which invert to these
+        // x's and a width of 73 (we had 70, and every pill 4px right).
+        //
+        // y 129, not 134: the reference pills occupy rows 674-686 where
+        // ours ran 679-691. That is one row BELOW the shipyard's
+        // (673-685), the same one-pixel drop the outfitter's grid and info
+        // pane have.
         this.buttons = {
-            buy: new Button(displayAssets, "Buy", 70, { x: -96, y: 134 }),
-            sell: new Button(displayAssets, "Sell", 70, { x: 14, y: 134 }),
-            done: new Button(displayAssets, "Done", 70, { x: 122, y: 134 })
+            buy: new Button(displayAssets, "Buy", 73, { x: -95, y: 129 }),
+            sell: new Button(displayAssets, "Sell", 73, { x: 11, y: 129 }),
+            done: new Button(displayAssets, "Done", 73, { x: 118, y: 129 })
         };
 
         // Option+click opens the bulk quantity dialog, as the
@@ -219,7 +282,11 @@ export class Outfitter extends Menu<Entity> {
 
         this.quantityDialog = new QuantityDialog(controlEvents);
 
-        this.pictContainer.position.x = 174;
+        // The selected item's picture. x 175 (not 174): sweeping our
+        // capture against shipyard/earth_spaceport.png's Shuttle artwork
+        // (the same PICT on both sides) bottoms out at dx = -1, i.e. ours
+        // sat one pixel left of the original's.
+        this.pictContainer.position.x = 175;
         this.pictContainer.position.y = -152.5;
         this.pictContainer.scale.x = 1;
         this.pictContainer.scale.y = 1;
@@ -228,34 +295,34 @@ export class Outfitter extends Menu<Entity> {
         this.text.description.position.x = -27;
         this.text.description.position.y = -150;
 
-        this.text.itemPrice.position.x = 234;
-        this.text.itemPrice.position.y = 58;
+        this.text.itemPrice.position.x = INFO_COLUMN.label;
+        this.text.itemPrice.position.y = INFO_ROWS.itemPrice;
 
-        this.text.price.position.x = 300;
-        this.text.price.position.y = 58;
+        this.text.price.position.x = INFO_COLUMN.value;
+        this.text.price.position.y = INFO_ROWS.itemPrice;
 
-        this.text.youHave.position.x = 234;
-        this.text.youHave.position.y = 70;
+        this.text.youHave.position.x = INFO_COLUMN.label;
+        this.text.youHave.position.y = INFO_ROWS.youHave;
 
-        this.text.count.position.x = 300;
-        this.text.count.position.y = 70;
+        this.text.count.position.x = INFO_COLUMN.value;
+        this.text.count.position.y = INFO_ROWS.youHave;
 
-        this.text.itemMass.position.x = 234;
-        this.text.itemMass.position.y = 94;
+        this.text.itemMass.position.x = INFO_COLUMN.label;
+        this.text.itemMass.position.y = INFO_ROWS.itemMass;
 
-        this.text.mass.position.x = 300;
-        this.text.mass.position.y = 94;
+        this.text.mass.position.x = INFO_COLUMN.value;
+        this.text.mass.position.y = INFO_ROWS.itemMass;
 
-        this.text.availableMass.position.x = 234;
-        this.text.availableMass.position.y = 106;
+        this.text.availableMass.position.x = INFO_COLUMN.label;
+        this.text.availableMass.position.y = INFO_ROWS.available;
 
-        this.text.freeMass.position.x = 300;
-        this.text.freeMass.position.y = 106;
+        this.text.freeMass.position.x = INFO_COLUMN.value;
+        this.text.freeMass.position.y = INFO_ROWS.available;
 
-        // Bottom of the right info pane, under the Available row —
-        // where the reference screenshots put "Can't have any more!".
-        this.text.status.position.x = 234;
-        this.text.status.position.y = 128;
+        // Bottom of the right info pane, a wide gap under the Available
+        // row, where the reference screenshots put "Can't have any more!".
+        this.text.status.position.x = INFO_COLUMN.label;
+        this.text.status.position.y = INFO_ROWS.status;
 
         for (const t of Object.values(this.text)) {
             this.container.addChild(t);
@@ -274,7 +341,12 @@ export class Outfitter extends Menu<Entity> {
 
         this.itemGrid.drawGrid();
         this.itemGrid.container.position.x = -373;
-        this.itemGrid.container.position.y = -153;
+        // One pixel below the shipyard's grid, which is not a typo: the
+        // original's outfitter lattice starts at screen y 388 (its top
+        // rule runs 388..658, five 54px rows) while the shipyard's starts
+        // at 387 (387..549, three rows). The whole outfitter info pane is
+        // likewise a pixel lower than the shipyard's (see INFO_ROWS).
+        this.itemGrid.container.position.y = -152;
         this.itemGrid.activeTile.subscribe(this.setOutfitSelected.bind(this));
         this.updateArrows();
 
@@ -503,10 +575,25 @@ export class Outfitter extends Menu<Entity> {
     }
 
     /**
-     * The original outfitter's denial captions (see the
-     * outfitter/earth_outfitter_cant_*.png reference screenshots):
-     * shown persistently at the bottom of the right info pane while a
-     * denied selection is highlighted, with the Buy button greyed.
+     * The original outfitter's denial captions, shown persistently at the
+     * bottom of the right info pane while a denied selection is
+     * highlighted, with the Buy button greyed.
+     *
+     * All four wordings are read straight off the reference screenshots
+     * (outfitter/earth_outfitter_cant_*.png):
+     *
+     *   cant_have_any                     "Can't have any of this item!"
+     *   cant_have_any_more                "Can't have any more!"
+     *   cant_hold_any                     "Can't hold any of this item!"
+     *   cant_hold_any_more                "Can't hold any of this item!"
+     *   carbon_fiber_cant_hold_any_more   "Can't hold any more!"
+     *
+     * Note the pair in the middle: the file NAMED cant_hold_any_more in
+     * fact shows the "of this item" wording (an unowned outfit that will
+     * not fit), and it is the carbon-fibre capture -- an outfit the pilot
+     * already owns three of -- that shows the "any more" one. So the
+     * "more" variants are the plain "Can't hold any more!" /
+     * "Can't have any more!", NOT the longer sentence we used to print.
      */
     private denialCaption(reason: BuyDenialReason, owned: number,
         fallback: string): string {
@@ -521,7 +608,7 @@ export class Outfitter extends Menu<Entity> {
             case 'mass':
             case 'cargo':
                 return owned > 0
-                    ? "Can't hold any more of this item!"
+                    ? "Can't hold any more!"
                     : "Can't hold any of this item!";
             case 'credits':
                 // The Bible/STR# have no dedicated outfitter money
@@ -717,7 +804,7 @@ export class Outfitter extends Menu<Entity> {
 
         if (outfitTile.item.physics.freeMass > 0) {
             // Set mass text
-            this.text.mass.text = outfitTile.item.physics.freeMass + " tons";
+            this.text.mass.text = formatMass(outfitTile.item.physics.freeMass);
             this.setFreeMassText();
             this.text.mass.visible = true;
             this.text.itemMass.visible = true;
@@ -852,6 +939,12 @@ export class Outfitter extends Menu<Entity> {
     }
 }
 
-function formatMass(m: number) {
-    return m.toLocaleString() + " tons";
+/**
+ * A tonnage as the outfitter's info pane prints it. Singular for exactly
+ * one ton: outfitter/earth_outfitter_carbon_fiber_cant_hold_any_more.png
+ * reads "Item Mass:  1 ton" against "Available:  0 tons" in the same
+ * pane, so the plural is not unconditional.
+ */
+export function formatMass(m: number) {
+    return `${m.toLocaleString()} ${m === 1 ? 'ton' : 'tons'}`;
 };

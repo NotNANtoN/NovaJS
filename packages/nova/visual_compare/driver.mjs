@@ -141,6 +141,65 @@ export async function waitForContainer(page, name, { timeout = 15000 } = {}) {
     }, { timeout }, name);
 }
 
+// --- shops pass (shipyard / outfitter) ------------------------------
+/**
+ * Click the shipyard/outfitter grid tile whose caption's FIRST line is
+ * `caption`, inside the visible menu named `menu` ('Shipyard' or
+ * 'Outfitter'). Returns false when no such tile is on the current page.
+ *
+ * Counting ArrowRight presses (what the ship-info scenarios used to do)
+ * only works while our grid holds exactly the items the original stocked;
+ * it does not, because our BuyRandom day-roll is off, so every variant of
+ * a hull is listed where the original showed one. Selecting by caption is
+ * stable under that. `occurrence` picks among same-captioned variants.
+ * --- end shops pass helper ---
+ */
+export async function clickGridTile(page, menu, caption,
+    { occurrence = 0, searchRows = 0 } = {}) {
+    for (let row = 0; row <= searchRows; row++) {
+        if (await clickVisibleGridTile(page, menu, caption, occurrence)) {
+            return true;
+        }
+        // Not on this page: ArrowRight past one more row and look again.
+        await pressKeyN(page, 'ArrowRight', 4, { gapMs: 60 });
+    }
+    return false;
+}
+
+async function clickVisibleGridTile(page, menu, caption, occurrence) {
+    const hit = await page.evaluate((menuName, text, nth) => {
+        let root = null;
+        (function walk(node) {
+            if (!node || root) return;
+            if (node.name === menuName && node.worldVisible) { root = node; return; }
+            (node.children || []).forEach(walk);
+        })(window.app.stage);
+        if (!root) return null;
+        const matches = [];
+        (function walk(node) {
+            if (!node) return;
+            const label = (node.children || []).find(
+                c => typeof c.text === 'string' && c.text === text);
+            if (label && node.worldVisible) {
+                const b = node.getBounds();
+                // Tiles are 83x54; skip anything of another size (the
+                // menu itself would otherwise match through its child).
+                if (Math.round(b.width) <= 90 && Math.round(b.height) <= 60) {
+                    matches.push({ x: b.x, y: b.y, width: b.width, height: b.height });
+                }
+            }
+            (node.children || []).forEach(walk);
+        })(root);
+        return matches[nth] ?? null;
+    }, menu, caption, occurrence);
+    if (!hit) {
+        return false;
+    }
+    await page.mouse.click(hit.x + hit.width / 2, hit.y + hit.height / 2);
+    await sleep(400);
+    return true;
+}
+
 /** Click the center of a named PIXI container (e.g. 'Button:Cargo'). */
 export async function clickContainer(page, name) {
     const info = await findContainer(page, name);

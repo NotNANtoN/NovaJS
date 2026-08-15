@@ -124,8 +124,11 @@ describe('shipyard price pane', () => {
     });
 
     it('places the price rows on the measured 12px pitch', () => {
+        // Text-box tops for ink rows 598 / 610 / 634 / 658 in
+        // shipyard/earth_spaceport.png (our glyphs start 2px below the
+        // box top).
         expect(SHIPYARD_PRICE_ROWS).toEqual({
-            shipPrice: 58, tradeIn: 70, finalPrice: 94, youHave: 118,
+            shipPrice: 56, tradeIn: 68, finalPrice: 92, youHave: 116,
         });
         // A blank line before "Final Price:" and another before "You
         // Have:", which is what the doubled gaps encode.

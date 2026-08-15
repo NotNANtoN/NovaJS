@@ -161,6 +161,16 @@ export interface ShipData extends SpaceObjectData {
      */
     shortName: string;
     /**
+     * The full class name (shïp Long Name): "The long string to display
+     * when the player purchases a ship of this type or starts a new
+     * pilot" (EVN Bible ~:2691). It is also what the shipyard's More Info
+     * dialog prints on its name strip -- "Sigma Shipyards Alpha class
+     * Shuttle", "Old Earth IDA Frigate" in the shipyard/*_info.png
+     * reference screenshots -- rather than the resource name. Empty when
+     * unset; fall back to the resource name.
+     */
+    longName: string;
+    /**
      * The ship class's subtitle (shïp SubTitle), shown on the second line
      * of the status-bar target display beneath the ship/përs name, e.g.
      * "Heavy Fighter Class" under "Pirate Viper". Empty when unset.
@@ -220,6 +230,7 @@ export function getDefaultShipData(): ShipData {
         hireRandom: 0,
         escortType: -1,
         shortName: "",
+        longName: "",
         subtitle: "",
         pilotDesc: "",
         disableArmorFraction: 0.33,

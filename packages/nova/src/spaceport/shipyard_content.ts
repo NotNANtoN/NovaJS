@@ -52,23 +52,33 @@ export const SHIPYARD_PRICE_LABELS = {
 } as const;
 
 /**
- * The price pane's two columns, in menu-container coordinates. The label
- * column is the one the outfitter's "Item Price:" uses -- both menus draw
- * on the 8502 frame, and the reference shots put the label at the same
- * screen x (1192) in each.
+ * The price pane's two columns, in menu-container coordinates (the menu
+ * is centred, so screen x = 960 + these).
+ *
+ * Measured on earth_spaceport.png: the labels' ink begins at screen x
+ * 1192 and the values' at 1262. Our PIXI.Text draws its first glyph at
+ * the box's left edge, so the boxes go at 1192 / 1262.
+ *
+ * These are NOT the outfitter's columns, which an earlier comment here
+ * asserted: the SAME string "You Have:" starts at x 1192 in
+ * shipyard/earth_spaceport.png but at x 1196 in
+ * outfitter/earth_outfitter_cant_hold_any.png. The original's outfitter
+ * info pane sits four pixels right (and one pixel down) of the
+ * shipyard's, so each menu carries its own numbers.
  */
-export const SHIPYARD_PRICE_COLUMNS = { label: 234, value: 304 } as const;
+export const SHIPYARD_PRICE_COLUMNS = { label: 232, value: 302 } as const;
 
 /**
- * The y of each price row. Measured at screen y 598 / 610 / 634 / 658 in
- * earth_spaceport.png: a 12px line pitch with a blank line before "Final
- * Price:" and another before "You Have:".
+ * The y of each price row: the PIXI.Text box top, whose ink starts 2px
+ * lower. Measured at ink rows 598 / 610 / 634 / 658 in
+ * earth_spaceport.png -- a 12px line pitch with a blank line before
+ * "Final Price:" and another before "You Have:".
  */
 export const SHIPYARD_PRICE_ROWS = {
-    shipPrice: 58,
-    tradeIn: 70,
-    finalPrice: 94,
-    youHave: 118,
+    shipPrice: 56,
+    tradeIn: 68,
+    finalPrice: 92,
+    youHave: 116,
 } as const;
 
 /** One pill in the shipyard's button row. */
