@@ -107,6 +107,114 @@ function prefsScenarios() {
     }));
 }
 
+// --- The sigma mission-text popups ------------------------------------------
+// Frame rectangles as measured on the references (x, y, width, height); ours
+// is the same rectangle unless the reference is the shifted offer capture.
+const SIGMA_POPUPS = [
+    {
+        id: 'sigma_offer', key: 'offer', label: 'offer (dësc 4427)',
+        file: 'sigma_mission_1/1_sigma_1_offer.png',
+        accept: 'Yes', refuse: 'No', style: 'offer',
+        ref: { x: 740, y: 428, width: 441, height: 162 },
+        // Ours is centred: 8 lines -> a 163px frame, top at 540-81. (The
+        // original's is 162: its offer dialog is a pixel shorter than the
+        // same-line-count briefing dialogs, which our one formula cannot be
+        // both of.)
+        ours: { x: 740, y: 459, width: 441, height: 163 },
+    },
+    {
+        id: 'sigma_accept', key: 'brief', label: 'briefing (dësc 5533)',
+        file: 'sigma_mission_1/2_sigma_1_accept.png',
+        accept: 'Okay', style: 'briefing',
+        ref: { x: 740, y: 465, width: 441, height: 151 },
+    },
+    {
+        id: 'sigma_pickup', key: 'loadCargo', label: 'cargo pickup (dësc 7518)',
+        file: 'sigma_mission_1/3_sigma_1_pick_up_cargo.png',
+        accept: 'Okay', style: 'briefing',
+        ref: { x: 740, y: 483, width: 441, height: 115 },
+    },
+    {
+        id: 'sigma_return', key: 'dropOffCargo',
+        label: 'cargo drop-off (dësc 8533)',
+        file: 'sigma_mission_1/4_sigma_1_return.png',
+        accept: 'Okay', style: 'briefing',
+        ref: { x: 740, y: 447, width: 441, height: 187 },
+    },
+    {
+        id: 'sigma_completion', key: 'completion',
+        label: 'completion with pict (dësc 9533 + PICT 5003)',
+        file: 'sigma_mission_1/5_sigma_1_mission_text_with_pict.png',
+        accept: 'Okay', style: 'briefing', pict: 'nova:5003',
+        ref: { x: 636, y: 418, width: 649, height: 244 },
+    },
+];
+
+function sigmaScenarios() {
+    return SIGMA_POPUPS.map((popup) => {
+        const ours = popup.ours ?? { ...popup.ref };
+        const dy = ours.y - popup.ref.y;
+        // Sub-regions are anchored to each frame's own edges: the text well
+        // (wrapping + leading) to the top, the footer band (button size,
+        // spacing and position) to the bottom — so a frame that differs in
+        // height by a pixel still compares its buttons like for like.
+        const height = Math.min(popup.ref.height, ours.height);
+        const fromTop = (id, label, x, y, width, h) => ({
+            id, label,
+            ref: { x: popup.ref.x + x, y: popup.ref.y + y, width, height: h },
+            ours: { x: ours.x + x, y: ours.y + y, width, height: h },
+        });
+        const fromBottom = (id, label, x, up, width, h) => ({
+            id, label,
+            ref: {
+                x: popup.ref.x + x,
+                y: popup.ref.y + popup.ref.height - up, width, height: h,
+            },
+            ours: {
+                x: ours.x + x, y: ours.y + ours.height - up, width, height: h,
+            },
+        });
+        const regions = [
+            {
+                id: 'popup_frame', label: 'Whole popup frame',
+                ref: { ...popup.ref, height },
+                ours: { ...ours, height },
+            },
+            popup.pict
+                ? fromTop('popup_text', 'Text well', 5, 4, 427, 203)
+                : fromTop('popup_text', 'Text well', 5, 6, 431, height - 49),
+            fromBottom('popup_buttons', 'Footer band + buttons',
+                0, 40, popup.ref.width, 40),
+        ];
+        return {
+            id: popup.id,
+            title: `Sigma mission text — ${popup.label}`,
+            description: `mïsn nova:555's ${popup.label} in the popup that `
+                + `shows it, against ${popup.file}. Compares the frame, the `
+                + `text well (wrap points and leading) and the footer band `
+                + (dy ? `(our centred frame is ${dy}px below the `
+                    + `reference's shifted one — see the note above). `
+                    : `. `)
+                + `Background differs (docked spaceport vs the original's `
+                + `venue) and is outside every region.`,
+            params: { ship: 'nova:164', system: 'nova:130' },
+            hideDebug: true,
+            setup: async (page, driver) => {
+                const { SIGMA_TEXTS } = await import('./sigma_texts.mjs');
+                await driver.landAt(page, 'planet nova:128');
+                await driver.dismissOfferPopup(page);
+                await driver.showOfferPopup(page, {
+                    text: SIGMA_TEXTS[popup.key],
+                    accept: popup.accept, refuse: popup.refuse ?? null,
+                    pict: popup.pict ?? null, style: popup.style,
+                });
+            },
+            references: [{ name: popup.id, file: popup.file }],
+            regions,
+        };
+    });
+}
+
 export const scenarios = [
     {
         id: 'in_space',
@@ -1438,4 +1546,29 @@ export const scenarios = [
                 868, 520, 190, 80),
         ],
     },
+
+    // ========================================================================
+    // SIGMA MISSION TEXT — the mission-text popups, measured text-for-text.
+    //
+    // The Sigma Shipyards intro mission (mïsn nova:555) was captured on real
+    // hardware at every step (sigma_mission_1/1..5), which makes it the one
+    // place where our frame geometry, font and line breaking can be compared
+    // against the original for the SAME string. Each scenario raises the
+    // popup directly with that dësc's text (visual_compare/sigma_texts.mjs,
+    // generated from the game data) through window.novaOfferPopups, exactly
+    // as the hail scenarios drive the comm dialog: the popup is a display
+    // slave of the text it is handed, so this is the same render the mission
+    // flow produces without needing the mission state that offers it.
+    //
+    // The BACKGROUND differs by design — the references were taken over the
+    // shipyard / landing view, ours over the docked spaceport — so only the
+    // popup's own rectangles are compared.
+    //
+    // Vertical placement: the original centres these dialogs on the screen
+    // (y=540). Four of the five references confirm it to the pixel; the
+    // offer capture (1_sigma_1_offer.png) alone sits 31px higher, which no
+    // other offer capture reproduces (the longer kont-probe offer is dead
+    // centre), so that scenario compares our centred frame against the
+    // reference's shifted one with explicit rects.
+    ...sigmaScenarios(),
 ];

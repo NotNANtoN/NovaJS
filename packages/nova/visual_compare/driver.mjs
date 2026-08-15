@@ -226,6 +226,63 @@ export async function showHail(page, context) {
     }, context);
 }
 
+/**
+ * Raise a mission-text popup with crafted text, the way showHail drives the
+ * comm dialog: reaching a specific mission's offer/briefing state in-game is
+ * slow and non-deterministic, while the popup itself is a pure display slave
+ * of the text it is handed. Uses the window.novaOfferPopups hook (every
+ * OfferPopup registers itself) and picks the one whose owner is on screen —
+ * the docked spaceport's — so the frame lands centred over the spaceport.
+ * show() blocks until the player answers, so it is fired without awaiting.
+ */
+export async function showOfferPopup(page,
+    { text, accept = 'Okay', refuse = null, pict = null, style = 'briefing' }) {
+    const ok = await page.evaluate((opts) => {
+        const popups = window.novaOfferPopups ?? [];
+        const popup = popups.find(p => p.container.parent?.worldVisible)
+            ?? popups[popups.length - 1];
+        if (!popup) return false;
+        void popup.show(opts.text,
+            { accept: opts.accept, refuse: opts.refuse },
+            { pict: opts.pict, style: opts.style });
+        return true;
+    }, { text, accept, refuse, pict, style });
+    if (!ok) throw new Error('showOfferPopup: no OfferPopup registered');
+    await waitForContainer(page, 'OfferPopup');
+    await sleep(600);
+}
+
+/**
+ * Press and hold a named button (the popup's scroll arrows), so the hold
+ * behaviour — a jump on press, a continuous glide while held — can be
+ * observed. Returns nothing; read the text position around the call.
+ */
+export async function holdContainer(page, name, { holdMs = 1000 } = {}) {
+    const info = await findContainer(page, name);
+    if (!info) {
+        throw new Error(`Container not found: ${name}`);
+    }
+    const { x, y, width, height } = info.bounds;
+    const cx = x + width / 2;
+    const cy = y + height / 2;
+    await page.mouse.move(cx, cy);
+    await page.mouse.down();
+    await sleep(holdMs);
+    await page.mouse.up();
+    await sleep(120);
+}
+
+/** The mission-popup text sprite's y (how far it has scrolled). */
+export function popupTextY(page) {
+    return page.evaluate(() => {
+        const popups = window.novaOfferPopups ?? [];
+        const popup = popups.find(p => p.container.worldVisible);
+        if (!popup) return null;
+        const text = popup.container.children.find(c => c.text !== undefined);
+        return text ? text.position.y : null;
+    });
+}
+
 /** Open the player-info dialog (control 'properties' = KeyP). */
 export async function openPlayerInfo(page) {
     await pressKey(page, 'KeyP');
