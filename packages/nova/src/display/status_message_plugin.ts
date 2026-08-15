@@ -29,8 +29,14 @@ class StatusLine {
     /** How long the message stays fully opaque, then how long it fades. */
     private static readonly HOLD_MS = 8000;
     private static readonly FADE_MS = 4000;
-    /** Left/bottom inset from the screen edge, matching the original. */
-    private static readonly INSET = 8;
+    /**
+     * Insets from the screen edge. Measured on the original's status line
+     * (map/mini_map/mini_map.png, "Jumping into the Tau Ceti system on March
+     * 17th, 1178 NC."): its first glyph starts at x=25 on a 1920-wide frame,
+     * with the line's descenders reaching y=1071 of 1080.
+     */
+    private static readonly INSET_X = 24;
+    private static readonly INSET_Y = 8;
 
     constructor() {
         this.text = new PIXI.Text("", new PIXI.TextStyle({
@@ -65,8 +71,8 @@ class StatusLine {
     }
 
     reposition(screenHeight: number) {
-        this.container.position.set(StatusLine.INSET,
-            screenHeight - StatusLine.INSET);
+        this.container.position.set(StatusLine.INSET_X,
+            screenHeight - StatusLine.INSET_Y);
     }
 }
 

@@ -11,7 +11,7 @@ import { ResourceBuilder } from "../resource_parsers/resource_builder.js";
  * Mirrors the byte layout exercised in govt_resource_test.ts so this test
  * focuses on the projection onto the data-interface GovtData shape.
  */
-function buildGovt(): ResourceBuilder {
+function buildGovt(interfaceId = 130): ResourceBuilder {
     const b = new ResourceBuilder();
     b.int16(1003)                             // voiceType
         .uint16(0x0243)                       // flags
@@ -37,7 +37,7 @@ function buildGovt(): ResourceBuilder {
         .string("the Vell-os", 64)            // mediumName
         .uint32(0x00ff8800)                   // color
         .uint32(0x00123456)                   // shipColor
-        .int16(130)                           // interface
+        .int16(interfaceId)                   // interface
         .int16(9001)                          // newsPic
         .skip(16);                            // unused
     return b;
@@ -196,5 +196,41 @@ describe("GovtParse", () => {
         expect(govt.require).toBe(0x0000000100000002n.toString());
         // GovtData must survive JSON round-tripping over the HTTP data route.
         expect(() => JSON.stringify(govt)).not.toThrow();
+    });
+});
+
+/**
+ * gövt Interface -> the status bar's ïntf resource. EVN Bible, gövt section:
+ * "ID of an ïntf resource to use when the player is flying a ship whose
+ * inherent attributes govt or inherent combat govt is equal to this govt
+ * type. Values less than 128 will be interpreted as 128" — the sub-128 case
+ * parses to null, which the display reads as "use the default bar".
+ */
+describe("GovtParse status bar (gövt Interface)", () => {
+    /** Parses the fixture gövt with `interfaceId` written into Interface. */
+    function parseWithInterface(interfaceId: number, seedIntf?: number) {
+        const idSpace = getEmptyNovaResources();
+        if (seedIntf !== undefined) {
+            idSpace["ïntf"][seedIntf] = {
+                globalID: `nova:${seedIntf}`,
+            } as NovaResources["ïntf"][number];
+        }
+        const resource = new GovtResource(
+            buildGovt(interfaceId).resource("gövt", 128, "Vell-os"), idSpace);
+        resource.globalID = "nova:128";
+        resource.prefix = "nova";
+        return GovtParse(resource, () => { });
+    }
+
+    it("resolves the Interface id to a global ïntf id", async () => {
+        expect((await parseWithInterface(130, 130)).statusBar).toBe("nova:130");
+    });
+
+    it("is null when the named ïntf resource is missing", async () => {
+        expect((await parseWithInterface(130)).statusBar).toBeNull();
+    });
+
+    it("is null for values below 128 (the engine's default bar)", async () => {
+        expect((await parseWithInterface(0, 0)).statusBar).toBeNull();
     });
 });

@@ -10,6 +10,27 @@ import { FPS, ShipAccelerationConversionFactor, ShipSpeedConversionFactor, ShipT
 import { ShanParse } from "./shan_parse.js";
 
 
+/**
+ * The gövt LOCAL id a shïp's InherentGovt names for status-bar (ïntf)
+ * purposes, or null when the class has no inherent government at all. The
+ * Bible's shïp section gives the field three ranges: 128-383 is both the
+ * combat and the attributes govt, 1128-1383 is an attributes govt offset by
+ * 1000, and 2128-2383 a combat govt offset by 2000. The gövt Interface rule
+ * accepts either association, so all three collapse to one id here.
+ */
+export function interfaceGovtId(inherentGovt: number): number | null {
+    if (inherentGovt >= 2128 && inherentGovt <= 2383) {
+        return inherentGovt - 2000;
+    }
+    if (inherentGovt >= 1128 && inherentGovt <= 1383) {
+        return inherentGovt - 1000;
+    }
+    if (inherentGovt >= 128 && inherentGovt <= 383) {
+        return inherentGovt;
+    }
+    return null;
+}
+
 export type ShipPictMap = Promise<{ [index: string]: string }>;
 export type WeaponOutfitMap = ShipPictMap;
 /** Maps a weapon's global id to the outfit that is its ammo. */
@@ -198,6 +219,12 @@ export async function ShipParse(ship: ShipResource,
         freeMass += outfit.mass * outfits[outfitID];
     }
 
+    // The government whose ïntf status bar this class shows for the player.
+    const interfaceGovtLocalId = interfaceGovtId(ship.inherentGovt);
+    const interfaceGovt = interfaceGovtLocalId !== null
+        ? (ship.idSpace.gövt[interfaceGovtLocalId]?.globalID ?? null)
+        : null;
+
     // EVN Bible shïp Flags: slow (75%), semi-fast (125%), and fast
     // (150%) hyperspace jump speed. The bits are mutually exclusive.
     var jumpSpeedMult = 1;
@@ -271,6 +298,12 @@ export async function ShipParse(ship: ShipResource,
         inherentGovt: ship.inherentGovt >= 128
             ? (ship.idSpace.gövt[ship.inherentGovt]?.globalID ?? null)
             : null,
+        // The ïntf status bar's govt reads the SAME field through the Bible's
+        // three InherentGovt encodings (both / attributes-only 1128-1383 /
+        // combat-only 2128-2383), because the gövt Interface rule fires on
+        // either association. Most stock player-flyable ships use the
+        // attributes-only form, so this is what actually selects the bar.
+        interfaceGovt: interfaceGovt,
         price: ship.cost,
         techLevel: ship.techLevel,
         hireRandom: ship.hireRandom,

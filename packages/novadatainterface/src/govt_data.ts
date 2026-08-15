@@ -117,6 +117,16 @@ export interface GovtData extends BaseData {
     newsPic: string | null;
 
     /**
+     * Global ïntf id of the status bar shown while the player flies a ship of
+     * this government (gövt Interface). EVN Bible, gövt section: "ID of an
+     * ïntf resource to use when the player is flying a ship whose inherent
+     * attributes govt or inherent combat govt is equal to this govt type.
+     * Values less than 128 will be interpreted as 128" — which is what a null
+     * here means: fall back to the default status bar.
+     */
+    statusBar: string | null;
+
+    /**
      * The generic comms-dialog greetings shown when a non-përs ship of this
      * government is hailed and answers with a greeting. Resolved at parse time
      * from the government's greeting STR# (id 7000 + (govtId - 128), one
@@ -240,6 +250,7 @@ export function getDefaultGovtData(): GovtData {
         require: "0",
         voiceType: -1,
         newsPic: null,
+        statusBar: null,
         commGreetings: [],
     };
 }

@@ -136,6 +136,21 @@ export interface ShipData extends SpaceObjectData {
      * the government of the ship the player is flying.
      */
     inherentGovt: string | null;
+    /**
+     * The government whose ïntf status bar this ship class shows while the
+     * PLAYER flies it, as a global gövt id (null when the class has none).
+     *
+     * This is a wider reading of the same InherentGovt field than
+     * `inherentGovt` above: the Bible's status-bar rule fires on "a ship
+     * whose inherent attributes govt OR inherent combat govt is equal to
+     * this govt type" (gövt Interface), so all three encodings count —
+     * 128-383 (both associations), 1128-1383 (attributes only) and
+     * 2128-2383 (combat only), the last two carrying the govt id offset by
+     * 1000/2000 (EVN Bible, shïp InherentGovt). `inherentGovt` deliberately
+     * keeps its narrower 128-383 reading, because it feeds the mission
+     * AvailShipType gate rather than the display.
+     */
+    interfaceGovt: string | null;
     /** Purchase price in credits (shïp Cost). */
     price: number;
     /**
@@ -215,6 +230,7 @@ export function getDefaultShipData(): ShipData {
         strength: 0,
         inherentAI: 1,
         inherentGovt: null,
+        interfaceGovt: null,
         price: 0,
         techLevel: 0,
         hireRandom: 0,
