@@ -45,6 +45,7 @@ Output lands in `visual_compare/output/` (git-ignored):
 | `compare.mjs`   | `crop` + `compareRegion` (pngjs + pixelmatch). |
 | `sweep_button_y.mjs` | Positioning aid, not part of a run: nudges the shipyard's button row a pixel at a time **in the live page** and prints the region diff for each offset, so a widget's position can be measured instead of guessed. `AXIS=x` sweeps horizontally, `FIXED_Y=<n>` pins the other axis. Reading a sprite's position out of a screenshot is unreliable when the art is not flush with its bounds (the button pills' red face sits low inside a 25px sprite); sweeping sidesteps that entirely. |
 | `scenarios.mjs` | **the only file you edit to extend coverage** — scenario + region definitions. |
+| `sigma_texts.mjs` | the Sigma Shipyards intro mission's five dësc texts, generated from the game data (see the header) so the mission-popup scenarios drive byte-exact strings. |
 | `run.mjs`       | orchestrates: ensure server, capture each scenario, diff every region, write crops + `report.html`, print a worst-first summary. |
 | `report.mjs`    | HTML generator. |
 
@@ -94,6 +95,20 @@ Regions are the unit of measurement. A region over stable chrome (a frame
 border, a metal panel) is the meaningful signal; a region over dynamic content
 (the star-map graph, live target text, radar blips) will always diff and is
 only useful as a full-frame sanity check.
+
+## Measuring text, not just chrome
+
+The `sigma_*` scenarios are the one place where the *text* is comparable
+rather than only the frame: the original was captured at every step of one
+mission (mïsn nova:555), so the same string can be rendered on both sides.
+They raise a popup directly through `driver.showOfferPopup` (the
+`window.novaOfferPopups` hook, the mission-text twin of `novaHailDialog`)
+instead of reaching the mission state that offers it, and compare three
+rectangles: the frame, the text well (wrap points and leading) and the footer
+band. The *background* differs by design and lies outside every region.
+
+`driver.holdContainer` presses and holds a container, for the scroll arrows'
+press-vs-hold behaviour; `driver.popupTextY` reads how far the text scrolled.
 
 ## Caveats — read before trusting a number
 
