@@ -173,13 +173,15 @@ describe('activePriceEvents', () => {
 });
 
 describe('applyPriceEvents', () => {
-    // Port Kane's real tiers: food is "high" (base 75 -> 94).
+    // Port Kane's real tiers: food is "high" (base 75 -> 93: tier prices
+    // TRUNCATE like the original — Medical high is a measured 937, not
+    // the rounded 938; see tierPrice).
     const portKane = makePlanet(['high', 'med', 'high', 'med', 'med', 'low']);
 
     it('overrides the tier with basePrice + delta and marks the row', () => {
         const goods = standardTradeGoods(portKane);
         const food = goods.find(g => g.key === 'cargo:0')!;
-        expect(food.price).toBe(94); // 75 * 1.25, the high tier
+        expect(food.price).toBe(93); // floor(75 * 1.25), the high tier
         const adjusted = applyPriceEvents(goods, [
             { commodity: 0, priceDelta: -15, name: 'An enormous food surplus' },
         ]);
