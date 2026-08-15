@@ -27,6 +27,7 @@ import { DeathAIComponent } from './npc_plugin.js';
 import { FormationComponent, NpcComponent, NpcSteeringSystem, nextFormationSlot } from './npc_ai_plugin.js';
 import { EscortLandingComponent, PlayerEscortComponent } from './player_escort.js';
 import { ShipComponent } from './ship_plugin.js';
+import { SoundEvent } from './sound_plugin.js';
 import { TargetComponent } from './target_component.js';
 import { WeaponsStateComponent } from './weapons_state.js';
 
@@ -187,7 +188,7 @@ class BayWeaponEntry extends WeaponEntry {
         return ship;
     }
 
-    fire(position: Position, angle: Angle, owner: string, target = undefined, source: string, sourceVelocity?: Vector, exitPointData?: ExitPointData): Entity | undefined {
+    fire(position: Position, angle: Angle, owner: string, target = undefined, source: string, sourceVelocity?: Vector, exitPointData?: ExitPointData, silent?: boolean): Entity | undefined {
         // In input-driven multiplayer every peer simulates every bay
         // deterministically; ownership tags along for identity only.
         const q = this.runQuery(BaySourceQuery, source)[0];
@@ -254,6 +255,27 @@ class BayWeaponEntry extends WeaponEntry {
         const ownerVuln = this.entities.get(source)?.components
             .get(CollisionVulnerabilityComponent);
         ownerVuln?.vulnerableTo.add(`return_escorts`);
+
+        // A BAY IS A WEAPON, so a launch is heard exactly like any other
+        // shot: the wëap resource's own snd, on the untargeted SoundEvent
+        // channel that everyone hears (not the self-only PlayerSoundEvent),
+        // so ANY ship's launch is audible. 22 of the 23 stock bays carry a
+        // sound (only nova:175 "Create Dart", a mission-spawn utility, has
+        // none) — launching was silent purely because this path never
+        // emitted, unlike ProjectileWeaponEntry/BeamWeaponEntry.fire.
+        //
+        // Byte-for-byte the projectile pattern, including `silent` (used by
+        // submunition bursts so one volley is heard once). Emitting an event
+        // touches no simulation state and draws no PRNG, so this cannot move
+        // the sim. The "how many copies of one sound may start this frame"
+        // cap is display-side (display/sound_plugin.ts, sound_limiter.ts),
+        // so a carrier emptying its bays gets it for free.
+        if (this.data.sound && !silent) {
+            this.emit(SoundEvent, {
+                id: this.data.sound,
+                loop: this.data.loopSound,
+            });
+        }
 
         return ship;
     }
