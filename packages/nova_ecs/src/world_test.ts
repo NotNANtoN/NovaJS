@@ -1568,3 +1568,320 @@ describe('world', () => {
         expect(world.entities.get('foo')?.uuid).toEqual('foo');
     });
 });
+
+describe('world plugin loading', () => {
+    let world: World;
+    beforeEach(() => {
+        world = new World('plugin test');
+    });
+
+    // Collects unhandled promise rejections for the duration of `fn`.
+    // Nested `addPlugin` calls are fire-and-forget (`Plugin.build` is
+    // synchronous and can not await them), so a nested failure used to
+    // surface only as an unhandled rejection, long after the outer
+    // `addPlugin` had already resolved successfully.
+    async function unhandledRejectionsDuring(fn: () => Promise<void>) {
+        const rejections: unknown[] = [];
+        const onUnhandled = (reason: unknown) => { rejections.push(reason); };
+        process.on('unhandledRejection', onUnhandled);
+        try {
+            await fn();
+            // Let node report any rejection that has no handler.
+            await new Promise(resolve => setTimeout(resolve, 10));
+        } finally {
+            process.off('unhandledRejection', onUnhandled);
+        }
+        return rejections;
+    }
+
+    it('rejects when a nested plugin\'s build throws', async () => {
+        const failing: Plugin = {
+            name: 'FailingPlugin',
+            build() {
+                throw new Error('nested build failed');
+            }
+        };
+        const outer: Plugin = {
+            name: 'OuterPlugin',
+            build(world) {
+                // Not awaited. `build` is synchronous, so it can't be.
+                world.addPlugin(failing);
+            }
+        };
+
+        await expectAsync(world.addPlugin(outer))
+            .toBeRejectedWithError(/nested build failed/);
+    });
+
+    it('rejects when a plugin nested two deep fails', async () => {
+        const failing: Plugin = {
+            name: 'FailingPlugin',
+            build() {
+                throw new Error('deeply nested build failed');
+            }
+        };
+        const middle: Plugin = {
+            name: 'MiddlePlugin',
+            build(world) {
+                world.addPlugin(failing);
+            }
+        };
+        const outer: Plugin = {
+            name: 'OuterPlugin',
+            build(world) {
+                world.addPlugin(middle);
+            }
+        };
+
+        await expectAsync(world.addPlugin(outer))
+            .toBeRejectedWithError(/deeply nested build failed/);
+    });
+
+    it('rejects when a nested plugin\'s async build rejects', async () => {
+        const failing: Plugin = {
+            name: 'FailingAsyncPlugin',
+            async build() {
+                await Promise.resolve();
+                throw new Error('nested async build failed');
+            }
+        };
+        const outer: Plugin = {
+            name: 'OuterPlugin',
+            build(world) {
+                world.addPlugin(failing);
+            }
+        };
+
+        await expectAsync(world.addPlugin(outer))
+            .toBeRejectedWithError(/nested async build failed/);
+    });
+
+    it('rejects when a nested plugin\'s system is missing a resource', async () => {
+        // The shipped bug: a scratch world was missing a resource needed by a
+        // system that a nested plugin registers. `addSystem` threw, but the
+        // outer `await world.addPlugin(...)` resolved anyway.
+        const missingResource = new Resource<{ q: number }>('MissingResource');
+        const needsResource = new System({
+            name: 'NeedsMissingResource',
+            args: [missingResource] as const,
+            step: () => { },
+        });
+        const nested: Plugin = {
+            name: 'NestedPlugin',
+            build(world) {
+                world.addSystem(needsResource);
+            }
+        };
+        const outer: Plugin = {
+            name: 'OuterPlugin',
+            build(world) {
+                world.addPlugin(nested);
+            }
+        };
+
+        await expectAsync(world.addPlugin(outer))
+            .toBeRejectedWithError(/MissingResource/);
+    });
+
+    it('reports a nested failure without an extra unhandled rejection',
+        async () => {
+            const failing: Plugin = {
+                name: 'FailingPlugin',
+                build() {
+                    throw new Error('nested build failed');
+                }
+            };
+            const outer: Plugin = {
+                name: 'OuterPlugin',
+                build(world) {
+                    world.addPlugin(failing);
+                }
+            };
+
+            const rejections = await unhandledRejectionsDuring(async () => {
+                await expectAsync(world.addPlugin(outer)).toBeRejected();
+            });
+
+            expect(rejections).toEqual([]);
+        });
+
+    it('has every nested plugin\'s systems once it resolves', async () => {
+        const stepData: string[] = [];
+        const makeSystem = (name: string) => new System({
+            name,
+            args: [] as const,
+            step: () => { stepData.push(name); },
+        });
+
+        // An async build defers the rest of its registration to a later
+        // microtask, which is what used to race the caller's `step()`.
+        const asyncLeaf: Plugin = {
+            name: 'AsyncLeafPlugin',
+            async build(world) {
+                // A macrotask, so this can not resolve in the same microtask
+                // drain as the outer `addPlugin`.
+                await new Promise(resolve => setTimeout(resolve, 0));
+                world.addSystem(makeSystem('asyncLeaf'));
+            }
+        };
+        const nested: Plugin = {
+            name: 'NestedPlugin',
+            build(world) {
+                world.addPlugin(asyncLeaf);
+                world.addSystem(makeSystem('nested'));
+            }
+        };
+        const outer: Plugin = {
+            name: 'OuterPlugin',
+            build(world) {
+                world.addPlugin(nested);
+                world.addSystem(makeSystem('outer'));
+            }
+        };
+
+        await world.addPlugin(outer);
+        world.step();
+
+        expect(stepData).toContain('outer');
+        expect(stepData).toContain('nested');
+        expect(stepData).toContain('asyncLeaf');
+        expect(world.plugins).toContain(asyncLeaf);
+    });
+
+    it('waits for a nested plugin that awaits its own nested plugin',
+        async () => {
+            const stepData: string[] = [];
+            const leaf: Plugin = {
+                name: 'LeafPlugin',
+                async build(world) {
+                    await new Promise(resolve => setTimeout(resolve, 0));
+                    world.addSystem(new System({
+                        name: 'LeafSystem',
+                        args: [] as const,
+                        step: () => { stepData.push('leaf'); },
+                    }));
+                }
+            };
+            // Awaits its nested plugin, like ShipController does.
+            const middle: Plugin = {
+                name: 'MiddlePlugin',
+                async build(world) {
+                    await world.addPlugin(leaf);
+                }
+            };
+            const outer: Plugin = {
+                name: 'OuterPlugin',
+                build(world) {
+                    world.addPlugin(middle);
+                }
+            };
+
+            await world.addPlugin(outer);
+            world.step();
+
+            expect(stepData).toEqual(['leaf']);
+        });
+
+    it('does not deadlock on a cyclic plugin graph', async () => {
+        const stepData: string[] = [];
+        const a: Plugin = {
+            name: 'PluginA',
+            build(world) {
+                world.addPlugin(b);
+                world.addSystem(new System({
+                    name: 'ASystem',
+                    args: [] as const,
+                    step: () => { stepData.push('a'); },
+                }));
+            }
+        };
+        const b: Plugin = {
+            name: 'PluginB',
+            build(world) {
+                // Back edge to a plugin that is still building.
+                world.addPlugin(a);
+                world.addSystem(new System({
+                    name: 'BSystem',
+                    args: [] as const,
+                    step: () => { stepData.push('b'); },
+                }));
+            }
+        };
+
+        await world.addPlugin(a);
+        world.step();
+
+        expect(stepData).toContain('a');
+        expect(stepData).toContain('b');
+    });
+
+    it('waits for the other nested plugins when one of them fails',
+        async () => {
+            let slowFinished = false;
+            const slow: Plugin = {
+                name: 'SlowPlugin',
+                async build() {
+                    await new Promise(resolve => setTimeout(resolve, 5));
+                    slowFinished = true;
+                }
+            };
+            const failing: Plugin = {
+                name: 'FailingPlugin',
+                build() {
+                    throw new Error('nested build failed');
+                }
+            };
+            const outer: Plugin = {
+                name: 'OuterPlugin',
+                build(world) {
+                    world.addPlugin(failing);
+                    world.addPlugin(slow);
+                }
+            };
+
+            await expectAsync(world.addPlugin(outer)).toBeRejected();
+            // A failed load must not leave a plugin still building.
+            expect(slowFinished).toBeTrue();
+        });
+
+    it('only builds a plugin once when added twice', async () => {
+        let builds = 0;
+        const plugin: Plugin = {
+            name: 'CountedPlugin',
+            build() { builds++; }
+        };
+
+        await world.addPlugin(plugin);
+        await world.addPlugin(plugin);
+
+        expect(builds).toEqual(1);
+    });
+
+    it('can remove a plugin that failed to build', async () => {
+        const failing: Plugin = {
+            name: 'FailingPlugin',
+            build() {
+                throw new Error('build failed');
+            },
+            remove() { }
+        };
+
+        await expectAsync(world.addPlugin(failing)).toBeRejected();
+        await expectAsync(world.removePlugin(failing)).toBeResolvedTo(true);
+        expect(world.plugins.has(failing)).toBeFalse();
+    });
+
+    it('rejects when re-adding a plugin that failed to build', async () => {
+        const failing: Plugin = {
+            name: 'FailingPlugin',
+            build() {
+                throw new Error('build failed');
+            }
+        };
+
+        await expectAsync(world.addPlugin(failing))
+            .toBeRejectedWithError(/build failed/);
+        await expectAsync(world.addPlugin(failing))
+            .toBeRejectedWithError(/build failed/);
+    });
+});
