@@ -77,6 +77,42 @@ export function captionSegments(
         .map(text => ({ text, grey: !/^[a-zA-Z0-9]/.test(text) }));
 }
 
+/**
+ * The selected-item pict pane budget shared by the shipyard, outfitter,
+ * and hire dialogs (pane origin x=175 inside the 618-wide frame leaves
+ * ~134px to the frame edge). Stock picts fit 1:1 and are never rescaled
+ * (the fit only ever shrinks); PLUGIN picts come in arbitrary sizes that
+ * vary by plugin (e.g. 'Nuclear Missile', 'IR type Multi Launcher') and
+ * are scaled down to fit the pane. Applies to ship picts through the
+ * same tile path.
+ */
+export const LARGE_PICT_FIT = 130;
+
+/** The downscale-to-fit factor: never upscales. */
+export function fitScale(width: number, height: number, max: number): number {
+    return Math.min(1, max / width, max / height);
+}
+
+/**
+ * Applies {@link fitScale} once the sprite's texture is loaded —
+ * spriteFromPict textures load asynchronously, so the dimensions aren't
+ * known at construction.
+ */
+function fitWhenLoaded(sprite: PIXI.Sprite, max: number) {
+    const fit = () => {
+        const { width, height } = sprite.texture;
+        if (width <= 1 || height <= 1) {
+            return;
+        }
+        sprite.scale.set(fitScale(width, height, max));
+    };
+    if (sprite.texture.baseTexture.valid) {
+        fit();
+    } else {
+        sprite.texture.baseTexture.once('loaded', fit);
+    }
+}
+
 export class ItemTile<I extends Item> {
     private font = {
         normal: {
@@ -157,6 +193,7 @@ export class ItemTile<I extends Item> {
         if (this.item.pict) {
             const smallPict = this.displayAssets.spriteFromPict(this.item.pict);
             const largePict = this.displayAssets.spriteFromPict(this.item.pict);
+            fitWhenLoaded(largePict, LARGE_PICT_FIT);
             this.largePict.addChild(largePict);
             smallPict.anchor.x = 0.5;
             smallPict.position.x = TILE_SIZE[0] / 2;

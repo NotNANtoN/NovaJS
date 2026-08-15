@@ -1,6 +1,6 @@
 import 'jasmine';
 import * as PIXI from 'pixi.js';
-import { ItemGrid, raiseToTop } from './item_grid.js';
+import { fitScale, ItemGrid, raiseToTop } from './item_grid.js';
 
 /**
  * The item grid's selection highlight has to paint above the other tiles.
@@ -91,5 +91,22 @@ describe('ItemGrid selection clearing', () => {
         grid.setItems([]);
         grid.setItems([]);
         expect(emissions).toBe(before);
+    });
+});
+
+describe('fitScale (plugin pict downscale-to-fit)', () => {
+    it('leaves stock-sized picts at 1:1', () => {
+        expect(fitScale(100, 100, 130)).toBe(1);
+        expect(fitScale(130, 130, 130)).toBe(1);
+    });
+
+    it('shrinks oversized plugin picts to the pane on the long axis', () => {
+        expect(fitScale(260, 130, 130)).toBe(0.5);
+        expect(fitScale(130, 260, 130)).toBe(0.5);
+        expect(fitScale(200, 200, 130)).toBeCloseTo(130 / 200, 9);
+    });
+
+    it('never upscales a small pict', () => {
+        expect(fitScale(50, 40, 130)).toBe(1);
     });
 });
