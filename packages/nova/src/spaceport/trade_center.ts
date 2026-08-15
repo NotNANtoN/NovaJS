@@ -28,35 +28,78 @@ import {
     TradeWorkingState,
 } from '../nova_plugin/trade_logic.js';
 import { Button, ButtonClick } from './button.js';
+import {
+    LINE_HEIGHT, ROW_HEIGHT, SELECTION_COLOR, TRADE, TRADE_ROW_TEXT_DY,
+    listRowY,
+} from './dialog_layout.js';
 import { Menu } from './menu.js';
 import { computeCargoCapacity } from './mission_session.js';
 import { QuantityDialog } from './quantity_dialog.js';
 
-// Laid out to fit the 426x252 Trade dialog (PICT 8510): the main pane
-// spans x 37..388, y 6..183; the strip below it y 189..213; the metal
-// button row fills the bottom. Coordinates are center-anchored.
-const PANE_LEFT = -176;
-const PANE_RIGHT = 175;
-const PANE_TOP = -118;
-const LIST_TOP = PANE_TOP + 18;
-const ROW_HEIGHT = 13;
-const LIST_ROWS = 10;
-// The "Other cargo" / "Free cargo space" lines at the pane's bottom.
-const SUMMARY_TOP = 27;
-// The narrow strip pane: status messages.
-const STATUS_TOP = 66;
-const BUTTON_Y = 90;
-// Column x positions (right edges for the numeric columns).
-const HOLD_RIGHT = 95;
-const TIER_LEFT = 105;
-const PRICE_RIGHT = PANE_RIGHT - 4;
-
+// The 426x252 Trade dialog (PICT 8510). All geometry lives in
+// dialog_layout.ts, measured against trade_center/*.png (1920x1080).
 const LIST_FONT: Partial<PIXI.ITextStyle> = {
-    fontFamily: 'Geneva', fontSize: 10, fill: 0xffffff,
-    align: 'left', wordWrap: false,
+    fontFamily: 'Geneva', fontSize: 9.4, fill: 0xffffff,
+    align: 'left', wordWrap: false, lineHeight: LINE_HEIGHT,
 };
 const RIGHT_FONT: Partial<PIXI.ITextStyle> =
     { ...LIST_FONT, align: 'right' };
+
+/**
+ * The exchange's column headers and cargo-summary wording, stock Nova's
+ * own (STR# 2002 indices 196-199 and 362-368). "In Hold:" is the
+ * no-escort form; a player with escorts sees "In Fleet:" and a split
+ * ship/fleet free-space readout (documented gap: we have no fleet-cargo
+ * model, so only the solo wording is rendered).
+ */
+const HEADER_COMMODITY = 'Commodity:';
+const HEADER_HOLD = 'In Hold:';
+const HEADER_PRICE = 'Price:';
+
+/**
+ * Which row a good occupies. The original keeps a FIXED slot for each of
+ * the six standard commodities whether or not this stellar trades it —
+ * Earth doesn't trade Equipment and leaves row 5 empty, putting its
+ * Duranium Alloy jünk row on row 6, exactly where Port Kane (which
+ * trades all six) puts its own jünk row. Jünk rows follow in list order.
+ */
+export function tradeSlot(good: TradeGood,
+    goods: readonly TradeGood[]): number {
+    const standard = /^cargo:(\d+)$/.exec(good.key);
+    if (standard) {
+        return Number(standard[1]);
+    }
+    const junks = goods.filter(g => !g.key.startsWith('cargo:'));
+    return TRADE.standardSlots + Math.max(0, junks.indexOf(good));
+}
+
+/**
+ * The exchange's price-event line. The öops resource's own name is only
+ * the subject ("An enormous food surplus"); the original completes the
+ * sentence from STR# 2002 — index 191 "has", 192 "raised" / 193
+ * "lowered", 180 "the price of" — giving the reference's "An enormous
+ * food surplus has lowered the price of food."
+ * (trade_center_port_kane_with_mission_cargo_and_lower_cost_food_event.png).
+ */
+export function priceEventSentence(good: TradeGood): string {
+    if (!good.event) {
+        return '';
+    }
+    const verb = good.event.direction === 'lower' ? 'lowered' : 'raised';
+    return `${good.event.name} has ${verb} the price of `
+        + `${good.name.toLowerCase()}.`;
+}
+
+/** Tons of mission cargo in the hold ('mission:*' keys). */
+export function missionCargoTons(cargo: ReadonlyMap<string, number>): number {
+    let tons = 0;
+    for (const [key, amount] of cargo) {
+        if (key.startsWith('mission:')) {
+            tons += amount;
+        }
+    }
+    return tons;
+}
 
 /**
  * The commodity exchange (spöb flag 0x2): standard commodities at this
@@ -92,9 +135,9 @@ export class TradeCenter extends Menu<Entity> {
     private quantityDialog: QuantityDialog;
 
     private text = {
-        headerCommodity: new PIXI.Text('Commodity:', LIST_FONT),
-        headerHold: new PIXI.Text('In Hold:', RIGHT_FONT),
-        headerPrice: new PIXI.Text('Price:', RIGHT_FONT),
+        headerCommodity: new PIXI.Text(HEADER_COMMODITY, LIST_FONT),
+        headerHold: new PIXI.Text(HEADER_HOLD, LIST_FONT),
+        headerPrice: new PIXI.Text(HEADER_PRICE, LIST_FONT),
         otherCargo: new PIXI.Text('', LIST_FONT),
         freeSpace: new PIXI.Text('', LIST_FONT),
         // The active price-event description line ("An enormous food
@@ -112,15 +155,13 @@ export class TradeCenter extends Menu<Entity> {
         super(displayAssets, simulationData, 'nova:8510', controlEvents);
         this.container.name = 'TradeCenter';
 
-        // Measured against trade_center/*.png (1920x1080): the reference
-        // Buy/Sell/Done pill centers sit ~106px apart (screen x 853/959/1066),
-        // not the 120px this row used before — Buy already matched, but Sell
-        // and Done drifted right by ~14 and ~28px. -150/-44/+62 lands all
-        // three on the reference centers.
         this.buttons = {
-            buy: new Button(displayAssets, 'Buy', 60, { x: -150, y: BUTTON_Y }),
-            sell: new Button(displayAssets, 'Sell', 60, { x: -44, y: BUTTON_Y }),
-            done: new Button(displayAssets, 'Done', 60, { x: 62, y: BUTTON_Y }),
+            buy: new Button(displayAssets, 'Buy', TRADE.button.width,
+                { x: TRADE.button.buy, y: TRADE.button.y }),
+            sell: new Button(displayAssets, 'Sell', TRADE.button.width,
+                { x: TRADE.button.sell, y: TRADE.button.y }),
+            done: new Button(displayAssets, 'Done', TRADE.button.width,
+                { x: TRADE.button.done, y: TRADE.button.y }),
         };
         // Option+click opens the bulk quantity dialog, as the
         // original's exchange does.
@@ -131,18 +172,23 @@ export class TradeCenter extends Menu<Entity> {
 
         this.quantityDialog = new QuantityDialog(controlEvents);
 
-        this.text.headerCommodity.position.set(PANE_LEFT + 4, PANE_TOP);
-        this.text.headerHold.anchor.x = 1;
-        this.text.headerHold.position.set(HOLD_RIGHT, PANE_TOP);
-        this.text.headerPrice.anchor.x = 1;
-        this.text.headerPrice.position.set(PRICE_RIGHT, PANE_TOP);
-        this.text.otherCargo.position.set(PANE_LEFT + 4, SUMMARY_TOP);
-        this.text.freeSpace.position.set(PANE_LEFT + 4, SUMMARY_TOP + 16);
+        // "Commodity:" / "In Hold:" / "Price:" are all LEFT-aligned in
+        // the original; only the quantities and prices under them are
+        // right-aligned (earth_trade_center.png: the headers start at
+        // x792 / x1015 / x1067).
+        this.text.headerCommodity.position.set(TRADE.nameX, TRADE.headerY);
+        this.text.headerHold.position.set(
+            TRADE.quantityHeaderX, TRADE.headerY);
+        this.text.headerPrice.position.set(TRADE.tierX, TRADE.headerY);
+        this.text.otherCargo.position.set(TRADE.nameX, TRADE.summaryTop);
+        this.text.freeSpace.position.set(TRADE.nameX, TRADE.summaryTop);
         // The event line sits in the strip below the pane (the reference
         // screenshot's "food surplus" position); transaction feedback
         // shows just under it.
-        this.text.event.position.set(PANE_LEFT + 4, STATUS_TOP);
-        this.text.status.position.set(PANE_LEFT + 4, STATUS_TOP + 13);
+        this.text.event.position.set(
+            TRADE.statusText.x, TRADE.statusText.y);
+        this.text.status.position.set(
+            TRADE.statusText.x, TRADE.statusText.y + LINE_HEIGHT);
 
         this.container.addChild(this.highlight, this.listContainer);
         for (const t of Object.values(this.text)) {
@@ -226,7 +272,8 @@ export class TradeCenter extends Menu<Entity> {
             const events = activePriceEvents(
                 this.oopses, this.planetId, dayNumber(date), bits);
             this.goods = applyPriceEvents(this.goods, events);
-            this.eventText = events.map(e => e.name).join(' ');
+            this.eventText = this.goods.map(priceEventSentence)
+                .filter(Boolean).join(' ');
         } else {
             this.eventText = '';
         }
@@ -353,22 +400,16 @@ export class TradeCenter extends Menu<Entity> {
         this.rowHits = [];
         this.highlight.clear();
 
-        const start = Math.max(0, Math.min(
-            this.selectedIndex - (LIST_ROWS - 2),
-            this.goods.length - LIST_ROWS));
-        const visible = this.goods.slice(start, start + LIST_ROWS);
         const tierLabel = { low: 'Low', med: 'Med', high: 'High' } as const;
-        visible.forEach((good, i) => {
-            const index = start + i;
-            // Jünk rows sit below the standard commodities with a
-            // blank line between, as in the original.
-            const junkGap = good.key.startsWith('junk:') ? ROW_HEIGHT / 2 : 0;
-            const y = LIST_TOP + i * ROW_HEIGHT + junkGap;
+        this.goods.forEach((good, index) => {
+            const slot = tradeSlot(good, this.goods);
+            const y = listRowY(TRADE.listTop, slot,
+                slot >= TRADE.standardSlots);
             if (index === this.selectedIndex) {
                 // The original's full-width selection bar.
-                this.highlight.beginFill(0x8b0000)
-                    .drawRect(PANE_LEFT + 2, y,
-                        PANE_RIGHT - PANE_LEFT - 4, ROW_HEIGHT)
+                this.highlight.beginFill(SELECTION_COLOR)
+                    .drawRect(TRADE.pane.x, y, TRADE.pane.width,
+                        ROW_HEIGHT)
                     .endFill();
             }
             // A full-width transparent hit target so the whole row —
@@ -378,7 +419,7 @@ export class TradeCenter extends Menu<Entity> {
             hit.interactive = true;
             hit.cursor = 'pointer';
             hit.hitArea = new PIXI.Rectangle(
-                PANE_LEFT + 2, y, PANE_RIGHT - PANE_LEFT - 4, ROW_HEIGHT);
+                TRADE.pane.x, y, TRADE.pane.width, ROW_HEIGHT);
             hit.on('pointerdown', () => {
                 this.selectedIndex = index;
                 this.text.status.text = '';
@@ -393,10 +434,10 @@ export class TradeCenter extends Menu<Entity> {
                 ? (good.event.direction === 'lower' ? 'Lower' : 'Higher')
                 : tierLabel[good.tier];
             const columns: [string, number, number][] = [
-                [good.name, PANE_LEFT + 4, 0],
-                [held > 0 ? `${held}` : '', HOLD_RIGHT, 1],
-                [tierWord, TIER_LEFT, 0],
-                [`${good.price.toLocaleString()}`, PRICE_RIGHT, 1],
+                [good.name, TRADE.nameX, 0],
+                [held > 0 ? `${held}` : '', TRADE.quantityRight, 1],
+                [tierWord, TRADE.tierX, 0],
+                [`${good.price.toLocaleString()}`, TRADE.priceRight, 1],
             ];
             for (const [label, x, anchor] of columns) {
                 if (!label) {
@@ -405,22 +446,24 @@ export class TradeCenter extends Menu<Entity> {
                 const text = new PIXI.Text(label,
                     anchor ? RIGHT_FONT : LIST_FONT);
                 text.anchor.x = anchor;
-                text.position.set(x, y);
+                text.position.set(x, y + TRADE_ROW_TEXT_DY);
                 this.listContainer.addChild(text);
                 this.rowTexts.push(text);
             }
         });
-        if (this.goods.length === 0) {
-            const text = new PIXI.Text(
-                '(no goods traded here)', LIST_FONT);
-            text.position.set(PANE_LEFT + 4, LIST_TOP);
-            this.listContainer.addChild(text);
-            this.rowTexts.push(text);
-        }
 
+        // The cargo summary below the list rule. The original stacks
+        // "Other cargo: N tons of mission cargo", a blank line, and the
+        // free-space readout (trade_center_port_kane_...png: caps at
+        // y544 and y568, 24px apart).
         const other = otherCargoNames(this.state.cargo, this.goods);
-        this.text.otherCargo.text = other.length > 0
-            ? `Other cargo: ${other.join(', ')}` : '';
+        const missionTons = missionCargoTons(this.state.cargo);
+        this.text.otherCargo.text = missionTons > 0
+            ? `Other cargo: ${missionTons} `
+            + `ton${missionTons === 1 ? '' : 's'} of mission cargo`
+            : other.length > 0 ? `Other cargo: ${other.join(', ')}` : '';
+        this.text.freeSpace.y = TRADE.summaryTop
+            + (this.text.otherCargo.text ? 2 * LINE_HEIGHT : 0);
         this.text.freeSpace.text =
             `Free cargo space: ${freeCargoSpace(this.state)} tons`;
 

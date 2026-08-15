@@ -10,12 +10,27 @@ import { MenuControls } from './menu_controls.js';
 // "Enter quantity:" label, a black entry field with white digits, and
 // grey bevel Cancel / <verb> buttons. It is not one of the game's
 // PICT frames, so it's drawn with Graphics.
-const PANEL_WIDTH = 220;
-const PANEL_HEIGHT = 96;
-const FIELD_WIDTH = 70;
-const FIELD_HEIGHT = 20;
-const BUTTON_WIDTH = 78;
-const BUTTON_HEIGHT = 26;
+// Measured off trade_center/buy_quantity.png (1920x1080): the panel is
+// centred on the screen at x874..1045, y504..575; its entry field is
+// x983..1040, y508..530; Cancel is x885..954 and the default button
+// x966..1036, both y546..565. (The original's is a NATIVE macOS dialog
+// — blue default button, Aqua bevels — so only the rectangles are
+// reproduced, not the styling.)
+const PANEL_WIDTH = 172;
+const PANEL_HEIGHT = 72;
+const FIELD_WIDTH = 58;
+const FIELD_HEIGHT = 23;
+/** Field inset from the panel's right edge / top. */
+const FIELD_INSET_RIGHT = 5;
+const FIELD_INSET_TOP = 4;
+/** "Enter quantity:" ink starts 7px in, its cap 10px down. */
+const LABEL_INSET_X = 7;
+const LABEL_INSET_Y = 8;
+const BUTTON_WIDTH = 70;
+const BUTTON_HEIGHT = 20;
+const BUTTON_INSET_LEFT = 11;
+const BUTTON_INSET_RIGHT = 9;
+const BUTTON_INSET_BOTTOM = 10;
 
 /** Longest quantity the field accepts (999,999,999 is beyond any cap). */
 const MAX_DIGITS = 9;
@@ -119,25 +134,27 @@ export class QuantityDialog {
             // The entry field: black, inset at the panel's top right.
             .lineStyle(0)
             .beginFill(0x000000)
-            .drawRect(left + PANEL_WIDTH - FIELD_WIDTH - 12, top + 12,
-                FIELD_WIDTH, FIELD_HEIGHT)
+            .drawRect(left + PANEL_WIDTH - FIELD_WIDTH - FIELD_INSET_RIGHT,
+                top + FIELD_INSET_TOP, FIELD_WIDTH, FIELD_HEIGHT)
             .endFill();
         panel.interactive = true;
         this.container.addChild(panel);
 
         const label = new PIXI.Text('Enter quantity:', LABEL_FONT);
-        label.position.set(left + 12, top + 15);
+        label.position.set(left + LABEL_INSET_X, top + LABEL_INSET_Y);
         this.container.addChild(label);
 
         this.valueText.position.set(
-            left + PANEL_WIDTH - FIELD_WIDTH - 12 + 5, top + 15);
+            left + PANEL_WIDTH - FIELD_WIDTH - FIELD_INSET_RIGHT + 4,
+            top + FIELD_INSET_TOP + 4);
         this.container.addChild(this.valueText);
 
-        const buttonY = top + PANEL_HEIGHT - BUTTON_HEIGHT - 12;
+        const buttonY =
+            top + PANEL_HEIGHT - BUTTON_HEIGHT - BUTTON_INSET_BOTTOM;
         const cancel = new SystemButton('Cancel',
-            left + 14, buttonY, () => this.close(undefined));
+            left + BUTTON_INSET_LEFT, buttonY, () => this.close(undefined));
         this.confirmButton = new SystemButton('OK',
-            left + PANEL_WIDTH - BUTTON_WIDTH - 14, buttonY,
+            left + PANEL_WIDTH - BUTTON_WIDTH - BUTTON_INSET_RIGHT, buttonY,
             () => this.confirm());
         this.container.addChild(cancel.container,
             this.confirmButton.container);

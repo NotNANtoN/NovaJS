@@ -3,17 +3,18 @@ import { firstValueFrom, Observable, Subject } from 'rxjs';
 import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data.js';
 import { ControlEvent } from '../nova_plugin/controls_plugin.js';
 import { Button, ButtonClick } from './button.js';
+import { GAMBLE } from './dialog_layout.js';
 import { MenuControls } from './menu_controls.js';
 import { QuantityDialog } from './quantity_dialog.js';
 
-// Laid out to fit the 470x230 racing dialog (PICT 8529): the header
-// LED strip on top, four ~100x103 racer boxes at y 84..187, and the
-// metal button strip along the bottom. Center-anchored coordinates.
-const SLOT_CENTERS_X = [-173, -60, 57.5, 169.5];
-const SLOT_CENTER_Y = 20.5;
-const SLOT_SIZE = 100;
+// The 470x230 racing dialog (PICT 8529): the header LED strip on top,
+// four 100x100 racer PICTs and the metal button strip along the bottom.
+// Geometry lives in dialog_layout.ts, measured against bar/gamble/*.png.
+const SLOT_CENTERS_X = GAMBLE.slotCentersX;
+const SLOT_CENTER_Y = GAMBLE.slotCenterY;
+const SLOT_SIZE = GAMBLE.slotSize;
 const TRACK = { left: -223, right: 221, top: -31, bottom: 72 };
-const BUTTON_Y = 78;
+const BUTTON_Y = GAMBLE.button.y;
 
 /** The four racer PICTs (8530-8533), one per selection box. */
 const RACER_PICTS = ['nova:8530', 'nova:8531', 'nova:8532', 'nova:8533'];
@@ -83,9 +84,12 @@ export class GambleDialog {
             const sprite = displayAssets.spriteFromPict(pict);
             sprite.anchor.set(0.5);
             sprite.position.set(SLOT_CENTERS_X[i], SLOT_CENTER_Y);
-            const scale = SLOT_SIZE / Math.max(
-                sprite.width || SLOT_SIZE, sprite.height || SLOT_SIZE, 1);
-            sprite.scale.set(Math.min(scale, 1) * 0.9);
+            // The racer PICTs are already 100x100 and the original
+            // blits them 1:1 (bar/gamble/gamble.png: the first fills
+            // x738..837, y513..612); only oversized plug-in art scales.
+            const scale = Math.min(1, SLOT_SIZE / Math.max(
+                sprite.width || SLOT_SIZE, sprite.height || SLOT_SIZE, 1));
+            sprite.scale.set(scale);
             sprite.interactive = true;
             sprite.cursor = 'pointer';
             sprite.on('pointerdown', () => this.select(i));
@@ -97,14 +101,17 @@ export class GambleDialog {
         this.container.addChild(this.status);
 
         this.buttons = {
-            help: new Button(displayAssets, 'Help', 60,
-                { x: -125, y: BUTTON_Y }),
-            bet1000: new Button(displayAssets, 'Bet 1000', 70,
-                { x: -180, y: BUTTON_Y }),
-            bet5000: new Button(displayAssets, 'Bet 5000', 70,
-                { x: -55, y: BUTTON_Y }),
-            cancel: new Button(displayAssets, 'Cancel', 60,
-                { x: 25, y: BUTTON_Y }),
+            help: new Button(displayAssets, 'Help', GAMBLE.button.width,
+                { x: GAMBLE.button.help, y: BUTTON_Y }),
+            bet1000: new Button(displayAssets, 'Bet 1000',
+                GAMBLE.button.width,
+                { x: GAMBLE.button.help, y: BUTTON_Y }),
+            bet5000: new Button(displayAssets, 'Bet 5000',
+                GAMBLE.button.width,
+                { x: GAMBLE.button.cancel, y: BUTTON_Y }),
+            cancel: new Button(displayAssets, 'Cancel',
+                GAMBLE.button.width,
+                { x: GAMBLE.button.cancel, y: BUTTON_Y }),
         };
         this.buttons.help.click.subscribe(() => this.showHelp());
         // Option+click on a bet button opens the quantity dialog for a
@@ -141,7 +148,11 @@ export class GambleDialog {
         this.buttons.help.container.visible = !chosen;
         this.buttons.bet1000.container.visible = chosen;
         this.buttons.bet5000.container.visible = chosen;
-        this.buttons.cancel.container.position.x = chosen ? 80 : 25;
+        // The reference's base dialog is Help / Cancel; once a racer is
+        // picked our two stakes take those two slots and Cancel moves
+        // right of them (the original bets a fixed 1,000 on the click).
+        this.buttons.cancel.container.position.x =
+            chosen ? GAMBLE.button.cancel + 113 : GAMBLE.button.cancel;
         const affordable = (bet: number) =>
             chosen && !this.racing && this.credits.credits >= bet;
         this.buttons.bet1000.state = affordable(1000) ? 'normal' : 'grey';

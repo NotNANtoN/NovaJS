@@ -30,6 +30,8 @@
 // coverage; run.mjs and report.mjs are generic.
 // ============================================================================
 
+import { dialogScenarios } from './scenarios_dialogs.mjs';
+
 const region = (id, label, x, y, width, height) => ({
     id, label, ref: { x, y, width, height }, ours: { x, y, width, height },
 });
@@ -1571,4 +1573,6 @@ export const scenarios = [
     // centre), so that scenario compares our centred frame against the
     // reference's shifted one with explicit rects.
     ...sigmaScenarios(),
+    // Bar / mission BBS / mission info / trade center interiors.
+    ...dialogScenarios,
 ];

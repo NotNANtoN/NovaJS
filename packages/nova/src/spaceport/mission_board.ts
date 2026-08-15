@@ -4,7 +4,7 @@ import { Observable } from 'rxjs';
 import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data.js';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { ControlEvent } from '../nova_plugin/controls_plugin.js';
-import { dateFromDayNumber, formatDate } from '../nova_plugin/calendar.js';
+import { dateFromDayNumber } from '../nova_plugin/calendar.js';
 import {
     acceptOffer,
     MissionMapMark,
@@ -21,33 +21,51 @@ import { activeAsOffer, offerSubstitutions, rollOffers } from './mission_offers.
 import { MissionSession } from './mission_session.js';
 import { OpenStarmapOptions } from './starmap.js';
 import { MissionUniverse } from './mission_universe.js';
-import { FONT } from './outfitter.js';
+import { formatMapDate } from './route.js';
+import {
+    BBS, LINE_HEIGHT, ROW_HEIGHT, ROW_TEXT_DY, SELECTION_COLOR, listRowY,
+} from './dialog_layout.js';
 
+/**
+ * The original's body font: Geneva 9, whose advance widths our outline
+ * Geneva matches most closely a shade above 9px (see offer_popup.ts),
+ * on the bitmap font's own 12px line pitch.
+ */
 const LIST_FONT: Partial<PIXI.ITextStyle> = {
-    fontFamily: 'Geneva', fontSize: 10, fill: 0xffffff,
-    align: 'left', wordWrap: false,
+    fontFamily: 'Geneva', fontSize: 9.4, fill: 0xffffff,
+    align: 'left', wordWrap: false, lineHeight: LINE_HEIGHT,
 };
 const LIST_FONT_DIM: Partial<PIXI.ITextStyle> =
     { ...LIST_FONT, fill: 0x888888 };
 const LIST_FONT_HEADER: Partial<PIXI.ITextStyle> =
     { ...LIST_FONT, fill: 0xffff88 };
+/** The strip captions are the original's light grey (#c0c0c0 sampled on
+ * earth_mission_bbs.png), not white. */
+const STRIP_FONT: Partial<PIXI.ITextStyle> =
+    { ...LIST_FONT, fill: 0xc0c0c0 };
+/** The date is dimmer still (#404040 on the same capture). */
+const DATE_FONT: Partial<PIXI.ITextStyle> =
+    { ...LIST_FONT, fill: 0x808080, align: 'right' };
+/** The selected listing's name, in the upper right pane's large type. */
+const TITLE_FONT: Partial<PIXI.ITextStyle> = {
+    fontFamily: 'Geneva', fontSize: BBS.titleFontSize, fill: 0xffffff,
+    align: 'left', wordWrap: false,
+};
+const DESC_FONT: Partial<PIXI.ITextStyle> = {
+    ...LIST_FONT, wordWrap: true, wordWrapWidth: BBS.descWrapWidth,
+};
 
-// Laid out to fit the 510x201 Mission BBS dialog (PICT 8505):
-// header strip x 8..410, y 4..18; list pane x 6..219, y 26..173;
-// right upper strip y 30..58 and description pane below it; metal
-// button row along the bottom. Center-anchored coordinates.
-const HEADER_Y = -95;
-const LIST_X = -245;
-const LIST_TOP = -72;
-const LIST_ROWS = 11;
-const ROW_HEIGHT = 13;
-const LIST_WIDTH = 208;
-const DESC_X = -24;
-const DESC_TOP = -36;
-const DESC_WIDTH = 240;
-const DESC_HEIGHT = 108;
-const INFO_Y = -66;
-const BUTTON_Y = 75;
+/**
+ * The board's own strings, stock Nova's wording verbatim: STR# 2002
+ * ("misc strings") index 358 is the header caption and index 352 the
+ * empty-board message. Read from the table at show() time; these are the
+ * fallbacks for a data set whose STR# 2002 is missing or too short.
+ */
+export const BBS_HEADER = 'The following missions are available here:';
+export const BBS_NO_MISSIONS = 'There are no missions available here.';
+export const BBS_STRING_TABLE = 'nova:2002';
+export const BBS_HEADER_INDEX = 358;
+export const BBS_NO_MISSIONS_INDEX = 352;
 
 type Row =
     | { kind: 'offer', offer: MissionOffer }
@@ -85,15 +103,19 @@ export class MissionBoard extends Menu<Entity> {
     };
 
     private text = {
-        title: new PIXI.Text('', {
-            fontFamily: 'Geneva', fontSize: 12, fill: 0xffffff,
-        }),
-        dateCredits: new PIXI.Text('', { ...LIST_FONT, align: 'right' }),
-        info: new PIXI.Text('', LIST_FONT),
-        description: new PIXI.Text('', {
-            ...FONT.normal, wordWrapWidth: DESC_WIDTH,
-        }),
-        status: new PIXI.Text('', { ...FONT.normal, wordWrap: false }),
+        /** The strip caption ("The following missions are available
+         * here:"), not the dialog's own name. */
+        header: new PIXI.Text('', STRIP_FONT),
+        date: new PIXI.Text('', DATE_FONT),
+        /** The selected listing's name, in the upper right pane. */
+        title: new PIXI.Text('', TITLE_FONT),
+        description: new PIXI.Text('', DESC_FONT),
+        status: new PIXI.Text('', LIST_FONT),
+    };
+    /** The header caption / empty-board message, read from STR# 2002. */
+    private strings = {
+        header: BBS_HEADER,
+        noMissions: BBS_NO_MISSIONS,
     };
 
     constructor(displayAssets: DisplayAssetDataInterface,
@@ -123,36 +145,47 @@ export class MissionBoard extends Menu<Entity> {
         // Accept pill at x975, Leave at x1078); aborting lives in the
         // Mission Info dialog ('i').
         this.buttons = {
-            accept: new Button(displayAssets, 'Accept', 74, { x: 8, y: BUTTON_Y }),
-            done: new Button(displayAssets, 'Leave', 74, { x: 111, y: BUTTON_Y }),
+            accept: new Button(displayAssets, 'Accept', BBS.button.width,
+                { x: BBS.button.accept, y: BBS.button.y }),
+            done: new Button(displayAssets, 'Leave', BBS.button.width,
+                { x: BBS.button.leave, y: BBS.button.y }),
         };
         this.buttons.accept.click.subscribe(this.accept.bind(this));
         this.buttons.done.click.subscribe(this.done.bind(this));
         this.addButtons(this.buttons);
 
-        this.text.title.text = title;
-        this.text.title.position.set(LIST_X, HEADER_Y);
-        this.text.dateCredits.anchor.x = 1;
-        this.text.dateCredits.position.set(155, HEADER_Y + 2);
-        this.text.info.position.set(DESC_X, INFO_Y);
-        this.listContainer.position.set(LIST_X, LIST_TOP);
-        this.text.description.position.set(DESC_X, DESC_TOP);
-        this.text.status.position.set(LIST_X, BUTTON_Y - 16);
-        this.container.addChild(this.highlight, this.text.title,
-            this.text.dateCredits, this.text.info, this.listContainer,
+        this.text.header.position.set(BBS.headerText.x, BBS.headerText.y);
+        this.text.date.anchor.x = 1;
+        this.text.date.position.set(BBS.dateRight, BBS.headerText.y);
+        this.text.title.position.set(BBS.titleText.x, BBS.titleText.y);
+        this.listContainer.position.set(BBS.list.x, BBS.list.y);
+        this.text.description.position.set(
+            BBS.descText.x, BBS.descText.y);
+        this.text.status.position.set(
+            BBS.statusText.x, BBS.statusText.y);
+        this.container.addChild(this.highlight, this.text.header,
+            this.text.date, this.text.title, this.listContainer,
             this.text.description, this.text.status);
 
-        // Clip the list and the description to their dialog panes.
+        // Clip the list, the name pane and the description to their panes.
         const listMask = new PIXI.Graphics()
             .beginFill(0xffffff)
-            .drawRect(LIST_X, LIST_TOP, LIST_WIDTH,
-                LIST_ROWS * ROW_HEIGHT + 4)
+            .drawRect(BBS.list.x, BBS.list.y, BBS.list.width,
+                BBS.list.height)
             .endFill();
         this.container.addChild(listMask);
         this.listContainer.mask = listMask;
+        const titleMask = new PIXI.Graphics()
+            .beginFill(0xffffff)
+            .drawRect(BBS.titlePane.x, BBS.titlePane.y,
+                BBS.titlePane.width, BBS.titlePane.height)
+            .endFill();
+        this.container.addChild(titleMask);
+        this.text.title.mask = titleMask;
         const descMask = new PIXI.Graphics()
             .beginFill(0xffffff)
-            .drawRect(DESC_X, DESC_TOP, DESC_WIDTH + 10, DESC_HEIGHT)
+            .drawRect(BBS.desc.x, BBS.desc.y, BBS.desc.width,
+                BBS.desc.height)
             .endFill();
         this.container.addChild(descMask);
         this.text.description.mask = descMask;
@@ -228,6 +261,7 @@ export class MissionBoard extends Menu<Entity> {
             console.warn('Mission board failed to load:', e);
             return input;
         }
+        await this.loadStrings();
         this.offers = rollOffers(this.session, this.universe,
             this.location);
         this.buildRows();
@@ -238,6 +272,27 @@ export class MissionBoard extends Menu<Entity> {
         this.refreshList();
         this.refreshDescription();
         return super.show(input);
+    }
+
+    /**
+     * Reads the board's two fixed strings out of STR# 2002, keeping the
+     * constants above as the fallback (the hire dialog's pattern).
+     */
+    private async loadStrings() {
+        try {
+            const table = await this.displayAssets.data.StringTable
+                .get(BBS_STRING_TABLE);
+            const header = table.strings[BBS_HEADER_INDEX];
+            const empty = table.strings[BBS_NO_MISSIONS_INDEX];
+            if (header?.trim()) {
+                this.strings.header = header;
+            }
+            if (empty?.trim()) {
+                this.strings.noMissions = empty;
+            }
+        } catch {
+            // Keep the built-in wording.
+        }
     }
 
     /** Rebuilds the row list from the frozen offers + active missions. */
@@ -253,15 +308,44 @@ export class MissionBoard extends Menu<Entity> {
         // missions live in the mission-info dialog ('i'). The 'active'
         // row kind stays supported for that dialog's shared row plumbing.
         if (this.rows.length === 0) {
-            this.rows.push({ kind: 'header', label: '(no missions available)' });
+            this.rows.push({ kind: 'header',
+                label: this.strings.noMissions });
         }
     }
 
+    /**
+     * The header strip: a fixed caption on the left and the date on the
+     * right. The original shows NO credit balance here — the strip on
+     * earth_mission_bbs.png carries only "Nov. 18th, 1177 NC" — and the
+     * date is in the map's galactic-calendar shape, not calendar.ts's.
+     */
     private refreshHeader() {
         const session = this.session!;
-        const date = formatDate(dateFromDayNumber(session.currentDay));
-        const credits = session.state.credits.credits.toLocaleString();
-        this.text.dateCredits.text = `${date}    ${credits} cr`;
+        this.text.header.text = this.strings.header;
+        this.text.date.text =
+            formatMapDate(dateFromDayNumber(session.currentDay));
+    }
+
+    /**
+     * A row's caption — the mission's name with the same <DST>-style
+     * wildcards the descriptions carry. Shared by the list and the
+     * upper right pane, which shows the selected row's caption verbatim.
+     */
+    private rowLabel(row: Row): string {
+        if (row.kind === 'header') {
+            return row.label;
+        }
+        if (row.kind === 'offer') {
+            return expandMissionText(
+                missionDisplayName(row.offer.data.name),
+                this.substitutionsFor(row.offer), this.descContext());
+        }
+        const offer = activeAsOffer(this.universe, row.active);
+        return offer
+            ? expandMissionText(missionDisplayName(offer.data.name),
+                this.substitutionsFor(offer, row.active),
+                this.descContext())
+            : row.active.id;
     }
 
     private refreshList() {
@@ -279,37 +363,23 @@ export class MissionBoard extends Menu<Entity> {
 
         // A simple window keeps the selection visible.
         const start = Math.max(0, Math.min(
-            this.selectedIndex - (LIST_ROWS - 2),
-            this.rows.length - LIST_ROWS));
-        const visible = this.rows.slice(start, start + LIST_ROWS);
+            this.selectedIndex - (BBS.list.rows - 2),
+            this.rows.length - BBS.list.rows));
+        const visible = this.rows.slice(start, start + BBS.list.rows);
         visible.forEach((row, i) => {
             const index = start + i;
-            let label: string;
+            const label = this.rowLabel(row);
             let style: Partial<PIXI.ITextStyle> = LIST_FONT;
-            if (row.kind === 'offer') {
-                // Mission names use the same <DST>-style wildcards as
-                // the descriptions.
-                label = expandMissionText(missionDisplayName(row.offer.data.name),
-                    this.substitutionsFor(row.offer), this.descContext());
-                if (!row.offer.acceptable) {
-                    style = LIST_FONT_DIM;
-                }
-            } else if (row.kind === 'active') {
-                const offer = activeAsOffer(this.universe, row.active);
-                label = offer
-                    ? expandMissionText(missionDisplayName(offer.data.name),
-                        this.substitutionsFor(offer, row.active),
-                        this.descContext())
-                    : row.active.id;
-            } else {
-                label = row.label;
+            if (row.kind === 'offer' && !row.offer.acceptable) {
+                style = LIST_FONT_DIM;
+            } else if (row.kind === 'header') {
                 style = LIST_FONT_HEADER;
             }
             if (index === this.selectedIndex && row.kind !== 'header') {
                 // The original's full-width selection bar.
-                this.highlight.beginFill(0x8b0000)
-                    .drawRect(LIST_X, LIST_TOP + i * ROW_HEIGHT,
-                        LIST_WIDTH, ROW_HEIGHT)
+                this.highlight.beginFill(SELECTION_COLOR)
+                    .drawRect(BBS.list.x, listRowY(BBS.list.y, i),
+                        BBS.list.width, ROW_HEIGHT)
                     .endFill();
             }
             if (row.kind !== 'header') {
@@ -321,7 +391,7 @@ export class MissionBoard extends Menu<Entity> {
                 hit.interactive = true;
                 hit.cursor = 'pointer';
                 hit.hitArea = new PIXI.Rectangle(
-                    0, i * ROW_HEIGHT, LIST_WIDTH, ROW_HEIGHT);
+                    0, i * ROW_HEIGHT, BBS.list.width, ROW_HEIGHT);
                 hit.on('pointerdown', () => {
                     this.selectedIndex = index;
                     this.refreshList();
@@ -331,7 +401,8 @@ export class MissionBoard extends Menu<Entity> {
                 this.rowHits.push(hit);
             }
             const text = new PIXI.Text(label, style);
-            text.position.set(4, i * ROW_HEIGHT);
+            text.position.set(BBS.listTextX,
+                i * ROW_HEIGHT + ROW_TEXT_DY);
             this.listContainer.addChild(text);
             this.rowTexts.push(text);
         });
@@ -371,16 +442,23 @@ export class MissionBoard extends Menu<Entity> {
         return makeDescTextContext(this.session!.state.bits, playerGender());
     }
 
-    /** The right pane: expanded text, info line, and button labels. */
+    /**
+     * The right side: the selected listing's NAME in the upper pane's
+     * large type (the original repeats the list caption there — see
+     * mission_bbs/un_shipping_mission.png) and its expanded text below.
+     * There is no pay/deadline line: the original's offer text carries
+     * both in prose.
+     */
     private refreshDescription() {
         const row = this.selectedRow();
         this.buttons.accept.setLabel('Accept');
-        this.text.info.text = '';
         if (!row || row.kind === 'header') {
+            this.text.title.text = '';
             this.text.description.text = '';
             this.buttons.accept.state = 'grey';
             return;
         }
+        this.text.title.text = this.rowLabel(row);
         if (row.kind === 'offer') {
             const { offer } = row;
             const subs = this.substitutionsFor(offer);
@@ -388,12 +466,6 @@ export class MissionBoard extends Menu<Entity> {
                 this.descContext());
             const extra = offer.acceptable ? '' : `\n\n[${offer.reason}]`;
             this.text.description.text = text + extra;
-            this.text.info.text = [
-                subs.payment !== undefined
-                    ? `Pay: ${subs.payment.toLocaleString()} cr` : '',
-                subs.deadline !== undefined
-                    ? `Deadline: ${subs.deadline}` : '',
-            ].filter(Boolean).join('    ');
             // The mïsn's custom accept label, where present.
             if (offer.data.acceptButton) {
                 this.buttons.accept.setLabel(offer.data.acceptButton);
