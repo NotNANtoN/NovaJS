@@ -147,6 +147,9 @@ export const PendingMissionNoticeType = t.intersection([t.type({
     /** Global PICT id of the dësc Graphic paired with `text` (fail /
      * shipDone picts queued mid-flight), absent when the dësc has none. */
     pict: t.string,
+    /** <SN> value for the notice's text (additive; older records simply
+     * fall back to the generic phrase). */
+    specialShipName: t.string,
 })]);
 export type PendingMissionNotice = t.TypeOf<typeof PendingMissionNoticeType>;
 export const PendingMissionNoticesType = t.array(PendingMissionNoticeType);

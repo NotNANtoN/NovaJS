@@ -710,6 +710,14 @@ export function applyStartsDisabled(entity: Entity,
         return;
     }
     const govtData = gameData.data.Govt.getCached(govt);
+    if (govtData === undefined) {
+        // The staged-at-genesis contract says every govt a spawn table can
+        // produce is cached before spawning. A miss here would silently
+        // spawn a would-be derelict ALIVE (the exact bug the hulk feature
+        // fixes), so make the contract violation loud (review finding M2).
+        console.warn(`applyStartsDisabled: govt ${govt} not cached; `
+            + `a starts-disabled ship would spawn alive`);
+    }
     const shipData = entity.components.get(ShipDataComponent);
     const physics = entity.components.get(ShipPhysicsComponent);
     if (!shipData || !physics) {

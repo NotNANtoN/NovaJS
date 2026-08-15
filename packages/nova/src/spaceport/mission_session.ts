@@ -298,6 +298,7 @@ export function drainPendingMissionNotices(entity: Entity): MissionEvent[] {
         text: notice.text,
         pict: notice.pict,
         payment: notice.payment,
+        specialShipName: notice.specialShipName,
     }));
 }
 
@@ -402,6 +403,8 @@ async function processInFlightMissions(entity: Entity,
                 // Only a present (non-null) pict rides the serialized
                 // partial; a null dësc-graphic is simply omitted.
                 ...(e.pict ? { pict: e.pict } : {}),
+                ...(e.specialShipName
+                    ? { specialShipName: e.specialShipName } : {}),
             }))]);
     }
 }

@@ -387,10 +387,36 @@ export class Spaceport extends Menu<Entity> {
                 || event.type === 'autoAborted' || event.type === 'shipDone'
                 || event.type === 'cargoLoaded'
                 || event.type === 'cargoDropped') {
+                // Where "here" fits in the mission's shape depends on the
+                // event: completion/failure text fires at the mission's
+                // RETURN stop, so <RST>/<RSY> mean "here" — but the cargo
+                // texts fire at the TRAVEL stop, where "here" is
+                // <DST>/<DSY> and the return tags must name the mission's
+                // actual return planet (still in the player's active
+                // state, since a cargo transfer doesn't end the mission).
+                const cargoEvent = event.type === 'cargoLoaded'
+                    || event.type === 'cargoDropped';
+                const active = entity.components.get(MissionsComponent)
+                    ?.get(event.missionId);
+                const here = {
+                    stellar: this.universe.planetName(this.id),
+                    system: this.universe.systemNameOfPlanet(this.id),
+                };
                 const text = expandMissionText(event.text, {
                     ...identity,
-                    returnStellar: this.universe.planetName(this.id),
-                    returnSystem: this.universe.systemNameOfPlanet(this.id),
+                    ...(cargoEvent ? {
+                        destinationStellar: here.stellar,
+                        destinationSystem: here.system,
+                        ...(active?.returnPlanet ? {
+                            returnStellar: this.universe.planetName(
+                                active.returnPlanet),
+                            returnSystem: this.universe.systemNameOfPlanet(
+                                active.returnPlanet),
+                        } : {}),
+                    } : {
+                        returnStellar: here.stellar,
+                        returnSystem: here.system,
+                    }),
                     payment: event.payment,
                     // <SN>: carried on the event, since the mission is
                     // already gone from the player's state by the time

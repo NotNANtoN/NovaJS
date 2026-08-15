@@ -115,7 +115,15 @@ export class OfferPopup {
         // text instead of having to reach the mission state that offers it.
         if (typeof window !== 'undefined') {
             const w = window as unknown as { novaOfferPopups?: OfferPopup[] };
-            (w.novaOfferPopups ??= []).push(this);
+            const popups = (w.novaOfferPopups ??= []);
+            popups.push(this);
+            // Bounded: the harness only drives recent instances, and a
+            // new display world is built per system transit — retaining
+            // every popup ever constructed leaked their scenes (review
+            // finding L5).
+            if (popups.length > 4) {
+                popups.splice(0, popups.length - 4);
+            }
         }
     }
 

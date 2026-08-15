@@ -108,7 +108,10 @@ export const ShipDisableSystem = new System({
 
         // A spawn-disabled hulk keeps full armor yet stays disabled: only
         // an external repair that DELETES the component (boarding) brings
-        // it back online, so the threshold rules below don't apply.
+        // it back online, so the threshold rules below don't apply. Any
+        // future repair path that should revive hulks (e.g. NPC roadside
+        // assistance) must delete DisabledComponent itself — writing
+        // armor can never lift a hulk (review note L3).
         if (disabled.hulk) {
             return;
         }

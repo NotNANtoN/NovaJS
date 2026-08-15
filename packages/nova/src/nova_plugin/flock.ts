@@ -132,7 +132,14 @@ export function provokeGuidedLock(target: string, source: string | undefined,
     if (firingImmune(shooterGroup, victimGroup, undefined, undefined)) {
         return;
     }
-    const aggressor = source ?? ownerRoot;
+    // ONE answer for "who shot me": the same firing-group-root resolution
+    // the damage path uses (aggression_plugin's damagerRoot — group root,
+    // else the concrete firer). Crediting the concrete firer here while
+    // damage credited the root split one escort's missile into two
+    // different aggressor entries on the victim (review finding M1,
+    // 2026-08-15).
+    const aggressor = shooter?.components.get(FiringGroupComponent)?.group
+        ?? source ?? ownerRoot;
     const npc = victim.components.get(NpcComponent);
     if (npc) {
         npc.aggressor = aggressor;
