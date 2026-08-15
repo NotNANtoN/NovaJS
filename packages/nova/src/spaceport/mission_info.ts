@@ -94,6 +94,8 @@ export class MissionInfoDialog {
     private description = new PIXI.Text('', DESC_FONT);
     private abort: Button;
     private rowTexts: PIXI.Text[] = [];
+    /** Full-width transparent click targets, one per selectable row. */
+    private rowHits: PIXI.Container[] = [];
     private missions: [string, ActiveMission][] = [];
     private selectedIndex = 0;
     private currentDay = 0;
@@ -225,6 +227,11 @@ export class MissionInfoDialog {
             text.destroy();
         }
         this.rowTexts = [];
+        for (const hit of this.rowHits) {
+            this.listContainer.removeChild(hit);
+            hit.destroy();
+        }
+        this.rowHits = [];
         this.highlight.clear();
 
         if (this.missions.length === 0) {
@@ -248,16 +255,24 @@ export class MissionInfoDialog {
                         LIST_WIDTH, ROW_HEIGHT)
                     .endFill();
             }
-            const text = new PIXI.Text(this.missionName(id, active),
-                LIST_FONT);
-            text.position.set(4, i * ROW_HEIGHT);
-            text.interactive = true;
-            text.cursor = 'pointer';
-            text.on('pointerdown', () => {
+            // A full-width transparent hit target so the whole row —
+            // everywhere the selection bar renders, not just the text —
+            // is clickable (the trade center / mission BBS pattern).
+            const hit = new PIXI.Container();
+            hit.interactive = true;
+            hit.cursor = 'pointer';
+            hit.hitArea = new PIXI.Rectangle(
+                0, i * ROW_HEIGHT, LIST_WIDTH, ROW_HEIGHT);
+            hit.on('pointerdown', () => {
                 this.selectedIndex = index;
                 this.refreshList();
                 this.refreshDescription();
             });
+            this.listContainer.addChild(hit);
+            this.rowHits.push(hit);
+            const text = new PIXI.Text(this.missionName(id, active),
+                LIST_FONT);
+            text.position.set(4, i * ROW_HEIGHT);
             this.listContainer.addChild(text);
             this.rowTexts.push(text);
         });
