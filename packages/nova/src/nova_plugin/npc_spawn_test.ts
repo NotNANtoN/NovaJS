@@ -3,7 +3,7 @@ import { getDefaultGovtData } from 'novadatainterface/govt_data';
 import { Random } from 'nova_ecs/plugins/random_plugin';
 import {
     fleetAllowedInSystem, MAX_NPC_POPULATION, persAllowedInSystem,
-    pickWeighted, rollPopulationTarget,
+    PERS_SPAWN_CHANCE, pickPersEntry, pickWeighted, rollPopulationTarget,
 } from './npc_spawn_plugin.js';
 
 function govt(overrides: Partial<ReturnType<typeof getDefaultGovtData>>) {
@@ -51,6 +51,85 @@ describe('pickWeighted', () => {
         const random = new Random(1);
         expect(pickWeighted([], random)).toBeUndefined();
         expect(pickWeighted([{ weight: 0 }], random)).toBeUndefined();
+    });
+});
+
+describe('pickPersEntry (sÿst Person chances inside the Bible 5%)', () => {
+    /** Sol's own Person fields (sÿst nova:130), chances and all. */
+    const sol = [
+        { id: 'nova:128', chance: 12 },  // Terrapin
+        { id: 'nova:227', chance: 1 },   // Valkyrie
+        { id: 'nova:156', chance: 2 },   // Drifting Derelict (Heavy Shuttle)
+        { id: 'nova:299', chance: 15 },  // Galadriel
+    ];
+    /** The roll at which entry `index`'s sub-interval starts. */
+    const start = (index: number) => sol.slice(0, index)
+        .reduce((sum, entry) => sum + entry.chance, 0)
+        * PERS_SPAWN_CHANCE / 100;
+
+    it('gives each listed person 5% x their own percent chance', () => {
+        // Each person owns a sub-interval of width 5% x chance%, laid
+        // end to end in table order: Terrapin [0, 0.6%), Valkyrie
+        // [0.6%, 0.65%), the derelict [0.65%, 0.75%), Galadriel
+        // [0.75%, 1.5%).
+        for (let i = 0; i < sol.length; i++) {
+            const middle = (start(i) + start(i + 1)) / 2;
+            expect(pickPersEntry(sol, middle)).toBe(sol[i]);
+        }
+        // Sol's chances sum to 30, so 1.5% of draws create someone and
+        // the other 98.5% create nobody.
+        expect(pickPersEntry(sol, 0.0151)).toBeUndefined();
+        expect(pickPersEntry(sol, 0.049)).toBeUndefined();
+        expect(pickPersEntry(sol, 0.9)).toBeUndefined();
+    });
+
+    it("matches the Bible's flat 5% when the chances sum to 100", () => {
+        const even = [{ chance: 50 }, { chance: 50 }];
+        expect(pickPersEntry(even, 0)).toBe(even[0]);
+        expect(pickPersEntry(even, 0.024)).toBe(even[0]);
+        expect(pickPersEntry(even, 0.026)).toBe(even[1]);
+        expect(pickPersEntry(even, PERS_SPAWN_CHANCE * 0.999)).toBe(even[1]);
+        expect(pickPersEntry(even, PERS_SPAWN_CHANCE * 1.001)).toBeUndefined();
+    });
+
+    it('saturates the window when the chances sum past 100 '
+        + '(stock data reaches 600)', () => {
+            const crowded = Array.from({ length: 8 }, () => ({ chance: 75 }));
+            expect(pickPersEntry(crowded, PERS_SPAWN_CHANCE * 0.999))
+                .toBe(crowded[7]);
+            // Never more than the Bible's 5%.
+            expect(pickPersEntry(crowded, PERS_SPAWN_CHANCE * 1.001))
+                .toBeUndefined();
+        });
+
+    it('gives an empty or all-zero table nobody', () => {
+        expect(pickPersEntry([], 0)).toBeUndefined();
+        expect(pickPersEntry([{ chance: 0 }], 0)).toBeUndefined();
+        expect(pickPersEntry([{ chance: 0 }, { chance: 5 }], 0))
+            .toEqual({ chance: 5 });
+    });
+
+    it('holds its stated frequencies over a seeded run', () => {
+        const random = new Random(20260814);
+        const counts = new Map<string, number>();
+        const draws = 200_000;
+        for (let i = 0; i < draws; i++) {
+            const picked = pickPersEntry(sol, random.next());
+            if (picked) {
+                counts.set(picked.id, (counts.get(picked.id) ?? 0) + 1);
+            }
+        }
+        for (const entry of sol) {
+            const rate = (counts.get(entry.id) ?? 0) / draws;
+            const expected = PERS_SPAWN_CHANCE * entry.chance / 100;
+            // Within 20% of the analytic rate (the rarest, the 2%
+            // derelict, is 0.1% per draw => ~200 hits here).
+            expect(rate).toBeGreaterThan(expected * 0.8);
+            expect(rate).toBeLessThan(expected * 1.2);
+        }
+        // Nobody who isn't listed: the derelict Leviathan përs nova:180
+        // is not in Sol's Person fields, so it can never be picked.
+        expect(counts.has('nova:180')).toBeFalse();
     });
 });
 

@@ -1,5 +1,5 @@
 import { SystResource } from "../resource_parsers/syst_resource.js";
-import { SystemData, SystemSpawnChance } from "novadatainterface/system_data";
+import { SystemData, SystemPersonChance, SystemSpawnChance } from "novadatainterface/system_data";
 import { BaseParse } from "./base_parse.js";
 import { BaseData } from "novadatainterface/base_data";
 
@@ -79,6 +79,20 @@ export async function SystemParse(syst: SystResource, notFoundFunction: (m: stri
         }
     }
 
+    // The sÿst Person fields: the AI-people that can appear here, with
+    // their percent chances. Soft references like the dude table (a
+    // plug-in may list përs it doesn't ship), and order-preserving so
+    // every peer builds the same spawn table.
+    const persons: Array<SystemPersonChance> = [];
+    for (const { id, chance } of syst.persons) {
+        const pers = syst.idSpace.përs[id];
+        if (pers) {
+            persons.push({ id: pers.globalID, chance });
+        } else {
+            console.warn("Missing përs id " + id + " for sÿst " + base.id);
+        }
+    }
+
     // Also a soft reference: an unresolvable owning govt degrades to
     // independent.
     let govt: string | null = null;
@@ -105,6 +119,7 @@ export async function SystemParse(syst: SystResource, notFoundFunction: (m: stri
         visibility: syst.visibility,
         dudes,
         fleets,
+        persons,
         avgShips: syst.avgShips,
         govt,
     }
