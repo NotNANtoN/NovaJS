@@ -288,6 +288,33 @@ const BayFormationQuery = new Query([FormationComponent] as const);
 const BaySourceQuery = new Query(
     [Optional(MultiplayerData), Optional(GovtComponent)] as const);
 
+/**
+ * Keeps a carrier SCOOPABLE while any of its collectable fighters exist.
+ *
+ * A returning fighter docks by colliding with its carrier through the
+ * 'return_escorts' collision channel, which requires the CARRIER's
+ * CollisionVulnerability to list that tag. The tag used to be added only
+ * as a side effect of BayWeaponEntry.fire — but the carrier entity is
+ * REBUILT on landing/departure (the providers derive a fresh
+ * vulnerability set), so fighters deployed before a landing could not
+ * return afterwards until a NEW launch happened to re-add the tag
+ * (shipped bug: "return to ship" silently failed post-departure until
+ * another fighter was launched). Deriving the tag from current state
+ * makes the launch-time add merely an optimization.
+ *
+ * Deterministic: an idempotent in-place set add, commutative across
+ * entity iteration order; no PRNG, no time.
+ */
+const ReturnVulnerabilitySystem = new System({
+    name: 'ReturnVulnerability',
+    args: [SourceComponent, CollectableEscortComponent, Entities] as const,
+    step(source, _collectable, entities) {
+        entities.get(source)?.components
+            .get(CollisionVulnerabilityComponent)
+            ?.vulnerableTo.add('return_escorts');
+    },
+});
+
 const CollectableEscortAI = new System({
     name: 'CollectableEscortAI',
     events: [CollisionEvent],
@@ -437,6 +464,7 @@ export const BayPlugin: Plugin = {
         });
 
         world.addSystem(ReturnAI);
+        world.addSystem(ReturnVulnerabilitySystem);
         world.addSystem(CollectableEscortAI);
         world.addSystem(OrphanedBayFighterSystem);
     }

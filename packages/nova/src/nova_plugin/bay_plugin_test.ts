@@ -16,7 +16,7 @@ import { SoundEvent } from './sound_plugin.js';
 import { EscortCommandComponent } from './escort_command.js';
 import { FormationComponent, NpcComponent } from './npc_ai_plugin.js';
 import { BayFighterComponent, EXIT_KICK, startReturnHome } from './bay_plugin.js';
-import { CollisionEvent } from './collision_interaction.js';
+import { CollisionEvent, CollisionVulnerabilityComponent } from './collision_interaction.js';
 import { completeEntity } from './entity_data_loader.js';
 import { OwnerComponent, SourceComponent } from './fire_weapon_plugin.js';
 import { makeShip } from './make_ship.js';
@@ -303,6 +303,30 @@ describe('bay weapons', () => {
             // exit kick alone.
             const kick = launched.subtract(carrierVelocity);
             expect(kick.length).toBeCloseTo(EXIT_KICK, 4);
+        });
+
+    it('re-derives the carrier\'s return_escorts vulnerability after the '
+        + 'carrier is rebuilt (land + depart with fighters deployed)',
+        async () => {
+            const { world, carrier } = await makeTestWorld({
+                fighterCounts: { [FIGHTER_A_ID]: 1 },
+            });
+            const [, fighter] = await launchOne(world, carrier);
+            const vuln = carrier.components
+                .get(CollisionVulnerabilityComponent)!;
+            expect(vuln.vulnerableTo.has('return_escorts')).toBeTrue();
+
+            // Landing + departing rebuilds the carrier entity: the
+            // providers derive a FRESH vulnerability set without the
+            // launch-time 'return_escorts' side effect (shipped bug:
+            // 'return to ship' silently failed after a landing until a
+            // NEW launch re-added the tag).
+            vuln.vulnerableTo.delete('return_escorts');
+
+            startReturnHome(fighter);
+            await stepWorld(world, 1);
+            expect(carrier.components.get(CollisionVulnerabilityComponent)!
+                .vulnerableTo.has('return_escorts')).toBeTrue();
         });
 
     it('refunds exactly one fighter and removes the fighter when it docks',
