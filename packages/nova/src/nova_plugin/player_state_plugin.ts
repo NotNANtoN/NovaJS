@@ -90,6 +90,15 @@ export const ActiveMissionType = t.intersection([t.type({
      * the shipObjective.failed marker for special-ship goals.
      */
     failed: t.boolean,
+    /**
+     * The special ships' name, drawn from the mïsn's ShipNameID STR#
+     * list when the mission was accepted (mission_logic.ts). This is
+     * the <SN> wildcard's value and the name every special ship of
+     * this mission is spawned with. Absent when the mission has no
+     * name list (ShipNameID -1) — and absent in saves written before
+     * <SN> existed, which decode unchanged.
+     */
+    shipName: t.string,
 })]);
 export type ActiveMission = t.TypeOf<typeof ActiveMissionType>;
 

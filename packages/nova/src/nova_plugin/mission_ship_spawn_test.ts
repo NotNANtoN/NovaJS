@@ -73,7 +73,7 @@ function makeObjective(overrides: Partial<ShipObjective>): ShipObjective {
 }
 
 function makePlayer(objective?: ShipObjective,
-    mission?: MissionData): Entity {
+    mission?: MissionData, shipName?: string): Entity {
     const active: ActiveMission = {
         id: mission?.id ?? MISSION_ID,
         acceptedDay: 0,
@@ -86,6 +86,7 @@ function makePlayer(objective?: ShipObjective,
         travelDone: false,
         deadlineDay: null,
         ...(objective ? { shipObjective: objective } : {}),
+        ...(shipName ? { shipName } : {}),
     };
     const player = new Entity('player');
     player.components.set(MissionsComponent,
@@ -227,6 +228,42 @@ describe('buildMissionShipSpawns', () => {
             'nova:128', makeGameData(), makeUniverse(mission));
         expect(ship.name).toBe('Doomblade');
     });
+
+    it('uses the name picked at accept, so the ships agree with <SN>',
+        async () => {
+            // The accepted mission froze "Blood Honor" out of the
+            // ShipNameID list (STR# nova:25000, "Auroran Warships");
+            // the spawn must not re-roll a different one.
+            const mission: MissionData = {
+                ...getDefaultMissionData(),
+                id: MISSION_ID,
+                shipNames: ['Dechanik', 'Blood Honor', 'Doomblade'],
+            };
+            const player = makePlayer(makeObjective({ total: 3 }), mission,
+                'Blood Honor');
+            const ships = await buildMissionShipSpawns(player, OWNER,
+                'nova:128', makeGameData(), makeUniverse(mission));
+            expect(ships.length).toBe(3);
+            // One name per mission, shared by all its special ships: the
+            // Bible's ShipNameID is singular about the name and plural
+            // about the ships, and <SN> is singular.
+            expect(ships.map(s => s.name))
+                .toEqual(['Blood Honor', 'Blood Honor', 'Blood Honor']);
+        });
+
+    it('leaves ships unnamed when the mission has no ShipNameID list',
+        async () => {
+            const mission: MissionData = {
+                ...getDefaultMissionData(),
+                id: MISSION_ID,
+                shipNames: [],
+            };
+            const player = makePlayer(makeObjective({ total: 1 }), mission);
+            const [ship] = await buildMissionShipSpawns(player, OWNER,
+                'nova:128', makeGameData(), makeUniverse(mission));
+            // makeNpcShip's default: the ship type's own name.
+            expect(ship.name).toBe('Test Raider');
+        });
 
     it('spawns aux ships wherever the player goes', async () => {
         const mission: MissionData = {

@@ -69,6 +69,11 @@ export function offerSubstitutions(universe: MissionUniverse,
         deadline: deadlineDay !== null
             ? formatDate(dateFromDayNumber(deadlineDay)) : undefined,
         payment: offer.data.payVal > 0 ? offer.data.payVal : undefined,
+        // <SN>: only an ACCEPTED mission has a special ship name (the
+        // pick happens at accept — EVN Bible). A bare offer leaves it
+        // undefined, which expandMissionText renders as its generic
+        // fallback.
+        specialShipName: active?.shipName,
     };
 }
 

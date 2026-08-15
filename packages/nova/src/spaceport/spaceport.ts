@@ -392,6 +392,10 @@ export class Spaceport extends Menu<Entity> {
                     returnStellar: this.universe.planetName(this.id),
                     returnSystem: this.universe.systemNameOfPlanet(this.id),
                     payment: event.payment,
+                    // <SN>: carried on the event, since the mission is
+                    // already gone from the player's state by the time
+                    // its completion/failure text is shown.
+                    specialShipName: event.specialShipName,
                 }, ctx);
                 // Show the result dësc's graphic beside the text when the
                 // mission set one (completion/fail/shipDone/brief pict);

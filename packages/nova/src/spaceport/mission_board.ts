@@ -434,7 +434,12 @@ export class MissionBoard extends Menu<Entity> {
             this.text.status.text = result.reason;
             return;
         }
-        const subs = this.substitutionsFor(row.offer);
+        // Substitutions built AFTER the accept, against the now-active
+        // mission: the briefing is where <SN> lives (the special ship
+        // name is only picked at accept), so a pre-accept table would
+        // show the unresolved fallback.
+        const subs = this.substitutionsFor(row.offer,
+            this.session.state.missions.get(row.offer.data.id));
         const ctx = this.descContext();
         const brief = expandMissionText(row.offer.data.briefText, subs, ctx);
         // Mission names carry the same <DST>-style wildcards as the

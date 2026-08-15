@@ -674,6 +674,15 @@ export interface MissionEvent {
     pict?: string | null;
     /** Credits paid (positive) with this event, if any. */
     payment?: number;
+    /**
+     * The mission's special-ship name (ActiveMission.shipName), so the
+     * landing popups can expand <SN> in completion/failure/ShipDone/
+     * cargo texts — stock missions do use it there (e.g. mïsn nova:158
+     * and nova:159, the Polaris "Watch Wraith Talks" pair). The event
+     * is the only mission shape those popups get; absent when the
+     * mission has no ShipNameID list.
+     */
+    specialShipName?: string;
 }
 
 /**
@@ -829,6 +838,44 @@ export function runMissionSetString(machinery: MissionMachineryContext,
     }
 }
 
+/**
+ * Picks the special ships' name for a mission being accepted, from
+ * the mïsn's ShipNameID STR# list (MissionData.shipNames; empty when
+ * ShipNameID is -1). Undefined when the mission names no list — the
+ * ships then get their normal random names and <SN> has nothing to
+ * expand to.
+ *
+ * The EVN Bible's <SN> note fixes the timing: "Nova will screw up if
+ * you use this in the initial mission description, as it doesn't pick
+ * the special ship names until you actually accept the mission." The
+ * pick is therefore made HERE, at accept, and frozen on the
+ * ActiveMission so text and ships agree for the mission's whole life
+ * (including across saves and system re-entries, which respawn the
+ * ships).
+ *
+ * ONE name per mission, shared by all its special ships: the Bible's
+ * ShipNameID line is singular about the name and plural about the
+ * ships ("Tells Nova how to name the special ships ... Pick a name
+ * from this STR# resource"), <SN> itself is singular, and the only
+ * stock multi-ship text that uses it reads "I believe most of them
+ * have been named <SN>" (mïsn nova:353) — i.e. one name covering the
+ * group. No stock mission combines ShipCount > 1 with a ShipNameID,
+ * so nothing in the data contradicts the simpler reading.
+ *
+ * Player-local randomness, like the AvailRandom offer roll
+ * (mission_offers.ts): the result is committed into the player's
+ * mission state and mirrors to peers through that state, never
+ * through a sim PRNG draw.
+ */
+function pickSpecialShipName(mission: MissionData,
+    random: () => number): string | undefined {
+    const names = mission.shipNames;
+    if (names.length === 0) {
+        return undefined;
+    }
+    return names[Math.floor(random() * names.length)];
+}
+
 /** The result of an accept attempt (see acceptOffer). */
 export type AcceptResult =
     | { accepted: true }
@@ -876,6 +923,9 @@ export function acceptOffer(machinery: MissionMachineryContext,
             // consistent with the text beside it.
             pict: mission.briefPict,
             payment,
+            // An auto-abort mission never becomes active, so its <SN>
+            // pick lives only as long as this popup.
+            specialShipName: pickSpecialShipName(mission, machinery.random),
         });
         return { accepted: true };
     }
@@ -911,6 +961,9 @@ export function acceptOffer(machinery: MissionMachineryContext,
             ...offer.shipObjective,
             live: new Map(offer.shipObjective.live),
         },
+        // <SN>: the special ships' name, picked now (see
+        // pickSpecialShipName) and frozen for the mission's life.
+        shipName: pickSpecialShipName(mission, machinery.random),
     };
     state.missions.set(mission.id, active);
     if (offer.cargoQty > 0
@@ -931,6 +984,7 @@ export function acceptOffer(machinery: MissionMachineryContext,
         missionName: mission.name,
         type: 'accepted',
         text: mission.briefText,
+        specialShipName: active.shipName,
     });
     return { accepted: true };
 }
@@ -1012,6 +1066,7 @@ export function failMission(machinery: MissionMachineryContext,
         type: 'failed',
         text: mission?.failText ?? '',
         pict: mission?.failPict ?? null,
+        specialShipName: active.shipName,
     });
 }
 
@@ -1048,6 +1103,7 @@ function completeMission(machinery: MissionMachineryContext,
         text: mission.completionText,
         pict: mission.completionPict,
         payment,
+        specialShipName: active.shipName,
     });
 }
 
@@ -1076,6 +1132,7 @@ function runShipDoneIfPending(machinery: MissionMachineryContext,
             type: 'shipDone',
             text: mission.shipDoneText,
             pict: mission.shipDonePict,
+            specialShipName: active.shipName,
         });
     }
 }
@@ -1214,6 +1271,7 @@ export function processLanding(machinery: MissionMachineryContext,
                         type: 'cargoLoaded',
                         text: mission.loadCargoText,
                         pict: mission.loadCargoPict,
+                        specialShipName: active.shipName,
                     });
                 }
             }
@@ -1230,6 +1288,7 @@ export function processLanding(machinery: MissionMachineryContext,
                         type: 'cargoDropped',
                         text: mission.dropOffCargoText,
                         pict: mission.dropOffCargoPict,
+                        specialShipName: active.shipName,
                     });
                 }
             }

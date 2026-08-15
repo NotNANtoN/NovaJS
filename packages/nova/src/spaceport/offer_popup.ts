@@ -300,8 +300,14 @@ export async function presentOffers(popup: OfferPopup,
                 await popup.show(result.reason, { accept: 'OK' });
                 continue;
             }
-            const brief = expandMissionText(offer.data.briefText,
-                substitutions, ctx);
+            // Rebuilt against the now-active mission: <SN> (the special
+            // ship name) is only picked at accept, and the briefing is
+            // where stock missions use it.
+            const brief = expandMissionText(offer.data.briefText, {
+                ...offerSubstitutions(universe, session.currentDay, offer,
+                    session.state.missions.get(offer.data.id)),
+                ...identity,
+            }, ctx);
             if (brief) {
                 // The briefing (post-accept) text uses the generic
                 // briefing frame, with its own dësc picture when set.
