@@ -137,6 +137,56 @@ describe('AttemptLandingSystem', () => {
         expect(blocked[0].reason).toEqual('tooFast');
     }, 30_000);
 
+    it('refuses to land on an UNLANDABLE stellar (Jupiter) even from a '
+        + 'dead stop right on top of it', async () => {
+            const { world, ship } = await makeHarness();
+            // Sol's Jupiter (nova:159) has the spöb can-land bit clear.
+            const jupiter = stellars(world)
+                .find(p => p.uuid === 'planet nova:159')!;
+            ship.components.get(PlanetTargetComponent)!.target = jupiter.uuid;
+            place(ship, jupiter.position);
+
+            const { lands, blocked } = pressLand(world);
+
+            expect(lands).toEqual([]);
+            expect(blocked.length).toBe(1);
+            expect(blocked[0].reason).toEqual('unlandable');
+            expect(blocked[0].entities).toEqual([SHIP_UUID]);
+            expect((blocked[0] as { stellarName?: string }).stellarName)
+                .toEqual('Jupiter');
+        }, 30_000);
+
+    it('still reports the approach window first for an unlandable stellar',
+        async () => {
+            // Range and speed are what the original answers first; the
+            // "unable to land" refusal is the answer to a request you were
+            // actually close enough to make.
+            const { world, ship } = await makeHarness();
+            const jupiter = stellars(world)
+                .find(p => p.uuid === 'planet nova:159')!;
+            ship.components.get(PlanetTargetComponent)!.target = jupiter.uuid;
+            place(ship, new Position(jupiter.position.x + 5000,
+                jupiter.position.y));
+
+            const { blocked } = pressLand(world);
+
+            expect(blocked.length).toBe(1);
+            expect(blocked[0].reason).toEqual('tooFar');
+        }, 30_000);
+
+    it('still lands on an ordinary port in the same system', async () => {
+        const { world, ship } = await makeHarness();
+        const earth = stellars(world)
+            .find(p => p.uuid === 'planet nova:128')!;
+        ship.components.get(PlanetTargetComponent)!.target = earth.uuid;
+        place(ship, earth.position);
+
+        const { lands, blocked } = pressLand(world);
+
+        expect(blocked).toEqual([]);
+        expect(lands.length).toBe(1);
+    }, 30_000);
+
     it('targets the player ship with the blocked feedback event', async () => {
         const { world, ship } = await makeHarness();
         const planets = stellars(world);

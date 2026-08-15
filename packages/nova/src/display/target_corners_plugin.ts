@@ -4,6 +4,7 @@ import { Plugin } from 'nova_ecs/plugin';
 import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { Resource } from "nova_ecs/resource";
 import { System } from "nova_ecs/system";
+import { SingletonComponent } from "nova_ecs/world";
 import * as PIXI from "pixi.js";
 import { DisplayAssetDataInterface } from "../client/gamedata/display_asset_data.js";
 import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
@@ -29,6 +30,15 @@ const TIME_TO_TARGET = 100; // milliseconds
 export class TargetCorners {
     private targetTime = 0;
     targetUuid?: string;
+    /**
+     * Set by the drawing system on every step it draws these corners, and
+     * cleared by the sweep system that runs after it (see
+     * cornersSweepSystem). It is how the corners find out the player left
+     * the world — landing docks the player's entity OUT of the display
+     * world, so the per-entity drawing system simply stops running and the
+     * corners would otherwise hang frozen over the target's last position.
+     */
+    drawnThisStep = false;
     container = new PIXI.Container();
     private sprites: PIXI.Sprite[] = [];
     private textures = new Map<string, PIXI.Texture>();
@@ -158,6 +168,30 @@ export function styleForTarget(targetUuid: string, targetEntity: Entity,
         attackingPlayer);
 }
 
+/**
+ * Hides a corner set on any step nothing drew it. The drawing systems are
+ * per-entity (they run on the player's ship), so when the player's entity
+ * leaves the display world — landing at a spaceport, docking at a gate —
+ * they stop running entirely and cannot hide their own corners. The
+ * original has no reticle while you are landed and none when you take off
+ * again, so a step with no player is a step with no corners.
+ */
+export function cornersSweepSystem(name: string,
+    resource: Resource<TargetCorners>, drawSystem: System): System {
+    return new System({
+        name,
+        args: [resource, SingletonComponent] as const,
+        step(corners) {
+            if (!corners.drawnThisStep) {
+                corners.visible = false;
+                corners.targetUuid = undefined;
+            }
+            corners.drawnThisStep = false;
+        },
+        after: [drawSystem],
+    });
+}
+
 const DrawTargetCornersSystem = new System({
     name: "DrawTargetCornersSystem",
     args: [TargetComponent, TimeResource, TargetCornersResource, Entities,
@@ -185,9 +219,13 @@ const DrawTargetCornersSystem = new System({
         targetCorners.step(time.time, target, targetGraphic.size);
         targetCorners.setPosition(targetGraphic.container.position);
         targetCorners.visible = true;
+        targetCorners.drawnThisStep = true;
     },
     after: [ObjectDrawSystem],
 });
+
+const SweepTargetCornersSystem = cornersSweepSystem('SweepTargetCornersSystem',
+    TargetCornersResource, DrawTargetCornersSystem);
 
 export const TargetCornersPlugin: Plugin = {
     name: 'TargetCornersPlugin',
@@ -206,9 +244,11 @@ export const TargetCornersPlugin: Plugin = {
         space.addChild(targetCorners.container);
         world.resources.set(TargetCornersResource, targetCorners);
         world.addSystem(DrawTargetCornersSystem);
+        world.addSystem(SweepTargetCornersSystem);
     },
     remove(world) {
         world.removeSystem(DrawTargetCornersSystem);
+        world.removeSystem(SweepTargetCornersSystem);
         const space = world.resources.get(Space);
         const targetCorners = world.resources.get(TargetCornersResource);
         if (space && targetCorners) {

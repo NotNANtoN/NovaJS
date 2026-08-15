@@ -10,6 +10,7 @@ import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import { passthroughType, SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
 import { Provide } from 'nova_ecs/provide';
 import { World } from 'nova_ecs/world';
+import { landable } from './landable.js';
 import { ProvideFromCache } from './provide_from_cache.js';
 import { registerEntityDeriver } from './entity_factory.js';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
@@ -64,19 +65,35 @@ registerSimulationBridgeEvent({ event: LandEvent });
 
 /**
  * Emitted (targeted at the player's ship) when the player presses 'land'
- * with a stellar already selected but the ship is out of the landing
- * window. The reason drives the original's on-screen feedback:
- * "You're too far away to..." or "You're moving too fast to...". Consumed
- * display-side by the status line (status_message_plugin.ts). Never mutates
- * the simulation.
+ * with a stellar already selected and the landing is refused. The reason
+ * drives the original's on-screen feedback: "You're too far away to..." /
+ * "You're moving too fast to..." for the landing window, and "Your ship is
+ * unable to..." for a stellar that is not a port at all (`unlandable` —
+ * see landable.ts). Consumed display-side by the status line
+ * (status_message_plugin.ts). Never mutates the simulation.
+ *
+ * `stellarName` and `gateKind` are only meaningful for `unlandable`, whose
+ * message names the stellar; both are optional so the window reasons stay
+ * exactly the shape they always were.
  */
 export const LandingBlockedEvent =
-    new EcsEvent<{ reason: 'tooFar' | 'tooFast', isStation: boolean }>(
-        'LandingBlockedEvent');
-export const LandingBlockedEventType = t.type({
-    reason: t.union([t.literal('tooFar'), t.literal('tooFast')]),
-    isStation: t.boolean,
-});
+    new EcsEvent<{
+        reason: 'tooFar' | 'tooFast' | 'unlandable',
+        isStation: boolean,
+        stellarName?: string,
+        gateKind?: 'hypergate' | 'wormhole',
+    }>('LandingBlockedEvent');
+export const LandingBlockedEventType = t.intersection([
+    t.type({
+        reason: t.union([t.literal('tooFar'), t.literal('tooFast'),
+        t.literal('unlandable')]),
+        isStation: t.boolean,
+    }),
+    t.partial({
+        stellarName: t.string,
+        gateKind: t.union([t.literal('hypergate'), t.literal('wormhole')]),
+    }),
+]);
 
 registerSimulationBridgeEvent({ event: LandingBlockedEvent });
 
@@ -119,6 +136,21 @@ const AttemptLandingSystem = new System({
                 } else if (velocity.lengthSquared >= LAND_SPEED_SQUARED) {
                     emit(LandingBlockedEvent, { reason: 'tooFast', isStation },
                         [playerUuid]);
+                } else if (planetData && !landable(planetData)) {
+                    // Not a port: Jupiter and the other scenery worlds, and
+                    // the destroyed hypergates of the collapsed network
+                    // (landable.ts). Checked AFTER the window so the
+                    // original's approach feedback still comes first — the
+                    // engine only answers a landing request the ship is
+                    // actually close enough and slow enough to make.
+                    // Unknown planet data (the provider has not run) is
+                    // treated as landable, exactly as before.
+                    emit(LandingBlockedEvent, {
+                        reason: 'unlandable', isStation,
+                        stellarName: planetData.name,
+                        ...(planetData.gate
+                            ? { gateKind: planetData.gate.kind } : {}),
+                    }, [playerUuid]);
                 } else {
                     emit(LandEvent, { id, uuid }, [playerUuid]);
                 }

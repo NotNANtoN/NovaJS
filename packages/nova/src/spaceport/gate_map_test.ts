@@ -1,6 +1,13 @@
 import "jasmine";
+import { getDefaultMissionData } from "novadatainterface/mission_data";
+import { Entity } from "nova_ecs/entity";
+import * as PIXI from "pixi.js";
 import { getIntegrationGameData } from "../communication/simulation_test_fixture.js";
-import { computeSelectableSystems } from "./gate_map.js";
+import { gateMapMissionMarks } from "../display/gate_map_plugin.js";
+import { MissionMapMark } from "../nova_plugin/mission_logic.js";
+import { ActiveMission, MissionsComponent } from "../nova_plugin/player_state_plugin.js";
+import { computeSelectableSystems, gateMapGraphOptions } from "./gate_map.js";
+import { MissionUniverse } from "./mission_universe.js";
 
 describe('computeSelectableSystems', () => {
     it('maps each neighbor system to its destination gate spöb', () => {
@@ -52,4 +59,70 @@ describe('computeSelectableSystems', () => {
         // ...and VNP-002 (nova:425), which contains HG-V02, is offered.
         expect(selectable.get('nova:425')).toBe('nova:1401');
     }, 30_000);
+});
+
+describe('the hypergate map keeps the starmap\'s mission marks', () => {
+    function activeMission(partial: Partial<ActiveMission>): ActiveMission {
+        return {
+            id: 'nova:200', acceptedDay: 0, acceptedAt: 'nova:128',
+            travelPlanet: null, returnPlanet: null, cargoType: -1,
+            cargoQty: 0, cargoLoaded: false, travelDone: false,
+            deadlineDay: null, ...partial,
+        };
+    }
+
+    /** A universe stub: one known mission, one placed stellar. */
+    function stubUniverse(): MissionUniverse {
+        return {
+            getMission: (id: string) =>
+                id === 'nova:200' ? getDefaultMissionData() : undefined,
+            systemIdOfPlanet: (planetId: string) =>
+                planetId === 'nova:300' ? 'nova:400' : undefined,
+        } as unknown as MissionUniverse;
+    }
+
+    it('derives the docked ship\'s marks (the entity is out of the world)',
+        () => {
+            const ship = new Entity('docked').addComponent(MissionsComponent,
+                new Map([['nova:200',
+                    activeMission({ travelPlanet: 'nova:300' })]]));
+            expect(gateMapMissionMarks(ship, stubUniverse())).toEqual([
+                {
+                    systemId: 'nova:400', kind: 'destination',
+                    missionId: 'nova:200',
+                },
+            ]);
+        });
+
+    it('gives no marks for a pilot with no missions', () => {
+        expect(gateMapMissionMarks(new Entity('docked'), stubUniverse()))
+            .toEqual([]);
+    });
+
+    // The gate map builds its SystemGraph in destination-PICKER mode
+    // (selectable + gateLinks). Picker mode must not swallow the marks,
+    // and the marks must not touch what is selectable.
+    it('carries the marks into the picker-mode graph options', () => {
+        const marks: MissionMapMark[] = [
+            { systemId: 'nova:400', kind: 'destination', missionId: 'nova:200' },
+        ];
+        const options = gateMapGraphOptions([['a', 'b']], new Set(['b']),
+            marks, PIXI.Texture.EMPTY);
+        expect(options.missionMarks).toEqual(marks);
+        expect(options.missionMarkTextures?.active).toBe(PIXI.Texture.EMPTY);
+        // Still a destination picker over the gate lanes.
+        expect([...options.selectable!]).toEqual(['b']);
+        expect(options.gateLinks).toEqual([['a', 'b']]);
+        // The BBS-viewed (green) marks are the mission computer's, not
+        // this map's.
+        expect(options.viewedMarks ?? []).toEqual([]);
+    });
+
+    it('draws no marks for a pilot with no missions, and none at all '
+        + 'without the icon', () => {
+            expect(gateMapGraphOptions([], new Set(), [], PIXI.Texture.EMPTY)
+                .missionMarks).toEqual([]);
+            expect(gateMapGraphOptions([], new Set(), undefined, undefined)
+                .missionMarkTextures).toBeUndefined();
+        });
 });

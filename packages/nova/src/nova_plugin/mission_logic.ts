@@ -4,6 +4,7 @@ import { PlanetData } from 'novadatainterface/planet_data';
 import { DEFAULT_CARGO_NAMES } from 'novadatainterface/player_start_data';
 import { evaluateNCBTest, makeControlBitHooks, NCBParseError, NCBSetHooks, runNCBSet } from './ncb.js';
 import { Cargo, cargoUsed } from './cargo_plugin.js';
+import { landable } from './landable.js';
 import { resolveShipObjective, shipGoalOfferable } from './mission_ship_logic.js';
 import type { SystemInfo } from './mission_ship_logic.js';
 import { objectiveAllowsCompletion, ShipObjective } from './mission_ship_state.js';
@@ -55,7 +56,9 @@ export function stellarInfoOf(planet: PlanetData): StellarInfo {
         id: planet.id,
         govt: planet.govt,
         uninhabited: planet.flags.uninhabited,
-        canLand: planet.flags.canLand && !planet.flags.landOnlyIfDestroyed,
+        // The one shared port predicate (landable.ts), so a mission can
+        // never send the player somewhere the land gate refuses.
+        canLand: landable(planet),
     };
 }
 

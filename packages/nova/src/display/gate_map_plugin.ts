@@ -7,7 +7,10 @@ import { System } from 'nova_ecs/system';
 import { SingletonComponent } from 'nova_ecs/world';
 import { ControlsSubject } from '../nova_plugin/controls_plugin.js';
 import { DisplayAssetDataResource, SimulationGameDataResource } from '../nova_plugin/game_data_resource.js';
+import { MissionMapMark, missionMapMarks } from '../nova_plugin/mission_logic.js';
+import { MissionsComponent } from '../nova_plugin/player_state_plugin.js';
 import { GateMap } from '../spaceport/gate_map.js';
+import { MissionUniverse } from '../spaceport/mission_universe.js';
 import { ResizeEvent, ScreenSize } from './screen_size_plugin.js';
 import { Stage } from './stage_resource.js';
 
@@ -31,18 +34,40 @@ export const LeaveGateMapEvent = new EcsEvent<{
 }>('LeaveGateMapEvent');
 
 const GateMapResource = new Resource<GateMap>('GateMapResource');
+/** The shared stellar/mission index, for the map's mission marks. */
+const GateMapUniverseResource =
+    new Resource<MissionUniverse>('GateMapUniverseResource');
+
+/**
+ * The player's active-mission marks for the DOCKED ship. The gate map only
+ * ever opens for a ship the browser has just pulled out of the world, so
+ * the marks have to come off that entity — the same reason the spaceport
+ * passes its own marks to the starmap (OpenStarmapOptions.missionMarks).
+ */
+export function gateMapMissionMarks(ship: Entity,
+    universe: MissionUniverse): MissionMapMark[] {
+    const missions = ship.components.get(MissionsComponent);
+    if (!missions) {
+        return [];
+    }
+    return missionMapMarks(missions.values(),
+        id => universe.getMission(id),
+        planetId => universe.systemIdOfPlanet(planetId));
+}
 
 const OpenGateMapSystem = new System({
     name: 'OpenGateMapSystem',
     events: [OpenGateMapEvent],
-    args: [OpenGateMapEvent, GateMapResource, ScreenSize, Emit,
-        SingletonComponent] as const,
-    step({ gateSpob, systemId, ship }, gateMap, { x, y }, emit) {
+    args: [OpenGateMapEvent, GateMapResource, GateMapUniverseResource,
+        ScreenSize, Emit, SingletonComponent] as const,
+    step({ gateSpob, systemId, ship }, gateMap, universe, { x, y }, emit) {
         gateMap.container.position.x = x / 2;
         gateMap.container.position.y = y / 2;
-        void gateMap.show({ gateSpob, systemId, destinationSpob: null })
-            .then(({ destinationSpob }) =>
-                emit(LeaveGateMapEvent, { ship, destinationSpob }));
+        void gateMap.show({
+            gateSpob, systemId, destinationSpob: null,
+            missionMarks: gateMapMissionMarks(ship, universe),
+        }).then(({ destinationSpob }) =>
+            emit(LeaveGateMapEvent, { ship, destinationSpob }));
     }
 });
 
@@ -70,6 +95,12 @@ export const GateMapPlugin: Plugin = {
         const gateMap = new GateMap(displayAssets, simulationData, controls);
         stage.addChild(gateMap.container);
         world.resources.set(GateMapResource, gateMap);
+        // Idempotent and shared with the starmap / mission board; kicked
+        // off here so the stellar->system index is warm by the time the
+        // player reaches a gate.
+        const universe = MissionUniverse.shared(simulationData);
+        void universe.load();
+        world.resources.set(GateMapUniverseResource, universe);
         world.addSystem(OpenGateMapSystem);
         world.addSystem(GateMapResizeSystem);
     },
@@ -82,5 +113,6 @@ export const GateMapPlugin: Plugin = {
         world.removeSystem(OpenGateMapSystem);
         world.removeSystem(GateMapResizeSystem);
         world.resources.delete(GateMapResource);
+        world.resources.delete(GateMapUniverseResource);
     }
 }

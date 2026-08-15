@@ -1,12 +1,17 @@
 import 'jasmine';
 import { getDefaultGovtData, GovtData } from 'novadatainterface/govt_data';
 import { Entity } from 'nova_ecs/entity';
+import { Resource } from 'nova_ecs/resource';
+import { System } from 'nova_ecs/system';
+import { SingletonComponent, World } from 'nova_ecs/world';
 import { DisabledComponent } from '../nova_plugin/disabled_component.js';
 import { GovtComponent } from '../nova_plugin/govt_component.js';
 import { FormationComponent, NpcComponent } from '../nova_plugin/npc_ai_plugin.js';
 import { ShootAllWeaponsComponent } from '../nova_plugin/npc_plugin.js';
 import { TargetComponent } from '../nova_plugin/target_component.js';
-import { styleForTarget } from './target_corners_plugin.js';
+import {
+    cornersSweepSystem, styleForTarget, TargetCorners,
+} from './target_corners_plugin.js';
 
 const PLAYER = 'player uuid';
 
@@ -159,4 +164,54 @@ describe('styleForTarget (target corner selection)', () => {
             { 'npc leader': npcLeader, 'npc escort': npcEscort }))
             .toBe('hostile');
     });
+});
+
+/**
+ * The corner sweep: landing pulls the player's entity OUT of the display
+ * world, so the per-entity drawing systems stop running and used to leave
+ * the reticle frozen over the target's last position (Matthew's playtest).
+ */
+describe('cornersSweepSystem', () => {
+    function harness() {
+        const world = new World('corner sweep test');
+        const resource = new Resource<TargetCorners>('TestCornersResource');
+        const corners = {
+            visible: true, targetUuid: 'some target', drawnThisStep: false,
+        } as unknown as TargetCorners;
+        world.resources.set(resource, corners);
+        // Stands in for the real per-entity drawing system: it only ever
+        // runs while the player's entity is in the world.
+        let drawing = true;
+        const draw = new System({
+            name: 'TestDrawCorners',
+            args: [resource, SingletonComponent] as const,
+            step(c) {
+                if (drawing) {
+                    c.visible = true;
+                    c.drawnThisStep = true;
+                }
+            },
+        });
+        world.addSystem(draw);
+        world.addSystem(cornersSweepSystem('TestSweep', resource, draw));
+        return { world, corners, stopDrawing: () => { drawing = false; } };
+    }
+
+    it('leaves the corners alone while the player is drawing them', () => {
+        const { world, corners } = harness();
+        world.step();
+        world.step();
+        expect(corners.visible).toBeTrue();
+    });
+
+    it('takes the corners down on the first step nothing draws them '
+        + '(the player landed)', () => {
+            const { world, corners, stopDrawing } = harness();
+            world.step();
+            expect(corners.visible).toBeTrue();
+            stopDrawing();
+            world.step();
+            expect(corners.visible).toBeFalse();
+            expect(corners.targetUuid).toBeUndefined();
+        });
 });

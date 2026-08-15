@@ -42,7 +42,9 @@ const ROUTE_SINGLE_WIDTH = 1;
 // being viewed in the Mission BBS. The green art mirrors the orange (they
 // point down-right and down-left respectively), so the two marks can flank
 // a shared system from opposite sides. Placement in placeMarkIcon.
-const MISSION_MARK_ACTIVE_CICN = 'nova:15000';
+// Exported because the hypergate map (gate_map.ts) draws the same active
+// marks on the same SystemGraph.
+export const MISSION_MARK_ACTIVE_CICN = 'nova:15000';
 const MISSION_MARK_VIEWED_CICN = 'nova:15001';
 const SELECT_COLOR = 0x00ff00;
 const LABEL_FONT_NAME = 'StarmapSystemLabel';
