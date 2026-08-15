@@ -97,6 +97,28 @@ const BODY_FONT: Partial<PIXI.ITextStyle> = {
     wordWrap: true, wordWrapWidth: 240,
 };
 
+/**
+ * Which offer the 'r' key ("recharge", the original's request-assistance
+ * key) activates in the hail dialog: the assist button slot's occupant —
+ * Request Assistance when eligible, or Beg for Mercy against a hostile
+ * ship (the slot's replacement). Nothing on the haggle page (where the
+ * offer buttons are Pay/Leave) or when neither offer exists.
+ */
+export function assistSlotAction(phase: 'main' | 'haggle',
+    context?: { assist?: unknown, bribe?: unknown }):
+    'assist' | 'beg' | undefined {
+    if (phase !== 'main' || !context) {
+        return undefined;
+    }
+    if (context.assist) {
+        return 'assist';
+    }
+    if (context.bribe) {
+        return 'beg';
+    }
+    return undefined;
+}
+
 export class HailDialog {
     container = new PIXI.Container();
     private content = new PIXI.Container();
@@ -124,6 +146,9 @@ export class HailDialog {
             // 'y' toggles the dialog closed again; 'd'/Escape backs out.
             hail: () => this.closed.next(),
             depart: () => this.close(),
+            // 'r': the assist slot — Request Assistance, or Beg for
+            // Mercy when hostile (the slot's replacement).
+            recharge: () => this.pressAssistSlot(),
         });
     }
 
@@ -139,6 +164,50 @@ export class HailDialog {
         this.callbacks.playSound(HAIL_SND_CLOSE);
         this.controls.unbind();
         this.container.visible = false;
+    }
+
+    /** The Beg for Mercy press: into the haggle page. */
+    private pressBeg() {
+        this.beep();
+        this.phase = 'haggle';
+        void this.render();
+    }
+
+    /** The Request Assistance press. */
+    private pressAssist() {
+        const context = this.context;
+        if (!context?.assist) {
+            return;
+        }
+        this.beep();
+        const refusal = this.callbacks.requestAssistance();
+        if (refusal !== undefined) {
+            // Refused (the ship is busy fighting). The channel stays
+            // OPEN showing its answer, so the player reads why; the
+            // offer button goes away so the same request can't be
+            // hammered at a ship that already said no, and the player
+            // closes the channel themselves.
+            this.context = { ...context, body: refusal, assist: undefined };
+            void this.render();
+            return;
+        }
+        this.close();
+    }
+
+    /**
+     * The 'r' key ("recharge", the original's request-assistance key):
+     * presses whatever occupies the assist button slot on the main page —
+     * see {@link assistSlotAction}.
+     */
+    private pressAssistSlot() {
+        switch (assistSlotAction(this.phase, this.context)) {
+            case 'assist':
+                this.pressAssist();
+                break;
+            case 'beg':
+                this.pressBeg();
+                break;
+        }
     }
 
     private close() {
@@ -237,11 +306,7 @@ export class HailDialog {
         if (context.bribe) {
             const beg = new Button(this.displayAssets, 'Beg for Mercy',
                 buttonWidth, { x: leftX, y: buttonY });
-            beg.click.subscribe(() => {
-                this.beep();
-                this.phase = 'haggle';
-                void this.render();
-            });
+            beg.click.subscribe(() => this.pressBeg());
             this.content.addChild(beg.container);
             buttonY -= buttonSpacing;
         }
@@ -251,21 +316,7 @@ export class HailDialog {
                 ? 'Request Aid (free)' : 'Request Assistance';
             const button = new Button(this.displayAssets, label, buttonWidth,
                 { x: leftX, y: buttonY });
-            button.click.subscribe(() => {
-                this.beep();
-                const refusal = this.callbacks.requestAssistance();
-                if (refusal !== undefined) {
-                    // Refused (the ship is busy fighting). The channel stays
-                    // OPEN showing its answer, so the player reads why; the
-                    // offer button goes away so the same request can't be
-                    // hammered at a ship that already said no, and the player
-                    // closes the channel themselves.
-                    this.context = { ...context, body: refusal, assist: undefined };
-                    void this.render();
-                    return;
-                }
-                this.close();
-            });
+            button.click.subscribe(() => this.pressAssist());
             this.content.addChild(button.container);
             buttonY -= buttonSpacing;
         }
