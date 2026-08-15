@@ -3,6 +3,10 @@ import { firstValueFrom, Observable, Subject } from 'rxjs';
 import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data.js';
 import { ControlEvent } from '../nova_plugin/controls_plugin.js';
 import { Button } from './button.js';
+import {
+    buttonRowY, commButtonSlots, COMM_ESCORT, COMM_HAGGLE, COMM_LINE_HEIGHT,
+    COMM_PLANET, COMM_SHIP, CommFrameLayout, fitImage, frameOrigin,
+} from './hail_layout.js';
 import { MenuControls } from './menu_controls.js';
 
 /**
@@ -88,14 +92,44 @@ export interface HailCallbacks {
     playSound(id: string): void;
 }
 
+/**
+ * The comm dialogs' body font. Geneva 9.4px with an explicit 15px leading:
+ * the same bitmap face and size the mission popups use (popup_layout's
+ * POPUP_FONT), set to the looser line pitch these frames show — see
+ * COMM_LINE_HEIGHT. NOT bold and not two different sizes: the references'
+ * response and identity text are the same face, and the only variation is
+ * colour (dim grey labels, white values).
+ */
 const HEADING_FONT: Partial<PIXI.ITextStyle> = {
-    fontFamily: 'Geneva', fontSize: 12, fill: 0xffffff, align: 'left',
-    fontWeight: 'bold', wordWrap: false,
+    fontFamily: 'Geneva', fontSize: 9.4, fill: 0xffffff, align: 'left',
+    wordWrap: false, lineHeight: COMM_LINE_HEIGHT,
 };
 const BODY_FONT: Partial<PIXI.ITextStyle> = {
-    fontFamily: 'Geneva', fontSize: 11, fill: 0xdddddd, align: 'left',
-    wordWrap: true, wordWrapWidth: 240,
+    fontFamily: 'Geneva', fontSize: 9.4, fill: 0xffffff, align: 'left',
+    wordWrap: true, wordWrapWidth: 240, lineHeight: COMM_LINE_HEIGHT,
 };
+
+/**
+ * A Button's container.x is not quite its sprite's left edge: the left cap
+ * (13px wide) is anchored to END at container.x + 13.2 (button.ts's
+ * LEFT_POS), so the sprite's left edge lands at container.x + 0.2.
+ * hail_layout quotes the measured SPRITE left edge, so placing one takes
+ * that fifth of a pixel back off.
+ */
+const BUTTON_CAP_INSET = 0.2;
+
+/** The frame layout for a context/phase (see hail_layout.ts). */
+export function frameFor(phase: 'main' | 'haggle',
+    variant: 'ship' | 'planet' | 'escort'): CommFrameLayout {
+    if (phase === 'haggle') {
+        return COMM_HAGGLE;
+    }
+    switch (variant) {
+        case 'planet': return COMM_PLANET;
+        case 'escort': return COMM_ESCORT;
+        default: return COMM_SHIP;
+    }
+}
 
 /**
  * Which offer the 'r' key ("recharge", the original's request-assistance
@@ -126,6 +160,8 @@ export class HailDialog {
     private closed = new Subject<void>();
     private phase: 'main' | 'haggle' = 'main';
     private context?: HailContext;
+    /** The context the channel opened with, so Greetings can restore it. */
+    private opening?: HailContext;
 
     constructor(private displayAssets: DisplayAssetDataInterface,
         private controlEvents: Observable<ControlEvent>,
@@ -155,6 +191,7 @@ export class HailDialog {
     /** Shows the dialog for a computed context; resolves when dismissed. */
     async show(context: HailContext): Promise<void> {
         this.context = context;
+        this.opening = context;
         this.phase = 'main';
         await this.render();
         this.container.visible = true;
@@ -164,6 +201,23 @@ export class HailDialog {
         this.callbacks.playSound(HAIL_SND_CLOSE);
         this.controls.unbind();
         this.container.visible = false;
+    }
+
+    /**
+     * The Greetings press (the top button in every ship/planet reference):
+     * hails again. NovaJS's greeting line is a deterministic function of the
+     * target (hail_dialog_plugin's greetingText, seeded by its uuid), so the
+     * answer is the SAME line every time — pressing it restores the greeting
+     * the channel opened with, which is what it is good for after a refusal
+     * has replaced the response text.
+     */
+    private pressGreetings() {
+        this.beep();
+        if (this.context && this.opening
+            && this.context.body !== this.opening.body) {
+            this.context = { ...this.context, body: this.opening.body };
+            void this.render();
+        }
     }
 
     /** The Beg for Mercy press: into the haggle page. */
@@ -227,144 +281,196 @@ export class HailDialog {
         if (!context) {
             return;
         }
-        const backgroundId = this.phase === 'haggle'
-            ? HAIL_PICT_HAGGLE
-            : context.variant === 'planet' ? HAIL_PICT_PLANET
-                : context.variant === 'escort' ? HAIL_PICT_ESCORT
-                    : HAIL_PICT_SHIP;
-        // Load the background so its true size is known before layout.
+        const frame = frameFor(this.phase, context.variant);
+        // Load the background so it is ready before anything is laid out on
+        // it. Its size comes from hail_layout (measured off the art), not
+        // from the sprite, so a slow/missing texture cannot shift the layout.
         const background = await this.displayAssets
-            .spriteFromPictAsync(backgroundId);
-        background.anchor.set(0.5);
+            .spriteFromPictAsync(frame.pict);
+        // Positioned by its top-left at the WHOLE-PIXEL origin the original
+        // blits to (frameOrigin), not centred with anchor 0.5: an odd-width
+        // frame centred that way lands on a half pixel, which blurs the art
+        // and drags every glyph laid on it a pixel left.
+        const { x: originX, y: originY } =
+            frameOrigin(frame.width, frame.height);
+        background.anchor.set(0);
+        background.position.set(originX, originY);
         background.interactive = true;
         this.content.addChild(background);
 
-        const width = background.width || 300;
-        const height = background.height || 200;
-        const originX = -width / 2;
-        const originY = -height / 2;
-
         if (this.phase === 'haggle') {
-            this.renderHaggle(originX, originY, width, height);
+            this.renderHaggle(frame, originX, originY);
         } else {
-            await this.renderMain(context, originX, originY, width, height);
+            await this.renderMain(context, frame, originX, originY);
         }
     }
 
-    private async renderMain(context: HailContext, originX: number,
-        originY: number, width: number, height: number) {
-        // Layout measured against the hail/*.png references (all comm
-        // backgrounds share it): two stacked text boxes on the LEFT, a
-        // vertical column of red buttons under them, and the target image
-        // filling a framed box on the RIGHT. Offsets are proportional to
-        // the (per-PICT) frame size, calibrated on the 423x215 ship frame.
-        const leftX = originX + Math.round(width * 0.026);   // ~11 on ship
-        const leftWidth = Math.round(width * 0.44);          // left column
-        const buttonWidth = Math.round(width * 0.38);        // ~160 on ship
+    /** Places a Button by its frame-local sprite box (hail_layout's
+     * coordinates are the SPRITE's left edge; a Button draws its left cap
+     * ending at container.x + BUTTON_CAP_INSET). */
+    private placeButton(label: string, frame: CommFrameLayout,
+        originX: number, originY: number, row: number): Button {
+        return new Button(this.displayAssets, label, frame.buttonWidth, {
+            x: originX + frame.buttonX - BUTTON_CAP_INSET,
+            y: originY + buttonRowY(frame, row),
+        });
+    }
 
-        // Target image on the RIGHT, filling the frame's image box.
-        if (context.image) {
+    private async renderMain(context: HailContext, frame: CommFrameLayout,
+        originX: number, originY: number) {
+        // Layout comes from hail_layout.ts, measured off each frame's own
+        // PICT art and its reference capture. The comm dialog is:
+        //   - the hailed party's RESPONSE in the upper black well,
+        //   - WHO they are in the lower well,
+        //   - a button column under them,
+        //   - their picture in the framed pane on the right.
+        // (Both texts used to be stacked in the upper area with the lower
+        // well left empty.)
+
+        // Target picture on the RIGHT, fitted to the frame's image pane.
+        if (context.image && frame.imagePane) {
             try {
                 const image = await this.displayAssets
                     .spriteFromPictAsync(context.image);
                 image.anchor.set(0.5);
-                const maxDim = Math.min(width * 0.46, height * 0.92);
-                const scale = image.width > 0
-                    ? Math.min(1, maxDim / Math.max(image.width, image.height))
-                    : 1;
-                image.scale.set(scale);
-                image.position.set(originX + Math.round(width * 0.74),
-                    originY + Math.round(height * 0.5));
+                const fit = fitImage(frame.imagePane, image.width,
+                    image.height);
+                image.scale.set(fit.scale);
+                image.position.set(originX + fit.x, originY + fit.y);
                 this.content.addChild(image);
             } catch {
                 // Missing pict: skip the image, keep the text.
             }
         }
 
-        const heading = new PIXI.Text(context.heading, HEADING_FONT);
-        heading.position.set(leftX, originY + Math.round(height * 0.06));
-        this.content.addChild(heading);
+        // Upper well: what they said.
+        const response = new PIXI.Text(context.body, {
+            ...BODY_FONT,
+            wordWrapWidth: frame.responseWell.width
+                - (frame.responseText.x - frame.responseWell.x) - 4,
+        });
+        response.position.set(originX + frame.responseText.x,
+            originY + frame.responseText.y);
+        this.content.addChild(response);
 
-        const body = new PIXI.Text(context.body,
-            { ...BODY_FONT, wordWrapWidth: leftWidth });
-        body.position.set(leftX, originY + Math.round(height * 0.19));
-        this.content.addChild(body);
-
-        // Buttons: a bottom-anchored vertical column on the left, so
-        // Close Channel sits on the reference's bottom row and any
-        // Request Aid / Beg for Mercy stack above it.
-        const buttonSpacing = 28;
-        let buttonY = originY + height - 24;
-
-        // Close Channel (the original's label for the dismiss button).
-        const close = new Button(this.displayAssets, 'Close Channel',
-            buttonWidth, { x: leftX, y: buttonY });
-        close.click.subscribe(() => this.close());
-        this.content.addChild(close.container);
-        buttonY -= buttonSpacing;
-
-        if (context.bribe) {
-            const beg = new Button(this.displayAssets, 'Beg for Mercy',
-                buttonWidth, { x: leftX, y: buttonY });
-            beg.click.subscribe(() => this.pressBeg());
-            this.content.addChild(beg.container);
-            buttonY -= buttonSpacing;
-        }
-
-        if (context.assist) {
-            const label = context.assist.free
-                ? 'Request Aid (free)' : 'Request Assistance';
-            const button = new Button(this.displayAssets, label, buttonWidth,
-                { x: leftX, y: buttonY });
-            button.click.subscribe(() => this.pressAssist());
-            this.content.addChild(button.container);
-            buttonY -= buttonSpacing;
+        // Lower well: who they are.
+        if (frame.infoWell) {
+            const info = new PIXI.Text(context.heading, {
+                ...HEADING_FONT,
+                wordWrap: true,
+                wordWrapWidth: frame.infoWell.width
+                    - (frame.infoText.x - frame.infoWell.x) - 4,
+            });
+            info.position.set(originX + frame.infoText.x,
+                originY + frame.infoText.y);
+            this.content.addChild(info);
         }
 
         if (context.escort) {
-            // The original's escort comm MANAGES a hired escort; it does not
-            // issue fleet commands (that's the keyboard escort-controls'
-            // job). Per hail/hail_escort.png the column reads, top to bottom,
-            // Upgrade Escort / Sell Escort / Release / Close Channel. Close
-            // Channel is already placed at the bottom above; stack the three
-            // management options over it (bottom-up: Release, then Sell
-            // Escort, then Upgrade Escort). All three depend on state NovaJS
-            // does not model yet — shipyard upgrade transfer, escort resale
-            // value, and per-escort release (a future per-escort-control
-            // feature) — so they render GREYED with no handler (seams).
-            const seams = ['Release', 'Sell Escort', 'Upgrade Escort'];
-            for (const label of seams) {
-                const button = new Button(this.displayAssets, label,
-                    buttonWidth, { x: leftX, y: buttonY });
-                button.state = 'grey';
-                this.content.addChild(button.container);
-                buttonY -= buttonSpacing;
-            }
+            this.renderEscortButtons(frame, originX, originY);
+            return;
         }
+        this.renderCommButtons(context, frame, originX, originY);
     }
 
-    private renderHaggle(originX: number, originY: number, width: number,
-        height: number) {
+    /**
+     * The ship / planet comm's button column. Every reference shows a FIXED
+     * column with Greetings on top and Close Channel at the bottom; between
+     * them is one OFFER SLOT — Request Assistance (request_assistance.png) or
+     * Beg For Mercy (hail_hostile.png). NovaJS previously grew the column
+     * from the bottom and never drew Greetings at all.
+     */
+    private renderCommButtons(context: HailContext, frame: CommFrameLayout,
+        originX: number, originY: number) {
+        const slots = commButtonSlots(context.variant, context);
+        slots.forEach((slot, row) => {
+            let label: string;
+            let onPress: (() => void) | undefined;
+            switch (slot) {
+                case 'greetings':
+                    label = 'Greetings';
+                    onPress = () => this.pressGreetings();
+                    break;
+                case 'assist':
+                    label = context.assist?.free
+                        ? 'Request Aid (free)' : 'Request Assistance';
+                    onPress = () => this.pressAssist();
+                    break;
+                case 'beg':
+                    label = 'Beg For Mercy';
+                    onPress = () => this.pressBeg();
+                    break;
+                case 'tribute':
+                    // A seam: planet tribute isn't modeled. Greyed rather
+                    // than omitted, so Close Channel stays on the
+                    // reference's third row.
+                    label = 'Demand Tribute';
+                    onPress = undefined;
+                    break;
+                default:
+                    label = 'Close Channel';
+                    onPress = () => this.close();
+                    break;
+            }
+            const button =
+                this.placeButton(label, frame, originX, originY, row);
+            if (onPress) {
+                button.click.subscribe(onPress);
+            } else {
+                button.state = 'grey';
+            }
+            this.content.addChild(button.container);
+        });
+    }
+
+    /**
+     * The escort comm MANAGES a hired escort; it does not issue fleet
+     * commands (that's the keyboard escort-controls' job). Per
+     * hail/hail_escort.png the column reads, top to bottom: Upgrade Escort /
+     * Sell Escort / Release / Close Channel. The first three depend on state
+     * NovaJS does not model yet — shipyard upgrade transfer, escort resale
+     * value, and per-escort release (a future per-escort-control feature) —
+     * so they render GREYED with no handler (seams). The reference greys Sell
+     * Escort for the same reason our three are greyed: nothing to sell.
+     */
+    private renderEscortButtons(frame: CommFrameLayout, originX: number,
+        originY: number) {
+        const seams = ['Upgrade Escort', 'Sell Escort', 'Release'];
+        seams.forEach((label, row) => {
+            const button =
+                this.placeButton(label, frame, originX, originY, row);
+            button.state = 'grey';
+            this.content.addChild(button.container);
+        });
+        const close = this.placeButton('Close Channel', frame, originX,
+            originY, seams.length);
+        close.click.subscribe(() => this.close());
+        this.content.addChild(close.container);
+    }
+
+    private renderHaggle(frame: CommFrameLayout, originX: number,
+        originY: number) {
         const context = this.context;
         const bribe = context?.bribe;
-        const heading = new PIXI.Text(context?.heading ?? '', HEADING_FONT);
-        heading.position.set(originX + 16, originY + 14);
-        this.content.addChild(heading);
-
         const demand = bribe
             ? `They demand ${bribe.amount.toLocaleString()} credits to let you `
-            + `go. ${bribe.canAfford ? '' : 'You cannot afford it.'}`
+            + `go.${bribe.canAfford ? '' : ' You cannot afford it.'}`
             : 'They refuse to negotiate.';
-        const body = new PIXI.Text(demand,
-            { ...BODY_FONT, wordWrapWidth: width - 40 });
-        body.position.set(originX + 16, originY + 40);
+        const body = new PIXI.Text(demand, {
+            ...BODY_FONT,
+            wordWrapWidth: frame.responseWell.width
+                - (frame.responseText.x - frame.responseWell.x) - 4,
+        });
+        body.position.set(originX + frame.responseText.x,
+            originY + frame.responseText.y);
         this.content.addChild(body);
 
-        const buttonY = originY + height - 30;
+        // Two rows, as in beg_mercy.png (the original's are Lower Price /
+        // Accept Price against a haggling pirate; ours pays or backs out).
         if (bribe && bribe.canAfford) {
-            const pay = new Button(this.displayAssets,
-                `Pay ${bribe.amount.toLocaleString()} cr`, 140,
-                { x: originX + 16, y: buttonY });
+            const pay = this.placeButton(
+                `Pay ${bribe.amount.toLocaleString()} cr`, frame,
+                originX, originY, 0);
             pay.click.subscribe(() => {
                 this.beep();
                 this.callbacks.bribe();
@@ -372,8 +478,8 @@ export class HailDialog {
             });
             this.content.addChild(pay.container);
         }
-        const cancel = new Button(this.displayAssets, 'Never Mind', 100,
-            { x: originX + width - 116, y: buttonY });
+        const cancel =
+            this.placeButton('Never Mind', frame, originX, originY, 1);
         cancel.click.subscribe(() => {
             this.beep();
             this.phase = 'main';

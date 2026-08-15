@@ -96,9 +96,11 @@ import { installTouchControls, wantsTouchControls } from "./touch_controls.js";
 import { TitleScreen, TitleStatus } from "./title/title_screen.js";
 import { TitleMusic } from "./title/title_music.js";
 import {
-    showAboutDialog, showNewPilotDialog, showOpenPilotDialog,
-    showPreferencesDialog, PilotDialogActions, PilotEntry,
+    ABOUT_TEXT, fillAboutPlaceholders, showNewPilotDialog,
+    showOpenPilotDialog, showPreferencesDialog, PilotDialogActions,
+    PilotEntry,
 } from "./title/title_dialogs.js";
+import { OfferPopup } from "./spaceport/offer_popup.js";
 import {
     clearPilotProfile, loadPilotProfile, mergeControls, savePilotProfile,
 } from "./title/client_prefs.js";
@@ -2292,19 +2294,27 @@ const ABOUT_DESC_IDS = ['nova:32767', 'nova:32766'];
  * the data has no About dësc, so the dialog falls back to its built-in
  * text rather than showing an empty box.
  */
-async function loadAboutText(): Promise<string | undefined> {
+async function loadAboutText():
+    Promise<{ text: string, pict: string | null } | undefined> {
     const parts: string[] = [];
+    // The About box is the game's own desc+pict frame (PICT 8527), so it
+    // also carries the dësc's Graphic in the pane on the right — dësc
+    // 32767 names PICT 5005, the ship shown in title_screen/about.png.
+    let pict: string | null = null;
     for (const id of ABOUT_DESC_IDS) {
         try {
             const desc = await displayAssetData.data.Description.get(id);
             if (desc.text.trim()) {
                 parts.push(desc.text.trim());
             }
+            if (pict === null && desc.graphic >= 0) {
+                pict = `nova:${desc.graphic}`;
+            }
         } catch {
             // A data set without this dësc: skip it.
         }
     }
-    return parts.length ? parts.join('\n\n') : undefined;
+    return parts.length ? { text: parts.join('\n\n'), pict } : undefined;
 }
 
 /** Saves `text` to the player's downloads as `filename`. */
@@ -2408,6 +2418,34 @@ async function runTitle() {
             title.setStatus(await computeTitleStatus());
         } catch (e) {
             console.warn('Failed to compute title status:', e);
+        }
+    };
+
+    // ── About ──────────────────────────────────────────────────────────
+    // The About box is NOT native chrome in the original: title_screen/
+    // about.png shows the game's own desc+pict frame (PICT 8527, at screen
+    // 635,419 — plainly centred) with the credits scrolling in its text well,
+    // the dësc's Graphic in the pane on the right, a red Okay and the two
+    // round scroll arrows. That is exactly what OfferPopup renders, so About
+    // reuses it instead of the HTML modal it used to open. (The pilot and
+    // Preferences dialogs ARE native windows in the original, and keep their
+    // HTML stand-ins by the project's standing ruling.)
+    const aboutPopup = new OfferPopup(displayAssetData);
+    aboutPopup.container.name = 'AboutPopup';
+    const centreAbout = () => aboutPopup.container.position.set(
+        app.renderer.width / 2, app.renderer.height / 2);
+    window.addEventListener('resize', centreAbout);
+    const showAbout = async () => {
+        const about = await loadAboutText();
+        // Keep the popup above the title art, and only while it is up.
+        app.stage.addChild(aboutPopup.container);
+        centreAbout();
+        try {
+            await aboutPopup.show(
+                fillAboutPlaceholders(about?.text ?? ABOUT_TEXT.join('\n')),
+                { accept: 'Okay' }, { pict: about?.pict ?? null });
+        } finally {
+            app.stage.removeChild(aboutPopup.container);
         }
     };
 
@@ -2605,11 +2643,12 @@ async function runTitle() {
                 title.setEnabled(true);
                 break;
             }
-            case 'about':
+            case 'about': {
                 title.setEnabled(false);
-                await showAboutDialog(await loadAboutText());
+                await showAbout();
                 title.setEnabled(true);
                 break;
+            }
             case 'quit':
                 // Deliberately a no-op: a browser tab cannot quit itself
                 // (window.close() is ignored for tabs the script did not

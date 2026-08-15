@@ -18,7 +18,7 @@ import {
 } from '../nova_plugin/hail.js';
 import { ShootAllWeaponsComponent } from '../nova_plugin/npc_plugin.js';
 import {
-    assistRefusal, computeContext, targetIsFighting,
+    assistRefusal, computeContext, shipIdentityBlock, targetIsFighting,
 } from './hail_dialog_plugin.js';
 
 const PLAYER = 'player-uuid';
@@ -95,7 +95,12 @@ describe('computeContext: bay fighters vs hired escorts (SourceComponent)',
                 });
                 const result = await computeContext(world, gameData);
                 expect(result?.context.variant).toBe('escort');
-                expect(result?.context.heading).toBe('Hired Escort:');
+                // `heading` is the LOWER well's whole identity block (the
+                // comm frames' second black box), so the label is its first
+                // line with the ship's name/class indented beneath it — the
+                // way hail/hail_escort.png stacks them.
+                expect(result?.context.heading.split('\n')[0])
+                    .toBe('Hired Escort:');
                 expect(result?.isEscort).toBeTrue();
             });
 
@@ -110,7 +115,8 @@ describe('computeContext: bay fighters vs hired escorts (SourceComponent)',
                     target.components.set(SourceComponent, PLAYER);
                 });
                 const result = await computeContext(world, gameData);
-                expect(result?.context.heading).toBe('Fighter:');
+                expect(result?.context.heading.split('\n')[0])
+                    .toBe('Fighter:');
                 expect(result?.isEscort).toBeFalse();
                 // No escort-management seam buttons for a bay fighter.
                 expect(result?.context.escort).toBeFalsy();
@@ -247,5 +253,38 @@ describe('hail assistance refusal (busy ships)', () => {
         });
         const result = await computeContext(world, gameData);
         expect(result?.busyText).toBe(BUSY_RESPONSE_FALLBACK);
+    });
+});
+
+describe('shipIdentityBlock', () => {
+    // The ship comm's LOWER well (PICT 8511's second black box). Compare
+    // hail/hail.png ("Class: Terrapin") with hail/hail_hostile.png
+    // ("Class: Fed Destroyer" / "(Federation)" / "Status: Hostile").
+    it('classes an anonymous ship on one line', () => {
+        expect(shipIdentityBlock({ shipClass: 'Terrapin', hostile: false }))
+            .toBe('Class: Terrapin');
+    });
+
+    it('adds the government and the hostile status', () => {
+        expect(shipIdentityBlock({
+            shipClass: 'Fed Destroyer', govtName: 'Federation', hostile: true,
+        })).toBe('Class: Fed Destroyer\n(Federation)\nStatus: Hostile');
+    });
+
+    it('names a pers instead of classing them', () => {
+        expect(shipIdentityBlock({
+            persName: 'Captain Hector', shipClass: 'Terrapin', hostile: false,
+        })).toBe('Captain Hector');
+    });
+
+    it('stays readable with nothing known', () => {
+        expect(shipIdentityBlock({ hostile: false }))
+            .toBe('Class: Unidentified ship');
+    });
+
+    it('never leaves a Status line on a friendly ship', () => {
+        expect(shipIdentityBlock({
+            shipClass: 'Terrapin', govtName: 'Federation', hostile: false,
+        })).not.toContain('Status:');
     });
 });

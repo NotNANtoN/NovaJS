@@ -3,6 +3,7 @@
 // Shipyard / outfitter / ship-info scenarios live in their own file so
 // several fidelity passes can extend the harness without colliding here.
 import { shopScenarios } from './scenarios_shops.mjs';
+import { hailInfoScenarios } from './scenarios_hail_info.mjs';
 //
 // ============================================================================
 // HOW TO ADD A SCENARIO
@@ -805,26 +806,33 @@ export const scenarios = [
     // buttons) — not pixel parity with a native OS dialog.
     {
         id: 'title_about',
-        title: 'Title — About dialog (HTML modal)',
-        description: 'The About panel (novaTitle action "about"). The original '
-            + 'draws its credits in a black panel embedded in the title frame '
-            + 'with a red "Okay"; ours is a centered HTML modal with a dark '
-            + 'credits body and an "Okay" button. Structural match, different '
-            + 'rendering tech / placement — CONTENT.',
+        title: 'Title — About box (game-rendered 8527 frame)',
+        description: 'The About panel (novaTitle action "about"). This is NOT '
+            + 'native chrome in the original: title_screen/about.png shows '
+            + 'the game\'s own desc+pict frame (PICT 8527, 649x244, blitted '
+            + 'centred at screen 635,419) with the dësc 32767 credits in its '
+            + 'text well, that dësc\'s Graphic (PICT 5005) in the pane beside '
+            + 'them, and a red Okay with the two round scroll arrows beneath. '
+            + 'NovaJS used to open an HTML modal here; it now renders the '
+            + 'same OfferPopup the mission texts use. Regions: the whole '
+            + 'frame, its text well and its picture pane.',
         entry: 'title',
         params: {},
         hideDebug: false,
         setup: async (page, driver) => {
             await driver.fireTitleAction(page, 'about');
-            await driver.waitForTestId(page, 'about-dialog');
-            await driver.sleep(400);
+            await driver.waitForContainer(page, 'AboutPopup');
+            await driver.sleep(600);
         },
         references: [
             { name: 'about', file: 'title_screen/about.png' },
         ],
         regions: [
-            region('about_modal', 'About dialog area (centered HTML modal)',
-                640, 340, 640, 400),
+            // 8527 art rects (popup_layout's PICT_TEXT_WELL / PICT_PANE),
+            // offset by the frame origin measured on about.png.
+            region('about_frame', 'Whole 8527 About frame', 635, 419, 649, 244),
+            region('about_text_well', 'Credits text well', 640, 423, 427, 203),
+            region('about_pict_pane', 'dësc graphic pane', 1074, 423, 202, 203),
         ],
     },
     {
@@ -1518,7 +1526,9 @@ export const scenarios = [
                 bribe: { amount: 20000, canAfford: true },
             });
             await driver.sleep(800);
-            await driver.clickContainer(page, 'Button:Beg for Mercy');
+            // "Beg For Mercy" — the reference's capitalisation
+            // (hail/hail_hostile.png).
+            await driver.clickContainer(page, 'Button:Beg For Mercy');
             await driver.sleep(900);
         },
         references: [
@@ -1626,13 +1636,12 @@ export const scenarios = [
     // centre), so that scenario compares our centred frame against the
     // reference's shifted one with explicit rects.
     ...sigmaScenarios(),
-<<<<<<< HEAD
     ...shopScenarios(),
     // In-flight HUD coverage (status bar interfaces, cargo/target panels,
     // star-map properties column, status line) — see scenarios_hud.mjs.
     ...hudScenarios,
-=======
     // Bar / mission BBS / mission info / trade center interiors.
     ...dialogScenarios,
->>>>>>> e396fb00
+    // Fine-grained hail / boarding / player-info layout regions.
+    ...hailInfoScenarios,
 ];

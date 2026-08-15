@@ -157,6 +157,36 @@ async function resolveBusyText(
  * turns out to be busy when the player presses the button (the press itself
  * is what decides — see the plugin's requestAssistance callback).
  */
+/**
+ * The identity block for the ship comm's LOWER well (PICT 8511's second
+ * black box), built the way the references fill it:
+ *
+ *   hail.png          "Class: Terrapin"
+ *   hail_hostile.png  "Class: Fed Destroyer" / "(Federation)" /
+ *                     "Status: Hostile"
+ *
+ * A përs is named instead of classed (the original titles a named captain by
+ * name); the government line and the Status line only appear when there is
+ * something to say. Pure, so the wording is pinned in specs.
+ */
+export function shipIdentityBlock({ persName, shipClass, govtName, hostile }: {
+    persName?: string, shipClass?: string, govtName?: string, hostile: boolean,
+}): string {
+    const lines: string[] = [];
+    if (persName) {
+        lines.push(persName);
+    } else {
+        lines.push(`Class: ${shipClass || 'Unidentified ship'}`);
+    }
+    if (govtName) {
+        lines.push(`(${govtName})`);
+    }
+    if (hostile) {
+        lines.push('Status: Hostile');
+    }
+    return lines.join('\n');
+}
+
 export async function computeContext(world: World,
     gameData: SimulationGameDataInterface,
     displayAssets?: DisplayAssetDataInterface):
@@ -208,8 +238,12 @@ export async function computeContext(world: World,
         // "nova:4001"), so it must NOT be re-prefixed. Fall back to the ship's
         // own pict when the pers has no custom portrait.
         const image = pers?.hailPict ?? shipData?.pict ?? null;
-        const heading = persComponent?.name
-            || govt?.commName || shipData?.name || 'Unidentified ship';
+        const heading = shipIdentityBlock({
+            persName: persComponent?.name,
+            shipClass: shipData?.name,
+            govtName: govt?.commName,
+            hostile: disposition === 'hostile' || attackingPlayer,
+        });
 
         // Is this the player's own direct escort? (one parent hop) Carrier-bay
         // fighters ALSO have a parent link pointed at the player, so they'd
@@ -237,9 +271,17 @@ export async function computeContext(world: World,
             const fighterClass = shipData?.subtitle?.trim();
             return {
                 context: {
-                    variant: 'escort', heading: 'Fighter:', image,
-                    body: fighterClass ? `${fighterName}\n${fighterClass}`
-                        : fighterName,
+                    variant: 'escort', image,
+                    // The whole identity block goes in the LOWER well, the way
+                    // hail_escort.png stacks "Hired Escort: / Terrapin /
+                    // Standard" there. The UPPER well is the reference's
+                    // Upgrade Cost / daily Pay readout, which has no backing
+                    // state here (documented content gap) — so it stays empty
+                    // rather than borrowing the identity lines.
+                    heading: fighterClass
+                        ? `Fighter:\n ${fighterName}\n ${fighterClass}`
+                        : `Fighter:\n ${fighterName}`,
+                    body: '',
                 },
                 target: shipTargetUuid, isEscort: false,
                 busyText: BUSY_RESPONSE_FALLBACK,
@@ -247,19 +289,22 @@ export async function computeContext(world: World,
         }
 
         if (isEscort) {
-            // Hired-escort management box (hail/hail_escort.png): the header
-            // reads "Hired Escort:" and the body carries the escort's ship
-            // name + class subtitle. The reference's upper box (Upgrade Cost /
-            // daily Pay) has no backing state — NovaJS models neither an
-            // escort salary nor an upgrade price — so it's omitted as a
-            // documented content gap; the buttons carry the seam story.
+            // Hired-escort management box (hail/hail_escort.png). The LOWER
+            // well holds the whole identity block — "Hired Escort:" over the
+            // escort's ship name and class subtitle, indented exactly as the
+            // reference indents them. The UPPER well is the reference's
+            // Upgrade Cost / daily Pay readout; NovaJS models neither an
+            // escort salary nor an upgrade price, so it stays EMPTY (a
+            // documented content gap) and the buttons carry the seam story.
             const escortName = shipData?.name || 'Escort';
             const escortClass = shipData?.subtitle?.trim();
             return {
                 context: {
-                    variant: 'escort', heading: 'Hired Escort:', image,
-                    body: escortClass ? `${escortName}\n${escortClass}`
-                        : escortName,
+                    variant: 'escort', image,
+                    heading: escortClass
+                        ? `Hired Escort:\n ${escortName}\n ${escortClass}`
+                        : `Hired Escort:\n ${escortName}`,
+                    body: '',
                     escort: true,
                 },
                 target: shipTargetUuid, isEscort: true,

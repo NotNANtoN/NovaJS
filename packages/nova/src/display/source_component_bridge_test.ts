@@ -131,7 +131,9 @@ describe('SourceComponent sim -> display wiring', () => {
             displayWorld.entities.set(TARGET, mirror(simFighter));
 
             const result = await computeContext(displayWorld, gameData);
-            expect(result?.context.heading).toBe('Fighter:');
+            // `heading` is the comm frame's LOWER-well identity block: the
+            // label on its first line, the ship's class indented under it.
+            expect(result?.context.heading.split('\n')[0]).toBe('Fighter:');
             expect(result?.isEscort).toBeFalse();
             expect(result?.context.escort).toBeFalsy();
         });
