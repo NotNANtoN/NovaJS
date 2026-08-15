@@ -15,42 +15,85 @@ import { combatRatingName } from '../nova_plugin/reputation.js';
 import { CombatRatingComponent, LegalRecordsComponent } from '../nova_plugin/reputation_plugin.js';
 import { ShipComponent, ShipPhysicsComponent } from '../nova_plugin/ship_plugin.js';
 import { Button } from './button.js';
+import { frameOrigin, INK_TO_BOX } from './hail_layout.js';
 import { MenuControls } from './menu_controls.js';
 import { computeCargoCapacity } from './mission_session.js';
 
 // The player-info dialog composes the three PICTs 8518 (top strip,
-// 413x40, tab row) / 8519 (black content pane, tiled or cropped to the
-// content height) / 8520 (bottom strip, 413x40, Done row). Measured
-// against the p_properties/*.png reference screenshots (1920x1080):
-// the dialog is 413x230 overall, the four tab buttons' centers sit
-// 149/50 px left and right of the dialog center, and Done sits at the
-// bottom right with Jettison Cargo beside it on the cargo page.
+// 413x40, tab row) / 8519 (black content pane, tiled to the content
+// height) / 8520 (bottom strip, 413x40, Done row).
+//
+// Everything below was measured on the p_properties/*.png references
+// (1920x1080) by correlating the PICTs themselves against them and by
+// template-matching the button end-cap sprites (7500/7502 normal,
+// 7506/7508 grey):
+//
+//   - 8518 lands at screen (754,427) and 8520 at (754,614) on ALL FIVE
+//     pages, so the dialog is a fixed 413x227 — the content pane is 147
+//     tall, not the 150 assumed before (227 = round((1080-227)/2) = 427
+//     from the top, i.e. plainly centred).
+//   - The four tabs' sprites start at frame x = 7 / 107 / 207 / 307,
+//     y = 8, each 99 wide (a 73px middle between two 13px caps) — so
+//     TAB_WIDTH is 73, not 66, and the row sits 8px into the strip
+//     rather than 10.5.
+//   - Done's sprite is at frame (293,195), 73 wide; Jettison Cargo's at
+//     (60,195), 124 wide (cargo_with_stuff.png).
+//   - Text rows: labels at frame x=9 (left column) and x=209 (right),
+//     values 75px further right, first row's ink at frame y=45, 16px
+//     pitch (general.png's nine left rows run y=45..173).
 const WIDTH = 413;
 const TOP_HEIGHT = 40;
-const CONTENT_HEIGHT = 150;
+const CONTENT_HEIGHT = 147;
 const BOTTOM_HEIGHT = 40;
 const HEIGHT = TOP_HEIGHT + CONTENT_HEIGHT + BOTTOM_HEIGHT;
-const ORIGIN_Y = -HEIGHT / 2;
+// Whole-pixel origin, as the original blits a centred frame — see
+// hail_layout.frameOrigin. 413 and 227 are both odd, so -WIDTH/2 would put
+// the strips on a half pixel and drag every glyph on them a pixel left.
+const { x: ORIGIN_X, y: ORIGIN_Y } = frameOrigin(WIDTH, HEIGHT);
 
-const TAB_CENTERS = [-149, -50, 50, 150];
-const TAB_WIDTH = 66;
-// Button containers place their left cap at x+13.2 and are 25 tall.
-const BUTTON_CAP = 13.2;
-const TAB_Y = ORIGIN_Y + TOP_HEIGHT / 2 - 9.5;
-const BOTTOM_BUTTON_Y = ORIGIN_Y + HEIGHT - BOTTOM_HEIGHT / 2 - 12.5;
+/** Frame-local left edges of the four tab button SPRITES. */
+const TAB_X = [7, 107, 207, 307];
+const TAB_WIDTH = 73;
+/** A Button's sprite starts at container.x + 0.2 (button.ts's LEFT_POS
+ * anchors the 13px left cap to END at 13.2), so a measured sprite-left
+ * is placed by taking that fifth of a pixel back off. */
+const BUTTON_CAP_INSET = 0.2;
+const TAB_Y = ORIGIN_Y + 8;
+const BOTTOM_BUTTON_Y = ORIGIN_Y + 195;
+const DONE_X = 293;
+const DONE_WIDTH = 73;
+const JETTISON_X = 60;
+const JETTISON_WIDTH = 124;
 
-const CONTENT_X = -190;
-const CONTENT_TOP = ORIGIN_Y + TOP_HEIGHT + 8;
+/** Text-box origin sits INK_TO_BOX above the ink it renders; the
+ * references' first table row inks at frame y=45. */
+const CONTENT_X = ORIGIN_X + 9;
+const CONTENT_TOP = ORIGIN_Y + 45 - INK_TO_BOX;
 const ROW_HEIGHT = 16;
-const VALUE_OFFSET = 78;
-const RIGHT_COLUMN_X = 10;
+const VALUE_OFFSET = 75;
+const RIGHT_COLUMN_X = ORIGIN_X + 209;
 
+/** Geneva 9.4 — the same bitmap face the comm dialogs and mission popups
+ * use (popup_layout's POPUP_FONT), at this dialog's 16px pitch. Row LABELS
+ * are dim in the references and the values beside them white. */
 const INFO_FONT: Partial<PIXI.ITextStyle> = {
-    fontFamily: 'Geneva', fontSize: 10, fill: 0xffffff,
-    align: 'left', wordWrap: false,
+    fontFamily: 'Geneva', fontSize: 9.4, fill: 0xffffff,
+    align: 'left', wordWrap: false, lineHeight: ROW_HEIGHT,
 };
+const LABEL_FONT: Partial<PIXI.ITextStyle> =
+    { ...INFO_FONT, fill: 0xa0a0a0 };
+/**
+ * The prose pages (Cargo / Extras / Honors) are NOT set on the table's 16px
+ * step: cargo_with_stuff.png's three paragraphs ink at frame y = 48 / 72 / 96,
+ * a 24px paragraph pitch — one blank line at the font's natural 12px leading,
+ * the same pitch the mission popups use (popup_layout.POPUP_LINE_HEIGHT). The
+ * table's 16 is an explicit per-row step, not the font's leading.
+ */
+const PROSE_LINE_HEIGHT = 12;
+const PROSE_TOP = ORIGIN_Y + 48 - INK_TO_BOX;
 const PROSE_FONT: Partial<PIXI.ITextStyle> = {
-    ...INFO_FONT, wordWrap: true, wordWrapWidth: 385,
+    ...INFO_FONT, wordWrap: true, wordWrapWidth: WIDTH - 20,
+    lineHeight: PROSE_LINE_HEIGHT,
 };
 
 type Page = 'general' | 'cargo' | 'extras' | 'honors';
@@ -121,19 +164,19 @@ export class PlayerInfoDialog {
         this.container.addChild(shield);
 
         const top = displayAssets.spriteFromPict('nova:8518');
-        top.position.set(-WIDTH / 2, ORIGIN_Y);
+        top.position.set(ORIGIN_X, ORIGIN_Y);
         const middle = new PIXI.TilingSprite(
             displayAssets.textureFromPict('nova:8519'),
             WIDTH, CONTENT_HEIGHT);
-        middle.position.set(-WIDTH / 2, ORIGIN_Y + TOP_HEIGHT);
+        middle.position.set(ORIGIN_X, ORIGIN_Y + TOP_HEIGHT);
         const bottom = displayAssets.spriteFromPict('nova:8520');
-        bottom.position.set(-WIDTH / 2, ORIGIN_Y + TOP_HEIGHT + CONTENT_HEIGHT);
+        bottom.position.set(ORIGIN_X, ORIGIN_Y + TOP_HEIGHT + CONTENT_HEIGHT);
         top.interactive = middle.interactive = bottom.interactive = true;
         this.container.addChild(top, middle, bottom);
 
         const tabButton = (label: string, page: Page, slot: number) => {
             const button = new Button(displayAssets, label, TAB_WIDTH, {
-                x: TAB_CENTERS[slot] - BUTTON_CAP - TAB_WIDTH / 2,
+                x: ORIGIN_X + TAB_X[slot] - BUTTON_CAP_INSET,
                 y: TAB_Y,
             });
             button.click.subscribe(() => this.showPage(page));
@@ -152,14 +195,15 @@ export class PlayerInfoDialog {
         // The reference's Jettison Cargo button (cargo page only).
         // Greyed: jettison isn't modeled yet, and the dialog is
         // read-only in flight.
-        this.jettison = new Button(displayAssets, 'Jettison Cargo', 100,
-            { x: -72 - BUTTON_CAP - 50, y: BOTTOM_BUTTON_Y });
+        this.jettison = new Button(displayAssets, 'Jettison Cargo',
+            JETTISON_WIDTH,
+            { x: ORIGIN_X + JETTISON_X - BUTTON_CAP_INSET, y: BOTTOM_BUTTON_Y });
         this.jettison.state = 'grey';
         this.jettison.container.visible = false;
         this.container.addChild(this.jettison.container);
 
-        const done = new Button(displayAssets, 'Done', 60,
-            { x: 135 - BUTTON_CAP - 30, y: BOTTOM_BUTTON_Y });
+        const done = new Button(displayAssets, 'Done', DONE_WIDTH,
+            { x: ORIGIN_X + DONE_X - BUTTON_CAP_INSET, y: BOTTOM_BUTTON_Y });
         done.click.subscribe(() => this.closed.next());
         this.container.addChild(done.container);
 
@@ -255,7 +299,7 @@ export class PlayerInfoDialog {
 
     private addRows(rows: [string, string][], x: number) {
         rows.forEach(([label, value], i) => {
-            const labelText = new PIXI.Text(label, INFO_FONT);
+            const labelText = new PIXI.Text(label, LABEL_FONT);
             labelText.position.set(x, CONTENT_TOP + i * ROW_HEIGHT);
             const valueText = new PIXI.Text(value, INFO_FONT);
             valueText.position.set(x + VALUE_OFFSET,
@@ -266,7 +310,7 @@ export class PlayerInfoDialog {
 
     private addProse(lines: string[]) {
         const text = new PIXI.Text(lines.join('\n\n'), PROSE_FONT);
-        text.position.set(CONTENT_X, CONTENT_TOP);
+        text.position.set(CONTENT_X, PROSE_TOP);
         this.content.addChild(text);
     }
 

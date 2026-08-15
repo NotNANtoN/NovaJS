@@ -124,48 +124,14 @@ export function fillAboutPlaceholders(text: string): string {
     return conditional.replace(/<REG>/g, 'NovaJS (unregistered)');
 }
 
-/** The "About Nova" panel: the credits, with an Okay button.
- * `text` is the credits sourced from game data; omitted => fallback. */
-export function showAboutDialog(text?: string): Promise<void> {
-    return new Promise((resolve) => {
-        const modal = makeModal('about-dialog');
-        const title = document.createElement('div');
-        title.textContent = 'About Escape Velocity: Nova';
-        Object.assign(title.style, {
-            fontWeight: '600', fontSize: '15px', marginBottom: '12px',
-        } as Partial<CSSStyleDeclaration>);
-        modal.panel.appendChild(title);
-
-        const body = document.createElement('div');
-        Object.assign(body.style, {
-            background: '#000', color: '#d8d8d8', padding: '14px 16px',
-            borderRadius: '6px', fontFamily: 'Geneva, monospace',
-            fontSize: '12px', whiteSpace: 'pre-wrap', lineHeight: '1.4',
-            maxHeight: '320px', overflowY: 'auto',
-        } as Partial<CSSStyleDeclaration>);
-        body.textContent = fillAboutPlaceholders(
-            text?.trim() ? text : ABOUT_TEXT.join('\n'));
-        modal.panel.appendChild(body);
-
-        const okay = button('Okay', 'about-okay', true);
-        modal.panel.appendChild(buttonRow(okay));
-
-        const done = () => { cleanup(); resolve(); };
-        const cleanup = () => {
-            document.removeEventListener('keydown', onKey);
-            modal.close();
-        };
-        const onKey = (e: KeyboardEvent) => {
-            if (e.key === 'Enter' || e.key === 'Escape') {
-                e.preventDefault();
-                done();
-            }
-        };
-        okay.addEventListener('click', done);
-        document.addEventListener('keydown', onKey);
-        okay.focus();
-    });
-}
+// There is deliberately NO showAboutDialog here any more. The About box is
+// not native chrome in the original — title_screen/about.png shows the game's
+// own desc+pict frame (PICT 8527) with the credits in its text well, the
+// dësc's Graphic beside them and a red Okay under it — so browser.ts renders
+// it with OfferPopup, the same widget the mission-text popups use. Only the
+// pilot and Preferences dialogs (native OS windows in the original) keep
+// their HTML stand-ins. ABOUT_TEXT and fillAboutPlaceholders above are still
+// the text source and placeholder pass for that popup.
 
 // ---------------------------------------------------------------------------
 // New Pilot.

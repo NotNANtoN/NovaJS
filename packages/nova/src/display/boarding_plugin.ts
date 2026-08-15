@@ -21,6 +21,10 @@ import { ShipDataComponent } from '../nova_plugin/ship_plugin.js';
 import { DisplayAssetDataResource } from '../nova_plugin/game_data_resource.js';
 import { formatCredits } from './status_bar_content.js';
 import { Button } from '../spaceport/button.js';
+import {
+    CAPTURE_FRAME, frameOrigin, PLUNDER_BUTTONS, PLUNDER_FRAME,
+    PLUNDER_LINE_HEIGHT,
+} from '../spaceport/hail_layout.js';
 import { MenuControls } from '../spaceport/menu_controls.js';
 import { ScreenSize } from './screen_size_plugin.js';
 import { Stage } from './stage_resource.js';
@@ -51,46 +55,41 @@ import { Stage } from './stage_resource.js';
 export const PlunderActionEvent =
     new EcsEvent<{ action: ControlAction }>('PlunderActionEvent');
 
-const WIDTH = 320;
-const HEIGHT = 200;
-const ORIGIN_X = -WIDTH / 2;
-const ORIGIN_Y = -HEIGHT / 2;
+// Geometry lives in spaceport/hail_layout.ts, measured off PICT 8515/8516's
+// own art and space/board_ship.png (frame at screen 806,441) — see that file
+// for the citations. The frame is 309x198, NOT the 320x200 this module used
+// to assume, which pushed every element ~5px left and 1px up of the art.
+const { x: ORIGIN_X, y: ORIGIN_Y } =
+    frameOrigin(PLUNDER_FRAME.width, PLUNDER_FRAME.height);
+
+/**
+ * A Button's sprite starts at container.x + 0.2 (its 13px left cap is
+ * anchored to END at button.ts's LEFT_POS = 13.2). hail_layout quotes the
+ * measured SPRITE left edge, so placing one takes that back off.
+ */
+const BUTTON_CAP_INSET = 0.2;
+
+/** Geneva 9.4 at the plunder readout's 14px pitch (PLUNDER_LINE_HEIGHT) —
+ * the same bitmap face the comm dialogs and mission popups use. */
 const TITLE_FONT: Partial<PIXI.ITextStyle> = {
-    fontFamily: 'Geneva', fontSize: 12, fill: 0xffffff, align: 'left',
+    fontFamily: 'Geneva', fontSize: 9.4, fill: 0xffffff, align: 'left',
+    wordWrap: false, lineHeight: PLUNDER_LINE_HEIGHT,
 };
+/** Row LABELS are dim in the references ("Cargo:", "Credits:"); the values
+ * beside them are white. */
+const LABEL_FONT: Partial<PIXI.ITextStyle> =
+    { ...TITLE_FONT, fill: 0xa0a0a0 };
 const BODY_FONT: Partial<PIXI.ITextStyle> = {
-    fontFamily: 'Geneva', fontSize: 10, fill: 0xffffff, align: 'left',
-    wordWrap: true, wordWrapWidth: WIDTH - 24,
+    ...TITLE_FONT, wordWrap: true,
+    wordWrapWidth: PLUNDER_FRAME.well.width - 16,
 };
 
-// Plunder button grid (PICT 8515), measured against space/board_ship.png.
-// The original's layout, matched here: three narrow buttons on the top row
-// (Energy / Cargo / Ammo), two below (Credits + the wider Capture Ship), then
-// a centered Abort — all in the metal lower third of the frame. Coordinates
-// are LOCAL to the frame centre (button centres at screen x 864/958/1052 etc.,
-// frame centred at 960). A Button's pill width excludes its two ~13.2px end
-// caps, so its rendered width is pill + 2*BTN_LEFT_POS; the left edge we pass
-// as position.x is centre - rendered/2.
-const BTN_LEFT_POS = 13.2;                    // Button end-cap width
-const btnRendered = (pill: number) => pill + 2 * BTN_LEFT_POS;
-const btnLeft = (centre: number, pill: number) =>
-    centre - btnRendered(pill) / 2;
-const PILL_SMALL = 60;                        // Energy/Cargo/Ammo/Credits
-const PILL_WIDE = 118;                        // Capture Ship (double-ish)
-const PILL_ABORT = 84;                        // centered Abort
-// Row top-Y (button height 25); rows land at screen y ~567/595/611.
-const BTN_ROW_Y = [ORIGIN_Y + 115, ORIGIN_Y + 143, ORIGIN_Y + 171];
+const { x: CAP_ORIGIN_X, y: CAP_ORIGIN_Y } =
+    frameOrigin(CAPTURE_FRAME.width, CAPTURE_FRAME.height);
 
-// Capture-assignment frame (PICT 8516) is a distinct, smaller sprite than
-// the plunder frame (measured 267x128, centered). Positioning its title and
-// buttons off the plunder ORIGIN left the title floating above the frame, so
-// this dialog anchors its own elements to the 8516 geometry.
-const CAP_W = 267;
-const CAP_H = 128;
-const CAP_ORIGIN_X = -CAP_W / 2;
-const CAP_ORIGIN_Y = -CAP_H / 2;
-const CAP_BTN_W = 150;
-const CAP_BTN_X = -(CAP_BTN_W + 2 * BTN_LEFT_POS) / 2; // centered
+/** Cargo / Credits / Ammo / Energy — the fixed four rows of the readout
+ * table (space/board_ship.png). */
+const PLUNDER_ROWS = 4;
 
 /**
  * The plunder dialog's whole readable state — the booty summary lines and
@@ -108,9 +107,19 @@ const CAP_BTN_X = -(CAP_BTN_W + 2 * BTN_LEFT_POS) / 2; // centered
  * refuse. The odds readout goes with it (there are no odds), replaced by a
  * line saying why.
  */
+/** One row of the plunder readout: a label/value pair, plus the optional
+ * second pair the Energy row carries ("Capture Odds: 13%"). */
+export interface PlunderRow {
+    label: string;
+    value: string;
+    rightLabel?: string;
+    rightValue?: string;
+}
+
 export function plunderDialogContent(boarding: BoardingState,
     target: Entity | undefined, playerCrew: number): {
-        lines: string[], enabledByAction: Record<string, boolean>
+        rows: PlunderRow[], notes: string[], lines: string[],
+        enabledByAction: Record<string, boolean>
     } {
     const cargo = target?.components.get(CargoComponent);
     const cargoTons = cargo
@@ -129,22 +138,41 @@ export function plunderDialogContent(boarding: BoardingState,
             : `${cargoTons} tons`;
     const odds = boarding.capture === 'succeeded' || captureBlocked
         ? null : Math.round(captureChance(playerCrew, targetCrew) * 100);
-    const lines = [
-        `Cargo:    ${cargoText}`,
-        `Credits:  ${formatCredits(boarding.creditsAvailable)}`,
-        `Ammo:     ${boarding.ammoAvailable > 0
-            ? `${boarding.ammoAvailable}` : 'None'}`,
-        `Energy:   ${fuel ? Math.floor(fuel.current) : 0}`
-            + (odds === null ? '' : `        Capture Odds:  ${odds}%`),
+    // The readout is a two-COLUMN table in the original (space/board_ship.png
+    // sets the labels at frame x=11 and their values at x=61, with "Capture
+    // Odds:" opening a second pair at x=131/207), not one space-padded string
+    // — a proportional font never lines those up. `rows` carries the columns;
+    // `lines` keeps the flat rendering for specs and for the notes below it.
+    const rows: PlunderRow[] = [
+        { label: 'Cargo:', value: cargoText },
+        { label: 'Credits:', value: formatCredits(boarding.creditsAvailable) },
+        {
+            label: 'Ammo:',
+            value: boarding.ammoAvailable > 0
+                ? `${boarding.ammoAvailable}` : 'None',
+        },
+        {
+            label: 'Energy:',
+            value: `${fuel ? Math.floor(fuel.current) : 0}`,
+            ...(odds === null ? {} : {
+                rightLabel: 'Capture Odds:', rightValue: `${odds}%`,
+            }),
+        },
     ];
+    const notes: string[] = [];
     if (captureBlocked) {
-        lines.push('Her captain still holds the bridge: cannot capture.');
+        notes.push('Her captain still holds the bridge: cannot capture.');
     } else if (boarding.capture === 'failed') {
-        lines.push('You were repelled while attempting to capture!');
+        notes.push('You were repelled while attempting to capture!');
     }
+    const lines = [
+        ...rows.map(r => `${r.label}  ${r.value}`
+            + (r.rightLabel ? `    ${r.rightLabel}  ${r.rightValue}` : '')),
+        ...notes,
+    ];
 
     return {
-        lines,
+        rows, notes, lines,
         enabledByAction: {
             plunderCargo: !boarding.cargoTaken && cargoTons > 0,
             plunderCredits: !boarding.creditsTaken
@@ -176,6 +204,11 @@ class PlunderDialog {
     private rows: Row[] = [];
     private selected = 0;
     private highlight = new PIXI.Graphics();
+    /** The readout table's cells, one entry per PLUNDER_ROWS row. */
+    private readout: {
+        label: PIXI.Text, value: PIXI.Text,
+        rightLabel: PIXI.Text, rightValue: PIXI.Text,
+    }[] = [];
 
     constructor(private displayAssets: DisplayAssetDataInterface,
         controlEvents: Observable<ControlEvent>,
@@ -190,39 +223,66 @@ class PlunderDialog {
         this.container.addChild(shield);
 
         // PICT 8515 is the plunder frame in stock Nova.
-        const background = this.safeSprite('nova:8515');
-        background.anchor.set(0.5);
+        const background = this.safeSprite(PLUNDER_FRAME.pict);
+        // Top-left at the whole-pixel origin the original blits to (see
+        // frameOrigin) rather than anchor-centred: 309 is odd, so centring
+        // would land the art on a half pixel.
+        background.anchor.set(0);
+        background.position.set(ORIGIN_X, ORIGIN_Y);
         background.interactive = true;
         this.container.addChild(background);
 
-        // The original's title line (space/board_ship.png).
+        // The original's title line (space/board_ship.png), at the well's
+        // measured pen.
         this.title.text = 'Select what to plunder from this ship:';
-        this.title.position.set(ORIGIN_X + 12, ORIGIN_Y + 10);
-        this.body.position.set(ORIGIN_X + 12, ORIGIN_Y + 30);
+        this.title.position.set(ORIGIN_X + PLUNDER_FRAME.titleText.x,
+            ORIGIN_Y + PLUNDER_FRAME.titleText.y);
+        // The notes line ("cannot capture" / "you were repelled") sits under
+        // the four-row table.
+        this.body.position.set(ORIGIN_X + PLUNDER_FRAME.labelX,
+            ORIGIN_Y + PLUNDER_FRAME.rowsTop
+            + PLUNDER_ROWS * PLUNDER_LINE_HEIGHT);
         this.container.addChild(this.highlight, this.title, this.body);
+        // Four label/value row pairs (plus the Energy row's second pair),
+        // laid out in the two measured columns and filled by refresh().
+        for (let i = 0; i < PLUNDER_ROWS; i++) {
+            const y = ORIGIN_Y + PLUNDER_FRAME.rowsTop
+                + i * PLUNDER_LINE_HEIGHT;
+            const cells = {
+                label: new PIXI.Text('', LABEL_FONT),
+                value: new PIXI.Text('', TITLE_FONT),
+                rightLabel: new PIXI.Text('', LABEL_FONT),
+                rightValue: new PIXI.Text('', TITLE_FONT),
+            };
+            cells.label.position.set(ORIGIN_X + PLUNDER_FRAME.labelX, y);
+            cells.value.position.set(ORIGIN_X + PLUNDER_FRAME.valueX, y);
+            cells.rightLabel.position.set(
+                ORIGIN_X + PLUNDER_FRAME.rightLabelX, y);
+            cells.rightValue.position.set(
+                ORIGIN_X + PLUNDER_FRAME.rightValueX, y);
+            this.readout.push(cells);
+            this.container.addChild(cells.label, cells.value,
+                cells.rightLabel, cells.rightValue);
+        }
 
         // Action grid mirroring the original 8515 button block: Energy /
         // Cargo / Ammo across the top, Credits + the wider Capture Ship below,
         // then a centered Abort. "Energy" is the victim's fuel transfer; the
-        // labels/order/placement follow board_ship.png.
-        const specs: [ControlAction, string, number, number, number][] = [
-            // action, label, centreX, rowIndex, pillWidth
-            ['plunderFuel', 'Energy', -94, 0, PILL_SMALL],
-            ['plunderCargo', 'Cargo', 0, 0, PILL_SMALL],
-            ['plunderAmmo', 'Ammo', 94, 0, PILL_SMALL],
-            ['plunderCredits', 'Credits', -76, 1, PILL_SMALL],
-            ['plunderCapture', 'Capture Ship', 47, 1, PILL_WIDE],
-            ['plunderDone', 'Abort', 0, 2, PILL_ABORT],
-        ];
-        specs.forEach(([action, label, centreX, row, pill]) => {
-            const pos = { x: btnLeft(centreX, pill), y: BTN_ROW_Y[row] };
-            const button = new Button(this.displayAssets, label, pill, pos);
+        // labels, order, widths and positions are PLUNDER_BUTTONS, measured
+        // by template-matching the cap sprites on board_ship.png.
+        for (const spec of PLUNDER_BUTTONS) {
+            const button = new Button(this.displayAssets, spec.label,
+                spec.width, {
+                    x: ORIGIN_X + spec.x - BUTTON_CAP_INSET,
+                    y: ORIGIN_Y + spec.y,
+                });
+            const action = spec.action as ControlAction;
             button.click.subscribe(() => this.activate(action));
             this.container.addChild(button.container);
             this.rows.push({
-                action, button, rendered: btnRendered(pill), enabled: true,
+                action, button, rendered: spec.width + 26, enabled: true,
             });
-        });
+        }
 
         this.controls = new MenuControls(controlEvents, {
             up: () => this.move(-1),
@@ -241,7 +301,8 @@ class PlunderDialog {
             // Missing PICT: a plain dark panel keeps the flow driveable.
             const g = new PIXI.Graphics().beginFill(0x101820, 0.95)
                 .lineStyle(1, 0x88aacc)
-                .drawRect(ORIGIN_X, ORIGIN_Y, WIDTH, HEIGHT).endFill();
+                .drawRect(ORIGIN_X, ORIGIN_Y, PLUNDER_FRAME.width,
+                    PLUNDER_FRAME.height).endFill();
             const tex = new PIXI.Sprite();
             tex.addChild(g);
             return tex as unknown as PIXI.Sprite;
@@ -295,9 +356,16 @@ class PlunderDialog {
      * crew, for the capture-odds readout. */
     refresh(boarding: BoardingState, target: Entity | undefined,
         playerCrew: number) {
-        const { lines, enabledByAction } =
+        const { rows, notes, enabledByAction } =
             plunderDialogContent(boarding, target, playerCrew);
-        this.body.text = lines.join('\n');
+        this.readout.forEach((cells, i) => {
+            const row = rows[i];
+            cells.label.text = row?.label ?? '';
+            cells.value.text = row?.value ?? '';
+            cells.rightLabel.text = row?.rightLabel ?? '';
+            cells.rightValue.text = row?.rightValue ?? '';
+        });
+        this.body.text = notes.join('\n');
 
         for (const row of this.rows) {
             row.enabled = enabledByAction[row.action] ?? true;
@@ -344,27 +412,43 @@ class CaptureAssignmentDialog {
 
         let background: PIXI.Sprite;
         try {
-            background = displayAssets.spriteFromPict('nova:8516');
+            background = displayAssets.spriteFromPict(CAPTURE_FRAME.pict);
         } catch {
             const g = new PIXI.Graphics().beginFill(0x101820, 0.95)
                 .lineStyle(1, 0x88aacc)
-                .drawRect(ORIGIN_X, ORIGIN_Y, WIDTH, HEIGHT).endFill();
+                .drawRect(CAP_ORIGIN_X, CAP_ORIGIN_Y,
+                    CAPTURE_FRAME.width, CAPTURE_FRAME.height).endFill();
             background = new PIXI.Sprite();
             background.addChild(g);
         }
-        background.anchor?.set(0.5);
+        background.anchor?.set(0);
+        background.position.set(CAP_ORIGIN_X, CAP_ORIGIN_Y);
         background.interactive = true;
         this.container.addChild(background);
 
-        const title = new PIXI.Text('You have captured the ship!', TITLE_FONT);
-        title.position.set(CAP_ORIGIN_X + 14, CAP_ORIGIN_Y + 12);
+        // The question goes in the 8516 frame's own black well. The original
+        // asks a longer question (escort vs. trading places with her captain)
+        // and offers a third choice NovaJS does not model — see
+        // CAPTURE_FRAME's note.
+        const title = new PIXI.Text('You have captured the ship!', {
+            ...TITLE_FONT, wordWrap: true,
+            wordWrapWidth: CAPTURE_FRAME.well.width - 18,
+        });
+        title.position.set(CAP_ORIGIN_X + CAPTURE_FRAME.text.x,
+            CAP_ORIGIN_Y + CAPTURE_FRAME.text.y);
         this.container.addChild(title);
 
-        const escort = new Button(displayAssets, 'Keep as Escort', CAP_BTN_W,
-            { x: CAP_BTN_X, y: CAP_ORIGIN_Y + 54 });
+        // Two pills centred in the frame at 120 wide with a 32px pitch, as
+        // capture_assignment.png's inset shows them.
+        const capButton = (label: string, row: number) =>
+            new Button(displayAssets, label, CAPTURE_FRAME.buttonWidth, {
+                x: CAP_ORIGIN_X + CAPTURE_FRAME.buttonX - BUTTON_CAP_INSET,
+                y: CAP_ORIGIN_Y + CAPTURE_FRAME.buttonTop
+                    + row * CAPTURE_FRAME.buttonPitch,
+            });
+        const escort = capButton('Keep as Escort', 0);
         escort.click.subscribe(() => send('plunderCaptureEscort'));
-        const release = new Button(displayAssets, 'Release', CAP_BTN_W,
-            { x: CAP_BTN_X, y: CAP_ORIGIN_Y + 88 });
+        const release = capButton('Release', 1);
         release.click.subscribe(() => send('plunderDone'));
         this.container.addChild(escort.container, release.container);
 
