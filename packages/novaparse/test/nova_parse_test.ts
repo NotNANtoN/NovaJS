@@ -85,7 +85,19 @@ describe("NovaParse", () => {
         // Flags2 0x0020: can jump without slowing down.
         expect(s128.physics.canJumpWithoutSlowing).toEqual(false);
         expect(s128.physics.jumpDistanceMod).toEqual(0);
-        expect(s128.displayWeight).toEqual(128);
+        // The ship's DispWeight (its display order in the shipyard grid)
+        // from the shïp resource's displayOrder field, not its id — the
+        // grid orders by this, and the Flags3 0x4000 rule compares it.
+        expect(s128.displayWeight).toEqual(3);
+        // The shipyard gates parsed from the raw shïp resource:
+        // Availability NCB, BuyRandom, and the Flags3 0x0100/0x0200/
+        // 0x4000 bits (see shipyard_stock_rules.ts). The fixture's
+        // flags3 is 0x361: 0x0100 + 0x0200 set, 0x4000 clear.
+        expect(s128.availability).toEqual("b13");
+        expect(s128.buyRandom).toEqual(4);
+        expect(s128.hideIfAvailabilityFalse).toEqual(true);
+        expect(s128.hideIfRequireUnmet).toEqual(true);
+        expect(s128.excludeEqualDisplayWeight).toEqual(false);
         expect(s128.deathDelay).toEqual(67 / 30);
         expect(s128.largeExplosion).toEqual(true);
     });

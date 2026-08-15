@@ -9,6 +9,9 @@ import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_
 import { ControlEvent } from '../nova_plugin/controls_plugin.js';
 import { ShipComponent } from '../nova_plugin/ship_plugin.js';
 import { ControlBitsComponent } from '../nova_plugin/ncb_plugin.js';
+import { numericId } from '../nova_plugin/mission_logic.js';
+import { OutfitsStateComponent } from '../nova_plugin/outfit_plugin.js';
+import { GameDateComponent } from '../nova_plugin/player_state_plugin.js';
 import { makeDescTextContext, playerGender, resolveConditionalBlocks }
     from '../nova_plugin/desc_text.js';
 import { Button } from './button.js';
@@ -31,6 +34,14 @@ import {
     purchaseContextFrom,
     ShipPurchaseContext,
 } from './shipyard_rules.js';
+import { dayNumber } from '../nova_plugin/calendar.js';
+import { getDefaultGameDate } from 'novadatainterface/player_start_data';
+import {
+    canBuyShip as canBuyStockShip,
+    ShipyardContext,
+    ShipyardStellar,
+    visibleShips,
+} from './shipyard_stock_rules.js';
 
 export class Shipyard extends Menu<Entity> {
     private pictContainer = new PIXI.Container();
@@ -44,6 +55,16 @@ export class Shipyard extends Menu<Entity> {
     private allOutfits = new Map<string, OutfitData>();
     /** The ShipData of the hull the player is currently flying. */
     private currentShipData?: ShipData;
+    /**
+     * The docked stellar's tech level / SpecialTech (see setPlanet).
+     * Absent means "no shipyard context", under which every ship is stocked
+     * (see ShipyardContext.planet — the same fallback the outfitter
+     * uses so headless tests stay free of stellar boilerplate).
+     */
+    private planet?: ShipyardStellar;
+    /** The docked stellar's global id, for the deterministic
+     * BuyRandom roll. */
+    private stellarId?: string;
     private text = {
         description: new PIXI.Text("", FONT.normal),
         // The price pane under the ship picture. Labels and values in
@@ -142,13 +163,81 @@ export class Shipyard extends Menu<Entity> {
         };
     }
 
+    /** Every ship loaded once, as the grid's pool (see refreshGrid). */
+    private allShips: ShipData[] = [];
+
     private async makeShipsGrid() {
         const ids = (await this.simulationData.ids).Ship;
         const ships = await Promise.all(ids.map(id =>
             this.simulationData.data.Ship.get(id, 100)));
-        ships.sort((a, b) => b.displayWeight - a.displayWeight);
-        const itemGrid = new ItemGrid(this.displayAssets, ships);
+        this.allShips = ships;
+        const itemGrid = new ItemGrid(this.displayAssets,
+            visibleShips(ships, this.stockContext()));
         return itemGrid;
+    }
+
+    /**
+     * The stellar being visited, supplying the tech level / SpecialTech
+     * rules that decide which ships this shipyard stocks. Set by the
+     * Spaceport once its planet data loads (the shipyard's analogue of
+     * outfitter.setPlanet). Absent means "no shipyard context", under
+     * which every ship is stocked.
+     */
+    setPlanet(planet: ShipyardStellar, stellarId: string) {
+        this.planet = planet;
+        this.stellarId = stellarId;
+    }
+
+    /**
+     * Repopulates the grid from the current context (docked stellar,
+     * control bits, contribute, day). Called from setInput (every time the
+     * shipyard opens) so the Availability / Require / per-day BuyRandom
+     * gates reflect the player standing here today. Not called from
+     * refreshTradeState: repopulating re-emits the active tile, which calls
+     * back into refreshTradeState, and the two would recurse (the same
+     * reason the outfitter's refreshGrid is separate).
+     */
+    private refreshGrid() {
+        if (!this.itemGrid) {
+            return;
+        }
+        this.itemGrid.setItems(visibleShips(this.allShips,
+            this.stockContext()));
+    }
+
+    /**
+     * The docked-shipyard gate context (tech, control bits, contribute,
+     * day, stellar id) for the current player and day.
+     */
+    private stockContext(): ShipyardContext {
+        const day = dayNumber(this.input?.components.get(GameDateComponent)
+            ?? getDefaultGameDate());
+        return {
+            planet: this.planet,
+            bits: this.input?.components.get(ControlBitsComponent) ?? new Set(),
+            contribute: this.playerContributeBits(),
+            day,
+            stellarId: this.stellarId ? numericId(this.stellarId) : null,
+        };
+    }
+
+    /**
+     * The player's 64-bit Contribute set: their current hull's contribute
+     * or'd with the contribute sets of every owned outfit.
+     */
+    private playerContributeBits(): bigint {
+        let contribute = this.currentShipData
+            ? BigInt(this.currentShipData.contribute ?? '0x0') : 0n;
+        const outfits = this.input?.components.get(OutfitsStateComponent);
+        if (outfits) {
+            for (const [id, { count }] of outfits) {
+                if (count > 0) {
+                    contribute |= BigInt(
+                        this.allOutfits.get(id)?.contribute ?? '0x0');
+                }
+            }
+        }
+        return contribute;
     }
 
     /** Loads every outfit once, for the trade-in valuation. */
@@ -190,19 +279,27 @@ export class Shipyard extends Menu<Entity> {
                 }
             }).catch(e => console.warn('Failed to load current ship:', e));
         }
+        // The grid's Availability / Require / BuyRandom gates are
+        // per-player and per-day, so repopulate it for this player.
+        this.refreshGrid();
         this.refreshTradeState();
     }
 
     /**
      * Re-quotes the price pane, greys the Buy button for a ship the
-     * player cannot afford, and shows the denial caption as the
-     * outfitter does for outfits.
+     * player cannot BUY (stock gate or affordability), and shows the denial
+     * caption as the outfitter does for outfits.
      *
      * Every path that can change either the quote or its answer runs
      * this: a new selection (setShipSelected), a new input entity or its
      * ShipData arriving (setInput), and a completed purchase (buyShip) —
      * which is what makes a second trade in the same visit quote against
      * the hull just bought and the credits just spent.
+     *
+     * The stock gate (tech, availability, require, today's BuyRandom) and
+     * the affordability gate are the SAME rules the buy path quotes (in
+     * buyShip), so the greyed Buy button and the actual purchase can never
+     * disagree.
      */
     private refreshTradeState() {
         const ship = this.itemGrid?.selection;
@@ -212,9 +309,15 @@ export class Shipyard extends Menu<Entity> {
             this.buttons.buy.state = 'grey';
             return;
         }
+        const stockCheck = canBuyStockShip(ship, this.stockContext());
         const check = canBuyShip(ship, context);
-        this.buttons.buy.state = check.allowed ? 'normal' : 'grey';
-        this.text.status.text = check.allowed ? '' : check.message;
+        this.buttons.buy.state =
+            (stockCheck.allowed && check.allowed) ? 'normal' : 'grey';
+        if (stockCheck.allowed) {
+            this.text.status.text = check.allowed ? '' : check.message;
+        } else {
+            this.text.status.text = stockCheck.message;
+        }
     }
 
     /**
@@ -281,6 +384,14 @@ export class Shipyard extends Menu<Entity> {
         if (!context) {
             // Ship or outfit data still loading; refuse rather than
             // charge a price computed from an incomplete valuation.
+            return;
+        }
+        // The stock gate (tech, availability, require, today's BuyRandom)
+        // is re-quoted here, not just trusted from the greyed button — the
+        // keyboard shortcut path reaches this line directly.
+        const stockCheck = canBuyStockShip(newShip, this.stockContext());
+        if (!stockCheck.allowed) {
+            this.text.status.text = stockCheck.message;
             return;
         }
         const check = canBuyShip(newShip, context);

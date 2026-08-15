@@ -530,6 +530,12 @@ export class Spaceport extends Menu<Entity> {
         // The outfitter stocks by this stellar's tech level / SpecialTech
         // and honours its "buys anything" flag (see outfitter_rules.ts).
         this.outfitter.setPlanet(data);
+        // The shipyard stocks ships by the same tech level / SpecialTech
+        // (see shipyard_stock_rules.ts) and rolls the per-day BuyRandom
+        // pool against this stellar's id.
+        this.shipyard.setPlanet(
+            { techLevel: data.techLevel, specialTech: data.specialTech },
+            this.id);
         const title = new PIXI.Text(data.name, this.font.title);
         title.anchor.x = 0.5;
         title.position.x = -2;

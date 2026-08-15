@@ -83,6 +83,40 @@ export interface ShipData extends SpaceObjectData {
     /** 64-bit flag set required to buy this ship. Hex string. */
     require: string;
     /**
+     * Control-bit test expression the player must PASS to purchase this
+     * ship (shïp Availability, EVN Bible ~:2588): "The player will be
+     * able to purchase this type of ship when the expression evaluates to
+     * true. Leave blank if unused." Depending on Flags3 0x0100, a false
+     * Availability either shows the ship greyed or hides it entirely.
+     */
+    availability: string;
+    /**
+     * The percent chance this ship is available for purchase on a given
+     * day (shïp BuyRandom, EVN Bible ~:2630): "0 means this ship will
+     * never be made available for purchase." The daily roll is a
+     * deterministic hash of (game day, stellar, ship) so every client and
+     * every reload of the same day agrees.
+     */
+    buyRandom: number;
+    /**
+     * shïp Flags3 0x0100 (~:2655): "Don't show ship in shipyard if
+     * Availability is false." When clear, a false Availability still SHOWS
+     * the ship greyed (purchase refused).
+     */
+    hideIfAvailabilityFalse: boolean;
+    /**
+     * shïp Flags3 0x0200 (~:2656): "Don't show ship in shipyard if
+     * Require bits not met." When clear, unmet Require still SHOWS the
+     * ship greyed.
+     */
+    hideIfRequireUnmet: boolean;
+    /**
+     * shïp Flags3 0x4000 (~:2657): when this ship is available for
+     * sale, it suppresses every higher-numbered ship sharing its exact
+     * DispWeight.
+     */
+    excludeEqualDisplayWeight: boolean;
+    /**
      * The ship's combat strength rating (shïp Strength), used for the
      * govt MaxOdds fight-or-flee calculation. The Bible scales a ship's
      * effective strength between 30% and 100% of this by its current
@@ -173,6 +207,11 @@ export function getDefaultShipData(): ShipData {
         displayWeight: 1,
         contribute: "0x0",
         require: "0x0",
+        availability: "",
+        buyRandom: 0,
+        hideIfAvailabilityFalse: false,
+        hideIfRequireUnmet: false,
+        excludeEqualDisplayWeight: false,
         strength: 0,
         inherentAI: 1,
         inherentGovt: null,

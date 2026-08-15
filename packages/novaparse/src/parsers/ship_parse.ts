@@ -251,12 +251,19 @@ export async function ShipParse(ship: ShipResource,
         finalExplosion: finalExplosionID,
         deathDelay: ship.deathDelay / FPS,
         largeExplosion: ship.deathDelay >= 60,
-        displayWeight: ship.id, // TODO: Fix this once displayweight is implemented
+        displayWeight: ship.displayOrder,
         animation,
         vulnerableTo: ["normal"], // TODO: Parse if it's vulnerable to point defense
         // 64-bit flag sets as JSON-safe hex strings.
         contribute: "0x" + ship.contribute.toString(16),
         require: "0x" + ship.require.toString(16),
+        // The shipyard gates (EVN Bible shïp Availability ~:2588, BuyRandom
+        // ~:2630, and the Flags3 0x0100/0x0200/0x4000 bits ~:2655).
+        availability: ship.availabilityNCB,
+        buyRandom: ship.buyRandom,
+        hideIfAvailabilityFalse: Boolean(ship.flags3N & 0x0100),
+        hideIfRequireUnmet: Boolean(ship.flags3N & 0x0200),
+        excludeEqualDisplayWeight: Boolean(ship.flags3N & 0x4000),
         strength: ship.strength,
         inherentAI: ship.inherentAI,
         // Resolve the ship's inherent gövt to its global id (-1 / missing

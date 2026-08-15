@@ -1,0 +1,326 @@
+/**
+ * The shipyard's STOCK gates (which ships appear, and whether the player
+ * can buy one), per the EVN Bible's shïp documentation:
+ *
+ *   - TechLevel (~:2413): "This ship will be available at all shipyards
+ *     with a tech level of this value or higher" — with the spöb
+ *     SpecialTech exact-match exception (~:2765).
+ *   - Availability (~:2588): "Control bit test expression. The player
+ *     will be able to purchase this type of ship when the expression
+ *     evaluates to true."
+ *   - Require (~:2620): "If for each 1 bit in the Require fields
+ *     there is a matching 1 bit in one or more of the Contribute
+ *     fields, the ship can be purchased."
+ *   - BuyRandom (~:2630): "The percent chance that a ship of this type
+ *     will be available for purchase on a given day. A BuyRandom of 0
+ *     means this ship will never be made available for purchase."
+ *   - Flags3 0x0100 / 0x0200 / 0x4000 (~:2655-2658).
+ *
+ * Pure logic; the Shipyard menu supplies the context. This module is the
+ * shipyard's counterpart to outfitter_rules.ts, and deliberately REUSES
+ * that file's generic pieces (meetsTechLevel, the NCB evaluator) rather
+ * than duplicating them.
+ */
+import { ShipData } from 'novadatainterface/ship_data';
+import { meetsTechLevel } from './outfitter_rules.js';
+import { evaluateNCBTest, NCBParseError } from '../nova_plugin/ncb.js';
+
+export interface ShipyardStellar {
+    /** Everything with techLevel <= this is stocked (spöb TechLevel). */
+    techLevel: number;
+    /** Extra tech levels stocked by EXACT match only (spöb SpecialTech). */
+    specialTech: readonly number[];
+}
+
+/**
+ * Everything the shipyard's visibility and purchase rules need about the
+ * player and the shipyard they are standing in.
+ */
+export interface ShipyardContext {
+    /**
+     * The stellar the player is docked at (its tech level / SpecialTech).
+     * Absent means "no shipyard context", under which every ship is stocked —
+     * the behaviour a headless purchase test (no real planet) wants, and
+     * the boundary at which a caller that only cares about the purchase
+     * gates stays free of docked-planet boilerplate.
+     */
+    planet?: ShipyardStellar;
+    /** The player's control bits (ControlBitsComponent). */
+    bits: ReadonlySet<number>;
+    /**
+     * The union of the Contribute flag sets of the player's current ship
+     * and every outfit it carries (see playerContribute below).
+     */
+    contribute: bigint;
+    /**
+     * The absolute game day number (calendar.ts dayNumber). Drives the
+     * deterministic BuyRandom roll.
+     */
+    day: number;
+    /** The numeric local id of the docked stellar, or null. */
+    stellarId: number | null;
+}
+
+/**
+ * The shipyard's counterpart to the outfitter's playerContribute: the
+ * union of the contributing ship+outfit flag sets the player currently has.
+ * In the shipyard the player always owns a ship, so this is the current
+ * hull's contribute or'd with the contribute of each owned outfit.
+ */
+export function playerContribute(shipContribute: string,
+    outfits: ReadonlyMap<string, string>): bigint {
+    let contribute = BigInt(shipContribute ?? '0x0');
+    for (const value of outfits.values()) {
+        contribute |= BigInt(value ?? '0x0');
+    }
+    return contribute;
+}
+
+/**
+ * Whether the player's Contribute set covers this ship's Require flags. An
+ * empty Require (0) always passes.
+ */
+export function shipRequirementsMet(requireHex: string,
+    contribute: bigint): boolean {
+    const require = BigInt(requireHex ?? '0x0');
+    return (require & contribute) === require;
+}
+
+/**
+ * Whether the ship's Availability control-bit test passes. Malformed
+ * expressions log and count as available, matching the blank-expression
+ * default — the same policy as the outfitter's availabilityTest.
+ */
+export function shipAvailabilityPasses(ship: ShipData,
+    ctx: ShipyardContext): boolean {
+    if (!ship.availability) {
+        return true;
+    }
+    try {
+        // The stock Availability expressions are pure control-bit tests
+        // (bXXX / P30); the exotic NCB terms default harmlessly.
+        return evaluateNCBTest(ship.availability, {
+            getBit: bit => ctx.bits.has(bit),
+        });
+    } catch (error) {
+        if (error instanceof NCBParseError) {
+            console.warn(`Bad Availability for ship ${ship.id}:`, error);
+            return true;
+        }
+        throw error;
+    }
+}
+
+/**
+ * A deterministic percent roll against the Bible's "percent chance this ship
+ * is available for purchase on a given day".
+ *
+ * BuyRandom in the original is a per-day random availability. NovaJS's
+ * shipyard runs on every peer, and the stock ships' day pools must agree
+ * across clients AND across a reload of the same day, so Math.random /
+ * Date.now are forbidden here. The roll is a pure function of the three
+ * inputs that distinguish "this ship at this shipyard on this day":
+ *
+ *     hash = FNV-1a 32-bit over "day|stellarId|shipId"
+ *     available = (hash % 100) < buyRandom
+ *
+ * FNV-1a was chosen over a crypto hash because it is a single trivial
+ * integer loop (no allocations, deterministic across every JS engine) and its
+ * 32-bit output spreads a ship's daily availability across the buyRandom
+ * percent bands evenly enough for the stock 0-100 values. Every peer
+ * computes the SAME hash for the same (day, stellar, ship), so the day's
+ * pool is identical everywhere and stable across reloads.
+ *
+ * JUDGMENT CALL — the hash deliberately does NOT include the player (their id
+ * or anything player-specific): the Bible's "available for purchase on a given
+ * day" is a property of the SHIP and the DAY at a shipyard, shared by all
+ * players visiting it, not a per-player roll. Including the player would also
+ * make the grid differ between two players docked at the same stellar on the
+ * same day, which nothing in the original suggests.
+ */
+export function shipBuyRandomPasses(ship: ShipData,
+    ctx: ShipyardContext): boolean {
+    if (ship.buyRandom >= 100) {
+        return true;
+    }
+    if (ship.buyRandom <= 0) {
+        // "A BuyRandom of 0 means this ship will never be made available
+        // for purchase."
+        return false;
+    }
+    const shipNum = resourceNumber(ship.id) ?? 0;
+    const hash = fnv1a(`${ctx.day}|${ctx.stellarId ?? 0}|${shipNum}`);
+    return (hash % 100) < ship.buyRandom;
+}
+
+/** FNV-1a 32-bit hash of a string (offset basis 2166136261, prime
+ * 16777619). Deterministic, allocation-light, identical across engines. */
+function fnv1a(input: string): number {
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < input.length; i++) {
+        hash ^= input.charCodeAt(i);
+        hash = Math.imul(hash, 0x01000193);
+    }
+    return hash >>> 0;
+}
+
+export type ShipyardDenialReason =
+    | 'notStocked'
+    | 'availability'
+    | 'require'
+    | 'notAvailableToday'
+    | 'credits';
+
+export type ShipyardCheck =
+    | { allowed: true }
+    | { allowed: false, reason: ShipyardDenialReason, message: string };
+
+function denied(reason: ShipyardDenialReason, message: string):
+    ShipyardCheck {
+    return { allowed: false, reason, message };
+}
+
+/**
+ * Whether the docked shipyard STOCKS this ship (its tech level / SpecialTech
+ * gate — the same rule the outfitter uses). No planet context means "no
+ * shipyard", which stocks everything.
+ */
+export function shipStocked(ship: ShipData, ctx: ShipyardContext): boolean {
+    return !ctx.planet
+        || meetsTechLevel(ship.techLevel, ctx.planet);
+}
+
+/**
+ * Whether the ship is "available for sale" here today, in the sense the
+ * Flags3 0x4000 rule uses: stocked on tech, Require met, Availability
+ * passes, and the day's BuyRandom roll comes up. This deliberately ignores
+ * transient affordability (credits) — a full wallet or empty one does not
+ * change which ship the shop is OFFERING, only whether the player can take it.
+ */
+export function shipAvailableForSale(ship: ShipData,
+    ctx: ShipyardContext): boolean {
+    return shipStocked(ship, ctx)
+        && shipRequirementsMet(ship.require, ctx.contribute)
+        && shipAvailabilityPasses(ship, ctx)
+        && shipBuyRandomPasses(ship, ctx);
+}
+
+/**
+ * Every gate a ship must clear before the player is allowed to BUY it:
+ * stocked, Availability, Require, the day's BuyRandom roll. The Shipyard
+ * quotes this for its Buy button / purchase path; the grid quotes
+ * visibleShips, and the two share shipStocked/shipRequirementsMet/
+ * shipAvailabilityPasses/shipBuyRandomPasses underneath so they can never
+ * disagree.
+ */
+export function canBuyShip(ship: ShipData,
+    ctx: ShipyardContext): ShipyardCheck {
+    if (!shipStocked(ship, ctx)) {
+        return denied('notStocked', 'They don\'t sell this here.');
+    }
+    if (!shipAvailabilityPasses(ship, ctx)) {
+        return denied('availability', 'Not available.');
+    }
+    if (!shipRequirementsMet(ship.require, ctx.contribute)) {
+        return denied('require', 'You lack something this requires.');
+    }
+    if (!shipBuyRandomPasses(ship, ctx)) {
+        return denied('notAvailableToday',
+            'This ship isn\'t for sale today.');
+    }
+    return { allowed: true };
+}
+
+/**
+ * The numeric resource id inside a global id like "nova:128" (128), or
+ * null. Mirrors outfitter_rules.resourceNumber; kept local so these rules
+ * stay self-contained.
+ */
+function resourceNumber(globalId: string): number | null {
+    const parsed = parseInt(globalId.slice(globalId.lastIndexOf(':') + 1), 10);
+    return Number.isNaN(parsed) ? null : parsed;
+}
+
+/**
+ * A total order on ship global ids matching what the Flags3 0x4000 rule
+ * means by "higher-numbered": the numeric resource id. Mirrors
+ * outfitter_rules.compareOutfitIds — the original's shïp space is a single
+ * flat id space, so the resource NUMBER is what is compared (the NovaJS
+ * "prefix:" namespacing only breaks ties).
+ */
+export function compareShipIds(a: string, b: string): number {
+    const [numA, numB] = [resourceNumber(a), resourceNumber(b)];
+    if (numA !== numB) {
+        if (numA === null) return 1;
+        if (numB === null) return -1;
+        return numA - numB;
+    }
+    return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/**
+ * Whether this ship passes the BUY-side visibility gates before the 0x4000
+ * exclusion pass. Per the Bible, failing Availability or Require WITHOUT the
+ * matching 0x0100/0x0200 hide-flag is NOT a visibility failure: the
+ * ship still shows (greyed, purchase refused); only the hide-flags drop it.
+ */
+function buyVisible(ship: ShipData, ctx: ShipyardContext): boolean {
+    if (!shipStocked(ship, ctx)) {
+        return false;
+    }
+    if (ship.hideIfAvailabilityFalse
+        && !shipAvailabilityPasses(ship, ctx)) {
+        return false;
+    }
+    if (ship.hideIfRequireUnmet
+        && !shipRequirementsMet(ship.require, ctx.contribute)) {
+        return false;
+    }
+    return true;
+}
+
+/**
+ * The ships the shipyard shows, in display order (DispWeight descending —
+ * "Ships with a higher display weight are shown closer to the top of the
+ * shipyard dialog", Bible ~:2451 — with ties broken by ascending id for a
+ * deterministic, resource-order list).
+ *
+ * JUDGMENT CALL — BuyRandom does NOT hide a stocked ship here. The Bible's
+ * appearance-hiding language is attached only to Availability ("might appear in
+ * the shipyard but not be able to be purchased if its Availability evaluates
+ * to false") and Require, and to the two hide-flags 0x0100/0x0200 —
+ * never to the day roll. A ship that simply isn't for sale today still
+ * SHOWS (greyed), and its Buy is refused by canBuyShip's
+ * 'notAvailableToday'. This matches the observable original: the stock ship list
+ * is stable across a day, with individual ships greyed/refused, and the
+ * day roll affects only which of them can actually be bought. What IS
+ * day-sensitive here is the Flags3 0x4000 exclusion below, which keys on
+ * "available for sale today".
+ */
+export function visibleShips(ships: Iterable<ShipData>,
+    ctx: ShipyardContext): ShipData[] {
+    const ordered = [...ships].sort((a, b) =>
+        b.displayWeight - a.displayWeight
+        || compareShipIds(a.id, b.id));
+
+    // 0x4000 (~:2657): "When this ship is available for sale, it
+    // prevents all higher-numbered ship types with equal DispWeight from
+    // being made available for sale at the same time." Exclusion is driven
+    // only by ships that are themselves available for sale today, and it
+    // suppresses the higher-numbered equal-DispWeight ships the way the
+    // outfitter's 0x1000 does.
+    const excluders = ordered.filter(ship => ship.excludeEqualDisplayWeight
+        && shipAvailableForSale(ship, ctx));
+    const excluded = new Set<string>();
+    for (const excluder of excluders) {
+        for (const other of ordered) {
+            if (other.displayWeight === excluder.displayWeight
+                && compareShipIds(other.id, excluder.id) > 0) {
+                excluded.add(other.id);
+            }
+        }
+    }
+
+    return ordered.filter(ship =>
+        buyVisible(ship, ctx) && !excluded.has(ship.id));
+}
