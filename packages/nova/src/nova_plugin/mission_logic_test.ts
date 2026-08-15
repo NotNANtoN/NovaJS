@@ -1204,3 +1204,92 @@ describe('missionMapMarks', () => {
         ]);
     });
 });
+
+describe('the <SN> special ship name', () => {
+    // The stock bounty-hunter name list: mïsn nova:258 ("25000 Credit
+    // Bounty;Bounty Hunter1a") points ShipNameID at STR# nova:25000,
+    // "Auroran Warships".
+    const AURORAN_WARSHIPS = [
+        'Dechanik', 'Blood Honor', 'Frunch\'eck', 'Talons of Integrity',
+        'Warrior\'s Pride', 'Doomblade', 'Warrior\'s Path', 'Gjinchar',
+        'Swordsman\'s Song', 'Ytrack',
+    ];
+
+    function bountyMission(partial: Partial<MissionData> = {}): MissionData {
+        return makeMission({
+            id: 'nova:258',
+            name: '25000 Credit Bounty',
+            shipGoal: 0, shipCount: 1, shipDudeId: 'nova:240',
+            returnStel: 129, returnStelId: 'nova:129',
+            shipNames: AURORAN_WARSHIPS,
+            briefText: 'In the last few weeks a rogue Auroran ship, the '
+                + '<SN>, has slipped past Federation border patrols.',
+            ...partial,
+        });
+    }
+
+    function shipMachinery(state: MissionWorkingState,
+        missions: MissionData[], random: () => number) {
+        const machinery = makeMachinery(state, missions, {
+            systems: [{ id: 'nova:200', govt: null, links: [] }],
+            systemIdOfStellar: () => 'nova:200',
+        });
+        return { ...machinery, random };
+    }
+
+    it('picks the name from the ShipNameID list at accept', () => {
+        const mission = bountyMission();
+        const state = makeState();
+        // 0.55 * 10 = 5 -> "Doomblade".
+        const machinery = shipMachinery(state, [mission], () => 0.55);
+        acceptOffer(machinery,
+            makeMissionOffer(mission, machinery.offerContext())!);
+        expect(state.missions.get('nova:258')!.shipName).toBe('Doomblade');
+    });
+
+    it('leaves the name unset when the mission has no ShipNameID list', () => {
+        // mïsn nova:685 ("Assassinate Krane") is the stock example: its
+        // QuickBrief says "...in the <SN>" but ShipNameID is -1, so the
+        // original screws that up too.
+        const mission = bountyMission({ id: 'nova:685', shipNames: [] });
+        const state = makeState();
+        const machinery = shipMachinery(state, [mission], () => 0.55);
+        acceptOffer(machinery,
+            makeMissionOffer(mission, machinery.offerContext())!);
+        expect(state.missions.get('nova:685')!.shipName).toBeUndefined();
+    });
+
+    it('keeps the accepted name stable for the mission\'s whole life', () => {
+        const mission = bountyMission();
+        const state = makeState();
+        let roll = 0.55;
+        const machinery = shipMachinery(state, [mission], () => roll);
+        acceptOffer(machinery,
+            makeMissionOffer(mission, machinery.offerContext())!);
+        const active = state.missions.get('nova:258')!;
+        // Later randomness (spawns, NCB sets) must not re-roll it.
+        roll = 0.05;
+        expect(active.shipName).toBe('Doomblade');
+    });
+
+    it('carries the name on the events whose dëscs can use it', () => {
+        const mission = bountyMission({
+            completionText: 'The <SN> is scrap. Here is your bounty.',
+            payVal: 25000,
+        });
+        const state = makeState();
+        const machinery = shipMachinery(state, [mission], () => 0.55);
+        acceptOffer(machinery,
+            makeMissionOffer(mission, machinery.offerContext())!);
+        expect(state.events.find(e => e.type === 'accepted')!.specialShipName)
+            .toBe('Doomblade');
+        // The mission is gone from the player's state by the time the
+        // completion popup renders, so the event has to carry the name.
+        const active = state.missions.get('nova:258')!;
+        active.shipObjective!.satisfied = active.shipObjective!.total;
+        active.shipObjective!.complete = true;
+        processLanding(machinery, 'nova:129', 1010);
+        const completed = state.events.find(e => e.type === 'completed')!;
+        expect(completed.specialShipName).toBe('Doomblade');
+    });
+});

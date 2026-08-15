@@ -203,7 +203,18 @@ export async function buildMissionShipSpawns(playerEntity: Entity,
             objective.live = new Map();
             if (objective.systemId === null
                 || objective.systemId === systemId) {
+                // The mission's special ships all wear the name picked
+                // from its ShipNameID STR# list when the mission was
+                // accepted (mission_logic.ts), which is also what <SN>
+                // expands to — so the target pane and the briefing
+                // agree, and re-entering the system respawns the same
+                // name. Missions accepted before <SN> existed carry no
+                // shipName; they keep the old per-spawn random pick.
                 const names = mission?.shipNames ?? [];
+                const name = active.shipName
+                    ?? (names.length > 0
+                        ? names[Math.floor(random() * names.length)]
+                        : undefined);
                 for (let i = shipsToSpawn(objective); i > 0; i--) {
                     const ship = await buildShip(ctx, missionId,
                         objective.dudeId, {
@@ -211,8 +222,7 @@ export async function buildMissionShipSpawns(playerEntity: Entity,
                         shipStart: objective.shipStart,
                         behavior: objective.behavior,
                         goal: objective.goal,
-                        name: names.length > 0 ? names[
-                            Math.floor(random() * names.length)] : undefined,
+                        name,
                     });
                     if (ship) {
                         ships.push(ship);

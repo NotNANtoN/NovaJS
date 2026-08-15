@@ -37,6 +37,18 @@ export interface MissionTextSubstitutions {
     playerShipName?: string;
     /** <PST> the player's ship type name. */
     playerShipType?: string;
+    /**
+     * <SN> the mission's special ship name, drawn from the mïsn's
+     * ShipNameID STR# list when the mission was ACCEPTED and frozen on
+     * the ActiveMission (mission_logic.ts). Absent for a mission that
+     * has not been accepted yet — the Bible's documented broken case:
+     * "Nova will screw up if you use this in the initial mission
+     * description, as it doesn't pick the special ship names until you
+     * actually accept the mission." No stock mission puts <SN> in its
+     * offer text; the ones that use it do so in BriefText/QuickBrief
+     * and later dëscs, all of which see the accepted mission.
+     */
+    specialShipName?: string;
 }
 
 /**
@@ -77,6 +89,12 @@ export function expandMissionText(text: string,
         ['<PST>', subs.playerShipType ?? 'ship'],
         ['<PRK>', 'captain'],
         ['<SRK>', 'captain'],
+        // The <SN> fallback is deliberately article-free ("the <SN>" is
+        // how every stock mission phrases it, so "the unknown ship"
+        // reads as English): an unaccepted mission has no name yet, and
+        // the Bible's documented broken case should degrade to a
+        // generic phrase rather than leave a raw "<SN>" on screen.
+        ['<SN>', subs.specialShipName ?? 'unknown ship'],
     ];
     let expanded = conditional;
     for (const [tag, value] of replacements) {

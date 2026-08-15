@@ -24,7 +24,9 @@ import { Stat } from './stat.js';
 import { ControlBitsComponent } from './ncb_plugin.js';
 import { OutfitsState, OutfitsStateComponent } from './outfit_plugin.js';
 import { CombatRatingComponent, LegalRecordsComponent } from './reputation_plugin.js';
+import { isRight } from 'fp-ts/lib/Either.js';
 import {
+    ActiveMissionType,
     CreditsComponent,
     CronStatesComponent,
     GameDateComponent,
@@ -172,6 +174,38 @@ describe('save_game schema', () => {
         expect(restored.components.get(CombatRatingComponent))
             .toEqual({ kills: 420 });
     });
+
+    it('decodes an active mission saved before <SN> ship names existed',
+        () => {
+            // ActiveMission.shipName is a t.partial addition: a pilot
+            // file written by an older build has no such key, and must
+            // still decode (and restore) unchanged.
+            const legacyMission = {
+                id: 'nova:258',
+                acceptedDay: 430064,
+                acceptedAt: 'nova:172',
+                travelPlanet: null,
+                returnPlanet: 'nova:128',
+                cargoType: -1,
+                cargoQty: 0,
+                cargoLoaded: false,
+                travelDone: false,
+                deadlineDay: null,
+            };
+            const decoded = ActiveMissionType.decode(legacyMission);
+            expect(isRight(decoded)).toBe(true);
+            if (isRight(decoded)) {
+                expect(decoded.right.shipName).toBeUndefined();
+            }
+            // And a mission accepted by the current build round-trips
+            // its name.
+            const named = ActiveMissionType.decode(
+                { ...legacyMission, shipName: 'Doomblade' });
+            expect(isRight(named)).toBe(true);
+            if (isRight(named)) {
+                expect(named.right.shipName).toBe('Doomblade');
+            }
+        });
 
     it('loads a v1 save written before player state existed', () => {
         // Exactly what an old build wrote: only ship/outfits/system.

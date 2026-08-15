@@ -9,6 +9,7 @@ import { makeShip } from './make_ship.js';
 import {
     acceptOffer,
     LOCATION_BAR,
+    LOCATION_SHIP,
     LOCATION_MAIN_SPACEPORT,
     LOCATION_MISSION_COMPUTER,
     makeMissionOffer,
@@ -17,7 +18,9 @@ import {
     missionMatchesLocation,
     stellarVisible,
 } from './mission_logic.js';
-import { rollOffers } from '../spaceport/mission_offers.js';
+import { offerSubstitutions, rollOffers } from '../spaceport/mission_offers.js';
+import { expandMissionText } from './mission_text.js';
+import { buildMissionShipSpawns } from './mission_ship_spawn.js';
 import { GOAL_DESTROY } from './mission_ship_state.js';
 import { ControlBitsComponent } from './ncb_plugin.js';
 import { CombatRatingComponent } from './reputation_plugin.js';
@@ -321,6 +324,79 @@ describe('missions against real Nova data', () => {
                 .toBe(true);
             expect(entity.components.get(MissionsComponent)!.size).toBe(0);
         });
+
+    /**
+     * The <SN> wildcard against real data. mïsn nova:140 ("25000 Credit
+     * Bounty") is the plain bounty-hunter exemplar: a përs-offered
+     * bounty (AvailLoc 2, "offered from a ship") with one special ship
+     * (ShipCount 1, ShipGoal 0 "destroy", ShipDude nova:154) whose
+     * ShipNameID points at STR# nova:25000 "Auroran Warships". Its
+     * QuickBrief reads
+     *
+     *   "Locate and destroy the <SN> and then collect your bounty at
+     *    the Guild offices on the Kane Band."
+     *
+     * while its OFFER text (correctly, per the Bible's warning) uses no
+     * <SN> at all: "Apparently an Auroran ship has been raiding in and
+     * around this system.  The bounty for its destruction is 25000
+     * Federation credits."
+     */
+    it('picks a bounty target\'s name at accept and spends it on the '
+        + 'briefing and the ships (mïsn nova:140)', async () => {
+        const gameData = await getIntegrationGameData();
+        const universe = MissionUniverse.shared(gameData);
+        await universe.load();
+
+        const mission = await gameData.data.Mission.get('nova:140');
+        expect(mission.availLoc).toBe(LOCATION_SHIP);
+        expect(mission.shipCount).toBe(1);
+        expect(mission.shipGoal).toBe(GOAL_DESTROY);
+        // ShipNameID resolves to the STR# list verbatim.
+        const nameList = await gameData.data.StringTable.get('nova:25000');
+        expect(nameList.name).toBe('Auroran Warships');
+        expect(nameList.strings[0]).toBe('Dechanik');
+        expect(mission.shipNames).toEqual(nameList.strings);
+        expect(mission.quickBrief).toContain('destroy the <SN>');
+        // The Bible: <SN> in the initial description is broken because
+        // the name isn't picked until accept. The stock mission obeys.
+        expect(mission.offerText).not.toContain('<SN>');
+
+        const start = await gameData.data.PlayerStart.get('nova:128');
+        const shipData = await gameData.data.Ship.get(start.ship);
+        const entity = makeShip(shipData);
+        entity.components.set(GameDateComponent, { ...start.date });
+        entity.components.set(CreditsComponent, { credits: start.credits });
+        entity.components.set(ControlBitsComponent, new Set([0]));
+
+        const session = await MissionSession.create(
+            entity, gameData, universe, 'nova:128');
+        const ctx = session.machinery.offerContext();
+        const offer = makeMissionOffer(mission, ctx)!;
+
+        // Before the accept there is no name: the offer expands <SN> to
+        // the generic fallback.
+        expect(expandMissionText(mission.quickBrief,
+            offerSubstitutions(universe, session.currentDay, offer)))
+            .toContain('destroy the unknown ship');
+
+        acceptOffer(session.machinery, offer, session.outfits);
+        session.commit();
+        const active = entity.components.get(MissionsComponent)!
+            .get('nova:140')!;
+        expect(nameList.strings).toContain(active.shipName!);
+
+        // The briefing/QuickBrief now names the target...
+        const brief = expandMissionText(mission.quickBrief,
+            offerSubstitutions(universe, session.currentDay, offer, active));
+        expect(brief).toContain(`destroy the ${active.shipName}`);
+        expect(brief).not.toContain('<SN>');
+
+        // ...and the ship the player actually meets wears that name.
+        const ships = await buildMissionShipSpawns(entity, 'owner',
+            active.shipObjective!.systemId!, gameData, universe);
+        expect(ships.length).toBe(1);
+        expect(ships[0].name).toBe(active.shipName);
+    });
 
     it('fails a mission whose ship goal failed, at the next landing',
         async () => {
