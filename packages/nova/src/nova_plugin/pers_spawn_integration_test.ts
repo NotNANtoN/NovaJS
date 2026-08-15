@@ -160,22 +160,23 @@ describe('përs spawning against real Nova data', () => {
         expect(hulks.length).toBeGreaterThan(0);
 
         for (const hulk of hulks) {
-            // Disabled from spawn, with no self-repair scheduled.
+            // Disabled from spawn, with no self-repair scheduled, marked
+            // as a hulk (disabled regardless of armor).
             const disabled = hulk.components.get(DisabledComponent);
             expect(disabled).toBeDefined();
             expect(disabled!.repairAt).toBeNull();
+            expect(disabled!.hulk).toBeTrue();
 
-            // Armor pinned at/below the disable threshold so the existing
-            // ShipDisableSystem keeps the ship disabled; shields dropped.
+            // FULL armor and shields: the original's derelicts read
+            // "disabled" yet take a whole hull's worth of shots to
+            // destroy (Matthew's playtest observation, 2026-08-14).
             const shipData = hulk.components.get(ShipDataComponent);
             const armor = hulk.components.get(ArmorComponent);
             const shield = hulk.components.get(ShieldComponent);
             expect(shipData).toBeDefined();
             expect(armor).toBeDefined();
-            expect(armor!.current).toBeLessThanOrEqual(
-                shipData!.disableArmorFraction * armor!.max);
-            expect(armor!.current).toBeGreaterThan(0);
-            expect(shield!.current).toBe(0);
+            expect(armor!.current).toBe(armor!.max);
+            expect(shield!.current).toBe(shield!.max);
         }
     }, 120_000);
 });

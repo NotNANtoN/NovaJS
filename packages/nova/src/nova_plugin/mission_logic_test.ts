@@ -638,6 +638,57 @@ describe('accept / landing / completion flow', () => {
         expect(state.credits.credits).toBe(6000);
     });
 
+    it('emits the cargo-transfer dësc texts as landing events '
+        + '(the Kontik probe shape: silent drop reads as a stuck mission)',
+        () => {
+            const mission = makeMission({
+                id: 'nova:830',
+                travelStel: 315,
+                travelStelId: 'nova:315',
+                returnStel: -4,
+                cargoType: 1,
+                cargoQty: 5,
+                pickupMode: 1,   // pick up at travel stellar
+                dropOffMode: 0,  // drop off at travel stellar too
+                payVal: 50000,
+                loadCargoText: 'You take the probe aboard.',
+                dropOffCargoText: 'You launch the probe over <DST>.',
+            });
+            const state = makeState();
+            const machinery = makeMachinery(state, [mission]);
+            const offer = makeMissionOffer(mission, machinery.offerContext());
+            acceptOffer(machinery, offer!);
+
+            processLanding(machinery, 'nova:315', 1001);
+            const loaded = state.events.find(e => e.type === 'cargoLoaded');
+            const dropped = state.events.find(e => e.type === 'cargoDropped');
+            expect(loaded?.text).toBe('You take the probe aboard.');
+            expect(dropped?.text).toBe('You launch the probe over <DST>.');
+            // One event per transfer: a later landing at the same stellar
+            // (travel already done) must not repeat them.
+            processLanding(machinery, 'nova:315', 1002);
+            expect(state.events.filter(e => e.type === 'cargoDropped').length)
+                .toBe(1);
+        });
+
+    it('emits no cargo-transfer events when the dësc ids are unset', () => {
+        const mission = makeMission({
+            id: 'nova:211',
+            travelStel: 130,
+            travelStelId: 'nova:130',
+            returnStel: -1,
+            cargoType: 0, cargoQty: 1, pickupMode: 0, dropOffMode: 0,
+            payVal: 100,
+        });
+        const state = makeState();
+        const machinery = makeMachinery(state, [mission]);
+        const offer = makeMissionOffer(mission, machinery.offerContext());
+        acceptOffer(machinery, offer!);
+        processLanding(machinery, 'nova:130', 1001);
+        expect(state.events.some(e => e.type === 'cargoLoaded'
+            || e.type === 'cargoDropped')).toBeFalse();
+    });
+
     // The real MissionSession recomputes freeCargoSpace from the current
     // cargo on every offerContext() call; the default makeMachinery freezes
     // it. This variant mirrors the session so accept-time re-checks (L3/L4)

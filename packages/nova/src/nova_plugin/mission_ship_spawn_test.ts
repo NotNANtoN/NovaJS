@@ -1,10 +1,13 @@
 import 'jasmine';
 import { getDefaultDudeData } from 'novadatainterface/dude_data';
+import { getDefaultGovtData } from 'novadatainterface/govt_data';
 import { getDefaultMissionData, MissionData } from 'novadatainterface/mission_data';
 import { getDefaultShipData } from 'novadatainterface/ship_data';
 import { MockGameData } from 'novadatainterface/mock_game_data';
 import { Entity } from 'nova_ecs/entity';
+import { DisabledComponent } from './disabled_component.js';
 import { FiringGroupComponent } from './firing_group.js';
+import { ArmorComponent } from './health_plugin.js';
 import { MissionShipComponent } from './mission_ship_plugin.js';
 import {
     buildMissionShipSpawns,
@@ -105,6 +108,42 @@ describe('buildMissionShipSpawns', () => {
             // Goal targets must not auto-depart.
             expect(ship.components.get(NpcComponent)?.departAt)
                 .toBe(MISSION_SHIP_NO_DEPART_MS);
+        }
+    });
+
+    it('spawns a derelict-govt mission ship disabled with full stats '
+        + '(the Kontik probe\'s Aurora Cruiser)', async () => {
+        const objective = makeObjective({ satisfied: 1 });
+        const player = makePlayer(objective);
+        const gameData = makeGameData();
+        gameData.data.Govt.map.set('nova:200', {
+            ...getDefaultGovtData(),
+            id: 'nova:200',
+            flags: {
+                ...getDefaultGovtData().flags,
+                startsDisabled: true,
+            },
+        });
+        const ships = await buildMissionShipSpawns(player, OWNER,
+            'nova:128', gameData, makeUniverse());
+        expect(ships.length).toBeGreaterThan(0);
+        for (const ship of ships) {
+            const disabled = ship.components.get(DisabledComponent);
+            expect(disabled).toBeDefined();
+            expect(disabled!.repairAt).toBeNull();
+            expect(disabled!.hulk).toBeTrue();
+            const armor = ship.components.get(ArmorComponent);
+            expect(armor!.current).toBe(armor!.max);
+        }
+    });
+
+    it('leaves an ordinary-govt mission ship enabled', async () => {
+        const player = makePlayer(makeObjective({ satisfied: 1 }));
+        const ships = await buildMissionShipSpawns(player, OWNER,
+            'nova:128', makeGameData(), makeUniverse());
+        expect(ships.length).toBeGreaterThan(0);
+        for (const ship of ships) {
+            expect(ship.components.get(DisabledComponent)).toBeUndefined();
         }
     });
 

@@ -384,7 +384,9 @@ export class Spaceport extends Menu<Entity> {
                 continue;
             }
             if (event.type === 'completed' || event.type === 'failed'
-                || event.type === 'autoAborted' || event.type === 'shipDone') {
+                || event.type === 'autoAborted' || event.type === 'shipDone'
+                || event.type === 'cargoLoaded'
+                || event.type === 'cargoDropped') {
                 const text = expandMissionText(event.text, {
                     ...identity,
                     returnStellar: this.universe.planetName(this.id),

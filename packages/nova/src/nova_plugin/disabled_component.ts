@@ -38,9 +38,23 @@ import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_
  * it back online, or null when the ship has no self-repair (no repair
  * outfit and not player-controlled) and must wait for outside help.
  */
-export const DisabledState = t.type({
-    repairAt: t.union([t.number, t.null]),
-});
+export const DisabledState = t.intersection([
+    t.type({
+        repairAt: t.union([t.number, t.null]),
+    }),
+    // Additive (t.partial: wire/save records without it stay decodable).
+    t.partial({
+        /**
+         * A spawn-disabled derelict (gövt Flags1 0x0800): disabled with
+         * FULL shields and armor — the original's derelicts read
+         * "disabled" yet take a whole hull's worth of shots to destroy
+         * (Matthew's playtest observation, 2026-08-14). ShipDisableSystem
+         * must NOT re-enable a hulk just because its armor sits above the
+         * disable threshold; only an external repair (boarding) clears it.
+         */
+        hulk: t.literal(true),
+    }),
+]);
 export type DisabledState = t.TypeOf<typeof DisabledState>;
 export const DisabledComponent = new Component<DisabledState>('DisabledComponent');
 

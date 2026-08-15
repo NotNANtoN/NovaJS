@@ -183,6 +183,26 @@ describe('ship disabling in a live world', () => {
         world.emit(ShipControlEvent, undefined, [SHIP]);
     }
 
+    it('keeps a full-armor hulk disabled, and un-disables it only when '
+        + 'the component is deleted (boarding repair)', async () => {
+        const { world, ship } = await shipWorld('nova:128');
+        // A spawn-disabled derelict: full armor + shields, hulk flag
+        // (Matthew's playtest observation: the original's derelicts read
+        // "disabled" yet take a whole hull's worth of shots to destroy).
+        ship.components.set(DisabledComponent,
+            { repairAt: null, hulk: true });
+        world.step();
+        world.step();
+        // Armor is far above the threshold, but the hulk stays disabled.
+        expect(armorOf(ship).current).toBe(armorOf(ship).max);
+        expect(ship.components.get(DisabledComponent)).toBeDefined();
+        // Boarding repair deletes the component; the ship comes back and
+        // stays back (armor was never below the threshold).
+        ship.components.delete(DisabledComponent);
+        world.step();
+        expect(ship.components.get(DisabledComponent)).toBeUndefined();
+    });
+
     it('enters at 33% for a Shuttle and NOT at 33% for a Fed Destroyer',
         async () => {
             {

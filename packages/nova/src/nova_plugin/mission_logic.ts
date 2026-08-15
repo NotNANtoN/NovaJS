@@ -662,7 +662,7 @@ export interface MissionEvent {
     missionId: string;
     missionName: string;
     type: 'completed' | 'failed' | 'aborted' | 'accepted' | 'autoAborted'
-        | 'shipDone';
+        | 'shipDone' | 'cargoLoaded' | 'cargoDropped';
     /** The mission's dësc text for this event ('' if none). */
     text: string;
     /**
@@ -1204,9 +1204,34 @@ export function processLanding(machinery: MissionMachineryContext,
             let transferred = true;
             if (mission.pickupMode === 1) {
                 transferred = loadMissionCargo(state, active);
+                if (transferred && mission.loadCargoText) {
+                    // The LoadCargText dësc, as a landing popup — without
+                    // it, picking up the cargo is silent and the player
+                    // can't tell the stop registered.
+                    state.events.push({
+                        missionId: mission.id,
+                        missionName: mission.name,
+                        type: 'cargoLoaded',
+                        text: mission.loadCargoText,
+                        pict: mission.loadCargoPict,
+                    });
+                }
             }
             if (mission.dropOffMode === 0) {
                 unloadMissionCargo(state, active);
+                if (mission.dropOffCargoText) {
+                    // The DropCargText dësc (e.g. the Kontik probe's desc
+                    // 8781) — the original shows it when the cargo is
+                    // dropped at the travel stellar; landing "silently
+                    // working" reads as the mission being stuck.
+                    state.events.push({
+                        missionId: mission.id,
+                        missionName: mission.name,
+                        type: 'cargoDropped',
+                        text: mission.dropOffCargoText,
+                        pict: mission.dropOffCargoPict,
+                    });
+                }
             }
             if (transferred) {
                 active.travelDone = true;

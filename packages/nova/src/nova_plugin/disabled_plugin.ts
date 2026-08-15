@@ -106,6 +106,13 @@ export const ShipDisableSystem = new System({
             return;
         }
 
+        // A spawn-disabled hulk keeps full armor yet stays disabled: only
+        // an external repair that DELETES the component (boarding) brings
+        // it back online, so the threshold rules below don't apply.
+        if (disabled.hulk) {
+            return;
+        }
+
         // Outside repair (boarding, death-respawn refill, plug effects):
         // armor back above the threshold re-enables the ship.
         if (!isBelowDisableThreshold(armor, fraction)) {

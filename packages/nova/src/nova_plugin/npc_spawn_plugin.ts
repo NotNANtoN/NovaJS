@@ -605,37 +605,63 @@ export function applyStartsDisabled(entity: Entity,
         return;
     }
     const govtData = gameData.data.Govt.getCached(govt);
-    if (!govtData?.flags.startsDisabled) {
-        return;
-    }
     const shipData = entity.components.get(ShipDataComponent);
     const physics = entity.components.get(ShipPhysicsComponent);
     if (!shipData || !physics) {
         return;
     }
+    applyStartsDisabledData(entity, govtData, {
+        disableArmorFraction: shipData.disableArmorFraction,
+        armor: physics.armor,
+        armorRecharge: physics.armorRecharge,
+        shield: physics.shield,
+        shieldRecharge: physics.shieldRecharge,
+    });
+}
+
+/**
+ * The data-driven core of {@link applyStartsDisabled}, for spawn paths
+ * that hold the govt/ship data directly instead of derived entity
+ * components — mission special ships are built client-side and inserted
+ * through the input-record path BEFORE any provider system has run, so
+ * there is no ShipPhysicsComponent to read yet (the Kontik-probe derelict
+ * Aurora flew around happily because this never applied there).
+ */
+export function applyStartsDisabledData(entity: Entity,
+    govtData: GovtData | undefined,
+    stats: {
+        disableArmorFraction: number,
+        armor: number, armorRecharge: number,
+        shield: number, shieldRecharge: number,
+    }): void {
+    if (!govtData?.flags.startsDisabled) {
+        return;
+    }
     // deriveEntityComponents provides ShipData/physics but NOT armor or
     // shields (those are provider systems that first run a tick later), so
     // seed proper Stats here to make the hull fully formed at insertion.
-    // Armor is pinned at the disable threshold — isBelowDisableThreshold
-    // uses <=, so ShipDisableSystem keeps the ship disabled rather than
-    // re-enabling it — and shields are dropped. The provider systems
-    // preserve `current` on the next tick (armor?.current ?? physics.armor),
-    // so the low values persist; recharge stays suspended while disabled.
+    // FULL armor and shields: the original's derelicts read "disabled" yet
+    // take a whole hull's worth of shots to destroy (Matthew's playtest
+    // observation vs the Kontik Aurora, 2026-08-14) — the disabled state
+    // is the `hulk` flag, not a low armor value, and ShipDisableSystem
+    // leaves a hulk disabled regardless of its armor. The provider systems
+    // preserve `current` on the next tick (armor?.current ?? physics.armor);
+    // recharge stays suspended while disabled.
     entity.components.set(ArmorComponent, new Stat({
-        current: shipData.disableArmorFraction * physics.armor,
-        max: physics.armor,
+        current: stats.armor,
+        max: stats.armor,
         min: 0,
-        recharge: physics.armorRecharge,
+        recharge: stats.armorRecharge,
     }));
     entity.components.set(ShieldComponent, new Stat({
-        current: 0,
-        max: physics.shield,
-        min: -physics.shield * 0.05,
-        recharge: physics.shieldRecharge,
+        current: stats.shield,
+        max: stats.shield,
+        min: -stats.shield * 0.05,
+        recharge: stats.shieldRecharge,
     }));
     // Disabled from tick 0 (repairAt null: an NPC hulk never self-repairs,
     // so no Random is drawn — pure, peer-identical genesis state).
-    entity.components.set(DisabledComponent, { repairAt: null });
+    entity.components.set(DisabledComponent, { repairAt: null, hulk: true });
 }
 
 /** Jump-in kinematics: where an arriving NPC appears and how it moves

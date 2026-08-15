@@ -11,6 +11,7 @@ import { MissionShipComponent } from './mission_ship_plugin.js';
 import { GOAL_CHASE_OFF, GOAL_ESCORT, shipsToSpawn } from './mission_ship_state.js';
 import { FormationComponent, NpcComponent } from './npc_ai_plugin.js';
 import {
+    applyStartsDisabledData,
     INITIAL_SPAWN_HALF_SIZE,
     jumpInState,
     makeNpcShip,
@@ -123,6 +124,26 @@ async function buildShip(ctx: SpawnContext, missionId: string,
         mission: missionId,
         owner: ctx.ownerUuid,
         ...(options.aux ? { aux: true } : {}),
+    });
+    // Derelict-govt (gövt Flags1 0x0800) mission ships spawn disabled
+    // like every other spawn path — e.g. the Kontik probe's derelict
+    // Aurora Cruiser, which otherwise flies around alive and well. This
+    // path builds ships client-side before any provider system runs, so
+    // the data-driven variant seeds the stats directly from ShipData.
+    let govtData: GovtData | undefined;
+    if (dude.govt) {
+        try {
+            govtData = await ctx.gameData.data.Govt.get(dude.govt);
+        } catch {
+            // Unknown govt: not a derelict; spawn normally.
+        }
+    }
+    applyStartsDisabledData(ship, govtData, {
+        disableArmorFraction: shipData.disableArmorFraction,
+        armor: shipData.physics.armor,
+        armorRecharge: shipData.physics.armorRecharge,
+        shield: shipData.physics.shield,
+        shieldRecharge: shipData.physics.shieldRecharge,
     });
     if (options.aux) {
         return ship;
