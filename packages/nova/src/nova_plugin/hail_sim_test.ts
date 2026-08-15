@@ -236,6 +236,91 @@ describe('applyHail: request assistance', () => {
         expect(target(world).components.has(AssistingComponent)).toBeFalse();
     });
 
+    it('REFUSES a ship that is busy fighting someone else, and leaves its '
+        + 'combat state untouched', async () => {
+            // Matthew's playtest bug: a ship in the middle of a fight would
+            // agree to assist — turning toward the player while still firing
+            // at its opponent. It must refuse ("I'm busy") instead.
+            const { world, addShip } = await makeWorld();
+            player(world).components.set(DisabledComponent, { repairAt: null });
+            await addShip('bystander', 900, 0);
+            await addShip('target', 150, 0, ship => {
+                ship.components.set(GovtComponent, { id: 'test:meek' });
+                ship.components.set(NpcComponent,
+                    { aiType: 3, mode: 'attack', aggressor: 'bystander' });
+                ship.components.set(TargetComponent, { target: 'bystander' });
+            });
+
+            applyHail(world, PEER,
+                { kind: 'requestAssistance', target: 'target' });
+
+            expect(target(world).components.has(AssistingComponent))
+                .toBeFalse();
+            // Its fight is undisturbed: same mode, same target.
+            const npc = target(world).components.get(NpcComponent)!;
+            expect(npc.mode).toBe('attack');
+            expect(target(world).components.get(TargetComponent)!.target)
+                .toBe('bystander');
+        });
+
+    it('assists once the fight is over and the ship is re-hailed', async () => {
+        // The refusal is a state, not a grudge: the same ship helps as soon
+        // as it is no longer fighting.
+        const { world, addShip } = await makeWorld();
+        player(world).components.set(DisabledComponent, { repairAt: null });
+        await addShip('bystander', 900, 0);
+        await addShip('target', 150, 0, ship => {
+            ship.components.set(GovtComponent, { id: 'test:meek' });
+            ship.components.set(NpcComponent,
+                { aiType: 3, mode: 'attack' });
+            ship.components.set(TargetComponent, { target: 'bystander' });
+        });
+        applyHail(world, PEER,
+            { kind: 'requestAssistance', target: 'target' });
+        expect(target(world).components.has(AssistingComponent)).toBeFalse();
+
+        // The fight ends.
+        const npc = target(world).components.get(NpcComponent)!;
+        npc.mode = undefined;
+        target(world).components.get(TargetComponent)!.target = undefined;
+
+        applyHail(world, PEER,
+            { kind: 'requestAssistance', target: 'target' });
+        expect(target(world).components.get(AssistingComponent))
+            .toEqual({ client: 'player' });
+    });
+
+    it('still assists a ship whose attack mode has no target', async () => {
+        // "Busy" is the fire-control condition (mode AND a target); an
+        // attack mode with nothing targeted is not shooting at anyone.
+        const { world, addShip } = await makeWorld();
+        player(world).components.set(DisabledComponent, { repairAt: null });
+        await addShip('target', 150, 0, ship => {
+            ship.components.set(GovtComponent, { id: 'test:meek' });
+            ship.components.set(NpcComponent, { aiType: 3, mode: 'attack' });
+            ship.components.set(TargetComponent, { target: undefined });
+        });
+        applyHail(world, PEER,
+            { kind: 'requestAssistance', target: 'target' });
+        expect(target(world).components.get(AssistingComponent))
+            .toEqual({ client: 'player' });
+    });
+
+    it('still assists a ship that is fleeing', async () => {
+        const { world, addShip } = await makeWorld();
+        player(world).components.set(DisabledComponent, { repairAt: null });
+        await addShip('bystander', 900, 0);
+        await addShip('target', 150, 0, ship => {
+            ship.components.set(GovtComponent, { id: 'test:meek' });
+            ship.components.set(NpcComponent, { aiType: 3, mode: 'flee' });
+            ship.components.set(TargetComponent, { target: 'bystander' });
+        });
+        applyHail(world, PEER,
+            { kind: 'requestAssistance', target: 'target' });
+        expect(target(world).components.get(AssistingComponent))
+            .toEqual({ client: 'player' });
+    });
+
     it('an alongside assister repairs and refuels the client, then leaves',
         async () => {
             const { world, addShip } = await makeWorld();

@@ -3,6 +3,10 @@ import { getIntegrationGameData } from '../communication/simulation_test_fixture
 import {
     NO_SHIPS_FOR_HIRE, NO_SHIPS_FOR_HIRE_INDEX, NO_SHIPS_FOR_HIRE_TABLE,
 } from '../spaceport/hire_escort.js';
+import {
+    busyResponseText, BUSY_RESPONSE_COUNT, BUSY_RESPONSE_FALLBACK,
+    BUSY_RESPONSE_FIRST_INDEX, HAIL_RESPONSE_TABLE,
+} from './hail.js';
 
 // These assertions run against the real Nova game data (Nova_Data). They
 // pin the STR# and dësc resources the title screen and the bar read their
@@ -34,6 +38,46 @@ describe('StringTable against real Nova data', () => {
         expect(table.strings[222])
             .toBe('There are no ships available for purchase here.');
     });
+
+    it('pins the ship-comm busy responses (STR# 3000, indices 80-84)',
+        async () => {
+            // The stock comm-response table runs in groups of five
+            // interchangeable variants. The group at 75-79 GRANTS assistance
+            // ("All right, I'll help you."); the group at 80-84 is the BUSY
+            // refusal a ship in the middle of a fight answers with, which is
+            // what hail.ts's busyResponseText draws from.
+            const gameData = await getIntegrationGameData();
+            const table =
+                await gameData.data.StringTable.get(HAIL_RESPONSE_TABLE);
+            const busy = table.strings.slice(BUSY_RESPONSE_FIRST_INDEX,
+                BUSY_RESPONSE_FIRST_INDEX + BUSY_RESPONSE_COUNT);
+            expect(busy).toEqual([
+                "I'm busy.",
+                "I'm a little busy right now.",
+                "I'm too busy to help you.",
+                'I have other business.',
+                "I've got other things to do.",
+            ]);
+            // The hardcoded fallback must stay in step with the data.
+            expect(table.strings[BUSY_RESPONSE_FIRST_INDEX])
+                .toBe(BUSY_RESPONSE_FALLBACK);
+            // The neighbouring group is the ACCEPTANCE, not another refusal —
+            // an off-by-five in the index would land the dialog there.
+            expect(table.strings[BUSY_RESPONSE_FIRST_INDEX - 5])
+                .toBe("All right, I'll help you.");
+        });
+
+    it('answers every busy seed with a real line from the stock table',
+        async () => {
+            const gameData = await getIntegrationGameData();
+            const table =
+                await gameData.data.StringTable.get(HAIL_RESPONSE_TABLE);
+            const busy = table.strings.slice(BUSY_RESPONSE_FIRST_INDEX,
+                BUSY_RESPONSE_FIRST_INDEX + BUSY_RESPONSE_COUNT);
+            for (const seed of [0, 1, 2, 3, 4, 987654]) {
+                expect(busy).toContain(busyResponseText(table.strings, seed));
+            }
+        });
 
     it('exposes string tables in the id list', async () => {
         const gameData = await getIntegrationGameData();

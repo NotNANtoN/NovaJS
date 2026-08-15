@@ -19,6 +19,7 @@ import { ArmorComponent, FuelComponent, ShieldComponent } from './health_plugin.
 import {
     bribeAmount,
     canRequestAssistance,
+    shipIsFighting,
     shipTakesBribes,
 } from './hail.js';
 import { shipDisposition } from './iff_plugin.js';
@@ -147,6 +148,25 @@ export function applyHail(world: World, peerId: string | undefined,
             playerNeedsHelp: playerNeedsHelp(player),
             govt: targetGovt,
             attackingPlayer,
+        })) {
+            return;
+        }
+        // BUSY: a ship in the middle of a fight refuses ("I'm busy" — STR#
+        // 3000 index 80-84, rendered by the dialog) and is left completely
+        // alone. Returning here is the whole refusal: no AssistingComponent
+        // means NpcDecisionSystem never yields its brain, AssistBehaviorSystem
+        // never steers it, and its target and firing state are untouched — the
+        // playtest bug was an assisting ship flying at the player while still
+        // shooting its opponent.
+        //
+        // Checked AFTER canRequestAssistance so the ineligible cases (healthy
+        // player, hostile govt) keep their existing outcomes, and evaluated
+        // from synced state with the same predicate the dialog uses, so every
+        // peer refuses on the same tick.
+        if (shipIsFighting({
+            npcMode: targetNpcMode,
+            npcTarget: target.components.get(TargetComponent)?.target,
+            shootsAllWeapons: target.components.has(ShootAllWeaponsComponent),
         })) {
             return;
         }

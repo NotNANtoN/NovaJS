@@ -1,3 +1,4 @@
+import { Entity } from 'nova_ecs/entity';
 import { EcsEvent } from 'nova_ecs/events';
 import { Plugin } from 'nova_ecs/plugin';
 import { Resource } from 'nova_ecs/resource';
@@ -12,13 +13,18 @@ import { DisplayAssetDataResource, SimulationGameDataResource } from '../nova_pl
 import { GovtComponent } from '../nova_plugin/govt_component.js';
 import {
     bribeAmount,
+    busyResponseText,
+    BUSY_RESPONSE_FALLBACK,
     canRequestAssistance,
     greetingText,
+    HAIL_RESPONSE_TABLE,
     hashString,
     hostileText,
     shipHailResponse,
+    shipIsFighting,
     shipTakesBribes,
 } from '../nova_plugin/hail.js';
+import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data.js';
 import { HailAction } from '../nova_plugin/hail_plugin.js';
 import { SoundEvent } from '../nova_plugin/sound_plugin.js';
 import { FuelComponent } from '../nova_plugin/health_plugin.js';
@@ -88,14 +94,76 @@ function playerNeedsHelp(entity: ReturnType<typeof getPlayerShip>): boolean {
 }
 
 /**
+ * Whether a hailed ship is busy fighting, read off the same synced components
+ * the simulation's applyHail reads (hail_plugin.ts) and passed through the one
+ * shared predicate, so the dialog's answer and the sim's refusal agree.
+ */
+export function targetIsFighting(target: Entity): boolean {
+    return shipIsFighting({
+        npcMode: target.components.get(NpcComponent)?.mode,
+        npcTarget: target.components.get(TargetComponent)?.target,
+        shootsAllWeapons: target.components.has(ShootAllWeaponsComponent),
+    });
+}
+
+/**
+ * What pressing "Request Assistance" gets: the ship's refusal line when it is
+ * busy fighting, or undefined when the request should be dispatched to the
+ * simulation.
+ *
+ * Evaluated at the moment of the press (not when the channel was opened) so a
+ * ship that got into a fight while the dialog was up still answers honestly.
+ * The simulation's applyHail re-checks the SAME predicate over the SAME synced
+ * components and is the authority; this exists so the player SEES the refusal
+ * instead of pressing a button that silently does nothing.
+ */
+export function assistRefusal(world: World, targetUuid: string | undefined,
+    busyText: string): string | undefined {
+    if (!targetUuid) {
+        return undefined;
+    }
+    const target = world.entities.get(targetUuid);
+    return target && targetIsFighting(target) ? busyText : undefined;
+}
+
+/**
+ * The busy-refusal line for a hailed ship, resolved from STR# 3000 (the stock
+ * comm-response table) ahead of time, because the assist button's handler is
+ * synchronous. Seeded by the ship's uuid so the line is stable per encounter
+ * and identical on every peer. Falls back to the pinned literal if the table
+ * is unavailable, exactly as noShipsForHire does (spaceport/hire_escort.ts).
+ */
+async function resolveBusyText(
+    displayAssets: DisplayAssetDataInterface | undefined,
+    targetUuid: string): Promise<string> {
+    if (!displayAssets) {
+        return BUSY_RESPONSE_FALLBACK;
+    }
+    try {
+        const table =
+            await displayAssets.data.StringTable.get(HAIL_RESPONSE_TABLE);
+        return busyResponseText(table.strings, hashString(targetUuid));
+    } catch {
+        return BUSY_RESPONSE_FALLBACK;
+    }
+}
+
+/**
  * Computes the dialog context for the player's current target (ship or, if no
  * ship is targeted, the selected planet). Returns undefined when there is
  * nothing to hail. Async: loads govt / pers game data.
+ *
+ * `busyText` is the line the ship answers an assistance request with IF it
+ * turns out to be busy when the player presses the button (the press itself
+ * is what decides — see the plugin's requestAssistance callback).
  */
 export async function computeContext(world: World,
-    gameData: SimulationGameDataInterface):
-    Promise<{ context: HailContext, target: string, isEscort: boolean }
-        | undefined> {
+    gameData: SimulationGameDataInterface,
+    displayAssets?: DisplayAssetDataInterface):
+    Promise<{
+        context: HailContext, target: string, isEscort: boolean,
+        busyText: string,
+    } | undefined> {
     const player = getPlayerShip(world);
     if (!player) {
         return undefined;
@@ -174,6 +242,7 @@ export async function computeContext(world: World,
                         : fighterName,
                 },
                 target: shipTargetUuid, isEscort: false,
+                busyText: BUSY_RESPONSE_FALLBACK,
             };
         }
 
@@ -194,6 +263,7 @@ export async function computeContext(world: World,
                     escort: true,
                 },
                 target: shipTargetUuid, isEscort: true,
+                busyText: BUSY_RESPONSE_FALLBACK,
             };
         }
 
@@ -206,6 +276,7 @@ export async function computeContext(world: World,
                     body: 'There is no response.',
                 },
                 target: shipTargetUuid, isEscort: false,
+                busyText: BUSY_RESPONSE_FALLBACK,
             };
         }
         if (response.kind === 'hostile') {
@@ -222,6 +293,7 @@ export async function computeContext(world: World,
                     bribe,
                 },
                 target: shipTargetUuid, isEscort: false,
+                busyText: BUSY_RESPONSE_FALLBACK,
             };
         }
         // Ordinary greeting: a përs quote, else a real line from the govt's
@@ -238,11 +310,19 @@ export async function computeContext(world: World,
             disposition, playerNeedsHelp: playerNeedsHelp(player), govt,
             attackingPlayer,
         }) ? { free: !!govt?.flags2.roadsideAssistance } : undefined;
+        // The OFFER is not withdrawn for a ship that happens to be fighting:
+        // the player asks and is told "I'm busy", exactly as the original's
+        // comm dialog answers with a line from the response table. Only the
+        // line is resolved here (the press decides whether it is used), and
+        // only when there is an offer to refuse.
+        const busyText = assist
+            ? await resolveBusyText(displayAssets, shipTargetUuid)
+            : BUSY_RESPONSE_FALLBACK;
         return {
             context: {
                 variant: 'ship', heading, image, body, assist,
             },
-            target: shipTargetUuid, isEscort: false,
+            target: shipTargetUuid, isEscort: false, busyText,
         };
     }
 
@@ -269,6 +349,7 @@ export async function computeContext(world: World,
         return {
             context: { variant: 'planet', heading, image, body },
             target: planetTargetUuid, isEscort: false,
+            busyText: BUSY_RESPONSE_FALLBACK,
         };
     }
 
@@ -289,15 +370,25 @@ export const HailDialogPlugin: Plugin = {
         }
 
         let currentTarget: string | undefined;
+        let currentBusyText = BUSY_RESPONSE_FALLBACK;
         const dialog = new HailDialog(displayAssets, controls, {
             requestAssistance: () => {
-                if (currentTarget) {
-                    world.emit(HailRequestEvent, {
-                        action: {
-                            kind: 'requestAssistance', target: currentTarget,
-                        },
-                    });
+                if (!currentTarget) {
+                    return undefined;
                 }
+                // BUSY SHIPS REFUSE, and nothing is dispatched for them —
+                // the ship's combat behavior is left completely untouched.
+                const refusal = assistRefusal(world, currentTarget,
+                    currentBusyText);
+                if (refusal !== undefined) {
+                    return refusal;
+                }
+                world.emit(HailRequestEvent, {
+                    action: {
+                        kind: 'requestAssistance', target: currentTarget,
+                    },
+                });
+                return undefined;
             },
             bribe: () => {
                 if (currentTarget) {
@@ -323,11 +414,13 @@ export const HailDialogPlugin: Plugin = {
             }
             opening = true;
             try {
-                const computed = await computeContext(world, simulationData);
+                const computed = await computeContext(world, simulationData,
+                    displayAssets);
                 if (!computed) {
                     return;
                 }
                 currentTarget = computed.target;
+                currentBusyText = computed.busyText;
                 // Re-add to move above later-added containers (spaceport).
                 stage.addChild(dialog.container);
                 dialog.container.position.set(

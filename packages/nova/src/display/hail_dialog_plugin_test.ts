@@ -11,7 +11,15 @@ import { PersComponent } from '../nova_plugin/pers_plugin.js';
 import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin.js';
 import { ShipDataComponent } from '../nova_plugin/ship_plugin.js';
 import { TargetComponent } from '../nova_plugin/target_component.js';
-import { computeContext } from './hail_dialog_plugin.js';
+import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data.js';
+import { DisabledComponent } from '../nova_plugin/disabled_component.js';
+import {
+    BUSY_RESPONSE_FALLBACK, BUSY_RESPONSE_FIRST_INDEX, HAIL_RESPONSE_TABLE,
+} from '../nova_plugin/hail.js';
+import { ShootAllWeaponsComponent } from '../nova_plugin/npc_plugin.js';
+import {
+    assistRefusal, computeContext, targetIsFighting,
+} from './hail_dialog_plugin.js';
 
 const PLAYER = 'player-uuid';
 const TARGET = 'target-uuid';
@@ -126,5 +134,118 @@ describe('computeContext: behavioral hostility (attacking neutral)', () => {
         // Behavioral hostility → the hostile body line, and NO assistance offer.
         expect(result?.context.assist).toBeUndefined();
         expect(result?.context.body).toContain('hostility');
+    });
+});
+
+/**
+ * The "I'm busy" refusal. The OFFER is still made to a fighting ship — the
+ * player asks and is told no, as the original's comm dialog answers with a
+ * line from the response table — so the decision happens on the press, which
+ * is what assistRefusal answers.
+ */
+describe('hail assistance refusal (busy ships)', () => {
+    /** A display-asset stub carrying the stock busy group of STR# 3000. */
+    function fakeDisplayAssets(): DisplayAssetDataInterface {
+        const strings: string[] = [];
+        strings[BUSY_RESPONSE_FIRST_INDEX] = "I'm busy.";
+        strings[BUSY_RESPONSE_FIRST_INDEX + 1] = "I'm a little busy right now.";
+        strings[BUSY_RESPONSE_FIRST_INDEX + 2] = "I'm too busy to help you.";
+        strings[BUSY_RESPONSE_FIRST_INDEX + 3] = 'I have other business.';
+        strings[BUSY_RESPONSE_FIRST_INDEX + 4] = "I've got other things to do.";
+        return {
+            data: {
+                StringTable: {
+                    get: async (id: string) => id === HAIL_RESPONSE_TABLE
+                        ? { strings } : { strings: [] },
+                },
+            },
+        } as unknown as DisplayAssetDataInterface;
+    }
+
+    /** A world whose player needs help (disabled) so an offer is made. */
+    function needyWorld(configureTarget: (target: Entity) => void) {
+        const built = makeWorld(configureTarget);
+        built.world.entities.get(PLAYER)!.components
+            .set(DisabledComponent, { repairAt: null });
+        return built;
+    }
+
+    it('reads the target\'s combat state the same way the sim does', () => {
+        const fighting = new Entity()
+            .addComponent(NpcComponent, { aiType: 3, mode: 'attack' } as never)
+            .addComponent(TargetComponent, { target: 'someone else' });
+        expect(targetIsFighting(fighting)).toBeTrue();
+
+        const idle = new Entity()
+            .addComponent(NpcComponent, { aiType: 3 } as never)
+            .addComponent(TargetComponent, { target: undefined });
+        expect(targetIsFighting(idle)).toBeFalse();
+
+        const devEnemy = new Entity()
+            .addComponent(ShootAllWeaponsComponent, undefined);
+        expect(targetIsFighting(devEnemy)).toBeTrue();
+    });
+
+    it('still OFFERS assistance to a ship that is busy fighting', async () => {
+        const { world, gameData } = needyWorld(target => {
+            target.components.set(NpcComponent,
+                { aiType: 3, mode: 'attack' });
+            target.components.set(TargetComponent, { target: 'someone else' });
+        });
+        const result = await computeContext(world, gameData);
+        // The button is there; pressing it is what gets the refusal.
+        expect(result?.context.assist).toBeDefined();
+    });
+
+    it('answers a press with a busy line from STR# 3000, and dispatches '
+        + 'nothing', async () => {
+            const { world, gameData } = needyWorld(target => {
+                target.components.set(NpcComponent,
+                    { aiType: 3, mode: 'attack' });
+                target.components.set(TargetComponent,
+                    { target: 'someone else' });
+            });
+            const result = await computeContext(world, gameData,
+                fakeDisplayAssets());
+            expect(result?.busyText).toContain('busy');
+
+            const refusal = assistRefusal(world, TARGET, result!.busyText);
+            expect(refusal).toBe(result!.busyText);
+        });
+
+    it('lets the press through for a ship that is not fighting', async () => {
+        const { world, gameData } = needyWorld(target => {
+            target.components.set(NpcComponent, { aiType: 3 });
+            target.components.set(TargetComponent, { target: undefined });
+        });
+        const result = await computeContext(world, gameData,
+            fakeDisplayAssets());
+        expect(assistRefusal(world, TARGET, result!.busyText)).toBeUndefined();
+    });
+
+    it('lets the press through once the fight ends', async () => {
+        const { world, gameData } = needyWorld(target => {
+            target.components.set(NpcComponent,
+                { aiType: 3, mode: 'attack' });
+            target.components.set(TargetComponent, { target: 'someone else' });
+        });
+        const result = await computeContext(world, gameData,
+            fakeDisplayAssets());
+        expect(assistRefusal(world, TARGET, result!.busyText)).toBeDefined();
+
+        // The fight ends while the channel is open: the SAME open dialog now
+        // gets the request through, because the press is what decides.
+        const target = world.entities.get(TARGET)!;
+        target.components.get(NpcComponent)!.mode = undefined;
+        target.components.get(TargetComponent)!.target = undefined;
+        expect(assistRefusal(world, TARGET, result!.busyText)).toBeUndefined();
+    });
+
+    it('falls back to the pinned literal with no display assets', async () => {
+        const { world, gameData } = needyWorld(target => {
+            target.components.set(NpcComponent, { aiType: 3 });
+        });
+        const result = await computeContext(world, gameData);
+        expect(result?.busyText).toBe(BUSY_RESPONSE_FALLBACK);
     });
 });
