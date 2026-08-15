@@ -28,6 +28,53 @@ export interface ButtonClick {
     option: boolean;
 }
 
+/** A pointer event the press state machine reacts to. */
+export type PressEvent = 'down' | 'up' | 'upoutside';
+
+/** What a press event does to a button. `state` undefined = unchanged. */
+export interface PressResult {
+    state: string | undefined;
+    pressedFrom: string | undefined;
+    /** Whether this release fires the click. */
+    fire: boolean;
+}
+
+/**
+ * The button press state machine, pure so it is testable without PIXI.
+ *
+ * A GREYED button ignores presses entirely: no pressed flash on down,
+ * and — because no press was recorded — release (on or off the button)
+ * neither fires a click nor bounces the visual back to an
+ * enabled-looking 'normal'. (Shipped bug: down unconditionally showed
+ * 'clicked' and up unconditionally restored 'normal', so clicking a
+ * greyed button made it flash pressed and then look clickable.)
+ *
+ * A drag-off release restores the state the press started from rather
+ * than 'normal', so a button greyed mid-press stays grey; without an
+ * active press it changes nothing.
+ */
+export function pressTransition(currentState: string,
+    pressedFrom: string | undefined, event: PressEvent): PressResult {
+    const unchanged = { state: undefined, pressedFrom, fire: false };
+    switch (event) {
+        case 'down':
+            if (currentState === 'grey') {
+                return unchanged;
+            }
+            return { state: 'clicked', pressedFrom: currentState, fire: false };
+        case 'up':
+            if (pressedFrom === undefined) {
+                return unchanged;
+            }
+            return { state: 'normal', pressedFrom: undefined, fire: true };
+        case 'upoutside':
+            if (pressedFrom === undefined) {
+                return unchanged;
+            }
+            return { state: pressedFrom, pressedFrom: undefined, fire: false };
+    }
+}
+
 export class Button {
     container = new PIXI.Container();
     private states = new Map<string, PIXI.Container>();
@@ -36,6 +83,15 @@ export class Button {
     private wrappedState = 'normal';
     /** The state to restore if this press is cancelled off the button. */
     private pressedFrom?: string;
+
+    /** Applies a {@link pressTransition} result; returns its `fire`. */
+    private applyPress(result: PressResult): boolean {
+        this.pressedFrom = result.pressedFrom;
+        if (result.state !== undefined) {
+            this.state = result.state;
+        }
+        return result.fire;
+    }
     private width: number;
 
     // See colr resource                                                              
@@ -80,14 +136,15 @@ export class Button {
         this.container.interactive = true;
         this.container.cursor = 'pointer';
         this.container.on('pointerdown', () => {
-            this.pressedFrom = this.wrappedState;
-            this.state = 'clicked';
+            this.applyPress(pressTransition(
+                this.wrappedState, this.pressedFrom, 'down'));
         });
 
         this.container.on('pointerup', (event: PIXI.FederatedPointerEvent) => {
-            this.pressedFrom = undefined;
-            this.state = 'normal';
-            this.click.next({ option: event.altKey });
+            if (this.applyPress(pressTransition(
+                this.wrappedState, this.pressedFrom, 'up'))) {
+                this.click.next({ option: event.altKey });
+            }
         });
 
         // Releasing the pointer OFF the button cancels the press. Without
@@ -100,8 +157,8 @@ export class Button {
         // the state the button had BEFORE the press, so a genuinely grey
         // button does not come back looking enabled, and fires no click.
         this.container.on('pointerupoutside', () => {
-            this.state = this.pressedFrom ?? 'normal';
-            this.pressedFrom = undefined;
+            this.applyPress(pressTransition(
+                this.wrappedState, this.pressedFrom, 'upoutside'));
         });
 
         for (const [name, { left, middle, right }] of this.buttonIds) {
