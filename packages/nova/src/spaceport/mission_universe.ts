@@ -4,6 +4,7 @@ import { MissionData } from 'novadatainterface/mission_data';
 import { PlanetData } from 'novadatainterface/planet_data';
 import { SystemData } from 'novadatainterface/system_data';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
+import { displayName } from '../nova_plugin/display_name.js';
 import { StellarInfo, stellarInfoOf } from '../nova_plugin/mission_logic.js';
 import { SystemInfo } from '../nova_plugin/mission_ship_logic.js';
 
@@ -159,6 +160,20 @@ export class MissionUniverse {
 
     getMission(id: string): MissionData | undefined {
         return this.missionsById.get(id);
+    }
+
+    /**
+     * The display name of a shïp type (its resource name, "; comment"
+     * suffix hidden), for the <PST>/<PSN> identity wildcards. Undefined
+     * when the ship can't be loaded — the wildcard falls back to its
+     * generic default rather than breaking the dialog.
+     */
+    async shipTypeName(shipId: string): Promise<string | undefined> {
+        try {
+            return displayName((await this.gameData.data.Ship.get(shipId)).name);
+        } catch {
+            return undefined;
+        }
     }
 
     getPlanet(id: string): PlanetData | undefined {

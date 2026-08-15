@@ -3,9 +3,10 @@
  * mission description is shown, tags like <DST> are replaced with
  * pertinent mission information.
  *
- * Only the mission-shape tags are handled; the player-identity tags
- * (<PN>, <PSN>, ranks, ...) fall back to placeholders until player
- * naming exists.
+ * The player-identity tags (<PN>, <PNN>, <PSN>, <PST>) take their real
+ * values from spaceport/player_identity.ts (pilot profile + current
+ * hull); the rank tags still fall back to placeholders until ranks
+ * exist.
  */
 import { displayName } from './display_name.js';
 import { NCBTestContext } from './ncb.js';
@@ -30,6 +31,8 @@ export interface MissionTextSubstitutions {
     payment?: number;
     /** <PN> the player's name. */
     playerName?: string;
+    /** <PNN> the player's nickname (falls back to the full name). */
+    playerNickname?: string;
     /** <PSN> the player's ship's name. */
     playerShipName?: string;
     /** <PST> the player's ship type name. */
@@ -67,7 +70,9 @@ export function expandMissionText(text: string,
             ? Math.abs(subs.payment).toLocaleString() : '0'],
         ['<REG>', 'NovaJS'],
         ['<PN>', subs.playerName ?? 'Captain'],
-        ['<PNN>', subs.playerName ?? 'Captain'],
+        // "If no nickname was specified, Nova will use the player's full
+        // name here instead" (Bible <PNN>).
+        ['<PNN>', subs.playerNickname ?? subs.playerName ?? 'Captain'],
         ['<PSN>', subs.playerShipName ?? 'your ship'],
         ['<PST>', subs.playerShipType ?? 'ship'],
         ['<PRK>', 'captain'],

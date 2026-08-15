@@ -1,11 +1,8 @@
 import { PlanetData } from 'novadatainterface/planet_data';
-import { AsyncSystemResource } from 'nova_ecs/async_system';
 import { Position } from 'nova_ecs/datatypes/position';
 import { Vector } from 'nova_ecs/datatypes/vector';
 import { Entity } from 'nova_ecs/entity';
 import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
-import { Random, RandomResource } from 'nova_ecs/plugins/random_plugin';
-import { World } from 'nova_ecs/world';
 import * as PIXI from 'pixi.js';
 import { Observable } from 'rxjs';
 import { makeDescTextContext, playerGender, resolveConditionalBlocks }
@@ -13,15 +10,12 @@ import { makeDescTextContext, playerGender, resolveConditionalBlocks }
 import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data.js';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { ControlEvent } from '../nova_plugin/controls_plugin.js';
-import { DisplayAssetDataResource, SimulationGameDataResource } from '../nova_plugin/game_data_resource.js';
 import { ArmorComponent, FUEL_PER_JUMP, FuelComponent, IonizationComponent, ShieldComponent } from '../nova_plugin/health_plugin.js';
-import { IdFactory, IdFactoryResource } from '../nova_plugin/id_factory.js';
-import { ShipPhysicsComponent } from '../nova_plugin/ship_plugin.js';
-import { SystemIdResource } from '../nova_plugin/system_id_resource.js';
-import { SystemPlugin } from '../nova_plugin/system_plugin.js';
+import { ShipComponent, ShipPhysicsComponent } from '../nova_plugin/ship_plugin.js';
 import { WeaponsStateComponent } from '../nova_plugin/weapons_state.js';
 import { LOCATION_MAIN_SPACEPORT, LOCATION_MISSION_COMPUTER, MissionEvent, MissionMapMark, missionMapMarks } from '../nova_plugin/mission_logic.js';
-import { missionDisplayName } from '../nova_plugin/mission_text.js';
+import { expandMissionText, missionDisplayName } from '../nova_plugin/mission_text.js';
+import { ControlBitsComponent } from '../nova_plugin/ncb_plugin.js';
 import { CreditsComponent, GameDateComponent, MissionsComponent } from '../nova_plugin/player_state_plugin.js';
 import { DockedLiveStatus, DockedShip } from '../display/docked_ship.js';
 import { Bar } from './bar.js';
@@ -35,6 +29,8 @@ import { MissionSession, processEntityLanding } from './mission_session.js';
 import { rollOffers } from './mission_offers.js';
 import { MissionUniverse } from './mission_universe.js';
 import { Outfitter } from './outfitter.js';
+import { playerIdentitySubs } from './player_identity.js';
+import { runShipBuildWorld } from './ship_build_world.js';
 import { Shipyard } from './shipyard.js';
 import { OpenStarmapOptions } from './starmap.js';
 import { TradeCenter } from './trade_center.js';
@@ -238,23 +234,12 @@ export class Spaceport extends Menu<Entity> {
             this.controls.unbind();
             const newInput = await this.shipyard.show(this.input);
             if (newInput !== this.input) {
-                // Construct a fake system and run providers so that outfits of the new
-                // ship are provided.
-                const shipBuildWorld = new World('outfit builder');
-                shipBuildWorld.resources.set(SimulationGameDataResource, simulationData);
-                shipBuildWorld.resources.set(DisplayAssetDataResource, displayAssets);
-                shipBuildWorld.resources.set(SystemIdResource, 'nova:128');
-                // Sim systems require the determinism resources since
-                // the rollback work; this scratch world only computes
-                // ship stats, so any seed will do.
-                shipBuildWorld.resources.set(RandomResource, new Random(0));
-                shipBuildWorld.resources.set(IdFactoryResource, new IdFactory());
-                await shipBuildWorld.addPlugin(SystemPlugin);
-                shipBuildWorld.entities.set('ship', newInput);
-                shipBuildWorld.step();
-                await shipBuildWorld.resources.get(AsyncSystemResource)?.done;
-                shipBuildWorld.step();
-                shipBuildWorld.entities.delete('ship');
+                // Construct a fake system and run providers so that outfits
+                // of the new ship are provided (see ship_build_world.ts —
+                // extracted so a spec pins that the scratch world's resource
+                // set stays sufficient for SystemPlugin).
+                await runShipBuildWorld(newInput, simulationData,
+                    displayAssets);
             }
             this.input = newInput;
 
@@ -382,18 +367,35 @@ export class Spaceport extends Menu<Entity> {
      */
     private async presentLandingPopups(entity: Entity,
         events: MissionEvent[]) {
-        // Completion / failure text as popups (the completion dësc).
+        // Completion / failure text as popups (the completion dësc),
+        // expanded like any other mission text: dësc conditionals against
+        // the player's real bits/gender, then wildcards. The event carries
+        // no resolved mission shape, so only the identity tags, <PAY>, and
+        // the return-stellar tags get real values — and since these popups
+        // fire at the planet the player just landed on (the mission's
+        // return stop), <RST>/<RSY> resolve to "here".
+        const ctx = makeDescTextContext(
+            entity.components.get(ControlBitsComponent) ?? new Set(),
+            playerGender());
+        const identity = await playerIdentitySubs(this.universe,
+            entity.components.get(ShipComponent)?.id);
         for (const event of events) {
             if (!event.text) {
                 continue;
             }
             if (event.type === 'completed' || event.type === 'failed'
                 || event.type === 'autoAborted' || event.type === 'shipDone') {
+                const text = expandMissionText(event.text, {
+                    ...identity,
+                    returnStellar: this.universe.planetName(this.id),
+                    returnSystem: this.universe.systemNameOfPlanet(this.id),
+                    payment: event.payment,
+                }, ctx);
                 // Show the result dësc's graphic beside the text when the
                 // mission set one (completion/fail/shipDone/brief pict);
                 // OfferPopup falls back to the plain briefing frame when
                 // pict is absent.
-                await this.offerPopup.show(event.text, { accept: 'Okay' },
+                await this.offerPopup.show(text, { accept: 'Okay' },
                     { pict: event.pict, style: 'briefing' });
             }
         }
@@ -435,9 +437,10 @@ export class Spaceport extends Menu<Entity> {
                 default:
                     break;
             }
-            if (event.text) {
-                lines.push(event.text);
-            }
+            // The event's full dësc text is NOT repeated here (Matthew,
+            // 2026-08-14): it already showed as a popup in
+            // presentLandingPopups; the notices line is just the summary
+            // over the landing description.
         }
         this.notices.text = lines.join('\n\n');
     }

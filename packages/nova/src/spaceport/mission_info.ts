@@ -8,7 +8,9 @@ import { ControlEvent } from '../nova_plugin/controls_plugin.js';
 import { abortMission } from '../nova_plugin/mission_logic.js';
 import { expandMissionText, missionDisplayName } from '../nova_plugin/mission_text.js';
 import { makeDescTextContext, playerGender } from '../nova_plugin/desc_text.js';
+import { PlayerIdentitySubs, playerIdentitySubs } from './player_identity.js';
 import { ControlBitsComponent } from '../nova_plugin/ncb_plugin.js';
+import { ShipComponent } from '../nova_plugin/ship_plugin.js';
 import { ActiveMission, GameDateComponent, MissionsComponent } from '../nova_plugin/player_state_plugin.js';
 import { Button } from './button.js';
 import { MenuControls } from './menu_controls.js';
@@ -97,6 +99,8 @@ export class MissionInfoDialog {
     private currentDay = 0;
     private entity?: Entity;
     private abortContext?: MissionInfoAbortContext;
+    /** <PN>/<PSN>-style identity values, loaded per show(). */
+    private identity: PlayerIdentitySubs = {};
     private aborting = false;
 
     constructor(private displayAssets: DisplayAssetDataInterface,
@@ -168,6 +172,8 @@ export class MissionInfoDialog {
         abortContext?: MissionInfoAbortContext): Promise<void> {
         this.entity = entity;
         this.abortContext = abortContext;
+        this.identity = await playerIdentitySubs(this.universe,
+            entity.components.get(ShipComponent)?.id);
         try {
             await this.universe.load();
         } catch (e) {
@@ -206,8 +212,11 @@ export class MissionInfoDialog {
             return id;
         }
         return expandMissionText(missionDisplayName(offer.data.name),
-            offerSubstitutions(this.universe, this.currentDay, offer,
-                active), this.descContext());
+            {
+                ...offerSubstitutions(this.universe, this.currentDay, offer,
+                    active),
+                ...this.identity,
+            }, this.descContext());
     }
 
     private refreshList() {
@@ -272,8 +281,11 @@ export class MissionInfoDialog {
         const brief = mission.quickBrief || mission.briefText
             || mission.offerText;
         this.description.text = expandMissionText(brief,
-            offerSubstitutions(this.universe, this.currentDay, offer,
-                active), this.descContext());
+            {
+                ...offerSubstitutions(this.universe, this.currentDay, offer,
+                    active),
+                ...this.identity,
+            }, this.descContext());
     }
 
     private refreshAbortState() {

@@ -14,6 +14,7 @@ import {
 import { expandMissionText, missionDisplayName } from '../nova_plugin/mission_text.js';
 import { makeDescTextContext, playerGender } from '../nova_plugin/desc_text.js';
 import { ActiveMission } from '../nova_plugin/player_state_plugin.js';
+import { PlayerIdentitySubs, playerIdentitySubs } from './player_identity.js';
 import { Button } from './button.js';
 import { Menu } from './menu.js';
 import { activeAsOffer, offerSubstitutions, rollOffers } from './mission_offers.js';
@@ -70,6 +71,8 @@ type Row =
 export class MissionBoard extends Menu<Entity> {
     private session?: MissionSession;
     private offers: MissionOffer[] = [];
+    /** <PN>/<PSN>-style identity values for this docked visit. */
+    private identity: PlayerIdentitySubs = {};
     private rows: Row[] = [];
     private selectedIndex = 0;
     private rowTexts: PIXI.Text[] = [];
@@ -218,6 +221,8 @@ export class MissionBoard extends Menu<Entity> {
         try {
             this.session = await MissionSession.create(input,
                 this.simulationData, this.universe, this.planetId);
+            this.identity = await playerIdentitySubs(this.universe,
+                this.session.shipId);
         } catch (e) {
             // Data failed to load; don't wedge the spaceport.
             console.warn('Mission board failed to load:', e);
@@ -243,13 +248,10 @@ export class MissionBoard extends Menu<Entity> {
             offer => !session.state.missions.has(offer.data.id));
         this.rows = this.offers.map(
             offer => ({ kind: 'offer', offer } as Row));
-        const active = [...session.state.missions.values()];
-        if (active.length > 0) {
-            this.rows.push({ kind: 'header', label: '--- Active missions ---' });
-            for (const mission of active) {
-                this.rows.push({ kind: 'active', active: mission });
-            }
-        }
+        // Active missions are NOT listed here (Matthew, 2026-08-14): the
+        // original's BBS shows only what's on offer; already-accepted
+        // missions live in the mission-info dialog ('i'). The 'active'
+        // row kind stays supported for that dialog's shared row plumbing.
         if (this.rows.length === 0) {
             this.rows.push({ kind: 'header', label: '(no missions available)' });
         }
@@ -357,8 +359,11 @@ export class MissionBoard extends Menu<Entity> {
 
     private substitutionsFor(offer: MissionOffer,
         active?: ActiveMission) {
-        return offerSubstitutions(this.universe, this.session!.currentDay,
-            offer, active);
+        return {
+            ...offerSubstitutions(this.universe, this.session!.currentDay,
+                offer, active),
+            ...this.identity,
+        };
     }
 
     /** The real NCB context this board's dësc text renders against. */

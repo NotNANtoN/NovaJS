@@ -10,6 +10,7 @@ import { expandMissionText } from '../nova_plugin/mission_text.js';
 import { makeDescTextContext, playerGender } from '../nova_plugin/desc_text.js';
 import { Button } from './button.js';
 import { offerSubstitutions } from './mission_offers.js';
+import { playerIdentitySubs } from './player_identity.js';
 import { MissionSession } from './mission_session.js';
 import { MissionUniverse } from './mission_universe.js';
 
@@ -268,13 +269,16 @@ export class OfferPopup {
 export async function presentOffers(popup: OfferPopup,
     session: MissionSession, universe: MissionUniverse,
     offers: MissionOffer[]): Promise<void> {
+    const identity = await playerIdentitySubs(universe, session.shipId);
     for (const offer of offers) {
         // A prior accept this visit may have made the mission active.
         if (session.state.missions.has(offer.data.id)) {
             continue;
         }
-        const substitutions =
-            offerSubstitutions(universe, session.currentDay, offer);
+        const substitutions = {
+            ...offerSubstitutions(universe, session.currentDay, offer),
+            ...identity,
+        };
         const ctx = makeDescTextContext(session.state.bits,
             playerGender());
         const text = expandMissionText(offer.data.offerText, substitutions, ctx);
