@@ -10,7 +10,8 @@ import { ControlsSubject } from '../nova_plugin/controls_plugin.js';
 import { DisabledComponent } from '../nova_plugin/disabled_component.js';
 import { SimulationGameDataResource } from '../nova_plugin/game_data_resource.js';
 import { FuelComponent, FUEL_PER_JUMP } from '../nova_plugin/health_plugin.js';
-import { JumpRouteComponent, JUMP_DISTANCE } from '../nova_plugin/jump_plugin.js';
+import { JumpComponent, JumpRouteComponent, JUMP_DISTANCE } from '../nova_plugin/jump_plugin.js';
+import { jumpBlocker, jumpRadiusFor } from '../nova_plugin/jump_readiness.js';
 import { PlanetTargetComponent } from '../nova_plugin/planet_plugin.js';
 import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin.js';
 import { ShipComponent, ShipPhysicsComponent } from '../nova_plugin/ship_plugin.js';
@@ -91,20 +92,25 @@ const DisabledBeepSystem = new System({
 });
 
 // The moment a jump becomes possible (route selected + outside the no-jump
-// zone + enough fuel). Mirrors PlayerJumpControl's gate (jump_plugin.ts)
-// display-side; edge-triggered and re-armed on route change / after jumping.
+// zone + enough fuel + not disabled + not already jumping). The conditions
+// are NOT copied from PlayerJumpControl — both quote the shared readiness
+// predicate (nova_plugin/jump_readiness.ts) — so the cue cannot drift from
+// the gate. Edge-triggered and re-armed on route change / after jumping.
 const JumpReadyBeepSystem = new System({
     name: 'JumpReadyBeep',
     args: [JumpRouteComponent, MovementStateComponent, ShipPhysicsComponent,
-        FuelComponent, UiSoundTriggerStateResource, Emit,
-        PlayerShipSelector] as const,
-    step(jumpRoute, movement, shipPhysics, fuel, state, emit) {
+        FuelComponent, Optional(DisabledComponent), Optional(JumpComponent),
+        UiSoundTriggerStateResource, Emit, PlayerShipSelector] as const,
+    step(jumpRoute, movement, shipPhysics, fuel, disabled, jump, state, emit) {
         const { beep, next } = jumpReadyEdge(state.jumpReady, {
             hasRoute: jumpRoute.route.length > 0,
             distance: movement.position.length,
-            jumpRadius: Math.max(0, JUMP_DISTANCE + shipPhysics.jumpDistanceMod),
+            jumpRadius: jumpRadiusFor(JUMP_DISTANCE,
+                shipPhysics.jumpDistanceMod),
             fuel: fuel.current,
             fuelPerJump: FUEL_PER_JUMP,
+            disabled: disabled !== undefined,
+            jumping: jump !== undefined,
             routeHead: jumpRoute.route[0],
         });
         if (beep) {
@@ -153,11 +159,25 @@ function playerWeapons(world: World) {
 }
 
 /**
- * True when the player pressed hyperjump with a route selected but the
- * jump gate refuses it (inside the no-jump zone or under a jump's worth
- * of fuel) — the same conditions JumpReadyBeepSystem mirrors from
- * PlayerJumpControl. Undefined route or no player ship → no beep (the
- * key is a no-op, not a refusal).
+ * True when the player pressed hyperjump and the jump gate refuses it: the
+ * NEGATION of the shared readiness predicate (nova_plugin/jump_readiness.ts)
+ * at the moment of the press, so this beep, the nova:154 jump-ready cue and
+ * PlayerJumpControl itself are answering one question with one implementation.
+ *
+ * NO ROUTE COUNTS AS A REFUSAL. The original decision (commit f2ef16e1) left
+ * it silent — "the key is a no-op, not a refusal" — but that was a judgement
+ * call, not an observation: the snd-153 research found no documentary hook
+ * for the interface beeps at all, so the Bible and the notes cannot say what
+ * the original did here. Matthew's ruling is that pressing jump with nothing
+ * to jump to is also a "can't", so it beeps, and 'noRoute' is simply one more
+ * blocker like the rest.
+ *
+ * ALREADY JUMPING is deliberately NOT a refusal (the 'jumping' blocker is
+ * excluded below): the key is held through a jump sequence as a matter of
+ * course — that is how a held key chain-jumps a route — and beeping at a
+ * player whose jump is already underway would be nonsense.
+ *
+ * No player ship / missing components → no beep: there is no ship to refuse.
  */
 function playerJumpRefused(world: World): boolean {
     for (const entity of world.entities.values()) {
@@ -168,14 +188,19 @@ function playerJumpRefused(world: World): boolean {
         const movement = entity.components.get(MovementStateComponent);
         const physics = entity.components.get(ShipPhysicsComponent);
         const fuel = entity.components.get(FuelComponent);
-        if (!route || route.route.length === 0 || !movement || !physics
-            || !fuel) {
+        if (!route || !movement || !physics || !fuel) {
             return false;
         }
-        const jumpRadius = Math.max(0,
-            JUMP_DISTANCE + physics.jumpDistanceMod);
-        return movement.position.length < jumpRadius
-            || fuel.current < FUEL_PER_JUMP;
+        const blocked = jumpBlocker({
+            hasRoute: route.route.length > 0,
+            distance: movement.position.length,
+            jumpRadius: jumpRadiusFor(JUMP_DISTANCE, physics.jumpDistanceMod),
+            fuel: fuel.current,
+            fuelPerJump: FUEL_PER_JUMP,
+            disabled: entity.components.has(DisabledComponent),
+            jumping: entity.components.has(JumpComponent),
+        });
+        return blocked !== undefined && blocked !== 'jumping';
     }
     return false;
 }
@@ -214,10 +239,13 @@ export const UiSoundTriggersPlugin: Plugin = {
                     if (MenuControls.focused) {
                         return;
                     }
-                    // Jump refused: hyperjump pressed with a route
-                    // selected but inside the no-jump zone / out of
-                    // fuel (per the snd-153 research: the natural
-                    // negative counterpart of 154's jump-ready).
+                    // Jump refused: hyperjump pressed while the shared
+                    // readiness predicate says no — inside the no-jump
+                    // zone, out of fuel, disabled, or with no route at
+                    // all (per the snd-153 research: the natural
+                    // negative counterpart of 154's jump-ready). Only
+                    // 'start' reaches here, so a held/auto-repeating key
+                    // beeps ONCE per discrete press.
                     if (action === 'hyperjump') {
                         if (playerJumpRefused(world)) {
                             playUiSound(world, { id: BEEP_CANT_DO });

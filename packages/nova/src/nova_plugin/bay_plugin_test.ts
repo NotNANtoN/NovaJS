@@ -9,7 +9,10 @@ import { Vector } from 'nova_ecs/datatypes/vector';
 import { Entity } from 'nova_ecs/entity';
 import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import { RandomResource } from 'nova_ecs/plugins/random_plugin';
-import { World } from 'nova_ecs/world';
+import { System } from 'nova_ecs/system';
+import { SingletonComponent, World } from 'nova_ecs/world';
+import { getIntegrationGameData } from '../communication/simulation_test_fixture.js';
+import { SoundEvent } from './sound_plugin.js';
 import { EscortCommandComponent } from './escort_command.js';
 import { FormationComponent, NpcComponent } from './npc_ai_plugin.js';
 import { BayFighterComponent, EXIT_KICK, startReturnHome } from './bay_plugin.js';
@@ -36,10 +39,12 @@ const CARRIER_UUID = 'test carrier uuid';
  * preinstalled fighter load (the outfits a bay spends as ammo).
  */
 async function makeTestWorld({ fighterCounts = { [FIGHTER_A_ID]: 2 },
-    maxAmmo = 4, bays = 1 }: {
+    maxAmmo = 4, bays = 1, sound }: {
         fighterCounts?: { [id: string]: number },
         maxAmmo?: number,
         bays?: number,
+        /** The bay's wëap snd, as the stock bays carry one. */
+        sound?: string,
     } = {}) {
     const gameData = new MockGameData();
 
@@ -47,6 +52,7 @@ async function makeTestWorld({ fighterCounts = { [FIGHTER_A_ID]: 2 },
         ...getDefaultBayWeaponData(),
         id: BAY_ID,
         shipID: FIGHTER_SHIP_ID,
+        sound,
         // What the parser now produces for a bay: its ammo is its
         // fighters, held by outfits whose ammoFor is the bay itself.
         ammoType: ['weapon', BAY_ID],
@@ -139,6 +145,93 @@ async function launchOne(world: World, carrier: Entity) {
     expect(now.length).toBe(before + 1);
     return now[now.length - 1];
 }
+
+/**
+ * A bay is a WEAPON, so launching a fighter is heard exactly like any other
+ * shot — the wëap's own snd on the untargeted (everyone-hears) SoundEvent
+ * channel. Launching used to be silent: BayWeaponEntry.fire simply never
+ * emitted, unlike the projectile and beam entries.
+ */
+describe('bay launch sound', () => {
+    const BAY_SOUND = 'test:baySound';
+
+    function recordSounds(world: World): string[] {
+        const sounds: string[] = [];
+        world.addSystem(new System({
+            name: 'BaySoundRecorder',
+            events: [SoundEvent],
+            // SingletonComponent, exactly as the real SoundSystem does:
+            // SoundEvent is UNtargeted, so a system without it would run
+            // once per matching entity and count every emission N times.
+            args: [SoundEvent, SingletonComponent] as const,
+            step({ id }) { sounds.push(id); },
+        }));
+        return sounds;
+    }
+
+    it('plays the bay weapon\'s sound on launch', async () => {
+        const { world, carrier } = await makeTestWorld({ sound: BAY_SOUND });
+        const sounds = recordSounds(world);
+        await launchOne(world, carrier);
+        expect(sounds).toContain(BAY_SOUND);
+    });
+
+    it('plays once per launched fighter', async () => {
+        const { world, carrier } = await makeTestWorld({
+            fighterCounts: { [FIGHTER_A_ID]: 2 }, sound: BAY_SOUND,
+        });
+        const sounds = recordSounds(world);
+        await launchOne(world, carrier);
+        expect(sounds.filter(id => id === BAY_SOUND).length).toBe(1);
+        await launchOne(world, carrier);
+        expect(sounds.filter(id => id === BAY_SOUND).length).toBe(2);
+    });
+
+    it('stays silent for a bay with no sound in its data', async () => {
+        // One stock bay (nova:175 "Create Dart") genuinely has no snd; a
+        // soundless bay must not invent one.
+        const { world, carrier } = await makeTestWorld({ sound: undefined });
+        const sounds = recordSounds(world);
+        await launchOne(world, carrier);
+        expect(sounds.length).toBe(0);
+    });
+
+    it('the stock bays really do carry sounds (real Nova data)', async () => {
+        // The reason a launch can be heard at all: this is data, not
+        // invention. 22 of the 23 stock bays name a snd; only nova:175
+        // ("Create Dart", a mission-spawn utility) has none.
+        const gameData = await getIntegrationGameData();
+        const ids = await gameData.ids;
+        const bays: { id: string, sound?: string }[] = [];
+        for (const id of [...ids.Weapon].sort()) {
+            const weapon = await gameData.data.Weapon.get(id);
+            if (weapon.type === 'BayWeaponData') {
+                bays.push({ id, sound: (weapon as { sound?: string }).sound });
+            }
+        }
+        expect(bays.length).toBeGreaterThan(0);
+        expect(bays.filter(bay => bay.sound).length)
+            .toBeGreaterThan(bays.length / 2);
+        // The Viper Bay, the archetypal stock carrier bay.
+        expect(bays.find(bay => bay.id === 'nova:149')?.sound)
+            .toBe('nova:221');
+        // ...and the one that genuinely has none.
+        expect(bays.find(bay => bay.id === 'nova:175')?.sound)
+            .toBeUndefined();
+    }, 60_000);
+
+    it('makes no sound when an empty bay launches nothing', async () => {
+        const { world, carrier } = await makeTestWorld({
+            fighterCounts: { [FIGHTER_A_ID]: 0 }, sound: BAY_SOUND,
+        });
+        const sounds = recordSounds(world);
+        setFiring(carrier, true);
+        await stepWorld(world, 10);
+        setFiring(carrier, false);
+        expect(fighters(world).length).toBe(0);
+        expect(sounds).not.toContain(BAY_SOUND);
+    });
+});
 
 describe('bay weapons', () => {
     it('spends one fighter outfit per launch', async () => {

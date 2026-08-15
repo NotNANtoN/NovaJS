@@ -2,6 +2,11 @@ import { GovtData, getDefaultGovtData } from 'novadatainterface/govt_data';
 import {
     assistIsFree,
     bribeAmount,
+    busyResponseText,
+    BUSY_RESPONSE_COUNT,
+    BUSY_RESPONSE_FALLBACK,
+    BUSY_RESPONSE_FIRST_INDEX,
+    shipIsFighting,
     BRIBE_FRACTION,
     BRIBE_FRACTION_LARGE,
     BRIBE_MINIMUM,
@@ -220,5 +225,92 @@ describe('hashString', () => {
     });
     it('differs for different inputs (no trivial collisions)', () => {
         expect(hashString('uuid-a')).not.toBe(hashString('uuid-b'));
+    });
+});
+
+describe('shipIsFighting', () => {
+    it('is true for an NPC in attack mode with a target', () => {
+        expect(shipIsFighting({ npcMode: 'attack', npcTarget: 'someone' }))
+            .toBeTrue();
+    });
+
+    it('is false for attack mode with nothing targeted', () => {
+        // NpcFireControl needs both before it fires a shot, so both are
+        // required here: no target means nothing is being shot at.
+        expect(shipIsFighting({ npcMode: 'attack', npcTarget: undefined }))
+            .toBeFalse();
+    });
+
+    it('is false for the peaceful modes, even with a target', () => {
+        for (const mode of ['travel', 'dwell', 'patrol', 'depart', undefined]) {
+            expect(shipIsFighting({ npcMode: mode, npcTarget: 'someone' }))
+                .withContext(`mode ${mode}`).toBeFalse();
+        }
+    });
+
+    it('is false for a FLEEING ship', () => {
+        // Running away is not shooting, and a fleeing ship talked into a
+        // rendezvous was never the complaint.
+        expect(shipIsFighting({ npcMode: 'flee', npcTarget: 'someone' }))
+            .toBeFalse();
+    });
+
+    it('is true for the legacy shoot-all-weapons dev enemy', () => {
+        expect(shipIsFighting({
+            npcMode: undefined, npcTarget: undefined, shootsAllWeapons: true,
+        })).toBeTrue();
+    });
+
+    it('is false for a ship with no NPC brain at all', () => {
+        expect(shipIsFighting({ npcMode: undefined, npcTarget: undefined }))
+            .toBeFalse();
+    });
+});
+
+describe('busyResponseText', () => {
+    // The stock table's busy group (STR# 3000 indices 80-84) as it reads in
+    // the real game data; string_table_integration_test pins that.
+    const table: string[] = [];
+    table[BUSY_RESPONSE_FIRST_INDEX] = "I'm busy.";
+    table[BUSY_RESPONSE_FIRST_INDEX + 1] = "I'm a little busy right now.";
+    table[BUSY_RESPONSE_FIRST_INDEX + 2] = "I'm too busy to help you.";
+    table[BUSY_RESPONSE_FIRST_INDEX + 3] = 'I have other business.';
+    table[BUSY_RESPONSE_FIRST_INDEX + 4] = "I've got other things to do.";
+
+    it('picks a line from the busy group', () => {
+        const line = busyResponseText(table, 12345);
+        expect(table.slice(BUSY_RESPONSE_FIRST_INDEX,
+            BUSY_RESPONSE_FIRST_INDEX + BUSY_RESPONSE_COUNT))
+            .toContain(line);
+    });
+
+    it('is deterministic in the seed (no PRNG, same on every peer)', () => {
+        for (const seed of [0, 1, 2, 3, 4, 99, 123456]) {
+            expect(busyResponseText(table, seed))
+                .toBe(busyResponseText(table, seed));
+        }
+    });
+
+    it('spreads across the whole group as the seed varies', () => {
+        const seen = new Set<string>();
+        for (let seed = 0; seed < BUSY_RESPONSE_COUNT; seed++) {
+            seen.add(busyResponseText(table, seed));
+        }
+        expect(seen.size).toBe(BUSY_RESPONSE_COUNT);
+    });
+
+    it('falls back to the pinned literal with no usable table', () => {
+        expect(busyResponseText(undefined)).toBe(BUSY_RESPONSE_FALLBACK);
+        expect(busyResponseText([])).toBe(BUSY_RESPONSE_FALLBACK);
+    });
+
+    it('skips blank entries rather than answering with an empty line', () => {
+        const sparse: string[] = [];
+        sparse[BUSY_RESPONSE_FIRST_INDEX] = '  ';
+        sparse[BUSY_RESPONSE_FIRST_INDEX + 1] = 'I have other business.';
+        for (const seed of [0, 1, 2, 3, 4]) {
+            expect(busyResponseText(sparse, seed))
+                .toBe('I have other business.');
+        }
     });
 });

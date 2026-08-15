@@ -16,7 +16,8 @@ export interface NavReadout {
     header: string;
     /** The destination/selection name, or "No Destination". */
     value: string;
-    /** Whether the value is the dim "No Destination" placeholder. */
+    /** Whether the value is drawn in the dim text colour: the "No Destination"
+     * placeholder, or a hyperspace destination the ship cannot yet jump to. */
     dim: boolean;
 }
 
@@ -25,11 +26,21 @@ export interface NavReadout {
  * system; otherwise a selected stellar shows "Stellar Navigation" + its name;
  * with neither, the dim "No Destination" placeholder (matching the original's
  * space/board_ship reference).
+ *
+ * `jumpReady` dims the HYPERSPACE destination until the ship can actually
+ * jump to it — the answer of the shared readiness predicate
+ * (nova_plugin/jump_readiness.ts), the same one that gates the jump itself
+ * and fires the nova:154 cue, so the readout brightens exactly when pressing
+ * the key would work. It defaults to true so callers that cannot see the
+ * ship's state (and the stellar/no-destination cases, where jump readiness is
+ * irrelevant) keep their previous appearance.
  */
 export function navReadout(destinationSystem: string | null,
-    selectedStellar: string | null): NavReadout {
+    selectedStellar: string | null, jumpReady = true): NavReadout {
     if (destinationSystem) {
-        return { header: 'Hyperspace', value: destinationSystem, dim: false };
+        return {
+            header: 'Hyperspace', value: destinationSystem, dim: !jumpReady,
+        };
     }
     if (selectedStellar) {
         return { header: 'Stellar Navigation', value: selectedStellar, dim: false };

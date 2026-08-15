@@ -36,6 +36,21 @@ describe('navReadout', () => {
         expect(navReadout(null, null))
             .toEqual({ header: 'Stellar Navigation', value: 'No Destination', dim: true });
     });
+    it('dims the hyperspace destination until the ship can jump', () => {
+        expect(navReadout('Sanddown', null, false))
+            .toEqual({ header: 'Hyperspace', value: 'Sanddown', dim: true });
+        expect(navReadout('Sanddown', null, true))
+            .toEqual({ header: 'Hyperspace', value: 'Sanddown', dim: false });
+    });
+    it('leaves a stellar selection bright regardless of jump readiness', () => {
+        // Jump readiness has nothing to do with a selected stellar.
+        expect(navReadout(null, 'Europa', false))
+            .toEqual({ header: 'Stellar Navigation', value: 'Europa', dim: false });
+    });
+    it('keeps the "No Destination" placeholder dim either way', () => {
+        expect(navReadout(null, null, true).dim).toBeTrue();
+        expect(navReadout(null, null, false).dim).toBeTrue();
+    });
 });
 
 describe('cargo helpers', () => {

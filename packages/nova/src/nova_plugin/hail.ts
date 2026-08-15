@@ -154,6 +154,85 @@ export function canRequestAssistance(opts: {
 }
 
 /**
+ * Whether the hailed ship is ENGAGED IN COMBAT right now, in which case it
+ * refuses an assistance request ("I'm busy") and carries on fighting.
+ *
+ * THE SIGNAL IS THE GAME'S OWN, not a new flag: `npc.mode === 'attack'` with
+ * a live target is exactly the condition NpcFireControl (npc_ai_plugin.ts)
+ * requires before it will fire this ship's weapons, and the same one
+ * FormationSystem treats as "engaged escorts fight". So "busy" means
+ * precisely "shooting at someone" — which is what the playtest complaint was
+ * about: a ship that turned to assist while still hosing its opponent.
+ *
+ * The legacy dev-enemy marker (ShootAllWeaponsComponent, npc_plugin.ts)
+ * counts too: such a ship fires at everything unconditionally.
+ *
+ * Modes deliberately NOT counted: 'flee' (running, not shooting — and a
+ * fleeing ship being talked into a rendezvous is not the bug), and any mode
+ * without a target (nothing to fight).
+ *
+ * Pure and total, over synced state only (NpcComponent.mode,
+ * TargetComponent.target, the marker), so the display dialog and the sim's
+ * applyHail reach the same verdict on every peer — the same arrangement the
+ * behavioral-hostility check already uses.
+ */
+export function shipIsFighting(opts: {
+    npcMode: string | undefined,
+    npcTarget: string | undefined,
+    shootsAllWeapons?: boolean,
+}): boolean {
+    if (opts.shootsAllWeapons) {
+        return true;
+    }
+    return opts.npcMode === 'attack' && opts.npcTarget !== undefined;
+}
+
+/**
+ * The stock ship-comm response table (STR# 3000), whose entries run in groups
+ * of five interchangeable variants — the original picks one at random per
+ * response. Index 75-79 is "All right, I'll help you." (assistance granted);
+ * the group used here, 80-84, is the BUSY refusal:
+ *
+ *   [80] "I'm busy."
+ *   [81] "I'm a little busy right now."
+ *   [82] "I'm too busy to help you."
+ *   [83] "I have other business."
+ *   [84] "I've got other things to do."
+ *
+ * (Verified against the real Nova data; pinned by
+ * nova_plugin/string_table_integration_test.ts so a parser regression shows
+ * up there rather than as a wrong line in the comm dialog.)
+ */
+export const HAIL_RESPONSE_TABLE = 'nova:3000';
+export const BUSY_RESPONSE_FIRST_INDEX = 80;
+export const BUSY_RESPONSE_COUNT = 5;
+/** Fallback if the table is missing/short: STR# 3000 index 80 verbatim. */
+export const BUSY_RESPONSE_FALLBACK = "I'm busy.";
+
+/**
+ * The busy refusal line for a hailed ship, chosen from the STR# 3000 busy
+ * group. The original rolls a random variant; this picks one by `seed` (a
+ * hash of the ship's uuid, exactly as greetingText does) so the line is
+ * stable per encounter, identical on every peer, and draws no PRNG — the
+ * dialog is client-side, and a Math.random here would show two players
+ * different text for the same event.
+ */
+export function busyResponseText(strings: readonly string[] | undefined,
+    seed = 0): string {
+    const group: string[] = [];
+    for (let i = 0; i < BUSY_RESPONSE_COUNT; i++) {
+        const line = strings?.[BUSY_RESPONSE_FIRST_INDEX + i];
+        if (line && line.trim() !== '') {
+            group.push(line);
+        }
+    }
+    if (group.length === 0) {
+        return BUSY_RESPONSE_FALLBACK;
+    }
+    return group[seed % group.length];
+}
+
+/**
  * Whether the assistance is free. Roadside-Assistance govts (Flags2 0x0010)
  * always repair/refuel for free. The ränk allied-repair flag (0x0800) would
  * also make it free, but per-player rank state is not modelled yet — a

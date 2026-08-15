@@ -73,7 +73,17 @@ export interface HailContext {
  * deterministic input path; `playSound` plays a local client UI beep through
  * the display audio path (no simulation involvement). */
 export interface HailCallbacks {
-    requestAssistance(): void;
+    /**
+     * Asks the hailed ship for aid. Returns the ship's REFUSAL line when it
+     * turns the request down (it is in the middle of a fight — "I'm busy"),
+     * in which case no simulation effect was dispatched and the dialog shows
+     * the answer; undefined when the request went through.
+     *
+     * The answer comes back from the one call rather than from a separate
+     * "may I?" probe on purpose: probe-then-send would evaluate the ship's
+     * state twice, and could dispatch a request the probe had just cleared.
+     */
+    requestAssistance(): string | undefined;
     bribe(): void;
     playSound(id: string): void;
 }
@@ -243,7 +253,17 @@ export class HailDialog {
                 { x: leftX, y: buttonY });
             button.click.subscribe(() => {
                 this.beep();
-                this.callbacks.requestAssistance();
+                const refusal = this.callbacks.requestAssistance();
+                if (refusal !== undefined) {
+                    // Refused (the ship is busy fighting). The channel stays
+                    // OPEN showing its answer, so the player reads why; the
+                    // offer button goes away so the same request can't be
+                    // hammered at a ship that already said no, and the player
+                    // closes the channel themselves.
+                    this.context = { ...context, body: refusal, assist: undefined };
+                    void this.render();
+                    return;
+                }
                 this.close();
             });
             this.content.addChild(button.container);

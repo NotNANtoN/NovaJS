@@ -5,6 +5,8 @@
  * audio) so the edge semantics are unit-testable in isolation.
  */
 
+import { canJump, JumpReadinessInputs } from '../nova_plugin/jump_readiness.js';
+
 /** A target selection changed to a new, non-empty target this tick. */
 export function targetChangedEdge(prev: string | undefined,
     cur: string | undefined): { beep: boolean; next: string | undefined } {
@@ -27,17 +29,12 @@ export function firstHostileEdge(prevAny: boolean, anyHostile: boolean):
     return { beep: anyHostile && !prevAny, next: anyHostile };
 }
 
-export interface JumpReadyInputs {
-    /** A jump route is selected (route.length > 0). */
-    hasRoute: boolean;
-    /** Distance from the system center (movement.position.length). */
-    distance: number;
-    /** No-jump radius: max(0, JUMP_DISTANCE + jumpDistanceMod). */
-    jumpRadius: number;
-    /** Current fuel (FuelComponent.current). */
-    fuel: number;
-    /** Fuel a jump costs (FUEL_PER_JUMP). */
-    fuelPerJump: number;
+/**
+ * The jump-ready cue's inputs: the shared readiness predicate's inputs
+ * (jump_readiness.ts — the SAME conditions PlayerJumpControl gates on) plus
+ * the route head, which only this edge needs for re-arming.
+ */
+export interface JumpReadyInputs extends JumpReadinessInputs {
     /** The next hop (route[0]); used to re-arm when the route changes. */
     routeHead: string | undefined;
 }
@@ -52,18 +49,23 @@ export function initialJumpReadyState(): JumpReadyState {
 }
 
 /**
- * Jump-ready: fire the moment jump eligibility flips true — a route is
- * selected, the ship is outside the no-jump zone, and it has the fuel. The
- * edge is re-armed both when eligibility drops back to false and when the
+ * Jump-ready: fire the moment jump eligibility flips true. Eligibility is
+ * NOT re-derived here — it is `canJump`, the same predicate the simulation's
+ * jump gate uses (jump_readiness.ts), so the cue cannot promise a jump the
+ * gate would refuse.
+ *
+ * The edge is re-armed both when eligibility drops back to false and when the
  * selected route's next hop changes (picking a new destination while already
  * far enough out should re-announce readiness), so a held-eligible state
- * doesn't keep re-beeping but a fresh reason to be ready does.
+ * doesn't keep re-beeping but a fresh reason to be ready does. Passing the
+ * `jumping` input is what stops that re-arm from mis-firing DURING a jump:
+ * beginJump shifts the route the instant a jump starts, so the route head
+ * changes while the ship is mid-sequence — but a ship already jumping is not
+ * "ready to jump", so no beep.
  */
 export function jumpReadyEdge(prev: JumpReadyState, cur: JumpReadyInputs):
     { beep: boolean; next: JumpReadyState } {
-    const eligible = cur.hasRoute
-        && cur.distance >= cur.jumpRadius
-        && cur.fuel >= cur.fuelPerJump;
+    const eligible = canJump(cur);
     const wasEligible = prev.eligible && prev.routeHead === cur.routeHead;
     return {
         beep: eligible && !wasEligible,

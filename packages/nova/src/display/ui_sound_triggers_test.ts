@@ -13,7 +13,7 @@ import { DisabledComponent } from "../nova_plugin/disabled_component.js";
 import { DeathEvent, ZeroArmorEvent } from "../nova_plugin/death_plugin.js";
 import { DisplayAssetDataResource, SimulationGameDataResource } from "../nova_plugin/game_data_resource.js";
 import { FuelComponent } from "../nova_plugin/health_plugin.js";
-import { JumpRouteComponent } from "../nova_plugin/jump_plugin.js";
+import { JumpComponent, JumpRouteComponent } from "../nova_plugin/jump_plugin.js";
 import { PlanetTargetComponent } from "../nova_plugin/planet_plugin.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 import { GovtComponent } from "../nova_plugin/govt_component.js";
@@ -140,6 +140,80 @@ describe('UI sound triggers (audio-layer spy)', () => {
         expect(played).toContain('nova:154');
     });
 
+    it('beeps 154 on flying out of the no-jump zone, and only once',
+        async () => {
+            const { world, played, player } = await makeWorld();
+            player.components.set(MovementStateComponent,
+                { position: new Position(100, 0) } as never);
+            player.components.set(ShipPhysicsComponent,
+                { jumpDistanceMod: 0 } as never);
+            player.components.set(FuelComponent,
+                { current: 100, max: 100 } as never);
+            player.components.set(JumpRouteComponent, { route: ['nova:129'] });
+            world.step();
+            expect(played).not.toContain('nova:154');
+
+            player.components.set(MovementStateComponent,
+                { position: new Position(1200, 0) } as never);
+            world.step();
+            expect(played).toContain('nova:154');
+
+            // Level, not edge: staying eligible does not re-beep.
+            played.length = 0;
+            world.step();
+            expect(played).not.toContain('nova:154');
+        });
+
+    it('does NOT beep 154 for a disabled ship, and beeps when it recovers',
+        async () => {
+            const { world, played, player } = await makeWorld();
+            player.components.set(MovementStateComponent,
+                { position: new Position(1200, 0) } as never);
+            player.components.set(ShipPhysicsComponent,
+                { jumpDistanceMod: 0 } as never);
+            player.components.set(FuelComponent,
+                { current: 100, max: 100 } as never);
+            player.components.set(DisabledComponent, { repairAt: null });
+            player.components.set(JumpRouteComponent, { route: ['nova:129'] });
+            world.step();
+            // A disabled ship cannot spin up its hyperdrive, so it is not
+            // "ready to jump" — the gate would refuse.
+            expect(played).not.toContain('nova:154');
+
+            player.components.delete(DisabledComponent);
+            world.step();
+            expect(played).toContain('nova:154');
+        });
+
+    it('does NOT beep 154 mid-jump when the route head advances', async () => {
+        // beginJump shifts the hop off the route the instant a jump starts,
+        // which changes the route head and used to re-arm the edge — beeping
+        // "you can jump!" at a ship that is already jumping.
+        const { world, played, player } = await makeWorld();
+        player.components.set(MovementStateComponent,
+            { position: new Position(1200, 0) } as never);
+        player.components.set(ShipPhysicsComponent,
+            { jumpDistanceMod: 0 } as never);
+        player.components.set(FuelComponent, { current: 200, max: 200 } as never);
+        player.components.set(JumpRouteComponent,
+            { route: ['nova:129', 'nova:130'] });
+        world.step();
+        expect(played).toContain('nova:154');
+
+        // The jump starts: the route advances and a JumpComponent appears.
+        played.length = 0;
+        player.components.set(JumpRouteComponent, { route: ['nova:130'] });
+        player.components.set(JumpComponent,
+            { stage: 'stopping', direction: 0, to: 'nova:129' });
+        world.step();
+        expect(played).not.toContain('nova:154');
+
+        // On arrival the sequence ends and the next hop is available again.
+        player.components.delete(JumpComponent);
+        world.step();
+        expect(played).toContain('nova:154');
+    });
+
     it('plays 370 on the first hostile ship, then stays quiet', async () => {
         const { world, played } = await makeWorld();
         world.step();
@@ -209,21 +283,95 @@ describe('UI sound triggers (audio-layer spy)', () => {
         expect(played).toContain('nova:153');
     });
 
-    it('does NOT beep 153 on an eligible jump or with no route', async () => {
+    it('does NOT beep 153 on an eligible jump', async () => {
         const { world, played, controls, player } = await makeWorld();
         player.components.set(MovementStateComponent,
             { position: new Position(1200, 0) } as never);
         player.components.set(ShipPhysicsComponent,
             { jumpDistanceMod: 0 } as never);
         player.components.set(FuelComponent, { current: 100, max: 100 } as never);
-        // Eligible jump: no refusal beep.
         player.components.set(JumpRouteComponent, { route: ['nova:129'] });
         world.step();
         controls.next({ action: 'hyperjump', state: 'start' });
         world.step();
         expect(played).not.toContain('nova:153');
-        // No route: the key is a no-op, not a refusal.
+    });
+
+    it('beeps 153 when jump is pressed with no route at all', async () => {
+        // Matthew's ruling: pressing jump with nothing to jump to is also a
+        // "can't". (This reverses the original f2ef16e1 choice to stay
+        // silent, which was a judgement call, not an observation of the
+        // original — the snd-153 research found no documentary hook.)
+        const { world, played, controls, player } = await makeWorld();
+        player.components.set(MovementStateComponent,
+            { position: new Position(1200, 0) } as never);
+        player.components.set(ShipPhysicsComponent,
+            { jumpDistanceMod: 0 } as never);
+        player.components.set(FuelComponent, { current: 100, max: 100 } as never);
         player.components.set(JumpRouteComponent, { route: [] });
+        world.step();
+        controls.next({ action: 'hyperjump', state: 'start' });
+        world.step();
+        expect(played).toContain('nova:153');
+    });
+
+    it('beeps 153 when jump is pressed without a jump\'s worth of fuel',
+        async () => {
+            const { world, played, controls, player } = await makeWorld();
+            player.components.set(MovementStateComponent,
+                { position: new Position(1200, 0) } as never);
+            player.components.set(ShipPhysicsComponent,
+                { jumpDistanceMod: 0 } as never);
+            player.components.set(FuelComponent,
+                { current: 99, max: 100 } as never);
+            player.components.set(JumpRouteComponent, { route: ['nova:129'] });
+            world.step();
+            controls.next({ action: 'hyperjump', state: 'start' });
+            world.step();
+            expect(played).toContain('nova:153');
+        });
+
+    it('beeps 153 ONCE per discrete press, not on key auto-repeat',
+        async () => {
+            const { world, played, controls, player } = await makeWorld();
+            player.components.set(MovementStateComponent,
+                { position: new Position(100, 0) } as never);
+            player.components.set(ShipPhysicsComponent,
+                { jumpDistanceMod: 0 } as never);
+            player.components.set(FuelComponent,
+                { current: 100, max: 100 } as never);
+            player.components.set(JumpRouteComponent, { route: ['nova:129'] });
+            world.step();
+
+            controls.next({ action: 'hyperjump', state: 'start' });
+            world.step();
+            expect(played.filter(id => id === 'nova:153').length).toBe(1);
+
+            // A held key repeats; only the discrete press beeps.
+            controls.next({ action: 'hyperjump', state: 'repeat' });
+            controls.next({ action: 'hyperjump', state: 'repeat' });
+            world.step();
+            expect(played.filter(id => id === 'nova:153').length).toBe(1);
+
+            // Releasing and pressing again is a new refusal.
+            controls.next({ action: 'hyperjump', state: false });
+            controls.next({ action: 'hyperjump', state: 'start' });
+            world.step();
+            expect(played.filter(id => id === 'nova:153').length).toBe(2);
+        });
+
+    it('does NOT beep 153 while a jump is already under way', async () => {
+        // The key is held through a whole jump sequence as a matter of
+        // course (that is how a held key chain-jumps a route).
+        const { world, played, controls, player } = await makeWorld();
+        player.components.set(MovementStateComponent,
+            { position: new Position(100, 0) } as never);
+        player.components.set(ShipPhysicsComponent,
+            { jumpDistanceMod: 0 } as never);
+        player.components.set(FuelComponent, { current: 0, max: 100 } as never);
+        player.components.set(JumpRouteComponent, { route: [] });
+        player.components.set(JumpComponent,
+            { stage: 'accelerating', direction: 0, to: 'nova:129' });
         world.step();
         controls.next({ action: 'hyperjump', state: 'start' });
         world.step();

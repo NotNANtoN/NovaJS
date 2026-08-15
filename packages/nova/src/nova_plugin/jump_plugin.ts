@@ -22,6 +22,7 @@ import { ControlledByComponent, ShipControlStateComponent } from "./ship_control
 import { ControlShipSystem } from "./ship_controller_plugin.js";
 import { ShipPhysics } from "novadatainterface/ship_data";
 import { getShipMovementPhysics, ShipPhysicsComponent } from "./ship_plugin.js";
+import { jumpBlocker, jumpRadiusFor } from "./jump_readiness.js";
 import { PlayerShipSelector } from "./player_ship_plugin.js";
 import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
 import { SimulationGameDataResource } from "./game_data_resource.js";
@@ -469,30 +470,27 @@ const PlayerJumpControl = new System({
         if (!controlState.get('hyperjump')) {
             return;
         }
-        // A disabled ship cannot spin up its hyperdrive (it cannot even
-        // thrust; see disabled_component.ts).
-        if (disabled) {
-            return;
-        }
-        if (entity.components.has(JumpComponent)) {
-            // A jump is already in progress.
-            return;
-        }
         const destination = jumpRoute.route[0];
-        if (!destination) {
-            return;
-        }
-        // EVN Bible: ships can only enter hyperspace outside the
-        // no-jump zone around the system center (standard radius 1000,
-        // adjusted by "hyperspace dist mod" outfits).
-        const jumpRadius = Math.max(0,
-            JUMP_DISTANCE + shipPhysics.jumpDistanceMod);
-        if (movement.position.length < jumpRadius) {
-            return;
-        }
-        // EVN Bible: fuel "100 = 1 jump". Not enough fuel refuses the
-        // jump the same way the no-jump zone does.
-        if (fuel.current < FUEL_PER_JUMP) {
+        // THE GATE. Every condition lives in the shared readiness predicate
+        // (jump_readiness.ts) so the jump-ready beep and the status bar's
+        // dim destination cannot drift from what actually refuses a jump:
+        // a disabled ship (it cannot even thrust; disabled_component.ts), a
+        // jump already in progress, no route, the no-jump zone (EVN Bible:
+        // standard radius 1000, adjusted by "hyperspace dist mod" outfits),
+        // and fuel (EVN Bible: "100 = 1 jump").
+        const blocked = jumpBlocker({
+            hasRoute: destination !== undefined,
+            distance: movement.position.length,
+            jumpRadius: jumpRadiusFor(JUMP_DISTANCE,
+                shipPhysics.jumpDistanceMod),
+            fuel: fuel.current,
+            fuelPerJump: FUEL_PER_JUMP,
+            disabled: disabled !== undefined,
+            jumping: entity.components.has(JumpComponent),
+        });
+        // The destination re-check is redundant with the 'noRoute' blocker;
+        // it is what narrows the type for beginJump.
+        if (blocked !== undefined || destination === undefined) {
             return;
         }
         // "multi-jump" (ModType 32): a single jump initiation performs up to
@@ -732,8 +730,8 @@ export const JumpSequenceSystem = new System({
                     // outside the no-jump zone (JUMP_ARRIVAL_MARGIN_S)
                     // that another jump can start before it drifts in.
                     const basePhysics = getShipMovementPhysics(shipPhysics);
-                    const jumpRadius = Math.max(0,
-                        JUMP_DISTANCE + shipPhysics.jumpDistanceMod);
+                    const jumpRadius = jumpRadiusFor(JUMP_DISTANCE,
+                        shipPhysics.jumpDistanceMod);
                     const arrivalDistance = jumpRadius
                         + basePhysics.maxVelocity * JUMP_ARRIVAL_MARGIN_S;
                     const unit = target.getUnitVector();
