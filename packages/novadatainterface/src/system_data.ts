@@ -13,6 +13,23 @@ export interface SystemSpawnChance {
     weight: number;
 }
 
+/**
+ * One entry from the sÿst Person fields: a global përs id and the
+ * percent chance that this person is the one an AI-person spawn creates.
+ *
+ * Unlike the DudeTypes weights (which sum to 100 in essentially all stock
+ * systems and are a normalized distribution), the Person chances are
+ * absolute per-person percentages that sum to anything from 10 to 600 in
+ * stock data — see npc_spawn_plugin's maybeSpawnPers for how they compose
+ * with the Bible's 5% AI-person roll.
+ */
+export interface SystemPersonChance {
+    /** Global përs id. */
+    id: string;
+    /** Percent chance for this person (sÿst Person "% Prob"). */
+    chance: number;
+}
+
 export interface SystemData extends BaseData {
     position: [number, number],
     links: Array<string>,
@@ -68,6 +85,17 @@ export interface SystemData extends BaseData {
     fleets: Array<SystemSpawnChance>,
 
     /**
+     * The AI-people (përs) that can appear in this system, from the sÿst
+     * Person fields at the end of the resource, with their percent
+     * chances. The Bible: "Want to make a 'pers' type ship always appear?
+     * Put its ID into one of the Person fields that appear at the end of
+     * the syst resource." This list — not a scan of every përs whose
+     * LinkSyst happens to admit the system — is what the system's
+     * AI-person spawns are drawn from.
+     */
+    persons: Array<SystemPersonChance>,
+
+    /**
      * The average number of AI ships in the system (sÿst AvgShips,
      * +/- 50% per the Bible). Zero means an empty system.
      */
@@ -91,6 +119,7 @@ export function getDefaultSystemData(): SystemData {
         visibility: '',
         dudes: [],
         fleets: [],
+        persons: [],
         avgShips: 0,
         govt: null,
     };

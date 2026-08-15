@@ -78,14 +78,48 @@ import { TargetComponent } from './target_component.js';
  * AppearOn passes with no bits set (i.e. unconditional or negated-bit
  * expressions) can spawn.
  *
- * përs unique characters ride the same machinery: the Bible's "when
+ * përs unique characters ride the same machinery: the Bible's "When
  * ships are created, there is a 5% chance that a specific AI-person
- * will also be created" is implemented as a 5% roll on each spawn
- * draw against a genesis përs table (LinkSyst eligibility, ActiveOn
- * under the same empty-bit-set constraint as AppearOn, ship/govt
- * staged like everything else). At most one living instance of a
- * person exists in the system at a time. See pers_plugin.ts for what
- * of the përs resource is and isn't applied.
+ * will also be created" is a roll on each spawn draw against a genesis
+ * përs table. WHICH people that table holds comes from the sÿst Person
+ * fields when the system has any — the Bible: "Want to make a 'pers'
+ * type ship always appear? Put its ID into one of the Person fields
+ * that appear at the end of the syst resource." Sol (sÿst nova:130)
+ * lists exactly four: Terrapin 12%, Valkyrie 1%, a Drifting Derelict
+ * Heavy Shuttle 2%, Galadriel 15%.
+ *
+ * Composition (see maybeSpawnPers): the 5% is the whole window and each
+ * listed person's percent is its share of it, so a person appears on
+ * 5% x chance% of spawn draws (Sol's derelict: 0.1%, rare but real; a
+ * përs Sol does not list: zero). A system whose listed chances sum to
+ * 100 uses the full 5%; sums past 100 saturate it.
+ *
+ * LinkSyst ("Which systems the person can be created in") is NOT
+ * ANDed with an authored list. Stock data forbids it: of the 228
+ * Person entries in the 65 systems that have any, 160 name a person
+ * whose own LinkSyst excludes the listing system (Sol's Valkyrie përs
+ * nova:227 is bound to gövt nova:134's systems, yet Sol lists it at
+ * 1% — a deliberate rare cameo). An authored list is the system's
+ * cast, full stop.
+ *
+ * The other 480 stock systems list nobody, and there LinkSyst is the
+ * only thing that speaks: those systems fall back to the pool of përs
+ * whose LinkSyst admits them, spread evenly across the same 5% window.
+ * The fallback is not optional — only 48 of the game's 516 përs are
+ * named in any system's Person fields, so list-only selection would
+ * strand 91% of the cast (përs nova:142, a Terrapin bound by LinkSyst
+ * to sÿst nova:136 Fomalhaut and named by nobody, is typical). It
+ * leaves 23 përs unreachable even so: those whose LinkSyst admits only
+ * systems that DO have an authored list, e.g. përs nova:140, bound to
+ * sÿst nova:134 Kerella, whose Person fields name three other people.
+ * Nova itself must resolve that overlap somehow; nothing in the Bible
+ * says how, and every alternative reading costs more (see above).
+ *
+ * ActiveOn is evaluated under the same empty-bit-set constraint as
+ * flët AppearOn either way, and ship/govt are staged like everything
+ * else. At most one living instance of a person exists in the system
+ * at a time. See pers_plugin.ts for what of the përs resource is and
+ * isn't applied.
  */
 
 /** Hard cap on the NPC population. AvgShips reaches 20 in stock data
@@ -143,6 +177,14 @@ export const PersSpawnEntry = t.type({
     govt: t.union([t.string, t.null]),
     /** 1-4 (përs AIType). */
     aiType: t.number,
+    /**
+     * This person's percent share of the Bible's 5% AI-person window
+     * (sÿst Person "% Prob"), so the per-spawn-draw chance of seeing
+     * them is 5% x chance%. Systems with no authored Person list
+     * spread 100% evenly over their LinkSyst pool, reproducing the
+     * Bible's flat 5%.
+     */
+    chance: t.number,
 });
 export type PersSpawnEntry = t.TypeOf<typeof PersSpawnEntry>;
 
@@ -403,13 +445,15 @@ async function pooledMap<T, R>(items: readonly T[],
 }
 
 /**
- * Builds the system's përs table: every person whose LinkSyst admits
- * this system and whose ActiveOn passes with no bits set (the same
- * shared-spawn constraint as flët AppearOn; see the module comment),
- * with their ship class and govt staged. Sorted ids (and order-
+ * Builds the system's përs table (see the module comment for where the
+ * people come from and what the chances mean): the sÿst Person list
+ * when the system has one, otherwise the LinkSyst pool spread evenly.
+ * ActiveOn must pass with no bits set either way (the same shared-spawn
+ * constraint as flët AppearOn), and every ship class and govt the table
+ * can spawn is staged. Resource order (and sorted ids, and order-
  * preserving pooled loads) so the table is identical on every world;
- * the bounded concurrency and per-ship-class dedup keep the scan of
- * several hundred përs resources off the genesis critical path.
+ * the bounded concurrency and per-ship-class dedup keep the fallback
+ * scan of several hundred përs resources off the genesis critical path.
  */
 export async function buildPersSpawnTable(world: World, systemId: string,
     systemData: SystemData): Promise<PersSpawnEntry[]> {
@@ -417,41 +461,64 @@ export async function buildPersSpawnTable(world: World, systemId: string,
     if (!gameData) {
         throw new Error('Expected SimulationGameDataResource to exist');
     }
-    const systemGovtData = systemData.govt
-        ? await gameData.data.Govt.get(systemData.govt).catch(() => undefined)
-        : undefined;
 
-    const persIds = [...(await gameData.ids).Pers].sort();
-    const eligible = (await pooledMap(persIds, async persId => {
-        let pers: PersData;
+    // ActiveOn under an empty bit set (per-player bits cannot drive
+    // shared spawns).
+    const active = (pers: PersData) => {
         try {
-            pers = await gameData.data.Pers.get(persId);
-        } catch {
-            return undefined;
+            return !pers.activeOn || evaluateNCBTest(pers.activeOn,
+                { getBit: () => false });
+        } catch (e) {
+            console.warn(`Bad ActiveOn for përs ${pers.id}: ${e}`);
+            return false;
         }
-        const link = pers.linkSyst;
-        const linkGovtData =
-            (link.type === 'allySystems' || link.type === 'enemySystems')
-                ? await gameData.data.Govt.get(link.govt)
-                    .catch(() => undefined)
-                : undefined;
-        if (!persAllowedInSystem(link, systemId, systemData.govt,
-            systemGovtData, linkGovtData)) {
-            return undefined;
-        }
-        // ActiveOn under an empty bit set (per-player bits cannot
-        // drive shared spawns).
-        try {
-            if (pers.activeOn && !evaluateNCBTest(pers.activeOn,
-                { getBit: () => false })) {
+    };
+
+    let eligible: Array<{ pers: PersData, chance: number }>;
+    if (systemData.persons.length > 0) {
+        // The authored cast. LinkSyst is deliberately not consulted
+        // (see the module comment: 160 of 228 stock entries would die).
+        eligible = (await pooledMap(systemData.persons,
+            async ({ id, chance }) => {
+                let pers: PersData;
+                try {
+                    pers = await gameData.data.Pers.get(id);
+                } catch (e) {
+                    console.warn(`përs table: dropping ${id} listed by `
+                        + `${systemId}: ${e}`);
+                    return undefined;
+                }
+                return active(pers) ? { pers, chance } : undefined;
+            })).filter((entry): entry is { pers: PersData, chance: number } =>
+                entry !== undefined);
+    } else {
+        const systemGovtData = systemData.govt
+            ? await gameData.data.Govt.get(systemData.govt)
+                .catch(() => undefined)
+            : undefined;
+        const persIds = [...(await gameData.ids).Pers].sort();
+        const pool = (await pooledMap(persIds, async persId => {
+            let pers: PersData;
+            try {
+                pers = await gameData.data.Pers.get(persId);
+            } catch {
                 return undefined;
             }
-        } catch (e) {
-            console.warn(`Bad ActiveOn for përs ${persId}: ${e}`);
-            return undefined;
-        }
-        return pers;
-    })).filter((pers): pers is PersData => pers !== undefined);
+            const link = pers.linkSyst;
+            const linkGovtData =
+                (link.type === 'allySystems' || link.type === 'enemySystems')
+                    ? await gameData.data.Govt.get(link.govt)
+                        .catch(() => undefined)
+                    : undefined;
+            if (!persAllowedInSystem(link, systemId, systemData.govt,
+                systemGovtData, linkGovtData)) {
+                return undefined;
+            }
+            return active(pers) ? pers : undefined;
+        })).filter((pers): pers is PersData => pers !== undefined);
+        // Evenly over the whole 5% window: the Bible's flat rate.
+        eligible = pool.map(pers => ({ pers, chance: 100 / pool.length }));
+    }
 
     // Stage each distinct ship-class/govt pair once.
     const staged = new Map<string, Promise<boolean>>();
@@ -470,38 +537,76 @@ export async function buildPersSpawnTable(world: World, systemId: string,
         return promise;
     };
     const stagedOk = await pooledMap(eligible,
-        pers => stageOnce(pers.ship, pers.govt));
+        ({ pers }) => stageOnce(pers.ship, pers.govt));
 
-    return eligible.filter((_, index) => stagedOk[index]).map(pers => ({
-        id: pers.id,
-        name: pers.name,
-        subtitle: pers.subtitle,
-        ship: pers.ship,
-        govt: pers.govt,
-        aiType: pers.aiType,
-    }));
+    return eligible.filter((_, index) => stagedOk[index])
+        .map(({ pers, chance }) => ({
+            id: pers.id,
+            name: pers.name,
+            subtitle: pers.subtitle,
+            ship: pers.ship,
+            govt: pers.govt,
+            aiType: pers.aiType,
+            chance,
+        }));
 }
 
 /** The Bible's chance that a spawn draw also creates a person. */
 export const PERS_SPAWN_CHANCE = 0.05;
 
 /**
- * The Bible's "when ships are created, there is a 5% chance that a
- * specific AI-person will also be created": rolled on each spawn draw.
- * A person already alive in the system is not duplicated (the roll is
- * still consumed, keeping the PRNG stream in lockstep). Deterministic:
- * seeded Random, staged getCached reads, ids from the IdFactory.
+ * Which person a spawn draw creates, from a single uniform roll in
+ * [0, 1) — or undefined for the overwhelmingly common "nobody".
+ *
+ * The Bible's 5% is the whole AI-person window and each entry's percent
+ * chance is its share of it: entry i owns the sub-interval of width
+ * 5% x chance_i%, laid end to end in table order, so P(person i) =
+ * 0.05 * chance_i / 100 and P(nobody) is whatever is left of the 5%.
+ * Chances that sum past 100 (stock data reaches 600) would overflow the
+ * window, so they saturate it instead — the window never exceeds 5%,
+ * and the entries keep their relative shares.
+ *
+ * One roll decides both "does anyone appear" and "who", so a spawn
+ * attempt consumes exactly one draw whatever the table holds.
+ */
+export function pickPersEntry<T extends { chance: number }>(
+    entries: readonly T[], roll: number): T | undefined {
+    const total = entries.reduce((sum, entry) =>
+        sum + Math.max(0, entry.chance), 0);
+    if (total <= 0) {
+        return undefined;
+    }
+    const scale = PERS_SPAWN_CHANCE / Math.max(100, total);
+    let remaining = roll;
+    for (const entry of entries) {
+        const width = Math.max(0, entry.chance) * scale;
+        if (remaining < width) {
+            return entry;
+        }
+        remaining -= width;
+    }
+    return undefined;
+}
+
+/**
+ * The Bible's "When ships are created, there is a 5% chance that a
+ * specific AI-person will also be created", weighted by the sÿst Person
+ * chances (see pickPersEntry and the module comment): rolled on each
+ * spawn draw. A person already alive in the system is not duplicated.
+ *
+ * Deterministic: seeded Random, staged getCached reads, ids from the
+ * IdFactory — and structurally EXACTLY ONE draw per spawn attempt, no
+ * matter whether the table is empty, the roll picks nobody, or the
+ * person picked is already flying around. Only an actual spawn draws
+ * further (for placement), exactly as the dude path does.
  */
 function maybeSpawnPers(world: World,
     gameData: SimulationGameDataInterface, ids: IdFactory, random: Random,
     persEntries: readonly PersSpawnEntry[], atEdge: boolean): number {
-    if (persEntries.length === 0) {
+    const pers = pickPersEntry(persEntries, random.next());
+    if (!pers) {
         return 0;
     }
-    if (random.next() >= PERS_SPAWN_CHANCE) {
-        return 0;
-    }
-    const pers = persEntries[random.below(persEntries.length)];
     for (const entity of world.entities.values()) {
         if (entity.components.get(PersComponent)?.id === pers.id) {
             // Only one of each person at a time.

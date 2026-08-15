@@ -72,8 +72,15 @@ describe('NPC spawning in a real system', () => {
             expect(npc.aiType).toBeLessThanOrEqual(4);
         }
         // Sol's dude table is entirely governed (Federation, merchant
-        // govts, ...): every spawn carries a GovtComponent.
+        // govts, ...): every dude spawn carries a GovtComponent. Fleet
+        // spawns need not — stock flët nova:214 and nova:215
+        // ("Leviathan + Escorts") are bound to Sol with Govt -1, so
+        // their members legitimately fly independent. Fleet membership
+        // is the FiringGroupComponent every fleet spawn shares.
         for (const [, entity] of npcs(world)) {
+            if (entity.components.has(FiringGroupComponent)) {
+                continue;
+            }
             expect(entity.components.get(GovtComponent)).toBeDefined();
         }
     }, 120_000);
