@@ -6,18 +6,17 @@ import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { ControlEvent } from '../nova_plugin/controls_plugin.js';
 import { CronStatesComponent } from '../nova_plugin/player_state_plugin.js';
+import { LINE_HEIGHT, NEWS } from './dialog_layout.js';
 import { MenuControls } from './menu_controls.js';
 import { MissionUniverse } from './mission_universe.js';
 
 // The 300x230 news dialog PICTs (9000 generic, 9001+ per-govt
-// NewsPic): header art on top, text pane at x 5..295, y 132..226.
-const TEXT_X = -140;
-const TEXT_Y = 22;
-const TEXT_WIDTH = 280;
-
+// NewsPic): header art on top, text pane below a rule at y554.
+// Geometry lives in dialog_layout.ts, measured against bar/news/*.png.
 const NEWS_FONT: Partial<PIXI.ITextStyle> = {
-    fontFamily: 'Geneva', fontSize: 10, fill: 0xffffff,
-    align: 'left', wordWrap: true, wordWrapWidth: TEXT_WIDTH,
+    fontFamily: 'Geneva', fontSize: 9.4, fill: 0xffffff,
+    align: 'left', wordWrap: true, wordWrapWidth: NEWS.wrapWidth,
+    lineHeight: LINE_HEIGHT,
 };
 
 /** Shown when no crön has news for this stellar (cf. STR# 8101). */
@@ -53,7 +52,9 @@ export class NewsDialog {
     private controls: MenuControls;
     private closed = new Subject<void>();
     private background?: PIXI.Sprite;
-    private text = new PIXI.Text('', NEWS_FONT);
+    /** One text per news item: the original separates items by a HALF
+     * line, which a single wrapped Text cannot express. */
+    private items: PIXI.Text[] = [];
 
     constructor(private displayAssets: DisplayAssetDataInterface,
         private simulationData: SimulationGameDataInterface,
@@ -65,11 +66,34 @@ export class NewsDialog {
         this.controls = new MenuControls(controlEvents, {
             depart: () => this.closed.next(),
         });
-        this.text.position.set(TEXT_X, TEXT_Y);
+    }
+
+    /**
+     * Stacks the day's items down the text pane, each starting a half
+     * line (6px) below the previous item's last line — the original's
+     * spacing on bar/news/*.png, where the second item's cap lands 30px
+     * below the first's (two 12px lines plus the gap), not 36.
+     */
+    private layoutItems(items: string[]) {
+        for (const text of this.items) {
+            this.container.removeChild(text);
+            text.destroy();
+        }
+        this.items = [];
+        let y = NEWS.text.y;
+        for (const item of items) {
+            const text = new PIXI.Text(item, NEWS_FONT);
+            text.position.set(NEWS.text.x, y);
+            this.container.addChild(text);
+            this.items.push(text);
+            const lines = text.text ? Math.max(1,
+                Math.round(text.height / LINE_HEIGHT)) : 1;
+            y += lines * LINE_HEIGHT + NEWS.paragraphGap;
+        }
     }
 
     /** Picks the news for the player's active crons at this stellar. */
-    private pickNews(entity: Entity, govtId: string | null): string {
+    private pickNews(entity: Entity, govtId: string | null): string[] {
         const cronStates = entity.components.get(CronStatesComponent);
         const active: CronData[] = this.universe.crons.filter(
             cron => cronStates?.get(cron.id)?.phase === 'active');
@@ -91,7 +115,7 @@ export class NewsDialog {
         if (items.length === 0) {
             items.push(pick(GENERIC_NEWS));
         }
-        return items.join('\n\n');
+        return items;
     }
 
     /** Shows the dialog and resolves when the player dismisses it. */
@@ -120,14 +144,13 @@ export class NewsDialog {
         // Any click on the news window dismisses it.
         this.background.on('pointerdown', () => this.closed.next());
         this.container.addChildAt(this.background, 0);
-        this.container.addChild(this.text);
 
         try {
             await this.universe.load();
-            this.text.text = this.pickNews(entity, govtId);
+            this.layoutItems(this.pickNews(entity, govtId));
         } catch (e) {
             console.warn('News dialog failed to load crons:', e);
-            this.text.text = GENERIC_NEWS[0];
+            this.layoutItems([GENERIC_NEWS[0]]);
         }
 
         this.container.visible = true;

@@ -8,6 +8,7 @@ import { ControlEvent } from '../nova_plugin/controls_plugin.js';
 import { makeDescTextContext, playerGender, resolveConditionalBlocks }
     from '../nova_plugin/desc_text.js';
 import { Button } from './button.js';
+import { HIRE } from './dialog_layout.js';
 import { ItemGrid, ItemTile } from './item_grid.js';
 import { MenuControls } from './menu_controls.js';
 import { FONT } from './outfitter.js';
@@ -106,10 +107,16 @@ export class HireEscortDialog {
         background.interactive = true;
         this.container.addChild(background);
 
+        // Measured off bar/hire_escort/select_escort.png: the pills'
+        // red faces run x948..1045 and x1063..1160 at y673. (The
+        // original also has an Info button left of them; we have no
+        // pilot-info dialog of our own, so that slot stays empty.)
         this.buttons = {
-            hire: new Button(displayAssets, 'Hire Escort', 90,
-                { x: -35, y: 126 }),
-            done: new Button(displayAssets, 'Done', 60, { x: 100, y: 126 }),
+            hire: new Button(displayAssets, 'Hire Escort',
+                HIRE.button.hireWidth,
+                { x: HIRE.button.hire, y: HIRE.button.y }),
+            done: new Button(displayAssets, 'Done', HIRE.button.hireWidth,
+                { x: HIRE.button.done, y: HIRE.button.y }),
         };
         this.buttons.hire.click.subscribe(this.hire.bind(this));
         this.buttons.done.click.subscribe(() => this.closed.next());
@@ -122,10 +129,14 @@ export class HireEscortDialog {
         this.gridContainer.position.set(-373, -153);
         this.pictContainer.position.set(174, -152.5);
         this.text.description.position.set(-27, -150);
-        this.text.hiringPrice.position.set(234, 58);
-        this.text.price.position.set(310, 58);
-        this.text.youHave.position.set(234, 70);
-        this.text.count.position.set(310, 70);
+        // "Hiring Price:" / "You Have:" sit 24px apart, twice the body
+        // leading (caps at y598 and y622 on select_escort.png).
+        this.text.hiringPrice.position.set(HIRE.label.x, HIRE.label.y);
+        this.text.price.position.set(HIRE.valueX, HIRE.label.y);
+        this.text.youHave.position.set(
+            HIRE.label.x, HIRE.label.y + HIRE.labelPitch);
+        this.text.count.position.set(
+            HIRE.valueX, HIRE.label.y + HIRE.labelPitch);
         this.text.status.position.set(-170, 118);
         this.container.addChild(this.gridContainer, this.pictContainer);
         for (const t of Object.values(this.text)) {

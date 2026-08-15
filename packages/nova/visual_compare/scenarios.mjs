@@ -35,6 +35,7 @@ import { shopScenarios } from './scenarios_shops.mjs';
 // ============================================================================
 
 import { hudScenarios } from './scenarios_hud.mjs';
+import { dialogScenarios } from './scenarios_dialogs.mjs';
 
 const region = (id, label, x, y, width, height) => ({
     id, label, ref: { x, y, width, height }, ours: { x, y, width, height },
@@ -1625,8 +1626,13 @@ export const scenarios = [
     // centre), so that scenario compares our centred frame against the
     // reference's shifted one with explicit rects.
     ...sigmaScenarios(),
+<<<<<<< HEAD
     ...shopScenarios(),
     // In-flight HUD coverage (status bar interfaces, cargo/target panels,
     // star-map properties column, status line) — see scenarios_hud.mjs.
     ...hudScenarios,
+=======
+    // Bar / mission BBS / mission info / trade center interiors.
+    ...dialogScenarios,
+>>>>>>> e396fb00
 ];

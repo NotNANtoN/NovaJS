@@ -9,6 +9,7 @@ import { makeDescTextContext, playerGender, resolveConditionalBlocks }
     from '../nova_plugin/desc_text.js';
 import { LOCATION_BAR } from '../nova_plugin/mission_logic.js';
 import { Button } from './button.js';
+import { BAR, LINE_HEIGHT } from './dialog_layout.js';
 import { GambleDialog } from './gamble.js';
 import { HireEscortDialog, noShipsForHire } from './hire_escort.js';
 import { Menu } from './menu.js';
@@ -20,18 +21,13 @@ import { MissionUniverse } from './mission_universe.js';
 import { NewsDialog } from './news_dialog.js';
 import { PendingEscortsComponent } from './pending_escorts.js';
 
-// Laid out to fit the 263x185 Bar dialog (PICT 8503): text pane at
-// x 5..252, y 3..118; the metal button area below fits a 2x2 grid.
-const DESC_X = -122;
-const DESC_Y = -85;
-const DESC_WIDTH = 238;
-const BUTTON_COL = [-120, 8];
-const BUTTON_ROW = [30, 60];
-const BUTTON_WIDTH = 80;
-
+// The 263x185 Bar dialog (PICT 8503). Geometry lives in
+// dialog_layout.ts, measured against bar/bar_earth.png and
+// bar/bar_port_kane.png (1920x1080).
 const DESC_FONT: Partial<PIXI.ITextStyle> = {
-    fontFamily: 'Geneva', fontSize: 10, fill: 0xffffff,
-    align: 'left', wordWrap: true, wordWrapWidth: DESC_WIDTH,
+    fontFamily: 'Geneva', fontSize: 9.4, fill: 0xffffff,
+    align: 'left', wordWrap: true, wordWrapWidth: BAR.wrapWidth,
+    lineHeight: LINE_HEIGHT,
 };
 
 const FALLBACK_DESC = 'The bar is quiet tonight. A tired bartender '
@@ -82,15 +78,18 @@ export class Bar extends Menu<Entity> {
         // background: the opaque 8504 frame covers it when populated.
         this.container.addChild(this.barPictLayer);
 
+        // The original's grid is asymmetric: the left column's pills are
+        // wider than the right's (see BAR.button in dialog_layout.ts).
+        const { columns, widths, rows } = BAR.button;
         this.buttons = {
             hireEscort: new Button(displayAssets, 'Hire Escort',
-                BUTTON_WIDTH, { x: BUTTON_COL[0], y: BUTTON_ROW[0] }),
+                widths[0], { x: columns[0], y: rows[0] }),
             gamble: new Button(displayAssets, 'Gamble',
-                BUTTON_WIDTH, { x: BUTTON_COL[1], y: BUTTON_ROW[0] }),
+                widths[1], { x: columns[1], y: rows[0] }),
             holovid: new Button(displayAssets, 'Holovid',
-                BUTTON_WIDTH, { x: BUTTON_COL[0], y: BUTTON_ROW[1] }),
+                widths[0], { x: columns[0], y: rows[1] }),
             leave: new Button(displayAssets, 'Leave',
-                BUTTON_WIDTH, { x: BUTTON_COL[1], y: BUTTON_ROW[1] }),
+                widths[1], { x: columns[1], y: rows[1] }),
         };
         this.buttons.hireEscort.click.subscribe(
             () => void this.showHireEscort());
@@ -101,7 +100,7 @@ export class Bar extends Menu<Entity> {
         this.buttons.leave.click.subscribe(this.done.bind(this));
         this.addButtons(this.buttons);
 
-        this.description.position.set(DESC_X, DESC_Y);
+        this.description.position.set(BAR.text.x, BAR.text.y);
         this.container.addChild(this.description);
 
         this.news = new NewsDialog(displayAssets, simulationData,

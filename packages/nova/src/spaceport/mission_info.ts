@@ -3,7 +3,7 @@ import * as PIXI from 'pixi.js';
 import { firstValueFrom, Observable, Subject } from 'rxjs';
 import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data.js';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
-import { dayNumber, formatDate } from '../nova_plugin/calendar.js';
+import { dayNumber } from '../nova_plugin/calendar.js';
 import { ControlEvent } from '../nova_plugin/controls_plugin.js';
 import { abortMission } from '../nova_plugin/mission_logic.js';
 import { expandMissionText, missionDisplayName } from '../nova_plugin/mission_text.js';
@@ -17,6 +17,11 @@ import { MenuControls } from './menu_controls.js';
 import { activeAsOffer, offerSubstitutions } from './mission_offers.js';
 import { MissionSession } from './mission_session.js';
 import { MissionUniverse } from './mission_universe.js';
+import { formatMapDate } from './route.js';
+import {
+    LINE_HEIGHT, MISSION_INFO, ROW_HEIGHT, ROW_TEXT_DY, SELECTION_COLOR,
+    listRowY,
+} from './dialog_layout.js';
 
 /**
  * Docked context that makes the Abort button functional: aborting runs
@@ -31,46 +36,28 @@ export interface MissionInfoAbortContext {
 }
 
 // The Mission Info dialog on the 471x155 PICT 8517 frame: a left list of
-// the player's active missions, a right pane with the current date and
-// the selected mission's briefing text, and Abort / Done along the
-// bottom. Center-anchored coordinates, measured against the
-// missions/missions_info.png reference (1920x1080).
-const WIDTH = 471;
-const HEIGHT = 155;
-const ORIGIN_X = -WIDTH / 2;
-const ORIGIN_Y = -HEIGHT / 2;
-
-const HEADER_X = ORIGIN_X + 10;
-const HEADER_Y = ORIGIN_Y + 7;
-const LIST_X = ORIGIN_X + 8;
-const LIST_TOP = ORIGIN_Y + 24;
-const LIST_WIDTH = 206;
-const ROW_HEIGHT = 13;
-const LIST_ROWS = 8;
-const DATE_X = ORIGIN_X + WIDTH - 12;
-const DATE_Y = HEADER_Y;
-const DESC_X = ORIGIN_X + 232;
-const DESC_TOP = ORIGIN_Y + 24;
-const DESC_WIDTH = 222;
-const DESC_HEIGHT = 96;
-const BUTTON_Y = ORIGIN_Y + HEIGHT - 22;
-
+// the player's active missions, a right pane with the selected mission's
+// briefing text, a date strip of its own in the upper right, and
+// Abort / Done along the bottom. The geometry lives in dialog_layout.ts,
+// measured against missions/missions_info.png (1920x1080).
 const HEADER_FONT: Partial<PIXI.ITextStyle> = {
-    fontFamily: 'Geneva', fontSize: 10, fill: 0xbbbbbb, align: 'left',
-    wordWrap: false,
+    fontFamily: 'Geneva', fontSize: 9.4, fill: 0xc0c0c0, align: 'left',
+    wordWrap: false, lineHeight: LINE_HEIGHT,
 };
 const DATE_FONT: Partial<PIXI.ITextStyle> = {
-    ...HEADER_FONT, align: 'right',
+    ...HEADER_FONT, fill: 0x808080, align: 'center',
 };
 const LIST_FONT: Partial<PIXI.ITextStyle> = {
-    fontFamily: 'Geneva', fontSize: 10, fill: 0xffffff, align: 'left',
-    wordWrap: false,
+    fontFamily: 'Geneva', fontSize: 9.4, fill: 0xffffff, align: 'left',
+    wordWrap: false, lineHeight: LINE_HEIGHT,
 };
 const DESC_FONT: Partial<PIXI.ITextStyle> = {
-    fontFamily: 'Geneva', fontSize: 10, fill: 0xffffff, align: 'left',
-    wordWrap: true, wordWrapWidth: DESC_WIDTH,
+    ...LIST_FONT, wordWrap: true,
+    wordWrapWidth: MISSION_INFO.descWrapWidth,
 };
 
+/** Stock Nova's own wording: STR# 2002 index 359 / 353. */
+const HEADER_TEXT = 'Currently active missions:';
 const NO_MISSIONS = 'You have no active missions.';
 
 /**
@@ -125,35 +112,45 @@ export class MissionInfoDialog {
         background.interactive = true;
         this.container.addChild(background);
 
-        this.header.text = 'Currently active missions:';
-        this.header.position.set(HEADER_X, HEADER_Y);
-        this.date.anchor.set(1, 0);
-        this.date.position.set(DATE_X, DATE_Y);
-        this.listContainer.position.set(LIST_X, LIST_TOP);
-        this.description.position.set(DESC_X, DESC_TOP);
+        this.header.text = HEADER_TEXT;
+        this.header.position.set(
+            MISSION_INFO.headerText.x, MISSION_INFO.headerText.y);
+        // The date is centred in its own strip, not right-aligned:
+        // "Nov. 21st, 1177 NC" shares the strip's midpoint (x1128).
+        this.date.anchor.set(0.5, 0);
+        this.date.position.set(
+            MISSION_INFO.dateCenter, MISSION_INFO.dateText.y);
+        this.listContainer.position.set(
+            MISSION_INFO.list.x, MISSION_INFO.list.y);
+        this.description.position.set(
+            MISSION_INFO.descText.x, MISSION_INFO.descText.y);
         this.container.addChild(this.highlight, this.header, this.date,
             this.listContainer, this.description);
 
         // Clip the list and description to their panes.
         const listMask = new PIXI.Graphics().beginFill(0xffffff)
-            .drawRect(LIST_X, LIST_TOP, LIST_WIDTH, LIST_ROWS * ROW_HEIGHT)
+            .drawRect(MISSION_INFO.list.x, MISSION_INFO.list.y,
+                MISSION_INFO.list.width, MISSION_INFO.list.height)
             .endFill();
         this.container.addChild(listMask);
         this.listContainer.mask = listMask;
         const descMask = new PIXI.Graphics().beginFill(0xffffff)
-            .drawRect(DESC_X, DESC_TOP, DESC_WIDTH + 6, DESC_HEIGHT)
+            .drawRect(MISSION_INFO.desc.x, MISSION_INFO.desc.y,
+                MISSION_INFO.desc.width, MISSION_INFO.desc.height)
             .endFill();
         this.container.addChild(descMask);
         this.description.mask = descMask;
 
         // Functional while docked (see class doc); greyed in flight or
         // when the selected mission can't be aborted.
-        this.abort = new Button(displayAssets, 'Abort', 80,
-            { x: ORIGIN_X + 60, y: BUTTON_Y });
+        this.abort = new Button(displayAssets, 'Abort',
+            MISSION_INFO.button.width,
+            { x: MISSION_INFO.button.abort, y: MISSION_INFO.button.y });
         this.abort.state = 'grey';
         this.abort.click.subscribe(() => void this.doAbort());
-        const done = new Button(displayAssets, 'Done', 80,
-            { x: ORIGIN_X + 285, y: BUTTON_Y });
+        const done = new Button(displayAssets, 'Done',
+            MISSION_INFO.button.width,
+            { x: MISSION_INFO.button.done, y: MISSION_INFO.button.y });
         done.click.subscribe(() => this.closed.next());
         this.container.addChild(this.abort.container, done.container);
 
@@ -189,7 +186,7 @@ export class MissionInfoDialog {
             : [];
         const date = entity.components.get(GameDateComponent);
         this.currentDay = date ? dayNumber(date) : 0;
-        this.date.text = date ? formatDate(date) : '';
+        this.date.text = date ? formatMapDate(date) : '';
         this.selectedIndex = 0;
 
         this.refreshList();
@@ -235,24 +232,25 @@ export class MissionInfoDialog {
         this.highlight.clear();
 
         if (this.missions.length === 0) {
-            const empty = new PIXI.Text('None.', LIST_FONT);
-            empty.position.set(4, 0);
-            this.listContainer.addChild(empty);
-            this.rowTexts.push(empty);
+            // The original leaves the list pane empty and says so in the
+            // description pane (STR# 2002 index 353), which
+            // refreshDescription() does.
             return;
         }
 
         // A simple window keeps the selection visible.
         const start = Math.max(0, Math.min(
-            this.selectedIndex - (LIST_ROWS - 1),
-            this.missions.length - LIST_ROWS));
-        const visible = this.missions.slice(start, start + LIST_ROWS);
+            this.selectedIndex - (MISSION_INFO.list.rows - 1),
+            this.missions.length - MISSION_INFO.list.rows));
+        const visible = this.missions.slice(
+            start, start + MISSION_INFO.list.rows);
         visible.forEach(([id, active], i) => {
             const index = start + i;
             if (index === this.selectedIndex) {
-                this.highlight.beginFill(0x8b0000)
-                    .drawRect(LIST_X, LIST_TOP + i * ROW_HEIGHT,
-                        LIST_WIDTH, ROW_HEIGHT)
+                this.highlight.beginFill(SELECTION_COLOR)
+                    .drawRect(MISSION_INFO.list.x,
+                        listRowY(MISSION_INFO.list.y, i),
+                        MISSION_INFO.list.width, ROW_HEIGHT)
                     .endFill();
             }
             // A full-width transparent hit target so the whole row —
@@ -262,7 +260,7 @@ export class MissionInfoDialog {
             hit.interactive = true;
             hit.cursor = 'pointer';
             hit.hitArea = new PIXI.Rectangle(
-                0, i * ROW_HEIGHT, LIST_WIDTH, ROW_HEIGHT);
+                0, i * ROW_HEIGHT, MISSION_INFO.list.width, ROW_HEIGHT);
             hit.on('pointerdown', () => {
                 this.selectedIndex = index;
                 this.refreshList();
@@ -272,7 +270,8 @@ export class MissionInfoDialog {
             this.rowHits.push(hit);
             const text = new PIXI.Text(this.missionName(id, active),
                 LIST_FONT);
-            text.position.set(4, i * ROW_HEIGHT);
+            text.position.set(MISSION_INFO.listTextX,
+                i * ROW_HEIGHT + ROW_TEXT_DY);
             this.listContainer.addChild(text);
             this.rowTexts.push(text);
         });
