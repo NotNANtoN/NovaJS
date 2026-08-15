@@ -25,7 +25,8 @@ import { OutfitsStateComponent, sumOutfitField } from "../nova_plugin/outfit_plu
 import { PersComponent } from "../nova_plugin/pers_plugin.js";
 import { DisabledComponent } from "../nova_plugin/disabled_component.js";
 import { PlanetDataComponent, PlanetTargetComponent } from "../nova_plugin/planet_plugin.js";
-import { JumpRouteComponent } from "../nova_plugin/jump_plugin.js";
+import { JumpComponent, JumpRouteComponent, JUMP_DISTANCE } from "../nova_plugin/jump_plugin.js";
+import { canJump, jumpRadiusFor } from "../nova_plugin/jump_readiness.js";
 import { CargoComponent } from "../nova_plugin/cargo_plugin.js";
 import { CreditsComponent } from "../nova_plugin/player_state_plugin.js";
 import { OutfitsState } from "../nova_plugin/outfit_plugin.js";
@@ -35,7 +36,7 @@ import { SingletonComponent } from "nova_ecs/world";
 import { ControlAction } from "../nova_plugin/controls.js";
 import { displayName, govtTargetName } from "../nova_plugin/display_name.js";
 import { STANDARD_CARGO_NAMES } from "../nova_plugin/mission_logic.js";
-import { ShipComponent } from "../nova_plugin/ship_plugin.js";
+import { ShipComponent, ShipPhysicsComponent } from "../nova_plugin/ship_plugin.js";
 import {
     formatCredits, navReadout, NavReadout, CargoLine, abbreviateCargoName,
     specialCargoSummary, standardCargoIndex, targetGovtLabel,
@@ -649,7 +650,13 @@ class StatusBar {
         if (!this.built) {
             return;
         }
-        const key = `${readout.header} ${readout.value}`;
+        // `dim` belongs in the memo key, not just the text: becoming
+        // able to jump changes ONLY the colour of an unchanged
+        // destination name, so a header+value key would memoize the
+        // restyle away and the readout would never brighten.
+        // (The separator was a stray NUL byte, which made this whole
+        // source file read as binary to grep and friends.)
+        const key = `${readout.header}|${readout.value}|${readout.dim}`;
         if (key === this.lastNav) {
             return;
         }
@@ -961,16 +968,32 @@ const DrawStatusBarInterference = new System({
 });
 
 const PlanetNavQuery = new Query([PlanetDataComponent] as const);
-const DrawStatusBarNavigation = new System({
+/** Exported for status_bar_navigation_test (the dim / in-flight rules). */
+export const DrawStatusBarNavigation = new System({
     name: 'DrawStatusBarNavigation',
     args: [StatusBarResource, Optional(JumpRouteComponent),
-        Optional(PlanetTargetComponent), RunQuery,
+        Optional(PlanetTargetComponent), Optional(JumpComponent),
+        Optional(MovementStateComponent), Optional(ShipPhysicsComponent),
+        Optional(FuelComponent), Optional(DisabledComponent), RunQuery,
         SimulationGameDataResource, PlayerShipSelector] as const,
-    step(statusBar, jumpRoute, planetTarget, runQuery, gameData) {
-        // A set hyperspace route shows the next system; getCached is undefined
-        // until the system data loads, then the name appears.
+    step(statusBar, jumpRoute, planetTarget, jump, movement, shipPhysics,
+        fuel, disabled, runQuery, gameData) {
+        // WHERE THE SHIP IS ACTUALLY HEADED. A jump in progress shows ITS
+        // destination, not the route's new head: beginJump (jump_plugin)
+        // shifts the hop off the route the instant the sequence starts, so
+        // reading route[0] mid-jump names the hop AFTER this one and the
+        // readout jumps ahead of the ship. The simulation's ordering is
+        // deliberate (multi-jump and rollback depend on it), so this is
+        // fixed where it is a display question: prefer the in-flight jump's
+        // own `to` and fall back to the route head.
+        //
+        // A vanishing jump's `to` is the empty-string sentinel
+        // (VANISH_DESTINATION) and is falsy, so `??`-style truthiness keeps
+        // the fallback correct — though a player ship never vanishes.
+        const nextSystem = (jump?.to || undefined) ?? jumpRoute?.route[0];
+        // getCached is undefined until the system data loads, then the name
+        // appears.
         let destinationName: string | null = null;
-        const nextSystem = jumpRoute?.route[0];
         if (nextSystem) {
             destinationName =
                 gameData.data.System.getCached(nextSystem)?.name ?? null;
@@ -983,7 +1006,35 @@ const DrawStatusBarNavigation = new System({
             stellarName = planet ? planet[0].name : null;
         }
 
-        statusBar.drawNavigation(navReadout(destinationName, stellarName));
+        // DIM UNTIL JUMP-READY, off the shared readiness predicate
+        // (nova_plugin/jump_readiness.ts) that PlayerJumpControl gates on
+        // and the nova:154 cue fires from — the destination brightens
+        // exactly when pressing the jump key would work.
+        //
+        // A jump ALREADY UNDERWAY reads bright: `canJump` says no (the
+        // 'jumping' blocker), but the ship is on its way to that very
+        // destination, and dimming it for the length of the sequence would
+        // be a lie in the other direction.
+        //
+        // Missing inputs (the components are Optional so this system keeps
+        // drawing the panel in every state) fall back to `true`, i.e. the
+        // pre-existing always-bright behavior.
+        const jumpReady = jump !== undefined
+            || (movement !== undefined && shipPhysics !== undefined
+                && fuel !== undefined
+                ? canJump({
+                    hasRoute: nextSystem !== undefined,
+                    distance: movement.position.length,
+                    jumpRadius: jumpRadiusFor(JUMP_DISTANCE,
+                        shipPhysics.jumpDistanceMod),
+                    fuel: fuel.current,
+                    fuelPerJump: FUEL_PER_JUMP,
+                    disabled: disabled !== undefined,
+                })
+                : true);
+
+        statusBar.drawNavigation(
+            navReadout(destinationName, stellarName, jumpReady));
     }
 });
 

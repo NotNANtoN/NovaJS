@@ -40,7 +40,9 @@ export const BEEP_TARGET_PLANET = 'nova:150';
 export const BEEP_DISABLED = 'nova:151';
 /** snd 152 "beep 3": a ship was targeted; the map was opened; mission-info closed. */
 export const BEEP_TARGET_SHIP = 'nova:152';
-/** snd 153 "beep 4": "can't do that" (blocked landing/boarding, no secondary). */
+/** snd 153 "beep 4": "can't do that" (blocked landing/boarding, no secondary
+ * weapon, and hyperjump pressed when the jump gate refuses — no route, too
+ * close to the system center, out of fuel, or disabled). */
 export const BEEP_CANT_DO = 'nova:153';
 /** snd 154 "beep 5": a jump became possible (jump route + far enough out). */
 export const BEEP_JUMP_READY = 'nova:154';
