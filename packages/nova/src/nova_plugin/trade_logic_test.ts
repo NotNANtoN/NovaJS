@@ -58,6 +58,13 @@ describe('tierPrice', () => {
         // Luxury goods (base 900): the screenshot's High 1125.
         expect(tierPrice(900, 'high')).toEqual(1125);
     });
+
+    it('truncates fractional tier prices like the original', () => {
+        // Medical Supplies (base 750): 390_medical_supplies.png shows
+        // High 937, not the rounded 938 (750 x 1.25 = 937.5).
+        expect(tierPrice(750, 'high')).toEqual(937);
+        expect(tierPrice(751, 'low')).toEqual(600);
+    });
 });
 
 describe('standardTradeGoods', () => {

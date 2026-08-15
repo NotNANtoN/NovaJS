@@ -31,10 +31,13 @@ export const STANDARD_COMMODITY_BASE_PRICES =
  * there.
  */
 export function tierPrice(basePrice: number, tier: TradeTier): number {
+    // The original TRUNCATES fractional tier prices: Medical Supplies
+    // (base 750) shows High 937 in the reference screenshots, not the
+    // rounded 938 (750 x 1.25 = 937.5). Review-measured 2026-08-15.
     switch (tier) {
-        case 'low': return Math.round(basePrice * 0.8);
+        case 'low': return Math.floor(basePrice * 0.8);
         case 'med': return basePrice;
-        case 'high': return Math.round(basePrice * 1.25);
+        case 'high': return Math.floor(basePrice * 1.25);
     }
 }
 
