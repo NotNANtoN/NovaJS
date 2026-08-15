@@ -69,11 +69,35 @@ export class World {
     readonly events = new DefaultMap<UnknownEvent, SyncSubject<UnknownEventWithEntities>>(
         () => new SyncSubject()) as WorldEventsMap;
     private pluginPromises = new Map<Plugin, Promise<void>>();
+    /**
+     * Plugins whose build (including the builds of the plugins they add) has
+     * started but not finished. Used to avoid waiting on a plugin that is
+     * (possibly transitively) waiting on us, which would deadlock.
+     */
+    private buildingPlugins = new Set<Plugin>();
+    /**
+     * Stack of collectors for nested `addPlugin` calls.
+     *
+     * `Plugin.build` is synchronous (it may return a promise, but a plugin
+     * that adds other plugins from a synchronous build can not await them),
+     * so nested `addPlugin` calls are usually fire-and-forget. Each
+     * `addPlugin` pushes a frame before calling `build` and does not resolve
+     * until everything registered in that frame has settled. That makes a
+     * failure at any depth reject the outermost awaited `addPlugin`, and
+     * guarantees no nested plugin is still registering systems once it
+     * resolves (which used to race a subsequent `world.step()`).
+     */
+    private pluginBuildFrames: Promise<void>[][] = [];
     readonly plugins = new Set<Plugin>();
 
     constructor(readonly name?: string, readonly basePlugins =
         new Set([AsyncSystemPlugin, ProvidePlugin, ProvideAsyncPlugin])) {
         for (const plugin of basePlugins) {
+            // A constructor can not await these. Base plugins build
+            // synchronously, so their systems and resources are in place when
+            // this returns; a base plugin with an asynchronous build would
+            // still race the caller (and report failures as unhandled
+            // rejections).
             this.addPlugin(plugin);
         }
         this.resources.set(Entities, this.entities);
@@ -146,22 +170,124 @@ export class World {
     /**
      * Add a plugin to the `World` if it is not already added by calling its
      * `build` function with `this` instance of the `World`.
+     *
+     * The returned promise does not resolve until the plugin and every plugin
+     * it adds (at any depth) have finished building, and it rejects if any of
+     * those builds fails. Plugins commonly add other plugins from a
+     * synchronous `build`, which can not await them; those nested promises are
+     * collected here instead of being dropped.
      */
-    async addPlugin(plugin: Plugin) {
+    addPlugin(plugin: Plugin): Promise<void> {
+        // Read the enclosing build's frame synchronously: it is only the
+        // current one while the enclosing `build` is on the stack.
+        const parentFrame =
+            this.pluginBuildFrames[this.pluginBuildFrames.length - 1];
+        const added = this.addPluginInternal(plugin, parentFrame);
+        if (parentFrame) {
+            // A nested call's failure is reported by the enclosing
+            // `addPlugin` (through `parentFrame`), so mark this promise
+            // handled. Without this, the usual fire-and-forget nested call
+            // would *also* surface the failure as an unhandled rejection.
+            // Callers that do await a nested call still see the rejection.
+            added.catch(() => { });
+        }
+        return added;
+    }
+
+    private async addPluginInternal(plugin: Plugin,
+        parentFrame?: Promise<void>[]): Promise<void> {
         // TODO: Namespace component and system names? Perhaps use ':' or '/' to
         // denote namespace vs name. Use a proxy like NovaData uses.
         if (this.plugins.has(plugin)) {
             // TODO: Should this warning be re-enabled?
             // console.warn(`Not adding plugin ${plugin.name} since it is already added`);
+            const existing = this.pluginPromises.get(plugin);
+            // Only wait on a build that has already finished (to report its
+            // failure). Waiting on one that is still building risks
+            // deadlocking on a cyclic plugin graph, and is not needed for
+            // completeness: whoever added it first is in this same build tree
+            // and is already waited on.
+            if (existing && !this.buildingPlugins.has(plugin)) {
+                await existing;
+            }
             return;
         }
 
         this.plugins.add(plugin);
-        const pluginPromise = plugin.build(this);
-        if (isPromise(pluginPromise)) {
-            this.pluginPromises.set(plugin, pluginPromise);
-            await pluginPromise;
+        const pluginPromise = this.buildPlugin(plugin);
+        this.pluginPromises.set(plugin, pluginPromise);
+        // Hand the promise to the enclosing build, which can not await it
+        // itself.
+        parentFrame?.push(pluginPromise);
+        await pluginPromise;
+    }
+
+    /**
+     * Call a plugin's `build` and wait for it and for every plugin it adds.
+     */
+    private async buildPlugin(plugin: Plugin): Promise<void> {
+        const frame: Promise<void>[] = [];
+        this.buildingPlugins.add(plugin);
+        try {
+            // Both of these wait for everything they cover even when part of
+            // it fails, so a failed load never leaves a plugin registering
+            // systems in the background. The plugin's own failure is reported
+            // in preference to a nested one since it's the likelier cause.
+            const buildFailure = await this.runPluginBuild(plugin, frame);
+            const nestedFailure = await this.drainPluginFrame(frame);
+            if (buildFailure) {
+                throw buildFailure.reason;
+            }
+            if (nestedFailure) {
+                throw nestedFailure.reason;
+            }
+        } finally {
+            this.buildingPlugins.delete(plugin);
         }
+    }
+
+    /**
+     * Call `plugin.build` with `frame` as the collector for the plugins it
+     * adds. Returns its failure instead of throwing it.
+     */
+    private async runPluginBuild(plugin: Plugin, frame: Promise<void>[]):
+        Promise<{ reason: unknown } | undefined> {
+        let built: void | Promise<void>;
+        this.pluginBuildFrames.push(frame);
+        try {
+            built = plugin.build(this);
+        } catch (reason) {
+            return { reason };
+        } finally {
+            // `build` has returned control, so its frame is no longer the
+            // enclosing one, even if it returned a promise.
+            this.pluginBuildFrames.pop();
+        }
+        if (isPromise(built)) {
+            try {
+                await built;
+            } catch (reason) {
+                return { reason };
+            }
+        }
+        return undefined;
+    }
+
+    /**
+     * Wait for every plugin registered in `frame`, and for the plugins they
+     * add in turn. Returns the first failure instead of throwing it.
+     */
+    private async drainPluginFrame(frame: Promise<void>[]):
+        Promise<{ reason: unknown } | undefined> {
+        let failure: { reason: unknown } | undefined;
+        // Not a `for` loop: waiting on these can register more.
+        while (frame.length > 0) {
+            const results = await Promise.all(frame.splice(0).map(
+                pluginPromise => pluginPromise.then(
+                    () => undefined, (reason: unknown) => ({ reason }))));
+            failure = failure ?? results.find(result => result);
+        }
+        return failure;
     }
 
     /**
@@ -176,7 +302,9 @@ export class World {
         // Wait for the plugin to finish building before removing it since this
         // can not be interrupted.
         if (this.pluginPromises.has(plugin)) {
-            await this.pluginPromises.get(plugin)!;
+            // A build failure is reported to whoever added the plugin. Here it
+            // only means there is nothing left to wait for.
+            await this.pluginPromises.get(plugin)!.catch(() => { });
         }
         if (plugin.remove != null) {
             // Await async removes: dropping the promise hides teardown
