@@ -135,7 +135,11 @@ export class Shipyard extends Menu<Entity> {
         for (const t of Object.values(this.text)) {
             this.container.addChild(t);
         }
-        this.pictContainer.position.x = 174;
+        // x 175 (not 174): sweeping our capture of this very pane against
+        // shipyard/earth_spaceport.png -- both showing the same Shuttle
+        // PICT -- bottoms out at dx = -1 (5.9% differing pixels, against
+        // 10.0% at dx = 0), i.e. ours sat one pixel left of the original's.
+        this.pictContainer.position.x = 175;
         this.pictContainer.position.y = -152.5;
         this.container.addChild(this.pictContainer);
         this.build();

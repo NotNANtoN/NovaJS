@@ -1,5 +1,9 @@
 // Scenario + region definitions for the visual-comparison harness.
 //
+// Shipyard / outfitter / ship-info scenarios live in their own file so
+// several fidelity passes can extend the harness without colliding here.
+import { shopScenarios } from './scenarios_shops.mjs';
+//
 // ============================================================================
 // HOW TO ADD A SCENARIO
 // ============================================================================
@@ -502,7 +506,14 @@ export const scenarios = [
             + 'against spaceport/earth.png.',
         params: { ship: 'nova:164', system: 'nova:130' },
         hideDebug: true,
-        setup: async (page, driver) => { await driver.landAt(page, 'planet nova:128'); },
+        setup: async (page, driver) => {
+            await driver.landAt(page, 'planet nova:128');
+            // The first landing at Earth offers the Trainee Program
+            // mission; its popup covers the whole 8500 frame, so every
+            // region here was measuring the popup, not the spaceport.
+            await driver.dismissOfferPopup(page);
+            await driver.sleep(600);
+        },
         references: [
             { name: 'earth', file: 'spaceport/earth.png' },
         ],
@@ -523,7 +534,12 @@ export const scenarios = [
             + 'not a placeholder. Compare against spaceport/port_kane.png.',
         params: { ship: 'nova:164', system: 'nova:128' },
         hideDebug: true,
-        setup: async (page, driver) => { await driver.landAt(page, 'planet nova:137'); },
+        setup: async (page, driver) => {
+            await driver.landAt(page, 'planet nova:137');
+            // As above: any landing offer would sit over the frame.
+            await driver.dismissOfferPopup(page);
+            await driver.sleep(600);
+        },
         references: [
             { name: 'port_kane', file: 'spaceport/port_kane.png' },
         ],
@@ -586,6 +602,11 @@ export const scenarios = [
         hideDebug: true,
         setup: async (page, driver) => {
             await driver.landAt(page, 'planet nova:128');
+            // The first landing offers a mission; its popup sits over the
+            // outfitter's description pane and button row and swamped
+            // every region here until it was dismissed (as the sibling
+            // earth_shipyard scenario already did).
+            await driver.dismissOfferPopup(page);
             await driver.clickContainer(page, 'Button:Outfitter');
             await driver.waitForContainer(page, 'Outfitter');
             await driver.sleep(1500);
@@ -853,6 +874,10 @@ export const scenarios = [
         hideDebug: true,
         setup: async (page, driver) => {
             await driver.landAt(page, 'planet nova:128');
+            // The first landing offers a mission; its popup's modal
+            // shield swallows the Info click (this scenario used to time
+            // out waiting for ShipInfo, aborting the whole run).
+            await driver.dismissOfferPopup(page);
             await driver.clickContainer(page, 'Button:Shipyard');
             await driver.waitForContainer(page, 'Shipyard');
             await driver.pressKey(page, 'ArrowRight'); // select a ship
@@ -1119,11 +1144,17 @@ export const scenarios = [
         hideDebug: true,
         setup: async (page, driver) => {
             await driver.landAt(page, 'planet nova:128');
+            // The first landing offers a mission; its popup's modal
+            // shield swallows the Info click (this scenario used to time
+            // out waiting for ShipInfo, aborting the whole run).
+            await driver.dismissOfferPopup(page);
             await driver.clickContainer(page, 'Button:Shipyard');
             await driver.waitForContainer(page, 'Shipyard');
             await driver.sleep(400);
-            // Grid is displayWeight-sorted; Heavy Shuttle is 19 steps in.
-            await driver.pressKeyN(page, 'ArrowRight', 19);
+            // Pick the tile by its caption: a fixed number of ArrowRight
+            // presses no longer lands on the Heavy Shuttle now that the
+            // grid lists every variant (see driver.clickGridTile).
+            await driver.clickGridTile(page, 'Shipyard', 'Heavy Shuttle');
             await driver.clickContainer(page, 'Button:Info');
             await driver.waitForContainer(page, 'ShipInfo');
             await driver.sleep(1000);
@@ -1148,10 +1179,18 @@ export const scenarios = [
         hideDebug: true,
         setup: async (page, driver) => {
             await driver.landAt(page, 'planet nova:128');
+            // The first landing offers a mission; its popup's modal
+            // shield swallows the Info click (this scenario used to time
+            // out waiting for ShipInfo, aborting the whole run).
+            await driver.dismissOfferPopup(page);
             await driver.clickContainer(page, 'Button:Shipyard');
             await driver.waitForContainer(page, 'Shipyard');
             await driver.sleep(400);
-            await driver.pressKeyN(page, 'ArrowRight', 8);
+            // By caption, not by a press count (see clickGridTile). The
+            // IDA Frigate's displayWeight puts it past the first page, so
+            // let the helper page forward until the tile shows.
+            await driver.clickGridTile(page, 'Shipyard', 'IDA Frigate',
+                { searchRows: 40 });
             await driver.clickContainer(page, 'Button:Info');
             await driver.waitForContainer(page, 'ShipInfo');
             await driver.sleep(1000);
@@ -1571,4 +1610,5 @@ export const scenarios = [
     // centre), so that scenario compares our centred frame against the
     // reference's shifted one with explicit rects.
     ...sigmaScenarios(),
+    ...shopScenarios(),
 ];

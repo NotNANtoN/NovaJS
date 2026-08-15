@@ -6,15 +6,88 @@ import { displayName } from '../nova_plugin/display_name.js';
 
 const TILE_SIZE = [83, 54];
 
+/**
+ * The caption's line pitch. Measured on
+ * shipyard/earth_spaceport.png: the "Asteroid" / "Miner" tile's two
+ * lines have their ink tops at screen y 475 and 486, and the
+ * "Starbridge" / "- used -" tile's at 529 and 540 -- 11px apart in both.
+ * (The description panes' body text runs at a 12px pitch; the tile
+ * captions are tighter.)
+ */
+export const CAPTION_LINE_HEIGHT = 11;
+
+/**
+ * Where a tile's caption block starts, in tile coordinates -- the y handed
+ * to the first line's PIXI.Text, whose ink begins 2px lower.
+ *
+ * The original uses two layouts, which the reference screenshots show
+ * directly (tile tops at screen y 387 / 441 / 495 in
+ * shipyard/earth_spaceport.png):
+ *
+ *   one line   "Thunderhead"   ink rows 537-543, i.e. tile-relative 42-48
+ *   two lines  "Starbridge"    ink rows 529-535, tile-relative 34-40
+ *              "- used -"      ink rows 540-546, tile-relative 45-51
+ *
+ * so a second line does not push the first one up by a whole line (11) but
+ * by 8. outfitter/earth_outfitter.png agrees, one pixel lower throughout
+ * because that grid itself sits one pixel lower (see the outfitter's grid
+ * container y).
+ */
+export const CAPTION_TOP = { single: 40, multi: 32 } as const;
+
+/**
+ * The subtitle grey. The "- used -" line in shipyard/earth_spaceport.png
+ * is a flat (78,78,78) -- the original's font is a bitmap, so the sample
+ * is exact rather than an antialiased average.
+ */
+export const CAPTION_GREY = 0x4e4e4e;
+
+/** One rendered line-group of a tile caption: a run of text and its colour. */
+export interface CaptionSegment {
+    text: string;
+    /** True for the grey subtitle styling (see captionSegments). */
+    grey: boolean;
+}
+
+/**
+ * The caption lines a shipyard/outfitter tile shows, per the EVN Bible's
+ * shïp ShortName (~:2680):
+ *
+ *   "The short string that is displayed in the shipyard dialog menu for
+ *    this ship type. If you want to split this name into two separate
+ *    lines, put the characters "\n" into the name [...] lines that start
+ *    with an alphanumeric character are drawn in white, while lines that
+ *    start with other symbols are drawn in grey."
+ *
+ * The separator really is the two characters backslash-n, not a newline
+ * byte -- that is what the parser reads out of the resource (e.g.
+ * "Heavy Shuttle\\n- used -", "Asteroid\\nMiner").
+ *
+ * Items with no ShortName (every outfit; ships whose field is blank) fall
+ * back to the resource name with its "; developer note" suffix stripped,
+ * as a single white line that PIXI wraps.
+ */
+export function captionSegments(
+    item: { name: string, shortName?: string }): CaptionSegment[] {
+    const source = item.shortName?.trim()
+        ? item.shortName : displayName(item.name);
+    return source.split(/\\n|\n/)
+        .map(line => line.trim())
+        .filter(line => line.length > 0)
+        .map(text => ({ text, grey: !/^[a-zA-Z0-9]/.test(text) }));
+}
+
 export class ItemTile<I extends Item> {
     private font = {
         normal: {
             fontFamily: "Geneva", fontSize: 10, fill: 0xffffff,
-            align: 'center', wordWrap: true, wordWrapWidth: TILE_SIZE[0]
+            align: 'center', wordWrap: true, wordWrapWidth: TILE_SIZE[0],
+            lineHeight: CAPTION_LINE_HEIGHT,
         } as const,
         grey: {
-            fontFamily: "Geneva", fontSize: 10, fill: 0x262626,
-            align: 'center', wordWrap: true, wordWrapWidth: TILE_SIZE[0]
+            fontFamily: "Geneva", fontSize: 10, fill: CAPTION_GREY,
+            align: 'center', wordWrap: true, wordWrapWidth: TILE_SIZE[0],
+            lineHeight: CAPTION_LINE_HEIGHT,
         } as const,
         count: {
             fontFamily: "Geneva", fontSize: 10, fill: 0xffffff,
@@ -39,11 +112,27 @@ export class ItemTile<I extends Item> {
     public largePict = new PIXI.Container();
 
     constructor(private displayAssets: DisplayAssetDataInterface, readonly item: I) {
-        // Outfit / ship tile captions hide the "; developer note" suffix.
-        const nameText = new PIXI.Text(displayName(item.name), this.font.normal);
-        nameText.anchor.x = 0.5;
-        nameText.position.x = TILE_SIZE[0] / 2;
-        nameText.position.y = TILE_SIZE[1] / 2;
+        // The ShortName caption: one PIXI.Text per "\n"-separated segment,
+        // so each can carry its own colour (PIXI has no per-line fill).
+        // PIXI still wraps WITHIN a segment, which is how a long single
+        // segment ("Light Blaster Turret") becomes two white lines.
+        const segments = captionSegments(item);
+        const captionTexts = segments.map(({ text, grey }) => {
+            const style = grey ? this.font.grey : this.font.normal;
+            const line = new PIXI.Text(text, style);
+            line.anchor.x = 0.5;
+            line.position.x = TILE_SIZE[0] / 2;
+            return { line, style, text };
+        });
+        const lineCounts = captionTexts.map(({ text, style }) =>
+            PIXI.TextMetrics.measureText(text,
+                new PIXI.TextStyle(style)).lines.length);
+        const totalLines = lineCounts.reduce((a, b) => a + b, 0);
+        let y = totalLines > 1 ? CAPTION_TOP.multi : CAPTION_TOP.single;
+        captionTexts.forEach(({ line }, i) => {
+            line.position.y = y;
+            y += lineCounts[i] * CAPTION_LINE_HEIGHT;
+        });
 
         this.quantityText = new PIXI.Text("", this.font.normal);
         this.quantityText.anchor.x = 1;
@@ -54,7 +143,9 @@ export class ItemTile<I extends Item> {
         this.active = false;
 
         this.container.addChild(this.graphics);
-        this.container.addChild(nameText);
+        for (const { line } of captionTexts) {
+            this.container.addChild(line);
+        }
         this.container.addChild(this.quantityText);
     }
 
@@ -90,7 +181,15 @@ export class ItemTile<I extends Item> {
         }
 
         this.graphics.beginFill(0x000000);
-        this.graphics.drawRect(0, 0, TILE_SIZE[0], TILE_SIZE[1]);
+        // Half-pixel origin so the 1px stroke, which PIXI centres on the
+        // path, covers whole pixels instead of straddling two. Drawn from
+        // (0,0) the left edge spanned x 586.5-587.5 and rasterized to 586,
+        // one pixel left of the original's lattice (the reference grids'
+        // vertical rules are at screen x 587/670/753/836/919 in both
+        // shipyard/earth_spaceport.png and outfitter/earth_outfitter.png);
+        // the horizontal rules happened to round the other way and were
+        // already right. From (0.5,0.5) neither axis is ambiguous.
+        this.graphics.drawRect(0.5, 0.5, TILE_SIZE[0], TILE_SIZE[1]);
     }
 
     hide() {
@@ -137,6 +236,12 @@ interface Item {
     id: string,
     desc: string,
     pict: string,
+    /**
+     * shïp ShortName, the caption the original prints on the tile (see
+     * captionSegments). Ships carry one; outfits have no such field, so
+     * their tiles fall back to the resource name.
+     */
+    shortName?: string,
 }
 
 const BOX_COUNT = [4, 5];

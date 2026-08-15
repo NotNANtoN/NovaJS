@@ -21,11 +21,18 @@ const ORIGIN_Y = -HEIGHT / 2;
 
 // The picture area (the framed region above the name strip).
 const PICT_AREA = { x: 0, y: ORIGIN_Y + 210, w: 590, h: 400 };
-// The name strip's centre.
-const NAME_Y = ORIGIN_Y + 428;
-// The stats block.
-const STATS_TOP = ORIGIN_Y + 450;
-const ROW_HEIGHT = 11.5;
+// The name strip. Its text was 12px too low (ours ran to screen y 716,
+// past the strip's own bottom, where shuttle_info.png has the name's ink
+// on rows 690-702) and two sizes too small: the original's caps there are
+// 13 rows tall, exactly like the spaceport title bar's -- which our 18px
+// Geneva already matches -- against 11 rows for the 14px we used.
+const NAME_Y = ORIGIN_Y + 414.5;
+// The stats block. Measured on shipyard/shuttle_info.png: the seven
+// left-column rows (Speed .. Turrets) have their ink tops at screen y
+// 719, 731, 743, 755, 767, 779 and 791 -- a flat 12px pitch, not 11.5,
+// and the first box top two pixels above the first ink row (540 + 177).
+const STATS_TOP = ORIGIN_Y + 445.5;
+const ROW_HEIGHT = 12;
 const LEFT_LABEL_X = ORIGIN_X + 10;
 const LEFT_VALUE_X = ORIGIN_X + 62;
 const MID_LABEL_X = ORIGIN_X + 150;
@@ -40,7 +47,7 @@ const DONE_X = ORIGIN_X + 503;
 const DONE_WIDTH = 74;
 
 const NAME_FONT: Partial<PIXI.ITextStyle> = {
-    fontFamily: 'Geneva', fontSize: 14, fill: 0xffffff, align: 'center',
+    fontFamily: 'Geneva', fontSize: 18, fill: 0xffffff, align: 'center',
 };
 const STAT_FONT: Partial<PIXI.ITextStyle> = {
     fontFamily: 'Geneva', fontSize: 10, fill: 0xffffff, align: 'left',
@@ -83,6 +90,23 @@ function turnRating(raw: number): string {
 function hardpoints(count: number): string {
     if (count <= 0) return 'None';
     return `Maximum of ${count}`;
+}
+
+/**
+ * The name the More Info dialog prints on its strip: the shïp Long Name,
+ * not the resource name. The three reference captures show
+ * "Sigma Shipyards Alpha class Shuttle" (shuttle_info.png),
+ * "Sigma Shipyards Epsilon Class Heavy Shuttle"
+ * (heavy_shuttle_info.png) and "Old Earth IDA Frigate"
+ * (ida_frigate_info.png), where the resources are merely named "Shuttle;
+ * Version A", "Heavy Shuttle; Version A" and "IDA Frigate; 350".
+ *
+ * Falls back to the resource name (minus its "; developer note" suffix)
+ * for ships and plug-ins that leave Long Name blank.
+ */
+export function infoDialogName(
+    ship: { name: string, longName?: string }): string {
+    return ship.longName?.trim() ? ship.longName : displayName(ship.name);
 }
 
 /**
@@ -138,8 +162,7 @@ export class ShipInfoDialog {
     async show(ship: ShipData): Promise<void> {
         this.pictContainer.removeChildren();
         this.content.removeChildren();
-        // Strip the "; note" author suffix the original never shows.
-        this.nameText.text = displayName(ship.name);
+        this.nameText.text = infoDialogName(ship);
 
         // The ship's dedicated info artwork, scaled to fit the picture
         // area. Falls back to the shipyard browse picture for ships (and
