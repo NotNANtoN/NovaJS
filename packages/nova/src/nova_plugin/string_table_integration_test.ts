@@ -7,8 +7,9 @@ import {
     busyResponseText, BUSY_RESPONSE_COUNT, BUSY_RESPONSE_FALLBACK,
     BUSY_RESPONSE_FIRST_INDEX, HAIL_RESPONSE_TABLE,
     HOSTILE_RESPONSE_COUNT, HOSTILE_RESPONSE_FALLBACK,
-    HOSTILE_RESPONSE_FIRST_INDEX, NO_NEED_RESPONSE_COUNT,
+    HOSTILE_RESPONSE_FIRST_INDEX, MISC_STRING_TABLE, NO_NEED_RESPONSE_COUNT,
     NO_NEED_RESPONSE_FALLBACK, NO_NEED_RESPONSE_FIRST_INDEX,
+    NO_RESPONSE_FALLBACK, NO_RESPONSE_INDEX,
 } from './hail.js';
 
 // These assertions run against the real Nova game data (Nova_Data). They
@@ -41,6 +42,23 @@ describe('StringTable against real Nova data', () => {
         expect(table.strings[222])
             .toBe('There are no ships available for purchase here.');
     });
+
+    it('sources the unanswered-hail status line from STR# 2002 index 52',
+        async () => {
+            // What the original prints on the bottom-left status line when a
+            // hail goes unanswered — which is what hailing an UNINHABITED
+            // stellar (Jupiter, a dead hypergate) gets instead of a comm
+            // dialog. This is the MISC table's status-line group, not STR#
+            // 3000's ship "no response" group (5-9); the neighbour at 53
+            // pins that reading.
+            const gameData = await getIntegrationGameData();
+            const table = await gameData.data.StringTable.get(MISC_STRING_TABLE);
+            expect(table.strings[NO_RESPONSE_INDEX]).toBe('No response.');
+            // The hardcoded fallback must stay in step with the data.
+            expect(table.strings[NO_RESPONSE_INDEX]).toBe(NO_RESPONSE_FALLBACK);
+            expect(table.strings[NO_RESPONSE_INDEX + 1]).toBe(
+                'Unable to send hail - target ship is entering hyperspace.');
+        });
 
     it('pins the ship-comm busy responses (STR# 3000, indices 80-84)',
         async () => {

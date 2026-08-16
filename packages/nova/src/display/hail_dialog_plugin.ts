@@ -32,6 +32,8 @@ import {
     miscString,
     noNeedResponseText,
     NO_NEED_RESPONSE_FALLBACK,
+    NO_RESPONSE_FALLBACK,
+    NO_RESPONSE_INDEX,
     planetTakesBribes,
     shipHailResponse,
     shipIsFighting,
@@ -71,6 +73,8 @@ import { MenuControls } from '../spaceport/menu_controls.js';
 import { HailContext, HailDialog } from '../spaceport/hail_dialog.js';
 import { ScreenSize } from './screen_size_plugin.js';
 import { Stage } from './stage_resource.js';
+import { showStatusMessage } from './status_message_plugin.js';
+import { BEEP_CANT_DO, playUiSound } from './ui_sound.js';
 
 /**
  * Opens the communications (hail) dialog with the 'hail' key ('y') while in
@@ -83,6 +87,12 @@ import { Stage } from './stage_resource.js';
  *  - HailRequestEvent  -> bridge.hail(action)          (assist / bribe)
  * The dialog itself never touches the sim, keeping every effect on the
  * input-record path that all peers replay identically.
+ *
+ * NOT EVERY HAIL OPENS A CHANNEL: with an UNINHABITED stellar selected
+ * (Jupiter, a dead hypergate — landable.ts) there is nobody to answer, so no
+ * dialog appears at all. The press gets the original's "No response." on the
+ * bottom-left status line and the can't-do beep, the same feedback a blocked
+ * landing gets. See hailIsUnanswerable / refuseHail.
  *
  * ESCORT COMM: the escort variant is a hired-escort MANAGEMENT dialog
  * (Upgrade / Sell / Release / Close Channel per hail/hail_escort.png), not a
@@ -108,6 +118,39 @@ function getPlayerShip(world: World) {
         }
     }
     return undefined;
+}
+
+/**
+ * Whether the player's hail would go to an UNINHABITED stellar — Jupiter, a
+ * scenery world, a wrecked hypergate: anything the spöb can-land bit rules
+ * out (landable.ts).
+ *
+ * There is nobody down there to answer, so the original opens NO channel at
+ * all: it prints "No response." (STR# 2002 index 52) on the bottom-left
+ * status line and beeps. Split out from computeContext — which returns
+ * undefined for exactly this case — so the plugin can tell a refusal apart
+ * from "nothing is targeted", which is also undefined and is silent.
+ *
+ * A targeted SHIP wins over the planet target, the same order computeContext
+ * reads them in, so hailing a ship while a dead moon happens to be selected
+ * still opens the ship's channel.
+ */
+export function hailIsUnanswerable(world: World): boolean {
+    const player = getPlayerShip(world);
+    if (!player) {
+        return false;
+    }
+    const shipTargetUuid = player.entity.components.get(TargetComponent)?.target;
+    if (shipTargetUuid && world.entities.get(shipTargetUuid)) {
+        return false;
+    }
+    const planetTargetUuid =
+        player.entity.components.get(PlanetTargetComponent)?.target;
+    const planetData = planetTargetUuid
+        ? world.entities.get(planetTargetUuid)
+            ?.components.get(PlanetDataComponent)
+        : undefined;
+    return !!planetData && !landable(planetData);
 }
 
 /** Whether the player ship is disabled or low on fuel (assist gate). */
@@ -509,9 +552,15 @@ export async function computeContext(world: World,
             ? planetData.landingPict : null;
         const isStation = planetData?.flags.isStation ?? false;
         // An uninhabited stellar (Jupiter, a wrecked gate) has no traffic
-        // control to clear anyone: the landing gate refuses it outright and
-        // the radar paints it grey, so the channel must not say "cleared".
+        // control at all: nobody is listening, so the original never opens a
+        // channel to one. Refuse here — the plugin turns this undefined into
+        // the status line's "No response." and a can't-do beep (see
+        // hailIsUnanswerable) — rather than opening a comm dialog just to
+        // deny a landing that was never on offer.
         const isLandable = planetData ? landable(planetData) : true;
+        if (!isLandable) {
+            return undefined;
+        }
 
         // THE SAME clearance verdict the landing gate and the radar blip use
         // (stellar_clearance.ts), read off the same delta-synced components
@@ -539,8 +588,7 @@ export async function computeContext(world: World,
         // a hostile ship offers Beg For Mercy. Price and affordability are the
         // same pure functions the simulation re-derives in applyHail, so the
         // dialog never shows a number the sim would disagree with.
-        const canBribe = isLandable && !clearance.cleared
-            && planetTakesBribes(govt);
+        const canBribe = !clearance.cleared && planetTakesBribes(govt);
         const amount = bribeAmount(credits, !!govt?.flags.largerBribes);
         const bribe = canBribe
             ? {
@@ -558,12 +606,7 @@ export async function computeContext(world: World,
         // stellar's name appended to the group's trailing space.
         const opening =
             `${stellarChannelOpenText(stellarStrings, seed)}${name}.`;
-        const answer = !isLandable
-            ? miscString(miscStrings,
-                isStation ? DOCKING_DENIED_INDEX : LANDING_DENIED_INDEX,
-                isStation ? 'Docking request denied.'
-                    : 'Landing request denied.')
-            : clearance.cleared
+        const answer = clearance.cleared
             ? miscString(miscStrings,
                 isStation ? CLEARED_TO_DOCK_INDEX : CLEARED_TO_LAND_INDEX,
                 isStation ? 'You are cleared to dock.'
@@ -583,6 +626,9 @@ export async function computeContext(world: World,
         // index 172) for a shut port or a missing travel permit, "Hostile"
         // (173) for a legal record below its MinStatus. identityRuns paints a
         // "Status:" line red, exactly as it does for a hostile ship.
+        // `isLandable` is always true here (the unlandable case returned
+        // above); it is still threaded through the SAME planetDisposition the
+        // radar blip reads so the two can never drift apart.
         const status = planetDisposition(clearance, isLandable);
         const heading = status === 'neutral' || status === 'unlandable' ? name
             : `${name}\nStatus: ${miscString(miscStrings,
@@ -653,9 +699,29 @@ export const HailDialogPlugin: Plugin = {
                 .novaHailDialog = dialog;
         }
 
+        /**
+         * The refusal an unanswerable hail gets instead of a comm dialog:
+         * the original's own "No response." on the bottom-left status line
+         * (STR# 2002 index 52), plus the can't-do beep every other blocked
+         * action uses (blocked landings and boardings — status_message_plugin).
+         * Both are client-local display effects; nothing reaches the sim.
+         */
+        const refuseHail = async (): Promise<void> => {
+            const miscStrings =
+                await loadStrings(displayAssets, MISC_STRING_TABLE);
+            showStatusMessage(world, miscString(miscStrings, NO_RESPONSE_INDEX,
+                NO_RESPONSE_FALLBACK));
+            playUiSound(world, { id: BEEP_CANT_DO });
+        };
+
         let opening = false;
         const openHail = async (): Promise<void> => {
             if (dialog.container.visible || opening) {
+                return;
+            }
+            // Nobody is home on a dead moon: no channel opens at all.
+            if (hailIsUnanswerable(world)) {
+                await refuseHail();
                 return;
             }
             opening = true;

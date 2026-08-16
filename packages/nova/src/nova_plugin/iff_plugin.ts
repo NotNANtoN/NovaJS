@@ -141,6 +141,33 @@ export function dispositionColor(disposition: Disposition): number {
 }
 
 /**
+ * A DISABLED ship's radar blip. Grey, the same grey an unlandable stellar's
+ * blip uses ({@link PLANET_UNLANDABLE_COLOR}) and the same story the gray
+ * 'disabled' corner set tells (cicn 10020-10023, hostility.ts's
+ * styleForTarget): dead in space trumps every allegiance, so it is a fact
+ * about the ship rather than about the pilot looking at it.
+ */
+export const SHIP_DISABLED_COLOR = 0x808080;
+
+/**
+ * A ship's radar blip colour, or undefined when the status bar's flat
+ * dimRadar colour should be used (that colour is ïntf data the status bar
+ * owns, so it is not named here).
+ *
+ * DISABLED is grey with OR without IFF and takes precedence over hostile
+ * red — the same priority the target corners give it. Otherwise, without an
+ * IFF outfit there is nothing to colorize and every ship stays flat; with
+ * one, the blip takes its disposition's colour.
+ */
+export function shipBlipColor(disposition: Disposition, hasIff: boolean,
+    disabled = false): number | undefined {
+    if (disabled) {
+        return SHIP_DISABLED_COLOR;
+    }
+    return hasIff ? dispositionColor(disposition) : undefined;
+}
+
+/**
  * A STELLAR's disposition toward the player, the planet-side counterpart of
  * shipDisposition. It is not a second opinion about politics: it is exactly a
  * reading of `stellarClearance` (stellar_clearance.ts), so the radar blip, the
