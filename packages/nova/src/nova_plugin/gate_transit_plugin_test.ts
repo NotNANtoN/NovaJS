@@ -14,6 +14,8 @@ import {
     GateArrivalComponent, GateTransit, GateTransitEvent, GATE_EMERGENCE_DISTANCE,
 } from "./gate_transit_plugin.js";
 import { GateDestinationResolver } from "./gate_destination_resolver.js";
+import { gateMapDestinations } from "../spaceport/hypergate_network.js";
+import { landable } from "./landable.js";
 import { EscortCommandComponent } from "./escort_command.js";
 import { FiringGroupComponent } from "./firing_group.js";
 import { FormationComponent } from "./npc_ai_plugin.js";
@@ -34,6 +36,12 @@ const SYSTEM_B = 'nova:425';
 const WORMHOLE_SPOB = 'nova:465';
 const WORMHOLE_SYSTEM = 'nova:130';
 const SHIP_UUID = 'gate test ship';
+// HG-V0a (spöb nova:1402, in Vellos) is a LEAF of the stock network: its only
+// HyperLink is HG-V02. HG-Moash (spöb nova:1416) is four lanes away in Moash
+// (sÿst nova:366, plus its stacked NCB copies) — same network, not adjacent.
+const LEAF_GATE_SPOB = 'nova:1402';
+const FAR_GATE_SPOB = 'nova:1416';
+const FAR_GATE_SYSTEMS = ['nova:366', 'nova:535', 'nova:605'];
 
 async function makeGateHarness(systemId: string) {
     const gameData = await getIntegrationGameData();
@@ -193,6 +201,74 @@ describe('gate transit', () => {
             expected >= Math.PI ? expected - 2 * Math.PI : expected));
         expect(angleOff).toBeLessThan(1e-6);
     }, 30_000);
+
+    it('carries the ship to a NON-ADJACENT gate under hypergate transitivity',
+        async () => {
+        // HG-V0a (nova:1402, Vellos) has exactly ONE HyperLink — HG-V02 — so
+        // in the original game HG-Moash (nova:1416, Moash nova:366) is simply
+        // not on offer. With the server's hypergateTransitivity on, the gate
+        // map offers it (same network, four lanes away) and the transit is a
+        // single hop: the ship arrives at HG-Moash exactly the way an
+        // adjacent transit arrives, because nothing in the sim knows or cares
+        // how far the named destination was.
+        const gameData = await getIntegrationGameData();
+        const leafGate = await gameData.data.Planet.get(LEAF_GATE_SPOB);
+        expect(leafGate.gate!.destinations).toEqual([GATE_B_SPOB]);
+        expect(leafGate.gate!.destinations).not.toContain(FAR_GATE_SPOB);
+
+        // Off: not offered at all. On: offered.
+        const planets = await Promise.all(
+            (await gameData.ids).Planet.map(id => gameData.data.Planet.get(id)));
+        const links = new Map<string, string[]>();
+        const unusable = new Set<string>();
+        for (const planet of planets) {
+            if (!landable(planet)) {
+                unusable.add(planet.id);
+            }
+            if (planet.gate?.kind === 'hypergate') {
+                links.set(planet.id, planet.gate.destinations);
+            }
+        }
+        const network = { links, unusable };
+        expect(gateMapDestinations(network, LEAF_GATE_SPOB, false))
+            .not.toContain(FAR_GATE_SPOB);
+        expect(gateMapDestinations(network, LEAF_GATE_SPOB, true))
+            .toContain(FAR_GATE_SPOB);
+
+        // The far gate resolves to the right system...
+        const resolver = new GateDestinationResolver(gameData);
+        const farSystem = await resolver.systemOf(FAR_GATE_SPOB);
+        expect(FAR_GATE_SYSTEMS).toContain(farSystem!);
+
+        // ...and arriving there puts the ship at that gate.
+        const destWorld = await makeSystem(farSystem!, gameData);
+        const ids = await gameData.ids;
+        const shipData = await gameData.data.Ship.get([...ids.Ship].sort()[0]!);
+        const ship = makeShip(shipData);
+        ship.components.set(GateArrivalComponent, {
+            destinationSpob: FAR_GATE_SPOB,
+            emergenceAngle: null,
+            randomDraw: 0.5,
+        });
+        await completeEntity(destWorld, ship);
+        destWorld.entities.set(SHIP_UUID, ship);
+        destWorld.step();
+
+        expect(ship.components.has(GateArrivalComponent)).toBeFalse();
+        const gatePlanet = destWorld.entities.get(`planet ${FAR_GATE_SPOB}`)!;
+        expect(gatePlanet).toBeDefined();
+        const gatePos =
+            gatePlanet.components.get(MovementStateComponent)!.position;
+        const movement = ship.components.get(MovementStateComponent)!;
+        const offset = movement.position.subtract(gatePos);
+        const physics = ship.components.get(ShipPhysicsComponent)!;
+        const speed = getShipMovementPhysics(physics).maxVelocity;
+        expect(offset.length)
+            .toBeGreaterThanOrEqual(GATE_EMERGENCE_DISTANCE - 1e-6);
+        expect(offset.length)
+            .toBeLessThan(GATE_EMERGENCE_DISTANCE + speed * 0.05);
+        expect(movement.velocity.dot(offset)).toBeGreaterThan(0);
+    }, 60_000);
 
     it('resolves a real hypergate pair end-to-end (system and position)',
         async () => {

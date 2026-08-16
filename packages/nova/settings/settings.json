@@ -1,3 +1,4 @@
 {
-    "jumpVisual": "flash"
+    "jumpVisual": "flash",
+    "hypergateTransitivity": true
 }

@@ -6,7 +6,11 @@ import { getIntegrationGameData } from "../communication/simulation_test_fixture
 import { gateMapMissionMarks } from "../display/gate_map_plugin.js";
 import { MissionMapMark } from "../nova_plugin/mission_logic.js";
 import { ActiveMission, MissionsComponent } from "../nova_plugin/player_state_plugin.js";
-import { computeSelectableSystems, gateMapGraphOptions } from "./gate_map.js";
+import { landable } from "../nova_plugin/landable.js";
+import {
+    computeGateMapSelection, computeSelectableSystems, gateMapGraphOptions,
+} from "./gate_map.js";
+import { HypergateNetwork } from "./hypergate_network.js";
 import { MissionUniverse } from "./mission_universe.js";
 
 describe('computeSelectableSystems', () => {
@@ -59,6 +63,82 @@ describe('computeSelectableSystems', () => {
         // ...and VNP-002 (nova:425), which contains HG-V02, is offered.
         expect(selectable.get('nova:425')).toBe('nova:1401');
     }, 30_000);
+});
+
+describe('what the gate map offers per the transitivity setting', () => {
+    /**
+     * The stock hypergate graph plus the spöb -> systems index, exactly as
+     * GateMap.build() assembles them.
+     */
+    async function stockGateMapIndex() {
+        const gameData = await getIntegrationGameData();
+        const ids = await gameData.ids;
+        const systems = await Promise.all(
+            ids.System.map(s => gameData.data.System.get(s)));
+        const systemsOfSpob = new Map<string, string[]>();
+        for (const system of systems) {
+            for (const spob of system.planets) {
+                const all = systemsOfSpob.get(spob) ?? [];
+                all.push(system.id);
+                systemsOfSpob.set(spob, all);
+            }
+        }
+        const planets = await Promise.all(
+            ids.Planet.map(id => gameData.data.Planet.get(id)));
+        const links = new Map<string, string[]>();
+        const unusable = new Set<string>();
+        for (const planet of planets) {
+            if (!landable(planet)) {
+                unusable.add(planet.id);
+            }
+            if (planet.gate?.kind === 'hypergate') {
+                links.set(planet.id, planet.gate.destinations);
+            }
+        }
+        const network: HypergateNetwork = { links, unusable };
+        return { systemsOfSpob, network };
+    }
+
+    // HG-V0a (nova:1402, in Vellos nova:424) has ONE HyperLink: HG-V02
+    // (nova:1401, in VNP-002 nova:425). HG-Moash (nova:1416) sits four lanes
+    // away in Moash (nova:366) — same network, not adjacent.
+    const LEAF_GATE = 'nova:1402';
+
+    it('offers only the adjacent system with transitivity OFF', async () => {
+        const { systemsOfSpob, network } = await stockGateMapIndex();
+        const selectable = computeGateMapSelection(
+            systemsOfSpob, network, LEAF_GATE, false);
+        // VNP-002 and its stacked NCB copy, and nothing else.
+        expect([...new Set(selectable.values())]).toEqual(['nova:1401']);
+        expect(selectable.get('nova:425')).toBe('nova:1401');
+        expect(selectable.has('nova:366')).toBeFalse();
+    }, 60_000);
+
+    it('offers the whole network with transitivity ON', async () => {
+        const { systemsOfSpob, network } = await stockGateMapIndex();
+        const selectable = computeGateMapSelection(
+            systemsOfSpob, network, LEAF_GATE, true);
+        // The adjacent one is still there...
+        expect(selectable.get('nova:425')).toBe('nova:1401');
+        // ...and so is Moash, four lanes away, mapped to its gate.
+        expect(selectable.get('nova:366')).toBe('nova:1416');
+        // All 18 other live gates are reachable, so every system that holds
+        // one is offered (stacked NCB copies included).
+        expect([...new Set(selectable.values())].sort().length).toBe(18);
+        // Never the gate the ship is standing on.
+        expect([...selectable.values()]).not.toContain(LEAF_GATE);
+        expect(selectable.has('nova:424')).toBeFalse();
+    }, 60_000);
+
+    it('never offers a destroyed gate\'s system, either way', async () => {
+        const { systemsOfSpob, network } = await stockGateMapIndex();
+        for (const transitive of [false, true]) {
+            const selectable = computeGateMapSelection(
+                systemsOfSpob, network, LEAF_GATE, transitive);
+            // nova:130 (HG-Aldebaran) is one of the 16 collapsed gates.
+            expect([...selectable.values()]).not.toContain('nova:130');
+        }
+    }, 60_000);
 });
 
 describe('the hypergate map keeps the starmap\'s mission marks', () => {
