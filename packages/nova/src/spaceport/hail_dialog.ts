@@ -78,18 +78,76 @@ export interface HailContext {
  * the display audio path (no simulation involvement). */
 export interface HailCallbacks {
     /**
-     * Asks the hailed ship for aid. Returns the ship's REFUSAL line when it
-     * turns the request down (it is in the middle of a fight — "I'm busy"),
-     * in which case no simulation effect was dispatched and the dialog shows
-     * the answer; undefined when the request went through.
+     * Asks the hailed ship for aid, and returns WHAT IT SAID — an acceptance
+     * ("All right, I'll help you."), a busy refusal ("I'm busy.") or a
+     * pointless-request refusal ("You're not in any trouble."), all real lines
+     * from the stock comm table. The simulation effect, if any, has already
+     * been dispatched by the time this returns.
      *
      * The answer comes back from the one call rather than from a separate
      * "may I?" probe on purpose: probe-then-send would evaluate the ship's
      * state twice, and could dispatch a request the probe had just cleared.
      */
-    requestAssistance(): string | undefined;
+    requestAssistance(): string;
     bribe(): void;
     playSound(id: string): void;
+}
+
+/**
+ * The comm dialogs' identity-block colours, sampled from the original-hardware
+ * captures (1920x1080, frames blitted 1:1 — these are the game's own pixels):
+ * on hail/hail_hostile.png the lower well's "Class:" / "Status:" labels are
+ * 0x808080 grey, "Fed Destroyer" and "(Federation)" are white, and "Hostile"
+ * is 0xdd0806 red. hail/hail.png and hail/hail_escort.png agree (a bare label
+ * line such as "Hired Escort:" is grey, the name under it white).
+ */
+export const COMM_LABEL_COLOR = 0x808080;
+export const COMM_VALUE_COLOR = 0xffffff;
+export const COMM_HOSTILE_COLOR = 0xdd0806;
+
+/** A stretch of identity text drawn in one colour. */
+export interface CommTextRun {
+    text: string;
+    color: number;
+}
+
+/**
+ * Splits an identity block (hail_dialog_plugin's shipIdentityBlock) into the
+ * coloured runs the original draws, one array of runs per line:
+ *
+ *   "Class: Fed Destroyer" -> grey "Class: " + white "Fed Destroyer"
+ *   "Status: Hostile"      -> grey "Status: " + RED "Hostile"
+ *   "(Federation)"         -> white, whole
+ *   "Hired Escort:"        -> grey, whole (a label with nothing after it)
+ *
+ * Pure and total, and it never alters the text: concatenating the runs back
+ * together reproduces the block exactly. Only the Status line is red, and
+ * "Hostile" is the only status the block ever carries.
+ */
+export function identityRuns(block: string): CommTextRun[][] {
+    return block.split('\n').map(line => {
+        const colon = line.indexOf(':');
+        if (colon < 0) {
+            return [{ text: line, color: COMM_VALUE_COLOR }];
+        }
+        // Keep the separating space with the LABEL, so the value run starts
+        // at the first inked pixel of the value.
+        const valueStart = /\S/.exec(line.slice(colon + 1));
+        if (!valueStart) {
+            // A bare label ("Hired Escort:", "Fighter:") — all dim.
+            return [{ text: line, color: COMM_LABEL_COLOR }];
+        }
+        const split = colon + 1 + valueStart.index;
+        const label = line.slice(0, split);
+        return [
+            { text: label, color: COMM_LABEL_COLOR },
+            {
+                text: line.slice(split),
+                color: label.trimEnd() === 'Status:'
+                    ? COMM_HOSTILE_COLOR : COMM_VALUE_COLOR,
+            },
+        ];
+    });
 }
 
 /**
@@ -227,25 +285,24 @@ export class HailDialog {
         void this.render();
     }
 
-    /** The Request Assistance press. */
+    /**
+     * The Request Assistance press. WHATEVER the ship answers — an acceptance
+     * ("All right, I'll help you."), a busy refusal ("I'm busy.") or "you
+     * don't need help" — the channel stays OPEN showing the line, so the
+     * player actually hears the reply and closes the channel themselves. The
+     * offer button goes away with the answer, so one request cannot be
+     * hammered at a ship that has already replied. (Accepting used to slam the
+     * dialog shut the moment the request was dispatched.)
+     */
     private pressAssist() {
         const context = this.context;
         if (!context?.assist) {
             return;
         }
         this.beep();
-        const refusal = this.callbacks.requestAssistance();
-        if (refusal !== undefined) {
-            // Refused (the ship is busy fighting). The channel stays
-            // OPEN showing its answer, so the player reads why; the
-            // offer button goes away so the same request can't be
-            // hammered at a ship that already said no, and the player
-            // closes the channel themselves.
-            this.context = { ...context, body: refusal, assist: undefined };
-            void this.render();
-            return;
-        }
-        this.close();
+        const answer = this.callbacks.requestAssistance();
+        this.context = { ...context, body: answer, assist: undefined };
+        void this.render();
     }
 
     /**
@@ -353,17 +410,34 @@ export class HailDialog {
             originY + frame.responseText.y);
         this.content.addChild(response);
 
-        // Lower well: who they are.
+        // Lower well: who they are, in the reference's colours — dim labels,
+        // white values, and a RED status (identityRuns). Each line is laid
+        // out as a row of runs, the pen advancing by each run's own width, so
+        // the block still starts at the measured infoText origin and keeps
+        // the frames' 15px leading.
         if (frame.infoWell) {
-            const info = new PIXI.Text(context.heading, {
-                ...HEADING_FONT,
-                wordWrap: true,
-                wordWrapWidth: frame.infoWell.width
-                    - (frame.infoText.x - frame.infoWell.x) - 4,
-            });
-            info.position.set(originX + frame.infoText.x,
-                originY + frame.infoText.y);
-            this.content.addChild(info);
+            const wrapWidth = frame.infoWell.width
+                - (frame.infoText.x - frame.infoWell.x) - 4;
+            let y = originY + frame.infoText.y;
+            for (const runs of identityRuns(context.heading)) {
+                let x = originX + frame.infoText.x;
+                // A single-run line can still WRAP inside the well (a long
+                // pers name); a label+value line is short by construction and
+                // is laid out inline, as the references show it.
+                const wordWrap = runs.length === 1;
+                let height = COMM_LINE_HEIGHT;
+                for (const run of runs) {
+                    const text = new PIXI.Text(run.text, {
+                        ...HEADING_FONT, fill: run.color,
+                        wordWrap, wordWrapWidth: wrapWidth,
+                    });
+                    text.position.set(x, y);
+                    this.content.addChild(text);
+                    x += text.width;
+                    height = Math.max(height, text.height);
+                }
+                y += height;
+            }
         }
 
         if (context.escort) {

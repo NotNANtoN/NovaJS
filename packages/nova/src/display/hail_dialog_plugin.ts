@@ -12,6 +12,8 @@ import { SourceComponent } from '../nova_plugin/fire_weapon_plugin.js';
 import { DisplayAssetDataResource, SimulationGameDataResource } from '../nova_plugin/game_data_resource.js';
 import { GovtComponent } from '../nova_plugin/govt_component.js';
 import {
+    assistGrantedText,
+    ASSIST_GRANTED_FALLBACK,
     bribeAmount,
     busyResponseText,
     BUSY_RESPONSE_FALLBACK,
@@ -19,7 +21,10 @@ import {
     greetingText,
     HAIL_RESPONSE_TABLE,
     hashString,
-    hostileText,
+    hostileResponseText,
+    HOSTILE_RESPONSE_FALLBACK,
+    noNeedResponseText,
+    NO_NEED_RESPONSE_FALLBACK,
     shipHailResponse,
     shipIsFighting,
     shipTakesBribes,
@@ -107,44 +112,101 @@ export function targetIsFighting(target: Entity): boolean {
 }
 
 /**
- * What pressing "Request Assistance" gets: the ship's refusal line when it is
- * busy fighting, or undefined when the request should be dispatched to the
- * simulation.
+ * The three things a hailed ship can say to a Request Assistance press, all
+ * resolved from STR# 3000 when the channel opens (the button's handler is
+ * synchronous, so the text cannot be fetched on the press).
+ */
+export interface AssistReplies {
+    /** "All right, I'll help you." — accepted, the errand is dispatched. */
+    granted: string;
+    /** "I'm busy." — the ship is in the middle of a fight. */
+    busy: string;
+    /** "You're not in any trouble." — the player's ship is fine. */
+    noNeed: string;
+}
+
+/** The pinned literals, used when the string table cannot be loaded. */
+export const ASSIST_REPLIES_FALLBACK: AssistReplies = {
+    granted: ASSIST_GRANTED_FALLBACK,
+    busy: BUSY_RESPONSE_FALLBACK,
+    noNeed: NO_NEED_RESPONSE_FALLBACK,
+};
+
+/**
+ * What pressing "Request Assistance" gets: the line the ship answers with,
+ * and whether a request is dispatched to the simulation at all.
+ *
+ * The two refusals come first and dispatch NOTHING — a healthy player is told
+ * they are in no trouble, and a ship in a fight says it is busy — so the
+ * hailed ship's combat state is left completely untouched. Need is checked
+ * ahead of busy: asking for aid you don't need is pointless whatever the
+ * other captain happens to be doing.
  *
  * Evaluated at the moment of the press (not when the channel was opened) so a
- * ship that got into a fight while the dialog was up still answers honestly.
- * The simulation's applyHail re-checks the SAME predicate over the SAME synced
- * components and is the authority; this exists so the player SEES the refusal
- * instead of pressing a button that silently does nothing.
+ * ship that got into a fight, or a player who took a hit, while the dialog was
+ * up still gets an honest answer. The simulation's applyHail re-checks the
+ * SAME predicates over the SAME synced components and is the authority; this
+ * exists so the player SEES the answer instead of pressing a button that
+ * silently does nothing.
  */
-export function assistRefusal(world: World, targetUuid: string | undefined,
-    busyText: string): string | undefined {
-    if (!targetUuid) {
-        return undefined;
+export function assistAnswer(world: World, targetUuid: string | undefined,
+    replies: AssistReplies): { line: string, dispatch: boolean } {
+    const player = getPlayerShip(world);
+    if (!playerNeedsHelp(player)) {
+        return { line: replies.noNeed, dispatch: false };
     }
-    const target = world.entities.get(targetUuid);
-    return target && targetIsFighting(target) ? busyText : undefined;
+    const target = targetUuid ? world.entities.get(targetUuid) : undefined;
+    if (target && targetIsFighting(target)) {
+        return { line: replies.busy, dispatch: false };
+    }
+    return { line: replies.granted, dispatch: true };
 }
 
 /**
- * The busy-refusal line for a hailed ship, resolved from STR# 3000 (the stock
- * comm-response table) ahead of time, because the assist button's handler is
- * synchronous. Seeded by the ship's uuid so the line is stable per encounter
- * and identical on every peer. Falls back to the pinned literal if the table
- * is unavailable, exactly as noShipsForHire does (spaceport/hire_escort.ts).
+ * The assistance replies for a hailed ship, resolved from STR# 3000 (the
+ * stock comm-response table) ahead of time. Seeded by the ship's uuid so each
+ * line is stable per encounter and identical on every peer. Falls back to the
+ * pinned literals if the table is unavailable, exactly as noShipsForHire does
+ * (spaceport/hire_escort.ts).
  */
-async function resolveBusyText(
+async function resolveAssistReplies(
     displayAssets: DisplayAssetDataInterface | undefined,
-    targetUuid: string): Promise<string> {
+    targetUuid: string): Promise<AssistReplies> {
     if (!displayAssets) {
-        return BUSY_RESPONSE_FALLBACK;
+        return ASSIST_REPLIES_FALLBACK;
     }
     try {
         const table =
             await displayAssets.data.StringTable.get(HAIL_RESPONSE_TABLE);
-        return busyResponseText(table.strings, hashString(targetUuid));
+        const seed = hashString(targetUuid);
+        return {
+            granted: assistGrantedText(table.strings, seed),
+            busy: busyResponseText(table.strings, seed),
+            noNeed: noNeedResponseText(table.strings, seed),
+        };
     } catch {
-        return BUSY_RESPONSE_FALLBACK;
+        return ASSIST_REPLIES_FALLBACK;
+    }
+}
+
+/**
+ * A hostile ship's response line, from STR# 3000's hostile group (indices
+ * 10-14) rather than from its government's greetings — see hail.ts. Seeded by
+ * the ship's uuid, so it is the same line on every peer and every re-hail
+ * (which is what makes the Greetings button able to restore it).
+ */
+async function resolveHostileText(
+    displayAssets: DisplayAssetDataInterface | undefined,
+    targetUuid: string): Promise<string> {
+    if (!displayAssets) {
+        return HOSTILE_RESPONSE_FALLBACK;
+    }
+    try {
+        const table =
+            await displayAssets.data.StringTable.get(HAIL_RESPONSE_TABLE);
+        return hostileResponseText(table.strings, hashString(targetUuid));
+    } catch {
+        return HOSTILE_RESPONSE_FALLBACK;
     }
 }
 
@@ -153,9 +215,10 @@ async function resolveBusyText(
  * ship is targeted, the selected planet). Returns undefined when there is
  * nothing to hail. Async: loads govt / pers game data.
  *
- * `busyText` is the line the ship answers an assistance request with IF it
- * turns out to be busy when the player presses the button (the press itself
- * is what decides — see the plugin's requestAssistance callback).
+ * `replies` are the three lines a Request Assistance press can be answered
+ * with, resolved here because the button's handler is synchronous; WHICH one
+ * the ship says is decided by the press itself (assistAnswer — see the
+ * plugin's requestAssistance callback).
  */
 /**
  * The identity block for the ship comm's LOWER well (PICT 8511's second
@@ -192,7 +255,7 @@ export async function computeContext(world: World,
     displayAssets?: DisplayAssetDataInterface):
     Promise<{
         context: HailContext, target: string, isEscort: boolean,
-        busyText: string,
+        replies: AssistReplies,
     } | undefined> {
     const player = getPlayerShip(world);
     if (!player) {
@@ -284,7 +347,7 @@ export async function computeContext(world: World,
                     body: '',
                 },
                 target: shipTargetUuid, isEscort: false,
-                busyText: BUSY_RESPONSE_FALLBACK,
+                replies: ASSIST_REPLIES_FALLBACK,
             };
         }
 
@@ -308,7 +371,7 @@ export async function computeContext(world: World,
                     escort: true,
                 },
                 target: shipTargetUuid, isEscort: true,
-                busyText: BUSY_RESPONSE_FALLBACK,
+                replies: ASSIST_REPLIES_FALLBACK,
             };
         }
 
@@ -321,7 +384,7 @@ export async function computeContext(world: World,
                     body: 'There is no response.',
                 },
                 target: shipTargetUuid, isEscort: false,
-                busyText: BUSY_RESPONSE_FALLBACK,
+                replies: ASSIST_REPLIES_FALLBACK,
             };
         }
         if (response.kind === 'hostile') {
@@ -330,15 +393,20 @@ export async function computeContext(world: World,
             const bribe = response.canBribe
                 ? { amount, canAfford: credits >= amount && amount > 0 }
                 : undefined;
+            // A hostile ship answers from the GLOBAL hostile group (STR# 3000
+            // 10-14, "What is it?" on hail/hail_hostile.png), not from its
+            // government's greetings — those are friendly lines only. A përs
+            // still speaks their own CommQuote.
             return {
                 context: {
                     variant: 'ship', heading, image,
-                    body: pers?.commQuote?.trim()
-                        ? pers.commQuote : hostileText(govt?.commName),
+                    body: pers?.commQuote?.trim() ? pers.commQuote
+                        : await resolveHostileText(displayAssets,
+                            shipTargetUuid),
                     bribe,
                 },
                 target: shipTargetUuid, isEscort: false,
-                busyText: BUSY_RESPONSE_FALLBACK,
+                replies: ASSIST_REPLIES_FALLBACK,
             };
         }
         // Ordinary greeting: a përs quote, else a real line from the govt's
@@ -352,22 +420,22 @@ export async function computeContext(world: World,
             seed: hashString(shipTargetUuid),
         }) || 'There is no response.';
         const assist = canRequestAssistance({
-            disposition, playerNeedsHelp: playerNeedsHelp(player), govt,
-            attackingPlayer,
+            disposition, govt, attackingPlayer,
         }) ? { free: !!govt?.flags2.roadsideAssistance } : undefined;
-        // The OFFER is not withdrawn for a ship that happens to be fighting:
-        // the player asks and is told "I'm busy", exactly as the original's
-        // comm dialog answers with a line from the response table. Only the
-        // line is resolved here (the press decides whether it is used), and
-        // only when there is an offer to refuse.
-        const busyText = assist
-            ? await resolveBusyText(displayAssets, shipTargetUuid)
-            : BUSY_RESPONSE_FALLBACK;
+        // The OFFER is not withdrawn for a ship that happens to be fighting,
+        // nor for a player whose ship is in perfect shape: they ask, and the
+        // ship answers with a line from the response table ("I'm busy" /
+        // "You're not in any trouble." / "All right, I'll help you."). Only
+        // the lines are resolved here — the press decides which is used — and
+        // only when there is an offer to answer.
+        const replies = assist
+            ? await resolveAssistReplies(displayAssets, shipTargetUuid)
+            : ASSIST_REPLIES_FALLBACK;
         return {
             context: {
                 variant: 'ship', heading, image, body, assist,
             },
-            target: shipTargetUuid, isEscort: false, busyText,
+            target: shipTargetUuid, isEscort: false, replies,
         };
     }
 
@@ -394,7 +462,7 @@ export async function computeContext(world: World,
         return {
             context: { variant: 'planet', heading, image, body },
             target: planetTargetUuid, isEscort: false,
-            busyText: BUSY_RESPONSE_FALLBACK,
+            replies: ASSIST_REPLIES_FALLBACK,
         };
     }
 
@@ -415,25 +483,23 @@ export const HailDialogPlugin: Plugin = {
         }
 
         let currentTarget: string | undefined;
-        let currentBusyText = BUSY_RESPONSE_FALLBACK;
+        let currentReplies = ASSIST_REPLIES_FALLBACK;
         const dialog = new HailDialog(displayAssets, controls, {
             requestAssistance: () => {
-                if (!currentTarget) {
-                    return undefined;
+                // ONE call decides and answers: the ship's line comes back
+                // whether it accepted or refused, and only an acceptance
+                // dispatches. A refusal (busy, or a player who needs nothing)
+                // leaves the ship's behavior completely untouched.
+                const answer = assistAnswer(world, currentTarget,
+                    currentReplies);
+                if (answer.dispatch && currentTarget) {
+                    world.emit(HailRequestEvent, {
+                        action: {
+                            kind: 'requestAssistance', target: currentTarget,
+                        },
+                    });
                 }
-                // BUSY SHIPS REFUSE, and nothing is dispatched for them —
-                // the ship's combat behavior is left completely untouched.
-                const refusal = assistRefusal(world, currentTarget,
-                    currentBusyText);
-                if (refusal !== undefined) {
-                    return refusal;
-                }
-                world.emit(HailRequestEvent, {
-                    action: {
-                        kind: 'requestAssistance', target: currentTarget,
-                    },
-                });
-                return undefined;
+                return answer.line;
             },
             bribe: () => {
                 if (currentTarget) {
@@ -465,7 +531,7 @@ export const HailDialogPlugin: Plugin = {
                     return;
                 }
                 currentTarget = computed.target;
-                currentBusyText = computed.busyText;
+                currentReplies = computed.replies;
                 // Re-add to move above later-added containers (spaceport).
                 stage.addChild(dialog.container);
                 dialog.container.position.set(
