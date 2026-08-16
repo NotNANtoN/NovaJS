@@ -15,7 +15,9 @@ import {
     runPendingShipDone,
     stellarInfoOf,
 } from '../nova_plugin/mission_logic.js';
-import { ControlBitsComponent } from '../nova_plugin/ncb_plugin.js';
+import {
+    ActiveRanksComponent, ControlBitsComponent,
+} from '../nova_plugin/ncb_plugin.js';
 import { OutfitsStateComponent } from '../nova_plugin/outfit_plugin.js';
 import {
     CreditsComponent,
@@ -28,6 +30,7 @@ import { CombatRatingComponent, LegalRecordsComponent } from '../nova_plugin/rep
 import { ShipComponent, ShipPhysicsComponent } from '../nova_plugin/ship_plugin.js';
 import { WeaponsStateComponent } from '../nova_plugin/weapons_state.js';
 import { MissionUniverse } from './mission_universe.js';
+import { rankSalaryPerDay } from '../nova_plugin/rank_logic.js';
 
 /**
  * A player-local editing session over the mission-related components
@@ -59,6 +62,7 @@ export class MissionSession {
                 credits: entity.components.get(CreditsComponent)?.credits ?? 0,
             },
             bits: new Set(entity.components.get(ControlBitsComponent) ?? []),
+            ranks: new Set(entity.components.get(ActiveRanksComponent) ?? []),
             cargoCapacity,
             dateAdvance: 0,
             events: [],
@@ -77,6 +81,7 @@ export class MissionSession {
             random: Math.random,
             allGovts: () => universe.govts(),
             sameStellar: (a, b) => universe.sameStellar(a, b),
+            getRank: id => universe.getRank(id),
         };
     }
 
@@ -148,6 +153,9 @@ export class MissionSession {
         entity.components.set(CreditsComponent,
             { credits: this.state.credits.credits });
         entity.components.set(ControlBitsComponent, this.state.bits);
+        if (this.state.ranks) {
+            entity.components.set(ActiveRanksComponent, this.state.ranks);
+        }
         if (this.state.records) {
             entity.components.set(LegalRecordsComponent, this.state.records);
         }
@@ -193,6 +201,43 @@ export class MissionSession {
     runMissionSet(expression: string, missionPrefix: string): void {
         runMissionSetString(this.machinery, expression, missionPrefix,
             this.outfits);
+    }
+}
+
+/**
+ * Pays the active ranks' salaries for `days` days of calendar advance.
+ *
+ * EVN Bible, ränk: Salary is "The number of credits that the affiliated
+ * government will pay the player, per day"; SalaryCap is "The maximum amount
+ * of money the player can have before the affiliated government stops paying
+ * the salary. Set to 0 or -1 if unused."
+ *
+ * Paid DAY BY DAY, re-reading the balance each day, so a capped salary stops
+ * on the day the cap is crossed rather than paying the whole jump at once
+ * (and so several days' pay cannot vault a player past a cap they should have
+ * stopped at). Player-local, like every other part of the date advance: the
+ * resulting CreditsComponent is what reaches peers.
+ *
+ * The ranks passed in are the set the crons just finished mutating, so a rank
+ * granted mid-advance starts earning from the following day.
+ */
+function payRankSalaries(entity: Entity, ranks: Set<string>,
+    universe: MissionUniverse, days: number): void {
+    const credits = entity.components.get(CreditsComponent);
+    if (!credits || ranks.size === 0) {
+        return;
+    }
+    const getRank = (id: string) => universe.getRank(id);
+    let balance = credits.credits;
+    for (let day = 0; day < days; day++) {
+        const pay = rankSalaryPerDay(ranks, getRank, balance);
+        if (pay === 0) {
+            break; // Nothing active pays, and nothing here can change that.
+        }
+        balance += pay;
+    }
+    if (balance !== credits.credits) {
+        entity.components.set(CreditsComponent, { credits: balance });
     }
 }
 
@@ -247,6 +292,23 @@ export async function computePlayerContribute(entity: Entity,
                 if (count > 0) {
                     contribute |= parseMask(
                         (await gameData.data.Outfit.get(outfitId)).contribute);
+                }
+            }
+        }
+        // rank Contribute: "Another 64 bits of Contribute values that kick
+        // in when the rank is active. These can be used to prevent the player
+        // from buying certain items or doing certain missions until achieving
+        // a certain rank" (EVN Bible). Decimal, and per-plug-in namespaced by
+        // novaparse exactly as outfit Contribute is, so it ORs straight in.
+        const ranks = entity.components.get(ActiveRanksComponent);
+        if (ranks) {
+            for (const rankId of ranks) {
+                try {
+                    contribute |=
+                        BigInt((await gameData.data.Rank.get(rankId))
+                            .contribute);
+                } catch {
+                    // Unknown rank: contributes nothing.
                 }
             }
         }
@@ -327,6 +389,8 @@ export async function advanceEntityDate(entity: Entity, days: number,
     try {
         await universe.load();
         const bits = new Set(entity.components.get(ControlBitsComponent)!);
+        const ranks =
+            new Set(entity.components.get(ActiveRanksComponent) ?? []);
         const cronStates =
             new Map(entity.components.get(CronStatesComponent)!);
         // The player's ship + outfit Contribute mask gates cron Require
@@ -334,10 +398,24 @@ export async function advanceEntityDate(entity: Entity, days: number,
         const contribute = gameData
             ? await computePlayerContribute(entity, gameData)
             : 0n;
+        // A cron's set string may grant a rank (Kxxx), so the crons run
+        // against a working copy of the active ranks too and it is committed
+        // beside the bits.
         runCronsForDays(universe.crons, cronStates, bits,
-            fromDay, fromDay + days, Math.random, contribute);
+            fromDay, fromDay + days, Math.random, contribute, {
+            active: ranks,
+            // A cron's numeric ids are scoped to the plug-in that wrote it,
+            // but runCronsForDays steps every cron at once; the prefix of
+            // the cron whose string is running is not threaded through the
+            // state machine, so stock scoping is used. Plug-in crons that
+            // grant plug-in ranks are the documented gap.
+            resolveId: id => `nova:${id}`,
+            getRank: id => universe.getRank(id),
+        });
         entity.components.set(ControlBitsComponent, bits);
+        entity.components.set(ActiveRanksComponent, ranks);
         entity.components.set(CronStatesComponent, cronStates);
+        payRankSalaries(entity, ranks, universe, days);
     } catch (e) {
         console.warn('Cron evaluation failed:', e);
     }
@@ -429,6 +507,9 @@ export function ensurePlayerStateComponents(entity: Entity): void {
     }
     if (!entity.components.get(ControlBitsComponent)) {
         entity.components.set(ControlBitsComponent, new Set());
+    }
+    if (!entity.components.get(ActiveRanksComponent)) {
+        entity.components.set(ActiveRanksComponent, new Set());
     }
     if (!entity.components.get(CronStatesComponent)) {
         entity.components.set(CronStatesComponent, new Map());

@@ -18,6 +18,9 @@ import { Button } from './button.js';
 import { frameOrigin, INK_TO_BOX } from './hail_layout.js';
 import { MenuControls } from './menu_controls.js';
 import { computeCargoCapacity } from './mission_session.js';
+import { ActiveRanksComponent } from '../nova_plugin/ncb_plugin.js';
+import { activeRankData } from '../nova_plugin/rank_logic.js';
+import { RankData } from 'novadatainterface/rank_data';
 
 // The player-info dialog composes the three PICTs 8518 (top strip,
 // 413x40, tab row) / 8519 (black content pane, tiled to the content
@@ -145,6 +148,8 @@ export class PlayerInfoDialog {
     /** Standard cargo names (STR# 4000), loaded on first show. */
     private cargoNames: string[] = [];
     private outfitNames = new Map<string, { name: string, price: number }>();
+    /** The player's active ranks, loaded on show for the Honors page. */
+    private ranks: RankData[] = [];
 
     constructor(private displayAssets: DisplayAssetDataInterface,
         private simulationData: SimulationGameDataInterface,
@@ -245,6 +250,19 @@ export class PlayerInfoDialog {
                     .PlayerStart.get(ids.PlayerStart[0])).cargoNames];
             }
         }
+        // The player's active ranks, for the Honors page. Only the ones
+        // they actually hold are fetched — the set is at most a handful.
+        const active = entity.components.get(ActiveRanksComponent);
+        const loaded = new Map<string, RankData>();
+        for (const id of active ?? []) {
+            try {
+                loaded.set(id, await this.simulationData.data.Rank.get(id));
+            } catch {
+                // A rank this build cannot resolve is simply not listed.
+            }
+        }
+        this.ranks = activeRankData(active, id => loaded.get(id));
+
         // Outfit names and prices, for the Extras page.
         this.outfitNames.clear();
         const outfits = entity.components.get(OutfitsStateComponent);
@@ -475,8 +493,21 @@ export class PlayerInfoDialog {
     }
 
     private renderHonors() {
-        // Ränk resources aren't parsed yet, so there are no ranks or
-        // honors to report (documented gap).
-        this.addProse(['Your ranks and honors:', 'None.']);
+        // "the name of that rank is displayed in the player-info dialog ...
+        // Ranks with higher weight are displayed first" (EVN Bible, ränk).
+        // The RESOURCE NAME is the full rank name shown here — "The name of
+        // the ränk resource is the full name of the rank, displayed in the
+        // player-info dialog. example: 'Commission of Space Marshall in the
+        // Hector Empire'" — not ConvName, which is the conversational <PRK>
+        // form.
+        //
+        // Stock rank names carry an authoring suffix after a semicolon
+        // ("Federation Naval Rank of Commander;Fed 1"), the same convention
+        // mission names use; only the part before it is player-facing.
+        const names = this.ranks
+            .map(rank => rank.name.split(';')[0].trim())
+            .filter(name => name.length > 0);
+        this.addProse(['Your ranks and honors:',
+            names.length > 0 ? names.join('\n') : 'None.']);
     }
 }

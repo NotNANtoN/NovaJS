@@ -18,6 +18,7 @@ import { PersData } from "./pers_data.js";
 import { PlanetData } from "./planet_data.js";
 import { PlayerStartData } from "./player_start_data.js";
 import { PpatImageData } from "./ppat_image.js";
+import { RankData } from "./rank_data.js";
 import { ShipData } from "./ship_data.js";
 import { SoundFile } from "./sound_file.js";
 import { SpriteSheetData, SpriteSheetFramesData, SpriteSheetImageData } from "./sprite_sheet_data.js";
@@ -38,6 +39,7 @@ enum NovaDataType {
     Cicn = "Cicn",
     CicnImage = "CicnImage",
     PpatImage = "PpatImage",
+    Rank = "Rank",
     Planet = "Planet",
     System = "System",
     Govt = "Govt",
@@ -71,6 +73,7 @@ type NovaDataInterface = {
     Cicn: Gettable<CicnData>,
     CicnImage: Gettable<CicnImageData>,
     PpatImage: Gettable<PpatImageData>,
+    Rank: Gettable<RankData>,
     Planet: Gettable<PlanetData>,
     System: Gettable<SystemData>,
     Govt: Gettable<GovtData>,

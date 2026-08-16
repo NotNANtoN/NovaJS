@@ -25,6 +25,7 @@ import { ItemGrid, ItemTile } from "./item_grid.js";
 import { Menu } from "./menu.js";
 import { MissionSession } from "./mission_session.js";
 import { MissionUniverse } from "./mission_universe.js";
+import { rankContribute } from "../nova_plugin/rank_logic.js";
 import { DeployedOutfitCounts } from "./deployed_outfits.js";
 import { BuyDenialReason, canBuyOutfit, canSellOutfit, freeCargo, freeMass, hasPurchaseSideEffects, maxBuyCount, maxSellCount, sellRefund, OutfitterContext, OutfitterStellar, stellarOf, visibleOutfits } from "./outfitter_rules.js";
 import { PlanetData } from "novadatainterface/planet_data";
@@ -197,6 +198,18 @@ export class Outfitter extends Menu<Entity> {
      * the build failed — then set strings fall back to bit-only hooks).
      */
     private missionSession?: MissionSession;
+    /**
+     * The union of the active ranks' Contribute sets, for the Require test
+     * (see outfitter_rules' playerContribute). Read off the mission
+     * session's working rank set so a rank granted by an OnPurchase set
+     * string takes effect on the very next grid refresh, before commit.
+     * Zero without a session, which is the pre-rank behaviour.
+     */
+    private rankContribute(): bigint {
+        const ranks = this.missionSession?.state.ranks;
+        const universe = MissionUniverse.shared(this.simulationData);
+        return rankContribute(ranks, id => universe.getRank(id));
+    }
     /**
      * Owned-but-not-aboard units for this landing (bay fighters still in
      * flight), supplied by the display side via
@@ -462,6 +475,7 @@ export class Outfitter extends Menu<Entity> {
             getOutfit: id => this.simulationData.data.Outfit.getCached(id),
             getWeapon: id => this.simulationData.data.Weapon.getCached(id),
             bits: this.controlBits,
+            rankContribute: this.rankContribute(),
             credits: this.credits.credits,
             // Resolved against the outfits the player owns, because a
             // deployed fighter names only its bay weapon and has to be

@@ -29,6 +29,7 @@ import { CicnImageData } from "novadatainterface/cicn_image";
 import { CicnData } from "novadatainterface/cicn_data";
 import { PpatImageData } from "novadatainterface/ppat_image";
 import { SoundFile } from "novadatainterface/sound_file";
+import { RankData } from "novadatainterface/rank_data";
 import { StringTableData } from "novadatainterface/string_table_data";
 import { DescriptionData } from "novadatainterface/description_data";
 
@@ -76,6 +77,7 @@ class GameDataAggregator implements GameDataInterface {
             StatusBar: this.makeAggregator<StatusBarData>(NovaDataType.StatusBar),
             Explosion: this.makeAggregator<ExplosionData>(NovaDataType.Explosion),
             SoundFile: this.makeAggregator<SoundFile>(NovaDataType.SoundFile),
+            Rank: this.makeAggregator<RankData>(NovaDataType.Rank),
             StringTable: this.makeAggregator<StringTableData>(NovaDataType.StringTable),
             Description: this.makeAggregator<DescriptionData>(NovaDataType.Description),
         };

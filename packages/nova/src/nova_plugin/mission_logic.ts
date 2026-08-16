@@ -1,4 +1,5 @@
 import { GovtData } from 'novadatainterface/govt_data';
+import { RankData } from 'novadatainterface/rank_data';
 import { MissionData } from 'novadatainterface/mission_data';
 import { PlanetData } from 'novadatainterface/planet_data';
 import { DEFAULT_CARGO_NAMES } from 'novadatainterface/player_start_data';
@@ -8,6 +9,7 @@ import { landable } from './landable.js';
 import { resolveShipObjective, shipGoalOfferable } from './mission_ship_logic.js';
 import type { SystemInfo } from './mission_ship_logic.js';
 import { objectiveAllowsCompletion, ShipObjective } from './mission_ship_state.js';
+import { ActiveRanks } from './ncb_plugin.js';
 import { ActiveMission, MAX_ACTIVE_MISSIONS, Missions } from './player_state_plugin.js';
 import {
     addRecord,
@@ -709,6 +711,13 @@ export interface MissionWorkingState {
      * working; reputation effects are skipped when absent.
      */
     records?: LegalRecords;
+    /**
+     * The player's active ranks, for the Kxxx/Lxxx set operators
+     * (rank_logic.ts). Optional so bare test states keep working; rank
+     * activation is then reported as an unimplemented hook, exactly as it
+     * was before ranks existed.
+     */
+    ranks?: ActiveRanks;
 }
 
 export interface MissionMachineryContext {
@@ -734,6 +743,13 @@ export interface MissionMachineryContext {
      * matches complete a landing.
      */
     sameStellar?(a: string, b: string): boolean;
+    /**
+     * Resolves a global rank id to its data, so the Kxxx/Lxxx operators can
+     * run the Bible's deactivation cascades. Optional; without it a rank is
+     * still activated/deactivated, just with no cascade (rank_logic.ts
+     * records unresolvable ranks rather than dropping player state).
+     */
+    getRank?(id: string): RankData | undefined;
 }
 
 /**
@@ -796,6 +812,10 @@ export function makeMissionSetHooks(machinery: MissionMachineryContext,
     const hooks = makeControlBitHooks(state.bits, outfits ? {
         outfits,
         resolveId: id => `${runningMissionPrefix}:${id}`,
+    } : undefined, state.ranks ? {
+        active: state.ranks,
+        resolveId: id => `${runningMissionPrefix}:${id}`,
+        getRank: id => machinery.getRank?.(id),
     } : undefined);
 
     if (depth > 4) {

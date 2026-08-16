@@ -86,12 +86,20 @@ function intersects(a: readonly number[], b: readonly number[]): boolean {
  */
 export function shipDisposition(shipGovt: GovtData | undefined,
     playerGovt: GovtData | undefined,
-    playerRecords?: LegalRecords): Disposition {
+    playerRecords?: LegalRecords,
+    /**
+     * ränk 0x0100 for THIS ship's government ("Ships of the affiliated
+     * government will not automatically attack the player when he has this
+     * rank"). The AI's twin of this test lives in govt_disposition's
+     * govtDispositionTo; both read the same rank set so the corners and the
+     * ship shooting at you cannot disagree.
+     */
+    rankSuppressesAggression?: boolean): Disposition {
     if (!shipGovt) {
         return 'neutral';
     }
     const flags = shipGovt.flags;
-    if (!flags.neverAttacksPlayer) {
+    if (!flags.neverAttacksPlayer && !rankSuppressesAggression) {
         if (flags.alwaysAttacksPlayer || flags.xenophobic) {
             return 'hostile';
         }

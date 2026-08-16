@@ -27,12 +27,14 @@ import {
     PlanetComponent, PlanetDataComponent, stellarClearanceFor,
     StellarBribesComponent, STELLAR_BRIBE_MS,
 } from './planet_plugin.js';
+import { ActiveRanksComponent } from './ncb_plugin.js';
+import { ranksAllowAssistance } from './rank_logic.js';
 import { OutfitsStateComponent } from './outfit_plugin.js';
 import { ShipDataComponent } from './ship_plugin.js';
 import { shipDisposition } from './iff_plugin.js';
 import { NpcComponent, NpcSteeringSystem } from './npc_ai_plugin.js';
 import { ShootAllWeaponsComponent } from './npc_plugin.js';
-import { CreditsComponent } from './player_state_plugin.js';
+import { CreditsComponent, MissionsComponent } from './player_state_plugin.js';
 import { GovtsResource, LegalRecordsComponent } from './reputation_plugin.js';
 import { findControlledEntity } from './ship_control.js';
 import { ShipComponent } from './ship_plugin.js';
@@ -151,6 +153,8 @@ function applyPlanetBribe(world: World, player: Entity, target: Entity) {
         records: player.components.get(LegalRecordsComponent),
         shipData: player.components.get(ShipDataComponent),
         outfits: player.components.get(OutfitsStateComponent),
+        ranks: player.components.get(ActiveRanksComponent),
+        missions: player.components.get(MissionsComponent),
         bribes, planetId, now,
     });
     if (clearance.cleared) {
@@ -230,6 +234,13 @@ export function applyHail(world: World, peerId: string | undefined,
             disposition,
             govt: targetGovt,
             attackingPlayer,
+            // ränk 0x0400: "Player can always request battle assistance from
+            // ships of the affiliated government" (rank_logic.ts).
+            rankAlwaysAssists: ranksAllowAssistance(
+                player.components.get(ActiveRanksComponent),
+                (id: string) => world.resources
+                    .get(SimulationGameDataResource)?.data.Rank.getCached(id),
+                targetGovt?.id),
         })) {
             return;
         }

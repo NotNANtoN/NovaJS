@@ -22,6 +22,7 @@ import { getDefaultShipData } from "./ship_data.js";
 import { getDefaultSoundFile } from "./sound_file.js";
 import { getDefaultSpriteSheetData, getDefaultSpriteSheetFrames } from "./sprite_sheet_data.js";
 import { getDefaultStatusBarData } from "./status_bar_data.js";
+import { getDefaultRankData } from "./rank_data.js";
 import { getDefaultStringTableData } from "./string_table_data.js";
 import { getDefaultSystemData } from "./system_data.js";
 import { getDefaultTargetCornersData } from "./target_corners_data.js";
@@ -71,6 +72,7 @@ export class MockGameData implements GameDataInterface {
         Cicn: new MockGettable(getDefaultCicnData()),
         CicnImage: new MockGettable(new Uint8Array(0).buffer),
         PpatImage: new MockGettable(new Uint8Array(0).buffer),
+        Rank: new MockGettable(getDefaultRankData()),
         Planet: new MockGettable(getDefaultPlanetData()),
         Ship: new MockGettable(getDefaultShipData()),
         SpriteSheet: new MockGettable(getDefaultSpriteSheetData()),

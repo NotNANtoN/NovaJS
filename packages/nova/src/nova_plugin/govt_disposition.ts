@@ -74,8 +74,28 @@ export function govtDisposition(self: GovtData | undefined,
  */
 export function govtDispositionTo(self: GovtData | undefined,
     other: GovtData | undefined,
-    otherRecords?: LegalRecords): Disposition {
+    otherRecords?: LegalRecords,
+    /**
+     * ränk Flags 0x0100: "Ships of the affiliated government will not
+     * automatically attack the player when he has this rank" — true when the
+     * TARGET holds an active rank affiliated with `self` carrying that bit
+     * (rank_logic.ts's ranksSuppressAggression).
+     *
+     * "AUTOMATICALLY" is the operative word, and it is why this only
+     * suppresses the disposition: the aggressor path in npc_ai_plugin's
+     * target selection is untouched, so a ship the player shoots at still
+     * fights back. The rank buys you their goodwill, not immunity.
+     */
+    otherRankSuppresses?: boolean): Disposition {
     const base = govtDisposition(self, other);
+    if (otherRankSuppresses) {
+        // The rank buys off the automatic hostility and nothing else: an
+        // 'enemy' becomes 'neutral', an existing 'ally' stays an ally, and
+        // the criminal-record test below is skipped (a rank the govt itself
+        // granted outranks the record they hold on you — that is the point
+        // of "will not automatically attack").
+        return base === 'enemy' ? 'neutral' : base;
+    }
     if (base !== 'enemy' && self && otherRecords
         && !self.flags.neverAttacksPlayer
         && recordHostile(recordWith(otherRecords, self.id, self),

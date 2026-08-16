@@ -32,6 +32,8 @@ import { ShipPhysics } from 'novadatainterface/ship_data';
 import { PlanetComponent, PlanetDataComponent } from './planet_plugin.js';
 import { EscortLandingComponent } from './player_escort.js';
 import { LegalRecordsComponent } from './reputation_plugin.js';
+import { ActiveRanksComponent } from './ncb_plugin.js';
+import { ranksSuppressAggression } from './rank_logic.js';
 import { SourceComponent } from './weapon_components.js';
 import { ShipComponent, ShipDataComponent, ShipPhysicsComponent } from './ship_plugin.js';
 import { TargetComponent } from './target_component.js';
@@ -479,7 +481,7 @@ const PlanetsQuery = new Query(
 const NpcTargetsQuery = new Query([UUID, MovementStateComponent, ShipComponent,
     ShipDataComponent, Optional(GovtComponent), Optional(ShieldComponent),
     Optional(CloakActiveComponent), Optional(DisabledComponent),
-    Optional(LegalRecordsComponent)] as const);
+    Optional(LegalRecordsComponent), Optional(ActiveRanksComponent)] as const);
 
 function lookupGovt(gameData: SimulationGameDataInterface,
     govt: { id: string } | undefined) {
@@ -627,7 +629,8 @@ const NpcDecisionSystem = new System({
         const hostiles: Array<readonly [string, number]> = [];
         let aggressorEntry: readonly [string, number, number] | undefined;
         for (const [otherUuid, otherMovement, , otherData, otherGovt,
-            otherShield, cloak, otherDisabled, otherRecords] of ships) {
+            otherShield, cloak, otherDisabled, otherRecords,
+            otherRanks] of ships) {
             if (otherUuid === uuid || !isTargetable(cloak) || otherDisabled) {
                 continue;
             }
@@ -643,7 +646,11 @@ const NpcDecisionSystem = new System({
                 aggressorEntry = [otherUuid, distanceSquared, otherStrength];
             }
             const disposition = govtDispositionTo(govtData,
-                lookupGovt(gameData, otherGovt), otherRecords);
+                lookupGovt(gameData, otherGovt), otherRecords,
+                // ränk 0x0100 for THIS ship's government: its holder is not
+                // attacked on sight.
+                ranksSuppressAggression(otherRanks,
+                    id => gameData.data.Rank.getCached(id), govtData?.id));
             if (disposition === 'enemy') {
                 hostiles.push([otherUuid, distanceSquared] as const);
             }

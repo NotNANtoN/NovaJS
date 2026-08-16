@@ -17,6 +17,7 @@ import {
     bribeAmount,
     busyResponseText,
     BUSY_RESPONSE_FALLBACK,
+    assistIsFree,
     canRequestAssistance,
     CLEARED_TO_DOCK_INDEX,
     CLEARED_TO_LAND_INDEX,
@@ -52,12 +53,16 @@ import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { NpcComponent } from '../nova_plugin/npc_ai_plugin.js';
 import { ShootAllWeaponsComponent } from '../nova_plugin/npc_plugin.js';
 import { PersComponent } from '../nova_plugin/pers_plugin.js';
+import { ActiveRanksComponent } from '../nova_plugin/ncb_plugin.js';
+import {
+    ranksAllowAssistance, ranksGiveFreeRepair,
+} from '../nova_plugin/rank_logic.js';
 import {
     PlanetComponent, PlanetDataComponent, PlanetTargetComponent,
     stellarClearanceFor, StellarBribesComponent,
 } from '../nova_plugin/planet_plugin.js';
 import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin.js';
-import { CreditsComponent } from '../nova_plugin/player_state_plugin.js';
+import { CreditsComponent, MissionsComponent } from '../nova_plugin/player_state_plugin.js';
 import { LegalRecordsComponent } from '../nova_plugin/reputation_plugin.js';
 import { ShipDataComponent } from '../nova_plugin/ship_plugin.js';
 import { TargetComponent } from '../nova_plugin/target_component.js';
@@ -455,9 +460,21 @@ export async function computeContext(world: World,
             talkative: response.talkative,
             seed: hashString(shipTargetUuid),
         }) || 'There is no response.';
+        // ränk 0x0400 / 0x0800 for the hailed ship's OWN government
+        // (rank_logic.ts): always-assist and free repair. Read off the same
+        // synced ActiveRanksComponent the simulation reads, so the dialog and
+        // applyHail cannot disagree about whether the button is offered.
+        const hailRanks = player.entity.components.get(ActiveRanksComponent);
+        const getHailRank = (id: string) =>
+            gameData.data.Rank.getCached(id);
         const assist = canRequestAssistance({
             disposition, govt, attackingPlayer,
-        }) ? { free: !!govt?.flags2.roadsideAssistance } : undefined;
+            rankAlwaysAssists: ranksAllowAssistance(
+                hailRanks, getHailRank, govt?.id),
+        }) ? {
+            free: assistIsFree(govt, ranksGiveFreeRepair(
+                hailRanks, getHailRank, govt?.id)),
+        } : undefined;
         // The OFFER is not withdrawn for a ship that happens to be fighting,
         // nor for a player whose ship is in perfect shape: they ask, and the
         // ship answers with a line from the response table ("I'm busy" /
@@ -502,6 +519,8 @@ export async function computeContext(world: World,
                 shipData: player.entity.components.get(ShipDataComponent),
                 outfits: player.entity.components.get(OutfitsStateComponent),
                 bribes: player.entity.components.get(StellarBribesComponent),
+                ranks: player.entity.components.get(ActiveRanksComponent),
+                missions: player.entity.components.get(MissionsComponent),
                 planetId, now: world.resources.get(TimeResource)?.time ?? 0,
             })
             : { cleared: true as const };

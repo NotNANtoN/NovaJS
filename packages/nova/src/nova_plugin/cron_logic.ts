@@ -1,6 +1,9 @@
 import { CronData } from 'novadatainterface/cron_data';
 import { dateFromDayNumber } from './calendar.js';
-import { makeControlBitHooks, NCBParseError, runNCBSet, evaluateNCBTest } from './ncb.js';
+import {
+    makeControlBitHooks, NCBParseError, RankHookOptions, runNCBSet,
+    evaluateNCBTest,
+} from './ncb.js';
 import { CronState, CronStates } from './player_state_plugin.js';
 
 /**
@@ -45,12 +48,13 @@ function inDateRange(cron: CronData, day: number): boolean {
 }
 
 function runCronSetString(expression: string, bits: Set<number>,
-    random: () => number): void {
+    random: () => number, ranks?: RankHookOptions): void {
     if (!expression) {
         return;
     }
     try {
-        runNCBSet(expression, makeControlBitHooks(bits), random);
+        runNCBSet(expression,
+            makeControlBitHooks(bits, undefined, ranks), random);
     } catch (e) {
         if (e instanceof NCBParseError) {
             console.warn('Bad crön set string:', e.message);
@@ -109,13 +113,14 @@ function conditionsHold(cron: CronData, bits: Set<number>,
  * checked against the cron's Require mask.
  */
 function stepCron(cron: CronData, state: CronState, day: number,
-    bits: Set<number>, contribute: bigint, random: () => number): void {
+    bits: Set<number>, contribute: bigint, random: () => number,
+    ranks?: RankHookOptions): void {
     if (state.phase === 'idle') {
         // loopOnEnd: while inside the postHoldoff window after ending,
         // keep re-running OnEnd each day its conditions still hold.
         if (day < state.nextEligible) {
             if (cron.loopOnEnd && conditionsHold(cron, bits, contribute)) {
-                runCronSetString(cron.onEnd, bits, random);
+                runCronSetString(cron.onEnd, bits, random, ranks);
             }
             return;
         }
@@ -137,7 +142,7 @@ function stepCron(cron: CronData, state: CronState, day: number,
         if (day < state.phaseStart + Math.max(0, cron.preHoldoff)) {
             return;
         }
-        runCronSetString(cron.onStart, bits, random);
+        runCronSetString(cron.onStart, bits, random, ranks);
         state.phase = 'active';
         state.phaseStart = day;
         // Fall through so duration 0 ends today.
@@ -146,13 +151,13 @@ function stepCron(cron: CronData, state: CronState, day: number,
         && conditionsHold(cron, bits, contribute)) {
         // loopOnStart: re-run OnStart each subsequent active day while
         // its conditions still hold (the entry day already ran it above).
-        runCronSetString(cron.onStart, bits, random);
+        runCronSetString(cron.onStart, bits, random, ranks);
     }
     if (state.phase === 'active') {
         if (day < state.phaseStart + Math.max(0, cron.duration)) {
             return;
         }
-        runCronSetString(cron.onEnd, bits, random);
+        runCronSetString(cron.onEnd, bits, random, ranks);
         state.phase = 'idle';
         state.phaseStart = day;
         state.nextEligible = day + Math.max(0, cron.postHoldoff) + 1;
@@ -184,7 +189,8 @@ function activeCronContribute(crons: CronData[], states: CronStates,
  */
 export function runCronsForDays(crons: CronData[], states: CronStates,
     bits: Set<number>, fromDay: number, toDay: number,
-    random: () => number = Math.random, baseContribute: bigint = 0n): void {
+    random: () => number = Math.random, baseContribute: bigint = 0n,
+    ranks?: RankHookOptions): void {
     for (let day = fromDay + 1; day <= toDay; day++) {
         for (const cron of crons) {
             let state = states.get(cron.id);
@@ -194,7 +200,7 @@ export function runCronsForDays(crons: CronData[], states: CronStates,
             }
             const contribute =
                 activeCronContribute(crons, states, baseContribute);
-            stepCron(cron, state, day, bits, contribute, random);
+            stepCron(cron, state, day, bits, contribute, random, ranks);
         }
     }
 }

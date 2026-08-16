@@ -255,7 +255,7 @@ export class MissionBoard extends Menu<Entity> {
             this.session = await MissionSession.create(input,
                 this.simulationData, this.universe, this.planetId);
             this.identity = await playerIdentitySubs(this.universe,
-                this.session.shipId);
+                this.session.shipId, undefined, this.session.state.ranks);
         } catch (e) {
             // Data failed to load; don't wedge the spaceport.
             console.warn('Mission board failed to load:', e);

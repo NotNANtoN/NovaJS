@@ -18,6 +18,7 @@ import { getDefaultPictData } from "./pict_data.js";
 import { getDefaultPictImageData } from "./pict_image.js";
 import { getDefaultPlanetData } from "./planet_data.js";
 import { getDefaultPpatImageData } from "./ppat_image.js";
+import { getDefaultRankData } from "./rank_data.js";
 import { getDefaultShipData } from "./ship_data.js";
 import { getDefaultSoundFile } from "./sound_file.js";
 import { getDefaultSpriteSheetData, getDefaultSpriteSheetFrames } from "./sprite_sheet_data.js";
@@ -38,6 +39,7 @@ export const Defaults = {
     get Cicn() { return getDefaultCicnData() },
     get CicnImage() { return getDefaultCicnImageData() },
     get PpatImage() { return getDefaultPpatImageData() },
+    get Rank() { return getDefaultRankData() },
     get Planet() { return getDefaultPlanetData() },
     get System() { return getDefaultSystemData() },
     get Govt() { return getDefaultGovtData() },

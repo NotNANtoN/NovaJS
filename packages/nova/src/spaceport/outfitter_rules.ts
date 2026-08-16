@@ -54,6 +54,15 @@ export interface OutfitterContext {
      * free of stellar boilerplate. The real outfitter always sets it.
      */
     planet?: OutfitterStellar;
+    /**
+     * The union of the active ranks' Contribute sets (rank_logic.ts's
+     * rankContribute). The EVN Bible's rank Contribute is "Another 64 bits
+     * of Contribute values that kick in when the rank is active [which] can
+     * be used to prevent the player from buying certain items ... until
+     * achieving a certain rank", so it joins the ship + outfit set for the
+     * Require test. Absent means "no ranks", the pre-rank behaviour.
+     */
+    rankContribute?: bigint;
 }
 
 /**
@@ -216,7 +225,8 @@ function hardpoints(context: OutfitterContext,
  * owned outfits.
  */
 export function playerContribute(context: OutfitterContext): bigint {
-    let contribute = BigInt(context.shipData.contribute ?? '0x0');
+    let contribute = BigInt(context.shipData.contribute ?? '0x0')
+        | (context.rankContribute ?? 0n);
     for (const [outfit, count] of ownedOutfits(context)) {
         if (count > 0) {
             contribute |= BigInt(outfit.contribute ?? '0x0');

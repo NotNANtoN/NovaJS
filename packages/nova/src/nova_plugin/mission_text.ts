@@ -38,6 +38,13 @@ export interface MissionTextSubstitutions {
     /** <PST> the player's ship type name. */
     playerShipType?: string;
     /**
+     * <PRK> the ConvName of the highest-weight active ränk that has
+     * one. Absent falls back to the Bible's "captain".
+     */
+    rankName?: string;
+    /** <SRK> / <PSR> the same rank's ShortName. */
+    rankShortName?: string;
+    /**
      * <SN> the mission's special ship name, drawn from the mïsn's
      * ShipNameID STR# list when the mission was ACCEPTED and frozen on
      * the ActiveMission (mission_logic.ts). Absent for a mission that
@@ -87,8 +94,15 @@ export function expandMissionText(text: string,
         ['<PNN>', subs.playerNickname ?? subs.playerName ?? 'Captain'],
         ['<PSN>', subs.playerShipName ?? 'your ship'],
         ['<PST>', subs.playerShipType ?? 'ship'],
-        ['<PRK>', 'captain'],
-        ['<SRK>', 'captain'],
+        // "the active rank with the highest weight is selected for the
+        // <PRK> and <PSR> mission briefing tags ... If there are no active
+        // ranks or none of the active ranks have ConvNames, the <PRK> tag
+        // will simply display 'captain'" (EVN Bible, ränk). <SRK> is the
+        // Bible's ShortName tag; it also documents it as <PSR> in the same
+        // paragraph, so both spellings expand here.
+        ['<PRK>', subs.rankName ?? 'captain'],
+        ['<SRK>', subs.rankShortName ?? 'captain'],
+        ['<PSR>', subs.rankShortName ?? 'captain'],
         // The <SN> fallback is deliberately article-free ("the <SN>" is
         // how every stock mission phrases it, so "the unknown ship"
         // reads as English): an unaccepted mission has no name yet, and

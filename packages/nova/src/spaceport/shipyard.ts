@@ -8,7 +8,11 @@ import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { ControlEvent } from '../nova_plugin/controls_plugin.js';
 import { ShipComponent } from '../nova_plugin/ship_plugin.js';
-import { ControlBitsComponent } from '../nova_plugin/ncb_plugin.js';
+import {
+    ActiveRanksComponent, ControlBitsComponent,
+} from '../nova_plugin/ncb_plugin.js';
+import { rankContribute } from '../nova_plugin/rank_logic.js';
+import { MissionUniverse } from './mission_universe.js';
 import { numericId } from '../nova_plugin/mission_logic.js';
 import { OutfitsStateComponent } from '../nova_plugin/outfit_plugin.js';
 import { GameDateComponent } from '../nova_plugin/player_state_plugin.js';
@@ -230,7 +234,15 @@ export class Shipyard extends Menu<Entity> {
      * or'd with the contribute sets of every owned outfit.
      */
     private playerContributeBits(): bigint {
-        let contribute = this.currentShipData
+        // Plus the active ranks' Contribute (EVN Bible: rank Contribute
+        // "can be used to prevent the player from buying certain items ...
+        // until achieving a certain rank"), which for the shipyard is what
+        // gates rank-restricted hulls.
+        const universe = MissionUniverse.shared(this.simulationData);
+        let contribute = rankContribute(
+            this.input?.components.get(ActiveRanksComponent),
+            id => universe.getRank(id));
+        contribute |= this.currentShipData
             ? BigInt(this.currentShipData.contribute ?? '0x0') : 0n;
         const outfits = this.input?.components.get(OutfitsStateComponent);
         if (outfits) {

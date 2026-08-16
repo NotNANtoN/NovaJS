@@ -4,8 +4,8 @@ import { LegalRecords, recordWith } from './reputation.js';
 
 /**
  * ============================================================================
- * Landing clearance — the ONE predicate (EVN Bible, spöb MinStatus + gövt
- * Require)
+ * Landing clearance — the ONE predicate (EVN Bible, spöb MinStatus, gövt
+ * Require, ränk 0x0200, and the mission-destination override)
  * ============================================================================
  *
  * Whether a stellar will let THIS player land, and — when it won't — WHY.
@@ -17,8 +17,8 @@ import { LegalRecords, recordWith } from './reputation.js';
  * all" and `shipDisposition` uses for ship hostility.
  *
  * Pure and total over synced state (spöb data, the player's legal records,
- * the player's Contribute bits, the bribe map), with no clock read and no
- * randomness, so the display and the simulation reach the same verdict on
+ * the player's Contribute bits, their active ränks, the bribe map), with no
+ * clock read and no randomness, so the display and the simulation reach the same verdict on
  * every peer.
  *
  * THE RULES, verbatim from the Bible:
@@ -45,6 +45,41 @@ import { LegalRecords, recordWith } from './reputation.js';
  *    the same mask arithmetic the shipyard and outfitter already use
  *    (shipyard_stock_rules' shipRequirementsMet).
  *
+ *  - ränk **Flags 0x0200** (~:2260): "All planets of the affiliated
+ *    government will let the player land when he has this rank, regardless of
+ *    their MinStatus field." A THIRD input, and the one that makes the stock
+ *    hypergate network a progression gate rather than a wall — see below.
+ *
+ *  - THE MISSION-DESTINATION OVERRIDE. A stellar an ACTIVE mission sends the
+ *    player to lets them land no matter what: not the record, not a 32767
+ *    "never", not a missing travel permit, not a rank they don't hold. A
+ *    mission that could not be completed because its own destination refuses
+ *    the pilot would be a dead end, and the original does not create those.
+ *    The Bible does not spell this out as a field — it is a behaviour of the
+ *    engine — so it is implemented here as the single most permissive rule,
+ *    ahead of every denial reason.
+ *
+ *    ONLY ACTIVE missions count. An aborted or failed mission is removed from
+ *    MissionsComponent outright (mission_logic.ts's abortMission/failMission),
+ *    so "active" is simply "present in the map" and a dropped mission stops
+ *    opening its destination on the very same tick.
+ *
+ *    BOTH LEGS count — travelPlanet and returnPlanet — for as long as the
+ *    mission is active. The travel leg is not re-shut once travelDone is set:
+ *    a player who has to go back (to re-take on cargo, or because the return
+ *    leg routes through the same port) must not find the door closed behind
+ *    them.
+ *
+ *    Duplicate stellars: landing on one copy of a stacked stellar satisfies an
+ *    objective set to another (the Bible's TravelStel/ReturnStel rule), which
+ *    mission_logic.ts implements through an injected `sameStellar`. That
+ *    topology (name + containing-system coordinates) lives in the spaceport's
+ *    MissionUniverse and is NOT reachable from the simulation, so
+ *    `isMissionDestination` takes the same optional callback and falls back to
+ *    an exact id match. In the sim that is what runs — a documented narrowing,
+ *    and a conservative one: the worst case is that the override does not fire
+ *    for a hidden duplicate, never that it fires when it should not.
+ *
  * "YOUR RECORD IN THE CURRENT SYSTEM": the original keys legal records by
  * SYSTEM, seeded from the system owner's InitialRec. NovaJS keys them by
  * GOVERNMENT (reputation.ts's sanctioned simplification), so the record a
@@ -54,23 +89,34 @@ import { LegalRecords, recordWith } from './reputation.js';
  * An INDEPENDENT stellar (spöb Govt -1, `govt: null`) has no government to
  * hold a record with and reads as 0.
  *
- * TWO EXEMPTIONS, both from the data rather than from taste:
+ * ONE EXEMPTION, from the data rather than from taste: UNINHABITED stellars
+ * (spöb Flags 0x0020) — the Bible's own parenthesis. There is no traffic
+ * control to deny you. (Every stock wormhole and every DEAD hypergate of the
+ * collapsed network is uninhabited, so they pass here and are filtered, if at
+ * all, by landable.ts.)
  *
- *  1. UNINHABITED stellars (spöb Flags 0x0020) — the Bible's own parenthesis.
- *     There is no traffic control to deny you.
+ * THE HYPERGATE NETWORK IS SUPPOSED TO BE LOCKED. All 19 WORKING stock gates
+ * — HG-V01 (nova:1400) through HG-Koria (nova:1418) — carry MinStatus 32767,
+ * "Player can never land", and belong to gövt nova:183 "Hypergate" (whose
+ * Require is 0, so no travel permit is involved). That 32767 is REAL: it says
+ * the network is shut. What opens it is ränk nova:147 "Have Access to
+ * Hypergate System" — affilGovt nova:183, flags 0x0208 (0x0200 land-anywhere
+ * plus 0x0008 permanent) — granted by mïsn nova:898 "Deliver New Hypergate
+ * Code;Sigma4" (OnAccept `k147 S899 S900`) at the end of the Sigma Shipyards
+ * string, or by mïsn nova:608 "Steal Hypergate Codes;Rebel Sideline"
+ * (OnSuccess `b149 k147`). A pilot without it is refused at every gate, and
+ * the gate map never opens; a pilot with it is cleared at all 19.
  *
- *  2. HYPERGATES AND WORMHOLES. All 19 stock spöbs carrying MinStatus 32767
- *     ("Player can never land") are working hypergates — HG-V01 through
- *     HG-Koria, every one of them gövt nova:183 with the can-land bit SET and
- *     live HyperLink destinations. They are not shut ports; the field is
- *     saying "you never LAND on a gate", and the engine's gate ENTRY is a
- *     different operation from a landing-clearance request. Honouring 32767
- *     literally here would break the entire working hypergate network, so a
- *     stellar with a `gate` is cleared without consulting MinStatus at all.
- *     (There is consequently NO stock spöb that is 'forbidden' — see the
- *     report; military-base style bases were expected but the stock data has
- *     none. The 'forbidden' path exists for plug-ins and for the govt Require
- *     permits.)
+ * An EARLIER version of this module exempted any stellar with a `gate` from
+ * MinStatus entirely, on the reading that "you never LAND on a gate". That was
+ * a workaround for a feature: it handed every fresh pilot the whole network.
+ *
+ * RECORD-GATED PORTS DO EXIST in the stock data, which is what the 'hostile'
+ * reason is for: the numbered Federation spacedocks (Spacedock I nova:184,
+ * II nova:133, III nova:136, V nova:150, and Wild Geese Spacedock VI
+ * nova:154) are MinStatus 2 — "They have to like you this much before they
+ * let you land" — so a fresh pilot, whose Federation record starts at the
+ * govt's InitialRec of 0, is refused there with 'hostile' until they earn it.
  *
  * NCB-gated landing denial (the mïsn/spöb bit tests behind some of the
  * original's refusals) remains the separate, unbuilt seam landable.ts names.
@@ -105,8 +151,6 @@ const CLEARED: StellarClearance = { cleared: true };
 export interface ClearanceStellar {
     minStatus: number;
     flags: { uninhabited: boolean };
-    /** Non-null for a hypergate/wormhole (PlanetData.gate). */
-    gate: unknown | null;
 }
 
 /** The player half: who they are to this stellar right now. */
@@ -123,6 +167,25 @@ export interface ClearancePlayer {
     contribute?: bigint;
     /** True while a paid bribe is buying this player clearance here. */
     bribed?: boolean;
+    /**
+     * True when an ACTIVE mission sends this player to this stellar (its
+     * travel or return leg). Overrides every denial reason — see the module
+     * comment. `isMissionDestination` computes it.
+     */
+    missionDestination?: boolean;
+    /**
+     * True when the player holds an active ränk affiliated with this
+     * stellar's owning government carrying Flags 0x0200, "All planets of the
+     * affiliated government will let the player land when he has this rank,
+     * regardless of their MinStatus field".
+     *
+     * It neutralizes BOTH MinStatus outcomes — the 32767 "never" sentinel and
+     * the record comparison — because both are the MinStatus field. It does
+     * NOT cover the gövt Require travel permit, which the Bible describes as a
+     * separate test on a separate field and which no rank flag mentions.
+     * rank_logic.ts's `ranksAllowLanding` computes it.
+     */
+    rankLandingOverride?: boolean;
 }
 
 /**
@@ -155,6 +218,38 @@ export function govtRequirementsMet(require: string | undefined,
 }
 
 /**
+ * One active mission's resolved destinations — the part of
+ * player_state_plugin's ActiveMission this module needs, taken structurally so
+ * the clearance rules stay independent of the mission layer.
+ */
+export interface MissionDestinations {
+    travelPlanet: string | null;
+    returnPlanet: string | null;
+}
+
+/**
+ * Whether any ACTIVE mission sends the player to `planetId` — the left-hand
+ * side of the mission-destination override. `sameStellar` is the duplicate
+ * stellar rule (mission_logic.ts's); without it, ids must match exactly.
+ */
+export function isMissionDestination(
+    missions: Iterable<MissionDestinations> | undefined,
+    planetId: string | undefined,
+    sameStellar?: (a: string, b: string) => boolean): boolean {
+    if (!missions || planetId === undefined) {
+        return false;
+    }
+    const matches = (destId: string | null) => destId !== null
+        && (destId === planetId || (sameStellar?.(destId, planetId) ?? false));
+    for (const mission of missions) {
+        if (matches(mission.travelPlanet) || matches(mission.returnPlanet)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
  * Whether `stellar` grants `player` landing clearance, and why not. See the
  * module comment for the rules and the two exemptions.
  *
@@ -165,9 +260,9 @@ export function govtRequirementsMet(require: string | undefined,
  */
 export function stellarClearance(stellar: ClearanceStellar,
     player: ClearancePlayer): StellarClearance {
-    // A gate is entered, not landed on: MinStatus never applies (see the
-    // module comment's exemption 2).
-    if (stellar.gate) {
+    // A mission destination is open to the pilot the mission was given to,
+    // whatever the port would otherwise say (see the module comment).
+    if (player.missionDestination) {
         return CLEARED;
     }
     // A paid bribe buys clearance past EVERY denial reason for as long as it
@@ -182,16 +277,20 @@ export function stellarClearance(stellar: ClearanceStellar,
     if (stellar.flags.uninhabited) {
         return CLEARED;
     }
-    if (stellar.minStatus === MIN_STATUS_NEVER) {
+    // ränk 0x0200 makes the whole MinStatus field read as "ignored"; the
+    // permit test below still runs. Computed once so the two MinStatus
+    // outcomes ('forbidden' and 'hostile') can't disagree about it.
+    const minStatusOk = player.rankLandingOverride === true
+        || stellar.minStatus === MIN_STATUS_IGNORED
+        || (stellar.minStatus !== MIN_STATUS_NEVER
+            && player.record >= stellar.minStatus);
+    if (!minStatusOk && stellar.minStatus === MIN_STATUS_NEVER) {
         return { cleared: false, reason: 'forbidden' };
     }
     if (!govtRequirementsMet(player.govtRequire, player.contribute)) {
         return { cleared: false, reason: 'permit' };
     }
-    if (stellar.minStatus === MIN_STATUS_IGNORED) {
-        return CLEARED;
-    }
-    if (player.record < stellar.minStatus) {
+    if (!minStatusOk) {
         return { cleared: false, reason: 'hostile' };
     }
     return CLEARED;
@@ -224,12 +323,16 @@ export function stellarRecord(planetGovt: GovtData | undefined,
  * passed simply isn't applied, so no one has to prune the map.
  */
 export function planetClearance(opts: {
-    planet: Pick<PlanetData, 'minStatus' | 'flags' | 'gate'>,
+    planet: Pick<PlanetData, 'minStatus' | 'flags'>,
     planetGovt?: GovtData,
     records?: LegalRecords,
     contribute?: bigint,
     bribedUntil?: number,
     now?: number,
+    /** ränk 0x0200 for this stellar's govt; see ClearancePlayer. */
+    rankLandingOverride?: boolean,
+    /** An active mission sends the player here; see ClearancePlayer. */
+    missionDestination?: boolean,
 }): StellarClearance {
     const bribed = opts.bribedUntil !== undefined
         && opts.bribedUntil > (opts.now ?? 0);
@@ -238,5 +341,7 @@ export function planetClearance(opts: {
         govtRequire: opts.planetGovt?.require,
         contribute: opts.contribute,
         bribed,
+        rankLandingOverride: opts.rankLandingOverride,
+        missionDestination: opts.missionDestination,
     });
 }

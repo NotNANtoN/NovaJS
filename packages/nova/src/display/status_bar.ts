@@ -24,12 +24,13 @@ import { ArmorComponent, FuelComponent, FUEL_PER_JUMP, ShieldComponent } from ".
 import { OutfitsStateComponent, sumOutfitField } from "../nova_plugin/outfit_plugin.js";
 import { PersComponent } from "../nova_plugin/pers_plugin.js";
 import { DisabledComponent } from "../nova_plugin/disabled_component.js";
+import { ActiveRanksComponent } from "../nova_plugin/ncb_plugin.js";
 import { PlanetComponent, PlanetDataComponent, PlanetTargetComponent, stellarClearanceFor, StellarBribesComponent } from "../nova_plugin/planet_plugin.js";
 import { landable } from "../nova_plugin/landable.js";
 import { JumpComponent, JumpRouteComponent, JUMP_DISTANCE } from "../nova_plugin/jump_plugin.js";
 import { canJump, jumpRadiusFor } from "../nova_plugin/jump_readiness.js";
 import { CargoComponent } from "../nova_plugin/cargo_plugin.js";
-import { CreditsComponent } from "../nova_plugin/player_state_plugin.js";
+import { CreditsComponent, MissionsComponent } from "../nova_plugin/player_state_plugin.js";
 import { OutfitsState } from "../nova_plugin/outfit_plugin.js";
 import { DockedShipResource } from "./docked_ship.js";
 import { SimulationGameDataInterface } from "../client/gamedata/simulation_game_data.js";
@@ -1001,6 +1002,8 @@ const DrawRadar = new System({
             const planetRecords = entity.components.get(LegalRecordsComponent);
             const bribes = entity.components.get(StellarBribesComponent);
             const shipData = entity.components.get(ShipDataComponent);
+            const planetRanks = entity.components.get(ActiveRanksComponent);
+            const planetMissions = entity.components.get(MissionsComponent);
             const planetColors = new Map<string, number>();
             for (const [uuid, , planetData, planet] of planets) {
                 const isLandable = landable(planetData);
@@ -1008,6 +1011,7 @@ const DrawRadar = new System({
                     ? stellarClearanceFor({
                         planetData, gameData, records: planetRecords,
                         shipData, outfits: playerOutfits, bribes,
+                        ranks: planetRanks, missions: planetMissions,
                         planetId: planet.id, now: time,
                     })
                     : { cleared: true } as const;

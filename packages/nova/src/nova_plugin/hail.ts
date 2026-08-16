@@ -155,8 +155,23 @@ export function canRequestAssistance(opts: {
     disposition: Disposition,
     govt: GovtData | undefined,
     attackingPlayer?: boolean,
+    /**
+     * ränk Flags 0x0400: "Player can always request battle assistance from
+     * ships of the affiliated government". ALWAYS — so it overrides both the
+     * politics and the govt's own noAssistOrMercy switch. It does not
+     * override behavioral hostility: a ship currently shooting at the player
+     * is not going to answer, and letting the rank override that would
+     * reopen the assistance exploit the attackingPlayer test closes.
+     */
+    rankAlwaysAssists?: boolean,
 }): boolean {
-    if (opts.disposition === 'hostile' || opts.attackingPlayer) {
+    if (opts.attackingPlayer) {
+        return false;
+    }
+    if (opts.rankAlwaysAssists) {
+        return true;
+    }
+    if (opts.disposition === 'hostile') {
         return false;
     }
     if (opts.govt?.flags.cantBeHailed || opts.govt?.flags2.noAssistOrMercy) {
@@ -316,15 +331,26 @@ export function hostileResponseText(strings: readonly string[] | undefined,
 
 /**
  * Whether the assistance is free. Roadside-Assistance govts (Flags2 0x0010)
- * always repair/refuel for free. The ränk allied-repair flag (0x0800) would
- * also make it free, but per-player rank state is not modelled yet — a
- * documented seam. Non-free assistance is currently also rendered for free
- * (there is no "charge for fuel" credit model yet); this helper still reports
- * the distinction so the dialog can word the offer, and so a future charge
- * can hook in here.
+ * always repair/refuel for free, and so does an active ränk with Flags 0x0800
+ * ("Ships allied with the affiliated govt will always repair or refuel the
+ * player for free") affiliated with the hailed ship's government —
+ * `rankFreeRepair`, from rank_logic.ts's ranksGiveFreeRepair.
+ *
+ * NARROWING: the Bible says ships ALLIED WITH the affiliated govt, not only
+ * ships OF it. Allies are expressed through gövt class numbers rather than
+ * govt ids (govt_data.ts's classes/allies), so honouring the wider reading
+ * would mean resolving the whole ally graph at every hail; the caller passes
+ * the same-govt answer, which is the case every stock rank with 0x0800 is
+ * written for. Documented, not silent.
+ *
+ * Non-free assistance is currently also rendered for free (there is no
+ * "charge for fuel" credit model yet); this helper still reports the
+ * distinction so the dialog can word the offer, and so a future charge can
+ * hook in here.
  */
-export function assistIsFree(govt: GovtData | undefined): boolean {
-    return !!govt?.flags2.roadsideAssistance;
+export function assistIsFree(govt: GovtData | undefined,
+    rankFreeRepair = false): boolean {
+    return rankFreeRepair || !!govt?.flags2.roadsideAssistance;
 }
 
 /** Whether a hailed planet's government will take a bribe (hostile planets). */

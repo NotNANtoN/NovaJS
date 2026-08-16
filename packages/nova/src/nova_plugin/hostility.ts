@@ -12,6 +12,8 @@ import { shipDisposition, targetCornerStyle } from './iff_plugin.js';
 import { NpcComponent } from './npc_ai_plugin.js';
 import { ShootAllWeaponsComponent } from './npc_plugin.js';
 import { LegalRecordsComponent } from './reputation_plugin.js';
+import { ActiveRanksComponent } from './ncb_plugin.js';
+import { ranksSuppressAggression } from './rank_logic.js';
 import { ShipComponent } from './ship_plugin.js';
 import { TargetComponent } from './target_component.js';
 
@@ -122,7 +124,10 @@ export function styleForTarget(targetUuid: string, targetEntity: Entity,
     // criminal with shows hostile corners, same rule as the sim.
     const playerRecords = playerEntity.components.get(LegalRecordsComponent);
     return targetCornerStyle(
-        shipDisposition(targetGovt, playerGovt, playerRecords),
+        shipDisposition(targetGovt, playerGovt, playerRecords,
+            ranksSuppressAggression(
+                playerEntity.components.get(ActiveRanksComponent),
+                id => gameData.data.Rank.getCached(id), targetGovt?.id)),
         attackingPlayer);
 }
 

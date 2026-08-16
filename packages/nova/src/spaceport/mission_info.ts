@@ -9,7 +9,9 @@ import { abortMission } from '../nova_plugin/mission_logic.js';
 import { expandMissionText, missionDisplayName } from '../nova_plugin/mission_text.js';
 import { makeDescTextContext, playerGender } from '../nova_plugin/desc_text.js';
 import { PlayerIdentitySubs, playerIdentitySubs } from './player_identity.js';
-import { ControlBitsComponent } from '../nova_plugin/ncb_plugin.js';
+import {
+    ActiveRanksComponent, ControlBitsComponent,
+} from '../nova_plugin/ncb_plugin.js';
 import { ShipComponent } from '../nova_plugin/ship_plugin.js';
 import { ActiveMission, GameDateComponent, MissionsComponent } from '../nova_plugin/player_state_plugin.js';
 import { Button } from './button.js';
@@ -172,7 +174,8 @@ export class MissionInfoDialog {
         this.entity = entity;
         this.abortContext = abortContext;
         this.identity = await playerIdentitySubs(this.universe,
-            entity.components.get(ShipComponent)?.id);
+            entity.components.get(ShipComponent)?.id, undefined,
+            entity.components.get(ActiveRanksComponent));
         try {
             await this.universe.load();
         } catch (e) {

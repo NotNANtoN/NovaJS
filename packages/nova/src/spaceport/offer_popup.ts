@@ -416,7 +416,8 @@ export class OfferPopup {
 export async function presentOffers(popup: OfferPopup,
     session: MissionSession, universe: MissionUniverse,
     offers: MissionOffer[]): Promise<void> {
-    const identity = await playerIdentitySubs(universe, session.shipId);
+    const identity = await playerIdentitySubs(universe, session.shipId,
+        undefined, session.state.ranks);
     for (const offer of offers) {
         // A prior accept this visit may have made the mission active.
         if (session.state.missions.has(offer.data.id)) {

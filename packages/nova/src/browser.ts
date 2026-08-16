@@ -51,7 +51,9 @@ import { GateArrivalAnticipationEvent } from "./display/gate_animation_plugin.js
 import { makeShip } from "./nova_plugin/make_ship.js";
 import { makeSystem, SIMULATION_STEP_MS } from "./nova_plugin/make_system.js";
 import { makeControlBitHooks, NCBParseError, runNCBSet } from "./nova_plugin/ncb.js";
-import { ControlBitsComponent } from "./nova_plugin/ncb_plugin.js";
+import {
+    ActiveRanksComponent, ControlBitsComponent,
+} from "./nova_plugin/ncb_plugin.js";
 import { MultiRoomResource, NovaPlugin } from "./nova_plugin/nova_plugin.js";
 import { OutfitsStateComponent } from "./nova_plugin/outfit_plugin.js";
 import { LandEvent, PlanetTargetComponent } from "./nova_plugin/planet_plugin.js";
@@ -1648,11 +1650,18 @@ async function startGame() {
         shipEntity.components.set(CreditsComponent,
             { credits: playerStart.credits });
         const bits = new Set<number>();
+        const startRanks = new Set<string>();
         try {
             // New-pilot setup is player-local; plain randomness is
             // fine for R(a b) here (see the outfitter's runSetString).
-            runNCBSet(playerStart.onStart, makeControlBitHooks(bits),
-                Math.random);
+            // A chär OnStart may grant a rank (Kxxx); the cascades need
+            // rank data, which is fetched on demand from the cache.
+            runNCBSet(playerStart.onStart,
+                makeControlBitHooks(bits, undefined, {
+                    active: startRanks,
+                    resolveId: id => `${playerStart.prefix}:${id}`,
+                    getRank: id => simulationGameData.data.Rank.getCached(id),
+                }), Math.random);
         } catch (e) {
             if (e instanceof NCBParseError) {
                 console.warn('Bad chär OnStart string:', e);
@@ -1661,6 +1670,7 @@ async function startGame() {
             }
         }
         shipEntity.components.set(ControlBitsComponent, bits);
+        shipEntity.components.set(ActiveRanksComponent, startRanks);
     }
     ensurePlayerStateComponents(shipEntity);
     (window as any).myShip = shipEntity;

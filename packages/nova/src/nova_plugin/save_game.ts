@@ -5,7 +5,7 @@ import {
     EncodedEntity, Serializer,
 } from 'nova_ecs/plugins/serializer_plugin';
 import { CargoComponent } from './cargo_plugin.js';
-import { ControlBitsComponent } from './ncb_plugin.js';
+import { ActiveRanksComponent, ControlBitsComponent } from './ncb_plugin.js';
 import { OutfitsStateComponent } from './outfit_plugin.js';
 import {
     ActiveMissionType,
@@ -164,6 +164,18 @@ export const SaveData = t.intersection([
         // The number is unused (always 1); the shape predates this
         // field being written and stays for compatibility.
         novaControlBits: t.array(t.tuple([t.string, t.number])),
+        // The player's active ränks, as global ränk ids ('nova:147').
+        // Set and cleared by the same set strings the control bits are
+        // (the Kxxx/Lxxx operators; see rank_logic.ts), and persisted
+        // alongside them for the same reason.
+        //
+        // ADDITIVE and optional: a save written before ranks existed
+        // simply has no entry and decodes to "no active ranks", which is
+        // exactly the state a pre-ranks pilot was in. SAVE_VERSION does
+        // NOT move — bumping it would make older builds quarantine saves
+        // written by this one, whereas an unknown field is ignored by the
+        // non-exact codec.
+        ranks: t.array(t.string),
         // Cargo aboard: commodity key ('mission:<id>', 'cargo:<n>',
         // 'junk:<id>') -> tons.
         cargo: t.array(t.tuple([t.string, t.number])),
@@ -251,6 +263,11 @@ export function extractSaveData(entity: Entity, systemId: string):
     if (bits) {
         save.novaControlBits = [...bits].map(bit => [String(bit), 1]);
     }
+    const ranks = entity.components.get(ActiveRanksComponent);
+    if (ranks) {
+        // Sorted so the same active set always writes the same bytes.
+        save.ranks = [...ranks].sort();
+    }
     const cargo = entity.components.get(CargoComponent);
     if (cargo) {
         save.cargo = [...cargo];
@@ -291,6 +308,9 @@ export function restorePlayerState(entity: Entity, save: SaveData): void {
             save.novaControlBits
                 .map(([bit]) => parseInt(bit, 10))
                 .filter(bit => !Number.isNaN(bit))));
+    }
+    if (save.ranks) {
+        entity.components.set(ActiveRanksComponent, new Set(save.ranks));
     }
     if (save.cargo) {
         entity.components.set(CargoComponent, new Map(save.cargo));

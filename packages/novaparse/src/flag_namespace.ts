@@ -49,13 +49,14 @@ export const FIRST_PRIVATE_PHYSICAL_BIT = 64;
 
 /**
  * A resource that takes part in the flag space. Contribute is optional
- * because mïsns only have Require.
+ * because mïsns only have Require, and Require is optional because ränks
+ * only have Contribute.
  */
 export interface FlagResource {
     globalID: string;
     writerPrefix: string;
     contribute?: bigint;
-    require: bigint;
+    require?: bigint;
 }
 
 /** One participating resource with the type it was found under. */
@@ -69,7 +70,8 @@ export interface FlagResourceRef {
  * scanned (this order does not affect the mapping — only namespace order
  * and bit number do — but it keeps reports stable).
  */
-export const FLAG_RESOURCE_TYPES = ["shïp", "oütf", "crön", "mïsn"] as const;
+export const FLAG_RESOURCE_TYPES =
+    ["shïp", "oütf", "crön", "mïsn", "ränk"] as const;
 
 /** Positions of the 1-bits of `value`, ascending. */
 export function flagBits(value: bigint): number[] {
@@ -94,7 +96,10 @@ export function collectFlagResources(resources: NovaResources): FlagResourceRef[
         const list = resources[type] ?? {};
         for (const id of Object.keys(list)) {
             const resource = list[id] as BaseResource & Partial<FlagResource>;
-            if (typeof resource.require !== "bigint") {
+            // A ränk contributes without requiring; everything else
+            // requires (possibly 0) and may contribute.
+            if (typeof resource.require !== "bigint"
+                && typeof resource.contribute !== "bigint") {
                 continue;
             }
             refs.push({ type, resource: resource as FlagResource });
@@ -112,7 +117,8 @@ export function collectFlagResources(resources: NovaResources): FlagResourceRef[
 export function scanBaseFlagSet(resources: NovaResources): Set<number> {
     const bits = new Set<number>();
     for (const { resource } of collectFlagResources(resources)) {
-        for (const bit of flagBits((resource.contribute ?? 0n) | resource.require)) {
+        for (const bit of flagBits(
+            (resource.contribute ?? 0n) | (resource.require ?? 0n))) {
             bits.add(bit);
         }
     }
@@ -225,7 +231,7 @@ export function buildFlagNamespaceMapFrom(
             }
             bits.add(bit);
         }
-        for (const bit of flagBits(resource.require)) {
+        for (const bit of flagBits(resource.require ?? 0n)) {
             if (baseSet.has(bit)) {
                 continue;
             }

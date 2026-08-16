@@ -32,8 +32,11 @@ import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { OutfitsState, OutfitsStateComponent } from './outfit_plugin.js';
 import { LegalRecords } from './reputation.js';
 import { GovtsResource, LegalRecordsComponent } from './reputation_plugin.js';
+import { ActiveRanks, ActiveRanksComponent } from './ncb_plugin.js';
+import { ranksAllowLanding } from './rank_logic.js';
+import { Missions, MissionsComponent } from './player_state_plugin.js';
 import {
-    contributeBits, planetClearance, StellarClearance,
+    contributeBits, isMissionDestination, planetClearance, StellarClearance,
 } from './stellar_clearance.js';
 
 export const PlanetType = t.type({
@@ -163,6 +166,17 @@ export function stellarClearanceFor(opts: {
     shipData?: ShipData,
     outfits?: OutfitsState,
     bribes?: StellarBribes,
+    /** The player's active ränks (ActiveRanksComponent). */
+    ranks?: ActiveRanks,
+    /** The player's active missions (MissionsComponent). */
+    missions?: Missions,
+    /**
+     * The duplicate-stellar rule (mission_logic.ts's `sameStellar`). The
+     * simulation has no system topology to build it from, so it is omitted
+     * there and mission destinations match by exact id; the spaceport, which
+     * has MissionUniverse, may pass one.
+     */
+    sameStellar?: (a: string, b: string) => boolean,
     planetId: string,
     now: number,
 }): StellarClearance {
@@ -179,6 +193,14 @@ export function stellarClearanceFor(opts: {
         outfitContributes.push(
             opts.gameData.data.Outfit.getCached(id)?.contribute ?? '0x0');
     }
+    // ränk 0x0200: a rank affiliated with this stellar's govt that lets the
+    // player land "regardless of their MinStatus field" — the stock hypergate
+    // network's key (rank_logic.ts). Rank data comes from the same cached
+    // simulation game data the govts and outfits above do, so the sim reads it
+    // without awaiting: a rank whose data has not loaded yet simply grants
+    // nothing this tick, exactly as an unloaded outfit contributes nothing.
+    const rankLandingOverride = ranksAllowLanding(opts.ranks,
+        id => opts.gameData.data.Rank.getCached(id), govtId ?? null);
     return planetClearance({
         planet: opts.planetData,
         planetGovt,
@@ -187,6 +209,9 @@ export function stellarClearanceFor(opts: {
             outfitContributes),
         bribedUntil: opts.bribes?.get(opts.planetId),
         now: opts.now,
+        rankLandingOverride,
+        missionDestination: isMissionDestination(opts.missions?.values(),
+            opts.planetId, opts.sameStellar),
     });
 }
 
@@ -201,10 +226,12 @@ const AttemptLandingSystem = new System({
         ShipControlStateComponent, Emit,
         Optional(LegalRecordsComponent), Optional(ShipDataComponent),
         Optional(OutfitsStateComponent), Optional(StellarBribesComponent),
+        Optional(ActiveRanksComponent), Optional(MissionsComponent),
         SimulationGameDataResource, Optional(GovtsResource),
         Optional(TimeResource)] as const,
     step(planets, playerUuid, { position, velocity }, planetTarget, controls,
-        emit, records, shipData, outfits, bribes, gameData, govts, time) {
+        emit, records, shipData, outfits, bribes, ranks, missions, gameData,
+        govts, time) {
         if (controls.get('land') !== 'start') {
             return;
         }
@@ -247,7 +274,8 @@ const AttemptLandingSystem = new System({
                     }, [playerUuid]);
                 } else if (planetData && !stellarClearanceFor({
                     planetData, gameData, govts, records, shipData, outfits,
-                    bribes, planetId: id, now: time?.time ?? 0,
+                    bribes, ranks, missions,
+                    planetId: id, now: time?.time ?? 0,
                 }).cleared) {
                     // CLEARANCE. A port that is shut to this pilot answers
                     // "Landing request denied." (STR# 2002 index 82; index 81

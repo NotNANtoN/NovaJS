@@ -2,6 +2,7 @@ import { CronData } from 'novadatainterface/cron_data';
 import { GovtData } from 'novadatainterface/govt_data';
 import { MissionData } from 'novadatainterface/mission_data';
 import { PlanetData } from 'novadatainterface/planet_data';
+import { RankData } from 'novadatainterface/rank_data';
 import { SystemData } from 'novadatainterface/system_data';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { displayName } from '../nova_plugin/display_name.js';
@@ -46,6 +47,7 @@ export class MissionUniverse {
     private missionsById = new Map<string, MissionData>();
     private planetsById = new Map<string, PlanetData>();
     private govtsById = new Map<string, GovtData>();
+    private ranksById = new Map<string, RankData>();
     private systemsById = new Map<string, SystemData>();
     private planetSystem = new Map<string, string>();
     /** The Visibility expressions of every system a placed planet sits in. */
@@ -81,7 +83,8 @@ export class MissionUniverse {
 
         // Bounded concurrency: firing thousands of parallel fetches
         // makes Chrome throw ERR_INSUFFICIENT_RESOURCES.
-        const [missions, planets, systems, govts, crons] = await Promise.all([
+        const [missions, planets, systems, govts, crons, ranks] =
+            await Promise.all([
             pooledMap(ids.Mission, async id =>
                 [id, await data.Mission.get(id)] as const),
             pooledMap(ids.Planet, async id =>
@@ -91,12 +94,15 @@ export class MissionUniverse {
             pooledMap(ids.Govt, async id =>
                 [id, await data.Govt.get(id)] as const),
             pooledMap(ids.Cron, id => data.Cron.get(id)),
+            pooledMap(ids.Rank, async id =>
+                [id, await data.Rank.get(id)] as const),
         ]);
 
         this.missionsById = new Map(missions);
         this.planetsById = new Map(planets);
         this.systemsById = new Map(systems);
         this.govtsById = new Map(govts);
+        this.ranksById = new Map(ranks);
         this.crons = crons;
 
         this.missions = [...this.missionsById.values()];
@@ -185,6 +191,16 @@ export class MissionUniverse {
     }
 
     /** Every govt, sorted by id, for reputation ally/classmate scopes. */
+    /** A rank's data by global id, for the Kxxx/Lxxx cascades. */
+    getRank(id: string): RankData | undefined {
+        return this.ranksById.get(id);
+    }
+
+    /** Every rank, for the player-info Honors page. */
+    ranks(): Iterable<readonly [string, RankData]> {
+        return this.ranksById;
+    }
+
     govts(): Iterable<readonly [string, GovtData]> {
         return [...this.govtsById].sort(([a], [b]) => a < b ? -1 : 1);
     }

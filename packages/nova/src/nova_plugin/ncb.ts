@@ -15,6 +15,9 @@
  * operators are supplied by the caller.
  */
 
+import { RankData } from 'novadatainterface/rank_data';
+import { activateRank, deactivateRank } from './rank_logic.js';
+
 export class NCBParseError extends Error {
     constructor(message: string) {
         super(message);
@@ -614,21 +617,45 @@ export function runNCBSet(expression: string, hooks: NCBSetHooks,
 }
 
 /**
+ * The active-ränk half of `makeControlBitHooks`: the working set of
+ * active rank ids to mutate, plus the lookups needed to run the
+ * Bible's deactivation cascades (see rank_logic.ts). Supplying this
+ * wires `Kxxx` / `Lxxx` at every set-string site that has the player's
+ * rank state to hand.
+ */
+export interface RankHookOptions {
+    /** The working copy of the player's active ränk ids. */
+    active: Set<string>;
+    /** Maps a resource id like 147 to a global id like "nova:147". */
+    resolveId(id: number): string;
+    /** Resolves a global ränk id to its data, for the cascades. */
+    getRank(id: string): RankData | undefined;
+}
+
+/**
  * Hooks that mutate a `Set<number>` of control bits and optionally
- * grant/remove outfits in an `id -> count` map. This is what outfit
- * OnPurchase/OnSell strings use; the outfit-count map is keyed by
- * global outfit ids, so numeric resource ids pass through `resolveId`.
+ * grant/remove outfits in an `id -> count` map, and activate/deactivate
+ * ränks in a set of global rank ids. This is what outfit
+ * OnPurchase/OnSell strings use; the outfit-count and rank maps are
+ * keyed by global ids, so numeric resource ids pass through `resolveId`.
  */
 export function makeControlBitHooks(bits: Set<number>, outfitCounts?: {
     outfits: Map<string, number>,
     /** Maps a resource id like 142 to a global id like "nova:142". */
     resolveId(id: number): string,
-}): NCBSetHooks {
+}, ranks?: RankHookOptions): NCBSetHooks {
     const hooks: NCBSetHooks = {
         setBit: bit => bits.add(bit),
         clearBit: bit => bits.delete(bit),
         toggleBit: bit => bits.has(bit) ? bits.delete(bit) : bits.add(bit),
     };
+    if (ranks) {
+        const { active, resolveId, getRank } = ranks;
+        hooks.activateRank = id =>
+            activateRank(active, resolveId(id), getRank);
+        hooks.deactivateRank = id =>
+            deactivateRank(active, resolveId(id), getRank);
+    }
     if (outfitCounts) {
         const { outfits, resolveId } = outfitCounts;
         // Grants bypass all purchase limits by design.

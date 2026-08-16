@@ -15,7 +15,9 @@ import { ShipComponent, ShipPhysicsComponent } from '../nova_plugin/ship_plugin.
 import { WeaponsStateComponent } from '../nova_plugin/weapons_state.js';
 import { LOCATION_MAIN_SPACEPORT, LOCATION_MISSION_COMPUTER, MissionEvent, MissionMapMark, missionMapMarks } from '../nova_plugin/mission_logic.js';
 import { expandMissionText } from '../nova_plugin/mission_text.js';
-import { ControlBitsComponent } from '../nova_plugin/ncb_plugin.js';
+import {
+    ActiveRanksComponent, ControlBitsComponent,
+} from '../nova_plugin/ncb_plugin.js';
 import { CreditsComponent, GameDateComponent, MissionsComponent } from '../nova_plugin/player_state_plugin.js';
 import { DockedLiveStatus, DockedShip } from '../display/docked_ship.js';
 import { Bar } from './bar.js';
@@ -374,7 +376,8 @@ export class Spaceport extends Menu<Entity> {
             entity.components.get(ControlBitsComponent) ?? new Set(),
             playerGender());
         const identity = await playerIdentitySubs(this.universe,
-            entity.components.get(ShipComponent)?.id);
+            entity.components.get(ShipComponent)?.id, undefined,
+            entity.components.get(ActiveRanksComponent));
         for (const event of events) {
             if (!event.text) {
                 continue;

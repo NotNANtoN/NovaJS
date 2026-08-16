@@ -163,11 +163,20 @@ describe('Flag namespace map over real plug-in data', () => {
         expect(map.report.collisions).toEqual([
             { bit: 22, namespaces: ['extra-outfits', 'Nuke'] },
         ]);
-        // Extra Outfits' 2nd-generation Afterburner / Solar Panels /
-        // Battery Pack require bit 47, which nothing in the plug-in (or
-        // stock) contributes.
+        // Nothing is unsatisfiable. Extra Outfits' 2nd-generation
+        // Afterburner / Solar Panels / Battery Pack require bit 47, and
+        // what contributes it is a RÄNK — extra-outfits:204 — which is
+        // exactly the use the EVN Bible gives rank Contribute: "These can
+        // be used to prevent the player from buying certain items or doing
+        // certain missions until achieving a certain rank."
+        //
+        // Before ränks were plumbed through, ränk was not part of the flag
+        // space at all, so that Require looked like an authoring bug and
+        // those three outfits could never be bought however the player
+        // played. Both the diagnostic and the lockout are fixed by the same
+        // change (novaparse's FLAG_RESOURCE_TYPES now includes ränk).
         expect(map.report.unsatisfiable.map(u => [u.namespace, u.bit]))
-            .toEqual([['extra-outfits', 47]]);
+            .toEqual([]);
     });
 });
 

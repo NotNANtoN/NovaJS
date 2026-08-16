@@ -21,7 +21,9 @@ import { makeSystem } from './make_system.js';
 import { FormationComponent } from './npc_ai_plugin.js';
 import { PlayerEscortComponent } from './player_escort.js';
 import { Stat } from './stat.js';
-import { ControlBitsComponent } from './ncb_plugin.js';
+import {
+    ActiveRanksComponent, ControlBitsComponent,
+} from './ncb_plugin.js';
 import { OutfitsState, OutfitsStateComponent } from './outfit_plugin.js';
 import { CombatRatingComponent, LegalRecordsComponent } from './reputation_plugin.js';
 import { isRight } from 'fp-ts/lib/Either.js';
@@ -122,6 +124,8 @@ describe('save_game schema', () => {
         entity.components.set(GameDateComponent,
             { day: 24, month: 6, year: 1177 });
         entity.components.set(ControlBitsComponent, new Set([13, 342]));
+        entity.components.set(ActiveRanksComponent,
+            new Set(['nova:147', 'nova:138']));
         entity.components.set(CargoComponent, new Map([
             ['mission:nova:128', 10],
             ['cargo:2', 3],
@@ -163,6 +167,11 @@ describe('save_game schema', () => {
             .toEqual({ day: 24, month: 6, year: 1177 });
         expect(restored.components.get(ControlBitsComponent))
             .toEqual(new Set([13, 342]));
+        expect(restored.components.get(ActiveRanksComponent))
+            .toEqual(new Set(['nova:147', 'nova:138']));
+        // Written sorted, so the same active set always writes the same
+        // bytes.
+        expect(saved.ranks).toEqual(['nova:138', 'nova:147']);
         expect(restored.components.get(CargoComponent))
             .toEqual(entity.components.get(CargoComponent)!);
         expect(restored.components.get(MissionsComponent))
@@ -205,6 +214,29 @@ describe('save_game schema', () => {
             if (isRight(named)) {
                 expect(named.right.shipName).toBe('Doomblade');
             }
+        });
+
+    it('decodes a save written before ranks existed, and one with them',
+        () => {
+            // SaveData.ranks is a t.partial addition: a pilot file written by
+            // an older build has no such key and must still decode, reading
+            // as "no active ranks" — which is exactly the state a pre-rank
+            // pilot was in. SAVE_VERSION deliberately does not move.
+            const legacy = { ...SAMPLE, credits: 1000 };
+            const decoded = decodeSave(encodeSave(legacy))!;
+            expect(decoded.ranks).toBeUndefined();
+            const entity = new Entity('restored');
+            restorePlayerState(entity, decoded);
+            expect(entity.components.get(ActiveRanksComponent))
+                .toBeUndefined();
+
+            const withRanks = decodeSave(encodeSave(
+                { ...legacy, ranks: ['nova:147'] }))!;
+            expect(withRanks.ranks).toEqual(['nova:147']);
+            const ranked = new Entity('ranked');
+            restorePlayerState(ranked, withRanks);
+            expect(ranked.components.get(ActiveRanksComponent))
+                .toEqual(new Set(['nova:147']));
         });
 
     it('loads a v1 save written before player state existed', () => {

@@ -3,9 +3,11 @@ import { getDefaultGovtData, GovtData } from 'novadatainterface/govt_data';
 import { getDefaultPlanetData, PlanetData } from 'novadatainterface/planet_data';
 import { getIntegrationGameData } from '../communication/simulation_test_fixture.js';
 import { LegalRecords } from './reputation.js';
+import { ranksAllowLanding } from './rank_logic.js';
 import {
-    clearanceDenial, contributeBits, govtRequirementsMet, MIN_STATUS_IGNORED,
-    MIN_STATUS_NEVER, planetClearance, stellarClearance, stellarRecord,
+    clearanceDenial, contributeBits, govtRequirementsMet, isMissionDestination,
+    MIN_STATUS_IGNORED, MIN_STATUS_NEVER, planetClearance, stellarClearance,
+    stellarRecord,
 } from './stellar_clearance.js';
 
 function stellar(over: Partial<PlanetData> = {}): PlanetData {
@@ -19,7 +21,7 @@ function govt(over: Partial<GovtData> = {}): GovtData {
 /** The clearance verdict for a MinStatus / record pair, nothing else set. */
 function verdict(minStatus: number, record: number) {
     return stellarClearance(
-        { minStatus, flags: { uninhabited: false }, gate: null }, { record });
+        { minStatus, flags: { uninhabited: false } }, { record });
 }
 
 describe('stellarClearance MinStatus semantics', () => {
@@ -57,19 +59,91 @@ describe('stellarClearance MinStatus semantics', () => {
 
     // "(Note that this field is ignored if the stellar is uninhabited)"
     it('ignores MinStatus entirely on an uninhabited stellar', () => {
-        const shut = { minStatus: MIN_STATUS_NEVER, gate: null };
+        const shut = { minStatus: MIN_STATUS_NEVER };
         expect(stellarClearance({ ...shut, flags: { uninhabited: true } },
             { record: -30000 }).cleared).toBeTrue();
         expect(stellarClearance({ ...shut, flags: { uninhabited: false } },
             { record: -30000 }).cleared).toBeFalse();
     });
 
-    it('never applies MinStatus to a gate, whose 32767 means "you do not '
-        + 'LAND on a gate"', () => {
-            expect(stellarClearance({
-                minStatus: MIN_STATUS_NEVER, flags: { uninhabited: false },
-                gate: { kind: 'hypergate' },
-            }, { record: -30000 }).cleared).toBeTrue();
+    // The gate exemption this module used to carry is GONE: a working
+    // hypergate's 32767 is a real "shut until you hold the rank".
+    it('applies MinStatus to a gate like any other inhabited stellar', () => {
+        expect(stellarClearance({
+            minStatus: MIN_STATUS_NEVER, flags: { uninhabited: false },
+        }, { record: 30000 })).toEqual(
+            { cleared: false, reason: 'forbidden' });
+    });
+});
+
+describe('stellarClearance rank 0x0200 (land regardless of MinStatus)', () => {
+    // EVN Bible, rank Flags 0x0200: "All planets of the affiliated government
+    // will let the player land when he has this rank, regardless of their
+    // MinStatus field".
+    const inhabited = { flags: { uninhabited: false } };
+
+    it('opens a MinStatus 32767 stellar - the hypergate case', () => {
+        const shutGate = { ...inhabited, minStatus: MIN_STATUS_NEVER };
+        expect(stellarClearance(shutGate, { record: 0 })).toEqual(
+            { cleared: false, reason: 'forbidden' });
+        expect(stellarClearance(shutGate,
+            { record: 0, rankLandingOverride: true }).cleared).toBeTrue();
+    });
+
+    it('opens a record-gated stellar the player is too disliked for', () => {
+        const dock = { ...inhabited, minStatus: 2 };
+        expect(stellarClearance(dock, { record: -500 })).toEqual(
+            { cleared: false, reason: 'hostile' });
+        expect(stellarClearance(dock,
+            { record: -500, rankLandingOverride: true }).cleared).toBeTrue();
+    });
+
+    it('does NOT bypass the govt Require travel permit, which is a '
+        + 'different field', () => {
+            expect(stellarClearance(
+                { ...inhabited, minStatus: MIN_STATUS_NEVER },
+                {
+                    record: 0, rankLandingOverride: true,
+                    govtRequire: '4', contribute: 0n,
+                })).toEqual({ cleared: false, reason: 'permit' });
+        });
+});
+
+describe('the mission-destination override', () => {
+    const shutTight = { flags: { uninhabited: false }, minStatus: 100 };
+
+    it('clears a stellar an active mission sends the player to, no matter '
+        + 'what the port would otherwise say', () => {
+            expect(stellarClearance(shutTight, { record: -900 }).cleared)
+                .toBeFalse();
+            expect(stellarClearance(shutTight,
+                { record: -900, missionDestination: true }).cleared).toBeTrue();
+            // Even a 32767 "never", and even with the permit missing.
+            expect(stellarClearance(
+                { flags: { uninhabited: false }, minStatus: MIN_STATUS_NEVER },
+                {
+                    record: -900, missionDestination: true,
+                    govtRequire: '4', contribute: 0n,
+                }).cleared).toBeTrue();
+        });
+
+    it('matches either leg of an active mission', () => {
+        const travel = [{ travelPlanet: 'nova:133', returnPlanet: null }];
+        const ret = [{ travelPlanet: null, returnPlanet: 'nova:133' }];
+        expect(isMissionDestination(travel, 'nova:133')).toBeTrue();
+        expect(isMissionDestination(ret, 'nova:133')).toBeTrue();
+        expect(isMissionDestination(travel, 'nova:134')).toBeFalse();
+        expect(isMissionDestination([], 'nova:133')).toBeFalse();
+        expect(isMissionDestination(undefined, 'nova:133')).toBeFalse();
+    });
+
+    it('honours the duplicate-stellar rule when a sameStellar is supplied, '
+        + 'and matches exact ids without one', () => {
+            const missions = [{ travelPlanet: 'nova:503', returnPlanet: null }];
+            expect(isMissionDestination(missions, 'nova:214')).toBeFalse();
+            expect(isMissionDestination(missions, 'nova:214',
+                (a, b) => (a === 'nova:503' && b === 'nova:214')
+                    || (a === 'nova:214' && b === 'nova:503'))).toBeTrue();
         });
 });
 
@@ -80,7 +154,6 @@ describe('stellarClearance govt Require (travel permits)', () => {
     it('denies a stellar whose govt Require is not covered', () => {
         const open = {
             minStatus: MIN_STATUS_IGNORED, flags: { uninhabited: false },
-            gate: null,
         };
         expect(stellarClearance(open,
             { record: 0, govtRequire: '4', contribute: 0n }))
@@ -96,7 +169,7 @@ describe('stellarClearance govt Require (travel permits)', () => {
 
     it('reports the permit denial ahead of the legal-record one', () => {
         expect(clearanceDenial(stellarClearance(
-            { minStatus: 100, flags: { uninhabited: false }, gate: null },
+            { minStatus: 100, flags: { uninhabited: false } },
             { record: -500, govtRequire: '1', contribute: 0n })))
             .toEqual('permit');
     });
@@ -194,26 +267,63 @@ describe('stellarClearance against real Nova data', () => {
         expect(brass.minStatus).toBe(-100);
     });
 
-    it('finds MinStatus 32767 ONLY on the working hypergates, which is why '
-        + 'gates are exempt', () => {
+    it('finds MinStatus 32767 ONLY on the 19 working hypergates, and '
+        + 'refuses every one of them to a rank-less pilot', () => {
             const never = planets.filter(p => p.minStatus === MIN_STATUS_NEVER);
-            // All 19 of them: HG-V01 .. HG-Koria, gövt nova:183.
+            // All 19 of them: HG-V01 (nova:1400) .. HG-Koria (nova:1418).
             expect(never.length).toBe(19);
-            for (const gate of never) {
-                expect(gate.gate?.kind)
-                    .withContext(`${gate.id} ${gate.name}`).toBe('hypergate');
-                expect(gate.flags.canLand)
-                    .withContext(`${gate.id} ${gate.name}`).toBeTrue();
-                // Honouring 32767 literally would shut the whole network.
-                expect(planetClearance({ planet: gate }).cleared)
-                    .withContext(`${gate.id} ${gate.name}`).toBeTrue();
+            expect(never.map(p => p.id)).toContain('nova:1400');
+            expect(never.find(p => p.id === 'nova:1400')!.name).toBe('HG-V01');
+            for (const stock of never) {
+                expect(stock.gate?.kind)
+                    .withContext(`${stock.id} ${stock.name}`).toBe('hypergate');
+                expect(stock.flags.canLand)
+                    .withContext(`${stock.id} ${stock.name}`).toBeTrue();
+                // govt nova:183 "Hypergate" - the rank's affiliation.
+                expect(stock.govt)
+                    .withContext(`${stock.id} ${stock.name}`).toBe('nova:183');
+                // The network is SHUT until rank nova:147 is active.
+                expect(planetClearance({
+                    planet: stock, planetGovt: govts.get('nova:183'),
+                })).withContext(`${stock.id} ${stock.name}`)
+                    .toEqual({ cleared: false, reason: 'forbidden' });
+                // ...and open with it.
+                expect(planetClearance({
+                    planet: stock, planetGovt: govts.get('nova:183'),
+                    rankLandingOverride: true,
+                }).cleared).withContext(`${stock.id} ${stock.name}`).toBeTrue();
             }
-            // Consequently NO stock spöb is 'forbidden'.
-            expect(planets.filter(p =>
+            // The 19 gates are consequently the ONLY stock 'forbidden'
+            // stellars.
+            const forbidden = planets.filter(p =>
                 clearanceDenial(planetClearance({
                     planet: p,
                     planetGovt: p.govt ? govts.get(p.govt) : undefined,
-                })) === 'forbidden').length).toBe(0);
+                })) === 'forbidden');
+            expect(forbidden.length).toBe(19);
+        });
+
+    it('opens every gate to a pilot holding rank nova:147, and to one on a '
+        + 'mission that sends them there', async () => {
+            const gameData = await getIntegrationGameData();
+            const rank = await gameData.data.Rank.get('nova:147');
+            const stock = planets.find(p => p.id === 'nova:1400')!;
+            const hypergateGovt = govts.get('nova:183')!;
+            // The whole mechanism, end to end, off the real data.
+            expect(rank.affilGovt).toBe(hypergateGovt.id);
+            expect(rank.rankFlags.canAlwaysLandOnGovtStellars).toBeTrue();
+            expect(planetClearance({
+                planet: stock, planetGovt: hypergateGovt,
+                rankLandingOverride: ranksAllowLanding(
+                    new Set(['nova:147']), () => rank, stock.govt),
+            }).cleared).toBeTrue();
+            // A mission that sends the pilot to a gate opens it too, with no
+            // rank at all. (No STOCK mission does - see rank_stock_test.ts -
+            // but a plug-in's may.)
+            expect(planetClearance({
+                planet: stock, planetGovt: hypergateGovt,
+                missionDestination: true,
+            }).cleared).toBeTrue();
         });
 
     it('shuts Spacedock II to a fresh pilot and opens it to a liked one',
