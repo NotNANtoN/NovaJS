@@ -671,6 +671,37 @@ describe('accept / landing / completion flow', () => {
                 .toBe(1);
         });
 
+    it('shows the DropCargText at the RETURN stop before the CompText for '
+        + 'DropOffMode 1, even with no cargo (the Polaris martial-arts shape)',
+        () => {
+            // mïsn nova:167/172: no cargo, DropOffMode 1, both a DropCargText
+            // and a CompText — the original lands to two boxes in a row.
+            const mission = makeMission({
+                id: 'nova:167',
+                travelStel: -1,
+                returnStel: -4,
+                cargoType: -1, cargoQty: -1,
+                pickupMode: 0, dropOffMode: 1,
+                payVal: 0,
+                dropOffCargoText: 'You head over to Eamon\'s office.',
+                completionText: 'Time after time he makes you submit.',
+            });
+            const state = makeState();
+            const machinery = makeMachinery(state, [mission]);
+            const offer = makeMissionOffer(mission, machinery.offerContext());
+            acceptOffer(machinery, offer!);
+
+            processLanding(machinery, 'nova:128', 1001);
+            expect(state.missions.size).toBe(0);
+            const kinds = state.events.map(e => e.type);
+            expect(kinds.indexOf('cargoDropped')).toBeGreaterThanOrEqual(0);
+            expect(kinds.indexOf('cargoDropped'))
+                .toBeLessThan(kinds.indexOf('completed'));
+            const dropped = state.events.find(e => e.type === 'cargoDropped');
+            expect(dropped?.text).toBe('You head over to Eamon\'s office.');
+            expect(dropped?.stop).toBe('return');
+        });
+
     it('emits no cargo-transfer events when the dësc ids are unset', () => {
         const mission = makeMission({
             id: 'nova:211',

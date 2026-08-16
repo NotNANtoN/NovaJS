@@ -688,6 +688,13 @@ export interface MissionEvent {
      * mission has no ShipNameID list.
      */
     specialShipName?: string;
+    /**
+     * For cargo events: which stop the transfer happened at. 'return' is
+     * the DropOffMode 1 drop at the mission's end, where "here" is the
+     * RETURN stellar (the mission is already gone from the player's state
+     * when the popup is shown, so the popup can't look it up).
+     */
+    stop?: 'travel' | 'return';
 }
 
 /**
@@ -1098,6 +1105,26 @@ function completeMission(machinery: MissionMachineryContext,
     outfits?: Map<string, number>): void {
     const { state } = machinery;
     state.missions.delete(active.id);
+    // DropOffMode 1: "Drop off at mission end (ReturnStel)". The original
+    // shows the DropCargText here, BEFORE the CompText — and it does so
+    // whether or not the mission carries any cargo: 52 stock missions
+    // (e.g. mïsn nova:167/172, the Polaris martial-arts pair) have no
+    // cargo, DropOffMode 1 and a DropCargText, and land to two boxes in a
+    // row. Per the Bible's note the drop only happens if the cargo was
+    // picked up (vacuously true with no cargo); the ship-goal condition
+    // is already met by the time completion is reached.
+    if (mission.dropOffMode === 1 && mission.dropOffCargoText
+        && (active.cargoQty <= 0 || active.cargoLoaded)) {
+        state.events.push({
+            missionId: mission.id,
+            missionName: mission.name,
+            type: 'cargoDropped',
+            text: mission.dropOffCargoText,
+            pict: mission.dropOffCargoPict,
+            specialShipName: active.shipName,
+            stop: 'return',
+        });
+    }
     unloadMissionCargo(state, active);
     let payment: number | undefined;
     // PayVal: credits, record cleaning, or cash removal (the Bible's
@@ -1295,6 +1322,7 @@ export function processLanding(machinery: MissionMachineryContext,
                         text: mission.loadCargoText,
                         pict: mission.loadCargoPict,
                         specialShipName: active.shipName,
+                        stop: 'travel',
                     });
                 }
             }
@@ -1312,6 +1340,7 @@ export function processLanding(machinery: MissionMachineryContext,
                         text: mission.dropOffCargoText,
                         pict: mission.dropOffCargoPict,
                         specialShipName: active.shipName,
+                        stop: 'travel',
                     });
                 }
             }

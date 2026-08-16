@@ -393,8 +393,11 @@ export class Spaceport extends Menu<Entity> {
                 // <DST>/<DSY> and the return tags must name the mission's
                 // actual return planet (still in the player's active
                 // state, since a cargo transfer doesn't end the mission).
-                const cargoEvent = event.type === 'cargoLoaded'
-                    || event.type === 'cargoDropped';
+                // (A DropOffMode 1 drop fires at the RETURN stop, right
+                // before completion, and reads like a completion.)
+                const cargoEvent = (event.type === 'cargoLoaded'
+                    || event.type === 'cargoDropped')
+                    && event.stop !== 'return';
                 const active = entity.components.get(MissionsComponent)
                     ?.get(event.missionId);
                 const here = {
