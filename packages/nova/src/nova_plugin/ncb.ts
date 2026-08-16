@@ -85,7 +85,9 @@ function tokenizeTest(expression: string): TestToken[] {
     const tokens: TestToken[] = [];
     // Case doesn't matter, per the Bible.
     const lower = expression.toLowerCase();
-    const pattern = /\s+|[()!&|]|([bope])(\d+)|g/gy;
+    // The letter is OPTIONAL: see the bare-number compatibility rule in
+    // parseNCBTest's docs.
+    const pattern = /\s+|[()!&|]|([bope]?)(\d+)|g/gy;
     let index = 0;
     while (index < lower.length) {
         pattern.lastIndex = index;
@@ -100,9 +102,10 @@ function tokenizeTest(expression: string): TestToken[] {
         if (/^\s+$/.test(text)) {
             continue;
         }
-        if (letter) {
+        if (digits !== undefined) {
             const value = parseInt(digits, 10);
-            switch (letter) {
+            // A bare number is a control bit (compatibility rule).
+            switch (letter || 'b') {
                 case 'b':
                     tokens.push({
                         kind: 'term',
@@ -136,6 +139,31 @@ function tokenizeTest(expression: string): TestToken[] {
  * mixed `&`/`|` without parentheses; this one gives `!` the highest
  * precedence, then `&`, then `|`, which agrees with Nova on all
  * properly-parenthesized expressions.
+ *
+ * COMPATIBILITY RULE (bare numbers). A term that is just a number, with
+ * no `B`/`O`/`E`/`P` letter in front of it, is read as a CONTROL BIT --
+ * as though the missing `b` were there. Real scenario data relies on
+ * this, and it is not merely a plug-in author's slip:
+ *
+ *   - STOCK Nova mïsn 428 has AvailBits
+ *     `!(b511 | b515) & !((b50 | 467) | b6666)`, and that same mission's
+ *     OnFailure and OnAbort are both `b467 !b511`. The bare `467` is
+ *     unmistakably bit 467, the mission's own "the player already blew
+ *     this one" flag; on any other reading the mission re-offers after
+ *     it has been failed, which it demonstrably does not.
+ *   - oütf 471 of the Extra Outfits plug-in ("Empty Weapon Hull") has
+ *     Availability `b9002 & b9003 & b9004 & !9001` — the same slip,
+ *     gating the crafting step that builds the Self-Made Energon Cannon.
+ *   - oütf 536 of the More Blasters CHEAT plug-in has Availability
+ *     `0525` (leading zero and all), i.e. bit 525.
+ *
+ * The Bible warns that "the Nova evaluator is fairly primitive", which
+ * is exactly the shape of a term reader that consumes an optional
+ * leading letter and defaults to a bit lookup when there isn't one.
+ * Rejecting these outright is worse than tolerating them: an
+ * unparseable Availability falls OPEN (see outfitter_rules'
+ * availabilityTest), so a strict reading does not fail safe, it silently
+ * un-gates the very thing the expression exists to gate.
  */
 export function parseNCBTest(expression: string): NCBTestExpression {
     const tokens = tokenizeTest(expression);
@@ -346,11 +374,36 @@ export interface NCBSetHooks {
 /**
  * Parses a control bit set expression, e.g. `b1 !b2 ^b3 G142 R(b4 !b5)`.
  * A blank expression parses to no operations.
+ *
+ * COMPATIBILITY RULE (stray `&` / `|`). Set expressions are a LIST of
+ * operations — the Bible: "These are simpler than the test
+ * expressions... basically all you are doing here is listing what bits
+ * you want to be modified", with no operators of their own beyond
+ * `R(...)` ("No parentheses are supported for set expressions"). Yet
+ * plug-in authors routinely carry the test language's `&` over into
+ * them, writing `D613 & G615 & b9027` where they meant
+ * `D613 G615 b9027`. Those characters are treated as whitespace here:
+ * separators that separate nothing.
+ *
+ * The citing example is oütf 471 of the Extra Outfits plug-in ("Empty
+ * Weapon Hull"), whose OnPurchase is
+ * `!b9002 & !b9003 & !b9004 & b9001 G472 D468 D469 D470 D471 `. Because
+ * parsing happens up front, rejecting the `&` threw away the WHOLE
+ * string — so the Self-Made Energon Cannon (G472) was never granted
+ * and the consumed parts (D468-D471) were never removed, which is
+ * precisely the "I bought the hull and got no cannon" symptom. It is
+ * not one plug-in's habit either: the same slip appears in the arpia
+ * and HypergatePass plug-ins, in oütf, mïsn and crön set strings alike,
+ * so the original engine plainly tolerated it.
+ *
+ * Note the trailing space in that same string: harmless already, but a
+ * reminder that this data is hand-written and needs a forgiving reader.
  */
 export function parseNCBSet(expression: string): NCBSetOperation[] {
     // Case doesn't matter, per the Bible.
     const lower = expression.toLowerCase();
-    const pattern = /\s+|([!^]?)b(\d+)|([afsgdmncehklpyuqtx])(\d+)|r\(|\)/gy;
+    // The trailing [&|] alternative is the stray-separator rule above.
+    const pattern = /\s+|([!^]?)b(\d+)|([afsgdmncehklpyuqtx])(\d+)|r\(|\)|[&|]/gy;
     let index = 0;
 
     function fail(message: string): never {
@@ -370,7 +423,8 @@ export function parseNCBSet(expression: string): NCBSetOperation[] {
         }
         index = pattern.lastIndex;
         const [text, bitPrefix, bitDigits, opLetter, opDigits] = match;
-        if (/^\s+$/.test(text)) {
+        if (/^\s+$/.test(text) || text === '&' || text === '|') {
+            // Whitespace, or a stray test-language separator (see above).
             continue;
         }
         const operations = stack[stack.length - 1];

@@ -326,17 +326,50 @@ function ownedAmmoCount(ammoFor: string, context: OutfitterContext): number {
 }
 
 /**
+ * The global id an `Oxxx` term inside `from`'s Availability names.
+ *
+ * Numeric ids in scenario scripting live in ONE flat space: a plug-in
+ * that defines resource 514 either overrides the stock 514 or occupies an
+ * id the stock data never used. NovaJS splits that space by prefix, and
+ * the loader (novaparse's IDSpaceHandler) resolves the collision the same
+ * way every time — a plug-in resource keeps the "nova:" prefix when it
+ * overrides a stock one, and only gets its own prefix when there is no
+ * stock resource to override. So "the plug-in's own id if it has one,
+ * else the stock id" reproduces exactly what the original engine sees.
+ *
+ * Hard-coding "nova:" here instead meant an Oxxx term in a plug-in outfit
+ * pointed at a stock outfit that usually does not exist, so the term was
+ * always false. The Extra Outfits plug-in leans on Oxxx for mutual
+ * exclusion — its three Engineering Officer grades (oütf 513/514/515)
+ * are each `b9010 & !O<other> & !O<other>`, and about twenty more of its
+ * outfits pair up the same way — and stock outfits stop at 443, so every
+ * one of those exclusions silently passed and all three grades could be
+ * bought at once.
+ */
+function resolveOutfitReference(id: number, from: string,
+    context: OutfitterContext): string {
+    const local = `${resourcePrefix(from)}:${id}`;
+    return context.getOutfit(local) ? local : `nova:${id}`;
+}
+
+/**
  * Whether the outfit's Availability control bit test passes.
  * Malformed expressions log and count as available, matching the
  * blank-expression default.
+ *
+ * `Oxxx` counts deployed units as owned, per the Bible's note that "the
+ * Oxxx operator also considers any carried fighters that are deployed
+ * when it examines the player's current list of outfits" — hence
+ * ownedCount rather than a bare lookup.
  */
 export function availabilityTest(outfit: OutfitData,
     context: OutfitterContext): boolean {
-    const resolveId = context.resolveId ?? (id => `nova:${id}`);
+    const resolveId = context.resolveId
+        ?? (id => resolveOutfitReference(id, outfit.id, context));
     try {
         return evaluateNCBTest(outfit.availability ?? '', {
             getBit: bit => context.bits.has(bit),
-            hasOutfit: id => (context.outfits.get(resolveId(id)) ?? 0) > 0,
+            hasOutfit: id => ownedCount(resolveId(id), context) > 0,
         });
     } catch (error) {
         if (error instanceof NCBParseError) {
@@ -537,6 +570,16 @@ export function maxSellCount(outfit: OutfitData,
 function resourceNumber(globalId: string): number | null {
     const parsed = parseInt(globalId.slice(globalId.lastIndexOf(':') + 1), 10);
     return Number.isNaN(parsed) ? null : parsed;
+}
+
+/**
+ * The plug-in prefix in a global id like "extra-outfits:471" ("nova" when
+ * there isn't one). Mirrors mission_logic's idPrefix; kept local so these
+ * rules stay a dependency-free pure module, as resourceNumber above is.
+ */
+function resourcePrefix(globalId: string): string {
+    const colon = globalId.lastIndexOf(':');
+    return colon < 0 ? 'nova' : globalId.slice(0, colon);
 }
 
 /**

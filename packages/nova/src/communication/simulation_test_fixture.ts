@@ -1,4 +1,5 @@
 import fs from "fs";
+import os from "os";
 import path from "path";
 import { v4 } from "uuid";
 import { multiplayer, MultiplayerData } from "nova_ecs/plugins/multiplayer_plugin";
@@ -44,6 +45,68 @@ export async function getIntegrationGameData() {
         gameDataPromise = Promise.resolve(aggregator);
     }
     return gameDataPromise;
+}
+
+const pluginDataPromises = new Map<string, Promise<GameDataAggregator | undefined>>();
+
+/**
+ * Base "Nova Files" data PLUS exactly one named plug-in directory from
+ * Nova_Data/Plug-ins — for specs that pin behaviour against real
+ * third-party scenario data (the compatibility rules in nova_plugin/ncb.ts,
+ * say). Resolves to undefined when that plug-in is not installed, so such a
+ * spec can skip itself instead of failing on a machine (or CI) without it.
+ *
+ * Only the ONE plug-in is loaded, and it is loaded through a scratch
+ * Nova_Data root of symlinks rather than the real Plug-ins directory. That
+ * matters for the same reason getIntegrationGameData loads no plug-ins at
+ * all: whatever else a developer happens to have installed must not shift
+ * ids or stats underneath the spec. Symlinking (never copying) also keeps
+ * the canonical data read-only and preserves the macOS resource forks the
+ * parser reads.
+ *
+ * The plug-in's id prefix is its DIRECTORY name, which is why the directory
+ * itself is the thing linked: pointing novaPlugins at it directly would
+ * give each file inside its own prefix instead.
+ */
+export async function getPluginGameData(pluginDirectory: string):
+    Promise<GameDataAggregator | undefined> {
+    let promise = pluginDataPromises.get(pluginDirectory);
+    if (!promise) {
+        promise = buildPluginGameData(pluginDirectory);
+        pluginDataPromises.set(pluginDirectory, promise);
+    }
+    return promise;
+}
+
+async function buildPluginGameData(pluginDirectory: string):
+    Promise<GameDataAggregator | undefined> {
+    const novaData = path.join(packageRoot, "Nova_Data");
+    const pluginPath = path.join(novaData, "Plug-ins", pluginDirectory);
+    if (!fs.existsSync(pluginPath)) {
+        return undefined;
+    }
+    // A fixed scratch root, reused across runs rather than a fresh mkdtemp
+    // each time, so repeated test runs don't litter the temp directory.
+    const root = path.join(os.tmpdir(),
+        `novajs-plugin-fixture-${pluginDirectory}`);
+    fs.mkdirSync(path.join(root, "Plug-ins"), { recursive: true });
+    linkOnce(path.join(novaData, "Nova Files"), path.join(root, "Nova Files"));
+    linkOnce(pluginPath, path.join(root, "Plug-ins", pluginDirectory));
+
+    const novaParse = new NovaParse(root, false,
+        { novaFiles: "Nova Files", novaPlugins: "Plug-ins" });
+    novaParse.resourceNotFoundFunction = () => { };
+    return new GameDataAggregator([
+        new FilesystemData(path.join(packageRoot, "objects")),
+        novaParse,
+    ], () => { });
+}
+
+function linkOnce(target: string, link: string) {
+    if (fs.existsSync(link)) {
+        return;
+    }
+    fs.symlinkSync(target, link);
 }
 
 export async function makeSimulationBridgeHarness() {
