@@ -79,6 +79,12 @@ export class Button {
     container = new PIXI.Container();
     private states = new Map<string, PIXI.Container>();
     readonly click = new Subject<ButtonClick>();
+    /**
+     * Fires on a press-DOWN that the state machine accepted (i.e. never on
+     * a greyed button), for press-and-hold controls such as the popup
+     * scroll arrows. `click` remains the release-on-button event.
+     */
+    readonly press = new Subject<void>();
     private text: PIXI.Text;
     private wrappedState = 'normal';
     /** The state to restore if this press is cancelled off the button. */
@@ -136,8 +142,12 @@ export class Button {
         this.container.interactive = true;
         this.container.cursor = 'pointer';
         this.container.on('pointerdown', () => {
-            this.applyPress(pressTransition(
-                this.wrappedState, this.pressedFrom, 'down'));
+            const result = pressTransition(
+                this.wrappedState, this.pressedFrom, 'down');
+            this.applyPress(result);
+            if (result.state === 'clicked') {
+                this.press.next();
+            }
         });
 
         this.container.on('pointerup', (event: PIXI.FederatedPointerEvent) => {

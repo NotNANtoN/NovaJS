@@ -103,20 +103,37 @@ export type JumpRoute = {
 export const JumpRouteComponent = new Component<JumpRoute>('JumpRouteComponent');
 
 /**
- * Drops `arrivedSystem` from the HEAD of the entity's jump route (all
- * consecutive occurrences), so arriving in a routed system unpins it no
- * matter how the ship got there. The hyperspace path shifts the route at
- * jump START (beginJump), so its own arrival never sees the destination;
- * a hypergate or wormhole transit does NOT touch the route, so a system
- * reached by gate stayed pinned — the status bar kept reading
- * "Hyperspace: <this system>" and the next jump press went nowhere
- * useful. Deeper entries are left alone: a route through here to
- * somewhere else keeps its later hops. Pure over the entity; the caller
- * runs it before the entity is encoded into its insertion record.
+ * Reconciles the entity's jump route with the system it just ARRIVED in.
+ *
+ * Two arrival kinds, two rules:
+ *
+ *  - 'jump' (hyperspace): beginJump already shifted the destination off
+ *    the route at jump START, so on arrival route[0] is the NEXT hop of a
+ *    multi-jump chain (or the route is empty). Nothing to do — the
+ *    remaining hops are exactly the player's onward plan.
+ *  - 'gate' (hypergate / wormhole): the transit never touched the route,
+ *    so whatever the player had pinned before is now stale relative to
+ *    where they are. If this system heads the route, drop it (a route
+ *    through here keeps its later hops); otherwise the route led somewhere
+ *    the player didn't go and is CLEARED — a stale single hop from the old
+ *    system would otherwise draw the starmap's route line straight from
+ *    the new system to a non-adjacent target, and the status bar would
+ *    read "Hyperspace: <old target>" (Matthew's playtests, 2026-08-15).
+ *
+ * Pure over the entity; the caller runs it before the entity is encoded
+ * into its insertion record, so every peer sees the same route.
  */
-export function unpinArrivedSystem(entity: Entity, arrivedSystem: string): void {
+export function reconcileRouteOnArrival(entity: Entity, arrivedSystem: string,
+    arrival: 'jump' | 'gate'): void {
+    if (arrival === 'jump') {
+        return;
+    }
     const jumpRoute = entity.components.get(JumpRouteComponent);
-    if (!jumpRoute) {
+    if (!jumpRoute || jumpRoute.route.length === 0) {
+        return;
+    }
+    if (jumpRoute.route[0] !== arrivedSystem) {
+        jumpRoute.route.length = 0;
         return;
     }
     while (jumpRoute.route.length > 0 && jumpRoute.route[0] === arrivedSystem) {

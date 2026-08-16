@@ -536,20 +536,49 @@ export const BULK_BUY_LIMIT = 9999;
  */
 export function maxBuyCount(outfit: OutfitData, context: OutfitterContext,
     limit = BULK_BUY_LIMIT): number {
-    const working = new Map(context.outfits);
-    let count = 0;
-    while (count < limit) {
-        const simulated: OutfitterContext = {
+    // Every purchase gate is MONOTONE in the count bought (max, ammo
+    // capacity, hardpoints, mass, cargo, credits all only get tighter as
+    // units are added), so "can I buy n?" is monotone in n and the largest
+    // n is a binary search — ~11 canBuyOutfit evaluations for the 2000-unit
+    // ammo case instead of 2000 (each evaluation walks every owned outfit
+    // for mass/contribute; the linear scan lagged the game for half a
+    // second on a big ammo buy). Only OnPurchase side effects could break
+    // monotonicity, and this function never runs them: it is the DIALOG's
+    // prefill/clamp, and the actual bulk buy re-checks per unit for outfits
+    // that carry them.
+    const canBuyN = (n: number) => {
+        const working = new Map(context.outfits);
+        working.set(outfit.id, (working.get(outfit.id) ?? 0) + (n - 1));
+        return canBuyOutfit(outfit, {
             ...context, outfits: working,
-            credits: context.credits - count * outfit.price,
-        };
-        if (!canBuyOutfit(outfit, simulated).allowed) {
-            break;
-        }
-        working.set(outfit.id, (working.get(outfit.id) ?? 0) + 1);
-        count++;
+            credits: context.credits - (n - 1) * outfit.price,
+        }).allowed;
+    };
+    if (limit <= 0 || !canBuyN(1)) {
+        return 0;
     }
-    return count;
+    let lo = 1;          // known buyable
+    let hi = limit + 1;  // known not buyable (or beyond the limit)
+    while (hi - lo > 1) {
+        const mid = Math.floor((lo + hi) / 2);
+        if (canBuyN(mid)) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    return lo;
+}
+
+/**
+ * Whether buying this outfit has per-unit side effects that can change
+ * what a LATER unit is allowed to do — an OnPurchase set string, or a
+ * legal-record clean (ModType 21). Purchases of such outfits must be
+ * applied one unit at a time with a re-check between; everything else
+ * (ammo, plain equipment) can be applied as one count bump.
+ */
+export function hasPurchaseSideEffects(outfit: OutfitData): boolean {
+    return Boolean(outfit.onPurchase) || outfit.cleanLegalRecord !== null;
 }
 
 /**

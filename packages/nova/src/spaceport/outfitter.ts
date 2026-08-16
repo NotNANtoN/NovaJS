@@ -26,7 +26,7 @@ import { Menu } from "./menu.js";
 import { MissionSession } from "./mission_session.js";
 import { MissionUniverse } from "./mission_universe.js";
 import { DeployedOutfitCounts } from "./deployed_outfits.js";
-import { BuyDenialReason, canBuyOutfit, canSellOutfit, freeCargo, freeMass, maxBuyCount, maxSellCount, sellRefund, OutfitterContext, OutfitterStellar, stellarOf, visibleOutfits } from "./outfitter_rules.js";
+import { BuyDenialReason, canBuyOutfit, canSellOutfit, freeCargo, freeMass, hasPurchaseSideEffects, maxBuyCount, maxSellCount, sellRefund, OutfitterContext, OutfitterStellar, stellarOf, visibleOutfits } from "./outfitter_rules.js";
 import { PlanetData } from "novadatainterface/planet_data";
 import { QuantityDialog } from "./quantity_dialog.js";
 
@@ -535,14 +535,19 @@ export class Outfitter extends Menu<Entity> {
     }
 
     /** Applies one unit's purchase: charge, count, ModType 21, OnPurchase. */
-    private applyBuy(outfit: OutfitData) {
+    private applyBuy(outfit: OutfitData, units = 1) {
         // Charge the item's price. Callers gate on canBuyOutfit (which
         // includes affordability), so this never drives credits negative.
-        this.credits.credits -= outfit.price;
-        this.outfits.set(outfit.id, this.outfits.get(outfit.id) + 1);
+        // `units` > 1 is the side-effect-free bulk path (see bulkBuy):
+        // the OnPurchase / legal-record hooks below run ONCE per call, so
+        // callers must pass units=1 for outfits that have them
+        // (hasPurchaseSideEffects).
+        this.credits.credits -= outfit.price * units;
+        this.outfits.set(outfit.id, this.outfits.get(outfit.id) + units);
         // Record the same-visit purchase so selling it back before
         // leaving refunds the full price (see applySell).
-        this.visitPurchases.set(outfit.id, this.visitPurchases.get(outfit.id) + 1);
+        this.visitPurchases.set(outfit.id,
+            this.visitPurchases.get(outfit.id) + units);
         // ModType 21: buying the outfit cleans (raises to at least 0)
         // the player's legal record with the ModVal govt, or with every
         // govt when ModVal is -1. Applies once, at purchase.
@@ -702,13 +707,28 @@ export class Outfitter extends Menu<Entity> {
             return;
         }
         let bought = 0;
-        while (bought < quantity) {
-            const step = this.makeContext();
-            if (!step || !canBuyOutfit(outfit, step).allowed) {
-                break;
+        if (!hasPurchaseSideEffects(outfit)) {
+            // No per-unit side effects (ammo, plain equipment): the gates
+            // are monotone in count, so the quantity the dialog clamped to
+            // (via maxBuyCount) is buyable as a block. One re-check against
+            // the live context, then one bulk apply — not 2000 rounds of
+            // makeContext + canBuyOutfit + applyBuy, which lagged the game
+            // for half a second on a big ammo buy.
+            const live = this.makeContext();
+            const n = live ? Math.min(quantity, maxBuyCount(outfit, live)) : 0;
+            if (n > 0) {
+                this.applyBuy(outfit, n);
+                bought = n;
             }
-            this.applyBuy(outfit);
-            bought++;
+        } else {
+            while (bought < quantity) {
+                const step = this.makeContext();
+                if (!step || !canBuyOutfit(outfit, step).allowed) {
+                    break;
+                }
+                this.applyBuy(outfit);
+                bought++;
+            }
         }
         this.refreshGrid();
         this.setFreeMassText();

@@ -297,11 +297,12 @@ describe('UI sound triggers (audio-layer spy)', () => {
         expect(played).not.toContain('nova:153');
     });
 
-    it('beeps 153 when jump is pressed with no route at all', async () => {
-        // Matthew's ruling: pressing jump with nothing to jump to is also a
-        // "can't". (This reverses the original f2ef16e1 choice to stay
-        // silent, which was a judgement call, not an observation of the
-        // original — the snd-153 research found no documentary hook.)
+    it('stays SILENT when jump is pressed with no route at all', async () => {
+        // Matthew's ruling (2026-08-15): the can't-do beep is for a jump the
+        // player is trying to make and can't — too close, no fuel — and
+        // "doesn't include when you haven't selected a destination". (An
+        // intermediate revision beeped here; this restores f2ef16e1's
+        // original silence.)
         const { world, played, controls, player } = await makeWorld();
         player.components.set(MovementStateComponent,
             { position: new Position(1200, 0) } as never);
@@ -312,7 +313,7 @@ describe('UI sound triggers (audio-layer spy)', () => {
         world.step();
         controls.next({ action: 'hyperjump', state: 'start' });
         world.step();
-        expect(played).toContain('nova:153');
+        expect(played).not.toContain('nova:153');
     });
 
     it('beeps 153 when jump is pressed without a jump\'s worth of fuel',

@@ -108,7 +108,7 @@ export class Bar extends Menu<Entity> {
         this.gamble = new GambleDialog(displayAssets, controlEvents);
         this.hireEscort = new HireEscortDialog(displayAssets,
             simulationData, controlEvents, planetId);
-        this.offerPopup = new OfferPopup(displayAssets);
+        this.offerPopup = new OfferPopup(displayAssets, controlEvents);
         this.popupBlocker = new MenuControls(controlEvents);
         this.container.addChild(this.hireEscort.container,
             this.gamble.container, this.news.container,

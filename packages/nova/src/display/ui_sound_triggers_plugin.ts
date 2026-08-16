@@ -168,13 +168,11 @@ function playerWeapons(world: World) {
  * at the moment of the press, so this beep, the nova:154 jump-ready cue and
  * PlayerJumpControl itself are answering one question with one implementation.
  *
- * NO ROUTE COUNTS AS A REFUSAL. The original decision (commit f2ef16e1) left
- * it silent — "the key is a no-op, not a refusal" — but that was a judgement
- * call, not an observation: the snd-153 research found no documentary hook
- * for the interface beeps at all, so the Bible and the notes cannot say what
- * the original did here. Matthew's ruling is that pressing jump with nothing
- * to jump to is also a "can't", so it beeps, and 'noRoute' is simply one more
- * blocker like the rest.
+ * NO ROUTE IS SILENT (Matthew's ruling, 2026-08-15, restoring commit
+ * f2ef16e1's original judgement): the can't-do beep answers a jump the
+ * player is TRYING to make and can't — inside the no-jump zone or out of
+ * fuel — and pressing jump with no destination selected is a no-op, not a
+ * refusal. (An intermediate revision beeped there too; it was overruled.)
  *
  * ALREADY JUMPING is deliberately NOT a refusal (the 'jumping' blocker is
  * excluded below): the key is held through a jump sequence as a matter of
@@ -204,7 +202,13 @@ function playerJumpRefused(world: World): boolean {
             disabled: entity.components.has(DisabledComponent),
             jumping: entity.components.has(JumpComponent),
         });
-        return blocked !== undefined && blocked !== 'jumping';
+        // 'noRoute' is a no-op, not a refusal (Matthew, 2026-08-15: the
+        // can't-do beep is for "not enough energy / not far enough from
+        // system center", and "doesn't include when you haven't selected a
+        // destination"). 'jumping' is excluded for the held-key reason
+        // documented above.
+        return blocked !== undefined && blocked !== 'jumping'
+            && blocked !== 'noRoute';
     }
     return false;
 }

@@ -1,5 +1,5 @@
 import * as PIXI from 'pixi.js';
-import { firstValueFrom, Subject } from 'rxjs';
+import { firstValueFrom, Observable, Subject } from 'rxjs';
 import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data.js';
 import {
     acceptOffer,
@@ -8,7 +8,9 @@ import {
 } from '../nova_plugin/mission_logic.js';
 import { expandMissionText } from '../nova_plugin/mission_text.js';
 import { makeDescTextContext, playerGender } from '../nova_plugin/desc_text.js';
+import { ControlEvent } from '../nova_plugin/controls_plugin.js';
 import { Button } from './button.js';
+import { MenuControls } from './menu_controls.js';
 import { offerSubstitutions } from './mission_offers.js';
 import { playerIdentitySubs } from './player_identity.js';
 import { MissionSession } from './mission_session.js';
@@ -107,9 +109,30 @@ export class OfferPopup {
         tick: () => void,
     };
 
-    constructor(private displayAssets: DisplayAssetDataInterface) {
+    /**
+     * Keyboard: up/down arrows scroll a paginated popup a line at a time
+     * (the same step as an arrow-button press) and 'accept' presses the
+     * accept button. Bound only while a popup is up, on the shared
+     * MenuControls focus stack — so it also mutes the owner's keys, which
+     * is why owners no longer need a separate empty "popup blocker".
+     * Optional: a popup built without control events (the About box, the
+     * headless harness) is pointer-only. Owners still hold their own
+     * empty "blocker" MenuControls around a whole popup SEQUENCE, so a
+     * key pressed between two consecutive popups doesn't leak through.
+     */
+    private controls?: MenuControls;
+
+    constructor(private displayAssets: DisplayAssetDataInterface,
+        controlEvents?: Observable<ControlEvent>) {
         this.container.name = 'OfferPopup';
         this.container.visible = false;
+        if (controlEvents) {
+            this.controls = new MenuControls(controlEvents, {
+                up: () => this.scrollBy(-POPUP_SCROLL_STEP),
+                down: () => this.scrollBy(POPUP_SCROLL_STEP),
+                accept: () => this.choice.next('accept'),
+            });
+        }
         // Headless-harness hook, like window.novaHailDialog: the
         // visual-comparison scenarios raise a popup with crafted mission
         // text instead of having to reach the mission state that offers it.
@@ -142,12 +165,16 @@ export class OfferPopup {
         }
 
         this.container.visible = true;
-        const result = await firstValueFrom(this.choice);
-        this.container.visible = false;
-        this.container.removeChildren();
-        this.endHold();
-        this.scroll = undefined;
-        return result;
+        this.controls?.bind();
+        try {
+            return await firstValueFrom(this.choice);
+        } finally {
+            this.controls?.unbind();
+            this.container.visible = false;
+            this.container.removeChildren();
+            this.endHold();
+            this.scroll = undefined;
+        }
     }
 
     /**
@@ -212,7 +239,11 @@ export class OfferPopup {
      * POPUP_SCROLL_HOLD_SPEED px/s until the pointer is released.
      */
     private bindScrollButton(button: Button, direction: number) {
-        button.container.on('pointerdown', () => {
+        // Through the Button's own press state machine (button.ts
+        // pressTransition), NOT a raw pointerdown: a GREYED arrow — at the
+        // top or bottom of the text — must ignore the press entirely (no
+        // pressed flash, no scroll), which the raw handler bypassed.
+        button.press.subscribe(() => {
             this.scrollBy(direction * POPUP_SCROLL_STEP);
             this.beginHold(direction);
         });

@@ -5,7 +5,7 @@ import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
 import { World } from "nova_ecs/world";
 import { getIntegrationGameData } from "../communication/simulation_test_fixture.js";
 import { completeEntity } from "./entity_data_loader.js";
-import { FinishJump, FinishJumpEvent, JumpComponent, JumpRouteComponent, unpinArrivedSystem, JUMP_ARRIVAL_MARGIN_S, JUMP_DEPART_DELAY_MS, JUMP_DISTANCE, JUMP_SPINUP_DELAY_MS, WARP_OUT_SOUND, WARP_UP_FAST_SOUND, WARP_UP_SOUND } from "./jump_plugin.js";
+import { FinishJump, FinishJumpEvent, JumpComponent, JumpRouteComponent, reconcileRouteOnArrival, JUMP_ARRIVAL_MARGIN_S, JUMP_DEPART_DELAY_MS, JUMP_DISTANCE, JUMP_SPINUP_DELAY_MS, WARP_OUT_SOUND, WARP_UP_FAST_SOUND, WARP_UP_SOUND } from "./jump_plugin.js";
 import { makeShip } from "./make_ship.js";
 import { makeSystem, SIMULATION_STEP_MS } from "./make_system.js";
 import { applyControlEvents } from "./ship_control.js";
@@ -711,38 +711,51 @@ describe('a disabled player\'s jump is cancelled', () => {
         }, 30_000);
 });
 
-describe('unpinArrivedSystem', () => {
+describe('reconcileRouteOnArrival', () => {
     function shipWithRoute(route: string[]): Entity {
         const ship = new Entity('ship');
         ship.components.set(JumpRouteComponent, { route });
         return ship;
     }
+    const routeOf = (ship: Entity) =>
+        ship.components.get(JumpRouteComponent)!.route;
 
-    it('drops the arrived system from the head of the route (a gate '
-        + 'transit into a routed system left it pinned)', () => {
-        const ship = shipWithRoute(['nova:130', 'nova:131']);
-        unpinArrivedSystem(ship, 'nova:130');
-        expect(ship.components.get(JumpRouteComponent)!.route)
-            .toEqual(['nova:131']);
-    });
-
-    it('drops consecutive duplicates of the arrived system', () => {
-        const ship = shipWithRoute(['nova:130', 'nova:130', 'nova:132']);
-        unpinArrivedSystem(ship, 'nova:130');
-        expect(ship.components.get(JumpRouteComponent)!.route)
-            .toEqual(['nova:132']);
-    });
-
-    it('leaves a route that does not head with the arrived system alone',
+    it('gate arrival: drops the arrived system from the head of the route',
         () => {
-            const ship = shipWithRoute(['nova:131', 'nova:130']);
-            unpinArrivedSystem(ship, 'nova:130');
-            expect(ship.components.get(JumpRouteComponent)!.route)
-                .toEqual(['nova:131', 'nova:130']);
+            // Jumped into nova:130 with it pinned, then left by gate and
+            // came back: the pin must not stand.
+            const ship = shipWithRoute(['nova:130', 'nova:131']);
+            reconcileRouteOnArrival(ship, 'nova:130', 'gate');
+            expect(routeOf(ship)).toEqual(['nova:131']);
         });
+
+    it('gate arrival: CLEARS a route that did not lead here (a stale single '
+        + 'hop after hypergating elsewhere)', () => {
+        // Single-hop target nova:131 set, then the player hypergated to
+        // nova:130: the old route would draw a line from nova:130 straight
+        // to nova:131.
+        const ship = shipWithRoute(['nova:131']);
+        reconcileRouteOnArrival(ship, 'nova:130', 'gate');
+        expect(routeOf(ship)).toEqual([]);
+    });
+
+    it('gate arrival: keeps the later hops of a route that ran THROUGH here',
+        () => {
+            const ship = shipWithRoute(['nova:130', 'nova:131', 'nova:132']);
+            reconcileRouteOnArrival(ship, 'nova:130', 'gate');
+            expect(routeOf(ship)).toEqual(['nova:131', 'nova:132']);
+        });
+
+    it('hyperspace arrival: leaves the route alone (beginJump already '
+        + 'shifted it, so route[0] is the NEXT hop of a chain)', () => {
+        const ship = shipWithRoute(['nova:131', 'nova:132']);
+        reconcileRouteOnArrival(ship, 'nova:130', 'jump');
+        expect(routeOf(ship)).toEqual(['nova:131', 'nova:132']);
+    });
 
     it('is a no-op without a route component', () => {
         const ship = new Entity('ship');
-        expect(() => unpinArrivedSystem(ship, 'nova:130')).not.toThrow();
+        expect(() => reconcileRouteOnArrival(ship, 'nova:130', 'gate'))
+            .not.toThrow();
     });
 });

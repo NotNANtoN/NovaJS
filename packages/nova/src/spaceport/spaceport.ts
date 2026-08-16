@@ -14,7 +14,7 @@ import { ArmorComponent, FUEL_PER_JUMP, FuelComponent, IonizationComponent, Shie
 import { ShipComponent, ShipPhysicsComponent } from '../nova_plugin/ship_plugin.js';
 import { WeaponsStateComponent } from '../nova_plugin/weapons_state.js';
 import { LOCATION_MAIN_SPACEPORT, LOCATION_MISSION_COMPUTER, MissionEvent, MissionMapMark, missionMapMarks } from '../nova_plugin/mission_logic.js';
-import { expandMissionText, missionDisplayName } from '../nova_plugin/mission_text.js';
+import { expandMissionText } from '../nova_plugin/mission_text.js';
 import { ControlBitsComponent } from '../nova_plugin/ncb_plugin.js';
 import { CreditsComponent, GameDateComponent, MissionsComponent } from '../nova_plugin/player_state_plugin.js';
 import { DockedLiveStatus, DockedShip } from '../display/docked_ship.js';
@@ -89,10 +89,6 @@ export class Spaceport extends Menu<Entity> {
      * transaction's working credits/cargo before it commits to the entity.
      */
     private dockedShip?: DockedShip;
-    private notices = new PIXI.Text('', {
-        fontFamily: 'Geneva', fontSize: 10, fill: 0xffff88,
-        align: 'left', wordWrap: true, wordWrapWidth: 301,
-    });
 
     private font = {
         title: {
@@ -177,7 +173,7 @@ export class Spaceport extends Menu<Entity> {
         buttons.outfitter.click.subscribe(showOutfitter);
 
         this.universe = MissionUniverse.shared(simulationData);
-        this.offerPopup = new OfferPopup(displayAssets);
+        this.offerPopup = new OfferPopup(displayAssets, controlEvents);
         this.popupBlocker = new MenuControls(controlEvents);
         this.missionComputer = new MissionBoard(displayAssets, simulationData,
             controlEvents, this.universe, id, LOCATION_MISSION_COMPUTER,
@@ -326,7 +322,6 @@ export class Spaceport extends Menu<Entity> {
         try {
             events = await processEntityLanding(input,
                 this.simulationData, this.universe, this.id);
-            this.setNotices(events);
         } catch (e) {
             console.warn('Mission landing processing failed:', e);
         }
@@ -360,8 +355,9 @@ export class Spaceport extends Menu<Entity> {
     /**
      * The on-landing popup sequence, over the already-visible spaceport:
      * first each mission completion/failure text (the completion dësc,
-     * per the "_succeed" references — the notices line stays as the
-     * summary afterward), then the main-spaceport (AvailLoc 3) mission
+     * per the "_succeed" references; nothing is repeated on the spaceport
+     * itself afterwards — the popups ARE the notice), then the
+     * main-spaceport (AvailLoc 3) mission
      * offers, each with its custom accept/refuse buttons and continuation
      * pages for long text (the kont-probe reference).
      */
@@ -450,31 +446,6 @@ export class Spaceport extends Menu<Entity> {
         }
         await presentOffers(this.offerPopup, session, this.universe, offers);
         session.commit();
-    }
-
-    private setNotices(events: MissionEvent[]) {
-        const lines: string[] = [];
-        for (const event of events) {
-            const name = missionDisplayName(event.missionName);
-            switch (event.type) {
-                case 'completed':
-                    lines.push(`Mission complete: ${name}`
-                        + (event.payment
-                            ? ` (+${event.payment.toLocaleString()} cr)`
-                            : ''));
-                    break;
-                case 'failed':
-                    lines.push(`Mission failed: ${name}`);
-                    break;
-                default:
-                    break;
-            }
-            // The event's full dësc text is NOT repeated here (Matthew,
-            // 2026-08-14): it already showed as a popup in
-            // presentLandingPopups; the notices line is just the summary
-            // over the landing description.
-        }
-        this.notices.text = lines.join('\n\n');
     }
 
     /** Points the status bar at the docked ship for this landing. */
@@ -589,9 +560,6 @@ export class Spaceport extends Menu<Entity> {
         desc.position.y = 70;
         this.container.addChild(desc);
 
-        // Mission completion / failure notices, over the landing desc.
-        this.notices.position.set(-149, 180);
-        this.container.addChild(this.notices);
 
         // Venue buttons only appear where the stellar offers the
         // service (spöb flags).

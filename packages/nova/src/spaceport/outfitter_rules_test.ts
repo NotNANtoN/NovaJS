@@ -625,6 +625,59 @@ describe('maxBuyCount', () => {
         expect(maxBuyCount(outfit, context, 25)).toBe(25);
     });
 
+    it('agrees with a unit-by-unit scan on every boundary (binary search)',
+        () => {
+            // The count is a binary search over the monotone gates; pin it
+            // against the linear scan it replaced for the tight cases:
+            // credits-limited, mass-limited, and the exact-fit boundary.
+            const linear = (outfit: OutfitData, context: OutfitterContext,
+                limit: number) => {
+                const working = new Map(context.outfits);
+                let count = 0;
+                while (count < limit) {
+                    if (!canBuyOutfit(outfit, {
+                        ...context, outfits: working,
+                        credits: context.credits - count * outfit.price,
+                    }).allowed) {
+                        break;
+                    }
+                    working.set(outfit.id, (working.get(outfit.id) ?? 0) + 1);
+                    count++;
+                }
+                return count;
+            };
+            const cases: [OutfitData, OutfitterContext][] = [];
+            for (const price of [1, 7, 33, 100]) {
+                for (const freeMassUnit of [0, 3, 30, 101]) {
+                    for (const credits of [0, 6, 99, 100, 5000]) {
+                        const outfit = makeOutfit('nova:200', { price },
+                            { freeMass: freeMassUnit });
+                        cases.push([outfit,
+                            makeContext({ outfits: [outfit], credits })]);
+                    }
+                }
+            }
+            for (const [outfit, context] of cases) {
+                for (const limit of [0, 1, 2, 50, 2000]) {
+                    expect(maxBuyCount(outfit, context, limit))
+                        .toBe(linear(outfit, context, limit));
+                }
+            }
+        });
+
+    it('costs O(log n) purchase checks, not O(n)', () => {
+        // 2000 chaingun rounds: the linear scan called canBuyOutfit 2000
+        // times (each walking every owned outfit) and lagged the game.
+        const outfit = makeOutfit('nova:200');
+        const context = makeContext({ outfits: [outfit], credits: 1e9 });
+        const spy = jasmine.createSpy('getOutfit').and.callFake(
+            (id: string) => context.getOutfit(id));
+        maxBuyCount(outfit, { ...context, getOutfit: spy }, 2000);
+        // Well under the linear count; the exact number depends on how
+        // many owned-outfit lookups one canBuyOutfit makes.
+        expect(spy.calls.count()).toBeLessThan(200);
+    });
+
     it('is limited by affordability (floor(credits/price))', () => {
         const outfit = makeOutfit('nova:200', { price: 1000 });
         // 3500 credits / 1000 each = 3 affordable.
