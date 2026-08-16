@@ -59,6 +59,20 @@ import { Stage } from "./stage_resource.js";
 
 /** Full on+off period of the blinking system-center radar arrow, in ms. */
 const CENTER_ARROW_BLINK_MS = 700;
+/**
+ * The selected target's radar blip flashes white: on for the first half of
+ * each period. Same wall-clock cadence family as the centre arrow and the
+ * running lights (display-only; never sim time). Tunables — the original's
+ * exact rate isn't recorded in the reference notes.
+ */
+export const TARGET_FLASH_MS = 800;
+const TARGET_FLASH_COLOR = 0xffffff;
+const TARGET_FLASH_SIZE = 2;
+
+/** Whether the target blip is in the ON half of its flash at `time`. */
+export function targetFlashOn(time: number): boolean {
+    return (time % TARGET_FLASH_MS) < TARGET_FLASH_MS / 2;
+}
 
 /**
  * Left edge (StatusBar-container x) of the debug-button stack (Add Enemy /
@@ -536,7 +550,15 @@ class StatusBar {
          * while the arrow should be visible (nothing stellar on radar, and the
          * blink is in its ON phase); otherwise it is omitted.
          */
-        centerArrow?: { x: number, y: number } | null) {
+        centerArrow?: { x: number, y: number } | null,
+        /**
+         * The uuid of the ship the player has targeted, passed only on the
+         * ON phase of its blink: that ship's blip is drawn white and larger
+         * over its normal colour, so the selected target flashes on the
+         * radar (Matthew's playtest, 2026-08-15 — the original's radar
+         * flashes the selected target white).
+         */
+        flashTarget?: string | null) {
         this.radar.clear();
 
         // Interference (0-100) makes sensors unreliable: on each radar tick,
@@ -553,6 +575,11 @@ class StatusBar {
         for (const [uuid, { position }] of ships) {
             const color = iffColors?.get(uuid)
                 ?? this.statusBarData.colors.dimRadar;
+            if (uuid === flashTarget) {
+                this.drawDot(position, TARGET_FLASH_COLOR, source,
+                    TARGET_FLASH_SIZE);
+                continue;
+            }
             this.drawDot(position, color, source);
         }
 
@@ -972,8 +999,11 @@ const DrawRadar = new System({
                     y: wrapNearestDelta(0 - position.y),
                 }
                 : null;
+            // The selected target flashes white on the radar.
+            const targetUuid = entity.components.get(TargetComponent)?.target;
             statusBar.drawRadar(position, visibleShips, planets, iffColors,
-                centerArrow);
+                centerArrow,
+                targetUuid && targetFlashOn(time) ? targetUuid : null);
             radarTime.lastTime = time;
         }
     }
