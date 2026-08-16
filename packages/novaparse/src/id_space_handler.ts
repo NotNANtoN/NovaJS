@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { readNovaFile } from "./read_nova_file.js";
 import { NovaResources, NovaResourceType, getEmptyNovaResources } from "./resource_parsers/resource_holder_base.js";
+import { buildFlagNamespaceMap, FlagNamespaceMap, scanBaseFlagSet } from "./flag_namespace.js";
 
 class BadDirectoryStructureError extends Error { };
 
@@ -35,6 +36,16 @@ class IDSpaceHandler {
     private novaFilesPath: string;
     // null when plug-in loading is explicitly disabled.
     private novaPluginsPath: string | null;
+    // Plug-in id prefixes in the order they were first loaded. This is the
+    // order the Require/Contribute flag namespaces are allocated in (see
+    // flag_namespace.ts), so it must be — and is — a pure function of the
+    // Plug-ins directory's contents (see addNovaPluginsDirectory).
+    private pluginPrefixOrder: string[] = [];
+    // The stock flag bits, snapshotted after the base "Nova Files" load and
+    // before any plug-in does; and the finished mapping. Both are set by
+    // build(); read the map through getFlagMap().
+    private baseFlagSet: Set<number> | null = null;
+    private flagMap: FlagNamespaceMap | null = null;
 
     constructor(novaPath: string,
         { novaFiles, novaPlugins }: NovaSubPaths = DEFAULT_SUB_PATHS) {
@@ -51,12 +62,44 @@ class IDSpaceHandler {
 
     private async build() {
         await this.addNovaFilesDirectory(this.novaFilesPath);
+        // The base set of the flag space is defined by the stock data alone,
+        // so it is taken now, before a plug-in can override anything.
+        this.baseFlagSet = scanBaseFlagSet(this.tmpBuildingResources);
         // A null plug-ins path is an explicit opt-out, not an error: the
         // caller wants base "Nova Files" data only.
         if (this.novaPluginsPath !== null) {
             await this.addNovaPluginsDirectory(this.novaPluginsPath);
         }
+        // Allocate every plug-in-private flag bit up front, from the whole
+        // loaded data set, so the mapping never depends on the order in
+        // which resources later happen to be parsed (which is on demand).
+        this.flagMap = buildFlagNamespaceMap(this.tmpBuildingResources,
+            this.baseFlagSet, this.pluginPrefixOrder);
         return this.tmpBuildingResources;
+    }
+
+    /**
+     * The Require/Contribute flag namespace mapping for the loaded data.
+     * Rejects like getIDSpace when the core data failed to load.
+     */
+    public async getFlagMap(): Promise<FlagNamespaceMap> {
+        var result = await this.globalResources;
+        if (result instanceof Error) {
+            throw result;
+        }
+        if (this.flagMap === null) {
+            throw new Error("Flag namespace map was not built");
+        }
+        return this.flagMap;
+    }
+
+    /** Plug-in prefixes in load (= flag namespace allocation) order. */
+    public async getPluginPrefixOrder(): Promise<string[]> {
+        var result = await this.globalResources;
+        if (result instanceof Error) {
+            throw result;
+        }
+        return [...this.pluginPrefixOrder];
     }
 
     // Returns the IDSpace of namespace 'prefix'
@@ -134,6 +177,10 @@ class IDSpaceHandler {
                         // is "nova" or prefix. It's not the best practice...
                         value.globalID = globalID;
                         value.prefix = usedPrefix;
+                        // Also the only place the WRITING plug-in is known:
+                        // for an override usedPrefix is "nova", and which
+                        // plug-in actually wrote it would otherwise be lost.
+                        value.writerPrefix = prefix;
 
 
                         return Reflect.set(target, globalID, value);
@@ -160,11 +207,21 @@ class IDSpaceHandler {
             console.warn("Plug-ins parser given a directory called " + path.basename(pluginsPath) + " instead of Plug-ins");
         }
 
-        var fileNames = (await readdir(pluginsPath)).reverse();
+        // Plug-ins load in REVERSE NAME ORDER (a later-named plug-in's
+        // stock override is overwritten by an earlier-named one's). The sort
+        // is explicit rather than trusting readdir: on macOS readdir happens
+        // to come back sorted, but that is not guaranteed on every
+        // filesystem, and both which override wins and the allocation of
+        // namespaced Require/Contribute flag bits (which follows this
+        // order) must be identical on every peer of a networked game.
+        var fileNames = (await readdir(pluginsPath)).sort().reverse();
         for (let i in fileNames) {
             var name = fileNames[i];
             var currentPath = path.join(pluginsPath, name);
             var prefix = name.split(".")[0]; // Cut off extensions
+            if (!this.pluginPrefixOrder.includes(prefix)) {
+                this.pluginPrefixOrder.push(prefix);
+            }
 
 
             if (await isDirectory(currentPath)) {
@@ -199,7 +256,9 @@ class IDSpaceHandler {
 
         log("Adding Directory of plugins " + dirPath);
 
-        var fileNames = await readdir(dirPath);
+        // Sorted for the same reason as in addNovaPluginsDirectory: which
+        // file's copy of a shared id wins must not depend on the filesystem.
+        var fileNames = (await readdir(dirPath)).sort();
         for (let i in fileNames) {
             var name = fileNames[i];
             var currentPath = path.join(dirPath, name);

@@ -6,6 +6,7 @@ import { BayGuidanceSet } from "novadatainterface/weapon_data";
 import { NovaResources } from "../resource_parsers/resource_holder_base.js";
 import { ShipResource } from "../resource_parsers/ship_resource.js";
 import { BaseParse } from "./base_parse.js";
+import { FlagNamespaceMap, resolveResourceFlags } from "../flag_namespace.js";
 import { FPS, ShipAccelerationConversionFactor, ShipSpeedConversionFactor, ShipTurnRateConversionFactor } from "./constants.js";
 import { ShanParse } from "./shan_parse.js";
 
@@ -39,12 +40,16 @@ export type AmmoOutfitMap = ShipPictMap;
 export function ShipParseClosure(shipPictMap: ShipPictMap,
     weaponOutfitMap: WeaponOutfitMap,
     ammoOutfitMap: AmmoOutfitMap,
-    globalIDSpacePromise: Promise<NovaResources | Error>): (s: ShipResource, m: (message: string) => void) => Promise<ShipData> {
+    globalIDSpacePromise: Promise<NovaResources | Error>,
+    // Namespaces the Require/Contribute bits per plug-in (flag_namespace.ts);
+    // null (the default) passes the raw 64-bit values through.
+    flagMapPromise: Promise<FlagNamespaceMap | null> = Promise.resolve(null),
+): (s: ShipResource, m: (message: string) => void) => Promise<ShipData> {
 
     // Returns the function ShipParse with shipPictMap already assigned
     return function(ship: ShipResource, notFoundFunction: (m: string) => void) {
         return ShipParse(ship, notFoundFunction, shipPictMap, weaponOutfitMap,
-            ammoOutfitMap, globalIDSpacePromise);
+            ammoOutfitMap, globalIDSpacePromise, flagMapPromise);
     }
 
 }
@@ -54,13 +59,16 @@ export async function ShipParse(ship: ShipResource,
     shipPictMap: ShipPictMap,
     weaponOutfitMap: WeaponOutfitMap,
     ammoOutfitMap: AmmoOutfitMap,
-    globalIDSpacePromise: Promise<NovaResources | Error>): Promise<ShipData> {
+    globalIDSpacePromise: Promise<NovaResources | Error>,
+    flagMapPromise: Promise<FlagNamespaceMap | null> = Promise.resolve(null),
+): Promise<ShipData> {
 
     var globalIDSpace = await globalIDSpacePromise;
 
     if (globalIDSpace instanceof Error) {
         throw globalIDSpace;
     }
+    const flagMap = await flagMapPromise;
 
     var base: BaseData = await BaseParse(ship, notFoundFunction);
 
@@ -281,9 +289,10 @@ export async function ShipParse(ship: ShipResource,
         displayWeight: ship.displayOrder,
         animation,
         vulnerableTo: ["normal"], // TODO: Parse if it's vulnerable to point defense
-        // 64-bit flag sets as JSON-safe hex strings.
-        contribute: "0x" + ship.contribute.toString(16),
-        require: "0x" + ship.require.toString(16),
+        // Flag sets as JSON-safe hex strings, namespaced per plug-in (so
+        // they may run past 64 bits).
+        contribute: "0x" + resolveResourceFlags(flagMap, ship, ship.contribute).toString(16),
+        require: "0x" + resolveResourceFlags(flagMap, ship, ship.require).toString(16),
         // The shipyard gates (EVN Bible shïp Availability ~:2588, BuyRandom
         // ~:2630, and the Flags3 0x0100/0x0200/0x4000 bits ~:2655).
         availability: ship.availabilityNCB,

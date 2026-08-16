@@ -40,6 +40,52 @@ describe("IDSpaceHandler", () => {
     });
     */
 
+    it("records which plug-in WROTE each resource, even for overrides", () => {
+        // `prefix` is where the resource lives; `writerPrefix` is who wrote
+        // it. They differ exactly for a plug-in's override of a core id —
+        // which is what the per-plug-in Require/Contribute namespacing (and
+        // later, plug-in control bits) key off.
+        expect(idSpace.wëap['nova:300'].prefix).toEqual("nova");
+        expect(idSpace.wëap['nova:300'].writerPrefix).toEqual("nova");
+
+        expect(idSpace.wëap['nova:128'].prefix).toEqual("nova");
+        expect(idSpace.wëap['nova:128'].writerPrefix).toEqual("plug pack");
+        expect(idSpace.wëap['nova:129'].prefix).toEqual("nova");
+        expect(idSpace.wëap['nova:129'].writerPrefix).toEqual("A first plug");
+
+        expect(idSpace.wëap['Plugin 1:150'].writerPrefix).toEqual("Plugin 1");
+        expect(idSpace.wëap['plug pack:153'].writerPrefix).toEqual("plug pack");
+    });
+
+    it("loads plug-ins in reverse name order, explicitly sorted", async () => {
+        // The Plug-ins directory holds "A first plug.ndat", "Plugin 1.ndat"
+        // and the "plug pack" subdirectory. Reverse-sorted by name (UTF-16
+        // code units, so lowercase 'p' sorts after 'P') that is plug pack,
+        // Plugin 1, A first plug — and this order is what the flag
+        // namespace allocation follows, so it must not depend on readdir.
+        const dataPath = resolveFixture("IDSpaceHandlerTestFilesystem");
+        const handler = new IDSpaceHandler(dataPath);
+        expect(await handler.getPluginPrefixOrder())
+            .toEqual(["plug pack", "Plugin 1", "A first plug"]);
+        // The last-loaded plug-in's override wins.
+        expect(idSpace.wëap['nova:129'].writerPrefix).toEqual("A first plug");
+    });
+
+    it("builds the flag namespace map from the loaded data", async () => {
+        const dataPath = resolveFixture("IDSpaceHandlerTestFilesystem");
+        const handler = new IDSpaceHandler(dataPath);
+        const map = await handler.getFlagMap();
+        // The fixture's stock hulls contribute bit 0 and nothing in it uses
+        // any other flag bit, so there is nothing to allocate.
+        expect(map.report.baseSet).toEqual([0]);
+        expect(map.report.namespaces).toEqual([]);
+        expect(map.namespaceOrder).toEqual(["nova"]);
+        expect(map.resolve("plug pack", 1n)).toBe(1n);
+        // Built twice from the same data: identical.
+        const again = await new IDSpaceHandler(dataPath).getFlagMap();
+        expect(again.report).toEqual(map.report);
+    });
+
     it("should defer errors to when a specific idSpace is requested", async () => {
         const broken = new IDSpaceHandler("./not/a/real/path/");
         const brokenSpace = broken.getIDSpace("nova");

@@ -92,10 +92,15 @@ describe('Extra Outfits crew requirements against real plug-in data', () => {
                 return;
             }
             // Contribute is derived from what is owned right now, so it is
-            // not a latch: drop the quarters and bit 22 goes with them.
-            expect(playerContribute(b.context([[QUARTERS, 1]], [])) >> 22n & 1n)
-                .toBe(1n);
-            expect(playerContribute(b.context([], [])) >> 22n & 1n).toBe(0n);
+            // not a latch: drop the quarters and their bit goes with them.
+            // (The plug-in's raw bit 22 is namespaced to a physical bit of
+            // its own, so compare against the quarters' contribute rather
+            // than a literal bit position.)
+            const quartersBits = BigInt(b.outfits.get(QUARTERS)!.contribute);
+            expect(quartersBits).not.toBe(0n);
+            expect(playerContribute(b.context([[QUARTERS, 1]], [])) & quartersBits)
+                .toBe(quartersBits);
+            expect(playerContribute(b.context([], [])) & quartersBits).toBe(0n);
         });
 
     it('keeps the three Engineering Officer grades mutually exclusive',

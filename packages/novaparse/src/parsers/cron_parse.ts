@@ -2,15 +2,18 @@ import { CronData } from "novadatainterface/cron_data";
 import { BaseData } from "novadatainterface/base_data";
 import { CronResource } from "../resource_parsers/cron_resource.js";
 import { BaseParse } from "./base_parse.js";
+import { FlagNamespaceMap, resolveResourceFlags } from "../flag_namespace.js";
 
 /**
  * Maps a parsed crön resource onto the CronData shape. A straight
  * projection: the resource parser already decodes the flag words, and
- * the 64-bit contribute/require sets become decimal strings so the
- * data stays JSON-serializable over the HTTP data route.
+ * the contribute/require sets become decimal strings so the data stays
+ * JSON-serializable over the HTTP data route. The sets are namespaced
+ * per plug-in (flag_namespace.ts), so they may exceed 64 bits.
  */
 export async function CronParse(cron: CronResource,
-    notFoundFunction: (m: string) => void): Promise<CronData> {
+    notFoundFunction: (m: string) => void,
+    flagMap: FlagNamespaceMap | null = null): Promise<CronData> {
     const base: BaseData = await BaseParse(cron, notFoundFunction);
 
     return {
@@ -30,8 +33,8 @@ export async function CronParse(cron: CronResource,
         enableOn: cron.enableOn,
         onStart: cron.onStart,
         onEnd: cron.onEnd,
-        contribute: cron.contribute.toString(),
-        require: cron.require.toString(),
+        contribute: resolveResourceFlags(flagMap, cron, cron.contribute).toString(),
+        require: resolveResourceFlags(flagMap, cron, cron.require).toString(),
         indNews: newsStrings(cron, cron.indNewsStr),
         govtNews: cron.govtNews.flatMap(({ govt, newsStr }) => {
             const govtResource = cron.idSpace.gövt[govt];

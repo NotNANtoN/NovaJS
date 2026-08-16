@@ -29,6 +29,7 @@ import { SystemData } from "novadatainterface/system_data";
 import { TargetCornersData } from "novadatainterface/target_corners_data";
 import { WeaponData } from "novadatainterface/weapon_data";
 import { DEFAULT_SUB_PATHS, IDSpaceHandler, NovaSubPaths } from "./id_space_handler.js";
+import { describeFlagNamespaceReport, FlagNamespaceMap } from "./flag_namespace.js";
 import { AsteroidParse } from "./parsers/asteroid_parse.js";
 import { DudeParse } from "./parsers/dude_parse.js";
 import { ExplosionParse } from "./parsers/explosion_parse.js";
@@ -92,6 +93,12 @@ import { SoundFile } from "novadatainterface/sound_file";
 export type { PilotData, PilotGlobalsData, PilotPlayerData } from "./pilot/pilot_data.js";
 export { parsePilotResources, parsePltPilot, readPilot } from "./pilot/pilot_parse.js";
 
+// Per-plug-in Require/Contribute flag namespacing; see flag_namespace.ts.
+export type {
+    FlagNamespaceMap, FlagNamespaceReport, FlagCollision, UnsatisfiableRequire,
+} from "./flag_namespace.js";
+export { describeFlagNamespaceReport, flagBits } from "./flag_namespace.js";
+
 type ParseFunction<T extends BaseResource, O> = (resource: T, errorFunc: (message: string) => void) => Promise<O>;
 
 export class NovaParse implements GameDataInterface {
@@ -115,6 +122,14 @@ export class NovaParse implements GameDataInterface {
 
     public readonly ids: Promise<NovaIDs>;
     public readonly idSpace: Promise<NovaResources | Error>;
+    // The per-plug-in Require/Contribute flag namespacing (flag_namespace.ts).
+    // Rejects when the core data failed to load; parsers that need it then
+    // fail the same way idSpace consumers do.
+    public readonly flagMap: Promise<FlagNamespaceMap>;
+    // Where the one-time flag namespace diagnostics (separated cross-plug-in
+    // collisions, unsatisfiable Requires) go. Overridable, like
+    // resourceNotFoundFunction, so tests can silence it.
+    public flagNamespaceWarn: (message: string) => void = console.warn;
 
     // subPaths.novaPlugins may be set to null to parse the base "Nova Files"
     // data only, ignoring the Plug-ins directory entirely. The default keeps
@@ -142,11 +157,25 @@ export class NovaParse implements GameDataInterface {
 
         this.idSpace.catch((_e: Error) => { });
 
+        this.flagMap = this.idSpaceHandler.getFlagMap().then(map => {
+            const lines = describeFlagNamespaceReport(map.report);
+            if (lines.length > 0) {
+                this.flagNamespaceWarn(
+                    "NovaParse: Require/Contribute flag namespacing:\n    "
+                    + lines.join("\n    "));
+            }
+            return map;
+        });
+        // Same no-op catch as idSpace: constructing over broken core data
+        // must not itself produce an unhandled rejection.
+        this.flagMap.catch((_e: Error) => { });
+
         this.shipPICTMap = this.makeShipPictMap();
         this.weaponOutfitMap = this.makeWeaponOutfitMap();
         this.ammoOutfitMap = this.makeAmmoOutfitMap();
         this.shipParser = ShipParseClosure(this.shipPICTMap,
-            this.weaponOutfitMap, this.ammoOutfitMap, this.idSpace);
+            this.weaponOutfitMap, this.ammoOutfitMap, this.idSpace,
+            this.flagMap);
 
 
         // Holds spriteSheetMulti which gets split up
@@ -242,7 +271,8 @@ export class NovaParse implements GameDataInterface {
         var data: NovaDataInterface = {
             Asteroid: this.makeGettable<RoidResource, AsteroidData>(NovaResourceType.röid, AsteroidParse),
             Ship: this.makeGettable<ShipResource, ShipData>(NovaResourceType.shïp, this.shipParser),
-            Outfit: this.makeGettable<OutfResource, OutfitData>(NovaResourceType.oütf, OutfitParse),
+            Outfit: this.makeGettable<OutfResource, OutfitData>(NovaResourceType.oütf,
+                async (outf, notFound) => OutfitParse(outf, notFound, await this.flagMap)),
             Weapon: this.makeGettable<WeapResource, WeaponData>(NovaResourceType.wëap, WeaponParse),
             Pict: this.pictGettable,
             PictImage: this.pictImageGettable,
@@ -256,9 +286,11 @@ export class NovaParse implements GameDataInterface {
             Fleet: this.makeGettable<FletResource, FleetData>(NovaResourceType.flët, FleetParse),
             Junk: this.makeGettable<JunkResource, JunkData>(NovaResourceType.jünk, JunkParse),
             Oops: this.makeGettable<OopsResource, OopsData>(NovaResourceType.öops, OopsParse),
-            Mission: this.makeGettable<MisnResource, MissionData>(NovaResourceType.mïsn, MisnParse),
+            Mission: this.makeGettable<MisnResource, MissionData>(NovaResourceType.mïsn,
+                async (misn, notFound) => MisnParse(misn, notFound, await this.flagMap)),
             Pers: this.makeGettable<PersResource, PersData>(NovaResourceType.përs, PersParse),
-            Cron: this.makeGettable<CronResource, CronData>(NovaResourceType.crön, CronParse),
+            Cron: this.makeGettable<CronResource, CronData>(NovaResourceType.crön,
+                async (cron, notFound) => CronParse(cron, notFound, await this.flagMap)),
             PlayerStart: this.makeGettable<CharResource, PlayerStartData>(NovaResourceType.chär, CharParse),
             TargetCorners: this.makeGettable<BaseResource, TargetCornersData>(NovaResourceType.cicn, TargetCornersParse),
             SpriteSheet: this.spriteSheetDataGettable,

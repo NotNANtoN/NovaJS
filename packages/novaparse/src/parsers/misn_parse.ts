@@ -3,6 +3,7 @@ import { BaseData } from "novadatainterface/base_data";
 import { MisnResource } from "../resource_parsers/misn_resource.js";
 import { NovaResources } from "../resource_parsers/resource_holder_base.js";
 import { BaseParse } from "./base_parse.js";
+import { FlagNamespaceMap, resolveResourceFlags } from "../flag_namespace.js";
 
 /**
  * The dësc id holding a mission's offer text (shown in the mission
@@ -90,7 +91,8 @@ function strList(idSpace: NovaResources, id: number): string[] {
  * a separate dësc data type.
  */
 export async function MisnParse(misn: MisnResource,
-    notFoundFunction: (m: string) => void): Promise<MissionData> {
+    notFoundFunction: (m: string) => void,
+    flagMap: FlagNamespaceMap | null = null): Promise<MissionData> {
     const base: BaseData = await BaseParse(misn, notFoundFunction);
 
     return {
@@ -103,7 +105,8 @@ export async function MisnParse(misn: MisnResource,
         availRandom: misn.availRandom,
         availBits: misn.availBits,
         availShipType: misn.availShipType,
-        require: misn.require.toString(),
+        // Namespaced per plug-in; see flag_namespace.ts.
+        require: resolveResourceFlags(flagMap, misn, misn.require).toString(),
         travelStel: misn.travelStel,
         travelStelId: stellarId(misn.idSpace, misn.travelStel),
         returnStel: misn.returnStel,
