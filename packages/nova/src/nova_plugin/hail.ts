@@ -333,6 +333,93 @@ export function planetTakesBribes(govt: GovtData | undefined): boolean {
 }
 
 /**
+ * The stock STELLAR-comm response table (STR# 3002, "Stellar Comm Strings",
+ * 50 entries), the planet-side twin of STR# 3000, likewise in groups of five
+ * interchangeable variants. The groups this module answers with, verbatim
+ * from the real Nova data:
+ *
+ *   [0-4]   channel open: "Communications channel open to " /
+ *           "Communications interlink established with " / "Hailing
+ *           frequencies open to " / "Ready with hailing channel to " /
+ *           "Channel open to "   (each ends with a SPACE; the stellar's name
+ *           is appended — hail/hail_planet.png reads "Channel open to Earth.")
+ *   [40-44] bribe offered: "We'll let you slip by the security barrier if you
+ *           pay us." / "We'll let you pass through the patrols if you pay
+ *           us." / "We'll let you defeat spaceport security if you pay us." /
+ *           "You want in?  You'd better grease the hand that feeds you
+ *           buddy." / "Pay us and we'll look the other way if you want to
+ *           visit our spaceport."
+ *   [30-34] bribe refused: "Yeah, you wish." / "No way. Leave immediately." /
+ *           "No deal, cheapskate." / "Your greed has been noted. Go away." /
+ *           "Apparently you don't want to port here after all."
+ *
+ * Group [25-26] is tribute accepted and [35-36] tribute released — the
+ * domination seam, not modelled. Chosen deterministically by `seed` (a hash of
+ * the stellar's uuid), like every other line here.
+ */
+export const STELLAR_RESPONSE_TABLE = 'nova:3002';
+
+export const STELLAR_CHANNEL_OPEN_FIRST_INDEX = 0;
+export const STELLAR_CHANNEL_OPEN_FALLBACK =
+    'Communications channel open to ';
+
+export const STELLAR_BRIBE_OFFER_FIRST_INDEX = 40;
+export const STELLAR_BRIBE_OFFER_FALLBACK =
+    "We'll let you slip by the security barrier if you pay us.";
+
+export const STELLAR_BRIBE_REFUSED_FIRST_INDEX = 30;
+export const STELLAR_BRIBE_REFUSED_FALLBACK = 'Yeah, you wish.';
+
+/** "Channel open to " — the prefix the stellar's name is appended to. */
+export function stellarChannelOpenText(strings: readonly string[] | undefined,
+    seed = 0): string {
+    return responseText(strings, STELLAR_CHANNEL_OPEN_FIRST_INDEX,
+        STELLAR_CHANNEL_OPEN_FALLBACK, seed);
+}
+
+/** The port's price for looking the other way (STR# 3002 indices 40-44). */
+export function stellarBribeOfferText(strings: readonly string[] | undefined,
+    seed = 0): string {
+    return responseText(strings, STELLAR_BRIBE_OFFER_FIRST_INDEX,
+        STELLAR_BRIBE_OFFER_FALLBACK, seed);
+}
+
+/** A port that won't be bought (STR# 3002 indices 30-34). */
+export function stellarBribeRefusedText(strings: readonly string[] | undefined,
+    seed = 0): string {
+    return responseText(strings, STELLAR_BRIBE_REFUSED_FIRST_INDEX,
+        STELLAR_BRIBE_REFUSED_FALLBACK, seed);
+}
+
+/**
+ * The stock misc-strings table (STR# 2002), which holds the traffic-control
+ * lines. Used verbatim rather than paraphrased:
+ *
+ *   [81] "Docking request denied."   [82] "Landing request denied."
+ *   [95] "You are cleared to dock."  [98] "You are cleared to land."
+ *   [172] "Forbidden"                [173] "Hostile"
+ *
+ * (Indices 96/97 and 93/94 are the headline and lower-case continuation forms
+ * of the clearance, used after a name; the standalone sentences are what a
+ * comm-dialog body wants.) The literals below are the pinned fallbacks and
+ * are what status_bar_content's clearanceDeniedMessage already emits.
+ */
+export const MISC_STRING_TABLE = 'nova:2002';
+export const DOCKING_DENIED_INDEX = 81;
+export const LANDING_DENIED_INDEX = 82;
+export const CLEARED_TO_DOCK_INDEX = 95;
+export const CLEARED_TO_LAND_INDEX = 98;
+export const STELLAR_STATUS_FORBIDDEN_INDEX = 172;
+export const STELLAR_STATUS_HOSTILE_INDEX = 173;
+
+/** One STR# 2002 line, falling back to its pinned literal. */
+export function miscString(strings: readonly string[] | undefined,
+    index: number, fallback: string): string {
+    const line = strings?.[index];
+    return line && line.trim() !== '' ? line : fallback;
+}
+
+/**
  * A stable 32-bit hash of a string (FNV-1a). Used to pick a government
  * greeting deterministically from a ship's uuid, so the client-side dialog
  * chooses the same line on every peer and every re-hail (never Math.random).

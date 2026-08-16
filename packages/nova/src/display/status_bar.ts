@@ -18,13 +18,13 @@ import { DisplayAssetDataInterface } from "../client/gamedata/display_asset_data
 import { DisplayAssetDataResource, SimulationGameDataResource } from "../nova_plugin/game_data_resource.js";
 import { CloakActiveComponent, CloakComponent, CloakScannerComponent } from "../nova_plugin/cloak_plugin.js";
 import { GovtComponent } from "../nova_plugin/govt_component.js";
-import { deriveIff, dispositionColor, shipDisposition } from "../nova_plugin/iff_plugin.js";
+import { deriveIff, dispositionColor, planetBlipColor, planetDisposition, PLANET_FLAT_COLOR, shipDisposition } from "../nova_plugin/iff_plugin.js";
 import { LegalRecordsComponent } from "../nova_plugin/reputation_plugin.js";
 import { ArmorComponent, FuelComponent, FUEL_PER_JUMP, ShieldComponent } from "../nova_plugin/health_plugin.js";
 import { OutfitsStateComponent, sumOutfitField } from "../nova_plugin/outfit_plugin.js";
 import { PersComponent } from "../nova_plugin/pers_plugin.js";
 import { DisabledComponent } from "../nova_plugin/disabled_component.js";
-import { PlanetDataComponent, PlanetTargetComponent } from "../nova_plugin/planet_plugin.js";
+import { PlanetComponent, PlanetDataComponent, PlanetTargetComponent, stellarClearanceFor, StellarBribesComponent } from "../nova_plugin/planet_plugin.js";
 import { JumpComponent, JumpRouteComponent, JUMP_DISTANCE } from "../nova_plugin/jump_plugin.js";
 import { canJump, jumpRadiusFor } from "../nova_plugin/jump_readiness.js";
 import { CargoComponent } from "../nova_plugin/cargo_plugin.js";
@@ -533,7 +533,8 @@ class StatusBar {
 
     drawRadar(source: Position,
         ships: Iterable<readonly [string, MovementState, ...unknown[]]>,
-        planets: Iterable<readonly [string, MovementState, PlanetData]>,
+        planets: Iterable<readonly [string, MovementState, PlanetData,
+            ...unknown[]]>,
         /**
          * Per-ship blip colour by uuid, from IFF (ModType 14). When the map is
          * absent or a ship is missing, blips use the flat dimRadar colour;
@@ -558,7 +559,16 @@ class StatusBar {
          * radar (Matthew's playtest, 2026-08-15 — the original's radar
          * flashes the selected target white).
          */
-        flashTarget?: string | null) {
+        flashTarget?: string | null,
+        /**
+         * Per-stellar blip colour by uuid. Stellars are yellow
+         * (PLANET_FLAT_COLOR, measured off the original captures) until the
+         * player owns an IFF outfit, at which point DrawRadar fills this in
+         * with the landing-clearance palette (iff_plugin's planetBlipColor) —
+         * the same rule ship blips follow. Missing entries fall back to the
+         * flat colour.
+         */
+        planetColors?: ReadonlyMap<string, number>) {
         this.radar.clear();
 
         // Interference (0-100) makes sensors unreliable: on each radar tick,
@@ -583,8 +593,9 @@ class StatusBar {
             this.drawDot(position, color, source);
         }
 
-        for (const [, { position }] of planets) {
-            this.drawDot(position, 0xFFFF00, source, 2);
+        for (const [uuid, { position }] of planets) {
+            this.drawDot(position,
+                planetColors?.get(uuid) ?? PLANET_FLAT_COLOR, source, 2);
         }
 
         if (centerArrow) {
@@ -929,7 +940,8 @@ const DrawRadar = new System({
     new Query([UUID, MovementStateComponent, ShipDataComponent,
         Optional(CloakActiveComponent), Optional(CloakComponent),
         Optional(GovtComponent)] as const),
-    new Query([UUID, MovementStateComponent, PlanetDataComponent] as const),
+    new Query([UUID, MovementStateComponent, PlanetDataComponent,
+        PlanetComponent] as const),
         SimulationGameDataResource, GetEntity, PlayerShipSelector] as const,
     step(radarTime, { time }, statusBar, { position }, ships, planets,
         gameData, entity) {
@@ -976,6 +988,28 @@ const DrawRadar = new System({
                         shipDisposition(govt, playerGovt, playerRecords)));
                 }
             }
+            // Stellars are coloured by LANDING CLEARANCE under the same IFF
+            // gate: neutral (you may land) blue, forbidden orange, hostile red
+            // — one reading of the ONE clearance predicate the landing gate
+            // and the comm dialog use (stellar_clearance.ts), so a blip can
+            // never promise a landing the gate refuses. Without IFF every
+            // stellar stays the flat measured yellow.
+            let planetColors: Map<string, number> | undefined;
+            if (hasIff) {
+                const playerRecords =
+                    entity.components.get(LegalRecordsComponent);
+                const bribes = entity.components.get(StellarBribesComponent);
+                const shipData = entity.components.get(ShipDataComponent);
+                planetColors = new Map();
+                for (const [uuid, , planetData, planet] of planets) {
+                    planetColors.set(uuid, planetBlipColor(planetDisposition(
+                        stellarClearanceFor({
+                            planetData, gameData, records: playerRecords,
+                            shipData, outfits: playerOutfits, bribes,
+                            planetId: planet.id, now: time,
+                        })), true));
+                }
+            }
             // System-center arrow: when no stellar object falls within the
             // radar's range, the original blinks a white arrow at the radar's
             // edge pointing back toward the system centre (0, 0). Chosen gate:
@@ -1003,7 +1037,8 @@ const DrawRadar = new System({
             const targetUuid = entity.components.get(TargetComponent)?.target;
             statusBar.drawRadar(position, visibleShips, planets, iffColors,
                 centerArrow,
-                targetUuid && targetFlashOn(time) ? targetUuid : null);
+                targetUuid && targetFlashOn(time) ? targetUuid : null,
+                planetColors);
             radarTime.lastTime = time;
         }
     }

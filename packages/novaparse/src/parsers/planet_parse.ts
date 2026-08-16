@@ -194,6 +194,9 @@ export async function PlanetParse(spob: SpobResource, notFoundFunction: (m: stri
         landingPict: pictID,
         animation,
         govt,
+        // spöb MinStatus (int16 at offset 22), passed through verbatim
+        // including both sentinels (-32767 ignored / 32767 never).
+        minStatus: spob.minStatus,
         flags: {
             canLand: Boolean(spob.flags & 0x1),
             hasCommodityExchange: Boolean(spob.flags & 0x2),

@@ -1,15 +1,27 @@
 import { getDefaultGovtData, GovtData } from 'novadatainterface/govt_data';
 import { getDefaultOutfitData, OutfitData } from 'novadatainterface/outfit_data';
+import { getDefaultPlanetData, PlanetData } from 'novadatainterface/planet_data';
 import {
     deriveIff,
     dispositionColor,
     IFF_FRIENDLY_COLOR,
     IFF_HOSTILE_COLOR,
     IFF_NEUTRAL_COLOR,
+    planetBlipColor,
+    planetDisposition,
+    PLANET_FLAT_COLOR,
+    PLANET_FORBIDDEN_COLOR,
+    PLANET_HOSTILE_COLOR,
+    PLANET_NEUTRAL_COLOR,
     shipDisposition,
     targetCornerStyle,
 } from './iff_plugin.js';
 import { OutfitsState } from './outfit_plugin.js';
+import { planetClearance } from './stellar_clearance.js';
+
+function stellar(over: Partial<PlanetData> = {}): PlanetData {
+    return { ...getDefaultPlanetData(), ...over };
+}
 
 /** A gameData stub exposing only the Outfit.getCached the deriver uses. */
 function mockGameData(outfits: { [id: string]: OutfitData | undefined }) {
@@ -140,4 +152,58 @@ describe('targetCornerStyle', () => {
             expect(targetCornerStyle('friendly', true)).toBe('hostile');
             expect(targetCornerStyle('hostile', true)).toBe('hostile');
         });
+});
+
+describe('planetDisposition', () => {
+    it('reads a cleared stellar as neutral (blue)', () => {
+        expect(planetDisposition({ cleared: true })).toBe('neutral');
+    });
+
+    it('reads a record-based refusal as hostile (red)', () => {
+        expect(planetDisposition({ cleared: false, reason: 'hostile' }))
+            .toBe('hostile');
+    });
+
+    it('reads a shut port and a missing travel permit as forbidden (orange)',
+        () => {
+            expect(planetDisposition({ cleared: false, reason: 'forbidden' }))
+                .toBe('forbidden');
+            expect(planetDisposition({ cleared: false, reason: 'permit' }))
+                .toBe('forbidden');
+        });
+
+    it('never disagrees with the landing gate: it IS the clearance verdict',
+        () => {
+            const shut = stellar({ minStatus: 100 });
+            expect(planetDisposition(planetClearance({ planet: shut })))
+                .toBe('hostile');
+            // ...and a bribe turns the same stellar blue.
+            expect(planetDisposition(planetClearance({
+                planet: shut, bribedUntil: 100, now: 0,
+            }))).toBe('neutral');
+        });
+});
+
+describe('planetBlipColor', () => {
+    it('draws every stellar the measured flat yellow without an IFF outfit',
+        () => {
+            // Sampled off the original-hardware captures: the stationary
+            // stellar blip on space/in_space*.png is pure #FFFF00.
+            expect(PLANET_FLAT_COLOR).toBe(0xffff00);
+            for (const d of ['neutral', 'forbidden', 'hostile'] as const) {
+                expect(planetBlipColor(d, false)).toBe(PLANET_FLAT_COLOR);
+            }
+        });
+
+    it('colours by disposition once the player owns IFF', () => {
+        expect(planetBlipColor('neutral', true)).toBe(PLANET_NEUTRAL_COLOR);
+        expect(planetBlipColor('forbidden', true)).toBe(PLANET_FORBIDDEN_COLOR);
+        expect(planetBlipColor('hostile', true)).toBe(PLANET_HOSTILE_COLOR);
+    });
+
+    it('uses the palette Matthew specified: blue / orange / red', () => {
+        expect(PLANET_NEUTRAL_COLOR).toBe(0x0000ff);
+        expect(PLANET_FORBIDDEN_COLOR).toBe(0xff7f00);
+        expect(PLANET_HOSTILE_COLOR).toBe(0xff0000);
+    });
 });

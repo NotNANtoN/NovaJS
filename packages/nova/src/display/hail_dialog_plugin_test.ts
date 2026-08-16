@@ -1,5 +1,7 @@
 import 'jasmine';
+import { getDefaultGovtData } from 'novadatainterface/govt_data';
 import { getDefaultPersData } from 'novadatainterface/pers_data';
+import { getDefaultPlanetData } from 'novadatainterface/planet_data';
 import { getDefaultShipData } from 'novadatainterface/ship_data';
 import { MockGameData } from 'novadatainterface/mock_game_data';
 import { Entity } from 'nova_ecs/entity';
@@ -17,8 +19,14 @@ import {
     ASSIST_GRANTED_FALLBACK, ASSIST_GRANTED_FIRST_INDEX,
     BUSY_RESPONSE_FALLBACK, BUSY_RESPONSE_FIRST_INDEX, HAIL_RESPONSE_TABLE,
     HOSTILE_RESPONSE_FALLBACK, HOSTILE_RESPONSE_FIRST_INDEX,
-    NO_NEED_RESPONSE_FALLBACK, NO_NEED_RESPONSE_FIRST_INDEX,
+    MISC_STRING_TABLE, NO_NEED_RESPONSE_FALLBACK, NO_NEED_RESPONSE_FIRST_INDEX,
+    STELLAR_RESPONSE_TABLE,
 } from '../nova_plugin/hail.js';
+import { CreditsComponent } from '../nova_plugin/player_state_plugin.js';
+import { LegalRecordsComponent } from '../nova_plugin/reputation_plugin.js';
+import {
+    PlanetComponent, PlanetDataComponent, PlanetTargetComponent,
+} from '../nova_plugin/planet_plugin.js';
 import { ShootAllWeaponsComponent } from '../nova_plugin/npc_plugin.js';
 import {
     assistAnswer, computeContext, shipIdentityBlock, targetIsFighting,
@@ -441,4 +449,144 @@ describe('shipIdentityBlock', () => {
             shipClass: 'Terrapin', govtName: 'Federation', hostile: false,
         })).not.toContain('Status:');
     });
+});
+
+describe('computeContext: hailing a STELLAR', () => {
+    const PLANET = 'planet-uuid';
+
+    /** A world whose player has a stellar (and no ship) selected. */
+    function planetWorld(opts: {
+        minStatus?: number,
+        record?: number,
+        planetsTakeBribes?: boolean,
+        credits?: number,
+        isStation?: boolean,
+    } = {}) {
+        const gameData = new MockGameData();
+        const govt = {
+            ...getDefaultGovtData(), id: 'nova:128', name: 'Federation',
+        };
+        govt.flags.planetsTakeBribes = opts.planetsTakeBribes ?? false;
+        gameData.data.Govt.map.set('nova:128', govt);
+
+        const planetData = {
+            ...getDefaultPlanetData(), id: 'nova:128', name: 'Earth',
+            govt: 'nova:128', minStatus: opts.minStatus ?? -32767,
+            flags: {
+                ...getDefaultPlanetData().flags,
+                isStation: opts.isStation ?? false,
+            },
+        };
+
+        const world = new World();
+        world.entities.set(PLAYER, new Entity()
+            .addComponent(PlayerShipSelector, undefined)
+            .addComponent(CreditsComponent, { credits: opts.credits ?? 10_000 })
+            .addComponent(LegalRecordsComponent,
+                new Map([['nova:128', opts.record ?? 0]]))
+            .addComponent(PlanetTargetComponent, { target: PLANET }));
+        world.entities.set(PLANET, new Entity()
+            .addComponent(PlanetComponent, { id: 'nova:128' })
+            .addComponent(PlanetDataComponent, planetData));
+        return { world, gameData };
+    }
+
+    /** displayAssets carrying the real STR# 3002 / 2002 lines under test. */
+    function stellarAssets() {
+        const stellar: string[] = [];
+        stellar[0] = 'Communications channel open to ';
+        stellar[30] = 'Yeah, you wish.';
+        stellar[40] =
+            "We'll let you slip by the security barrier if you pay us.";
+        const misc: string[] = [];
+        misc[81] = 'Docking request denied.';
+        misc[82] = 'Landing request denied.';
+        misc[95] = 'You are cleared to dock.';
+        misc[98] = 'You are cleared to land.';
+        misc[172] = 'Forbidden';
+        misc[173] = 'Hostile';
+        return {
+            data: {
+                StringTable: {
+                    get: async (id: string) =>
+                        id === STELLAR_RESPONSE_TABLE ? { strings: stellar }
+                            : id === MISC_STRING_TABLE ? { strings: misc }
+                                : { strings: [] },
+                },
+            },
+        } as unknown as DisplayAssetDataInterface;
+    }
+
+    it('clears an open port in the original\'s words and offers no bribe',
+        async () => {
+            const { world, gameData } = planetWorld();
+            const result = await computeContext(world, gameData,
+                stellarAssets());
+
+            expect(result?.context.variant).toBe('planet');
+            // "Channel open to Earth." is the reference's own opening line.
+            expect(result?.context.body)
+                .toBe('Communications channel open to Earth.\n'
+                    + 'You are cleared to land.');
+            // A friendly port names itself and carries no Status line.
+            expect(result?.context.heading).toBe('Earth');
+            expect(result?.context.bribe).toBeUndefined();
+        });
+
+    it('refuses a criminal, states the status as Hostile, and offers the '
+        + 'port\'s price when its govt bargains', async () => {
+            const { world, gameData } = planetWorld({
+                minStatus: 0, record: -1, planetsTakeBribes: true,
+            });
+            const result = await computeContext(world, gameData,
+                stellarAssets());
+
+            // STR# 3002 index 40 — the bribe offer, not a flat refusal.
+            expect(result?.context.body).toContain(
+                "We'll let you slip by the security barrier if you pay us.");
+            // STR# 2002 index 173, painted red by identityRuns.
+            expect(result?.context.heading).toBe('Earth\nStatus: Hostile');
+            // 10% of 10,000 (this govt is not a largerBribes one).
+            expect(result?.context.bribe)
+                .toEqual({ amount: 1000, canAfford: true, purpose: 'landing' });
+        });
+
+    it('refuses flatly when the port will not be bought', async () => {
+        const { world, gameData } = planetWorld({
+            minStatus: 0, record: -1, planetsTakeBribes: false,
+        });
+        const result = await computeContext(world, gameData, stellarAssets());
+
+        // STR# 2002 index 82 followed by STR# 3002 index 30.
+        expect(result?.context.body).toContain('Landing request denied.');
+        expect(result?.context.body).toContain('Yeah, you wish.');
+        expect(result?.context.bribe).toBeUndefined();
+    });
+
+    it('reports a shut port as Forbidden and uses the STATION wording',
+        async () => {
+            const { world, gameData } = planetWorld({
+                minStatus: 32767, isStation: true,
+            });
+            const result = await computeContext(world, gameData,
+                stellarAssets());
+
+            expect(result?.context.heading).toBe('Earth\nStatus: Forbidden');
+            expect(result?.context.body).toContain('Docking request denied.');
+        });
+
+    it('clears a station with the docking wording', async () => {
+        const { world, gameData } = planetWorld({ isStation: true });
+        const result = await computeContext(world, gameData, stellarAssets());
+        expect(result?.context.body).toContain('You are cleared to dock.');
+    });
+
+    it('falls back to pinned literals when the string tables are missing',
+        async () => {
+            const { world, gameData } = planetWorld();
+            const result = await computeContext(world, gameData);
+            expect(result?.context.body)
+                .toBe('Communications channel open to Earth.\n'
+                    + 'You are cleared to land.');
+        });
 });

@@ -4,7 +4,7 @@ import {
     formatCredits, navReadout, abbreviateCargoName, specialCargoSummary,
     standardCargoIndex, ordinal, formatLongDate, jumpArrivalMessage,
     landingBlockedMessage, bayCaptureMessage, targetGovtLabel,
-    ESCORT_GOVT_LABEL,
+    clearanceDeniedMessage, ESCORT_GOVT_LABEL,
 } from './status_bar_content.js';
 
 describe('formatCredits', () => {
@@ -135,6 +135,21 @@ describe('landingBlockedMessage', () => {
         expect(landingBlockedMessage('unlandable', false))
             .toBe('Your ship is unable to land on this planet. '
                 + "The planet's environment is too hostile.");
+    });
+    // Clearance refusals: stock STR# 2002 indices 81 and 82, verbatim and
+    // complete — the original explains nothing about WHY.
+    it('refuses clearance in the original\'s own words', () => {
+        expect(landingBlockedMessage('denied', false))
+            .toBe('Landing request denied.');
+        expect(landingBlockedMessage('denied', true))
+            .toBe('Docking request denied.');
+        expect(clearanceDeniedMessage(false)).toBe('Landing request denied.');
+        expect(clearanceDeniedMessage(true)).toBe('Docking request denied.');
+    });
+    it('names no stellar and gives no reason when clearance is refused', () => {
+        // A Forbidden port and a Hostile one get the SAME line.
+        expect(landingBlockedMessage('denied', false, 'Earth'))
+            .toBe('Landing request denied.');
     });
 });
 

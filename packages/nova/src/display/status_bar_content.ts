@@ -146,15 +146,38 @@ export function jumpArrivalMessage(systemName: string,
  * 0x10), matching stock Nova's strings verbatim.
  */
 export function landingBlockedMessage(
-    reason: 'tooFar' | 'tooFast' | 'unlandable', isStation: boolean,
+    reason: 'tooFar' | 'tooFast' | 'unlandable' | 'denied', isStation: boolean,
     stellarName?: string, gateKind?: 'hypergate' | 'wormhole'): string {
     if (reason === 'unlandable') {
         return unlandableMessage(isStation, stellarName, gateKind);
+    }
+    if (reason === 'denied') {
+        return clearanceDeniedMessage(isStation);
     }
     const place = isStation ? 'dock at this station' : 'land on this planet';
     const cause = reason === 'tooFar'
         ? "You're too far away to" : "You're moving too fast to";
     return `${cause} ${place}.`;
+}
+
+/**
+ * The original's refusal when traffic control WON'T CLEAR YOU — the stellar is
+ * a working port, you were in the landing window, and they said no
+ * (stellar_clearance.ts: MinStatus, or the gövt travel-permit Require test).
+ *
+ * Stock STR# 2002, verbatim and complete — the original explains nothing:
+ *
+ *   81 "Docking request denied."      82 "Landing request denied."
+ *
+ * The station form is chosen by spöb Flags 0x0010, exactly as the too-far /
+ * too-fast lines above choose between "dock at this station" and "land on this
+ * planet". Deliberately NOT worded with the reason: the original does not tell
+ * you whether you are Forbidden (STR# 2002 index 172), Hostile (173), or just
+ * short a travel permit, and the same one line covers all three.
+ */
+export function clearanceDeniedMessage(isStation: boolean): string {
+    return isStation
+        ? 'Docking request denied.' : 'Landing request denied.';
 }
 
 /**

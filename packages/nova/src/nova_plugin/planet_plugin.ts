@@ -1,7 +1,10 @@
 import * as t from 'io-ts';
+import { GovtData } from "novadatainterface/govt_data";
 import { PlanetData } from "novadatainterface/planet_data";
+import { ShipData } from "novadatainterface/ship_data";
 import { Emit, Entities, UUID } from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
+import { map } from 'nova_ecs/datatypes/map';
 import { EcsEvent } from 'nova_ecs/events';
 import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
@@ -23,8 +26,15 @@ import { findControlledEntity, ShipControlEvent, ShipControlStateComponent } fro
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { SystemIdResource } from './system_id_resource.js';
 import { PlayerShipSelector } from './player_ship_plugin.js';
-import { ShipComponent } from './ship_plugin.js';
+import { ShipComponent, ShipDataComponent } from './ship_plugin.js';
 import { Target } from './target_component.js';
+import { TimeResource } from 'nova_ecs/plugins/time_plugin';
+import { OutfitsState, OutfitsStateComponent } from './outfit_plugin.js';
+import { LegalRecords } from './reputation.js';
+import { GovtsResource, LegalRecordsComponent } from './reputation_plugin.js';
+import {
+    contributeBits, planetClearance, StellarClearance,
+} from './stellar_clearance.js';
 
 export const PlanetType = t.type({
     id: t.string // Not a UUID. A nova id.
@@ -78,7 +88,7 @@ registerSimulationBridgeEvent({ event: LandEvent });
  */
 export const LandingBlockedEvent =
     new EcsEvent<{
-        reason: 'tooFar' | 'tooFast' | 'unlandable',
+        reason: 'tooFar' | 'tooFast' | 'unlandable' | 'denied',
         isStation: boolean,
         stellarName?: string,
         gateKind?: 'hypergate' | 'wormhole',
@@ -86,7 +96,7 @@ export const LandingBlockedEvent =
 export const LandingBlockedEventType = t.intersection([
     t.type({
         reason: t.union([t.literal('tooFar'), t.literal('tooFast'),
-        t.literal('unlandable')]),
+        t.literal('unlandable'), t.literal('denied')]),
         isStation: t.boolean,
     }),
     t.partial({
@@ -95,11 +105,90 @@ export const LandingBlockedEventType = t.intersection([
     }),
 ]);
 
+/**
+ * Per-player temporary landing clearance bought with a bribe: the stellar's
+ * NOVA ID (PlanetComponent.id, e.g. 'nova:133' — not the entity uuid, which
+ * changes when a system is rebuilt) -> the simulation time the reprieve
+ * lapses.
+ *
+ * Lives on the PLAYER entity, like LegalRecordsComponent and CreditsComponent,
+ * because clearance is a fact about a pilot rather than about the port. It is
+ * written only by the deterministic input path (hail_plugin's applyHail, on
+ * the tick every peer applies the bribe record) and read by the pure
+ * clearance predicate, so it is ordinary synced sim state — nothing derives
+ * it and nothing races on it.
+ *
+ * Expiry is compared against TimeResource, never Date.now, and lapsed entries
+ * are simply not honoured rather than pruned, so no system has to run to keep
+ * the map correct and two peers cannot prune on different ticks.
+ */
+export const StellarBribesType = map(t.string, t.number);
+export type StellarBribes = t.TypeOf<typeof StellarBribesType>;
+export const StellarBribesComponent =
+    new Component<StellarBribes>('StellarBribes');
+
+/**
+ * How long a bribe keeps a stellar's landing pad open, in ms. TUNABLE /
+ * ASSUMPTION: the Bible quantifies neither the price nor the duration of a
+ * planet bribe. Two minutes matches the ship-bribe reprieve (hail_plugin's
+ * BRIBE_PACIFY_MS) — long enough to fly in and land, short enough that the
+ * clearance has to be re-bought on a later visit. The legal record is
+ * unchanged by a bribe, exactly as a ship bribe leaves it alone.
+ */
+export const STELLAR_BRIBE_MS = 120_000;
+
 registerSimulationBridgeEvent({ event: LandingBlockedEvent });
 
 /** Landing window: within 100 units (dist²) and slower than ~54.8 (speed²). */
 export const LAND_DISTANCE_SQUARED = 10_000;
 export const LAND_SPEED_SQUARED = 3_000;
+
+/**
+ * The landing-clearance decision for one player at one stellar, assembled from
+ * synced simulation state. The ONE place the sim resolves a stellar's govt,
+ * the player's record with it, the player's Contribute bits and their bribe,
+ * so AttemptLandingSystem and applyHail (hail_plugin) cannot disagree about
+ * whether a port is open. Pure given its inputs; the rules live in
+ * stellar_clearance.ts.
+ *
+ * Government data comes from GovtsResource when it is staged (makeSystem sets
+ * it before the world steps) and falls back to the cached game data, exactly
+ * as hail_plugin's lookupGovt does.
+ */
+export function stellarClearanceFor(opts: {
+    planetData: PlanetData,
+    gameData: SimulationGameDataInterface,
+    govts?: Map<string, GovtData>,
+    records?: LegalRecords,
+    shipData?: ShipData,
+    outfits?: OutfitsState,
+    bribes?: StellarBribes,
+    planetId: string,
+    now: number,
+}): StellarClearance {
+    const govtId = opts.planetData.govt ?? undefined;
+    const planetGovt = govtId
+        ? (opts.govts?.get(govtId)
+            ?? opts.gameData.data.Govt.getCached(govtId))
+        : undefined;
+    const outfitContributes: string[] = [];
+    for (const [id, state] of opts.outfits ?? []) {
+        if (state.count <= 0) {
+            continue;
+        }
+        outfitContributes.push(
+            opts.gameData.data.Outfit.getCached(id)?.contribute ?? '0x0');
+    }
+    return planetClearance({
+        planet: opts.planetData,
+        planetGovt,
+        records: opts.records,
+        contribute: contributeBits(opts.shipData?.contribute,
+            outfitContributes),
+        bribedUntil: opts.bribes?.get(opts.planetId),
+        now: opts.now,
+    });
+}
 
 const LandablePlanetsQuery = new Query(
     [UUID, MovementStateComponent, PlanetComponent,
@@ -109,8 +198,13 @@ const AttemptLandingSystem = new System({
     events: [ShipControlEvent] as const,
     args: [LandablePlanetsQuery, UUID,
         MovementStateComponent, PlanetTargetComponent,
-        ShipControlStateComponent, Emit] as const,
-    step(planets, playerUuid, { position, velocity }, planetTarget, controls, emit) {
+        ShipControlStateComponent, Emit,
+        Optional(LegalRecordsComponent), Optional(ShipDataComponent),
+        Optional(OutfitsStateComponent), Optional(StellarBribesComponent),
+        SimulationGameDataResource, Optional(GovtsResource),
+        Optional(TimeResource)] as const,
+    step(planets, playerUuid, { position, velocity }, planetTarget, controls,
+        emit, records, shipData, outfits, bribes, gameData, govts, time) {
         if (controls.get('land') !== 'start') {
             return;
         }
@@ -150,6 +244,28 @@ const AttemptLandingSystem = new System({
                         stellarName: planetData.name,
                         ...(planetData.gate
                             ? { gateKind: planetData.gate.kind } : {}),
+                    }, [playerUuid]);
+                } else if (planetData && !stellarClearanceFor({
+                    planetData, gameData, govts, records, shipData, outfits,
+                    bribes, planetId: id, now: time?.time ?? 0,
+                }).cleared) {
+                    // CLEARANCE. A port that is shut to this pilot answers
+                    // "Landing request denied." (STR# 2002 index 82; index 81
+                    // for a station), which is all the original says — it does
+                    // not explain whether you are forbidden, unwelcome or
+                    // missing a permit. Checked AFTER the landing window and
+                    // after the is-it-a-port test, so the approach feedback
+                    // still comes first: traffic control only answers a
+                    // request the ship was actually able to make.
+                    //
+                    // The verdict is the same pure predicate the radar blip
+                    // and the planet comm dialog read (stellar_clearance.ts),
+                    // over synced state only, so every peer refuses on the
+                    // same tick and the player's comm dialog never offers a
+                    // bribe for a landing the gate would have allowed.
+                    emit(LandingBlockedEvent, {
+                        reason: 'denied', isStation,
+                        stellarName: planetData.name,
                     }, [playerUuid]);
                 } else {
                     emit(LandEvent, { id, uuid }, [playerUuid]);
@@ -290,6 +406,7 @@ export const PlanetPlugin: Plugin = {
 
         world.addComponent(PlanetComponent);
         world.addComponent(PlanetDataComponent);
+        world.addComponent(StellarBribesComponent);
         registerEntityDeriver(world, {
             name: 'PlanetDataDeriver',
             provided: PlanetDataComponent,
@@ -299,6 +416,11 @@ export const PlanetPlugin: Plugin = {
         });
         world.resources.get(SerializerResource)?.addComponent(
             PlanetDataComponent, passthroughType<PlanetData>('PlanetDataComponentType'));
+        // Bought landing clearance is ordinary synced player state: it has to
+        // survive a snapshot (a peer joining mid-bribe must honour it) and be
+        // delta-synced so the display's comm dialog and radar see it.
+        world.resources.get(SerializerResource)?.addComponent(
+            StellarBribesComponent, StellarBribesType);
         world.resources.get(SerializerResource)?.addEvent(LandEvent, LandEventType);
         world.resources.get(SerializerResource)?.addEvent(
             LandingBlockedEvent, LandingBlockedEventType);
@@ -307,6 +429,9 @@ export const PlanetPlugin: Plugin = {
         });
         deltaMaker.addComponent(PlanetTargetComponent, {
             componentType: Target,
+        });
+        deltaMaker.addComponent(StellarBribesComponent, {
+            componentType: StellarBribesType,
         });
         world.addSystem(PlanetTargetProvider);
         world.addSystem(PlanetAnimationProvider);
