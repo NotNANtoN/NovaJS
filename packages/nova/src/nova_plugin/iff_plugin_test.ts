@@ -13,6 +13,7 @@ import {
     PLANET_FORBIDDEN_COLOR,
     PLANET_HOSTILE_COLOR,
     PLANET_NEUTRAL_COLOR,
+    PLANET_UNLANDABLE_COLOR,
     shipDisposition,
     targetCornerStyle,
 } from './iff_plugin.js';
@@ -201,9 +202,35 @@ describe('planetBlipColor', () => {
         expect(planetBlipColor('hostile', true)).toBe(PLANET_HOSTILE_COLOR);
     });
 
-    it('uses the palette Matthew specified: blue / orange / red', () => {
-        expect(PLANET_NEUTRAL_COLOR).toBe(0x0000ff);
-        expect(PLANET_FORBIDDEN_COLOR).toBe(0xff7f00);
-        expect(PLANET_HOSTILE_COLOR).toBe(0xff0000);
+    it('uses the palette Matthew specified: yellow / orange / red / grey',
+        () => {
+            // Neutral is the SAME yellow the references show, so a landable
+            // neutral port looks identical with and without IFF (Matthew's
+            // correction, 2026-08-15).
+            expect(PLANET_NEUTRAL_COLOR).toBe(0xffff00);
+            expect(PLANET_NEUTRAL_COLOR).toBe(PLANET_FLAT_COLOR);
+            expect(PLANET_FORBIDDEN_COLOR).toBe(0xff7f00);
+            expect(PLANET_HOSTILE_COLOR).toBe(0xff0000);
+            expect(PLANET_UNLANDABLE_COLOR).toBe(0x808080);
+        });
+
+    it('draws an unlandable stellar (Jupiter) grey with OR without IFF',
+        () => {
+            expect(planetBlipColor('unlandable', false))
+                .toBe(PLANET_UNLANDABLE_COLOR);
+            expect(planetBlipColor('unlandable', true))
+                .toBe(PLANET_UNLANDABLE_COLOR);
+        });
+});
+
+describe('planetDisposition: the unlandable tier', () => {
+    it('reads unlandable regardless of clearance', () => {
+        // The spöb can-land bit (landable.ts) is a fact about the stellar,
+        // checked FIRST, so a cleared or a hostile clearance both yield
+        // 'unlandable' for Jupiter.
+        expect(planetDisposition({ cleared: true }, false)).toBe('unlandable');
+        expect(planetDisposition({ cleared: false, reason: 'hostile' }, false))
+            .toBe('unlandable');
+        expect(planetDisposition({ cleared: true }, true)).toBe('neutral');
     });
 });

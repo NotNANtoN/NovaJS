@@ -25,6 +25,7 @@ import { OutfitsStateComponent, sumOutfitField } from "../nova_plugin/outfit_plu
 import { PersComponent } from "../nova_plugin/pers_plugin.js";
 import { DisabledComponent } from "../nova_plugin/disabled_component.js";
 import { PlanetComponent, PlanetDataComponent, PlanetTargetComponent, stellarClearanceFor, StellarBribesComponent } from "../nova_plugin/planet_plugin.js";
+import { landable } from "../nova_plugin/landable.js";
 import { JumpComponent, JumpRouteComponent, JUMP_DISTANCE } from "../nova_plugin/jump_plugin.js";
 import { canJump, jumpRadiusFor } from "../nova_plugin/jump_readiness.js";
 import { CargoComponent } from "../nova_plugin/cargo_plugin.js";
@@ -988,27 +989,30 @@ const DrawRadar = new System({
                         shipDisposition(govt, playerGovt, playerRecords)));
                 }
             }
-            // Stellars are coloured by LANDING CLEARANCE under the same IFF
-            // gate: neutral (you may land) blue, forbidden orange, hostile red
-            // — one reading of the ONE clearance predicate the landing gate
-            // and the comm dialog use (stellar_clearance.ts), so a blip can
-            // never promise a landing the gate refuses. Without IFF every
-            // stellar stays the flat measured yellow.
-            let planetColors: Map<string, number> | undefined;
-            if (hasIff) {
-                const playerRecords =
-                    entity.components.get(LegalRecordsComponent);
-                const bribes = entity.components.get(StellarBribesComponent);
-                const shipData = entity.components.get(ShipDataComponent);
-                planetColors = new Map();
-                for (const [uuid, , planetData, planet] of planets) {
-                    planetColors.set(uuid, planetBlipColor(planetDisposition(
-                        stellarClearanceFor({
-                            planetData, gameData, records: playerRecords,
-                            shipData, outfits: playerOutfits, bribes,
-                            planetId: planet.id, now: time,
-                        })), true));
-                }
+            // Stellars are coloured by LANDING CLEARANCE: neutral (you may
+            // land) yellow, forbidden orange, hostile red — one reading of
+            // the ONE clearance predicate the landing gate and the comm
+            // dialog use (stellar_clearance.ts), so a blip can never promise
+            // a landing the gate refuses — under the same IFF gate as ships
+            // (without IFF every landable stellar stays the flat yellow).
+            // UNLANDABLE stellars (Jupiter, scenery worlds, dead gates —
+            // landable.ts) are GREY with or without IFF: that is a fact
+            // about the stellar, not about the pilot.
+            const planetRecords = entity.components.get(LegalRecordsComponent);
+            const bribes = entity.components.get(StellarBribesComponent);
+            const shipData = entity.components.get(ShipDataComponent);
+            const planetColors = new Map<string, number>();
+            for (const [uuid, , planetData, planet] of planets) {
+                const isLandable = landable(planetData);
+                const clearance = (hasIff && isLandable)
+                    ? stellarClearanceFor({
+                        planetData, gameData, records: planetRecords,
+                        shipData, outfits: playerOutfits, bribes,
+                        planetId: planet.id, now: time,
+                    })
+                    : { cleared: true } as const;
+                planetColors.set(uuid, planetBlipColor(
+                    planetDisposition(clearance, isLandable), hasIff));
             }
             // System-center arrow: when no stellar object falls within the
             // radar's range, the original blinks a white arrow at the radar's

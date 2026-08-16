@@ -151,11 +151,21 @@ export function dispositionColor(disposition: Disposition): number {
  * colour: it is the same "you are not allowed in here" state, and Matthew's
  * palette has three entries.
  */
-export type PlanetDisposition = 'neutral' | 'forbidden' | 'hostile';
+export type PlanetDisposition =
+    'neutral' | 'forbidden' | 'hostile' | 'unlandable';
 
-/** The stellar disposition implied by a clearance decision. */
-export function planetDisposition(clearance: StellarClearance):
-    PlanetDisposition {
+/**
+ * The stellar disposition implied by a clearance decision, plus the
+ * static "can this ever be landed on" fact (landable.ts — the spöb can-land
+ * bit: Jupiter and the other 41 stock scenery worlds, and the destroyed
+ * hypergates). An UNLANDABLE stellar is unlandable regardless of anyone's
+ * record, so that tier is checked FIRST and reads the same to every pilot.
+ */
+export function planetDisposition(clearance: StellarClearance,
+    isLandable = true): PlanetDisposition {
+    if (!isLandable) {
+        return 'unlandable';
+    }
     if (clearance.cleared) {
         return 'neutral';
     }
@@ -174,31 +184,35 @@ export function planetDisposition(clearance: StellarClearance):
  * radar) are pure #FFFF00 — the stationary 2x2 blip that holds still across
  * two captures taken seconds apart while every ship blip moves.
  *
- * WITH IFF, the disposition palette is Matthew's spec ("Neutral spobs ... show
- * up as blue ... Forbidden spobs ... orange ... Hostile ... red"). The cölr
- * resource does NOT carry these — its colour fields are menu/button/list/
- * progress-bar chrome only (EVN Bible, "The cölr resource") — and the ïntf
- * resource carries only brightRadar/dimRadar (StatusBarColors). So:
- *
- *   - PLANET_NEUTRAL_COLOR is the pure #0000FF that DOES appear on the
- *     reference radars.
- *   - PLANET_HOSTILE_COLOR is pure #FF0000, matching the IFF hostile family.
- *   - PLANET_FORBIDDEN_COLOR is a TUNABLE GUESS: no reference capture shows a
- *     forbidden stellar, and the stock data contains no forbidden spöb at all
- *     (see stellar_clearance.ts), so orange had to be picked rather than
- *     sampled. Matthew may replace this hex.
+ * The palette (Matthew's corrected spec, 2026-08-15): NEUTRAL stellars are
+ * YELLOW — the same #FFFF00 the references show, so with or without IFF a
+ * landable neutral port looks identical; FORBIDDEN orange; HOSTILE red;
+ * and UNLANDABLE (Jupiter, scenery worlds, dead gates — the spöb can-land
+ * bit) GREY, which applies regardless of IFF because it is a fact about the
+ * stellar, not about allegiance. The cölr resource does NOT carry these —
+ * its colour fields are menu/button/list/progress-bar chrome only (EVN
+ * Bible, "The cölr resource") — and the ïntf resource carries only
+ * brightRadar/dimRadar (StatusBarColors); the non-yellow hexes are
+ * tunables (orange and grey were not sampled — no reference capture shows a
+ * forbidden or an unlandable stellar's blip; hostile red matches the IFF
+ * hostile family).
  */
 export const PLANET_FLAT_COLOR = 0xffff00;
-export const PLANET_NEUTRAL_COLOR = 0x0000ff;
+export const PLANET_NEUTRAL_COLOR = PLANET_FLAT_COLOR;
 export const PLANET_FORBIDDEN_COLOR = 0xff7f00;
 export const PLANET_HOSTILE_COLOR = 0xff0000;
+export const PLANET_UNLANDABLE_COLOR = 0x808080;
 
 /**
- * A stellar's radar blip colour. Without IFF every stellar is the flat
- * measured colour, mirroring the ship rule exactly.
+ * A stellar's radar blip colour. Unlandable is grey with or without IFF;
+ * otherwise, without IFF every stellar is the flat yellow, mirroring the
+ * ship rule (an IFF outfit "colorizes" the radar).
  */
 export function planetBlipColor(disposition: PlanetDisposition,
     hasIff: boolean): number {
+    if (disposition === 'unlandable') {
+        return PLANET_UNLANDABLE_COLOR;
+    }
     if (!hasIff) {
         return PLANET_FLAT_COLOR;
     }
