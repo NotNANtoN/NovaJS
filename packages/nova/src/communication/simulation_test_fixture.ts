@@ -68,38 +68,71 @@ const pluginDataPromises = new Map<string, Promise<GameDataAggregator | undefine
  * itself is the thing linked: pointing novaPlugins at it directly would
  * give each file inside its own prefix instead.
  */
-export async function getPluginGameData(pluginDirectory: string):
+export async function getPluginGameData(
+    pluginDirectory: string | string[]):
     Promise<GameDataAggregator | undefined> {
-    let promise = pluginDataPromises.get(pluginDirectory);
+    // Several plug-ins may be loaded together (for the specs about how
+    // plug-ins interact, e.g. Require/Contribute flag namespacing). The
+    // set is what matters, not the order given: NovaParse loads plug-ins
+    // in a sorted order of its own regardless.
+    const directories = [...new Set(
+        typeof pluginDirectory === "string"
+            ? [pluginDirectory] : pluginDirectory)].sort();
+    const key = directories.join("+");
+    let promise = pluginDataPromises.get(key);
     if (!promise) {
-        promise = buildPluginGameData(pluginDirectory);
-        pluginDataPromises.set(pluginDirectory, promise);
+        promise = buildPluginGameData(directories);
+        pluginDataPromises.set(key, promise);
     }
     return promise;
 }
 
-async function buildPluginGameData(pluginDirectory: string):
+async function buildPluginGameData(pluginDirectories: string[]):
     Promise<GameDataAggregator | undefined> {
+    const novaParse = makePluginNovaParse(pluginDirectories);
+    if (!novaParse) {
+        return undefined;
+    }
+    return new GameDataAggregator([
+        new FilesystemData(path.join(packageRoot, "objects")),
+        novaParse,
+    ], () => { });
+}
+
+/**
+ * A FRESH, uncached NovaParse over base data plus the named plug-in
+ * directories (see getPluginGameData for the scratch-root arrangement),
+ * or undefined if any of them is not installed. For specs that need to
+ * parse the same plug-in set more than once — the determinism of the
+ * Require/Contribute flag namespacing, say. Prefer getPluginGameData
+ * (cached, wrapped in the aggregator) for everything else.
+ */
+export function makePluginNovaParse(pluginDirectories: string[]):
+    NovaParse | undefined {
     const novaData = path.join(packageRoot, "Nova_Data");
-    const pluginPath = path.join(novaData, "Plug-ins", pluginDirectory);
-    if (!fs.existsSync(pluginPath)) {
+    const pluginPaths = pluginDirectories.map(
+        dir => path.join(novaData, "Plug-ins", dir));
+    if (!pluginPaths.every(p => fs.existsSync(p))) {
         return undefined;
     }
     // A fixed scratch root, reused across runs rather than a fresh mkdtemp
     // each time, so repeated test runs don't litter the temp directory.
     const root = path.join(os.tmpdir(),
-        `novajs-plugin-fixture-${pluginDirectory}`);
+        `novajs-plugin-fixture-${pluginDirectories.join("+")}`);
     fs.mkdirSync(path.join(root, "Plug-ins"), { recursive: true });
     linkOnce(path.join(novaData, "Nova Files"), path.join(root, "Nova Files"));
-    linkOnce(pluginPath, path.join(root, "Plug-ins", pluginDirectory));
+    for (let i = 0; i < pluginDirectories.length; i++) {
+        linkOnce(pluginPaths[i],
+            path.join(root, "Plug-ins", pluginDirectories[i]));
+    }
 
     const novaParse = new NovaParse(root, false,
         { novaFiles: "Nova Files", novaPlugins: "Plug-ins" });
     novaParse.resourceNotFoundFunction = () => { };
-    return new GameDataAggregator([
-        new FilesystemData(path.join(packageRoot, "objects")),
-        novaParse,
-    ], () => { });
+    // The one-time flag namespacing diagnostics are for people loading a
+    // real Plug-ins folder, not for the test log.
+    novaParse.flagNamespaceWarn = () => { };
+    return novaParse;
 }
 
 function linkOnce(target: string, link: string) {

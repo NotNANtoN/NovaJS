@@ -15,6 +15,7 @@ class BaseResource {
     idSpace: NovaResources;
     private _globalID: string | null;
     private _prefix: string | null;
+    private _writerPrefix: string | null;
 
     constructor(resource: Resource, idSpace: NovaResources) {
         this.idSpace = idSpace;
@@ -23,6 +24,7 @@ class BaseResource {
         this.data = resource.data;
         this._globalID = null; // This is set by IDSpaceHandler in getIDSpaceUnsafe
         this._prefix = null;   // Same for this
+        this._writerPrefix = null; // And this
     }
     get globalID(): string {
         if (this._globalID == null) {
@@ -44,6 +46,26 @@ class BaseResource {
 
     set prefix(id: string) {
         this._prefix = id;
+    }
+
+    /**
+     * The id prefix of the plug-in (or "nova" for the base data) whose file
+     * this resource was read from. Differs from `prefix` exactly when a
+     * plug-in overrides a stock resource: the resource then lives at
+     * "nova:<id>" (prefix "nova") but was written by the plug-in. Anything
+     * that must resolve in the writing plug-in's namespace — the
+     * Require/Contribute flag bits today, plug-in control bits next —
+     * keys off this rather than `prefix`.
+     */
+    get writerPrefix(): string {
+        if (this._writerPrefix == null) {
+            throw new Error("writerPrefix of " + this.name + " was requested before it was set");
+        }
+        return this._writerPrefix;
+    }
+
+    set writerPrefix(id: string) {
+        this._writerPrefix = id;
     }
 
 }

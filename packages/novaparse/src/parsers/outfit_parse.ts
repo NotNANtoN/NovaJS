@@ -1,6 +1,7 @@
 import { OutfResource } from "../resource_parsers/outf_resource.js";
 import { BaseData } from "novadatainterface/base_data";
 import { BaseParse } from "./base_parse.js";
+import { FlagNamespaceMap, resolveResourceFlags } from "../flag_namespace.js";
 import { CloakData, decodeCloakModVal, getDefaultCloakData } from "novadatainterface/cloak_data";
 import { CloakScannerData, decodeCloakScannerModVal, getDefaultCloakScannerData } from "novadatainterface/cloak_scanner_data";
 import { OutfitData, OutfitPhysics } from "novadatainterface/outfit_data";
@@ -14,7 +15,10 @@ type NoUnitConversion = "freeCargo" | "shield" | "armor" | "energy" | "ionizatio
 const perFrameTimes1000 = new Set(["shieldRecharge", "armorRecharge"]);
 type PerFrameTimes1000 = "shieldRecharge" | "armorRecharge";
 
-export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: string) => void): Promise<OutfitData> {
+// `flagMap` namespaces the Require/Contribute bits per plug-in (see
+// flag_namespace.ts); null passes the raw 64-bit values through.
+export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: string) => void,
+    flagMap: FlagNamespaceMap | null = null): Promise<OutfitData> {
     var base: BaseData = await BaseParse(outf, notFoundFunction);
 
     // Unlike during parsing, these are objects instead of
@@ -344,9 +348,10 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
         availability: outf.availability,
         onPurchase: outf.onPurchase,
         onSell: outf.onSell,
-        // 64-bit flag sets as JSON-safe hex strings.
-        contribute: "0x" + outf.contribute.toString(16),
-        require: "0x" + outf.require.toString(16),
+        // Flag sets as JSON-safe hex strings, namespaced per plug-in (so
+        // they may run past 64 bits).
+        contribute: "0x" + resolveResourceFlags(flagMap, outf, outf.contribute).toString(16),
+        require: "0x" + resolveResourceFlags(flagMap, outf, outf.require).toString(16),
         fixedGun: (outf.flags & 0x1) > 0,
         turret: (outf.flags & 0x2) > 0,
         // 0x4: stays with you when you trade ships (Bible ~:1962).
