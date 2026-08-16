@@ -8,6 +8,7 @@ import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { OutfitsState, OutfitsStateComponent } from './outfit_plugin.js';
 import { LegalRecords, recordHostile, recordWith } from './reputation.js';
+import { StellarClearance } from './stellar_clearance.js';
 
 /**
  * A ship's IFF (Identify Friend or Foe) capability, derived from its owned
@@ -128,6 +129,83 @@ export function dispositionColor(disposition: Disposition): number {
         case 'hostile': return IFF_HOSTILE_COLOR;
         case 'friendly': return IFF_FRIENDLY_COLOR;
         case 'neutral': return IFF_NEUTRAL_COLOR;
+    }
+}
+
+/**
+ * A STELLAR's disposition toward the player, the planet-side counterpart of
+ * shipDisposition. It is not a second opinion about politics: it is exactly a
+ * reading of `stellarClearance` (stellar_clearance.ts), so the radar blip, the
+ * planet comm dialog and the landing gate can never disagree about whether a
+ * port is open.
+ *
+ *  - 'neutral': the port will let you land (Matthew: "Neutral spobs let you
+ *    land and show up as blue on iff").
+ *  - 'forbidden': the port is shut — MinStatus 32767, or a gövt travel permit
+ *    the player doesn't hold. The original's word for the state is "Forbidden"
+ *    (STR# 2002 index 172).
+ *  - 'hostile': the player's legal record is below the stellar's MinStatus.
+ *    The original's word is "Hostile" (STR# 2002 index 173).
+ *
+ * The travel-permit denial folds into 'forbidden' rather than earning a fourth
+ * colour: it is the same "you are not allowed in here" state, and Matthew's
+ * palette has three entries.
+ */
+export type PlanetDisposition = 'neutral' | 'forbidden' | 'hostile';
+
+/** The stellar disposition implied by a clearance decision. */
+export function planetDisposition(clearance: StellarClearance):
+    PlanetDisposition {
+    if (clearance.cleared) {
+        return 'neutral';
+    }
+    return clearance.reason === 'hostile' ? 'hostile' : 'forbidden';
+}
+
+/**
+ * Stellar blip colours.
+ *
+ * WITHOUT an IFF outfit the radar draws every stellar the one flat colour, in
+ * the same way ship blips fall back to the flat dimRadar colour — the Bible
+ * says an IFF outfit "colorizes" the radar and "overrides" its colours, so
+ * with no IFF there is nothing to colorize. {@link PLANET_FLAT_COLOR} is
+ * MEASURED, not chosen: the stellar blips on the original-hardware captures
+ * (ui_screenshots/original_macos_screenshots/space/in_space*.png, statusbar
+ * radar) are pure #FFFF00 — the stationary 2x2 blip that holds still across
+ * two captures taken seconds apart while every ship blip moves.
+ *
+ * WITH IFF, the disposition palette is Matthew's spec ("Neutral spobs ... show
+ * up as blue ... Forbidden spobs ... orange ... Hostile ... red"). The cölr
+ * resource does NOT carry these — its colour fields are menu/button/list/
+ * progress-bar chrome only (EVN Bible, "The cölr resource") — and the ïntf
+ * resource carries only brightRadar/dimRadar (StatusBarColors). So:
+ *
+ *   - PLANET_NEUTRAL_COLOR is the pure #0000FF that DOES appear on the
+ *     reference radars.
+ *   - PLANET_HOSTILE_COLOR is pure #FF0000, matching the IFF hostile family.
+ *   - PLANET_FORBIDDEN_COLOR is a TUNABLE GUESS: no reference capture shows a
+ *     forbidden stellar, and the stock data contains no forbidden spöb at all
+ *     (see stellar_clearance.ts), so orange had to be picked rather than
+ *     sampled. Matthew may replace this hex.
+ */
+export const PLANET_FLAT_COLOR = 0xffff00;
+export const PLANET_NEUTRAL_COLOR = 0x0000ff;
+export const PLANET_FORBIDDEN_COLOR = 0xff7f00;
+export const PLANET_HOSTILE_COLOR = 0xff0000;
+
+/**
+ * A stellar's radar blip colour. Without IFF every stellar is the flat
+ * measured colour, mirroring the ship rule exactly.
+ */
+export function planetBlipColor(disposition: PlanetDisposition,
+    hasIff: boolean): number {
+    if (!hasIff) {
+        return PLANET_FLAT_COLOR;
+    }
+    switch (disposition) {
+        case 'hostile': return PLANET_HOSTILE_COLOR;
+        case 'forbidden': return PLANET_FORBIDDEN_COLOR;
+        case 'neutral': return PLANET_NEUTRAL_COLOR;
     }
 }
 

@@ -19,9 +19,16 @@ import { ArmorComponent, FuelComponent, ShieldComponent } from './health_plugin.
 import {
     bribeAmount,
     canRequestAssistance,
+    planetTakesBribes,
     shipIsFighting,
     shipTakesBribes,
 } from './hail.js';
+import {
+    PlanetComponent, PlanetDataComponent, stellarClearanceFor,
+    StellarBribesComponent, STELLAR_BRIBE_MS,
+} from './planet_plugin.js';
+import { OutfitsStateComponent } from './outfit_plugin.js';
+import { ShipDataComponent } from './ship_plugin.js';
 import { shipDisposition } from './iff_plugin.js';
 import { NpcComponent, NpcSteeringSystem } from './npc_ai_plugin.js';
 import { ShootAllWeaponsComponent } from './npc_plugin.js';
@@ -109,6 +116,71 @@ function playerNeedsHelp(player: Entity): boolean {
 }
 
 /**
+ * Buys temporary landing clearance at a stellar. Re-checks EVERYTHING against
+ * synced state — the record carries intent only:
+ *
+ *  1. The stellar must actually be refusing this player (the same pure
+ *    `stellarClearanceFor` verdict the landing gate and the radar use). You
+ *    cannot pay for clearance you already have.
+ *  2. Its government must take planet bribes — gövt Flags 0x4000 "Planets of
+ *    this govt will take bribes", or 0x8000 whose Bible text ends "...and
+ *    their planets will always take bribes" (hail.ts's planetTakesBribes).
+ *    An INDEPENDENT stellar has no government and so never bargains.
+ *  3. The player must be able to afford the demand, which is the SAME
+ *    percentage-of-cash figure a ship demands (hail.ts's bribeAmount), with
+ *    the pirate/largerBribes surcharge — the Bible gives no separate planet
+ *    price, so the ship convention is reused rather than invented (a
+ *    documented assumption).
+ *
+ * The effect is one map entry on the player: this stellar's NOVA id -> the
+ * simulation time the clearance lapses. Time comes from TimeResource, never
+ * Date.now, so the expiry is identical on every peer.
+ */
+function applyPlanetBribe(world: World, player: Entity, target: Entity) {
+    const planetData = target.components.get(PlanetDataComponent);
+    const planetId = target.components.get(PlanetComponent)?.id;
+    const gameData = world.resources.get(SimulationGameDataResource);
+    if (!planetData || planetId === undefined || !gameData) {
+        return;
+    }
+    const now = world.resources.get(TimeResource)?.time ?? 0;
+    const bribes = player.components.get(StellarBribesComponent);
+    const clearance = stellarClearanceFor({
+        planetData, gameData,
+        govts: world.resources.get(GovtsResource),
+        records: player.components.get(LegalRecordsComponent),
+        shipData: player.components.get(ShipDataComponent),
+        outfits: player.components.get(OutfitsStateComponent),
+        bribes, planetId, now,
+    });
+    if (clearance.cleared) {
+        return;
+    }
+    const govt = lookupGovt(world, planetData.govt ?? undefined);
+    if (!planetTakesBribes(govt)) {
+        return;
+    }
+    const credits = player.components.get(CreditsComponent);
+    if (!credits) {
+        return;
+    }
+    const amount = bribeAmount(credits.credits, !!govt?.flags.largerBribes);
+    if (amount <= 0 || credits.credits < amount) {
+        return;
+    }
+    credits.credits -= amount;
+    // Mutate the existing map when there is one so the delta/serializer sees
+    // the component it already knows about, and materialize it otherwise.
+    const until = now + STELLAR_BRIBE_MS;
+    if (bribes) {
+        bribes.set(planetId, until);
+    } else {
+        player.components.set(StellarBribesComponent,
+            new Map([[planetId, until]]));
+    }
+}
+
+/**
  * Applies a hail action deterministically on every peer. Resolves the hailing
  * player from `peerId` and the target from the record; re-checks eligibility
  * against synced state before mutating anything.
@@ -121,7 +193,18 @@ export function applyHail(world: World, peerId: string | undefined,
     }
     const player = found.entity;
     const target = world.entities.get(action.target);
-    if (!target || !target.components.has(ShipComponent)) {
+    if (!target) {
+        return;
+    }
+    // A STELLAR was hailed, not a ship: the only action it accepts is a bribe
+    // for landing clearance.
+    if (target.components.has(PlanetComponent)) {
+        if (action.kind === 'bribe') {
+            applyPlanetBribe(world, player, target);
+        }
+        return;
+    }
+    if (!target.components.has(ShipComponent)) {
         return;
     }
     const targetGovt = lookupGovt(world,

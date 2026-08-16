@@ -66,8 +66,15 @@ export interface HailContext {
     body: string;
     /** Request-assistance offer (fuel/repair), when eligible. */
     assist?: { free: boolean };
-    /** Bribe / beg-for-mercy offer against a hostile ship, when eligible. */
-    bribe?: { amount: number, canAfford: boolean };
+    /**
+     * A bribe offer. Against a hostile SHIP this is the beg-for-mercy price
+     * (they let you go); at a STELLAR that is refusing you landing clearance
+     * it is the price of being let in (`purpose: 'landing'`), which is the
+     * only thing that changes about the haggle page.
+     */
+    bribe?: {
+        amount: number, canAfford: boolean, purpose?: 'mercy' | 'landing',
+    };
     /** Escort-management dialog (escort variant only): show the Upgrade
      * Escort / Sell Escort / Release seam buttons above Close Channel. */
     escort?: boolean;
@@ -474,6 +481,12 @@ export class HailDialog {
                     label = 'Beg For Mercy';
                     onPress = () => this.pressBeg();
                     break;
+                case 'bribe':
+                    // The original's own label for the planet offer slot
+                    // (STR# 150 index 23). Same haggle page as Beg For Mercy.
+                    label = 'Offer Bribe';
+                    onPress = () => this.pressBeg();
+                    break;
                 case 'tribute':
                     // A seam: planet tribute isn't modeled. Greyed rather
                     // than omitted, so Close Channel stays on the
@@ -526,9 +539,10 @@ export class HailDialog {
         originY: number) {
         const context = this.context;
         const bribe = context?.bribe;
+        const what = bribe?.purpose === 'landing' ? 'land' : 'go';
         const demand = bribe
             ? `They demand ${bribe.amount.toLocaleString()} credits to let you `
-            + `go.${bribe.canAfford ? '' : ' You cannot afford it.'}`
+            + `${what}.${bribe.canAfford ? '' : ' You cannot afford it.'}`
             : 'They refuse to negotiate.';
         const body = new PIXI.Text(demand, {
             ...BODY_FONT,

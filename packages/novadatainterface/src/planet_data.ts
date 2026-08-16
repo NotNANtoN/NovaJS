@@ -96,6 +96,23 @@ export interface PlanetData extends SpaceObjectData {
 
     /** Global id of the owning gövt, or null for independent. */
     govt: string | null;
+
+    /**
+     * spöb MinStatus (EVN Bible, spöb section): "The point on your record in
+     * the current system that you'll be denied landing clearance on this
+     * stellar."
+     *
+     *   -32767          Ignored (player can always land)
+     *   -1 to -32766    You can be this evil before they shun you
+     *    0 to 32766     They have to like you this much before they let you land
+     *    32767          Player can never land.
+     *   "(Note that this field is ignored if the stellar is uninhabited)"
+     *
+     * A signed int16 at spöb offset 22 (novaparse/docs/tmpl). Interpreted by
+     * nova_plugin/stellar_clearance.ts, which is the only thing that should
+     * read it.
+     */
+    minStatus: number;
     /** Named spöb flag booleans (landability, services, habitation). */
     flags: PlanetFlags;
     /** Tech level, controlling default outfit/ship availability. */
@@ -175,6 +192,10 @@ export function getDefaultPlanetData(): PlanetData {
         gate: null,
         landingFee: 0,
         govt: null,
+        // The Bible's "Ignored (player can always land)" sentinel: a default
+        // PlanetData imposes no legal-status requirement, so every existing
+        // fixture stays landable.
+        minStatus: -32767,
         flags: getDefaultPlanetFlags(),
         techLevel: 0,
         specialTech: [],

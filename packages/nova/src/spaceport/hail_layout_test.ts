@@ -169,6 +169,16 @@ describe('commButtonSlots', () => {
         expect(commButtonSlots('planet', {}))
             .toEqual(['greetings', 'tribute', 'close']);
     });
+
+    it('turns the planet\'s middle row into Offer Bribe when a shut port '
+        + 'will bargain', () => {
+            // hail_planet.png is a FRIENDLY Earth, so it shows the tribute
+            // seam; a port refusing clearance puts its price in the same slot,
+            // the way a hostile ship's slot becomes Beg For Mercy. Close
+            // Channel still lands on the reference's third row.
+            expect(commButtonSlots('planet', { bribe: { amount: 3000 } }))
+                .toEqual(['greetings', 'bribe', 'close']);
+        });
 });
 
 describe('fitImage', () => {

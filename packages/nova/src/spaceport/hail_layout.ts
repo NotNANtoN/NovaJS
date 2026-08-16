@@ -204,7 +204,7 @@ export const COMM_HAGGLE: CommFrameLayout = {
 
 /** The buttons a comm dialog's column can hold, top to bottom. */
 export type CommButton =
-    'greetings' | 'assist' | 'beg' | 'tribute' | 'close';
+    'greetings' | 'assist' | 'beg' | 'bribe' | 'tribute' | 'close';
 
 /**
  * The ship and planet comms' button columns.
@@ -216,14 +216,20 @@ export type CommButton =
  * bottom and never drew Greetings at all.)
  *
  * PLANET (8512): hail_planet.png shows Greetings / Demand Tribute / Close
- * Channel. Tribute is a seam — NovaJS models no planet tribute — so it is
- * rendered GREYED rather than omitted, which keeps Close Channel on the
- * reference's third row instead of sliding it up into the second.
+ * Channel — and that reference is a FRIENDLY Earth, i.e. the case where the
+ * middle row has nothing better to offer. The planet column has the SAME
+ * three-row shape as the ship column, with the middle row an OFFER SLOT: when
+ * the port is refusing this pilot clearance and its government bargains, the
+ * slot becomes "Offer Bribe" (the original's own label — STR# 150 index 23,
+ * beside "Demand Tribute" at 44), exactly the way a hostile ship's slot
+ * becomes "Beg For Mercy". Otherwise it stays Demand Tribute, greyed: planet
+ * tribute (domination) is still a seam, and greying rather than omitting keeps
+ * Close Channel on the reference's third row instead of sliding it up.
  */
 export function commButtonSlots(variant: 'ship' | 'planet' | 'escort',
     context: { assist?: { free: boolean }, bribe?: unknown }): CommButton[] {
     if (variant === 'planet') {
-        return ['greetings', 'tribute', 'close'];
+        return ['greetings', context.bribe ? 'bribe' : 'tribute', 'close'];
     }
     const offer = context.assist ? 'assist' as const
         : context.bribe ? 'beg' as const : undefined;

@@ -18,26 +18,44 @@ import {
     busyResponseText,
     BUSY_RESPONSE_FALLBACK,
     canRequestAssistance,
+    CLEARED_TO_DOCK_INDEX,
+    CLEARED_TO_LAND_INDEX,
+    DOCKING_DENIED_INDEX,
     greetingText,
     HAIL_RESPONSE_TABLE,
     hashString,
     hostileResponseText,
     HOSTILE_RESPONSE_FALLBACK,
+    LANDING_DENIED_INDEX,
+    MISC_STRING_TABLE,
+    miscString,
     noNeedResponseText,
     NO_NEED_RESPONSE_FALLBACK,
+    planetTakesBribes,
     shipHailResponse,
     shipIsFighting,
     shipTakesBribes,
+    stellarBribeOfferText,
+    stellarBribeRefusedText,
+    stellarChannelOpenText,
+    STELLAR_RESPONSE_TABLE,
+    STELLAR_STATUS_FORBIDDEN_INDEX,
+    STELLAR_STATUS_HOSTILE_INDEX,
 } from '../nova_plugin/hail.js';
 import { DisplayAssetDataInterface } from '../client/gamedata/display_asset_data.js';
 import { HailAction } from '../nova_plugin/hail_plugin.js';
 import { SoundEvent } from '../nova_plugin/sound_plugin.js';
 import { FuelComponent } from '../nova_plugin/health_plugin.js';
-import { shipDisposition } from '../nova_plugin/iff_plugin.js';
+import { planetDisposition, shipDisposition } from '../nova_plugin/iff_plugin.js';
+import { OutfitsStateComponent } from '../nova_plugin/outfit_plugin.js';
+import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { NpcComponent } from '../nova_plugin/npc_ai_plugin.js';
 import { ShootAllWeaponsComponent } from '../nova_plugin/npc_plugin.js';
 import { PersComponent } from '../nova_plugin/pers_plugin.js';
-import { PlanetDataComponent, PlanetTargetComponent } from '../nova_plugin/planet_plugin.js';
+import {
+    PlanetComponent, PlanetDataComponent, PlanetTargetComponent,
+    stellarClearanceFor, StellarBribesComponent,
+} from '../nova_plugin/planet_plugin.js';
 import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin.js';
 import { CreditsComponent } from '../nova_plugin/player_state_plugin.js';
 import { LegalRecordsComponent } from '../nova_plugin/reputation_plugin.js';
@@ -186,6 +204,24 @@ async function resolveAssistReplies(
         };
     } catch {
         return ASSIST_REPLIES_FALLBACK;
+    }
+}
+
+/**
+ * A string table's lines, or undefined when it can't be loaded (every caller
+ * then falls back to its pinned literal). Used for the stellar comm table
+ * (STR# 3002) and the misc traffic-control table (STR# 2002).
+ */
+async function loadStrings(
+    displayAssets: DisplayAssetDataInterface | undefined, table: string):
+    Promise<readonly string[] | undefined> {
+    if (!displayAssets) {
+        return undefined;
+    }
+    try {
+        return (await displayAssets.data.StringTable.get(table)).strings;
+    } catch {
+        return undefined;
     }
 }
 
@@ -446,21 +482,86 @@ export async function computeContext(world: World,
         ? world.entities.get(planetTargetUuid) : undefined;
     if (planetTargetUuid && planetTarget) {
         const planetData = planetTarget.components.get(PlanetDataComponent);
+        const planetId = planetTarget.components.get(PlanetComponent)?.id;
         const govt = planetData?.govt
             ? await gameData.data.Govt.get(planetData.govt).catch(() => undefined)
             : undefined;
-        const disposition = shipDisposition(govt, playerGovt, playerRecords);
-        const heading = planetData?.name || 'Spaceport';
+        const name = planetData?.name || 'Spaceport';
         const image = planetData?.landingPict
             ? planetData.landingPict : null;
-        // No landing-DENIAL concept yet, so this is informational: a friendly
-        // port clears you to land; a hostile one is noted (planet bribes are
-        // a documented seam — see the plugin's module comment).
-        const body = disposition === 'hostile'
-            ? `${heading} refuses to answer your hail.`
-            : `${heading} spaceport control: you are cleared to land.`;
+        const isStation = planetData?.flags.isStation ?? false;
+
+        // THE SAME clearance verdict the landing gate and the radar blip use
+        // (stellar_clearance.ts), read off the same delta-synced components
+        // the simulation reads, so the dialog can never offer a bribe for a
+        // landing that was already allowed — or promise clearance the gate
+        // will refuse a second later.
+        const clearance = planetData && planetId !== undefined
+            ? stellarClearanceFor({
+                planetData, gameData, records: playerRecords,
+                shipData: player.entity.components.get(ShipDataComponent),
+                outfits: player.entity.components.get(OutfitsStateComponent),
+                bribes: player.entity.components.get(StellarBribesComponent),
+                planetId, now: world.resources.get(TimeResource)?.time ?? 0,
+            })
+            : { cleared: true as const };
+
+        // A port that is refusing you and whose government bargains (gövt
+        // 0x4000 / 0x8000) offers the deal in the middle button slot, the way
+        // a hostile ship offers Beg For Mercy. Price and affordability are the
+        // same pure functions the simulation re-derives in applyHail, so the
+        // dialog never shows a number the sim would disagree with.
+        const canBribe = !clearance.cleared && planetTakesBribes(govt);
+        const amount = bribeAmount(credits, !!govt?.flags.largerBribes);
+        const bribe = canBribe
+            ? {
+                amount, canAfford: credits >= amount && amount > 0,
+                purpose: 'landing' as const,
+            }
+            : undefined;
+
+        const stellarStrings = await loadStrings(displayAssets,
+            STELLAR_RESPONSE_TABLE);
+        const miscStrings = await loadStrings(displayAssets, MISC_STRING_TABLE);
+        const seed = hashString(planetTargetUuid);
+        // "Channel open to Earth." — the reference's own opening line
+        // (hail/hail_planet.png), from STR# 3002's channel-open group with the
+        // stellar's name appended to the group's trailing space.
+        const opening =
+            `${stellarChannelOpenText(stellarStrings, seed)}${name}.`;
+        const answer = clearance.cleared
+            ? miscString(miscStrings,
+                isStation ? CLEARED_TO_DOCK_INDEX : CLEARED_TO_LAND_INDEX,
+                isStation ? 'You are cleared to dock.'
+                    : 'You are cleared to land.')
+            : canBribe
+                ? stellarBribeOfferText(stellarStrings, seed)
+                // A shut port that won't be bought says so in its own words
+                // (STR# 3002 30-34) after traffic control's flat refusal.
+                : `${miscString(miscStrings,
+                    isStation ? DOCKING_DENIED_INDEX : LANDING_DENIED_INDEX,
+                    isStation ? 'Docking request denied.'
+                        : 'Landing request denied.')} `
+                + `${stellarBribeRefusedText(stellarStrings, seed)}`;
+
+        // The lower well names the stellar, and — when it is refusing you —
+        // states WHY in the original's own vocabulary: "Forbidden" (STR# 2002
+        // index 172) for a shut port or a missing travel permit, "Hostile"
+        // (173) for a legal record below its MinStatus. identityRuns paints a
+        // "Status:" line red, exactly as it does for a hostile ship.
+        const status = planetDisposition(clearance);
+        const heading = status === 'neutral' ? name
+            : `${name}\nStatus: ${miscString(miscStrings,
+                status === 'hostile'
+                    ? STELLAR_STATUS_HOSTILE_INDEX
+                    : STELLAR_STATUS_FORBIDDEN_INDEX,
+                status === 'hostile' ? 'Hostile' : 'Forbidden')}`;
+
         return {
-            context: { variant: 'planet', heading, image, body },
+            context: {
+                variant: 'planet', heading, image,
+                body: `${opening}\n${answer}`, bribe,
+            },
             target: planetTargetUuid, isEscort: false,
             replies: ASSIST_REPLIES_FALLBACK,
         };
