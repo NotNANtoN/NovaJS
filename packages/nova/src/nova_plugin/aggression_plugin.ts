@@ -9,7 +9,7 @@ import {
     AggressionComponent, AggressionState, applyAggression, sweepAggression,
 } from './aggression.js';
 import { DamagedEvent } from './death_plugin.js';
-import { SourceComponent } from './fire_weapon_plugin.js';
+import { SourceComponent } from './weapon_components.js';
 import { FiringGroupComponent } from './firing_group.js';
 import { ControlledByComponent } from './ship_control.js';
 import { ShipComponent } from './ship_plugin.js';

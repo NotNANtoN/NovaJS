@@ -16,7 +16,8 @@ import { decodeHull, encodeHull, HitboxHullComponent, HurtboxHullComponent } fro
 import { CreateTime } from "./create_time.js";
 import { AnalogControlComponent, ShipControlStateComponent } from "./ship_control.js";
 import { ControlState } from "./control_state_event.js";
-import { defaultWeaponLocalState, SourceComponent, SubCounts, WeaponsComponent } from "./fire_weapon_plugin.js";
+import { defaultWeaponLocalState, SubCounts, WeaponsComponent } from "./fire_weapon_plugin.js";
+import { SourceComponent } from "./weapon_components.js";
 import { IdFactoryResource } from "./id_factory.js";
 import { PlanetDataComponent } from "./planet_plugin.js";
 import { ProjectileBlastHull, ProjectileDataComponent } from "./projectile_data.js";

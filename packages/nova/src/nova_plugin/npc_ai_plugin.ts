@@ -32,7 +32,7 @@ import { ShipPhysics } from 'novadatainterface/ship_data';
 import { PlanetComponent, PlanetDataComponent } from './planet_plugin.js';
 import { EscortLandingComponent } from './player_escort.js';
 import { LegalRecordsComponent } from './reputation_plugin.js';
-import { SourceComponent } from './fire_weapon_plugin.js';
+import { SourceComponent } from './weapon_components.js';
 import { ShipComponent, ShipDataComponent, ShipPhysicsComponent } from './ship_plugin.js';
 import { TargetComponent } from './target_component.js';
 import { WeaponsStateComponent } from './weapons_state.js';

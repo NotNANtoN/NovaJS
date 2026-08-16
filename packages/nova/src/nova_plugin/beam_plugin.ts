@@ -19,7 +19,8 @@ import { CollisionEvent, CollisionHitterComponent } from './collision_interactio
 import { CreateTime, CreateTimeArgProvider } from './create_time.js';
 import { DamagedEvent } from './death_plugin.js';
 import { applyExitPoint, ExitPointData } from './exit_point.js';
-import { FireSubs, liveTargetMovement, OwnerComponent, sampleInaccuracy, SourceComponent, WeaponConstructors, WeaponEntry } from './fire_weapon_plugin.js';
+import { FireSubs, liveTargetMovement, sampleInaccuracy, WeaponConstructors, WeaponEntry } from './fire_weapon_plugin.js';
+import { OwnerComponent, SourceComponent } from './weapon_components.js';
 import { FiringGroupComponent, firingImmune, victimFiringGroup } from './firing_group.js';
 import { GovtComponent } from './govt_component.js';
 import { DisabledComponent } from './disabled_component.js';

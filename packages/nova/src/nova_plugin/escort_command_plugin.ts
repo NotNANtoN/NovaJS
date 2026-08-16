@@ -14,7 +14,7 @@ import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_
 import { BayFighterComponent, ReturnWhenTargetRemovedComponent, startReturnHome } from './bay_plugin.js';
 import { DisabledComponent } from './disabled_component.js';
 import { EscortCommandComponent, EscortCommandState, EscortOrders, EscortOrdersComponent } from './escort_command.js';
-import { OwnerComponent } from './fire_weapon_plugin.js';
+import { OwnerComponent } from './weapon_components.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { ExplodingComponent } from './death_plugin.js';
 import { GovtComponent } from './govt_component.js';

@@ -7,7 +7,7 @@ import { System } from "nova_ecs/system";
 import { ShipAnimationMode } from "novadatainterface/animation";
 import { AnimationComponent } from "../nova_plugin/animation_plugin.js";
 import { BeamDataComponent } from "../nova_plugin/beam_plugin.js";
-import { SourceComponent } from "../nova_plugin/fire_weapon_plugin.js";
+import { SourceComponent } from "../nova_plugin/weapon_components.js";
 import { SimulationGameDataResource } from "../nova_plugin/game_data_resource.js";
 import { CloakActiveComponent, CloakScannerComponent } from "../nova_plugin/cloak_plugin.js";
 import { DisabledComponent } from "../nova_plugin/disabled_component.js";
