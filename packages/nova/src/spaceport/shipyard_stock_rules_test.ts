@@ -259,6 +259,17 @@ describe('Flags3 0x4000 equal-DispWeight exclusion', () => {
 });
 
 describe('visibleShips', () => {
+    it('hides a ship that is never for sale (BuyRandom 0) instead of '
+        + 'showing it greyed', () => {
+        // Matthew, 2026-08-15: hide ships that aren't for sale — the
+        // Vell-os craft and mission-only hulls stop cluttering the grid.
+        const never = makeShip('nova:173', { buyRandom: 0, techLevel: 1 });
+        const sold = makeShip('nova:128', { buyRandom: 100, techLevel: 1 });
+        const ctx = makeContext(sold, { planet: STELLAR_TECH_5 });
+        expect(visibleShips([never, sold], ctx).map(s => s.id))
+            .toEqual(['nova:128']);
+    });
+
     it('sorts by DispWeight descending, ties by id ascending', () => {
         const low = makeShip('nova:128', { displayWeight: 5 });
         const high = makeShip('nova:129', { displayWeight: 10 });

@@ -297,6 +297,14 @@ function buyVisible(ship: ShipData, ctx: ShipyardContext): boolean {
     if (!shipStocked(ship, ctx)) {
         return false;
     }
+    // A ship that is never for sale (BuyRandom 0 — Vell-os craft,
+    // mission-only variants) is HIDDEN, not shown greyed as "isn't for
+    // sale" (Matthew, 2026-08-15: hide ships that aren't for sale). This
+    // is the same treatment his ruling gives a failed day roll once
+    // BUY_RANDOM_DAY_ROLL_ENABLED returns: not-for-sale means absent.
+    if (!shipBuyRandomPasses(ship, ctx)) {
+        return false;
+    }
     if (ship.hideIfAvailabilityFalse
         && !shipAvailabilityPasses(ship, ctx)) {
         return false;
