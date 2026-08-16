@@ -519,7 +519,11 @@ export class Outfitter extends Menu<Entity> {
             // the resulting state reaches the simulation.
             runNCBSet(expression, makeControlBitHooks(this.controlBits, {
                 outfits: this.outfits,
-                resolveId: id => `nova:${id}`,
+                // Numeric ids in an outfit's own set string are scoped to
+                // the plug-in that defined it, exactly as the mission path
+                // scopes them (makeMissionSetHooks). Hard-coding "nova"
+                // here made a plug-in's `G472` grant the STOCK outfit 472.
+                resolveId: id => `${resourcePrefix}:${id}`,
             }), Math.random);
         } catch (error) {
             if (error instanceof NCBParseError) {

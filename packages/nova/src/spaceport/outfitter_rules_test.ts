@@ -213,6 +213,46 @@ describe('canBuyOutfit', () => {
                 { allowed: false, reason: 'availability' }));
     });
 
+    it('resolves an Oxxx term in the outfit\'s own plug-in first', () => {
+        // The Extra Outfits shape: two grades of the same item, each
+        // excluding the other. Both live in the plug-in's id space, and
+        // the stock data has no outfit 301 at all.
+        const goodGrade = makeOutfit('plug:300', { availability: '!o301' });
+        const badGrade = makeOutfit('plug:301');
+        expect(canBuyOutfit(goodGrade, makeContext({
+            outfits: [goodGrade, badGrade],
+            owned: [['plug:301', 1]],
+        }))).toEqual(jasmine.objectContaining(
+            { allowed: false, reason: 'availability' }));
+        expect(canBuyOutfit(goodGrade, makeContext({
+            outfits: [goodGrade, badGrade],
+        }))).toEqual({ allowed: true });
+    });
+
+    it('falls back to the stock id space when the plug-in has no such id',
+        () => {
+            // A plug-in outfit referring to a STOCK licence it does not
+            // redefine: nothing named "plug:300" exists, so O300 is nova:300.
+            const licensed = makeOutfit('plug:200', { availability: 'o300' });
+            const license = makeOutfit('nova:300');
+            expect(canBuyOutfit(licensed, makeContext({
+                outfits: [licensed, license],
+                owned: [['nova:300', 1]],
+            }))).toEqual({ allowed: true });
+        });
+
+    it('counts a deployed fighter as owned for Oxxx', () => {
+        // Bible: "The Oxxx operator also considers any carried fighters
+        // that are deployed when it examines the player's current list of
+        // outfits." A launched fighter is gone from context.outfits.
+        const gated = makeOutfit('nova:200', { availability: 'o300' });
+        const fighter = makeOutfit('nova:300');
+        expect(canBuyOutfit(gated, makeContext({
+            outfits: [gated, fighter],
+            deployed: [['nova:300', 1]],
+        }))).toEqual({ allowed: true });
+    });
+
     it('treats a malformed availability expression as available', () => {
         const outfit = makeOutfit('nova:200', { availability: 'b13 &' });
         expect(canBuyOutfit(outfit, makeContext()))

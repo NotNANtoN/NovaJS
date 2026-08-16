@@ -78,6 +78,25 @@ describe('parseNCBTest', () => {
         expect(() => parseNCBTest('b9999')).not.toThrow();
     });
 
+    // Plug-in-data compatibility rule; see parseNCBTest's docs for why a
+    // bare number is a control bit and where real data relies on it.
+    it('reads a bare number as a control bit', () => {
+        expect(parseNCBTest('9001')).toEqual({ type: 'bit', bit: 9001 });
+        expect(parseNCBTest('!9001')).toEqual(parseNCBTest('!b9001'));
+        // More Blasters CHEAT oütf 536's Availability, leading zero and all.
+        expect(parseNCBTest('0525')).toEqual({ type: 'bit', bit: 525 });
+        // Extra Outfits oütf 471 ("Empty Weapon Hull"), verbatim.
+        expect(parseNCBTest('b9002 & b9003 & b9004 & !9001'))
+            .toEqual(parseNCBTest('b9002 & b9003 & b9004 & !b9001'));
+        // Stock Nova mïsn 428's AvailBits, verbatim.
+        expect(parseNCBTest('!(b511 | b515) & !((b50 | 467) | b6666)'))
+            .toEqual(parseNCBTest('!(b511 | b515) & !((b50 | b467) | b6666)'));
+    });
+
+    it('still range-checks a bare number', () => {
+        expect(() => parseNCBTest('10000')).toThrowError(NCBParseError);
+    });
+
     it('rejects malformed expressions', () => {
         expect(() => parseNCBTest('b13 &')).toThrowError(NCBParseError);
         expect(() => parseNCBTest('& b13')).toThrowError(NCBParseError);
@@ -220,6 +239,25 @@ describe('parseNCBSet', () => {
     it('is case-insensitive', () => {
         expect(parseNCBSet('B1 g142 r(B2 !B3)'))
             .toEqual(parseNCBSet('b1 G142 R(b2 !b3)'));
+    });
+
+    // Plug-in-data compatibility rule; see parseNCBSet's docs. Rejecting
+    // these threw away the whole string, taking the operators AFTER the
+    // stray separator with it -- the Energon Cannon bug.
+    it('treats a stray & or | between operations as a separator', () => {
+        expect(parseNCBSet('D613 & G615 & b9027'))
+            .toEqual(parseNCBSet('D613 G615 b9027'));
+        expect(parseNCBSet('b1 | b2')).toEqual(parseNCBSet('b1 b2'));
+        // Extra Outfits oütf 471's OnPurchase, verbatim (trailing space
+        // included): the whole crafting step in one string.
+        expect(parseNCBSet(
+            '!b9002 & !b9003 & !b9004 & b9001 G472 D468 D469 D470 D471 '))
+            .toEqual(parseNCBSet(
+                '!b9002 !b9003 !b9004 b9001 G472 D468 D469 D470 D471'));
+        // HypergatePass crön 386's OnEnd: the separator sits mid-string,
+        // with a Qxxx after it that used to be lost.
+        expect(parseNCBSet('D444 L159 !B918 & Q25077'))
+            .toEqual(parseNCBSet('D444 L159 !b918 Q25077'));
     });
 
     it('rejects malformed expressions', () => {
