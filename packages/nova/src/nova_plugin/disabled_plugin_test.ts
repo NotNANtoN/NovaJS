@@ -34,7 +34,7 @@ import {
 } from './npc_ai_plugin.js';
 import { OutfitsState, OutfitsStateComponent } from './outfit_plugin.js';
 import { ControlledByComponent, ShipControlEvent, ShipControlStateComponent } from './ship_control.js';
-import { ShipDataComponent } from './ship_plugin.js';
+import { ShipDataComponent, ShipPhysicsComponent } from './ship_plugin.js';
 import { PlayerSoundEvent } from './sound_plugin.js';
 import { Stat } from './stat.js';
 
@@ -230,6 +230,37 @@ describe('ship disabling in a live world', () => {
                 expect(ship.components.has(DisabledComponent)).toBeTrue();
             }
         }, 120_000);
+
+    it('spends no afterburner fuel while disabled', async () => {
+        // The stock Shuttle has no afterburner; fit the stock Afterburner
+        // outfit (nova:197, 37 fuel/s) through the real provider path.
+        const { world, ship } = await shipWorld('nova:128', {
+            extraOutfits: { 'nova:197': 1 },
+        });
+        expect(ship.components.get(ShipPhysicsComponent)!.afterburner)
+            .toBeGreaterThan(0);
+        const fuel = ship.components.get(FuelComponent)!;
+        fuel.current = fuel.max;
+
+        // Enabled: holding afterburner drains fuel (the control reaches
+        // EffectiveMovementPhysicsSystem).
+        holdControls(world, ship, { afterburner: true });
+        world.step();
+        const afterEnabledBurn = fuel.current;
+        expect(afterEnabledBurn).toBeLessThan(fuel.max);
+
+        // Disabled: DisabledMovementSystem erased the thrust afterwards
+        // but the fuel was still being spent up front (shipped bug).
+        damageToFraction(ship, 0.2);
+        world.step();
+        expect(ship.components.has(DisabledComponent)).toBeTrue();
+        const beforeDisabledBurn = fuel.current;
+        for (let i = 0; i < 30; i++) {
+            holdControls(world, ship, { afterburner: true });
+            world.step();
+        }
+        expect(fuel.current).toEqual(beforeDisabledBurn);
+    }, 120_000);
 
     it('suspends thrust and turning, and the ship slows to rest',
         async () => {

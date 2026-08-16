@@ -3,6 +3,7 @@ import { Plugin } from 'nova_ecs/plugin';
 import { MovementPhysicsComponent, MovementStateComponent, MovementSystem } from 'nova_ecs/plugins/movement_plugin';
 import { TimeResource, TimeSystem } from 'nova_ecs/plugins/time_plugin';
 import { System } from 'nova_ecs/system';
+import { DisabledComponent } from './disabled_component.js';
 import { FuelComponent } from './health_plugin.js';
 import { ION_FACTOR, IsIonizedComponent } from './ionization_plugin.js';
 import { JumpComponent, JumpSequenceSystem, JUMP_BASE_SPEED, JUMP_DEPART_DELAY_MS } from './jump_plugin.js';
@@ -42,11 +43,15 @@ export const EffectiveMovementPhysicsSystem = new System({
     args: [ShipPhysicsComponent, MovementPhysicsComponent,
         MovementStateComponent, TimeResource,
         Optional(ShipControlStateComponent), Optional(FuelComponent),
-        Optional(IsIonizedComponent), Optional(JumpComponent)] as const,
+        Optional(IsIonizedComponent), Optional(JumpComponent),
+        Optional(DisabledComponent)] as const,
     step(shipPhysics, movementPhysics, movementState, time,
-        controlState, fuel, isIonized, jump) {
+        controlState, fuel, isIonized, jump, disabled) {
         let afterburning = false;
-        if (!jump && controlState?.get('afterburner')
+        // A disabled ship cannot burn: DisabledMovementSystem erases the
+        // thrust afterwards, but the fuel was already spent here (Matthew's
+        // playtest — holding afterburner while disabled drained the tank).
+        if (!jump && !disabled && controlState?.get('afterburner')
             && shipPhysics.afterburner > 0
             && fuel && fuel.current > 0) {
             afterburning = true;
