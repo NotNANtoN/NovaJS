@@ -208,15 +208,52 @@ describe('applyHail: request assistance', () => {
                 .toEqual({ client: 'player' });
         });
 
-    it('does nothing when the player is healthy', async () => {
+    it('does nothing when the player is healthy — the dialog still OFFERS '
+        + 'the request, and the ship just says you need no help', async () => {
+            // Matthew: "it should show request assistance even if there's no
+            // reason for you to request it (they usually just tell you that
+            // you don't need help)." The OFFER moved out to the dialog, so a
+            // healthy player's request now reaches the sim — and must still
+            // leave the hailed ship completely alone: no AssistingComponent,
+            // so AssistBehaviorSystem never steers it and never heals anyone.
+            const { world, addShip } = await makeWorld();
+            await addShip('target', 150, 0, ship => {
+                ship.components.set(GovtComponent, { id: 'test:meek' });
+                ship.components.set(NpcComponent, { aiType: 3, mode: 'travel' });
+                ship.components.set(TargetComponent, { target: undefined });
+            });
+            const before = { ...target(world).components
+                .get(MovementStateComponent)! };
+
+            applyHail(world, PEER,
+                { kind: 'requestAssistance', target: 'target' });
+            world.step();
+
+            expect(target(world).components.has(AssistingComponent))
+                .toBeFalse();
+            // Its own errand is untouched: same mode, and no assist steering
+            // was written over the top of it.
+            expect(target(world).components.get(NpcComponent)!.mode)
+                .toBe('travel');
+            const after = target(world).components
+                .get(MovementStateComponent)!;
+            expect(after.position.x).toBe(before.position.x);
+            expect(after.position.y).toBe(before.position.y);
+        });
+
+    it('still grants the errand to a player who DOES need help', async () => {
+        // The need test moved from the offer to the answer; a real need must
+        // still get a helper on its way.
         const { world, addShip } = await makeWorld();
+        player(world).components.set(DisabledComponent, { repairAt: null });
         await addShip('target', 150, 0, ship => {
             ship.components.set(GovtComponent, { id: 'test:meek' });
-            ship.components.set(NpcComponent, { aiType: 3 });
+            ship.components.set(NpcComponent, { aiType: 3, mode: 'travel' });
         });
         applyHail(world, PEER,
             { kind: 'requestAssistance', target: 'target' });
-        expect(target(world).components.has(AssistingComponent)).toBeFalse();
+        expect(target(world).components.get(AssistingComponent))
+            .toEqual({ client: 'player' });
     });
 
     it('refuses a neutral-govt ship ATTACKING the disabled player', async () => {

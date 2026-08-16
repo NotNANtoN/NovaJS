@@ -145,10 +145,20 @@ export function applyHail(world: World, peerId: string | undefined,
     if (action.kind === 'requestAssistance') {
         if (!canRequestAssistance({
             disposition,
-            playerNeedsHelp: playerNeedsHelp(player),
             govt: targetGovt,
             attackingPlayer,
         })) {
+            return;
+        }
+        // NO NEED, NO ERRAND. The button is offered to every non-hostile ship
+        // now, whatever shape the player's hull is in — the ship answers a
+        // pointless request with "You're not in any trouble." (STR# 3000
+        // 70-74, rendered by the dialog) and is left completely alone here:
+        // no AssistingComponent means NpcDecisionSystem keeps its brain and
+        // AssistBehaviorSystem never steers it. The same synced predicate the
+        // dialog uses, so every peer reaches the same verdict on the tick the
+        // record is applied.
+        if (!playerNeedsHelp(player)) {
             return;
         }
         // BUSY: a ship in the middle of a fight refuses ("I'm busy" — STR#

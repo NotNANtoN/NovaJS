@@ -6,6 +6,9 @@ import {
 import {
     busyResponseText, BUSY_RESPONSE_COUNT, BUSY_RESPONSE_FALLBACK,
     BUSY_RESPONSE_FIRST_INDEX, HAIL_RESPONSE_TABLE,
+    HOSTILE_RESPONSE_COUNT, HOSTILE_RESPONSE_FALLBACK,
+    HOSTILE_RESPONSE_FIRST_INDEX, NO_NEED_RESPONSE_COUNT,
+    NO_NEED_RESPONSE_FALLBACK, NO_NEED_RESPONSE_FIRST_INDEX,
 } from './hail.js';
 
 // These assertions run against the real Nova game data (Nova_Data). They
@@ -77,6 +80,82 @@ describe('StringTable against real Nova data', () => {
             for (const seed of [0, 1, 2, 3, 4, 987654]) {
                 expect(busy).toContain(busyResponseText(table.strings, seed));
             }
+        });
+
+    it('pins the "you don\'t need help" responses (STR# 3000, indices 70-74)',
+        async () => {
+            // What a ship answers a POINTLESS assistance request with — the
+            // player asked for aid they don't need. Matthew: "it should show
+            // request assistance even if there's no reason for you to request
+            // it (they usually just tell you that you don't need help)."
+            const gameData = await getIntegrationGameData();
+            const table =
+                await gameData.data.StringTable.get(HAIL_RESPONSE_TABLE);
+            const noNeed = table.strings.slice(NO_NEED_RESPONSE_FIRST_INDEX,
+                NO_NEED_RESPONSE_FIRST_INDEX + NO_NEED_RESPONSE_COUNT);
+            expect(noNeed).toEqual([
+                "You're not in any trouble.",
+                "You're in no danger.",
+                "You don't have any problems.",
+                'It looks like you\'re sitting pretty from here.  Try helping '
+                + 'yourself.',
+                "There's no danger to you right now.",
+            ]);
+            // The hardcoded fallback must stay in step with the data.
+            expect(table.strings[NO_NEED_RESPONSE_FIRST_INDEX])
+                .toBe(NO_NEED_RESPONSE_FALLBACK);
+            // The group immediately AFTER is the acceptance ("All right, I'll
+            // help you.") — an off-by-five would agree to a pointless errand.
+            expect(table.strings[NO_NEED_RESPONSE_FIRST_INDEX + 5])
+                .toBe("All right, I'll help you.");
+        });
+
+    it('pins the hostile hail responses (STR# 3000, indices 10-14)',
+        async () => {
+            // A hostile ship answers a hail from this GLOBAL group, not from
+            // its government's greeting STR# (7000 + govtId - 128, which holds
+            // only friendly greetings). hail/hail_hostile.png shows a hostile
+            // Fed Destroyer answering "What is it?" — index 12/13 here.
+            const gameData = await getIntegrationGameData();
+            const table =
+                await gameData.data.StringTable.get(HAIL_RESPONSE_TABLE);
+            const hostile = table.strings.slice(HOSTILE_RESPONSE_FIRST_INDEX,
+                HOSTILE_RESPONSE_FIRST_INDEX + HOSTILE_RESPONSE_COUNT);
+            expect(hostile).toEqual([
+                'What is it you want?',
+                'What do you want?',
+                'What is it?',
+                'What is it?',
+                'What?',
+            ]);
+            expect(hostile).toContain('What is it?');
+            // The hardcoded fallback must stay in step with the data.
+            expect(table.strings[HOSTILE_RESPONSE_FIRST_INDEX])
+                .toBe(HOSTILE_RESPONSE_FALLBACK);
+            // The neighbours are the "no response" group (5-9) before — under
+            // it the "channel open" group (0-4) — and the hostile TAUNTS
+            // (15-19) after. An off-by-five would answer a hostile hail with
+            // "No response." or a taunt aimed at a mercy plea.
+            expect(table.strings[HOSTILE_RESPONSE_FIRST_INDEX - 5])
+                .toBe('No response.');
+            expect(table.strings[HOSTILE_RESPONSE_FIRST_INDEX - 10])
+                .toBe('Channel open.');
+            expect(table.strings[HOSTILE_RESPONSE_FIRST_INDEX + 5])
+                .toBe('Calling to beg for your life?');
+        });
+
+    it('keeps the per-govt greeting tables friendly (STR# 7000 = Federation)',
+        async () => {
+            // Why the hostile line cannot come from the govt greetings: the
+            // govt tables are ten LINES OF GREETING, one table per government
+            // (7000 + govtId - 128), with nothing hostile in them.
+            const gameData = await getIntegrationGameData();
+            const table = await gameData.data.StringTable.get('nova:7000');
+            expect(table.name).toBe('Federation');
+            expect(table.strings.length).toBe(10);
+            expect(table.strings[1])
+                .toBe('Greetings from the government of the Federation.');
+            expect(table.strings).not.toContain('What is it?');
         });
 
     it('exposes string tables in the id list', async () => {

@@ -1414,16 +1414,21 @@ export const scenarios = [
     {
         id: 'hail_hostile',
         title: 'Hail — hostile ship (8511 + bribe)',
-        description: 'A hostile ship comm: the hostile line plus a Beg for '
-            + 'Mercy (bribe) button above Close Channel. Compares the 8511 '
-            + 'frame, left column and image box against hail/hail_hostile.png.',
+        description: 'A hostile ship comm: the hostile response line (STR# '
+            + '3000 indices 10-14) over the identity block with its RED '
+            + 'Status value, plus a Beg for Mercy (bribe) button above Close '
+            + 'Channel. Compares the 8511 frame, left column and image box '
+            + 'against hail/hail_hostile.png.',
         params: { ship: 'nova:164', system: 'nova:130' },
         hideDebug: true,
         setup: async (page, driver) => {
+            // The reference's own content: "What is it?" from the hostile
+            // group, and the three identity lines with "Hostile" in red.
             await driver.showHail(page, {
-                variant: 'ship', heading: 'Class: Fed Destroyer',
+                variant: 'ship',
+                heading: 'Class: Fed Destroyer\n(Federation)\nStatus: Hostile',
                 image: 'nova:5003',
-                body: 'You are scum, and we will destroy you.',
+                body: 'What is it?',
                 bribe: { amount: 20000, canAfford: true },
             });
             await driver.sleep(1200);
@@ -1487,9 +1492,14 @@ export const scenarios = [
         params: { ship: 'nova:164', system: 'nova:130' },
         hideDebug: true,
         setup: async (page, driver) => {
+            // The whole identity block goes in the LOWER well, the way
+            // computeContext builds it (and the way hail_escort.png stacks
+            // "Hired Escort: / Terrapin / Standard" there); the upper well is
+            // the reference's Upgrade Cost / Pay readout, which we don't model.
             await driver.showHail(page, {
-                variant: 'escort', heading: 'Hired Escort:',
-                image: 'nova:5003', body: 'Terrapin\nStandard',
+                variant: 'escort',
+                heading: 'Hired Escort:\n Terrapin\n Standard',
+                image: 'nova:5003', body: '',
                 escort: true,
             });
             await driver.sleep(1200);

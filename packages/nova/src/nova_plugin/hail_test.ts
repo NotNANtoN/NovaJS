@@ -13,6 +13,14 @@ import {
     canRequestAssistance,
     greetingText,
     hashString,
+    hostileResponseText,
+    HOSTILE_RESPONSE_COUNT,
+    HOSTILE_RESPONSE_FALLBACK,
+    HOSTILE_RESPONSE_FIRST_INDEX,
+    noNeedResponseText,
+    NO_NEED_RESPONSE_COUNT,
+    NO_NEED_RESPONSE_FALLBACK,
+    NO_NEED_RESPONSE_FIRST_INDEX,
     planetTakesBribes,
     shipHailResponse,
     shipTakesBribes,
@@ -120,39 +128,37 @@ describe('shipHailResponse', () => {
 });
 
 describe('canRequestAssistance', () => {
-    it('requires the player to actually need help', () => {
-        expect(canRequestAssistance({ disposition: 'neutral',
-            playerNeedsHelp: false, govt: govt() })).toBe(false);
-        expect(canRequestAssistance({ disposition: 'neutral',
-            playerNeedsHelp: true, govt: govt() })).toBe(true);
+    it('is OFFERED even when the player needs no help at all', () => {
+        // Matthew: "it should show request assistance even if there's no
+        // reason for you to request it (they usually just tell you that you
+        // don't need help)." The offer is about who you are talking to, not
+        // about your hull — the ANSWER is where the need is judged.
+        expect(canRequestAssistance({ disposition: 'neutral', govt: govt() }))
+            .toBe(true);
+        expect(canRequestAssistance({ disposition: 'friendly', govt: govt() }))
+            .toBe(true);
     });
     it('is refused by hostile ships', () => {
-        expect(canRequestAssistance({ disposition: 'hostile',
-            playerNeedsHelp: true, govt: govt() })).toBe(false);
+        expect(canRequestAssistance({ disposition: 'hostile', govt: govt() }))
+            .toBe(false);
     });
     it('is refused by noAssistOrMercy / cantBeHailed govts', () => {
         expect(canRequestAssistance({ disposition: 'neutral',
-            playerNeedsHelp: true,
             govt: withFlags2({ noAssistOrMercy: true }) })).toBe(false);
         expect(canRequestAssistance({ disposition: 'friendly',
-            playerNeedsHelp: true,
             govt: withFlags({ cantBeHailed: true }) })).toBe(false);
     });
-    it('is allowed for Roadside Assistance govts when the player needs help',
-        () => {
-            expect(canRequestAssistance({ disposition: 'neutral',
-                playerNeedsHelp: true,
-                govt: withFlags2({ roadsideAssistance: true }) })).toBe(true);
-        });
+    it('is allowed for Roadside Assistance govts', () => {
+        expect(canRequestAssistance({ disposition: 'neutral',
+            govt: withFlags2({ roadsideAssistance: true }) })).toBe(true);
+    });
     it('is refused by a neutral-govt ship attacking the player', () => {
         // The assistance exploit: a neutral warship shooting a disabled player
         // must not also offer to fly over and repair them.
-        expect(canRequestAssistance({ disposition: 'neutral',
-            playerNeedsHelp: true, govt: govt(),
+        expect(canRequestAssistance({ disposition: 'neutral', govt: govt(),
             attackingPlayer: true })).toBe(false);
         // Even a Roadside-Assistance govt refuses while attacking.
         expect(canRequestAssistance({ disposition: 'neutral',
-            playerNeedsHelp: true,
             govt: withFlags2({ roadsideAssistance: true }),
             attackingPlayer: true })).toBe(false);
     });
@@ -312,5 +318,92 @@ describe('busyResponseText', () => {
             expect(busyResponseText(sparse, seed))
                 .toBe('I have other business.');
         }
+    });
+});
+
+describe('noNeedResponseText', () => {
+    // STR# 3000 indices 70-74, the group the original answers a pointless
+    // assistance request with (string_table_integration_test pins the data).
+    const table: string[] = [];
+    table[NO_NEED_RESPONSE_FIRST_INDEX] = "You're not in any trouble.";
+    table[NO_NEED_RESPONSE_FIRST_INDEX + 1] = "You're in no danger.";
+    table[NO_NEED_RESPONSE_FIRST_INDEX + 2] = "You don't have any problems.";
+    table[NO_NEED_RESPONSE_FIRST_INDEX + 3] =
+        "It looks like you're sitting pretty from here.  Try helping yourself.";
+    table[NO_NEED_RESPONSE_FIRST_INDEX + 4] =
+        "There's no danger to you right now.";
+
+    it('picks a line from the no-need group', () => {
+        expect(table.slice(NO_NEED_RESPONSE_FIRST_INDEX,
+            NO_NEED_RESPONSE_FIRST_INDEX + NO_NEED_RESPONSE_COUNT))
+            .toContain(noNeedResponseText(table, 4242));
+    });
+
+    it('never answers with a BUSY line (the neighbouring group)', () => {
+        const both = [...table];
+        both[BUSY_RESPONSE_FIRST_INDEX] = "I'm busy.";
+        for (let seed = 0; seed < NO_NEED_RESPONSE_COUNT; seed++) {
+            expect(noNeedResponseText(both, seed)).not.toBe("I'm busy.");
+        }
+    });
+
+    it('is deterministic in the seed (no PRNG, same on every peer)', () => {
+        for (const seed of [0, 1, 2, 3, 4, 99, 123456]) {
+            expect(noNeedResponseText(table, seed))
+                .toBe(noNeedResponseText(table, seed));
+        }
+    });
+
+    it('spreads across the whole group as the seed varies', () => {
+        const seen = new Set<string>();
+        for (let seed = 0; seed < NO_NEED_RESPONSE_COUNT; seed++) {
+            seen.add(noNeedResponseText(table, seed));
+        }
+        expect(seen.size).toBe(NO_NEED_RESPONSE_COUNT);
+    });
+
+    it('falls back to the pinned literal with no usable table', () => {
+        expect(noNeedResponseText(undefined)).toBe(NO_NEED_RESPONSE_FALLBACK);
+        expect(noNeedResponseText([])).toBe(NO_NEED_RESPONSE_FALLBACK);
+    });
+});
+
+describe('hostileResponseText', () => {
+    // STR# 3000 indices 10-14 — what a hostile ship answers a hail with
+    // ("What is it?" on hail/hail_hostile.png). A GLOBAL table: the per-govt
+    // STR# 7000+ resources hold only friendly greetings.
+    const table: string[] = [];
+    table[HOSTILE_RESPONSE_FIRST_INDEX] = 'What is it you want?';
+    table[HOSTILE_RESPONSE_FIRST_INDEX + 1] = 'What do you want?';
+    table[HOSTILE_RESPONSE_FIRST_INDEX + 2] = 'What is it?';
+    table[HOSTILE_RESPONSE_FIRST_INDEX + 3] = 'What is it?';
+    table[HOSTILE_RESPONSE_FIRST_INDEX + 4] = 'What?';
+
+    it('picks a line from the hostile group', () => {
+        expect(table.slice(HOSTILE_RESPONSE_FIRST_INDEX,
+            HOSTILE_RESPONSE_FIRST_INDEX + HOSTILE_RESPONSE_COUNT))
+            .toContain(hostileResponseText(table, 987));
+    });
+
+    it('never answers with a friendly greeting (the group at 20-24)', () => {
+        const both = [...table];
+        both[20] = 'What can I do for you?';
+        for (let seed = 0; seed < HOSTILE_RESPONSE_COUNT; seed++) {
+            expect(hostileResponseText(both, seed))
+                .not.toBe('What can I do for you?');
+        }
+    });
+
+    it('is deterministic in the seed (no PRNG, same on every peer)', () => {
+        for (const seed of [0, 1, 2, 3, 4, 99, 123456]) {
+            expect(hostileResponseText(table, seed))
+                .toBe(hostileResponseText(table, seed));
+        }
+    });
+
+    it('falls back to the pinned literal with no usable table', () => {
+        expect(hostileResponseText(undefined))
+            .toBe(HOSTILE_RESPONSE_FALLBACK);
+        expect(hostileResponseText([])).toBe(HOSTILE_RESPONSE_FALLBACK);
     });
 });

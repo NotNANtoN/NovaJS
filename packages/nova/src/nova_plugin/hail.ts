@@ -40,6 +40,11 @@ import { LegalRecords } from './reputation.js';
  *    of the encounter's stable id, never Math.random) so the client-side
  *    dialog agrees across peers and re-hails. A government with no greeting
  *    resource falls back to a synthetic govt-appropriate line.
+ *  - HOSTILE ships do not use their government's greetings at all: they
+ *    answer from the global ship-comm table (STR# 3000 indices 10-14 — "What
+ *    is it?" on hail/hail_hostile.png), as do the assistance answers
+ *    (granted 75-79, busy 80-84, "you don't need help" 70-74). See
+ *    HAIL_RESPONSE_TABLE below.
  */
 
 /** Which of the two AI-type bribe flags applies to a ship of this aiType. */
@@ -126,11 +131,20 @@ export function shipHailResponse(govt: GovtData | undefined,
 }
 
 /**
- * Whether the player may request fuel/repair assistance from a hailed ship.
- * Requires that the player actually needs help (disabled or low on fuel),
- * the ship is not hostile, and the govt is talkative (not Flags2
- * noAssistOrMercy). Roadside-Assistance govts still gate on player need —
- * they repair/refuel, they don't hand out charity to a healthy ship.
+ * Whether the player may ASK a hailed ship for fuel/repair assistance — i.e.
+ * whether the comm dialog offers the button at all. It is offered to every
+ * ship that would entertain the question: not hostile (politically or
+ * behaviorally), not a cantBeHailed govt, and not a Flags2 noAssistOrMercy
+ * govt ("the request assistance / beg for mercy button is disabled").
+ *
+ * DELIBERATELY NOT gated on whether the player needs help. Matthew: "it
+ * should show request assistance even if there's no reason for you to request
+ * it (they usually just tell you that you don't need help)" — the original
+ * answers a pointless request from its own response group (STR# 3000 indices
+ * 70-74, {@link noNeedResponseText}) with the channel left open, exactly as
+ * it answers a busy ship's refusal. Need is judged in the ANSWER
+ * (hail_plugin's applyHail, which grants nothing to a healthy player), not in
+ * the offer.
  *
  * `attackingPlayer` is behavioral hostility (see shipHailResponse): a ship
  * actively attacking the player refuses assistance even if its politics are
@@ -139,12 +153,10 @@ export function shipHailResponse(govt: GovtData | undefined,
  */
 export function canRequestAssistance(opts: {
     disposition: Disposition,
-    playerNeedsHelp: boolean,
     govt: GovtData | undefined,
     attackingPlayer?: boolean,
 }): boolean {
-    if (!opts.playerNeedsHelp || opts.disposition === 'hostile'
-        || opts.attackingPlayer) {
+    if (opts.disposition === 'hostile' || opts.attackingPlayer) {
         return false;
     }
     if (opts.govt?.flags.cantBeHailed || opts.govt?.flags2.noAssistOrMercy) {
@@ -188,48 +200,118 @@ export function shipIsFighting(opts: {
 }
 
 /**
- * The stock ship-comm response table (STR# 3000), whose entries run in groups
- * of five interchangeable variants — the original picks one at random per
- * response. Index 75-79 is "All right, I'll help you." (assistance granted);
- * the group used here, 80-84, is the BUSY refusal:
+ * The stock ship-comm response table (STR# 3000, "Ship Comm Strings", 190
+ * entries), whose lines run in GROUPS OF FIVE interchangeable variants — the
+ * original picks one at random per response. The groups this module answers
+ * with, verbatim from the real Nova data:
  *
- *   [80] "I'm busy."
- *   [81] "I'm a little busy right now."
- *   [82] "I'm too busy to help you."
- *   [83] "I have other business."
- *   [84] "I've got other things to do."
+ *   [10-14] hostile:  "What is it you want?" / "What do you want?" /
+ *                     "What is it?" / "What is it?" / "What?"
+ *   [70-74] no need:  "You're not in any trouble." / "You're in no danger." /
+ *                     "You don't have any problems." / "It looks like you're
+ *                     sitting pretty from here.  Try helping yourself." /
+ *                     "There's no danger to you right now."
+ *   [75-79] granted:  "All right, I'll help you." / "Sure, I'll help you
+ *                     out." / "Help is on the way." / "I'll come and help
+ *                     you." / "Hang on, I'm coming."
+ *   [80-84] busy:     "I'm busy." / "I'm a little busy right now." / "I'm too
+ *                     busy to help you." / "I have other business." / "I've
+ *                     got other things to do."
  *
- * (Verified against the real Nova data; pinned by
- * nova_plugin/string_table_integration_test.ts so a parser regression shows
- * up there rather than as a wrong line in the comm dialog.)
+ * (Pinned by nova_plugin/string_table_integration_test.ts against the real
+ * data, so a parser regression shows up there rather than as a wrong line in
+ * the comm dialog. Each fallback below is its group's first line verbatim,
+ * used only when the table cannot be loaded at all.)
  */
 export const HAIL_RESPONSE_TABLE = 'nova:3000';
+export const RESPONSE_GROUP_SIZE = 5;
+
+/**
+ * A HOSTILE ship's answer to a hail. Global, not per-government: the per-govt
+ * greeting resources (STR# 7000 + govtId - 128, resolved into
+ * GovtData.commGreetings) hold only friendly greetings, so a hostile ship
+ * answers from this shared group instead — hail/hail_hostile.png shows a
+ * hostile Fed Destroyer answering "What is it?" (index 12/13).
+ *
+ * The neighbouring group at 15-19 ("Calling to beg for your life?") is the
+ * original's TAUNT set, which belongs to a different moment (a mercy plea),
+ * not to opening the channel.
+ */
+export const HOSTILE_RESPONSE_FIRST_INDEX = 10;
+export const HOSTILE_RESPONSE_COUNT = RESPONSE_GROUP_SIZE;
+export const HOSTILE_RESPONSE_FALLBACK = 'What is it you want?';
+
+/** "You don't need help" — the answer to a pointless assistance request. */
+export const NO_NEED_RESPONSE_FIRST_INDEX = 70;
+export const NO_NEED_RESPONSE_COUNT = RESPONSE_GROUP_SIZE;
+export const NO_NEED_RESPONSE_FALLBACK = "You're not in any trouble.";
+
+/** "All right, I'll help you." — the answer when the errand is accepted. */
+export const ASSIST_GRANTED_FIRST_INDEX = 75;
+export const ASSIST_GRANTED_COUNT = RESPONSE_GROUP_SIZE;
+export const ASSIST_GRANTED_FALLBACK = "All right, I'll help you.";
+
+/** The BUSY refusal from a ship in the middle of a fight. */
 export const BUSY_RESPONSE_FIRST_INDEX = 80;
-export const BUSY_RESPONSE_COUNT = 5;
-/** Fallback if the table is missing/short: STR# 3000 index 80 verbatim. */
+export const BUSY_RESPONSE_COUNT = RESPONSE_GROUP_SIZE;
 export const BUSY_RESPONSE_FALLBACK = "I'm busy.";
 
 /**
- * The busy refusal line for a hailed ship, chosen from the STR# 3000 busy
- * group. The original rolls a random variant; this picks one by `seed` (a
- * hash of the ship's uuid, exactly as greetingText does) so the line is
- * stable per encounter, identical on every peer, and draws no PRNG — the
- * dialog is client-side, and a Math.random here would show two players
- * different text for the same event.
+ * One line from a five-variant STR# 3000 group. The original rolls a random
+ * variant; this picks one by `seed` (a hash of the ship's uuid, exactly as
+ * greetingText does) so the line is stable per encounter, identical on every
+ * peer, and draws no PRNG — these dialogs are client-side, and a Math.random
+ * here would show two players different text for the same event. Blank
+ * entries are skipped rather than answered with, and an entirely missing
+ * group falls back to the pinned literal.
  */
-export function busyResponseText(strings: readonly string[] | undefined,
-    seed = 0): string {
+function responseText(strings: readonly string[] | undefined, first: number,
+    fallback: string, seed: number): string {
     const group: string[] = [];
-    for (let i = 0; i < BUSY_RESPONSE_COUNT; i++) {
-        const line = strings?.[BUSY_RESPONSE_FIRST_INDEX + i];
+    for (let i = 0; i < RESPONSE_GROUP_SIZE; i++) {
+        const line = strings?.[first + i];
         if (line && line.trim() !== '') {
             group.push(line);
         }
     }
     if (group.length === 0) {
-        return BUSY_RESPONSE_FALLBACK;
+        return fallback;
     }
     return group[seed % group.length];
+}
+
+/** The busy refusal line for a hailed ship (STR# 3000 indices 80-84). */
+export function busyResponseText(strings: readonly string[] | undefined,
+    seed = 0): string {
+    return responseText(strings, BUSY_RESPONSE_FIRST_INDEX,
+        BUSY_RESPONSE_FALLBACK, seed);
+}
+
+/**
+ * The "you don't need help" line for a hailed ship (STR# 3000 indices 70-74),
+ * answering an assistance request from a player whose ship is fine.
+ */
+export function noNeedResponseText(strings: readonly string[] | undefined,
+    seed = 0): string {
+    return responseText(strings, NO_NEED_RESPONSE_FIRST_INDEX,
+        NO_NEED_RESPONSE_FALLBACK, seed);
+}
+
+/** The acceptance line for a granted assistance request (indices 75-79). */
+export function assistGrantedText(strings: readonly string[] | undefined,
+    seed = 0): string {
+    return responseText(strings, ASSIST_GRANTED_FIRST_INDEX,
+        ASSIST_GRANTED_FALLBACK, seed);
+}
+
+/**
+ * A hostile ship's answer to a hail (STR# 3000 indices 10-14), used in place
+ * of the government greeting the friendly path draws on.
+ */
+export function hostileResponseText(strings: readonly string[] | undefined,
+    seed = 0): string {
+    return responseText(strings, HOSTILE_RESPONSE_FIRST_INDEX,
+        HOSTILE_RESPONSE_FALLBACK, seed);
 }
 
 /**
@@ -299,10 +381,3 @@ export function greetingText(opts: {
     return `Greetings from ${who}. Fly safe, captain.`;
 }
 
-/** The response line for a hostile ship (no pers quote). */
-export function hostileText(govtCommName?: string): string {
-    const who = govtCommName && govtCommName.trim() !== ''
-        ? govtCommName
-        : 'The other ship';
-    return `${who} responds with hostility and refuses to talk.`;
-}
