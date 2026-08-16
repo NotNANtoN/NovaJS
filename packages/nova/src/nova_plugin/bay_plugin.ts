@@ -22,7 +22,8 @@ import { CollisionEvent, CollisionHitterComponent, CollisionVulnerabilityCompone
 import { EscortCommandComponent } from './escort_command.js';
 import { ExitPointData } from './exit_point.js';
 import { GovtComponent } from './govt_component.js';
-import { OwnerComponent, SourceComponent, WeaponConstructors, WeaponEntry } from './fire_weapon_plugin.js';
+import { WeaponConstructors, WeaponEntry } from './fire_weapon_plugin.js';
+import { OwnerComponent, SourceComponent } from './weapon_components.js';
 import { DeathAIComponent } from './npc_plugin.js';
 import { FormationComponent, NpcComponent, NpcSteeringSystem, nextFormationSlot } from './npc_ai_plugin.js';
 import { EscortLandingComponent, PlayerEscortComponent } from './player_escort.js';

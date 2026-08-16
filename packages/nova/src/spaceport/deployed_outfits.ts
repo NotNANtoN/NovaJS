@@ -35,7 +35,7 @@
 import { OutfitData } from 'novadatainterface/outfit_data';
 import { Entity } from 'nova_ecs/entity';
 import { BayFighterComponent } from '../nova_plugin/bay_plugin.js';
-import { OwnerComponent, SourceComponent } from '../nova_plugin/fire_weapon_plugin.js';
+import { OwnerComponent, SourceComponent } from '../nova_plugin/weapon_components.js';
 
 /**
  * Outfit global id -> how many units of it the player owns that are not

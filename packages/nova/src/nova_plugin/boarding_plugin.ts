@@ -31,7 +31,7 @@ import {
 } from './bay_plugin.js';
 import { DisabledComponent, isBelowDisableThreshold, repairedArmor } from './disabled_component.js';
 import { EscortCommandComponent } from './escort_command.js';
-import { OwnerComponent, SourceComponent } from './fire_weapon_plugin.js';
+import { OwnerComponent, SourceComponent } from './weapon_components.js';
 import { FiringGroupComponent } from './firing_group.js';
 import { isInFlock } from './flock.js';
 import { SimulationGameDataResource } from './game_data_resource.js';

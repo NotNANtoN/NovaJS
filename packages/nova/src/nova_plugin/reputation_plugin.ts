@@ -12,7 +12,7 @@ import { System } from 'nova_ecs/system';
 import { DamagedEvent, DeathEvent, ZeroArmorEvent } from './death_plugin.js';
 import { DisabledComponent } from './disabled_component.js';
 import { FiringGroupComponent } from './firing_group.js';
-import { SourceComponent } from './fire_weapon_plugin.js';
+import { SourceComponent } from './weapon_components.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { GovtComponent } from './govt_component.js';
 import { ArmorComponent } from './health_plugin.js';

@@ -20,17 +20,36 @@ import { Time, TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { Provide } from 'nova_ecs/provide';
 import { Query } from 'nova_ecs/query';
 import { Resource } from 'nova_ecs/resource';
+import { System } from 'nova_ecs/system';
 import { DefaultMap } from 'nova_ecs/utils';
 import { SingletonComponent } from 'nova_ecs/world';
+import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
+// FIRST among the local imports, and deliberately: the leaf module that
+// holds OwnerComponent/SourceComponent/VulnerableToPD, which everything
+// below (hostility, flock, ship_plugin and their dependencies) also
+// wants. See weapon_components.ts for why they do not live here.
+import {
+    OwnerComponent, OwnerComponentType, SourceComponent, VulnerableToPD,
+} from './weapon_components.js';
 import { AnimationComponent } from './animation_plugin.js';
+import { CloakActiveComponent, CloakScannerComponent, isTargetable } from './cloak_plugin.js';
 import { ExplodingComponent } from './death_plugin.js';
+import { DisabledComponent } from './disabled_component.js';
 import { applyExitPoint, closestExitPointIndex, ExitPointData, getExitPointData } from './exit_point.js';
 import { FiringGroup, FiringGroupComponent } from './firing_group.js';
+import { isInFlock } from './flock.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { GovtComponent } from './govt_component.js';
 import { firstOrderWithFallback } from './guidance.js';
+import { isHostileTarget } from './hostility.js';
+import { PointDefenseCandidate, selectPointDefenseTarget } from './point_defense.js';
+import { ShipComponent, ShipDataComponent, ShipDataProvider } from './ship_plugin.js';
 import { TargetComponent } from './target_component.js';
 import { WeaponsStateComponent } from './weapons_state.js';
+
+// Re-exported so the ~40 existing importers of these three keep working.
+export { OwnerComponent, SourceComponent, VulnerableToPD };
+export type { OwnerComponentType };
 
 export const WeaponConstructors = new Resource<Map<WeaponData['type'],
     { new(data: WeaponData, runQuery: RunQueryFunction): WeaponEntry }>>('WeaponConstructors');
@@ -215,12 +234,6 @@ function getRandomInCone(angle: number, count: number, random: Random) {
     return angles;
 }
 
-export const SourceComponent = new Component<string>('Source');
-// TODO: Fix delta system to allow stuff that isn't an object.
-const OwnerComponentType = t.type({owner: t.string});
-type OwnerComponentType = t.TypeOf<typeof OwnerComponentType>;
-export const OwnerComponent = new Component<OwnerComponentType>('Owner');
-
 const FireFromEntityQuery = new Query([Optional(WeaponsComponent),
     Entities, MovementStateComponent, AnimationComponent, UUID,
 Optional(OwnerComponent), Optional(TargetComponent), GetEntity] as const, 'FireFromEntityQuery');
@@ -230,11 +243,45 @@ const SubsQuery = new Query([WeaponEntries, MovementStateComponent, Optional(Sub
 
 const ConstructorQuery = new Query([Entities, Emit, WeaponEntries,
     RandomResource, IdFactoryResource, TimeResource,
-    SingletonComponent] as const);
+    SimulationGameDataResource, SingletonComponent] as const);
 
-export const VulnerableToPD = new Component<undefined>('VulnerableToPD');
 const PointDefenseQuery = new Query([MovementStateComponent, Optional(OwnerComponent),
-    UUID, Optional(TargetComponent), VulnerableToPD] as const);
+    UUID, Optional(TargetComponent), GetEntity, VulnerableToPD] as const);
+
+/**
+ * Attaches (and removes) the point defense marker on SHIPS, from the
+ * ship class's own data.
+ *
+ * A step system rather than a Provide or an entity deriver because the
+ * marker is a MARKER: its data is `undefined`, which both of those
+ * mechanisms read as "not derivable yet". It also has to cope with
+ * entities that never pass through staging — a bay fighter is built by
+ * BayWeaponEntry.fire and dropped straight into the entity map, so the
+ * provider systems are the only thing that ever completes it, and bay
+ * fighters are the main reason this feature exists.
+ *
+ * DETERMINISM: reads only ShipDataComponent, which is derived from
+ * synced game data on every peer, and writes an idempotent marker. No
+ * PRNG, no clock, no dependence on iteration order. Ordered after
+ * ShipDataProvider so a freshly inserted ship is marked on the same tick
+ * its data lands rather than the one after.
+ */
+const ShipPointDefenseVulnerabilitySystem = new System({
+    name: 'ShipPointDefenseVulnerability',
+    after: [ShipDataProvider],
+    args: [ShipDataComponent, GetEntity] as const,
+    step(shipData, entity) {
+        const vulnerable = shipData.vulnerableTo.includes('pointDefense');
+        if (vulnerable === entity.components.has(VulnerableToPD)) {
+            return;
+        }
+        if (vulnerable) {
+            entity.components.set(VulnerableToPD, undefined);
+        } else {
+            entity.components.delete(VulnerableToPD);
+        }
+    },
+});
 
 export abstract class WeaponEntry {
     protected entities: EntityMap;
@@ -251,11 +298,18 @@ export abstract class WeaponEntry {
      * (provokeGuidedLock).
      */
     protected time: Time;
+    /**
+     * The simulation's game data, held for the same reason `time` is:
+     * point defense now has to ask the one hostility rule (hostility.ts)
+     * whether a PD-vulnerable SHIP in reach is an enemy, and that rule
+     * reads government data.
+     */
+    protected gameData: SimulationGameDataInterface;
     protected abstract pointDefenseRangeSquared: number;
     constructor(public data: WeaponData, protected runQuery: RunQueryFunction) {
         let weaponEntries: Gettable<WeaponEntry | undefined>;
         [this.entities, this.emit, weaponEntries, this.random, this.ids,
-            this.time] = runQuery(ConstructorQuery)[0];
+            this.time, this.gameData] = runQuery(ConstructorQuery)[0];
         if ('submunitions' in this.data) {
             for (const sub of this.data.submunitions) {
                 weaponEntries.get(sub.id);
@@ -297,6 +351,90 @@ export abstract class WeaponEntry {
         const firingGroup: FiringGroup =
             govt === undefined ? { group } : { group, govt };
         spawned.components.set(FiringGroupComponent, firingGroup);
+    }
+
+    /**
+     * What this point defense turret shoots at THIS instant, out of the
+     * live world: the Bible's "incoming guided weapons and nearby ships"
+     * (wëap Guidance 9/10, ~:3103), missiles first.
+     *
+     * This half gathers facts; point_defense.ts makes the choice (and is
+     * unit-tested on its own). The split is what keeps the priority and
+     * tie-breaking rules readable and testable without a world.
+     *
+     * WHOSE ENEMIES the turret fights: its OWNER's. A bay fighter's or a
+     * hired escort's turret judges hostility from the point of view of
+     * the ship it belongs to, so an escort's point defense engages the
+     * enemies its master is at war with rather than the (usually empty)
+     * politics of a hireling. An independent NPC owns itself and so
+     * judges for itself.
+     *
+     * Cost: hostility is asked only about SHIPS that are already inside
+     * the turret's reach — a handful of entities on a busy tick, and
+     * zero on a quiet one. Distance is measured first for exactly that
+     * reason.
+     */
+    private choosePointDefenseTarget(exitPoint: Position, source: string,
+        ownerUuid: string, firer: Entity) {
+        const viewerUuid = ownerUuid ?? source;
+        const viewerEntity = this.entities.get(viewerUuid) ?? firer;
+        const myScanner = viewerEntity.components.get(CloakScannerComponent);
+        const getEntity = (uuid: string) => this.entities.get(uuid);
+
+        const candidates: (PointDefenseCandidate
+            & { movement: MovementState })[] = [];
+        for (const [movement, candidateOwner, uuid, candidateTarget, entity]
+            of this.runQuery(PointDefenseQuery)) {
+            const distanceSquared =
+                movement.position.subtract(exitPoint).lengthSquared;
+            if (distanceSquared > this.pointDefenseRangeSquared) {
+                continue;
+            }
+            const isShip = entity.components.has(ShipComponent);
+            if (isShip) {
+                // The same three filters the nearest-hostile scan
+                // applies (hostility.ts): a hulk in its death throes, a
+                // ship dead in space, and a ship this one cannot see are
+                // not targets. Without them the "has us targeted" half
+                // of the candidacy rule would keep a turret firing into
+                // a wreck whose stale lock still names us.
+                if (entity.components.has(ExplodingComponent)
+                    || entity.components.has(DisabledComponent)
+                    || !isTargetable(
+                        entity.components.get(CloakActiveComponent),
+                        myScanner)) {
+                    continue;
+                }
+            }
+            candidates.push({
+                uuid,
+                kind: isShip ? 'fighter' : 'missile',
+                distanceSquared,
+                owner: candidateOwner?.owner ?? uuid,
+                target: candidateTarget?.target,
+                hostile: isShip && isHostileTarget(uuid, entity, {
+                    viewerUuid,
+                    viewerEntity,
+                    entities: this.entities,
+                    gameData: this.gameData,
+                    now: this.time.time,
+                }),
+                // Checked for MISSILES too, and deliberately: a shot
+                // fired by our escort carries that escort as its owner,
+                // so only the flock walk (not the owner comparison)
+                // recognises it as ours.
+                inFlock: isInFlock(uuid, viewerUuid, getEntity)
+                    || (viewerUuid !== source
+                        && isInFlock(uuid, source, getEntity)),
+                movement,
+            });
+        }
+
+        return selectPointDefenseTarget(candidates, {
+            owner: viewerUuid,
+            source,
+            rangeSquared: this.pointDefenseRangeSquared,
+        });
     }
 
     fireFromEntity(source: string, inaccuracy = true): Entity | undefined {
@@ -364,35 +502,13 @@ export abstract class WeaponEntry {
 
             if (this.data.guidance === 'pointDefense' ||
                 this.data.guidance === 'pointDefenseBeam') {
-                const targets = this.runQuery(PointDefenseQuery);
-                let closest: MovementState | undefined = undefined
-                let closestUuid: string | undefined = undefined;
-                let distance2 = Infinity;
-                for (let [movement, targetOwner, uuid, otherTarget] of targets) {
-                    if (!targetOwner) {
-                        targetOwner = {owner: uuid};
-                    }
-                    if (targetOwner === owner) {
-                        continue;
-                    }
-                    if (!(otherTarget?.target === owner.owner
-                        || otherTarget?.target === source)) {
-                        continue;
-                    }
-                    const newDistance2 = movement.position.subtract(exitPoint).lengthSquared;
-                    if (newDistance2 < distance2) {
-                        closest = movement;
-                        closestUuid = uuid;
-                        distance2 = newDistance2;
-                    }
-                }
-
-                if (closest && distance2 <= this.pointDefenseRangeSquared) {
-                    angle = this.guidance(exitPoint, movement, closest);
-                    target = closestUuid;
-                } else {
+                const chosen = this.choosePointDefenseTarget(
+                    exitPoint, source, owner.owner, entity);
+                if (!chosen) {
                     return undefined;
                 }
+                angle = this.guidance(exitPoint, movement, chosen.movement);
+                target = chosen.uuid;
             }
             // TODO: Blindspots
         }
@@ -497,10 +613,6 @@ export const FireWeaponPlugin: Plugin = {
         if (!deltaMaker) {
             throw new Error('Expected DeltaMaker to exist');
         }
-        deltaMaker.addComponent(VulnerableToPD, {
-            componentType: markerType,
-        });
-
         deltaMaker.addComponent(OwnerComponent, {
             componentType: OwnerComponentType,
         });
@@ -549,7 +661,29 @@ export const FireWeaponPlugin: Plugin = {
         }
         serializer.addComponent(SourceComponent, t.string);
 
+        // VulnerableToPD is registered the same way, and for the same
+        // reason: a MARKER's data is `undefined`, and DeltaMaker's
+        // default delta path calls immer's createDraft on every
+        // registered component's data, which throws on anything that is
+        // not objectish. That never bit while only PROJECTILES carried
+        // the marker (projectiles hold no MultiplayerData, so they never
+        // reach DeltaMaker.getDelta); the moment ships carry it — which
+        // is the whole point of shïp Flags2 0x0008 — every delta-synced
+        // ship went through that path.
+        //
+        // Nothing is lost by not sending it. The marker is DERIVED, not
+        // authored: from the ship class's data on every peer every step
+        // (ShipPointDefenseVulnerabilitySystem) and from the weapon's
+        // data at spawn for projectiles, both off synced game data. And
+        // serializer registration is what the wire-snapshot, rollback
+        // and desync-hash paths actually consult.
+        serializer.addComponent(VulnerableToPD, markerType);
+
         world.addSystem(WeaponsComponentProvider);
+        // Marks PD-vulnerable ship classes (shïp Flags2 0x0008) so point
+        // defense turrets can see the "nearby ships" half of their prey.
+        world.addSystem(ShipPointDefenseVulnerabilitySystem);
+        world.addComponent(VulnerableToPD);
         world.addComponent(WeaponsComponent);
         world.addComponent(OwnerComponent);
         world.addComponent(SourceComponent);

@@ -1,7 +1,7 @@
 import { Entity } from 'nova_ecs/entity';
 import { applyAggression } from './aggression.js';
 import { FiringGroupComponent, firingImmune, victimFiringGroup } from './firing_group.js';
-import { OwnerComponent } from './fire_weapon_plugin.js';
+import { OwnerComponent } from './weapon_components.js';
 import { FormationComponent, NpcComponent } from './npc_ai_plugin.js';
 import { PlayerEscortComponent } from './player_escort.js';
 

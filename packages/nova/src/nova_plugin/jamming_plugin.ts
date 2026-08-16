@@ -21,7 +21,7 @@ import { Govt, GovtComponent } from './govt_component.js';
 import { OutfitsState, OutfitsStateComponent } from './outfit_plugin.js';
 import { ProjectileDataComponent } from './projectile_data.js';
 import { ProvideFromCache } from './provide_from_cache.js';
-import { OwnerComponent, SourceComponent } from './fire_weapon_plugin.js';
+import { OwnerComponent, SourceComponent } from './weapon_components.js';
 import { TargetComponent } from './target_component.js';
 
 /**

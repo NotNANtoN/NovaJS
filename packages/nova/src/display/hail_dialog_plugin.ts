@@ -8,7 +8,7 @@ import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_
 import { ControlsSubject } from '../nova_plugin/controls_plugin.js';
 import { DisabledComponent } from '../nova_plugin/disabled_component.js';
 import { escortParent } from '../nova_plugin/escort_command_plugin.js';
-import { SourceComponent } from '../nova_plugin/fire_weapon_plugin.js';
+import { SourceComponent } from '../nova_plugin/weapon_components.js';
 import { DisplayAssetDataResource, SimulationGameDataResource } from '../nova_plugin/game_data_resource.js';
 import { GovtComponent } from '../nova_plugin/govt_component.js';
 import {

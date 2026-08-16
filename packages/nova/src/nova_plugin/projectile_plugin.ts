@@ -25,7 +25,8 @@ import { CollisionEvent, CollisionHitterComponent, CollisionVulnerabilityCompone
 import { CreateTime } from './create_time.js';
 import { DamagedEvent, ZeroArmorEvent } from './death_plugin.js';
 import { ExitPointData } from './exit_point.js';
-import { FireSubs, OwnerComponent, SourceComponent, SubCounts, VulnerableToPD, WeaponConstructors, WeaponEntry } from './fire_weapon_plugin.js';
+import { FireSubs, SubCounts, WeaponConstructors, WeaponEntry } from './fire_weapon_plugin.js';
+import { OwnerComponent, SourceComponent, VulnerableToPD } from './weapon_components.js';
 import { FiringGroupComponent, firingImmune, victimFiringGroup } from './firing_group.js';
 import { provokeGuidedLock } from './flock.js';
 import { SimulationGameDataResource } from './game_data_resource.js';

@@ -9,7 +9,7 @@ import { BlastDamageComponent, BlastIgnoreComponent } from './blast_data.js';
 import { CollisionSystem } from './collisions_plugin.js';
 import { CollisionEvent } from './collision_interaction.js';
 import { DamagedEvent } from './death_plugin.js';
-import { OwnerComponent } from './fire_weapon_plugin.js';
+import { OwnerComponent } from './weapon_components.js';
 import { FiringGroupComponent, firingImmune, victimFiringGroup } from './firing_group.js';
 import { GovtComponent } from './govt_component.js';
 import { DisabledComponent } from './disabled_component.js';

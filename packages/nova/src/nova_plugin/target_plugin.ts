@@ -14,7 +14,7 @@ import { ExplodingComponent } from "./death_plugin.js";
 import { findControlledEntity, ShipControlEvent, ShipControlStateComponent } from "./ship_control.js";
 import { CloakActiveComponent, CloakScannerComponent, isTargetable } from "./cloak_plugin.js";
 import { DisabledComponent } from "./disabled_component.js";
-import { OwnerComponent } from "./fire_weapon_plugin.js";
+import { OwnerComponent } from './weapon_components.js';
 import { isInFlock } from "./flock.js";
 import { SimulationGameDataResource } from "./game_data_resource.js";
 import { selectNearestHostile } from "./hostility.js";

@@ -280,7 +280,19 @@ export async function ShipParse(ship: ShipResource,
         largeExplosion: ship.deathDelay >= 60,
         displayWeight: ship.displayOrder,
         animation,
-        vulnerableTo: ["normal"], // TODO: Parse if it's vulnerable to point defense
+        // shïp Flags2 0x0008 (EVN Bible ~:2572): "Ship can be fired on by
+        // point defense systems". This is the SHIP half of the Bible's
+        // description of point defense — "fires automatically at incoming
+        // guided weapons and nearby ships" (wëap Guidance 9/10, ~:3103) —
+        // and it is expressed on the same field the wëap parser uses for
+        // the missile half (weapon_parse's vulnerableTo), so one marker
+        // and one collision tag cover both. 131 of the 288 stock shïp
+        // resources set it, and they are the fighters and small craft:
+        // Viper, Fed Viper, Lightning, Thunderhead, Firebird, Shuttle.
+        // The capital ships (Fed Carrier, Fed Destroyer, IDA Frigate,
+        // Leviathan) do not, and so cannot be touched by point defense.
+        vulnerableTo: (ship.flags2N & 0x0008)
+            ? ["normal", "pointDefense"] : ["normal"],
         // 64-bit flag sets as JSON-safe hex strings.
         contribute: "0x" + ship.contribute.toString(16),
         require: "0x" + ship.require.toString(16),

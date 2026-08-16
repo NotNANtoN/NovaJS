@@ -109,15 +109,41 @@ const ShipAnimationProvider = Provide({
     factory: shipData => shipData.animation,
 });
 
+function deriveShipVulnerability(shipData: ShipData | undefined) {
+    return {
+        // 'debris' lets asteroid resource-boxes (which hit nothing
+        // else) collide with ships for scooping.
+        //
+        // 'pointDefense' rides in from the ship's own data (shïp Flags2
+        // 0x0008, EVN Bible ~:2572: "Ship can be fired on by point
+        // defense systems"), which ship_parse folds into the same
+        // `vulnerableTo` list the weapon parser uses. Without the tag a
+        // PD shot passes straight through, which is the Bible's rule:
+        // point defense damages incoming guided weapons and the ship
+        // classes that opt in, and nothing else. A fighter's PD marker
+        // (VulnerableToPD, which is what a turret AIMS at) is derived
+        // from the same field in fire_weapon_plugin, so a turret can
+        // never target something its shots cannot hurt.
+        //
+        // `shipData` is optional because this provider can run on the
+        // tick before ShipDataProvider has attached it; `update`
+        // re-derives the moment it lands. Re-deriving is safe: the
+        // 'return_escorts' tag a carrier needs is re-added every step by
+        // bay_plugin's ReturnVulnerabilitySystem, which exists precisely
+        // because this set is rebuilt whenever the ship is.
+        vulnerableTo: new Set<unknown>(
+            shipData?.vulnerableTo.includes('pointDefense')
+                ? ['normal', 'debris', 'pointDefense']
+                : ['normal', 'debris']),
+    };
+}
+
 const ShipCollisionInteractionProvider = Provide({
     name: "ShipCollisionInteractionProvider",
     provided: CollisionVulnerabilityComponent,
-    args: [ShipComponent] as const,
-    factory: () => ({
-        // 'debris' lets asteroid resource-boxes (which hit nothing
-        // else) collide with ships for scooping.
-        vulnerableTo: new Set(['normal', 'debris']),
-    }),
+    update: [ShipDataComponent],
+    args: [ShipComponent, Optional(ShipDataComponent)] as const,
+    factory: (_ship, shipData) => deriveShipVulnerability(shipData),
 });
 
 const ShipShieldProvider = Provide({
