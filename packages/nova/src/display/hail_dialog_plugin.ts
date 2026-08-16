@@ -48,8 +48,9 @@ import { HailAction } from '../nova_plugin/hail_plugin.js';
 import { SoundEvent } from '../nova_plugin/sound_plugin.js';
 import { FuelComponent } from '../nova_plugin/health_plugin.js';
 import { planetDisposition, shipDisposition } from '../nova_plugin/iff_plugin.js';
+import { landable } from '../nova_plugin/landable.js';
 import { OutfitsStateComponent } from '../nova_plugin/outfit_plugin.js';
-import { TimeResource } from 'nova_ecs/plugins/time_plugin';
+import { SimulationTimeResource } from './simulation_time.js';
 import { NpcComponent } from '../nova_plugin/npc_ai_plugin.js';
 import { ShootAllWeaponsComponent } from '../nova_plugin/npc_plugin.js';
 import { PersComponent } from '../nova_plugin/pers_plugin.js';
@@ -507,6 +508,10 @@ export async function computeContext(world: World,
         const image = planetData?.landingPict
             ? planetData.landingPict : null;
         const isStation = planetData?.flags.isStation ?? false;
+        // An uninhabited stellar (Jupiter, a wrecked gate) has no traffic
+        // control to clear anyone: the landing gate refuses it outright and
+        // the radar paints it grey, so the channel must not say "cleared".
+        const isLandable = planetData ? landable(planetData) : true;
 
         // THE SAME clearance verdict the landing gate and the radar blip use
         // (stellar_clearance.ts), read off the same delta-synced components
@@ -521,7 +526,11 @@ export async function computeContext(world: World,
                 bribes: player.entity.components.get(StellarBribesComponent),
                 ranks: player.entity.components.get(ActiveRanksComponent),
                 missions: player.entity.components.get(MissionsComponent),
-                planetId, now: world.resources.get(TimeResource)?.time ?? 0,
+                // Bribe expiries are SIM-clock stamps; the display world's
+                // own TimeResource is the wall clock and would judge every
+                // paid bribe already expired.
+                planetId,
+                now: world.resources.get(SimulationTimeResource)?.time ?? 0,
             })
             : { cleared: true as const };
 
@@ -530,7 +539,8 @@ export async function computeContext(world: World,
         // a hostile ship offers Beg For Mercy. Price and affordability are the
         // same pure functions the simulation re-derives in applyHail, so the
         // dialog never shows a number the sim would disagree with.
-        const canBribe = !clearance.cleared && planetTakesBribes(govt);
+        const canBribe = isLandable && !clearance.cleared
+            && planetTakesBribes(govt);
         const amount = bribeAmount(credits, !!govt?.flags.largerBribes);
         const bribe = canBribe
             ? {
@@ -548,7 +558,12 @@ export async function computeContext(world: World,
         // stellar's name appended to the group's trailing space.
         const opening =
             `${stellarChannelOpenText(stellarStrings, seed)}${name}.`;
-        const answer = clearance.cleared
+        const answer = !isLandable
+            ? miscString(miscStrings,
+                isStation ? DOCKING_DENIED_INDEX : LANDING_DENIED_INDEX,
+                isStation ? 'Docking request denied.'
+                    : 'Landing request denied.')
+            : clearance.cleared
             ? miscString(miscStrings,
                 isStation ? CLEARED_TO_DOCK_INDEX : CLEARED_TO_LAND_INDEX,
                 isStation ? 'You are cleared to dock.'
@@ -568,8 +583,8 @@ export async function computeContext(world: World,
         // index 172) for a shut port or a missing travel permit, "Hostile"
         // (173) for a legal record below its MinStatus. identityRuns paints a
         // "Status:" line red, exactly as it does for a hostile ship.
-        const status = planetDisposition(clearance);
-        const heading = status === 'neutral' ? name
+        const status = planetDisposition(clearance, isLandable);
+        const heading = status === 'neutral' || status === 'unlandable' ? name
             : `${name}\nStatus: ${miscString(miscStrings,
                 status === 'hostile'
                     ? STELLAR_STATUS_HOSTILE_INDEX

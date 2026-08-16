@@ -404,11 +404,8 @@ export async function advanceEntityDate(entity: Entity, days: number,
         runCronsForDays(universe.crons, cronStates, bits,
             fromDay, fromDay + days, Math.random, contribute, {
             active: ranks,
-            // A cron's numeric ids are scoped to the plug-in that wrote it,
-            // but runCronsForDays steps every cron at once; the prefix of
-            // the cron whose string is running is not threaded through the
-            // state machine, so stock scoping is used. Plug-in crons that
-            // grant plug-in ranks are the documented gap.
+            // Fallback only: runCronsForDays rescopes ids to each cron's
+            // own plug-in prefix as it steps it.
             resolveId: id => `nova:${id}`,
             getRank: id => universe.getRank(id),
         });

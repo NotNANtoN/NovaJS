@@ -1,5 +1,6 @@
 import 'jasmine';
 import { CronData, getDefaultCronData } from 'novadatainterface/cron_data';
+import { getDefaultRankData } from 'novadatainterface/rank_data';
 import { dayNumber } from './calendar.js';
 import { runCronsForDays } from './cron_logic.js';
 import { CronStates } from './player_state_plugin.js';
@@ -17,6 +18,23 @@ function makeCron(partial: Partial<CronData> = {}): CronData {
 const DAY = dayNumber({ day: 23, month: 6, year: 1177 });
 
 describe('runCronsForDays', () => {
+    it('scopes a cron\'s Kxxx rank grant to the cron\'s OWN plug-in, not '
+        + 'the stock namespace', () => {
+            // A plug-in cron granting "its" rank 147 must activate
+            // "arpia:147", exactly as a plug-in mission's set string does —
+            // regardless of the caller's fallback resolveId.
+            const cron = makeCron({ id: 'arpia:300', onStart: 'K147' });
+            const active = new Set<string>();
+            runCronsForDays([cron], new Map(), new Set(), DAY, DAY + 1,
+                () => 0, 0n, {
+                    active,
+                    resolveId: id => `nova:${id}`,
+                    getRank: id => id === 'arpia:147'
+                        ? { ...getDefaultRankData(), id } : undefined,
+                });
+            expect([...active]).toEqual(['arpia:147']);
+        });
+
     it('runs OnStart and OnEnd together for duration 0', () => {
         const cron = makeCron({ onStart: 'b10', onEnd: 'b11' });
         const bits = new Set<number>();

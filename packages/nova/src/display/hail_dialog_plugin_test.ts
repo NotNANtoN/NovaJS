@@ -26,7 +26,10 @@ import { CreditsComponent } from '../nova_plugin/player_state_plugin.js';
 import { LegalRecordsComponent } from '../nova_plugin/reputation_plugin.js';
 import {
     PlanetComponent, PlanetDataComponent, PlanetTargetComponent,
+    StellarBribesComponent,
 } from '../nova_plugin/planet_plugin.js';
+import { TimePlugin, TimeResource } from 'nova_ecs/plugins/time_plugin';
+import { SimulationTimeResource } from './simulation_time.js';
 import { ShootAllWeaponsComponent } from '../nova_plugin/npc_plugin.js';
 import {
     assistAnswer, computeContext, shipIdentityBlock, targetIsFighting,
@@ -461,6 +464,9 @@ describe('computeContext: hailing a STELLAR', () => {
         planetsTakeBribes?: boolean,
         credits?: number,
         isStation?: boolean,
+        canLand?: boolean,
+        /** Sim-clock ms until which this port has been bribed. */
+        bribedUntil?: number,
     } = {}) {
         const gameData = new MockGameData();
         const govt = {
@@ -475,12 +481,18 @@ describe('computeContext: hailing a STELLAR', () => {
             flags: {
                 ...getDefaultPlanetData().flags,
                 isStation: opts.isStation ?? false,
+                canLand: opts.canLand ?? true,
             },
         };
 
         const world = new World();
-        world.entities.set(PLAYER, new Entity()
-            .addComponent(PlayerShipSelector, undefined)
+        const player = new Entity()
+            .addComponent(PlayerShipSelector, undefined);
+        if (opts.bribedUntil !== undefined) {
+            player.addComponent(StellarBribesComponent,
+                new Map([['nova:128', opts.bribedUntil]]));
+        }
+        world.entities.set(PLAYER, player
             .addComponent(CreditsComponent, { credits: opts.credits ?? 10_000 })
             .addComponent(LegalRecordsComponent,
                 new Map([['nova:128', opts.record ?? 0]]))
@@ -580,6 +592,56 @@ describe('computeContext: hailing a STELLAR', () => {
         const result = await computeContext(world, gameData, stellarAssets());
         expect(result?.context.body).toContain('You are cleared to dock.');
     });
+
+    it('judges a paid bribe against the MIRRORED SIM CLOCK, not this '
+        + 'world\'s wall clock', async () => {
+            // The sim stamps bribe expiries on its 0-based logical clock.
+            // A display world keeps wall-clock epoch ms in TimeResource,
+            // which is ~50 years past any such stamp: read there, every
+            // paid bribe looked expired and the channel re-offered the deal.
+            const { world, gameData } = planetWorld({
+                minStatus: 0, record: -1, planetsTakeBribes: true,
+                bribedUntil: 90_000,
+            });
+            await world.addPlugin(TimePlugin);
+            world.resources.set(TimeResource, {
+                time: 1_800_000_000_000, delta_ms: 16, delta_s: 0.016,
+                frame: 1,
+            });
+            world.resources.set(SimulationTimeResource, {
+                time: 60_000, delta_ms: 16, delta_s: 0.016, frame: 3600,
+            });
+            const result = await computeContext(world, gameData,
+                stellarAssets());
+
+            expect(result?.context.body).toContain('You are cleared to land.');
+            expect(result?.context.bribe).toBeUndefined();
+            expect(result?.context.heading).toBe('Earth');
+
+            // And once the sim clock passes the expiry, the deal is back.
+            world.resources.set(SimulationTimeResource, {
+                time: 90_001, delta_ms: 16, delta_s: 0.016, frame: 5400,
+            });
+            const later = await computeContext(world, gameData,
+                stellarAssets());
+            expect(later?.context.bribe?.purpose).toBe('landing');
+        });
+
+    it('never clears an UNLANDABLE stellar (Jupiter) — the gate refuses it '
+        + 'and the radar paints it grey', async () => {
+            const { world, gameData } = planetWorld({
+                canLand: false, planetsTakeBribes: true,
+            });
+            const result = await computeContext(world, gameData,
+                stellarAssets());
+
+            expect(result?.context.body).toContain('Landing request denied.');
+            expect(result?.context.body).not.toContain('cleared');
+            // No traffic control to bargain with, and no Status line: it
+            // is neither Forbidden nor Hostile, just not a port.
+            expect(result?.context.bribe).toBeUndefined();
+            expect(result?.context.heading).toBe('Earth');
+        });
 
     it('falls back to pinned literals when the string tables are missing',
         async () => {

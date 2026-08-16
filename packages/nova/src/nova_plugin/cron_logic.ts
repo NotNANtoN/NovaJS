@@ -187,6 +187,12 @@ function activeCronContribute(crons: CronData[], states: CronStates,
  * is the player's ship + outfit Contribute mask (the active crons' own
  * Contribute is folded in per day); default 0n means no contributions.
  */
+/** The plug-in prefix of a cron's global id ("nova:512" -> "nova"). */
+function cronPrefix(cron: CronData): string {
+    const colon = cron.id.lastIndexOf(':');
+    return colon === -1 ? 'nova' : cron.id.slice(0, colon);
+}
+
 export function runCronsForDays(crons: CronData[], states: CronStates,
     bits: Set<number>, fromDay: number, toDay: number,
     random: () => number = Math.random, baseContribute: bigint = 0n,
@@ -200,7 +206,10 @@ export function runCronsForDays(crons: CronData[], states: CronStates,
             }
             const contribute =
                 activeCronContribute(crons, states, baseContribute);
-            stepCron(cron, state, day, bits, contribute, random, ranks);
+            // A cron's Kxxx/Lxxx numeric ids are scoped to the plug-in
+            // that wrote the cron, exactly as a mission's are.
+            stepCron(cron, state, day, bits, contribute, random,
+                ranks && { ...ranks, resolveId: id => `${cronPrefix(cron)}:${id}` });
         }
     }
 }

@@ -10,13 +10,14 @@ import { Plugin } from "nova_ecs/plugin";
 import { MovementState, MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
 import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { Query } from "nova_ecs/query";
+import { defaultSimulationTime, SimulationTimeResource } from "./simulation_time.js";
 import { Resource } from "nova_ecs/resource";
 import { System } from "nova_ecs/system";
 import * as PIXI from "pixi.js";
 import { Subject } from "rxjs";
 import { DisplayAssetDataInterface } from "../client/gamedata/display_asset_data.js";
 import { DisplayAssetDataResource, SimulationGameDataResource } from "../nova_plugin/game_data_resource.js";
-import { CloakActiveComponent, CloakComponent, CloakScannerComponent } from "../nova_plugin/cloak_plugin.js";
+import { CloakActiveComponent, CloakComponent, deriveCloakScanner } from "../nova_plugin/cloak_plugin.js";
 import { GovtComponent } from "../nova_plugin/govt_component.js";
 import { deriveIff, dispositionColor, planetBlipColor, planetDisposition, PLANET_FLAT_COLOR, shipDisposition } from "../nova_plugin/iff_plugin.js";
 import { LegalRecordsComponent } from "../nova_plugin/reputation_plugin.js";
@@ -938,14 +939,15 @@ const RadarTime = new Component<{ lastTime: number }>('RadarTime');
 
 const DrawRadar = new System({
     name: 'DrawRadar',
-    args: [Optional(RadarTime), TimeResource, StatusBarResource, MovementStateComponent,
+    args: [Optional(RadarTime), TimeResource, SimulationTimeResource,
+        StatusBarResource, MovementStateComponent,
     new Query([UUID, MovementStateComponent, ShipDataComponent,
         Optional(CloakActiveComponent), Optional(CloakComponent),
         Optional(GovtComponent)] as const),
     new Query([UUID, MovementStateComponent, PlanetDataComponent,
         PlanetComponent] as const),
         SimulationGameDataResource, GetEntity, PlayerShipSelector] as const,
-    step(radarTime, { time }, statusBar, { position }, ships, planets,
+    step(radarTime, { time }, simTime, statusBar, { position }, ships, planets,
         gameData, entity) {
         if (!radarTime) {
             radarTime = { lastTime: 0 };
@@ -958,8 +960,16 @@ const DrawRadar = new System({
             // radar (ModVal 0x0001). Builds on the merged interference/
             // static radar. The player's own ship is drawn separately
             // from `source`, so it always shows.
-            const scanner = entity.components.get(CloakScannerComponent);
-            const revealsCloaked = scanner?.revealsOnRadar === true;
+            // Like IFF below, the scanner capability is derived here from
+            // the player's delta-synced outfits: CloakScannerComponent is a
+            // sim-side provider output that never crosses the bridge, so
+            // reading it off the mirrored entity always came back empty.
+            const scannerOutfits =
+                entity.components.get(OutfitsStateComponent);
+            const revealsCloaked = scannerOutfits
+                ? deriveCloakScanner(scannerOutfits, gameData)
+                    ?.revealsOnRadar === true
+                : false;
             const visibleShips = revealsCloaked ? ships : ships.filter(
                 ([, , , cloakActive, cloak]) =>
                     !(cloakActive?.active && (cloak?.hidesFromRadar ?? true)));
@@ -1012,7 +1022,10 @@ const DrawRadar = new System({
                         planetData, gameData, records: planetRecords,
                         shipData, outfits: playerOutfits, bribes,
                         ranks: planetRanks, missions: planetMissions,
-                        planetId: planet.id, now: time,
+                        // Bribe expiries are SIM-clock stamps (0-based
+                        // logical time); this world's TimeResource is the
+                        // wall clock, ~50 years past every expiry.
+                        planetId: planet.id, now: simTime.time,
                     })
                     : { cleared: true } as const;
                 planetColors.set(uuid, planetBlipColor(
@@ -1503,6 +1516,12 @@ export const StatusBarPlugin: Plugin = {
             world.resources.set(DockedShipResource, {});
         }
 
+        // DrawRadar judges bribe expiries against the mirrored sim clock;
+        // seed it so the radar can draw before the first frame arrives.
+        if (!world.resources.has(SimulationTimeResource)) {
+            world.resources.set(SimulationTimeResource,
+                defaultSimulationTime());
+        }
         world.addSystem(DrawRadar);
         world.addSystem(SelectStatusBarInterface);
         world.addSystem(StatusBarResize);
