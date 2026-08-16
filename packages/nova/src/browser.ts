@@ -43,7 +43,7 @@ import { daysPerJump } from "./nova_plugin/calendar.js";
 import { ControlEvent, ControlsSubject, EcsControlEvent } from "./nova_plugin/controls_plugin.js";
 import { Controls, getActions, SavedControls } from "./nova_plugin/controls.js";
 import { DisplayAssetDataResource, SimulationGameDataResource } from "./nova_plugin/game_data_resource.js";
-import { FinishJumpEvent, JumpComponent, JumpRouteComponent } from "./nova_plugin/jump_plugin.js";
+import { FinishJumpEvent, JumpComponent, JumpRouteComponent, unpinArrivedSystem } from "./nova_plugin/jump_plugin.js";
 import { GateArrivalComponent, GateTransitEvent } from "./nova_plugin/gate_transit_plugin.js";
 import { GateDestinationResolver } from "./nova_plugin/gate_destination_resolver.js";
 import { LeaveGateMapEvent, OpenGateMapEvent } from "./display/gate_map_plugin.js";
@@ -1406,6 +1406,14 @@ async function enterSystem({ entity, to, uuid }:
     const missionShips = entity.components.has(PlayerShipSelector)
         ? await prepareMissionShips(entity, uuid, to,
             holdBatch ? 0 : jumpEscorts.length) : [];
+    // Arriving in a system that heads the pinned route unpins it — however
+    // we got here. The hyperspace path shifts the route at jump START (so
+    // its arrival finds the destination already gone), but a hypergate or
+    // wormhole transit into a routed system left the pin standing (Matthew's
+    // playtest: jumped in, left by gate, still pinned). Mutating the held
+    // entity BEFORE it is encoded into its insertion record keeps this on
+    // the owner-driven input path, identical on every peer.
+    unpinArrivedSystem(entity, to);
     await newSimulationBridge.addEntity(uuid, entity);
     if (entity.components.has(PlayerShipSelector)) {
         (window as any).myShip = entity;

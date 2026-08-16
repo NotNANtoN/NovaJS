@@ -101,6 +101,28 @@ export type JumpRoute = {
     route: string[],
 };
 export const JumpRouteComponent = new Component<JumpRoute>('JumpRouteComponent');
+
+/**
+ * Drops `arrivedSystem` from the HEAD of the entity's jump route (all
+ * consecutive occurrences), so arriving in a routed system unpins it no
+ * matter how the ship got there. The hyperspace path shifts the route at
+ * jump START (beginJump), so its own arrival never sees the destination;
+ * a hypergate or wormhole transit does NOT touch the route, so a system
+ * reached by gate stayed pinned — the status bar kept reading
+ * "Hyperspace: <this system>" and the next jump press went nowhere
+ * useful. Deeper entries are left alone: a route through here to
+ * somewhere else keeps its later hops. Pure over the entity; the caller
+ * runs it before the entity is encoded into its insertion record.
+ */
+export function unpinArrivedSystem(entity: Entity, arrivedSystem: string): void {
+    const jumpRoute = entity.components.get(JumpRouteComponent);
+    if (!jumpRoute) {
+        return;
+    }
+    while (jumpRoute.route.length > 0 && jumpRoute.route[0] === arrivedSystem) {
+        jumpRoute.route.shift();
+    }
+}
 const JumpRouteProvider = Provide({
     name: 'JumpRouteProvider',
     // Every controlled ship (any peer's), not just the local player:

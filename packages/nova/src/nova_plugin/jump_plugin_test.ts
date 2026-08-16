@@ -5,7 +5,7 @@ import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
 import { World } from "nova_ecs/world";
 import { getIntegrationGameData } from "../communication/simulation_test_fixture.js";
 import { completeEntity } from "./entity_data_loader.js";
-import { FinishJump, FinishJumpEvent, JumpComponent, JumpRouteComponent, JUMP_ARRIVAL_MARGIN_S, JUMP_DEPART_DELAY_MS, JUMP_DISTANCE, JUMP_SPINUP_DELAY_MS, WARP_OUT_SOUND, WARP_UP_FAST_SOUND, WARP_UP_SOUND } from "./jump_plugin.js";
+import { FinishJump, FinishJumpEvent, JumpComponent, JumpRouteComponent, unpinArrivedSystem, JUMP_ARRIVAL_MARGIN_S, JUMP_DEPART_DELAY_MS, JUMP_DISTANCE, JUMP_SPINUP_DELAY_MS, WARP_OUT_SOUND, WARP_UP_FAST_SOUND, WARP_UP_SOUND } from "./jump_plugin.js";
 import { makeShip } from "./make_ship.js";
 import { makeSystem, SIMULATION_STEP_MS } from "./make_system.js";
 import { applyControlEvents } from "./ship_control.js";
@@ -709,4 +709,40 @@ describe('a disabled player\'s jump is cancelled', () => {
             expect(ship.components.get(JumpRouteComponent)!.route.length)
                 .toEqual(1);
         }, 30_000);
+});
+
+describe('unpinArrivedSystem', () => {
+    function shipWithRoute(route: string[]): Entity {
+        const ship = new Entity('ship');
+        ship.components.set(JumpRouteComponent, { route });
+        return ship;
+    }
+
+    it('drops the arrived system from the head of the route (a gate '
+        + 'transit into a routed system left it pinned)', () => {
+        const ship = shipWithRoute(['nova:130', 'nova:131']);
+        unpinArrivedSystem(ship, 'nova:130');
+        expect(ship.components.get(JumpRouteComponent)!.route)
+            .toEqual(['nova:131']);
+    });
+
+    it('drops consecutive duplicates of the arrived system', () => {
+        const ship = shipWithRoute(['nova:130', 'nova:130', 'nova:132']);
+        unpinArrivedSystem(ship, 'nova:130');
+        expect(ship.components.get(JumpRouteComponent)!.route)
+            .toEqual(['nova:132']);
+    });
+
+    it('leaves a route that does not head with the arrived system alone',
+        () => {
+            const ship = shipWithRoute(['nova:131', 'nova:130']);
+            unpinArrivedSystem(ship, 'nova:130');
+            expect(ship.components.get(JumpRouteComponent)!.route)
+                .toEqual(['nova:131', 'nova:130']);
+        });
+
+    it('is a no-op without a route component', () => {
+        const ship = new Entity('ship');
+        expect(() => unpinArrivedSystem(ship, 'nova:130')).not.toThrow();
+    });
 });
