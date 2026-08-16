@@ -71,6 +71,7 @@ import { MenuControls } from '../spaceport/menu_controls.js';
 import { HailContext, HailDialog } from '../spaceport/hail_dialog.js';
 import { ScreenSize } from './screen_size_plugin.js';
 import { Stage } from './stage_resource.js';
+import { displayName } from '../nova_plugin/display_name.js';
 
 /**
  * Opens the communications (hail) dialog with the 'hail' key ('y') while in
@@ -504,7 +505,8 @@ export async function computeContext(world: World,
         const govt = planetData?.govt
             ? await gameData.data.Govt.get(planetData.govt).catch(() => undefined)
             : undefined;
-        const name = planetData?.name || 'Spaceport';
+        // "; comment" resource-name suffixes are authoring notes, hidden.
+        const name = displayName(planetData?.name ?? '') || 'Spaceport';
         const image = planetData?.landingPict
             ? planetData.landingPict : null;
         const isStation = planetData?.flags.isStation ?? false;

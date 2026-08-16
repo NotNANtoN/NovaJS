@@ -169,6 +169,17 @@ export class MissionInfoDialog {
      * Shows the dialog for a ship entity; resolves when dismissed.
      * Passing an abort context (docked only) enables the Abort button.
      */
+    /**
+     * Closes the dialog from outside (its display world is being torn
+     * down mid-jump), releasing the MenuControls binding. No-op when
+     * not shown.
+     */
+    dismiss() {
+        if (this.container.visible) {
+            this.closed.next();
+        }
+    }
+
     async show(entity: Entity,
         abortContext?: MissionInfoAbortContext): Promise<void> {
         this.entity = entity;

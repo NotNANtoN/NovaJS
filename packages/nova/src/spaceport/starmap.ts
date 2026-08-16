@@ -368,7 +368,7 @@ export class SystemGraph {
         for (const { system, x, y } of this.clickTargets) {
             drawSystem(system, circleGraphics, x, y);
             if (fontReady) {
-                const label = new PIXI.BitmapText(system.name, {
+                const label = new PIXI.BitmapText(displayName(system.name), {
                     fontName: LABEL_FONT_NAME,
                     fontSize: LABEL_FONT_SIZE,
                 });
@@ -509,7 +509,7 @@ export class SystemGraph {
         let prefixMatch: SystemData | undefined;
         let prefixMatches = 0;
         for (const { system } of this.clickTargets) {
-            const candidate = system.name.toLowerCase();
+            const candidate = displayName(system.name).toLowerCase();
             if (candidate === wanted) {
                 this.selectForInfo(system.id);
                 this.centerOn(system.id);
@@ -1296,13 +1296,13 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
         const explored = this.isSystemExplored(systemId);
         if (!system || !explored) {
             addLine(PropSlot.System, title,
-                [explored && system ? system.name : '<Unknown>']);
+                [explored && system ? displayName(system.name) : '<Unknown>']);
             this.portsValue.text = '<Unknown>';
             this.hazardsValue.text = '<Unknown>';
             return;
         }
 
-        addLine(PropSlot.System, title, [system.name]);
+        addLine(PropSlot.System, title, [displayName(system.name)]);
 
         const govt = system.govt
             ? this.universe.getGovt(system.govt) : undefined;
@@ -1348,7 +1348,7 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
             services.length > 0 ? services : ['None']);
 
         this.portsValue.text = ports.length > 0
-            ? ports.map(p => p.name).join(', ') : 'None';
+            ? ports.map(p => displayName(p.name)).join(', ') : 'None';
         this.hazardsValue.text =
             hazardDescription(system.asteroids, system.interference);
     }

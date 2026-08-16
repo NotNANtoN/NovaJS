@@ -21,6 +21,7 @@ import { computeCargoCapacity } from './mission_session.js';
 import { ActiveRanksComponent } from '../nova_plugin/ncb_plugin.js';
 import { activeRankData } from '../nova_plugin/rank_logic.js';
 import { RankData } from 'novadatainterface/rank_data';
+import { displayName } from '../nova_plugin/display_name.js';
 
 // The player-info dialog composes the three PICTs 8518 (top strip,
 // 413x40, tab row) / 8519 (black content pane, tiled to the content
@@ -222,6 +223,17 @@ export class PlayerInfoDialog {
     }
 
     /** Shows the dialog and resolves when the player dismisses it. */
+    /**
+     * Closes the dialog from outside (its display world is being torn
+     * down mid-jump), releasing the MenuControls binding. No-op when
+     * not shown.
+     */
+    dismiss() {
+        if (this.container.visible) {
+            this.closed.next();
+        }
+    }
+
     async show(entity: Entity): Promise<void> {
         this.entity = entity;
         try {
@@ -405,13 +417,13 @@ export class PlayerInfoDialog {
         // Kick off (or reuse) the async load; the value shows on the
         // next page render if it wasn't ready yet.
         void this.simulationData.data.System.get(systemId).then(system => {
-            this.systemName = system.name;
+            this.systemName = displayName(system.name);
         }).catch(() => undefined);
         const cached = this.simulationData.data.System.getCached(systemId);
         if (!cached) {
             return records ? 0 : undefined;
         }
-        this.systemName = cached.name;
+        this.systemName = displayName(cached.name);
         if (!cached.govt) {
             return 0;
         }

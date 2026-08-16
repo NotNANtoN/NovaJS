@@ -209,7 +209,8 @@ export class MissionUniverse {
         if (!id) {
             return 'nowhere';
         }
-        return this.planetsById.get(id)?.name ?? id;
+        const name = this.planetsById.get(id)?.name;
+        return name === undefined ? id : displayName(name);
     }
 
     systemIdOfPlanet(planetId: string): string | undefined {
@@ -241,6 +242,7 @@ export class MissionUniverse {
         if (!systemId) {
             return 'deep space';
         }
-        return this.systemsById.get(systemId)?.name ?? systemId;
+        const name = this.systemsById.get(systemId)?.name;
+        return name === undefined ? systemId : displayName(name);
     }
 }

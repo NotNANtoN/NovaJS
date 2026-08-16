@@ -115,6 +115,9 @@ export const MissionInfoPlugin: Plugin = {
         world.resources.get(MissionInfoControlsSubscription)?.unsubscribe();
         const stage = world.resources.get(Stage);
         const dialog = world.resources.get(MissionInfoResource);
+        // Release the keyboard if the dialog is still open while its world
+        // is torn down (jumped with it up); see Menu.dismiss.
+        dialog?.dismiss();
         if (stage && dialog) {
             stage.removeChild(dialog.container);
         }

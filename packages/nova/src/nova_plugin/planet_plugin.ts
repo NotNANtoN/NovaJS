@@ -38,6 +38,7 @@ import { Missions, MissionsComponent } from './player_state_plugin.js';
 import {
     contributeBits, isMissionDestination, planetClearance, StellarClearance,
 } from './stellar_clearance.js';
+import { displayName } from './display_name.js';
 
 export const PlanetType = t.type({
     id: t.string // Not a UUID. A nova id.
@@ -268,7 +269,7 @@ const AttemptLandingSystem = new System({
                     // treated as landable, exactly as before.
                     emit(LandingBlockedEvent, {
                         reason: 'unlandable', isStation,
-                        stellarName: planetData.name,
+                        stellarName: displayName(planetData.name),
                         ...(planetData.gate
                             ? { gateKind: planetData.gate.kind } : {}),
                     }, [playerUuid]);
@@ -293,7 +294,7 @@ const AttemptLandingSystem = new System({
                     // bribe for a landing the gate would have allowed.
                     emit(LandingBlockedEvent, {
                         reason: 'denied', isStation,
-                        stellarName: planetData.name,
+                        stellarName: displayName(planetData.name),
                     }, [playerUuid]);
                 } else {
                     emit(LandEvent, { id, uuid }, [playerUuid]);

@@ -64,4 +64,18 @@ export abstract class Menu<T> {
     protected done() {
         this.results.next(this.input);
     }
+
+    /**
+     * Closes the menu from OUTSIDE (the owning display world is being torn
+     * down — a jump or gate transit while the map is open). Resolves the
+     * pending show() with the current input so the MenuControls binding is
+     * released; a menu left bound after its world died kept the keyboard
+     * for good, and the ship could not be flown in the next system.
+     * No-op when not shown.
+     */
+    dismiss() {
+        if (this.container.visible) {
+            this.done();
+        }
+    }
 }

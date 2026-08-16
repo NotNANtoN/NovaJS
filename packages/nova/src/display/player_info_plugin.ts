@@ -105,6 +105,9 @@ export const PlayerInfoPlugin: Plugin = {
         world.resources.get(PlayerInfoControlsSubscription)?.unsubscribe();
         const stage = world.resources.get(Stage);
         const dialog = world.resources.get(PlayerInfoResource);
+        // Release the keyboard if the dialog is still open while its world
+        // is torn down (jumped with it up); see Menu.dismiss.
+        dialog?.dismiss();
         if (stage && dialog) {
             stage.removeChild(dialog.container);
         }

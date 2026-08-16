@@ -1,4 +1,4 @@
-import { RunQuery, UUID } from 'nova_ecs/arg_types';
+import { GetWorld, RunQuery, UUID } from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
 import { AddEvent, EcsEvent } from 'nova_ecs/events';
 import { Plugin } from 'nova_ecs/plugin';
@@ -9,8 +9,15 @@ import { Query } from 'nova_ecs/query';
 import { Resource } from 'nova_ecs/resource';
 import { System } from 'nova_ecs/system';
 import { GATE_EMERGENCE_DISTANCE } from '../nova_plugin/gate_transit_plugin.js';
-import { PlanetComponent, PlanetDataComponent, PlanetTargetComponent } from '../nova_plugin/planet_plugin.js';
-import { ShipComponent } from '../nova_plugin/ship_plugin.js';
+import { Optional } from 'nova_ecs/optional';
+import { SimulationGameDataResource } from '../nova_plugin/game_data_resource.js';
+import { ActiveRanksComponent } from '../nova_plugin/ncb_plugin.js';
+import { OutfitsStateComponent } from '../nova_plugin/outfit_plugin.js';
+import { PlanetComponent, PlanetDataComponent, PlanetTargetComponent, stellarClearanceFor, StellarBribesComponent } from '../nova_plugin/planet_plugin.js';
+import { MissionsComponent } from '../nova_plugin/player_state_plugin.js';
+import { LegalRecordsComponent } from '../nova_plugin/reputation_plugin.js';
+import { ShipComponent, ShipDataComponent } from '../nova_plugin/ship_plugin.js';
+import { defaultSimulationTime, SimulationTimeResource } from './simulation_time.js';
 import { AnimationGraphicComponent, ObjectDrawSystem } from './animation_graphic_plugin.js';
 
 /**
@@ -200,15 +207,30 @@ const ShipArrivedAtGateSystem = new System({
     },
 });
 
-const ShipTargetQuery = new Query([PlanetTargetComponent] as const);
+/**
+ * A ship's landing selection plus everything the clearance rule reads. A
+ * PLAYER (the only kind of ship that carries a legal record) opens a gate
+ * only if the gate would actually let it through — the same
+ * stellarClearanceFor verdict the landing gate, radar blip and comm dialog
+ * quote (ränk 147 unlocks the stock network) — so a pilot without access
+ * sees a gate that ignores them. NPC selections open it as before.
+ */
+const ShipTargetQuery = new Query([PlanetTargetComponent,
+    Optional(LegalRecordsComponent), Optional(ShipDataComponent),
+    Optional(OutfitsStateComponent), Optional(StellarBribesComponent),
+    Optional(ActiveRanksComponent), Optional(MissionsComponent)] as const);
 
 export const GateAnimationSystem = new System({
     name: 'GateAnimationSystem',
     args: [GateAnimationComponent, PlanetComponent, PlanetDataComponent,
         AnimationGraphicComponent, UUID, TimeResource,
-        GateAnticipationResource, RunQuery] as const,
+        GateAnticipationResource, RunQuery, GetWorld] as const,
     step(state, planet, planetData, graphic, uuid, time, anticipation,
-        runQuery) {
+        runQuery, world) {
+        // Optional resources: a test world without game data treats every
+        // selection as cleared (the pre-clearance rule).
+        const gameData = world.resources.get(SimulationGameDataResource);
+        const simTime = world.resources.get(SimulationTimeResource);
         if (planetData.gate?.kind !== 'hypergate') {
             return;
         }
@@ -225,8 +247,19 @@ export const GateAnimationSystem = new System({
         // (per-ship synced state, so other players' selections count too),
         // or while an arrival through this gate is pending/fresh.
         let wantOpen = false;
-        for (const [target] of runQuery(ShipTargetQuery)) {
-            if (target.target === uuid) {
+        for (const [target, records, shipData, outfits, bribes, ranks,
+            missions] of runQuery(ShipTargetQuery)) {
+            if (target.target !== uuid) {
+                continue;
+            }
+            // Bribe expiries are sim-clock stamps: judge them against the
+            // mirrored sim clock, never this world's wall clock.
+            const cleared = !records || !gameData || stellarClearanceFor({
+                planetData, gameData, records, shipData, outfits, bribes,
+                ranks, missions, planetId: planet.id,
+                now: simTime?.time ?? 0,
+            }).cleared;
+            if (cleared) {
                 wantOpen = true;
                 break;
             }
@@ -258,6 +291,10 @@ export const GateAnimationPlugin: Plugin = {
     build(world) {
         world.addComponent(GateAnimationComponent);
         world.resources.set(GateAnticipationResource, new Map());
+        if (!world.resources.has(SimulationTimeResource)) {
+            world.resources.set(SimulationTimeResource,
+                defaultSimulationTime());
+        }
         world.addSystem(GateAnimationProvider);
         world.addSystem(AnticipateArrivalSystem);
         world.addSystem(ShipArrivedAtGateSystem);

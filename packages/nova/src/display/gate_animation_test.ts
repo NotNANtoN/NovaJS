@@ -6,7 +6,13 @@ import { Entity } from "nova_ecs/entity";
 import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
 import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { World } from "nova_ecs/world";
+import { getDefaultGovtData } from "novadatainterface/govt_data";
+import { MockGameData } from "novadatainterface/mock_game_data";
 import { getDefaultPlanetData } from "novadatainterface/planet_data";
+import { getDefaultRankData, getDefaultRankFlags } from "novadatainterface/rank_data";
+import { SimulationGameDataResource } from "../nova_plugin/game_data_resource.js";
+import { ActiveRanksComponent } from "../nova_plugin/ncb_plugin.js";
+import { LegalRecordsComponent } from "../nova_plugin/reputation_plugin.js";
 import { GATE_EMERGENCE_DISTANCE } from "../nova_plugin/gate_transit_plugin.js";
 import { PlanetComponent, PlanetDataComponent, PlanetTargetComponent } from "../nova_plugin/planet_plugin.js";
 import { ShipComponent } from "../nova_plugin/ship_plugin.js";
@@ -228,6 +234,59 @@ describe('GateAnimationSystem triggers', () => {
         }
         expect(gateState().mode).toBe('closed');
         expect(sprite.frame).toBe(0);
+    });
+
+    it('ignores a PLAYER without access to a locked gate, opens for one '
+        + 'holding the unlocking rank, and still opens for NPC selections',
+        async () => {
+        // A stock working gate: MinStatus 32767 under the Hypergate govt,
+        // unlocked only by a rank carrying 0x0200 for that govt.
+        const gameData = new MockGameData();
+        const govt = { ...getDefaultGovtData(), id: 'nova:183' };
+        gameData.data.Govt.map.set('nova:183', govt);
+        await gameData.data.Govt.get('nova:183');
+        const rank = {
+            ...getDefaultRankData(), id: 'nova:147', affilGovt: 'nova:183',
+            rankFlags: {
+                ...getDefaultRankFlags(), canAlwaysLandOnGovtStellars: true,
+            },
+        };
+        gameData.data.Rank.map.set('nova:147', rank);
+        await gameData.data.Rank.get('nova:147');
+        world.resources.set(SimulationGameDataResource, gameData);
+        const gate = world.entities.get(GATE_UUID)!;
+        gate.components.set(PlanetDataComponent, {
+            ...gate.components.get(PlanetDataComponent)!,
+            govt: 'nova:183', minStatus: 32767,
+        });
+
+        // A player (has a legal record) without the rank: the gate ignores
+        // their selection.
+        const player = new Entity('player');
+        player.components.set(PlanetTargetComponent, { target: GATE_UUID });
+        player.components.set(LegalRecordsComponent, new Map());
+        world.entities.set('player uuid', player);
+        for (let i = 0; i < 5; i++) {
+            step();
+        }
+        expect(gateState().mode).toBe('closed');
+        expect(sprite.frame).toBe(0);
+
+        // Grant the rank: it opens.
+        player.components.set(ActiveRanksComponent, new Set(['nova:147']));
+        step();
+        step();
+        expect(gateState().mode).toBe('opening');
+
+        // An NPC (no legal record) selecting it opens it as before.
+        world.entities.delete('player uuid');
+        const npc = new Entity('npc');
+        npc.components.set(PlanetTargetComponent, { target: GATE_UUID });
+        world.entities.set('npc uuid', npc);
+        for (let i = 0; i < FRAMES + 2; i++) {
+            step();
+        }
+        expect(gateState().mode).not.toBe('closed');
     });
 
     it('opens on an announced arrival (browser anticipation event)', () => {

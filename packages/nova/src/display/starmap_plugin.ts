@@ -24,6 +24,8 @@ import { BEEP_MAP_CLOSE, BEEP_MAP_OPEN, playUiSound } from './ui_sound.js';
 
 const StarmapResource = new Resource<Starmap>("Starmap");
 const StarmapControlsSubscription = new Resource<Subscription>('StarmapControlsSubscription');
+/** Marks the plugin's openStarmap as torn down (see remove). */
+const StarmapDisposer = new Resource<() => void>('StarmapDisposer');
 export const SetJumpRouteEvent = new EcsEvent<{ route: string[] }>('SetJumpRouteEvent');
 /**
  * Opens the starmap over whatever is on screen and resolves with the
@@ -119,6 +121,10 @@ export const StarmapPlugin: Plugin = {
             () => playerComponent(world, GameDateComponent),
             () => playerComponent(world, LegalRecordsComponent));
         let opening = false;
+        // Set by remove(): a map dismissed because its world is being torn
+        // down (jump/gate transit with the map open) must not write its
+        // stale route back into the next system's state.
+        let disposed = false;
         stage.addChild(starmap.container);
         world.resources.set(StarmapResource, starmap);
         // Debug/headless-driving handle, like window.displayWorld.
@@ -141,6 +147,9 @@ export const StarmapPlugin: Plugin = {
                 starmap.container.position.set(screenSize.x / 2, screenSize.y / 2);
                 starmap.openOptions = options ?? {};
                 const route = await starmap.show(jumpRoute?.route ?? []);
+                if (disposed) {
+                    return route;
+                }
                 if (jumpRoute) {
                     jumpRoute.route = route;
                 }
@@ -151,6 +160,7 @@ export const StarmapPlugin: Plugin = {
             }
         };
         world.resources.set(OpenStarmapResource, openStarmap);
+        world.resources.set(StarmapDisposer, () => { disposed = true; });
         world.resources.set(StarmapControlsSubscription, controls.subscribe(({ action, state }) => {
             if (action !== 'map' || state !== 'start') {
                 return;
@@ -176,10 +186,16 @@ export const StarmapPlugin: Plugin = {
         world.resources.get(StarmapControlsSubscription)?.unsubscribe();
         const stage = world.resources.get(Stage);
         const starmap = world.resources.get(StarmapResource);
+        // A map still open while its world dies (jumped with 'm' up) would
+        // otherwise keep its MenuControls bound forever, and the ship could
+        // not be flown in the next system.
+        world.resources.get(StarmapDisposer)?.();
+        starmap?.dismiss();
         if (stage && starmap) {
             stage.removeChild(starmap.container);
         }
         world.resources.delete(StarmapControlsSubscription);
+        world.resources.delete(StarmapDisposer);
         world.resources.delete(StarmapResource);
         world.resources.delete(OpenStarmapResource);
     }
