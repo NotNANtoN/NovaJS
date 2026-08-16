@@ -531,7 +531,10 @@ export function exportPilot(id: string, storage?: PrefsStorage):
 export function exportFileName(name: string): string {
     const safe = name.trim().replace(/[^A-Za-z0-9 _-]+/g, '').trim()
         .replace(/\s+/g, '_');
-    return `${safe || 'pilot'}.novapilot.json`;
+    // The original game's pilot-file extension; the payload is JSON, and
+    // import validates by CONTENT, so older .novapilot.json exports keep
+    // importing (the picker accepts both).
+    return `${safe || 'pilot'}.plt`;
 }
 
 export type ImportResult =

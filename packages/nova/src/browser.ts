@@ -2432,8 +2432,11 @@ async function runTitle() {
     // HTML stand-ins by the project's standing ruling.)
     const aboutPopup = new OfferPopup(displayAssetData);
     aboutPopup.container.name = 'AboutPopup';
+    // Centre in CSS pixels (app.screen), not renderer.width/height: with
+    // autoDensity on a 2x display those are DEVICE pixels, and halving them
+    // put the About box in the bottom-right corner (Matthew's playtest).
     const centreAbout = () => aboutPopup.container.position.set(
-        app.renderer.width / 2, app.renderer.height / 2);
+        app.screen.width / 2, app.screen.height / 2);
     window.addEventListener('resize', centreAbout);
     const showAbout = async () => {
         const about = await loadAboutText();

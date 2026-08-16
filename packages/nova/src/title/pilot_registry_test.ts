@@ -410,16 +410,16 @@ describe('pilot registry', () => {
     describe('export filenames', () => {
         it('builds a safe filename from the pilot name', () => {
             expect(exportFileName('Shane Merrol'))
-                .toBe('Shane_Merrol.novapilot.json');
+                .toBe('Shane_Merrol.plt');
         });
 
         it('strips path separators and other unsafe characters', () => {
             expect(exportFileName('../../etc/passwd'))
-                .toBe('etcpasswd.novapilot.json');
+                .toBe('etcpasswd.plt');
         });
 
         it('falls back when the name has nothing usable', () => {
-            expect(exportFileName('///')).toBe('pilot.novapilot.json');
+            expect(exportFileName('///')).toBe('pilot.plt');
         });
     });
 });

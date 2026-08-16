@@ -389,7 +389,7 @@ export function showOpenPilotDialog(entries: PilotEntry[],
         // file; it is appended so a headless driver can set files on it.
         const fileInput = document.createElement('input');
         fileInput.type = 'file';
-        fileInput.accept = '.json,application/json';
+        fileInput.accept = '.plt,.json,application/json';
         fileInput.dataset.testid = 'open-pilot-file';
         fileInput.style.display = 'none';
         modal.panel.appendChild(fileInput);

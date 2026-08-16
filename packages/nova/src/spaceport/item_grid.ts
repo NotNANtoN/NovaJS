@@ -90,6 +90,9 @@ export function captionSegments(
  */
 export const LARGE_PICT_FIT = 200;
 
+/** The tile thumbnail budget: the stock 200x200 pict at its 0.15 scale. */
+export const TILE_PICT_FIT = LARGE_PICT_FIT * 0.15;
+
 /** The downscale-to-fit factor: never upscales. */
 export function fitScale(width: number, height: number, max: number): number {
     return Math.min(1, max / width, max / height);
@@ -201,9 +204,11 @@ export class ItemTile<I extends Item> {
             smallPict.position.x = TILE_SIZE[0] / 2;
             smallPict.position.y = 1;
 
-            const scale = 0.15;
-            smallPict.scale.x = scale;
-            smallPict.scale.y = scale;
+            // The tile thumbnail is the stock 200x200 pict at 0.15 (30px).
+            // Fit to that same 30px budget so oversized plugin picts (e.g.
+            // 400x400) shrink like the large pane's do, and stock stays
+            // exactly as before (fitScale never upscales).
+            fitWhenLoaded(smallPict, TILE_PICT_FIT);
 
             this.container.addChildAt(smallPict, 1);
         }
