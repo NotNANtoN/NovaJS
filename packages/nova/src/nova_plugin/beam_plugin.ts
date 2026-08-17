@@ -1,5 +1,5 @@
 import { BeamWeaponData, WeaponData } from 'novadatainterface/weapon_data';
-import { EmitNow, Entities, RunQueryFunction, UUID } from 'nova_ecs/arg_types';
+import { EmitNow, Entities, GetWorld, RunQueryFunction, UUID } from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
 import { Angle } from 'nova_ecs/datatypes/angle';
 import { Position } from 'nova_ecs/datatypes/position';
@@ -16,6 +16,11 @@ import { System } from 'nova_ecs/system';
 import SAT from "sat";
 import { CollisionSystem, CompositeHull, HitboxHullComponent, HurtboxHullComponent, UpdateHitboxHullSystem } from './collisions_plugin.js';
 import { CollisionEvent, CollisionHitterComponent } from './collision_interaction.js';
+import { SimulationGameDataResource } from './game_data_resource.js';
+import { ShipComponent } from './ship_plugin.js';
+import { isInFlock } from './flock.js';
+import { pointDefenseMayDamage } from './point_defense.js';
+import { isHostileTarget } from './hostility.js';
 import { CreateTime, CreateTimeArgProvider } from './create_time.js';
 import { DamagedEvent } from './death_plugin.js';
 import { applyExitPoint, ExitPointData } from './exit_point.js';
@@ -329,9 +334,12 @@ export const BeamCollisionSystem = new System({
     args: [CollisionEvent, Entities, Optional(OwnerComponent),
         Optional(FiringGroupComponent), BeamDataComponent,
         BeamStateComponent, MovementStateComponent,
-        Optional(SourceComponent)] as const,
+        Optional(SourceComponent), UUID, TimeResource, GetWorld] as const,
     step(collision, entities, owner, firingGroup, beamData, beamState,
-        movement, source) {
+        movement, source, uuid, time, world) {
+        // Optional: a test world without game data can't judge hostility
+        // and keeps the plain collision rules.
+        const gameData = world.resources.get(SimulationGameDataResource);
 
         const other = entities.get(collision.other);
         if (!other) {
@@ -350,6 +358,36 @@ export const BeamCollisionSystem = new System({
             other.components.get(GovtComponent)?.id,
             other.components.has(DisabledComponent))) {
             return;
+        }
+
+        // A POINT DEFENSE beam hurts only what the turret would have
+        // aimed at — a missile flying at us, a ship hostile to us
+        // (point_defense.ts); a bystander it sweeps across is not a hit.
+        if (beamData.guidance === 'pointDefenseBeam' && gameData) {
+            const viewerUuid = owner?.owner ?? source ?? uuid;
+            const viewerEntity = entities.get(viewerUuid);
+            const isShip = other.components.has(ShipComponent);
+            const getEntity = (id: string) => entities.get(id);
+            const sourceUuid = source ?? viewerUuid;
+            const mayDamage = viewerEntity !== undefined
+                && pointDefenseMayDamage({
+                    uuid: collision.other,
+                    kind: isShip ? 'fighter' : 'missile',
+                    owner: other.components.get(OwnerComponent)?.owner
+                        ?? collision.other,
+                    target: other.components.get(TargetComponent)?.target,
+                    hostile: isShip && isHostileTarget(collision.other, other, {
+                        viewerUuid, viewerEntity, entities,
+                        gameData, now: time.time,
+                    }),
+                    inFlock: isInFlock(collision.other, viewerUuid, getEntity)
+                        || (viewerUuid !== sourceUuid
+                            && isInFlock(collision.other, sourceUuid,
+                                getEntity)),
+                }, { owner: viewerUuid, source: sourceUuid });
+            if (!mayDamage) {
+                return;
+            }
         }
 
         const otherHull = other.components.get(HitboxHullComponent);

@@ -1,6 +1,7 @@
 import 'jasmine';
 import {
     isPointDefenseCandidate, PointDefenseCandidate, PointDefenseFirer,
+    pointDefenseMayDamage,
     selectPointDefenseTarget,
 } from './point_defense.js';
 
@@ -201,5 +202,43 @@ describe('point defense target selection', () => {
             expect(isPointDefenseCandidate(
                 fighter('f', 20, { hostile: false }), FIRER)).toBeFalse();
         });
+    });
+});
+
+describe('pointDefenseMayDamage (collision-time twin of candidacy)', () => {
+    const FIRER_NO_RANGE = { owner: 'carrier', source: 'turretShip' };
+
+    it('lets a PD shot hurt a hostile fighter and a missile aimed at us', () => {
+        expect(pointDefenseMayDamage({
+            uuid: 'f', kind: 'fighter', owner: 'f', hostile: true,
+            inFlock: false, target: 'someoneElse',
+        }, FIRER_NO_RANGE)).toBeTrue();
+        expect(pointDefenseMayDamage({
+            uuid: 'm', kind: 'missile', owner: 'enemy', hostile: false,
+            inFlock: false, target: 'carrier',
+        }, FIRER_NO_RANGE)).toBeTrue();
+    });
+
+    it('lets a stray PD shot PASS THROUGH a neutral fighter or somebody '
+        + 'else\'s missile (no accidental wars)', () => {
+        expect(pointDefenseMayDamage({
+            uuid: 'trader', kind: 'fighter', owner: 'trader', hostile: false,
+            inFlock: false, target: 'carrier',
+        }, FIRER_NO_RANGE)).toBeFalse();
+        expect(pointDefenseMayDamage({
+            uuid: 'm', kind: 'missile', owner: 'enemy', hostile: false,
+            inFlock: false, target: 'someoneElse',
+        }, FIRER_NO_RANGE)).toBeFalse();
+    });
+
+    it('never hurts our own wing or flock', () => {
+        expect(pointDefenseMayDamage({
+            uuid: 'w', kind: 'fighter', owner: 'carrier', hostile: true,
+            inFlock: false, target: 'x',
+        }, FIRER_NO_RANGE)).toBeFalse();
+        expect(pointDefenseMayDamage({
+            uuid: 'e', kind: 'fighter', owner: 'e', hostile: true,
+            inFlock: true, target: 'x',
+        }, FIRER_NO_RANGE)).toBeFalse();
     });
 });

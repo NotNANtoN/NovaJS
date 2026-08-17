@@ -190,3 +190,23 @@ function outranks(candidate: PointDefenseCandidate,
     }
     return candidate.uuid < best.uuid;
 }
+
+/**
+ * WHAT A POINT DEFENSE SHOT MAY HURT — the collision-time twin of the
+ * candidacy rule above (Matthew's ruling): a PD round or beam damages
+ * only something the turret would have FILTERED THROUGH to aim at — a
+ * missile flying at us, a ship hostile to us — never merely "a fighter"
+ * or "a missile". A stray burst that crosses a neutral PD-vulnerable
+ * fighter, or somebody else's missile, passes straight through instead
+ * of landing the few points of damage that turn a bystander into an
+ * enemy (recent aggression flips them red at the first hit).
+ *
+ * Exactly isPointDefenseCandidate with range ignored (the shot has
+ * already reached the thing), so the two can never disagree.
+ */
+export function pointDefenseMayDamage(candidate: Omit<PointDefenseCandidate,
+    'distanceSquared'>, firer: Omit<PointDefenseFirer, 'rangeSquared'>):
+    boolean {
+    return isPointDefenseCandidate({ ...candidate, distanceSquared: 0 },
+        { ...firer, rangeSquared: Infinity });
+}

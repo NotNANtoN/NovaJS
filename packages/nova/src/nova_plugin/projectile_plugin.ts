@@ -1,6 +1,6 @@
 import * as t from 'io-ts';
 import { ProjectileWeaponData, WeaponData, WeaponDamage } from 'novadatainterface/weapon_data';
-import { Emit, EmitNow, Entities, GetEntity, RunQueryFunction, UUID } from 'nova_ecs/arg_types';
+import { Emit, EmitNow, Entities, GetEntity, GetWorld, RunQueryFunction, UUID } from 'nova_ecs/arg_types';
 import { Angle } from 'nova_ecs/datatypes/angle';
 import { Position, PositionType } from 'nova_ecs/datatypes/position';
 import { Vector } from 'nova_ecs/datatypes/vector';
@@ -28,8 +28,11 @@ import { ExitPointData } from './exit_point.js';
 import { FireSubs, SubCounts, WeaponConstructors, WeaponEntry } from './fire_weapon_plugin.js';
 import { OwnerComponent, SourceComponent, VulnerableToPD } from './weapon_components.js';
 import { FiringGroupComponent, firingImmune, victimFiringGroup } from './firing_group.js';
-import { provokeGuidedLock } from './flock.js';
+import { isInFlock, provokeGuidedLock } from './flock.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
+import { isHostileTarget } from './hostility.js';
+import { ShipComponent } from './ship_plugin.js';
+import { pointDefenseMayDamage } from './point_defense.js';
 import { GovtComponent } from './govt_component.js';
 import { DisabledComponent } from './disabled_component.js';
 import { guidanceAngle, Guidance, GuidanceComponent, MissileGuidanceResource } from './guidance.js';
@@ -357,9 +360,12 @@ export const ProjectileCollisionSystem = new System({
     args: [CollisionEvent, Entities, UUID, ProjectileDataComponent,
         Optional(OwnerComponent), Optional(FiringGroupComponent),
         Optional(TargetComponent), FireSubs, TimeResource, CreateTime,
-        EmitNow] as const,
+        EmitNow, GetWorld, Optional(SourceComponent)] as const,
     step(collision, entities, uuid, projectileData, owner, firingGroup,
-        target, fireSubs, time, createTime, emitNow) {
+        target, fireSubs, time, createTime, emitNow, world, source) {
+        // Optional: a test world without game data can't judge hostility
+        // and keeps the plain collision rules.
+        const gameData = world.resources.get(SimulationGameDataResource);
         const other = entities.get(collision.other);
         if (!other) {
             return;
@@ -401,6 +407,38 @@ export const ProjectileCollisionSystem = new System({
             // the Seeker 0x0001 'passes over asteroids' flag is set.
             if (!other.components.has(AsteroidComponent)
                 || projectileData.seeker.passOverAsteroids) {
+                return;
+            }
+        }
+
+        // A POINT DEFENSE round hurts only what the turret would have
+        // aimed at — a missile flying at us, a ship hostile to us
+        // (point_defense.ts). A stray PD burst crossing a neutral fighter
+        // or someone else's missile passes through rather than starting a
+        // war (Matthew's ruling).
+        if (projectileData.guidance === 'pointDefense' && gameData) {
+            const viewerUuid = owner?.owner ?? source ?? uuid;
+            const viewerEntity = entities.get(viewerUuid);
+            const isShip = other.components.has(ShipComponent);
+            const getEntity = (id: string) => entities.get(id);
+            const sourceUuid = source ?? viewerUuid;
+            const mayDamage = viewerEntity !== undefined
+                && pointDefenseMayDamage({
+                    uuid: collision.other,
+                    kind: isShip ? 'fighter' : 'missile',
+                    owner: other.components.get(OwnerComponent)?.owner
+                        ?? collision.other,
+                    target: other.components.get(TargetComponent)?.target,
+                    hostile: isShip && isHostileTarget(collision.other, other, {
+                        viewerUuid, viewerEntity, entities,
+                        gameData, now: time.time,
+                    }),
+                    inFlock: isInFlock(collision.other, viewerUuid, getEntity)
+                        || (viewerUuid !== sourceUuid
+                            && isInFlock(collision.other, sourceUuid,
+                                getEntity)),
+                }, { owner: viewerUuid, source: sourceUuid });
+            if (!mayDamage) {
                 return;
             }
         }
