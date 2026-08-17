@@ -25,9 +25,11 @@ import { map } from 'nova_ecs/datatypes/map';
  *                the tick it becomes disabled. A ship destroyed before
  *                it was disabled makes the goal unachievable => the
  *                mission fails (at the next landing).
- *    2 board     "Board them" — boarding does not exist in the engine
- *                yet, so board missions are not offered (see
- *                mission_ship_logic.ts).
+ *    2 board     "Board them": each ship counts the first time the
+ *                MISSION'S OWNER boards it (mission_ship_plugin's
+ *                MissionShipTrackSystem reads the shared BoardedComponent
+ *                record). Evaluated, but not yet OFFERED — see
+ *                goalSupported.
  *    3 escort    "Escort them (keep them from getting killed)": the
  *                goal never blocks completion; a mission ship dying
  *                fails the mission. Stock escort missions use ShipSyst
@@ -109,14 +111,17 @@ export type ShipObjective = t.TypeOf<typeof ShipObjectiveType>;
 /**
  * Goals the engine can evaluate; the rest stay unofferable.
  *
- * SEAM: player boarding now exists (boarding_plugin.ts), and the goal
- * state machine already tracks it (shipBoarded, below, and GOAL_BOARD in
- * countsDown). Board (2) missions remain UNOFFERED here on purpose: the
- * remaining step is to have MissionShipTrackSystem detect the shared
- * BoardedComponent and call shipBoarded, then flip GOAL_BOARD to
- * supported and update mission_ship_state_test / mission_logic_test.
- * Rescue (5) additionally needs the "spawn disabled and stay disabled"
- * mechanic, which is not built.
+ * GOAL_BOARD (2) is now fully EVALUATED — MissionShipTrackSystem reads
+ * the shared BoardedComponent and calls shipBoarded — but deliberately
+ * still UNOFFERED: turning stock board missions on is a content decision
+ * (Matthew's), not an engine one, and the whole point of the one-plunder
+ * ruling is that a board mission's ships get exactly one shot each, which
+ * wants play-testing before those missions appear on real bulletin
+ * boards. Flipping it on is now a one-line change plus the
+ * mission_ship_state_test / mission_logic_test expectations.
+ *
+ * GOAL_RESCUE (5) additionally needs the "spawn disabled and stay
+ * disabled" mechanic, which is not built.
  */
 export function goalSupported(goal: number): boolean {
     return goal === GOAL_NONE || goal === GOAL_DESTROY
@@ -216,9 +221,10 @@ export function shipDisabled(objective: ShipObjective, uuid: string): void {
 
 /**
  * A tracked ship has been boarded by the owner (GOAL_BOARD). Mirrors
- * shipDisabled: one board counts once. This is the mission-side hook for
- * boarding_plugin.ts; it is dormant until GOAL_BOARD is made offerable
- * (see goalSupported), but is unit-tested so the seam stays correct.
+ * shipDisabled: one board counts once — which is also all a ship ever
+ * gets, since a hulk's plunder record is spent by its first boarding
+ * (boarding_component.ts). Called by MissionShipTrackSystem off the
+ * shared BoardedComponent.
  */
 export function shipBoarded(objective: ShipObjective, uuid: string): void {
     const flags = objective.live.get(uuid);

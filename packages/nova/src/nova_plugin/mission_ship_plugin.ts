@@ -8,6 +8,7 @@ import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import { SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
 import { TimeSystem } from 'nova_ecs/plugins/time_plugin';
 import { System } from 'nova_ecs/system';
+import { BoardedComponent } from './boarding_component.js';
 import { CloakActiveComponent, CloakComponent, isTargetable } from './cloak_plugin.js';
 import { DeathEvent } from './death_plugin.js';
 import { DisabledComponent } from './disabled_component.js';
@@ -19,6 +20,7 @@ import {
     shipDied,
     shipDisabled,
     shipObserved,
+    shipBoarded,
     ShipObjective,
 } from './mission_ship_state.js';
 
@@ -99,14 +101,38 @@ function objectiveOf(missionShip: MissionShip,
 /**
  * Tracks a mission ship in its owner's objective and evaluates the
  * per-ship conditions that come from co-existence in the sim:
- * registration, disabling, and observation.
+ * registration, disabling, boarding, and observation.
+ *
+ * MISSION SHIPS ARE BOARDABLE, per the Bible, and two of its seven ship
+ * goals are ABOUT boarding them: ShipGoal 2 is "Board them" and ShipGoal
+ * 5 is "Rescue them (they start out disabled and stay that way until you
+ * board them)". mïsn Flags 0x0001 confirms the mechanic from the other
+ * side — "the mission will auto-abort after the special ship is boarded"
+ * — and mïsn PickupMode 2 is "Pick up when boarding special ship". So
+ * nothing here refuses a boarding; instead a boarding by the OWNER is
+ * credited to the goal, closing the shipBoarded seam that
+ * mission_ship_state.ts documents.
+ *
+ * `boarder === owner` is checked because the durable record names
+ * whoever spent the hulk's one plunder, and that can be somebody else: a
+ * rival player, or (in principle) an NPC pirate. Only the mission's own
+ * player boarding it is progress. NPCs cannot in fact reach a mission
+ * ship — gövt Flags 0x1000 plunders "non-mission" enemies only, and
+ * npcPlunderEligible enforces that — but the goal must not depend on
+ * that flag staying the way it is.
+ *
+ * GOAL_BOARD is still not OFFERED (mission_ship_state's goalSupported):
+ * turning board missions on is a content decision, and the sibling
+ * GOAL_RESCUE additionally needs the "spawns disabled and stays disabled"
+ * mechanic. The evaluation half is now real and specced either way.
  */
 const MissionShipTrackSystem = new System({
     name: 'MissionShipTrackSystem',
     args: [MissionShipComponent, UUID, MovementStateComponent,
         Optional(DisabledComponent), Optional(CloakComponent),
-        Optional(CloakActiveComponent), Entities] as const,
-    step(missionShip, uuid, movement, disabled, cloak, cloakActive,
+        Optional(CloakActiveComponent), Optional(BoardedComponent),
+        Entities] as const,
+    step(missionShip, uuid, movement, disabled, cloak, cloakActive, boarded,
         entities) {
         const objective = objectiveOf(missionShip, entities);
         if (!objective) {
@@ -115,6 +141,9 @@ const MissionShipTrackSystem = new System({
         registerShip(objective, uuid);
         if (disabled) {
             shipDisabled(objective, uuid);
+        }
+        if (boarded?.plundered && boarded.boarder === missionShip.owner) {
+            shipBoarded(objective, uuid);
         }
         // Observation: no cloak capability = observed by co-presence
         // (the owner inserted us into their own system); cloak-capable
