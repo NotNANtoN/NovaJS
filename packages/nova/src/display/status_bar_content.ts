@@ -216,16 +216,13 @@ function unlandableMessage(isStation: boolean, stellarName?: string,
 }
 
 /**
- * The stock line for a hulk whose one boarding has already been spent,
- * STR# 2002 ("misc strings") index 125, quoted verbatim. It sits in the
- * stock table between "Your attempt to capture this ship was
- * unsuccessful." (124) and the repair/capture confirmations (126-128),
- * immediately above the boarding-gate refusals (129-131) — i.e. among the
- * boarding outcomes, phrased as a statement about the TARGET, which is
- * what makes it the original's "you can't, it's already been done" line
- * rather than a success confirmation.
+ * The line for a hulk whose one boarding has already been spent: the
+ * original's catch-all boarding refusal, STR# 2002 ("misc strings") index
+ * 129, quoted verbatim (Matthew's ruling — the original says this, not
+ * index 125's "Target ship has been boarded.", which is the confirmation
+ * shown when a boarding SUCCEEDS).
  */
-export const ALREADY_BOARDED_MESSAGE = 'Target ship has been boarded.';
+export const ALREADY_BOARDED_MESSAGE = "You can't board this ship.";
 
 /**
  * The stock line for a repelled capture attempt: STR# 2002 index 124,

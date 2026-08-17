@@ -951,9 +951,9 @@ describe('boarding in a live world', () => {
                 press(world, BOARDER, 'board');
                 expect(boarder.components.has(BoardingComponent)).toBeFalse();
                 expect(reasons).toEqual(['alreadyBoarded']);
-                // The stock line for it: STR# 2002 index 125.
+                // The stock line for it: STR# 2002 index 129.
                 expect(boardingBlockedMessage('alreadyBoarded'))
-                    .toEqual('Target ship has been boarded.');
+                    .toEqual("You can't board this ship.");
             });
 
         it('blocks a second boarding while a session is OPEN', async () => {

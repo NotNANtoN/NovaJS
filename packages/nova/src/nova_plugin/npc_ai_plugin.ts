@@ -1361,8 +1361,8 @@ export function npcBoardArrived(boarder: MovementState,
  * (gövt Flags 0x1000). A warship that has reached its hulk spends the
  * hulk's ONE boarding — the same durable BoardedComponent record a player
  * writes (boarding_component.ts) — and the player who turns up afterwards
- * is refused with "Target ship has been boarded." (stock STR# 2002 index
- * 125). The converse falls out of the same record: an NPC whose prize the
+ * is refused with "You can't board this ship." (stock STR# 2002 index
+ * 129). The converse falls out of the same record: an NPC whose prize the
  * player boarded first finds it already spent and gives up its approach.
  *
  * The NPC takes nothing material. There is nowhere for an NPC's plunder

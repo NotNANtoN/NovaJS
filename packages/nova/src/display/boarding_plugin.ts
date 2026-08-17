@@ -323,8 +323,12 @@ class PlunderDialog {
             up: () => this.move(-1),
             down: () => this.move(1),
             accept: () => this.activate(this.rows[this.selected]?.action),
-            // 'b' / Escape close the session (same as Done).
-            board: () => this.activate('plunderDone'),
+            // Escape closes the session (same as Done). 'b' deliberately
+            // does NOTHING here: the player spams 'b' while lining up the
+            // approach, and the press that lands after the dialog opened
+            // was closing it again before they could read it. The modal
+            // MenuControls swallows the key so it can't reach the sim's
+            // BoardingGateSystem either.
             depart: () => this.activate('plunderDone'),
         });
     }
