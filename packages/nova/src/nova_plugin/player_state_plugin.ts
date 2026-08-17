@@ -76,6 +76,27 @@ export const ActiveMissionType = t.intersection([t.type({
      */
     shipObjective: ShipObjectiveType,
     /**
+     * The DEFERRED auto-abort (mïsn Flags 0x0001): this mission
+     * auto-aborts "after the special ship is boarded" rather than at
+     * accept, because its SpecialShipGoal is board or rescue. Frozen at
+     * accept, with the two numeric effects the SIMULATION applies on that
+     * boarding beside it (see MissionShipTrackSystem's rescueBoarded).
+     */
+    autoAbortOnBoard: t.boolean,
+    /** mïsn Flags2 0x0002, "Apply mission Pay on auto-abort": the credits
+     * to hand over when the deferred auto-abort fires. */
+    autoAbortPay: t.number,
+    /** mïsn Flags 0x0008, "Mission takes away 100 units of fuel upon
+     * auto-abort": the fuel to deduct when it fires. */
+    autoAbortFuel: t.number,
+    /**
+     * The deferred auto-abort has fired in the simulation; the
+     * player-local half (the OnAbort set string, dropping the mission,
+     * its popup) still has to run at the owner's next date advance. The
+     * same shape as the objective's `shipDonePending`.
+     */
+    autoAbortPending: t.boolean,
+    /**
      * mïsn PickupMode 2, "Pick up when boarding special ship", frozen at
      * accept time. The pickup happens in the shared simulation the tick
      * the owner boards the special ship (MissionShipTrackSystem), and the

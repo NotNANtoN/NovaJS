@@ -10,6 +10,7 @@ import { applyAnalogControl, applyControlEvents, ControlledByComponent } from ".
 import { applySetTarget } from "../nova_plugin/target_plugin.js";
 import { applySetPlanetTarget } from "../nova_plugin/planet_plugin.js";
 import { applyHail, HailAction } from "../nova_plugin/hail_plugin.js";
+import { AcceptedMission, applyAcceptMission } from "../nova_plugin/mission_accept.js";
 
 /**
  * Everything that changes the simulation from outside is an input,
@@ -36,6 +37,14 @@ export type SimulationInput =
     /** A hail dialog action (request assistance / bribe) against a ship. The
      * effect (repair, credit change, pacify) is recomputed sim-side. */
     | { kind: 'hail', action: HailAction }
+    /**
+     * An in-flight mission acceptance (a përs ship's LinkMission, offered
+     * on hail or on boarding). The client resolves the offer — the sim
+     * has no access to mission data at all — and bakes the RESULT in as
+     * deltas, together with any special/aux ships the accept spawns.
+     * See mission_accept.ts for where the trust boundary sits and why.
+     */
+    | { kind: 'acceptMission', accepted: AcceptedMission }
     | { kind: 'addEntity', uuid: string, entity: EncodedEntity }
     | { kind: 'removeEntity', uuid: string }
     | { kind: 'setJumpRoute', route: string[] }
@@ -94,12 +103,22 @@ export async function loadInputRecordsGameData(
     }
     for (const record of records) {
         for (const input of record.inputs) {
-            if (input.kind !== 'addEntity') {
-                continue;
-            }
-            const decoded = serializer.decode(input.entity);
-            if (!isLeft(decoded)) {
-                await loadEntityGameData(world, decoded.right);
+            // Every input that carries an ENTITY must stage it, or a peer
+            // that did not originate the record derives against unloaded
+            // game data and diverges. acceptMission carries a BATCH of
+            // them (a mission's special/aux ships), so it is staged here
+            // exactly like addEntity's single one.
+            const entities: EncodedEntity[] =
+                input.kind === 'addEntity' ? [input.entity]
+                    : input.kind === 'acceptMission'
+                        ? (input.accepted.ships ?? []).map(
+                            ship => ship.entity as EncodedEntity)
+                        : [];
+            for (const encoded of entities) {
+                const decoded = serializer.decode(encoded);
+                if (!isLeft(decoded)) {
+                    await loadEntityGameData(world, decoded.right);
+                }
             }
         }
     }
@@ -154,6 +173,10 @@ export function applySimulationInputs(world: World, inputs: SimulationInput[],
                 }
                 deriveEntityComponents(world, decoded.right);
                 world.entities.set(input.uuid, decoded.right);
+                break;
+            }
+            case 'acceptMission': {
+                applyAcceptMission(world, peerId, input.accepted);
                 break;
             }
             case 'removeEntity': {

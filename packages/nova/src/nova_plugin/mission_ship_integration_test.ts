@@ -16,11 +16,14 @@ import {
     GOAL_DESTROY,
     GOAL_DISABLE,
     GOAL_OBSERVE,
+    GOAL_RESCUE,
     ShipObjective,
     shipsToSpawn,
 } from './mission_ship_state.js';
 import { BoardedComponent } from './boarding_component.js';
 import { CargoComponent } from './cargo_plugin.js';
+import { CreditsComponent } from './player_state_plugin.js';
+import { FuelComponent } from './health_plugin.js';
 import { missionCargoKey } from './mission_logic.js';
 import { makeNpcShip } from './npc_spawn_plugin.js';
 import { Angle } from 'nova_ecs/datatypes/angle';
@@ -334,6 +337,144 @@ describe('mission ships in the shared simulation', () => {
             expect(owner.components.get(CargoComponent)!
                 .get(missionCargoKey(MISSION_ID))).toEqual(2);
         }, 30_000);
+
+        it('rescues a GOAL_RESCUE hulk when the owner boards it',
+            async () => {
+                // Bible, mïsn ShipGoal 5: "Rescue them (they start out
+                // disabled and stay that way until you board them)". The
+                // "stay that way" half is the hulk flag, which
+                // ShipDisableSystem refuses to lift however healthy the
+                // armor is — so boarding, which DELETES the component, is
+                // the only thing that can end it.
+                const { world, shipUuid, missionShipUuid, activeObjective } =
+                    await makeWorldWithMissionShip(GOAL_RESCUE);
+                const ship = world.entities.get(missionShipUuid)!;
+                // Spawned as a hulk by mission_ship_spawn; stand that in
+                // here, since this harness builds its ship directly.
+                ship.components.set(DisabledComponent,
+                    { repairAt: null, hulk: true });
+                for (let i = 0; i < 5; i++) {
+                    world.step();
+                }
+                // Still adrift, at full armor: nothing lifts a hulk.
+                expect(ship.components.has(DisabledComponent)).toBeTrue();
+
+                ship.components.set(BoardedComponent,
+                    { boarder: shipUuid, plundered: true });
+                for (let i = 0; i < 5; i++) {
+                    world.step();
+                }
+                // Rescued: it flies off under its own AI, and the goal is
+                // credited by the same boarding.
+                expect(ship.components.has(DisabledComponent)).toBeFalse();
+                expect(activeObjective()!.satisfied).toBe(1);
+                expect(activeObjective()!.complete).toBeTrue();
+            }, 30_000);
+
+        it('fires the deferred auto-abort on that boarding: pay, fuel, '
+            + 'and a pending abort', async () => {
+                // Bible, mïsn Flags 0x0001, verbatim: "If the mission is
+                // one in which a special ship replaces a përs ship at
+                // mission start (such as for a 'rescue disabled ship'
+                // mission) and the SpecialShipGoal is 2 or 5 (board or
+                // rescue) the mission will auto-abort after the special
+                // ship is boarded." The sim does the numeric half now;
+                // the OnAbort set string waits for the next date advance.
+                const { world, shipUuid, missionShipUuid } =
+                    await makeWorldWithMissionShip(GOAL_RESCUE);
+                const owner = world.entities.get(shipUuid)!;
+                const active = owner.components.get(MissionsComponent)!
+                    .get(MISSION_ID)!;
+                active.autoAbortOnBoard = true;
+                active.autoAbortPay = 2000;         // mïsn Flags2 0x0002
+                active.autoAbortFuel = 100;         // mïsn Flags 0x0008
+                owner.components.set(CreditsComponent, { credits: 500 });
+                const fuel = owner.components.get(FuelComponent)!;
+                fuel.current = fuel.max;
+                const fuelBefore = fuel.current;
+
+                world.entities.get(missionShipUuid)!.components
+                    .set(BoardedComponent,
+                        { boarder: shipUuid, plundered: true });
+                for (let i = 0; i < 5; i++) {
+                    world.step();
+                }
+
+                expect(owner.components.get(CreditsComponent)!.credits)
+                    .toEqual(2500);
+                expect(owner.components.get(FuelComponent)!.current)
+                    .toEqual(fuelBefore - 100);
+                // The player-local half is queued, not run: the sim never
+                // reads mission game data, so OnAbort waits for the next
+                // date advance (processInFlightMissions).
+                expect(owner.components.get(MissionsComponent)!
+                    .get(MISSION_ID)!.autoAbortPending).toBeTrue();
+            }, 30_000);
+
+        it('pays the deferred auto-abort exactly once', async () => {
+            const { world, shipUuid, missionShipUuid } =
+                await makeWorldWithMissionShip(GOAL_RESCUE);
+            const owner = world.entities.get(shipUuid)!;
+            const active = owner.components.get(MissionsComponent)!
+                .get(MISSION_ID)!;
+            active.autoAbortOnBoard = true;
+            active.autoAbortPay = 2000;
+            owner.components.set(CreditsComponent, { credits: 0 });
+            world.entities.get(missionShipUuid)!.components
+                .set(BoardedComponent,
+                    { boarder: shipUuid, plundered: true });
+            for (let i = 0; i < 60; i++) {
+                world.step();
+            }
+            expect(owner.components.get(CreditsComponent)!.credits)
+                .toEqual(2000);
+        }, 30_000);
+
+        it('gives another shot at a mission ship a RIVAL plundered, on '
+            + 're-entering the system', async () => {
+                // Matthew's confirmed ruling: the one-plunder rule applies
+                // to mission ships too, and the player whose mission ship
+                // somebody else boarded has to leave and come back. This
+                // pins that the path actually works, which rests on two
+                // facts that are easy to break independently.
+                const { world, shipUuid, missionShipUuid, activeObjective } =
+                    await makeWorldWithMissionShip(GOAL_BOARD);
+
+                // A rival gets there first. It is THEIR boarding, so the
+                // goal is not credited...
+                world.entities.get(missionShipUuid)!.components
+                    .set(BoardedComponent,
+                        { boarder: 'some rival', plundered: true });
+                for (let i = 0; i < 5; i++) {
+                    world.step();
+                }
+                expect(activeObjective()!.satisfied).toBe(0);
+
+                // ...and the objective therefore still wants a full count,
+                // so re-entry spawns a replacement rather than counting
+                // the ship that was stolen (shipsToSpawn = total -
+                // satisfied).
+                expect(shipsToSpawn(activeObjective()!)).toBe(1);
+
+                // The owner leaves: their absence despawns the mission
+                // ships wholesale (MissionShipCleanupSystem), taking the
+                // spent record with the hull that carried it. The
+                // objective itself rides the owner's own entity, so hold
+                // it before that entity leaves the world.
+                const objective = activeObjective()!;
+                world.entities.delete(shipUuid);
+                for (let i = 0; i < 5; i++) {
+                    world.step();
+                }
+                expect(world.entities.has(missionShipUuid)).toBeFalse();
+
+                // So the ship the mission builds on the next system entry
+                // is a brand-new hull with no plunder record at all —
+                // which is the whole of "leave and come back".
+                expect(objective.complete).toBeFalse();
+                expect(objective.failed).toBeFalse();
+                expect(shipsToSpawn(objective)).toBe(1);
+            }, 30_000);
 
         it('keeps a captured prize when the mission ends', async () => {
             // The regression this pins: MissionShipCleanupSystem deletes

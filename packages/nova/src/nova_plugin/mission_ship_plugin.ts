@@ -1,5 +1,5 @@
 import * as t from 'io-ts';
-import { Entities, UUID } from 'nova_ecs/arg_types';
+import { Entities, GetEntity, UUID } from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
 import { Entity } from 'nova_ecs/entity';
 import { EntityMap } from 'nova_ecs/entity_map';
@@ -14,10 +14,11 @@ import { CloakActiveComponent, CloakComponent, isTargetable } from './cloak_plug
 import { DeathEvent } from './death_plugin.js';
 import { DisabledComponent } from './disabled_component.js';
 import { CargoComponent, cargoUsed } from './cargo_plugin.js';
+import { FuelComponent } from './health_plugin.js';
 import { missionCargoKey } from './mission_logic.js';
 import { ShipPhysicsComponent } from './ship_plugin.js';
 import {
-    ActiveMission, Missions, MissionsComponent,
+    ActiveMission, CreditsComponent, Missions, MissionsComponent,
 } from './player_state_plugin.js';
 import { DeathAISystem } from './npc_plugin.js';
 import {
@@ -27,6 +28,7 @@ import {
     shipDisabled,
     shipObserved,
     shipBoarded,
+    GOAL_RESCUE,
     ShipObjective,
 } from './mission_ship_state.js';
 
@@ -149,6 +151,72 @@ function pickUpOnBoarding(active: ActiveMission, owner: Entity): void {
 }
 
 /**
+ * Everything a BOARDING settles on the spot, the first time the mission's
+ * owner boards one of its special ships.
+ *
+ * THE RESCUE ITSELF (mïsn ShipGoal 5, "they start out disabled and stay
+ * that way until you board them"). Boarding is the rescue, so the hulk
+ * state is lifted here and the ship flies off under its own AI — the only
+ * thing that CAN lift it, since ShipDisableSystem refuses to re-enable a
+ * `hulk` however healthy its armor is (see makeHulk). Deleting the
+ * component is the documented external-repair route that file names.
+ *
+ * THE DEFERRED AUTO-ABORT (mïsn Flags 0x0001, verbatim): "If the mission
+ * is one in which a special ship replaces a përs ship at mission start
+ * (such as for a 'rescue disabled ship' mission) and the SpecialShipGoal
+ * is 2 or 5 (board or rescue) the mission will auto-abort AFTER THE
+ * SPECIAL SHIP IS BOARDED." An ordinary auto-abort mission never becomes
+ * active at all (mission_logic's acceptOffer); this kind has to, because
+ * its special ship must exist to be found and boarded. `autoAbortOnBoard`
+ * is the frozen marker that it is the deferred kind.
+ *
+ * SPLIT BETWEEN SIM AND CLIENT, along the line every other mission
+ * transition already uses. The parts that are pure arithmetic on synced
+ * components happen HERE, immediately and visibly on every peer:
+ *
+ *  - mïsn Flags2 0x0002, "Apply mission Pay on auto-abort" — the Refuel
+ *    Trader's 2000 credits, which the trader hands over as they undock;
+ *  - mïsn Flags 0x0008, "Mission takes away 100 units of fuel upon
+ *    auto-abort" — the fuel you just gave them. Clamped at the tank, and
+ *    the mission is not offered below 100 units in the first place (the
+ *    same Bible line says so), so the clamp is belt and braces.
+ *
+ * The parts that need the mission UNIVERSE — running the OnAbort set
+ * string, dropping the mission from the list, showing its popup — cannot
+ * happen in the sim, which never reads mission game data. They are marked
+ * `autoAbortPending` and run at the owner's next date advance, exactly as
+ * `shipDonePending` already does for OnShipDone (mission_session's
+ * processInFlightMissions).
+ *
+ * Everything here is guarded on the FIRST boarding, so a re-board (which
+ * the one-plunder rule makes impossible today, but which is not something
+ * to depend on) cannot pay twice.
+ */
+function rescueBoarded(active: ActiveMission, owner: Entity,
+    ship: Entity): void {
+    if (active.shipObjective?.goal === GOAL_RESCUE) {
+        // Rescued: it is no longer a hulk, so it flies off.
+        ship.components.delete(DisabledComponent);
+    }
+    if (!active.autoAbortOnBoard || active.autoAbortPending) {
+        return;
+    }
+    active.autoAbortPending = true;
+    if (active.autoAbortPay) {
+        const credits = owner.components.get(CreditsComponent);
+        if (credits) {
+            credits.credits += active.autoAbortPay;
+        }
+    }
+    if (active.autoAbortFuel) {
+        const fuel = owner.components.get(FuelComponent);
+        if (fuel) {
+            fuel.current = Math.max(0, fuel.current - active.autoAbortFuel);
+        }
+    }
+}
+
+/**
  * Tracks a mission ship in its owner's objective and evaluates the
  * per-ship conditions that come from co-existence in the sim:
  * registration, disabling, boarding, and observation.
@@ -181,9 +249,9 @@ const MissionShipTrackSystem = new System({
     args: [MissionShipComponent, UUID, MovementStateComponent,
         Optional(DisabledComponent), Optional(CloakComponent),
         Optional(CloakActiveComponent), Optional(BoardedComponent),
-        Entities] as const,
+        GetEntity, Entities] as const,
     step(missionShip, uuid, movement, disabled, cloak, cloakActive, boarded,
-        entities) {
+        shipEntity, entities) {
         const objective = objectiveOf(missionShip, entities);
         if (!objective) {
             return;
@@ -193,13 +261,17 @@ const MissionShipTrackSystem = new System({
             shipDisabled(objective, uuid);
         }
         if (boarded?.plundered && boarded.boarder === missionShip.owner) {
+            const first = !objective.live.get(uuid)?.boarded;
             shipBoarded(objective, uuid);
-            // mïsn PickupMode 2: boarding IS the pickup.
             const owner = entities.get(missionShip.owner);
             const active = owner?.components.get(MissionsComponent)
                 ?.get(missionShip.mission);
             if (owner && active) {
+                // mïsn PickupMode 2: boarding IS the pickup.
                 pickUpOnBoarding(active, owner);
+                if (first) {
+                    rescueBoarded(active, owner, shipEntity);
+                }
             }
         }
         // Observation: no cloak capability = observed by co-presence

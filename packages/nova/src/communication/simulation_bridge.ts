@@ -13,6 +13,7 @@ import { loadEntityGameData, loadWireSnapshotGameData } from "../nova_plugin/ent
 import { deriveEntityComponents } from "../nova_plugin/entity_factory.js";
 import { applyInputRecords, InputRecord, loadInputRecordsGameData, SimulationInput } from "./simulation_input.js";
 import { HailAction } from "../nova_plugin/hail_plugin.js";
+import { AcceptedMission } from "../nova_plugin/mission_accept.js";
 import { ArchiveBaseline, canonicalDesyncHash, DesyncDump, PROTOCOL_VERSION, RollbackLogEntry, STATE_HASH_INTERVAL, unwrapRollbackMessage, wrapRollbackMessage } from "./rollback_protocol.js";
 import { makeNpc } from "../nova_plugin/npc_plugin.js";
 import { SIMULATION_STEP_MS } from "../nova_plugin/make_system.js";
@@ -136,6 +137,7 @@ export interface SimulationBridgeHostApi {
     setTarget(target: string | null): void;
     setPlanetTarget(target: string | null): void;
     hail(action: HailAction): void;
+    acceptMission(accepted: AcceptedMission): void | Promise<void>;
     step(count?: number): void;
     snapshot(): SimulationFrame;
     addEntity(uuid: string, entity: EncodedEntity): void | Promise<void>;
@@ -168,6 +170,7 @@ export interface AsyncSimulationBridgeHostApi {
     setTarget(target: string | null): Promise<void>;
     setPlanetTarget(target: string | null): Promise<void>;
     hail(action: HailAction): Promise<void>;
+    acceptMission(accepted: AcceptedMission): Promise<void>;
     step(count?: number): Promise<void>;
     snapshot(): Promise<SimulationFrame>;
     addEntity(uuid: string, entity: EncodedEntity): Promise<void>;
@@ -563,7 +566,8 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
      * rollback correction.
      */
     private integrateStaged(record: InputRecord) {
-        if (record.inputs.some(input => input.kind === 'addEntity')) {
+        if (record.inputs.some(input => input.kind === 'addEntity'
+            || input.kind === 'acceptMission')) {
             // If the buffer is cleared while staging (a catch-up log
             // arrived, which contains this record), drop it: pushing
             // after the clear would apply it twice.
@@ -969,6 +973,26 @@ export class SimulationBridgeHost implements SimulationBridgeHostApi {
     }
 
     /**
+     * An in-flight mission acceptance (mission_accept.ts). Stages the
+     * mission's special/aux ships BEFORE scheduling, exactly as addEntity
+     * stages its single one — applying (and replaying) the input has to
+     * be synchronous, so every entity's game-data closure must already be
+     * loaded when the record lands.
+     */
+    async acceptMission(accepted: AcceptedMission) {
+        for (const ship of accepted.ships ?? []) {
+            const decoded = this.serializer.decode(ship.entity as EncodedEntity);
+            if (isLeft(decoded)) {
+                throw new Error('Failed to decode mission ship: '
+                    + this.serializer.describeDecodeFailure(
+                        ship.entity as EncodedEntity, decoded.left));
+            }
+            await loadEntityGameData(this.world, decoded.right);
+        }
+        this.schedule({ kind: 'acceptMission', accepted });
+    }
+
+    /**
      * How this peer's clock should slew to track the room's: a rate
      * factor proportional to the drift between the local tick and the
      * extrapolated server tick plus a small send-ahead lead, clamped
@@ -1185,6 +1209,10 @@ export class SimulationBridgeClient {
         this.host.hail(structuredClone(action));
     }
 
+    acceptMission(accepted: AcceptedMission) {
+        return this.host.acceptMission(structuredClone(accepted));
+    }
+
     addEntity(uuid: string, entity: Entity) {
         return this.host.addEntity(uuid, structuredClone(this.serializer.encode(entity)) as EncodedEntity);
     }
@@ -1304,6 +1332,10 @@ export class AsyncSimulationBridgeClient {
 
     async hail(action: HailAction) {
         await this.guard(() => this.host.hail(action));
+    }
+
+    async acceptMission(accepted: AcceptedMission) {
+        await this.guard(() => this.host.acceptMission(accepted));
     }
 
     async addEntity(uuid: string, entity: Entity) {

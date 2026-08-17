@@ -750,6 +750,30 @@ export function applyStartsDisabledData(entity: Entity,
     if (!govtData?.flags.startsDisabled) {
         return;
     }
+    makeHulk(entity, stats);
+}
+
+/**
+ * Makes a freshly built (not yet inserted) ship a HULK: disabled from
+ * tick 0, with FULL shields and armor, and marked so nothing can lift the
+ * disable except an external repair.
+ *
+ * Two callers, two different reasons for the same state:
+ *  - gövt Flags1 0x0800, "ships of this govt start out disabled" — the
+ *    Drifting Derelicts (applyStartsDisabledData above);
+ *  - mïsn ShipGoal 5, "Rescue them (they start out disabled and stay that
+ *    way until you board them)" — where it is the MISSION, not the
+ *    government, that makes the ship a hulk (mission_ship_spawn).
+ *
+ * The Bible's "and stay that way" is exactly what the `hulk` flag buys:
+ * ShipDisableSystem refuses to re-enable a hulk however healthy its armor
+ * is, so only something that DELETES DisabledComponent — a boarding —
+ * brings it back online.
+ */
+export function makeHulk(entity: Entity, stats: {
+    armor: number, armorRecharge: number,
+    shield: number, shieldRecharge: number,
+}): void {
     // deriveEntityComponents provides ShipData/physics but NOT armor or
     // shields (those are provider systems that first run a tick later), so
     // seed proper Stats here to make the hull fully formed at insertion.

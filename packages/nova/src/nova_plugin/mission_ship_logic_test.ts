@@ -74,11 +74,11 @@ describe('shipGoalOfferable', () => {
         }))).toBe(true);
     });
 
-    it('offers board goals and suppresses rescue', () => {
+    it('offers both boarding goals', () => {
         expect(shipGoalOfferable(
             makeMission({ shipGoal: GOAL_BOARD }))).toBe(true);
         expect(shipGoalOfferable(
-            makeMission({ shipGoal: GOAL_RESCUE }))).toBe(false);
+            makeMission({ shipGoal: GOAL_RESCUE }))).toBe(true);
     });
 });
 
@@ -150,9 +150,16 @@ describe('resolveShipObjective', () => {
             makeContext(), null, null)).toBeUndefined();
     });
 
-    it('returns null (unofferable) for unsupported goals', () => {
-        expect(resolveShipObjective(makeMission({ shipGoal: GOAL_RESCUE }),
+    it('returns null (unofferable) for an unknown goal', () => {
+        expect(resolveShipObjective(makeMission({ shipGoal: 99 }),
             makeContext(), null, null)).toBeNull();
+    });
+
+    it('freezes a RESCUE goal like any other supported one', () => {
+        expect(resolveShipObjective(
+            makeMission({ shipGoal: GOAL_RESCUE, shipCount: 1 }),
+            makeContext(), null, null)).toEqual(
+                jasmine.objectContaining({ goal: GOAL_RESCUE, total: 1 }));
     });
 
     it('freezes a BOARD goal like any other supported one', () => {
