@@ -112,6 +112,28 @@ describe('buildMissionShipSpawns', () => {
         }
     });
 
+    it('spawns in a STACKED DUPLICATE of the frozen objective system '
+        + '(mïsn 737 frozen to nova:765 while the player enters nova:308)',
+        async () => {
+            const objective = makeObjective({ systemId: 'nova:765' });
+            const player = makePlayer(objective);
+            const universe = {
+                ...makeUniverse(),
+                sameSystem: (a: string, b: string) => a === b
+                    || new Set([a, b]).size === 2
+                    && ['nova:308', 'nova:765'].includes(a)
+                    && ['nova:308', 'nova:765'].includes(b),
+            };
+            const ships = await buildMissionShipSpawns(player, OWNER,
+                'nova:308', makeGameData(), universe);
+            expect(ships.length).toBe(3);
+            // And still not in an unrelated system.
+            const elsewhere = await buildMissionShipSpawns(
+                makePlayer(makeObjective({ systemId: 'nova:765' })), OWNER,
+                'nova:130', makeGameData(), universe);
+            expect(elsewhere.length).toBe(0);
+        });
+
     it('spawns a derelict-govt mission ship disabled with full stats '
         + '(the Kontik probe\'s Aurora Cruiser)', async () => {
         const objective = makeObjective({ satisfied: 1 });

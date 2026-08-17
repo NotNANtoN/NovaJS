@@ -21,6 +21,7 @@ import {
     pickWeighted,
 } from './npc_spawn_plugin.js';
 import { MissionsComponent } from './player_state_plugin.js';
+import { ControlBitsComponent } from './ncb_plugin.js';
 import { TargetComponent } from './target_component.js';
 
 /**
@@ -69,9 +70,18 @@ export const MISSION_SHIP_NO_DEPART_MS = 1e15;
  * modules never depend on the spaceport). */
 export interface MissionShipUniverse {
     getMission(id: string): MissionData | undefined;
-    systemIdOfPlanet(planetId: string): string | undefined;
+    systemIdOfPlanet(planetId: string, bits?: ReadonlySet<number>):
+        string | undefined;
     getGovt(id: string): GovtData | undefined;
     getSystemInfo(systemId: string): SystemInfo | undefined;
+    /**
+     * Whether two system ids are stacked copies of one system (same name
+     * and map position under mutually exclusive Visibility), so a ship
+     * objective frozen to the copy the player cannot enter still spawns
+     * in the copy they do (mïsn 737's Moash fleet, frozen to nova:765
+     * while the player flies into nova:308).
+     */
+    sameSystem?(a: string, b: string): boolean;
 }
 
 function scatter(random: () => number): Position {
@@ -207,6 +217,7 @@ export async function buildMissionShipSpawns(playerEntity: Entity,
     const ctx: SpawnContext = {
         gameData, universe, ownerUuid, random, nextSlot: firstSlot,
     };
+    const playerBits = playerEntity.components.get(ControlBitsComponent);
     const system = universe.getSystemInfo(systemId);
     const ships: Entity[] = [];
 
@@ -219,7 +230,9 @@ export async function buildMissionShipSpawns(playerEntity: Entity,
             // not misread as departures.
             objective.live = new Map();
             if (objective.systemId === null
-                || objective.systemId === systemId) {
+                || objective.systemId === systemId
+                || (universe.sameSystem?.(objective.systemId, systemId)
+                    ?? false)) {
                 // The mission's special ships all wear the name picked
                 // from its ShipNameID STR# list when the mission was
                 // accepted (mission_logic.ts), which is also what <SN>
@@ -251,7 +264,7 @@ export async function buildMissionShipSpawns(playerEntity: Entity,
         // Flag 0x0010 (infinite aux ships) is not modeled beyond the
         // once-per-system-entry respawn that naturally happens here.
         if (mission && system && auxShipsMatchSystem(mission, active,
-            system, id => universe.systemIdOfPlanet(id),
+            system, id => universe.systemIdOfPlanet(id, playerBits),
             id => universe.getGovt(id))) {
             for (let i = 0; i < mission.auxShipCount; i++) {
                 const ship = await buildShip(ctx, missionId,

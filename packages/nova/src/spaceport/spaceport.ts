@@ -293,9 +293,10 @@ export class Spaceport extends Menu<Entity> {
         if (!missions) {
             return [];
         }
+        const bits = this.input?.components.get(ControlBitsComponent);
         return missionMapMarks(missions.values(),
             missionId => this.universe.getMission(missionId),
-            planetId => this.universe.systemIdOfPlanet(planetId));
+            planetId => this.universe.systemIdOfPlanet(planetId, bits));
     }
 
     /**

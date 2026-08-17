@@ -222,7 +222,8 @@ export class MissionBoard extends Menu<Entity> {
         const seen = new Set<string>();
         for (const planet of planets) {
             const systemId = planet
-                ? this.universe.systemIdOfPlanet(planet) : undefined;
+                ? this.universe.systemIdOfPlanet(planet,
+                    this.session?.state.bits) : undefined;
             if (!systemId || seen.has(systemId)) {
                 continue;
             }
@@ -241,7 +242,8 @@ export class MissionBoard extends Menu<Entity> {
         const active = this.session
             ? missionMapMarks(this.session.state.missions.values(),
                 id => this.universe.getMission(id),
-                planetId => this.universe.systemIdOfPlanet(planetId))
+                planetId => this.universe.systemIdOfPlanet(planetId,
+                    this.session?.state.bits))
             : [];
         await this.openStarmap({
             viewedMarks: this.viewedMarks(),

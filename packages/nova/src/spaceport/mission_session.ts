@@ -120,7 +120,8 @@ export class MissionSession {
                 .get(CombatRatingComponent)?.kills ?? 0,
             playerContribute: this.playerContribute,
             systems: this.universe.systemInfos,
-            systemIdOfStellar: id => this.universe.systemIdOfPlanet(id),
+            systemIdOfStellar: id =>
+                this.universe.systemIdOfPlanet(id, this.state.bits),
         };
     }
 

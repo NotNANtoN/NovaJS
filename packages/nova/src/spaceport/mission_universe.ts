@@ -6,8 +6,22 @@ import { RankData } from 'novadatainterface/rank_data';
 import { SystemData } from 'novadatainterface/system_data';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import { displayName } from '../nova_plugin/display_name.js';
+import { evaluateNCBTest } from '../nova_plugin/ncb.js';
 import { StellarInfo, stellarInfoOf } from '../nova_plugin/mission_logic.js';
 import { SystemInfo } from '../nova_plugin/mission_ship_logic.js';
+
+/** A system's Visibility test against the player's bits (blank = visible;
+ * a malformed expression fails open, like stellarVisible). */
+function systemVisible(visibility: string, bits: ReadonlySet<number>): boolean {
+    if (visibility.trim() === '') {
+        return true;
+    }
+    try {
+        return evaluateNCBTest(visibility, { getBit: bit => bits.has(bit) });
+    } catch {
+        return true;
+    }
+}
 
 /** Maps over `items` with at most `concurrency` calls in flight. */
 async function pooledMap<T, R>(items: readonly T[],
@@ -49,7 +63,12 @@ export class MissionUniverse {
     private govtsById = new Map<string, GovtData>();
     private ranksById = new Map<string, RankData>();
     private systemsById = new Map<string, SystemData>();
+    /** The FIRST (id-sorted) system listing each placed planet. */
     private planetSystem = new Map<string, string>();
+    /** EVERY system listing each placed planet, id-sorted, with its
+     * Visibility expression — stacked duplicate systems (e.g. SPC-1421 as
+     * nova:308 "!b995" and nova:765 "b995") share their stellars. */
+    private planetSystems = new Map<string, { id: string, visibility: string }[]>();
     /** The Visibility expressions of every system a placed planet sits in. */
     private planetVisibilities = new Map<string, string[]>();
     /** Canonical "same stellar" key (name + map coords) per placed planet. */
@@ -127,11 +146,18 @@ export class MissionUniverse {
         // random destination sampling, and a canonical name+coords key so a
         // frozen duplicate id still completes on landing at its visible copy.
         this.planetSystem.clear();
+        this.planetSystems.clear();
         this.planetVisibilities.clear();
         this.stellarKeyById.clear();
-        for (const [systemId, system] of this.systemsById) {
+        for (const [systemId, system] of [...this.systemsById]
+            .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
             for (const planetId of system.planets) {
-                this.planetSystem.set(planetId, systemId);
+                if (!this.planetSystem.has(planetId)) {
+                    this.planetSystem.set(planetId, systemId);
+                }
+                const all = this.planetSystems.get(planetId) ?? [];
+                all.push({ id: systemId, visibility: system.visibility });
+                this.planetSystems.set(planetId, all);
                 const vis = this.planetVisibilities.get(planetId) ?? [];
                 vis.push(system.visibility);
                 this.planetVisibilities.set(planetId, vis);
@@ -162,6 +188,20 @@ export class MissionUniverse {
 
     getSystemInfo(systemId: string): SystemInfo | undefined {
         return this.systemInfosById.get(systemId);
+    }
+
+    /** Whether two system ids are stacked duplicates of one system: same
+     * name and map coordinates (see systemIdOfPlanet). */
+    sameSystem(a: string, b: string): boolean {
+        if (a === b) {
+            return true;
+        }
+        const sa = this.systemsById.get(a);
+        const sb = this.systemsById.get(b);
+        return sa !== undefined && sb !== undefined
+            && sa.name === sb.name
+            && sa.position[0] === sb.position[0]
+            && sa.position[1] === sb.position[1];
     }
 
     getMission(id: string): MissionData | undefined {
@@ -213,8 +253,34 @@ export class MissionUniverse {
         return name === undefined ? id : displayName(name);
     }
 
-    systemIdOfPlanet(planetId: string): string | undefined {
-        return this.planetSystem.get(planetId);
+    /**
+     * The system a stellar is in — the VISIBLE one, when the player's
+     * control bits are known. Duplicate stellars are stacked in duplicate
+     * systems under mutually exclusive Visibility expressions (mïsn 737's
+     * return stellar Auroran LP I sits in both nova:308 "!b995" and
+     * nova:765 "b995"); resolving ShipSyst -3/-4 or a map mark to the
+     * copy the player cannot enter put the Moash fleet in a system the
+     * player never sees. Without bits, the id-sorted first system with a
+     * blank Visibility, else the first.
+     */
+    systemIdOfPlanet(planetId: string,
+        bits?: ReadonlySet<number>): string | undefined {
+        const all = this.planetSystems.get(planetId);
+        if (!all || all.length === 0) {
+            return undefined;
+        }
+        if (all.length === 1) {
+            return all[0].id;
+        }
+        if (bits) {
+            const visible = all.find(({ visibility }) =>
+                systemVisible(visibility, bits));
+            if (visible) {
+                return visible.id;
+            }
+        }
+        return (all.find(({ visibility }) => visibility.trim() === '')
+            ?? all[0]).id;
     }
 
     /**

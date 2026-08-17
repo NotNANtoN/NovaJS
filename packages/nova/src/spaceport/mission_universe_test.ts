@@ -25,3 +25,40 @@ describe('MissionUniverse name lookups', () => {
             expect(universe.planetName('nova:999')).toBe('nova:999');
         });
 });
+
+describe('MissionUniverse.systemIdOfPlanet across stacked duplicate systems', () => {
+    async function universe() {
+        const gameData = new MockGameData();
+        gameData.data.Planet.map.set('nova:333', {
+            ...getDefaultPlanetData(), id: 'nova:333', name: 'Auroran LP I',
+        });
+        // SPC-1421 twice: nova:308 while !b995, nova:765 once b995 is set.
+        gameData.data.System.map.set('nova:308', {
+            ...getDefaultSystemData(), id: 'nova:308', name: 'SPC-1421',
+            planets: ['nova:333'], visibility: '!b995', position: [10, 20],
+        });
+        gameData.data.System.map.set('nova:765', {
+            ...getDefaultSystemData(), id: 'nova:765', name: 'SPC-1421',
+            planets: ['nova:333'], visibility: 'b995', position: [10, 20],
+        });
+        const u = new MissionUniverse(gameData);
+        await u.load();
+        return u;
+    }
+
+    it('resolves the return stellar to the copy the player can SEE '
+        + '(the Moash fleet spawned in the invisible nova:765)', async () => {
+            const u = await universe();
+            expect(u.systemIdOfPlanet('nova:333', new Set())).toBe('nova:308');
+            expect(u.systemIdOfPlanet('nova:333', new Set([995])))
+                .toBe('nova:765');
+        });
+
+    it('falls back deterministically without bits, and treats the two '
+        + 'copies as the same system', async () => {
+            const u = await universe();
+            expect(u.systemIdOfPlanet('nova:333')).toBe('nova:308');
+            expect(u.sameSystem('nova:308', 'nova:765')).toBeTrue();
+            expect(u.sameSystem('nova:308', 'nova:128')).toBeFalse();
+        });
+});
