@@ -430,6 +430,52 @@ describe('mission ships in the shared simulation', () => {
                 .toEqual(2000);
         }, 30_000);
 
+        it('gives another shot at a mission ship a RIVAL plundered, on '
+            + 're-entering the system', async () => {
+                // Matthew's confirmed ruling: the one-plunder rule applies
+                // to mission ships too, and the player whose mission ship
+                // somebody else boarded has to leave and come back. This
+                // pins that the path actually works, which rests on two
+                // facts that are easy to break independently.
+                const { world, shipUuid, missionShipUuid, activeObjective } =
+                    await makeWorldWithMissionShip(GOAL_BOARD);
+
+                // A rival gets there first. It is THEIR boarding, so the
+                // goal is not credited...
+                world.entities.get(missionShipUuid)!.components
+                    .set(BoardedComponent,
+                        { boarder: 'some rival', plundered: true });
+                for (let i = 0; i < 5; i++) {
+                    world.step();
+                }
+                expect(activeObjective()!.satisfied).toBe(0);
+
+                // ...and the objective therefore still wants a full count,
+                // so re-entry spawns a replacement rather than counting
+                // the ship that was stolen (shipsToSpawn = total -
+                // satisfied).
+                expect(shipsToSpawn(activeObjective()!)).toBe(1);
+
+                // The owner leaves: their absence despawns the mission
+                // ships wholesale (MissionShipCleanupSystem), taking the
+                // spent record with the hull that carried it. The
+                // objective itself rides the owner's own entity, so hold
+                // it before that entity leaves the world.
+                const objective = activeObjective()!;
+                world.entities.delete(shipUuid);
+                for (let i = 0; i < 5; i++) {
+                    world.step();
+                }
+                expect(world.entities.has(missionShipUuid)).toBeFalse();
+
+                // So the ship the mission builds on the next system entry
+                // is a brand-new hull with no plunder record at all —
+                // which is the whole of "leave and come back".
+                expect(objective.complete).toBeFalse();
+                expect(objective.failed).toBeFalse();
+                expect(shipsToSpawn(objective)).toBe(1);
+            }, 30_000);
+
         it('keeps a captured prize when the mission ends', async () => {
             // The regression this pins: MissionShipCleanupSystem deletes
             // any mission ship whose owner has lost the mission, which
