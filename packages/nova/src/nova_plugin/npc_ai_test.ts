@@ -9,7 +9,9 @@ import {
     chaserBlocksJump, chooseNearest, Formation, formationOffset,
     formationSlotPosition, FLEE_JUMP_BLOCK_RANGE,
     FORMATION_LATERAL_SPACING, FORMATION_ROW_SPACING,
-    landingDestinations, nextFormationSlot, PlanetEntry,
+    landingDestinations, nextFormationSlot, npcBoardArrived,
+    npcPlunderEligible, npcPlundersHulks, NPC_BOARD_RADIUS, NPC_BOARD_SPEED,
+    NPC_PLUNDER_TAKES_FROM_PLAYERS, PlanetEntry,
     RCS_ACCEL_FRACTION, RCS_DISENGAGE_SPEED, RCS_ENGAGE_SPEED,
     steerFormation,
 } from './npc_ai_plugin.js';
@@ -568,5 +570,95 @@ describe('landingDestinations', () => {
 
     it('excludes land-only-if-destroyed stellars', () => {
         expect(landingDestinations([destroyFirst])).toEqual([]);
+    });
+});
+
+/**
+ * The gövt Flags 0x1000 eligibility rule as a pure predicate. The Bible
+ * gives one sentence — "Warships will plunder non-mission, trader-type
+ * enemies (including the player) before destroying them" — so every
+ * clause of it is pinned here, together with the judgment calls that
+ * sentence forced (see the NPC_PLUNDER_* constants).
+ */
+describe('npcPlunderEligible (gövt Flags 0x1000)', () => {
+    const warship = { aiType: 3, plundersBeforeDestroying: true };
+    const hulk = {
+        aiType: 1, disabled: true, plunderSpent: false,
+        missionShip: false, controlled: false, hostile: true,
+    };
+
+    it('lets a warship of a plundering govt board a disabled enemy trader',
+        () => {
+            expect(npcPlunderEligible(warship, hulk)).toBeTrue();
+            expect(npcPlunderEligible(warship, { ...hulk, aiType: 2 }))
+                .toBeTrue();
+        });
+
+    it('needs the govt flag', () => {
+        expect(npcPlunderEligible(
+            { ...warship, plundersBeforeDestroying: false }, hulk))
+            .toBeFalse();
+        expect(npcPlunderEligible(
+            { ...warship, plundersBeforeDestroying: undefined }, hulk))
+            .toBeFalse();
+    });
+
+    it('is warships only — AIType 3, not the piracy-police interceptor',
+        () => {
+            expect(npcPlundersHulks(3, true)).toBeTrue();
+            for (const aiType of [1, 2, 4]) {
+                expect(npcPlundersHulks(aiType, true))
+                    .withContext(`AIType ${aiType}`).toBeFalse();
+            }
+        });
+
+    it('is trader-type victims only (the Bible "Freighters", AI 1-2)',
+        () => {
+            for (const aiType of [3, 4]) {
+                expect(npcPlunderEligible(warship, { ...hulk, aiType }))
+                    .withContext(`AIType ${aiType}`).toBeFalse();
+            }
+            // A hull with no NPC brain at all is not a trader either.
+            expect(npcPlunderEligible(warship, { ...hulk, aiType: undefined }))
+                .toBeFalse();
+        });
+
+    it('spares mission ships, live ships, friends, and spent hulks', () => {
+        expect(npcPlunderEligible(warship, { ...hulk, missionShip: true }))
+            .toBeFalse();
+        expect(npcPlunderEligible(warship, { ...hulk, disabled: false }))
+            .toBeFalse();
+        expect(npcPlunderEligible(warship, { ...hulk, hostile: false }))
+            .toBeFalse();
+        expect(npcPlunderEligible(warship, { ...hulk, plunderSpent: true }))
+            .toBeFalse();
+    });
+
+    it('follows NPC_PLUNDER_TAKES_FROM_PLAYERS for a flown ship', () => {
+        // The corrected Bible says the flag includes the player; NovaJS
+        // does not model what an NPC takes from one, so the tunable is
+        // off and this spec tracks it rather than the Bible.
+        expect(npcPlunderEligible(warship, { ...hulk, controlled: true }))
+            .toEqual(NPC_PLUNDER_TAKES_FROM_PLAYERS);
+    });
+});
+
+describe('npcBoardArrived', () => {
+    const at = (x: number, vx = 0): MovementState => ({
+        accelerating: 0, position: new Position(x, 0), rotation: new Angle(0),
+        turnBack: false, turning: 0, velocity: new Vector(vx, 0),
+    });
+
+    it('needs the boarder alongside the hulk', () => {
+        expect(npcBoardArrived(at(0), at(NPC_BOARD_RADIUS - 1))).toBeTrue();
+        expect(npcBoardArrived(at(0), at(NPC_BOARD_RADIUS + 1))).toBeFalse();
+    });
+
+    it('needs the boarder matched to the drift, not merely slow', () => {
+        // Both moving together at speed: still alongside.
+        expect(npcBoardArrived(at(0, 400), at(50, 400))).toBeTrue();
+        // Screaming past it: not a boarding.
+        expect(npcBoardArrived(at(0, 0), at(50, NPC_BOARD_SPEED + 10)))
+            .toBeFalse();
     });
 });
