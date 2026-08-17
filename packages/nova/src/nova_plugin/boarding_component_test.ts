@@ -20,8 +20,11 @@ import {
     planAmmoPlunder,
     AmmoOutfitInfo,
     bayCaptureRoom,
+    BoardedComponent,
     CaptureBayCandidate,
     chooseCaptureBay,
+    clearPlunderRecord,
+    plunderSpent,
 } from './boarding_component.js';
 
 /**
@@ -299,5 +302,50 @@ describe('bay-capture shortcut gate', () => {
             bay({ bayWeaponId: 'weap:a', shipId: 'ship:drone' }),
             bay({ bayWeaponId: 'weap:b' }),
         ])).toEqual('weap:b');
+    });
+});
+
+/**
+ * The DURABLE plunder record: a hulk gets one plunder per life segment,
+ * and the segment ends when it lands and departs or jumps (Matthew's
+ * ruling; the Bible's booty model is stateless, so this is entirely
+ * NovaJS's rule). These are the two readings of that record every caller
+ * shares.
+ */
+describe('the one-plunder record', () => {
+    it('reads a hulk nobody has boarded as unspent', () => {
+        expect(plunderSpent(undefined)).toBeFalse();
+    });
+
+    it('does not read a MERE boarding mark as spent', () => {
+        // Presence is the mission-goal seam; `plundered` is the lock. A
+        // record that somehow carries neither must not lock the hulk out.
+        expect(plunderSpent({ boarder: 'someone' })).toBeFalse();
+        expect(plunderSpent({ boarder: 'someone', active: true }))
+            .toBeFalse();
+    });
+
+    it('reads a spent hulk as spent, whoever spent it', () => {
+        expect(plunderSpent({ boarder: 'the player', plundered: true }))
+            .toBeTrue();
+        expect(plunderSpent({ boarder: 'npc:pirate', plundered: true }))
+            .toBeTrue();
+    });
+
+    it('clears the whole record at a life-segment boundary', () => {
+        const hulk = new Entity('hulk');
+        hulk.components.set(BoardedComponent, {
+            boarder: 'the player', plundered: true, creditsTaken: true,
+        });
+        clearPlunderRecord(hulk);
+        expect(hulk.components.has(BoardedComponent)).toBeFalse();
+        expect(plunderSpent(hulk.components.get(BoardedComponent)))
+            .toBeFalse();
+    });
+
+    it('is a no-op on a ship that was never boarded', () => {
+        const ship = new Entity('ship');
+        clearPlunderRecord(ship);
+        expect(ship.components.has(BoardedComponent)).toBeFalse();
     });
 });

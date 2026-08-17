@@ -216,14 +216,41 @@ function unlandableMessage(isStation: boolean, stellarName?: string,
 }
 
 /**
+ * The stock line for a hulk whose one boarding has already been spent,
+ * STR# 2002 ("misc strings") index 125, quoted verbatim. It sits in the
+ * stock table between "Your attempt to capture this ship was
+ * unsuccessful." (124) and the repair/capture confirmations (126-128),
+ * immediately above the boarding-gate refusals (129-131) — i.e. among the
+ * boarding outcomes, phrased as a statement about the TARGET, which is
+ * what makes it the original's "you can't, it's already been done" line
+ * rather than a success confirmation.
+ */
+export const ALREADY_BOARDED_MESSAGE = 'Target ship has been boarded.';
+
+/**
+ * The stock line for a repelled capture attempt: STR# 2002 index 124,
+ * verbatim. The player sees it on the status line rather than in the
+ * dialog, because the one capture attempt a session gets ends that
+ * session (boarding_plugin) and the dialog is already gone.
+ */
+export const CAPTURE_REPELLED_MESSAGE =
+    'Your attempt to capture this ship was unsuccessful.';
+
+/**
  * On-screen feedback when a board attempt is rejected. Mirrors
  * landingBlockedMessage: the boarding ship must have a DISABLED target
  * with crew, and must be close, matched in speed, and axis-aligned
- * (parallel or anti-parallel) with the hulk (boarding_component.ts).
+ * (parallel or anti-parallel) with the hulk (boarding_component.ts) —
+ * and the hulk's one plunder must not already have been spent.
+ *
+ * The 'tooFar' and 'tooFast' lines are the stock strings verbatim (STR#
+ * 2002 indices 130 and 131); the rest have no stock equivalent, since the
+ * original lumps every other refusal into index 129, "You can't board
+ * this ship."
  */
 export function boardingBlockedMessage(reason:
     'noTarget' | 'notDisabled' | 'noCrew' | 'tooFar' | 'tooFast'
-    | 'notAligned'): string {
+    | 'notAligned' | 'alreadyBoarded'): string {
     switch (reason) {
         case 'noTarget':
             return 'You have no ship targeted to board.';
@@ -232,12 +259,19 @@ export function boardingBlockedMessage(reason:
         case 'noCrew':
             return 'There is no one left aboard to board.';
         case 'tooFar':
-            return "You're too far away to board this ship.";
+            return "You're not close enough to board this ship.";
         case 'tooFast':
             return "You're moving too fast to board this ship.";
         case 'notAligned':
             return 'Line up alongside the ship before boarding.';
+        case 'alreadyBoarded':
+            return ALREADY_BOARDED_MESSAGE;
     }
+}
+
+/** The status line for a repelled capture (see CAPTURE_REPELLED_MESSAGE). */
+export function captureRepelledMessage(): string {
+    return CAPTURE_REPELLED_MESSAGE;
 }
 
 /**

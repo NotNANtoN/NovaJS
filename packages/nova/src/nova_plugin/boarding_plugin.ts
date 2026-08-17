@@ -17,8 +17,12 @@ import {
     AmmoOutfitInfo, axesAligned, BoardBlockReason, BoardedComponent,
     BoardedState, boardingBlockedReason, BoardingComponent, BoardingState,
     capturable, captureChance, CaptureBayCandidate, chooseCaptureBay,
-    creditBooty, fuelTransferAmount, planAmmoPlunder, planCargoPlunder,
+    clearPlunderRecord, creditBooty, fuelTransferAmount, planAmmoPlunder,
+    planCargoPlunder, plunderSpent,
 } from './boarding_component.js';
+import { AggressionComponent } from './aggression.js';
+import { LandEvent } from './planet_plugin.js';
+import { MissionShipComponent } from './mission_ship_plugin.js';
 import { CargoComponent, cargoUsed } from './cargo_plugin.js';
 import { CollisionHitterComponent } from './collision_interaction.js';
 import { HurtboxHullComponent } from './collisions_plugin.js';
@@ -94,9 +98,23 @@ export const BoardingBlockedEvent =
 export const BoardingBlockedEventType = t.type({
     reason: t.union([
         t.literal('noTarget'), t.literal('notDisabled'), t.literal('noCrew'),
-        t.literal('tooFar'), t.literal('tooFast'), t.literal('notAligned')]),
+        t.literal('tooFar'), t.literal('tooFast'), t.literal('notAligned'),
+        t.literal('alreadyBoarded')]),
 });
 registerSimulationBridgeEvent({ event: BoardingBlockedEvent });
+
+/**
+ * Emitted (targeted at the boarding ship) when the ONE capture attempt a
+ * plunder session gets is repelled. The session is over on the same tick,
+ * so the dialog is already gone by the time the display sees this — which
+ * is exactly why the event exists: the status line is the only place the
+ * player is told why (stock STR# 2002 index 124, "Your attempt to capture
+ * this ship was unsuccessful."). Never mutates the simulation.
+ */
+export const BoardingRepelledEvent =
+    new EcsEvent<Record<string, never>>('BoardingRepelledEvent');
+export const BoardingRepelledEventType = t.type({});
+registerSimulationBridgeEvent({ event: BoardingRepelledEvent });
 
 /**
  * Emitted (targeted at the boarding ship) when boarding one of your OWN
@@ -490,6 +508,12 @@ const BoardingGateSystem = new System({
         if (captureBay !== undefined && stowCaptureIntoBay(
             targetUuid!, captureBay, entity, entities, gameData)) {
             applyBoardCrime(records, targetGovtId, gameData, govts);
+            // Same memory sweep the plunder-dialog capture runs: the hull
+            // is gone from the world, so nothing can shoot it any more,
+            // but no NPC is left carrying an aggressor slot or a target
+            // lock naming a uuid that no longer exists, and the two
+            // capture routes leave identical state behind.
+            clearHostilityToward(targetUuid!, entities);
             // The prize is gone from the world; leaving it selected would
             // point the HUD at an entity that no longer exists.
             target.target = undefined;
@@ -537,6 +561,24 @@ const BoardingGateSystem = new System({
         const ammoAvailable = planAmmoPlunder(victim, boarderRoundsByWeapon, info)
             .reduce((sum, [, rounds]) => sum + rounds, 0);
 
+        // 3. ONE PLUNDER PER LIFE SEGMENT (Matthew's ruling; see
+        // BoardedState). The hulk's one boarding has already been spent —
+        // by this player, by a rival, or by an NPC pirate that reached it
+        // first — so no plunder session may open, however many times it is
+        // repaired and disabled again. It resets only when the ship lands
+        // and departs, or jumps (clearPlunderRecord).
+        //
+        // CHECKED HERE, past the bay-capture and own-escort branches, on
+        // purpose: neither of those is plunder, and Matthew's ruling
+        // exempts non-plunder boarding ("repairing/refuelling your own
+        // disabled escort, fuel transfer") outright. So you can still
+        // patch up your own hulk, and still scoop a fitting hull into a
+        // bay, after somebody has stripped it.
+        if (plunderSpent(boarded)) {
+            emit(BoardingBlockedEvent, { reason: 'alreadyBoarded' }, [uuid]);
+            return;
+        }
+
         // SEAM: boarding-mission offers are not implemented. Several përs
         // ships — the Drifting Derelicts among them — are authored to
         // offer a mission when boarded (mïsn AvailLoc "boarding ship"),
@@ -546,11 +588,14 @@ const BoardingGateSystem = new System({
         // player already holds) must still be capturable, which is what
         // the session bookkeeping below guarantees.
         //
-        // Re-boarding a hulk resumes from what it has already given up:
-        // the booty flags carry over so nothing can be taken twice (the
-        // credits booty in particular is re-derived from the ship price
-        // every time, so only this flag stops it being farmed). Capture
-        // starts fresh at 'none' — that is the retry.
+        // The session is seeded from whatever the hulk has already given
+        // up. With the one-plunder rule above there is nothing left to
+        // carry over in practice — the only way to reach here with a prior
+        // record is a record whose `plundered` flag is somehow absent —
+        // but the booty flags are kept as belt-and-braces, because the
+        // credits booty is the one thing NOT physically removed from the
+        // victim (creditBooty re-derives it from the ship price every
+        // time) and so the only one a second session could duplicate.
         const priorBoarded = boarded;
         entity.components.set(BoardingComponent, {
             target: targetUuid!,
@@ -565,8 +610,13 @@ const BoardingGateSystem = new System({
             // booty or tries a capture earns the BoardPenalty again.
             crimeApplied: false,
         });
+        // The durable record is stamped the moment the session OPENS, not
+        // when booty is taken: a boarder who looks around and leaves has
+        // still spent this hulk's one boarding, and an UNGRACEFUL end
+        // (destroyed, jumped out, landed mid-session) must not hand the
+        // hulk back for a second go.
         targetEntity!.components.set(BoardedComponent, {
-            ...priorBoarded, boarder: uuid, active: true,
+            ...priorBoarded, boarder: uuid, active: true, plundered: true,
         });
         // Local boarding beep for the boarding player only.
         emit(PlayerSoundEvent, { id: BOARD_SOUND }, [uuid]);
@@ -634,6 +684,104 @@ function endBoardingSession(entity: Entity,
 }
 
 /**
+ * ============================================================================
+ * CAPTURE RESETS HOSTILITY (Matthew's ruling, authoritative)
+ * ============================================================================
+ *
+ * A prize must come out of a capture standing exactly where a freshly
+ * HIRED escort of the same player stands: hostile only to whoever is
+ * hostile to the player. Shedding the hull's government (convertToEscort)
+ * is only half of that — it fixes what the prize IS, and leaves untouched
+ * what every other ship in the system REMEMBERS about it. Those memories
+ * are what kept a fresh prize under fire from the fleet it had just left.
+ *
+ * THE AUDIT, of every synced thing that can make an NPC keep shooting at
+ * a particular ship:
+ *
+ *  CLEARED HERE
+ *   - `TargetComponent.target` of any NPC pointing at the prize, with the
+ *     attack posture it is flying (`NpcComponent.mode === 'attack'`) —
+ *     this is the live lock. The think timer is zeroed too, so the ship
+ *     re-plans on the very next tick instead of orbiting an ex-enemy for
+ *     up to a full decision interval.
+ *   - `NpcComponent.aggressor`, the "who hit me last" memory. This is the
+ *     durable half: NpcDecisionSystem feeds the aggressor straight back
+ *     into `engageable` for warships and interceptors and makes traders
+ *     fight or flee, so leaving it set re-acquires the prize on the next
+ *     think even after the target slot is cleared.
+ *   - `AggressionComponent` entries keyed by the prize, on every ship
+ *     that has one. That component only lives on player-controlled ships
+ *     (aggression.ts), so this is the PvP half of the same idea: without
+ *     it, a rival player whose shields the prize dented ten seconds ago
+ *     goes on seeing red corners on their fellow player's new escort, and
+ *     'r' goes on picking it.
+ *
+ *  DELIBERATELY NOT TOUCHED, with reasons:
+ *   - `NpcComponent.pacifiedFrom` naming the prize: that is a bribe to
+ *     LEAVE IT ALONE. Clearing it would restore hostility, not remove it.
+ *   - The prize's own outbound state — its target, mode and aggressor —
+ *     is cleared by convertToEscort itself, which owns the prize.
+ *   - Any ship holding FORMATION on the prize (its old fleet's wing, or
+ *     its own bay fighters). Formation membership is not a reason to
+ *     shoot the prize — it is the opposite — so it is not hostility, and
+ *     re-parenting somebody else's fleet is a much larger question than
+ *     this one. SEE THE REPORT: a captured fleet LEADER drags its former
+ *     wing into the player's flock (they keep formation on it, so
+ *     flock.ts walks them up to the player), and those followers keep
+ *     their old government and their own aggressor memories — including,
+ *     often, the player. That is a real inconsistency, it predates this
+ *     change, and it needs a ruling of its own.
+ *   - `PersComponent`: a name tag and the "one of each person alive"
+ *     spawn guard, not a hostility input. A captured përs escort keeping
+ *     the character's name is a feature.
+ *   - `GovtsResource` / anything cache-shaped: there is none. Hostility
+ *     is recomputed from live components every time it is asked for
+ *     (hostility.ts, govt_disposition.ts), so dropping GovtComponent is
+ *     immediately visible to every reader with nothing to invalidate.
+ *
+ * DETERMINISM. The sweep visits the entity map in UUID-SORTED order.
+ * Nothing it writes actually depends on visit order (each entity's edit
+ * is a function of that entity alone), but the sort is kept because it
+ * makes that independence checkable rather than merely true today, and it
+ * is the house rule for cross-entity work. No PRNG is drawn.
+ *
+ * Called for BOTH capture routes. The bay-capture shortcut deletes the
+ * hulk outright, so its hostility is moot on the next think — but the
+ * memories are cleaned there too, so a stale aggressor slot is never left
+ * pointing at a uuid that no longer exists, and the two routes leave the
+ * world in the same shape.
+ */
+export function clearHostilityToward(prizeUuid: string,
+    entities: EntityMap): void {
+    for (const uuid of [...entities.keys()].sort()) {
+        if (uuid === prizeUuid) {
+            continue;
+        }
+        const other = entities.get(uuid);
+        if (!other) {
+            continue;
+        }
+        const npc = other.components.get(NpcComponent);
+        if (npc) {
+            if (npc.aggressor === prizeUuid) {
+                npc.aggressor = undefined;
+            }
+            const otherTarget = other.components.get(TargetComponent);
+            if (otherTarget?.target === prizeUuid) {
+                otherTarget.target = undefined;
+                if (npc.mode === 'attack') {
+                    npc.mode = undefined;
+                }
+                // Re-plan on the next tick rather than at the end of the
+                // current decision interval.
+                npc.nextDecision = 0;
+            }
+        }
+        other.components.get(AggressionComponent)?.delete(prizeUuid);
+    }
+}
+
+/**
  * Turns a captured disabled hulk into the boarder's escort: it joins
  * the formation flock, hands its brain to the escort-command framework
  * (which suppresses its native hostile AI), shares the boarder's
@@ -680,7 +828,7 @@ function endBoardingSession(entity: Entity,
  * captureIntoBay's sibling path always overwrote these; this one used to
  * leave them.
  */
-function convertToEscort(target: Entity,
+function convertToEscort(target: Entity, targetUuid: string,
     leaderUuid: string, leaderOwner: string | undefined,
     leaderControlled: boolean, entities: EntityMap): void {
     const slot = nextFormationSlot(formationsIn(entities), leaderUuid);
@@ -746,6 +894,25 @@ function convertToEscort(target: Entity,
     if (targetTarget) {
         targetTarget.target = undefined;
     }
+    // MISSION-SPECIAL IDENTITY IS SHED (Matthew's ruling; the Bible is
+    // silent on capturing a mission ship — it only ever excludes mission
+    // ships from NPC plunder, gövt Flags 0x1000 "non-mission"). A prize is
+    // the player's escort now, not the mission's prop:
+    //
+    //  - MissionShipCleanupSystem deletes any mission ship whose owner has
+    //    lost the mission, which would otherwise VAPORISE the escort the
+    //    moment the mission ended (mission_ship_plugin.ts);
+    //  - MissionShipTrackSystem would go on registering it in the
+    //    objective's live roster and crediting disable/observe progress
+    //    for a ship the player now owns;
+    //  - the respawn path counts `total - satisfied` (shipsToSpawn), so
+    //    with the prize no longer tracked the mission simply spawns its
+    //    replacement on the next system entry and the prize is left alone
+    //    — which is exactly the outcome asked for.
+    target.components.delete(MissionShipComponent);
+    // Every other ship's MEMORY of this hull, so the fleet it just left
+    // stops shooting at it (see clearHostilityToward).
+    clearHostilityToward(targetUuid, entities);
     // Bring it back online: restore armor above the disable threshold
     // and drop DisabledComponent so DisabledMovementSystem stops braking
     // it and the escort/formation systems can steer it.
@@ -775,7 +942,7 @@ const BoardingActionSystem = new System({
         Emit] as const,
     step(controls, boarding, shipData, cargo, physics, credits, fuel, records,
         boarderOutfits, boarderWeapons, entity, uuid, entities, random, govts,
-        gameData) {
+        gameData, emit) {
         const target = entities.get(boarding.target);
 
         // Charges the BoardPenalty crime once per session, the first
@@ -804,7 +971,7 @@ const BoardingActionSystem = new System({
         if (controls.get('plunderCaptureEscort') === 'start'
             && boarding.capture === 'succeeded' && capturable(target)) {
             const owner = entity.components.get(MultiplayerData)?.owner;
-            convertToEscort(target, uuid, owner,
+            convertToEscort(target, boarding.target, uuid, owner,
                 entity.components.has(ControlledByComponent), entities);
             boarding.capture = 'assigned';
             entity.components.delete(BoardingComponent);
@@ -888,24 +1055,73 @@ const BoardingActionSystem = new System({
             chargeCrime();
         }
 
-        // The capture contest. A ship somebody is flying is never
-        // capturable (see `capturable`), and the roll is skipped ENTIRELY
-        // for one — no draw from the seeded RandomResource, so the draw
-        // count stays identical on every peer and across resimulation
-        // (the predicate is synced state, so every peer skips together).
-        // The dialog greys the button off the same predicate, so pressing
-        // it is only reachable by a hand-sent control input.
+        // The capture contest — ONE ATTEMPT PER SESSION (Matthew's
+        // ruling), and since a session is itself once per life segment
+        // (see BoardedState) that is one attempt per hulk, full stop.
+        //
+        // `capture === 'none'` is the whole gate: the attempt is the
+        // transition out of 'none', and there is no path back into it.
+        // This is the deliberate REMOVAL of the old retry, which re-opened
+        // a session at 'none' on every re-board and let a player grind a
+        // 5%-odds derelict by pressing 'b' until it fell.
+        //
+        // A ship somebody is flying is never capturable (see `capturable`),
+        // and the roll is skipped ENTIRELY for one — no draw from the
+        // seeded RandomResource, so the draw count stays identical on every
+        // peer and across resimulation (the predicate is synced state, so
+        // every peer skips together). The dialog greys the button off the
+        // same predicates, so pressing it is only reachable by a hand-sent
+        // control input.
         if (controls.get('plunderCapture') === 'start'
-            && boarding.capture !== 'succeeded' && capturable(target)) {
+            && boarding.capture === 'none' && capturable(target)) {
             const targetCrew =
                 target.components.get(ShipDataComponent)?.crew ?? 0;
             // Bible: a 0-crew boarder can't capture. Marines (ModType 25)
             // would add to the boarder's effective crew here — a
             // documented seam (unparsed), so the raw shïp Crew is used.
             const chance = captureChance(shipData.crew, targetCrew);
-            boarding.capture = random.next() < chance ? 'succeeded' : 'failed';
+            const won = random.next() < chance;
+            boarding.capture = won ? 'succeeded' : 'failed';
+            // Piracy is charged for the attempt either way, before the
+            // session can end under us.
             chargeCrime();
+            if (!won) {
+                // REPELLED. The boarders are thrown off the hulk: the
+                // dialog closes on the spot and nothing further can be
+                // taken from this ship — the durable record (stamped when
+                // the session opened) already marks it fully spent, so
+                // even a fresh approach is refused. The status line is the
+                // only feedback left, hence the event.
+                endBoardingSession(entity, target);
+                emit(BoardingRepelledEvent, {}, [uuid]);
+                return;
+            }
         }
+    },
+});
+
+/**
+ * A ship LANDED, so its plunder life segment is over: the durable
+ * boarding record is dropped and the ship may be plundered once again
+ * when it comes back up (Matthew's ruling; see clearPlunderRecord).
+ *
+ * LandEvent is targeted at the landing ship and covers both routes a
+ * player leaves a system's world by while still coming back — an ordinary
+ * stellar and a hypergate/wormhole transit (gate_transit_plugin fires the
+ * same event). It runs on every peer, so the record clears in lockstep,
+ * and it runs BEFORE the client tears the world down, so the cleared
+ * component is what gets serialized and carried.
+ *
+ * The escort half of the same boundary is in player_escort_plugin (an
+ * escort lands or is swept along by a jump or a gate transit), and the
+ * jumping ship's own half is in jump_plugin's JumpFromSystem.
+ */
+const BoardingLandingResetSystem = new System({
+    name: 'BoardingLandingResetSystem',
+    events: [LandEvent] as const,
+    args: [GetEntity] as const,
+    step(entity) {
+        clearPlunderRecord(entity);
     },
 });
 
@@ -932,12 +1148,16 @@ export const BoardingPlugin: Plugin = {
             EscortRepairedEvent, EscortRepairedEventType);
         world.resources.get(SerializerResource)?.addEvent(
             BayCaptureEvent, BayCaptureEventType);
+        world.resources.get(SerializerResource)?.addEvent(
+            BoardingRepelledEvent, BoardingRepelledEventType);
 
         world.addSystem(BoardingGateSystem);
         world.addSystem(BoardingActionSystem);
+        world.addSystem(BoardingLandingResetSystem);
     },
     remove(world) {
         world.removeSystem(BoardingGateSystem);
         world.removeSystem(BoardingActionSystem);
+        world.removeSystem(BoardingLandingResetSystem);
     },
 };

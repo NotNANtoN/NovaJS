@@ -4,6 +4,9 @@ import {
     NO_SHIPS_FOR_HIRE, NO_SHIPS_FOR_HIRE_INDEX, NO_SHIPS_FOR_HIRE_TABLE,
 } from '../spaceport/hire_escort.js';
 import {
+    ALREADY_BOARDED_MESSAGE, boardingBlockedMessage, CAPTURE_REPELLED_MESSAGE,
+} from '../display/status_bar_content.js';
+import {
     busyResponseText, BUSY_RESPONSE_COUNT, BUSY_RESPONSE_FALLBACK,
     BUSY_RESPONSE_FIRST_INDEX, HAIL_RESPONSE_TABLE,
     HOSTILE_RESPONSE_COUNT, HOSTILE_RESPONSE_FALLBACK,
@@ -33,6 +36,32 @@ describe('StringTable against real Nova data', () => {
         expect(table.strings[NO_SHIPS_FOR_HIRE_INDEX])
             .toBe(NO_SHIPS_FOR_HIRE);
     });
+
+    it('sources the boarding messages from STR# 2002 (124, 125, 130, 131)',
+        async () => {
+            // The one-plunder ruling needs an "already been boarded" line,
+            // and the stock table has one: index 125, sitting among the
+            // boarding outcomes (124 is the repelled capture, 126-128 the
+            // repair/capture confirmations) and immediately above the
+            // boarding-gate refusals at 129-131. It is phrased as a
+            // statement about the TARGET, which is what makes it a refusal
+            // rather than a success confirmation.
+            const gameData = await getIntegrationGameData();
+            const table = await gameData.data.StringTable.get('nova:2002');
+            expect(table.strings[125]).toBe(ALREADY_BOARDED_MESSAGE);
+            expect(table.strings[124]).toBe(CAPTURE_REPELLED_MESSAGE);
+            // The two proximity refusals, quoted verbatim from the same
+            // table, so a data change shows up here rather than as
+            // drifting wording. (The too-far line reads "not close
+            // enough" in stock Nova, not "too far away".)
+            expect(table.strings[130]).toBe(boardingBlockedMessage('tooFar'));
+            expect(table.strings[131]).toBe(boardingBlockedMessage('tooFast'));
+            // Index 129 is the original's catch-all refusal; NovaJS says
+            // something more specific for each of its own reasons, so it
+            // is pinned only as the sibling that must not be confused
+            // with 125.
+            expect(table.strings[129]).toBe("You can't board this ship.");
+        });
 
     it('keeps the shipyard sibling at index 222 distinct', async () => {
         const gameData = await getIntegrationGameData();

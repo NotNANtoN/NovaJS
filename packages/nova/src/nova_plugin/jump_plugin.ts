@@ -16,6 +16,7 @@ import { System } from "nova_ecs/system";
 import { isLeft } from "fp-ts/lib/Either.js";
 import { registerSimulationBridgeEvent } from "../communication/simulation_bridge_events.js";
 import { deImmerify } from "../util/deimmerify.js";
+import { clearPlunderRecord } from "./boarding_component.js";
 import { DisabledComponent } from "./disabled_component.js";
 import { FuelComponent, FUEL_PER_JUMP } from "./health_plugin.js";
 import { ControlledByComponent, ShipControlStateComponent } from "./ship_control.js";
@@ -359,6 +360,12 @@ export const JumpFromSystem = new System({
             return;
         }
         entities.delete(uuid);
+        // A JUMP ENDS A PLUNDER LIFE SEGMENT (Matthew's ruling): the ship
+        // arrives in the next system plunderable once again. Cleared here,
+        // before the entity is serialized, so the record never rides to
+        // the destination in the first place — the alternative (clearing
+        // on arrival) would have to be repeated in every arrival path.
+        clearPlunderRecord(entity);
         deImmerify(entity);
         emit(FinishJumpEvent, { entity, uuid, to }, [uuid]);
     }
