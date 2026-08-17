@@ -20,6 +20,7 @@ import { SimulationGameData } from "../client/gamedata/simulation_game_data.js";
 import { ControlEvent } from "../nova_plugin/controls_plugin.js";
 import { AnalogControlState } from "../nova_plugin/ship_control.js";
 import { HailAction } from "../nova_plugin/hail_plugin.js";
+import { AcceptedMission } from "../nova_plugin/mission_accept.js";
 import { makeSystem } from "../nova_plugin/make_system.js";
 import { SimulationBridgeHost, SimulationFrame } from "./simulation_bridge.js";
 import { BrowserSimulationBridgeWorkerApi, BrowserWorkerRoomState } from "./simulation_bridge_browser_worker.js";
@@ -139,6 +140,10 @@ class BrowserSimulationBridgeHost implements BrowserSimulationBridgeWorkerApi {
 
     async hail(action: HailAction) {
         this.requireBridge().hail(action);
+    }
+
+    async acceptMission(accepted: AcceptedMission) {
+        await this.requireBridge().acceptMission(accepted);
     }
 
     async step(count?: number) {
