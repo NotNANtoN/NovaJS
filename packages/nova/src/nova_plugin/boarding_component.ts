@@ -86,9 +86,12 @@ export const BoardingState = t.type({
     ammoTaken: t.boolean,
     /**
      * Capture-attempt state, driving the capture-assignment dialog:
-     *  'none'      no attempt yet (or the last attempt was repelled and
-     *              the player may try again),
-     *  'failed'    the most recent attempt was repelled,
+     *  'none'      no attempt yet — the ONE attempt this session gets,
+     *  'failed'    the attempt was repelled. Transient: the session ends
+     *              on the same tick it is set (see the one-capture-chance
+     *              rule below), so nothing observes it for longer than
+     *              the write. The literal is kept in the codec because
+     *              the wire shape is additive-only.
      *  'succeeded' the ship was captured; the assignment dialog is up,
      *  'assigned'  the captured ship has been taken as an escort.
      */
@@ -102,41 +105,71 @@ export type BoardingState = t.TypeOf<typeof BoardingState>;
 export const BoardingComponent = new Component<BoardingState>('Boarding');
 
 /**
- * Present on a ship from the moment it is first boarded, naming the most
- * recent boarder, and marking the ship for mission-goal tracking
- * (mission_ship_state.ts shipBoarded seam).
+ * Present on a ship from the moment it is first boarded, naming the
+ * boarder that spent its plunder, and marking the ship for mission-goal
+ * tracking (mission_ship_state.ts shipBoarded seam).
  *
- * TWO DIFFERENT JOBS, which this component used to conflate into bare
- * presence — and that conflation is what made Drifting Derelicts
- * impossible to capture:
+ * ============================================================================
+ * ONE PLUNDER PER LIFE SEGMENT (Matthew's ruling, authoritative)
+ * ============================================================================
  *
- *  - `active` is MUTUAL EXCLUSION. Only while a plunder session is
- *    actually open is a second boarding refused. It is cleared when the
- *    session ends, so a hulk can be boarded again — which is the whole
- *    point for a derelict: capture odds are a per-attempt roll (5-95%,
- *    and only 9% for a starting Shuttle's crew of 1 against an Argosy's
- *    10), so capturing one is meant to take repeated tries. Before this
- *    split, the component was set at board time and removed ONLY on a
- *    successful capture, so the first repelled attempt locked the hulk
- *    out of every future boarding for the rest of the game.
+ * `plundered` is the DURABLE record that this hulk's one plunder has been
+ * spent. Once it is set nothing may open another plunder session against
+ * this ship — not after it is repaired, not after it is disabled again,
+ * not by a different pirate. It is set the instant a plunder session
+ * OPENS (not when booty is taken), so a boarder who takes nothing has
+ * still used the ship's one boarding up, and it also carries the identity
+ * of whoever spent it in `boarder` — which is how "another pirate got
+ * here first" is expressed (npc_ai_plugin's NpcPlunderBoardSystem writes
+ * exactly the same record).
  *
- *  - The `*Taken` flags are the BOOTY MEMORY, and they persist across
- *    sessions. Cargo, fuel and ammo are physically removed from the
- *    victim, so re-boarding could never duplicate them; CREDITS are the
- *    exception — `creditsAvailable` is re-derived from the victim's ship
- *    class price on every board (creditBooty), so without a durable flag
- *    a player could re-board the same hulk indefinitely to farm money.
- *    Seeding a new session from these flags closes that.
+ * The record RESETS on a LIFE-SEGMENT boundary: the ship lands on a
+ * planet and departs again, or it jumps to another system. That is
+ * Matthew's multiplayer-persistence ruling, and it is what stops the
+ * record being an unbounded permanent scar in a session that never ends.
+ * Every place a ship leaves this system's world by a route it can come
+ * back from calls `clearPlunderRecord` (see that function for the roster
+ * of boundaries); a ship that leaves by dying takes its record with it.
+ *
+ * The Bible has NOTHING to say about any of this — its booty model is
+ * stateless ("any ship of a given dude class ... will yield the same
+ * types of booty when boarded", düde intro) — so the whole rule is
+ * NovaJS's, per Matthew.
+ *
+ * WHAT THE OTHER FIELDS ARE FOR:
+ *
+ *  - `active` is MUTUAL EXCLUSION: only while a plunder session is
+ *    actually open is a second boarding refused for THAT reason. It is
+ *    cleared when the session ends. With the one-plunder rule above it is
+ *    now the narrower of the two locks (a hulk whose session has ended is
+ *    still refused, by `plundered`), but it is kept distinct because the
+ *    two answer different questions and produce different feedback, and
+ *    because `active` is corroborated against the named boarder so a
+ *    boarder that vanished mid-session cannot strand anything.
+ *
+ *  - The `*Taken` flags are the BOOTY MEMORY. Cargo, fuel and ammo are
+ *    physically removed from the victim, so re-boarding could never
+ *    duplicate them; CREDITS are the exception — `creditsAvailable` is
+ *    re-derived from the victim's ship class price on every board
+ *    (creditBooty). They are now belt-and-braces behind `plundered` (a
+ *    second session cannot open at all), and they survive a reset of the
+ *    record only in the sense that the whole component goes with it.
  *
  * Capture state deliberately does NOT persist here: it lives on the
- * boarder's BoardingComponent, so every new session starts at 'none' and
- * the player may try again.
+ * boarder's BoardingComponent, and the player gets exactly ONE capture
+ * attempt inside the one session (see BoardingActionSystem) — a repelled
+ * attempt ends the session on the spot.
  */
 export const BoardedState = t.intersection([t.type({
     boarder: t.string,
 }), t.partial({
     /** Whether a plunder session is open against this ship right now. */
     active: t.boolean,
+    /**
+     * This ship's one plunder has been spent (by `boarder`) and cannot be
+     * spent again until the record resets. See the module note above.
+     */
+    plundered: t.boolean,
     cargoTaken: t.boolean,
     creditsTaken: t.boolean,
     fuelTaken: t.boolean,
@@ -144,6 +177,37 @@ export const BoardedState = t.intersection([t.type({
 })]);
 export type BoardedState = t.TypeOf<typeof BoardedState>;
 export const BoardedComponent = new Component<BoardedState>('Boarded');
+
+/**
+ * Ends a ship's PLUNDER LIFE SEGMENT: the durable boarding record is
+ * dropped, so the ship may be plundered once again.
+ *
+ * Called from every boundary at which a ship leaves this system's world
+ * by a route it can return from — Matthew's "lands & departs a planet or
+ * jumps to a new system":
+ *
+ *  - the player's own hyperspace jump (jump_plugin's JumpFromSystem, just
+ *    before the entity is serialized and carried to the next system);
+ *  - an escort following its player out, by jump (player_escort_plugin's
+ *    sweepJumpingEscort) or through a gate (EscortFollowGateSystem);
+ *  - an escort landing behind its player (EscortLandingSystem);
+ *  - any ship that LANDS, which for a player is the LandEvent (covering
+ *    an ordinary stellar and a gate transit alike) — boarding_plugin's
+ *    BoardingLandingResetSystem;
+ *  - an NPC trader that finishes loitering at a planet and sets off
+ *    again, which is this engine's stand-in for an NPC landing and
+ *    departing (npc_ai_plugin's dwell -> travel transition).
+ *
+ * Deliberately unconditional on `active`: a session whose victim has just
+ * jumped or landed is over anyway (BoardingActionSystem ends a session
+ * whose target has left the world), so there is nothing to protect.
+ *
+ * Idempotent, and free for the overwhelming majority of ships, which have
+ * never been boarded and so carry no component at all.
+ */
+export function clearPlunderRecord(entity: Entity): void {
+    entity.components.delete(BoardedComponent);
+}
 
 /**
  * Boarding window (mirrors the landing gate in planet_plugin.ts).
@@ -187,10 +251,19 @@ export function axesAligned(a: Angle, b: Angle,
     return diff <= tol || diff >= Math.PI - tol;
 }
 
-/** Why a board attempt was rejected, or null when it is allowed. */
+/**
+ * Why a board attempt was rejected, or null when it is allowed.
+ *
+ * 'alreadyBoarded' is NOT produced by `boardingBlockedReason` below: it
+ * is decided by the gate AFTER the bay-capture and own-escort-repair
+ * branches, because those two are not plunder and the one-plunder rule
+ * must not touch them (Matthew: "Boarding for other purposes (repairing/
+ * refuelling your own disabled escort, fuel transfer) is NOT
+ * restricted"). See BoardingGateSystem.
+ */
 export type BoardBlockReason =
     | 'noTarget' | 'notDisabled' | 'noCrew'
-    | 'tooFar' | 'tooFast' | 'notAligned';
+    | 'tooFar' | 'tooFast' | 'notAligned' | 'alreadyBoarded';
 
 /**
  * Pure boarding gate. Checks, in the order the on-screen feedback
@@ -225,6 +298,17 @@ export function boardingBlockedReason(input: {
         return 'notAligned';
     }
     return null;
+}
+
+/**
+ * Whether a hulk's one plunder has already been spent — by the player, by
+ * a rival player, or by an NPC pirate that got there first. The single
+ * reading of the durable record, shared by the boarding gate, the NPC
+ * boarding approach (which gives up on a hulk somebody else has already
+ * taken), and the specs.
+ */
+export function plunderSpent(boarded: BoardedState | undefined): boolean {
+    return boarded?.plundered === true;
 }
 
 /** Money booty from a victim's purchase price (floored, non-negative). */

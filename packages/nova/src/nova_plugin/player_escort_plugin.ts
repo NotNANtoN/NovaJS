@@ -21,6 +21,7 @@ import { SingletonComponent } from 'nova_ecs/world';
 import { registerSimulationBridgeEvent } from '../communication/simulation_bridge_events.js';
 import { deImmerify } from '../util/deimmerify.js';
 import { CollectableEscortComponent, ReturnComponent } from './bay_plugin.js';
+import { clearPlunderRecord } from './boarding_component.js';
 import { EscortCommandComponent } from './escort_command.js';
 import { FiringGroupComponent } from './firing_group.js';
 import { flockParent, MAX_FLOCK_DEPTH } from './flock.js';
@@ -665,6 +666,11 @@ function sweepJumpingEscort(escort: Entity, escortUuid: string,
     // in the system being left behind.
     escort.components.delete(EscortLandingComponent);
     escort.components.delete(JumpComponent);
+    // A jump ends this escort's plunder life segment: whatever a pirate
+    // stripped from it in the system being left behind is forgotten, and
+    // it arrives plunderable once again (Matthew's ruling — see
+    // clearPlunderRecord).
+    clearPlunderRecord(escort);
     entities.delete(escortUuid);
     deImmerify(escort);
     emit(EscortJumpEvent,
@@ -878,6 +884,9 @@ export const EscortFollowGateSystem = new System({
             // A landing order does not survive the transit: the stellar it
             // named is in the system being left behind.
             escort.components.delete(EscortLandingComponent);
+            // The transit ends this escort's plunder life segment, like
+            // the jump sweep and the landing below (clearPlunderRecord).
+            clearPlunderRecord(escort);
             entities.delete(escortUuid);
             deImmerify(escort);
             emit(EscortLandedEvent, {
@@ -926,6 +935,9 @@ export const EscortLandingSystem = new System({
             // Landed. The order is dropped before the entity is captured
             // so the escort comes back out of the roster clean.
             entity.components.delete(EscortLandingComponent);
+            // Landing-and-departing ends this escort's plunder life
+            // segment (Matthew's ruling — see clearPlunderRecord).
+            clearPlunderRecord(entity);
             entities.delete(uuid);
             deImmerify(entity);
             emit(EscortLandedEvent, {

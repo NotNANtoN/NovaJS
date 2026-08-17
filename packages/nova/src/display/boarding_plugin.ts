@@ -98,14 +98,43 @@ const PLUNDER_ROWS = 4;
  * can be pinned directly (the same split hail_dialog_plugin's
  * computeContext uses).
  *
- * CAPTURE is greyed for a victim somebody is flying (`capturable`). That
- * predicate is simulation state — serializer-registered, forwarded to this
- * world by the bridge with every other synced component, and not in
- * PEER_LOCAL_COMPONENTS — so every peer looking at the same victim greys
- * the same button, and it is the SAME predicate the sim's capture roll
+ * ============================================================================
+ * EVERY ROW IS DATA-DRIVEN (Matthew's ruling)
+ * ============================================================================
+ *
+ * A row is live only when the victim actually HAS the thing it takes and
+ * the boarder has not already taken it. There is no row whose enablement
+ * is a constant, and none is inferred from the dialog's own history: each
+ * one is a predicate over state the SIMULATION owns and the delta bridge
+ * mirrors into this world —
+ *
+ *   Cargo    the victim's CargoComponent has tons left, and this session
+ *            has not taken them (the sim empties the hold on the take, so
+ *            the two agree even before the flag is read);
+ *   Credits  the money booty frozen at board time is above zero;
+ *   Ammo     the compatible rounds frozen at board time are above zero
+ *            (the boarder must MOUNT a launcher for them — the sim's
+ *            planAmmoPlunder decides, and the dialog only reads its sum);
+ *   Energy   the victim's FuelComponent has fuel left;
+ *   Capture  the contest is available: the victim is not being flown
+ *            (`capturable`), no attempt has been made yet, and the
+ *            boarder has crew to send (Bible, shïp Crew: "Ships with 0
+ *            crew can't be boarded, nor can they capture any other
+ *            ships").
+ *
+ * ONE ATTEMPT. `capture !== 'none'` greys the Capture row for good: the
+ * player gets a single attempt per session, and a repelled one ends the
+ * session outright (the dialog closes rather than sitting there with a
+ * dead button). The 'failed' branch below is therefore a belt-and-braces
+ * rendering of a state the sim clears on the same tick.
+ *
+ * Everything read here is simulation state — serializer-registered,
+ * forwarded to this world by the bridge with every other synced
+ * component, and not in PEER_LOCAL_COMPONENTS — so every peer looking at
+ * the same victim greys the same buttons, off the SAME predicates the sim
  * consults: the dialog can never offer an action the simulation would
- * refuse. The odds readout goes with it (there are no odds), replaced by a
- * line saying why.
+ * refuse. Where capture is impossible the odds readout goes with it
+ * (there are no odds), replaced by a line saying why.
  */
 /** One row of the plunder readout: a label/value pair, plus the optional
  * second pair the Energy row carries ("Capture Odds: 13%"). */
@@ -126,7 +155,10 @@ export function plunderDialogContent(boarding: BoardingState,
         ? [...cargo.values()].reduce((a, b) => a + b, 0) : 0;
     const fuel = target?.components.get(FuelComponent);
     const targetCrew = target?.components.get(ShipDataComponent)?.crew ?? 0;
-    const captureBlocked = target !== undefined && !capturable(target);
+    // No capture is possible against a ship somebody is flying, and none
+    // is possible with nobody to send across (Bible, shïp Crew).
+    const captureBlocked = (target !== undefined && !capturable(target))
+        || playerCrew <= 0;
 
     // Booty readout mirroring board_ship.png: Cargo / Credits / Ammo /
     // Energy, with capture odds inline. Cargo is summarised on one line
@@ -160,8 +192,10 @@ export function plunderDialogContent(boarding: BoardingState,
         },
     ];
     const notes: string[] = [];
-    if (captureBlocked) {
+    if (target !== undefined && !capturable(target)) {
         notes.push('Her captain still holds the bridge: cannot capture.');
+    } else if (playerCrew <= 0) {
+        notes.push('You have no crew to send across: cannot capture.');
     } else if (boarding.capture === 'failed') {
         notes.push('You were repelled while attempting to capture!');
     }
@@ -179,8 +213,9 @@ export function plunderDialogContent(boarding: BoardingState,
                 && boarding.creditsAvailable > 0,
             plunderFuel: !boarding.fuelTaken && !!fuel && fuel.current > 0,
             plunderAmmo: !boarding.ammoTaken && boarding.ammoAvailable > 0,
-            plunderCapture: boarding.capture !== 'succeeded'
-                && !captureBlocked,
+            // ONE attempt per session: any state but 'none' means it has
+            // been used (see the module note).
+            plunderCapture: boarding.capture === 'none' && !captureBlocked,
             plunderDone: true,
         },
     };

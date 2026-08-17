@@ -10,9 +10,9 @@ import { SimulationGameDataResource } from "../nova_plugin/game_data_resource.js
 import { GameDateComponent } from "../nova_plugin/player_state_plugin.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 import { SystemIdResource } from "../nova_plugin/system_id_resource.js";
-import { bayCaptureMessage, boardingBlockedMessage, escortRepairedMessage, jumpArrivalMessage, landingBlockedMessage } from "./status_bar_content.js";
+import { bayCaptureMessage, boardingBlockedMessage, captureRepelledMessage, escortRepairedMessage, jumpArrivalMessage, landingBlockedMessage } from "./status_bar_content.js";
 import { LandingBlockedEvent } from "../nova_plugin/planet_plugin.js";
-import { BayCaptureEvent, BoardingBlockedEvent, EscortRepairedEvent } from "../nova_plugin/boarding_plugin.js";
+import { BayCaptureEvent, BoardingBlockedEvent, BoardingRepelledEvent, EscortRepairedEvent } from "../nova_plugin/boarding_plugin.js";
 import { ResizeEvent, ScreenSize } from "./screen_size_plugin.js";
 import { Stage } from "./stage_resource.js";
 
@@ -162,6 +162,22 @@ const ShowBoardingBlockedMessage = new System({
     },
 });
 
+// The ONE capture attempt a plunder session gets was repelled. The sim
+// ends the session on the same tick, so the plunder dialog has already
+// closed by the time this arrives — the status line is the only place the
+// player is told what happened, which is why the sim emits an event for
+// it at all. A failure, so it takes the cant-do beep.
+const ShowBoardingRepelledMessage = new System({
+    name: 'ShowBoardingRepelledMessage',
+    events: [BoardingRepelledEvent],
+    args: [StatusLineResource, TimeResource, PlayerShipSelector,
+        Emit] as const,
+    step(statusLine, { time }, _player, emit) {
+        statusLine.setMessage(captureRepelledMessage(), time);
+        emit(UiSoundEvent, { id: BEEP_CANT_DO });
+    },
+});
+
 // Success feedback when boarding repairs one of your own disabled flock
 // members (EscortRepairedEvent from the boarding gate). Like the blocked
 // messages it is emitted in the sim targeted at the boarding ship and
@@ -231,6 +247,7 @@ export const StatusMessagePlugin: Plugin = {
         world.addSystem(DrawStatusMessage);
         world.addSystem(ShowLandingBlockedMessage);
         world.addSystem(ShowBoardingBlockedMessage);
+        world.addSystem(ShowBoardingRepelledMessage);
         world.addSystem(ShowEscortRepairedMessage);
         world.addSystem(ShowBayCaptureMessage);
     },
@@ -239,6 +256,7 @@ export const StatusMessagePlugin: Plugin = {
         world.removeSystem(DrawStatusMessage);
         world.removeSystem(ShowLandingBlockedMessage);
         world.removeSystem(ShowBoardingBlockedMessage);
+        world.removeSystem(ShowBoardingRepelledMessage);
         world.removeSystem(ShowEscortRepairedMessage);
         world.removeSystem(ShowBayCaptureMessage);
         const stage = world.resources.get(Stage);

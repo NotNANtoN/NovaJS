@@ -11,12 +11,15 @@ import { ArmorComponent } from './health_plugin.js';
 import { completeEntity } from './entity_data_loader.js';
 import { MissionShipComponent } from './mission_ship_plugin.js';
 import {
+    GOAL_BOARD,
     GOAL_CHASE_OFF,
     GOAL_DESTROY,
     GOAL_DISABLE,
     GOAL_OBSERVE,
     ShipObjective,
+    shipsToSpawn,
 } from './mission_ship_state.js';
+import { BoardedComponent } from './boarding_component.js';
 import { makeNpcShip } from './npc_spawn_plugin.js';
 import { Angle } from 'nova_ecs/datatypes/angle';
 import { Position } from 'nova_ecs/datatypes/position';
@@ -193,6 +196,113 @@ describe('mission ships in the shared simulation', () => {
             }
             expect(world.entities.has(missionShipUuid)).toBe(false);
         }, 30_000);
+
+
+    /**
+     * ========================================================================
+     * MISSION SHIPS ARE BOARDABLE — and a captured one stops being one
+     * ========================================================================
+     *
+     * The Bible settles the first half outright. Two of the seven mïsn
+     * ShipGoal values are about boarding a special ship: 2 is "Board
+     * them" and 5 is "Rescue them (they start out disabled and stay that
+     * way until you board them)". mïsn Flags 0x0001 says the mission
+     * "will auto-abort after the special ship is boarded", and mïsn
+     * PickupMode 2 is "Pick up when boarding special ship". So mission
+     * ships are boarded on purpose, and a board by the OWNER is goal
+     * progress.
+     *
+     * CAPTURING one is undocumented — the Bible's only word on missions
+     * and plunder is the exclusion in gövt Flags 0x1000 ("non-mission"),
+     * which keeps NPC pirates off them. Matthew's ruling fills the gap:
+     * the capture is allowed, and the prize SHEDS its mission-special
+     * identity, so the mission's own housekeeping can no longer reach
+     * it. The alternative — teaching every mission system to skip ships
+     * that are now player escorts — would have to be repeated in the
+     * cleanup, the tracker and the respawn count; dropping the tag does
+     * all three at once.
+     */
+    describe('boarding and capturing mission special ships', () => {
+        it('credits a board goal when the OWNER boards the ship',
+            async () => {
+                const { world, shipUuid, missionShipUuid, activeObjective } =
+                    await makeWorldWithMissionShip(GOAL_BOARD);
+                world.entities.get(missionShipUuid)!.components
+                    .set(BoardedComponent,
+                        { boarder: shipUuid, plundered: true });
+                for (let i = 0; i < 5; i++) {
+                    world.step();
+                }
+                const objective = activeObjective()!;
+                expect(objective.satisfied).toBe(1);
+                expect(objective.complete).toBe(true);
+            }, 30_000);
+
+        it('does not credit a board by somebody else', async () => {
+            // The durable record names whoever spent the hulk's one
+            // plunder, and that can be a rival player. Only the mission's
+            // own player boarding it is progress.
+            const { world, missionShipUuid, activeObjective } =
+                await makeWorldWithMissionShip(GOAL_BOARD);
+            world.entities.get(missionShipUuid)!.components
+                .set(BoardedComponent,
+                    { boarder: 'some rival', plundered: true });
+            for (let i = 0; i < 5; i++) {
+                world.step();
+            }
+            expect(activeObjective()!.satisfied).toBe(0);
+        }, 30_000);
+
+        it('keeps a captured prize when the mission ends', async () => {
+            // The regression this pins: MissionShipCleanupSystem deletes
+            // any mission ship whose owner has lost the mission, which
+            // would VAPORISE the player's new escort the moment the
+            // mission was completed or aborted. Shedding the tag on
+            // capture (convertToEscort) is what saves it.
+            const { world, shipUuid, missionShipUuid } =
+                await makeWorldWithMissionShip(GOAL_DESTROY);
+            expect(world.entities.get(missionShipUuid)!.components
+                .has(MissionShipComponent)).toBe(true);
+
+            // What capture does to the hull, in one line.
+            world.entities.get(missionShipUuid)!.components
+                .delete(MissionShipComponent);
+            // The mission then ends.
+            world.entities.get(shipUuid)!.components
+                .set(MissionsComponent, new Map());
+            for (let i = 0; i < 5; i++) {
+                world.step();
+            }
+            expect(world.entities.has(missionShipUuid)).toBe(true);
+        }, 30_000);
+
+        it('stops tracking a captured prize, so the mission respawns a '
+            + 'replacement instead of counting the prize', async () => {
+                // shipsToSpawn is total - satisfied, and the prize is no
+                // longer registered in `live`, so the objective is exactly
+                // where it was before the ship existed: the next system
+                // entry spawns a fresh one and the escort is left alone.
+                const { world, missionShipUuid, activeObjective } =
+                    await makeWorldWithMissionShip(GOAL_DESTROY);
+                expect(activeObjective()!.live.has(missionShipUuid))
+                    .toBe(true);
+
+                world.entities.get(missionShipUuid)!.components
+                    .delete(MissionShipComponent);
+                // The tracker no longer re-registers it; the departure
+                // sweep leaves it alone too, because it is still in the
+                // world.
+                activeObjective()!.live.delete(missionShipUuid);
+                for (let i = 0; i < 5; i++) {
+                    world.step();
+                }
+                const objective = activeObjective()!;
+                expect(objective.live.has(missionShipUuid)).toBe(false);
+                expect(objective.satisfied).toBe(0);
+                expect(shipsToSpawn(objective)).toBe(1);
+                expect(world.entities.has(missionShipUuid)).toBe(true);
+            }, 30_000);
+    });
 
     it('despawns mission ships whose mission is gone', async () => {
         const { world, shipUuid, missionShipUuid } =

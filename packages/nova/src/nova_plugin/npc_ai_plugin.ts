@@ -15,7 +15,11 @@ import { TimeResource, TimeSystem } from 'nova_ecs/plugins/time_plugin';
 import { Query } from 'nova_ecs/query';
 import { RunQuery } from 'nova_ecs/arg_types';
 import { System } from 'nova_ecs/system';
+import { SingletonComponent } from 'nova_ecs/world';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
+import {
+    BoardedComponent, BoardedState, clearPlunderRecord, plunderSpent,
+} from './boarding_component.js';
 import { CloakActiveComponent, isTargetable } from './cloak_plugin.js';
 import { DamagedEvent, ExplodingComponent } from './death_plugin.js';
 import { DisabledComponent, DisabledState } from './disabled_component.js';
@@ -27,6 +31,8 @@ import { govtDispositionTo, effectiveStrength, oddsFavorable } from './govt_disp
 import { ArmorComponent, ShieldComponent } from './health_plugin.js';
 import { beginDepartureJump, JumpComponent, JumpSequenceSystem, JUMP_DISTANCE, JUMP_ARRIVAL_MARGIN_S } from './jump_plugin.js';
 import { landable } from './landable.js';
+import { MissionShipComponent } from './mission_ship_plugin.js';
+import { ControlledByComponent } from './ship_control.js';
 import { PlanetData } from 'novadatainterface/planet_data';
 import { ShipPhysics } from 'novadatainterface/ship_data';
 import { PlanetComponent, PlanetDataComponent } from './planet_plugin.js';
@@ -205,10 +211,126 @@ export const RCS_ENGAGE_SPEED = 60;
  * hysteresis that stops flip-flopping at the boundary. */
 export const RCS_DISENGAGE_SPEED = 120;
 
+// --- NPC plundering of disabled hulks (gövt Flags 0x1000) ---
+//
+// EVN Bible, gövt Flags (unofficial-corrections edition, the copy at the
+// repo root):
+//
+//   0x1000     Warships will plunder non-mission, trader-type enemies
+//              (including the player) before destroying them
+//
+// (The original Ambrosia text read "non-mission, non-player enemies";
+// Appendix V records the correction. Both agree on "warships",
+// "non-mission" and "trader-type".)
+//
+// That sentence is the ONLY NPC-side boarding rule in the whole Bible.
+// Everything it does not say is a judgment call, so each one is a named
+// constant here and every one of them is listed in the report as wanting
+// a ruling:
+//
+//  - "Warships" -> AIType 3 only. AIType 3 IS "Warship"; AIType 4 is
+//    "Interceptor", whose documented job is the opposite one — it "acts
+//    as 'piracy police' by attacking any ship that fires on or attempts
+//    to board another, non-enemy ship". Putting interceptors on the
+//    plundering side would have them police themselves.
+//  - "trader-type" -> AIType 1 and 2, which is how the Bible spells the
+//    same idea everywhere else: gövt Flags 0x0080 says "Freighters (i.e.
+//    AiTypes 1 and 2)" and flët Flags 0x0001 says "Freighters
+//    (InherentAI <= 2)".
+//  - "(including the player)" is NOT implemented: NPC boarding of a
+//    player's ship raises the whole question of what an NPC takes from a
+//    player and how that reaches the player's own state, which is far
+//    beyond a minimal deterministic approach. See
+//    NPC_PLUNDER_TAKES_FROM_PLAYERS.
+//  - DISABLED FIRST is imposed by this engine, not by the Bible (the
+//    flag says only "before destroying them"). Boarding in NovaJS is
+//    defined against a disabled hulk (boarding_component.ts), so an NPC
+//    plunder run waits for the hulk like the player does.
+//  - The NPC takes NOTHING material. It marks the hulk's durable plunder
+//    record as spent (BoardedComponent), which is the whole point: "some
+//    other pirate got here first", and the player is then refused.
+//    Moving cargo into an NPC's hold would be invisible and pointless.
+
+/**
+ * TUNABLE (Bible-ambiguous). AI types that run a plunder-boarding
+ * approach when their government carries gövt Flags 0x1000.
+ */
+export const NPC_PLUNDER_BOARDER_AI_TYPES: ReadonlySet<number> = new Set([3]);
+/**
+ * TUNABLE (Bible-ambiguous). AI types that count as the flag's
+ * "trader-type" victims.
+ */
+export const NPC_PLUNDER_VICTIM_AI_TYPES: ReadonlySet<number> = new Set([1, 2]);
+/**
+ * TUNABLE. Whether NPCs plunder ships somebody is FLYING. The corrected
+ * Bible text says the flag includes the player; NovaJS does not model
+ * what an NPC would take from a player, so this is off and the exclusion
+ * is explicit rather than accidental.
+ */
+export const NPC_PLUNDER_TAKES_FROM_PLAYERS = false;
+/** TUNABLE. How far away a warship will notice a plunderable hulk. */
+export const NPC_PLUNDER_SEEK_RANGE = 4000;
+/** TUNABLE. "Pulled alongside", for an NPC (the player's own gate is
+ * tighter, and additionally axis-aligned — an NPC is not asked to fly
+ * that precisely). */
+export const NPC_BOARD_RADIUS = 140;
+/** TUNABLE. Relative speed at which an NPC counts as matched to the
+ * hulk's drift. */
+export const NPC_BOARD_SPEED = 60;
+
 export const NpcMode = t.union([
     t.literal('travel'), t.literal('dwell'), t.literal('flee'),
-    t.literal('attack'), t.literal('patrol'), t.literal('depart')]);
+    t.literal('attack'), t.literal('patrol'), t.literal('depart'),
+    /** Flying to a disabled hulk to plunder it (gövt Flags 0x1000). */
+    t.literal('board')]);
 export type NpcMode = t.TypeOf<typeof NpcMode>;
+
+/**
+ * Whether this NPC is a plunderer at all: the "Warships ... of this govt"
+ * half of gövt Flags 0x1000. Split out so the decision step can decide in
+ * one cheap test whether to look at hulks at all.
+ */
+export function npcPlundersHulks(aiType: number,
+    plundersBeforeDestroying: boolean | undefined): boolean {
+    return plundersBeforeDestroying === true
+        && NPC_PLUNDER_BOARDER_AI_TYPES.has(aiType);
+}
+
+/**
+ * Whether a warship of a plundering government would run a boarding
+ * approach on this victim — the gövt Flags 0x1000 rule, as a pure
+ * predicate over already-resolved facts so it can be pinned directly.
+ */
+export function npcPlunderEligible(boarder: {
+    aiType: number, plundersBeforeDestroying: boolean | undefined,
+}, victim: {
+    /** The victim's NpcComponent aiType; undefined when it has no NPC
+     * brain (a player's ship, a dev-spawned hull). */
+    aiType: number | undefined,
+    disabled: boolean,
+    /** Its one plunder has already been spent (plunderSpent). */
+    plunderSpent: boolean,
+    /** It is a mission special ship — the flag's "non-mission". */
+    missionShip: boolean,
+    /** Somebody is flying it (ControlledByComponent). */
+    controlled: boolean,
+    /** The boarder's government calls it an enemy. */
+    hostile: boolean,
+}): boolean {
+    if (!npcPlundersHulks(boarder.aiType,
+        boarder.plundersBeforeDestroying)) {
+        return false;
+    }
+    if (!victim.disabled || victim.plunderSpent || victim.missionShip
+        || !victim.hostile) {
+        return false;
+    }
+    if (victim.controlled) {
+        return NPC_PLUNDER_TAKES_FROM_PLAYERS;
+    }
+    return victim.aiType !== undefined
+        && NPC_PLUNDER_VICTIM_AI_TYPES.has(victim.aiType);
+}
 
 export const NpcState = t.intersection([t.type({
     /** Effective AI type 1-4 (düde AIType, or the shïp InherentAI when
@@ -228,6 +350,10 @@ export const NpcState = t.intersection([t.type({
     aggressor: t.string,
     /** Sim time (ms) after which the NPC heads for a jump-out. */
     departAt: t.number,
+    /** Uuid of the disabled hulk this NPC is flying to plunder (mode
+     * 'board'; gövt Flags 0x1000). Cleared the moment the approach ends,
+     * however it ends. */
+    boardTarget: t.string,
     /** Uuid of a ship this NPC has been bribed to leave alone (hail bribe /
      * beg-for-mercy). While `pacifiedUntil` has not lapsed, this ship is
      * skipped as a hostile and forgotten as an aggressor. */
@@ -555,10 +681,10 @@ const NpcDecisionSystem = new System({
         Optional(EscortCommandComponent), Optional(AssistingComponent),
         Optional(JumpComponent), NpcTargetsQuery,
         PlanetsQuery, TimeResource, RandomResource, Entities, UUID,
-        SimulationGameDataResource] as const,
+        SimulationGameDataResource, GetEntity] as const,
     step(npc, movement, target, govt, shield, shipData, formation,
         escortCommand, assisting, jump, ships, planets, time, random, entities,
-        uuid, gameData) {
+        uuid, gameData, entity) {
         if (escortCommand) {
             // A player-commanded escort: its brain is the escort
             // command framework (escort_command_plugin), not NPC AI.
@@ -622,16 +748,27 @@ const NpcDecisionSystem = new System({
         // Gather enemies: govt-hostile ships plus the recorded
         // aggressor. Cloaked ships are excluded (invisible to AI), and
         // so are DISABLED ships: a disabled ship is no longer a threat,
-        // so warships and interceptors drop it and pick a new target
-        // (boarding/piracy behavior is not modeled). Ships with legal
-        // records (players) whose record with this govt is below its
-        // crime tolerance are enemies too: crime has consequences.
+        // so warships and interceptors drop it and pick a new target.
+        // Ships with legal records (players) whose record with this govt
+        // is below its crime tolerance are enemies too: crime has
+        // consequences.
+        //
+        // Disabled enemies are collected SEPARATELY as plunder candidates
+        // (gövt Flags 0x1000; see npcPlunderEligible). They are still not
+        // hostiles — a warship never shoots at a hulk — but a warship of a
+        // plundering government will fly over and board one.
         const hostiles: Array<readonly [string, number]> = [];
+        const plunderable: Array<readonly [string, number]> = [];
+        // Only a warship of a plundering government looks at hulks at all,
+        // so the extra per-hulk entity lookups below cost nothing for
+        // every other NPC in the system.
+        const plunders = npcPlundersHulks(npc.aiType,
+            govtData?.flags.plundersBeforeDestroying);
         let aggressorEntry: readonly [string, number, number] | undefined;
         for (const [otherUuid, otherMovement, , otherData, otherGovt,
             otherShield, cloak, otherDisabled, otherRecords,
             otherRanks] of ships) {
-            if (otherUuid === uuid || !isTargetable(cloak) || otherDisabled) {
+            if (otherUuid === uuid || !isTargetable(cloak)) {
                 continue;
             }
             if (otherUuid === pacifiedFrom) {
@@ -640,6 +777,35 @@ const NpcDecisionSystem = new System({
             }
             const distanceSquared = otherMovement.position
                 .subtract(position).lengthSquared;
+            if (otherDisabled) {
+                if (plunders && distanceSquared
+                    <= NPC_PLUNDER_SEEK_RANGE * NPC_PLUNDER_SEEK_RANGE
+                    && govtDispositionTo(govtData,
+                        lookupGovt(gameData, otherGovt), otherRecords,
+                        ranksSuppressAggression(otherRanks,
+                            id => gameData.data.Rank.getCached(id),
+                            govtData?.id)) === 'enemy') {
+                    const hulk = entities.get(otherUuid);
+                    if (hulk && npcPlunderEligible({
+                        aiType: npc.aiType,
+                        plundersBeforeDestroying:
+                            govtData?.flags.plundersBeforeDestroying,
+                    }, {
+                        aiType: hulk.components.get(NpcComponent)?.aiType,
+                        disabled: true,
+                        plunderSpent: plunderSpent(
+                            hulk.components.get(BoardedComponent)),
+                        missionShip:
+                            hulk.components.has(MissionShipComponent),
+                        controlled:
+                            hulk.components.has(ControlledByComponent),
+                        hostile: true,
+                    })) {
+                        plunderable.push([otherUuid, distanceSquared] as const);
+                    }
+                }
+                continue;
+            }
             const otherStrength = effectiveStrength(
                 otherData.strength, shieldFraction(otherShield));
             if (otherUuid === npc.aggressor) {
@@ -696,6 +862,19 @@ const NpcDecisionSystem = new System({
                     }
                 } else if (npc.mode === 'dwell') {
                     if (time.time >= (npc.until ?? 0)) {
+                        // The loiter is over: this trader has "landed and
+                        // departed" as far as this engine models it (dwell
+                        // is the documented stand-in for a landing, since a
+                        // real one would despawn and respawn the ship), so
+                        // its PLUNDER LIFE SEGMENT ends here — Matthew's
+                        // ruling that the one-plunder record resets when a
+                        // ship lands and departs. It is rare in practice
+                        // (a plundered hulk has to be repaired before it
+                        // can travel at all) but it is the boundary the
+                        // ruling names, and the sibling boundaries live in
+                        // jump_plugin, player_escort_plugin and
+                        // boarding_plugin's landing reset.
+                        clearPlunderRecord(entity);
                         if (time.time >= npc.departAt) {
                             npc.mode = 'depart';
                             return;
@@ -745,6 +924,33 @@ const NpcDecisionSystem = new System({
                 if (npc.mode === 'attack' || npc.mode === 'flee') {
                     npc.mode = undefined;
                     target.target = undefined;
+                }
+                // PLUNDER RUN (gövt Flags 0x1000): with nothing left to
+                // shoot, a warship of a plundering government goes over to
+                // a hulk it has a quarrel with and boards it. Ordered
+                // AFTER the engagement decision, so a live enemy always
+                // wins over a hulk, and BEFORE departure and patrol, so a
+                // pirate does not wander off past a prize.
+                //
+                // STICKY: the ship keeps the hulk it already chose while
+                // that hulk is still a candidate, so a long approach is not
+                // re-aimed at whatever drifted nearer this second. The
+                // fallback picks the nearest, which breaks exact ties by
+                // uuid (chooseNearest), so every peer chooses alike.
+                if (plunderable.length > 0) {
+                    const keep = npc.mode === 'board' && npc.boardTarget
+                        !== undefined && plunderable.some(
+                            ([u]) => u === npc.boardTarget);
+                    npc.boardTarget = keep
+                        ? npc.boardTarget : chooseNearest(plunderable);
+                    npc.mode = 'board';
+                    return;
+                }
+                if (npc.mode === 'board') {
+                    // The prize was taken, repaired, destroyed, or drifted
+                    // out of range: back to ordinary warship business.
+                    npc.mode = undefined;
+                    npc.boardTarget = undefined;
                 }
                 if (time.time >= npc.departAt) {
                     npc.mode = 'depart';
@@ -985,10 +1191,13 @@ export const NpcSteeringSystem = new System({
         if (escortCommand) {
             return; // Player-commanded: see escort_command_plugin.
         }
-        // Escorts holding formation are steered by FormationSystem.
+        // Escorts holding formation are steered by FormationSystem —
+        // unless they are off doing something of their own, a plunder run
+        // included (a warship peeling out of formation to board a hulk
+        // must not be dragged back to its station).
         if (formation && entities.has(formation.leader)
             && npc.mode !== 'attack' && npc.mode !== 'flee'
-            && npc.mode !== 'depart') {
+            && npc.mode !== 'depart' && npc.mode !== 'board') {
             return;
         }
         switch (npc.mode) {
@@ -1031,6 +1240,28 @@ export const NpcSteeringSystem = new System({
                 steerArrive(movement, physics,
                     new Position(npc.waypoint[0], npc.waypoint[1]),
                     WAYPOINT_RADIUS, physics.speed);
+                break;
+            }
+            case 'board': {
+                // Flying over to plunder a hulk (gövt Flags 0x1000). This
+                // arm only STEERS; the arrival and the claim itself belong
+                // to NpcPlunderBoardSystem, which sweeps in uuid order so
+                // two warships reaching the same hulk on the same tick
+                // cannot resolve differently on different peers.
+                const prize = npc.boardTarget
+                    ? entities.get(npc.boardTarget) : undefined;
+                const prizeMovement =
+                    prize?.components.get(MovementStateComponent);
+                if (!prize || !prizeMovement
+                    || !prize.components.has(DisabledComponent)) {
+                    // Destroyed, jumped out, or patched up while we flew.
+                    npc.mode = undefined;
+                    npc.boardTarget = undefined;
+                    return;
+                }
+                steerArrive(movement, physics,
+                    Position.fromVectorLike(prizeMovement.position),
+                    NPC_BOARD_RADIUS, NPC_BOARD_SPEED);
                 break;
             }
             case 'attack': {
@@ -1109,6 +1340,90 @@ export const NpcSteeringSystem = new System({
     // (determinism rule 4). The reverse edge would be a cycle via
     // DisabledMovementSystem, which is after both.
     before: [MovementSystem, JumpSequenceSystem],
+});
+
+/**
+ * Whether an NPC on a plunder approach has arrived: pulled alongside the
+ * hulk and matched to its drift. Deliberately looser than the player's
+ * gate (boardingBlockedReason) — an NPC is not asked to line its axis up
+ * with the hulk's.
+ */
+export function npcBoardArrived(boarder: MovementState,
+    hulk: MovementState): boolean {
+    return hulk.position.subtract(boarder.position).lengthSquared
+        <= NPC_BOARD_RADIUS * NPC_BOARD_RADIUS
+        && hulk.velocity.subtract(boarder.velocity).lengthSquared
+        <= NPC_BOARD_SPEED * NPC_BOARD_SPEED;
+}
+
+/**
+ * "SOME OTHER PIRATE GOT HERE FIRST": the terminal of an NPC plunder run
+ * (gövt Flags 0x1000). A warship that has reached its hulk spends the
+ * hulk's ONE boarding — the same durable BoardedComponent record a player
+ * writes (boarding_component.ts) — and the player who turns up afterwards
+ * is refused with "Target ship has been boarded." (stock STR# 2002 index
+ * 125). The converse falls out of the same record: an NPC whose prize the
+ * player boarded first finds it already spent and gives up its approach.
+ *
+ * The NPC takes nothing material. There is nowhere for an NPC's plunder
+ * to go and no way for the player to observe it; the point of the
+ * behavior is the denial, and the crime/booty machinery stays entirely on
+ * the player's side.
+ *
+ * WHY THIS IS ITS OWN SYSTEM RATHER THAN AN ARM OF NpcSteeringSystem.
+ * The claim is a race between ships: two warships can reach the same hulk
+ * on the same tick, and a per-entity system visits them in ENTITY-MAP
+ * order, which differs between a peer that built its map by insertion and
+ * one restored from a wire snapshot — so whichever of them "got there
+ * first" would differ between peers, and the hulk's recorded `boarder` is
+ * hashed shared state. Sweeping the map in UUID-SORTED order from a
+ * single once-per-tick system (SingletonComponent) removes the race
+ * outright: the lexicographically smallest arrived claimant wins, on
+ * every peer, always. No PRNG is involved.
+ */
+export const NpcPlunderBoardSystem = new System({
+    name: 'NpcPlunderBoardSystem',
+    args: [SingletonComponent, Entities] as const,
+    step(_singleton, entities) {
+        for (const uuid of [...entities.keys()].sort()) {
+            const boarder = entities.get(uuid);
+            const npc = boarder?.components.get(NpcComponent);
+            if (!boarder || !npc || npc.mode !== 'board') {
+                continue;
+            }
+            const giveUp = () => {
+                npc.mode = undefined;
+                npc.boardTarget = undefined;
+            };
+            const prize = npc.boardTarget
+                ? entities.get(npc.boardTarget) : undefined;
+            const prizeMovement =
+                prize?.components.get(MovementStateComponent);
+            const boarderMovement =
+                boarder.components.get(MovementStateComponent);
+            if (!prize || !prizeMovement || !boarderMovement
+                || !prize.components.has(DisabledComponent)) {
+                giveUp();
+                continue;
+            }
+            const boarded: BoardedState | undefined =
+                prize.components.get(BoardedComponent);
+            if (plunderSpent(boarded)) {
+                // Beaten to it — by the player, by a rival player, or by
+                // a warship earlier in this very sweep.
+                giveUp();
+                continue;
+            }
+            if (!npcBoardArrived(boarderMovement, prizeMovement)) {
+                continue; // Still on the way; NpcSteeringSystem flies it.
+            }
+            prize.components.set(BoardedComponent, {
+                ...boarded, boarder: uuid, active: false, plundered: true,
+            });
+            giveUp();
+        }
+    },
+    after: [TimeSystem, NpcSteeringSystem],
 });
 
 /**
@@ -1356,9 +1671,11 @@ export const FormationSystem = new System({
             // takes, for the same reason.
             return;
         }
-        // Engaged escorts fight; FormationSystem only holds station.
+        // Engaged escorts fight (or go plundering); FormationSystem only
+        // holds station.
         if (npc && !escortCommand && (npc.mode === 'attack'
-            || npc.mode === 'flee' || npc.mode === 'depart')) {
+            || npc.mode === 'flee' || npc.mode === 'depart'
+            || npc.mode === 'board')) {
             return;
         }
         // Player-commanded escorts: station-keep only while the
@@ -1414,6 +1731,7 @@ export const NpcAiPlugin: Plugin = {
         world.addSystem(NpcAggressionSystem);
         world.addSystem(NpcDecisionSystem);
         world.addSystem(NpcSteeringSystem);
+        world.addSystem(NpcPlunderBoardSystem);
         world.addSystem(NpcFireControlSystem);
         world.addSystem(FormationSystem);
     },

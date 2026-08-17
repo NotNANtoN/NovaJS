@@ -89,6 +89,109 @@ describe('plunder dialog content', () => {
         });
     });
 
+
+    /**
+     * ========================================================================
+     * EVERY ROW IS DATA-DRIVEN (Matthew's ruling)
+     * ========================================================================
+     *
+     * "Every button whose resource the victim doesn't have (no cargo, no
+     * credits, no fuel, no compatible ammo, no capture possible) is grey."
+     * Each of these greys off state the SIMULATION owns and the delta
+     * bridge mirrors here, so the dialog can never offer an action the sim
+     * would refuse.
+     */
+    describe('rows grey off what the victim actually has', () => {
+        it('greys Cargo for an empty hold', () => {
+            const empty = victim();
+            empty.components.set(CargoComponent, new Map());
+            expect(plunderDialogContent(boardingState(), empty, 100)
+                .enabledByAction['plunderCargo']).toBeFalse();
+            // ...and says so in the readout.
+            expect(plunderDialogContent(boardingState(), empty, 100)
+                .lines.join('\n')).toContain('Cargo:  None');
+        });
+
+        it('greys Credits when the money booty is zero', () => {
+            expect(plunderDialogContent(
+                boardingState({ creditsAvailable: 0 }), victim(), 100)
+                .enabledByAction['plunderCredits']).toBeFalse();
+        });
+
+        it('greys Energy for a dry tank', () => {
+            const dry = victim();
+            dry.components.set(FuelComponent,
+                new Stat({ current: 0, max: 400, min: 0, recharge: 0 }));
+            expect(plunderDialogContent(boardingState(), dry, 100)
+                .enabledByAction['plunderFuel']).toBeFalse();
+        });
+
+        it('greys Ammo when nothing aboard fits the boarder\'s launchers',
+            () => {
+                // ammoAvailable is the sim's own planAmmoPlunder sum,
+                // frozen at board time — the dialog never re-derives it.
+                expect(plunderDialogContent(
+                    boardingState({ ammoAvailable: 0 }), victim(), 100)
+                    .enabledByAction['plunderAmmo']).toBeFalse();
+            });
+
+        it('greys Capture for a boarder with no crew to send', () => {
+            // Bible, shïp Crew: "Ships with 0 crew can't be boarded, nor
+            // can they capture any other ships."
+            const { enabledByAction, lines } =
+                plunderDialogContent(boardingState(), victim(), 0);
+            expect(enabledByAction['plunderCapture']).toBeFalse();
+            expect(lines.join('\n')).not.toContain('Capture Odds:');
+            expect(lines.join('\n')).toContain('no crew to send');
+        });
+
+        it('greys everything at once when there is nothing left to take',
+            () => {
+                const stripped = victim();
+                stripped.components.set(CargoComponent, new Map());
+                stripped.components.set(FuelComponent,
+                    new Stat({ current: 0, max: 400, min: 0, recharge: 0 }));
+                const { enabledByAction } = plunderDialogContent(
+                    boardingState({
+                        creditsAvailable: 0, ammoAvailable: 0,
+                        capture: 'failed',
+                    }), stripped, 100);
+                for (const action of ['plunderCargo', 'plunderCredits',
+                    'plunderFuel', 'plunderAmmo', 'plunderCapture']) {
+                    expect(enabledByAction[action])
+                        .withContext(action).toBeFalse();
+                }
+                // Leaving is always possible.
+                expect(enabledByAction['plunderDone']).toBeTrue();
+            });
+    });
+
+    /**
+     * ONE CAPTURE ATTEMPT (Matthew's ruling). Any state but 'none' means
+     * the session's single attempt has been used. A repelled attempt also
+     * ENDS the session, so the sim drops BoardingComponent on the same
+     * tick and the dialog closes — 'failed' is pinned here as the
+     * belt-and-braces rendering of a state nothing should linger in.
+     */
+    describe('the capture row after the one attempt', () => {
+        for (const capture of ['failed', 'succeeded', 'assigned'] as const) {
+            it(`is grey once capture is '${capture}'`, () => {
+                expect(plunderDialogContent(
+                    boardingState({ capture }), victim(), 100)
+                    .enabledByAction['plunderCapture']).toBeFalse();
+            });
+        }
+
+        it('still shows the booty rows on a repelled attempt', () => {
+            // The rows are independent: what stops the player going back
+            // for the cargo is the SESSION ending, not a greyed button.
+            const { enabledByAction } = plunderDialogContent(
+                boardingState({ capture: 'failed' }), victim(), 100);
+            expect(enabledByAction['plunderCargo']).toBeTrue();
+            expect(enabledByAction['plunderCapture']).toBeFalse();
+        });
+    });
+
     it('greys a booty already taken, and Capture after it succeeded', () => {
         const { enabledByAction } = plunderDialogContent(
             boardingState({ cargoTaken: true, capture: 'succeeded' }),

@@ -10,13 +10,21 @@ import { Angle, Vector } from 'nova_ecs/datatypes/vector';
 import { Position } from 'nova_ecs/datatypes/position';
 import { Entity } from 'nova_ecs/entity';
 import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
-import { RandomResource } from 'nova_ecs/plugins/random_plugin';
+import { Random, RandomResource } from 'nova_ecs/plugins/random_plugin';
 import { World } from 'nova_ecs/world';
 import { UUID } from 'nova_ecs/arg_types';
 import { System } from 'nova_ecs/system';
+import { boardingBlockedMessage } from '../display/status_bar_content.js';
 import { getIntegrationGameData } from '../communication/simulation_test_fixture.js';
-import { BayCaptureEvent, EscortRepairedEvent } from './boarding_plugin.js';
+import {
+    BayCaptureEvent, BoardingBlockedEvent, clearHostilityToward,
+    EscortRepairedEvent,
+} from './boarding_plugin.js';
+import { AggressionComponent } from './aggression.js';
+import { MissionShipComponent } from './mission_ship_plugin.js';
 import { BoardedComponent, BoardingComponent } from './boarding_component.js';
+import { InitiateJumpEvent } from './jump_plugin.js';
+import { LandEvent } from './planet_plugin.js';
 import {
     BayFighterComponent, CollectableEscortComponent, ReturnComponent,
     ReturnWhenTargetRemovedComponent, startReturnHome,
@@ -42,7 +50,9 @@ import { makeSystem } from './make_system.js';
 import { FormationComponent, NpcComponent } from './npc_ai_plugin.js';
 import { OutfitsStateComponent } from './outfit_plugin.js';
 import { PlayerEscortComponent } from './player_escort.js';
-import { CreditsComponent } from './player_state_plugin.js';
+import {
+    CreditsComponent, MissionsComponent,
+} from './player_state_plugin.js';
 import { LegalRecordsComponent } from './reputation_plugin.js';
 import {
     ControlledByComponent, ShipControlEvent, ShipControlStateComponent,
@@ -54,6 +64,21 @@ import { WeaponsStateComponent } from './weapons_state.js';
 const BOARDER = 'boarder';
 const SECOND_BOARDER = 'boarder2';
 const TARGET = 'target';
+
+/**
+ * Pins the seeded capture roll: `next()` returns 0, which always lands
+ * inside the chance (a SUCCESS), or 0.999, which never does (REPELLED).
+ *
+ * Needed because the player now gets exactly ONE capture attempt per
+ * session (Matthew's ruling), so the old "press until it lands" loops
+ * cannot work — and forcing the roll makes every capture spec exact
+ * rather than merely overwhelmingly likely.
+ */
+function forceCaptureRoll(world: World, succeed: boolean) {
+    const random = new Random();
+    random.next = () => (succeed ? 0 : 0.999);
+    world.resources.set(RandomResource, random);
+}
 
 /**
  * Live-world boarding against the real simulation stack (mirrors
@@ -203,15 +228,12 @@ describe('boarding in a live world', () => {
             .toEqual(2);
     });
 
-    /** Runs the whole capture flow and takes the prize as an escort. */
+    /** Runs the whole capture flow and takes the prize as an escort.
+     * The single attempt a session gets is forced to land. */
     function captureAsEscort(world: World, boarder: Entity) {
+        forceCaptureRoll(world, true);
         press(world, BOARDER, 'board');
-        // Attempt capture until it lands (chance is clamped to 0.95).
-        for (let i = 0; i < 20
-            && boarder.components.get(BoardingComponent)?.capture
-            !== 'succeeded'; i++) {
-            press(world, BOARDER, 'plunderCapture');
-        }
+        press(world, BOARDER, 'plunderCapture');
         expect(boarder.components.get(BoardingComponent)?.capture)
             .toEqual('succeeded');
         press(world, BOARDER, 'plunderCaptureEscort');
@@ -415,13 +437,9 @@ describe('boarding in a live world', () => {
         const { world, boarder, target } = await boardingWorld({
             boarderCrew: 500, targetCrew: 1,
         });
+        forceCaptureRoll(world, true);
         press(world, BOARDER, 'board');
-        // Attempt capture until it lands (chance is clamped to 0.95).
-        for (let i = 0; i < 20
-            && boarder.components.get(BoardingComponent)?.capture
-            !== 'succeeded'; i++) {
-            press(world, BOARDER, 'plunderCapture');
-        }
+        press(world, BOARDER, 'plunderCapture');
         expect(boarder.components.get(BoardingComponent)?.capture)
             .toEqual('succeeded');
 
@@ -438,6 +456,198 @@ describe('boarding in a live world', () => {
         expect(target.components.has(DisabledComponent)).toBeFalse();
         // Session ended.
         expect(boarder.components.has(BoardingComponent)).toBeFalse();
+    });
+
+    /**
+     * ========================================================================
+     * CAPTURE RESETS HOSTILITY (Matthew's ruling)
+     * ========================================================================
+     *
+     * A prize must come out of a capture standing exactly where a freshly
+     * HIRED escort of the same player stands. Shedding the hull's
+     * government was only half of it: every OTHER ship in the system was
+     * still carrying its own memory of the hull — a live target lock, the
+     * "who hit me last" aggressor slot, a player's behavioural aggression
+     * entry — and those memories put the prize straight back under fire
+     * from the fleet it had just left.
+     *
+     * See clearHostilityToward for the full audit, including what is
+     * deliberately NOT touched and why.
+     */
+    it('a captured MISSION SHIP sheds its mission-special identity',
+        async () => {
+            // The Bible is silent on capturing a mission ship (its only
+            // word on missions and plunder is gövt Flags 0x1000's
+            // "non-mission" exclusion, which keeps NPC pirates off them),
+            // so this is Matthew's ruling: the capture is allowed and the
+            // prize stops being the mission's prop. Dropping the tag is
+            // what keeps MissionShipCleanupSystem from deleting the
+            // player's new escort when the mission ends, keeps the tracker
+            // from crediting goal progress for a ship the player owns, and
+            // leaves the respawn count where it was so the mission simply
+            // sends a replacement.
+            const { world, boarder, target } = await boardingWorld({
+                boarderCrew: 500, targetCrew: 1,
+            });
+            // A live mission held by the boarder, whose special ship the
+            // hulk is. The mission has to really exist on a live owner or
+            // MissionShipCleanupSystem would delete the hulk before it
+            // could be boarded at all.
+            boarder.components.set(MissionsComponent, new Map([['nova:9999', {
+                id: 'nova:9999', acceptedDay: 0, acceptedAt: 'nova:128',
+                travelPlanet: null, returnPlanet: 'nova:128', cargoType: -1,
+                cargoQty: 0, cargoLoaded: false, travelDone: false,
+                deadlineDay: null,
+            }]]));
+            target.components.set(MissionShipComponent,
+                { mission: 'nova:9999', owner: BOARDER });
+            world.step();
+            // Precondition: it survived as a mission ship.
+            expect(target.components.has(MissionShipComponent)).toBeTrue();
+
+            captureAsEscort(world, boarder);
+
+            expect(target.components.has(MissionShipComponent)).toBeFalse();
+            expect(target.components.get(FormationComponent)?.leader)
+                .toEqual(BOARDER);
+        });
+
+    describe('capture resets everyone else\'s hostility to the prize', () => {
+        const BYSTANDER = 'some warship';
+
+        /**
+         * A capture world with a third ship that hates the victim: an NPC
+         * warship locked onto it and in attack posture, holding it as its
+         * aggressor too, plus a rival player carrying a behavioural
+         * aggression entry against it.
+         */
+        async function hostileWorld() {
+            const ctx = await boardingWorld({
+                boarderCrew: 500, targetCrew: 1,
+            });
+            const { world, boarder } = ctx;
+            boarder.components.set(ControlledByComponent,
+                { peerId: 'test peer' });
+
+            const bystander = new Entity();
+            bystander.components.set(NpcComponent, {
+                aiType: 3, mode: 'attack', aggressor: TARGET,
+                nextDecision: 1e12,
+            });
+            bystander.components.set(TargetComponent, { target: TARGET });
+            bystander.components.set(GovtComponent, { id: 'nova:129' });
+            // A rival player who traded shots with the victim.
+            bystander.components.set(AggressionComponent, new Map([
+                [TARGET, { at: 0, damage: 100, hostile: true }],
+                ['someone else', { at: 0, damage: 100, hostile: true }],
+            ]));
+            world.entities.set(BYSTANDER, bystander);
+            world.step();
+            return { ...ctx, bystander };
+        }
+
+        it('drops every NPC target lock and attack posture aimed at it',
+            async () => {
+                const { world, boarder, bystander } = await hostileWorld();
+                // Precondition: it really is gunning for the victim.
+                expect(bystander.components.get(TargetComponent)?.target)
+                    .toEqual(TARGET);
+                expect(bystander.components.get(NpcComponent)?.mode)
+                    .toEqual('attack');
+
+                captureAsEscort(world, boarder);
+
+                expect(bystander.components.get(TargetComponent)?.target)
+                    .toBeUndefined();
+                expect(bystander.components.get(NpcComponent)?.mode)
+                    .toBeUndefined();
+            });
+
+        it('forgets the aggressor slot, so it is not re-acquired next think',
+            async () => {
+                // The durable half. Clearing only the target slot would
+                // leave the prize back in `engageable` on the very next
+                // decision tick, because the aggressor is pushed in
+                // unconditionally.
+                const { world, boarder, bystander } = await hostileWorld();
+                captureAsEscort(world, boarder);
+
+                expect(bystander.components.get(NpcComponent)?.aggressor)
+                    .toBeUndefined();
+                // And it re-plans immediately rather than orbiting an
+                // ex-enemy for the rest of its decision interval.
+                expect(bystander.components.get(NpcComponent)?.nextDecision)
+                    .toEqual(0);
+            });
+
+        it('clears behavioural aggression entries about the prize only',
+            async () => {
+                // This is the PvP half: without it a rival player goes on
+                // seeing red corners on their fellow player's new escort,
+                // and 'r' goes on picking it. Other entries are untouched.
+                const { world, boarder, bystander } = await hostileWorld();
+                captureAsEscort(world, boarder);
+
+                const aggression =
+                    bystander.components.get(AggressionComponent)!;
+                expect(aggression.has(TARGET)).toBeFalse();
+                expect(aggression.has('someone else')).toBeTrue();
+            });
+
+        it('leaves the prize standing exactly where a hired escort stands',
+            async () => {
+                // "Hostile only to whoever is hostile to the player": the
+                // prize has no government of its own to be judged on, it
+                // is in the player's flock, and it carries no outbound
+                // hostility either.
+                const { world, boarder, target } = await hostileWorld();
+                captureAsEscort(world, boarder);
+
+                expect(target.components.has(GovtComponent)).toBeFalse();
+                expect(isInFlock(TARGET, BOARDER,
+                    uuid => world.entities.get(uuid))).toBeTrue();
+                expect(target.components.get(TargetComponent)?.target)
+                    .toBeUndefined();
+                expect(target.components.get(NpcComponent)?.aggressor)
+                    .toBeUndefined();
+                expect(target.components.get(NpcComponent)?.mode)
+                    .toBeUndefined();
+            });
+
+        it('does the same sweep for the bay-capture shortcut', async () => {
+            // The hull leaves the world there, so nothing can shoot it —
+            // but no NPC may be left holding a lock or an aggressor slot
+            // naming a uuid that no longer exists, and both capture routes
+            // must leave the world in the same shape.
+            const { world, target, bystander } = await hostileWorld();
+            // Stand in for the shortcut's effect on the rest of the world:
+            // the prize is gone and the sweep has run.
+            world.entities.delete(TARGET);
+            clearHostilityToward(TARGET, world.entities);
+            expect(target).toBeDefined();
+
+            expect(bystander.components.get(TargetComponent)?.target)
+                .toBeUndefined();
+            expect(bystander.components.get(NpcComponent)?.aggressor)
+                .toBeUndefined();
+            expect(bystander.components.get(AggressionComponent)!.has(TARGET))
+                .toBeFalse();
+        });
+
+        it('does not disturb a bribe that names the prize', async () => {
+            // pacifiedFrom is a bribe to LEAVE IT ALONE; clearing it would
+            // restore hostility rather than remove it.
+            const { world, boarder, bystander } = await hostileWorld();
+            const npc = bystander.components.get(NpcComponent)!;
+            npc.pacifiedFrom = TARGET;
+            npc.pacifiedUntil = 1e12;
+            world.step();
+
+            captureAsEscort(world, boarder);
+
+            expect(bystander.components.get(NpcComponent)?.pacifiedFrom)
+                .toEqual(TARGET);
+        });
     });
 
     describe('boarding your OWN disabled flock member repairs it', () => {
@@ -673,15 +883,26 @@ describe('boarding in a live world', () => {
     });
 
     /**
-     * Matthew's item 1: a Drifting Derelict could never be captured. Its
-     * capture odds are a per-attempt roll (a starting Shuttle's crew of 1
-     * against the derelict Argosy's 10 is 9%), so capturing one is meant
-     * to take several tries — but ending the first session used to leave
-     * BoardedComponent on the hulk forever, and the board gate refused
-     * every later attempt. One repelled roll locked the ship out for good.
+     * ========================================================================
+     * ONE PLUNDER PER LIFE SEGMENT, ONE CAPTURE ATTEMPT (Matthew's ruling)
+     * ========================================================================
+     *
+     * A hulk may be boarded FOR PLUNDER exactly once, however many times
+     * it is repaired and disabled again, and however many pirates come
+     * calling. Inside that one session the player gets exactly ONE capture
+     * attempt: if it is repelled the boarders are thrown off, the dialog
+     * closes on the spot, and nothing further can be had from that ship.
+     * The record resets only at a LIFE-SEGMENT boundary — the ship lands
+     * and departs, or jumps to another system.
+     *
+     * This suite replaces the old "a hulk can be boarded again after a
+     * session ends" block wholesale: that behaviour (re-board to retry a
+     * 5%-odds capture until it lands) is exactly what the ruling removes.
+     * Boarding for NON-plunder purposes is untouched, which the escort
+     * repair spec at the end pins.
      */
-    describe('a hulk can be boarded again after a session ends', () => {
-        it('re-opens a session after the player closes the last one',
+    describe('a hulk gets one plunder and one capture attempt', () => {
+        it('refuses a second plunder session after the first one closes',
             async () => {
                 const { world, boarder, target } = await boardingWorld();
                 press(world, BOARDER, 'board');
@@ -689,156 +910,256 @@ describe('boarding in a live world', () => {
 
                 press(world, BOARDER, 'plunderDone');
                 expect(boarder.components.has(BoardingComponent)).toBeFalse();
-                // Still marked as boarded (the mission-goal seam reads
-                // presence) but no longer an open session.
-                expect(target.components.has(BoardedComponent)).toBeTrue();
+                // The durable record survives the session end: marked as
+                // boarded (the mission-goal seam reads it) and spent.
+                expect(target.components.get(BoardedComponent)?.plundered)
+                    .toBeTrue();
                 expect(target.components.get(BoardedComponent)?.active)
                     .toBeFalsy();
 
                 press(world, BOARDER, 'board');
-                expect(boarder.components.get(BoardingComponent)?.target)
-                    .toEqual(TARGET);
+                expect(boarder.components.has(BoardingComponent)).toBeFalse();
             });
 
-        it('lets a repelled capture be retried in a later session',
+        it('spends the hulk even when the boarder takes nothing',
             async () => {
-                // 1 vs 400 crew is clamped to the 5% floor, so the first
-                // roll is overwhelmingly a failure; the point is that the
-                // hulk is still boardable afterwards.
-                const { world, boarder, target } = await boardingWorld(
-                    { boarderCrew: 1, targetCrew: 400 });
+                // The record is stamped when the session OPENS, so looking
+                // around and leaving still uses the ship's one boarding up.
+                const { world, boarder, target } = await boardingWorld();
                 press(world, BOARDER, 'board');
-                press(world, BOARDER, 'plunderCapture');
                 press(world, BOARDER, 'plunderDone');
-
-                // Keep boarding and rolling; with a live 5% chance this
-                // must eventually succeed rather than being locked out.
-                let captured = false;
-                for (let i = 0; i < 400 && !captured; i++) {
-                    press(world, BOARDER, 'board');
-                    expect(boarder.components.has(BoardingComponent))
-                        .withContext(`board attempt ${i} was refused`)
-                        .toBeTrue();
-                    press(world, BOARDER, 'plunderCapture');
-                    captured = boarder.components.get(BoardingComponent)
-                        ?.capture === 'succeeded';
-                    if (!captured) {
-                        press(world, BOARDER, 'plunderDone');
-                    }
-                }
-                expect(captured).toBeTrue();
-                expect(target.components.has(DisabledComponent)).toBeTrue();
-            });
-
-        it('blocks a second boarding only while a session is OPEN',
-            async () => {
-                const { world, boarder, target } = await boardingWorld();
-                press(world, BOARDER, 'board');
-                expect(target.components.get(BoardedComponent)?.active)
+                expect(target.components.get(BoardedComponent)?.plundered)
                     .toBeTrue();
-                // Pressing board again mid-session changes nothing.
+                expect(target.components.get(BoardedComponent)?.cargoTaken)
+                    .toBeFalsy();
                 press(world, BOARDER, 'board');
-                expect(boarder.components.get(BoardingComponent)?.target)
-                    .toEqual(TARGET);
+                expect(boarder.components.has(BoardingComponent)).toBeFalse();
             });
 
-        it('frees a hulk whose boarder left without ending the session',
+        it('tells the player the ship has already been boarded',
             async () => {
+                const { world, boarder } = await boardingWorld();
+                const reasons: string[] = [];
+                world.addSystem(new System({
+                    name: 'CollectBlocked',
+                    events: [BoardingBlockedEvent],
+                    args: [BoardingBlockedEvent] as const,
+                    step: ({ reason }) => { reasons.push(reason); },
+                }));
+                press(world, BOARDER, 'board');
+                press(world, BOARDER, 'plunderDone');
+                press(world, BOARDER, 'board');
+                expect(boarder.components.has(BoardingComponent)).toBeFalse();
+                expect(reasons).toEqual(['alreadyBoarded']);
+                // The stock line for it: STR# 2002 index 125.
+                expect(boardingBlockedMessage('alreadyBoarded'))
+                    .toEqual('Target ship has been boarded.');
+            });
+
+        it('blocks a second boarding while a session is OPEN', async () => {
+            const { world, boarder, target } = await boardingWorld();
+            press(world, BOARDER, 'board');
+            expect(target.components.get(BoardedComponent)?.active)
+                .toBeTrue();
+            // Pressing board again mid-session changes nothing.
+            press(world, BOARDER, 'board');
+            expect(boarder.components.get(BoardingComponent)?.target)
+                .toEqual(TARGET);
+        });
+
+        it('does not hand the hulk back when the boarder leaves '
+            + 'mid-session', async () => {
                 // A boarder that is destroyed / jumps out / lands never
-                // runs its session-end path, so the hulk keeps active:true.
-                // Trusting that flag alone would strand it unboardable for
-                // the rest of the game.
+                // runs its session-end path. The stale `active` flag is
+                // still self-healing (it is corroborated against the named
+                // boarder), but the DURABLE record is not: the hulk's one
+                // plunder was spent the moment the session opened.
                 const { world, boarder, target } = await boardingWorld();
                 press(world, BOARDER, 'board');
                 expect(target.components.get(BoardedComponent)?.active)
                     .toBeTrue();
 
-                // The boarder abandons the session without pressing done.
                 boarder.components.delete(BoardingComponent);
                 world.step();
 
                 press(world, BOARDER, 'board');
-                expect(boarder.components.get(BoardingComponent)?.target)
-                    .toEqual(TARGET);
+                expect(boarder.components.has(BoardingComponent)).toBeFalse();
+                expect(target.components.get(BoardedComponent)?.plundered)
+                    .toBeTrue();
             });
 
-        it('does not let booty be taken twice across sessions', async () => {
-            const { world, boarder, target } = await boardingWorld();
+        it('shuts the credit farm against a fresh boarder', async () => {
+            // Credits are the one booty NOT physically removed from the
+            // victim (creditBooty re-derives them from the ship price), so
+            // "take credits, die, come back" used to be an unbounded money
+            // supply. Now the hulk simply refuses the second boarding —
+            // and it refuses a DIFFERENT pirate too, not just the first.
+            const { world, boarder, target, gameData } = await boardingWorld();
             const price = target.components.get(ShipDataComponent)!.price;
             const booty = Math.floor(price * 0.10);
-            press(world, BOARDER, 'board');
-            press(world, BOARDER, 'plunderCredits');
-            press(world, BOARDER, 'plunderCargo');
-            expect(boarder.components.get(CreditsComponent)!.credits)
-                .toEqual(booty);
-            press(world, BOARDER, 'plunderDone');
+            expect(booty).toBeGreaterThan(0);
 
-            // Credits are re-derived from the ship price on every board,
-            // so without the durable flag this would farm money forever.
             press(world, BOARDER, 'board');
-            const resumed = boarder.components.get(BoardingComponent)!;
-            expect(resumed.creditsTaken).toBeTrue();
-            expect(resumed.cargoTaken).toBeTrue();
             press(world, BOARDER, 'plunderCredits');
             expect(boarder.components.get(CreditsComponent)!.credits)
                 .toEqual(booty);
+
+            // UNGRACEFUL end: the boarder is destroyed mid-session.
+            world.entities.delete(BOARDER);
+            world.step();
+            expect(target.components.get(BoardedComponent)?.creditsTaken)
+                .toBeTrue();
+
+            // A brand-new boarder takes over the same hulk.
+            const shipData = (await gameData.data.Ship.get('nova:128'))!;
+            const second = makeShip(shipData);
+            second.components.set(MovementStateComponent, {
+                position: new Position(0, 0), velocity: new Vector(0, 0),
+                rotation: new Angle(0), turning: 0, turnBack: false,
+                accelerating: 0,
+            });
+            second.components.set(CreditsComponent, { credits: 0 });
+            await completeEntity(world, second);
+            world.entities.set(SECOND_BOARDER, second);
+            world.step();
+            second.components.set(ShipDataComponent, {
+                ...second.components.get(ShipDataComponent)!, crew: 200,
+            });
+            second.components.set(CreditsComponent, { credits: 0 });
+            second.components.get(TargetComponent)!.target = TARGET;
+            world.step();
+
+            press(world, SECOND_BOARDER, 'board');
+            expect(second.components.has(BoardingComponent)).toBeFalse();
+            expect(second.components.get(CreditsComponent)!.credits)
+                .toEqual(0);
         });
 
-        it('keeps the credit booty spent when the session ends UNGRACEFULLY',
+        it('ends the session the moment a capture is repelled', async () => {
+            const { world, boarder, target } = await boardingWorld();
+            forceCaptureRoll(world, false);
+            press(world, BOARDER, 'board');
+            expect(boarder.components.has(BoardingComponent)).toBeTrue();
+
+            press(world, BOARDER, 'plunderCapture');
+            // REPELLED: the dialog's own state is gone, so the display
+            // closes it, and the hulk is fully spent.
+            expect(boarder.components.has(BoardingComponent)).toBeFalse();
+            expect(target.components.get(BoardedComponent)?.plundered)
+                .toBeTrue();
+            expect(target.components.get(BoardedComponent)?.active)
+                .toBeFalsy();
+            // Nothing further can be had from her, ever.
+            press(world, BOARDER, 'board');
+            expect(boarder.components.has(BoardingComponent)).toBeFalse();
+        });
+
+        it('leaves the repelled boarder nothing else to take', async () => {
+            // The cargo is still aboard the hulk; being thrown off means
+            // the player cannot go back for it.
+            const { world, boarder, target } = await boardingWorld({
+                cargo: new Map([['cargo:0', 5]]),
+            });
+            forceCaptureRoll(world, false);
+            press(world, BOARDER, 'board');
+            press(world, BOARDER, 'plunderCapture');
+            press(world, BOARDER, 'plunderCargo');
+            expect(boarder.components.get(CargoComponent)!.get('cargo:0'))
+                .toBeUndefined();
+            expect(target.components.get(CargoComponent)!.get('cargo:0'))
+                .toEqual(5);
+        });
+
+        it('charges the board crime for a repelled attempt', async () => {
+            const { world, boarder } = await boardingWorld();
+            forceCaptureRoll(world, false);
+            press(world, BOARDER, 'board');
+            press(world, BOARDER, 'plunderCapture');
+            expect(boarder.components.get(LegalRecordsComponent)!
+                .get('nova:128')).toBeLessThan(0);
+        });
+
+        it('gives no second capture attempt inside one session', async () => {
+            // The roll is forced to fail, but the session-ending path is
+            // the point: even a hand-sent second control edge finds no
+            // 'none' state to transition out of.
+            const { world, boarder, target } = await boardingWorld();
+            forceCaptureRoll(world, false);
+            press(world, BOARDER, 'board');
+            // Keep the session alive so the second press has something to
+            // act on: re-open the component exactly as the sim left it,
+            // minus the session end.
+            boarder.components.set(BoardingComponent, {
+                ...boarder.components.get(BoardingComponent)
+                ?? { target: TARGET, creditsAvailable: 0, ammoAvailable: 0 },
+                target: TARGET, creditsAvailable: 0, ammoAvailable: 0,
+                cargoTaken: false, creditsTaken: false, fuelTaken: false,
+                ammoTaken: false, capture: 'failed', crimeApplied: true,
+            });
+            world.step();
+            forceCaptureRoll(world, true);
+            press(world, BOARDER, 'plunderCapture');
+            // Still 'failed': a used attempt is used.
+            expect(boarder.components.get(BoardingComponent)?.capture)
+                .toEqual('failed');
+            expect(target.components.has(DisabledComponent)).toBeTrue();
+        });
+
+        it('still repairs your own disabled escort after it was plundered',
             async () => {
-                // The re-farm this pins shut: the durable *Taken flags used
-                // to be written onto the hulk only by the session-end path,
-                // which an abandoned session never runs. Take the credits,
-                // die (or jump, or land) without pressing done, come back
-                // with a new boarder — and creditBooty re-derived the money
-                // from the ship price all over again, forever.
-                const { world, boarder, target, gameData } =
-                    await boardingWorld();
-                const price = target.components.get(ShipDataComponent)!.price;
-                const booty = Math.floor(price * 0.10);
-
+                // Matthew: boarding for other purposes is NOT restricted.
+                // A rival strips your escort; you can still fly over and
+                // patch it up, as many times as it takes.
+                const { world, boarder, target } = await boardingWorld();
                 press(world, BOARDER, 'board');
-                press(world, BOARDER, 'plunderCredits');
-                expect(boarder.components.get(CreditsComponent)!.credits)
-                    .toEqual(booty);
-
-                // UNGRACEFUL end: the boarder is destroyed mid-session, so
-                // no session-end path ever runs on it.
-                world.entities.delete(BOARDER);
-                world.step();
-
-                // The HULK is what has to remember, and it must remember
-                // straight away — not at some session end that never comes.
-                expect(target.components.get(BoardedComponent)?.creditsTaken)
+                press(world, BOARDER, 'plunderDone');
+                expect(target.components.get(BoardedComponent)?.plundered)
                     .toBeTrue();
 
-                // A brand-new boarder takes over the same hulk.
-                const shipData = (await gameData.data.Ship.get('nova:128'))!;
-                const second = makeShip(shipData);
-                second.components.set(MovementStateComponent, {
-                    position: new Position(0, 0), velocity: new Vector(0, 0),
-                    rotation: new Angle(0), turning: 0, turnBack: false,
-                    accelerating: 0,
-                });
-                second.components.set(CreditsComponent, { credits: 0 });
-                await completeEntity(world, second);
-                world.entities.set(SECOND_BOARDER, second);
-                world.step();
-                second.components.set(ShipDataComponent, {
-                    ...second.components.get(ShipDataComponent)!, crew: 200,
-                });
-                second.components.set(CreditsComponent, { credits: 0 });
-                second.components.get(TargetComponent)!.target = TARGET;
+                // The hulk is now the boarder's escort (durably marked).
+                target.components.set(PlayerEscortComponent,
+                    { player: BOARDER, parent: BOARDER });
                 world.step();
 
-                press(world, SECOND_BOARDER, 'board');
-                const resumed = second.components.get(BoardingComponent)!;
-                expect(resumed.target).toEqual(TARGET);
-                expect(resumed.creditsTaken).toBeTrue();
+                press(world, BOARDER, 'board');
+                expect(target.components.has(DisabledComponent)).toBeFalse();
+                expect(target.components.get(FormationComponent)?.leader)
+                    .toEqual(BOARDER);
+                // A repair, not a plunder session.
+                expect(boarder.components.has(BoardingComponent)).toBeFalse();
+            });
 
-                press(world, SECOND_BOARDER, 'plunderCredits');
-                expect(second.components.get(CreditsComponent)!.credits)
-                    .toEqual(0);
+        it('resets the record when the hulk lands', async () => {
+            const { world, boarder, target } = await boardingWorld();
+            press(world, BOARDER, 'board');
+            press(world, BOARDER, 'plunderDone');
+            expect(target.components.has(BoardedComponent)).toBeTrue();
+
+            // Landing ends the life segment (BoardingLandingResetSystem).
+            world.emit(LandEvent, { id: 'nova:128', uuid: 'some stellar' },
+                [TARGET]);
+            world.step();
+            expect(target.components.has(BoardedComponent)).toBeFalse();
+
+            press(world, BOARDER, 'board');
+            expect(boarder.components.get(BoardingComponent)?.target)
+                .toEqual(TARGET);
+        });
+
+        it('resets the record when the hulk jumps to another system',
+            async () => {
+                const { world, boarder, target } = await boardingWorld();
+                press(world, BOARDER, 'board');
+                press(world, BOARDER, 'plunderDone');
+                expect(target.components.has(BoardedComponent)).toBeTrue();
+
+                // JumpFromSystem clears the record just before the entity
+                // is serialized and carried to the destination, so it
+                // arrives plunderable again.
+                world.emit(InitiateJumpEvent, { to: 'nova:227' }, [TARGET]);
+                world.step();
+                expect(target.components.has(BoardedComponent)).toBeFalse();
+                expect(boarder.components.has(BoardingComponent)).toBeFalse();
             });
     });
 });
@@ -1290,14 +1611,16 @@ describe('bay-capture shortcut', () => {
             return ctx;
         }
 
-        it('keeps the credit booty spent when the session ends '
-            + 'UNGRACEFULLY', async () => {
-                // The re-farm this pins shut: the durable *Taken flags used
-                // to be written onto the hulk only by the session-end path,
-                // which an abandoned session never runs. Take the credits,
-                // die (or jump, or land) without pressing done, come back
-                // with a new boarder — and creditsAvailable was re-derived
-                // from the ship price all over again, forever.
+        it('spends the hulk for good, against a SECOND pirate too',
+            async () => {
+                // The re-farm this pins shut: credits are the one booty
+                // not physically removed from the victim (creditsAvailable
+                // is re-derived from the ship price on every board), so
+                // "take credits, die without pressing done, come back"
+                // used to be an unbounded money supply. Under the
+                // one-plunder ruling the hulk refuses the next boarding
+                // outright — including by a DIFFERENT pirate, which is the
+                // half a per-boarder flag could never cover.
                 const { world, boarder, target, gameData } =
                     await plunderWorld();
                 const booty = Math.floor(PRICE * 0.10);
@@ -1315,12 +1638,15 @@ describe('bay-capture shortcut', () => {
                 world.entities.delete(BOARDER);
                 world.step();
 
-                // The HULK is what has to remember, and it must remember
-                // straight away — not at some session end that never comes.
+                // The HULK is what has to remember, and it remembers both
+                // halves straight away — not at a session end that never
+                // comes.
                 expect(target.components.get(BoardedComponent)?.creditsTaken)
                     .toBeTrue();
+                expect(target.components.get(BoardedComponent)?.plundered)
+                    .toBeTrue();
 
-                // A brand-new boarder takes over the same hulk.
+                // A brand-new boarder tries to take over the same hulk.
                 const second = makeShip(
                     gameData.data.Ship.map.get(CARRIER_SHIP)!);
                 second.components.set(MovementStateComponent, {
@@ -1340,10 +1666,7 @@ describe('bay-capture shortcut', () => {
                 world.step();
 
                 press(world, SECOND_BOARDER, 'board');
-                const resumed = second.components.get(BoardingComponent)!;
-                expect(resumed.target).toEqual(TARGET);
-                expect(resumed.creditsTaken).toBeTrue();
-
+                expect(second.components.has(BoardingComponent)).toBeFalse();
                 press(world, SECOND_BOARDER, 'plunderCredits');
                 expect(second.components.get(CreditsComponent)!.credits)
                     .toEqual(0);
@@ -1383,14 +1706,11 @@ describe('bay-capture shortcut', () => {
                     .toEqual(BOARDER);
             });
 
-        /** The capture flow, pressed until the roll lands. */
+        /** The capture flow, with the session's one roll forced to land. */
         function captureAsEscort(world: World, boarder: Entity) {
+            forceCaptureRoll(world, true);
             press(world, BOARDER, 'board');
-            for (let i = 0; i < 40
-                && boarder.components.get(BoardingComponent)?.capture
-                !== 'succeeded'; i++) {
-                press(world, BOARDER, 'plunderCapture');
-            }
+            press(world, BOARDER, 'plunderCapture');
             expect(boarder.components.get(BoardingComponent)?.capture)
                 .toEqual('succeeded');
             press(world, BOARDER, 'plunderCaptureEscort');
