@@ -102,10 +102,17 @@ describe('point defense target selection', () => {
                 ?.uuid).toBe('strafing');
         });
 
-        it('shoots a fighter that has us targeted before it turns red', () => {
+        it('does NOT shoot a non-hostile fighter merely for having us '
+            + 'targeted (a player selecting us to hail)', () => {
             expect(selectPointDefenseTarget([
-                fighter('freshLock', 20, { hostile: false, target: 'carrier' }),
-            ], FIRER)?.uuid).toBe('freshLock');
+                fighter('hailing', 20, { hostile: false, target: 'carrier' }),
+            ], FIRER)).toBeUndefined();
+        });
+
+        it('shoots that same fighter once it turns hostile', () => {
+            expect(selectPointDefenseTarget([
+                fighter('hailing', 20, { hostile: true, target: 'carrier' }),
+            ], FIRER)?.uuid).toBe('hailing');
         });
 
         it('leaves a non-hostile fighter minding its own business alone', () => {

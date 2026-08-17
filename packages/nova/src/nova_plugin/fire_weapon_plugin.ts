@@ -395,9 +395,8 @@ export abstract class WeaponEntry {
                 // The same three filters the nearest-hostile scan
                 // applies (hostility.ts): a hulk in its death throes, a
                 // ship dead in space, and a ship this one cannot see are
-                // not targets. Without them the "has us targeted" half
-                // of the candidacy rule would keep a turret firing into
-                // a wreck whose stale lock still names us.
+                // not targets. Without them a hostile wreck's stale
+                // 'attack' posture could keep a turret firing into it.
                 if (entity.components.has(ExplodingComponent)
                     || entity.components.has(DisabledComponent)
                     || !isTargetable(

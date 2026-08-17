@@ -112,18 +112,18 @@ export interface PointDefenseFirer {
  *    its way to someone else is not "incoming", and burning rounds on it
  *    would drain a turret that exists to save its own ship.
  *
- *  - A FIGHTER is prey when it is HOSTILE to us (hostility.ts — the same
- *    verdict that paints the target corners red and that the 'r' key
- *    scans for) OR when it has us targeted. The OR matters in both
- *    directions:
- *      * hostile-but-not-targeting-us catches the fighter strafing our
- *        formation with its lock on our escort rather than on us — it is
- *        shooting at our side, and a turret that waited to be personally
- *        targeted would sit idle through the pass;
- *      * targeting-us-but-not-yet-hostile catches the fighter that has
- *        just locked us and not yet fired, before recent-aggression or
- *        an 'attack' posture has made it red.
- *    The hostility half is what makes the flag safe to honour at all:
+ *  - A FIGHTER is prey ONLY when it is HOSTILE to us (hostility.ts — the
+ *    same verdict that paints the target corners red and that the 'r'
+ *    key scans for). Merely having us TARGETED is not enough: a player
+ *    in a fighter selects a neutral ship to hail it (or just to read its
+ *    stats), and a turret that answered the lock with fire started a war
+ *    over a comm call. Nothing is lost by waiting for hostility: the
+ *    hostility verdict already covers the fighter that fires at us
+ *    (recent-aggression flips it red the moment its shot lands or its
+ *    missile locks on), the fighter in an 'attack' posture, and the
+ *    fighter of an enemy government — and it catches the one strafing
+ *    our formation with its lock on our escort rather than on us. The
+ *    hostility half is what makes the flag safe to honour at all:
  *    without it, "PD-vulnerable ship in range" would include our own
  *    wing, passing traders and allied patrols, and a point defense
  *    turret would start wars on its own.
@@ -142,12 +142,11 @@ export function isPointDefenseCandidate(candidate: PointDefenseCandidate,
     if (candidate.inFlock) {
         return false;
     }
-    const aimedAtUs = candidate.target === firer.owner
-        || candidate.target === firer.source;
     if (candidate.kind === 'missile') {
-        return aimedAtUs;
+        return candidate.target === firer.owner
+            || candidate.target === firer.source;
     }
-    return candidate.hostile || aimedAtUs;
+    return candidate.hostile;
 }
 
 /**
