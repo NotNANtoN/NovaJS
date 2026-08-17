@@ -335,9 +335,10 @@ export const LOCATION_OUTFIT = 6;
  * landing so re-opening the board doesn't reroll).
  *
  * Known simplifications (documented gaps): Require must be zero (no
- * Contribute bits), and missions with board/rescue ship goals are
- * never offered (boarding is unimplemented, so they could never be
- * completed; see mission_ship_logic.ts).
+ * Contribute bits), and missions with a RESCUE ship goal are never
+ * offered — that goal needs "spawn disabled and stay disabled", which
+ * does not exist (see mission_ship_state.ts's goalSupported). BOARD-goal
+ * missions ARE offered now that boarding is real.
  */
 export function missionMatchesLocation(mission: MissionData,
     location: number, ctx: MissionContext): boolean {
@@ -994,6 +995,12 @@ export function acceptOffer(machinery: MissionMachineryContext,
         // <SN>: the special ships' name, picked now (see
         // pickSpecialShipName) and frozen for the mission's life.
         shipName: pickSpecialShipName(mission, machinery.random),
+        // mïsn PickupMode 2, "Pick up when boarding special ship" —
+        // frozen here for the same reason failIfPlayerDisabledOrDestroyed
+        // is: the pickup happens in the SHARED SIMULATION, the tick the
+        // owner boards the ship, and the sim never reads mission game
+        // data. See MissionShipTrackSystem.
+        pickupOnBoard: mission.pickupMode === 2 ? true : undefined,
     };
     state.missions.set(mission.id, active);
     if (offer.cargoQty > 0

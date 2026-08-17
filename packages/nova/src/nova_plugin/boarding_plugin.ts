@@ -63,7 +63,7 @@ import { TargetComponent } from './target_component.js';
 
 /** Interface beep when a plunder session opens (snd nova:390), heard only
  * by the boarding player (emitted targeted at the boarder). */
-const BOARD_SOUND = 'nova:390';
+export const BOARD_SOUND = 'nova:390';
 
 /**
  * Player-initiated boarding and plundering of disabled ships. See
@@ -514,6 +514,13 @@ const BoardingGateSystem = new System({
             // lock naming a uuid that no longer exists, and the two
             // capture routes leave identical state behind.
             clearHostilityToward(targetUuid!, entities);
+            // The prize's wing does not come with it here either. The
+            // dangling links would eventually be cleaned up by
+            // FormationSystem's leader-gone rule (the prize has left the
+            // world), but that scatters the wing instead of regrouping it,
+            // and it would leave the fighters' bay identity pointing at a
+            // hull the player has stowed.
+            reassignCapturedWing(targetUuid!, entities);
             // The prize is gone from the world; leaving it selected would
             // point the HUD at an entity that no longer exists.
             target.target = undefined;
@@ -574,6 +581,26 @@ const BoardingGateSystem = new System({
         // disabled escort, fuel transfer") outright. So you can still
         // patch up your own hulk, and still scoop a fitting hull into a
         // bay, after somebody has stripped it.
+        //
+        // MISSION BOARDING IS THE SAME CHANNEL, NOT A SEPARATE ONE — the
+        // rule chosen for mïsn ShipGoal 2 ("Board them"), where the
+        // alternative was a parallel mission-only board that ignored the
+        // record. One boarding does everything: it spends the ship's one
+        // plunder, credits the goal (MissionShipTrackSystem), and loads
+        // mïsn PickupMode 2 cargo. One channel is right because the Bible
+        // describes no second one — the goal is literally "board them",
+        // the same verb — and because two channels would mean the player
+        // boarding a mission ship twice, taking its booty on the second
+        // pass after the first was "only for the mission".
+        //
+        // That cannot lock a mission out. The refusal only ever fires for
+        // a ship SOMEBODY ELSE spent, and the only somebody else who can
+        // is a rival player: NPC pirates skip mission ships outright
+        // (gövt Flags 0x1000 is "non-mission", enforced in
+        // npcPlunderEligible). A ship a rival stole never incremented the
+        // objective's `satisfied`, so the mission simply spawns its
+        // replacement on the next system entry (shipsToSpawn is
+        // total - satisfied) and the goal stays achievable.
         if (plunderSpent(boarded)) {
             emit(BoardingBlockedEvent, { reason: 'alreadyBoarded' }, [uuid]);
             return;
@@ -782,6 +809,141 @@ export function clearHostilityToward(prizeUuid: string,
 }
 
 /**
+ * ============================================================================
+ * THE CAPTURED LEADER'S WING (Matthew's ruling)
+ * ============================================================================
+ *
+ * Capturing a fleet LEADER used to hand you its whole wing by accident.
+ * An NPC fleet shares two links, both naming the leader's uuid
+ * (npc_spawn_plugin): every escort holds FormationComponent.leader on it
+ * AND FiringGroupComponent.group on it, so that fleetmates' shots pass
+ * through each other. flock.ts walks exactly those two edges, so the
+ * moment convertToEscort re-parented the leader onto the player, every
+ * follower's chain ran leader -> player: they painted FRIENDLY, dropped
+ * out of the tab/r cycle, and the player's shots passed through them —
+ * while they kept their own government, their own aggressor memories, and
+ * their own reasons to kill the player. "Says it's mine, shoots at me,
+ * and I can't shoot back."
+ *
+ * MATTHEW'S RULING: the wing keeps its original government and
+ * allegiance — it is not part of the prize — and it ELECTS A NEW LEADER
+ * from among itself.
+ *
+ * THE ELECTION RULE (his exact rule was open; this is the deterministic
+ * one, documented so it can be changed in one place): the surviving wing
+ * member with the highest shïp Strength takes command, ties broken by the
+ * lexicographically smallest uuid. Strength is the Bible's own measure of
+ * how much ship a ship is (gövt MaxOdds is computed from it), so "the
+ * biggest one left" is both the intuitive answer and one every peer
+ * computes identically from synced state. The new leader sheds its own
+ * formation link and becomes its own firing-group root; the rest re-form
+ * on it in uuid order, so slot assignment cannot depend on entity-map
+ * iteration order.
+ *
+ * BAY FIGHTERS ARE DIFFERENT, and Matthew called this out separately: a
+ * captured CARRIER's launched fighters are not a fleet that can elect
+ * anybody, they are ordnance whose hangar just changed hands. They take
+ * the existing orphaned-fighter path (bay_plugin's
+ * OrphanedBayFighterSystem): an aiType-3 brain in 'depart' mode, so they
+ * fly out of the system. That system cannot do it itself here, because it
+ * only fires when the carrier is GONE from the world — after a
+ * plunder-dialog capture the carrier is very much still there, flying for
+ * the other side. The bay identity is shed in full for the same reason it
+ * is shed from the prize (see convertToEscort): a live launch link back
+ * to a hull the player now owns is what makes a ship half-owned.
+ *
+ * AFTERWARDS NOTHING IN THE WING REACHES THE PLAYER. Each follower's
+ * chain now ends at the new leader, and the new leader's own firing group
+ * names itself, so flock.ts's walk terminates there (`parent === current`
+ * is its stop condition) rather than climbing to the captor.
+ *
+ * Ships already marked as the captor's own (PlayerEscortComponent) are
+ * left alone: they are genuinely the player's. The wing cannot be
+ * mislabelled that way in the meantime, because this sweep runs inside
+ * the capture itself, before MarkPlayerEscortsSystem's next pass.
+ *
+ * DETERMINISM: one uuid-sorted sweep, no PRNG, and every decision is a
+ * function of synced components alone.
+ */
+export function reassignCapturedWing(prizeUuid: string,
+    entities: EntityMap): void {
+    const wing: string[] = [];
+    const fighters: string[] = [];
+    for (const uuid of [...entities.keys()].sort()) {
+        if (uuid === prizeUuid) {
+            continue;
+        }
+        const other = entities.get(uuid);
+        if (!other || other.components.has(PlayerEscortComponent)) {
+            continue;
+        }
+        const follows =
+            other.components.get(FormationComponent)?.leader === prizeUuid
+            || other.components.get(FiringGroupComponent)?.group === prizeUuid
+            || other.components.get(OwnerComponent)?.owner === prizeUuid;
+        if (!follows) {
+            continue;
+        }
+        if (other.components.has(BayFighterComponent)
+            || other.components.get(SourceComponent) === prizeUuid) {
+            fighters.push(uuid);
+        } else {
+            wing.push(uuid);
+        }
+    }
+
+    for (const uuid of fighters) {
+        const fighter = entities.get(uuid)!;
+        // The launch link, in full — the same set convertToEscort sheds
+        // from the prize, and for the same reason.
+        fighter.components.delete(BayFighterComponent);
+        fighter.components.delete(SourceComponent);
+        fighter.components.delete(OwnerComponent);
+        fighter.components.delete(ReturnWhenTargetRemovedComponent);
+        fighter.components.delete(ReturnComponent);
+        fighter.components.delete(CollectableEscortComponent);
+        fighter.components.delete(CollisionHitterComponent);
+        fighter.components.delete(HurtboxHullComponent);
+        // ...and the orphan treatment itself (OrphanedBayFighterSystem).
+        fighter.components.delete(EscortCommandComponent);
+        fighter.components.delete(FormationComponent);
+        fighter.components.delete(EscortLandingComponent);
+        fighter.components.set(FiringGroupComponent, { group: uuid });
+        fighter.components.set(NpcComponent, { aiType: 3, mode: 'depart' });
+    }
+
+    if (wing.length === 0) {
+        return;
+    }
+    // The election: most ship, then smallest uuid. `wing` is already in
+    // uuid order, so a strict `>` keeps the first (smallest) of a tie.
+    let leader = wing[0];
+    let best = entities.get(leader)?.components
+        .get(ShipDataComponent)?.strength ?? 0;
+    for (const uuid of wing) {
+        const strength = entities.get(uuid)?.components
+            .get(ShipDataComponent)?.strength ?? 0;
+        if (strength > best) {
+            leader = uuid;
+            best = strength;
+        }
+    }
+    let slot = 0;
+    for (const uuid of wing) {
+        const ship = entities.get(uuid)!;
+        // The whole wing regroups under the new leader, keeping its
+        // government, its NPC brain and every grudge it was holding.
+        ship.components.set(FiringGroupComponent, { group: leader });
+        if (uuid === leader) {
+            ship.components.delete(FormationComponent);
+            ship.components.set(FiringGroupComponent, { group: leader });
+            continue;
+        }
+        ship.components.set(FormationComponent, { leader, slot: slot++ });
+    }
+}
+
+/**
  * Turns a captured disabled hulk into the boarder's escort: it joins
  * the formation flock, hands its brain to the escort-command framework
  * (which suppresses its native hostile AI), shares the boarder's
@@ -911,8 +1073,12 @@ function convertToEscort(target: Entity, targetUuid: string,
     //    — which is exactly the outcome asked for.
     target.components.delete(MissionShipComponent);
     // Every other ship's MEMORY of this hull, so the fleet it just left
-    // stops shooting at it (see clearHostilityToward).
+    // stops shooting at it (see clearHostilityToward)...
     clearHostilityToward(targetUuid, entities);
+    // ...and its WING, which does not come with it: the followers keep
+    // their government and elect one of their own (see
+    // reassignCapturedWing).
+    reassignCapturedWing(targetUuid, entities);
     // Bring it back online: restore armor above the disable threshold
     // and drop DisabledComponent so DisabledMovementSystem stops braking
     // it and the escort/formation systems can steer it.

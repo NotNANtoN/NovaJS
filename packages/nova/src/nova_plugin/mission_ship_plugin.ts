@@ -1,6 +1,7 @@
 import * as t from 'io-ts';
 import { Entities, UUID } from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
+import { Entity } from 'nova_ecs/entity';
 import { EntityMap } from 'nova_ecs/entity_map';
 import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
@@ -12,7 +13,12 @@ import { BoardedComponent } from './boarding_component.js';
 import { CloakActiveComponent, CloakComponent, isTargetable } from './cloak_plugin.js';
 import { DeathEvent } from './death_plugin.js';
 import { DisabledComponent } from './disabled_component.js';
-import { Missions, MissionsComponent } from './player_state_plugin.js';
+import { CargoComponent, cargoUsed } from './cargo_plugin.js';
+import { missionCargoKey } from './mission_logic.js';
+import { ShipPhysicsComponent } from './ship_plugin.js';
+import {
+    ActiveMission, Missions, MissionsComponent,
+} from './player_state_plugin.js';
 import { DeathAISystem } from './npc_plugin.js';
 import {
     registerShip,
@@ -99,6 +105,50 @@ function objectiveOf(missionShip: MissionShip,
 }
 
 /**
+ * mïsn PickupMode 2 — "Pick up when boarding special ship". Moves the
+ * mission's cargo into the OWNER's hold the tick they board this ship.
+ *
+ * WHY IT IS AUTOMATIC AND NOT A DIALOG BUTTON. The Bible's PickupMode is
+ * a property of the mission, not an action the player takes: the cargo is
+ * picked up BY boarding. That also makes it robust against every way a
+ * boarding can end early — the plunder dialog is never opened on a
+ * one-shot capture, and a repelled capture closes it on the same tick —
+ * because it keys off the same durable BoardedComponent record the goal
+ * credit does, not off a button press.
+ *
+ * The stock reference is mïsn 832, "Recover Stolen Art": ShipGoal 2,
+ * PickupMode 2, CargoType 76 x2, DropOffMode 1. Its QuickBrief is
+ * "Disable and board the Leviathan ... pick up the stolen art and then
+ * head to <RST> ...", and without this the cargo never loads, so
+ * DropOffMode 1 never drops it and the mission cannot be completed.
+ *
+ * The hold must have room; if it does not, nothing happens and the next
+ * tick tries again, so jettisoning something finishes the pickup. The key
+ * is missionCargoKey — the single definition the landing path and the
+ * player-info cargo list already use, so the tonnage the sim adds is the
+ * tonnage the spaceport later drops off.
+ *
+ * Idempotent on `cargoLoaded`, which is serialized per-mission state, so
+ * a re-boarding (impossible today under the one-plunder rule, but not
+ * something to depend on) cannot duplicate the cargo.
+ */
+function pickUpOnBoarding(active: ActiveMission, owner: Entity): void {
+    if (!active.pickupOnBoard || active.cargoLoaded || active.cargoQty <= 0) {
+        return;
+    }
+    const cargo = owner.components.get(CargoComponent);
+    const physics = owner.components.get(ShipPhysicsComponent);
+    if (!cargo || !physics) {
+        return;
+    }
+    if (active.cargoQty > physics.freeCargo - cargoUsed(cargo)) {
+        return; // No room yet; try again next tick.
+    }
+    cargo.set(missionCargoKey(active.id), active.cargoQty);
+    active.cargoLoaded = true;
+}
+
+/**
  * Tracks a mission ship in its owner's objective and evaluates the
  * per-ship conditions that come from co-existence in the sim:
  * registration, disabling, boarding, and observation.
@@ -144,6 +194,13 @@ const MissionShipTrackSystem = new System({
         }
         if (boarded?.plundered && boarded.boarder === missionShip.owner) {
             shipBoarded(objective, uuid);
+            // mïsn PickupMode 2: boarding IS the pickup.
+            const owner = entities.get(missionShip.owner);
+            const active = owner?.components.get(MissionsComponent)
+                ?.get(missionShip.mission);
+            if (owner && active) {
+                pickUpOnBoarding(active, owner);
+            }
         }
         // Observation: no cloak capability = observed by co-presence
         // (the owner inserted us into their own system); cloak-capable

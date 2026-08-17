@@ -21,7 +21,8 @@ import {
 import { offerSubstitutions, rollOffers } from '../spaceport/mission_offers.js';
 import { expandMissionText } from './mission_text.js';
 import { buildMissionShipSpawns } from './mission_ship_spawn.js';
-import { GOAL_DESTROY } from './mission_ship_state.js';
+import { GOAL_DESTROY, goalSupported } from './mission_ship_state.js';
+import { shipGoalOfferable } from './mission_ship_logic.js';
 import { ControlBitsComponent } from './ncb_plugin.js';
 import { CombatRatingComponent } from './reputation_plugin.js';
 import {
@@ -433,7 +434,8 @@ describe('missions against real Nova data', () => {
      * Boarding does not exist, so it must stay suppressed even when
      * every other condition matches.
      */
-    it('still suppresses a real board-goal mission', async () => {
+    it('offers a real board-goal mission now that boarding is real',
+        async () => {
         const gameData = await getIntegrationGameData();
         const universe = MissionUniverse.shared(gameData);
         await universe.load();
@@ -453,10 +455,64 @@ describe('missions against real Nova data', () => {
         // Everything else about the mission matches this bar...
         expect(mission.availStelId).toBe('nova:286');
         expect(mission.availLoc).toBe(LOCATION_BAR);
-        // ...but the board goal keeps it unofferable.
+        // ...and the board goal no longer keeps it out (Matthew's
+        // ruling; mission_ship_state.ts's goalSupported).
         expect(missionMatchesLocation(mission, LOCATION_BAR, ctx))
-            .toBe(false);
+            .toBe(true);
     });
+
+    /**
+     * Matthew's reference case (a): Temmin Shard's Leviathan. Stock mïsn
+     * 832, "Recover Stolen Art", whose QuickBrief (dësc 6785) reads
+     * "Disable and board the Leviathan in the Arcturus system, pick up
+     * the stolen art and then head to <RST> in the <RSY> system."
+     *
+     * It is a BAR mission (AvailLoc 1), not a boarding-ship offer, so
+     * everything it needs is the board goal being offerable and mïsn
+     * PickupMode 2 being real. Both halves of its brief are pinned here
+     * against the actual game data, so a data or parser change that broke
+     * the mission would fail here rather than in play.
+     */
+    it('offers Temmin Shard\'s Leviathan board mission (mïsn 832)',
+        async () => {
+            const gameData = await getIntegrationGameData();
+            const universe = MissionUniverse.shared(gameData);
+            await universe.load();
+            const mission = universe.getMission('nova:832')!;
+
+            // The data this mission is built out of.
+            expect(mission.name).toContain('Recover Stolen Art');
+            expect(mission.shipGoal).toBe(2);        // Board them
+            expect(mission.shipCount).toBe(1);
+            expect(mission.pickupMode).toBe(2);      // ...on boarding
+            expect(mission.dropOffMode).toBe(1);     // ...at ReturnStel
+            expect(mission.cargoQty).toBeGreaterThan(0);
+            expect(mission.availLoc).toBe(LOCATION_BAR);
+
+            // Both halves of the goal are engine-supported now.
+            expect(goalSupported(mission.shipGoal)).toBeTrue();
+            expect(shipGoalOfferable(mission)).toBeTrue();
+
+            // And the accepted mission carries the frozen PickupMode-2
+            // flag the simulation reads when the player boards the
+            // Leviathan (MissionShipTrackSystem).
+            const start = await gameData.data.PlayerStart.get('nova:128');
+            const shipData = await gameData.data.Ship.get(start.ship);
+            const entity = makeShip(shipData);
+            entity.components.set(GameDateComponent, { ...start.date });
+            entity.components.set(CreditsComponent, { credits: 0 });
+            const session = await MissionSession.create(
+                entity, gameData, universe, mission.availStelId!);
+            const ctx = session.machinery.offerContext();
+            const offer = makeMissionOffer(mission, ctx)!;
+            expect(offer).not.toBeNull();
+            acceptOffer(session.machinery, offer, session.outfits, 0, true);
+            const active = session.state.missions.get('nova:832')!;
+            expect(active.pickupOnBoard).toBeTrue();
+            // Not loaded at accept: PickupMode 2 waits for the boarding.
+            expect(active.cargoLoaded).toBeFalse();
+            expect(active.shipObjective?.goal).toBe(2);
+        });
 
     it('starts a mission from an outfit-style Sxxx set string', async () => {
         // This is the outfitter hook (item 3): a set string run through

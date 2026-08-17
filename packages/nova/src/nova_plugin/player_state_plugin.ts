@@ -76,6 +76,14 @@ export const ActiveMissionType = t.intersection([t.type({
      */
     shipObjective: ShipObjectiveType,
     /**
+     * mïsn PickupMode 2, "Pick up when boarding special ship", frozen at
+     * accept time. The pickup happens in the shared simulation the tick
+     * the owner boards the special ship (MissionShipTrackSystem), and the
+     * sim never reads mission game data — the same reason
+     * failIfPlayerDisabledOrDestroyed is frozen here.
+     */
+    pickupOnBoard: t.boolean,
+    /**
      * Frozen at accept time from the mïsn Flags2 0x0004 bit
      * ("mission fails if player is disabled or destroyed"). The shared
      * sim reads this to decide whether a player disable/destroy should
