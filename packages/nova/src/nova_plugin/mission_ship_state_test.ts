@@ -37,7 +37,7 @@ function makeObjective(goal: number, total = 2): ShipObjective {
 }
 
 describe('mission ship goal state machine', () => {
-    it('supports every goal but rescue', () => {
+    it('supports every ship goal', () => {
         expect(goalSupported(GOAL_NONE)).toBe(true);
         expect(goalSupported(GOAL_DESTROY)).toBe(true);
         expect(goalSupported(GOAL_DISABLE)).toBe(true);
@@ -47,10 +47,10 @@ describe('mission ship goal state machine', () => {
         // Board is offered now that boarding is real end to end
         // (Matthew's ruling).
         expect(goalSupported(GOAL_BOARD)).toBe(true);
-        // Rescue still needs "they start out disabled and stay that way
-        // until you board them" (Bible, mïsn ShipGoal 5), which does not
-        // exist yet.
-        expect(goalSupported(GOAL_RESCUE)).toBe(false);
+        // Rescue is supported too: "they start out disabled and stay
+        // that way until you board them" (Bible, mïsn ShipGoal 5) is the
+        // hulk state (makeHulk), lifted by the owner's boarding.
+        expect(goalSupported(GOAL_RESCUE)).toBe(true);
     });
 
     describe('destroy', () => {

@@ -8,7 +8,9 @@ import { Cargo, cargoUsed } from './cargo_plugin.js';
 import { landable } from './landable.js';
 import { resolveShipObjective, shipGoalOfferable } from './mission_ship_logic.js';
 import type { SystemInfo } from './mission_ship_logic.js';
-import { objectiveAllowsCompletion, ShipObjective } from './mission_ship_state.js';
+import {
+    GOAL_BOARD, GOAL_RESCUE, objectiveAllowsCompletion, ShipObjective,
+} from './mission_ship_state.js';
 import { ActiveRanks } from './ncb_plugin.js';
 import { ActiveMission, MAX_ACTIVE_MISSIONS, Missions } from './player_state_plugin.js';
 import {
@@ -495,6 +497,13 @@ export function cargoName(cargoType: number,
         || `Cargo ${cargoType}`;
 }
 
+/**
+ * mïsn Flags 0x0008: "Mission takes away 100 units of fuel upon
+ * auto-abort. (mission won't be offered if player has less than 100 units
+ * of fuel)". The figure is the Bible's, not a tunable.
+ */
+export const AUTO_ABORT_FUEL_COST = 100;
+
 /** The CargoComponent key that holds a mission's cargo. */
 export function missionCargoKey(missionId: string): string {
     return `mission:${missionId}`;
@@ -907,6 +916,35 @@ function pickSpecialShipName(mission: MissionData,
     return names[Math.floor(random() * names.length)];
 }
 
+/**
+ * Whether a mission's auto-abort (mïsn Flags 0x0001) is DEFERRED to the
+ * boarding of its special ship rather than firing at accept.
+ *
+ * The Bible, verbatim: "If the mission is one in which a special ship
+ * replaces a përs ship at mission start (such as for a 'rescue disabled
+ * ship' mission) and the SpecialShipGoal is 2 or 5 (board or rescue) the
+ * mission will auto-abort after the special ship is boarded."
+ *
+ * The checkable half of that sentence is the goal, and it is the half
+ * that matters: the same paragraph already requires special ships for an
+ * auto-abort to trigger at all ("there must be special ships associated
+ * with the mission to trigger the auto-abort"), and a board/rescue goal
+ * is only satisfiable by boarding a ship that exists. The përs-
+ * replacement half is not re-checked here because acceptOffer does not
+ * know which përs offered the mission — and a board/rescue auto-abort
+ * mission with no përs behind it would otherwise abort instantly, before
+ * its own goal could ever be met.
+ *
+ * A deferred mission therefore BECOMES ACTIVE like any other, so its
+ * special ship spawns and can be found; MissionShipTrackSystem fires the
+ * abort when the owner boards it.
+ */
+export function deferredAutoAbort(mission: MissionData): boolean {
+    return mission.flags.autoAbort && mission.shipCount > 0
+        && (mission.shipGoal === GOAL_BOARD
+            || mission.shipGoal === GOAL_RESCUE);
+}
+
 /** The result of an accept attempt (see acceptOffer). */
 export type AcceptResult =
     | { accepted: true }
@@ -933,7 +971,7 @@ export function acceptOffer(machinery: MissionMachineryContext,
     const prefix = idPrefix(mission.id);
     const ctx = machinery.offerContext();
 
-    if (mission.flags.autoAbort) {
+    if (mission.flags.autoAbort && !deferredAutoAbort(mission)) {
         // One-shot scripting missions: run OnAccept (and pay if
         // flagged), never becoming active.
         runMissionSetString(machinery, mission.onAccept, prefix,
@@ -1001,6 +1039,18 @@ export function acceptOffer(machinery: MissionMachineryContext,
         // owner boards the ship, and the sim never reads mission game
         // data. See MissionShipTrackSystem.
         pickupOnBoard: mission.pickupMode === 2 ? true : undefined,
+        // The DEFERRED auto-abort (see deferredAutoAbort), with the two
+        // numeric effects the sim applies on that boarding frozen beside
+        // it. Both are Bible flags: Flags2 0x0002 "Apply mission Pay on
+        // auto-abort" and Flags 0x0008 "Mission takes away 100 units of
+        // fuel upon auto-abort".
+        ...(deferredAutoAbort(mission) ? {
+            autoAbortOnBoard: true,
+            autoAbortPay: mission.flags.applyPayOnAutoAbort
+                && mission.payVal > 0 ? mission.payVal : undefined,
+            autoAbortFuel: mission.flags.remove100FuelOnAutoAbort
+                ? AUTO_ABORT_FUEL_COST : undefined,
+        } : {}),
     };
     state.missions.set(mission.id, active);
     if (offer.cargoQty > 0
@@ -1224,6 +1274,41 @@ export function runPendingShipDone(machinery: MissionMachineryContext,
             continue;
         }
         runShipDoneIfPending(machinery, active, mission, outfits);
+        ran++;
+    }
+    return ran;
+}
+
+/**
+ * Runs the PLAYER-LOCAL half of a deferred auto-abort (mïsn Flags 0x0001
+ * on a board/rescue-goal mission — see deferredAutoAbort).
+ *
+ * The simulation already did the parts it owns, the tick the owner
+ * boarded the special ship: paying mïsn Flags2 0x0002's Pay, taking
+ * Flags 0x0008's 100 units of fuel, and lifting the rescue target's
+ * disable so it flies off (MissionShipTrackSystem's rescueBoarded). What
+ * is left needs the mission UNIVERSE, which the sim cannot see: the
+ * OnAbort set string, dropping the mission from the list, and its notice.
+ * That is exactly the split `shipDonePending` already uses, so this runs
+ * beside runPendingShipDone at every date advance.
+ *
+ * Reusing `abortMission` rather than open-coding it is what keeps the
+ * deferred case honest: the Bible calls this an ABORT ("the mission will
+ * auto-abort after the special ship is boarded"), so it must run OnAbort,
+ * apply the abort reputation, and unload mission cargo like any other.
+ * Returns how many ran.
+ */
+export function runPendingAutoAborts(machinery: MissionMachineryContext,
+    outfits?: Map<string, number>): number {
+    const { state } = machinery;
+    let ran = 0;
+    for (const active of [...state.missions.values()]) {
+        // The snapshot can go stale under an earlier mission's set string
+        // (the same hazard runPendingShipDone documents).
+        if (!state.missions.has(active.id) || !active.autoAbortPending) {
+            continue;
+        }
+        abortMission(machinery, active.id, outfits);
         ran++;
     }
     return ran;

@@ -12,6 +12,7 @@ import {
     MissionWorkingState,
     processLanding,
     runMissionSetString,
+    runPendingAutoAborts,
     runPendingShipDone,
     stellarInfoOf,
 } from '../nova_plugin/mission_logic.js';
@@ -454,7 +455,10 @@ async function processInFlightMissions(entity: Entity,
     const anyDue = [...missions.values()].some(active =>
         active.failed
         || (active.deadlineDay !== null && currentDay > active.deadlineDay)
-        || active.shipObjective?.shipDonePending);
+        || active.shipObjective?.shipDonePending
+        // A deferred auto-abort the sim fired when the owner boarded the
+        // special ship (mïsn Flags 0x0001); see runPendingAutoAborts.
+        || active.autoAbortPending);
     if (!anyDue) {
         return;
     }
@@ -463,6 +467,9 @@ async function processInFlightMissions(entity: Entity,
     // OnShipDone first: a goal that completed can influence a mission
     // that then fails (e.g. an OnShipDone that starts a timed follow-up).
     runPendingShipDone(session.machinery, session.outfits);
+    // The deferred auto-abort's player-local half, before the deadline
+    // sweep: a mission that has already aborted must not also be failed.
+    runPendingAutoAborts(session.machinery, session.outfits);
     failExpiredMissions(session.machinery, currentDay, session.outfits);
     const events = session.commit();
     if (events.length > 0) {

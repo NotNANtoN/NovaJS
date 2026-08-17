@@ -16,11 +16,14 @@ import {
     GOAL_DESTROY,
     GOAL_DISABLE,
     GOAL_OBSERVE,
+    GOAL_RESCUE,
     ShipObjective,
     shipsToSpawn,
 } from './mission_ship_state.js';
 import { BoardedComponent } from './boarding_component.js';
 import { CargoComponent } from './cargo_plugin.js';
+import { CreditsComponent } from './player_state_plugin.js';
+import { FuelComponent } from './health_plugin.js';
 import { missionCargoKey } from './mission_logic.js';
 import { makeNpcShip } from './npc_spawn_plugin.js';
 import { Angle } from 'nova_ecs/datatypes/angle';
@@ -333,6 +336,98 @@ describe('mission ships in the shared simulation', () => {
             }
             expect(owner.components.get(CargoComponent)!
                 .get(missionCargoKey(MISSION_ID))).toEqual(2);
+        }, 30_000);
+
+        it('rescues a GOAL_RESCUE hulk when the owner boards it',
+            async () => {
+                // Bible, mïsn ShipGoal 5: "Rescue them (they start out
+                // disabled and stay that way until you board them)". The
+                // "stay that way" half is the hulk flag, which
+                // ShipDisableSystem refuses to lift however healthy the
+                // armor is — so boarding, which DELETES the component, is
+                // the only thing that can end it.
+                const { world, shipUuid, missionShipUuid, activeObjective } =
+                    await makeWorldWithMissionShip(GOAL_RESCUE);
+                const ship = world.entities.get(missionShipUuid)!;
+                // Spawned as a hulk by mission_ship_spawn; stand that in
+                // here, since this harness builds its ship directly.
+                ship.components.set(DisabledComponent,
+                    { repairAt: null, hulk: true });
+                for (let i = 0; i < 5; i++) {
+                    world.step();
+                }
+                // Still adrift, at full armor: nothing lifts a hulk.
+                expect(ship.components.has(DisabledComponent)).toBeTrue();
+
+                ship.components.set(BoardedComponent,
+                    { boarder: shipUuid, plundered: true });
+                for (let i = 0; i < 5; i++) {
+                    world.step();
+                }
+                // Rescued: it flies off under its own AI, and the goal is
+                // credited by the same boarding.
+                expect(ship.components.has(DisabledComponent)).toBeFalse();
+                expect(activeObjective()!.satisfied).toBe(1);
+                expect(activeObjective()!.complete).toBeTrue();
+            }, 30_000);
+
+        it('fires the deferred auto-abort on that boarding: pay, fuel, '
+            + 'and a pending abort', async () => {
+                // Bible, mïsn Flags 0x0001, verbatim: "If the mission is
+                // one in which a special ship replaces a përs ship at
+                // mission start (such as for a 'rescue disabled ship'
+                // mission) and the SpecialShipGoal is 2 or 5 (board or
+                // rescue) the mission will auto-abort after the special
+                // ship is boarded." The sim does the numeric half now;
+                // the OnAbort set string waits for the next date advance.
+                const { world, shipUuid, missionShipUuid } =
+                    await makeWorldWithMissionShip(GOAL_RESCUE);
+                const owner = world.entities.get(shipUuid)!;
+                const active = owner.components.get(MissionsComponent)!
+                    .get(MISSION_ID)!;
+                active.autoAbortOnBoard = true;
+                active.autoAbortPay = 2000;         // mïsn Flags2 0x0002
+                active.autoAbortFuel = 100;         // mïsn Flags 0x0008
+                owner.components.set(CreditsComponent, { credits: 500 });
+                const fuel = owner.components.get(FuelComponent)!;
+                fuel.current = fuel.max;
+                const fuelBefore = fuel.current;
+
+                world.entities.get(missionShipUuid)!.components
+                    .set(BoardedComponent,
+                        { boarder: shipUuid, plundered: true });
+                for (let i = 0; i < 5; i++) {
+                    world.step();
+                }
+
+                expect(owner.components.get(CreditsComponent)!.credits)
+                    .toEqual(2500);
+                expect(owner.components.get(FuelComponent)!.current)
+                    .toEqual(fuelBefore - 100);
+                // The player-local half is queued, not run: the sim never
+                // reads mission game data, so OnAbort waits for the next
+                // date advance (processInFlightMissions).
+                expect(owner.components.get(MissionsComponent)!
+                    .get(MISSION_ID)!.autoAbortPending).toBeTrue();
+            }, 30_000);
+
+        it('pays the deferred auto-abort exactly once', async () => {
+            const { world, shipUuid, missionShipUuid } =
+                await makeWorldWithMissionShip(GOAL_RESCUE);
+            const owner = world.entities.get(shipUuid)!;
+            const active = owner.components.get(MissionsComponent)!
+                .get(MISSION_ID)!;
+            active.autoAbortOnBoard = true;
+            active.autoAbortPay = 2000;
+            owner.components.set(CreditsComponent, { credits: 0 });
+            world.entities.get(missionShipUuid)!.components
+                .set(BoardedComponent,
+                    { boarder: shipUuid, plundered: true });
+            for (let i = 0; i < 60; i++) {
+                world.step();
+            }
+            expect(owner.components.get(CreditsComponent)!.credits)
+                .toEqual(2000);
         }, 30_000);
 
         it('keeps a captured prize when the mission ends', async () => {

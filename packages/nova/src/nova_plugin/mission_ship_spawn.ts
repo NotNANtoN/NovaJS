@@ -8,11 +8,14 @@ import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_
 import { FiringGroupComponent } from './firing_group.js';
 import { auxShipsMatchSystem, SystemInfo } from './mission_ship_logic.js';
 import { MissionShipComponent } from './mission_ship_plugin.js';
-import { GOAL_CHASE_OFF, GOAL_ESCORT, shipsToSpawn } from './mission_ship_state.js';
+import {
+    GOAL_CHASE_OFF, GOAL_ESCORT, GOAL_RESCUE, shipsToSpawn,
+} from './mission_ship_state.js';
 import { FormationComponent, NpcComponent } from './npc_ai_plugin.js';
 import {
     applyStartsDisabledData,
     INITIAL_SPAWN_HALF_SIZE,
+    makeHulk,
     jumpInState,
     makeNpcShip,
     pickWeighted,
@@ -145,6 +148,20 @@ async function buildShip(ctx: SpawnContext, missionId: string,
         shield: shipData.physics.shield,
         shieldRecharge: shipData.physics.shieldRecharge,
     });
+    // mïsn ShipGoal 5: "Rescue them (they start out disabled and stay
+    // that way until you board them)". Here it is the MISSION rather than
+    // the government that makes the ship a hulk, so the same state is
+    // applied unconditionally — a rescue target of an ordinary trading
+    // govt is still found adrift. Idempotent with the derelict-govt path
+    // above, which writes the identical components.
+    if (options.goal === GOAL_RESCUE) {
+        makeHulk(ship, {
+            armor: shipData.physics.armor,
+            armorRecharge: shipData.physics.armorRecharge,
+            shield: shipData.physics.shield,
+            shieldRecharge: shipData.physics.shieldRecharge,
+        });
+    }
     if (options.aux) {
         return ship;
     }

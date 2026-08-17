@@ -38,8 +38,12 @@ import { map } from 'nova_ecs/datatypes/map';
  *                by merely sharing the system with the player; a
  *                cloak-capable ship must be seen up close while
  *                visible (OBSERVE_RANGE).
- *    5 rescue    "They start out disabled ... until you board them" —
- *                needs boarding; not offered, like board.
+ *    5 rescue    "Rescue them (they start out disabled and stay that
+ *                way until you board them)": the ships spawn as HULKS
+ *                (mission_ship_spawn's makeMissionHulk) and each counts
+ *                the first time the MISSION'S OWNER boards it, exactly
+ *                like a board goal. Boarding also RESCUES it — the sim
+ *                lifts the disable and it flies off under its own AI.
  *    6 chase off "Either kill them or scare them into jumping out of
  *                the system": a death OR a departure counts.
  *
@@ -121,18 +125,22 @@ export type ShipObjective = t.TypeOf<typeof ShipObjectiveType>;
  * head to <RST> in the <RSY> system." Both halves of that sentence now
  * work.
  *
- * GOAL_RESCUE (5) is still unofferable. The Bible defines it as "they
- * start out disabled and stay that way until you board them", which needs
- * a spawn-disabled-and-stay-disabled mechanic this engine does not have.
- * See the report: stock mïsn 141/650/651/652 ("Refuel Trader") are the
- * rescue missions, and they additionally need the përs LinkMission offer
- * channel and përs Flags 0x0040 ship replacement.
+ * GOAL_RESCUE (5) is offered too. The Bible's "they start out disabled
+ * and stay that way until you board them" maps exactly onto the HULK
+ * state this engine already has for derelict-govt spawns (gövt Flags1
+ * 0x0800): DisabledComponent with `hulk: true`, which ShipDisableSystem
+ * refuses to lift however healthy the armor is, so only an external
+ * repair — a boarding — brings it back. Stock mïsn 141/650/651/652
+ * ("Refuel Trader") are the rescue missions.
+ *
+ * EVERY goal is supported now, so this predicate exists only as the one
+ * place a future unsupported goal would be listed.
  */
 export function goalSupported(goal: number): boolean {
     return goal === GOAL_NONE || goal === GOAL_DESTROY
         || goal === GOAL_DISABLE || goal === GOAL_BOARD
         || goal === GOAL_ESCORT || goal === GOAL_OBSERVE
-        || goal === GOAL_CHASE_OFF;
+        || goal === GOAL_RESCUE || goal === GOAL_CHASE_OFF;
 }
 
 /** Goals whose remaining ships count down as they are satisfied (the
@@ -140,7 +148,7 @@ export function goalSupported(goal: number): boolean {
 function countsDown(goal: number): boolean {
     return goal === GOAL_DESTROY || goal === GOAL_DISABLE
         || goal === GOAL_OBSERVE || goal === GOAL_CHASE_OFF
-        || goal === GOAL_BOARD;
+        || goal === GOAL_BOARD || goal === GOAL_RESCUE;
 }
 
 /** How many ships the owner's client should spawn on system entry. */
@@ -226,11 +234,14 @@ export function shipDisabled(objective: ShipObjective, uuid: string): void {
 }
 
 /**
- * A tracked ship has been boarded by the owner (GOAL_BOARD). Mirrors
- * shipDisabled: one board counts once — which is also all a ship ever
- * gets, since a hulk's plunder record is spent by its first boarding
- * (boarding_component.ts). Called by MissionShipTrackSystem off the
- * shared BoardedComponent.
+ * A tracked ship has been boarded by the owner. Mirrors shipDisabled: one
+ * board counts once — which is also all a ship ever gets, since a hulk's
+ * plunder record is spent by its first boarding (boarding_component.ts).
+ * Called by MissionShipTrackSystem off the shared BoardedComponent.
+ *
+ * Credits both boarding goals. GOAL_BOARD ("board them") and GOAL_RESCUE
+ * ("they start out disabled and stay that way UNTIL YOU BOARD THEM")
+ * differ only in how the ship starts out, never in what satisfies them.
  */
 export function shipBoarded(objective: ShipObjective, uuid: string): void {
     const flags = objective.live.get(uuid);
@@ -238,7 +249,7 @@ export function shipBoarded(objective: ShipObjective, uuid: string): void {
         return;
     }
     flags.boarded = true;
-    if (objective.goal === GOAL_BOARD) {
+    if (objective.goal === GOAL_BOARD || objective.goal === GOAL_RESCUE) {
         objective.satisfied++;
         updateCompletion(objective);
     }

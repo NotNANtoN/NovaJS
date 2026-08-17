@@ -269,8 +269,7 @@ describe('missionMatchesLocation', () => {
             makeContext({ activeMissions }))).toBe(false);
     });
 
-    it('offers supported ship goals, board included; suppresses rescue',
-        () => {
+    it('offers every ship goal, board and rescue included', () => {
             // Destroy goals are supported now (mission_ship_logic.ts).
             expect(missionMatchesLocation(makeMission({
                 shipGoal: 0, shipCount: 3, shipDudeId: 'nova:240',
@@ -279,10 +278,11 @@ describe('missionMatchesLocation', () => {
             expect(missionMatchesLocation(makeMission({
                 shipGoal: 2, shipCount: 1, shipDudeId: 'nova:240',
             }), LOCATION_MISSION_COMPUTER, makeContext())).toBe(true);
-            // Rescue (5) still needs the spawn-disabled mechanic.
+            // Rescue (5) is offered too, now that "they start out
+            // disabled and stay that way" is the hulk state.
             expect(missionMatchesLocation(makeMission({
                 shipGoal: 5, shipCount: 1, shipDudeId: 'nova:240',
-            }), LOCATION_MISSION_COMPUTER, makeContext())).toBe(false);
+            }), LOCATION_MISSION_COMPUTER, makeContext())).toBe(true);
         });
 
     it('gates a Require mask on the player Contribute mask', () => {
