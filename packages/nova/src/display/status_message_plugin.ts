@@ -3,6 +3,7 @@ import { Plugin } from "nova_ecs/plugin";
 import { Resource } from "nova_ecs/resource";
 import { System } from "nova_ecs/system";
 import { TimeResource } from "nova_ecs/plugins/time_plugin";
+import { World } from "nova_ecs/world";
 import { BEEP_CANT_DO, UiSoundEvent } from "./ui_sound.js";
 import * as PIXI from "pixi.js";
 import { SimulationGameDataResource } from "../nova_plugin/game_data_resource.js";
@@ -77,6 +78,20 @@ class StatusLine {
 }
 
 export const StatusLineResource = new Resource<StatusLine>('StatusLine');
+
+/**
+ * Posts a transient line on the bottom-left status line from display code
+ * that isn't an ECS system (rxjs control subscriptions, promise
+ * continuations) but holds the display world — the StatusLine twin of
+ * ui_sound's playUiSound. A no-op when the plugin isn't built (headless
+ * specs), and it never touches the simulation. The systems below set the
+ * line directly with their own `Emit`/TimeResource args; this exists only
+ * for the callers that have neither.
+ */
+export function showStatusMessage(world: World, message: string) {
+    world.resources.get(StatusLineResource)?.setMessage(message,
+        world.resources.get(TimeResource)?.time ?? 0);
+}
 /** The scenario's date suffix (e.g. " NC"), fetched once at build. */
 const DateSuffixResource = new Resource<{ suffix: string }>('StatusLineDateSuffix');
 /** Marks that the arrival message has been shown for this system's world. */

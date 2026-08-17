@@ -19,7 +19,8 @@ import {
     ASSIST_GRANTED_FALLBACK, ASSIST_GRANTED_FIRST_INDEX,
     BUSY_RESPONSE_FALLBACK, BUSY_RESPONSE_FIRST_INDEX, HAIL_RESPONSE_TABLE,
     HOSTILE_RESPONSE_FALLBACK, HOSTILE_RESPONSE_FIRST_INDEX,
-    MISC_STRING_TABLE, NO_NEED_RESPONSE_FALLBACK, NO_NEED_RESPONSE_FIRST_INDEX,
+    MISC_STRING_TABLE, miscString, NO_NEED_RESPONSE_FALLBACK,
+    NO_NEED_RESPONSE_FIRST_INDEX, NO_RESPONSE_FALLBACK, NO_RESPONSE_INDEX,
     STELLAR_RESPONSE_TABLE,
 } from '../nova_plugin/hail.js';
 import { CreditsComponent } from '../nova_plugin/player_state_plugin.js';
@@ -32,7 +33,8 @@ import { TimePlugin, TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { SimulationTimeResource } from './simulation_time.js';
 import { ShootAllWeaponsComponent } from '../nova_plugin/npc_plugin.js';
 import {
-    assistAnswer, computeContext, shipIdentityBlock, targetIsFighting,
+    assistAnswer, computeContext, hailIsUnanswerable, shipIdentityBlock,
+    targetIsFighting,
 } from './hail_dialog_plugin.js';
 
 const PLAYER = 'player-uuid';
@@ -627,20 +629,30 @@ describe('computeContext: hailing a STELLAR', () => {
             expect(later?.context.bribe?.purpose).toBe('landing');
         });
 
-    it('never clears an UNLANDABLE stellar (Jupiter) — the gate refuses it '
-        + 'and the radar paints it grey', async () => {
+    it('opens NO channel to an UNLANDABLE stellar (Jupiter) — nobody is '
+        + 'there to answer', async () => {
             const { world, gameData } = planetWorld({
                 canLand: false, planetsTakeBribes: true,
             });
             const result = await computeContext(world, gameData,
                 stellarAssets());
 
-            expect(result?.context.body).toContain('Landing request denied.');
-            expect(result?.context.body).not.toContain('cleared');
-            // No traffic control to bargain with, and no Status line: it
-            // is neither Forbidden nor Hostile, just not a port.
-            expect(result?.context.bribe).toBeUndefined();
-            expect(result?.context.heading).toBe('Earth');
+            // The refusal marker: undefined, so no dialog is shown at all.
+            // A dead moon has no traffic control to deny a landing, to
+            // bargain, or to state a Status — the press gets "No response."
+            // on the status line and a beep instead (see the plugin's
+            // hailIsUnanswerable / refuseHail).
+            expect(result).toBeUndefined();
+        });
+
+    it('still opens the channel for a landable stellar targeted the same way',
+        async () => {
+            // Guards the refusal against over-reach: only the can-land bit
+            // silences the channel.
+            const { world, gameData } = planetWorld({ canLand: true });
+            const result = await computeContext(world, gameData,
+                stellarAssets());
+            expect(result?.context.variant).toBe('planet');
         });
 
     it('falls back to pinned literals when the string tables are missing',
@@ -651,4 +663,52 @@ describe('computeContext: hailing a STELLAR', () => {
                 .toBe('Communications channel open to Earth.\n'
                     + 'You are cleared to land.');
         });
+
+    describe('hailIsUnanswerable (the no-dialog refusal)', () => {
+        it('refuses a hail at an uninhabited stellar', () => {
+            const { world } = planetWorld({ canLand: false });
+            expect(hailIsUnanswerable(world)).toBeTrue();
+        });
+
+        it('lets a landable stellar answer', () => {
+            const { world } = planetWorld({ canLand: true });
+            expect(hailIsUnanswerable(world)).toBeFalse();
+        });
+
+        it('is silent (not a refusal) when nothing is targeted', () => {
+            // computeContext also returns undefined here, but a hail into
+            // empty space must not beep "No response." at the player.
+            const { world } = planetWorld();
+            world.entities.get(PLAYER)!.components
+                .delete(PlanetTargetComponent);
+            expect(hailIsUnanswerable(world)).toBeFalse();
+        });
+
+        it('a targeted SHIP wins over a dead moon that is also selected',
+            () => {
+                // The ship target is what computeContext reads first, so
+                // hailing a ship while Jupiter happens to be selected must
+                // open the ship's channel rather than beep.
+                const { world } = planetWorld({ canLand: false });
+                world.entities.get(PLAYER)!.components
+                    .set(TargetComponent, { target: TARGET });
+                world.entities.set(TARGET, new Entity()
+                    .addComponent(ShipDataComponent, shipData()));
+                expect(hailIsUnanswerable(world)).toBeFalse();
+            });
+
+        it('uses the original\'s wording, with the pinned fallback', () => {
+            // STR# 2002 index 52 is "No response." — the original's own
+            // status line for a hail nobody answers (its neighbour at 53
+            // is the other hail-failure line). The plugin reads it through
+            // miscString, so a missing table still says the right thing.
+            const misc: string[] = [];
+            misc[NO_RESPONSE_INDEX] = 'No response.';
+            expect(miscString(misc, NO_RESPONSE_INDEX, NO_RESPONSE_FALLBACK))
+                .toBe('No response.');
+            expect(miscString(undefined, NO_RESPONSE_INDEX,
+                NO_RESPONSE_FALLBACK)).toBe('No response.');
+            expect(NO_RESPONSE_FALLBACK).toBe('No response.');
+        });
+    });
 });

@@ -14,7 +14,9 @@ import {
     PLANET_HOSTILE_COLOR,
     PLANET_NEUTRAL_COLOR,
     PLANET_UNLANDABLE_COLOR,
+    shipBlipColor,
     shipDisposition,
+    SHIP_DISABLED_COLOR,
     targetCornerStyle,
 } from './iff_plugin.js';
 import { OutfitsState } from './outfit_plugin.js';
@@ -136,6 +138,45 @@ describe('dispositionColor', () => {
         expect(dispositionColor('hostile')).toBe(IFF_HOSTILE_COLOR);
         expect(dispositionColor('friendly')).toBe(IFF_FRIENDLY_COLOR);
         expect(dispositionColor('neutral')).toBe(IFF_NEUTRAL_COLOR);
+    });
+});
+
+describe('shipBlipColor', () => {
+    it('leaves every ship flat without an IFF outfit', () => {
+        // undefined means "use the status bar's dimRadar colour" — the
+        // ïntf-supplied flat colour the radar falls back to.
+        for (const d of ['neutral', 'friendly', 'hostile'] as const) {
+            expect(shipBlipColor(d, false)).toBeUndefined();
+        }
+    });
+
+    it('colours by disposition once the player owns IFF', () => {
+        expect(shipBlipColor('hostile', true)).toBe(IFF_HOSTILE_COLOR);
+        expect(shipBlipColor('friendly', true)).toBe(IFF_FRIENDLY_COLOR);
+        expect(shipBlipColor('neutral', true)).toBe(IFF_NEUTRAL_COLOR);
+    });
+
+    it('draws a DISABLED ship grey with OR without IFF', () => {
+        expect(shipBlipColor('neutral', false, true))
+            .toBe(SHIP_DISABLED_COLOR);
+        expect(shipBlipColor('neutral', true, true))
+            .toBe(SHIP_DISABLED_COLOR);
+    });
+
+    it('puts disabled AHEAD of hostile red, and of friendly green', () => {
+        // Dead in space trumps every allegiance — the same priority the
+        // gray corner set gives it (hostility.ts's styleForTarget).
+        expect(shipBlipColor('hostile', true, true))
+            .toBe(SHIP_DISABLED_COLOR);
+        expect(shipBlipColor('friendly', true, true))
+            .toBe(SHIP_DISABLED_COLOR);
+        expect(shipBlipColor('hostile', true, true))
+            .not.toBe(IFF_HOSTILE_COLOR);
+    });
+
+    it('uses the same grey the unlandable stellar blip uses', () => {
+        expect(SHIP_DISABLED_COLOR).toBe(0x808080);
+        expect(SHIP_DISABLED_COLOR).toBe(PLANET_UNLANDABLE_COLOR);
     });
 });
 

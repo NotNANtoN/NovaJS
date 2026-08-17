@@ -19,7 +19,7 @@ import { DisplayAssetDataInterface } from "../client/gamedata/display_asset_data
 import { DisplayAssetDataResource, SimulationGameDataResource } from "../nova_plugin/game_data_resource.js";
 import { CloakActiveComponent, CloakComponent, deriveCloakScanner } from "../nova_plugin/cloak_plugin.js";
 import { GovtComponent } from "../nova_plugin/govt_component.js";
-import { deriveIff, dispositionColor, planetBlipColor, planetDisposition, PLANET_FLAT_COLOR, shipDisposition } from "../nova_plugin/iff_plugin.js";
+import { deriveIff, planetBlipColor, planetDisposition, PLANET_FLAT_COLOR, shipBlipColor, shipDisposition } from "../nova_plugin/iff_plugin.js";
 import { LegalRecordsComponent } from "../nova_plugin/reputation_plugin.js";
 import { ArmorComponent, FuelComponent, FUEL_PER_JUMP, ShieldComponent } from "../nova_plugin/health_plugin.js";
 import { OutfitsStateComponent, sumOutfitField } from "../nova_plugin/outfit_plugin.js";
@@ -539,13 +539,14 @@ class StatusBar {
         planets: Iterable<readonly [string, MovementState, PlanetData,
             ...unknown[]]>,
         /**
-         * Per-ship blip colour by uuid, from IFF (ModType 14). When the map is
-         * absent or a ship is missing, blips use the flat dimRadar colour;
-         * when the player owns an IFF outfit the DrawRadar system fills this in
-         * so hostile/friendly/neutral ships are coloured (EVN Bible: an IFF
-         * outfit overrides the radar colours).
+         * Per-ship blip colour by uuid. When the map is absent or a ship is
+         * missing from it, that blip uses the flat dimRadar colour. DrawRadar
+         * fills it in for two reasons (iff_plugin's shipBlipColor): a DISABLED
+         * ship is always grey, and — when the player owns an IFF outfit
+         * (ModType 14) — every ship takes its disposition's colour (EVN Bible:
+         * an IFF outfit overrides the radar colours).
          */
-        iffColors?: ReadonlyMap<string, number>,
+        shipColors?: ReadonlyMap<string, number>,
         /**
          * When set, the toroidal-nearest direction from the player to the
          * system centre. The radar draws a blinking white arrow at its edge
@@ -586,7 +587,7 @@ class StatusBar {
         this.drawDot(source, this.statusBarData.colors.brightRadar, source);
 
         for (const [uuid, { position }] of ships) {
-            const color = iffColors?.get(uuid)
+            const color = shipColors?.get(uuid)
                 ?? this.statusBarData.colors.dimRadar;
             if (uuid === flashTarget) {
                 this.drawDot(position, TARGET_FLASH_COLOR, source,
@@ -943,7 +944,7 @@ const DrawRadar = new System({
         StatusBarResource, MovementStateComponent,
     new Query([UUID, MovementStateComponent, ShipDataComponent,
         Optional(CloakActiveComponent), Optional(CloakComponent),
-        Optional(GovtComponent)] as const),
+        Optional(GovtComponent), Optional(DisabledComponent)] as const),
     new Query([UUID, MovementStateComponent, PlanetDataComponent,
         PlanetComponent] as const),
         SimulationGameDataResource, GetEntity, PlayerShipSelector] as const,
@@ -980,24 +981,34 @@ const DrawRadar = new System({
             // The capability is derived here from the player's (delta-synced)
             // outfits rather than read off a component: the radar runs in the
             // display world, and IffComponent lives only in the sim worker.
+            //
+            // DISABLED ships (DisabledComponent — real, serializer-registered
+            // sim state, so it is here in the display world) are GREY with or
+            // without IFF, ahead of hostile red: dead in space is a fact about
+            // the ship, not about the pilot, exactly as the gray corner set
+            // reads it (hostility.ts's styleForTarget).
             const playerOutfits = entity.components.get(OutfitsStateComponent);
             const hasIff = playerOutfits
                 ? deriveIff(playerOutfits, gameData)?.hasIff === true : false;
-            let iffColors: Map<string, number> | undefined;
-            if (hasIff) {
-                const playerGovtId = entity.components.get(GovtComponent)?.id;
-                const playerGovt = playerGovtId
-                    ? gameData.data.Govt.getCached(playerGovtId) : undefined;
-                // The player's legal records (delta-synced): a govt the
-                // player is criminal with shows hostile blips.
-                const playerRecords =
-                    entity.components.get(LegalRecordsComponent);
-                iffColors = new Map();
-                for (const [uuid, , , , , shipGovt] of visibleShips) {
-                    const govt = shipGovt
-                        ? gameData.data.Govt.getCached(shipGovt.id) : undefined;
-                    iffColors.set(uuid, dispositionColor(
-                        shipDisposition(govt, playerGovt, playerRecords)));
+            const playerGovtId = hasIff
+                ? entity.components.get(GovtComponent)?.id : undefined;
+            const playerGovt = playerGovtId
+                ? gameData.data.Govt.getCached(playerGovtId) : undefined;
+            // The player's legal records (delta-synced): a govt the
+            // player is criminal with shows hostile blips.
+            const playerRecords = hasIff
+                ? entity.components.get(LegalRecordsComponent) : undefined;
+            const shipColors = new Map<string, number>();
+            for (const [uuid, , , , , shipGovt, disabled] of visibleShips) {
+                const govt = (hasIff && shipGovt)
+                    ? gameData.data.Govt.getCached(shipGovt.id) : undefined;
+                const color = shipBlipColor(
+                    hasIff
+                        ? shipDisposition(govt, playerGovt, playerRecords)
+                        : 'neutral',
+                    hasIff, disabled !== undefined);
+                if (color !== undefined) {
+                    shipColors.set(uuid, color);
                 }
             }
             // Stellars are coloured by LANDING CLEARANCE: neutral (you may
@@ -1056,7 +1067,7 @@ const DrawRadar = new System({
                 : null;
             // The selected target flashes white on the radar.
             const targetUuid = entity.components.get(TargetComponent)?.target;
-            statusBar.drawRadar(position, visibleShips, planets, iffColors,
+            statusBar.drawRadar(position, visibleShips, planets, shipColors,
                 centerArrow,
                 targetUuid && targetFlashOn(time) ? targetUuid : null,
                 planetColors);

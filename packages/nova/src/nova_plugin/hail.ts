@@ -421,6 +421,7 @@ export function stellarBribeRefusedText(strings: readonly string[] | undefined,
  * The stock misc-strings table (STR# 2002), which holds the traffic-control
  * lines. Used verbatim rather than paraphrased:
  *
+ *   [52] "No response."
  *   [81] "Docking request denied."   [82] "Landing request denied."
  *   [95] "You are cleared to dock."  [98] "You are cleared to land."
  *   [172] "Forbidden"                [173] "Hostile"
@@ -431,6 +432,16 @@ export function stellarBribeRefusedText(strings: readonly string[] | undefined,
  * are what status_bar_content's clearanceDeniedMessage already emits.
  */
 export const MISC_STRING_TABLE = 'nova:2002';
+/**
+ * "No response." — what the original prints on the bottom-left STATUS LINE
+ * when a hail goes unanswered, rather than opening a comm channel. Its
+ * neighbour at 53 ("Unable to send hail - target ship is entering
+ * hyperspace.") is the other hail-failure status line, which is what pins
+ * this as the status-line group and not a comm-dialog body. Used for a hail
+ * at an UNINHABITED stellar: there is no traffic control there to answer.
+ */
+export const NO_RESPONSE_INDEX = 52;
+export const NO_RESPONSE_FALLBACK = 'No response.';
 export const DOCKING_DENIED_INDEX = 81;
 export const LANDING_DENIED_INDEX = 82;
 export const CLEARED_TO_DOCK_INDEX = 95;
