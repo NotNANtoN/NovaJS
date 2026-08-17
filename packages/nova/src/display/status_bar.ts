@@ -267,6 +267,10 @@ class StatusBar {
         const background = await this.displayAssets.spriteFromPictAsync(this.statusBarData.image);
         this.container.addChild(background);
         this.width = background.width;
+        // Hit-testable so a click on the panel (radar, readouts) is seen
+        // as a click on UI by tap_targeting's isBlocked hit test, not as a
+        // click on the space drawn behind it.
+        background.eventMode = 'static';
         const dataAreas = this.statusBarData.dataAreas;
         [this.radar.position.x, this.radar.position.y] = dataAreas.radar.position;
         this.container.addChild(this.radar);

@@ -21,6 +21,13 @@ export interface TapHandlers {
     getMyPeerId(): string | undefined;
     targetShip(uuid: string): void;
     navigateToPlanet(uuid: string): void;
+    /**
+     * Whether a tap at these client coordinates landed on UI rather than
+     * on space — an open menu/dialog, a button, the status bar. Such a tap
+     * must not fall through to target a ship or land on a planet drawn
+     * underneath.
+     */
+    isBlocked?(clientX: number, clientY: number): boolean;
 }
 
 /** How close (world units ≈ px) a tap must be to count as a hit. */
@@ -95,6 +102,9 @@ export function installTapTargeting(view: HTMLElement,
         if (performance.now() - press.time > TAP_MS
             || Math.hypot(event.clientX - press.x,
                 event.clientY - press.y) > TAP_SLOP_PX) {
+            return;
+        }
+        if (handlers.isBlocked?.(event.clientX, event.clientY)) {
             return;
         }
         const world = handlers.getWorld();

@@ -1957,6 +1957,14 @@ async function startGame() {
                 void simulationBridge?.setPlanetTarget(uuid);
                 autopilot?.navigateTo(uuid);
             },
+            // A click on the map, a dialog, a button or the status bar is
+            // NOT a click on space: while a modal menu owns the keyboard,
+            // or when PIXI's hit test finds an interactive UI object under
+            // the pointer (only UI is interactive; ships/planets are
+            // picked by distance above), the tap stops here instead of
+            // targeting/landing on whatever is drawn underneath.
+            isBlocked: (x, y) => MenuControls.focused !== undefined
+                || app.renderer.events.rootBoundary.hitTest(x, y) !== null,
         });
     }
 

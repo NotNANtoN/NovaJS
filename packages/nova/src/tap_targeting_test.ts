@@ -60,3 +60,55 @@ describe('pickNearest', () => {
         expect(bestPlanet).toBeUndefined();
     });
 });
+
+describe('installTapTargeting: taps on UI do not fall through', () => {
+    /** A view that records listeners so a tap can be replayed by hand. */
+    function fakeView() {
+        const listeners = new Map<string, ((e: any) => void)[]>();
+        const view = {
+            addEventListener: (type: string, fn: (e: any) => void) => {
+                listeners.set(type, [...(listeners.get(type) ?? []), fn]);
+            },
+        } as unknown as HTMLElement;
+        const fire = (type: string, e: object) =>
+            (listeners.get(type) ?? []).forEach(fn => fn(e));
+        const tap = (clientX: number, clientY: number) => {
+            fire('pointerdown', { pointerId: 1, clientX, clientY });
+            fire('pointerup', { pointerId: 1, clientX, clientY });
+        };
+        return { view, tap };
+    }
+
+    async function harness(isBlocked: (x: number, y: number) => boolean) {
+        const { World } = await import('nova_ecs/world');
+        const PIXI = await import('pixi.js');
+        const { Space } = await import('./display/space_resource.js');
+        const { installTapTargeting } = await import('./tap_targeting.js');
+        const world = new World('tap');
+        world.resources.set(Space, new PIXI.Container());
+        world.entities.set('planet', planetAt(100, 100));
+        const landed: string[] = [];
+        const { view, tap } = fakeView();
+        installTapTargeting(view, {
+            getWorld: () => world,
+            getMyPeerId: () => undefined,
+            targetShip: () => { },
+            navigateToPlanet: uuid => landed.push(uuid),
+            isBlocked,
+        });
+        return { tap, landed };
+    }
+
+    it('lands on the planet under a tap on bare space', async () => {
+        const { tap, landed } = await harness(() => false);
+        tap(100, 100);
+        expect(landed).toEqual(['planet']);
+    });
+
+    it('ignores the tap when it landed on UI (open map, dialog, status '
+        + 'bar) even with a planet drawn underneath', async () => {
+        const { tap, landed } = await harness(() => true);
+        tap(100, 100);
+        expect(landed).toEqual([]);
+    });
+});
