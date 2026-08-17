@@ -24,6 +24,7 @@ import {
     LINE_HEIGHT, MISSION_INFO, ROW_HEIGHT, ROW_TEXT_DY, SELECTION_COLOR,
     listRowY,
 } from './dialog_layout.js';
+import { wrapIndex } from './list_selection.js';
 
 /**
  * Docked context that makes the Abort button functional: aborting runs
@@ -363,8 +364,8 @@ export class MissionInfoDialog {
         if (this.missions.length === 0) {
             return;
         }
-        this.selectedIndex = Math.max(0,
-            Math.min(this.missions.length - 1, this.selectedIndex + delta));
+        this.selectedIndex = wrapIndex(this.selectedIndex, delta,
+            this.missions.length);
         this.refreshList();
         this.refreshDescription();
     }

@@ -35,6 +35,7 @@ import {
 import { Menu } from './menu.js';
 import { computeCargoCapacity } from './mission_session.js';
 import { QuantityDialog } from './quantity_dialog.js';
+import { wrapIndex } from './list_selection.js';
 
 // The 426x252 Trade dialog (PICT 8510). All geometry lives in
 // dialog_layout.ts, measured against trade_center/*.png (1920x1080).
@@ -292,8 +293,8 @@ export class TradeCenter extends Menu<Entity> {
         if (this.goods.length === 0) {
             return;
         }
-        this.selectedIndex = Math.max(0, Math.min(
-            this.goods.length - 1, this.selectedIndex + delta));
+        this.selectedIndex = wrapIndex(this.selectedIndex, delta,
+            this.goods.length);
         this.refresh();
     }
 

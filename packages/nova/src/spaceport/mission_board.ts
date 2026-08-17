@@ -25,6 +25,7 @@ import { formatMapDate } from './route.js';
 import {
     BBS, LINE_HEIGHT, ROW_HEIGHT, ROW_TEXT_DY, SELECTION_COLOR, listRowY,
 } from './dialog_layout.js';
+import { wrapToSelectable } from './list_selection.js';
 
 /**
  * The original's body font: Geneva 9, whose advance widths our outline
@@ -416,11 +417,9 @@ export class MissionBoard extends Menu<Entity> {
         if (this.rows.length === 0) {
             return;
         }
-        let index = this.selectedIndex;
-        do {
-            index = Math.max(0, Math.min(this.rows.length - 1, index + delta));
-        } while (this.rows[index]?.kind === 'header'
-            && index > 0 && index < this.rows.length - 1);
+        // Wraps at either end, skipping the section headers.
+        const index = wrapToSelectable(this.selectedIndex, delta,
+            this.rows.length, i => this.rows[i]?.kind !== 'header');
         if (this.rows[index]?.kind !== 'header') {
             this.selectedIndex = index;
         }
