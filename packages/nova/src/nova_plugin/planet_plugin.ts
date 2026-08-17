@@ -305,12 +305,20 @@ const AttemptLandingSystem = new System({
             // away, etc.); fall through and pick the nearest as if unset.
         }
 
-        // No stellar selected: target the nearest one. Ties break on the
-        // lexicographically smaller uuid so every peer picks the same stellar
-        // regardless of entity-map iteration order (see ChooseTargetSystem).
+        // No stellar selected: target the nearest one that is a PORT at
+        // all (landable.ts — Jupiter, scenery worlds and dead gates are
+        // skipped, so 'l' never tries to land on Jupiter; a port may still
+        // deny landing, which is the clearance gate above). Unknown planet
+        // data (provider not yet run) counts as landable, as elsewhere.
+        // Ties break on the lexicographically smaller uuid so every peer
+        // picks the same stellar regardless of entity-map iteration order
+        // (see ChooseTargetSystem).
         let closestUuid: string | undefined = undefined;
         let minSquared = Infinity;
-        for (const [uuid, { position: planetPosition }] of planets) {
+        for (const [uuid, { position: planetPosition }, , data] of planets) {
+            if (data && !landable(data)) {
+                continue;
+            }
             const distanceSquared =
                 planetPosition.subtract(position).lengthSquared;
             if (distanceSquared < minSquared

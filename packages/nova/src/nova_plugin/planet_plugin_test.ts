@@ -20,6 +20,7 @@ import { SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
 import { applyHail } from './hail_plugin.js';
 import { CreditsComponent } from './player_state_plugin.js';
 import { LegalRecordsComponent } from './reputation_plugin.js';
+import { landable } from './landable.js';
 import { clearanceDeniedMessage } from '../display/status_bar_content.js';
 
 // Sol (nova:130) has several ordinary planets plus the link-less wormhole.
@@ -89,6 +90,28 @@ describe('AttemptLandingSystem', () => {
         // First press only selects; it never lands.
         expect(lands).toEqual([]);
     }, 30_000);
+
+    it('skips stellars that are not ports when picking the nearest '
+        + '(sitting on Jupiter, "l" selects the nearest LANDABLE stellar)',
+        async () => {
+            const { world, ship } = await makeHarness();
+            const jupiter = [...world.entities].find(([, e]) => {
+                const data = e.components.get(PlanetDataComponent);
+                return data !== undefined && !landable(data);
+            });
+            expect(jupiter).toBeDefined();
+            const [jupiterUuid, jupiterEntity] = jupiter!;
+            place(ship, jupiterEntity.components
+                .get(MovementStateComponent)!.position);
+
+            pressLand(world);
+
+            const target = ship.components.get(PlanetTargetComponent)!.target;
+            expect(target).toBeDefined();
+            expect(target).not.toEqual(jupiterUuid);
+            expect(landable(world.entities.get(target!)!.components
+                .get(PlanetDataComponent)!)).toBeTrue();
+        }, 30_000);
 
     it('lands on the ALREADY-selected stellar when in range and slow', async () => {
         const { world, ship } = await makeHarness();
