@@ -8,6 +8,8 @@ import { Vector } from 'nova_ecs/datatypes/vector';
 import { Entity } from 'nova_ecs/entity';
 import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import { World } from 'nova_ecs/world';
+import { UUID } from 'nova_ecs/arg_types';
+import { System } from 'nova_ecs/system';
 import { BoardedComponent, plunderSpent } from './boarding_component.js';
 import { DisabledComponent } from './disabled_component.js';
 import { completeEntity } from './entity_data_loader.js';
@@ -16,7 +18,15 @@ import { ArmorComponent } from './health_plugin.js';
 import { makeShip } from './make_ship.js';
 import { makeSystem } from './make_system.js';
 import { MissionShipComponent } from './mission_ship_plugin.js';
-import { NpcComponent } from './npc_ai_plugin.js';
+import { InitiateJumpEvent } from './jump_plugin.js';
+import {
+    NpcComponent, npcPlunderCredits, NPC_PLUNDER_CREDIT_FRACTION,
+    NPC_PLUNDER_CREDIT_MINIMUM, NPC_PLUNDER_TAKES_FROM_PLAYERS,
+    PlayerPlunderedEvent,
+} from './npc_ai_plugin.js';
+import { BRIBE_FRACTION_LARGE, BRIBE_MINIMUM, bribeAmount } from './hail.js';
+import { CreditsComponent } from './player_state_plugin.js';
+import { playerPlunderedMessage } from '../display/status_bar_content.js';
 import { ControlledByComponent } from './ship_control.js';
 import { Stat } from './stat.js';
 
@@ -63,6 +73,14 @@ interface HulkOptions {
     missionShip?: boolean;
     /** Mark it as flown by a peer (ControlledByComponent). */
     controlled?: boolean;
+    /** Give it a purse, as a player's ship has. */
+    credits?: number;
+    /** Leave it flying instead of disabling it. */
+    disabled?: boolean;
+    /** Make the pirate govt xenophobic (gövt Flags1 0x0001, "warships
+     * attack everyone except allies") — how a real pirate govt comes to
+     * regard a GOVERNMENTLESS ship, i.e. a player, as an enemy. */
+    xenophobicPirate?: boolean;
     /** Pre-spend its plunder record, as if somebody boarded it first. */
     alreadyBoarded?: string;
 }
@@ -89,6 +107,7 @@ async function plunderWorld(options: HulkOptions & {
         flags: {
             ...getDefaultGovtData().flags,
             plundersBeforeDestroying: options.plunders ?? true,
+            xenophobic: options.xenophobicPirate ?? false,
         },
     }));
     gameData.data.Govt.map.set(TRADER_GOVT,
@@ -144,8 +163,14 @@ async function plunderWorld(options: HulkOptions & {
                     boarder: options.alreadyBoarded, plundered: true,
                 });
             }
+            if (options.credits !== undefined) {
+                ship.components.set(CreditsComponent,
+                    { credits: options.credits });
+            }
         });
-    disable(hulk);
+    if (options.disabled ?? true) {
+        disable(hulk);
+    }
 
     const setUpPirate = (ship: Entity) => {
         ship.components.set(NpcComponent,
@@ -247,16 +272,15 @@ describe('NPC plunder-boarding (gövt Flags 0x1000)', () => {
         expect(runUntilBoarded(world, 400)).toBeFalse();
     });
 
-    it('spares a ship somebody is flying (NPC_PLUNDER_TAKES_FROM_PLAYERS)',
+    it('boards a ship somebody is flying (NPC_PLUNDER_TAKES_FROM_PLAYERS)',
         async () => {
-            // The corrected Bible text says the flag includes the player;
-            // NovaJS does not model what an NPC would take from one, so
-            // the exclusion is explicit and tunable. If this spec ever
-            // flips, it is because that ruling arrived.
+            // The corrected Bible text says the flag includes the player,
+            // and Matthew's ruling agrees. What they TAKE off a player is
+            // the suite at the bottom of this file.
+            expect(NPC_PLUNDER_TAKES_FROM_PLAYERS).toBeTrue();
             const { world, pirate } = await plunderWorld({ controlled: true });
-            expect(pirate.components.get(NpcComponent)?.mode)
-                .not.toEqual('board');
-            expect(runUntilBoarded(world, 400)).toBeFalse();
+            expect(pirate.components.get(NpcComponent)?.mode).toEqual('board');
+            expect(runUntilBoarded(world)).toBeTrue();
         });
 
     it('spares a neutral hulk it has no quarrel with', async () => {
@@ -322,4 +346,144 @@ describe('NPC plunder-boarding (gövt Flags 0x1000)', () => {
             expect(hulk.components.get(BoardedComponent)?.boarder)
                 .toEqual(boarder);
         });
+});
+
+/**
+ * ============================================================================
+ * Pirates plunder a disabled PLAYER (gövt Flags 0x1000, "including the
+ * player")
+ * ============================================================================
+ *
+ * Matthew's ruling: a disabled player is boarded exactly like a hulk, and
+ * the pirates take a cut of their cash — a cut that MUST COST MORE THAN
+ * BRIBING THE SAME SHIP OFF, or the bribe would be strictly dominated and
+ * nobody would ever pay one.
+ */
+describe('pirates plundering a disabled player', () => {
+    /**
+     * A realistic player victim: no government of its own (nothing gives
+     * a player ship one), flown by a peer, carrying a purse — and a
+     * XENOPHOBIC pirate govt, gövt Flags1 0x0001 "warships attack everyone
+     * except allies", which is how a real pirate government comes to
+     * regard a governmentless ship as an enemy in the first place.
+     */
+    const playerWorld = (extra: Parameters<typeof plunderWorld>[0] = {}) =>
+        plunderWorld({
+            controlled: true, governed: false, xenophobicPirate: true,
+            credits: 20_000, ...extra,
+        });
+
+    it('costs more than buying them off, at every purse and both bribe '
+        + 'tiers', () => {
+            // The relation the two functions must never drift out of. The
+            // fraction and floor are both pegged above the bribe's, and
+            // the floor is literally derived from BRIBE_MINIMUM.
+            expect(NPC_PLUNDER_CREDIT_FRACTION)
+                .toBeGreaterThan(BRIBE_FRACTION_LARGE);
+            expect(NPC_PLUNDER_CREDIT_MINIMUM)
+                .toBeGreaterThan(BRIBE_MINIMUM);
+
+            for (const purse of [0, 1, 4, 99, 499, 500, 501, 999, 1000, 1001,
+                1999, 2000, 2001, 5_000, 12_345, 100_000, 9_999_999]) {
+                const plunder = npcPlunderCredits(purse);
+                for (const larger of [false, true]) {
+                    const bribe = bribeAmount(purse, larger);
+                    expect(plunder)
+                        .withContext(`purse ${purse}, larger ${larger}`)
+                        .toBeGreaterThanOrEqual(bribe);
+                    // Strictly more, EXCEPT when the bribe is already
+                    // taking the player's whole purse — nobody can take
+                    // more than everything.
+                    if (bribe < purse) {
+                        expect(plunder)
+                            .withContext(`purse ${purse}, larger ${larger}`)
+                            .toBeGreaterThan(bribe);
+                    }
+                }
+            }
+        });
+
+    it('never takes more than the player has', () => {
+        expect(npcPlunderCredits(0)).toEqual(0);
+        expect(npcPlunderCredits(300)).toEqual(300);
+        expect(npcPlunderCredits(-5)).toEqual(0);
+    });
+
+    it('takes the fraction once the purse clears the floor', () => {
+        expect(npcPlunderCredits(100_000))
+            .toEqual(100_000 * NPC_PLUNDER_CREDIT_FRACTION);
+        // ...and the floor below that.
+        expect(npcPlunderCredits(1_500)).toEqual(NPC_PLUNDER_CREDIT_MINIMUM);
+    });
+
+    it('is a pure function of synced credits, with no roll', () => {
+        // A random cut would have to agree on its draw count with every
+        // other NPC decision roll on every peer.
+        expect(npcPlunderCredits(12_345)).toEqual(npcPlunderCredits(12_345));
+    });
+
+    it('boards a disabled player and takes the cut, exactly once',
+        async () => {
+            const { world, pirate, hulk } = await playerWorld();
+            expect(pirate.components.get(NpcComponent)?.mode).toEqual('board');
+
+            expect(runUntilBoarded(world)).toBeTrue();
+            expect(hulk.components.get(CreditsComponent)!.credits)
+                .toEqual(20_000 - npcPlunderCredits(20_000));
+            expect(hulk.components.get(BoardedComponent)?.boarder)
+                .toEqual(PIRATE);
+
+            // EXACTLY ONCE: the durable record is what stops the same
+            // pirate — or the next one — coming back for seconds.
+            const after = hulk.components.get(CreditsComponent)!.credits;
+            for (let i = 0; i < 300; i++) {
+                world.step();
+            }
+            expect(hulk.components.get(CreditsComponent)!.credits)
+                .toEqual(after);
+        });
+
+    it('tells the player what happened', async () => {
+        // The boarding is over in the tick it happens — no dialog opens —
+        // so the event is the only feedback there is.
+        const { world, hulk } = await playerWorld();
+        const taken: number[] = [];
+        world.addSystem(new System({
+            name: 'CollectPlundered',
+            events: [PlayerPlunderedEvent],
+            args: [PlayerPlunderedEvent, UUID] as const,
+            step({ credits }, uuid) {
+                if (uuid === HULK) {
+                    taken.push(credits);
+                }
+            },
+        }));
+        expect(runUntilBoarded(world)).toBeTrue();
+        expect(taken).toEqual([npcPlunderCredits(20_000)]);
+        expect(playerPlunderedMessage(taken[0])).toContain('stolen!');
+        expect(hulk.components.get(CreditsComponent)!.credits)
+            .toEqual(20_000 - taken[0]);
+    });
+
+    it('will not touch a player who is still flying', async () => {
+        // The disabled-first rule is this engine's, not the Bible's, and
+        // it applies to the player exactly as it does to a hulk.
+        const { world, pirate } = await playerWorld({ disabled: false });
+        expect(pirate.components.get(NpcComponent)?.mode).not.toEqual('board');
+        expect(runUntilBoarded(world, 400)).toBeFalse();
+    });
+
+    it('lets the player become plunderable again after a jump', async () => {
+        // The player's record resets on the same life-segment boundaries a
+        // hulk's does (clearPlunderRecord), so being robbed once is not a
+        // permanent immunity either.
+        const { world, hulk } = await playerWorld();
+        expect(runUntilBoarded(world)).toBeTrue();
+        expect(plunderSpent(hulk.components.get(BoardedComponent))).toBeTrue();
+
+        world.emit(InitiateJumpEvent, { to: 'test:elsewhere' }, [HULK]);
+        world.step();
+        expect(plunderSpent(hulk.components.get(BoardedComponent)))
+            .toBeFalse();
+    });
 });

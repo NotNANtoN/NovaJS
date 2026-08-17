@@ -10,9 +10,10 @@ import { SimulationGameDataResource } from "../nova_plugin/game_data_resource.js
 import { GameDateComponent } from "../nova_plugin/player_state_plugin.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin.js";
 import { SystemIdResource } from "../nova_plugin/system_id_resource.js";
-import { bayCaptureMessage, boardingBlockedMessage, captureRepelledMessage, escortRepairedMessage, jumpArrivalMessage, landingBlockedMessage } from "./status_bar_content.js";
+import { bayCaptureMessage, boardingBlockedMessage, captureRepelledMessage, escortRepairedMessage, jumpArrivalMessage, landingBlockedMessage, playerPlunderedMessage } from "./status_bar_content.js";
 import { LandingBlockedEvent } from "../nova_plugin/planet_plugin.js";
-import { BayCaptureEvent, BoardingBlockedEvent, BoardingRepelledEvent, EscortRepairedEvent } from "../nova_plugin/boarding_plugin.js";
+import { BayCaptureEvent, BOARD_SOUND, BoardingBlockedEvent, BoardingRepelledEvent, EscortRepairedEvent } from "../nova_plugin/boarding_plugin.js";
+import { PlayerPlunderedEvent } from "../nova_plugin/npc_ai_plugin.js";
 import { ResizeEvent, ScreenSize } from "./screen_size_plugin.js";
 import { Stage } from "./stage_resource.js";
 
@@ -178,6 +179,25 @@ const ShowBoardingRepelledMessage = new System({
     },
 });
 
+// Pirates boarded the LOCAL PLAYER's disabled ship and took a cut of
+// their cash (gövt Flags 0x1000). Emitted in the sim targeted at the
+// plundered ship, re-emitted here, shown on that player's client only.
+// The boarding is over in the tick it happens, so this line and the
+// boarding beep are the whole of the experience — hence the sound: it is
+// the same clamp-on beep the player hears when THEY board somebody
+// (BOARD_SOUND, snd nova:390), which is exactly what has just happened to
+// them. No cant-do beep: nothing was refused.
+const ShowPlayerPlunderedMessage = new System({
+    name: 'ShowPlayerPlunderedMessage',
+    events: [PlayerPlunderedEvent],
+    args: [PlayerPlunderedEvent, StatusLineResource, TimeResource,
+        PlayerShipSelector, Emit] as const,
+    step({ credits }, statusLine, { time }, _player, emit) {
+        statusLine.setMessage(playerPlunderedMessage(credits), time);
+        emit(UiSoundEvent, { id: BOARD_SOUND });
+    },
+});
+
 // Success feedback when boarding repairs one of your own disabled flock
 // members (EscortRepairedEvent from the boarding gate). Like the blocked
 // messages it is emitted in the sim targeted at the boarding ship and
@@ -248,6 +268,7 @@ export const StatusMessagePlugin: Plugin = {
         world.addSystem(ShowLandingBlockedMessage);
         world.addSystem(ShowBoardingBlockedMessage);
         world.addSystem(ShowBoardingRepelledMessage);
+        world.addSystem(ShowPlayerPlunderedMessage);
         world.addSystem(ShowEscortRepairedMessage);
         world.addSystem(ShowBayCaptureMessage);
     },
@@ -257,6 +278,7 @@ export const StatusMessagePlugin: Plugin = {
         world.removeSystem(ShowLandingBlockedMessage);
         world.removeSystem(ShowBoardingBlockedMessage);
         world.removeSystem(ShowBoardingRepelledMessage);
+        world.removeSystem(ShowPlayerPlunderedMessage);
         world.removeSystem(ShowEscortRepairedMessage);
         world.removeSystem(ShowBayCaptureMessage);
         const stage = world.resources.get(Stage);

@@ -1,6 +1,7 @@
 import * as t from 'io-ts';
-import { Entities, GetEntity, UUID } from 'nova_ecs/arg_types';
+import { Emit, Entities, GetEntity, UUID } from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
+import { EcsEvent } from 'nova_ecs/events';
 import { Entity } from 'nova_ecs/entity';
 import { EntityMap } from 'nova_ecs/entity_map';
 import { Angle } from 'nova_ecs/datatypes/angle';
@@ -16,6 +17,7 @@ import { Query } from 'nova_ecs/query';
 import { RunQuery } from 'nova_ecs/arg_types';
 import { System } from 'nova_ecs/system';
 import { SingletonComponent } from 'nova_ecs/world';
+import { registerSimulationBridgeEvent } from '../communication/simulation_bridge_events.js';
 import { SimulationGameDataInterface } from '../client/gamedata/simulation_game_data.js';
 import {
     BoardedComponent, BoardedState, clearPlunderRecord, plunderSpent,
@@ -26,12 +28,14 @@ import { DisabledComponent, DisabledState } from './disabled_component.js';
 import { EscortCommandComponent } from './escort_command.js';
 import { SimulationGameDataResource } from './game_data_resource.js';
 import { GovtComponent } from './govt_component.js';
+import { BRIBE_MINIMUM } from './hail.js';
 import { AssistingComponent } from './hail_component.js';
 import { govtDispositionTo, effectiveStrength, oddsFavorable } from './govt_disposition.js';
 import { ArmorComponent, ShieldComponent } from './health_plugin.js';
 import { beginDepartureJump, JumpComponent, JumpSequenceSystem, JUMP_DISTANCE, JUMP_ARRIVAL_MARGIN_S } from './jump_plugin.js';
 import { landable } from './landable.js';
 import { MissionShipComponent } from './mission_ship_plugin.js';
+import { CreditsComponent } from './player_state_plugin.js';
 import { ControlledByComponent } from './ship_control.js';
 import { PlanetData } from 'novadatainterface/planet_data';
 import { ShipPhysics } from 'novadatainterface/ship_data';
@@ -237,19 +241,20 @@ export const RCS_DISENGAGE_SPEED = 120;
 //    same idea everywhere else: gövt Flags 0x0080 says "Freighters (i.e.
 //    AiTypes 1 and 2)" and flët Flags 0x0001 says "Freighters
 //    (InherentAI <= 2)".
-//  - "(including the player)" is NOT implemented: NPC boarding of a
-//    player's ship raises the whole question of what an NPC takes from a
-//    player and how that reaches the player's own state, which is far
-//    beyond a minimal deterministic approach. See
-//    NPC_PLUNDER_TAKES_FROM_PLAYERS.
+//  - "(including the player)" IS implemented (Matthew's ruling): a
+//    DISABLED player is boarded exactly like a hulk, and the pirates take
+//    a cut of the player's cash. See npcPlunderCredits for the amount and
+//    why it is pegged above the bribe.
 //  - DISABLED FIRST is imposed by this engine, not by the Bible (the
 //    flag says only "before destroying them"). Boarding in NovaJS is
 //    defined against a disabled hulk (boarding_component.ts), so an NPC
-//    plunder run waits for the hulk like the player does.
-//  - The NPC takes NOTHING material. It marks the hulk's durable plunder
-//    record as spent (BoardedComponent), which is the whole point: "some
-//    other pirate got here first", and the player is then refused.
-//    Moving cargo into an NPC's hold would be invisible and pointless.
+//    plunder run waits for the hulk like the player does — the player
+//    included.
+//  - From an NPC HULK the boarder takes nothing material: there is
+//    nowhere for an NPC's booty to go and no way for anyone to observe
+//    it, so the whole point of the run is the DENIAL — the hulk's one
+//    plunder is spent and the player is refused. From a PLAYER there is
+//    somewhere for it to go, so credits actually move.
 
 /**
  * TUNABLE (Bible-ambiguous). AI types that run a plunder-boarding
@@ -262,12 +267,60 @@ export const NPC_PLUNDER_BOARDER_AI_TYPES: ReadonlySet<number> = new Set([3]);
  */
 export const NPC_PLUNDER_VICTIM_AI_TYPES: ReadonlySet<number> = new Set([1, 2]);
 /**
- * TUNABLE. Whether NPCs plunder ships somebody is FLYING. The corrected
- * Bible text says the flag includes the player; NovaJS does not model
- * what an NPC would take from a player, so this is off and the exclusion
- * is explicit rather than accidental.
+ * Whether NPCs plunder ships somebody is FLYING. The corrected Bible text
+ * says gövt Flags 0x1000 includes the player, and Matthew's ruling agrees:
+ * they do. Kept as a named constant so the predicate reads as a rule
+ * rather than an omission, and so the specs can quote it.
  */
-export const NPC_PLUNDER_TAKES_FROM_PLAYERS = false;
+export const NPC_PLUNDER_TAKES_FROM_PLAYERS = true;
+
+/**
+ * ============================================================================
+ * What pirates take off a disabled PLAYER
+ * ============================================================================
+ *
+ * A cut of the player's cash — Matthew's ruling — and it MUST COST MORE
+ * THAN BUYING THEM OFF. That relation is the whole design: a hostile ship
+ * you can still fly away from will take `bribeAmount` (hail.ts) to leave
+ * you alone, so if letting yourself be disabled and boarded were cheaper,
+ * the bribe would be strictly dominated and nobody would ever pay one.
+ *
+ * So both terms of the demand are pegged above the bribe's:
+ *
+ *  - the FRACTION is above BRIBE_FRACTION_LARGE (0.30), the biggest cut
+ *    any bribe takes — the pirate/`largerBribes` one, which is exactly the
+ *    kind of government that carries the plunder flag in the first place;
+ *  - the FLOOR is DERIVED from BRIBE_MINIMUM rather than written out, so
+ *    raising the bribe floor cannot silently leave a cheap plunder behind
+ *    it.
+ *
+ * The one place the two can be EQUAL is a purse too small to satisfy
+ * either demand: both are capped at what the player actually has, and
+ * nobody can take more than everything. npc_boarding_test pins the
+ * relation (>= always, > whenever the bribe is not already taking the
+ * whole purse) across a sweep of purses and both bribe flags, so the two
+ * functions cannot drift apart.
+ *
+ * PURE AND DETERMINISTIC: a function of the synced CreditsComponent
+ * alone, with no roll, so every peer deducts the same amount on the same
+ * tick. (A random cut would also have to agree on the draw count with
+ * every other NPC's decision roll.)
+ */
+export const NPC_PLUNDER_CREDIT_FRACTION = 0.50;
+/** The floor, pegged above the bribe's (see NPC_PLUNDER_CREDIT_FRACTION). */
+export const NPC_PLUNDER_CREDIT_MINIMUM = 2 * BRIBE_MINIMUM;
+
+/**
+ * The credits pirates take off a disabled player: the larger of the
+ * fraction and the floor, capped at what the player actually has.
+ * Mirrors bribeAmount's shape exactly, one tier up.
+ */
+export function npcPlunderCredits(playerCredits: number): number {
+    const purse = Math.max(0, Math.floor(playerCredits));
+    const demand = Math.max(NPC_PLUNDER_CREDIT_MINIMUM,
+        Math.floor(purse * NPC_PLUNDER_CREDIT_FRACTION));
+    return Math.min(demand, purse);
+}
 /** TUNABLE. How far away a warship will notice a plunderable hulk. */
 export const NPC_PLUNDER_SEEK_RANGE = 4000;
 /** TUNABLE. "Pulled alongside", for an NPC (the player's own gate is
@@ -1343,6 +1396,20 @@ export const NpcSteeringSystem = new System({
 });
 
 /**
+ * Emitted (targeted at the PLUNDERED PLAYER's ship) when pirates board a
+ * disabled player and take a cut of their cash. The boarding is over in
+ * the tick it happens — no dialog opens, nothing is negotiated — so this
+ * event is the only feedback there is; the display turns it into a status
+ * line and the boarding beep (status_message_plugin). Carries the credits
+ * actually taken so the line can name the sum; the sim never reads it
+ * back. Never mutates the simulation.
+ */
+export const PlayerPlunderedEvent =
+    new EcsEvent<{ credits: number }>('PlayerPlunderedEvent');
+export const PlayerPlunderedEventType = t.type({ credits: t.number });
+registerSimulationBridgeEvent({ event: PlayerPlunderedEvent });
+
+/**
  * Whether an NPC on a plunder approach has arrived: pulled alongside the
  * hulk and matched to its drift. Deliberately looser than the player's
  * gate (boardingBlockedReason) — an NPC is not asked to line its axis up
@@ -1365,10 +1432,21 @@ export function npcBoardArrived(boarder: MovementState,
  * 125). The converse falls out of the same record: an NPC whose prize the
  * player boarded first finds it already spent and gives up its approach.
  *
- * The NPC takes nothing material. There is nowhere for an NPC's plunder
- * to go and no way for the player to observe it; the point of the
- * behavior is the denial, and the crime/booty machinery stays entirely on
- * the player's side.
+ * FROM AN NPC HULK the boarder takes nothing material: there is nowhere
+ * for an NPC's plunder to go and no way for the player to observe it, so
+ * the point of the behavior is the denial alone.
+ *
+ * FROM A DISABLED PLAYER it takes credits — Matthew's ruling, and the
+ * corrected Bible's "(including the player)". The cut is npcPlunderCredits
+ * (pegged above what bribing the same ship off would have cost), it is
+ * deducted here in the shared sim off the synced CreditsComponent, and
+ * PlayerPlunderedEvent tells the victim what happened: the boarding is
+ * over in one tick, with no dialog, so the status line is the only
+ * feedback there is. The durable `plundered` record makes it
+ * EXACTLY-ONCE — the same record that stops a second pirate queueing up
+ * behind the first — and it clears at the same life-segment boundaries a
+ * hulk's does, so jumping out or landing and departing makes the player
+ * plunderable again.
  *
  * WHY THIS IS ITS OWN SYSTEM RATHER THAN AN ARM OF NpcSteeringSystem.
  * The claim is a race between ships: two warships can reach the same hulk
@@ -1383,8 +1461,8 @@ export function npcBoardArrived(boarder: MovementState,
  */
 export const NpcPlunderBoardSystem = new System({
     name: 'NpcPlunderBoardSystem',
-    args: [SingletonComponent, Entities] as const,
-    step(_singleton, entities) {
+    args: [SingletonComponent, Entities, Emit] as const,
+    step(_singleton, entities, emit) {
         for (const uuid of [...entities.keys()].sort()) {
             const boarder = entities.get(uuid);
             const npc = boarder?.components.get(NpcComponent);
@@ -1420,6 +1498,18 @@ export const NpcPlunderBoardSystem = new System({
             prize.components.set(BoardedComponent, {
                 ...boarded, boarder: uuid, active: false, plundered: true,
             });
+            // A DISABLED PLAYER is boarded exactly like a hulk, but there
+            // is somewhere for the booty to go, so credits actually move.
+            // Written after the record, so the deduction and the
+            // exactly-once mark are the same event: any path that reaches
+            // this line has just flipped `plundered` from unset.
+            const credits = prize.components.get(CreditsComponent);
+            if (credits) {
+                const taken = npcPlunderCredits(credits.credits);
+                credits.credits -= taken;
+                emit(PlayerPlunderedEvent, { credits: taken },
+                    [npc.boardTarget!]);
+            }
             giveUp();
         }
     },
@@ -1727,6 +1817,7 @@ export const NpcAiPlugin: Plugin = {
         // the legacy owner-only AI, whose components were excluded
         // from multiplayer state.
         serializer?.addComponent(NpcComponent, NpcState);
+        serializer?.addEvent(PlayerPlunderedEvent, PlayerPlunderedEventType);
         serializer?.addComponent(FormationComponent, Formation);
         world.addSystem(NpcAggressionSystem);
         world.addSystem(NpcDecisionSystem);

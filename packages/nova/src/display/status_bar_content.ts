@@ -275,6 +275,21 @@ export function captureRepelledMessage(): string {
 }
 
 /**
+ * What the player is told when pirates board their disabled ship and take
+ * a cut of their cash (gövt Flags 0x1000, "including the player").
+ *
+ * COMPOSED FROM STOCK VOCABULARY, the way the original composes its own
+ * theft line. STR# 2002 has no whole sentence for this — it builds one out
+ * of fragments, and the pieces sitting together at indices 372-373 are
+ * "cargo" and "stolen!", i.e. "<what> stolen!". Matthew's ruling is that
+ * pirates take CREDITS rather than cargo, so the same frame is filled with
+ * the sum: "12,500 credits stolen!".
+ */
+export function playerPlunderedMessage(credits: number): string {
+    return `${formatCredits(credits)} credits stolen!`;
+}
+
+/**
  * What the target pane's government line reads for a ship belonging to
  * the player looking at it.
  *
