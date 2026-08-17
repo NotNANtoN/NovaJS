@@ -74,13 +74,12 @@ describe('shipGoalOfferable', () => {
         }))).toBe(true);
     });
 
-    it('suppresses board and rescue goals (boarding not implemented)',
-        () => {
-            expect(shipGoalOfferable(
-                makeMission({ shipGoal: GOAL_BOARD }))).toBe(false);
-            expect(shipGoalOfferable(
-                makeMission({ shipGoal: GOAL_RESCUE }))).toBe(false);
-        });
+    it('offers board goals and suppresses rescue', () => {
+        expect(shipGoalOfferable(
+            makeMission({ shipGoal: GOAL_BOARD }))).toBe(true);
+        expect(shipGoalOfferable(
+            makeMission({ shipGoal: GOAL_RESCUE }))).toBe(false);
+    });
 });
 
 describe('resolveShipSystem', () => {
@@ -152,8 +151,17 @@ describe('resolveShipObjective', () => {
     });
 
     it('returns null (unofferable) for unsupported goals', () => {
-        expect(resolveShipObjective(makeMission({ shipGoal: GOAL_BOARD }),
+        expect(resolveShipObjective(makeMission({ shipGoal: GOAL_RESCUE }),
             makeContext(), null, null)).toBeNull();
+    });
+
+    it('freezes a BOARD goal like any other supported one', () => {
+        const objective = resolveShipObjective(
+            makeMission({ shipGoal: GOAL_BOARD, shipCount: 2 }),
+            makeContext(), null, null);
+        expect(objective).toEqual(jasmine.objectContaining({
+            goal: GOAL_BOARD, total: 2, satisfied: 0,
+        }));
     });
 
     it('freezes the goal state for a destroy mission', () => {

@@ -269,19 +269,21 @@ describe('missionMatchesLocation', () => {
             makeContext({ activeMissions }))).toBe(false);
     });
 
-    it('offers supported ship goals; suppresses board/rescue', () => {
-        // Destroy goals are supported now (mission_ship_logic.ts).
-        expect(missionMatchesLocation(makeMission({
-            shipGoal: 0, shipCount: 3, shipDudeId: 'nova:240',
-        }), LOCATION_MISSION_COMPUTER, makeContext())).toBe(true);
-        // Board (2) and rescue (5) need boarding: still unofferable.
-        expect(missionMatchesLocation(makeMission({
-            shipGoal: 2, shipCount: 1, shipDudeId: 'nova:240',
-        }), LOCATION_MISSION_COMPUTER, makeContext())).toBe(false);
-        expect(missionMatchesLocation(makeMission({
-            shipGoal: 5, shipCount: 1, shipDudeId: 'nova:240',
-        }), LOCATION_MISSION_COMPUTER, makeContext())).toBe(false);
-    });
+    it('offers supported ship goals, board included; suppresses rescue',
+        () => {
+            // Destroy goals are supported now (mission_ship_logic.ts).
+            expect(missionMatchesLocation(makeMission({
+                shipGoal: 0, shipCount: 3, shipDudeId: 'nova:240',
+            }), LOCATION_MISSION_COMPUTER, makeContext())).toBe(true);
+            // Board (2) is offered now that boarding is real.
+            expect(missionMatchesLocation(makeMission({
+                shipGoal: 2, shipCount: 1, shipDudeId: 'nova:240',
+            }), LOCATION_MISSION_COMPUTER, makeContext())).toBe(true);
+            // Rescue (5) still needs the spawn-disabled mechanic.
+            expect(missionMatchesLocation(makeMission({
+                shipGoal: 5, shipCount: 1, shipDudeId: 'nova:240',
+            }), LOCATION_MISSION_COMPUTER, makeContext())).toBe(false);
+        });
 
     it('gates a Require mask on the player Contribute mask', () => {
         const mission = makeMission({ require: '3' }); // bits 0x1 | 0x2

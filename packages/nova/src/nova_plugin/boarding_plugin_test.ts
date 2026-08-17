@@ -18,7 +18,7 @@ import { boardingBlockedMessage } from '../display/status_bar_content.js';
 import { getIntegrationGameData } from '../communication/simulation_test_fixture.js';
 import {
     BayCaptureEvent, BoardingBlockedEvent, clearHostilityToward,
-    EscortRepairedEvent,
+    EscortRepairedEvent, reassignCapturedWing,
 } from './boarding_plugin.js';
 import { AggressionComponent } from './aggression.js';
 import { MissionShipComponent } from './mission_ship_plugin.js';
@@ -511,6 +511,197 @@ describe('boarding in a live world', () => {
             expect(target.components.get(FormationComponent)?.leader)
                 .toEqual(BOARDER);
         });
+
+
+    /**
+     * ========================================================================
+     * THE CAPTURED LEADER'S WING (Matthew's ruling)
+     * ========================================================================
+     *
+     * An NPC fleet shares two links naming its leader — every escort holds
+     * FormationComponent.leader on it AND FiringGroupComponent.group on it
+     * (npc_spawn_plugin) — and flock.ts walks exactly those two edges. So
+     * capturing the leader used to drag the whole wing into the player's
+     * flock: friendly corners, hidden from tab/r, immune to the player's
+     * shots, while keeping their own government and their own reasons to
+     * kill the player.
+     *
+     * The ruling: the wing keeps its original government and allegiance
+     * and elects one of its own. See reassignCapturedWing for the election
+     * rule (most shïp Strength, ties to the smallest uuid).
+     */
+    describe('the captured leader\'s wing', () => {
+        const WING = ['wing:a', 'wing:b', 'wing:c'];
+
+        /**
+         * A capture world where the victim leads a wing of three, linked
+         * the way npc_spawn_plugin links a real NPC fleet. `strengths` are
+         * the shïp Strength ratings, in WING order.
+         */
+        async function wingWorld(strengths = [10, 30, 20]) {
+            const ctx = await boardingWorld({
+                boarderCrew: 500, targetCrew: 1,
+            });
+            const { world, boarder } = ctx;
+            boarder.components.set(ControlledByComponent,
+                { peerId: 'test peer' });
+            WING.forEach((uuid, i) => {
+                const ship = new Entity(uuid);
+                ship.components.set(NpcComponent,
+                    { aiType: 3, aggressor: BOARDER, mode: 'attack' });
+                ship.components.set(GovtComponent, { id: 'nova:129' });
+                ship.components.set(ShipDataComponent,
+                    { ...getDefaultShipData(), strength: strengths[i] });
+                ship.components.set(FormationComponent,
+                    { leader: TARGET, slot: i });
+                ship.components.set(FiringGroupComponent, { group: TARGET });
+                world.entities.set(uuid, ship);
+            });
+            world.step();
+            return ctx;
+        }
+
+        const flockOf = (world: World, uuid: string) =>
+            isInFlock(uuid, BOARDER, u => world.entities.get(u));
+
+        it('elects the strongest survivor and re-forms the rest on it',
+            async () => {
+                const { world, boarder } = await wingWorld([10, 30, 20]);
+                // Precondition: capturing the leader really would have
+                // swept them in.
+                expect(flockOf(world, 'wing:a')).toBeFalse();
+
+                captureAsEscort(world, boarder);
+
+                // 'wing:b' has the most ship (30).
+                const leader = world.entities.get('wing:b')!;
+                expect(leader.components.has(FormationComponent)).toBeFalse();
+                expect(leader.components.get(FiringGroupComponent)?.group)
+                    .toEqual('wing:b');
+                for (const uuid of ['wing:a', 'wing:c']) {
+                    const ship = world.entities.get(uuid)!;
+                    expect(ship.components.get(FormationComponent)?.leader)
+                        .withContext(uuid).toEqual('wing:b');
+                    expect(ship.components.get(FiringGroupComponent)?.group)
+                        .withContext(uuid).toEqual('wing:b');
+                }
+                // Slots are handed out in uuid order, so the layout does
+                // not depend on entity-map iteration order.
+                expect(world.entities.get('wing:a')!.components
+                    .get(FormationComponent)?.slot).toEqual(0);
+                expect(world.entities.get('wing:c')!.components
+                    .get(FormationComponent)?.slot).toEqual(1);
+            });
+
+        it('breaks a strength tie toward the smallest uuid', async () => {
+            const { world, boarder } = await wingWorld([30, 30, 30]);
+            captureAsEscort(world, boarder);
+            expect(world.entities.get('wing:a')!.components
+                .has(FormationComponent)).toBeFalse();
+            expect(world.entities.get('wing:b')!.components
+                .get(FormationComponent)?.leader).toEqual('wing:a');
+        });
+
+        it('keeps the wing hostile: original govt, grudges, and NOT in the '
+            + 'player\'s flock', async () => {
+                const { world, boarder } = await wingWorld();
+                captureAsEscort(world, boarder);
+
+                for (const uuid of WING) {
+                    const ship = world.entities.get(uuid)!;
+                    expect(ship.components.get(GovtComponent)?.id)
+                        .withContext(uuid).toEqual('nova:129');
+                    // Their quarrel with the player is untouched — only
+                    // memories of the PRIZE are swept (clearHostilityToward).
+                    expect(ship.components.get(NpcComponent)?.aggressor)
+                        .withContext(uuid).toEqual(BOARDER);
+                    // The whole point: the chain terminates at the new
+                    // leader instead of climbing to the captor, so they
+                    // are targetable and shootable again.
+                    expect(flockOf(world, uuid))
+                        .withContext(uuid).toBeFalse();
+                    expect(ship.components.has(PlayerEscortComponent))
+                        .withContext(uuid).toBeFalse();
+                }
+            });
+
+        it('retires a captured CARRIER\'s fighters instead of electing them',
+            async () => {
+                // Matthew's carve-out: launched fighters are ordnance whose
+                // hangar changed hands, not a fleet that can elect anybody.
+                // They take the existing orphaned-fighter path — which
+                // OrphanedBayFighterSystem cannot run itself here, since it
+                // only fires when the carrier has LEFT the world and this
+                // carrier is flying for the other side.
+                const { world, boarder } = await boardingWorld({
+                    boarderCrew: 500, targetCrew: 1,
+                });
+                boarder.components.set(ControlledByComponent,
+                    { peerId: 'test peer' });
+                const fighter = new Entity('wing:fighter');
+                fighter.components.set(BayFighterComponent,
+                    { bayWeaponId: 'nova:200' });
+                fighter.components.set(SourceComponent, TARGET);
+                fighter.components.set(OwnerComponent, { owner: TARGET });
+                fighter.components.set(FormationComponent,
+                    { leader: TARGET, slot: 0 });
+                fighter.components.set(FiringGroupComponent,
+                    { group: TARGET });
+                fighter.components.set(EscortCommandComponent,
+                    { command: 'attack' });
+                world.entities.set('wing:fighter', fighter);
+                world.step();
+
+                captureAsEscort(world, boarder);
+
+                expect(fighter.components.get(NpcComponent)?.mode)
+                    .toEqual('depart');
+                expect(fighter.components.get(NpcComponent)?.aiType)
+                    .toEqual(3);
+                // Every link back to the hull the player now owns is gone.
+                expect(fighter.components.has(BayFighterComponent)).toBeFalse();
+                expect(fighter.components.has(SourceComponent)).toBeFalse();
+                expect(fighter.components.has(OwnerComponent)).toBeFalse();
+                expect(fighter.components.has(FormationComponent)).toBeFalse();
+                expect(fighter.components.has(EscortCommandComponent))
+                    .toBeFalse();
+                expect(flockOf(world, 'wing:fighter')).toBeFalse();
+            });
+
+        it('leaves the captor\'s own escorts alone', async () => {
+            // A ship already marked as the player's is genuinely theirs,
+            // whatever it happens to be flying next to.
+            const { world, boarder } = await wingWorld();
+            const mine = world.entities.get('wing:a')!;
+            mine.components.set(PlayerEscortComponent,
+                { player: BOARDER, parent: BOARDER });
+            world.step();
+
+            captureAsEscort(world, boarder);
+
+            expect(mine.components.get(FormationComponent)?.leader)
+                .toEqual(TARGET);
+            // And the election ran among the ships that were actually
+            // swept: 'wing:c' (20) beats 'wing:b' (30)? No — b is stronger.
+            expect(world.entities.get('wing:b')!.components
+                .has(FormationComponent)).toBeFalse();
+        });
+
+        it('regroups the wing after a BAY capture too', async () => {
+            // The prize leaves the world there, so FormationSystem's
+            // leader-gone rule would eventually drop the links — but that
+            // scatters the wing instead of regrouping it.
+            const { world } = await wingWorld();
+            world.entities.delete(TARGET);
+            reassignCapturedWing(TARGET, world.entities);
+
+            expect(world.entities.get('wing:b')!.components
+                .has(FormationComponent)).toBeFalse();
+            expect(world.entities.get('wing:a')!.components
+                .get(FormationComponent)?.leader).toEqual('wing:b');
+            expect(flockOf(world, 'wing:a')).toBeFalse();
+        });
+    });
 
     describe('capture resets everyone else\'s hostility to the prize', () => {
         const BYSTANDER = 'some warship';

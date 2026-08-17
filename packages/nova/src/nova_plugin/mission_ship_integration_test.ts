@@ -20,6 +20,8 @@ import {
     shipsToSpawn,
 } from './mission_ship_state.js';
 import { BoardedComponent } from './boarding_component.js';
+import { CargoComponent } from './cargo_plugin.js';
+import { missionCargoKey } from './mission_logic.js';
 import { makeNpcShip } from './npc_spawn_plugin.js';
 import { Angle } from 'nova_ecs/datatypes/angle';
 import { Position } from 'nova_ecs/datatypes/position';
@@ -251,6 +253,86 @@ describe('mission ships in the shared simulation', () => {
                 world.step();
             }
             expect(activeObjective()!.satisfied).toBe(0);
+        }, 30_000);
+
+        it('picks up mïsn PickupMode 2 cargo the tick the owner boards',
+            async () => {
+                // Bible, mïsn PickupMode: "2  Pick up when boarding
+                // special ship". The stock case is mïsn 832, Temmin
+                // Shard's Leviathan — ShipGoal 2, PickupMode 2,
+                // DropOffMode 1 — whose cargo would otherwise never load,
+                // so DropOffMode 1 would never drop it and the mission
+                // could not be completed.
+                //
+                // It is AUTOMATIC, not a dialog button: it keys off the
+                // same durable BoardedComponent record the goal credit
+                // does, so it survives every way a boarding can end early
+                // (a one-shot bay capture opens no dialog at all, and a
+                // repelled capture closes it on the same tick).
+                const { world, shipUuid, missionShipUuid, activeObjective } =
+                    await makeWorldWithMissionShip(GOAL_BOARD);
+                const owner = world.entities.get(shipUuid)!;
+                const active = owner.components.get(MissionsComponent)!
+                    .get(MISSION_ID)!;
+                active.pickupOnBoard = true;
+                active.cargoType = 6;
+                active.cargoQty = 2;
+                expect(active.cargoLoaded).toBeFalse();
+
+                world.entities.get(missionShipUuid)!.components
+                    .set(BoardedComponent,
+                        { boarder: shipUuid, plundered: true });
+                for (let i = 0; i < 5; i++) {
+                    world.step();
+                }
+
+                const carried = owner.components.get(MissionsComponent)!
+                    .get(MISSION_ID)!;
+                expect(carried.cargoLoaded).toBeTrue();
+                expect(owner.components.get(CargoComponent)!
+                    .get(missionCargoKey(MISSION_ID))).toEqual(2);
+                // The goal credited on the same boarding — one channel.
+                expect(activeObjective()!.satisfied).toBe(1);
+            }, 30_000);
+
+        it('does not pick up for a mission without PickupMode 2',
+            async () => {
+                const { world, shipUuid, missionShipUuid } =
+                    await makeWorldWithMissionShip(GOAL_BOARD);
+                const owner = world.entities.get(shipUuid)!;
+                const active = owner.components.get(MissionsComponent)!
+                    .get(MISSION_ID)!;
+                active.cargoType = 6;
+                active.cargoQty = 2;
+                world.entities.get(missionShipUuid)!.components
+                    .set(BoardedComponent,
+                        { boarder: shipUuid, plundered: true });
+                for (let i = 0; i < 5; i++) {
+                    world.step();
+                }
+                expect(owner.components.get(MissionsComponent)!
+                    .get(MISSION_ID)!.cargoLoaded).toBeFalse();
+                expect(owner.components.get(CargoComponent)!
+                    .get(missionCargoKey(MISSION_ID))).toBeUndefined();
+            }, 30_000);
+
+        it('does not double-load the cargo on later ticks', async () => {
+            const { world, shipUuid, missionShipUuid } =
+                await makeWorldWithMissionShip(GOAL_BOARD);
+            const owner = world.entities.get(shipUuid)!;
+            const active = owner.components.get(MissionsComponent)!
+                .get(MISSION_ID)!;
+            active.pickupOnBoard = true;
+            active.cargoType = 6;
+            active.cargoQty = 2;
+            world.entities.get(missionShipUuid)!.components
+                .set(BoardedComponent,
+                    { boarder: shipUuid, plundered: true });
+            for (let i = 0; i < 40; i++) {
+                world.step();
+            }
+            expect(owner.components.get(CargoComponent)!
+                .get(missionCargoKey(MISSION_ID))).toEqual(2);
         }, 30_000);
 
         it('keeps a captured prize when the mission ends', async () => {

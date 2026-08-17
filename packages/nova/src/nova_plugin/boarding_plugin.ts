@@ -581,6 +581,26 @@ const BoardingGateSystem = new System({
         // disabled escort, fuel transfer") outright. So you can still
         // patch up your own hulk, and still scoop a fitting hull into a
         // bay, after somebody has stripped it.
+        //
+        // MISSION BOARDING IS THE SAME CHANNEL, NOT A SEPARATE ONE — the
+        // rule chosen for mïsn ShipGoal 2 ("Board them"), where the
+        // alternative was a parallel mission-only board that ignored the
+        // record. One boarding does everything: it spends the ship's one
+        // plunder, credits the goal (MissionShipTrackSystem), and loads
+        // mïsn PickupMode 2 cargo. One channel is right because the Bible
+        // describes no second one — the goal is literally "board them",
+        // the same verb — and because two channels would mean the player
+        // boarding a mission ship twice, taking its booty on the second
+        // pass after the first was "only for the mission".
+        //
+        // That cannot lock a mission out. The refusal only ever fires for
+        // a ship SOMEBODY ELSE spent, and the only somebody else who can
+        // is a rival player: NPC pirates skip mission ships outright
+        // (gövt Flags 0x1000 is "non-mission", enforced in
+        // npcPlunderEligible). A ship a rival stole never incremented the
+        // objective's `satisfied`, so the mission simply spawns its
+        // replacement on the next system entry (shipsToSpawn is
+        // total - satisfied) and the goal stays achievable.
         if (plunderSpent(boarded)) {
             emit(BoardingBlockedEvent, { reason: 'alreadyBoarded' }, [uuid]);
             return;

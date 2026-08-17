@@ -28,8 +28,7 @@ import { map } from 'nova_ecs/datatypes/map';
  *    2 board     "Board them": each ship counts the first time the
  *                MISSION'S OWNER boards it (mission_ship_plugin's
  *                MissionShipTrackSystem reads the shared BoardedComponent
- *                record). Evaluated, but not yet OFFERED — see
- *                goalSupported.
+ *                record). Offered — see goalSupported.
  *    3 escort    "Escort them (keep them from getting killed)": the
  *                goal never blocks completion; a mission ship dying
  *                fails the mission. Stock escort missions use ShipSyst
@@ -111,22 +110,29 @@ export type ShipObjective = t.TypeOf<typeof ShipObjectiveType>;
 /**
  * Goals the engine can evaluate; the rest stay unofferable.
  *
- * GOAL_BOARD (2) is now fully EVALUATED — MissionShipTrackSystem reads
- * the shared BoardedComponent and calls shipBoarded — but deliberately
- * still UNOFFERED: turning stock board missions on is a content decision
- * (Matthew's), not an engine one, and the whole point of the one-plunder
- * ruling is that a board mission's ships get exactly one shot each, which
- * wants play-testing before those missions appear on real bulletin
- * boards. Flipping it on is now a one-line change plus the
- * mission_ship_state_test / mission_logic_test expectations.
+ * GOAL_BOARD (2) IS OFFERED (Matthew's ruling). It is evaluated end to
+ * end: MissionShipTrackSystem reads the shared BoardedComponent and
+ * credits a board by the owner (shipBoarded), and mïsn PickupMode 2
+ * ("pick up when boarding special ship") loads the mission cargo at the
+ * same moment. The reference case is stock mïsn 832, "Recover Stolen
+ * Art" — Temmin Shard's Leviathan: AvailLoc 1 (in the bar), ShipGoal 2,
+ * PickupMode 2, DropOffMode 1, whose QuickBrief reads "Disable and board
+ * the Leviathan in the Arcturus system, pick up the stolen art and then
+ * head to <RST> in the <RSY> system." Both halves of that sentence now
+ * work.
  *
- * GOAL_RESCUE (5) additionally needs the "spawn disabled and stay
- * disabled" mechanic, which is not built.
+ * GOAL_RESCUE (5) is still unofferable. The Bible defines it as "they
+ * start out disabled and stay that way until you board them", which needs
+ * a spawn-disabled-and-stay-disabled mechanic this engine does not have.
+ * See the report: stock mïsn 141/650/651/652 ("Refuel Trader") are the
+ * rescue missions, and they additionally need the përs LinkMission offer
+ * channel and përs Flags 0x0040 ship replacement.
  */
 export function goalSupported(goal: number): boolean {
     return goal === GOAL_NONE || goal === GOAL_DESTROY
-        || goal === GOAL_DISABLE || goal === GOAL_ESCORT
-        || goal === GOAL_OBSERVE || goal === GOAL_CHASE_OFF;
+        || goal === GOAL_DISABLE || goal === GOAL_BOARD
+        || goal === GOAL_ESCORT || goal === GOAL_OBSERVE
+        || goal === GOAL_CHASE_OFF;
 }
 
 /** Goals whose remaining ships count down as they are satisfied (the
