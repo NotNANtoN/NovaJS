@@ -47,6 +47,8 @@ class StatusBar {
     private targetContainer = new PIXI.Container();
     private noTargetContainer = new PIXI.Container();
     private targetSprite = new PIXI.Sprite();
+    private targetRenderTexture?: PIXI.RenderTexture;
+    private targetRenderTextureSize = { width: 0, height: 0 };
 
     private text: { [index: string]: PIXI.Text } = {};
     private addEnemyButton: Button;
@@ -265,15 +267,24 @@ class StatusBar {
 
         if (shipGraphic) {
             const shipContainer = shipGraphic?.container;
-            const baseRenderTexture = new PIXI.BaseRenderTexture({
-                width: shipGraphic.size.x, height: shipGraphic.size.y,
-            });
-            const renderTexture = new PIXI.RenderTexture(baseRenderTexture);
+            const { x: width, y: height } = shipGraphic.size;
+            if (!this.targetRenderTexture) {
+                const baseRenderTexture = new PIXI.BaseRenderTexture({ width, height });
+                this.targetRenderTexture = new PIXI.RenderTexture(baseRenderTexture);
+                this.targetRenderTextureSize = { width, height };
+            } else if (this.targetRenderTextureSize.width !== width
+                || this.targetRenderTextureSize.height !== height) {
+                this.targetRenderTexture.resize(width, height);
+                this.targetRenderTextureSize = { width, height };
+            }
 
             shipContainer.setTransform();
-            shipContainer.position.x = shipGraphic.size.x / 2;
-            shipContainer.position.y = shipGraphic.size.y / 2;
-            this.renderer.render(shipContainer, { renderTexture });
+            shipContainer.position.x = width / 2;
+            shipContainer.position.y = height / 2;
+            const renderTexture = this.targetRenderTexture!;
+            this.renderer.render(shipContainer, {
+                renderTexture,
+            });
             this.targetSprite.texture = renderTexture;
             let scale = 1;
             const maxSize = 110;
@@ -292,6 +303,13 @@ class StatusBar {
         this.targetContainer.visible = false;
         this.noTargetContainer.visible = true;
         this.targetSprite.visible = false;
+        this.targetSprite.texture = PIXI.Texture.EMPTY;
+        this.targetRenderTexture?.destroy(true);
+        this.targetRenderTexture = undefined;
+        this.targetRenderTextureSize = { width: 0, height: 0 };
+    }
+    destroy() {
+        this.clearTarget();
     }
 }
 
@@ -425,6 +443,7 @@ export const StatusBarPlugin: Plugin = {
         if (stage && statusBar) {
             stage.removeChild(statusBar.container);
         }
+        statusBar?.destroy();
         world.resources.delete(StatusBarResource);
     }
 }

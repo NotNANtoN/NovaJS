@@ -204,8 +204,8 @@ export function starfield({ density = 0.00002,
                 throw new Error('Expected Stage resource to exist');
             }
 
-            const { frames } = await gameData.data.SpriteSheetFrames.get(STAR_ID);
-            const textures = texturesFromFrames(frames);
+            const framesData = await gameData.data.SpriteSheetFrames.get(STAR_ID);
+            const textures = await texturesFromFrames(framesData);
             const starfield = new Starfield({
                 textures,
                 density,

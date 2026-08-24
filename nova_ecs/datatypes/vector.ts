@@ -1,5 +1,5 @@
 import { isLeft, right } from 'fp-ts/Either';
-import { immerable } from 'immer';
+import { immerable, isDraft } from 'immer';
 import * as t from 'io-ts';
 
 const TWO_PI = 2 * Math.PI;
@@ -54,6 +54,26 @@ export class Vector implements VectorLike {
         return this.apply(other, (a, b) => a + b);
     }
 
+    addInPlace(other: VectorLike): this {
+        if (!isDraft(this)) {
+            return this.add(other) as this;
+        }
+        const draft = this as unknown as { x: number, y: number };
+        draft.x += other.x;
+        draft.y += other.y;
+        return this;
+    }
+
+    addScaledInPlace(other: VectorLike, scale: number): this {
+        if (!isDraft(this)) {
+            return this.add({ x: other.x * scale, y: other.y * scale }) as this;
+        }
+        const draft = this as unknown as { x: number, y: number };
+        draft.x += other.x * scale;
+        draft.y += other.y * scale;
+        return this;
+    }
+
     subtract(other: VectorLike) {
         return this.apply(other, (a, b) => a - b);
     }
@@ -94,6 +114,24 @@ export class Vector implements VectorLike {
         return this.scale(ratio);
     }
 
+    scaleInPlace(scale: number): this {
+        if (!isDraft(this)) {
+            return this.scale(scale) as this;
+        }
+        const draft = this as unknown as { x: number, y: number };
+        draft.x *= scale;
+        draft.y *= scale;
+        return this;
+    }
+
+    normalizeInPlace(targetLength = 1): this {
+        const length = this.length;
+        if (length === 0) {
+            throw new Error("Divide by zero");
+        }
+        return this.scaleInPlace(targetLength / length);
+    }
+
     get lengthSquared(): number {
         return this.x ** 2 + this.y ** 2;
     }
@@ -117,6 +155,14 @@ export class Vector implements VectorLike {
         const length = this.length;
         if (length > c) {
             return this.normalize(c);
+        }
+        return this;
+    }
+
+    shortenToLengthInPlace(c: number): this {
+        const length = this.length;
+        if (length > c) {
+            return this.normalizeInPlace(c);
         }
         return this;
     }

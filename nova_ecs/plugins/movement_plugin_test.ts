@@ -16,6 +16,7 @@ describe('Movement Plugin', () => {
         clock = jasmine.clock();
         clock.install();
         clock.mockDate(new Date(100));
+        spyOn(performance, 'now').and.returnValues(100, 100, 1100);
 
         world = new World();
         world.addPlugin(TimePlugin);

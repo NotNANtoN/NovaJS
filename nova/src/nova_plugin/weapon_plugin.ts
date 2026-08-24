@@ -1,7 +1,6 @@
 import { WeaponData } from 'novadatainterface/WeaponData';
 import { Emit, UUID } from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
-import { Entity } from 'nova_ecs/entity';
 import { EcsEvent } from 'nova_ecs/events';
 import { Plugin } from 'nova_ecs/plugin';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
@@ -16,28 +15,47 @@ import { PlatformResource } from './platform_plugin';
 import { PlayerShipSelector } from './player_ship_plugin';
 import { WeaponsState, WeaponsStateComponent, WeaponState } from './weapons_state';
 
-function checkReloaded(weapon: WeaponData, localState: WeaponLocalState,
-    state: WeaponState, time: Time): boolean {
-    const lastFired = localState.lastFired;
+/**
+ * Avoid an accidental large projectile burst after a stalled tab or server.
+ * Simultaneous weapons still fire a complete salvo, so the limit is approximate
+ * when a single salvo contains more than this many projectiles.
+ */
+export const MAX_WEAPON_PROJECTILES_PER_STEP = 16;
 
-    let reloadTime = weapon.fireSimultaneously
-        ? weapon.reload : weapon.reload / state.count;
-    let reloadingBurst = false;
-    if (localState.burstCount > weapon.burstCount * state.count) {
-        reloadTime = weapon.burstReload;
-        reloadingBurst = true;
+function getWeaponCount(state: WeaponState) {
+    return Math.max(0, Math.floor(state.count));
+}
+
+function getBurstLimit(weapon: WeaponData, count: number) {
+    if (weapon.burstCount <= 0) {
+        return Infinity;
     }
 
-    if (time.time - lastFired < reloadTime) {
-        // Still reloading
-        return false;
-    }
+    // A simultaneous firing opportunity is one salvo. Otherwise, every
+    // installed copy contributes its own shot to the burst.
+    return weapon.burstCount * (weapon.fireSimultaneously ? 1 : count);
+}
 
-    if (reloadingBurst) {
-        localState.burstCount = 0;
-    }
+function addShotsOwed(weapon: WeaponData, state: WeaponState,
+    localState: WeaponLocalState, time: Time, reloadingBurst: boolean,
+    maxFireCalls: number) {
+    const count = getWeaponCount(state);
+    const reloadTime = reloadingBurst ? weapon.burstReload : weapon.reload;
+    const callsPerReload = reloadingBurst || weapon.fireSimultaneously ? 1 : count;
+    const deltaMs = Math.max(0, time.delta_ms);
+    const added = reloadTime > 0
+        ? callsPerReload * deltaMs / reloadTime
+        : maxFireCalls;
 
-    return true;
+    // While the trigger is released, retain at most one ready shot. This
+    // preserves the old cooldown behavior without accumulating a backlog that
+    // fires all at once when the trigger is pressed again.
+    const maxOwed = state.firing
+        || weapon.guidance === 'pointDefense'
+        || weapon.guidance === 'pointDefenseBeam'
+        ? maxFireCalls : 1;
+    localState.shotsOwed = Math.min(maxOwed,
+        Math.max(0, localState.shotsOwed ?? 1) + added);
 }
 
 export const WeaponsSystem = new System({
@@ -52,30 +70,85 @@ export const WeaponsSystem = new System({
             }
 
             const localState = weaponsLocalState.get(id);
-            if (!checkReloaded(weapon.data, localState, state, time)) {
+            const count = getWeaponCount(state);
+            if (count === 0) {
                 continue;
             }
 
-            if (!(state.firing
+            const shouldFire = state.firing
                 || weapon.data.guidance === 'pointDefense'
-                || weapon.data.guidance === 'pointDefenseBeam')) {
+                || weapon.data.guidance === 'pointDefenseBeam';
+            const burstLimit = getBurstLimit(weapon.data, count);
+            const reloadingBurst = burstLimit !== Infinity
+                && localState.burstCount >= burstLimit;
+            localState.reloadingBurst = reloadingBurst;
+
+            // For independent copies, count/reload is the firing rate. A
+            // simultaneous weapon instead produces one count-sized salvo at
+            // each reload interval.
+            const maxFireCalls = weapon.data.fireSimultaneously
+                ? Math.max(1, Math.floor(
+                    MAX_WEAPON_PROJECTILES_PER_STEP / count))
+                : MAX_WEAPON_PROJECTILES_PER_STEP;
+            addShotsOwed(weapon.data, state, localState, time,
+                reloadingBurst, maxFireCalls);
+
+            if (!shouldFire) {
                 continue;
             }
 
-            let fired: Entity | undefined = undefined;
-            if (weapon.data.fireSimultaneously) {
-                for (let i = 0; i < state.count; i++) {
-                    fired = weapon.fireFromEntity(uuid) || fired;
-                }
-            } else {
-                fired = weapon.fireFromEntity(uuid);
+            // A burst reload completes as soon as one firing opportunity is
+            // owed. Any owed calls after that point belong to the new burst.
+            if (reloadingBurst && (localState.shotsOwed ?? 0) >= 1) {
+                localState.burstCount = 0;
+                localState.reloadingBurst = false;
             }
 
-            if (fired) {
+            let shotsToFire = Math.min(
+                Math.floor(localState.shotsOwed ?? 0), maxFireCalls);
+            if (burstLimit !== Infinity && !localState.reloadingBurst) {
+                shotsToFire = Math.min(shotsToFire,
+                    burstLimit - localState.burstCount);
+            }
+
+            let firedCalls = 0;
+            let fireUnavailable = false;
+            for (let i = 0; i < shotsToFire; i++) {
+                let fired = false;
+                if (weapon.data.fireSimultaneously) {
+                    for (let copy = 0; copy < count; copy++) {
+                        fired = weapon.fireFromEntity(uuid) !== undefined || fired;
+                    }
+                } else {
+                    fired = weapon.fireFromEntity(uuid) !== undefined;
+                }
+
+                // Guidance can make a weapon unavailable (for example, a
+                // turret without a target). Keep the owed shot for a later
+                // step rather than treating it as fired.
+                if (!fired) {
+                    fireUnavailable = true;
+                    break;
+                }
+
+                firedCalls++;
                 if (weapon.data.burstCount) {
                     localState.burstCount++;
                 }
-                localState.lastFired = time.time;
+            }
+            if (burstLimit !== Infinity && localState.burstCount >= burstLimit) {
+                // Remaining normal-reload credit cannot carry through the
+                // burst pause.
+                localState.shotsOwed = 0;
+            } else {
+                localState.shotsOwed = Math.max(0,
+                    (localState.shotsOwed ?? 0) - firedCalls);
+                if (fireUnavailable) {
+                    // Do not build a multi-shot backlog while guidance or a
+                    // projectile queue temporarily makes the weapon unusable.
+                    localState.shotsOwed = Math.min(
+                        localState.shotsOwed, 1 - Number.EPSILON);
+                }
             }
         }
     }

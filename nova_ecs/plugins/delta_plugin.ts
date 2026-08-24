@@ -1,4 +1,4 @@
-import { applyPatches, createDraft, Draft, enablePatches, finishDraft, isDraft, original, setAutoFreeze } from 'immer';
+import { applyPatches, createDraft, current, Draft, enablePatches, finishDraft, isDraft, original, setAutoFreeze } from 'immer';
 import { Objectish, Patch } from 'immer/dist/internal';
 import * as t from 'io-ts';
 import { set } from '../datatypes/set';
@@ -48,6 +48,11 @@ const DeltaComponent = new Component<{
 
 export class DeltaMaker {
     readonly componentDeltas: ComponentDeltaMap<UnknownComponent> = new Map();
+    private readonly trackedEntities = new Map<Entity, {
+        dirty: boolean,
+        subscriptions: Array<{ unsubscribe: () => void }>,
+    }>();
+    private readonly internalUpdates = new Set<Entity>();
 
     constructor(private serializer: Serializer) { }
 
@@ -60,12 +65,82 @@ export class DeltaMaker {
             getDelta: componentDelta.getDelta ?? immerGetDelta,
             applyDelta: componentDelta.applyDelta ?? immerApplyDelta,
         });
+        for (const tracking of this.trackedEntities.values()) {
+            tracking.dirty = true;
+        }
+    }
+
+    /**
+     * Starts tracking an entity's component changes. Draft mutations do not
+     * reach EventMap, so isDirty also checks Immer's current draft snapshot.
+     * This is still cheaper than finalizing every component every step.
+     */
+    track(entity: Entity) {
+        if (this.trackedEntities.has(entity)) {
+            return;
+        }
+
+        const tracking = {
+            dirty: true,
+            subscriptions: [] as Array<{ unsubscribe: () => void }>,
+        };
+        const markDirty = (component?: UnknownComponent) => {
+            if (component !== DeltaComponent && !this.internalUpdates.has(entity)) {
+                tracking.dirty = true;
+            }
+        };
+
+        tracking.subscriptions.push(
+            entity.components.events.setAlways.subscribe(([component]) =>
+                markDirty(component)),
+            entity.components.events.delete.subscribe((components) => {
+                if ([...components].some(([component]) => component !== DeltaComponent)) {
+                    markDirty();
+                }
+            }),
+        );
+        this.trackedEntities.set(entity, tracking);
+    }
+
+    isDirty(entity: Entity) {
+        this.track(entity);
+        const tracking = this.trackedEntities.get(entity)!;
+        if (tracking.dirty) {
+            return true;
+        }
+
+        // Immer draft property mutations do not emit component-map events.
+        // current() returns the original object for an unmodified draft.
+        for (const [component, data] of entity.components) {
+            if (this.componentDeltas.has(component) && isDraft(data)
+                && current(data) !== original(data)) {
+                tracking.dirty = true;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    clearDirty(entity: Entity) {
+        const tracking = this.trackedEntities.get(entity);
+        if (tracking) {
+            tracking.dirty = false;
+        }
     }
 
     /**
      * Removes the immer draftedness of an entity's components.
      */
     untrack(entity: Entity) {
+        const tracking = this.trackedEntities.get(entity);
+        if (!tracking && !entity.components.has(DeltaComponent)) {
+            return;
+        }
+        for (const subscription of tracking?.subscriptions ?? []) {
+            subscription.unsubscribe();
+        }
+        this.trackedEntities.delete(entity);
+
         for (const [component, data] of entity.components) {
             if (isDraft(data)) {
                 entity.components.set(component, finishDraft(data))
@@ -74,11 +149,26 @@ export class DeltaMaker {
         entity.components.delete(DeltaComponent);
     }
 
+    untrackExcept(entities: ReadonlySet<Entity>) {
+        for (const entity of this.trackedEntities.keys()) {
+            if (!entities.has(entity)) {
+                this.untrack(entity);
+            }
+        }
+    }
+
     /**
      * Gets the changes that have been made to an entity since the last
      * call to `getDelta`. Uses Immer to track changes on components.
      */
     getDelta(entity: Entity): EntityDelta | undefined {
+        this.track(entity);
+        if (!this.isDirty(entity)) {
+            return;
+        }
+
+        this.internalUpdates.add(entity);
+        try {
         const componentStates = new Map<string, unknown>();
         const componentDeltas = new Map<string, unknown>();
 
@@ -162,9 +252,14 @@ export class DeltaMaker {
 
         if (Object.keys(entityDelta).length > 0) {
             // TODO: Encode this here???
+            this.clearDirty(entity);
             return entityDelta;
         }
+        this.clearDirty(entity);
         return;
+        } finally {
+            this.internalUpdates.delete(entity);
+        }
     }
 
     /**

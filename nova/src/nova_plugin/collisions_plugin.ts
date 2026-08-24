@@ -12,6 +12,7 @@ import { Query } from "nova_ecs/query";
 import { Resource } from "nova_ecs/resource";
 import { System } from "nova_ecs/system";
 import { SingletonComponent } from "nova_ecs/world";
+import { init as initNovaWasm, isInitialized as isNovaWasmInitialized, satBatch } from "../../../nova_wasm";
 import RBush, { BBox } from "rbush";
 import * as SAT from "sat";
 import { getFrameFromMovement } from "../util/get_frame_and_angle";
@@ -20,6 +21,112 @@ import { CollisionEvent, CollisionHitter, CollisionHitterComponent, CollisionVul
 import { GameDataResource } from "./game_data_resource";
 
 type Shape = SAT.Polygon | SAT.Circle;
+
+interface PolygonBatchGeometry {
+    polygons: SAT.Polygon[];
+    vertices: Float32Array;
+    offsets: Uint32Array;
+}
+
+const polygonBatchGeometry = new WeakMap<Hull, PolygonBatchGeometry>();
+
+function getPolygonBatchGeometry(hull: Hull): PolygonBatchGeometry | undefined {
+    if (!hull.shapes.every(shape => shape instanceof SAT.Polygon)) {
+        return undefined;
+    }
+
+    const polygons = hull.shapes as SAT.Polygon[];
+    const cached = polygonBatchGeometry.get(hull);
+    if (cached &&
+        cached.polygons.length === polygons.length &&
+        cached.polygons.every((polygon, index) => polygon === polygons[index])) {
+        return cached;
+    }
+
+    const vertices: number[] = [];
+    const offsets = [0];
+    for (const polygon of polygons) {
+        for (const point of polygon.points) {
+            vertices.push(point.x, point.y);
+        }
+        offsets.push(vertices.length);
+    }
+
+    const geometry = {
+        polygons,
+        vertices: new Float32Array(vertices),
+        offsets: new Uint32Array(offsets),
+    };
+    polygonBatchGeometry.set(hull, geometry);
+    return geometry;
+}
+
+function makePairIndices(aCount: number, bCount: number): Uint32Array {
+    const pairs = new Uint32Array(aCount * bCount * 2);
+    for (let a = 0; a < aCount; a++) {
+        for (let b = 0; b < bCount; b++) {
+            const pairIndex = (a * bCount + b) * 2;
+            pairs[pairIndex] = a;
+            pairs[pairIndex + 1] = b;
+        }
+    }
+    return pairs;
+}
+
+// Below this many shape-pair tests, the WASM call overhead (typed array
+// allocation + boundary crossing) exceeds the cost of the JS SAT tests.
+const RUST_SAT_MIN_PAIRS = 4;
+
+function rustPolygonCollision(hull: Hull, other: Hull): boolean | undefined {
+    if (!isNovaWasmInitialized()
+        || hull.shapes.length * other.shapes.length < RUST_SAT_MIN_PAIRS) {
+        return undefined;
+    }
+
+    const geometry = getPolygonBatchGeometry(hull);
+    const otherGeometry = getPolygonBatchGeometry(other);
+    if (!geometry || !otherGeometry) {
+        return undefined;
+    }
+
+    const positions = new Float32Array(geometry.polygons.length * 2);
+    const rotations = new Float32Array(geometry.polygons.length);
+    for (let i = 0; i < geometry.polygons.length; i++) {
+        positions[i * 2] = geometry.polygons[i].pos.x;
+        positions[i * 2 + 1] = geometry.polygons[i].pos.y;
+        rotations[i] = geometry.polygons[i].angle;
+    }
+
+    const otherPositions = new Float32Array(otherGeometry.polygons.length * 2);
+    const otherRotations = new Float32Array(otherGeometry.polygons.length);
+    for (let i = 0; i < otherGeometry.polygons.length; i++) {
+        otherPositions[i * 2] = otherGeometry.polygons[i].pos.x;
+        otherPositions[i * 2 + 1] = otherGeometry.polygons[i].pos.y;
+        otherRotations[i] = otherGeometry.polygons[i].angle;
+    }
+
+    try {
+        const results = satBatch(
+            geometry.vertices,
+            geometry.offsets,
+            positions,
+            rotations,
+            otherGeometry.vertices,
+            otherGeometry.offsets,
+            otherPositions,
+            otherRotations,
+            makePairIndices(
+                geometry.polygons.length,
+                otherGeometry.polygons.length,
+            ),
+        );
+        return results.some(result => result !== 0);
+    } catch (_error) {
+        // A failed WASM call must not disable the existing JS collision path.
+        return undefined;
+    }
+}
+
 export abstract class Hull {
     abstract shapes: Shape[];
     abstract pos: SAT.Vector;
@@ -27,6 +134,11 @@ export abstract class Hull {
     abstract readonly bbox: BBox;
 
     collides(other: Hull) {
+        const rustResult = rustPolygonCollision(this, other);
+        if (rustResult !== undefined) {
+            return rustResult;
+        }
+
         for (const shape of this.shapes) {
             for (const otherShape of other.shapes) {
                 if (shape instanceof SAT.Polygon) {
@@ -54,6 +166,11 @@ export abstract class Hull {
 
 export class CompositeHull extends Hull {
     private bboxShape: BBox;
+    private rotatedBbox?: BBox;
+    private cachedBbox?: BBox;
+    private cachedBboxAngle?: number;
+    private cachedBboxX?: number;
+    private cachedBboxY?: number;
     private wrappedAngle = 0;
     private wrappedPos = new SAT.Vector(0, 0);
     constructor(readonly shapes: Shape[]) {
@@ -70,6 +187,7 @@ export class CompositeHull extends Hull {
             shape.pos = position;
         }
         this.wrappedPos = position;
+        this.cachedBbox = undefined;
     }
 
     get pos() {
@@ -86,14 +204,28 @@ export class CompositeHull extends Hull {
             }
         }
         this.wrappedAngle = angle;
+        this.rotatedBbox = undefined;
+        this.cachedBbox = undefined;
     }
     get angle() {
         return this.wrappedAngle
     }
 
     get bbox() {
-        const rotated = rotateAabb(this.bboxShape, this.angle);
-        return translateAabb(rotated, this.pos);
+        const angle = this.angle;
+        if (!this.rotatedBbox || this.cachedBboxAngle !== angle) {
+            this.rotatedBbox = rotateAabb(this.bboxShape, angle);
+            this.cachedBboxAngle = angle;
+            this.cachedBbox = undefined;
+        }
+
+        const { x, y } = this.pos;
+        if (!this.cachedBbox || this.cachedBboxX !== x || this.cachedBboxY !== y) {
+            this.cachedBbox = translateAabb(this.rotatedBbox, this.pos);
+            this.cachedBboxX = x;
+            this.cachedBboxY = y;
+        }
+        return this.cachedBbox;
     }
 }
 
@@ -114,6 +246,7 @@ class MultiFrameHull extends Hull {
     }
     set angle(angle: number) {
         this.activeHull.angle = angle;
+        this.wrappedAngle = angle;
     }
     set frame(frame: number) {
         const newHull = this.hulls[frame];
@@ -173,6 +306,11 @@ type RBushEntry = BBox & {
 });
 
 export const RBushResource = new Resource<RBush<RBushEntry>>("RBushResource");
+const rbushEntriesByTree = new WeakMap<
+    RBush<RBushEntry>,
+    Map<string, Map<RBushEntryType, RBushEntry>>
+>();
+const RBUSH_EPSILON = 0.0001;
 
 export function getBoundingBox(shapes: Shape[]): BBox {
     return shapes.map(
@@ -263,34 +401,105 @@ export const CollisionSystem = new System({
         new Query([HurtboxHullComponent, UUID, CollisionHitterComponent] as const),
         Emit, SingletonComponent] as const,
     step(rbush, hitboxColliders, hurtboxColliders, emit) {
-        rbush.clear();
+        let entriesByEntity = rbushEntriesByTree.get(rbush);
+        if (!entriesByEntity) {
+            entriesByEntity = new Map();
+            rbushEntriesByTree.set(rbush, entriesByEntity);
+        }
 
         function makeRbushEntry(type: RBushEntryType, [hull, uuid, interaction]:
             readonly [Hull, string, CollisionHitter | CollisionVulnerability]): RBushEntry {
-            const entry = hull.bbox as RBushEntry;
-            entry.uuid = uuid;
+            const entry = {
+                ...hull.bbox,
+                uuid,
+                hull,
+                type,
+            } as RBushEntry;
             if ('vulnerableTo' in interaction) {
                 (entry as { vulnerability: CollisionVulnerability })
                     .vulnerability = interaction;
             } else {
                 (entry as { hitter: CollisionHitter }).hitter = interaction;
             }
-            entry.hull = hull;
-            entry.type = type;
             return entry;
         }
 
-        const entries = [
-            ...hitboxColliders.map(data => makeRbushEntry(RBushEntryType.hitbox, data)),
-            ...hurtboxColliders.map(data => makeRbushEntry(RBushEntryType.hurtbox, data)),
-        ];
+        const currentEntries = new Set<RBushEntry>();
+        function updateEntry(type: RBushEntryType, data:
+            readonly [Hull, string, CollisionHitter | CollisionVulnerability]) {
+            const [hull, uuid, interaction] = data;
+            let entriesForEntity = entriesByEntity!.get(uuid);
+            if (!entriesForEntity) {
+                entriesForEntity = new Map();
+                entriesByEntity!.set(uuid, entriesForEntity);
+            }
 
-        rbush.load(entries);
+            let entry = entriesForEntity.get(type);
+            if (!entry) {
+                entry = makeRbushEntry(type, data);
+                entriesForEntity.set(type, entry);
+                rbush.insert(entry);
+            } else {
+                const bbox = hull.bbox;
+                const changed = [
+                    Math.abs(entry.minX - bbox.minX),
+                    Math.abs(entry.minY - bbox.minY),
+                    Math.abs(entry.maxX - bbox.maxX),
+                    Math.abs(entry.maxY - bbox.maxY),
+                ].some(delta => delta > RBUSH_EPSILON);
+                if (changed) {
+                    rbush.remove(entry);
+                    entry.minX = bbox.minX;
+                    entry.minY = bbox.minY;
+                    entry.maxX = bbox.maxX;
+                    entry.maxY = bbox.maxY;
+                    rbush.insert(entry);
+                }
+                entry.hull = hull;
+                if ('vulnerableTo' in interaction) {
+                    (entry as { vulnerability: CollisionVulnerability })
+                        .vulnerability = interaction;
+                } else {
+                    (entry as { hitter: CollisionHitter }).hitter = interaction;
+                }
+            }
+            currentEntries.add(entry);
+        }
+
+        for (const data of hitboxColliders) {
+            updateEntry(RBushEntryType.hitbox, data);
+        }
+        for (const data of hurtboxColliders) {
+            updateEntry(RBushEntryType.hurtbox, data);
+        }
+
+        for (const [uuid, entriesForEntity] of entriesByEntity) {
+            for (const [type, entry] of entriesForEntity) {
+                if (!currentEntries.has(entry)) {
+                    rbush.remove(entry);
+                    entriesForEntity.delete(type);
+                }
+            }
+            if (entriesForEntity.size === 0) {
+                entriesByEntity.delete(uuid);
+            }
+        }
 
         // Check for collisions
-        const alreadyCollided = new Set<string>();
+        const alreadyCollided = new Map<string, Set<string>>();
+        function hasAlreadyCollided(a: string, b: string) {
+            return alreadyCollided.get(a)?.has(b) || alreadyCollided.get(b)?.has(a);
+        }
+        function recordCollision(a: string, b: string) {
+            let collisionsWith = alreadyCollided.get(a);
+            if (!collisionsWith) {
+                collisionsWith = new Set();
+                alreadyCollided.set(a, collisionsWith);
+            }
+            collisionsWith.add(b);
+        }
 
-        for (const entry of entries) {
+        for (const entry of currentEntries) {
             const maybeCollisions = rbush.search(entry)
                 .filter(found => found !== entry);
 
@@ -298,7 +507,6 @@ export const CollisionSystem = new System({
                 if (entry.type === other.type) {
                     continue; // Hurtboxes can only hit hitboxes.
                 }
-                const collisionPair = [entry.uuid, other.uuid].sort().join();
                 // The initiator of a collision must have its hurtbox overlap the other
                 // collier's hitbox. If the inverse is allowed, then a missile's prox radius
                 // overlapping a point defense weapon can be considered a collision initiated
@@ -319,9 +527,9 @@ export const CollisionSystem = new System({
                 }
                 const canCollide = aHitsB(hitter, vulnerability);
                 if (canCollide &&
-                    !alreadyCollided.has(collisionPair) &&
+                    !hasAlreadyCollided(entry.uuid, other.uuid) &&
                     entry.hull.collides(other.hull)) {
-                    alreadyCollided.add(collisionPair);
+                    recordCollision(entry.uuid, other.uuid);
                     emit(CollisionEvent, {
                         other: other.uuid,
                         initiator: entryInitiates,
@@ -348,6 +556,9 @@ const LogCollisionSystem = new System({
 export const CollisionsPlugin: Plugin = {
     name: 'CollisionsPlugin',
     build(world) {
+        void initNovaWasm().catch(() => {
+            // CollisionSystem retains the SAT.js fallback if WASM is unavailable.
+        });
         //world.addComponent(HullComponent);
         world.resources.set(RBushResource, new RBush());
 

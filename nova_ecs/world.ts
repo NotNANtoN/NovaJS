@@ -343,10 +343,15 @@ export class World {
     private flush() {
         // Not a for loop because more events may be added as prior
         // ones are resolved.
-        while (this.eventQueue.length > 0) {
-            // TODO: Maybe use an actual queue for better time order.
-            const ecsEvent = this.eventQueue.shift()!;
-            this.runEvent(ecsEvent);
+        let cursor = 0;
+        try {
+            while (cursor < this.eventQueue.length) {
+                this.runEvent(this.eventQueue[cursor++]);
+            }
+        } finally {
+            // Remove processed events in one operation, preserving any events
+            // left queued if event processing throws.
+            this.eventQueue.splice(0, cursor);
         }
     }
 

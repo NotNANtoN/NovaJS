@@ -31,7 +31,7 @@ export class SpriteSheetSprite {
         const loadTextures = async () => {
             const framesData = await this.gameData.data
                 .SpriteSheetFrames.get(this.image.id);
-            this.textures = texturesFromFrames(framesData.frames);
+            this.textures = await texturesFromFrames(framesData);
             this.size.x = Math.max(0, ...this.textures.map(t => t.width));
             this.size.y = Math.max(0, ...this.textures.map(t => t.height));
             this.frames = this.textures.length;

@@ -18,8 +18,9 @@ export const TimeSystem = new System({
     name: 'time',
     args: [TimeResource, SingletonComponent] as const,
     step: (time) => {
-        // TODO: performance.now for node?
-        const now = new Date().getTime();
+        // timeOrigin anchors to the epoch so timestamps stored in replicated
+        // components remain comparable between the server and browser.
+        const now = performance.timeOrigin + performance.now();
         time.delta_ms = now - time.time;
         time.delta_s = time.delta_ms / 1000;
         time.time = now;
@@ -31,7 +32,7 @@ export const TimePlugin: Plugin = {
     name: 'time',
     build: (world) => {
         world.resources.set(TimeResource,
-            { delta_ms: 0, delta_s: 0, time: new Date().getTime(), frame: 0 });
+            { delta_ms: 0, delta_s: 0, time: performance.timeOrigin + performance.now(), frame: 0 });
         world.addSystem(TimeSystem);
     }
 }

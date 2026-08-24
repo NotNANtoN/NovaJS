@@ -9,8 +9,8 @@ ts_library(
     deps = [
         "//novadatainterface",
         "//novaparse/src/resource_parsers:resource_parsers",
-        "//novaparse/src/hull",
         "//novaparse/src/lamejs",
+        "//nova_wasm",
         "@npm//@types/node",
         "//resource_fork",
         "@npm//pngjs",

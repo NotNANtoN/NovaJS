@@ -36,7 +36,11 @@ export const FireSubs = new Resource<FireSubs>('FireSubs');
 export const SubCounts = new Component<DefaultMap<string, number>>('SubCount');
 
 export interface WeaponLocalState {
-    lastFired: number,
+    /**
+     * Fractional firing opportunities carried between simulation steps.
+     * Optional so state created by older clients can be upgraded in place.
+     */
+    shotsOwed?: number,
     burstCount: number,
     reloadingBurst: boolean,
     wasFiring: boolean,
@@ -44,6 +48,19 @@ export interface WeaponLocalState {
 }
 type WeaponsLocalState = DefaultMap<string, WeaponLocalState>;
 export const WeaponsComponent = new Component<WeaponsLocalState>('WeaponsComponent')
+
+export function getDefaultWeaponLocalState(): WeaponLocalState {
+    return {
+        // Preserve the old behavior of allowing a weapon to fire immediately
+        // when it is first pressed, while subsequent shots use the accumulator.
+        shotsOwed: 1,
+        burstCount: 0,
+        reloadingBurst: false,
+        wasFiring: false,
+        exitIndex: 0,
+    };
+}
+
 // TODO: This doesn't update if the set or count of weapons changes.
 export const WeaponsComponentProvider = Provide({
     name: "WeaponsComponentProvider",
@@ -51,13 +68,7 @@ export const WeaponsComponentProvider = Provide({
     update: [WeaponsStateComponent],
     args: [WeaponsStateComponent] as const,
     factory() {
-        return new DefaultMap(() => ({
-            lastFired: 0,
-            burstCount: 0,
-            reloadingBurst: false,
-            wasFiring: false,
-            exitIndex: 0,
-        }));
+        return new DefaultMap(getDefaultWeaponLocalState);
     }
 });
 
@@ -187,13 +198,7 @@ export abstract class WeaponEntry {
         }
         let target = targetVal?.target;
         if (!weapons) {
-            weapons = new DefaultMap(() => ({
-                lastFired: 0,
-                burstCount: 0,
-                reloadingBurst: false,
-                wasFiring: false,
-                exitIndex: 0,
-            }));
+            weapons = new DefaultMap(getDefaultWeaponLocalState);
             entity.components.set(WeaponsComponent, weapons);
         }
 

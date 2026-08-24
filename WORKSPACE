@@ -51,6 +51,9 @@ yarn_install(
     package_json = "//:package.json",
     package_path = "/",
     symlink_node_modules = True,
+    # package.json is managed by Bun; keep the legacy Yarn lockfile untouched.
+    frozen_lockfile = False,
+    args = ["--no-lockfile"],
     yarn = "@yarn//:bin/yarn",
     yarn_lock = "//:yarn.lock",
 )

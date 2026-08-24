@@ -52,6 +52,8 @@ ts_library(
         "@npm//seedrandom",
         "@npm//@types/seedrandom",
         "@npm//rxjs",
+        "@npm//url-join",
+        "@npm//@types/url-join",
     ]
 )
 

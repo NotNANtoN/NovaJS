@@ -68,7 +68,7 @@ esbuild(
         "keepNames": True,
     },
     entry_point = "browser.ts",
-    minify = False,
+    minify = True,
     sources_content = True,
     target = "es2015",
     deps = [

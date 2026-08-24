@@ -95,7 +95,10 @@ export class GameData implements GameDataInterface {
 
     private async getUrl(url: string, priority = 0): Promise<unknown> {
         await this.preloadData;
-        return PIXI.Assets.load(url);
+        return this.loadQueue.add(
+            () => PIXI.Assets.load(url),
+            { priority },
+        );
     }
 
     private getDataPrefix(dataType: NovaDataType): string {

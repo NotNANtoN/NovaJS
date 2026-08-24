@@ -6,7 +6,7 @@ import { BaseWeaponData, BayGuidanceSet, BayWeaponData, BeamGuidanceSet, BeamGui
 import { BLEND_MODES } from "novadatainterface/BlendModes";
 import { WeapResource } from "../resource_parsers/WeapResource";
 import { BaseParse } from "./BaseParse";
-import { FPS, ShipTurnRateConversionFactor } from "./Constants";
+import { FPS, framesToMilliseconds, ShipTurnRateConversionFactor } from "./Constants";
 
 export const WEAP_SPEED_FACTOR = 3 / 10;
 
@@ -27,11 +27,11 @@ async function BaseWeaponParse(weap: WeapResource, notFoundFunction: (m: string)
         accuracy: weap.accuracy,
         ammoType: "unlimited",
         burstCount: Math.max(weap.burstCount, 0),
-        burstReload: weap.burstReload / FPS * 1000,
+        burstReload: framesToMilliseconds(weap.burstReload),
         destroyShipWhenFiring: weap.ammoType === -999,
         exitType: weap.exitType,
         fireGroup: weap.fireGroup,
-        reload: weap.reload / FPS * 1000,
+        reload: framesToMilliseconds(weap.reload),
         fireSimultaneously: weap.fireSimultaneously,
         shotSpeed: weap.speed * WEAP_SPEED_FACTOR,
         sound,
@@ -105,7 +105,7 @@ async function NotBayWeaponParse(weap: WeapResource, notFoundFunction: (m: strin
         submunitions,
         damage,
         oneAmmoPerBurst: weap.oneAmmoPerBurst,
-        shotDuration: weap.duration * 1000 / FPS,
+        shotDuration: framesToMilliseconds(weap.duration),
         primaryExplosion,
         secondaryExplosion,
         blastRadius: weap.blastRadius,

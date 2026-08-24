@@ -4,7 +4,7 @@ import { SpriteSheetData, SpriteSheetFramesData, SpriteSheetImageData, Hull, Fra
 import { RledResource } from "../resource_parsers/RledResource";
 import { PNG } from "pngjs";
 import * as path from "path";
-import hull from 'hull.js';
+import { convexHullRgba, init as initNovaWasm } from "../../../nova_wasm";
 import { bufferToArrayBuffer } from "./buffer_to_array_buffer";
 
 
@@ -80,35 +80,22 @@ function buildPNG(frames: Array<PNG>): PNG {
 }
 
 
-// Includes in its output any points that are not black
-function makeVisibleArray(png: PNG): Array<[number, number]> {
-    var visibleArray: Array<[number, number]> = [];
-
-    var origin = [png.width / 2, png.height / 2];
-
-    for (var y = 0; y < png.height; y++) {
-        for (var x = 0; x < png.width; x++) {
-            var idx = (png.width * y + x) << 2;
-            if (png.data[idx + 3] === 255) {
-                visibleArray.push([x - origin[0], -(y - origin[1])]);
-            }
-
-        }
-    }
-    return visibleArray;
-}
-
 function makeConvexHull(png: PNG): ConvexHull {
-    // No concavity. Convex hull.
-    var visibleArray = makeVisibleArray(png);
-    // TODO: Maybe replace this with rust's fast convex hull
-    var hullWithRepeat = hull(visibleArray, Infinity) as ConvexHull;
-    // If the hull is empty, return the default conved hull instead.
-    if (hullWithRepeat.length === 0 || hullWithRepeat[0] === undefined) {
+    const hullPixels = convexHullRgba(png.data, png.width, png.height, 255);
+    if (hullPixels.length === 0) {
         return getDefaultConvexHull();
     }
-    // Cut off the last point since it's the same as the first.
-    return hullWithRepeat.slice(0, hullWithRepeat.length - 1);
+
+    const originX = png.width / 2;
+    const originY = png.height / 2;
+    const convexHull: ConvexHull = [];
+    for (let i = 0; i < hullPixels.length; i += 2) {
+        convexHull.push([
+            hullPixels[i] - originX,
+            -(hullPixels[i + 1] - originY),
+        ]);
+    }
+    return convexHull;
 }
 
 function makeHull(png: PNG): Hull {
@@ -163,6 +150,7 @@ function buildSpriteSheetFrames(rled: RledResource): SpriteSheetFramesData {
 // Parses SpriteSheet, SpriteSheetImage, and SpriteSheetFrames at the same time
 // They are separated from each other due to PIXI.js peculiarities.
 export async function SpriteSheetMultiParse(rled: RledResource, notFoundFunction: (m: string) => void): Promise<SpriteSheetMulti> {
+    await initNovaWasm();
     const base: BaseData = await BaseParse(rled, notFoundFunction);
 
     const assembledPNG: PNG = buildPNG(rled.frames);

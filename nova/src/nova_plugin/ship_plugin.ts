@@ -15,6 +15,7 @@ import { CollisionVulnerabilityComponent } from './collision_interaction';
 import { GameDataResource } from './game_data_resource';
 import { ArmorComponent, IonizationColorComponent, IonizationComponent, ShieldComponent } from './health_plugin';
 import { applyOutfitPhysics, OutfitsStateComponent } from './outfit_plugin';
+import { PlayerShipSelector } from './player_ship_plugin';
 import { Stat } from './stat';
 import { TargetComponent } from './target_component';
 
@@ -66,22 +67,32 @@ export const ShipPhysicsProvider = ProvideAsync({
     }
 });
 
-export function getShipMovementPhysics(physics: ShipPhysics): MovementPhysics {
+/**
+ * Nova gives the player ship a hidden 25% acceleration and turn-rate bonus
+ * outside strict mode. NovaJS currently has no strict-mode setting, so the
+ * documented default is applied whenever PlayerShipSelector is present.
+ */
+export const PLAYER_PHYSICS_MULTIPLIER = 1.25;
+
+export function getShipMovementPhysics(physics: ShipPhysics,
+    isPlayer = false): MovementPhysics {
+    const playerMultiplier = isPlayer ? PLAYER_PHYSICS_MULTIPLIER : 1;
     return {
-        acceleration: physics.acceleration,
+        acceleration: physics.acceleration * playerMultiplier,
         maxVelocity: physics.speed,
         movementType: physics.inertialess
             ? MovementType.INERTIALESS : MovementType.INERTIAL,
-        turnRate: physics.turnRate,
+        turnRate: physics.turnRate * playerMultiplier,
     };
 }
 
 export const ShipMovementPhysicsProvider = Provide({
     name: "ShipMovementPhysicsProvider",
     provided: MovementPhysicsComponent,
-    update: [ShipPhysicsComponent],
-    args: [ShipPhysicsComponent] as const,
-    factory: getShipMovementPhysics,
+    update: [ShipPhysicsComponent, PlayerShipSelector],
+    args: [ShipPhysicsComponent, Optional(PlayerShipSelector)] as const,
+    factory: (physics, player) =>
+        getShipMovementPhysics(physics, player !== undefined),
 });
 
 const ShipAnimationProvider = Provide({

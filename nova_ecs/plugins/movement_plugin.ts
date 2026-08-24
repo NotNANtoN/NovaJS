@@ -70,16 +70,16 @@ function inertialControls(state: MovementState, physics: MovementPhysics,
 
     // Acceleration
     if (state.accelerating > 0) {
-        state.velocity = state.velocity.add(
+        state.velocity = state.velocity.addInPlace(
             state.rotation.getUnitVector()
                 .normalize(state.accelerating * physics.acceleration * time.delta_s));
     }
-    state.velocity = state.velocity.shortenToLength(physics.maxVelocity);
+    state.velocity = state.velocity.shortenToLengthInPlace(physics.maxVelocity);
 
     // Velocity
     // TODO: Make it so you don't have to cast
     state.position = state.position
-        .add(state.velocity.scale(time.delta_s)) as Position;
+        .addScaledInPlace(state.velocity, time.delta_s) as Position;
 }
 
 function inertialessControls(state: MovementState, physics: MovementPhysics,
@@ -102,7 +102,7 @@ function inertialessControls(state: MovementState, physics: MovementPhysics,
 
 function updatePosition(state: MovementState, time: Time) {
     state.position = state.position
-        .add(state.velocity.scale(time.delta_s)) as Position;
+        .addScaledInPlace(state.velocity, time.delta_s) as Position;
 }
 function handleTurning(state: MovementState, physics: MovementPhysics,
     time: Time, entities: EntityMap) {
@@ -141,7 +141,7 @@ export function approachVec<T extends Vector>(target: T, current: T, maxDelta: n
         return target;
     }
 
-    return current.add(difference.normalize().scale(maxDelta)) as T;
+    return current.addInPlace(difference.normalize().scale(maxDelta)) as T;
 }
 
 function turnToAngle(state: MovementState, physics: MovementPhysics,

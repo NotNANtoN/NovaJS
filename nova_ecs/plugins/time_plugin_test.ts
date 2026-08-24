@@ -15,6 +15,7 @@ describe('time plugin', () => {
 
     it('ticks the time', () => {
         clock.mockDate(new Date(100));
+        spyOn(performance, 'now').and.returnValues(100, 100, 100, 150, 150);
 
         const world = new World();
         world.addPlugin(TimePlugin);

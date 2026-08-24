@@ -16,7 +16,7 @@ import { MultiRoom } from './src/communication/multi_room_communicator';
 import { SocketChannelServer } from "./src/communication/SocketChannelServer";
 import { GameDataResource } from './src/nova_plugin/game_data_resource';
 import { makeShip } from "./src/nova_plugin/make_ship";
-import { MultiRoomResource, NovaPlugin } from './src/nova_plugin/nova_plugin';
+import { MultiRoomResource, NovaPlugin, SystemComponent } from './src/nova_plugin/nova_plugin';
 import { ServerPlugin } from "./src/nova_plugin/server_plugin";
 import { NovaRepl } from "./src/server/nova_repl";
 import { FilesystemData } from "./src/server/parsing/FilesystemData";
@@ -33,9 +33,19 @@ const Settings = t.partial({
 });
 type Settings = t.TypeOf<typeof Settings>;
 
-const runfiles = require(process.env.BAZEL_NODE_RUNFILES_HELPER!) as { resolve: (path: string) => string };
+type Runfiles = { resolve: (path: string) => string };
+const runfilesHelperPath = process.env.BAZEL_NODE_RUNFILES_HELPER;
+const runfiles = runfilesHelperPath
+    ? require(runfilesHelperPath) as Runfiles
+    : undefined;
+const projectRoot = path.resolve(__dirname, "..");
+const sourceRoot = path.join(projectRoot, "nova");
+const runtimeRoot = runfiles ? __dirname : sourceRoot;
+const resolveAsset = (runfilePath: string, sourcePath: string): string =>
+    runfiles?.resolve(runfilePath) ?? path.join(projectRoot, sourcePath);
 
-const serverSettingsPath = runfiles.resolve("novajs/nova/settings/server.json");
+const serverSettingsPath = resolveAsset(
+    "novajs/nova/settings/server.json", "nova/settings/server.json");
 const maybeSettings = Settings.decode(
     JSON.parse(fs.readFileSync(serverSettingsPath, "utf8")) as unknown);
 
@@ -44,27 +54,29 @@ if (isLeft(maybeSettings)) {
 }
 
 const settings = maybeSettings.right;
-const port = settings.port ?? 8000;
-const novaDataPath = path.join(__dirname, settings.relativeDataPath ?? "Nova_Data");
+const port = Number(process.env.NOVA_PORT ?? settings.port ?? 8000);
+const novaDataPath = path.join(runtimeRoot, settings.relativeDataPath ?? "Nova_Data");
 
 const app = express();
 const httpServer = http.createServer(app);
 
-const filesystemDataPath = path.join(__dirname, "objects");
+const filesystemDataPath = path.join(runtimeRoot, "objects");
 const filesystemData = new FilesystemData(filesystemDataPath);
 
-const htmlPath = runfiles.resolve("novajs/nova/src/index.html");
-const bundlePath = runfiles.resolve("novajs/nova/src/browser_bundle.js");
-const bundleMapPath = runfiles.resolve("novajs/nova/src/browser_bundle.js.map");
-const clientSettingsPath = runfiles.resolve("novajs/nova/settings/controls.json");
+const htmlPath = resolveAsset("novajs/nova/src/index.html", "nova/src/index.html");
+const bundlePath = resolveAsset("novajs/nova/src/browser_bundle.js", "dist/browser_bundle.js");
+const bundleMapPath = resolveAsset(
+    "novajs/nova/src/browser_bundle.js.map", "dist/browser_bundle.js.map");
+const clientSettingsPath = resolveAsset(
+    "novajs/nova/settings/controls.json", "nova/settings/controls.json");
 
 
 const channel = new SocketChannelServer({ server: httpServer });
-const novaParseWorkerPath = runfiles.resolve(
-    "novajs/nova/src/server/parsing/nova_parse_worker_bundle.js");
+const novaParseWorkerPath = resolveAsset(
+    "novajs/nova/src/server/parsing/nova_parse_worker_bundle.js",
+    "dist/nova_parse_worker.js");
 
 let world: World;
-let systemWorld: World;
 const repl = new NovaRepl();
 
 let communicator: CommunicatorServer;
@@ -104,6 +116,20 @@ async function startGame() {
 
     await world.addPlugin(ServerPlugin);
     repl.repl.context.addEnemy = async (id?: string) => {
+        // System worlds are created lazily by ServerPlugin and stored as
+        // SystemComponent on entities of the root world.
+        let systemWorld: World | undefined;
+        for (const entity of world.entities.values()) {
+            systemWorld = entity.components.get(SystemComponent);
+            if (systemWorld) {
+                break;
+            }
+        }
+        if (!systemWorld) {
+            console.log('No active system world yet. '
+                + 'A client must connect before enemies can be added.');
+            return;
+        }
         const ids = await gameData.ids;
         id = id ?? ids.Ship[Math.floor(Math.random() * ids.Ship.length)];
         const randomShip = await gameData.data.Ship.get(id);
@@ -118,9 +144,26 @@ async function startGame() {
 }
 
 const STEP_TIME = 1000 / 60;
+// Fixed-timestep loop: schedules relative to when each step *should* have
+// run, so simulation frequency stays at 60Hz under load (bounded catch-up)
+// instead of drifting by the duration of every step.
+const MAX_CATCH_UP_STEPS = 5;
+let nextStepTime: number | undefined;
 function stepper() {
-    world.step();
-    setTimeout(stepper, STEP_TIME);
+    const now = performance.timeOrigin + performance.now();
+    nextStepTime = nextStepTime ?? now;
+
+    let steps = 0;
+    while (nextStepTime <= now && steps < MAX_CATCH_UP_STEPS) {
+        world.step();
+        nextStepTime += STEP_TIME;
+        steps++;
+    }
+    if (nextStepTime <= now) {
+        // Too far behind; drop the backlog rather than spiraling.
+        nextStepTime = now + STEP_TIME;
+    }
+    setTimeout(stepper, Math.max(0, nextStepTime - (performance.timeOrigin + performance.now())));
 }
 
 startGame();

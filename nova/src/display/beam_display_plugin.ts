@@ -4,7 +4,13 @@ import { Resource } from 'nova_ecs/resource';
 import { System } from 'nova_ecs/system';
 import { SingletonComponent } from "nova_ecs/world";
 import * as PIXI from "pixi.js";
-import { BeamDataComponent, BeamSystem } from "../nova_plugin/beam_plugin";
+import {
+    BeamClippingSystem,
+    BeamDataComponent,
+    BeamStateComponent,
+    BeamSystem,
+} from "../nova_plugin/beam_plugin";
+import { Optional } from "nova_ecs/optional";
 import { Space } from "./space_resource";
 
 
@@ -20,13 +26,15 @@ const ClearBeams = new System({
 
 const BeamDisplaySystem = new System({
     name: 'BeamDisplay',
-    args: [BeamDataComponent, MovementStateComponent,
+    args: [BeamDataComponent, Optional(BeamStateComponent), MovementStateComponent,
         BeamGraphicsResource, /*UUID*/] as const,
-    step(beamData, movement, beamGraphics, /*uuid*/) {
+    step(beamData, beamState, movement, beamGraphics, /*uuid*/) {
         const { width, beamColor, coronaColor, coronaFalloff, length, lightningAmplitude, lightningDensity }
             = beamData.beamAnimation;
+        const effectiveLength = Math.max(0, Math.min(
+            length, beamState?.length ?? length));
         const destination = movement.rotation.getUnitVector()
-            .scale(length).add(movement.position);
+            .scale(effectiveLength).add(movement.position);
         //const rng = seedrandom.alea(uuid);  //for if not randomized every frame
         const rng = Math.random;
         const lightningAmplitudeScale = 2;
@@ -67,7 +75,7 @@ const BeamDisplaySystem = new System({
             beamGraphics.lineTo(destination.x, destination.y);
         }
     },
-    after: [ClearBeams, BeamSystem],
+    after: [ClearBeams, BeamSystem, BeamClippingSystem],
     before: []
 });
 

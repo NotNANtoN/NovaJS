@@ -3,7 +3,7 @@ import * as t from 'io-ts';
 import { set } from "nova_ecs/datatypes/set";
 import { Communicator, MessageWithSource, Peers } from "nova_ecs/plugins/multiplayer_plugin";
 import { DefaultMap } from "nova_ecs/utils";
-import { BehaviorSubject, EMPTY, Observable, of, Subject } from "rxjs";
+import { BehaviorSubject, EMPTY, Observable, of, Subject, Subscription } from "rxjs";
 import { filter, map, mergeMap, takeUntil, tap } from "rxjs/operators";
 
 const RoomMessage = t.intersection([
@@ -92,10 +92,19 @@ export class MultiRoom {
         });
 
         this.roomMap = new DefaultMap(key => {
-            // TODO: Correctly clean up subscriptions
-            const finish = new Subject();
+            const finish = new Subject<void>();
+            const subscriptions = new Subscription();
+            let cleanedUp = false;
             const cleanup = () => {
-                finish.next(true);
+                if (cleanedUp) {
+                    return;
+                }
+                cleanedUp = true;
+                // Notify consumers before unsubscribing this room's
+                // subscriptions.
+                finish.next();
+                finish.complete();
+                subscriptions.unsubscribe();
             }
 
             const roomMessages = messages.pipe(
@@ -104,13 +113,13 @@ export class MultiRoom {
             );
 
             const peers = this.roomPeers.get(key);
-            roomMessages.pipe(
+            subscriptions.add(roomMessages.pipe(
                 takeUntil(finish),
                 filter(({ message }) => Boolean(message.peers)),
                 filter(({ source }) => communicator.servers.value.has(source))
             ).subscribe(({ message }) => {
                 peers.current.next(message.peers!);
-            });
+            }));
 
             return [new RoomCommunicator(
                 communicator,
@@ -168,11 +177,13 @@ export class MultiRoom {
             room: room,
             inRoom: false,
         }), [...this.communicator.servers.value][0]);
-        const [, cleanup] = this.roomMap.get(room);
+        const roomEntry = this.roomMap.has(room)
+            ? this.roomMap.get(room)
+            : undefined;
         this.roomPeers.delete(room);
-        this.roomMap.delete(room)
-        if (cleanup) {
-            cleanup()
+        if (roomEntry) {
+            this.roomMap.delete(room);
+            roomEntry[1]();
         }
     }
 

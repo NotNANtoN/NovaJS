@@ -6,6 +6,7 @@ import { Emit, Entities, GetEntity, UUID } from '../arg_types';
 import { Component } from '../component';
 import { map } from '../datatypes/map';
 import { set } from '../datatypes/set';
+import { Entity } from '../entity';
 import { EcsEvent } from '../events';
 import { Plugin } from '../plugin';
 import { Query } from '../query';
@@ -223,16 +224,20 @@ export function multiplayer(communicator: Communicator,
 
                 // Remove entities
                 for (const uuid of message.remove ?? []) {
-                    // if (entityMap.has(uuid) &&
-                    //     (entityMap.get(uuid)?.data.owner === source || peerIsAdmin)) {
+                    if (entityMap.has(uuid) &&
+                        (entityMap.get(uuid)?.data.owner === source || peerIsAdmin)) {
+                        const removedEntity = entityMap.get(uuid)?.entity;
+                        if (removedEntity) {
+                            deltaMaker.untrack(removedEntity);
+                        }
                         entities.delete(uuid);
                         fullStateRequests.delete(uuid);
                         added.delete(uuid);
                         removed.add(uuid);
                         entityMap.delete(uuid);
-                    //} else {
-                        //warn(`'${source}' tried to remove ${uuid}`);
-                    //}
+                    } else {
+                        warn(`'${source}' tried to remove ${uuid}`);
+                    }
                 }
 
                 // Add new entities
@@ -249,13 +254,14 @@ export function multiplayer(communicator: Communicator,
                         warn(`New entity '${uuid}' missing MultiplayerData`);
                         continue;
                     }
-                    // if (entityMap.has(uuid)
-                    //     && entityMap.get(uuid)?.data.owner !== source
-                    //     && !peerIsAdmin) {
-                    //     warn(`'${source}' tried to replace existing entity '${uuid}'`);
-                    //     continue;
-                    // }
+                    if (entityMap.has(uuid)
+                        && entityMap.get(uuid)?.data.owner !== source
+                        && !peerIsAdmin) {
+                        warn(`'${source}' tried to replace existing entity '${uuid}'`);
+                        continue;
+                    }
 
+                    deltaMaker.untrack(entityMap.get(uuid)?.entity ?? entity);
                     entities.set(uuid, entity);
                     added.set(uuid, multiplayerData.owner);
                     removed.delete(uuid);
@@ -284,10 +290,10 @@ export function multiplayer(communicator: Communicator,
                     }
                     const { entity, data } = entityMap.get(uuid)!;
 
-                    // if (source !== data.owner && !comms.admins.has(source)) {
-                    //     warn(`'${source}' tried to modify entity '${uuid}'`);
-                    //     continue;
-                    // }
+                    if (source !== data.owner && !peerIsAdmin) {
+                        warn(`'${source}' tried to modify entity '${uuid}'`);
+                        continue;
+                    }
                     try {
                         deltaMaker.applyDelta(entity, entityDelta);
                     } catch (e) {
@@ -347,15 +353,29 @@ export function multiplayer(communicator: Communicator,
             }
 
             // Get deltas and create drafts 
+            const ownedEntities = new Set<Entity>();
             for (const [uuid, entity, multiplayerData] of query) {
+                if (entityMap.get(uuid)?.entity !== entity) {
+                    deltaMaker.untrack(entity);
+                    continue;
+                }
                 if (multiplayerData.owner !== comms.uuid) {
+                    deltaMaker.untrack(entity);
+                    continue;
+                }
+                deltaMaker.track(entity);
+                ownedEntities.add(entity);
+                if (!deltaMaker.isDirty(entity)) {
                     continue;
                 }
                 const entityDelta = deltaMaker.getDelta(entity);
+                deltaMaker.clearDirty(entity);
                 if (entityDelta) {
                     delta.set(uuid, entityDelta);
                 }
             }
+            // Also release entities removed outside the multiplayer system.
+            deltaMaker.untrackExcept(ownedEntities);
 
             const changes: Message = {};
 

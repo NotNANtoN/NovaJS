@@ -58,6 +58,7 @@ ts_library(
         "//nova/src/common",
         "//nova/src/client/gamedata",
         "//nova/src/util",
+        "//nova_wasm",
         "@npm//io-ts",
         "@npm//fp-ts",
         "@npm//immer",
