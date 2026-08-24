@@ -6,6 +6,7 @@ import { Resource } from "nova_ecs/resource";
 import { SingletonComponent, World } from "nova_ecs/world";
 import { GameDataResource } from "./game_data_resource";
 import { makePlanet } from "./make_planet";
+import { PlayerStoreResource } from "./player_state";
 import { SystemIdResource } from "./system_id_resource";
 import { SystemPlugin } from "./system_plugin";
 
@@ -33,13 +34,18 @@ const MakePlanetsSystem = new AsyncSystem({
     }
 });
 
-export function makeSystem(systemId: string, gameData: GameDataInterface) {
+export function makeSystem(
+    systemId: string, gameData: GameDataInterface, playerStore?: unknown,
+) {
     //const system = await gameData.data.System.get(systemId);
     const world = new World(systemId);
 
     world.resources.set(AddedPlanetsResource, { val: false });
     world.resources.set(GameDataResource, gameData);
     world.resources.set(SystemIdResource, systemId);
+    if (playerStore !== undefined) {
+        world.resources.set(PlayerStoreResource, playerStore);
+    }
     world.addSystem(MakePlanetsSystem);
     world.addPlugin(SystemPlugin);
 

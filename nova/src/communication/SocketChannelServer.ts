@@ -9,6 +9,7 @@ import { SocketMessage } from "./SocketMessage";
 
 interface Client {
     socket: WebSocket;
+    playerToken?: string;
     keepaliveTimeout?: NodeJS.Timeout;
 }
 
@@ -97,13 +98,18 @@ export class SocketChannelServer implements ChannelServer {
         }, this.timeout);
     }
 
+    getPlayerToken(clientId: string) {
+        return this.clientMap.get(clientId)?.playerToken;
+    }
+
     /** Handles when a client first connects */
-    private onConnect(webSocket: WebSocket) {
+    private onConnect(webSocket: WebSocket, request?: http.IncomingMessage) {
         const clientUUID = v4();
         // This uuid is used only for communication and
         // has nothing to do with the game engine's uuids
         const client: Client = {
             socket: webSocket,
+            playerToken: this.getTokenFromRequest(request),
         };
         this.clientMap.set(clientUUID, client);
         this.resetClientTimeout(clientUUID);
@@ -122,6 +128,15 @@ export class SocketChannelServer implements ChannelServer {
 
         webSocket.on("message", this.handleMessageFromClient.bind(this, clientUUID));
         webSocket.on("close", this.handleClientClose.bind(this, clientUUID));
+    }
+
+    private getTokenFromRequest(request?: http.IncomingMessage) {
+        if (!request?.url) {
+            return undefined;
+        }
+        const host = request.headers.host ?? 'localhost';
+        const url = new URL(request.url, `http://${host}`);
+        return url.searchParams.get('playerToken') ?? undefined;
     }
 
     // Handles messages received from clients. Forwards messages to their destination.

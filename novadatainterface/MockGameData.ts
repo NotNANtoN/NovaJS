@@ -7,6 +7,7 @@ import { NovaIDs } from "./NovaIDs";
 import { getDefaultOutfitData } from "./OutiftData";
 import { getDefaultPictData } from "./PictData";
 import { getDefaultPlanetData } from "./PlanetData";
+import { getDefaultMissionData } from "./MissionData";
 import { getDefaultShipData } from "./ShipData";
 import { getDefaultSoundFile } from "./SoundFile";
 import { getDefaultSpriteSheetData, getDefaultSpriteSheetFrames } from "./SpriteSheetData";
@@ -43,7 +44,7 @@ class MockGettable<T> extends Gettable<T> {
 type ExtractGettableType<T> = T extends Gettable<infer T> ? T : never;
 
 type MockNovaDataInterface = {
-    [P in keyof NovaDataInterface]: MockGettable<ExtractGettableType<NovaDataInterface[P]>>
+    [P in keyof NovaDataInterface]-?: MockGettable<ExtractGettableType<NovaDataInterface[P]>>
 }
 
 export class MockGameData implements GameDataInterface {
@@ -61,6 +62,7 @@ export class MockGameData implements GameDataInterface {
         SpriteSheetImage: new MockGettable(new Uint8Array(0) as Buffer),
         StatusBar: new MockGettable(getDefaultStatusBarData()),
         System: new MockGettable(getDefaultSystemData()),
+        Mission: new MockGettable(getDefaultMissionData()),
         TargetCorners: new MockGettable(getDefaultTargetCornersData()),
         Weapon: new MockGettable(getDefaultProjectileWeaponData()),
         SoundFile: new MockGettable(getDefaultSoundFile()),

@@ -1,8 +1,12 @@
 import { readResourceFork } from "resource_fork";
 import { NovaResources, NovaResourceType } from "./resource_parsers/ResourceHolderBase";
 import { BoomResource } from "./resource_parsers/BoomResource";
+import { DudeResource } from "./resource_parsers/DudeResource";
 import { DescResource } from "./resource_parsers/DescResource";
+import { FletResource } from "./resource_parsers/FletResource";
+import { GovtResource } from "./resource_parsers/GovtResource";
 import { BaseResource } from "./resource_parsers/NovaResourceBase";
+import { MisnResource } from "./resource_parsers/MisnResource";
 import { OutfResource } from "./resource_parsers/OutfResource";
 import { PictResource } from "./resource_parsers/PictResource";
 import { RledResource } from "./resource_parsers/RledResource";
@@ -23,9 +27,16 @@ async function readNovaFile(filePath: string, localIDSpace: NovaResources) {
 
     for (const resourceType of $enum(NovaResourceType).values()) {
         const parser = getParser(<NovaResourceType>resourceType);
+        const resourcesOfType = rf[resourceType];
+        if (!resourcesOfType) {
+            continue;
+        }
 
-        for (const id in rf[resourceType]) {
-            localIDSpace[resourceType][id] = new parser(rf[resourceType][id], localIDSpace);
+        // STR# is named STRH in NovaResources because # is not a valid
+        // identifier. Keep the resource-fork spelling at the input boundary.
+        const localResourceType = resourceType === NovaResourceType.STRH ? "STRH" : resourceType;
+        for (const id in resourcesOfType) {
+            localIDSpace[localResourceType][id] = new parser(resourcesOfType[id], localIDSpace);
         }
     }
 }
@@ -49,12 +60,12 @@ parserMap[NovaResourceType.bööm] = BoomResource;
 parserMap[NovaResourceType.dësc] = DescResource;
 //parserMap[NovaResourceType.DITL] = ;
 //parserMap[NovaResourceType.DLOG] = ;
-//parserMap[NovaResourceType.düde] = ;
-//parserMap[NovaResourceType.flët] = ;
-//parserMap[NovaResourceType.gövt] = ;
+parserMap[NovaResourceType.düde] = DudeResource;
+parserMap[NovaResourceType.flët] = FletResource;
+parserMap[NovaResourceType.gövt] = GovtResource;
 //parserMap[NovaResourceType.ïntf] = ;
 //parserMap[NovaResourceType.jünk] = ;
-//parserMap[NovaResourceType.mïsn] = ;
+parserMap[NovaResourceType.mïsn] = MisnResource;
 //parserMap[NovaResourceType.nëbu] = ;
 //parserMap[NovaResourceType.öops] = ;
 parserMap[NovaResourceType.oütf] = OutfResource;

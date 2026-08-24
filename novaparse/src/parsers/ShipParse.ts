@@ -178,6 +178,7 @@ export async function ShipParse(ship: ShipResource,
 
     return {
         physics,
+        cost: ship.cost,
         pict: pictID,
         desc: desc,
         outfits,
@@ -186,6 +187,11 @@ export async function ShipParse(ship: ShipResource,
         deathDelay: ship.deathDelay / FPS,
         largeExplosion: ship.deathDelay >= 60,
         displayWeight: ship.id, // TODO: Fix this once displayweight is implemented
+        availabilityNCB: ship.availabilityNCB,
+        appearOn: ship.appearOn,
+        onPurchase: ship.onPurchase,
+        onCapture: ship.onCapture,
+        onRetire: ship.onRetire,
         animation,
         vulnerableTo: ["normal"], // TODO: Parse if it's vulnerable to point defense
         ...base

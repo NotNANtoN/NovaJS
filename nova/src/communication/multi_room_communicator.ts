@@ -29,6 +29,14 @@ class RoomCommunicator implements Communicator {
     get uuid() {
         return this.communicator.uuid;
     }
+
+    getPlayerToken(peer: string) {
+        const tokenAwareCommunicator = this.communicator as
+            Communicator & {
+                getPlayerToken?: (peer: string) => string | undefined
+            };
+        return tokenAwareCommunicator.getPlayerToken?.(peer);
+    }
 }
 
 export class MultiRoom {

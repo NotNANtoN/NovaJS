@@ -3,8 +3,9 @@ import { AddEvent } from "nova_ecs/events";
 import { multiplayer, MultiplayerData } from "nova_ecs/plugins/multiplayer_plugin";
 import { System } from "nova_ecs/system";
 import { World } from "nova_ecs/world";
+import { isRight } from "fp-ts/Either";
 import * as PIXI from "pixi.js";
-import { firstValueFrom, take, filter } from "rxjs";
+import { firstValueFrom, take, filter, map, timeout } from "rxjs";
 import Stats from 'stats.js';
 import { v4 } from "uuid";
 import { GameData } from "./client/gamedata/GameData";
@@ -22,6 +23,12 @@ import { makeShip } from "./nova_plugin/make_ship";
 import { makeSystem } from "./nova_plugin/make_system";
 import { MultiRoomResource, NovaPlugin, SystemComponent } from "./nova_plugin/nova_plugin";
 import { PlayerShipSelector } from "./nova_plugin/player_ship_plugin";
+import {
+    createInitialPlayerState,
+    PlayerData,
+    PlayerStateComponent,
+    PlayerStateResource,
+} from "./nova_plugin/player_state";
 import { SystemIdResource } from "./nova_plugin/system_id_resource";
 
 
@@ -50,6 +57,28 @@ const communicator = new CommunicatorClient(channel);
 (window as any).communicator = communicator;
 const multiRoom = new MultiRoom(communicator);
 (window as any).multiRoom = multiRoom;
+
+// New servers send this after the normal communicator UUID handshake. The
+// timeout keeps clients compatible with older servers that do not send it.
+const playerDataPromise = firstValueFrom(communicator.messages.pipe(
+    filter(({ source }) => source === 'server'),
+    map(({ message }) => {
+        const directData = PlayerData.decode(message);
+        if (isRight(directData)) {
+            return directData;
+        }
+        // ServerPlugin runs on the main-room communicator, which wraps
+        // regular messages in { room, message } for the wire protocol.
+        if (message && typeof message === 'object' && 'message' in message) {
+            return PlayerData.decode(message.message);
+        }
+        return directData;
+    }),
+    filter(isRight),
+    map(decoded => decoded.right),
+    take(1),
+    timeout({ first: 1000 }),
+)).catch(() => undefined);
 
 let world: World;
 let system: World | undefined;
@@ -109,14 +138,25 @@ async function startGame() {
 
     // Make the player's ship
     const ids = await gameData.ids;
-    let randomShip = ids.Ship[Math.floor(Math.random() * ids.Ship.length)];
-    const shipData = await gameData.data.Ship.get(randomShip);
+    const serverPlayerData = await playerDataPromise;
+    const playerState = serverPlayerData?.playerState
+        ?? createInitialPlayerState();
+    const requestedShip = playerState.shipId;
+    const shipId = ids.Ship.includes(requestedShip)
+        ? requestedShip : 'nova:128';
+    const shipData = await gameData.data.Ship.get(shipId);
     const shipEntity = makeShip(shipData);
+    shipEntity.components.set(PlayerStateComponent, playerState);
+    world.resources.set(PlayerStateResource, playerState);
     shipEntity.components.set(MultiplayerData, {
         owner: communicator.uuid!
     });
     shipEntity.components.set(PlayerShipSelector, undefined);
-    const systemId = 'nova:130';
+    const requestedSystem = serverPlayerData?.system
+        ?? playerState.currentSystem
+        ?? 'nova:130';
+    const systemId = ids.System.includes(requestedSystem)
+        ? requestedSystem : 'nova:130';
 
     await jumpTo({
         entity: shipEntity,

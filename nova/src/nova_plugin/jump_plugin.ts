@@ -3,11 +3,13 @@ import { Component } from "nova_ecs/component";
 import { Entity } from "nova_ecs/entity";
 import { EcsEvent } from "nova_ecs/events";
 import { Plugin } from "nova_ecs/plugin";
+import { Optional } from "nova_ecs/optional";
 import { Provide } from "nova_ecs/provide";
 import { System } from "nova_ecs/system";
 import { deImmerify } from "../util/deimmerify";
 import { ControlStateEvent } from "./control_state_event";
 import { PlayerShipSelector } from "./player_ship_plugin";
+import { advanceGameDate, PlayerStateComponent } from "./player_state";
 import { SystemIdResource } from "./system_id_resource";
 
 export interface InitiateJump {
@@ -38,9 +40,14 @@ export const FinishJumpEvent = new EcsEvent<FinishJump>('FinishJumpEvent');
 const JumpFromSystem = new System({
     name: 'JumpFromSystem',
     events: [InitiateJumpEvent],
-    args: [GetEntity, UUID, Entities, InitiateJumpEvent, Emit] as const,
-    step(entity, uuid, entities, { to }, emit) {
+    args: [GetEntity, UUID, Entities, InitiateJumpEvent, Emit,
+        Optional(PlayerStateComponent)] as const,
+    step(entity, uuid, entities, { to }, emit, playerState) {
         entities.delete(uuid);
+        if (playerState) {
+            advanceGameDate(playerState);
+            playerState.currentSystem = to;
+        }
         // TODO: Animation etc.
         deImmerify(entity);
         emit(FinishJumpEvent, { entity, uuid, to });

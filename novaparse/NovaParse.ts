@@ -2,12 +2,13 @@ import * as path from "path";
 import { ExplosionData } from "novadatainterface/ExplosionData";
 import { GameDataInterface } from "novadatainterface/GameDataInterface";
 import { Gettable } from "novadatainterface/Gettable";
-import { NovaDataInterface, NovaIDNotFoundError } from "novadatainterface/NovaDataInterface";
+import { NovaDataInterfaceWithMission, NovaIDNotFoundError } from "novadatainterface/NovaDataInterface";
 import { getDefaultNovaIDs, NovaIDs } from "novadatainterface/NovaIDs";
 import { OutfitData } from "novadatainterface/OutiftData";
 import { PictData } from "novadatainterface/PictData";
 import { PictImageData } from "novadatainterface/PictImage";
 import { PlanetData } from "novadatainterface/PlanetData";
+import { MissionData } from "novadatainterface/MissionData";
 import { ShipData } from "novadatainterface/ShipData";
 import { SpriteSheetData, SpriteSheetFramesData, SpriteSheetImageData } from "novadatainterface/SpriteSheetData";
 import { StatusBarData } from "novadatainterface/StatusBarData";
@@ -24,9 +25,11 @@ import { ShipParseClosure, ShipPictMap, WeaponOutfitMap } from "./src/parsers/Sh
 import { SpriteSheetMulti, SpriteSheetMultiParse } from "./src/parsers/SpriteSheetMultiParse";
 import { StatusBarParse } from "./src/parsers/StatusBarParse";
 import { SystemParse } from "./src/parsers/SystemParse";
+import { MissionParse } from "./src/parsers/MissionParse";
 import { TargetCornersParse } from "./src/parsers/TargetCornersParse";
 import { WeaponParse } from "./src/parsers/WeaponParse";
 import { BoomResource } from "./src/resource_parsers/BoomResource";
+import { MisnResource } from "./src/resource_parsers/MisnResource";
 import { BaseResource } from "./src/resource_parsers/NovaResourceBase";
 import { OutfResource } from "./src/resource_parsers/OutfResource";
 import { PictResource } from "./src/resource_parsers/PictResource";
@@ -58,7 +61,7 @@ export class NovaParse implements GameDataInterface {
     private shipPICTMap: ShipPictMap;
     private weaponOutfitMap: WeaponOutfitMap;
     resourceNotFoundFunction: (message: string) => void;
-    public data: NovaDataInterface;
+    public data: NovaDataInterfaceWithMission;
     path: string
     private idSpaceHandler: IDSpaceHandler;
 
@@ -136,6 +139,7 @@ export class NovaParse implements GameDataInterface {
             CicnImage: this.buildIDsForResource(idSpace.cicn),
             Planet: this.buildIDsForResource(idSpace.spöb),
             System: this.buildIDsForResource(idSpace.sÿst),
+            Mission: this.buildIDsForResource(idSpace.mïsn),
             TargetCorners: [], // TODO: parse these
             SpriteSheet: this.buildIDsForResource(idSpace.rlëD),
             SpriteSheetImage: this.buildIDsForResource(idSpace.rlëD),
@@ -147,9 +151,9 @@ export class NovaParse implements GameDataInterface {
     }
 
     // Assigns all the gettables to this.data
-    private buildData(): NovaDataInterface {
+    private buildData(): NovaDataInterfaceWithMission {
         // This should really use NovaDataType.Ship etc but that isn't allowed when constructing like this.
-        var data: NovaDataInterface = {
+        var data: NovaDataInterfaceWithMission = {
             Ship: this.makeGettable<ShipResource, ShipData>(NovaResourceType.shïp, this.shipParser),
             Outfit: this.makeGettable<OutfResource, OutfitData>(NovaResourceType.oütf, OutfitParse),
             Weapon: this.makeGettable<WeapResource, WeaponData>(NovaResourceType.wëap, WeaponParse),
@@ -159,6 +163,7 @@ export class NovaParse implements GameDataInterface {
             CicnImage: new Gettable(async () => Defaults.CicnImage), // TODO
             Planet: this.makeGettable<SpobResource, PlanetData>(NovaResourceType.spöb, PlanetParse),
             System: this.makeGettable<SystResource, SystemData>(NovaResourceType.sÿst, SystemParse),
+            Mission: this.makeGettable<MisnResource, MissionData>(NovaResourceType.mïsn, MissionParse),
             TargetCorners: this.makeGettable<BaseResource, TargetCornersData>(NovaResourceType.cicn, TargetCornersParse),
             SpriteSheet: this.spriteSheetDataGettable,
             SpriteSheetImage: this.spriteSheetImageGettable,

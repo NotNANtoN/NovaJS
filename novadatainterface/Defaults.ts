@@ -6,6 +6,7 @@ import { getDefaultOutfitData } from "./OutiftData";
 import { getDefaultPictData } from "./PictData";
 import { getDefaultPictImageData } from "./PictImage";
 import { getDefaultPlanetData } from "./PlanetData";
+import { getDefaultMissionData } from "./MissionData";
 import { getDefaultShipData } from "./ShipData";
 import { getDefaultSoundFile } from "./SoundFile";
 import { getDefaultSpriteSheetData, getDefaultSpriteSheetFrames } from "./SpriteSheetData";
@@ -25,6 +26,7 @@ export const Defaults = {
     get CicnImage() { return getDefaultCicnImageData() },
     get Planet() { return getDefaultPlanetData() },
     get System() { return getDefaultSystemData() },
+    get Mission() { return getDefaultMissionData() },
     get TargetCorners() { return getDefaultTargetCornersData() },
     get SpriteSheet() { return getDefaultSpriteSheetData() },
     get SpriteSheetImage() { return getDefaultSpriteSheetImage() },

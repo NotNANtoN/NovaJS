@@ -1,6 +1,7 @@
 import { isRight } from "fp-ts/Either";
 import { BehaviorSubject, Subject } from "rxjs";
 import { ChannelClient } from "./Channel";
+import { getPersistentPlayerToken } from "./player_identity";
 import { SocketMessage } from "./SocketMessage";
 
 export class SocketChannelClient implements ChannelClient {
@@ -16,19 +17,24 @@ export class SocketChannelClient implements ChannelClient {
     private messageListener: (m: MessageEvent) => void;
     private messageQueue: SocketMessage[] = [];
     private maxPings: number
+    readonly playerToken: string;
 
-    constructor({ webSocket, warn, timeout, webSocketFactory, maxPings }: {
+    constructor({ webSocket, warn, timeout, webSocketFactory, maxPings,
+        playerToken }: {
         webSocket?: WebSocket,
         warn?: ((m: string) => void),
         timeout?: number,
         webSocketFactory?: () => WebSocket,
         maxPings?: number,
+        playerToken?: string,
     }) {
+        this.playerToken = playerToken ?? getPersistentPlayerToken();
         this.webSocketFactory = webSocketFactory ?? (() => {
+            const token = encodeURIComponent(this.playerToken);
             if (location.protocol === "https:") {
-                return new WebSocket(`wss://${location.host}`);
+                return new WebSocket(`wss://${location.host}?playerToken=${token}`);
             }
-            return new WebSocket(`ws://${location.host}`);
+            return new WebSocket(`ws://${location.host}?playerToken=${token}`);
         });
 
         this.webSocket = webSocket ?? this.webSocketFactory();

@@ -1,7 +1,11 @@
 import { NovaDataType } from "./NovaDataInterface";
 
 export type NovaIDs = {
-    [index in NovaDataType]: Array<string>
+    [index in Exclude<NovaDataType, NovaDataType.Mission>]: Array<string>
+} & {
+    // Kept optional so legacy FilesystemData providers remain source
+    // compatible while they do not serve mission JSON yet.
+    Mission?: Array<string>
 }
 
 export function getDefaultNovaIDs(): NovaIDs {
@@ -19,6 +23,7 @@ export function getDefaultNovaIDs(): NovaIDs {
         SpriteSheetImage: [],
         StatusBar: [],
         System: [],
+        Mission: [],
         TargetCorners: [],
         Weapon: [],
         SoundFile: [],

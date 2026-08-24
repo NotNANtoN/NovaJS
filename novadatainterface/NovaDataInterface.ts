@@ -6,6 +6,7 @@ import { OutfitData } from "./OutiftData";
 import { PictData } from "./PictData";
 import { PictImageData } from "./PictImage";
 import { PlanetData } from "./PlanetData";
+import { MissionData } from "./MissionData";
 import { ShipData } from "./ShipData";
 import { SoundFile } from "./SoundFile";
 import { SpriteSheetData, SpriteSheetFramesData, SpriteSheetImageData } from "./SpriteSheetData";
@@ -25,6 +26,7 @@ enum NovaDataType {
     CicnImage = "CicnImage",
     Planet = "Planet",
     System = "System",
+    Mission = "Mission",
     TargetCorners = "TargetCorners",
     SpriteSheet = "SpriteSheet",
     SpriteSheetImage = "SpriteSheetImage",
@@ -45,6 +47,7 @@ type NovaDataInterface = {
     CicnImage: Gettable<CicnImageData>,
     Planet: Gettable<PlanetData>,
     System: Gettable<SystemData>,
+    Mission?: Gettable<MissionData>,
     TargetCorners: Gettable<TargetCornersData>,
     SpriteSheet: Gettable<SpriteSheetData>,
     SpriteSheetImage: Gettable<SpriteSheetImageData>,
@@ -54,6 +57,13 @@ type NovaDataInterface = {
     SoundFile: Gettable<SoundFile>,
 }
 
+// Some legacy GameDataInterface implementations do not serve mission data.
+// The parser, aggregator, and browser implementations do, so expose a
+// required form for callers that use one of those implementations.
+type NovaDataInterfaceWithMission = Omit<NovaDataInterface, "Mission"> & {
+    Mission: Gettable<MissionData>,
+};
+
 class NovaIDNotFoundError extends Error { };
 
-export { NovaDataInterface, NovaDataType, NovaIDNotFoundError };
+export { NovaDataInterface, NovaDataInterfaceWithMission, NovaDataType, NovaIDNotFoundError };

@@ -64,6 +64,10 @@ export class CommunicatorServer implements Communicator {
         channel.clientDisconnect.subscribe(peerLeave)
     }
 
+    getPlayerToken(peer: string) {
+        return this.channel.getPlayerToken?.(peer);
+    }
+
     private getDestSet(source: string, destination?: string | Set<string>) {
         let destSet: Set<string>;
         if (destination instanceof Set) {

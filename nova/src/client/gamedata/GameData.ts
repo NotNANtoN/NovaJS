@@ -4,12 +4,13 @@ import { CicnImageData } from 'novadatainterface/CicnImage';
 import { ExplosionData } from 'novadatainterface/ExplosionData';
 import { GameDataInterface, PreloadData } from 'novadatainterface/GameDataInterface';
 import { Gettable } from 'novadatainterface/Gettable';
-import { NovaDataInterface, NovaDataType } from 'novadatainterface/NovaDataInterface';
+import { NovaDataInterfaceWithMission, NovaDataType } from 'novadatainterface/NovaDataInterface';
 import { NovaIDs } from 'novadatainterface/NovaIDs';
 import { OutfitData } from 'novadatainterface/OutiftData';
 import { PictData } from 'novadatainterface/PictData';
 import { PictImageData } from 'novadatainterface/PictImage';
 import { PlanetData } from 'novadatainterface/PlanetData';
+import { MissionData } from 'novadatainterface/MissionData';
 import { ShipData } from 'novadatainterface/ShipData';
 import { SoundFile } from 'novadatainterface/SoundFile';
 import { SpriteSheetData, SpriteSheetFramesData, SpriteSheetImageData } from 'novadatainterface/SpriteSheetData';
@@ -41,7 +42,7 @@ class WeaponGettable extends Gettable<WeaponData> {
  * Retrieves game data from the server
  */
 export class GameData implements GameDataInterface {
-    public readonly data: NovaDataInterface & {
+    public readonly data: NovaDataInterfaceWithMission & {
         Sound: Gettable<sound.Sound>,
     };
     public readonly ids: Promise<NovaIDs>;
@@ -64,6 +65,7 @@ export class GameData implements GameDataInterface {
             CicnImage: this.addPictGettable<CicnImageData>(NovaDataType.CicnImage),
             Planet: this.addGettable<PlanetData>(NovaDataType.Planet),
             System: this.addGettable<SystemData>(NovaDataType.System),
+            Mission: this.addGettable<MissionData>(NovaDataType.Mission),
             TargetCorners: this.addGettable<TargetCornersData>(NovaDataType.TargetCorners),
             SpriteSheet: this.addGettable<SpriteSheetData>(NovaDataType.SpriteSheet),
             SpriteSheetImage: this.addPictGettable<SpriteSheetImageData>(NovaDataType.SpriteSheetImage),
@@ -88,7 +90,10 @@ export class GameData implements GameDataInterface {
         const data = await (await fetch('/preloadData.json')).json() as PreloadData;
         for (const [uncastKey, val] of Object.entries(data)) {
             const key = uncastKey as keyof typeof data;
-            this.data[key].gotten = val;
+            const gettable = this.data[key];
+            if (gettable) {
+                gettable.gotten = val;
+            }
         }
         return data;
     }

@@ -6,6 +6,9 @@ class SystResource extends BaseResource {
     position: number[];
     links: Set<number>;
     spobs: number[];
+    dudeTypes: number[];
+    dudeProbabilities: number[];
+    avgShips: number;
     constructor(resource: Resource, idSpace: NovaResources) {
         super(resource, idSpace);
         var d = resource.data;
@@ -27,6 +30,16 @@ class SystResource extends BaseResource {
                 this.spobs.push(spob);
             }
         }
+
+        // CSystResource::Save places the eight DudeTypes at byte 68,
+        // probabilities at 84, and AvgShips at 100.
+        this.dudeTypes = [];
+        this.dudeProbabilities = [];
+        for (let i = 0; i < 8; i++) {
+            this.dudeTypes.push(d.getInt16(68 + i * 2));
+            this.dudeProbabilities.push(d.getInt16(84 + i * 2));
+        }
+        this.avgShips = d.getInt16(100);
     }
 }
 

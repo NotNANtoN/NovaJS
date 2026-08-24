@@ -11,6 +11,7 @@ import { ControlsSubject } from '../nova_plugin/controls_plugin';
 import { GameDataResource } from '../nova_plugin/game_data_resource';
 import { LandEvent, PlanetComponent } from '../nova_plugin/planet_plugin';
 import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin';
+import { advanceGameDate, PlayerStateComponent } from '../nova_plugin/player_state';
 import { Spaceport } from '../spaceport/spaceport';
 import { deImmerify } from '../util/deimmerify';
 import { ResizeEvent, ScreenSize } from './screen_size_plugin';
@@ -35,13 +36,19 @@ const SpaceportQuery = new Query([SpaceportComponent] as const);
 const LandSystem = new System({
     name: 'LandSystem',
     events: [LandEvent],
-    args: [LandEvent, UUID, Entities, RunQuery, ScreenSize, GetEntity, Optional(CommunicatorResource), PlayerShipSelector] as const,
-    step({ uuid }, shipUuid, entities, runQuery, { x, y }, playerShip, communicator) {
+    args: [LandEvent, UUID, Entities, RunQuery, ScreenSize, GetEntity,
+        Optional(CommunicatorResource), PlayerShipSelector,
+        Optional(PlayerStateComponent)] as const,
+    step({ uuid }, shipUuid, entities, runQuery, { x, y }, playerShip,
+        communicator, playerState) {
         const spaceport = runQuery(SpaceportQuery, uuid)[0]?.[0];
         if (!spaceport) {
             return;
         }
 
+        if (playerState) {
+            advanceGameDate(playerState);
+        }
         entities.delete(shipUuid);
         deImmerify(playerShip);
 

@@ -12,6 +12,7 @@ import { ControlEvent } from '../nova_plugin/controls_plugin';
 import { GameDataResource } from '../nova_plugin/game_data_resource';
 import { ArmorComponent, IonizationComponent, ShieldComponent } from '../nova_plugin/health_plugin';
 import { OutfitsStateComponent } from '../nova_plugin/outfit_plugin';
+import { PlayerStateComponent } from '../nova_plugin/player_state';
 import { ShipPhysicsComponent } from '../nova_plugin/ship_plugin';
 import { SystemIdResource } from '../nova_plugin/system_id_resource';
 import { SystemPlugin } from '../nova_plugin/system_plugin';
@@ -55,6 +56,8 @@ export class Spaceport extends Menu<Entity> {
         const showOutfitter = async () => {
             this.controls.unbind();
             const outfits = this.input.components.get(OutfitsStateComponent) ?? new Map();
+            this.outfitter.setPlayerState(
+                this.input.components.get(PlayerStateComponent));
             const newOutfits = await this.outfitter.show(outfits);
             this.input.components.set(OutfitsStateComponent, newOutfits);
             // Delete these so they are re-created with the new outfits.
@@ -69,6 +72,8 @@ export class Spaceport extends Menu<Entity> {
 
         const showShipyard = async () => {
             this.controls.unbind();
+            this.shipyard.setPlayerState(
+                this.input.components.get(PlayerStateComponent));
             const newInput = await this.shipyard.show(this.input);
             if (newInput !== this.input) {
                 // Construct a fake system and run providers so that outfits of the new

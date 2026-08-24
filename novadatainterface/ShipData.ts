@@ -16,6 +16,7 @@ export function getDefaultShipPhysics(): ShipPhysics {
 
 export interface ShipData extends SpaceObjectData {
     physics: ShipPhysics;
+    cost: number;
     pict: string;
     desc: string;
     outfits: { [index: string]: number }
@@ -24,12 +25,18 @@ export interface ShipData extends SpaceObjectData {
     largeExplosion: boolean;
     deathDelay: number;
     displayWeight: number;
+    availabilityNCB: string;
+    appearOn: string;
+    onPurchase: string;
+    onCapture: string;
+    onRetire: string;
 };
 
 export function getDefaultShipData(): ShipData {
     return {
         ...getDefaultSpaceObjectData(),
         physics: getDefaultShipPhysics(),
+        cost: 0,
         pict: "default",
         desc: "default",
         outfits: {},
@@ -37,6 +44,11 @@ export function getDefaultShipData(): ShipData {
         finalExplosion: null,
         largeExplosion: false,
         deathDelay: 1,
-        displayWeight: 1
+        displayWeight: 1,
+        availabilityNCB: "",
+        appearOn: "",
+        onPurchase: "",
+        onCapture: "",
+        onRetire: ""
     }
 }

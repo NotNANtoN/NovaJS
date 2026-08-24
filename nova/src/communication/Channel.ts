@@ -18,6 +18,8 @@ export interface ChannelServer {
     readonly clientDisconnect: Subject<string>;
     readonly clients: Set<string>;
     readonly connected: BehaviorSubject<boolean>;
+    /** Optional because non-WebSocket channels may not have a token. */
+    readonly getPlayerToken?: (clientId: string) => string | undefined;
 }
 
 export interface ChannelClient {

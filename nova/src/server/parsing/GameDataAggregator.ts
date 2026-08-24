@@ -1,5 +1,5 @@
 import { GameDataInterface, PreloadData } from "novadatainterface/GameDataInterface";
-import { NovaDataInterface, NovaDataType } from "novadatainterface/NovaDataInterface";
+import { NovaDataInterface, NovaDataInterfaceWithMission, NovaDataType } from "novadatainterface/NovaDataInterface";
 import { Gettable, GettableData } from "novadatainterface/Gettable";
 import { BaseData } from "novadatainterface/BaseData";
 import { ShipData } from "novadatainterface/ShipData";
@@ -7,6 +7,7 @@ import { OutfitData } from "novadatainterface/OutiftData";
 import { WeaponData } from "novadatainterface/WeaponData";
 import { PictData } from "novadatainterface/PictData";
 import { PlanetData } from "novadatainterface/PlanetData";
+import { MissionData } from "novadatainterface/MissionData";
 import { SystemData } from "novadatainterface/SystemData";
 import { TargetCornersData } from "novadatainterface/TargetCornersData";
 import { SpriteSheetData, SpriteSheetImageData, SpriteSheetFramesData } from "novadatainterface/SpriteSheetData";
@@ -24,7 +25,7 @@ import { SoundFile } from "novadatainterface/SoundFile";
  * with access to all of their data.
  */
 class GameDataAggregator implements GameDataInterface {
-    readonly data: NovaDataInterface;
+    readonly data: NovaDataInterfaceWithMission;
     readonly ids: Promise<NovaIDs>;
     readonly preloadData: Promise<PreloadData>;
     private dataSources: Array<GameDataInterface>;
@@ -45,6 +46,7 @@ class GameDataAggregator implements GameDataInterface {
             CicnImage: this.makeAggregator<CicnImageData>(NovaDataType.CicnImage),
             Planet: this.makeAggregator<PlanetData>(NovaDataType.Planet),
             System: this.makeAggregator<SystemData>(NovaDataType.System),
+            Mission: this.makeAggregator<MissionData>(NovaDataType.Mission),
             TargetCorners: this.makeAggregator<TargetCornersData>(NovaDataType.TargetCorners),
             SpriteSheet: this.makeAggregator<SpriteSheetData>(NovaDataType.SpriteSheet),
             SpriteSheetImage: this.makeAggregator<SpriteSheetImageData>(NovaDataType.SpriteSheetImage),
@@ -71,7 +73,7 @@ class GameDataAggregator implements GameDataInterface {
             for (var i in this.getDataSources()) {
                 var dataSource: GameDataInterface = this.dataSources[i];
                 try {
-                    return <T>await dataSource.data[dataType].get(id);
+                    return <T>await dataSource.data[dataType]!.get(id);
                 }
                 catch (e) {
                     if (e instanceof Error) {
@@ -100,7 +102,11 @@ class GameDataAggregator implements GameDataInterface {
             var dataSource = this.dataSources[i];
             var newIDs = await dataSource.ids;
             for (let dataType in newIDs) {
-                IDs[<NovaDataType>dataType] = [...IDs[<NovaDataType>dataType], ...newIDs[<NovaDataType>dataType]];
+                const novaDataType = <NovaDataType>dataType;
+                IDs[<NovaDataType>dataType] = [
+                    ...(IDs[novaDataType] ?? []),
+                    ...(newIDs[<NovaDataType>dataType] ?? [])
+                ];
             }
         }
         return IDs;
@@ -127,6 +133,7 @@ class GameDataAggregator implements GameDataInterface {
         const outfit = this.preloadResource(NovaDataType.Outfit);
         const ships = this.preloadResource(NovaDataType.Ship);
         const systems = this.preloadResource(NovaDataType.System);
+        // Missions are numerous and are loaded on demand.
         preloadData.Outfit = await outfit;
         preloadData.Ship = await ships;
         preloadData.System = await systems;
@@ -135,10 +142,10 @@ class GameDataAggregator implements GameDataInterface {
 
     private async preloadResource<Data extends NovaDataType>(dataType: Data) {
         const allIds = await this.ids;
-        const ids = allIds[dataType];
+        const ids = allIds[dataType] ?? [];
 
         const loaded = await Promise.all(ids.map(async (id) => {
-            const data = await this.data[dataType].get(id);
+            const data = await this.data[dataType]!.get(id);
             return [id, data];
         }));
         return Object.fromEntries(loaded) as {

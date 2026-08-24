@@ -1,6 +1,10 @@
 import { BaseResource } from "./NovaResourceBase";
 import { BoomResource } from "./BoomResource";
+import { DudeResource } from "./DudeResource";
 import { DescResource } from "./DescResource";
+import { FletResource } from "./FletResource";
+import { GovtResource } from "./GovtResource";
+import { MisnResource } from "./MisnResource";
 import { OutfResource } from "./OutfResource";
 import { RledResource } from "./RledResource";
 import { PictResource } from "./PictResource";
@@ -72,12 +76,12 @@ type NovaResources = {
     dësc: ResList<DescResource>;
     DITL: ResList<BaseResource>;
     DLOG: ResList<BaseResource>;
-    düde: ResList<BaseResource>;
-    flët: ResList<BaseResource>;
-    gövt: ResList<BaseResource>;
+    düde: ResList<DudeResource>;
+    flët: ResList<FletResource>;
+    gövt: ResList<GovtResource>;
     ïntf: ResList<BaseResource>;
     jünk: ResList<BaseResource>;
-    mïsn: ResList<BaseResource>;
+    mïsn: ResList<MisnResource>;
     nëbu: ResList<BaseResource>;
     öops: ResList<BaseResource>;
     oütf: ResList<OutfResource>;

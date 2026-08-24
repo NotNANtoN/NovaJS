@@ -47,6 +47,7 @@ ts_library(
     srcs = [
         "SocketChannelClient.ts",
         "CommunicatorClient.ts",
+        "player_identity.ts",
     ],
     deps = [
         ":communication_lib",

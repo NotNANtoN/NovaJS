@@ -5,6 +5,7 @@ import { Observable } from "rxjs";
 import { GameData } from "../client/gamedata/GameData";
 import { ControlEvent } from "../nova_plugin/controls_plugin";
 import { OutfitsState } from "../nova_plugin/outfit_plugin";
+import { PlayerState } from "../nova_plugin/player_state";
 import { Button } from "./button";
 import { ItemGrid, ItemTile } from "./item_grid";
 import { Menu } from "./menu";
@@ -30,13 +31,14 @@ export class Outfitter extends Menu<OutfitsState> {
     private itemGrid?: ItemGrid<OutfitData>;
     private pictContainer = new PIXI.Container();
     private outfits: DefaultMap<string, number>;
+    private playerState?: PlayerState;
 
     private text = {
         description: new PIXI.Text("", FONT.normal),
         itemPrice: new PIXI.Text("Item Price:", FONT.normal),
-        price: new PIXI.Text("5,000 cr", FONT.normal),
-        youHave: new PIXI.Text("You Have:", FONT.normal),
-        count: new PIXI.Text("∞ cr", FONT.normal),
+        price: new PIXI.Text("", FONT.normal),
+        youHave: new PIXI.Text("Credits:", FONT.normal),
+        count: new PIXI.Text("0 cr", FONT.normal),
         itemMass: new PIXI.Text("Item Mass:", FONT.normal),
         mass: new PIXI.Text("3", FONT.normal),
         availableMass: new PIXI.Text("Available:", FONT.normal),
@@ -118,6 +120,11 @@ export class Outfitter extends Menu<OutfitsState> {
         };
     }
 
+    setPlayerState(playerState: PlayerState | undefined) {
+        this.playerState = playerState;
+        this.updateCreditsText();
+    }
+
     private async makeOutfitsGrid() {
         const ids = (await this.gameData.ids).Outfit;
         const outfits = await Promise.all(ids.map(id =>
@@ -131,25 +138,47 @@ export class Outfitter extends Menu<OutfitsState> {
     private buyOutfit() {
         //const mass = this.itemGrid?.selection.physics.freeMass;
         //if (mass <= global.myShip.properties.physics.freeMass) {
-        const id = this.itemGrid?.selection.id;
-        if (!id) {
+        const outfit = this.itemGrid?.selection;
+        if (!outfit) {
             return;
         }
-        this.outfits.set(id, this.outfits.get(id) + 1);
+        const price = Math.max(0, Math.floor(outfit.price));
+        if (!this.playerState) {
+            console.warn('Cannot buy outfit without player state.');
+            return;
+        }
+        if (this.playerState.credits < price) {
+            console.warn(`Not enough credits to buy outfit ${outfit.id}`);
+            return;
+        }
+        this.playerState.credits -= price;
+        this.outfits.set(outfit.id, this.outfits.get(outfit.id) + 1);
 
         //     global.myShip.addOutfit(outfit, false);
         // global.myShip.properties.physics.freeMass -= mass;
         // this.setFreeMassText();
         this.itemGrid?.setCounts(this.outfits);
+        this.updateCreditsText();
         //}
     }
 
     private sellOutfit() {
-        const id = this.itemGrid?.selection.id;
-        if (!id) {
+        const outfit = this.itemGrid?.selection;
+        if (!outfit) {
             return;
         }
-        this.outfits.set(id, Math.max(0, this.outfits.get(id) - 1));
+        const id = outfit.id;
+        const currentCount = this.outfits.get(id);
+        if (currentCount <= 0) {
+            return;
+        }
+        if (!this.playerState) {
+            console.warn('Cannot sell outfit without player state.');
+            return;
+        }
+        this.outfits.set(id, currentCount - 1);
+        // EV Nova's standard resale value is 25% of the purchase price.
+        this.playerState.credits += Math.floor(Math.max(0, outfit.price) * 0.25);
         if (this.outfits.get(id) === 0) {
             this.outfits.delete(id);
         }
@@ -159,6 +188,7 @@ export class Outfitter extends Menu<OutfitsState> {
         // }
         // this.setFreeMassText();
         this.itemGrid?.setCounts(this.outfits);
+        this.updateCreditsText();
     }
 
     private setOutfitSelected(outfitTile: ItemTile<OutfitData> | undefined) {
@@ -184,6 +214,7 @@ export class Outfitter extends Menu<OutfitsState> {
 
         // Set price text
         this.text.price.text = formatPrice(outfitTile.item.price);
+        this.updateCreditsText();
 
         if (outfitTile.item.physics.freeMass > 0) {
             // Set mass text
@@ -200,11 +231,16 @@ export class Outfitter extends Menu<OutfitsState> {
         //this.text.freeMass.text = formatMass(global.myShip.properties.physics.freeMass);
     }
 
+    private updateCreditsText() {
+        this.text.count.text = formatCredits(this.playerState?.credits ?? 0);
+    }
+
     protected override setInput(input: OutfitsState) {
         this.outfits = new DefaultMap(() => 0, [...input].map(
             ([k, v]) => [k, v.count]));
         super.setInput(input);
         this.itemGrid?.setCounts(this.outfits);
+        this.updateCreditsText();
     }
 
     protected override done() {
@@ -218,7 +254,7 @@ function addCommas(p: number) {
     return p.toLocaleString();
 }
 
-function formatPrice(p: number) {
+export function formatPrice(p: number) {
     var mil = 1000000;
     if (p >= mil) {
         var modmil = String(p % mil).substring(0, 3);
@@ -229,6 +265,10 @@ function formatPrice(p: number) {
         return addCommas(p) + " cr";
     }
 };
+
+function formatCredits(credits: number) {
+    return formatPrice(Math.max(0, Math.floor(credits)));
+}
 
 function formatMass(m: number) {
     return m.toLocaleString() + " tons";

@@ -19,6 +19,7 @@ import { OutfitPlugin } from "./outfit_plugin";
 import { PlanetPlugin } from "./planet_plugin";
 import { PlatformPlugin } from "./platform_plugin";
 import { ProjectilePlugin } from "./projectile_plugin";
+import { PlayerStatePlugin } from "./player_state";
 import { ReturnToQueuePlugin } from "./return_to_queue_plugin";
 import { ShipController } from "./ship_controller_plugin";
 import { ShipPlugin } from "./ship_plugin";
@@ -46,6 +47,7 @@ export const SystemPlugin: Plugin = {
         world.addPlugin(ProjectilePlugin);
         world.addPlugin(WeaponPlugin);
         world.addPlugin(OutfitPlugin);
+        world.addPlugin(PlayerStatePlugin);
         world.addPlugin(CollisionsPlugin);
         world.addPlugin(HealthPlugin);
         world.addPlugin(TargetPlugin);

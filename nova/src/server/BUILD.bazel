@@ -9,6 +9,7 @@ ts_library(
     srcs = [
         "setupRoutes.ts",
         "nova_repl.ts",
+        "player_store.ts",
     ],
     deps = [
         "@npm//@types/node",
@@ -16,6 +17,7 @@ ts_library(
         "@npm//@types/uuid",
         "@npm//express",
         "@npm//@types/express",
+        "@npm//io-ts",
         #"//nova/src/proto:protobufjs_bundle",
         "//novadatainterface",
         "//nova/src/server/parsing",

@@ -17,12 +17,14 @@ import { SocketChannelServer } from "./src/communication/SocketChannelServer";
 import { GameDataResource } from './src/nova_plugin/game_data_resource';
 import { makeShip } from "./src/nova_plugin/make_ship";
 import { MultiRoomResource, NovaPlugin, SystemComponent } from './src/nova_plugin/nova_plugin';
+import { PlayerStoreResource } from './src/nova_plugin/player_state';
 import { ServerPlugin } from "./src/nova_plugin/server_plugin";
 import { NovaRepl } from "./src/server/nova_repl";
 import { FilesystemData } from "./src/server/parsing/FilesystemData";
 import { GameDataAggregator } from "./src/server/parsing/GameDataAggregator";
 import { NovaParseWorkerApi } from "./src/server/parsing/nova_parse_worker";
 import { setupRoutes } from "./src/server/setupRoutes";
+import { PlayerStore } from './src/server/player_store';
 //import { NovaRepl } from "./src/server/NovaRepl";
 
 
@@ -78,9 +80,12 @@ const novaParseWorkerPath = resolveAsset(
 
 let world: World;
 const repl = new NovaRepl();
+const playerStore = new PlayerStore();
 
 let communicator: CommunicatorServer;
 async function startGame() {
+    // This also creates the default data file before asset parsing starts.
+    await playerStore.ready;
     // Set up the novaparse webworker
     const novaParseWorker = new Worker(novaParseWorkerPath);
     const novaParseWorkerApi = Comlink.wrap<NovaParseWorkerApi>(
@@ -108,6 +113,7 @@ async function startGame() {
 
     world = new World();
     world.resources.set(GameDataResource, gameData);
+    world.resources.set(PlayerStoreResource, playerStore);
     await world.addPlugin(multiplayer(multiRoom.join('main room')));
     world.resources.set(MultiRoomResource, multiRoom);
     await world.addPlugin(NovaPlugin);
