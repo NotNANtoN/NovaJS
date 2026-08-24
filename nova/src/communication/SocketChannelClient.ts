@@ -39,8 +39,10 @@ export class SocketChannelClient implements ChannelClient {
 
         this.webSocket = webSocket ?? this.webSocketFactory();
         this.warn = warn ?? console.warn;
-        this.timeout = timeout ?? 1200;
-        this.maxPings = maxPings ?? 3;
+        // Generous defaults: connections tunneled through VPN relays can see
+        // multi-second round trips; dropping too eagerly causes reconnect storms.
+        this.timeout = timeout ?? 4000;
+        this.maxPings = maxPings ?? 4;
 
         this.messageListener = this.handleMessage.bind(this)
         this.webSocket.addEventListener("message", this.messageListener);
