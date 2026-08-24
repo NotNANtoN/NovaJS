@@ -1,6 +1,10 @@
 import { Resource } from "resource_fork";
 import { NovaResources } from "./ResourceHolderBase";
 import { BaseResource } from "./NovaResourceBase";
+import {
+    getTradeCommodities,
+    TradeCommodity,
+} from "novadatainterface/CommodityData";
 
 class SpobResource extends BaseResource {
     position: number[];
@@ -12,6 +16,7 @@ class SpobResource extends BaseResource {
     government: number;
     landingPictID: number;
     landingDescID: number;
+    tradeCommodities: TradeCommodity[];
 
     constructor(resource: Resource, idSpace: NovaResources) {
         super(resource, idSpace);
@@ -33,6 +38,7 @@ class SpobResource extends BaseResource {
         this.government = d.getInt16(20);
         this.landingPictID = d.getUint16(24);
         this.landingDescID = this.id;
+        this.tradeCommodities = getTradeCommodities(this.flags);
     }
 
 }

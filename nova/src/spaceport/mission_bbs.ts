@@ -23,9 +23,16 @@ import {
 import {
     ActiveMission,
     formatGameDate,
+    getFreeSpace,
     PlayerState,
     PlayerStateComponent,
+    setCargoCapacity,
 } from '../nova_plugin/player_state';
+import { ShipDataComponent } from '../nova_plugin/ship_plugin';
+import {
+    generateProceduralMissions,
+    ProceduralMissionOffer,
+} from '../nova_plugin/procedural_missions';
 import { Button } from './button';
 import { Menu } from './menu';
 import { MenuControls } from './menu_controls';
@@ -40,6 +47,10 @@ const MISSION_FONT = {
     } as const,
     list: {
         fontFamily: 'Geneva', fontSize: 10, fill: 0xffffff,
+        align: 'left', wordWrap: true, wordWrapWidth: 205,
+    } as const,
+    unavailableList: {
+        fontFamily: 'Geneva', fontSize: 10, fill: 0x777777,
         align: 'left', wordWrap: true, wordWrapWidth: 205,
     } as const,
     detail: {
@@ -63,6 +74,7 @@ export interface MissionBoardWorld {
 interface MissionOffer {
     mission: MissionData;
     resolved: ResolvedMissionDestinations;
+    available: boolean;
 }
 
 const worldCache = new WeakMap<GameData, Promise<MissionBoardWorld>>();
@@ -273,7 +285,10 @@ export class MissionInfo extends Menu<Entity> {
                 .filter(entry => entry.state === 'active' || entry.state === 'failed')
                 .map(async entry => {
                     try {
-                        const mission = await this.gameData.data.Mission.get(entry.missionId);
+                        const mission = entry.missionData
+                            && typeof entry.missionData === 'object'
+                            ? entry.missionData as MissionData
+                            : await this.gameData.data.Mission.get(entry.missionId);
                         return {
                             entry,
                             mission,
@@ -285,7 +300,7 @@ export class MissionInfo extends Menu<Entity> {
             this.entries = missions.filter((entry): entry is {
                 entry: ActiveMission;
                 mission: MissionData;
-            } => entry !== undefined);
+            } => entry !== undefined && entry.mission !== undefined);
         }
         this.selectionIndex = this.entries.length > 0 ? 0 : -1;
         this.render();
@@ -370,6 +385,7 @@ export abstract class MissionBoard extends Menu<Entity> {
     private readonly title: PIXI.Text;
     private readonly flavor: PIXI.Text;
     private readonly list: PIXI.Text;
+    private readonly unavailableList: PIXI.Text;
     private readonly detail: PIXI.Text;
     private readonly status: PIXI.Text;
     private offers: MissionOffer[] = [];
@@ -378,6 +394,7 @@ export abstract class MissionBoard extends Menu<Entity> {
     private readonly planetId: string;
     private readonly offerLocation: MissionOfferLocation;
     private readonly onInfo?: () => void | Promise<void>;
+    private readonly acceptButton: Button;
 
     constructor(
         gameData: GameData,
@@ -399,6 +416,8 @@ export abstract class MissionBoard extends Menu<Entity> {
         );
         this.flavor = new PIXI.Text(flavorText, MISSION_FONT.flavor);
         this.list = new PIXI.Text('', MISSION_FONT.list);
+        this.unavailableList = new PIXI.Text(
+            '', MISSION_FONT.unavailableList);
         this.detail = new PIXI.Text('', MISSION_FONT.detail);
         this.status = new PIXI.Text('', MISSION_FONT.status);
         this.title.anchor.x = 0.5;
@@ -409,6 +428,7 @@ export abstract class MissionBoard extends Menu<Entity> {
         this.status.position.set(-290, 150);
 
         const accept = new Button(gameData, 'Accept', 70, { x: -120, y: 190 });
+        this.acceptButton = accept;
         const refuse = new Button(gameData, 'Refuse', 70, { x: -40, y: 190 });
         const info = new Button(gameData, 'Missions', 80, { x: 55, y: 190 });
         const done = new Button(gameData, 'Done', 60, { x: 150, y: 190 });
@@ -419,7 +439,8 @@ export abstract class MissionBoard extends Menu<Entity> {
         done.click.subscribe(this.done.bind(this));
 
         this.container.addChild(
-            this.title, this.flavor, this.list, this.detail, this.status);
+            this.title, this.flavor, this.list, this.unavailableList,
+            this.detail, this.status);
         this.controls = new MenuControls(controlEvents, {
             up: () => this.moveSelection(-1),
             down: () => this.moveSelection(1),
@@ -443,6 +464,7 @@ export abstract class MissionBoard extends Menu<Entity> {
             this.render();
             return;
         }
+        await this.syncCargoCapacity(state);
         const [world, missions] = await Promise.all([
             loadMissionWorld(this.gameData),
             loadMissionCatalog(this.gameData),
@@ -467,7 +489,7 @@ export abstract class MissionBoard extends Menu<Entity> {
             destinationSystems: world.systems,
             governments: world.governments,
         }).sort((a, b) => b.displayWeight - a.displayWeight);
-        this.offers = offerable
+        const resourceOffers = offerable
             .map(mission => ({
                 mission,
                 resolved: resolveMissionDestinations(state, mission, {
@@ -478,11 +500,56 @@ export abstract class MissionBoard extends Menu<Entity> {
                     initialSystemId: state.currentSystem,
                     currentSystemId: state.currentSystem,
                 }),
+                available: true,
             }))
             .filter((offer): offer is MissionOffer =>
                 offer.resolved !== undefined);
+        const proceduralOffers: MissionOffer[] = this.offerLocation
+            === MissionOfferLocation.MissionComputer
+            ? generateProceduralMissions({
+                currentSystemId: state.currentSystem,
+                currentPlanetId: this.planetId,
+                gameDate: state.gameDate,
+                freeSpace: getFreeSpace(state),
+                systems: world.systems,
+                planets: world.planets.map(planet => ({
+                    ...planet,
+                    name: world.planetNames.get(planet.id),
+                })),
+            }).filter(offer => !state.activeMissions.some(active =>
+                active.state === 'active'
+                && active.missionId === offer.mission.id))
+            .map((offer: ProceduralMissionOffer) => ({
+                mission: offer.mission,
+                resolved: {
+                    travelDestination: offer.destinationPlanetId,
+                    returnDestination: offer.destinationPlanetId,
+                },
+                available: offer.available,
+            }))
+            : [];
+        // The generated board is shown first, like the original Mission
+        // Computer, before data-driven mïsn resources.
+        this.offers = [...proceduralOffers, ...resourceOffers];
         this.selectionIndex = this.offers.length > 0 ? 0 : -1;
         this.render();
+    }
+
+    private async syncCargoCapacity(
+        state: PlayerState,
+    ): Promise<void> {
+        const shipData = this.input.components.get(ShipDataComponent);
+        if (shipData) {
+            setCargoCapacity(state, shipData.cargoCapacity);
+            return;
+        }
+        try {
+            const ship = await this.gameData.data.Ship.get(state.shipId);
+            setCargoCapacity(state, ship.cargoCapacity);
+        } catch {
+            // The persisted fallback capacity remains usable for old data
+            // providers which do not expose ship cargo fields.
+        }
     }
 
     private moveSelection(delta: number) {
@@ -514,20 +581,31 @@ export abstract class MissionBoard extends Menu<Entity> {
     private render() {
         if (this.offers.length === 0 || this.selectionIndex < 0) {
             this.list.text = 'No missions are available here.';
+            this.unavailableList.text = '';
             this.detail.text = '';
+            this.acceptButton.state = 'grey';
             return;
         }
         const world = this.world;
         if (!world) {
             return;
         }
+        const offerText = (offer: MissionOffer, index: number) =>
+            `${index === this.selectionIndex ? '▶ ' : '  '}`
+            + `${offer.available ? '' : '[NO ROOM] '}${offer.mission.name}`
+            + `\n   ${firstBriefLine(offer.mission)}`;
+        // Keep unavailable entries in the same line slots as the normal list,
+        // but render them in a separate grey layer so they are visibly
+        // disabled rather than merely carrying a status label.
         this.list.text = this.offers.map((offer, index) =>
-            `${index === this.selectionIndex ? '▶ ' : '  '}${offer.mission.name}`
-            + `\n   ${firstBriefLine(offer.mission)}`).join('\n');
+            offer.available ? offerText(offer, index) : '\n').join('\n');
+        this.unavailableList.text = this.offers.map((offer, index) =>
+            offer.available ? '\n' : offerText(offer, index)).join('\n');
         const offer = this.offers[this.selectionIndex];
         if (!offer) {
             return;
         }
+        this.acceptButton.state = offer.available ? 'normal' : 'grey';
         const state = this.input.components.get(PlayerStateComponent);
         const values = missionValues(
             offer.mission, this.planetId, world, state?.gameDate ?? 0,
@@ -546,7 +624,10 @@ export abstract class MissionBoard extends Menu<Entity> {
     private acceptSelected() {
         const offer = this.offers[this.selectionIndex];
         const state = this.input.components.get(PlayerStateComponent);
-        if (!offer || !state) {
+        if (!offer || !state || !offer.available) {
+            if (offer && !offer.available) {
+                this.status.text = 'This mission needs more cargo space.';
+            }
             return;
         }
         const accepted = acceptMission(

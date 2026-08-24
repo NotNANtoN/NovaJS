@@ -11,6 +11,7 @@ export const EV_NOVA_START_MONTH = 10;
 export const EV_NOVA_START_DAY = 18;
 
 export const MAX_ACTIVE_MISSIONS = 16;
+export const DEFAULT_CARGO_CAPACITY = 10;
 
 export const MissionState = t.union([
     t.literal('active'),
@@ -31,6 +32,13 @@ export const MissionCargo = t.intersection([
 ]);
 export type MissionCargo = t.TypeOf<typeof MissionCargo>;
 
+export const CargoHold = t.type({
+    commodity: t.string,
+    tons: t.number,
+    isMissionCargo: t.boolean,
+});
+export type CargoHold = t.TypeOf<typeof CargoHold>;
+
 const ActiveMission = t.type({
     missionId: t.string,
     state: MissionState,
@@ -46,6 +54,9 @@ const ActiveMissionDetails = t.intersection([
         shipSystem: t.string,
         cargo: MissionCargo,
         acceptedDate: t.number,
+        // Procedural missions do not exist in the mïsn resource catalog. The
+        // complete synthetic MissionData record is persisted with the entry.
+        missionData: t.any,
     }),
 ]);
 export type ActiveMission = t.TypeOf<typeof ActiveMissionDetails>;
@@ -54,15 +65,62 @@ export type ActiveMission = t.TypeOf<typeof ActiveMissionDetails>;
  * A boolean array is used instead of a Set so Immer can track changes and the
  * ECS serializer can send the component between client and server worlds.
  */
-export const PlayerStateCodec = t.type({
+const PlayerStateFields = t.type({
     credits: t.number,
     missionBits: t.array(t.boolean),
     gameDate: t.number,
     activeMissions: t.array(ActiveMissionDetails),
     shipId: t.string,
     currentSystem: t.string,
+    cargoCapacity: t.number,
+    holds: t.array(CargoHold),
 });
-export type PlayerState = t.TypeOf<typeof PlayerStateCodec>;
+type PlayerStateFields = t.TypeOf<typeof PlayerStateFields>;
+export type PlayerState = PlayerStateFields & {
+    /** Derived getter; it is intentionally excluded from persisted state. */
+    readonly freeSpace: number;
+};
+
+/**
+ * Decode both current state and the phase-one state shape. The output always
+ * has the current cargo fields, so callers do not need optional checks after a
+ * player has crossed the persistence/wire boundary.
+ */
+const LegacyPlayerStateFields = t.intersection([
+    t.type({
+        credits: t.number,
+        missionBits: t.array(t.boolean),
+        gameDate: t.number,
+        activeMissions: t.array(ActiveMissionDetails),
+        shipId: t.string,
+        currentSystem: t.string,
+    }),
+    t.partial({
+        cargoCapacity: t.number,
+        holds: t.array(CargoHold),
+    }),
+]);
+
+export const PlayerStateCodec = new t.Type<PlayerState>(
+    'PlayerStateCodec',
+    (value): value is PlayerState => PlayerStateFields.is(value),
+    (value, context) => {
+        const decoded = LegacyPlayerStateFields.validate(value, context);
+        if (decoded._tag === 'Left') {
+            return decoded;
+        }
+        const state = {
+            ...decoded.right,
+            cargoCapacity: Number.isFinite(decoded.right.cargoCapacity)
+                ? decoded.right.cargoCapacity
+                : DEFAULT_CARGO_CAPACITY,
+            holds: decoded.right.holds ?? [],
+        } as PlayerStateFields;
+        migrateMissionCargo(state);
+        return t.success(withComputedFreeSpace(state));
+    },
+    state => PlayerStateFields.encode(state) as PlayerState,
+);
 
 export const PlayerStateComponent =
     new Component<PlayerState>('PlayerStateComponent');
@@ -94,14 +152,139 @@ export const PlayerData = t.intersection([
 export type PlayerData = t.TypeOf<typeof PlayerData>;
 
 export function createInitialPlayerState(): PlayerState {
-    return {
+    return withComputedFreeSpace({
         credits: 10_000,
         missionBits: new Array<boolean>(MAX_MISSION_BITS).fill(false),
         gameDate: 0,
         activeMissions: [],
         shipId: 'nova:128',
         currentSystem: 'nova:130',
-    };
+        cargoCapacity: DEFAULT_CARGO_CAPACITY,
+        holds: [],
+    });
+}
+
+function withComputedFreeSpace(state: PlayerStateFields): PlayerState {
+    Object.defineProperty(state, 'freeSpace', {
+        configurable: true,
+        enumerable: false,
+        get: function(this: PlayerStateFields) {
+            return getFreeSpace(this);
+        },
+    });
+    return state as PlayerState;
+}
+
+export function cargoTons(state: Pick<PlayerState, 'holds'>): number {
+    return state.holds.reduce((total, hold) =>
+        total + Math.max(0, Number.isFinite(hold.tons) ? hold.tons : 0), 0);
+}
+
+/**
+ * Free cargo is derived from the ship's total capacity and current holds.
+ * Returning zero for an over-capacity legacy save prevents new cargo from
+ * making the discrepancy worse while still allowing missions to complete.
+ */
+export function getFreeSpace(
+    state: Pick<PlayerState, 'cargoCapacity' | 'holds'>,
+): number {
+    return Math.max(0, Math.floor(
+        state.cargoCapacity - cargoTons(state)));
+}
+
+/** Short alias matching the terminology used by the EV Nova UI. */
+export const freeSpace = getFreeSpace;
+
+export function setCargoCapacity(
+    state: PlayerState,
+    cargoCapacity: number,
+): number {
+    if (Number.isFinite(cargoCapacity) && cargoCapacity >= 0) {
+        state.cargoCapacity = Math.floor(cargoCapacity);
+    }
+    return state.cargoCapacity;
+}
+
+/**
+ * Add physical cargo without allowing mission cargo to be traded away.
+ * Identical ordinary holds are coalesced; mission holds remain keyed by
+ * mission id so release is exact.
+ */
+export function allocateCargo(
+    state: PlayerState,
+    hold: CargoHold,
+): boolean {
+    const tons = Math.floor(hold.tons);
+    if (tons <= 0 || getFreeSpace(state) < tons) {
+        return false;
+    }
+    const existing = state.holds.find(existing =>
+        existing.commodity === hold.commodity
+        && existing.isMissionCargo === hold.isMissionCargo);
+    if (existing) {
+        existing.tons += tons;
+    } else {
+        state.holds.push({
+            commodity: hold.commodity,
+            tons,
+            isMissionCargo: hold.isMissionCargo,
+        });
+    }
+    return true;
+}
+
+/**
+ * Release up to `tons` from matching cargo and return the amount removed.
+ * Mission cargo is excluded unless callers explicitly request it.
+ */
+export function releaseCargo(
+    state: PlayerState,
+    commodity: string,
+    tons = Infinity,
+    isMissionCargo = false,
+): number {
+    let remaining = Number.isFinite(tons) ? Math.max(0, tons) : Infinity;
+    let released = 0;
+    for (let index = state.holds.length - 1; index >= 0 && remaining > 0; index--) {
+        const hold = state.holds[index];
+        if (hold.commodity !== commodity
+            || hold.isMissionCargo !== isMissionCargo) {
+            continue;
+        }
+        const amount = Math.min(hold.tons, remaining);
+        hold.tons -= amount;
+        released += amount;
+        remaining -= amount;
+        if (hold.tons <= 0) {
+            state.holds.splice(index, 1);
+        }
+    }
+    return released;
+}
+
+export function releaseMissionCargo(
+    state: PlayerState,
+    missionId: string,
+): number {
+    return releaseCargo(state, missionId, Infinity, true);
+}
+
+function migrateMissionCargo(state: Pick<PlayerState, 'activeMissions' | 'holds'>) {
+    for (const mission of state.activeMissions) {
+        if (mission.state !== 'active' || !mission.cargo
+            || mission.cargo.quantity <= 0
+            || state.holds.some(hold =>
+                hold.isMissionCargo && hold.commodity === mission.missionId)) {
+            continue;
+        }
+        // Old saves stored cargo only on ActiveMission. Keep it in the hold
+        // during migration; a later capacity sync can expose it as full.
+        state.holds.push({
+            commodity: mission.missionId,
+            tons: mission.cargo.quantity,
+            isMissionCargo: true,
+        });
+    }
 }
 
 export function advanceGameDate(state: PlayerState, days = 1): number {

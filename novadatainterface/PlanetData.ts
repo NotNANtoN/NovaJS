@@ -1,5 +1,6 @@
 import { SpaceObjectData, getDefaultSpaceObjectData } from "./SpaceObjectData";
 import { DamageType } from "./WeaponData";
+import { TradeCommodity } from "./CommodityData";
 
 export interface PlanetData extends SpaceObjectData {
     landingPict: string;
@@ -9,6 +10,8 @@ export interface PlanetData extends SpaceObjectData {
     government?: number;
     /** Derived from the spöb uninhabited flag. */
     inhabited?: boolean;
+    /** Generic commodities available at this stellar and their price levels. */
+    tradeCommodities: TradeCommodity[];
 }
 
 export function getDefaultPlanetData(): PlanetData {
@@ -20,5 +23,6 @@ export function getDefaultPlanetData(): PlanetData {
         position: [0, 0],
         government: -1,
         inhabited: true,
+        tradeCommodities: [],
     };
 }

@@ -27,10 +27,12 @@ import { SystemIdResource } from './system_id_resource';
 export const PlayerData = PlayerDataCodec;
 export type PlayerData = t.TypeOf<typeof PlayerDataCodec>;
 
+type PersistedPlayerState = Omit<PlayerState, 'freeSpace'>;
+
 interface PlayerStoreApi {
     readonly ready: Promise<void>;
-    getOrCreate(token: string): Promise<PlayerState>;
-    save(token: string, state: PlayerState, ship?: unknown): Promise<void>;
+    getOrCreate(token: string): Promise<PersistedPlayerState>;
+    save(token: string, state: PersistedPlayerState, ship?: unknown): Promise<void>;
     bindPeer(peerId: string, token: string): void;
     getTokenForPeer(peerId: string): string | undefined;
 }
@@ -61,6 +63,8 @@ export const ManageClientsSystem = new System({
                         activeMissions: state.activeMissions.map(mission => ({ ...mission })),
                         shipId: state.shipId,
                         currentSystem: state.currentSystem || systemId,
+                        cargoCapacity: state.cargoCapacity,
+                        holds: state.holds.map(hold => ({ ...hold })),
                     });
                 }
                 entities.delete(uuid);
@@ -86,6 +90,8 @@ function playerStateFingerprint(state: PlayerState): string {
         state.currentSystem,
         bitHash,
         JSON.stringify(state.activeMissions),
+        state.cargoCapacity,
+        JSON.stringify(state.holds),
     ].join('|');
 }
 
@@ -116,6 +122,8 @@ const PersistPlayerStateSystem = new System({
                 activeMissions: state.activeMissions.map(mission => ({ ...mission })),
                 shipId: state.shipId,
                 currentSystem: state.currentSystem,
+                cargoCapacity: state.cargoCapacity,
+                holds: state.holds.map(hold => ({ ...hold })),
             });
         }
     },
@@ -173,7 +181,7 @@ export const ServerPlugin: Plugin = {
                 const data: PlayerData = {
                     uuid: peer,
                     system: state.currentSystem,
-                    playerState: state,
+                    playerState: state as PlayerState,
                 };
                 communicator.sendMessage(PlayerData.encode(data), peer);
             });

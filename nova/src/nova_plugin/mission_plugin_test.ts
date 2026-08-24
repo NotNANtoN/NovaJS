@@ -1,7 +1,14 @@
 import { MissionData, getDefaultMissionData } from 'novadatainterface/MissionData';
 import { GameDataInterface } from 'novadatainterface/GameDataInterface';
-import { MissionRuntime, acceptMission } from './mission_plugin';
-import { createInitialPlayerState } from './player_state';
+import {
+    MissionRuntime,
+    abortMission,
+    acceptMission,
+} from './mission_plugin';
+import {
+    createInitialPlayerState,
+    getFreeSpace,
+} from './player_state';
 
 function fakeGameData(mission: MissionData): GameDataInterface {
     return {
@@ -40,6 +47,7 @@ describe('mission runtime', () => {
 
         expect(accepted?.destination).toBe('nova:131');
         expect(accepted?.cargo?.quantity).toBe(4);
+        expect(getFreeSpace(state)).toBe(6);
         expect(state.missionBits[11]).toBe(true);
 
         const notices = await new MissionRuntime(fakeGameData(mission))
@@ -47,6 +55,7 @@ describe('mission runtime', () => {
         expect(state.credits).toBe(10_250);
         expect(state.missionBits[12]).toBe(true);
         expect(state.activeMissions).toEqual([]);
+        expect(getFreeSpace(state)).toBe(10);
         expect(notices[0].text).toBe(
             'Delivered 4 tons to Destination for 250 credits.',
         );
@@ -57,6 +66,8 @@ describe('mission runtime', () => {
             ...getDefaultMissionData(),
             id: 'nova:201',
             returnStel: 131,
+            cargoType: 0,
+            cargoQty: 2,
             timeLimit: 1,
             onFailure: 'b13',
             failText: 'Contract failed at <DST>.',
@@ -72,6 +83,7 @@ describe('mission runtime', () => {
             .processLanding(state, 'nova:130');
         expect(state.missionBits[13]).toBe(true);
         expect(state.activeMissions).toEqual([]);
+        expect(getFreeSpace(state)).toBe(10);
         expect(notices[0].kind).toBe('failure');
         expect(notices[0].text).toBe('Contract failed at Destination.');
     });
@@ -109,5 +121,56 @@ describe('mission runtime', () => {
         expect(accepted?.returnDestination).toBe('nova:129');
         expect(accepted?.destination).toBe('nova:129');
         expect(accepted?.shipSystem).toBe('nova:129');
+    });
+
+    it('releases mission cargo when a mission is aborted', () => {
+        const mission = {
+            ...getDefaultMissionData(),
+            id: 'nova:203',
+            returnStel: 131,
+            cargoType: 0,
+            cargoQty: 3,
+        };
+        const state = createInitialPlayerState();
+        const accepted = acceptMission(state, mission, {
+            initialPlanetId: 'nova:130',
+            planets: [{ id: 'nova:130' }, { id: 'nova:131' }],
+        });
+        expect(accepted).toBeDefined();
+        expect(getFreeSpace(state)).toBe(7);
+        expect(abortMission(state, accepted!, mission)).toBe(true);
+        expect(state.activeMissions).toEqual([]);
+        expect(getFreeSpace(state)).toBe(10);
+    });
+
+    it('runs and completes a persisted procedural mission record', async () => {
+        const mission = {
+            ...getDefaultMissionData(),
+            id: 'proc:abc:0',
+            name: 'Generated delivery',
+            returnStel: -1,
+            travelStel: -1,
+            cargoType: 0,
+            cargoQty: 2,
+            dropOffMode: 0,
+            payVal: 500,
+            compText: 'Generated delivery complete.',
+        };
+        const state = createInitialPlayerState();
+        const accepted = acceptMission(state, mission, {
+            initialPlanetId: 'nova:130',
+            resolved: {
+                travelDestination: 'nova:131',
+                returnDestination: 'nova:131',
+            },
+        });
+        expect(accepted?.missionData).toEqual(mission);
+        const notices = await new MissionRuntime(fakeGameData(
+            getDefaultMissionData(),
+        )).processLanding(state, 'nova:131');
+        expect(notices[0]?.kind).toBe('success');
+        expect(state.credits).toBe(10_500);
+        expect(state.activeMissions).toEqual([]);
+        expect(getFreeSpace(state)).toBe(10);
     });
 });

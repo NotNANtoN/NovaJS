@@ -87,5 +87,6 @@ export async function PlanetParse(spob: SpobResource, notFoundFunction: (m: stri
         position: [spob.position[0], spob.position[1]],
         government: spob.government,
         inhabited: (spob.flags & 0x20) === 0,
+        tradeCommodities: spob.tradeCommodities,
     }
 }

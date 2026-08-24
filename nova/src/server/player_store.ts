@@ -6,6 +6,13 @@ import os from 'node:os';
 const PLAYER_DATA_DIRECTORY = 'NovaJS-data';
 const PLAYER_DATA_FILE = 'players.json';
 const MAX_MISSION_BITS = 10_000;
+const DEFAULT_CARGO_CAPACITY = 10;
+
+export interface PersistentCargoHold {
+    commodity: string;
+    tons: number;
+    isMissionCargo: boolean;
+}
 
 export interface PersistentActiveMission {
     missionId: string;
@@ -17,6 +24,11 @@ export interface PersistentActiveMission {
         pickupDestination?: string;
     };
     acceptedDate?: number;
+    travelDestination?: string;
+    returnDestination?: string;
+    shipSystem?: string;
+    /** Full record for engine-generated procedural missions. */
+    missionData?: unknown;
 }
 
 export interface PersistentPlayerState {
@@ -26,6 +38,8 @@ export interface PersistentPlayerState {
     activeMissions: PersistentActiveMission[];
     shipId: string;
     currentSystem: string;
+    cargoCapacity: number;
+    holds: PersistentCargoHold[];
 }
 
 export interface StoredPlayer extends PersistentPlayerState {
@@ -51,6 +65,10 @@ const ActiveMissionDetails = t.intersection([
             }),
         ]),
         acceptedDate: t.number,
+        travelDestination: t.string,
+        returnDestination: t.string,
+        shipSystem: t.string,
+        missionData: t.any,
     }),
 ]);
 
@@ -65,6 +83,12 @@ const StoredPlayerCodec = t.intersection([
     }),
     t.partial({
         ship: t.unknown,
+        cargoCapacity: t.number,
+        holds: t.array(t.type({
+            commodity: t.string,
+            tons: t.number,
+            isMissionCargo: t.boolean,
+        })),
     }),
 ]);
 
@@ -84,6 +108,8 @@ function initialPlayerState(): PersistentPlayerState {
         activeMissions: [],
         shipId: 'nova:128',
         currentSystem: 'nova:130',
+        cargoCapacity: DEFAULT_CARGO_CAPACITY,
+        holds: [],
     };
 }
 
@@ -91,8 +117,48 @@ function clonePlayer(player: StoredPlayer): StoredPlayer {
     return {
         ...player,
         missionBits: [...player.missionBits],
-        activeMissions: player.activeMissions.map(mission => ({ ...mission })),
+        activeMissions: player.activeMissions.map(mission => ({
+            ...mission,
+            ...(mission.cargo ? { cargo: { ...mission.cargo } } : {}),
+            ...(mission.missionData && typeof mission.missionData === 'object'
+                ? { missionData: { ...(mission.missionData as object) } }
+                : {}),
+        })),
+        holds: player.holds.map(hold => ({ ...hold })),
     };
+}
+
+function normalizePlayer(
+    player: t.TypeOf<typeof StoredPlayerCodec>,
+): StoredPlayer {
+    const holds = player.holds ? player.holds.map(hold => ({ ...hold })) : [];
+    const activeMissions = player.activeMissions.map(mission => ({
+        ...mission,
+        ...(mission.cargo ? { cargo: { ...mission.cargo } } : {}),
+        ...(mission.missionData && typeof mission.missionData === 'object'
+            ? { missionData: { ...(mission.missionData as object) } }
+            : {}),
+    }));
+    for (const mission of activeMissions) {
+        if (mission.state !== 'active' || !mission.cargo
+            || mission.cargo.quantity <= 0
+            || holds.some(hold =>
+                hold.isMissionCargo && hold.commodity === mission.missionId)) {
+            continue;
+        }
+        holds.push({
+            commodity: mission.missionId,
+            tons: mission.cargo.quantity,
+            isMissionCargo: true,
+        });
+    }
+    return {
+        ...player,
+        cargoCapacity: Number.isFinite(player.cargoCapacity)
+            ? player.cargoCapacity : DEFAULT_CARGO_CAPACITY,
+        holds,
+        activeMissions,
+    } as StoredPlayer;
 }
 
 /**
@@ -144,7 +210,7 @@ export class PlayerStore {
         for (const [token, value] of Object.entries(raw)) {
             const decoded = StoredPlayerCodec.decode(value);
             if (decoded._tag === 'Right') {
-                this.players.set(token, decoded.right);
+                this.players.set(token, normalizePlayer(decoded.right));
             } else {
                 console.warn(`Ignoring invalid player record '${token}'`);
             }
@@ -173,7 +239,14 @@ export class PlayerStore {
         this.players.set(token, {
             ...state,
             missionBits: [...state.missionBits],
-            activeMissions: state.activeMissions.map(mission => ({ ...mission })),
+            activeMissions: state.activeMissions.map(mission => ({
+                ...mission,
+                ...(mission.cargo ? { cargo: { ...mission.cargo } } : {}),
+                ...(mission.missionData && typeof mission.missionData === 'object'
+                    ? { missionData: { ...(mission.missionData as object) } }
+                    : {}),
+            })),
+            holds: state.holds.map(hold => ({ ...hold })),
             ...(ship === undefined ? {} : { ship }),
         });
         this.scheduleSave();

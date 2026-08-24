@@ -1,4 +1,5 @@
 import { MissionData, MissionOfferLocation } from 'novadatainterface/MissionData';
+import { getFreeSpace } from './player_state';
 import type { PlayerState } from './player_state';
 import { evaluateTestExpression } from './ncb';
 import {
@@ -34,7 +35,8 @@ export interface MissionAvailabilityInput {
     missionIds: readonly string[];
     missions: ReadonlyMap<string, MissionData>
         | Readonly<Record<string, MissionData>>;
-    playerState: Pick<PlayerState, 'missionBits' | 'activeMissions'>;
+    playerState: Pick<PlayerState, 'missionBits' | 'activeMissions'>
+        & Partial<Pick<PlayerState, 'cargoCapacity' | 'holds'>>;
     currentPlanet: MissionPlanetSelector;
     currentSystem: MissionSystemSelector;
     offerLocation: MissionOfferLocation;
@@ -87,6 +89,13 @@ function destinationIsSatisfiable(
         input.currentPlanet.id,
         input.currentSystem.id,
     );
+}
+
+function missionCargoTons(mission: MissionData): number {
+    if (mission.cargoType < 0 || mission.cargoQty === -1) {
+        return 0;
+    }
+    return Math.abs(mission.cargoQty);
 }
 
 function missionDataFor(
@@ -150,6 +159,15 @@ export function getOfferableMissions(
         .filter(mission => mission.availRandom > 0
             && (mission.availRandom >= 100
                 || randomValue(random) < mission.availRandom / 100))
+        .filter(mission => {
+            if (!input.playerState.holds
+                || input.playerState.cargoCapacity === undefined) {
+                return true;
+            }
+            const cargoState = input.playerState as Pick<
+                PlayerState, 'cargoCapacity' | 'holds'>;
+            return missionCargoTons(mission) <= getFreeSpace(cargoState);
+        })
         .filter(mission => destinationIsSatisfiable(mission, input));
 }
 

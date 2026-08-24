@@ -25,12 +25,14 @@ import { MenuControls } from './menu_controls';
 import { MissionBbs, MissionInfo } from './mission_bbs';
 import { Outfitter } from './outfitter';
 import { Shipyard } from './shipyard';
+import { TradeCenter } from './trade';
 
 export class Spaceport extends Menu<Entity> {
     private outfitter: Outfitter;
     private shipyard: Shipyard;
     private missionBbs: MissionBbs;
     private bar: Bar;
+    private tradeCenter: TradeCenter;
     private missionInfo: MissionInfo;
     private data?: PlanetData;
     private missionNotice = new PIXI.Text("", {
@@ -59,6 +61,7 @@ export class Spaceport extends Menu<Entity> {
             shipyard: new Button(gameData, "Shipyard", 120, { x: 160, y: 74 }),
             missionBBS: new Button(gameData, "Mission BBS", 120, { x: 160, y: 32 }),
             bar: new Button(gameData, "Bar", 120, { x: 160, y: -10 }),
+            tradeCenter: new Button(gameData, "Trade Center", 120, { x: 160, y: -52 }),
             leave: new Button(gameData, "Leave", 120, { x: 160, y: 200 })
         };
 
@@ -118,6 +121,7 @@ export class Spaceport extends Menu<Entity> {
         this.missionBbs = new MissionBbs(
             gameData, this.id, controlEvents, showMissionInfo);
         this.bar = new Bar(gameData, this.id, controlEvents, showMissionInfo);
+        this.tradeCenter = new TradeCenter(gameData, this.id, controlEvents);
 
         const showMissionBbs = async () => {
             this.controls.unbind();
@@ -135,8 +139,17 @@ export class Spaceport extends Menu<Entity> {
                 this.controls.bind();
             }
         };
+        const showTradeCenter = async () => {
+            this.controls.unbind();
+            try {
+                await this.tradeCenter.show(this.input);
+            } finally {
+                this.controls.bind();
+            }
+        };
         buttons.missionBBS.click.subscribe(showMissionBbs);
         buttons.bar.click.subscribe(showBar);
+        buttons.tradeCenter.click.subscribe(showTradeCenter);
         this.addButtons(buttons);
 
         this.controls = new MenuControls(controlEvents, {
@@ -144,6 +157,7 @@ export class Spaceport extends Menu<Entity> {
             shipyard: showShipyard,
             missionBBS: showMissionBbs,
             bar: showBar,
+            tradeCenter: showTradeCenter,
             missions: showMissionInfo,
             depart: this.done.bind(this),
         });
@@ -154,6 +168,7 @@ export class Spaceport extends Menu<Entity> {
         await Promise.all([
             this.missionBbs.buildPromise,
             this.bar.buildPromise,
+            this.tradeCenter.buildPromise,
             this.missionInfo.buildPromise,
         ]);
         const data = await this.gameData.data.Planet.get(this.id);
@@ -176,6 +191,7 @@ export class Spaceport extends Menu<Entity> {
         this.container.addChild(this.shipyard.container);
         this.container.addChild(this.missionBbs.container);
         this.container.addChild(this.bar.container);
+        this.container.addChild(this.tradeCenter.container);
         this.container.addChild(this.missionInfo.container);
         this.missionNotice.position.set(-210, 145);
         this.container.addChild(this.missionNotice);

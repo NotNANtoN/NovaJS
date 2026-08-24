@@ -29,6 +29,7 @@ import {
     PlayerData,
     PlayerStateComponent,
     PlayerStateResource,
+    setCargoCapacity,
 } from "./nova_plugin/player_state";
 import { SystemIdResource } from "./nova_plugin/system_id_resource";
 
@@ -147,6 +148,7 @@ async function startGame() {
     const shipId = ids.Ship.includes(requestedShip)
         ? requestedShip : 'nova:128';
     const shipData = await gameData.data.Ship.get(shipId);
+    setCargoCapacity(playerState, shipData.cargoCapacity);
     const shipEntity = makeShip(shipData);
     shipEntity.components.set(PlayerStateComponent, playerState);
     world.resources.set(PlayerStateResource, playerState);

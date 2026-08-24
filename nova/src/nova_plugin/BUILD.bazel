@@ -17,6 +17,8 @@ ts_library(
         "ncb.ts",
         "mission_availability.ts",
         "mission_plugin.ts",
+        "procedural_missions.ts",
+        "trade_model.ts",
         "stellar_selector.ts",
         "make_ship.ts",
         "ship_plugin.ts",
@@ -91,6 +93,8 @@ ts_library(
         "mission_plugin_test.ts",
         "govt_relations_test.ts",
         "stellar_selector_test.ts",
+        "cargo_trade_test.ts",
+        "procedural_missions_test.ts",
     ],
     deps = [
         ":nova_plugin",

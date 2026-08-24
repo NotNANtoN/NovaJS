@@ -10,6 +10,7 @@ import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin';
 import {
     PlayerState,
     PlayerStateComponent,
+    setCargoCapacity,
 } from '../nova_plugin/player_state';
 import { Button } from './button';
 import { ItemGrid, ItemTile } from './item_grid';
@@ -140,6 +141,7 @@ export class Shipyard extends Menu<Entity> {
         }
         this.playerState.credits -= cost;
         this.playerState.shipId = selection.id;
+        setCargoCapacity(this.playerState, selection.cargoCapacity);
         this.input = makeShip(selection);
         this.input.components.set(PlayerShipSelector, undefined);
         this.input.components.set(MultiplayerData, multiplayerData);

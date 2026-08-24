@@ -16,6 +16,8 @@ export function getDefaultShipPhysics(): ShipPhysics {
 
 export interface ShipData extends SpaceObjectData {
     physics: ShipPhysics;
+    /** Total cargo hold capacity in tons, including cargo expansions. */
+    cargoCapacity: number;
     cost: number;
     pict: string;
     desc: string;
@@ -36,6 +38,7 @@ export function getDefaultShipData(): ShipData {
     return {
         ...getDefaultSpaceObjectData(),
         physics: getDefaultShipPhysics(),
+        cargoCapacity: 0,
         cost: 0,
         pict: "default",
         desc: "default",

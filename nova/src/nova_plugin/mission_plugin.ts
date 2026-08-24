@@ -13,10 +13,13 @@ import {
 } from './ncb';
 import {
     ActiveMission,
+    allocateCargo,
+    getFreeSpace,
     MAX_ACTIVE_MISSIONS,
     MissionCargo,
     PlayerState,
     PlayerStateComponent,
+    releaseMissionCargo,
     formatGameDate,
 } from './player_state';
 import {
@@ -251,8 +254,8 @@ function missionCargo(
 /**
  * Add a mission to PlayerState after running its OnAccept expression.
  *
- * The phase-one runtime represents delivery cargo as mission metadata. It does
- * not yet add a physical cargo item to the ship's cargo hold.
+ * Mission cargo is physical cargo: accepting a mission reserves its tons in
+ * the hold, and completion/failure/abort releases that reservation.
  */
 export function acceptMission(
     state: PlayerState,
@@ -282,8 +285,20 @@ export function acceptMission(
         ? resolved.travelDestination
         : resolved.returnDestination;
 
-    runMissionSetExpression(mission.onAccept, state, options.logger);
     const cargo = missionCargo(mission, pickupDestination);
+    if (cargo && getFreeSpace(state) < cargo.quantity) {
+        console.warn(`Cannot accept mission ${mission.id}: not enough cargo space`);
+        return undefined;
+    }
+    if (cargo && !allocateCargo(state, {
+        commodity: mission.id,
+        tons: cargo.quantity,
+        isMissionCargo: true,
+    })) {
+        console.warn(`Cannot accept mission ${mission.id}: cargo allocation failed`);
+        return undefined;
+    }
+    runMissionSetExpression(mission.onAccept, state, options.logger);
     const activeMission: ActiveMission = {
         missionId: mission.id,
         state: 'active',
@@ -295,6 +310,9 @@ export function acceptMission(
             ? {}
             : { shipSystem: resolved.shipSystem }),
         ...(cargo ? { cargo } : {}),
+        ...(mission.id.startsWith('proc:')
+            ? { missionData: mission }
+            : {}),
     };
     state.activeMissions.push(activeMission);
     return activeMission;
@@ -318,6 +336,7 @@ export function abortMission(
         return false;
     }
     runMissionSetExpression(mission.onAbort, state, logger);
+    releaseMissionCargo(state, entry.missionId);
     const index = state.activeMissions.indexOf(entry);
     if (index >= 0) {
         state.activeMissions.splice(index, 1);
@@ -403,6 +422,15 @@ export class MissionRuntime {
         return promise;
     }
 
+    private async getMissionForEntry(
+        entry: ActiveMission,
+    ): Promise<MissionData | undefined> {
+        if (entry.missionData && typeof entry.missionData === 'object') {
+            return entry.missionData as MissionData;
+        }
+        return this.getMission(entry.missionId);
+    }
+
     private async missionName(
         destination: string | undefined,
     ): Promise<string> {
@@ -442,12 +470,13 @@ export class MissionRuntime {
             }
             this.inFlight.add(key);
             try {
-                const mission = await this.getMission(entry.missionId);
+                const mission = await this.getMissionForEntry(entry);
                 if (!mission || !isExpired(state, entry, mission)) {
                     continue;
                 }
                 runMissionSetExpression(mission.onFailure, state);
                 entry.state = 'failed';
+                releaseMissionCargo(state, entry.missionId);
             } finally {
                 this.inFlight.delete(key);
             }
@@ -472,7 +501,7 @@ export class MissionRuntime {
             }
             this.inFlight.add(key);
             try {
-                const mission = await this.getMission(entry.missionId);
+                const mission = await this.getMissionForEntry(entry);
                 if (!mission) {
                     continue;
                 }
@@ -529,6 +558,7 @@ export class MissionRuntime {
     }
 
     private removeEntry(state: PlayerState, entry: ActiveMission) {
+        releaseMissionCargo(state, entry.missionId);
         const index = state.activeMissions.indexOf(entry);
         if (index >= 0) {
             state.activeMissions.splice(index, 1);

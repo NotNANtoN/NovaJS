@@ -173,11 +173,14 @@ export async function ShipParse(ship: ShipResource,
         inertialess: Boolean(ship.flags2N & 0x40),
         mass: ship.mass,
         freeMass,
-        freeCargo: ship.cargoSpace,
+        // A negative Holds value only disables mass expansions; its absolute
+        // value is still the ship's usable cargo capacity.
+        freeCargo: Math.abs(ship.cargoSpace),
     }
 
     return {
         physics,
+        cargoCapacity: Math.abs(ship.cargoSpace),
         cost: ship.cost,
         pict: pictID,
         desc: desc,
