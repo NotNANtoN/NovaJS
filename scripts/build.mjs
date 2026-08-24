@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,6 +27,36 @@ const packedPngPlugin = {
                     loader: "js",
                 };
             });
+    },
+};
+
+// Bun/npm may install a second copy of the @pixi/* packages nested inside
+// node_modules/pixi.js/node_modules. Both copies then register handlers on
+// the single shared @pixi/extensions registry, which throws "Extension type
+// renderer already has a handler" at startup. Canonicalize every @pixi/*
+// import to the top-level copy so exactly one instance is bundled.
+const dedupePixiPlugin = {
+    name: "dedupe-pixi",
+    setup(buildContext) {
+        buildContext.onResolve({ filter: /^@pixi\// }, args => {
+            const [scope, name] = args.path.split("/");
+            const rest = args.path.split("/").slice(2).join("/");
+            // Prefer the version-consistent set pinned by pixi.js itself.
+            const nested = path.join(
+                projectRoot, "node_modules", "pixi.js", "node_modules", scope, name);
+            const top = path.join(projectRoot, "node_modules", scope, name);
+            const pkgRoot = existsSync(nested) ? nested : top;
+            const pkg = JSON.parse(
+                readFileSync(path.join(pkgRoot, "package.json"), "utf8"));
+            let subPath;
+            if (rest) {
+                subPath = rest;
+            } else {
+                const exp = pkg.exports?.["."];
+                subPath = exp?.import?.default ?? exp?.import ?? pkg.module ?? pkg.main;
+            }
+            return { path: path.join(pkgRoot, subPath) };
+        });
     },
 };
 
