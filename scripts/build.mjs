@@ -64,7 +64,7 @@ const commonOptions = {
     absWorkingDir: projectRoot,
     bundle: true,
     logLevel: "info",
-    plugins: [packedPngPlugin],
+    plugins: [packedPngPlugin, dedupePixiPlugin],
     resolveExtensions: [".mjs", ".js", ".ts", ".tsx", ".jsx"],
     sourcemap: true,
     sourcesContent: true,
