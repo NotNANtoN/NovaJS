@@ -14,6 +14,7 @@ import { FireWeaponPlugin } from "./fire_weapon_plugin";
 import { HealthPlugin } from "./health_plugin";
 import { IonizedPlugin } from "./ionization_plugin";
 import { JumpPlugin } from "./jump_plugin";
+import { MissionPlugin } from "./mission_plugin";
 import { NpcPlugin } from "./npc_plugin";
 import { OutfitPlugin } from "./outfit_plugin";
 import { PlanetPlugin } from "./planet_plugin";
@@ -51,6 +52,7 @@ export const SystemPlugin: Plugin = {
         world.addPlugin(CollisionsPlugin);
         world.addPlugin(HealthPlugin);
         world.addPlugin(TargetPlugin);
+        world.addPlugin(MissionPlugin);
         world.addPlugin(BeamPlugin);
         world.addPlugin(BayPlugin);
         world.addPlugin(JumpPlugin);

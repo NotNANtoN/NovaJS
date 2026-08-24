@@ -6,6 +6,7 @@ import { Resource } from "nova_ecs/resource";
 import { SingletonComponent, World } from "nova_ecs/world";
 import { GameDataResource } from "./game_data_resource";
 import { makePlanet } from "./make_planet";
+import { NpcSpawnPlugin } from "./npc_spawn_plugin";
 import { PlayerStoreResource } from "./player_state";
 import { SystemIdResource } from "./system_id_resource";
 import { SystemPlugin } from "./system_plugin";
@@ -48,6 +49,11 @@ export function makeSystem(
     }
     world.addSystem(MakePlanetsSystem);
     world.addPlugin(SystemPlugin);
+    if (playerStore !== undefined) {
+        // NPC population is authoritative on the server. Browser-created
+        // system worlds must not independently generate ships.
+        world.addPlugin(NpcSpawnPlugin);
+    }
 
     return world;
 }

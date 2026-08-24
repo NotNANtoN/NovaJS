@@ -10,11 +10,42 @@ export const EV_NOVA_START_YEAR = 1177;
 export const EV_NOVA_START_MONTH = 10;
 export const EV_NOVA_START_DAY = 18;
 
+export const MAX_ACTIVE_MISSIONS = 16;
+
+export const MissionState = t.union([
+    t.literal('active'),
+    t.literal('completed'),
+    t.literal('failed'),
+    t.literal('aborted'),
+]);
+export type MissionState = t.TypeOf<typeof MissionState>;
+
+export const MissionCargo = t.intersection([
+    t.type({
+        type: t.number,
+        quantity: t.number,
+    }),
+    t.partial({
+        pickupDestination: t.string,
+    }),
+]);
+export type MissionCargo = t.TypeOf<typeof MissionCargo>;
+
 const ActiveMission = t.type({
     missionId: t.string,
-    state: t.string,
+    state: MissionState,
 });
-export type ActiveMission = t.TypeOf<typeof ActiveMission>;
+const ActiveMissionDetails = t.intersection([
+    ActiveMission,
+    t.partial({
+        // Optional during decode to keep player files from phase one
+        // backward-compatible. New missions always write both fields.
+        destination: t.string,
+        cargo: MissionCargo,
+        acceptedDate: t.number,
+    }),
+]);
+export type ActiveMission = t.TypeOf<typeof ActiveMissionDetails>;
 
 /**
  * A boolean array is used instead of a Set so Immer can track changes and the
@@ -24,7 +55,7 @@ export const PlayerStateCodec = t.type({
     credits: t.number,
     missionBits: t.array(t.boolean),
     gameDate: t.number,
-    activeMissions: t.array(ActiveMission),
+    activeMissions: t.array(ActiveMissionDetails),
     shipId: t.string,
     currentSystem: t.string,
 });

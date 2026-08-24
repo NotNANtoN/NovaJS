@@ -55,7 +55,11 @@ export const ManageClientsSystem = new System({
                 if (token && state) {
                     // PlayerStore copies the state before retaining it.
                     void store.save(token, {
-                        ...state,
+                        credits: state.credits,
+                        missionBits: [...state.missionBits],
+                        gameDate: state.gameDate,
+                        activeMissions: state.activeMissions.map(mission => ({ ...mission })),
+                        shipId: state.shipId,
                         currentSystem: state.currentSystem || systemId,
                     });
                 }
@@ -66,6 +70,56 @@ export const ManageClientsSystem = new System({
 });
 
 const LeaveSubscription = new Resource<Subscription>('LeaveSubscription');
+const PlayerStateSnapshots = new Resource<Map<string, string>>(
+    'PlayerStateSnapshots');
+
+function playerStateFingerprint(state: PlayerState): string {
+    let bitHash = 2166136261;
+    for (const bit of state.missionBits) {
+        bitHash ^= bit ? 1 : 0;
+        bitHash = Math.imul(bitHash, 16777619);
+    }
+    return [
+        state.credits,
+        state.gameDate,
+        state.shipId,
+        state.currentSystem,
+        bitHash,
+        JSON.stringify(state.activeMissions),
+    ].join('|');
+}
+
+const PersistPlayerStateSystem = new System({
+    name: 'PersistPlayerState',
+    args: [PlayerEntitiesQuery, PlayerStoreResource, PlayerStateSnapshots] as const,
+    step: (players, playerStore, snapshots) => {
+        const store = playerStore as PlayerStoreApi;
+        for (const [multiplayerData, uuid, state] of players) {
+            if (!state) {
+                continue;
+            }
+            const token = store.getTokenForPeer(multiplayerData.owner);
+            if (!token) {
+                continue;
+            }
+            const fingerprint = playerStateFingerprint(state);
+            if (snapshots.get(uuid) === fingerprint) {
+                continue;
+            }
+            snapshots.set(uuid, fingerprint);
+            // Copy before yielding: multiplayer may replace this Immer draft
+            // before PlayerStore.save reaches its first await.
+            void store.save(token, {
+                credits: state.credits,
+                missionBits: [...state.missionBits],
+                gameDate: state.gameDate,
+                activeMissions: state.activeMissions.map(mission => ({ ...mission })),
+                shipId: state.shipId,
+                currentSystem: state.currentSystem,
+            });
+        }
+    },
+});
 
 const ServerSystemPlugin: Plugin = {
     name: 'ServerSystemPlugin',
@@ -75,6 +129,8 @@ const ServerSystemPlugin: Plugin = {
             throw new Error('Expected CommunicatorResource to exist');
         }
         world.addSystem(ManageClientsSystem);
+        world.resources.set(PlayerStateSnapshots, new Map());
+        world.addSystem(PersistPlayerStateSystem);
         const subscription = communicator.peers.leave.subscribe(peer => {
             console.log(`${peer} left`);
             world.emit(RemovedPeerEvent, peer);

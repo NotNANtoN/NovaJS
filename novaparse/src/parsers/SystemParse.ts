@@ -1,7 +1,38 @@
 import { SystResource } from "../resource_parsers/SystResource";
-import { SystemData } from "novadatainterface/SystemData";
+import {
+    NpcShipSpawnData,
+    NpcSpawnData,
+    SystemData,
+} from "novadatainterface/SystemData";
 import { BaseParse } from "./BaseParse";
 import { BaseData } from "novadatainterface/BaseData";
+import { NovaResources } from "../resource_parsers/ResourceHolderBase";
+
+
+function resolveShips(
+    shipTypes: number[],
+    weights: number[],
+    idSpace: NovaResources,
+    notFoundFunction: (message: string) => void,
+    context: string,
+): NpcShipSpawnData[] {
+    const ships: NpcShipSpawnData[] = [];
+    for (let i = 0; i < shipTypes.length; i++) {
+        const localID = shipTypes[i];
+        const weight = weights[i];
+        if (localID <= 0 || weight <= 0) {
+            continue;
+        }
+
+        const ship = idSpace.shïp[localID];
+        if (!ship) {
+            notFoundFunction("Missing shïp id " + localID + " for " + context);
+            continue;
+        }
+        ships.push({ id: ship.globalID, weight });
+    }
+    return ships;
+}
 
 
 // TODO: Refactor redundant code
@@ -36,6 +67,7 @@ export async function SystemParse(syst: SystResource, notFoundFunction: (m: stri
     }
 
     var dudes: Array<{ id: string, weight: number }> = [];
+    var npcs: Array<NpcSpawnData> = [];
     for (var i = 0; i < syst.dudeTypes.length; i++) {
         var localID = syst.dudeTypes[i];
         var weight = syst.dudeProbabilities[i];
@@ -49,6 +81,18 @@ export async function SystemParse(syst: SystResource, notFoundFunction: (m: stri
             var dude = syst.idSpace.düde[localID];
             if (dude) {
                 dudes.push({ id: dude.globalID, weight });
+                npcs.push({
+                    id: dude.globalID,
+                    weight,
+                    government: dude.government,
+                    ships: resolveShips(
+                        dude.shipTypes,
+                        dude.probabilities,
+                        syst.idSpace,
+                        notFoundFunction,
+                        "düde " + dude.globalID,
+                    ),
+                });
             }
             else {
                 notFoundFunction("Missing düde id " + localID + " for sÿst " + base.id);
@@ -58,6 +102,24 @@ export async function SystemParse(syst: SystResource, notFoundFunction: (m: stri
             var flet = syst.idSpace.flët[-localID];
             if (flet) {
                 dudes.push({ id: flet.globalID, weight });
+                // A flët has no per-ship probabilities. Include its lead ship
+                // and active escort classes as equally likely fallback spawn
+                // choices. Slots with no escorts are intentionally ignored.
+                const activeEscorts = flet.escortTypes.filter((_type, index) =>
+                    flet.minEscorts[index] > 0 || flet.maxEscorts[index] > 0);
+                const shipTypes = [flet.leadShipType, ...activeEscorts];
+                npcs.push({
+                    id: flet.globalID,
+                    weight,
+                    government: flet.government,
+                    ships: resolveShips(
+                        shipTypes,
+                        shipTypes.map(() => 1),
+                        syst.idSpace,
+                        notFoundFunction,
+                        "flët " + flet.globalID,
+                    ),
+                });
             }
             else {
                 notFoundFunction("Missing flët id " + (-localID) + " for sÿst " + base.id);
@@ -72,6 +134,7 @@ export async function SystemParse(syst: SystResource, notFoundFunction: (m: stri
         position: [syst.position[0], syst.position[1]],
         planets,
         dudes,
+        npcs,
         avgShips: syst.avgShips
     }
 

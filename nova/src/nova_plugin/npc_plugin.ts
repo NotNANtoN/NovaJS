@@ -1,7 +1,9 @@
+import * as t from "io-ts";
 import { ShipData } from "novadatainterface/ShipData";
 import { Entities, UUID } from "nova_ecs/arg_types";
 import { Component } from "nova_ecs/component";
 import { Plugin } from "nova_ecs/plugin";
+import { DeltaResource } from "nova_ecs/plugins/delta_plugin";
 import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
 import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { Query } from "nova_ecs/query";
@@ -15,6 +17,7 @@ import { GameDataResource } from "./game_data_resource";
 
 const TargetsQuery = new Query([UUID, ShipComponent] as const);
 function getValidTargets(targets: Array<readonly [string, any]>, selfUuid: string): string[] {
+    // TODO: Filter targets using the governments' ally/enemy relationships.
     return targets.filter(([targetId]) => targetId !== selfUuid)
         .map(([uuid]) => uuid);
 }
@@ -85,6 +88,12 @@ export const DeathAISystem = new System({
     }
 })
 
+const GovtData = t.type({
+    id: t.number,
+});
+export type GovtData = t.TypeOf<typeof GovtData>;
+export const GovtComponent = new Component<GovtData>('GovtComponent');
+
 export function makeNpc(shipData: ShipData) {
     const ship = makeShip(shipData);
     ship.components.set(ChooseRandomTargetComponent, {
@@ -99,6 +108,14 @@ export function makeNpc(shipData: ShipData) {
 export const NpcPlugin: Plugin = {
     name: 'NpcPlugin',
     build(world) {
+        const deltaMaker = world.resources.get(DeltaResource);
+        if (!deltaMaker) {
+            throw new Error('Expected delta maker resource to exist');
+        }
+        deltaMaker.addComponent(GovtComponent, {
+            componentType: GovtData,
+        });
+        world.addComponent(GovtComponent);
         world.addSystem(ChooseRandomTargetAI);
         world.addSystem(FollowAI);
         world.addSystem(ShootAllWeaponsAI);

@@ -10,6 +10,13 @@ const MAX_MISSION_BITS = 10_000;
 export interface PersistentActiveMission {
     missionId: string;
     state: string;
+    destination?: string;
+    cargo?: {
+        type: number;
+        quantity: number;
+        pickupDestination?: string;
+    };
+    acceptedDate?: number;
 }
 
 export interface PersistentPlayerState {
@@ -30,13 +37,29 @@ const ActiveMission = t.type({
     missionId: t.string,
     state: t.string,
 });
+const ActiveMissionDetails = t.intersection([
+    ActiveMission,
+    t.partial({
+        destination: t.string,
+        cargo: t.intersection([
+            t.type({
+                type: t.number,
+                quantity: t.number,
+            }),
+            t.partial({
+                pickupDestination: t.string,
+            }),
+        ]),
+        acceptedDate: t.number,
+    }),
+]);
 
 const StoredPlayerCodec = t.intersection([
     t.type({
         credits: t.number,
         missionBits: t.array(t.boolean),
         gameDate: t.number,
-        activeMissions: t.array(ActiveMission),
+        activeMissions: t.array(ActiveMissionDetails),
         shipId: t.string,
         currentSystem: t.string,
     }),
