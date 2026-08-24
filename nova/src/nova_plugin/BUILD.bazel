@@ -7,6 +7,8 @@ ts_library(
     name = "nova_plugin",
     srcs = [
         "nova_plugin.ts",
+        "govt_relations.ts",
+        "npc_hostility.ts",
         "system_plugin.ts",
         "platform_plugin.ts",
         "game_data_resource.ts",
@@ -15,6 +17,7 @@ ts_library(
         "ncb.ts",
         "mission_availability.ts",
         "mission_plugin.ts",
+        "stellar_selector.ts",
         "make_ship.ts",
         "ship_plugin.ts",
         "control_state_event.ts",
@@ -86,6 +89,8 @@ ts_library(
         "ncb_test.ts",
         "mission_availability_test.ts",
         "mission_plugin_test.ts",
+        "govt_relations_test.ts",
+        "stellar_selector_test.ts",
     ],
     deps = [
         ":nova_plugin",

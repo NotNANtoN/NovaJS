@@ -21,8 +21,13 @@ import {
 } from './player_state';
 import {
     MissionPlanetSelector,
-    resolveMissionCompletionDestination,
 } from './mission_availability';
+import {
+    GovernmentRelation,
+    resolveStellarSelector,
+    resolveSystemSelector,
+    StellarSelectorContext,
+} from './stellar_selector';
 
 export interface MissionNotice {
     missionId: string;
@@ -33,7 +38,23 @@ export interface MissionNotice {
 export interface MissionDestinationOptions {
     initialPlanetId: string;
     planets?: readonly MissionPlanetSelector[];
+    systems?: readonly {
+        id: string;
+        links?: readonly string[];
+        planets?: readonly string[];
+        government?: number;
+    }[];
+    governments?: readonly GovernmentRelation[];
+    initialSystemId?: string;
+    currentSystemId?: string;
     random?: () => number;
+    resolved?: ResolvedMissionDestinations;
+}
+
+export interface ResolvedMissionDestinations {
+    travelDestination: string | '*';
+    returnDestination: string | '*';
+    shipSystem?: string;
 }
 
 export interface MissionTextValues {
@@ -81,6 +102,93 @@ export function formatMissionText(
 
 function noOpMissionOperation(operation: NcbOperation) {
     console.warn(`Mission operation '${operation.type}' is not implemented yet`);
+}
+
+function missionSelectorContext(
+    state: PlayerState,
+    options: MissionDestinationOptions,
+): StellarSelectorContext {
+    return {
+        planets: options.planets,
+        systems: options.systems,
+        governments: options.governments,
+        initialPlanetId: options.initialPlanetId,
+        initialSystemId: options.initialSystemId ?? state.currentSystem,
+        currentSystemId: options.currentSystemId ?? state.currentSystem,
+        random: options.random,
+    };
+}
+
+function concreteStellarDestination(
+    selector: number,
+    resolution: ReturnType<typeof resolveStellarSelector>,
+    options: MissionDestinationOptions,
+): string | '*' | undefined {
+    if (resolution.wildcard) {
+        return '*';
+    }
+    if (resolution.selected) {
+        return resolution.selected;
+    }
+    // A fixed resource ID remains meaningful when a caller has not loaded a
+    // galaxy catalog. With a catalog, an absent fixed resource is invalid.
+    if (options.planets === undefined
+        && selector >= 128 && selector <= 2175) {
+        return `nova:${selector}`;
+    }
+    return undefined;
+}
+
+/**
+ * Resolve every mission selector once at offer/accept time. The concrete
+ * values are written to ActiveMission so random destinations never change
+ * when a pilot is reloaded or the mission board is rendered again.
+ */
+export function resolveMissionDestinations(
+    state: PlayerState,
+    mission: MissionData,
+    options: MissionDestinationOptions,
+): ResolvedMissionDestinations | undefined {
+    const baseContext = missionSelectorContext(state, options);
+    const travelResolution = resolveStellarSelector(
+        mission.travelStel, baseContext, 'destination');
+    const travelDestination = concreteStellarDestination(
+        mission.travelStel, travelResolution, options);
+    if (travelDestination === undefined) {
+        return undefined;
+    }
+
+    const returnResolution = resolveStellarSelector(
+        mission.returnStel,
+        {
+            ...baseContext,
+            travelPlanetId: travelDestination === '*' ? undefined : travelDestination,
+        },
+        'destination');
+    const returnDestination = concreteStellarDestination(
+        mission.returnStel, returnResolution, options);
+    if (returnDestination === undefined) {
+        return undefined;
+    }
+
+    let shipSystem: string | undefined;
+    if (mission.shipCount >= 0 || mission.shipSyst !== -1) {
+        const systemResolution = resolveSystemSelector(mission.shipSyst, {
+            ...baseContext,
+            travelPlanetId: travelDestination === '*' ? undefined : travelDestination,
+            returnPlanetId: returnDestination === '*' ? undefined : returnDestination,
+        });
+        shipSystem = systemResolution.selected;
+        if (!shipSystem && options.systems === undefined
+            && mission.shipSyst >= 128 && mission.shipSyst <= 2175) {
+            shipSystem = `nova:${mission.shipSyst}`;
+        }
+        if (!shipSystem) {
+            return undefined;
+        }
+    }
+
+    return { travelDestination, returnDestination, shipSystem };
 }
 
 function runMissionSetExpression(
@@ -163,24 +271,16 @@ export function acceptMission(
         return undefined;
     }
 
-    const pickupDestination = resolveMissionCompletionDestination(
-        {
-            ...mission,
-            returnStel: mission.travelStel,
-            dropOffMode: 0,
-        },
-        options.initialPlanetId,
-        options,
-    );
-    const destination = resolveMissionCompletionDestination(
-        mission,
-        options.initialPlanetId,
-        options,
-    );
-    if (destination === undefined) {
+    const resolved = options.resolved ?? resolveMissionDestinations(
+        state, mission, options);
+    if (!resolved) {
         console.warn(`Cannot accept mission ${mission.id}: destination cannot be resolved`);
         return undefined;
     }
+    const pickupDestination = resolved.travelDestination;
+    const destination = mission.returnStel === -1 && mission.dropOffMode === 0
+        ? resolved.travelDestination
+        : resolved.returnDestination;
 
     runMissionSetExpression(mission.onAccept, state, options.logger);
     const cargo = missionCargo(mission, pickupDestination);
@@ -188,7 +288,12 @@ export function acceptMission(
         missionId: mission.id,
         state: 'active',
         destination,
+        travelDestination: resolved.travelDestination,
+        returnDestination: resolved.returnDestination,
         acceptedDate: state.gameDate,
+        ...(resolved.shipSystem === undefined
+            ? {}
+            : { shipSystem: resolved.shipSystem }),
         ...(cargo ? { cargo } : {}),
     };
     state.activeMissions.push(activeMission);
@@ -244,16 +349,23 @@ function missionDeadline(state: PlayerState, entry: ActiveMission, mission: Miss
         : undefined;
 }
 
+function missionTravelDestination(entry: ActiveMission): string | undefined {
+    return entry.travelDestination === '*' && entry.destination !== '*'
+        ? entry.destination
+        : entry.travelDestination ?? entry.destination;
+}
+
 function missionTextValues(
     state: PlayerState,
     entry: ActiveMission,
     mission: MissionData,
     destinationName: string,
+    returnDestinationName = destinationName,
 ): MissionTextValues {
     const deadline = missionDeadline(state, entry, mission);
     return {
         destination: destinationName,
-        returnDestination: destinationName,
+        returnDestination: returnDestinationName,
         cargo: mission.cargo ?? undefined,
         quantity: entry.cargo?.quantity,
         deadline: deadline === undefined ? undefined : formatGameDate(deadline),
@@ -365,14 +477,18 @@ export class MissionRuntime {
                     continue;
                 }
                 if (entry.state === 'failed') {
-                    const destinationName = await this.missionName(entry.destination);
+                    const destinationName = await this.missionName(
+                        missionTravelDestination(entry));
+                    const returnDestinationName = await this.missionName(
+                        entry.returnDestination ?? entry.destination);
                     notices.push({
                         missionId: entry.missionId,
                         kind: 'failure',
                         text: formatMissionText(
                             mission.failText || 'Mission failed.',
                             missionTextValues(
-                                state, entry, mission, destinationName),
+                                state, entry, mission,
+                                destinationName, returnDestinationName),
                         ),
                     });
                     this.removeEntry(state, entry);
@@ -390,14 +506,18 @@ export class MissionRuntime {
                 } else if (mission.payVal < -1) {
                     console.warn(`Mission pay value ${mission.payVal} is not implemented`);
                 }
-                const destinationName = await this.missionName(entry.destination);
+                const destinationName = await this.missionName(
+                    missionTravelDestination(entry));
+                const returnDestinationName = await this.missionName(
+                    entry.returnDestination ?? entry.destination);
                 notices.push({
                     missionId: entry.missionId,
                     kind: 'success',
                     text: formatMissionText(
                         mission.compText || 'Mission complete.',
                         missionTextValues(
-                            state, entry, mission, destinationName),
+                            state, entry, mission,
+                            destinationName, returnDestinationName),
                     ),
                 });
                 this.removeEntry(state, entry);

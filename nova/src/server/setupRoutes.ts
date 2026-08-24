@@ -11,8 +11,8 @@ import { NovaDataType } from "../../../novadatainterface/NovaDataInterface";
  * Serves GameData to the client
  * Maybe consider https://github.com/RioloGiuseppe/byte-serializer in the future?
  */
-export function setupRoutes(gameData: GameDataInterface, app: Express, htmlPath: string, bundlePath: string, bundleMapPath: string, settingsPath: string) {
-    return new GameDataServer(gameData, app, htmlPath, bundlePath, bundleMapPath, settingsPath);
+export function setupRoutes(gameData: GameDataInterface, app: Express, htmlPath: string, bundlePath: string, bundleMapPath: string, settingsPath: string, novaDataPath?: string) {
+    return new GameDataServer(gameData, app, htmlPath, bundlePath, bundleMapPath, settingsPath, novaDataPath);
 }
 
 function gzipMiddleware(req: express.Request, res: express.Response,
@@ -85,7 +85,8 @@ class GameDataServer {
         private readonly htmlPath: string,
         private readonly bundlePath: string,
         private readonly bundleMapPath: string,
-        private readonly settingsPath: string) {
+        private readonly settingsPath: string,
+        private readonly novaDataPath?: string) {
         this.setupRoutes();
     }
 
@@ -106,6 +107,14 @@ class GameDataServer {
         this.app.get(path.join(dataPath, ":name/:item.mp3"), this.requestFulfiller.bind(this));
         this.app.get(path.join(dataPath, ":name/:item"), this.requestFulfiller.bind(this));
         this.app.get(idsPath + ".json", this.idRequestFulfiller.bind(this));
+
+        if (this.novaDataPath) {
+            this.app.get("/music/Nova%20Music.mp3", (_req, res) => {
+                res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+                res.sendFile(path.join(this.novaDataPath!, "Nova Files",
+                    "Nova Music.mp3"));
+            });
+        }
 
         this.app.use('/preloadData.json', async (_req, res) => {
             res.send(this.gameData.preloadData ? await this.gameData.preloadData : {});

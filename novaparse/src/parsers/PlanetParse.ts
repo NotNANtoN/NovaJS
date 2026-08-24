@@ -84,6 +84,8 @@ export async function PlanetParse(spob: SpobResource, notFoundFunction: (m: stri
             turnRate: 0,
             inertialess: true,
         },
-        position: [spob.position[0], spob.position[1]]
+        position: [spob.position[0], spob.position[1]],
+        government: spob.government,
+        inhabited: (spob.flags & 0x20) === 0,
     }
 }

@@ -26,6 +26,7 @@ ts_library(
         "starmap_plugin.ts",
         "screen_size_plugin.ts",
         "sound_plugin.ts",
+        "music.ts",
         "ship_animation_plugin.ts",
     ],
     deps = [

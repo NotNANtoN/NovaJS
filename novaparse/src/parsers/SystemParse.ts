@@ -135,7 +135,8 @@ export async function SystemParse(syst: SystResource, notFoundFunction: (m: stri
         planets,
         dudes,
         npcs,
-        avgShips: syst.avgShips
+        avgShips: syst.avgShips,
+        government: syst.government,
     }
 
 }

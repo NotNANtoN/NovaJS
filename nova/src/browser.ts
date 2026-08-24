@@ -14,6 +14,7 @@ import { MultiRoom } from "./communication/multi_room_communicator";
 import { SocketChannelClient } from "./communication/SocketChannelClient";
 import { DebugSettings } from "./debug_settings";
 import { Display } from "./display/display_plugin";
+import { startTitleMusicOnGesture, stopTitleMusic } from "./display/music";
 import { PixiAppResource } from "./display/pixi_app_resource";
 import { ResizeEvent } from "./display/screen_size_plugin";
 import { Stage } from "./display/stage_resource";
@@ -51,6 +52,7 @@ const app = new PIXI.Application({
 
 (window as any).app = app;
 document.body.appendChild(app.view as any);
+startTitleMusicOnGesture();
 
 const channel = new SocketChannelClient({});
 const communicator = new CommunicatorClient(channel);
@@ -163,6 +165,7 @@ async function startGame() {
         to: systemId,
         uuid: v4(),
     });
+    stopTitleMusic();
 
     // if (activeSystem) {
     //     await activeSystem.addPlugin(Display);

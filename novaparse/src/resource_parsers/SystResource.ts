@@ -9,6 +9,7 @@ class SystResource extends BaseResource {
     dudeTypes: number[];
     dudeProbabilities: number[];
     avgShips: number;
+    government: number;
     constructor(resource: Resource, idSpace: NovaResources) {
         super(resource, idSpace);
         var d = resource.data;
@@ -40,6 +41,9 @@ class SystResource extends BaseResource {
             this.dudeProbabilities.push(d.getInt16(84 + i * 2));
         }
         this.avgShips = d.getInt16(100);
+        // Govt follows AvgShips in the sÿst resource. Older fixtures may end
+        // at AvgShips, in which case the system is independent.
+        this.government = d.byteLength >= 104 ? d.getInt16(102) : -1;
     }
 }
 

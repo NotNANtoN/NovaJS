@@ -1,5 +1,6 @@
 import { getDefaultCicnData } from "./CicnData";
 import { getDefaultExplosionData } from "./ExplosionData";
+import { getDefaultGovtData } from "./GovtData";
 import { GameDataInterface } from "./GameDataInterface";
 import { Gettable } from "./Gettable";
 import { NovaDataInterface } from "./NovaDataInterface";
@@ -50,6 +51,7 @@ type MockNovaDataInterface = {
 export class MockGameData implements GameDataInterface {
     data: MockNovaDataInterface = {
         Explosion: new MockGettable(getDefaultExplosionData()),
+        Govt: new MockGettable(getDefaultGovtData()),
         Outfit: new MockGettable(getDefaultOutfitData()),
         Pict: new MockGettable(getDefaultPictData()),
         PictImage: new MockGettable(new Uint8Array(0) as Buffer),

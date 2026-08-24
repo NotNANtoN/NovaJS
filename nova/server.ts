@@ -101,7 +101,8 @@ async function startGame() {
     repl.repl.context.gameData = gameData;
     repl.repl.context.makeShip = makeShip;
 
-    setupRoutes(gameData, app, htmlPath, bundlePath, bundleMapPath, clientSettingsPath);
+    setupRoutes(gameData, app, htmlPath, bundlePath, bundleMapPath,
+        clientSettingsPath, novaDataPath);
 
     httpServer.listen(port, function() {
         console.log("listening at port " + port);

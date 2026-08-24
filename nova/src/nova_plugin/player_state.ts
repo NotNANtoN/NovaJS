@@ -41,6 +41,9 @@ const ActiveMissionDetails = t.intersection([
         // Optional during decode to keep player files from phase one
         // backward-compatible. New missions always write both fields.
         destination: t.string,
+        travelDestination: t.string,
+        returnDestination: t.string,
+        shipSystem: t.string,
         cargo: MissionCargo,
         acceptedDate: t.number,
     }),

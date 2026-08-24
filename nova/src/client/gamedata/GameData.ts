@@ -2,6 +2,7 @@ import { BaseData } from 'novadatainterface/BaseData';
 import { CicnData } from 'novadatainterface/CicnData';
 import { CicnImageData } from 'novadatainterface/CicnImage';
 import { ExplosionData } from 'novadatainterface/ExplosionData';
+import { GovtData } from 'novadatainterface/GovtData';
 import { GameDataInterface, PreloadData } from 'novadatainterface/GameDataInterface';
 import { Gettable } from 'novadatainterface/Gettable';
 import { NovaDataInterfaceWithMission, NovaDataType } from 'novadatainterface/NovaDataInterface';
@@ -72,6 +73,7 @@ export class GameData implements GameDataInterface {
             SpriteSheetFrames: this.addTextureGettable<SpriteSheetFramesData>(NovaDataType.SpriteSheetFrames),
             StatusBar: this.addGettable<StatusBarData>(NovaDataType.StatusBar),
             Explosion: this.addGettable<ExplosionData>(NovaDataType.Explosion),
+            Govt: this.addGettable<GovtData>(NovaDataType.Govt),
             SoundFile: this.addSoundFileGettable(),
             Sound: this.addSoundGettable(),
         };

@@ -21,7 +21,9 @@ export interface SystemData extends BaseData {
     dudes: Array<{ id: string, weight: number }>,
     // Normalized düde/flët data used by server-side NPC population.
     npcs: Array<NpcSpawnData>,
-    avgShips: number
+    avgShips: number,
+    /** Raw controlling government ID; -1 means independent. */
+    government?: number,
 }
 
 export function getDefaultSystemData(): SystemData {
@@ -32,6 +34,7 @@ export function getDefaultSystemData(): SystemData {
         planets: [],
         dudes: [],
         npcs: [],
-        avgShips: 0
+        avgShips: 0,
+        government: -1,
     };
 }

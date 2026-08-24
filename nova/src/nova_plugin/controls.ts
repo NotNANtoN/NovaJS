@@ -61,6 +61,8 @@ const SavedControlsPartialObject = t.partial({
     'properties': ControlInputs,
     'missions': ControlInputs,
     'fullscreen': ControlInputs,
+    'volumeUp': ControlInputs,
+    'volumeDown': ControlInputs,
 });
 
 const ControlAction = t.keyof(SavedControlsPartialObject.props);

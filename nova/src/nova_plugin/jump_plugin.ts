@@ -10,6 +10,7 @@ import { deImmerify } from "../util/deimmerify";
 import { ControlStateEvent } from "./control_state_event";
 import { PlayerShipSelector } from "./player_ship_plugin";
 import { advanceGameDate, PlayerStateComponent } from "./player_state";
+import { SoundEvent } from "./sound_event";
 import { SystemIdResource } from "./system_id_resource";
 
 export interface InitiateJump {
@@ -49,6 +50,7 @@ const JumpFromSystem = new System({
             playerState.currentSystem = to;
         }
         // TODO: Animation etc.
+        emit(SoundEvent, { id: 'nova:130' });
         deImmerify(entity);
         emit(FinishJumpEvent, { entity, uuid, to });
     }
@@ -64,6 +66,7 @@ const PlayerJumpControl = new System({
             // TODO: Prevent this from being called twice before a jump.
             const nextSystem = jumpRoute.route.shift();
             if (nextSystem) {
+                emit(SoundEvent, { id: 'nova:128' });
                 emit(InitiateJumpEvent, { to: nextSystem }, [uuid]);
             }
         }

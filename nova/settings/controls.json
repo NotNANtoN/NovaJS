@@ -47,5 +47,7 @@
   "depart": ["Escape", "KeyD"],
   "properties": "KeyP",
   "missions": "KeyM",
-  "fullscreen": "Enter"
+  "fullscreen": "Enter",
+  "volumeUp": "Equal",
+  "volumeDown": "Minus"
 }

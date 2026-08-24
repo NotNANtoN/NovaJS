@@ -74,4 +74,71 @@ describe('mission availability', () => {
         });
         expect(getOfferableMissions(input)).toEqual([]);
     });
+
+    it('evaluates government and adjacent-system AvailStel selectors', () => {
+        const missions = [
+            { value: 10000, id: 'nova:203' },
+            { value: 15000, id: 'nova:204' },
+            { value: 20000, id: 'nova:205' },
+            { value: 25000, id: 'nova:206' },
+            { value: 30000, id: 'nova:207' },
+            { value: 31000, id: 'nova:208' },
+            { value: 5129, id: 'nova:209' },
+        ].map(({ value, id }) => ({
+            ...getDefaultMissionData(),
+            id,
+            availStel: value,
+            travelStel: -1,
+            returnStel: -1,
+        }));
+        const input: MissionAvailabilityInput = {
+            ...makeInput(missions[0]!),
+            missionIds: missions.map(mission => mission.id),
+            missions: new Map(missions.map(mission => [mission.id, mission])),
+            currentPlanet: {
+                id: 'nova:128',
+                inhabited: true,
+                government: 128,
+                systemId: 'nova:128',
+            },
+            currentSystem: {
+                id: 'nova:128',
+                government: 128,
+                links: ['nova:129'],
+                planets: ['nova:128'],
+            },
+            destinationPlanets: [
+                { id: 'nova:128', inhabited: true, government: 128, systemId: 'nova:128' },
+                { id: 'nova:129', inhabited: true, government: 129, systemId: 'nova:129' },
+                { id: 'nova:130', inhabited: true, government: 130, systemId: 'nova:130' },
+            ],
+            destinationSystems: [
+                {
+                    id: 'nova:128',
+                    government: 128,
+                    links: ['nova:129'],
+                    planets: ['nova:128'],
+                },
+                {
+                    id: 'nova:129',
+                    government: 129,
+                    links: ['nova:128'],
+                    planets: ['nova:129'],
+                },
+                {
+                    id: 'nova:130',
+                    government: 130,
+                    links: ['nova:129'],
+                    planets: ['nova:130'],
+                },
+            ],
+            governments: [
+                { index: 0, classes: [7], allies: [8], enemies: [9] },
+                { index: 1, classes: [7, 8], allies: [], enemies: [] },
+                { index: 2, classes: [9], allies: [], enemies: [] },
+            ],
+        };
+        expect(getOfferableMissions(input).map(mission => mission.id))
+            .toEqual(['nova:203', 'nova:207', 'nova:209']);
+    });
 });

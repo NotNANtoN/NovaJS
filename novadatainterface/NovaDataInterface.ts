@@ -1,6 +1,7 @@
 import { CicnData } from "./CicnData";
 import { CicnImageData } from "./CicnImage";
 import { ExplosionData } from "./ExplosionData";
+import { GovtData } from "./GovtData";
 import { Gettable } from "./Gettable";
 import { OutfitData } from "./OutiftData";
 import { PictData } from "./PictData";
@@ -33,6 +34,7 @@ enum NovaDataType {
     SpriteSheetFrames = "SpriteSheetFrames",
     StatusBar = "StatusBar",
     Explosion = "Explosion",
+    Govt = "Govt",
     SoundFile = "SoundFile",
 };
 
@@ -54,6 +56,8 @@ type NovaDataInterface = {
     SpriteSheetFrames: Gettable<SpriteSheetFramesData>,
     StatusBar: Gettable<StatusBarData>,
     Explosion: Gettable<ExplosionData>,
+    /** Optional for legacy generated-data providers. */
+    Govt?: Gettable<GovtData>,
     SoundFile: Gettable<SoundFile>,
 }
 

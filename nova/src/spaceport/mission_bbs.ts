@@ -1,6 +1,7 @@
 import { MissionData, MissionOfferLocation } from 'novadatainterface/MissionData';
 import { PlanetData } from 'novadatainterface/PlanetData';
 import { SystemData } from 'novadatainterface/SystemData';
+import { GovtData } from 'novadatainterface/GovtData';
 import { Entity } from 'nova_ecs/entity';
 import * as PIXI from 'pixi.js';
 import { Observable } from 'rxjs';
@@ -11,17 +12,18 @@ import {
     abortMission,
     formatMissionText,
     MissionDestinationOptions,
+    resolveMissionDestinations,
+    ResolvedMissionDestinations,
     refuseMission,
 } from '../nova_plugin/mission_plugin';
 import {
     getOfferableMissions,
     MissionPlanetSelector,
-    resolveMissionCompletionDestination,
-    resolveStellarSelector,
 } from '../nova_plugin/mission_availability';
 import {
     ActiveMission,
     formatGameDate,
+    PlayerState,
     PlayerStateComponent,
 } from '../nova_plugin/player_state';
 import { Button } from './button';
@@ -53,8 +55,14 @@ const MISSION_FONT = {
 export interface MissionBoardWorld {
     systems: readonly SystemData[];
     planets: readonly MissionPlanetSelector[];
+    governments: readonly GovtData[];
     planetNames: ReadonlyMap<string, string>;
     systemNames: ReadonlyMap<string, string>;
+}
+
+interface MissionOffer {
+    mission: MissionData;
+    resolved: ResolvedMissionDestinations;
 }
 
 const worldCache = new WeakMap<GameData, Promise<MissionBoardWorld>>();
@@ -90,10 +98,21 @@ async function loadMissionWorld(gameData: GameData): Promise<MissionBoardWorld> 
                 entry !== undefined)
             .map(([planet, id]) => ({
                 id,
-                // PlanetData does not expose habitation yet. The missions
-                // currently represented by the client use landing planets.
-                inhabited: true,
+                inhabited: planet.inhabited,
+                government: planet.government,
+                systemId: systems.find(system => system.planets.some(
+                    planetId => sameId(planetId, id)))?.id,
             }));
+        const govtGettable = gameData.data.Govt;
+        const governments = govtGettable
+            ? (await Promise.all((ids.Govt ?? []).map(async id => {
+                try {
+                    return await govtGettable.get(id);
+                } catch {
+                    return undefined;
+                }
+            }))).filter((govt): govt is GovtData => govt !== undefined)
+            : [];
         const planetNames = new Map(
             planetsWithData
                 .filter((entry): entry is readonly [PlanetData, string] =>
@@ -101,7 +120,7 @@ async function loadMissionWorld(gameData: GameData): Promise<MissionBoardWorld> 
                 .map(([planet, id]) => [id, planet.name]),
         );
         const systemNames = new Map(systems.map(system => [system.id, system.name]));
-        return { systems, planets, planetNames, systemNames };
+        return { systems, planets, governments, planetNames, systemNames };
     })();
     worldCache.set(gameData, promise);
     return promise;
@@ -174,22 +193,18 @@ function missionValues(
     planetId: string,
     world: MissionBoardWorld,
     stateDate: number,
+    resolved?: ResolvedMissionDestinations,
 ) {
-    const destination = resolveMissionCompletionDestination(
-        mission,
-        planetId,
-        { planets: world.planets, random: () => 0 },
-    );
-    const travelDestination = resolveStellarSelectorForText(
-        mission.travelStel, planetId, world);
-    const returnDestination = resolveStellarSelectorForText(
-        mission.returnStel, planetId, world);
-    const destinationLabel = planetName(travelDestination ?? destination, world);
-    const returnLabel = planetName(returnDestination ?? destination, world);
+    const travelDestination = resolved?.travelDestination
+        ?? (mission.travelStel === -1 ? '*' : undefined);
+    const returnDestination = resolved?.returnDestination
+        ?? (mission.returnStel === -1 ? '*' : undefined);
+    const destinationLabel = planetName(travelDestination, world);
+    const returnLabel = planetName(returnDestination, world);
     const destinationSystem = systemNameForPlanet(
-        travelDestination ?? destination, world);
+        travelDestination, world);
     const returnSystem = systemNameForPlanet(
-        returnDestination ?? destination, world);
+        returnDestination, world);
     return {
         destination: destinationLabel,
         destinationSystem,
@@ -202,18 +217,6 @@ function missionValues(
             : undefined,
         pay: mission.payVal > 0 ? mission.payVal : undefined,
     };
-}
-
-function resolveStellarSelectorForText(
-    selector: number,
-    planetId: string,
-    world: MissionBoardWorld,
-) {
-    return resolveStellarSelector(selector, {
-        initialPlanetId: planetId,
-        planets: world.planets,
-        random: () => 0,
-    });
 }
 
 export class MissionInfo extends Menu<Entity> {
@@ -315,15 +318,22 @@ export class MissionInfo extends Menu<Entity> {
         }
         this.abortButton.state = selected.mission.canAbort
             && selected.entry.state === 'active' ? 'normal' : 'grey';
-        const destination = planetName(selected.entry.destination, {
-            systems: [], planets: [], planetNames: new Map(), systemNames: new Map(),
-        });
+        const destination = planetName(
+            selected.entry.travelDestination ?? selected.entry.destination, {
+                systems: [], planets: [], governments: [],
+                planetNames: new Map(), systemNames: new Map(),
+            });
+        const returnDestination = planetName(
+            selected.entry.returnDestination ?? selected.entry.destination, {
+                systems: [], planets: [], governments: [],
+                planetNames: new Map(), systemNames: new Map(),
+            });
         this.detail.text = formatMissionText(
             selected.mission.quickBrief || selected.mission.briefText
             || 'Mission briefing unavailable.',
             {
                 destination,
-                returnDestination: destination,
+                returnDestination,
                 cargo: selected.mission.cargo ?? undefined,
                 quantity: selected.entry.cargo?.quantity,
                 pay: selected.mission.payVal > 0
@@ -362,7 +372,7 @@ export abstract class MissionBoard extends Menu<Entity> {
     private readonly list: PIXI.Text;
     private readonly detail: PIXI.Text;
     private readonly status: PIXI.Text;
-    private offers: MissionData[] = [];
+    private offers: MissionOffer[] = [];
     private world?: MissionBoardWorld;
     private selectionIndex = -1;
     private readonly planetId: string;
@@ -444,16 +454,33 @@ export abstract class MissionBoard extends Menu<Entity> {
                 links: [],
                 planets: [],
             };
-        this.offers = getOfferableMissions({
+        const currentPlanet = world.planets.find(planet =>
+            sameId(planet.id, this.planetId)) ?? { id: this.planetId };
+        const offerable = getOfferableMissions({
             missionIds: [...missions.keys()],
             missions,
             playerState: state,
-            currentPlanet: { id: this.planetId, inhabited: true },
+            currentPlanet,
             currentSystem,
             offerLocation: this.offerLocation,
             destinationPlanets: world.planets,
             destinationSystems: world.systems,
+            governments: world.governments,
         }).sort((a, b) => b.displayWeight - a.displayWeight);
+        this.offers = offerable
+            .map(mission => ({
+                mission,
+                resolved: resolveMissionDestinations(state, mission, {
+                    initialPlanetId: this.planetId,
+                    planets: world.planets,
+                    systems: world.systems,
+                    governments: world.governments,
+                    initialSystemId: state.currentSystem,
+                    currentSystemId: state.currentSystem,
+                }),
+            }))
+            .filter((offer): offer is MissionOffer =>
+                offer.resolved !== undefined);
         this.selectionIndex = this.offers.length > 0 ? 0 : -1;
         this.render();
     }
@@ -469,10 +496,18 @@ export abstract class MissionBoard extends Menu<Entity> {
         this.render();
     }
 
-    private destinationOptions(): MissionDestinationOptions {
+    private destinationOptions(
+        state: Pick<PlayerState, 'currentSystem'>,
+        resolved: ResolvedMissionDestinations,
+    ): MissionDestinationOptions {
         return {
             initialPlanetId: this.planetId,
             planets: this.world?.planets,
+            systems: this.world?.systems,
+            governments: this.world?.governments,
+            initialSystemId: state.currentSystem,
+            currentSystemId: state.currentSystem,
+            resolved,
         };
     }
 
@@ -486,55 +521,60 @@ export abstract class MissionBoard extends Menu<Entity> {
         if (!world) {
             return;
         }
-        this.list.text = this.offers.map((mission, index) =>
-            `${index === this.selectionIndex ? '▶ ' : '  '}${mission.name}`
-            + `\n   ${firstBriefLine(mission)}`).join('\n');
-        const mission = this.offers[this.selectionIndex];
-        if (!mission) {
+        this.list.text = this.offers.map((offer, index) =>
+            `${index === this.selectionIndex ? '▶ ' : '  '}${offer.mission.name}`
+            + `\n   ${firstBriefLine(offer.mission)}`).join('\n');
+        const offer = this.offers[this.selectionIndex];
+        if (!offer) {
             return;
         }
         const state = this.input.components.get(PlayerStateComponent);
         const values = missionValues(
-            mission, this.planetId, world, state?.gameDate ?? 0);
+            offer.mission, this.planetId, world, state?.gameDate ?? 0,
+            offer.resolved);
         this.detail.text = formatMissionText(
-            mission.briefText || mission.quickBrief || mission.offerText
+            offer.mission.briefText || offer.mission.quickBrief
+            || offer.mission.offerText
             || 'Mission briefing unavailable.',
             values,
         );
-        this.status.text = `Payment: ${mission.payVal > 0
-            ? `${mission.payVal.toLocaleString()} cr` : 'none'}`
-            + (mission.cargo ? `  Cargo: ${mission.cargo}` : '');
+        this.status.text = `Payment: ${offer.mission.payVal > 0
+            ? `${offer.mission.payVal.toLocaleString()} cr` : 'none'}`
+            + (offer.mission.cargo ? `  Cargo: ${offer.mission.cargo}` : '');
     }
 
     private acceptSelected() {
-        const mission = this.offers[this.selectionIndex];
+        const offer = this.offers[this.selectionIndex];
         const state = this.input.components.get(PlayerStateComponent);
-        if (!mission || !state) {
+        if (!offer || !state) {
             return;
         }
         const accepted = acceptMission(
-            state, mission, this.destinationOptions());
+            state, offer.mission, this.destinationOptions(
+                state, offer.resolved));
         if (!accepted) {
             this.status.text = 'This mission cannot be accepted.';
             return;
         }
-        this.status.text = `Mission accepted: ${mission.name}`;
+        this.status.text = `Mission accepted: ${offer.mission.name}`;
         void this.refreshOffers();
     }
 
     private refuseSelected() {
-        const mission = this.offers[this.selectionIndex];
+        const offer = this.offers[this.selectionIndex];
         const state = this.input.components.get(PlayerStateComponent);
-        if (!mission || !state) {
+        if (!offer || !state) {
             return;
         }
-        refuseMission(state, mission);
+        refuseMission(state, offer.mission);
         this.status.text = formatMissionText(
-            mission.refuseText || 'Mission refused.',
+            offer.mission.refuseText || 'Mission refused.',
             missionValues(
-                mission, this.planetId, this.world!, state.gameDate),
+                offer.mission, this.planetId, this.world!, state.gameDate,
+                offer.resolved),
         );
-        this.offers = this.offers.filter(entry => entry.id !== mission.id);
+        this.offers = this.offers.filter(entry =>
+            entry.mission.id !== offer.mission.id);
         this.selectionIndex = Math.min(
             this.selectionIndex, this.offers.length - 1);
         this.render();

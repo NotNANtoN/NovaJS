@@ -1,5 +1,6 @@
 import * as path from "path";
 import { ExplosionData } from "novadatainterface/ExplosionData";
+import { GovtData } from "novadatainterface/GovtData";
 import { GameDataInterface } from "novadatainterface/GameDataInterface";
 import { Gettable } from "novadatainterface/Gettable";
 import { NovaDataInterfaceWithMission, NovaIDNotFoundError } from "novadatainterface/NovaDataInterface";
@@ -15,6 +16,7 @@ import { StatusBarData } from "novadatainterface/StatusBarData";
 import { SystemData } from "novadatainterface/SystemData";
 import { TargetCornersData } from "novadatainterface/TargetCornersData";
 import { WeaponData } from "novadatainterface/WeaponData";
+import { GovtParse } from "./src/parsers/GovtParse";
 import { IDSpaceHandler } from "./src/IDSpaceHandler";
 import { ExplosionParse } from "./src/parsers/ExplosionParse";
 import { OutfitParse } from "./src/parsers/OutfitParse";
@@ -30,6 +32,7 @@ import { TargetCornersParse } from "./src/parsers/TargetCornersParse";
 import { WeaponParse } from "./src/parsers/WeaponParse";
 import { BoomResource } from "./src/resource_parsers/BoomResource";
 import { MisnResource } from "./src/resource_parsers/MisnResource";
+import { GovtResource } from "./src/resource_parsers/GovtResource";
 import { BaseResource } from "./src/resource_parsers/NovaResourceBase";
 import { OutfResource } from "./src/resource_parsers/OutfResource";
 import { PictResource } from "./src/resource_parsers/PictResource";
@@ -146,6 +149,7 @@ export class NovaParse implements GameDataInterface {
             SpriteSheetFrames: this.buildIDsForResource(idSpace.rlëD),
             StatusBar: this.buildIDsForResource(idSpace.ïntf),
             Explosion: this.buildIDsForResource(idSpace.bööm),
+            Govt: this.buildIDsForResource(idSpace.gövt),
             SoundFile: this.buildIDsForResource(idSpace["snd "]),
         }
     }
@@ -170,6 +174,7 @@ export class NovaParse implements GameDataInterface {
             SpriteSheetFrames: this.spriteSheetFramesGettable,
             StatusBar: this.makeGettable<BaseResource, StatusBarData>(NovaResourceType.ïntf, StatusBarParse),
             Explosion: this.makeGettable<BoomResource, ExplosionData>(NovaResourceType.bööm, ExplosionParse),
+            Govt: this.makeGettable<GovtResource, GovtData>(NovaResourceType.gövt, GovtParse),
             SoundFile: this.makeGettable<SndResource, SoundFile>(NovaResourceType.snd, SoundFileParse),
         }
 

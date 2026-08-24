@@ -75,4 +75,39 @@ describe('mission runtime', () => {
         expect(notices[0].kind).toBe('failure');
         expect(notices[0].text).toBe('Contract failed at Destination.');
     });
+
+    it('resolves random and government selectors once into active state', () => {
+        const mission = {
+            ...getDefaultMissionData(),
+            id: 'nova:202',
+            travelStel: -2,
+            returnStel: 15000,
+            shipCount: 0,
+            shipSyst: -2,
+        };
+        const state = createInitialPlayerState();
+        const accepted = acceptMission(state, mission, {
+            initialPlanetId: 'nova:128',
+            initialSystemId: 'nova:128',
+            planets: [
+                { id: 'nova:128', inhabited: true, government: 128, systemId: 'nova:128' },
+                { id: 'nova:129', inhabited: true, government: 129, systemId: 'nova:129' },
+                { id: 'nova:130', inhabited: false, government: 130, systemId: 'nova:130' },
+            ],
+            systems: [
+                { id: 'nova:128', government: 128, planets: ['nova:128'] },
+                { id: 'nova:129', government: 129, planets: ['nova:129'] },
+            ],
+            governments: [
+                { index: 0, allies: [8], classes: [], enemies: [] },
+                { index: 1, allies: [], classes: [8], enemies: [] },
+            ],
+            random: () => 0.99,
+        });
+
+        expect(accepted?.travelDestination).toBe('nova:129');
+        expect(accepted?.returnDestination).toBe('nova:129');
+        expect(accepted?.destination).toBe('nova:129');
+        expect(accepted?.shipSystem).toBe('nova:129');
+    });
 });

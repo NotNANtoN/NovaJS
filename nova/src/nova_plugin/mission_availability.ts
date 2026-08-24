@@ -1,6 +1,16 @@
 import { MissionData, MissionOfferLocation } from 'novadatainterface/MissionData';
 import type { PlayerState } from './player_state';
 import { evaluateTestExpression } from './ncb';
+import {
+    GovernmentRelation,
+    matchesStellarSelector,
+    novaResourceId,
+    resolveStellarSelector as resolveSelector,
+    sameResourceId,
+    StellarPlanet,
+    StellarSelectorContext,
+    StellarSystem,
+} from './stellar_selector';
 
 /**
  * The small amount of stellar information needed by the availability rules.
@@ -10,15 +20,14 @@ import { evaluateTestExpression } from './ncb';
  * galaxy. When they are supplied, they are also used to reject missions whose
  * fixed or random destinations cannot be resolved.
  */
-export interface MissionPlanetSelector {
-    id: string;
-    inhabited?: boolean;
-}
+export type MissionPlanetSelector = StellarPlanet;
+export type MissionSystemSelector = StellarSystem;
 
-export interface MissionSystemSelector {
-    id: string;
-    links?: readonly string[];
-    planets?: readonly string[];
+function randomValue(random: () => number): number {
+    const value = random();
+    return Number.isFinite(value)
+        ? Math.min(0.9999999999999999, Math.max(0, value))
+        : 0;
 }
 
 export interface MissionAvailabilityInput {
@@ -31,86 +40,32 @@ export interface MissionAvailabilityInput {
     offerLocation: MissionOfferLocation;
     destinationPlanets?: readonly MissionPlanetSelector[];
     destinationSystems?: readonly MissionSystemSelector[];
+    governments?: readonly GovernmentRelation[];
     random?: () => number;
-}
-
-function numberFromNovaId(id: string): number | undefined {
-    const match = /^(?:[^:]+:)?(\d+)$/.exec(id);
-    return match ? Number(match[1]) : undefined;
-}
-
-function idForNovaNumber(number: number): string {
-    return `nova:${number}`;
-}
-
-function hasPlanet(
-    planets: readonly MissionPlanetSelector[] | undefined,
-    selector: number,
-): boolean {
-    if (!planets) {
-        // An omitted galaxy means that the caller did not ask us to validate
-        // destinations. The availability result should still be useful.
-        return true;
-    }
-    return planets.some(planet => numberFromNovaId(planet.id) === selector);
-}
-
-function selectorMatchesCurrentPlanet(
-    selector: number,
-    currentPlanet: MissionPlanetSelector,
-    currentSystem: MissionSystemSelector,
-): boolean {
-    if (selector === -1) {
-        // A landing planet is inhabited unless a caller explicitly says
-        // otherwise. PlanetData currently has no government/inhabited field.
-        return currentPlanet.inhabited !== false;
-    }
-
-    const currentPlanetNumber = numberFromNovaId(currentPlanet.id);
-    if (selector >= 128 && selector <= 2175) {
-        return currentPlanetNumber === selector;
-    }
-
-    // This is the one encoded selector that can be handled without government
-    // data: 5000 + system ID means a stellar in an adjacent system.
-    if (selector >= 5000 && selector <= 7047) {
-        const adjacentSystem = selector - 5000;
-        return (currentSystem.links ?? [])
-            .some(systemId => numberFromNovaId(systemId) === adjacentSystem);
-    }
-
-    // Government, ally, enemy, and class-mate selectors need government data,
-    // which is not part of the current SystemData interface.
-    return false;
 }
 
 function destinationSelectorIsSatisfiable(
     selector: number,
     planets: readonly MissionPlanetSelector[] | undefined,
     systems: readonly MissionSystemSelector[] | undefined,
+    governments: readonly GovernmentRelation[] | undefined,
+    initialPlanetId: string,
+    initialSystemId: string,
 ): boolean {
-    switch (selector) {
-        case -1:
-        case -4:
-            return true;
-        case -2:
-            return planets === undefined
-                || planets.some(planet => planet.inhabited !== false);
-        case -3:
-            return planets === undefined
-                || planets.some(planet => planet.inhabited === false);
-        default:
-            if (selector >= 128 && selector <= 2175) {
-                return hasPlanet(planets, selector);
-            }
-
-            // The remaining encoded selectors (government, ally, enemy, and
-            // class-mate ranges, as well as unsupported destination
-            // adjacency selectors, are intentionally skipped until the
-            // corresponding world metadata is available. Offering them would
-            // create destinations that the phase-one runtime cannot resolve.
-            return false;
+    if (planets === undefined && systems === undefined) {
+        // Callers that do not load the galaxy can still use availability
+        // filtering. Fixed IDs and random selectors are resolved on accept.
+        return true;
     }
+    const resolution = resolveSelector(selector, {
+        planets,
+        systems,
+        governments,
+        initialPlanetId,
+        initialSystemId,
+        random: () => 0,
+    });
+    return resolution.wildcard || resolution.candidates.length > 0;
 }
 
 function destinationIsSatisfiable(
@@ -121,15 +76,17 @@ function destinationIsSatisfiable(
         mission.travelStel,
         input.destinationPlanets,
         input.destinationSystems,
+        input.governments,
+        input.currentPlanet.id,
+        input.currentSystem.id,
     ) && destinationSelectorIsSatisfiable(
         mission.returnStel,
         input.destinationPlanets,
         input.destinationSystems,
+        input.governments,
+        input.currentPlanet.id,
+        input.currentSystem.id,
     );
-}
-
-function randomValue(random: () => number): number {
-    return Math.min(0.9999999999999999, Math.max(0, random()));
 }
 
 function missionDataFor(
@@ -145,12 +102,8 @@ function missionDataFor(
 /**
  * Return missions that may be offered at the current stellar and menu.
  *
- * This deliberately covers the phase-one rules that can be evaluated from
- * PlayerState and the existing planet/system data: AvailStel, AvailLoc,
- * AvailRandom, AvailBits, active-mission exclusion, destination validity, and
- * the combat-mission stub. AvailRecord, AvailRating, AvailShipType, Require,
- * and government-based stellar selectors remain unavailable until their
- * corresponding player/world data is represented in NovaJS.
+ * This covers the data-driven AvailStel selector ranges, including
+ * government relations and adjacent-system availability.
  */
 export function getOfferableMissions(
     input: MissionAvailabilityInput,
@@ -165,12 +118,27 @@ export function getOfferableMissions(
         .filter((mission): mission is MissionData => mission !== undefined)
         .filter(mission => !activeIds.has(mission.id))
         .filter(mission => mission.availLoc === input.offerLocation)
+        // Combat mission execution is still a later engine phase. Selector
+        // resolution is nevertheless stored for missions that carry ships.
         .filter(mission => mission.shipGoal < 0)
-        .filter(mission => selectorMatchesCurrentPlanet(
-            mission.availStel,
-            input.currentPlanet,
-            input.currentSystem,
-        ))
+        .filter(mission => {
+            const planets = input.destinationPlanets
+                ? [...input.destinationPlanets]
+                : [];
+            if (!planets.some(planet =>
+                sameResourceId(planet.id, input.currentPlanet.id))) {
+                planets.push(input.currentPlanet);
+            }
+            const context: StellarSelectorContext = {
+                planets,
+                systems: input.destinationSystems ?? [input.currentSystem],
+                governments: input.governments,
+                currentPlanetId: input.currentPlanet.id,
+                currentSystemId: input.currentSystem.id,
+            };
+            return matchesStellarSelector(
+                mission.availStel, input.currentPlanet, context, 'availability');
+        })
         .filter(mission => {
             try {
                 return evaluateAvailabilityBits(mission, input.playerState);
@@ -195,45 +163,40 @@ function evaluateAvailabilityBits(
 }
 
 /**
- * Resolve a raw stellar selector to an ID for a newly accepted mission.
- *
- * `*` means any stellar, and is used for ReturnStel == -1. The return value is
- * intentionally undefined for government selectors because phase one does not
- * have government metadata to select a safe destination.
+ * Backwards-compatible string resolver for callers from phase one. New code
+ * should use the structured resolver in stellar_selector.ts.
  */
 export function resolveStellarSelector(
     selector: number,
     options: {
         initialPlanetId: string;
         planets?: readonly MissionPlanetSelector[];
+        systems?: readonly MissionSystemSelector[];
+        governments?: readonly GovernmentRelation[];
+        initialSystemId?: string;
+        currentSystemId?: string;
         random?: () => number;
     },
 ): string | '*' | undefined {
-    switch (selector) {
-        case -1:
-            return '*';
-        case -4:
-            return options.initialPlanetId;
-        case -2:
-        case -3: {
-            const candidates = (options.planets ?? []).filter(planet =>
-                selector === -2
-                    ? planet.inhabited !== false
-                    : planet.inhabited === false);
-            if (candidates.length === 0) {
-                return undefined;
-            }
-            const random = randomValue(options.random ?? Math.random);
-            return candidates[Math.floor(random * candidates.length)].id;
-        }
-        default:
-            if (selector >= 128 && selector <= 2175) {
-                const matchingPlanet = options.planets?.find(planet =>
-                    numberFromNovaId(planet.id) === selector);
-                return matchingPlanet?.id ?? idForNovaNumber(selector);
-            }
-            return undefined;
+    if (selector === -1) {
+        return '*';
     }
+    const resolution = resolveSelector(selector, {
+        planets: options.planets,
+        systems: options.systems,
+        governments: options.governments,
+        initialPlanetId: options.initialPlanetId,
+        initialSystemId: options.initialSystemId ?? options.currentSystemId,
+        random: options.random,
+    });
+    if (resolution.selected) {
+        return resolution.selected;
+    }
+    if (selector >= 128 && selector <= 2175
+        && options.planets === undefined) {
+        return novaResourceId(selector);
+    }
+    return undefined;
 }
 
 /**
@@ -247,6 +210,8 @@ export function resolveMissionCompletionDestination(
     initialPlanetId: string,
     options: {
         planets?: readonly MissionPlanetSelector[];
+        systems?: readonly MissionSystemSelector[];
+        governments?: readonly GovernmentRelation[];
         random?: () => number;
     } = {},
 ): string | '*' | undefined {
@@ -255,6 +220,8 @@ export function resolveMissionCompletionDestination(
         : mission.returnStel;
     return resolveStellarSelector(selector, {
         initialPlanetId,
+        systems: options.systems,
+        governments: options.governments,
         ...options,
     });
 }

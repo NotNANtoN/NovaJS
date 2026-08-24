@@ -11,6 +11,7 @@ import { v4 as uuid } from "uuid";
 import { GameDataResource } from "./game_data_resource";
 import { GovtComponent } from "./npc_plugin";
 import { makeNpc } from "./npc_plugin";
+import { NpcAIComponent } from "./npc_hostility";
 import { SystemIdResource } from "./system_id_resource";
 import { World } from "nova_ecs/world";
 
@@ -80,7 +81,10 @@ export function getNpcRespawnDelay(random: () => number = Math.random): number {
     return NPC_RESPAWN_INTERVAL_MS * (0.75 + normalizedSample * 0.5);
 }
 
-const NpcShipsQuery = new Query([GovtComponent] as const, "NpcShips");
+const NpcShipsQuery = new Query(
+    [GovtComponent, NpcAIComponent] as const,
+    "NpcShips",
+);
 const NpcSpawnStateResource = new Resource<NpcSpawnState>("NpcSpawnState");
 
 interface NpcSpawnState {

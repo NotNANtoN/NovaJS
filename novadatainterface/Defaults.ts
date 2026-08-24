@@ -2,6 +2,7 @@ import { getDefaultCicnData } from "./CicnData";
 import { getDefaultCicnImageData } from "./CicnImage";
 import { getDefaultSpriteSheetImage } from "./DefaultSpriteSheetImage";
 import { getDefaultExplosionData } from "./ExplosionData";
+import { getDefaultGovtData } from "./GovtData";
 import { getDefaultOutfitData } from "./OutiftData";
 import { getDefaultPictData } from "./PictData";
 import { getDefaultPictImageData } from "./PictImage";
@@ -33,5 +34,6 @@ export const Defaults = {
     get SpriteSheetFrames() { return getDefaultSpriteSheetFrames() },
     get StatusBar() { return getDefaultStatusBarData() },
     get Explosion() { return getDefaultExplosionData() },
+    get Govt() { return getDefaultGovtData() },
     get SoundFile() { return getDefaultSoundFile() },
 }
