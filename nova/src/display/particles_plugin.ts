@@ -15,9 +15,11 @@ import { ProjectileDataComponent } from "../nova_plugin/projectile_data";
 import { ProjectileCollisionEvent } from "../nova_plugin/projectile_plugin";
 import { PixiAppResource } from "./pixi_app_resource";
 import { Space } from "./space_resource";
+import { attachGraphic, ManagedGraphic } from './managed_graphic';
 
 
-const ParticleContainerResource = new Resource<PIXI.Container>('ParticleContainerResource');
+const ParticleContainerResource = new Resource<ManagedGraphic>(
+    'ParticleContainerResource');
 export const TrailParticlesComponent =
     new Component<ParticleConfig>('TrailParticlesComponent');
 
@@ -106,8 +108,11 @@ const TrailEmitterProvider = Provide({
     provided: TrailEmitterComponent,
     args: [TrailParticlesComponent, PixiAppResource,
         ParticleContainerResource, ParticleTextureResource] as const,
-    factory(particleConfig, app, particleContainer, texture) {
-        const emitter = makeEmitter(particleContainer, texture, app.ticker.FPS,
+    factory(particleConfig, app, particleHandle, texture) {
+        const emitter = makeEmitter(
+            particleHandle.root as PIXI.Container,
+            texture,
+            app.ticker.FPS,
             particleConfig);
         emitter.emit = true;
         return emitter;
@@ -206,8 +211,8 @@ export const ParticlesPlugin: Plugin = {
         particleContainer.autoResize = true;
         particleContainer.baseTexture = texture.baseTexture;
 
-        space.addChild(particleContainer);
-        world.resources.set(ParticleContainerResource, particleContainer);
+        const particleHandle = attachGraphic(space, particleContainer);
+        world.resources.set(ParticleContainerResource, particleHandle);
 
         world.addSystem(TrailParticlesProvider);
         world.addSystem(HitParticlesProvider);
@@ -226,6 +231,16 @@ export const ParticlesPlugin: Plugin = {
         world.removeSystem(OrphanEmittersSystem);
         world.removeSystem(HitEmitterSystem);
 
+        const orphanEmitters = world.resources.get(OrphanParticleEmitters);
+        if (orphanEmitters) {
+            for (const emitter of orphanEmitters.keys()) {
+                emitter.destroy();
+            }
+            orphanEmitters.clear();
+        }
+        world.resources.get(ParticleContainerResource)?.dispose();
+        world.resources.get(ParticleTextureResource)?.destroy(true);
+        world.resources.delete(ParticleContainerResource);
         world.resources.delete(ParticleTextureResource);
         world.resources.delete(OrphanParticleEmitters);
     }

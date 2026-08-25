@@ -18,7 +18,11 @@ function readStoredVolume(): number {
     }
 
     try {
-        const stored = Number(localStorage.getItem(MASTER_VOLUME_KEY));
+        const raw = localStorage.getItem(MASTER_VOLUME_KEY);
+        if (raw === null) {
+            return DEFAULT_MASTER_VOLUME;
+        }
+        const stored = Number(raw);
         return Number.isFinite(stored)
             ? clampVolume(stored) : DEFAULT_MASTER_VOLUME;
     } catch {

@@ -64,12 +64,16 @@ export const WeaponsSystem = new System({
         TimeResource, UUID, WeaponEntries] as const,
     step(weaponsState, weaponsLocalState, time, uuid, weaponEntries) {
         for (const [id, state] of weaponsState) {
+            const localState = weaponsLocalState.get(id);
+            if (state.firing) {
+                localState.pressObserved = true;
+            }
+
             const weapon = weaponEntries.getCached(id);
             if (!weapon) {
                 continue;
             }
 
-            const localState = weaponsLocalState.get(id);
             const count = getWeaponCount(state);
             if (count === 0) {
                 continue;
@@ -136,7 +140,8 @@ export const WeaponsSystem = new System({
                     localState.burstCount++;
                 }
             }
-            if (burstLimit !== Infinity && localState.burstCount >= burstLimit) {
+            if (burstLimit !== Infinity && localState.burstCount >= burstLimit
+                && !localState.reloadingBurst) {
                 // Remaining normal-reload credit cannot carry through the
                 // burst pause.
                 localState.shotsOwed = 0;
@@ -146,12 +151,61 @@ export const WeaponsSystem = new System({
                 if (fireUnavailable) {
                     // Do not build a multi-shot backlog while guidance or a
                     // projectile queue temporarily makes the weapon unusable.
-                    localState.shotsOwed = Math.min(
-                        localState.shotsOwed, 1 - Number.EPSILON);
+                    // Keep a whole ready opportunity: using 1 - EPSILON here
+                    // makes floor() return zero forever when a blocked weapon
+                    // becomes available without another positive time step
+                    // (for example while a paused client is being resumed).
+                    localState.shotsOwed = Math.min(localState.shotsOwed, 1);
                 }
             }
         }
     }
+});
+
+/**
+ * Apply the trigger for one weapon.
+ *
+ * A browser delivers keydown and keyup independently of the simulation, so a
+ * quick tap can begin and end between two steps. Releasing the intent
+ * immediately in that case throws the shot away entirely, and because `firing`
+ * is what gets replicated, the server never learns about the tap either. Hold
+ * the release until one step has observed the press.
+ */
+export function applyWeaponTrigger(state: WeaponState,
+    localState: WeaponLocalState, pressed: boolean) {
+    if (pressed) {
+        state.firing = true;
+        localState.releaseAfterStep = false;
+        return;
+    }
+    if (state.firing && !localState.pressObserved) {
+        localState.releaseAfterStep = true;
+        return;
+    }
+    state.firing = false;
+    localState.releaseAfterStep = false;
+    localState.pressObserved = false;
+}
+
+/**
+ * Clears a held trigger one step after the press was simulated. This runs only
+ * in the browser: the server's copy of `firing` is replicated intent and is
+ * never latched locally.
+ */
+export const ReleaseWeaponTriggerSystem = new System({
+    name: 'ReleaseWeaponTrigger',
+    args: [WeaponsStateComponent, WeaponsComponent] as const,
+    after: [WeaponsSystem],
+    step(weaponsState, weaponsLocalState) {
+        for (const [id, state] of weaponsState) {
+            const localState = weaponsLocalState.get(id);
+            if (localState.releaseAfterStep && localState.pressObserved) {
+                state.firing = false;
+                localState.releaseAfterStep = false;
+                localState.pressObserved = false;
+            }
+        }
+    },
 });
 
 type ActiveSecondary = {
@@ -175,15 +229,15 @@ const ControlPlayerWeapons = new System({
     events: [ControlStateEvent],
     args: [ControlStateEvent, WeaponsStateComponent, WeaponsComponent,
         ActiveSecondaryWeapon, Emit, GameDataResource, PlayerShipSelector] as const,
-    step(controlState, weaponsState, weaponsData, activeSecondary, emit, gameData) {
-        for (const [, weaponState] of weaponsState) {
-            weaponState.firing = false;
+    step(controlState, weaponsState, weaponsLocalState, activeSecondary, emit, gameData) {
+        for (const [id, weaponState] of weaponsState) {
+            applyWeaponTrigger(weaponState, weaponsLocalState.get(id), false);
         }
 
         // TODO: Store this somewhere?
         const secondaryWeapons = [
             undefined, // for when no weapon is selected
-            ...[...weaponsData].filter(([id]) => {
+            ...[...weaponsState].filter(([id]) => {
                 return gameData.data.Weapon.getCached(id)?.fireGroup === 'secondary';
             }).map(([id]) => id)
         ];
@@ -219,14 +273,17 @@ const ControlPlayerWeapons = new System({
             secondary = weaponsState.get(activeSecondary.secondary);
         }
 
-        if (secondary) {
-            secondary.firing = Boolean(controlState.get('fireSecondary'));
+        if (secondary && activeSecondary.secondary) {
+            applyWeaponTrigger(secondary,
+                weaponsLocalState.get(activeSecondary.secondary),
+                Boolean(controlState.get('fireSecondary')));
         }
 
         const firing = Boolean(controlState.get('firePrimary'));
         for (const [id, weaponState] of weaponsState) {
             if (gameData.data.Weapon.getCached(id)?.fireGroup === 'primary') {
-                weaponState.firing = firing;
+                applyWeaponTrigger(weaponState,
+                    weaponsLocalState.get(id), firing);
             }
         }
     }
@@ -251,6 +308,7 @@ export const WeaponPlugin: Plugin = {
         if (platform === 'browser') {
             world.addSystem(ActiveSecondaryProvider);
             world.addSystem(ControlPlayerWeapons);
+            world.addSystem(ReleaseWeaponTriggerSystem);
         }
         deltaMaker.addComponent(WeaponsStateComponent, {
             componentType: WeaponsState

@@ -62,7 +62,6 @@ Nova Ship*
 build/
 
 dist
-bazel-out
 node_modules
 
 # Latex
@@ -72,6 +71,3 @@ node_modules
 *.out
 *.pdf
 *.ps
-
-# Bazel
-.bazelrc.user

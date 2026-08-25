@@ -1,4 +1,5 @@
 import { BaseData } from 'novadatainterface/BaseData';
+import { DudeData } from 'novadatainterface/DudeData';
 import { CicnData } from 'novadatainterface/CicnData';
 import { CicnImageData } from 'novadatainterface/CicnImage';
 import { ExplosionData } from 'novadatainterface/ExplosionData';
@@ -64,6 +65,7 @@ export class GameData implements GameDataInterface {
             PictImage: this.addPictGettable<PictImageData>(NovaDataType.PictImage),
             Cicn: this.addGettable<CicnData>(NovaDataType.Cicn),
             CicnImage: this.addPictGettable<CicnImageData>(NovaDataType.CicnImage),
+            Dude: this.addGettable<DudeData>(NovaDataType.Dude),
             Planet: this.addGettable<PlanetData>(NovaDataType.Planet),
             System: this.addGettable<SystemData>(NovaDataType.System),
             Mission: this.addGettable<MissionData>(NovaDataType.Mission),

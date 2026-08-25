@@ -3,7 +3,7 @@
     "version": "0.1.0",
     "private": true,
     "engines": {
-        "node": ">=0.14"
+        "node": ">=24"
     },
     "packageManager": "bun@1.4.0",
     "engineStrict": true,
@@ -11,14 +11,6 @@
         "path": "path-browserify"
     },
     "devDependencies": {
-        "@bazel/bazelisk": "^1.12.1",
-        "@bazel/buildifier": "6.1.2",
-        "@bazel/concatjs": "5.8.1",
-        "@bazel/esbuild": "5.8.1",
-        "@bazel/ibazel": "^0.16.2",
-        "@bazel/jasmine": "5.8.1",
-        "@bazel/labs": "^4.6.1",
-        "@bazel/typescript": "5.8.1",
         "@pixi/filter-color-matrix": "^7.2.4",
         "@pixi/particle-emitter": "^5.0.8",
         "@pixi/sound": "^5.1.2",
@@ -62,19 +54,11 @@
         "url-join": "^5.0.0"
     },
     "scripts": {
-        "build": "bazelisk build //...",
-        "build:esbuild": "node scripts/build.mjs",
-        "dev": "npm run build:esbuild && node dist/server.js",
+        "build": "node scripts/build.mjs",
+        "dev": "npm run build && node dist/server.js",
+        "test": "node scripts/test.mjs",
         "typecheck": "tsc --noEmit",
-        "build-docker": "bazelisk build nova:nova_image.tar",
-        "test": "bazelisk test //...",
-        "test-watch": "ibazel test //...",
-        "test-only": "ibazel test",
-        "test-brk": "ibazel test --test_arg=--node_options=--inspect-brk --test_output=streamed --test_timeout=9999 --nocache_test_results",
-        "start": "bazelisk run nova",
-        "watch": "ibazel run nova",
-        "watch-brk": "ibazel run nova --config=debug",
-        "debug-bazel": "bazelisk run nova --verbose_failures --sandbox_debug"
+        "start": "node dist/server.js"
     },
     "dependencies": {
         "@types/uuid": "^9.0.1",

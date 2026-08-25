@@ -13,9 +13,10 @@ import { TargetComponent } from './target_component';
 
 
 // A resource because the ship may change.
-const ControlStateResource = new Resource<ControlState>('ControlStateResource');
+export const ControlStateResource =
+    new Resource<ControlState>('ControlStateResource');
 
-const UpdateControlState = new System({
+export const UpdateControlState = new System({
     name: 'UpdateControlState',
     events: [EcsControlEvent],
     args: [EcsControlEvent, ControlStateResource,
@@ -38,7 +39,7 @@ const UpdateControlState = new System({
 
 
 // TODO: Move this to ship plugin?
-const ControlPlayerShip = new System({
+export const ControlPlayerShip = new System({
     name: 'ControlPlayerShip',
     args: [ControlStateResource, MovementStateComponent,
         MovementPhysicsComponent, TargetComponent, PlayerShipSelector] as const,

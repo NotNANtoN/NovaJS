@@ -8,6 +8,7 @@ import { map } from 'nova_ecs/datatypes/map';
 import { Plugin } from 'nova_ecs/plugin';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
 import { MovementPhysics, MovementType } from 'nova_ecs/plugins/movement_plugin';
+import { Optional } from 'nova_ecs/optional';
 import { ProvideAsync } from "nova_ecs/provide_async";
 import { DefaultMap } from '../common/DefaultMap';
 import { GameDataResource } from './game_data_resource';
@@ -45,8 +46,9 @@ const OutfitWeaponProvider = ProvideAsync({
     name: "OutfitWeaponProvider",
     provided: WeaponsStateComponent,
     update: [OutfitsStateComponent],
-    args: [OutfitsStateComponent, GameDataResource] as const,
-    async factory(outfits, gameData) {
+    args: [OutfitsStateComponent, GameDataResource,
+        Optional(WeaponsStateComponent)] as const,
+    async factory(outfits, gameData, previous) {
         const weaponsState = new DefaultMap<string, WeaponState>(() => ({
             count: 0,
             firing: false,
@@ -61,6 +63,18 @@ const OutfitWeaponProvider = ProvideAsync({
             if (outfit.weapons) {
                 for (const [weaponId, count] of Object.entries(outfit.weapons)) {
                     weaponsState.get(weaponId).count += count * state.count;
+                }
+            }
+        }
+
+        // Outfit changes recompute how many copies of a weapon are installed.
+        // They say nothing about whether the trigger is currently held, so a
+        // recompute must not release the player's (or an NPC's) weapons.
+        if (previous) {
+            for (const [weaponId, state] of weaponsState) {
+                const firing = previous.get(weaponId)?.firing;
+                if (firing !== undefined) {
+                    state.firing = firing;
                 }
             }
         }

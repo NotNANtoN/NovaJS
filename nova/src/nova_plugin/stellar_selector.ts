@@ -6,6 +6,11 @@
  * important: a government value of 128 means government index 0, whereas a
  * stellar value of 128 means stellar resource ID 128.
  */
+import {
+    novaResourceId,
+    sameResourceId,
+} from '../common/resource_id';
+import { clampRandom } from '../common/random';
 
 export interface StellarPlanet {
     id: string;
@@ -88,16 +93,7 @@ function numericId(id: string | number | undefined): number | undefined {
     return match ? Number(match[1]) : undefined;
 }
 
-export function sameResourceId(a: string | undefined, b: string | undefined) {
-    if (!a || !b) {
-        return false;
-    }
-    return a === b || numericId(a) === numericId(b);
-}
-
-export function novaResourceId(number: number): string {
-    return `nova:${number}`;
-}
+export { novaResourceId, sameResourceId } from '../common/resource_id';
 
 /**
  * Government fields in spöb/sÿst resources contain government IDs.  The
@@ -112,13 +108,6 @@ export function governmentIndex(value: string | number | undefined):
     return number >= 128 && number <= 383 ? number - 128 : number;
 }
 
-function randomValue(random: () => number): number {
-    const value = random();
-    return Number.isFinite(value)
-        ? Math.min(0.9999999999999999, Math.max(0, value))
-        : 0;
-}
-
 function randomCandidate(
     candidates: readonly string[],
     random: () => number,
@@ -126,7 +115,7 @@ function randomCandidate(
     if (candidates.length === 0) {
         return undefined;
     }
-    return candidates[Math.floor(randomValue(random) * candidates.length)];
+    return candidates[Math.floor(clampRandom(random()) * candidates.length)];
 }
 
 function governmentForIndex(

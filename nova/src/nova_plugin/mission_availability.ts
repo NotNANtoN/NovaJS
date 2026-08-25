@@ -2,6 +2,9 @@ import { MissionData, MissionOfferLocation } from 'novadatainterface/MissionData
 import { getFreeSpace } from './player_state';
 import type { PlayerState } from './player_state';
 import { evaluateTestExpression } from './ncb';
+import { ncbTestContext } from './ncb_runtime';
+import type { OutfitsState } from './outfit_plugin';
+import { clampRandom } from '../common/random';
 import {
     GovernmentRelation,
     matchesStellarSelector,
@@ -24,19 +27,16 @@ import {
 export type MissionPlanetSelector = StellarPlanet;
 export type MissionSystemSelector = StellarSystem;
 
-function randomValue(random: () => number): number {
-    const value = random();
-    return Number.isFinite(value)
-        ? Math.min(0.9999999999999999, Math.max(0, value))
-        : 0;
-}
-
 export interface MissionAvailabilityInput {
     missionIds: readonly string[];
     missions: ReadonlyMap<string, MissionData>
         | Readonly<Record<string, MissionData>>;
-    playerState: Pick<PlayerState, 'missionBits' | 'activeMissions'>
+    playerState: Pick<
+        PlayerState,
+        'missionBits' | 'activeMissions' | 'gender' | 'exploredSystems'
+    >
         & Partial<Pick<PlayerState, 'cargoCapacity' | 'holds'>>;
+    outfits?: OutfitsState;
     currentPlanet: MissionPlanetSelector;
     currentSystem: MissionSystemSelector;
     offerLocation: MissionOfferLocation;
@@ -127,9 +127,6 @@ export function getOfferableMissions(
         .filter((mission): mission is MissionData => mission !== undefined)
         .filter(mission => !activeIds.has(mission.id))
         .filter(mission => mission.availLoc === input.offerLocation)
-        // Combat mission execution is still a later engine phase. Selector
-        // resolution is nevertheless stored for missions that carry ships.
-        .filter(mission => mission.shipGoal < 0)
         .filter(mission => {
             const planets = input.destinationPlanets
                 ? [...input.destinationPlanets]
@@ -150,7 +147,8 @@ export function getOfferableMissions(
         })
         .filter(mission => {
             try {
-                return evaluateAvailabilityBits(mission, input.playerState);
+                return evaluateAvailabilityBits(
+                    mission, input.playerState, input.outfits);
             } catch (error) {
                 console.warn(`Skipping mission ${mission.id} with invalid AvailBits`, error);
                 return false;
@@ -158,7 +156,7 @@ export function getOfferableMissions(
         })
         .filter(mission => mission.availRandom > 0
             && (mission.availRandom >= 100
-                || randomValue(random) < mission.availRandom / 100))
+                || clampRandom(random()) < mission.availRandom / 100))
         .filter(mission => {
             if (!input.playerState.holds
                 || input.playerState.cargoCapacity === undefined) {
@@ -173,10 +171,14 @@ export function getOfferableMissions(
 
 function evaluateAvailabilityBits(
     mission: MissionData,
-    playerState: Pick<PlayerState, 'missionBits'>,
+    playerState: Pick<
+        PlayerState,
+        'missionBits' | 'gender' | 'exploredSystems'
+    >,
+    outfits?: OutfitsState,
 ): boolean {
     return evaluateTestExpression(mission.availBits, {
-        missionBits: playerState.missionBits,
+        ...ncbTestContext(playerState, outfits),
     });
 }
 

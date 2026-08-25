@@ -226,4 +226,52 @@ describe('Delta Plugin', () => {
         expect(delta2.componentStates).toBeUndefined();
         expect(delta2.removeComponents).toEqual(new Set(['Foo']));
     });
+
+    it('does not report a component as changed when untracking', () => {
+        // Untracking finishes Immer drafts. That is a representation change,
+        // not a value change: reporting it re-runs every Provide watching one
+        // of the entity's components, which rebuilds derived gameplay state
+        // (weapon counts, reload accumulators, physics) and discards live
+        // local input. Regression test for firing intent lost every step.
+        const entity = new Entity()
+            .setName('Test Entity')
+            .addComponent(FooComponent, { x: 1 })
+            .addComponent(BarComponent, { y: 'Hello' });
+        world1.entities.set('test entity uuid', entity);
+
+        // Draft the components so untrack has drafts to finish.
+        deltaMaker1.getDelta(entity);
+        world1.step();
+
+        const changed: string[] = [];
+        world1.entities.events.changeComponent.subscribe(
+            ([, , component]) => changed.push(component.name));
+
+        deltaMaker1.untrack(entity);
+
+        expect(changed).toEqual([]);
+        expect(entity.components.get(FooComponent)).toEqual({ x: 1 });
+        expect(entity.components.get(BarComponent)).toEqual({ y: 'Hello' });
+    });
+
+    it('keeps a local edit outbound across a remote update', () => {
+        const entity = new Entity()
+            .setName('Test Entity')
+            .addComponent(FooComponent, { x: 1 })
+            .addComponent(BarComponent, { y: 'local' });
+        world1.entities.set('test entity uuid', entity);
+        deltaMaker1.getDelta(entity);
+        deltaMaker1.clearDirty(entity);
+
+        entity.components.set(BarComponent, { y: 'local edit' });
+        deltaMaker1.applyRemoteUpdate(entity, () => {
+            entity.components.set(FooComponent, { x: 42 });
+        });
+
+        expect(entity.components.get(FooComponent)).toEqual({ x: 42 });
+        expect(entity.components.get(BarComponent)).toEqual({ y: 'local edit' });
+        const delta = deltaMaker1.getDelta(entity);
+        expect(delta?.componentStates?.has('Bar')
+            || delta?.componentDeltas?.has('Bar')).toBeTrue();
+    });
 });

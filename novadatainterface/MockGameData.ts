@@ -1,5 +1,6 @@
 import { getDefaultCicnData } from "./CicnData";
 import { getDefaultExplosionData } from "./ExplosionData";
+import { getDefaultDudeData } from "./DudeData";
 import { getDefaultGovtData } from "./GovtData";
 import { GameDataInterface } from "./GameDataInterface";
 import { Gettable } from "./Gettable";
@@ -54,14 +55,15 @@ export class MockGameData implements GameDataInterface {
         Govt: new MockGettable(getDefaultGovtData()),
         Outfit: new MockGettable(getDefaultOutfitData()),
         Pict: new MockGettable(getDefaultPictData()),
-        PictImage: new MockGettable(new Uint8Array(0) as Buffer),
+        PictImage: new MockGettable(new Uint8Array(0).buffer as ArrayBuffer),
         Cicn: new MockGettable(getDefaultCicnData()),
-        CicnImage: new MockGettable(new Uint8Array(0) as Buffer),
+        CicnImage: new MockGettable(new Uint8Array(0).buffer as ArrayBuffer),
+        Dude: new MockGettable(getDefaultDudeData()),
         Planet: new MockGettable(getDefaultPlanetData()),
         Ship: new MockGettable(getDefaultShipData()),
         SpriteSheet: new MockGettable(getDefaultSpriteSheetData()),
         SpriteSheetFrames: new MockGettable(getDefaultSpriteSheetFrames()),
-        SpriteSheetImage: new MockGettable(new Uint8Array(0) as Buffer),
+        SpriteSheetImage: new MockGettable(new Uint8Array(0).buffer as ArrayBuffer),
         StatusBar: new MockGettable(getDefaultStatusBarData()),
         System: new MockGettable(getDefaultSystemData()),
         Mission: new MockGettable(getDefaultMissionData()),

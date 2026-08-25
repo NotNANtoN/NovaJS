@@ -1,0 +1,117 @@
+import 'jasmine';
+import { getDefaultShipData } from 'novadatainterface/ShipData';
+import { DeltaPlugin } from 'nova_ecs/plugins/delta_plugin';
+import { Entity } from 'nova_ecs/entity';
+import { MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
+import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
+import { TimeResource } from 'nova_ecs/plugins/time_plugin';
+import { World } from 'nova_ecs/world';
+import { Angle } from 'nova_ecs/datatypes/angle';
+import { Position } from 'nova_ecs/datatypes/position';
+import { Vector } from 'nova_ecs/datatypes/vector';
+import { ArmorComponent, ShieldComponent } from './health_plugin';
+import { GameDataResource } from './game_data_resource';
+import { GovtComponent } from './npc_plugin';
+import { NpcSpawnPlugin } from './npc_spawn_plugin';
+import { NpcAIComponent } from './npc_hostility';
+import { NpcCombatRoleComponent } from './npc_components';
+import { EntityBudgetResource, createEntityBudget } from './entity_budget';
+import { SystemIdResource } from './system_id_resource';
+import { DeathEvent, DeathPlugin } from './death_plugin';
+import { PlayerShipSelector } from './player_ship_plugin';
+import { Stat } from './stat';
+import { combatRoleForDudeAiType } from 'novaparse/src/parsers/SystemParse';
+
+describe('NPC spawning', () => {
+    it('derives defense eligibility from retail düde AI roles', () => {
+        expect(combatRoleForDudeAiType(1)).toBe('civilian');
+        expect(combatRoleForDudeAiType(2)).toBe('civilian');
+        expect(combatRoleForDudeAiType(3)).toBe('military');
+        expect(combatRoleForDudeAiType(4)).toBe('military');
+        expect(combatRoleForDudeAiType(0)).toBe('personal');
+    });
+
+    it('keeps the target population through player respawn', async () => {
+        const gameData = {
+            data: {
+                System: {
+                    get: async () => ({
+                        avgShips: 3,
+                        npcs: [{
+                            id: 'test-npc',
+                            weight: 1,
+                            government: 1,
+                            combatRole: 'civilian',
+                            ships: [{ id: 'nova:128', weight: 1 }],
+                        }],
+                    }),
+                },
+                Ship: {
+                    get: async () => getDefaultShipData(),
+                },
+            },
+        };
+        const world = new World('npc-spawn-test');
+        const time = {
+            time: 0,
+            delta_ms: 1000 / 60,
+            delta_s: 1 / 60,
+            frame: 0,
+        };
+        world.resources.set(GameDataResource, gameData as never);
+        world.resources.set(SystemIdResource, 'nova:test');
+        world.resources.set(TimeResource, time);
+        world.resources.set(EntityBudgetResource, createEntityBudget('modern'));
+        await world.addPlugin(DeltaPlugin);
+        await world.addPlugin(DeathPlugin);
+        await world.addPlugin(NpcSpawnPlugin);
+
+        for (let i = 0; i < 2; i++) {
+            world.entities.set(`existing-${i}`, new Entity()
+                .addComponent(NpcAIComponent, undefined)
+                .addComponent(GovtComponent, { id: 1 })
+                .addComponent(MultiplayerData, { owner: 'server' }));
+        }
+
+        world.step();
+        await Promise.resolve();
+        await Promise.resolve();
+        world.step();
+        await Promise.resolve();
+
+        const npcCount = [...world.entities.values()].filter(entity =>
+            entity.components.has(NpcAIComponent)).length;
+        expect(npcCount).toBe(3);
+        expect([...world.entities.values()].filter(entity =>
+            entity.components.has(NpcAIComponent)
+            && entity.components.get(NpcCombatRoleComponent) === 'civilian')
+            .length).toBe(1);
+
+        const player = new Entity('player')
+            .addComponent(PlayerShipSelector, undefined)
+            .addComponent(MovementStateComponent, {
+                accelerating: 0,
+                position: new Position(0, 0),
+                rotation: new Angle(0),
+                turnBack: false,
+                turning: 0,
+                velocity: new Vector(0, 0),
+            })
+            .addComponent(ShieldComponent, new Stat({
+                current: 0, recharge: 0, max: 1,
+            }))
+            .addComponent(ArmorComponent, new Stat({
+                current: 0, recharge: 0, max: 1,
+            }));
+        world.entities.set('player', player);
+        world.emitNow(DeathEvent, time, ['player']);
+        world.step();
+        time.time = 2_500;
+        world.step();
+        await Promise.resolve();
+        world.step();
+
+        expect([...world.entities.values()].filter(entity =>
+            entity.components.has(NpcAIComponent)).length).toBe(3);
+    });
+});

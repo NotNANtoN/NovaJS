@@ -1,8 +1,14 @@
+import { Either } from 'fp-ts/Either';
 import * as t from 'io-ts';
+import { Errors } from 'io-ts';
 import { Component } from 'nova_ecs/component';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
 import { Plugin } from 'nova_ecs/plugin';
 import { Resource } from 'nova_ecs/resource';
+import {
+    resourceId as canonicalResourceId,
+    sameResourceId,
+} from '../common/resource_id';
 import { EncodedEntity } from 'nova_ecs/plugins/serializer_plugin';
 
 export const MAX_MISSION_BITS = 10_000;
@@ -54,6 +60,18 @@ const ActiveMissionDetails = t.intersection([
         shipSystem: t.string,
         cargo: MissionCargo,
         acceptedDate: t.number,
+        missionUuid: t.string,
+        shipGoalProgress: t.type({
+            goal: t.number,
+            total: t.number,
+            destroyed: t.number,
+            disabled: t.number,
+            boarded: t.number,
+            observed: t.number,
+            lost: t.number,
+            completed: t.boolean,
+            shipDoneApplied: t.boolean,
+        }),
         // Procedural missions do not exist in the mïsn resource catalog. The
         // complete synthetic MissionData record is persisted with the entry.
         missionData: t.any,
@@ -61,21 +79,66 @@ const ActiveMissionDetails = t.intersection([
 ]);
 export type ActiveMission = t.TypeOf<typeof ActiveMissionDetails>;
 
+export interface MissionGoalProgress {
+    goal: number;
+    total: number;
+    destroyed: number;
+    disabled: number;
+    boarded: number;
+    observed: number;
+    lost: number;
+    completed: boolean;
+    shipDoneApplied: boolean;
+}
+
+export function createMissionGoalProgress(
+    goal: number,
+    total: number,
+): MissionGoalProgress {
+    return {
+        goal,
+        total: Math.max(0, Math.floor(total)),
+        destroyed: 0,
+        disabled: 0,
+        boarded: 0,
+        observed: 0,
+        lost: 0,
+        completed: total <= 0,
+        shipDoneApplied: false,
+    };
+}
+
 /**
  * A boolean array is used instead of a Set so Immer can track changes and the
  * ECS serializer can send the component between client and server worlds.
  */
-const PlayerStateFields = t.type({
-    credits: t.number,
-    missionBits: t.array(t.boolean),
-    gameDate: t.number,
-    activeMissions: t.array(ActiveMissionDetails),
-    shipId: t.string,
-    currentSystem: t.string,
-    cargoCapacity: t.number,
-    holds: t.array(CargoHold),
-});
+const PlayerStateFields = t.intersection([
+    t.type({
+        credits: t.number,
+        missionBits: t.array(t.boolean),
+        gameDate: t.number,
+        activeMissions: t.array(ActiveMissionDetails),
+        shipId: t.string,
+        currentSystem: t.string,
+        lastLandedPlanet: t.string,
+        lastLandedSystem: t.string,
+        lastLandedPosition: t.tuple([t.number, t.number]),
+        cargoCapacity: t.number,
+        holds: t.array(CargoHold),
+        pilotName: t.string,
+        shipName: t.string,
+        gender: t.union([t.literal('male'), t.literal('female')]),
+        destroyedStellars: t.array(t.string),
+        activeRanks: t.array(t.number),
+        exploredSystems: t.array(t.string),
+    }),
+    t.partial({
+        registered: t.boolean,
+        daysSinceRegistration: t.number,
+    }),
+]);
 type PlayerStateFields = t.TypeOf<typeof PlayerStateFields>;
+export type PersistentPlayerState = PlayerStateFields;
 export type PlayerState = PlayerStateFields & {
     /** Derived getter; it is intentionally excluded from persisted state. */
     readonly freeSpace: number;
@@ -98,29 +161,119 @@ const LegacyPlayerStateFields = t.intersection([
     t.partial({
         cargoCapacity: t.number,
         holds: t.array(CargoHold),
+        pilotName: t.string,
+        shipName: t.string,
+        gender: t.union([t.literal('male'), t.literal('female')]),
+        lastLandedPlanet: t.string,
+        lastLandedSystem: t.string,
+        lastLandedPosition: t.tuple([t.number, t.number]),
+        destroyedStellars: t.array(t.string),
+        activeRanks: t.array(t.number),
+        exploredSystems: t.array(t.string),
+        registered: t.boolean,
+        daysSinceRegistration: t.number,
     }),
 ]);
 
-export const PlayerStateCodec = new t.Type<PlayerState>(
+function decodePersistentPlayerState(
+    value: unknown,
+    context: t.Context,
+): Either<Errors, PersistentPlayerState> {
+    const decoded = LegacyPlayerStateFields.validate(value, context);
+    if (decoded._tag === 'Left') {
+        return decoded;
+    }
+    const state = {
+        ...decoded.right,
+        cargoCapacity: Number.isFinite(decoded.right.cargoCapacity)
+            ? decoded.right.cargoCapacity
+            : DEFAULT_CARGO_CAPACITY,
+        holds: decoded.right.holds ?? [],
+        pilotName: decoded.right.pilotName ?? 'Captain',
+        shipName: decoded.right.shipName ?? 'Nova',
+        gender: decoded.right.gender ?? 'male',
+        lastLandedPlanet: decoded.right.lastLandedPlanet ?? 'nova:128',
+        lastLandedSystem: decoded.right.lastLandedSystem
+            ?? decoded.right.currentSystem,
+        lastLandedPosition: decoded.right.lastLandedPosition ?? [0, 0],
+        destroyedStellars: decoded.right.destroyedStellars ?? [],
+        activeRanks: decoded.right.activeRanks ?? [],
+        exploredSystems: decoded.right.exploredSystems ?? [],
+    } as PersistentPlayerState;
+    migrateMissionCargo(state);
+    return t.success(state);
+}
+
+function encodePersistentPlayerState(
+    state: PersistentPlayerState,
+): PersistentPlayerState {
+    return PlayerStateFields.encode(state) as PersistentPlayerState;
+}
+
+/**
+ * The sole schema for data retained by PlayerStore and its snapshots.
+ *
+ * This codec intentionally excludes `freeSpace`, which is a derived runtime
+ * getter. Keeping the codec here makes the schema available to browser code
+ * without importing the Node filesystem implementation.
+ */
+export const PersistentPlayerStateCodec =
+    new t.Type<PersistentPlayerState>(
+    'PersistentPlayerStateCodec',
+    (value): value is PersistentPlayerState => PlayerStateFields.is(value),
+    decodePersistentPlayerState,
+    encodePersistentPlayerState,
+);
+
+export const PlayerStateCodec = new t.Type<
+    PlayerState,
+    PersistentPlayerState
+>(
     'PlayerStateCodec',
     (value): value is PlayerState => PlayerStateFields.is(value),
     (value, context) => {
-        const decoded = LegacyPlayerStateFields.validate(value, context);
+        const decoded = decodePersistentPlayerState(value, context);
         if (decoded._tag === 'Left') {
             return decoded;
         }
-        const state = {
-            ...decoded.right,
-            cargoCapacity: Number.isFinite(decoded.right.cargoCapacity)
-                ? decoded.right.cargoCapacity
-                : DEFAULT_CARGO_CAPACITY,
-            holds: decoded.right.holds ?? [],
-        } as PlayerStateFields;
-        migrateMissionCargo(state);
-        return t.success(withComputedFreeSpace(state));
+        return t.success(withComputedFreeSpace(decoded.right));
     },
-    state => PlayerStateFields.encode(state) as PlayerState,
+    state => encodePersistentPlayerState(state),
 );
+
+export function decodePlayerState(
+    raw: unknown,
+): Either<Errors, PlayerState> {
+    return PlayerStateCodec.decode(raw);
+}
+
+export function toPersistentPlayerState(
+    state: PlayerState | PersistentPlayerState,
+): PersistentPlayerState {
+    const decoded = PersistentPlayerStateCodec.decode(state);
+    if (decoded._tag === 'Left') {
+        throw new Error('Cannot persist invalid player state');
+    }
+    // Runtime state is commonly an Immer draft. Encoding alone preserves
+    // references to draft-backed arrays and objects; the draft is revoked at
+    // the end of the ECS step, before an async PlayerStore save resumes.
+    // Detach the canonical encoded shape synchronously so persistence never
+    // observes revoked proxies.
+    return JSON.parse(JSON.stringify(
+        encodePersistentPlayerState(decoded.right),
+    )) as PersistentPlayerState;
+}
+
+/**
+ * Clone via the canonical encoded shape rather than another hand-maintained
+ * list of state fields. Player data is JSON persistence data by definition.
+ */
+export function clonePlayerState(
+    state: PersistentPlayerState,
+): PersistentPlayerState {
+    return JSON.parse(JSON.stringify(
+        PersistentPlayerStateCodec.encode(state))) as PersistentPlayerState;
+}
 
 export const PlayerStateComponent =
     new Component<PlayerState>('PlayerStateComponent');
@@ -132,7 +285,65 @@ export const PlayerStateResource =
  * making browser bundles import its Node fs implementation.
  */
 export const PlayerStoreResource =
-    new Resource<unknown>('PlayerStoreResource');
+    new Resource<PlayerStorePort>('PlayerStoreResource');
+
+export const PlayerSnapshotSummary = t.intersection([
+    t.type({
+        id: t.string,
+        createdAt: t.number,
+        reason: t.union([t.literal('landing'), t.literal('manual')]),
+    }),
+    t.partial({
+        pilotName: t.string,
+        currentSystem: t.string,
+    }),
+]);
+export type PlayerSnapshotSummary = t.TypeOf<typeof PlayerSnapshotSummary>;
+
+export const PlayerSnapshotCodec = t.intersection([
+    t.type({
+        id: t.string,
+        createdAt: t.number,
+        reason: t.union([t.literal('landing'), t.literal('manual')]),
+        state: PersistentPlayerStateCodec,
+    }),
+    t.partial({
+        ship: EncodedEntity,
+    }),
+]);
+export type PlayerSnapshot = t.TypeOf<typeof PlayerSnapshotCodec>;
+
+/**
+ * Shared port implemented by the Node store and consumed by gameplay
+ * plugins. Keeping this contract beside the browser-safe codecs prevents
+ * each plugin from inventing a slightly different persistence API.
+ */
+export interface PlayerStorePort {
+    readonly ready: Promise<void>;
+    get(token: string): Promise<
+        (PersistentPlayerState & { readonly savedAt?: number }) | undefined
+    >;
+    getOrCreate(token: string): Promise<PersistentPlayerState>;
+    save(
+        token: string,
+        state: PersistentPlayerState,
+        ship?: t.TypeOf<typeof EncodedEntity>,
+    ): Promise<void>;
+    snapshot(
+        token: string,
+        state: PersistentPlayerState,
+        ship?: t.TypeOf<typeof EncodedEntity>,
+        reason?: PlayerSnapshot['reason'],
+    ): Promise<PlayerSnapshot>;
+    getSnapshots(token: string): Promise<PlayerSnapshot[]>;
+    restoreSnapshot(
+        token: string,
+        snapshotId: string,
+    ): Promise<{ readonly currentSystem: string } | undefined>;
+    bindPeer(peerId: string, token: string): void;
+    getTokenForPeer(peerId: string): string | undefined;
+    flush(): Promise<void>;
+}
 
 /**
  * Message sent by the server after the normal communicator UUID handshake.
@@ -145,8 +356,10 @@ export const PlayerData = t.intersection([
     }),
     t.partial({
         system: t.string,
+        savedAt: t.number,
         playerState: PlayerStateCodec,
         ship: EncodedEntity,
+        snapshots: t.array(PlayerSnapshotSummary),
     }),
 ]);
 export type PlayerData = t.TypeOf<typeof PlayerData>;
@@ -159,8 +372,18 @@ export function createInitialPlayerState(): PlayerState {
         activeMissions: [],
         shipId: 'nova:128',
         currentSystem: 'nova:130',
+        lastLandedPlanet: 'nova:128',
+        lastLandedSystem: 'nova:130',
+        lastLandedPosition: [0, 0],
         cargoCapacity: DEFAULT_CARGO_CAPACITY,
         holds: [],
+        pilotName: 'Captain',
+        shipName: 'Nova',
+        gender: 'male',
+        destroyedStellars: [],
+        activeRanks: [],
+        exploredSystems: [],
+        registered: false,
     });
 }
 
@@ -203,6 +426,50 @@ export function setCargoCapacity(
         state.cargoCapacity = Math.floor(cargoCapacity);
     }
     return state.cargoCapacity;
+}
+
+export function isStellarDestroyed(
+    state: Pick<PlayerState, 'destroyedStellars'>,
+    id: string | number,
+): boolean {
+    const resourceId = canonicalResourceId(id);
+    return state.destroyedStellars.some(entry =>
+        sameResourceId(entry, resourceId));
+}
+
+export function destroyStellar(
+    state: PlayerState,
+    id: string | number,
+): void {
+    if (!isStellarDestroyed(state, id)) {
+        state.destroyedStellars.push(canonicalResourceId(id));
+    }
+}
+
+export function regenerateStellar(
+    state: PlayerState,
+    id: string | number,
+): void {
+    state.destroyedStellars = state.destroyedStellars.filter(entry =>
+        !sameResourceId(entry, canonicalResourceId(id)));
+}
+
+export function activateRank(state: PlayerState, id: number): void {
+    if (!state.activeRanks.includes(id)) {
+        state.activeRanks.push(id);
+    }
+}
+
+export function deactivateRank(state: PlayerState, id: number): void {
+    state.activeRanks = state.activeRanks.filter(rank => rank !== id);
+}
+
+export function exploreSystem(state: PlayerState, id: string | number): void {
+    const systemId = canonicalResourceId(id);
+    if (!state.exploredSystems.some(entry =>
+        sameResourceId(entry, systemId))) {
+        state.exploredSystems.push(systemId);
+    }
 }
 
 /**

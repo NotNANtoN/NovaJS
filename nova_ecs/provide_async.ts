@@ -1,5 +1,5 @@
 import { isDraft, original } from "immer";
-import { ArgsToData, ArgTypes, GetEntity, UUID } from "./arg_types";
+import { ArgsToData, ArgTypes, Entities, GetEntity, UUID } from "./arg_types";
 import { AsyncSystem } from "./async_system";
 import { Component } from "./component";
 import { DeleteEvent, StepEvent } from "./events";
@@ -23,20 +23,21 @@ export type ProvideAsyncArgs<Data, Args extends readonly ArgTypes[]> =
         factory: (...args: ArgsToData<Args>) => Data | Promise<Data>,
         update?: Iterable<Component<any>>,
         onError?: (err: Error) => void,
+        dispose?: (data: Data) => void,
     };
 
-export function ProvideAsync<Data, Args extends readonly ArgTypes[]>({ name, provided, update, factory, args, before, after, onError }: ProvideAsyncArgs<Data, Args>) {
+export function ProvideAsync<Data, Args extends readonly ArgTypes[]>({ name, provided, update, factory, args, before, after, onError, dispose }: ProvideAsyncArgs<Data, Args>) {
     const updateEvents = [...update ?? []].map(component => ChangeEvents.get(component));
 
     return new AsyncSystem({
         name,
         events: [StepEvent, ...updateEvents],
         before, after,
-        args: [Optional(provided), AsyncProviderResource, UUID,
+        args: [Optional(provided), AsyncProviderResource, Entities, UUID,
             GetEntity, Optional(StepEvent), ...args] as const,
         skipIfApplyingPatches: true,
         exclusive: true,
-        async step(providedValue, asyncProviderData, uuid, entity, step, ...args) {
+        async step(providedValue, asyncProviderData, entities, uuid, entity, step, ...args) {
             const originalProvidedValue = entity.components.get(provided);
 
             const originalData = originalIfDraft(asyncProviderData);
@@ -60,6 +61,14 @@ export function ProvideAsync<Data, Args extends readonly ArgTypes[]>({ name, pro
             try {
                 providedValue = await factory(...args);
 
+                // The entity may have been deleted while the factory was
+                // waiting for network or asset data. Do not retain the
+                // completed graphic (or any other owned async resource).
+                if (entities.get(uuid) !== entity) {
+                    dispose?.(providedValue);
+                    return;
+                }
+
                 // If this instance of the provider is the most recent run,
                 // then apply the provided data.
                 if (originalDataForProvider.get(uuid) === runningSymbol) {
@@ -68,10 +77,13 @@ export function ProvideAsync<Data, Args extends readonly ArgTypes[]>({ name, pro
                     // don't set the value.
                     // TODO: Is this desirable?
                     if (entity.components.get(provided) !== originalProvidedValue) {
+                        dispose?.(providedValue);
                         return;
                     }
                     entity.components.set(
                         provided, originalIfDraft(providedValue));
+                } else {
+                    dispose?.(providedValue);
                 }
             } catch (e) {
                 (onError ?? console.warn)(e);

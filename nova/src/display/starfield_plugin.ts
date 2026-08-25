@@ -15,6 +15,7 @@ import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin";
 import { ResizeEvent } from "./screen_size_plugin";
 import { Stage } from "./stage_resource";
 import { texturesFromFrames } from "./textures_from_frames";
+import { createGraphicHandle, ManagedGraphic } from './managed_graphic';
 
 const STAR_ID = "nova:700";
 
@@ -35,6 +36,7 @@ class Starfield {
     private textures: PIXI.Texture[];
     private positionFactorRange: [number, number];
     container = new PIXI.Container();
+    readonly managed: ManagedGraphic = createGraphicHandle(this.container);
     private rbush = new RBush<Star>();
     private screen = { width: 100, height: 100 };
     private graphics = new PIXI.Graphics();
@@ -225,9 +227,8 @@ export function starfield({ density = 0.00002,
             world.removeSystem(StarfieldSystem);
 
             const starfield = world.resources.get(StarfieldResource);
-            const stage = world.resources.get(Stage);
-            if (starfield && stage) {
-                stage.removeChild(starfield.container);
+            if (starfield) {
+                starfield.managed.dispose();
             }
             world.resources.delete(StarfieldResource);
         }

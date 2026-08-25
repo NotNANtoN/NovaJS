@@ -1,94 +1,37 @@
-import * as t from 'io-ts';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import * as t from 'io-ts';
+import {
+    clonePlayerState,
+    createInitialPlayerState,
+    PersistentPlayerStateCodec,
+    PlayerSnapshot,
+    PlayerSnapshotCodec,
+    toPersistentPlayerState,
+} from '../nova_plugin/player_state';
+import type {
+    PersistentPlayerState,
+    PlayerStorePort,
+} from '../nova_plugin/player_state';
+import { EncodedEntity } from 'nova_ecs/plugins/serializer_plugin';
 
 const PLAYER_DATA_DIRECTORY = 'NovaJS-data';
 const PLAYER_DATA_FILE = 'players.json';
-const MAX_MISSION_BITS = 10_000;
-const DEFAULT_CARGO_CAPACITY = 10;
-
-export interface PersistentCargoHold {
-    commodity: string;
-    tons: number;
-    isMissionCargo: boolean;
-}
-
-export interface PersistentActiveMission {
-    missionId: string;
-    state: string;
-    destination?: string;
-    cargo?: {
-        type: number;
-        quantity: number;
-        pickupDestination?: string;
-    };
-    acceptedDate?: number;
-    travelDestination?: string;
-    returnDestination?: string;
-    shipSystem?: string;
-    /** Full record for engine-generated procedural missions. */
-    missionData?: unknown;
-}
-
-export interface PersistentPlayerState {
-    credits: number;
-    missionBits: boolean[];
-    gameDate: number;
-    activeMissions: PersistentActiveMission[];
-    shipId: string;
-    currentSystem: string;
-    cargoCapacity: number;
-    holds: PersistentCargoHold[];
-}
+export const MAX_PLAYER_SNAPSHOTS = 10;
 
 export interface StoredPlayer extends PersistentPlayerState {
-    /** Reserved for a future fully serialized ship restore. */
-    ship?: unknown;
+    savedAt?: number;
+    ship?: EncodedEntity;
+    snapshots: PlayerSnapshot[];
 }
 
-const ActiveMission = t.type({
-    missionId: t.string,
-    state: t.string,
-});
-const ActiveMissionDetails = t.intersection([
-    ActiveMission,
-    t.partial({
-        destination: t.string,
-        cargo: t.intersection([
-            t.type({
-                type: t.number,
-                quantity: t.number,
-            }),
-            t.partial({
-                pickupDestination: t.string,
-            }),
-        ]),
-        acceptedDate: t.number,
-        travelDestination: t.string,
-        returnDestination: t.string,
-        shipSystem: t.string,
-        missionData: t.any,
-    }),
-]);
-
 const StoredPlayerCodec = t.intersection([
-    t.type({
-        credits: t.number,
-        missionBits: t.array(t.boolean),
-        gameDate: t.number,
-        activeMissions: t.array(ActiveMissionDetails),
-        shipId: t.string,
-        currentSystem: t.string,
-    }),
+    PersistentPlayerStateCodec,
     t.partial({
-        ship: t.unknown,
-        cargoCapacity: t.number,
-        holds: t.array(t.type({
-            commodity: t.string,
-            tons: t.number,
-            isMissionCargo: t.boolean,
-        })),
+        savedAt: t.number,
+        ship: EncodedEntity,
+        snapshots: t.array(PlayerSnapshotCodec),
     }),
 ]);
 
@@ -100,65 +43,48 @@ function defaultPlayerDataPath() {
         : path.resolve(configured);
 }
 
-function initialPlayerState(): PersistentPlayerState {
+function initialPlayerState(): StoredPlayer {
     return {
-        credits: 10_000,
-        missionBits: new Array<boolean>(MAX_MISSION_BITS).fill(false),
-        gameDate: 0,
-        activeMissions: [],
-        shipId: 'nova:128',
-        currentSystem: 'nova:130',
-        cargoCapacity: DEFAULT_CARGO_CAPACITY,
-        holds: [],
+        ...createInitialPlayerState(),
+        snapshots: [],
+    };
+}
+
+function cloneSnapshot(snapshot: PlayerSnapshot): PlayerSnapshot {
+    return {
+        ...snapshot,
+        state: clonePlayerState(snapshot.state),
+        ...(snapshot.ship === undefined
+            ? {}
+            : {
+                ship: JSON.parse(JSON.stringify(snapshot.ship)) as EncodedEntity,
+            }),
     };
 }
 
 function clonePlayer(player: StoredPlayer): StoredPlayer {
     return {
         ...player,
-        missionBits: [...player.missionBits],
-        activeMissions: player.activeMissions.map(mission => ({
-            ...mission,
-            ...(mission.cargo ? { cargo: { ...mission.cargo } } : {}),
-            ...(mission.missionData && typeof mission.missionData === 'object'
-                ? { missionData: { ...(mission.missionData as object) } }
-                : {}),
-        })),
-        holds: player.holds.map(hold => ({ ...hold })),
+        ...clonePlayerState(player),
+        ...(player.ship === undefined
+            ? {}
+            : { ship: JSON.parse(JSON.stringify(player.ship)) as EncodedEntity }),
+        snapshots: player.snapshots.map(cloneSnapshot),
     };
 }
 
 function normalizePlayer(
     player: t.TypeOf<typeof StoredPlayerCodec>,
 ): StoredPlayer {
-    const holds = player.holds ? player.holds.map(hold => ({ ...hold })) : [];
-    const activeMissions = player.activeMissions.map(mission => ({
-        ...mission,
-        ...(mission.cargo ? { cargo: { ...mission.cargo } } : {}),
-        ...(mission.missionData && typeof mission.missionData === 'object'
-            ? { missionData: { ...(mission.missionData as object) } }
-            : {}),
-    }));
-    for (const mission of activeMissions) {
-        if (mission.state !== 'active' || !mission.cargo
-            || mission.cargo.quantity <= 0
-            || holds.some(hold =>
-                hold.isMissionCargo && hold.commodity === mission.missionId)) {
-            continue;
-        }
-        holds.push({
-            commodity: mission.missionId,
-            tons: mission.cargo.quantity,
-            isMissionCargo: true,
-        });
-    }
+    const state = toPersistentPlayerState(player);
     return {
-        ...player,
-        cargoCapacity: Number.isFinite(player.cargoCapacity)
-            ? player.cargoCapacity : DEFAULT_CARGO_CAPACITY,
-        holds,
-        activeMissions,
-    } as StoredPlayer;
+        ...state,
+        ...(player.savedAt === undefined ? {} : { savedAt: player.savedAt }),
+        ...(player.ship === undefined
+            ? {}
+            : { ship: JSON.parse(JSON.stringify(player.ship)) as EncodedEntity }),
+        snapshots: (player.snapshots ?? []).map(cloneSnapshot),
+    };
 }
 
 /**
@@ -168,7 +94,7 @@ function normalizePlayer(
  * in-memory map is keyed by the client-provided persistent token; transport
  * peer IDs are tracked separately and are never written as player identity.
  */
-export class PlayerStore {
+export class PlayerStore implements PlayerStorePort {
     readonly filePath: string;
     readonly ready: Promise<void>;
     private players = new Map<string, StoredPlayer>();
@@ -176,6 +102,7 @@ export class PlayerStore {
     private saveTimer?: NodeJS.Timeout;
     private writePromise: Promise<void> = Promise.resolve();
     private dirty = false;
+    private snapshotSequence = 0;
 
     constructor(filePath = defaultPlayerDataPath()) {
         this.filePath = path.resolve(filePath);
@@ -234,22 +161,92 @@ export class PlayerStore {
         return clonePlayer(player);
     }
 
-    async save(token: string, state: PersistentPlayerState, ship?: unknown) {
+    async save(
+        token: string,
+        state: PersistentPlayerState,
+        ship?: EncodedEntity,
+    ) {
         await this.ready;
+        const previous = this.players.get(token);
+        const persistedState = toPersistentPlayerState(state);
         this.players.set(token, {
-            ...state,
-            missionBits: [...state.missionBits],
-            activeMissions: state.activeMissions.map(mission => ({
-                ...mission,
-                ...(mission.cargo ? { cargo: { ...mission.cargo } } : {}),
-                ...(mission.missionData && typeof mission.missionData === 'object'
-                    ? { missionData: { ...(mission.missionData as object) } }
-                    : {}),
-            })),
-            holds: state.holds.map(hold => ({ ...hold })),
-            ...(ship === undefined ? {} : { ship }),
+            ...persistedState,
+            savedAt: Date.now(),
+            snapshots: previous?.snapshots.map(cloneSnapshot) ?? [],
+            ...(ship === undefined ? { ship: previous?.ship } : { ship }),
         });
         this.scheduleSave();
+    }
+
+    /**
+     * Retain a complete pilot-state snapshot. Saving first means a snapshot
+     * taken during landing is also the state returned by Continue.
+     */
+    async snapshot(
+        token: string,
+        state: PersistentPlayerState,
+        ship?: EncodedEntity,
+        reason: PlayerSnapshot['reason'] = 'landing',
+    ): Promise<PlayerSnapshot> {
+        const persistedState = toPersistentPlayerState(state);
+        await this.save(token, persistedState, ship);
+        const player = this.players.get(token);
+        if (!player) {
+            throw new Error(`Missing player ${token} after saving snapshot`);
+        }
+        const createdAt = Date.now();
+        const snapshot: PlayerSnapshot = {
+            id: `${createdAt}-${++this.snapshotSequence}`,
+            createdAt,
+            reason,
+            state: clonePlayerState(persistedState),
+            ...(ship === undefined
+                ? {}
+                : {
+                    ship: JSON.parse(JSON.stringify(ship)) as EncodedEntity,
+                }),
+        };
+        player.snapshots = [
+            ...player.snapshots,
+            snapshot,
+        ].slice(-MAX_PLAYER_SNAPSHOTS);
+        this.scheduleSave();
+        return cloneSnapshot(snapshot);
+    }
+
+    async getSnapshots(token: string): Promise<PlayerSnapshot[]> {
+        await this.ready;
+        return (this.players.get(token)?.snapshots ?? []).map(cloneSnapshot);
+    }
+
+    /**
+     * Restore state while retaining the snapshot history, so a mistaken
+     * restore can itself be undone from a later snapshot.
+     */
+    async restoreSnapshot(
+        token: string,
+        snapshotId: string,
+    ): Promise<StoredPlayer | undefined> {
+        await this.ready;
+        const player = this.players.get(token);
+        const snapshot = player?.snapshots.find(
+            candidate => candidate.id === snapshotId);
+        if (!player || !snapshot) {
+            return undefined;
+        }
+        const restored = clonePlayerState(snapshot.state);
+        this.players.set(token, {
+            ...restored,
+            savedAt: Date.now(),
+            snapshots: player.snapshots.map(cloneSnapshot),
+            ...(snapshot.ship === undefined
+                ? {}
+                : {
+                    ship: JSON.parse(JSON.stringify(snapshot.ship)) as EncodedEntity,
+                }),
+        });
+        this.scheduleSave();
+        return clonePlayer(this.players.get(token)!);
     }
 
     bindPeer(peerId: string, token: string) {

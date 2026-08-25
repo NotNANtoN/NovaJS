@@ -5,14 +5,15 @@ import { gzip } from "zlib";
 import { idsPath, dataPath, settingsPrefix } from "../common/GameDataPaths";
 import { GameDataInterface } from "../../../novadatainterface/GameDataInterface";
 import { NovaDataType } from "../../../novadatainterface/NovaDataInterface";
+import { PlayerStore } from "./player_store";
 
 
 /**
  * Serves GameData to the client
  * Maybe consider https://github.com/RioloGiuseppe/byte-serializer in the future?
  */
-export function setupRoutes(gameData: GameDataInterface, app: Express, htmlPath: string, bundlePath: string, bundleMapPath: string, settingsPath: string, novaDataPath?: string) {
-    return new GameDataServer(gameData, app, htmlPath, bundlePath, bundleMapPath, settingsPath, novaDataPath);
+export function setupRoutes(gameData: GameDataInterface, app: Express, htmlPath: string, bundlePath: string, bundleMapPath: string, settingsPath: string, novaDataPath?: string, playerStore?: PlayerStore) {
+    return new GameDataServer(gameData, app, htmlPath, bundlePath, bundleMapPath, settingsPath, novaDataPath, playerStore);
 }
 
 function gzipMiddleware(req: express.Request, res: express.Response,
@@ -86,7 +87,8 @@ class GameDataServer {
         private readonly bundlePath: string,
         private readonly bundleMapPath: string,
         private readonly settingsPath: string,
-        private readonly novaDataPath?: string) {
+        private readonly novaDataPath?: string,
+        private readonly playerStore?: PlayerStore) {
         this.setupRoutes();
     }
 
@@ -121,7 +123,71 @@ class GameDataServer {
         });
 
         this.app.use(settingsPrefix,
-            express.static(this.settingsPath));
+            express.static(path.dirname(this.settingsPath)));
+
+        if (this.playerStore) {
+            this.app.use(express.json());
+            this.app.get('/player/state', async (req, res) => {
+                const token = typeof req.query.token === 'string'
+                    ? req.query.token : undefined;
+                if (!token) {
+                    res.status(400).send('Missing player token');
+                    return;
+                }
+                const player = await this.playerStore!.get(token);
+                if (!player) {
+                    res.status(404).send('Player not found');
+                    return;
+                }
+                res.send({
+                    uuid: 'persisted',
+                    system: player.currentSystem,
+                    savedAt: player.savedAt,
+                    playerState: player,
+                    snapshots: player.snapshots.map(({
+                        id, createdAt, reason, state,
+                    }) => ({
+                        id,
+                        createdAt,
+                        reason,
+                        pilotName: state.pilotName,
+                        currentSystem: state.currentSystem,
+                    })),
+                });
+            });
+            this.app.get('/player/snapshots', async (req, res) => {
+                const token = typeof req.query.token === 'string'
+                    ? req.query.token : undefined;
+                if (!token) {
+                    res.status(400).send('Missing player token');
+                    return;
+                }
+                const snapshots = await this.playerStore!.getSnapshots(token);
+                res.send(snapshots.map(({ id, createdAt, reason, state }) => ({
+                    id,
+                    createdAt,
+                    reason,
+                    pilotName: state.pilotName,
+                    currentSystem: state.currentSystem,
+                })));
+            });
+            this.app.post('/player/snapshots/:snapshotId/restore',
+                async (req, res) => {
+                    const token = typeof req.body?.token === 'string'
+                        ? req.body.token : undefined;
+                    if (!token) {
+                        res.status(400).send('Missing player token');
+                        return;
+                    }
+                    const player = await this.playerStore!.restoreSnapshot(
+                        token, req.params.snapshotId);
+                    if (!player) {
+                        res.status(404).send('Snapshot not found');
+                        return;
+                    }
+                    res.send(player);
+                });
+        }
 
         //        // This has to be here or else sourcemaps don't work!
         //        const staticPath = path.join(this.appRoot, "build", "static");

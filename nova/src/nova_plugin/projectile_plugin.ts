@@ -8,8 +8,10 @@ import { EcsEvent } from 'nova_ecs/events';
 import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
 import { MovementPhysicsComponent, MovementStateComponent, MovementType } from 'nova_ecs/plugins/movement_plugin';
+import { MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { ProvideAsync } from "nova_ecs/provide_async";
+import { Query } from "nova_ecs/query";
 import { System } from 'nova_ecs/system';
 import * as SAT from "sat";
 import { v4 } from 'uuid';
@@ -20,6 +22,7 @@ import { CompositeHull, hullFromAnimation, HurtboxHullComponent } from './collis
 import { CollisionEvent, CollisionHitterComponent, CollisionVulnerabilityComponent } from './collision_interaction';
 import { CreateTime } from './create_time';
 import { DamagedEvent, ZeroArmorEvent } from './death_plugin';
+import { reserveEntity } from './entity_budget';
 import { FireSubs, OwnerComponent, SourceComponent, SubCounts, VulnerableToPD, WeaponConstructors, WeaponEntry } from './fire_weapon_plugin';
 import { GameDataResource } from './game_data_resource';
 import { firstOrderWithFallback, Guidance, GuidanceComponent } from './guidance';
@@ -30,6 +33,31 @@ import { SoundEvent } from './sound_event';
 import { Stat } from './stat';
 import { TargetComponent } from './target_component';
 
+const SourceOwnershipQuery = new Query([
+    Optional(MultiplayerData),
+    Optional(SourceComponent),
+] as const);
+
+function isPlayerOwnedSource(
+    source: string | undefined,
+    runQuery: RunQueryFunction,
+    visited = new Set<string>(),
+): boolean {
+    if (!source || visited.has(source)) {
+        return false;
+    }
+    visited.add(source);
+
+    const result = runQuery(SourceOwnershipQuery, source)[0];
+    if (!result) {
+        return false;
+    }
+    const [multiplayer, parentSource] = result;
+    if (multiplayer) {
+        return multiplayer.owner !== 'server';
+    }
+    return isPlayerOwnedSource(parentSource, runQuery, visited);
+}
 
 class ProjectileWeaponEntry extends WeaponEntry {
     declare data: ProjectileWeaponData;
@@ -171,6 +199,13 @@ class ProjectileWeaponEntry extends WeaponEntry {
             shield.current = shield.max;
         }
 
+        const playerOwned = isPlayerOwnedSource(source, this.runQuery);
+        if (!reserveEntity(this.budget, projectile, 'projectile', playerOwned)) {
+            // The object came from a reusable queue, so return it without
+            // retaining a budget reservation when the classic cap is full.
+            this.factoryQueue.enqueue(projectile);
+            return undefined;
+        }
         this.entities.set(v4(), projectile);
         if (this.data.sound) {
             this.emit(SoundEvent, {
@@ -294,9 +329,11 @@ const ProjectileBlastSystem = new System({
     name: 'ProjectileBlastSystem',
     events: [ProjectileExplodeEvent],
     args: [ProjectileDataComponent, ProjectileBlastHull, CollisionHitterComponent,
-        MovementStateComponent, Optional(OwnerComponent), Entities,
+        MovementStateComponent, Optional(OwnerComponent),
+        Optional(SourceComponent), Entities,
         ProjectileExplodeEvent] as const,
-    step(projectileData, blastHull, hitter, movement, owner, entities, other) {
+    step(projectileData, blastHull, hitter, movement, owner, source, entities,
+        other) {
         const blastIgnore = new Set<string>();
         // TODO: Tag ship that was hit as immune to explosion, since it's already hit.
         if (!projectileData.blastHurtsFiringShip && owner) {
@@ -327,6 +364,12 @@ const ProjectileBlastSystem = new System({
                 turnBack: false,
                 velocity: new Vector(0, 0),
             });
+        if (source) {
+            blast.addComponent(SourceComponent, source);
+        }
+        if (owner) {
+            blast.addComponent(OwnerComponent, owner);
+        }
         entities.set(v4(), blast);
     }
 });

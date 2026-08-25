@@ -3,5 +3,5 @@ import defaultCicn from 'novadatainterface/default_rled';
 export type CicnImageData = ArrayBuffer;
 
 export function getDefaultCicnImageData(): CicnImageData {
-    return Buffer.from(defaultCicn.buffer);
+    return Buffer.from(defaultCicn.buffer).buffer as ArrayBuffer;
 }

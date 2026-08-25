@@ -19,6 +19,9 @@ class OutfResource extends BaseResource {
     get max(): number {
         return this.data.getInt16(10);
     }
+    get flags(): number {
+        return this.data.getUint16(12);
+    }
     get pictID(): number {
         return this.id - 128 + 6000;
     }
@@ -27,6 +30,34 @@ class OutfResource extends BaseResource {
     }
     get cost(): number {
         return this.data.getInt32(14);
+    }
+    private getString(start: number, length: number): string {
+        let result = "";
+        for (let i = start; i < Math.min(start + length, this.data.byteLength); i++) {
+            const value = this.data.getUint8(i);
+            if (value !== 0) {
+                result += String.fromCharCode(value);
+            }
+        }
+        return result;
+    }
+    get availabilityNCB(): string {
+        return this.getString(46, 255);
+    }
+    get onPurchase(): string {
+        return this.getString(301, 255);
+    }
+    get contribute(): number[] {
+        return [
+            this.data.byteLength >= 548 ? this.data.getUint32(544) : 0,
+            this.data.byteLength >= 552 ? this.data.getUint32(548) : 0,
+        ];
+    }
+    get require(): number[] {
+        return [
+            this.data.byteLength >= 556 ? this.data.getUint32(552) : 0,
+            this.data.byteLength >= 560 ? this.data.getUint32(556) : 0,
+        ];
     }
     get functions(): OutfitFunctions {
         var functions: OutfitFunctions = [];

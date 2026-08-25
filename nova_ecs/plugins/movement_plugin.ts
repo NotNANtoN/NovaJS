@@ -5,6 +5,7 @@ import { Component } from '../component';
 import { Angle, AngleType } from '../datatypes/angle';
 import { Position, PositionType } from '../datatypes/position';
 import { Vector, VectorLike, VectorType } from '../datatypes/vector';
+import { Optional } from '../optional';
 import { Plugin } from '../plugin';
 import { System } from '../system';
 import { applyObjectDelta } from './delta';
@@ -50,11 +51,174 @@ export type MovementState = t.TypeOf<typeof MovementState>;
 // such as when a player accelerates, we send the full state.
 export const MovementStateComponent = new Component<MovementState>('MovementState');
 
+export interface MovementSnapshot {
+    readonly serverTime: number;
+    readonly state: MovementState;
+    readonly sequence?: number;
+}
+
+export interface RemoteMovementPresentation {
+    snapshots: MovementSnapshot[];
+}
+
+/**
+ * Authoritative snapshots for non-owned entities. This component is local
+ * presentation state; multiplayer never serializes it.
+ */
+export const RemoteMovementPresentationComponent =
+    new Component<RemoteMovementPresentation>('RemoteMovementPresentation');
+
+export const REMOTE_INTERPOLATION_DELAY_MS = 200;
+export const REMOTE_MAX_EXTRAPOLATION_MS = 100;
+
+export function copyMovementState(state: MovementState): MovementState {
+    return {
+        position: new Position(state.position.x, state.position.y),
+        velocity: new Vector(state.velocity.x, state.velocity.y),
+        rotation: new Angle(state.rotation.angle),
+        turning: state.turning,
+        turnBack: state.turnBack,
+        accelerating: state.accelerating,
+        turnTo: state.turnTo instanceof Angle
+            ? new Angle(state.turnTo.angle)
+            : state.turnTo,
+        targetSpeed: state.targetSpeed,
+    };
+}
+
+export function queueRemoteMovementSnapshot(
+    presentation: RemoteMovementPresentation,
+    state: MovementState,
+    serverTime: number,
+    sequence?: number,
+): void {
+    const snapshot = {
+        state: copyMovementState(state),
+        serverTime,
+        sequence,
+    };
+    const existing = presentation.snapshots.findIndex(
+        candidate => (sequence !== undefined
+            && candidate.sequence === sequence)
+            || candidate.serverTime === serverTime);
+    if (existing >= 0) {
+        presentation.snapshots[existing] = snapshot;
+    } else {
+        presentation.snapshots.push(snapshot);
+    }
+    presentation.snapshots.sort((a, b) => {
+        if (a.sequence !== undefined && b.sequence !== undefined
+            && a.sequence !== b.sequence) {
+            return a.sequence - b.sequence;
+        }
+        return a.serverTime - b.serverTime;
+    });
+    // Reordered packets older than the retained interpolation window cannot
+    // affect presentation and should not grow the component indefinitely.
+    if (presentation.snapshots.length > 8) {
+        presentation.snapshots.splice(0, presentation.snapshots.length - 8);
+    }
+}
+
+function interpolateMovementState(
+    before: MovementState,
+    after: MovementState,
+    amount: number,
+): MovementState {
+    const inverse = 1 - amount;
+    const rotationDelta = before.rotation.distanceTo(after.rotation).angle;
+    const discrete = amount < 1 ? before : after;
+    return {
+        position: new Position(
+            before.position.x * inverse + after.position.x * amount,
+            before.position.y * inverse + after.position.y * amount,
+        ),
+        velocity: new Vector(
+            before.velocity.x * inverse + after.velocity.x * amount,
+            before.velocity.y * inverse + after.velocity.y * amount,
+        ),
+        rotation: before.rotation.add(rotationDelta * amount),
+        turning: discrete.turning,
+        turnBack: discrete.turnBack,
+        accelerating: discrete.accelerating,
+        turnTo: discrete.turnTo,
+        targetSpeed: before.targetSpeed === undefined
+            || after.targetSpeed === undefined
+            ? discrete.targetSpeed
+            : before.targetSpeed * inverse + after.targetSpeed * amount,
+    };
+}
+
+export function advanceMovementState(
+    state: MovementState,
+    physics: MovementPhysics,
+    delta_s: number,
+    entities: EntityMap,
+): MovementState {
+    const advanced = copyMovementState(state);
+    let remaining = Math.max(0, delta_s);
+    while (remaining > 0) {
+        const step = Math.min(remaining, 1 / 60);
+        const time: Time = {
+            time: 0,
+            delta_s: step,
+            delta_ms: step * 1000,
+            frame: 0,
+        };
+        if (physics.movementType === MovementType.INERTIAL) {
+            inertialControls(advanced, physics, time, entities);
+        } else if (physics.movementType === MovementType.INERTIALESS) {
+            inertialessControls(advanced, physics, time, entities);
+        }
+        remaining -= step;
+    }
+    return advanced;
+}
+
+export function sampleRemoteMovement(
+    presentation: RemoteMovementPresentation,
+    renderTime: number,
+    physics: MovementPhysics,
+    entities: EntityMap,
+): MovementState | undefined {
+    const snapshots = presentation.snapshots;
+    if (snapshots.length === 0) {
+        return;
+    }
+    const afterIndex = snapshots.findIndex(
+        snapshot => snapshot.serverTime >= renderTime);
+    if (afterIndex === 0) {
+        return copyMovementState(snapshots[0].state);
+    }
+    if (afterIndex > 0) {
+        const before = snapshots[afterIndex - 1];
+        const after = snapshots[afterIndex];
+        const span = after.serverTime - before.serverTime;
+        const amount = span <= 0 ? 1
+            : Math.max(0, Math.min(1,
+                (renderTime - before.serverTime) / span));
+        return interpolateMovementState(before.state, after.state, amount);
+    }
+    const latest = snapshots[snapshots.length - 1];
+    const extrapolationMs = Math.min(
+        REMOTE_MAX_EXTRAPOLATION_MS,
+        Math.max(0, renderTime - latest.serverTime),
+    );
+    return advanceMovementState(
+        latest.state, physics, extrapolationMs / 1000, entities);
+}
+
 export const MovementSystem = new System({
     name: 'movement',
     args: [MovementStateComponent, MovementPhysicsComponent,
+        Optional(RemoteMovementPresentationComponent),
         TimeResource, Entities] as const,
-    step(state, physics, time, entities) {
+    step(state, physics, presentation, time, entities) {
+        if (presentation) {
+            // Remote movement is sampled by the presentation system below.
+            // Do not integrate it once and then overwrite it again.
+            return;
+        }
         if (physics.movementType === MovementType.INERTIAL) {
             inertialControls(state, physics, time, entities);
         } else if (physics.movementType === MovementType.INERTIALESS) {
@@ -62,6 +226,36 @@ export const MovementSystem = new System({
         }
     },
     after: [TimeSystem],
+});
+
+export const RemoteMovementPresentationSystem = new System({
+    name: 'RemoteMovementPresentationSystem',
+    args: [MovementStateComponent, MovementPhysicsComponent,
+        RemoteMovementPresentationComponent, TimeResource, Entities] as const,
+    step(state, physics, presentation, time, entities) {
+        const renderTime = time.time - REMOTE_INTERPOLATION_DELAY_MS;
+        const sampled = sampleRemoteMovement(
+            presentation, renderTime, physics, entities);
+        if (!sampled) {
+            return;
+        }
+        state.position = sampled.position;
+        state.velocity = sampled.velocity;
+        state.rotation = sampled.rotation;
+        state.turning = sampled.turning;
+        state.turnBack = sampled.turnBack;
+        state.accelerating = sampled.accelerating;
+        state.turnTo = sampled.turnTo;
+        state.targetSpeed = sampled.targetSpeed;
+
+        // Keep one snapshot before the render cursor so the next frame can
+        // continue interpolating across the same interval.
+        while (presentation.snapshots.length > 2
+            && presentation.snapshots[1].serverTime <= renderTime) {
+            presentation.snapshots.shift();
+        }
+    },
+    after: [MovementSystem],
 });
 
 function inertialControls(state: MovementState, physics: MovementPhysics,
@@ -195,6 +389,8 @@ export const MovementPlugin: Plugin = {
 
         world.addComponent(MovementPhysicsComponent);
         world.addComponent(MovementStateComponent);
+        world.addComponent(RemoteMovementPresentationComponent);
         world.addSystem(MovementSystem);
+        world.addSystem(RemoteMovementPresentationSystem);
     }
 };

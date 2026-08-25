@@ -4,6 +4,7 @@ import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
 import { System } from "nova_ecs/system";
 import * as PIXI from "pixi.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin";
+import { PlayerDeathComponent } from "../nova_plugin/death_plugin";
 import { AnimationGraphicPlugin } from "./animation_graphic_plugin";
 import { BeamDisplayPlugin } from "./beam_display_plugin";
 import { ExplosionPlugin } from "./explosion_plugin";
@@ -33,6 +34,34 @@ const CenterShipSystem = new System({
     }
 });
 
+const DeathOverlaySystem = new System({
+    name: 'DeathOverlaySystem',
+    args: [PlayerShipSelector, Optional(PlayerDeathComponent), Stage] as const,
+    step(_playerShip, death, stage) {
+        const existing = stage.getChildByName('PlayerDeathOverlay');
+        if (death && !existing) {
+            const overlay = new PIXI.Container();
+            overlay.name = 'PlayerDeathOverlay';
+            const background = new PIXI.Graphics();
+            background.beginFill(0x000000, 0.65);
+            background.drawRect(0, 0, window.innerWidth, window.innerHeight);
+            background.endFill();
+            const text = new PIXI.Text('You were destroyed', {
+                fontFamily: 'Geneva',
+                fontSize: 28,
+                fill: 0xffffff,
+                align: 'center',
+            });
+            text.anchor.set(0.5);
+            text.position.set(window.innerWidth / 2, window.innerHeight / 2);
+            overlay.addChild(background, text);
+            stage.addChild(overlay);
+        } else if (!death && existing) {
+            existing.destroy({ children: true });
+        }
+    },
+});
+
 const starfieldPlugin = starfield();
 
 export const Display: Plugin = {
@@ -51,6 +80,7 @@ export const Display: Plugin = {
         await world.addPlugin(StatusBarPlugin);
         await world.addPlugin(AnimationGraphicPlugin);
         world.addSystem(CenterShipSystem);
+        world.addSystem(DeathOverlaySystem);
         await world.addPlugin(TargetCornersPlugin);
         await world.addPlugin(ParticlesPlugin);
         await world.addPlugin(FullscreenPlugin);
@@ -75,6 +105,7 @@ export const Display: Plugin = {
         await world.removePlugin(TargetCornersPlugin);
 
         world.removeSystem(CenterShipSystem);
+        world.removeSystem(DeathOverlaySystem);
 
         await world.removePlugin(AnimationGraphicPlugin);
         await world.removePlugin(StatusBarPlugin);
@@ -85,6 +116,9 @@ export const Display: Plugin = {
         const space = world.resources.get(Space);
         if (stage && space) {
             stage.removeChild(space);
+        }
+        if (stage && !stage.destroyed) {
+            stage.destroy({ children: true });
         }
 
         world.resources.delete(Stage);

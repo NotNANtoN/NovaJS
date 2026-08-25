@@ -2,6 +2,10 @@ import { GameDataInterface } from "novadatainterface/GameDataInterface";
 import * as PIXI from "pixi.js";
 import { Animation } from "novadatainterface/Animation";
 import { SpriteSheetSprite } from "./sprite_sheet_sprite";
+import {
+    createGraphicHandle,
+    ManagedGraphic,
+} from './managed_graphic';
 
 /**
  * An AnimationGraphic is responsible for managing all the PIXI Sprites
@@ -11,6 +15,7 @@ import { SpriteSheetSprite } from "./sprite_sheet_sprite";
 export class AnimationGraphic {
     // AnimationGraphic is not a Drawable since it doesn't draw a state.
     readonly container = new PIXI.Container();
+    readonly managed: ManagedGraphic = createGraphicHandle(this.container);
     protected readonly gameData: GameDataInterface;
     readonly sprites = new Map<string, SpriteSheetSprite>();
     private wrappedProgress = 0;
@@ -25,6 +30,20 @@ export class AnimationGraphic {
         this.gameData = gameData;
         this.rotation = 0;
         this.buildPromise = this.build();
+    }
+
+    attachTo(parent: PIXI.Container): void {
+        if (!this.managed.disposed && this.container.parent !== parent) {
+            parent.addChild(this.container);
+        }
+    }
+
+    detach(): void {
+        this.managed.detach();
+    }
+
+    dispose(): void {
+        this.managed.dispose();
     }
 
     private async build(): Promise<AnimationGraphic> {
@@ -78,6 +97,7 @@ export class AnimationGraphic {
 
     set progress(progress: number) {
         progress = Math.min(1, Math.max(0, progress));
+        this.wrappedProgress = progress;
         for (const sprite of this.sprites.values()) {
             sprite.rotation = 0;
             sprite.frame = Math.min(sprite.frames - 1,

@@ -27,6 +27,7 @@ export interface ShipData extends SpaceObjectData {
     largeExplosion: boolean;
     deathDelay: number;
     displayWeight: number;
+    techLevel: number;
     availabilityNCB: string;
     appearOn: string;
     onPurchase: string;
@@ -48,6 +49,7 @@ export function getDefaultShipData(): ShipData {
         largeExplosion: false,
         deathDelay: 1,
         displayWeight: 1,
+        techLevel: 0,
         availabilityNCB: "",
         appearOn: "",
         onPurchase: "",

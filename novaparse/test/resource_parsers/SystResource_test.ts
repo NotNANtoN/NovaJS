@@ -2,9 +2,7 @@ import "jasmine";
 import { readResourceFork, ResourceMap } from "resource_fork";
 import { SystResource } from "novaparse/src/resource_parsers/SystResource";
 import { defaultIDSpace } from "./DefaultIDSpace";
-
-// Bazel no longer patches require.
-const runfiles = require(process.env['BAZEL_NODE_RUNFILES_HELPER'] as string) as typeof require;
+import { fixturePath } from "../../../test/fixture_path";
 
 describe("SystResource", function() {
     // Systs don't depend on other resources.
@@ -15,7 +13,7 @@ describe("SystResource", function() {
     let s2: SystResource;
 
     beforeEach(async function() {
-        const dataPath = runfiles.resolve("novajs/novaparse/test/resource_parsers/files/syst.ndat");
+        const dataPath = fixturePath("novaparse/test/resource_parsers/files/syst.ndat");
         rf = await readResourceFork(dataPath, false);
         const systs = rf.sÿst;
         s1 = new SystResource(systs[128], idSpace);

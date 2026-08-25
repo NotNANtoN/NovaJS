@@ -26,6 +26,7 @@ import { MissionBbs, MissionInfo } from './mission_bbs';
 import { Outfitter } from './outfitter';
 import { Shipyard } from './shipyard';
 import { TradeCenter } from './trade';
+import { hasSpaceportService } from './availability';
 
 export class Spaceport extends Menu<Entity> {
     private outfitter: Outfitter;
@@ -35,6 +36,12 @@ export class Spaceport extends Menu<Entity> {
     private tradeCenter: TradeCenter;
     private missionInfo: MissionInfo;
     private data?: PlanetData;
+    private serviceButtons?: {
+        outfitter: Button;
+        shipyard: Button;
+        tradeCenter: Button;
+        bar: Button;
+    };
     private missionNotice = new PIXI.Text("", {
         fontFamily: "Geneva", fontSize: 10, fill: 0xffff00,
         align: "left", wordWrap: true, wordWrapWidth: 420,
@@ -62,13 +69,18 @@ export class Spaceport extends Menu<Entity> {
             missionBBS: new Button(gameData, "Mission BBS", 120, { x: 160, y: 32 }),
             bar: new Button(gameData, "Bar", 120, { x: 160, y: -10 }),
             tradeCenter: new Button(gameData, "Trade Center", 120, { x: 160, y: -52 }),
+            missionLog: new Button(gameData, "Mission Log", 120, { x: 160, y: -94 }),
             leave: new Button(gameData, "Leave", 120, { x: 160, y: 200 })
         };
+        this.serviceButtons = buttons;
 
         buttons.leave.click.subscribe(this.done.bind(this));
 
         this.outfitter = new Outfitter(gameData, controlEvents);
         const showOutfitter = async () => {
+            if (!this.data || !hasSpaceportService(this.data, "outfitter")) {
+                return;
+            }
             this.controls.unbind();
             const outfits = this.input.components.get(OutfitsStateComponent) ?? new Map();
             this.outfitter.setPlayerState(
@@ -86,6 +98,9 @@ export class Spaceport extends Menu<Entity> {
         this.shipyard = new Shipyard(gameData, controlEvents);
 
         const showShipyard = async () => {
+            if (!this.data || !hasSpaceportService(this.data, "shipyard")) {
+                return;
+            }
             this.controls.unbind();
             this.shipyard.setPlayerState(
                 this.input.components.get(PlayerStateComponent));
@@ -132,6 +147,9 @@ export class Spaceport extends Menu<Entity> {
             }
         };
         const showBar = async () => {
+            if (!this.data || !hasSpaceportService(this.data, "bar")) {
+                return;
+            }
             this.controls.unbind();
             try {
                 await this.bar.show(this.input);
@@ -140,6 +158,9 @@ export class Spaceport extends Menu<Entity> {
             }
         };
         const showTradeCenter = async () => {
+            if (!this.data || !hasSpaceportService(this.data, "commodity")) {
+                return;
+            }
             this.controls.unbind();
             try {
                 await this.tradeCenter.show(this.input);
@@ -148,6 +169,7 @@ export class Spaceport extends Menu<Entity> {
             }
         };
         buttons.missionBBS.click.subscribe(showMissionBbs);
+        buttons.missionLog.click.subscribe(showMissionInfo);
         buttons.bar.click.subscribe(showBar);
         buttons.tradeCenter.click.subscribe(showTradeCenter);
         this.addButtons(buttons);
@@ -173,6 +195,18 @@ export class Spaceport extends Menu<Entity> {
         ]);
         const data = await this.gameData.data.Planet.get(this.id);
         this.data = data;
+        this.outfitter.setPlanetData(data);
+        this.shipyard.setPlanetData(data);
+        if (this.serviceButtons) {
+            this.serviceButtons.outfitter.container.visible =
+                hasSpaceportService(data, "outfitter");
+            this.serviceButtons.shipyard.container.visible =
+                hasSpaceportService(data, "shipyard");
+            this.serviceButtons.tradeCenter.container.visible =
+                hasSpaceportService(data, "commodity");
+            this.serviceButtons.bar.container.visible =
+                hasSpaceportService(data, "bar");
+        }
         const title = new PIXI.Text(data.name, this.font.title);
         title.position.x = -24;
         title.position.y = 39;

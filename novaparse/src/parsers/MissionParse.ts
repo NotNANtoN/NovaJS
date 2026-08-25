@@ -43,19 +43,25 @@ function parseCargo(resource: MisnResource): string | null {
     return getStringList(resource)[resource.cargoType] || null;
 }
 
-function parseDescription(resource: MisnResource, id: number,
-    notFoundFunction: (message: string) => void, reportMissing = true): string {
+function getDescription(resource: MisnResource, id: number,
+    notFoundFunction: (message: string) => void, reportMissing = true) {
     if (id < 128) {
-        return "";
+        return undefined;
     }
     var description = resource.idSpace.dësc[id];
     if (!description) {
         if (reportMissing) {
             notFoundFunction("No matching dësc " + id + " for mïsn " + resource.id);
         }
-        return "";
+        return undefined;
     }
-    return description.text;
+    return description;
+}
+
+function parseDescription(resource: MisnResource, id: number,
+    notFoundFunction: (message: string) => void, reportMissing = true): string {
+    return getDescription(
+        resource, id, notFoundFunction, reportMissing)?.text ?? "";
 }
 
 export async function MissionParse(mission: MisnResource,
@@ -66,6 +72,8 @@ export async function MissionParse(mission: MisnResource,
     // Explicit briefing fields below refer directly to dësc resources.
     var offerTextID = 4000 + mission.id - 128;
     var offerText = parseDescription(mission, offerTextID, notFoundFunction, false);
+    var briefDescription = getDescription(
+        mission, mission.briefText, notFoundFunction, false);
 
     return {
         ...base,
@@ -97,6 +105,9 @@ export async function MissionParse(mission: MisnResource,
         compReward: mission.compReward,
         shipSubtitle: mission.shipSubtitle,
         briefTextID: mission.briefText,
+        briefGraphic: briefDescription?.graphic,
+        briefMovieFile: briefDescription?.movieFile,
+        briefFlags: briefDescription?.flags,
         quickBriefID: mission.quickBrief,
         loadCargTextID: mission.loadCargText,
         dumpCargoTextID: mission.dumpCargoText,

@@ -1,5 +1,6 @@
 import { getDefaultCicnData } from "./CicnData";
 import { getDefaultCicnImageData } from "./CicnImage";
+import { getDefaultDudeData } from "./DudeData";
 import { getDefaultSpriteSheetImage } from "./DefaultSpriteSheetImage";
 import { getDefaultExplosionData } from "./ExplosionData";
 import { getDefaultGovtData } from "./GovtData";
@@ -25,6 +26,7 @@ export const Defaults = {
     get PictImage() { return getDefaultPictImageData() },
     get Cicn() { return getDefaultCicnData() },
     get CicnImage() { return getDefaultCicnImageData() },
+    get Dude() { return getDefaultDudeData() },
     get Planet() { return getDefaultPlanetData() },
     get System() { return getDefaultSystemData() },
     get Mission() { return getDefaultMissionData() },

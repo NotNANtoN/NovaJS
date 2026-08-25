@@ -6,8 +6,17 @@ import { Vector, VectorLike } from '../datatypes/vector';
 import { Entity } from '../entity';
 import { System } from '../system';
 import { World } from '../world';
-import { approachVec, MovementPhysicsComponent, MovementPlugin, MovementStateComponent, MovementSystem, MovementType } from './movement_plugin';
-import { TimePlugin } from './time_plugin';
+import {
+    approachVec,
+    MovementPhysicsComponent,
+    MovementPlugin,
+    MovementStateComponent,
+    MovementSystem,
+    MovementType,
+    RemoteMovementPresentationComponent,
+    RemoteMovementPresentationSystem,
+} from './movement_plugin';
+import { MAX_WALL_CLOCK_DELTA_MS, TimePlugin } from './time_plugin';
 
 describe('Movement Plugin', () => {
     let world: World;
@@ -66,7 +75,8 @@ describe('Movement Plugin', () => {
 
         expect(positions).toEqual([
             Position.fromVectorLike(velocity.scale(0)),
-            Position.fromVectorLike(velocity.scale(1)),
+            Position.fromVectorLike(velocity.scale(
+                MAX_WALL_CLOCK_DELTA_MS / 1000)),
         ]);
     });
 
@@ -108,7 +118,10 @@ describe('Movement Plugin', () => {
         // Inverted clock angles. See ../dataTypes/angle.ts.
         expect(velocities).toEqual([
             new Vector(0, 0),
-            new Vector(100 * Math.sin(rotation.angle), -100 * Math.cos(rotation.angle))
+            new Vector(
+                100 * Math.sin(rotation.angle),
+                -100 * Math.cos(rotation.angle),
+            ).scale(MAX_WALL_CLOCK_DELTA_MS / 1000),
         ]);
     });
 
@@ -148,8 +161,53 @@ describe('Movement Plugin', () => {
 
         expect(rotations).toEqual([
             0,
-            new Angle(50).angle,
+            new Angle(50 * MAX_WALL_CLOCK_DELTA_MS / 1000).angle,
         ]);
+    });
+
+    it('does not simulate a remote entity before presentation sampling', () => {
+        const uuid = v4();
+        world.entities.set(uuid, new Entity()
+            .addComponent(MovementStateComponent, {
+                position: new Position(0, 0),
+                accelerating: 0,
+                rotation: new Angle(0),
+                turnBack: false,
+                turning: 0,
+                velocity: new Vector(10, 0),
+            })
+            .addComponent(MovementPhysicsComponent, {
+                acceleration: 100,
+                maxVelocity: 500,
+                turnRate: 50,
+                movementType: MovementType.INERTIAL,
+            })
+            .addComponent(RemoteMovementPresentationComponent, {
+                snapshots: [{
+                    serverTime: 0,
+                    state: {
+                        position: new Position(100, 0),
+                        accelerating: 0,
+                        rotation: new Angle(0),
+                        turnBack: false,
+                        turning: 0,
+                        velocity: new Vector(0, 0),
+                    },
+                }],
+            }));
+
+        const positions: number[] = [];
+        world.addSystem(new System({
+            name: 'RemoteMovementBeforePresentationReport',
+            args: [MovementStateComponent] as const,
+            after: [MovementSystem],
+            before: [RemoteMovementPresentationSystem],
+            step: state => positions.push(state.position.x),
+        }));
+
+        world.step();
+
+        expect(positions).toEqual([0]);
     });
 
     it('approachVec approaches a target vector', () => {

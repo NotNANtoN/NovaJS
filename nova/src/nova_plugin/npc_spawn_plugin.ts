@@ -11,9 +11,13 @@ import { v4 as uuid } from "uuid";
 import { GameDataResource } from "./game_data_resource";
 import { GovtComponent } from "./npc_plugin";
 import { makeNpc } from "./npc_plugin";
-import { NpcAIComponent } from "./npc_hostility";
+import {
+    NpcAIComponent,
+    NpcCombatRoleComponent,
+} from "./npc_components";
 import { SystemIdResource } from "./system_id_resource";
-import { World } from "nova_ecs/world";
+import { SingletonComponent, World } from "nova_ecs/world";
+import { EntityBudgetResource, reserveEntity } from "./entity_budget";
 
 
 export const NPC_RESPAWN_INTERVAL_MS = 3_000;
@@ -114,6 +118,7 @@ function isNpcSpawnData(value: unknown): value is NpcSpawnData {
         id?: unknown,
         weight?: unknown,
         government?: unknown,
+        combatRole?: unknown,
         ships?: unknown,
     };
     return typeof entry.id === "string"
@@ -121,6 +126,10 @@ function isNpcSpawnData(value: unknown): value is NpcSpawnData {
         && Number.isFinite(entry.weight)
         && typeof entry.government === "number"
         && Number.isFinite(entry.government)
+        && (entry.combatRole === undefined
+            || entry.combatRole === "civilian"
+            || entry.combatRole === "military"
+            || entry.combatRole === "personal")
         && Array.isArray(entry.ships)
         && entry.ships.every(isWeightedShip);
 }
@@ -142,6 +151,7 @@ function getSpawnEntries(systemData: {
 async function createNpc(
     gameData: GameDataInterface,
     entries: readonly NpcSpawnData[],
+    budget: import('./entity_budget').EntityBudget,
 ) {
     const npcType = pickWeighted(entries);
     if (!npcType) {
@@ -155,7 +165,14 @@ async function createNpc(
     try {
         const shipData = await gameData.data.Ship.get(shipType.id);
         const npc = makeNpc(shipData);
+        if (!reserveEntity(budget, npc, 'ship')) {
+            return undefined;
+        }
         npc.components.set(GovtComponent, { id: npcType.government });
+        npc.components.set(
+            NpcCombatRoleComponent,
+            npcType.combatRole ?? "personal",
+        );
         npc.components.set(MultiplayerData, { owner: "server" });
         return npc;
     } catch (_error) {
@@ -168,15 +185,17 @@ async function createNpc(
 const NpcSpawnSystem = new AsyncSystem({
     name: "NpcSpawn",
     args: [
+        SingletonComponent,
         GameDataResource,
         SystemIdResource,
         TimeResource,
         NpcSpawnStateResource,
         NpcShipsQuery,
         GetWorld,
+        EntityBudgetResource,
     ] as const,
     exclusive: true,
-    async step(gameData, systemId, time, state, npcs, world) {
+    async step(_singleton, gameData, systemId, time, state, npcs, world, budget) {
         if (!activeWorlds.has(world) || state.disabled) {
             return;
         }
@@ -213,8 +232,11 @@ const NpcSpawnSystem = new AsyncSystem({
                 if (!activeWorlds.has(world)) {
                     return;
                 }
-                const npc = await createNpc(gameData, state.entries);
+                const npc = await createNpc(gameData, state.entries, budget);
                 if (!activeWorlds.has(world)) {
+                    if (npc) {
+                        budget.release('ship');
+                    }
                     return;
                 }
                 if (npc) {
@@ -232,8 +254,11 @@ const NpcSpawnSystem = new AsyncSystem({
         }
 
         state.nextSpawnAt = time.time + getNpcRespawnDelay();
-        const npc = await createNpc(gameData, state.entries);
+        const npc = await createNpc(gameData, state.entries, budget);
         if (!npc || !activeWorlds.has(world)) {
+            if (npc && !activeWorlds.has(world)) {
+                budget.release('ship');
+            }
             return;
         }
         world.entities.set(uuid(), npc);

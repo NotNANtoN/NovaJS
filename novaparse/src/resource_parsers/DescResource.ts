@@ -22,8 +22,27 @@ function ab2str(data: DataView) {
 
 
 class DescResource extends BaseResource {
+    readonly graphic: number;
+    readonly movieFile: string;
+    readonly flags: number;
+
     constructor(resource: Resource, idSpace: NovaResources) {
         super(resource, idSpace);
+        const textEnd = this.findTextEnd();
+        this.graphic = textEnd + 3 <= this.data.byteLength
+            ? this.data.getInt16(textEnd + 1)
+            : 0;
+        this.movieFile = '';
+        this.flags = 0;
+    }
+
+    private findTextEnd(): number {
+        for (let offset = 0; offset < this.data.byteLength; offset++) {
+            if (this.data.getUint8(offset) === 0) {
+                return offset;
+            }
+        }
+        return this.data.byteLength;
     }
 
     get text() {

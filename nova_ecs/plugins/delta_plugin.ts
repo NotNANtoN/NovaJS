@@ -121,6 +121,27 @@ export class DeltaMaker {
         return false;
     }
 
+    /**
+     * Checks one registered component without consuming the entity's delta.
+     * This lets systems that have side effects for a specific component share
+     * the dirty tracking used by replication without stealing that component's
+     * outbound delta.
+     */
+    isComponentDirty(entity: Entity, component: UnknownComponent): boolean {
+        if (!this.componentDeltas.has(component)) {
+            return false;
+        }
+        this.track(entity);
+        const data = entity.components.get(component);
+        const deltaComponent = entity.components.get(DeltaComponent);
+        if (!deltaComponent
+            || deltaComponent.components.get(component) !== data) {
+            return true;
+        }
+        return isDraft(data)
+            && current(data) !== original(data);
+    }
+
     clearDirty(entity: Entity) {
         const tracking = this.trackedEntities.get(entity);
         if (tracking) {
@@ -143,7 +164,15 @@ export class DeltaMaker {
 
         for (const [component, data] of entity.components) {
             if (isDraft(data)) {
-                entity.components.set(component, finishDraft(data))
+                // Finishing a draft replaces the value's representation, not
+                // its meaning. A non-silent set here reports every registered
+                // component as changed, which re-runs every Provide that
+                // watches one of them. On the inbound replication path that
+                // happens for each remote update and rebuilds derived state
+                // (weapon counts, reload accumulators, physics) continuously,
+                // discarding live local input.
+                (entity.components as EventMap<UnknownComponent, unknown>)
+                    .set(component, finishDraft(data), true /* Silent */);
             }
         }
         entity.components.delete(DeltaComponent);
@@ -337,6 +366,85 @@ export class DeltaMaker {
         }
 
         return missingComponents;
+    }
+
+    /**
+     * Applies replicated state without treating it as a new local edit.
+     *
+     * Tracked entities can have unsent local input when a remote update
+     * arrives. Capture that input, establish the remote result as the new
+     * tracking baseline, then reapply the local delta so it remains outbound.
+     * This prevents client/server echo storms without dropping input.
+     */
+    applyRemoteUpdate(entity: Entity, update: () => void): void {
+        const wasTracked = this.trackedEntities.has(entity);
+        const pending = wasTracked && this.isDirty(entity)
+            ? this.getDelta(entity)
+            : undefined;
+
+        if (wasTracked) {
+            this.untrack(entity);
+        }
+        update();
+        if (!wasTracked) {
+            return;
+        }
+
+        this.track(entity);
+        // A newly tracked entity initially reports its complete state. Consume
+        // that snapshot so the remote update becomes the baseline.
+        this.getDelta(entity);
+        this.clearDirty(entity);
+        if (pending) {
+            this.applyDelta(entity, pending);
+            // applyDelta writes silently, and a component-state replay can
+            // produce a plain value rather than an Immer draft. Mark the
+            // entity explicitly so the preserved local edit is still sent.
+            this.trackedEntities.get(entity)!.dirty = true;
+        }
+    }
+
+    applyRemoteDelta(
+        entity: Entity,
+        delta: EntityDelta,
+        mergeComponent?: (
+            component: UnknownComponent,
+            local: unknown,
+            remote: unknown,
+        ) => unknown,
+    ): void {
+        const localComponents = new Map<UnknownComponent, unknown>();
+        if (mergeComponent) {
+            const updatedNames = new Set([
+                ...delta.componentStates?.keys() ?? [],
+                ...delta.componentDeltas?.keys() ?? [],
+            ]);
+            for (const componentName of updatedNames) {
+                const component = this.serializer.componentsByName
+                    .get(componentName);
+                if (!component || !entity.components.has(component)) {
+                    continue;
+                }
+                const data = entity.components.get(component);
+                localComponents.set(
+                    component,
+                    isDraft(data) ? current(data) : data,
+                );
+            }
+        }
+
+        this.applyRemoteUpdate(entity, () => {
+            this.applyDelta(entity, delta);
+            for (const [component, local] of localComponents) {
+                if (!entity.components.has(component)) {
+                    continue;
+                }
+                const remote = entity.components.get(component);
+                const merged = mergeComponent!(component, local, remote);
+                (entity.components as EventMap<UnknownComponent, unknown>)
+                    .set(component, merged, true /* Silent */);
+            }
+        });
     }
 }
 

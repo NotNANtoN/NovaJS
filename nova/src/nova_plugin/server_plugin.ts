@@ -1,10 +1,16 @@
 import * as t from 'io-ts';
-import { Entities, UUID } from 'nova_ecs/arg_types';
+import { Entities, GetEntity, UUID } from 'nova_ecs/arg_types';
 import { Entity } from "nova_ecs/entity";
 import { EcsEvent } from 'nova_ecs/events';
 import { Optional } from 'nova_ecs/optional';
 import { Plugin } from "nova_ecs/plugin";
-import { CommunicatorResource, multiplayer, MultiplayerData } from "nova_ecs/plugins/multiplayer_plugin";
+import {
+    CommunicatorResource,
+    multiplayer,
+    MultiplayerData,
+    MultiplayerPhase,
+} from "nova_ecs/plugins/multiplayer_plugin";
+import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
 import { Query } from 'nova_ecs/query';
 import { Resource } from 'nova_ecs/resource';
 import { System } from 'nova_ecs/system';
@@ -15,10 +21,16 @@ import { GameDataResource } from "./game_data_resource";
 import { makeSystem } from './make_system';
 import { MultiRoomResource, SystemComponent } from "./nova_plugin";
 import {
+    CompatibilityProfile,
+    CompatibilityProfileResource,
+} from './entity_budget';
+import {
     PlayerData as PlayerDataCodec,
-    PlayerState,
+    PlayerStateCodec,
     PlayerStateComponent,
+    PlayerStorePort,
     PlayerStoreResource,
+    toPersistentPlayerState,
 } from './player_state';
 import { SystemIdResource } from './system_id_resource';
 
@@ -27,46 +39,49 @@ import { SystemIdResource } from './system_id_resource';
 export const PlayerData = PlayerDataCodec;
 export type PlayerData = t.TypeOf<typeof PlayerDataCodec>;
 
-type PersistedPlayerState = Omit<PlayerState, 'freeSpace'>;
-
-interface PlayerStoreApi {
-    readonly ready: Promise<void>;
-    getOrCreate(token: string): Promise<PersistedPlayerState>;
-    save(token: string, state: PersistedPlayerState, ship?: unknown): Promise<void>;
-    bindPeer(peerId: string, token: string): void;
-    getTokenForPeer(peerId: string): string | undefined;
-}
-
-const RemovedPeerEvent = new EcsEvent<string>('RemovedPeerEvent');
+export const RemovedPeerEvent = new EcsEvent<string>('RemovedPeerEvent');
 const PlayerEntitiesQuery = new Query([
     MultiplayerData, UUID, Optional(PlayerStateComponent),
 ] as const);
+const PlayerPersistenceEntitiesQuery = new Query([
+    MultiplayerData, UUID, GetEntity, PlayerStateComponent,
+] as const);
+
+interface PlayerStatePersistenceRecord {
+    readonly token: string;
+}
+
+export const PlayerStateSnapshots = new Resource<
+    Map<string, PlayerStatePersistenceRecord>
+>(
+    'PlayerStateSnapshots');
 
 export const ManageClientsSystem = new System({
     name: 'ManageClients',
     events: [RemovedPeerEvent],
     args: [RemovedPeerEvent, PlayerEntitiesQuery, Entities, SingletonComponent,
-        PlayerStoreResource, SystemIdResource] as const,
+        PlayerStoreResource, SystemIdResource, PlayerStateSnapshots] as const,
     step: (removedPeer, multiplayerEntities, entities, _singleton,
-        playerStore, systemId) => {
+        playerStore, systemId, snapshots) => {
         // Remove entities of peers who have disconnected
-        const store = playerStore as PlayerStoreApi;
         for (const [multiplayerData, uuid, state] of multiplayerEntities) {
             if (multiplayerData.owner === removedPeer) {
-                const token = store.getTokenForPeer(removedPeer);
+                const token = playerStore.getTokenForPeer(removedPeer);
                 if (token && state) {
                     // PlayerStore copies the state before retaining it.
-                    void store.save(token, {
-                        credits: state.credits,
-                        missionBits: [...state.missionBits],
-                        gameDate: state.gameDate,
-                        activeMissions: state.activeMissions.map(mission => ({ ...mission })),
-                        shipId: state.shipId,
-                        currentSystem: state.currentSystem || systemId,
-                        cargoCapacity: state.cargoCapacity,
-                        holds: state.holds.map(hold => ({ ...hold })),
-                    });
+                    const persistedState = toPersistentPlayerState(state);
+                    if (!persistedState.currentSystem) {
+                        persistedState.currentSystem = systemId;
+                    }
+                    void playerStore.save(token, persistedState)
+                        .then(() => playerStore.flush())
+                        .catch(error => console.error(
+                            'Failed to flush player state on disconnect', error));
+                } else if (token) {
+                    void playerStore.flush().catch(error => console.error(
+                        'Failed to flush player state on disconnect', error));
                 }
+                snapshots.delete(uuid);
                 entities.delete(uuid);
             }
         }
@@ -74,57 +89,40 @@ export const ManageClientsSystem = new System({
 });
 
 const LeaveSubscription = new Resource<Subscription>('LeaveSubscription');
-const PlayerStateSnapshots = new Resource<Map<string, string>>(
-    'PlayerStateSnapshots');
 
-function playerStateFingerprint(state: PlayerState): string {
-    let bitHash = 2166136261;
-    for (const bit of state.missionBits) {
-        bitHash ^= bit ? 1 : 0;
-        bitHash = Math.imul(bitHash, 16777619);
-    }
-    return [
-        state.credits,
-        state.gameDate,
-        state.shipId,
-        state.currentSystem,
-        bitHash,
-        JSON.stringify(state.activeMissions),
-        state.cargoCapacity,
-        JSON.stringify(state.holds),
-    ].join('|');
-}
-
-const PersistPlayerStateSystem = new System({
+export const PersistPlayerStateSystem = new System({
     name: 'PersistPlayerState',
-    args: [PlayerEntitiesQuery, PlayerStoreResource, PlayerStateSnapshots] as const,
-    step: (players, playerStore, snapshots) => {
-        const store = playerStore as PlayerStoreApi;
-        for (const [multiplayerData, uuid, state] of players) {
-            if (!state) {
-                continue;
-            }
-            const token = store.getTokenForPeer(multiplayerData.owner);
+    args: [
+        PlayerPersistenceEntitiesQuery,
+        PlayerStoreResource,
+        PlayerStateSnapshots,
+        DeltaResource,
+        SingletonComponent,
+    ] as const,
+    // Multiplayer consumes DeltaMaker's dirty bit while creating outbound
+    // deltas. Inspect persistence before that phase so a player mutation is
+    // observed without stealing the delta from replication.
+    before: [MultiplayerPhase],
+    step: (players, playerStore, snapshots, deltaMaker, _singleton) => {
+        for (const [multiplayerData, uuid, entity, state] of players) {
+            const token = playerStore.getTokenForPeer(multiplayerData.owner);
             if (!token) {
                 continue;
             }
-            const fingerprint = playerStateFingerprint(state);
-            if (snapshots.get(uuid) === fingerprint) {
+
+            const previous = snapshots.get(uuid);
+            if (previous?.token === token
+                && !deltaMaker.isComponentDirty(
+                    entity, PlayerStateComponent)) {
                 continue;
             }
-            snapshots.set(uuid, fingerprint);
+
             // Copy before yielding: multiplayer may replace this Immer draft
             // before PlayerStore.save reaches its first await.
-            void store.save(token, {
-                credits: state.credits,
-                missionBits: [...state.missionBits],
-                gameDate: state.gameDate,
-                activeMissions: state.activeMissions.map(mission => ({ ...mission })),
-                shipId: state.shipId,
-                currentSystem: state.currentSystem,
-                cargoCapacity: state.cargoCapacity,
-                holds: state.holds.map(hold => ({ ...hold })),
-            });
+            const persistedState = toPersistentPlayerState(state);
+            snapshots.set(uuid, { token });
+            void playerStore.save(token, persistedState).catch(error =>
+                console.error('Failed to save player state', error));
         }
     },
 });
@@ -136,8 +134,8 @@ const ServerSystemPlugin: Plugin = {
         if (!communicator) {
             throw new Error('Expected CommunicatorResource to exist');
         }
-        world.addSystem(ManageClientsSystem);
         world.resources.set(PlayerStateSnapshots, new Map());
+        world.addSystem(ManageClientsSystem);
         world.addSystem(PersistPlayerStateSystem);
         const subscription = communicator.peers.leave.subscribe(peer => {
             console.log(`${peer} left`);
@@ -166,23 +164,46 @@ export const ServerPlugin: Plugin = {
             throw new Error('MultiRoomResource must exist');
         }
         const playerStore = world.resources.get(PlayerStoreResource) as
-            PlayerStoreApi | undefined;
+            PlayerStorePort | undefined;
         if (!playerStore) {
             throw new Error('PlayerStoreResource must exist');
         }
         await playerStore.ready;
+        const compatibilityProfile = world.resources.get(
+            CompatibilityProfileResource) as CompatibilityProfile | undefined;
 
         const serverCommunicator = communicator as CommunicatorServer;
         communicator.peers.join.subscribe(peer => {
             const token = serverCommunicator.getPlayerToken(peer)
                 ?? `legacy:${peer}`;
             playerStore.bindPeer(peer, token);
-            void playerStore.getOrCreate(token).then(state => {
+            void Promise.all([
+                playerStore.get(token),
+                playerStore.getSnapshots(token),
+            ]).then(([state, snapshots]) => {
                 const data: PlayerData = {
                     uuid: peer,
-                    system: state.currentSystem,
-                    playerState: state as PlayerState,
+                    snapshots: snapshots.map(({
+                        id, createdAt, reason, state: snapshotState,
+                    }) => ({
+                        id,
+                        createdAt,
+                        reason,
+                        pilotName: snapshotState.pilotName,
+                        currentSystem: snapshotState.currentSystem,
+                    })),
                 };
+                if (state) {
+                    const decodedState = PlayerStateCodec.decode(state);
+                    if (decodedState._tag === 'Left') {
+                        throw new Error(
+                            `Invalid persisted player state for ${token}`,
+                        );
+                    }
+                    data.system = state.currentSystem;
+                    data.savedAt = state.savedAt;
+                    data.playerState = decodedState.right;
+                }
                 communicator.sendMessage(PlayerData.encode(data), peer);
             });
         });
@@ -204,7 +225,12 @@ export const ServerPlugin: Plugin = {
                 } else {
                     // Create the system if it doesn't exist yet.
                     if (!world.entities.has(systemId)) {
-                        const system = makeSystem(systemId, gameData, playerStore);
+                        const system = makeSystem(
+                            systemId,
+                            gameData,
+                            playerStore,
+                            compatibilityProfile ?? 'modern',
+                        );
                         world.entities.set(systemId, new Entity()
                             .addComponent(SystemComponent, system));
 

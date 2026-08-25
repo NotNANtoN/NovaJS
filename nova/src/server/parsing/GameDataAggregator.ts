@@ -2,6 +2,7 @@ import { GameDataInterface, PreloadData } from "novadatainterface/GameDataInterf
 import { NovaDataInterface, NovaDataInterfaceWithMission, NovaDataType } from "novadatainterface/NovaDataInterface";
 import { Gettable, GettableData } from "novadatainterface/Gettable";
 import { BaseData } from "novadatainterface/BaseData";
+import { DudeData } from "novadatainterface/DudeData";
 import { ShipData } from "novadatainterface/ShipData";
 import { OutfitData } from "novadatainterface/OutiftData";
 import { WeaponData } from "novadatainterface/WeaponData";
@@ -45,6 +46,7 @@ class GameDataAggregator implements GameDataInterface {
             PictImage: this.makeAggregator<PictImageData>(NovaDataType.PictImage),
             Cicn: this.makeAggregator<CicnData>(NovaDataType.Cicn),
             CicnImage: this.makeAggregator<CicnImageData>(NovaDataType.CicnImage),
+            Dude: this.makeAggregator<DudeData>(NovaDataType.Dude),
             Planet: this.makeAggregator<PlanetData>(NovaDataType.Planet),
             System: this.makeAggregator<SystemData>(NovaDataType.System),
             Mission: this.makeAggregator<MissionData>(NovaDataType.Mission),

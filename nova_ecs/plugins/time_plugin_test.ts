@@ -7,6 +7,7 @@ import {
     TimePlugin,
     TimeResource,
     TimeSystem,
+    resetWallClock,
 } from './time_plugin';
 
 describe('time plugin', () => {
@@ -81,5 +82,35 @@ describe('time plugin', () => {
         const time = world.resources.get(TimeResource)!;
         expect(time.delta_ms).toBe(MAX_WALL_CLOCK_DELTA_MS);
         expect(time.delta_s).toBe(MAX_WALL_CLOCK_DELTA_MS / 1000);
+    });
+
+    it('reanchors wall-clock time before the first resumed step', () => {
+        spyOn(performance, 'now').and.returnValues(100, 100, 1_000, 1_000 + 1000 / 60);
+
+        const world = new World();
+        world.addPlugin(TimePlugin);
+        const time = world.resources.get(TimeResource)!;
+        world.step();
+
+        const origin = performance.timeOrigin;
+        resetWallClock(time, origin + 1_000 - 1000 / 60);
+        world.step();
+
+        expect(time.delta_ms).toBe(0);
+        expect(time.delta_s).toBe(0);
+        world.step();
+        expect(time.delta_ms).toBeCloseTo(1000 / 60);
+    });
+
+    it('does not reset a fixed simulation clock', () => {
+        const world = new World();
+        world.addPlugin(TimePlugin);
+        const time = world.resources.get(TimeResource)!;
+        time.time = 42;
+        time.fixedDelta_ms = 1000 / 60;
+
+        resetWallClock(time, 10_000);
+
+        expect(time.time).toBe(42);
     });
 });

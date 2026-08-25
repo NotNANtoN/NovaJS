@@ -5,6 +5,7 @@ import { NovaResources } from "../../src/resource_parsers/ResourceHolderBase";
 import { PictResource } from "../../src/resource_parsers/PictResource";
 import { getPNG, PNGCustomMatchers } from "./PNGCompare";
 import { defaultIDSpace } from "./DefaultIDSpace";
+import { fixturePath } from "../../../test/fixture_path";
 
 
 declare global {
@@ -14,9 +15,6 @@ declare global {
         }
     }
 }
-
-// Bazel no longer patches require.
-const runfiles = require(process.env['BAZEL_NODE_RUNFILES_HELPER'] as string) as typeof require;
 
 describe("PictResource", function() {
     let ship: PictResource;
@@ -36,16 +34,16 @@ describe("PictResource", function() {
     beforeEach(async function() {
         jasmine.addMatchers(PNGCustomMatchers);
 
-        shipPNG = await getPNG(runfiles.resolve(
+        shipPNG = await getPNG(fixturePath(
             "novajs/novaparse/test/resource_parsers/files/picts/ship.png"));
-        landedPNG = await getPNG(runfiles.resolve(
+        landedPNG = await getPNG(fixturePath(
             "novajs/novaparse/test/resource_parsers/files/picts/landed.png"));
-        statusBarPNG = await getPNG(runfiles.resolve(
+        statusBarPNG = await getPNG(fixturePath(
             "novajs/novaparse/test/resource_parsers/files/picts/statusBar.png"));
-        targetImagePNG = await getPNG(runfiles.resolve(
+        targetImagePNG = await getPNG(fixturePath(
             "novajs/novaparse/test/resource_parsers/files/picts/targetImage.png"));
 
-        const dataPath = runfiles.resolve("novajs/novaparse/test/resource_parsers/files/pict.ndat");
+        const dataPath = fixturePath("novaparse/test/resource_parsers/files/pict.ndat");
         rf = await readResourceFork(dataPath, false);
 
         const picts = rf.PICT;

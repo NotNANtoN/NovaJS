@@ -1,7 +1,8 @@
 import { Entity } from "nova_ecs/entity";
-import { AddEvent } from "nova_ecs/events";
+import { Position } from "nova_ecs/datatypes/position";
+import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
 import { multiplayer, MultiplayerData } from "nova_ecs/plugins/multiplayer_plugin";
-import { System } from "nova_ecs/system";
+import { resetWallClock, TimeResource } from "nova_ecs/plugins/time_plugin";
 import { World } from "nova_ecs/world";
 import { isRight } from "fp-ts/Either";
 import * as PIXI from "pixi.js";
@@ -24,14 +25,20 @@ import { makeShip } from "./nova_plugin/make_ship";
 import { makeSystem } from "./nova_plugin/make_system";
 import { MultiRoomResource, NovaPlugin, SystemComponent } from "./nova_plugin/nova_plugin";
 import { PlayerShipSelector } from "./nova_plugin/player_ship_plugin";
+import { CompatibilityProfile } from "./nova_plugin/entity_budget";
 import {
-    createInitialPlayerState,
     PlayerData,
+    PlayerSnapshotSummary,
     PlayerStateComponent,
     PlayerStateResource,
     setCargoCapacity,
 } from "./nova_plugin/player_state";
 import { SystemIdResource } from "./nova_plugin/system_id_resource";
+import {
+    EscapeMenu,
+    StartMenu,
+    StartMenuSelection,
+} from "./client/start_menu";
 
 
 const gameData = new GameData();
@@ -48,7 +55,9 @@ PIXI.settings.SCALE_MODE = PIXI.SCALE_MODES.LINEAR;
 const app = new PIXI.Application({
     width: window.innerWidth,
     height: window.innerHeight,
-    autoDensity: true
+    autoDensity: true,
+    // Keep the back buffer readable for diagnostics and automated probes.
+    preserveDrawingBuffer: true,
 });
 
 (window as any).app = app;
@@ -83,26 +92,107 @@ const playerDataPromise = firstValueFrom(communicator.messages.pipe(
     timeout({ first: 1000 }),
 )).catch(() => undefined);
 
-let world: World;
+async function loadCompatibilityProfile(): Promise<CompatibilityProfile> {
+    try {
+        const settings = await gameData.getSettings('game.json');
+        if (settings && typeof settings === 'object'
+            && 'compatibilityProfile' in settings
+            && ((settings as { compatibilityProfile?: unknown })
+                .compatibilityProfile === 'classic')) {
+            return 'classic';
+        }
+    } catch {
+        // Older servers do not have game.json; modern is the safe default.
+    }
+    return 'modern';
+}
+
+async function loadControlSettings(): Promise<unknown> {
+    try {
+        return await gameData.getSettings('controls.json');
+    } catch {
+        return undefined;
+    }
+}
+
+async function loadPersistedPlayerData(): Promise<PlayerData | undefined> {
+    try {
+        const response = await fetch(
+            `/player/state?token=${encodeURIComponent(channel.playerToken)}`);
+        if (!response.ok) {
+            return undefined;
+        }
+        const decoded = PlayerData.decode(await response.json() as unknown);
+        return isRight(decoded) ? decoded.right : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+async function waitForCommunicatorUuid() {
+    const deadline = Date.now() + 5_000;
+    while (!communicator.uuid && Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    if (!communicator.uuid) {
+        throw new Error('Communicator handshake did not complete');
+    }
+}
+
+let world: World | undefined;
 let system: World | undefined;
+let compatibilityProfile: CompatibilityProfile = 'modern';
+let controlSettings: unknown;
+let gameRunning = false;
+let gamePaused = true;
+let tickerInstalled = false;
+let mainRoomJoined = false;
+
+function resetGameplayClocks() {
+    for (const gameplayWorld of [world, system]) {
+        const time = gameplayWorld?.resources.get(TimeResource);
+        if (time) {
+            resetWallClock(time);
+        }
+    }
+}
+
+function resumeGameplay() {
+    resetGameplayClocks();
+    gamePaused = false;
+}
+
+async function leaveGameWorld() {
+    if (!system) {
+        return;
+    }
+    for (const uuid of [...system.entities.keys()]) {
+        if (uuid !== 'singleton') {
+            system.entities.delete(uuid);
+        }
+    }
+    system.step(); // Let peers know the entity was removed
+    const stage = system.resources.get(Stage);
+    if (stage) {
+        app.stage.removeChild(stage);
+    }
+    const currentSystemUuid = system.resources.get(SystemIdResource);
+    if (currentSystemUuid) {
+        multiRoom.leave(currentSystemUuid);
+        world?.entities.delete(currentSystemUuid);
+    }
+    // Removing every non-base plugin also unsubscribes the multiplayer
+    // communicator, so the old world cannot continue receiving room events.
+    await system.removeAllPlugins();
+    system = undefined;
+}
 
 async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: string }) {
     if (system) {
-        system.entities.delete(uuid);
-        system.step(); // Let peers know the entity was removed
-        const stage = system.resources.get(Stage);
-        if (stage) {
-            app.stage.removeChild(stage);
-        }
-        const currentSystemUuid = system.resources.get(SystemIdResource);
-        if (currentSystemUuid) {
-            world.entities.delete(currentSystemUuid);
-            multiRoom.leave(currentSystemUuid);
-        }
-        await system.removePlugin(Display);
+        await leaveGameWorld();
     }
 
-    const newSystem = makeSystem(to, gameData);
+    const newSystem = makeSystem(to, gameData, undefined, compatibilityProfile);
     (window as any).novaDebug = new DebugSettings(newSystem, (window as any).novaDebug);
 
     (window as any).system = newSystem;
@@ -121,6 +211,9 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
 
     newSystem.events.get(FinishJumpEvent).subscribe(jumpTo);
 
+    if (!world) {
+        throw new Error('Game world was not initialized');
+    }
     world.entities.set(to, new Entity()
         .addComponent(SystemComponent, newSystem));
 
@@ -130,35 +223,40 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
     }
     newSystem.entities.set(uuid, entity);
     system = newSystem;
+    resetGameplayClocks();
 }
 
-async function startGame() {
+async function startGame(
+    selection: StartMenuSelection,
+) {
+    await waitForCommunicatorUuid();
     world = new World();
     world.resources.set(GameDataResource, gameData);
     await world.addPlugin(multiplayer(multiRoom.join('main room')));
+    mainRoomJoined = true;
     world.resources.set(MultiRoomResource, multiRoom);
     await world.addPlugin(NovaPlugin);
 
     // Make the player's ship
     const ids = await gameData.ids;
-    const serverPlayerData = await playerDataPromise;
-    const playerState = serverPlayerData?.playerState
-        ?? createInitialPlayerState();
+    const playerState = selection.playerState;
     const requestedShip = playerState.shipId;
     const shipId = ids.Ship.includes(requestedShip)
         ? requestedShip : 'nova:128';
     const shipData = await gameData.data.Ship.get(shipId);
     setCargoCapacity(playerState, shipData.cargoCapacity);
     const shipEntity = makeShip(shipData);
+    const movement = shipEntity.components.get(MovementStateComponent);
+    if (movement) {
+        movement.position = new Position(...playerState.lastLandedPosition);
+    }
     shipEntity.components.set(PlayerStateComponent, playerState);
     world.resources.set(PlayerStateResource, playerState);
     shipEntity.components.set(MultiplayerData, {
         owner: communicator.uuid!
     });
     shipEntity.components.set(PlayerShipSelector, undefined);
-    const requestedSystem = serverPlayerData?.system
-        ?? playerState.currentSystem
-        ?? 'nova:130';
+    const requestedSystem = playerState.currentSystem || 'nova:130';
     const systemId = ids.System.includes(requestedSystem)
         ? requestedSystem : 'nova:130';
 
@@ -168,6 +266,8 @@ async function startGame() {
         uuid: v4(),
     });
     stopTitleMusic();
+    gameRunning = true;
+    resumeGameplay();
 
     // if (activeSystem) {
     //     await activeSystem.addPlugin(Display);
@@ -224,20 +324,124 @@ async function startGame() {
     }
     window.onresize = resize;
 
-    const stats = new Stats();
-    document.body.appendChild(stats.dom);
-
-    //(window as any).novaDebug = new DebugSettings(activeSystem);
-
-    app.ticker.add(() => {
-        stats.begin();
-        world.step();
-        //activeSystem?.step();
-        stats.end();
-    });
+    if (!tickerInstalled) {
+        const stats = new Stats();
+        document.body.appendChild(stats.dom);
+        app.ticker.add(() => {
+            stats.begin();
+            if (!gamePaused) {
+                world?.step();
+            }
+            stats.end();
+        });
+        tickerInstalled = true;
+    }
 }
 
-startGame()
+async function loadSnapshotSummaries() {
+    try {
+        const response = await fetch(
+            `/player/snapshots?token=${encodeURIComponent(channel.playerToken)}`);
+        if (!response.ok) {
+            return [];
+        }
+        const raw = await response.json() as unknown;
+        if (!Array.isArray(raw)) {
+            return [];
+        }
+        return raw
+            .map(value => PlayerSnapshotSummary.decode(value))
+            .filter(isRight)
+            .map(decoded => decoded.right);
+    } catch {
+        return [];
+    }
+}
+
+async function restoreSnapshot(snapshotId: string): Promise<PlayerData | undefined> {
+    const response = await fetch(
+        `/player/snapshots/${encodeURIComponent(snapshotId)}/restore`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: channel.playerToken }),
+        });
+    if (!response.ok) {
+        return undefined;
+    }
+    const restored = await response.json() as Record<string, unknown>;
+    const decoded = PlayerData.decode({
+        uuid: communicator.uuid ?? 'client',
+        system: restored.currentSystem,
+        savedAt: restored.savedAt,
+        playerState: restored,
+    });
+    return isRight(decoded) ? decoded.right : undefined;
+}
+
+async function showMainMenu(playerData: PlayerData | undefined) {
+    escapeMenu.hide();
+    const menu = new StartMenu(gameData, {
+        compatibilityProfile,
+        controls: controlSettings,
+    });
+    const selection = await menu.show(playerData, restoreSnapshot);
+    await startGame(selection);
+}
+
+async function returnToMainMenu() {
+    gamePaused = true;
+    gameRunning = false;
+    const currentState = world?.resources.get(PlayerStateResource);
+    const currentPlayerData = currentState
+        ? {
+            uuid: communicator.uuid ?? 'client',
+            system: currentState.currentSystem,
+            savedAt: Date.now(),
+            playerState: currentState,
+            snapshots: await loadSnapshotSummaries(),
+        }
+        : await playerDataPromise;
+    await leaveGameWorld();
+    if (mainRoomJoined) {
+        multiRoom.leave('main room');
+        mainRoomJoined = false;
+    }
+    await showMainMenu(currentPlayerData);
+}
+
+const escapeMenu = new EscapeMenu(
+    resumeGameplay,
+    returnToMainMenu,
+);
+
+window.addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || !gameRunning) {
+        return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    if (escapeMenu.visible) {
+        escapeMenu.hide();
+        resumeGameplay();
+    } else {
+        gamePaused = true;
+        escapeMenu.show();
+    }
+}, true);
+
+async function bootstrap() {
+    [compatibilityProfile, controlSettings] = await Promise.all([
+        loadCompatibilityProfile(),
+        loadControlSettings(),
+    ]);
+    const initialPlayerData = await loadPersistedPlayerData()
+        ?? await playerDataPromise;
+    await showMainMenu(initialPlayerData);
+}
+
+void bootstrap().catch(error => {
+    console.error('Failed to start NovaJS', error);
+});
 
 
 

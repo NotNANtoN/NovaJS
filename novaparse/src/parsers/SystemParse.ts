@@ -8,6 +8,21 @@ import { BaseParse } from "./BaseParse";
 import { BaseData } from "novadatainterface/BaseData";
 import { NovaResources } from "../resource_parsers/ResourceHolderBase";
 
+export function combatRoleForDudeAiType(
+    aiType: number,
+): NpcSpawnData["combatRole"] {
+    // EV Nova Bible: 1/2 are traders; 3 is warship; 4 is interceptor/
+    // piracy police. AIType 0 delegates to ship data, which the current
+    // parser does not retain, so use the conservative personal-only role.
+    if (aiType === 3 || aiType === 4) {
+        return "military";
+    }
+    if (aiType === 1 || aiType === 2) {
+        return "civilian";
+    }
+    return "personal";
+}
+
 
 function resolveShips(
     shipTypes: number[],
@@ -85,6 +100,7 @@ export async function SystemParse(syst: SystResource, notFoundFunction: (m: stri
                     id: dude.globalID,
                     weight,
                     government: dude.government,
+                    combatRole: combatRoleForDudeAiType(dude.aiType),
                     ships: resolveShips(
                         dude.shipTypes,
                         dude.probabilities,
@@ -112,6 +128,9 @@ export async function SystemParse(syst: SystResource, notFoundFunction: (m: stri
                     id: flet.globalID,
                     weight,
                     government: flet.government,
+                    // flët resources explicitly describe coordinated military
+                    // groups rather than unrelated ambient traders.
+                    combatRole: "military",
                     ships: resolveShips(
                         shipTypes,
                         shipTypes.map(() => 1),

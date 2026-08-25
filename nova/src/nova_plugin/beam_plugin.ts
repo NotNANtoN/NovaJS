@@ -29,6 +29,7 @@ import {
 } from './collision_interaction';
 import { CreateTime, CreateTimeArgProvider } from './create_time';
 import { DamagedEvent } from './death_plugin';
+import { reserveEntity } from './entity_budget';
 import { applyExitPoint, ExitPointData } from './exit_point';
 import { FireSubs, OwnerComponent, sampleInaccuracy, SourceComponent, WeaponConstructors, WeaponEntry } from './fire_weapon_plugin';
 import { zeroOrderGuidance } from './guidance';
@@ -213,7 +214,8 @@ class BeamWeaponEntry extends WeaponEntry {
     }
 
     fire(position: Position, angle: Angle, owner?: string, target?: string,
-        source?: string, _sourceVelocity?: Vector, exitPointData?: ExitPointData): Entity {
+        source?: string, _sourceVelocity?: Vector,
+        exitPointData?: ExitPointData): Entity | undefined {
         const { width, length } = this.data.beamAnimation;
         const beamPoly = new SAT.Polygon(new SAT.Vector(0, 0), [
             new SAT.Vector(-width / 2, 0),
@@ -252,13 +254,16 @@ class BeamWeaponEntry extends WeaponEntry {
             beam.addComponent(SourceComponent, source);
         }
 
+        if (!reserveEntity(this.budget, beam, 'beam')) {
+            return undefined;
+        }
+        this.entities.set(v4(), beam);
         if (this.data.sound) {
             this.emit(SoundEvent, {
                 id: this.data.sound,
                 loop: this.data.loopSound,
             });
         }
-        this.entities.set(v4(), beam);
         return beam;
     }
 

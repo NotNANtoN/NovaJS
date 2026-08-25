@@ -5,6 +5,7 @@ import { GovtData } from 'novadatainterface/GovtData';
 import { Entity } from 'nova_ecs/entity';
 import * as PIXI from 'pixi.js';
 import { Observable } from 'rxjs';
+import { resourceId } from '../common/resource_id';
 import { GameData } from '../client/gamedata/GameData';
 import { ControlEvent } from '../nova_plugin/controls_plugin';
 import {
@@ -12,10 +13,14 @@ import {
     abortMission,
     formatMissionText,
     MissionDestinationOptions,
+    PendingMissionJumpComponent,
+    PendingMissionSoundComponent,
     resolveMissionDestinations,
     ResolvedMissionDestinations,
     refuseMission,
 } from '../nova_plugin/mission_plugin';
+import { NcbRuntime } from '../nova_plugin/ncb_runtime';
+import { ShipDataComponent } from '../nova_plugin/ship_plugin';
 import {
     getOfferableMissions,
     MissionPlanetSelector,
@@ -28,7 +33,7 @@ import {
     PlayerStateComponent,
     setCargoCapacity,
 } from '../nova_plugin/player_state';
-import { ShipDataComponent } from '../nova_plugin/ship_plugin';
+import { OutfitsStateComponent } from '../nova_plugin/outfit_plugin';
 import {
     generateProceduralMissions,
     ProceduralMissionOffer,
@@ -206,6 +211,11 @@ function missionValues(
     world: MissionBoardWorld,
     stateDate: number,
     resolved?: ResolvedMissionDestinations,
+    state?: Pick<
+        PlayerState,
+        'pilotName' | 'shipName' | 'shipId' | 'gender' |
+        'missionBits' | 'activeRanks'
+    >,
 ) {
     const travelDestination = resolved?.travelDestination
         ?? (mission.travelStel === -1 ? '*' : undefined);
@@ -228,6 +238,12 @@ function missionValues(
             ? formatGameDate(stateDate + mission.timeLimit)
             : undefined,
         pay: mission.payVal > 0 ? mission.payVal : undefined,
+        pilotName: state?.pilotName,
+        shipName: state?.shipName,
+        shipType: state?.shipId,
+        gender: state?.gender,
+        missionBits: state?.missionBits,
+        activeRanks: state?.activeRanks,
     };
 }
 
@@ -236,18 +252,21 @@ export class MissionInfo extends Menu<Entity> {
     private readonly list = new PIXI.Text('', MISSION_FONT.list);
     private readonly detail = new PIXI.Text('', MISSION_FONT.detail);
     private readonly status = new PIXI.Text('', MISSION_FONT.status);
+    private missionWorld?: MissionBoardWorld;
     private readonly abortButton: Button;
     private entries: Array<{
         entry: ActiveMission;
         mission: MissionData;
     }> = [];
     private selectionIndex = -1;
+    private readonly ncbRuntime: NcbRuntime;
 
     constructor(
         gameData: GameData,
         controlEvents: Observable<ControlEvent>,
     ) {
         super(gameData, 'nova:8500', controlEvents);
+        this.ncbRuntime = new NcbRuntime(gameData);
         this.abortButton = new Button(gameData, 'Abort', 65, { x: -60, y: 190 });
         const done = new Button(gameData, 'Done', 65, { x: 60, y: 190 });
         this.addButtons({ abort: this.abortButton, done });
@@ -280,6 +299,11 @@ export class MissionInfo extends Menu<Entity> {
     private async refresh() {
         const state = this.input.components.get(PlayerStateComponent);
         this.entries = [];
+        try {
+            this.missionWorld = await loadMissionWorld(this.gameData);
+        } catch {
+            this.missionWorld = undefined;
+        }
         if (state) {
             const missions = await Promise.all(state.activeMissions
                 .filter(entry => entry.state === 'active' || entry.state === 'failed')
@@ -324,37 +348,68 @@ export class MissionInfo extends Menu<Entity> {
             this.abortButton.state = 'grey';
             return;
         }
-        this.list.text = this.entries.map(({ entry, mission }, index) =>
-            `${index === this.selectionIndex ? '▶ ' : '  '}${mission.name}`
-            + ` [${entry.state}]`).join('\n');
+        const world = this.missionWorld;
+        this.list.text = this.entries.map(({ entry, mission }, index) => {
+            const destinationId = entry.travelDestination
+                ?? entry.destination;
+            const destination = world
+                ? planetName(destinationId, world) : destinationId ?? 'any destination';
+            const deadline = world && entry.acceptedDate !== undefined
+                && mission.timeLimit > 0
+                ? formatGameDate(entry.acceptedDate + mission.timeLimit)
+                : undefined;
+            return `${index === this.selectionIndex ? '▶ ' : '  '}${mission.name}`
+                + ` [${entry.state}]\n   ${destination}`
+                + (deadline ? ` — due ${deadline}` : '');
+        }).join('\n');
         const selected = this.entries[this.selectionIndex];
         if (!selected) {
             return;
         }
         this.abortButton.state = selected.mission.canAbort
             && selected.entry.state === 'active' ? 'normal' : 'grey';
+        const worldForMission = world ?? {
+            systems: [], planets: [], governments: [],
+            planetNames: new Map(), systemNames: new Map(),
+        };
         const destination = planetName(
-            selected.entry.travelDestination ?? selected.entry.destination, {
-                systems: [], planets: [], governments: [],
-                planetNames: new Map(), systemNames: new Map(),
-            });
+            selected.entry.travelDestination ?? selected.entry.destination,
+            worldForMission);
         const returnDestination = planetName(
-            selected.entry.returnDestination ?? selected.entry.destination, {
-                systems: [], planets: [], governments: [],
-                planetNames: new Map(), systemNames: new Map(),
-            });
+            selected.entry.returnDestination ?? selected.entry.destination,
+            worldForMission);
+        const destinationSystem = systemNameForPlanet(
+            selected.entry.travelDestination ?? selected.entry.destination,
+            worldForMission);
+        const deadline = selected.entry.acceptedDate !== undefined
+            && selected.mission.timeLimit > 0
+            ? formatGameDate(
+                selected.entry.acceptedDate + selected.mission.timeLimit)
+            : undefined;
+        const state = this.input.components.get(PlayerStateComponent);
         this.detail.text = formatMissionText(
             selected.mission.quickBrief || selected.mission.briefText
             || 'Mission briefing unavailable.',
             {
                 destination,
+                destinationSystem,
                 returnDestination,
+                deadline,
                 cargo: selected.mission.cargo ?? undefined,
                 quantity: selected.entry.cargo?.quantity,
                 pay: selected.mission.payVal > 0
                     ? selected.mission.payVal : undefined,
+                pilotName: state?.pilotName,
+                shipName: state?.shipName,
+                shipType: state?.shipId,
+                gender: state?.gender,
+                missionBits: state?.missionBits,
+                activeRanks: state?.activeRanks,
             },
         );
+        this.detail.text += `\n\nDestination: ${destination}`
+            + (destinationSystem ? ` (${destinationSystem})` : '')
+            + (deadline ? `\nDeadline: ${deadline}` : '\nNo deadline');
         this.status.text = selected.entry.state === 'failed'
             ? 'This mission has failed. Land anywhere to dismiss the report.'
             : selected.mission.canAbort
@@ -370,7 +425,11 @@ export class MissionInfo extends Menu<Entity> {
             || selected.entry.state !== 'active') {
             return;
         }
-        if (abortMission(state, selected.entry, selected.mission)) {
+        const ncb = this.ncbRuntime.setContext(this.input, state);
+        if (abortMission(state, selected.entry, selected.mission, undefined, ncb)) {
+            if (ncb.outfits) {
+                this.input.components.set(OutfitsStateComponent, ncb.outfits);
+            }
             this.status.text = 'Mission aborted.';
             void this.refresh();
         }
@@ -388,13 +447,17 @@ export abstract class MissionBoard extends Menu<Entity> {
     private readonly unavailableList: PIXI.Text;
     private readonly detail: PIXI.Text;
     private readonly status: PIXI.Text;
+    private readonly briefingGraphic = new PIXI.Container();
     private offers: MissionOffer[] = [];
     private world?: MissionBoardWorld;
     private selectionIndex = -1;
     private readonly planetId: string;
     private readonly offerLocation: MissionOfferLocation;
     private readonly onInfo?: () => void | Promise<void>;
+    private readonly ncbRuntime: NcbRuntime;
     private readonly acceptButton: Button;
+    private showing?: Promise<Entity>;
+    private refreshGeneration = 0;
 
     constructor(
         gameData: GameData,
@@ -405,6 +468,7 @@ export abstract class MissionBoard extends Menu<Entity> {
         onInfo?: () => void | Promise<void>,
     ) {
         super(gameData, 'nova:8500', controlEvents);
+        this.ncbRuntime = new NcbRuntime(gameData);
         this.planetId = planetId;
         this.offerLocation = offerLocation;
         this.onInfo = onInfo;
@@ -440,7 +504,7 @@ export abstract class MissionBoard extends Menu<Entity> {
 
         this.container.addChild(
             this.title, this.flavor, this.list, this.unavailableList,
-            this.detail, this.status);
+            this.detail, this.status, this.briefingGraphic);
         this.controls = new MenuControls(controlEvents, {
             up: () => this.moveSelection(-1),
             down: () => this.moveSelection(1),
@@ -451,13 +515,29 @@ export abstract class MissionBoard extends Menu<Entity> {
     }
 
     override async show(input: Entity): Promise<Entity> {
+        if (this.showing) {
+            return this.showing;
+        }
+        const showing = this.showOnce(input);
+        let guarded: Promise<Entity>;
+        guarded = showing.finally(() => {
+            if (this.showing === guarded) {
+                this.showing = undefined;
+            }
+        });
+        this.showing = guarded;
+        return guarded;
+    }
+
+    private async showOnce(input: Entity): Promise<Entity> {
         await this.buildPromise;
         this.setInput(input);
         await this.refreshOffers();
         return super.show(input);
     }
 
-    private async refreshOffers() {
+    private async refreshOffers(statusOverride?: string) {
+        const generation = ++this.refreshGeneration;
         const state = this.input.components.get(PlayerStateComponent);
         if (!state) {
             this.offers = [];
@@ -469,6 +549,9 @@ export abstract class MissionBoard extends Menu<Entity> {
             loadMissionWorld(this.gameData),
             loadMissionCatalog(this.gameData),
         ]);
+        if (generation !== this.refreshGeneration) {
+            return;
+        }
         this.world = world;
         const currentSystem = world.systems.find(system =>
             sameId(system.id, state.currentSystem)) ?? {
@@ -488,6 +571,7 @@ export abstract class MissionBoard extends Menu<Entity> {
             destinationPlanets: world.planets,
             destinationSystems: world.systems,
             governments: world.governments,
+            outfits: this.input.components.get(OutfitsStateComponent),
         }).sort((a, b) => b.displayWeight - a.displayWeight);
         const resourceOffers = offerable
             .map(mission => ({
@@ -533,6 +617,9 @@ export abstract class MissionBoard extends Menu<Entity> {
         this.offers = [...proceduralOffers, ...resourceOffers];
         this.selectionIndex = this.offers.length > 0 ? 0 : -1;
         this.render();
+        if (statusOverride) {
+            this.status.text = statusOverride;
+        }
     }
 
     private async syncCargoCapacity(
@@ -579,6 +666,7 @@ export abstract class MissionBoard extends Menu<Entity> {
     }
 
     private render() {
+        this.briefingGraphic.removeChildren();
         if (this.offers.length === 0 || this.selectionIndex < 0) {
             this.list.text = 'No missions are available here.';
             this.unavailableList.text = '';
@@ -605,20 +693,33 @@ export abstract class MissionBoard extends Menu<Entity> {
         if (!offer) {
             return;
         }
-        this.acceptButton.state = offer.available ? 'normal' : 'grey';
+        const boardingUnsupported = offer.mission.shipGoal === 2
+            || offer.mission.shipGoal === 5;
+        this.acceptButton.state = offer.available && !boardingUnsupported
+            ? 'normal' : 'grey';
         const state = this.input.components.get(PlayerStateComponent);
         const values = missionValues(
             offer.mission, this.planetId, world, state?.gameDate ?? 0,
-            offer.resolved);
+            offer.resolved, state);
         this.detail.text = formatMissionText(
             offer.mission.briefText || offer.mission.quickBrief
             || offer.mission.offerText
             || 'Mission briefing unavailable.',
             values,
         );
-        this.status.text = `Payment: ${offer.mission.payVal > 0
-            ? `${offer.mission.payVal.toLocaleString()} cr` : 'none'}`
-            + (offer.mission.cargo ? `  Cargo: ${offer.mission.cargo}` : '');
+        const briefGraphic = offer.mission.briefGraphic;
+        if (briefGraphic !== undefined && briefGraphic > 0) {
+            const graphic = this.gameData.spriteFromPict(
+                resourceId(briefGraphic));
+            graphic.position.set(205, -100);
+            graphic.scale.set(0.45);
+            this.briefingGraphic.addChild(graphic);
+        }
+        this.status.text = boardingUnsupported
+            ? 'Boarding missions are not supported yet.'
+            : `Payment: ${offer.mission.payVal > 0
+                ? `${offer.mission.payVal.toLocaleString()} cr` : 'none'}`
+                + (offer.mission.cargo ? `  Cargo: ${offer.mission.cargo}` : '');
     }
 
     private acceptSelected() {
@@ -630,15 +731,44 @@ export abstract class MissionBoard extends Menu<Entity> {
             }
             return;
         }
-        const accepted = acceptMission(
-            state, offer.mission, this.destinationOptions(
-                state, offer.resolved));
-        if (!accepted) {
-            this.status.text = 'This mission cannot be accepted.';
+        if (offer.mission.shipGoal === 2 || offer.mission.shipGoal === 5) {
+            this.status.text = 'Boarding missions are not supported yet.';
             return;
         }
-        this.status.text = `Mission accepted: ${offer.mission.name}`;
-        void this.refreshOffers();
+        const ncb = this.ncbRuntime.setContext(this.input, state);
+        ncb.onStartMission = (missionId: number) => {
+            const target = this.offers.find(candidate =>
+                candidate.mission.id === resourceId(missionId)
+                || candidate.mission.id.replace(/^.*:/, '') === String(missionId));
+            if (!target || !target.available) {
+                return;
+            }
+            acceptMission(state, target.mission, {
+                ...this.destinationOptions(state, target.resolved),
+                ncb: this.ncbRuntime.setContext(this.input, state),
+            });
+        };
+        const accepted = acceptMission(
+            state, offer.mission, {
+                ...this.destinationOptions(state, offer.resolved),
+                ncb,
+            });
+        if (!accepted) {
+            this.status.text = offer.mission.shipGoal === 2
+                || offer.mission.shipGoal === 5
+                ? 'Boarding missions are not supported yet.'
+                : 'This mission cannot be accepted.';
+            return;
+        }
+        if (ncb.outfits) {
+            this.input.components.set(OutfitsStateComponent, ncb.outfits);
+        }
+        this.offers = this.offers.filter(entry =>
+            entry.mission.id !== offer.mission.id);
+        this.selectionIndex = Math.min(
+            this.selectionIndex, this.offers.length - 1);
+        this.render();
+        void this.refreshOffers(`Mission accepted: ${offer.mission.name}`);
     }
 
     private refuseSelected() {
@@ -647,18 +777,22 @@ export abstract class MissionBoard extends Menu<Entity> {
         if (!offer || !state) {
             return;
         }
-        refuseMission(state, offer.mission);
-        this.status.text = formatMissionText(
-            offer.mission.refuseText || 'Mission refused.',
-            missionValues(
-                offer.mission, this.planetId, this.world!, state.gameDate,
-                offer.resolved),
-        );
+        const ncb = this.ncbRuntime.setContext(this.input, state);
+        refuseMission(state, offer.mission, undefined, ncb);
+        if (ncb.outfits) {
+            this.input.components.set(OutfitsStateComponent, ncb.outfits);
+        }
         this.offers = this.offers.filter(entry =>
             entry.mission.id !== offer.mission.id);
         this.selectionIndex = Math.min(
             this.selectionIndex, this.offers.length - 1);
         this.render();
+        this.status.text = formatMissionText(
+            offer.mission.refuseText || 'Mission refused.',
+            missionValues(
+                offer.mission, this.planetId, this.world!, state.gameDate,
+                offer.resolved, state),
+        );
     }
 }
 

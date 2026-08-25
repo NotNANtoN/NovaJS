@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import { BaseData } from "novadatainterface/BaseData";
+import { DudeData } from "novadatainterface/DudeData";
 import { CicnData } from "novadatainterface/CicnData";
 import { CicnImageData } from "novadatainterface/CicnImage";
 import { ExplosionData } from "novadatainterface/ExplosionData";
@@ -34,6 +35,7 @@ const Paths = {
     PictImage: { path: "PictImage", extension: "png" } as PathInfo,
     Cicn: { path: "Cicn", extension: "json" } as PathInfo,
     CicnImage: { path: "CicnImage", extension: "png" } as PathInfo,
+    Dude: { path: "Dude", extension: "json" } as PathInfo,
     Planet: { path: "Planet", extension: "json" } as PathInfo,
     System: { path: "System", extension: "json" } as PathInfo,
     TargetCorners: { path: "TargetCorners", extension: "json" } as PathInfo,
@@ -58,6 +60,7 @@ class FilesystemData implements GameDataInterface {
             PictImage: this.getFunction<PictImageData>(Paths.PictImage),
             Cicn: this.getFunction<CicnData>(Paths.Cicn),
             CicnImage: this.getFunction<CicnImageData>(Paths.CicnImage),
+            Dude: this.getFunction<DudeData>(Paths.Dude),
             Planet: this.getFunction<PlanetData>(Paths.Planet),
             System: this.getFunction<SystemData>(Paths.System),
             TargetCorners: this.getFunction<TargetCornersData>(Paths.TargetCorners),
@@ -105,6 +108,7 @@ class FilesystemData implements GameDataInterface {
             PictImage: await this.buildIDsForPath(Paths.PictImage),
             Cicn: await this.buildIDsForPath(Paths.Cicn),
             CicnImage: await this.buildIDsForPath(Paths.CicnImage),
+            Dude: await this.buildIDsForPath(Paths.Dude),
             Planet: await this.buildIDsForPath(Paths.Planet),
             System: await this.buildIDsForPath(Paths.System),
             TargetCorners: await this.buildIDsForPath(Paths.TargetCorners),

@@ -39,6 +39,9 @@ export interface MissionData extends BaseData {
     compReward: number;
     shipSubtitle: number;
     briefTextID: number;
+    briefGraphic?: number;
+    briefMovieFile?: string;
+    briefFlags?: number;
     quickBriefID: number;
     loadCargTextID: number;
     dumpCargoTextID: number;

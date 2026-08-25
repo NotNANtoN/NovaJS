@@ -1,6 +1,7 @@
 import { Entities, GetEntity, UUID } from "nova_ecs/arg_types";
 import { Component } from "nova_ecs/component";
 import { AddEvent, DeleteEvent } from "nova_ecs/events";
+import { Optional } from "nova_ecs/optional";
 import { Plugin } from "nova_ecs/plugin";
 import { MovementStateComponent, MovementSystem } from "nova_ecs/plugins/movement_plugin";
 import { Provide } from "nova_ecs/provide";
@@ -12,6 +13,7 @@ import { GameDataResource } from "../nova_plugin/game_data_resource";
 import { PlanetComponent } from "../nova_plugin/planet_plugin";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin";
 import { ProjectileComponent } from "../nova_plugin/projectile_data";
+import { ReturnToQueueComponent } from "../nova_plugin/return_to_queue_plugin";
 import { ShipComponent } from "../nova_plugin/ship_plugin";
 import { AnimationGraphic } from "./animation_graphic";
 import { Space } from "./space_resource";
@@ -22,6 +24,7 @@ const AnimationGraphicLoader = ProvideAsync({
     name: "AnimationGraphicLoader",
     provided: AnimationGraphicLoadedComponent,
     args: [AnimationComponent, GameDataResource, GetEntity] as const,
+    dispose: graphic => graphic.dispose(),
     async factory(animation, gameData, entity) {
         const graphic = new AnimationGraphic({
             gameData: currentIfDraft(gameData)!,
@@ -55,8 +58,9 @@ export const AnimationGraphicProvider = Provide({
     factory(graphic, space, entities, uuid) {
         // Only add the graphic to the container if the entity still exists
         if (entities.has(uuid)) {
-            space.addChild(graphic.container);
+            graphic.attachTo(space);
         } else {
+            graphic.dispose();
             console.log(`Not adding graphic for ${uuid} since it is no longer in the system`);
         }
         return graphic;
@@ -67,6 +71,11 @@ export const ObjectDrawSystem = new System({
     name: "ObjectDrawSystem",
     args: [MovementStateComponent, AnimationGraphicComponent] as const,
     step: (movementState, graphic) => {
+        if (graphic.managed.disposed) {
+            // Cleanup already destroyed this graphic (entity deleted); a
+            // straggler step must not touch the freed Pixi transform.
+            return;
+        }
         if (movementState.turning < 0) {
             graphic.setFramesToUse('left');
         } else if (movementState.turning > 0) {
@@ -88,9 +97,18 @@ export const ObjectDrawSystem = new System({
 const AnimationGraphicCleanup = new System({
     name: 'AnimationGraphicCleanup',
     events: [DeleteEvent],
-    args: [AnimationGraphicComponent, Space] as const,
-    step: (graphic, space) => {
-        space.removeChild(graphic.container);
+    args: [AnimationGraphicComponent, Optional(ReturnToQueueComponent),
+        Space] as const,
+    step: (graphic, recyclable) => {
+        if (recyclable) {
+            // Projectiles are pooled: the same Entity (and therefore the same
+            // AnimationGraphic) is reused for the next shot. Destroying the
+            // Pixi subtree here would leave every later shot simulated,
+            // audible, and collidable, but never drawn.
+            graphic.detach();
+            return;
+        }
+        graphic.dispose();
     }
 });
 
@@ -99,7 +117,7 @@ const AnimationGraphicInsert = new System({
     events: [AddEvent],
     args: [AnimationGraphicComponent, Space] as const,
     step(graphic, space) {
-        space.addChild(graphic.container);
+        graphic.attachTo(space);
     }
 });
 

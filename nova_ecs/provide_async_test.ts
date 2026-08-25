@@ -339,6 +339,30 @@ describe('ProvideAsync', () => {
         expect(entity.components.get(FOO_COMPONENT)?.x).toEqual(5);
     });
 
+    it('disposes a value that completes after entity deletion', async () => {
+        const dispose = jasmine.createSpy('dispose');
+        const provider = ProvideAsync({
+            name: 'foo from bar',
+            provided: FOO_COMPONENT,
+            args: [BAR_COMPONENT] as const,
+            factory: async (bar) => {
+                await sleep(10);
+                return { x: bar.y.length };
+            },
+            dispose,
+        });
+        world.addSystem(provider);
+
+        world.entities.set('word1', new Entity()
+            .addComponent(BAR_COMPONENT, { y: 'hello' }));
+        world.step();
+        world.entities.delete('word1');
+        clock.tick(11);
+        await world.resources.get(AsyncSystemResource)?.done;
+
+        expect(dispose).toHaveBeenCalledWith({ x: 5 });
+    });
+
     it('tries again if the factory throws an error', async () => {
         let willThrow = true;
         const onErrorSpy = jasmine.createSpy('onErrorSpy');

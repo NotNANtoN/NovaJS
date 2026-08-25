@@ -4,6 +4,7 @@ import { RledResource } from "../../src/resource_parsers/RledResource";
 import { PNG } from "pngjs";
 import { getPNG, getFrames, applyMask, PNGCustomMatchers } from "./PNGCompare"
 import { defaultIDSpace } from "./DefaultIDSpace";
+import { fixturePath } from "../../../test/fixture_path";
 
 declare global {
     namespace jasmine {
@@ -14,9 +15,6 @@ declare global {
 }
 
 jasmine.DEFAULT_TIMEOUT_INTERVAL = 30000; // 30 seconds
-
-// Bazel no longer patches require.
-const runfiles = require(process.env['BAZEL_NODE_RUNFILES_HELPER'] as string) as typeof require;
 
 describe("RledResource", function() {
     let rf: ResourceMap;
@@ -33,16 +31,16 @@ describe("RledResource", function() {
     beforeEach(async function() {
         jasmine.addMatchers(PNGCustomMatchers);
 
-        starbridgePNG = await getPNG(runfiles.resolve(
+        starbridgePNG = await getPNG(fixturePath(
             "novajs/novaparse/test/resource_parsers/files/rleds/starbridge.png"));
-        starbridgeMask = await getPNG(runfiles.resolve(
+        starbridgeMask = await getPNG(fixturePath(
             "novajs/novaparse/test/resource_parsers/files/rleds/starbridge_mask.png"));
-        leviathanPNG = await getPNG(runfiles.resolve(
+        leviathanPNG = await getPNG(fixturePath(
             "novajs/novaparse/test/resource_parsers/files/rleds/leviathan.png"));
-        leviathanMask = await getPNG(runfiles.resolve(
+        leviathanMask = await getPNG(fixturePath(
             "novajs/novaparse/test/resource_parsers/files/rleds/leviathan_mask.png"));
 
-        const dataPath = runfiles.resolve("novajs/novaparse/test/resource_parsers/files/rled.ndat");
+        const dataPath = fixturePath("novaparse/test/resource_parsers/files/rled.ndat");
         rf = await readResourceFork(dataPath, false);
 
         const rleds = rf.rlëD;

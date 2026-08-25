@@ -13,7 +13,12 @@ export interface OutfitData extends BaseData {
     price: number,
     desc: string,
     displayWeight: number,
-    max: number
+    max: number,
+    techLevel: number,
+    availabilityNCB: string,
+    onPurchase: string,
+    contribute: number[],
+    require: number[],
 }
 
 export function getDefaultOutfitData(): OutfitData {
@@ -27,6 +32,11 @@ export function getDefaultOutfitData(): OutfitData {
         price: 0,
         desc: "default outfit",
         displayWeight: 0,
-        max: 0
+        max: 0,
+        techLevel: 0,
+        availabilityNCB: "",
+        onPurchase: "",
+        contribute: [0, 0],
+        require: [0, 0],
     }
 }

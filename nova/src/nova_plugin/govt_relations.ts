@@ -1,6 +1,7 @@
 import { GovtData } from "novadatainterface/GovtData";
 import { GameDataInterface } from "novadatainterface/GameDataInterface";
 import { Resource } from "nova_ecs/resource";
+import { resourceId } from "../common/resource_id";
 
 export type GovernmentRelation = "ally" | "neutral" | "enemy";
 
@@ -154,8 +155,8 @@ export class GovernmentRelationStore {
         // (normally 128+). Also accept zero-based indexes for hand-authored
         // data and old callers.
         const resourceIds = id >= 128
-            ? [`nova:${id}`, String(id)]
-            : [`nova:${id + 128}`, `nova:${id}`];
+            ? [resourceId(id), String(id)]
+            : [resourceId(id + 128), resourceId(id)];
 
         for (const resourceId of resourceIds) {
             try {

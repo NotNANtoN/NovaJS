@@ -2,9 +2,7 @@ import "jasmine";
 import { readResourceFork, ResourceMap } from "resource_fork";
 import { BoomResource } from "../../src/resource_parsers/BoomResource";
 import { defaultIDSpace } from "./DefaultIDSpace";
-
-// Bazel no longer patches require.
-const runfiles = require(process.env['BAZEL_NODE_RUNFILES_HELPER'] as string) as typeof require;
+import { fixturePath } from "../../../test/fixture_path";
 
 describe("BoomResource", function() {
     // Booms don't depend on other resources.
@@ -16,7 +14,7 @@ describe("BoomResource", function() {
     let slowBoom: BoomResource;
 
     beforeEach(async function() {
-        const dataPath = runfiles.resolve("novajs/novaparse/test/resource_parsers/files/boom.ndat");
+        const dataPath = fixturePath("novaparse/test/resource_parsers/files/boom.ndat");
         rf = await readResourceFork(dataPath, false);
         const booms = rf.bööm;
         firstBoom = new BoomResource(booms[128], idSpace);

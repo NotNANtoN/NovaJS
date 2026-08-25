@@ -3,8 +3,7 @@ import { readResourceFork, ResourceMap } from "resource_fork";
 import { SndResource } from "../../src/resource_parsers/SndResource";
 import { defaultIDSpace } from "./DefaultIDSpace";
 import { ima4, pcm8 } from "./expected_sounds";
-
-const runfiles = require(process.env['BAZEL_NODE_RUNFILES_HELPER'] as string) as typeof require;
+import { fixturePath } from "../../../test/fixture_path";
 
 describe("SndResource", function() {
     let s1: SndResource;
@@ -15,7 +14,7 @@ describe("SndResource", function() {
     const idSpace = defaultIDSpace;
 
     beforeEach(async function() {
-        const dataPath = runfiles.resolve("novajs/novaparse/test/resource_parsers/files/snd.ndat");
+        const dataPath = fixturePath("novaparse/test/resource_parsers/files/snd.ndat");
         rf = await readResourceFork(dataPath, false);
 
         const snds = rf['snd '];

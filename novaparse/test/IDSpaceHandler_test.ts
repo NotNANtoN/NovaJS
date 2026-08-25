@@ -1,13 +1,13 @@
 import "jasmine";
-import path from "path";
 import { IDSpaceHandler } from "../src/IDSpaceHandler";
 import { NovaResources } from "../src/resource_parsers/ResourceHolderBase";
+import { fixturePath } from "../../test/fixture_path";
 
 
 describe("IDSpaceHandler", function() {
     let idSpace: NovaResources;
     beforeEach(async function() {
-        const dataPath = path.join(__dirname, "IDSpaceHandlerTestFilesystem");
+        const dataPath = fixturePath("novaparse/test/IDSpaceHandlerTestFilesystem");
         const handler = new IDSpaceHandler(dataPath);
         idSpace = await handler.getIDSpace();
     });

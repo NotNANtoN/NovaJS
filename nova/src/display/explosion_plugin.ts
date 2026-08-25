@@ -19,34 +19,38 @@ import { AnimationGraphicComponent } from "./animation_graphic_plugin";
 import { DeathEvent, PlayerDeathSystem, ZeroArmorEvent } from "../nova_plugin/death_plugin";
 import { ShipComponent, ShipDataComponent } from "../nova_plugin/ship_plugin";
 import { DeathAISystem } from "../nova_plugin/npc_plugin";
+import { EntityBudgetResource, reserveEntity } from "../nova_plugin/entity_budget";
+import { framesToMilliseconds } from "novaparse/src/parsers/Constants";
+import {
+    advanceExplosionTiming,
+    ExplosionTimingState,
+} from "./explosion_timing";
 
 
-const ExplosionState = new Component<{
-    startTime?: number,
-    lifetime?: number,
-}>('ExplosionState');
+const ExplosionState =
+    new Component<ExplosionTimingState>('ExplosionState');
 
-const ExplosionSystem = new System({
+export const ExplosionSystem = new System({
     name: 'ExplosionSystem',
     args: [AnimationGraphicComponent, ExplosionDataComponent,
         ExplosionState, TimeResource, Entities, UUID, Emit] as const,
     step(graphic, explosionData, explosionState, time, entities, uuid, emit) {
-        if (!explosionState.startTime || !explosionState.lifetime) {
-            explosionState.startTime = time.time;
-            const frameTime = 30 / explosionData.rate;
-            explosionState.lifetime = frameTime * Math.max(0,
-                ...[...graphic.sprites.values()].map(s => s.frames));
-
+        const starting = explosionState.startTime === undefined;
+        const timing = advanceExplosionTiming(
+            explosionState,
+            time.time,
+            Math.max(0, ...[...graphic.sprites.values()].map(s => s.frames)),
+            explosionData.rate,
+        );
+        if (starting) {
             if (explosionData.sound) {
                 emit(SoundEvent, { id: explosionData.sound })
             }
         }
 
-        const progress = (time.time - explosionState.startTime)
-            / explosionState.lifetime;
-        graphic.progress = progress;
+        graphic.progress = timing.progress;
 
-        if (progress > 1) {
+        if (timing.done) {
             entities.delete(uuid);
         }
     }
@@ -75,8 +79,8 @@ function randomPointInCircle(r: number): Vector {
 const SecondaryExplosionSystem = new System({
     name: 'SecondaryExplosion',
     args: [SecondaryExplosionComponent, TimeResource, Entities,
-        MovementStateComponent] as const,
-    step(explosion, time, entities, { position }) {
+        MovementStateComponent, EntityBudgetResource] as const,
+    step(explosion, time, entities, { position }, budget) {
         if (!explosion.lastTime) {
             explosion.lastTime = 0;
         }
@@ -89,10 +93,13 @@ const SecondaryExplosionSystem = new System({
         // TODO: Fix these types in position.ts
         const pos = position.add(
             randomPointInCircle(explosion.radius ?? 80)) as Position;
-        entities.set(v4(), makeExplosion({
+        const child = makeExplosion({
             ...explosion.explosion,
             sound: null,
-        }, pos));
+        }, pos);
+        if (reserveEntity(budget, child, 'explosion')) {
+            entities.set(v4(), child);
+        }
     }
 });
 
@@ -100,8 +107,8 @@ const ProjectileExplosionSystem = new System({
     name: 'ProjectileExplosionSystem',
     events: [ProjectileExplodeEvent],
     args: [ProjectileDataComponent, MovementStateComponent, GameDataResource,
-        Entities] as const,
-    step(projectileData, movement, gameData, entities) {
+        Entities, EntityBudgetResource] as const,
+    step(projectileData, movement, gameData, entities, budget) {
         const primary = projectileData.primaryExplosion;
         if (!primary) {
             return;
@@ -119,8 +126,11 @@ const ProjectileExplosionSystem = new System({
                 gameData.data.Explosion.getCached(secondary);
         }
 
-        entities.set(v4(), makeExplosion(primaryExplosionData,
-            movement.position, secondaryExplosionData));
+        const explosion = makeExplosion(primaryExplosionData,
+            movement.position, secondaryExplosionData);
+        if (reserveEntity(budget, explosion, 'explosion')) {
+            entities.set(v4(), explosion);
+        }
     }
 });
 
@@ -128,8 +138,9 @@ const ShipFinalExplosionSystem = new System({
     name: 'ShipFinalExplosionSystem',
     events: [DeathEvent],
     before: [PlayerDeathSystem, DeathAISystem],
-    args: [ShipDataComponent, GameDataResource, MovementStateComponent, Entities] as const,
-    step(ship, gameData, movement, entities) {
+    args: [ShipDataComponent, GameDataResource, MovementStateComponent,
+        Entities, EntityBudgetResource] as const,
+    step(ship, gameData, movement, entities, budget) {
         if (!ship.finalExplosion) {
             return;
         }
@@ -143,16 +154,18 @@ const ShipFinalExplosionSystem = new System({
         if (ship.largeExplosion) {
             largeExplosion = explosionData;
         }
-        entities.set(v4(), makeExplosion(
+        const explosion = makeExplosion(
             explosionData,
             Position.fromVectorLike(movement.position),
-            largeExplosion));
-
+            largeExplosion);
+        if (reserveEntity(budget, explosion, 'explosion')) {
+            entities.set(v4(), explosion);
+        }
     }
 });
 
 // TODO: Sample collisions in the convex hull of the ship
-const ShipSecondaryExposionSystem = new System({
+const ShipSecondaryExplosionSystem = new System({
     name: 'ShipSecondaryExplosionSystem',
     events: [ZeroArmorEvent],
     args: [ShipDataComponent, GetEntity, GameDataResource] as const,
@@ -169,7 +182,7 @@ const ShipSecondaryExposionSystem = new System({
 
         components.set(SecondaryExplosionComponent, {
             explosion,
-            period: 90,
+            period: framesToMilliseconds(90),
         });
     }
 });
@@ -199,7 +212,7 @@ export function makeExplosion(explosionData: ExplosionData, position: Position,
     if (secondaryExplosionData) {
         explosion.addComponent(SecondaryExplosionComponent, {
             explosion: secondaryExplosionData,
-            period: 30,
+            period: framesToMilliseconds(30),
         });
     }
     return explosion;
@@ -212,7 +225,7 @@ export const ExplosionPlugin: Plugin = {
         world.addSystem(ProjectileExplosionSystem);
         world.addSystem(SecondaryExplosionSystem);
         world.addSystem(ShipFinalExplosionSystem);
-        world.addSystem(ShipSecondaryExposionSystem);
+        world.addSystem(ShipSecondaryExplosionSystem);
         world.addSystem(ShipSecondaryExplosionDoneSystem);
     },
     remove(world) {
@@ -220,7 +233,7 @@ export const ExplosionPlugin: Plugin = {
         world.removeSystem(ProjectileExplosionSystem);
         world.removeSystem(SecondaryExplosionSystem);
         world.removeSystem(ShipFinalExplosionSystem);
-        world.removeSystem(ShipSecondaryExposionSystem);
+        world.removeSystem(ShipSecondaryExplosionSystem);
         world.removeSystem(ShipSecondaryExplosionDoneSystem);
     }
 }

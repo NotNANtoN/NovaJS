@@ -10,11 +10,13 @@ import { CollisionsPlugin } from './collisions_plugin';
 import { ControlsPlugin } from "./controls_plugin";
 import { CreateTimePlugin } from "./create_time";
 import { DeathPlugin } from "./death_plugin";
+import { EntityBudgetPlugin } from "./entity_budget";
 import { FireWeaponPlugin } from "./fire_weapon_plugin";
 import { HealthPlugin } from "./health_plugin";
 import { IonizedPlugin } from "./ionization_plugin";
 import { JumpPlugin } from "./jump_plugin";
 import { MissionPlugin } from "./mission_plugin";
+import { MissionShipsPlugin } from "./mission_ship_plugin";
 import { NpcPlugin } from "./npc_plugin";
 import { OutfitPlugin } from "./outfit_plugin";
 import { PlanetPlugin } from "./planet_plugin";
@@ -34,6 +36,7 @@ export const SystemPlugin: Plugin = {
     build(world) {
         world.addPlugin(TimePlugin);
         world.addPlugin(CreateTimePlugin);
+        world.addPlugin(EntityBudgetPlugin);
         world.addPlugin(ReturnToQueuePlugin);
         world.addPlugin(PlatformPlugin);
         world.addPlugin(DeltaPlugin);
@@ -56,6 +59,7 @@ export const SystemPlugin: Plugin = {
         world.addPlugin(BeamPlugin);
         world.addPlugin(BayPlugin);
         world.addPlugin(JumpPlugin);
+        world.addPlugin(MissionShipsPlugin);
         world.addPlugin(NpcPlugin);
         world.addPlugin(IonizedPlugin);
         world.addPlugin(BlastPlugin);

@@ -1,4 +1,5 @@
 import { OutfitData } from "novadatainterface/OutiftData";
+import { PlanetData } from "novadatainterface/PlanetData";
 import { DefaultMap } from "nova_ecs/utils";
 import * as PIXI from 'pixi.js';
 import { Observable } from "rxjs";
@@ -9,6 +10,7 @@ import { PlayerState } from "../nova_plugin/player_state";
 import { Button } from "./button";
 import { ItemGrid, ItemTile } from "./item_grid";
 import { Menu } from "./menu";
+import { isPurchaseAvailable } from "./availability";
 
 
 const descWidth = 190;
@@ -32,6 +34,8 @@ export class Outfitter extends Menu<OutfitsState> {
     private pictContainer = new PIXI.Container();
     private outfits: DefaultMap<string, number>;
     private playerState?: PlayerState;
+    private planetData?: PlanetData;
+    private refreshPromise?: Promise<void>;
 
     private text = {
         description: new PIXI.Text("", FONT.normal),
@@ -123,16 +127,59 @@ export class Outfitter extends Menu<OutfitsState> {
     setPlayerState(playerState: PlayerState | undefined) {
         this.playerState = playerState;
         this.updateCreditsText();
+        this.refreshPromise = this.refreshGrid();
+    }
+
+    setPlanetData(planetData: PlanetData | undefined) {
+        this.planetData = planetData;
+        this.refreshPromise = this.refreshGrid();
+    }
+
+    override async show(input: OutfitsState): Promise<OutfitsState> {
+        await this.buildPromise;
+        await this.refreshPromise;
+        return super.show(input);
     }
 
     private async makeOutfitsGrid() {
         const ids = (await this.gameData.ids).Outfit;
-        const outfits = await Promise.all(ids.map(id =>
+        let outfits = await Promise.all(ids.map(id =>
             this.gameData.data.Outfit.get(id, 100)));
+        if (this.planetData) {
+            outfits = outfits.filter(outfit => isPurchaseAvailable(
+                outfit,
+                this.planetData!,
+                this.playerState,
+                this.outfits,
+            ));
+        }
         outfits.sort((a, b) => b.displayWeight - a.displayWeight);
         const itemGrid = new ItemGrid(this.gameData, outfits);
         itemGrid.setCounts(this.outfits);
         return itemGrid;
+    }
+
+    private async refreshGrid() {
+        if (!this.itemGrid || !this.planetData) {
+            return;
+        }
+        const itemGrid = await this.makeOutfitsGrid();
+        this.container.removeChild(this.itemGrid.container);
+        this.itemGrid = itemGrid;
+        this.container.addChild(itemGrid.container);
+        itemGrid.drawGrid();
+        itemGrid.container.position.x = -373;
+        itemGrid.container.position.y = -153;
+        itemGrid.activeTile.subscribe(this.setOutfitSelected.bind(this));
+        this.controls.controls = {
+            left: () => itemGrid.left(),
+            right: () => itemGrid.right(),
+            up: () => itemGrid.up(),
+            down: () => itemGrid.down(),
+            buy: this.buyOutfit.bind(this),
+            sell: this.sellOutfit.bind(this),
+            depart: this.done.bind(this),
+        };
     }
 
     private buyOutfit() {
@@ -145,6 +192,15 @@ export class Outfitter extends Menu<OutfitsState> {
         const price = Math.max(0, Math.floor(outfit.price));
         if (!this.playerState) {
             console.warn('Cannot buy outfit without player state.');
+            return;
+        }
+        if (this.planetData && !isPurchaseAvailable(
+            outfit,
+            this.planetData,
+            this.playerState,
+            this.outfits,
+        )) {
+            console.warn(`Outfit ${outfit.id} is not available here.`);
             return;
         }
         if (this.playerState.credits < price) {

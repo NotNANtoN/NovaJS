@@ -1,13 +1,11 @@
 import "jasmine";
 import { NovaResources, getEmptyNovaResources } from "../src/resource_parsers/ResourceHolderBase";
 import { readNovaFile } from "../src/readNovaFile";
-
-// Bazel no longer patches require.
-const runfiles = require(process.env['BAZEL_NODE_RUNFILES_HELPER'] as string) as typeof require;
+import { fixturePath } from "../../test/fixture_path";
 
 describe("readNovaFile", function() {
 
-    const shipPath = runfiles.resolve("novajs/novaparse/test/resource_parsers/files/ship.ndat");
+    const shipPath = fixturePath("novaparse/test/resource_parsers/files/ship.ndat");
     let localIDSpace: NovaResources;
 
     beforeEach(async function() {

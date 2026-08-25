@@ -19,6 +19,7 @@ import { Resource } from 'nova_ecs/resource';
 import { DefaultMap } from 'nova_ecs/utils';
 import { SingletonComponent } from 'nova_ecs/world';
 import { AnimationComponent } from './animation_plugin';
+import { EntityBudget, EntityBudgetResource } from './entity_budget';
 import { applyExitPoint, ExitPointData, getExitPointData } from './exit_point';
 import { GameDataResource } from './game_data_resource';
 import { firstOrderWithFallback } from './guidance';
@@ -45,6 +46,17 @@ export interface WeaponLocalState {
     reloadingBurst: boolean,
     wasFiring: boolean,
     exitIndex: number,
+    /**
+     * Set once a simulation step has seen the current press. A press and its
+     * release can both arrive from the browser between two steps; without
+     * this the whole tap is discarded and no shot is ever fired.
+     */
+    pressObserved?: boolean,
+    /**
+     * The trigger was released before any step observed the press. Firing
+     * intent is held for exactly one step and then cleared.
+     */
+    releaseAfterStep?: boolean,
 }
 type WeaponsLocalState = DefaultMap<string, WeaponLocalState>;
 export const WeaponsComponent = new Component<WeaponsLocalState>('WeaponsComponent')
@@ -58,6 +70,8 @@ export function getDefaultWeaponLocalState(): WeaponLocalState {
         reloadingBurst: false,
         wasFiring: false,
         exitIndex: 0,
+        pressObserved: false,
+        releaseAfterStep: false,
     };
 }
 
@@ -66,9 +80,20 @@ export const WeaponsComponentProvider = Provide({
     name: "WeaponsComponentProvider",
     provided: WeaponsComponent,
     update: [WeaponsStateComponent],
-    args: [WeaponsStateComponent] as const,
-    factory() {
-        return new DefaultMap(getDefaultWeaponLocalState);
+    args: [WeaponsStateComponent, Optional(WeaponsComponent)] as const,
+    factory(_weaponsState, previous) {
+        // Reload accumulators, burst counters, and exit-point rotation are
+        // per-weapon firing progress. A refreshed WeaponsState (a purchased
+        // outfit, or a replicated update) must not silently reload every
+        // weapon, which would let a held trigger fire far faster than the
+        // weapon's reload allows.
+        const localState: WeaponsLocalState =
+            new DefaultMap<string, WeaponLocalState>(
+                getDefaultWeaponLocalState);
+        for (const [id, state] of previous ?? []) {
+            localState.set(id, state);
+        }
+        return localState;
     }
 });
 
@@ -156,7 +181,7 @@ const SubsQuery = new Query([WeaponEntries, MovementStateComponent, Optional(Sub
     Optional(OwnerComponent), Optional(TargetComponent), GetEntity] as const);
 
 const ConstructorQuery = new Query([Entities, Emit, WeaponEntries,
-    SingletonComponent] as const);
+    SingletonComponent, EntityBudgetResource] as const);
 
 export const VulnerableToPD = new Component<undefined>('VulnerableToPD');
 const PointDefenseQuery = new Query([MovementStateComponent, Optional(OwnerComponent),
@@ -165,10 +190,12 @@ const PointDefenseQuery = new Query([MovementStateComponent, Optional(OwnerCompo
 export abstract class WeaponEntry {
     protected entities: EntityMap;
     protected emit: EmitFunction;
+    protected budget: EntityBudget;
     protected abstract pointDefenseRangeSquared: number;
     constructor(public data: WeaponData, protected runQuery: RunQueryFunction) {
         let weaponEntries: Gettable<WeaponEntry | undefined>;
-        [this.entities, this.emit, weaponEntries] = runQuery(ConstructorQuery)[0];
+        [this.entities, this.emit, weaponEntries, , this.budget] =
+            runQuery(ConstructorQuery)[0];
         if ('submunitions' in this.data) {
             for (const sub of this.data.submunitions) {
                 weaponEntries.get(sub.id);

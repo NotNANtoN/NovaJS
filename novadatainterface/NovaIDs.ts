@@ -17,6 +17,7 @@ export function getDefaultNovaIDs(): NovaIDs {
         PictImage: [],
         Cicn: [],
         CicnImage: [],
+        Dude: [],
         Planet: [],
         Ship: [],
         SpriteSheet: [],

@@ -1,5 +1,6 @@
 import { CicnData } from "./CicnData";
 import { CicnImageData } from "./CicnImage";
+import { DudeData } from "./DudeData";
 import { ExplosionData } from "./ExplosionData";
 import { GovtData } from "./GovtData";
 import { Gettable } from "./Gettable";
@@ -25,6 +26,7 @@ enum NovaDataType {
     PictImage = "PictImage",
     Cicn = "Cicn",
     CicnImage = "CicnImage",
+    Dude = "Dude",
     Planet = "Planet",
     System = "System",
     Mission = "Mission",
@@ -47,6 +49,7 @@ type NovaDataInterface = {
     PictImage: Gettable<PictImageData>,
     Cicn: Gettable<CicnData>,
     CicnImage: Gettable<CicnImageData>,
+    Dude?: Gettable<DudeData>,
     Planet: Gettable<PlanetData>,
     System: Gettable<SystemData>,
     Mission?: Gettable<MissionData>,

@@ -1,10 +1,12 @@
+import * as t from 'io-ts';
 import { WeaponDamage } from 'novadatainterface/WeaponData';
-import { Components, Emit, RunQuery, UUID } from 'nova_ecs/arg_types';
+import { Emit, RunQuery, UUID } from 'nova_ecs/arg_types';
 import { Vector } from 'nova_ecs/datatypes/vector';
 import { Entity } from 'nova_ecs/entity';
 import { EcsEvent } from 'nova_ecs/events';
 import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
+import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
 import { MovementPhysicsComponent, MovementState, MovementStateComponent, MovementType } from 'nova_ecs/plugins/movement_plugin';
 import { Time, TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { Query } from 'nova_ecs/query';
@@ -17,6 +19,10 @@ import { PlayerShipSelector } from './player_ship_plugin';
 import { Position } from 'nova_ecs/datatypes/position';
 import { Component } from 'nova_ecs/component';
 import { GetEntity } from 'nova_ecs/arg_types';
+import {
+    PlayerStateComponent,
+} from './player_state';
+import { InitiateJumpEvent } from './jump_plugin';
 
 // const DamageQuery = new Query([Optional(ShieldComponent), Optional(ArmorComponent),
 // Optional(IonizationComponent), Optional(IonizationColorComponent),
@@ -24,16 +30,35 @@ import { GetEntity } from 'nova_ecs/arg_types';
 
 export const DeathEvent = new EcsEvent<Time>('DeathEvent');
 export const ZeroArmorEvent = new EcsEvent<Time>('ZeroArmorEvent');
+export const DisabledComponent = new Component<boolean>('DisabledComponent');
+export const DisableOnZeroArmorComponent =
+    new Component<undefined>('DisableOnZeroArmorComponent');
+const PlayerDeathState = t.type({
+    respawnAt: t.number,
+    wreckPosition: t.tuple([t.number, t.number]),
+});
+export const PlayerDeathComponent = new Component<t.TypeOf<typeof PlayerDeathState>>(
+    'PlayerDeathComponent');
 
-export const DamagedEvent = new EcsEvent<{ damage: WeaponDamage, damager: string, scale?: number }>('DamagedEvent');
+export const DamagedEvent = new EcsEvent<{
+    damage: WeaponDamage,
+    damager: string,
+    scale?: number,
+    fromExplosion?: boolean,
+}>('DamagedEvent');
 
 const DamageSystem = new System({
     name: 'DamageSystem',
     events: [DamagedEvent],
     args: [Emit, DamagedEvent, Optional(ShieldComponent), Optional(ArmorComponent),
         Optional(IonizationComponent), Optional(IonizationColorComponent),
-        Optional(ProjectileComponent), TimeResource, UUID] as const,
-    step(emit, { damage, scale = 1 }, shield, armor, ionization, ionizationColor, isProjectile, time, uuid) {
+        Optional(ProjectileComponent), Optional(PlayerDeathComponent),
+        TimeResource, UUID] as const,
+    step(emit, { damage, scale = 1 }, shield, armor, ionization, ionizationColor,
+        isProjectile, playerDeath, time, uuid) {
+        if (playerDeath) {
+            return;
+        }
 
         const hasShield = shield && shield.max > 0;
         if (isProjectile && !hasShield) {
@@ -69,9 +94,14 @@ const DamageSystem = new System({
 const ExplodingComponent = new Component<number>('ShipExplodingComponent');
 const ShipZeroArmorSystem = new System({
     name: 'ShipZeroArmorSystem',
-    args: [ShipDataComponent, ZeroArmorEvent, GetEntity] as const,
+    args: [ShipDataComponent, ZeroArmorEvent, GetEntity,
+        Optional(DisableOnZeroArmorComponent)] as const,
     events: [ZeroArmorEvent],
-    step(ship, zeroArmorTime, {components}) {
+    step(ship, zeroArmorTime, {components}, disableInstead) {
+        if (disableInstead) {
+            components.set(DisabledComponent, true);
+            return;
+        }
         if (components.has(ExplodingComponent)) {
             return;
         }
@@ -127,9 +157,12 @@ export const PlayerDeathSystem = new System({
     name: 'PlayerDeathSystem',
     args: [Optional(ShieldComponent), Optional(ArmorComponent),
            Optional(IonizationComponent), MovementStateComponent,
-           PlayerShipSelector] as const,
+           PlayerShipSelector, DeathEvent, GetEntity] as const,
     events: [DeathEvent],
-    step(shield, armor, ionization, movement) {
+    step(shield, armor, ionization, movement, _playerShip, { time }, entity) {
+        if (entity.components.has(PlayerDeathComponent)) {
+            return;
+        }
         if (shield) {
             shield.current = shield.max;
         }
@@ -139,20 +172,79 @@ export const PlayerDeathSystem = new System({
         if (ionization) {
             ionization.current = 0;
         }
-        movement.position = new Position(0, 0);
+        movement.velocity = new Vector(0, 0);
+        const deathState: t.TypeOf<typeof PlayerDeathState> = {
+            respawnAt: time + 2500,
+            wreckPosition: [movement.position.x, movement.position.y],
+        };
+        entity.components.set(PlayerDeathComponent, deathState);
     }
+});
+
+const PlayerRespawnSystem = new System({
+    name: 'PlayerRespawnSystem',
+    args: [
+        TimeResource,
+        PlayerDeathComponent,
+        Optional(ShieldComponent),
+        Optional(ArmorComponent),
+        Optional(IonizationComponent),
+        Optional(PlayerStateComponent),
+        MovementStateComponent,
+        GetEntity,
+        UUID,
+        Emit,
+        PlayerShipSelector,
+    ] as const,
+    step(time, death, shield, armor, ionization, playerState, movement,
+        entity, uuid, emit) {
+        if (time.time < death.respawnAt) {
+            movement.position = new Position(...death.wreckPosition);
+            movement.velocity = new Vector(0, 0);
+            return;
+        }
+        const position: [number, number] =
+            playerState?.lastLandedPosition ?? [0, 0];
+        movement.position = new Position(...position);
+        movement.velocity = new Vector(0, 0);
+        if (shield) {
+            shield.current = shield.max;
+        }
+        if (armor) {
+            armor.current = armor.max;
+        }
+        if (ionization) {
+            ionization.current = 0;
+        }
+        if (playerState?.lastLandedSystem
+            && playerState.lastLandedSystem !== playerState.currentSystem) {
+            emit(InitiateJumpEvent, { to: playerState.lastLandedSystem }, [uuid]);
+        }
+        entity.components.delete(PlayerDeathComponent);
+    },
 });
 
 export const DeathPlugin: Plugin = {
     name: 'DeathPlugin',
     build(world) {
-        //const runQuery = world.resources.get(RunQuery)!;
-        //const emit = world.resources.get(Emit)!;
+        const deltaMaker = world.resources.get(DeltaResource);
+        if (!deltaMaker) {
+            throw new Error('Expected delta maker resource to exist');
+        }
+        world.addComponent(DisabledComponent);
+        deltaMaker.addComponent(DisabledComponent, {
+            componentType: t.boolean,
+        });
+        world.addComponent(PlayerDeathComponent);
+        deltaMaker.addComponent(PlayerDeathComponent, {
+            componentType: PlayerDeathState,
+        });
         world.addSystem(DamageSystem);
         world.addSystem(KnockbackSystem);
         world.addSystem(PlayerDeathSystem);
         world.addSystem(ShipZeroArmorSystem);
         world.addSystem(ExplodingFinishedSystem);
+        world.addSystem(PlayerRespawnSystem);
     },
     remove(world) {
         world.removeSystem(DamageSystem);
@@ -160,5 +252,6 @@ export const DeathPlugin: Plugin = {
         world.removeSystem(PlayerDeathSystem);
         world.removeSystem(ShipZeroArmorSystem);
         world.removeSystem(ExplodingFinishedSystem);
+        world.removeSystem(PlayerRespawnSystem);
     }
 }

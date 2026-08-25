@@ -1,5 +1,5 @@
 export type SoundFile = ArrayBuffer;
 
 export function getDefaultSoundFile(): SoundFile {
-    return Buffer.from([]);
+    return Buffer.from([]).buffer as ArrayBuffer;
 }

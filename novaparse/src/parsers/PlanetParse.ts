@@ -26,7 +26,11 @@ export async function PlanetParse(spob: SpobResource, notFoundFunction: (m: stri
     }
 
     var pictID: string;
-    var pict = spob.idSpace.PICT[spob.landingPictID]
+    // The Bible reserves CustPicID values below 128 for the standard
+    // landscape. Never try to resolve those values as resource IDs.
+    var pict = spob.landingPictID >= 128
+        ? spob.idSpace.PICT[spob.landingPictID]
+        : undefined;
     if (pict) {
         pictID = pict.globalID;
     }
@@ -85,8 +89,16 @@ export async function PlanetParse(spob: SpobResource, notFoundFunction: (m: stri
             inertialess: true,
         },
         position: [spob.position[0], spob.position[1]],
+        flags: spob.flags,
+        techLevel: spob.techLevel,
+        specialTech: [...spob.specialTech],
+        canLand: (spob.flags & 0x00000001) !== 0,
         government: spob.government,
         inhabited: (spob.flags & 0x20) === 0,
+        hasCommodityExchange: (spob.flags & 0x00000002) !== 0,
+        hasOutfitter: (spob.flags & 0x00000004) !== 0,
+        hasShipyard: (spob.flags & 0x00000008) !== 0,
+        hasBar: (spob.flags & 0x00000040) !== 0,
         tradeCommodities: spob.tradeCommodities,
     }
 }

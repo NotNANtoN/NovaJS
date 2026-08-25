@@ -10,6 +10,8 @@ import { System } from 'nova_ecs/system';
 import { GameData } from '../client/gamedata/GameData';
 import { ControlsSubject } from '../nova_plugin/controls_plugin';
 import { GameDataResource } from '../nova_plugin/game_data_resource';
+import { NcbRuntimeResource } from '../nova_plugin/ncb_runtime';
+import { OutfitsStateComponent } from '../nova_plugin/outfit_plugin';
 import { LandEvent, PlanetComponent } from '../nova_plugin/planet_plugin';
 import {
     MissionNotice,
@@ -17,11 +19,15 @@ import {
     MissionRuntimeResource,
 } from '../nova_plugin/mission_plugin';
 import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin';
+import { PlayerStoreResource } from '../nova_plugin/player_state';
 import {
     advanceGameDate,
     PlayerState,
     PlayerStateComponent,
+    isStellarDestroyed,
 } from '../nova_plugin/player_state';
+import { SerializerResource } from 'nova_ecs/plugins/serializer_plugin';
+import { PlanetDataComponent } from '../nova_plugin/planet_plugin';
 import { Spaceport } from '../spaceport/spaceport';
 import { deImmerify } from '../util/deimmerify';
 import { ResizeEvent, ScreenSize } from './screen_size_plugin';
@@ -47,18 +53,32 @@ const LandSystem = new System({
     name: 'LandSystem',
     events: [LandEvent],
     args: [LandEvent, UUID, Entities, RunQuery, ScreenSize, GetEntity,
+        Emit, SerializerResource,
         Optional(CommunicatorResource), PlayerShipSelector,
-        Optional(PlayerStateComponent), Optional(MissionRuntimeResource)] as const,
+        Optional(MultiplayerData), Optional(PlayerStoreResource),
+        Optional(PlayerStateComponent), Optional(MissionRuntimeResource),
+        NcbRuntimeResource] as const,
     step({ id, uuid }, shipUuid, entities, runQuery, { x, y }, playerShip,
-        communicator, _playerShipSelector, playerState: PlayerState | undefined,
-        missionRuntime: MissionRuntime | undefined) {
+        emit, serializer, communicator, _playerShipSelector, playerMultiplayer,
+        playerStore, playerStateRaw, missionRuntimeRaw, ncbRuntime) {
+        const playerState = playerStateRaw;
+        const missionRuntime = missionRuntimeRaw;
         const spaceport = runQuery(SpaceportQuery, uuid)[0]?.[0];
         if (!spaceport) {
             return;
         }
 
+        if (playerState && isStellarDestroyed(playerState, id)) {
+            console.warn(`Cannot land at destroyed stellar ${id}`);
+            return;
+        }
         if (playerState) {
             advanceGameDate(playerState);
+            const landedPlanet = entities.get(uuid)?.components.get(
+                PlanetDataComponent);
+            playerState.lastLandedPlanet = id;
+            playerState.lastLandedSystem = playerState.currentSystem;
+            playerState.lastLandedPosition = landedPlanet?.position ?? [0, 0];
         }
         entities.delete(shipUuid);
         deImmerify(playerShip);
@@ -66,11 +86,31 @@ const LandSystem = new System({
         spaceport.container.position.x = x / 2;
         spaceport.container.position.y = y / 2;
         const landingState = playerShip.components.get(PlayerStateComponent);
+        const outfits = playerShip.components.get(OutfitsStateComponent);
         const landingNotices = landingState && missionRuntime
-            ? missionRuntime.processLanding(landingState, id)
+            ? missionRuntime.processLanding(
+                landingState, id, ncbRuntime.setContext(playerShip, landingState))
             : Promise.resolve([]);
-        void landingNotices.then((notices: MissionNotice[]) =>
-            spaceport.show(playerShip, notices))
+        void landingNotices.then((notices: MissionNotice[]) => {
+            if (playerState && playerStore && playerMultiplayer
+                && communicator) {
+                const store = playerStore;
+                const token = store.getTokenForPeer(playerMultiplayer.owner);
+                if (token) {
+                    const ship = serializer.encode(playerShip);
+                    void store.snapshot(token, playerState, ship)
+                        .catch(error => console.error(
+                            'Landing snapshot failed', error));
+                }
+            }
+            if (outfits) {
+                // NCB outfit handlers mutate the existing map so all
+                // operations in one expression see one another. Re-setting
+                // the component invalidates the outfit-derived providers.
+                playerShip.components.set(OutfitsStateComponent, outfits);
+            }
+            return spaceport.show(playerShip, notices);
+        })
             .then((newShip: Entity) => {
             if (communicator?.uuid) {
                 newShip.components.set(MultiplayerData, {

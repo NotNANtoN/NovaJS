@@ -26,7 +26,11 @@ const BlastCollisionSystem = new System({
         if (ignore?.has(collision.other)) {
             return;
         }
-        emitNow(DamagedEvent, { damage, damager: uuid }, [collision.other])
+        emitNow(DamagedEvent, {
+            damage,
+            damager: uuid,
+            fromExplosion: true,
+        }, [collision.other])
     }
 });
 

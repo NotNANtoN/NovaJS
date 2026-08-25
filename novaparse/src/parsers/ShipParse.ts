@@ -190,6 +190,7 @@ export async function ShipParse(ship: ShipResource,
         deathDelay: ship.deathDelay / FPS,
         largeExplosion: ship.deathDelay >= 60,
         displayWeight: ship.id, // TODO: Fix this once displayweight is implemented
+        techLevel: ship.techLevel,
         availabilityNCB: ship.availabilityNCB,
         appearOn: ship.appearOn,
         onPurchase: ship.onPurchase,

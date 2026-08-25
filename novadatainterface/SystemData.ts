@@ -10,6 +10,11 @@ export interface NpcSpawnData {
     id: string,
     weight: number,
     government: number,
+    /**
+     * Derived from düde AIType (warship/interceptor) or flët provenance.
+     * Missing values from older generated data remain personal-only.
+     */
+    combatRole?: "civilian" | "military" | "personal",
     ships: Array<NpcShipSpawnData>,
 }
 

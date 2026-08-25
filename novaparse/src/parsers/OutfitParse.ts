@@ -119,6 +119,11 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
         price: outf.cost,
         desc,
         displayWeight: outf.displayWeight,
-        max: outf.max
+        max: outf.max,
+        techLevel: outf.techLevel,
+        availabilityNCB: outf.availabilityNCB,
+        onPurchase: outf.onPurchase,
+        contribute: outf.contribute,
+        require: outf.require,
     }
 }

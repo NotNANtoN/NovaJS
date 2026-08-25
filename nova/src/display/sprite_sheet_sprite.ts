@@ -65,9 +65,14 @@ export class SpriteSheetSprite {
             console.warn('frame must be an integer');
             return;
         }
+        const texture = this.textures[frame];
+        if (frame === this.wrappedFrame
+            && this.pixiSprite.texture === texture) {
+            return;
+        }
 
         this.wrappedFrame = frame;
-        this.pixiSprite.texture = this.textures[frame];
+        this.pixiSprite.texture = texture;
     }
 
     set rotation(angle: number) {

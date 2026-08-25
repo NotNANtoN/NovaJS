@@ -6,6 +6,7 @@
  * expressions are parsed into operations so callers can provide the game
  * specific handlers for non-bit operations.
  */
+import { clampRandom } from '../common/random';
 
 export type MissionBits = Set<number> | boolean[];
 
@@ -139,6 +140,18 @@ class TestParser {
         }
         this.index++;
 
+        // Retail data sometimes writes a bare bit number ("4") instead of the
+        // documented "b4" form. Treat a leading digit as a bit test.
+        if (operator >= '0' && operator <= '9') {
+            const [bareNumber, bareEnd] = readNumber(this.source, this.index - 1);
+            if (bareNumber === undefined) {
+                throw new NcbParseError('Bit operand needs a number', offset);
+            }
+            this.index = bareEnd;
+            assertBit(bareNumber, offset);
+            return { type: 'bit', bit: bareNumber };
+        }
+
         const [number, end] = readNumber(this.source, this.index);
         this.index = end;
 
@@ -244,7 +257,12 @@ export type NcbOperation =
     | { type: 'removeOutfit', id: number }
     | { type: 'moveToSystem', id: number }
     | { type: 'moveToSystemRelative', id: number }
-    | { type: 'changeShip', id: number, includeDefaults: boolean }
+    | {
+        type: 'changeShip',
+        id: number,
+        includeDefaults: boolean,
+        resetNonPersistent?: boolean,
+    }
     | { type: 'activateRank', id: number }
     | { type: 'deactivateRank', id: number }
     | { type: 'playSound', id: number }
@@ -262,7 +280,8 @@ export interface NcbSetParseOptions {
 export interface NcbSetExecutionOptions extends NcbSetParseOptions {
     random?: () => number;
     handlers?: Partial<{
-        [K in NcbOperation['type']]: (operation: NcbOperation) => void
+        [K in NcbOperation['type']]:
+        (operation: Extract<NcbOperation, { type: K }>) => void
     }>;
 }
 
@@ -321,11 +340,26 @@ function parseSetToken(
         case 'N':
             return { type: 'moveToSystemRelative', id };
         case 'C':
-            return { type: 'changeShip', id, includeDefaults: false };
+            return {
+                type: 'changeShip',
+                id,
+                includeDefaults: false,
+                resetNonPersistent: false,
+            };
         case 'E':
-            return { type: 'changeShip', id, includeDefaults: true };
+            return {
+                type: 'changeShip',
+                id,
+                includeDefaults: true,
+                resetNonPersistent: false,
+            };
         case 'H':
-            return { type: 'changeShip', id, includeDefaults: true };
+            return {
+                type: 'changeShip',
+                id,
+                includeDefaults: true,
+                resetNonPersistent: true,
+            };
         case 'K':
             return { type: 'activateRank', id };
         case 'L':
@@ -451,10 +485,6 @@ function writeBit(bits: MissionBits, bit: number, value: boolean) {
     }
 }
 
-function randomValue(random: () => number) {
-    return Math.min(0.9999999999999999, Math.max(0, random()));
-}
-
 export function executeSetOperations(
     operations: readonly NcbOperation[],
     missionBits: MissionBits,
@@ -476,13 +506,13 @@ export function executeSetOperations(
                 break;
             case 'randomChance':
                 // RNNN is treated as a gate for the remaining operations.
-                if (randomValue(random) >= operation.percent / 100) {
+                if (clampRandom(random()) >= operation.percent / 100) {
                     return;
                 }
                 break;
             case 'randomChoice': {
                 const choice = operation.choices[
-                    Math.floor(randomValue(random) * operation.choices.length)];
+                    Math.floor(clampRandom(random()) * operation.choices.length)];
                 if (choice) {
                     executeSetOperations(choice, missionBits, options);
                 }
@@ -494,7 +524,7 @@ export function executeSetOperations(
             default: {
                 const handler = options.handlers?.[operation.type];
                 if (handler) {
-                    handler(operation);
+                    handler(operation as never);
                 } else {
                     logger(`No handler registered for NCB operation '${operation.type}'`);
                 }

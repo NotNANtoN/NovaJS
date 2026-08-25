@@ -11,6 +11,7 @@ import { TargetComponent } from "../nova_plugin/target_component";
 import { mod } from "../util/mod";
 import { AnimationGraphicComponent, ObjectDrawSystem } from "./animation_graphic_plugin";
 import { Space } from "./space_resource";
+import { createGraphicHandle, ManagedGraphic } from './managed_graphic';
 
 
 const NUM_CORNERS = 4;
@@ -20,6 +21,7 @@ export class TargetCorners {
     private targetTime = 0;
     targetUuid?: string;
     container = new PIXI.Container();
+    readonly managed: ManagedGraphic = createGraphicHandle(this.container);
     private sprites: PIXI.Sprite[] = [];
     private textures = new Map<string, PIXI.Texture>();
     built: Promise<void>;
@@ -73,6 +75,16 @@ export class TargetCorners {
                 sprite.texture = texture;
             }
         }
+    }
+
+    attachTo(parent: PIXI.Container): void {
+        if (!this.managed.disposed && this.container.parent !== parent) {
+            parent.addChild(this.container);
+        }
+    }
+
+    dispose(): void {
+        this.managed.dispose();
     }
 
     step(time: number, targetUuid: string | undefined,
@@ -139,16 +151,15 @@ export const TargetCornersPlugin: Plugin = {
         }
 
         const targetCorners = new TargetCorners(gameData as GameData);
-        space.addChild(targetCorners.container);
+        targetCorners.attachTo(space);
         world.resources.set(TargetCornersResource, targetCorners);
         world.addSystem(DrawTargetCornersSystem);
     },
     remove(world) {
         world.removeSystem(DrawTargetCornersSystem);
-        const space = world.resources.get(Space);
         const targetCorners = world.resources.get(TargetCornersResource);
-        if (space && targetCorners) {
-            space.removeChild(targetCorners.container);
+        if (targetCorners) {
+            targetCorners.dispose();
         }
         world.resources.delete(TargetCornersResource);
     }

@@ -16,6 +16,8 @@ import { Button } from './button';
 import { ItemGrid, ItemTile } from './item_grid';
 import { Menu } from './menu';
 import { FONT, formatPrice } from './outfitter';
+import { isPurchaseAvailable } from './availability';
+import { PlanetData } from 'novadatainterface/PlanetData';
 
 
 export class Shipyard extends Menu<Entity> {
@@ -29,6 +31,8 @@ export class Shipyard extends Menu<Entity> {
         creditAmount: new PIXI.Text("", FONT.normal),
     }
     private playerState?: PlayerState;
+    private planetData?: PlanetData;
+    private refreshPromise?: Promise<void>;
 
     constructor(gameData: GameData,
         controlEvents: Observable<ControlEvent>) {
@@ -87,15 +91,56 @@ export class Shipyard extends Menu<Entity> {
     setPlayerState(playerState: PlayerState | undefined) {
         this.playerState = playerState;
         this.updateCreditsText();
+        this.refreshPromise = this.refreshGrid();
+    }
+
+    setPlanetData(planetData: PlanetData | undefined) {
+        this.planetData = planetData;
+        this.refreshPromise = this.refreshGrid();
+    }
+
+    override async show(input: Entity): Promise<Entity> {
+        await this.buildPromise;
+        await this.refreshPromise;
+        return super.show(input);
     }
 
     private async makeShipsGrid() {
         const ids = (await this.gameData.ids).Ship;
-        const ships = await Promise.all(ids.map(id =>
+        let ships = await Promise.all(ids.map(id =>
             this.gameData.data.Ship.get(id, 100)));
+        if (this.planetData) {
+            ships = ships.filter(ship => isPurchaseAvailable(
+                ship,
+                this.planetData!,
+                this.playerState,
+            ));
+        }
         ships.sort((a, b) => b.displayWeight - a.displayWeight);
         const itemGrid = new ItemGrid(this.gameData, ships);
         return itemGrid;
+    }
+
+    private async refreshGrid() {
+        if (!this.itemGrid || !this.planetData) {
+            return;
+        }
+        const itemGrid = await this.makeShipsGrid();
+        this.container.removeChild(this.itemGrid.container);
+        this.itemGrid = itemGrid;
+        this.container.addChild(itemGrid.container);
+        itemGrid.drawGrid();
+        itemGrid.container.position.x = -373;
+        itemGrid.container.position.y = -153;
+        itemGrid.activeTile.subscribe(this.setShipSelected.bind(this));
+        this.controls.controls = {
+            left: () => itemGrid.left(),
+            right: () => itemGrid.right(),
+            up: () => itemGrid.up(),
+            down: () => itemGrid.down(),
+            buy: this.buyShip.bind(this),
+            depart: this.done.bind(this),
+        };
     }
 
     private setShipSelected(shipTile: ItemTile<ShipData> | undefined) {
@@ -124,6 +169,14 @@ export class Shipyard extends Menu<Entity> {
         }
         if (!this.playerState) {
             console.warn('Cannot buy ship without player state.');
+            return;
+        }
+        if (this.planetData && !isPurchaseAvailable(
+            selection,
+            this.planetData,
+            this.playerState,
+        )) {
+            console.warn(`Ship ${selection.id} is not available here.`);
             return;
         }
         const multiplayerData = this.input.components.get(MultiplayerData);

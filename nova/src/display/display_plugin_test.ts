@@ -28,8 +28,7 @@ describe('display plugin', () => {
         expect(123).toBe(123);
     });
 
-    // TODO: Write mocks to enable testing this.
-    xit('does not add a sprite to the stage if the entity is gone', async () => {
+    it('does not add a sprite to the stage if the entity is gone', async () => {
         const animation: Animation = {
             id: 'test:128',
             exitPoints: Defaults.Ship.animation.exitPoints,
@@ -56,13 +55,12 @@ describe('display plugin', () => {
         world.entities.set('testEntity', testEntity);
         world.step();
 
-        //world.entities.delete('testEntity');
+        world.entities.delete('testEntity');
         world.step();
 
         fulfillWait!();
         world.step()
 
-        debugger;
         expect(stage.children.length).toBe(0);
 
 

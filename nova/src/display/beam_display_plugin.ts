@@ -12,15 +12,16 @@ import {
 } from "../nova_plugin/beam_plugin";
 import { Optional } from "nova_ecs/optional";
 import { Space } from "./space_resource";
+import { attachGraphic, ManagedGraphic } from './managed_graphic';
 
 
-const BeamGraphicsResource = new Resource<PIXI.Graphics>('BeamGraphics');
+const BeamGraphicsResource = new Resource<ManagedGraphic>('BeamGraphics');
 
 const ClearBeams = new System({
     name: 'ClearBeams',
     args: [BeamGraphicsResource, SingletonComponent] as const,
-    step(beamGraphics) {
-        beamGraphics.clear();
+    step(beamHandle) {
+        (beamHandle.root as PIXI.Graphics).clear();
     }
 });
 
@@ -28,7 +29,8 @@ const BeamDisplaySystem = new System({
     name: 'BeamDisplay',
     args: [BeamDataComponent, Optional(BeamStateComponent), MovementStateComponent,
         BeamGraphicsResource, /*UUID*/] as const,
-    step(beamData, beamState, movement, beamGraphics, /*uuid*/) {
+    step(beamData, beamState, movement, beamHandle, /*uuid*/) {
+        const beamGraphics = beamHandle.root as PIXI.Graphics;
         const { width, beamColor, coronaColor, coronaFalloff, length, lightningAmplitude, lightningDensity }
             = beamData.beamAnimation;
         const effectiveLength = Math.max(0, Math.min(
@@ -89,17 +91,13 @@ export const BeamDisplayPlugin: Plugin = {
         }
         const beamGraphics = new PIXI.Graphics();
         beamGraphics.name = 'BeamGraphics';
-        world.resources.set(BeamGraphicsResource, beamGraphics);
-        space.addChild(beamGraphics);
+        world.resources.set(BeamGraphicsResource, attachGraphic(space, beamGraphics));
         world.addSystem(ClearBeams);
         world.addSystem(BeamDisplaySystem);
     },
     remove(world) {
         const space = world.resources.get(Space);
-        const beamGraphics = world.resources.get(BeamGraphicsResource);
-        if (space && beamGraphics) {
-            space.removeChild(beamGraphics);
-        }
+        world.resources.get(BeamGraphicsResource)?.dispose();
         world.removeSystem(BeamDisplaySystem);
         world.removeSystem(ClearBeams);
         world.resources.delete(BeamGraphicsResource);

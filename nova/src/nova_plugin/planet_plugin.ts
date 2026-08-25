@@ -49,7 +49,12 @@ export const LandEvent = new EcsEvent<{ id: string, uuid: string }>('LandEvent')
 const AttemptLandingSystem = new System({
     name: 'AttemptLandingSystem',
     events: [ControlStateEvent] as const,
-    args: [new Query([UUID, MovementStateComponent, PlanetComponent] as const),
+    args: [new Query([
+        UUID,
+        MovementStateComponent,
+        PlanetComponent,
+        PlanetDataComponent,
+    ] as const),
         MovementStateComponent, PlanetTargetComponent,
         ControlStateEvent, Emit, PlayerShipSelector] as const,
     step(planets, { position, velocity }, planetTarget, controls, emit) {
@@ -57,19 +62,28 @@ const AttemptLandingSystem = new System({
             let minSquared = Infinity;
             let closestUuid: string | undefined = undefined;
             let planetId: string | undefined = undefined;
-            for (const [uuid, { position: planetPosition }, { id }] of planets) {
+            let closestCanLand = false;
+            for (const [
+                uuid,
+                { position: planetPosition },
+                { id },
+                planetData,
+            ] of planets) {
                 const distance = planetPosition.subtract(position).lengthSquared;
                 if (distance < minSquared) {
                     closestUuid = uuid;
                     minSquared = distance;
                     planetId = id;
+                    closestCanLand = planetData.canLand === true
+                        && planetData.inhabited !== false;
                 }
             }
 
             if (planetTarget.target === closestUuid) {
                 // Try to land
                 if (minSquared < 10_000 && velocity.lengthSquared < 3000
-                    && planetId && closestUuid) {
+                    && planetId && closestUuid
+                    && closestCanLand) {
                     emit(LandEvent, { id: planetId, uuid: closestUuid });
                 }
             }

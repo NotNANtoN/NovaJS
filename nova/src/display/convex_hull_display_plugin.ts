@@ -9,10 +9,11 @@ import * as PIXI from "pixi.js";
 import * as SAT from "sat";
 import { HitboxHullComponent, HurtboxHullComponent, UpdateHitboxHullSystem, UpdateHurtboxHullSystem } from "../nova_plugin/collisions_plugin";
 import { Space } from "./space_resource";
+import { attachGraphic, ManagedGraphic } from './managed_graphic';
 
 
-const HitboxHullGraphicsComponent = new Component<PIXI.Graphics>('HitboxHullGraphics');
-const HurtboxHullGraphicsComponent = new Component<PIXI.Graphics>('HurtboxHullGraphics');
+const HitboxHullGraphicsComponent = new Component<ManagedGraphic>('HitboxHullGraphics');
+const HurtboxHullGraphicsComponent = new Component<ManagedGraphic>('HurtboxHullGraphics');
 
 const HitboxGraphicsProvider = Provide({
     name: "HitboxHullGraphicsProvider",
@@ -21,8 +22,7 @@ const HitboxGraphicsProvider = Provide({
     factory: (space) => {
         const graphics = new PIXI.Graphics();
         graphics.zIndex = 1000;
-        space.addChild(graphics);
-        return graphics;
+        return attachGraphic(space, graphics);
     }
 });
 
@@ -31,7 +31,7 @@ const HitboxGraphicsCleanup = new System({
     events: [DeleteEvent],
     args: [HitboxHullGraphicsComponent, Space, GetEntity] as const,
     step: (graphics, space, entity) => {
-        space.removeChild(graphics);
+        graphics.dispose();
         entity.components.delete(HitboxHullGraphicsComponent);
     }
 });
@@ -43,8 +43,7 @@ const HurtboxGraphicsProvider = Provide({
     factory: (space) => {
         const graphics = new PIXI.Graphics();
         graphics.zIndex = 1000;
-        space.addChild(graphics);
-        return graphics;
+        return attachGraphic(space, graphics);
     }
 });
 
@@ -53,7 +52,7 @@ const HurtboxGraphicsCleanup = new System({
     events: [DeleteEvent],
     args: [HurtboxHullGraphicsComponent, Space, GetEntity] as const,
     step: (graphics, space, entity) => {
-        space.removeChild(graphics);
+        graphics.dispose();
         entity.components.delete(HurtboxHullGraphicsComponent);
     }
 });
@@ -105,7 +104,8 @@ const HitboxHullGraphicsSystem = new System({
     name: 'HitboxHullGraphics',
     args: [HitboxHullComponent, HitboxHullGraphicsComponent] as const,
     after: [UpdateHitboxHullSystem],
-    step(hull, graphics) {
+    step(hull, graphicsHandle) {
+        const graphics = graphicsHandle.root as PIXI.Graphics;
         graphics.clear();
         for (let i = 0; i < hull.shapes.length; i++) {
             const shape = hull.shapes[i];
@@ -129,7 +129,9 @@ const HurtboxHullGraphicsSystem = new System({
     name: 'HurtboxHullGraphics',
     args: [HurtboxHullComponent, HurtboxHullGraphicsComponent] as const,
     after: [UpdateHurtboxHullSystem],
-    step: HitboxHullGraphicsSystem.step,
+    step(hull, graphicsHandle) {
+        HitboxHullGraphicsSystem.step(hull, graphicsHandle);
+    },
 });
 
 export const ConvexHullDisplayPlugin: Plugin = {
@@ -150,13 +152,14 @@ export const ConvexHullDisplayPlugin: Plugin = {
         world.removeSystem(HurtboxHullGraphicsSystem);
         world.removeSystem(HitboxGraphicsCleanup);
         world.removeSystem(HurtboxGraphicsCleanup);
-        const space = world.resources.get(Space);
         for (const entity of world.entities.values()) {
             const graphics = entity.components.get(HitboxHullGraphicsComponent);
-            if (graphics && space) {
-                space.removeChild(graphics);
+            if (graphics) {
+                graphics.dispose();
             }
             entity.components.delete(HitboxHullGraphicsComponent);
+            entity.components.get(HurtboxHullGraphicsComponent)?.dispose();
+            entity.components.delete(HurtboxHullGraphicsComponent);
         }
     }
 }

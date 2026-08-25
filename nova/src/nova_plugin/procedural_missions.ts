@@ -6,6 +6,7 @@ import {
     getDefaultMissionData,
     MissionData,
 } from 'novadatainterface/MissionData';
+import { clampRandom } from '../common/random';
 
 export type ProceduralMissionType = 'cargo' | 'rush' | 'passenger';
 
@@ -47,13 +48,6 @@ function normalizedId(id: string): string {
 
 function sameId(a: string, b: string): boolean {
     return a === b || normalizedId(a) === normalizedId(b);
-}
-
-function randomValue(random: () => number): number {
-    const value = random();
-    return Number.isFinite(value)
-        ? Math.min(0.9999999999999999, Math.max(0, value))
-        : 0;
 }
 
 function hashString(value: string): number {
@@ -168,7 +162,7 @@ function destinationCandidates(input: ProceduralMissionInput) {
 
 function randomCommodity(random: () => number): StandardCommodity {
     const index = Math.floor(
-        randomValue(random) * STANDARD_COMMODITIES.length);
+        clampRandom(random()) * STANDARD_COMMODITIES.length);
     return STANDARD_COMMODITIES[index]!;
 }
 
@@ -195,15 +189,15 @@ export function generateProceduralMissions(
         return [];
     }
 
-    const count = 6 + Math.floor(randomValue(random) * 7);
+    const count = 6 + Math.floor(clampRandom(random()) * 7);
     const freeSpace = Math.max(0, Math.floor(input.freeSpace ?? 0));
     const boardSeed = hashString(seed).toString(16);
     const offers: ProceduralMissionOffer[] = [];
 
     for (let index = 0; index < count; index++) {
         const candidate = candidates[
-            Math.floor(randomValue(random) * candidates.length)]!;
-        const kindRoll = randomValue(random);
+            Math.floor(clampRandom(random()) * candidates.length)]!;
+        const kindRoll = clampRandom(random());
         const type: ProceduralMissionType = kindRoll < 0.2
             ? 'passenger'
             : kindRoll < 0.5 ? 'rush' : 'cargo';
@@ -211,15 +205,15 @@ export function generateProceduralMissions(
         const normalMaximum = type === 'passenger'
             ? Math.min(4, Math.max(1, freeSpace))
             : Math.max(1, freeSpace);
-        const oversized = index % 5 === 0 || randomValue(random) < 0.15;
+        const oversized = index % 5 === 0 || clampRandom(random()) < 0.15;
         const tons = oversized
             ? freeSpace + 1
-                + Math.floor(randomValue(random)
+                + Math.floor(clampRandom(random())
                     * Math.max(1, Math.floor(freeSpace * 0.5) + 2))
-            : 1 + Math.floor(randomValue(random) * normalMaximum);
-        const rate = 100 + Math.floor(randomValue(random) * 151);
+            : 1 + Math.floor(clampRandom(random()) * normalMaximum);
+        const rate = 100 + Math.floor(clampRandom(random()) * 151);
         const rushMultiplier = type === 'rush'
-            ? 1.5 + randomValue(random) * 0.5
+            ? 1.5 + clampRandom(random()) * 0.5
             : 1;
         const pay = Math.max(1, Math.round(
             rate * tons * candidate.distance * rushMultiplier));

@@ -1,5 +1,6 @@
 import * as path from "path";
 import { ExplosionData } from "novadatainterface/ExplosionData";
+import { DudeData } from "novadatainterface/DudeData";
 import { GovtData } from "novadatainterface/GovtData";
 import { GameDataInterface } from "novadatainterface/GameDataInterface";
 import { Gettable } from "novadatainterface/Gettable";
@@ -17,6 +18,7 @@ import { SystemData } from "novadatainterface/SystemData";
 import { TargetCornersData } from "novadatainterface/TargetCornersData";
 import { WeaponData } from "novadatainterface/WeaponData";
 import { GovtParse } from "./src/parsers/GovtParse";
+import { DudeParse } from "./src/parsers/DudeParse";
 import { IDSpaceHandler } from "./src/IDSpaceHandler";
 import { ExplosionParse } from "./src/parsers/ExplosionParse";
 import { OutfitParse } from "./src/parsers/OutfitParse";
@@ -31,6 +33,7 @@ import { MissionParse } from "./src/parsers/MissionParse";
 import { TargetCornersParse } from "./src/parsers/TargetCornersParse";
 import { WeaponParse } from "./src/parsers/WeaponParse";
 import { BoomResource } from "./src/resource_parsers/BoomResource";
+import { DudeResource } from "./src/resource_parsers/DudeResource";
 import { MisnResource } from "./src/resource_parsers/MisnResource";
 import { GovtResource } from "./src/resource_parsers/GovtResource";
 import { BaseResource } from "./src/resource_parsers/NovaResourceBase";
@@ -140,6 +143,7 @@ export class NovaParse implements GameDataInterface {
             PictImage: this.buildIDsForResource(idSpace.PICT),
             Cicn: this.buildIDsForResource(idSpace.cicn),
             CicnImage: this.buildIDsForResource(idSpace.cicn),
+            Dude: this.buildIDsForResource(idSpace.düde),
             Planet: this.buildIDsForResource(idSpace.spöb),
             System: this.buildIDsForResource(idSpace.sÿst),
             Mission: this.buildIDsForResource(idSpace.mïsn),
@@ -165,6 +169,8 @@ export class NovaParse implements GameDataInterface {
             PictImage: this.pictImageGettable,
             Cicn: new Gettable(async () => Defaults.Cicn), // TODO
             CicnImage: new Gettable(async () => Defaults.CicnImage), // TODO
+            Dude: this.makeGettable<DudeResource, DudeData>(
+                NovaResourceType.düde, DudeParse),
             Planet: this.makeGettable<SpobResource, PlanetData>(NovaResourceType.spöb, PlanetParse),
             System: this.makeGettable<SystResource, SystemData>(NovaResourceType.sÿst, SystemParse),
             Mission: this.makeGettable<MisnResource, MissionData>(NovaResourceType.mïsn, MissionParse),

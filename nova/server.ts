@@ -25,6 +25,10 @@ import { GameDataAggregator } from "./src/server/parsing/GameDataAggregator";
 import { NovaParseWorkerApi } from "./src/server/parsing/nova_parse_worker";
 import { setupRoutes } from "./src/server/setupRoutes";
 import { PlayerStore } from './src/server/player_store';
+import {
+    CompatibilityProfile,
+    CompatibilityProfileResource,
+} from './src/nova_plugin/entity_budget';
 //import { NovaRepl } from "./src/server/NovaRepl";
 
 
@@ -32,6 +36,10 @@ const Settings = t.partial({
     port: t.number,
     relativeDataPath: t.string,
     https: t.boolean,
+    compatibilityProfile: t.union([
+        t.literal('classic'),
+        t.literal('modern'),
+    ]),
 });
 type Settings = t.TypeOf<typeof Settings>;
 
@@ -56,6 +64,8 @@ if (isLeft(maybeSettings)) {
 }
 
 const settings = maybeSettings.right;
+const compatibilityProfile: CompatibilityProfile =
+    settings.compatibilityProfile ?? 'modern';
 const port = Number(process.env.NOVA_PORT ?? settings.port ?? 8000);
 const novaDataPath = path.join(runtimeRoot, settings.relativeDataPath ?? "Nova_Data");
 
@@ -102,7 +112,7 @@ async function startGame() {
     repl.repl.context.makeShip = makeShip;
 
     setupRoutes(gameData, app, htmlPath, bundlePath, bundleMapPath,
-        clientSettingsPath, novaDataPath);
+        clientSettingsPath, novaDataPath, playerStore);
 
     httpServer.listen(port, function() {
         console.log("listening at port " + port);
@@ -115,6 +125,7 @@ async function startGame() {
     world = new World();
     world.resources.set(GameDataResource, gameData);
     world.resources.set(PlayerStoreResource, playerStore);
+    world.resources.set(CompatibilityProfileResource, compatibilityProfile);
     await world.addPlugin(multiplayer(multiRoom.join('main room')));
     world.resources.set(MultiRoomResource, multiRoom);
     await world.addPlugin(NovaPlugin);

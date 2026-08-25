@@ -1,19 +1,25 @@
 import { GameDataInterface } from 'novadatainterface/GameDataInterface';
 import { MissionData } from 'novadatainterface/MissionData';
 import { Optional } from 'nova_ecs/optional';
+import { Emit, GetEntity, UUID } from 'nova_ecs/arg_types';
 import { Plugin } from 'nova_ecs/plugin';
 import { Resource } from 'nova_ecs/resource';
 import { System } from 'nova_ecs/system';
+import { v4 as uuid } from 'uuid';
+import { resourceId } from '../common/resource_id';
 import { PlayerShipSelector } from './player_ship_plugin';
+import { InitiateJumpEvent } from './jump_plugin';
+import { SoundEvent } from './sound_event';
 import { GameDataResource } from './game_data_resource';
 import {
     executeSetOperations,
-    NcbOperation,
     parseSetExpression,
 } from './ncb';
+import { createNcbHandlers, NcbHandlerContext } from './ncb_handlers';
 import {
     ActiveMission,
     allocateCargo,
+    createMissionGoalProgress,
     getFreeSpace,
     MAX_ACTIVE_MISSIONS,
     MissionCargo,
@@ -22,6 +28,25 @@ import {
     releaseMissionCargo,
     formatGameDate,
 } from './player_state';
+import {
+    NcbRuntime,
+    NcbRuntimeResource,
+    PendingMissionJumpComponent,
+    PendingMissionSoundComponent,
+} from './ncb_runtime';
+export {
+    NcbRuntime,
+    NcbRuntimeResource,
+    PendingMissionJumpComponent,
+    PendingMissionSoundComponent,
+} from './ncb_runtime';
+import { advanceMissionGoal, MissionGoalEvent } from './mission_goals';
+import {
+    formatMissionText,
+    MissionTextValues,
+} from './mission_text';
+export { formatMissionText } from './mission_text';
+export type { MissionTextValues } from './mission_text';
 import {
     MissionPlanetSelector,
 } from './mission_availability';
@@ -52,6 +77,7 @@ export interface MissionDestinationOptions {
     currentSystemId?: string;
     random?: () => number;
     resolved?: ResolvedMissionDestinations;
+    ncb?: MissionSetContext;
 }
 
 export interface ResolvedMissionDestinations {
@@ -60,51 +86,51 @@ export interface ResolvedMissionDestinations {
     shipSystem?: string;
 }
 
-export interface MissionTextValues {
-    destination?: string;
-    destinationSystem?: string;
-    returnDestination?: string;
-    returnSystem?: string;
-    cargo?: string;
-    quantity?: number;
-    deadline?: string | number;
-    pay?: number | string;
-}
+export type MissionSetContext = Omit<NcbHandlerContext, 'state'>;
 
-/**
- * Replace the mission wildcards documented in the EV Nova Bible.
- *
- * The full Nova text formatter also knows about player/rank/ship fields. Those
- * values are not represented by PlayerState yet, so unknown tags are removed
- * rather than displayed literally.
- */
-export function formatMissionText(
-    text: string,
-    values: MissionTextValues = {},
-): string {
-    const destination = values.destination ?? '';
-    const returnDestination = values.returnDestination ?? destination;
-    const replacements: Record<string, string> = {
-        DSY: values.destinationSystem ?? destination,
-        DST: destination,
-        RSY: values.returnSystem ?? returnDestination,
-        RST: returnDestination,
-        // RET is accepted as a friendly alias used by some converted data.
-        RET: returnDestination,
-        CT: values.cargo ?? '',
-        CQ: values.quantity === undefined ? '' : String(values.quantity),
-        DL: values.deadline === undefined ? '' : String(values.deadline),
-        PAY: values.pay === undefined ? '' : String(values.pay),
-    };
+const MissionJumpSystem = new System({
+    name: 'MissionJump',
+    args: [
+        PlayerShipSelector, PendingMissionJumpComponent, UUID, GetEntity, Emit,
+    ] as const,
+    step(_playerShip, pending, uuid, entity, emit) {
+        emit(InitiateJumpEvent, { to: pending.systemId }, [uuid]);
+        entity.components.delete(PendingMissionJumpComponent);
+    },
+});
 
-    return text
-        .replace(/<([A-Z]{2,3})>/gi, (_whole, rawKey: string) =>
-            replacements[rawKey.toUpperCase()] ?? '')
-        .replace(/<[^>]*>/g, '');
-}
+const MissionSoundSystem = new System({
+    name: 'MissionSound',
+    args: [PlayerShipSelector, PendingMissionSoundComponent, UUID,
+        GetEntity, Emit] as const,
+    step(_playerShip, pending, _uuid, entity, emit) {
+        emit(SoundEvent, { id: pending.soundId });
+        entity.components.delete(PendingMissionSoundComponent);
+    },
+});
 
-function noOpMissionOperation(operation: NcbOperation) {
-    console.warn(`Mission operation '${operation.type}' is not implemented yet`);
+function runMissionSetExpression(
+    expression: string | undefined,
+    state: PlayerState,
+    logger: (message: string) => void = console.warn,
+    context: MissionSetContext = {},
+) {
+    if (!expression?.trim()) {
+        return;
+    }
+
+    try {
+        const operations = parseSetExpression(expression, { logger });
+        const handlers = createNcbHandlers({ ...context, state, logger });
+        // Bit operations are deliberately handled by ncb. All other
+        // operations now dispatch to the game handlers above.
+        executeSetOperations(operations, state.missionBits, {
+            handlers,
+            logger,
+        });
+    } catch (error) {
+        logger(`Could not execute mission set expression '${expression}': ${error}`);
+    }
 }
 
 function missionSelectorContext(
@@ -137,7 +163,7 @@ function concreteStellarDestination(
     // galaxy catalog. With a catalog, an absent fixed resource is invalid.
     if (options.planets === undefined
         && selector >= 128 && selector <= 2175) {
-        return `nova:${selector}`;
+        return resourceId(selector);
     }
     return undefined;
 }
@@ -184,7 +210,7 @@ export function resolveMissionDestinations(
         shipSystem = systemResolution.selected;
         if (!shipSystem && options.systems === undefined
             && mission.shipSyst >= 128 && mission.shipSyst <= 2175) {
-            shipSystem = `nova:${mission.shipSyst}`;
+            shipSystem = resourceId(mission.shipSyst);
         }
         if (!shipSystem) {
             return undefined;
@@ -192,44 +218,6 @@ export function resolveMissionDestinations(
     }
 
     return { travelDestination, returnDestination, shipSystem };
-}
-
-function runMissionSetExpression(
-    expression: string,
-    state: PlayerState,
-    logger: (message: string) => void = console.warn,
-) {
-    if (!expression.trim()) {
-        return;
-    }
-
-    try {
-        const operations = parseSetExpression(expression, { logger });
-        const handlers = {
-            abortMission: noOpMissionOperation,
-            failMission: noOpMissionOperation,
-            startMission: noOpMissionOperation,
-            grantOutfit: noOpMissionOperation,
-            removeOutfit: noOpMissionOperation,
-            moveToSystem: noOpMissionOperation,
-            moveToSystemRelative: noOpMissionOperation,
-            changeShip: noOpMissionOperation,
-            activateRank: noOpMissionOperation,
-            deactivateRank: noOpMissionOperation,
-            playSound: noOpMissionOperation,
-            destroyStellar: noOpMissionOperation,
-            regenerateStellar: noOpMissionOperation,
-            leaveStellar: noOpMissionOperation,
-            renameShip: noOpMissionOperation,
-            exploreSystem: noOpMissionOperation,
-        };
-        executeSetOperations(operations, state.missionBits, {
-            handlers,
-            logger,
-        });
-    } catch (error) {
-        logger(`Could not execute mission set expression '${expression}': ${error}`);
-    }
 }
 
 function missionCargo(
@@ -264,8 +252,9 @@ export function acceptMission(
         logger?: (message: string) => void;
     } = { initialPlanetId: '' },
 ): ActiveMission | undefined {
-    if (mission.shipGoal >= 0) {
-        console.warn(`Combat mission ${mission.id} is not offered in phase one`);
+    if (mission.shipGoal === 2 || mission.shipGoal === 5) {
+        console.warn(
+            `Mission ${mission.id} requires boarding, which is not supported yet`);
         return undefined;
     }
     if (state.activeMissions.filter(entry => entry.state === 'active').length
@@ -298,9 +287,12 @@ export function acceptMission(
         console.warn(`Cannot accept mission ${mission.id}: cargo allocation failed`);
         return undefined;
     }
-    runMissionSetExpression(mission.onAccept, state, options.logger);
+    runMissionSetExpression(
+        mission.onAccept, state, options.logger, options.ncb);
+    const missionUuid = uuid();
     const activeMission: ActiveMission = {
         missionId: mission.id,
+        missionUuid,
         state: 'active',
         destination,
         travelDestination: resolved.travelDestination,
@@ -313,6 +305,12 @@ export function acceptMission(
         ...(mission.id.startsWith('proc:')
             ? { missionData: mission }
             : {}),
+        ...(mission.shipCount > 0 && mission.shipGoal >= 0
+            ? {
+                shipGoalProgress: createMissionGoalProgress(
+                    mission.shipGoal, mission.shipCount),
+            }
+            : {}),
     };
     state.activeMissions.push(activeMission);
     return activeMission;
@@ -322,8 +320,9 @@ export function refuseMission(
     state: PlayerState,
     mission: MissionData,
     logger?: (message: string) => void,
+    context: MissionSetContext = {},
 ) {
-    runMissionSetExpression(mission.onRefuse, state, logger);
+    runMissionSetExpression(mission.onRefuse, state, logger, context);
 }
 
 export function abortMission(
@@ -331,11 +330,12 @@ export function abortMission(
     entry: ActiveMission,
     mission: MissionData,
     logger?: (message: string) => void,
+    context: MissionSetContext = {},
 ): boolean {
     if (!mission.canAbort || entry.state !== 'active') {
         return false;
     }
-    runMissionSetExpression(mission.onAbort, state, logger);
+    runMissionSetExpression(mission.onAbort, state, logger, context);
     releaseMissionCargo(state, entry.missionId);
     const index = state.activeMissions.indexOf(entry);
     if (index >= 0) {
@@ -368,6 +368,25 @@ function missionDeadline(state: PlayerState, entry: ActiveMission, mission: Miss
         : undefined;
 }
 
+function missionGoalProgress(
+    entry: ActiveMission,
+    mission: MissionData,
+) {
+    if (mission.shipCount <= 0 || mission.shipGoal < 0) {
+        return undefined;
+    }
+    if (!entry.shipGoalProgress) {
+        entry.shipGoalProgress = createMissionGoalProgress(
+            mission.shipGoal, mission.shipCount);
+    }
+    return entry.shipGoalProgress;
+}
+
+function activeMissionUuid(entry: ActiveMission): string {
+    return entry.missionUuid
+        ?? `${entry.missionId}:${entry.acceptedDate ?? 0}`;
+}
+
 function missionTravelDestination(entry: ActiveMission): string | undefined {
     return entry.travelDestination === '*' && entry.destination !== '*'
         ? entry.destination
@@ -389,6 +408,12 @@ function missionTextValues(
         quantity: entry.cargo?.quantity,
         deadline: deadline === undefined ? undefined : formatGameDate(deadline),
         pay: mission.payVal > 0 ? mission.payVal : undefined,
+        pilotName: state.pilotName,
+        shipName: state.shipName,
+        shipType: state.shipId,
+        gender: state.gender,
+        missionBits: state.missionBits,
+        activeRanks: state.activeRanks,
     };
 }
 
@@ -444,13 +469,17 @@ export class MissionRuntime {
         }
     }
 
-    checkDate(state: PlayerState) {
+    checkDate(
+        state: PlayerState,
+        context: MissionSetContext = {},
+    ): Promise<void> | undefined {
         if (this.checkedDates.get(state) === state.gameDate) {
-            return;
+            return undefined;
         }
         this.checkedDates.set(state, state.gameDate);
-        void this.failExpired(state).catch(error =>
-            console.error('Mission expiration processing failed', error));
+        return this.failExpired(state, context).catch(error => {
+            console.error('Mission expiration processing failed', error);
+        });
     }
 
     /**
@@ -458,7 +487,10 @@ export class MissionRuntime {
      * draft, so mutations made after data loading are safely turned into ECS
      * patches.
      */
-    async failExpired(state: PlayerState): Promise<void> {
+    async failExpired(
+        state: PlayerState,
+        context: MissionSetContext = {},
+    ): Promise<void> {
         const entries = [...state.activeMissions];
         for (const entry of entries) {
             if (entry.state !== 'active' || entry.acceptedDate === undefined) {
@@ -474,7 +506,8 @@ export class MissionRuntime {
                 if (!mission || !isExpired(state, entry, mission)) {
                     continue;
                 }
-                runMissionSetExpression(mission.onFailure, state);
+                runMissionSetExpression(mission.onFailure, state, console.warn,
+                    context);
                 entry.state = 'failed';
                 releaseMissionCargo(state, entry.missionId);
             } finally {
@@ -490,8 +523,9 @@ export class MissionRuntime {
     async processLanding(
         state: PlayerState,
         planetId: string,
+        context: MissionSetContext = {},
     ): Promise<MissionNotice[]> {
-        await this.failExpired(state);
+        await this.failExpired(state, context);
         const notices: MissionNotice[] = [];
         const entries = [...state.activeMissions];
         for (const entry of entries) {
@@ -529,7 +563,23 @@ export class MissionRuntime {
                     continue;
                 }
 
-                runMissionSetExpression(mission.onSuccess, state);
+                let goalProgress = missionGoalProgress(entry, mission);
+                if (goalProgress?.goal === 3 && !goalProgress.completed) {
+                    goalProgress = advanceMissionGoal(
+                        goalProgress, 'escortSafe');
+                    entry.shipGoalProgress = goalProgress;
+                }
+                if (goalProgress && !goalProgress.completed) {
+                    continue;
+                }
+
+                if (goalProgress && !goalProgress.shipDoneApplied) {
+                    goalProgress.shipDoneApplied = true;
+                    runMissionSetExpression(
+                        mission.onShipDone, state, console.warn, context);
+                }
+                runMissionSetExpression(
+                    mission.onSuccess, state, console.warn, context);
                 if (mission.payVal > 0) {
                     state.credits += mission.payVal;
                 } else if (mission.payVal < -1) {
@@ -557,6 +607,46 @@ export class MissionRuntime {
         return notices;
     }
 
+    /**
+     * Record a server-observed special-ship event. The counters live on the
+     * player state so they are sent to the owning client and survive a
+     * reconnect; only the server calls this method for live ECS events.
+     */
+    async recordShipGoal(
+        state: PlayerState,
+        missionUuid: string,
+        event: MissionGoalEvent,
+        context: MissionSetContext = {},
+    ): Promise<boolean> {
+        const entry = state.activeMissions.find(candidate =>
+            candidate.state === 'active'
+            && (activeMissionUuid(candidate) === missionUuid
+                || candidate.missionId === missionUuid));
+        if (!entry) {
+            return false;
+        }
+        const mission = await this.getMissionForEntry(entry);
+        if (!mission) {
+            return false;
+        }
+        const progress = missionGoalProgress(entry, mission);
+        if (!progress) {
+            return false;
+        }
+        // A destroyed escort counts as "lost", while a destroyed target
+        // counts toward both destroy and chase-off goals.
+        const effectiveEvent = mission.shipGoal === 3 ? 'lost' : event;
+        entry.shipGoalProgress = advanceMissionGoal(
+            progress, effectiveEvent);
+        if (entry.shipGoalProgress.completed
+            && !entry.shipGoalProgress.shipDoneApplied) {
+            entry.shipGoalProgress.shipDoneApplied = true;
+            runMissionSetExpression(
+                mission.onShipDone, state, console.warn, context);
+        }
+        return entry.shipGoalProgress.completed;
+    }
+
     private removeEntry(state: PlayerState, entry: ActiveMission) {
         releaseMissionCargo(state, entry.missionId);
         const index = state.activeMissions.indexOf(entry);
@@ -577,13 +667,21 @@ const MissionExpirationSystem = new System({
     name: 'MissionExpiration',
     args: [
         PlayerShipSelector,
+        GetEntity,
         Optional(PlayerStateComponent),
         MissionRuntimeResource,
+        NcbRuntimeResource,
     ] as const,
-    step(_playerShip, state, runtime) {
-        if (state) {
-            runtime.checkDate(state);
+    step(_playerShip, playerShip, state, missionRuntime, ncbRuntime) {
+        if (!playerShip || !state) {
+            return;
         }
+        const context = ncbRuntime.setContext(playerShip, state);
+        const expiration = missionRuntime.checkDate(state, context);
+        if (!expiration) {
+            return;
+        }
+        void expiration;
     },
 });
 
@@ -598,6 +696,19 @@ export const MissionPlugin: Plugin = {
             MissionRuntimeResource,
             new MissionRuntime(gameData),
         );
+        world.resources.set(
+            NcbRuntimeResource,
+            new NcbRuntime(gameData),
+        );
+        world.addComponent(PendingMissionJumpComponent);
+        world.addComponent(PendingMissionSoundComponent);
+        world.addSystem(MissionJumpSystem);
+        world.addSystem(MissionSoundSystem);
         world.addSystem(MissionExpirationSystem);
+    },
+    remove(world) {
+        world.removeSystem(MissionJumpSystem);
+        world.removeSystem(MissionSoundSystem);
+        world.removeSystem(MissionExpirationSystem);
     },
 };

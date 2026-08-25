@@ -1,4 +1,3 @@
-import * as t from "io-ts";
 import { ShipData } from "novadatainterface/ShipData";
 import { Entities, UUID } from "nova_ecs/arg_types";
 import { Component } from "nova_ecs/component";
@@ -12,7 +11,7 @@ import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { Query } from "nova_ecs/query";
 import { System } from "nova_ecs/system";
 import { Angle } from "nova_ecs/datatypes/angle";
-import { DeathEvent } from "./death_plugin";
+import { DeathEvent, PlayerDeathComponent } from "./death_plugin";
 import {
     GovernmentData,
     GovernmentRelationResource,
@@ -25,24 +24,34 @@ import { TargetComponent } from "./target_component";
 import { WeaponsStateComponent } from "./weapons_state";
 import { GameDataResource } from "./game_data_resource";
 import {
-    NpcAIComponent,
     NpcHostilitySystems,
     ProvocationResource,
     createProvocationState,
+    isPersonallyProvoked,
     isProvoked,
 } from "./npc_hostility";
-
-const GovtData = t.type({
-    id: t.number,
-});
-export type GovtData = t.TypeOf<typeof GovtData>;
-export const GovtComponent = new Component<GovtData>('GovtComponent');
+import {
+    ChooseRandomTargetComponent,
+    GovtData as GovtDataCodec,
+    GovtComponent,
+    NpcAIComponent,
+    NpcCombatRoleComponent,
+} from "./npc_components";
+import type { GovtData } from "./npc_components";
+export {
+    ChooseRandomTargetComponent,
+    GovtComponent,
+    NpcAIComponent,
+    NpcCombatRoleComponent,
+} from "./npc_components";
+export type { GovtData } from "./npc_components";
 
 const TargetsQuery = new Query([
     UUID,
     MovementStateComponent,
     MultiplayerData,
     Optional(GovtComponent),
+    Optional(PlayerDeathComponent),
     ShipComponent,
 ] as const);
 
@@ -51,6 +60,7 @@ type TargetCandidate = readonly [
     MovementState,
     { owner: string },
     GovtData | undefined,
+    { respawnAt: number, wreckPosition: [number, number] } | undefined,
     { id: string },
 ];
 
@@ -61,17 +71,29 @@ function getValidTargets(
     selfGovernment: GovernmentData,
     relationStore: GovernmentRelationStore,
     provocations: ReturnType<typeof createProvocationState>,
+    canAssistGovernment: boolean,
 ): string[] {
     return targets
-        .filter(([targetId, _movement, multiplayer, targetGovernment]) => {
+        .filter(([
+            targetId,
+            _movement,
+            multiplayer,
+            targetGovernment,
+            playerDeath,
+        ]) => {
             if (targetId === selfUuid) {
                 return false;
             }
+            if (playerDeath) {
+                return false;
+            }
+            const personal = isPersonallyProvoked(
+                provocations, selfUuid, targetId);
 
             if (multiplayer.owner !== "server") {
                 return canTargetPlayer(
                     selfGovernment,
-                    isProvoked(
+                    personal || canAssistGovernment && isProvoked(
                         provocations,
                         selfGovernmentId,
                         targetId,
@@ -83,11 +105,14 @@ function getValidTargets(
             if (!targetGovernment) {
                 return false;
             }
+            if (targetGovernment.id === selfGovernmentId) {
+                return false;
+            }
 
             return relationStore.relation(
                 selfGovernmentId,
                 targetGovernment.id,
-            ) === "enemy" || isProvoked(
+            ) === "enemy" || personal || canAssistGovernment && isProvoked(
                 provocations,
                 selfGovernmentId,
                 targetId,
@@ -97,21 +122,29 @@ function getValidTargets(
         .map(([uuid]) => uuid);
 }
 
-const ChooseRandomTargetComponent = new Component<{
-    interval: number,
-    nextTime?: number,
-}>('ChooseRandomTargetComponent');
-
-const ChooseRandomTargetAI = new System({
+export const ChooseRandomTargetAI = new System({
     name: 'ChooseRandomTarget',
     args: [TargetComponent, TargetsQuery, ChooseRandomTargetComponent,
         TimeResource, UUID, MovementStateComponent, Entities, GovernmentRelationResource,
         ProvocationResource, MultiplayerData, PlatformResource,
-        GovtComponent, NpcAIComponent] as const,
+        GovtComponent, NpcAIComponent, NpcCombatRoleComponent] as const,
     step(target, targets, randomTargetData, time, uuid, movementState, entities,
-        relationStore, provocations, multiplayer, platform, government) {
+        relationStore, provocations, multiplayer, platform, government,
+        _npcAI, combatRole) {
         if (platform !== "node" || multiplayer.owner !== "server") {
             return;
+        }
+
+        const currentCandidate = target.target
+            ? targets.find(candidate => candidate[0] === target.target)
+            : undefined;
+        if (target.target && (
+            target.target === uuid
+            || !currentCandidate
+            || currentCandidate[4] !== undefined
+            || currentCandidate[3]?.id === government.id
+        )) {
+            target.target = undefined;
         }
 
         if ((randomTargetData.nextTime ?? 0) > time.time &&
@@ -136,6 +169,7 @@ const ChooseRandomTargetAI = new System({
             selfGovernment,
             relationStore,
             provocations,
+            combatRole === "military",
         );
 
         const candidateByUuid = new Map(
@@ -158,7 +192,7 @@ const ChooseRandomTargetAI = new System({
 });
 
 export const FollowComponent = new Component<undefined>('FollowComponent');
-const FollowAI = new System({
+export const FollowAI = new System({
     name: 'FollowAndShootAI',
     args: [MovementStateComponent, TargetComponent, FollowComponent,
         Entities, MultiplayerData, PlatformResource] as const,
@@ -182,7 +216,7 @@ const FollowAI = new System({
 });
 
 export const ShootAllWeaponsComponent = new Component<undefined>('ShootAllWeaponsComponent');
-const ShootAllWeaponsAI = new System({
+export const ShootAllWeaponsAI = new System({
     name: 'ShootAllWeaponsAI',
     args: [WeaponsStateComponent, GameDataResource, TargetComponent,
         ShootAllWeaponsComponent, Entities, MultiplayerData,
@@ -277,6 +311,7 @@ export function makeNpc(shipData: ShipData) {
         nextTurnAt: 0,
     });
     ship.components.set(NpcAIComponent, undefined);
+    ship.components.set(NpcCombatRoleComponent, "personal");
     ship.components.set(DeathAIComponent, undefined);
     return ship;
 }
@@ -289,7 +324,7 @@ export const NpcPlugin: Plugin = {
             throw new Error('Expected delta maker resource to exist');
         }
         deltaMaker.addComponent(GovtComponent, {
-            componentType: GovtData,
+            componentType: GovtDataCodec,
         });
         world.addComponent(GovtComponent);
         world.resources.set(
@@ -300,6 +335,7 @@ export const NpcPlugin: Plugin = {
         world.addSystem(NpcHostilitySystems.trackDamageSources);
         world.addSystem(NpcHostilitySystems.provocation);
         world.addSystem(NpcHostilitySystems.cleanup);
+        world.addSystem(NpcHostilitySystems.playerDeathCleanup);
         world.addSystem(ChooseRandomTargetAI);
         world.addSystem(WanderAI);
         world.addSystem(FollowAI);
@@ -310,6 +346,7 @@ export const NpcPlugin: Plugin = {
         world.removeSystem(NpcHostilitySystems.trackDamageSources);
         world.removeSystem(NpcHostilitySystems.provocation);
         world.removeSystem(NpcHostilitySystems.cleanup);
+        world.removeSystem(NpcHostilitySystems.playerDeathCleanup);
         world.removeSystem(ChooseRandomTargetAI);
         world.removeSystem(WanderAI);
         world.removeSystem(FollowAI);

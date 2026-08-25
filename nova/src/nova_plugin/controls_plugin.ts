@@ -22,7 +22,7 @@ export const ControlsResource = new Resource<Controls>('ControlsResource');
 export const EcsControlEvent = new EcsEvent<ControlEvent[]>('ControlEvent');
 export const ControlsSubject = new Resource<Subject<ControlEvent>>('ControlsObservable');
 
-const ControlEventSystem = new System({
+export const ControlEventSystem = new System({
     name: 'ControlEventSystem',
     events: [EcsKeyboardEvent],
     args: [EcsKeyboardEvent, ControlsSubject, ControlsResource,

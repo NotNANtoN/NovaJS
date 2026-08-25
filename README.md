@@ -34,7 +34,7 @@ Yes. Escape Velocity Nova is copyrighted by Ambrosia Software. No rights are cla
 ## What's different in this fork
 
 ### Toolchain
-* **Bazel is no longer required.** The dev path is plain [Bun](https://bun.sh) (or npm) + [esbuild](https://esbuild.github.io/): `bun install`, then `npm run dev`. Works on Node 22/24 and Apple Silicon.
+* **Bazel and Yarn are fully removed.** The dev path is plain [Bun](https://bun.sh) (or npm) + [esbuild](https://esbuild.github.io/): `bun install`, then `npm run dev`. Works on Node 22/24 and Apple Silicon.
 * Minified browser bundle, gzip compression, and proper cache headers on the asset routes.
 
 ### Performance
@@ -85,11 +85,10 @@ npm run dev          # esbuild bundle + node dist/server.js
 The server listens on port 8000 by default; override with `NOVA_PORT=8001 npm run dev` or by editing `nova/settings/server.json`. Open [localhost:8000](http://localhost:8000) in a browser.
 
 Other scripts:
-* `npm run build:esbuild` — build only
+* `npm run build` — build only
 * `npm run typecheck` — TypeScript type check
 
-### Legacy Bazel path
-The upstream Bazel build (`yarn start`, `yarn test`, docker image) still exists but is unmaintained in this fork; see the [upstream README](https://github.com/mattsoulanille/NovaJS#readme) if you need it.
+The upstream Bazel/Yarn build has been removed from this fork; see the [upstream README](https://github.com/mattsoulanille/NovaJS#readme) if you need it.
 
 ### Rebuilding the WASM module
 The compiled artifacts are checked in under `nova_wasm/pkg/`. To rebuild from source you need a Rust toolchain with `wasm-pack`:

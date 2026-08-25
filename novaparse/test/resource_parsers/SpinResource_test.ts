@@ -3,9 +3,7 @@ import { readResourceFork, ResourceMap } from "resource_fork";
 import { SpinResource } from "../../src/resource_parsers/SpinResource";
 import { defaultIDSpace } from "./DefaultIDSpace";
 import { NovaResourceType } from "../../src/resource_parsers/ResourceHolderBase";
-
-// Bazel no longer patches require.
-const runfiles = require(process.env['BAZEL_NODE_RUNFILES_HELPER'] as string) as typeof require;
+import { fixturePath } from "../../../test/fixture_path";
 
 describe("SpinResource", function() {
     // Spins don't depend on other resources.
@@ -16,7 +14,7 @@ describe("SpinResource", function() {
     let blaster: SpinResource;
 
     beforeEach(async function() {
-        const dataPath = runfiles.resolve("novajs/novaparse/test/resource_parsers/files/spin.ndat");
+        const dataPath = fixturePath("novaparse/test/resource_parsers/files/spin.ndat");
         rf = await readResourceFork(dataPath, false);
         var spins = rf.spïn;
         explosion = new SpinResource(spins[412], idSpace);

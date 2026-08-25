@@ -270,13 +270,39 @@ class MultiFrameHull extends Hull {
 export const HitboxHullComponent = new Component<Hull>('HitboxHullComponent');
 export const HurtboxHullComponent = new Component<Hull>('HurtboxHullComponent');
 
+function signedArea(points: readonly SAT.Vector[]): number {
+    let twiceArea = 0;
+    for (let index = 0; index < points.length; index++) {
+        const point = points[index];
+        const next = points[(index + 1) % points.length];
+        twiceArea += point.x * next.y - next.x * point.y;
+    }
+    return twiceArea / 2;
+}
+
+/**
+ * Sprite-sheet hulls use image-independent y-up coordinates. SAT.js operates
+ * in the screen's y-down coordinates and expects positive-winding polygons
+ * for polygon/circle tests. The old hull.js parser and the Rust parser emit
+ * opposite windings, so normalize after flipping y instead of blindly
+ * reversing every resource.
+ */
+export function satPolygonFromConvexHull(
+    convexHull: readonly [number, number][],
+): SAT.Polygon {
+    let points = convexHull.map(([x, y]) => new SAT.Vector(x, -y));
+    if (signedArea(points) < 0) {
+        points = points.reverse();
+    }
+    return new SAT.Polygon(new SAT.Vector(), points);
+}
+
 export async function hullFromAnimation(animation: Animation, gameData: GameDataInterface) {
     const spriteSheet = await gameData.data.SpriteSheet
         .get(animation.images.baseImage.id);
 
     const hulls = spriteSheet.hulls.map(hull =>
-        hull.map(convexHull => new SAT.Polygon(new SAT.Vector(),
-            convexHull.slice().reverse().map(([x, y]) => new SAT.Vector(x, -y)))))
+        hull.map(satPolygonFromConvexHull))
         .map(convexPolys => new CompositeHull(convexPolys));
 
     return new MultiFrameHull(hulls);
