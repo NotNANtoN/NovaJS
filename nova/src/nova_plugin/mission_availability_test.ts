@@ -75,6 +75,38 @@ describe('mission availability', () => {
         expect(getOfferableMissions(input)).toEqual([]);
     });
 
+    it('rejects ship-specific offers for a different ship', () => {
+        const mission = {
+            ...getDefaultMissionData(),
+            id: 'nova:281',
+            availShipType: 381,
+            travelStel: -1,
+            returnStel: -1,
+        };
+        const input = makeInput(mission);
+        input.playerState.shipId = 'nova:128';
+        expect(getOfferableMissions(input)).toEqual([]);
+        input.playerState.shipId = 'nova:381';
+        expect(getOfferableMissions(input)).toEqual([mission]);
+    });
+
+    it('only hides insufficient-cargo offers when flags2 requests it', () => {
+        const mission = {
+            ...getDefaultMissionData(),
+            id: 'nova:211',
+            cargoType: 0,
+            cargoQty: 10,
+            travelStel: -1,
+            returnStel: -1,
+        };
+        const input = makeInput(mission);
+        input.playerState.cargoCapacity = 5;
+        input.playerState.holds = [];
+        expect(getOfferableMissions(input)).toEqual([mission]);
+        mission.flags2 = 0x0001;
+        expect(getOfferableMissions(input)).toEqual([]);
+    });
+
     it('evaluates government and adjacent-system AvailStel selectors', () => {
         const missions = [
             { value: 10000, id: 'nova:203' },

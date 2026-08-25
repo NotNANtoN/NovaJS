@@ -20,10 +20,12 @@ describe('starmap control handling', () => {
     async function runMapControl(
         controlEvent: ControlEvent[],
         starmap: ReturnType<typeof makeStarmap>,
+        route: string[] = [],
     ) {
-        const jumpRoute = { route: [] as string[] };
+        const jumpRoute = { route };
         await handleMapControlEvent(
             controlEvent, starmap, jumpRoute, { x: 800, y: 600 }, undefined);
+        return jumpRoute.route;
     }
 
     it('recognizes only a hidden map start as an opening edge', () => {
@@ -60,5 +62,20 @@ describe('starmap control handling', () => {
         expect(starmap.setExploredSystems).toHaveBeenCalledWith(undefined);
         expect(starmap.container.position.set).toHaveBeenCalledWith(400, 300);
         expect(starmap.show).toHaveBeenCalledWith([]);
+    });
+
+    it('passes the remaining multi-hop route through a reopen', async () => {
+        const starmap = makeStarmap();
+        const remaining = ['nova:132', 'nova:138'];
+        starmap.show.and.returnValue(Promise.resolve(remaining));
+
+        const result = await runMapControl(
+            [{ action: 'map', state: 'start' }],
+            starmap,
+            remaining,
+        );
+
+        expect(starmap.show).toHaveBeenCalledWith(remaining);
+        expect(result).toEqual(remaining);
     });
 });

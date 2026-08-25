@@ -1,8 +1,9 @@
 # Design ideas & future directions
 
-Captured from design discussions (Aug 2026). These are **not** scheduled waves —
-see the roadmap discussion for the engine work order. This file records intent
-so ideas survive between sessions.
+Captured from design discussions (Aug 2026). These ideas are **optional and
+parked**; they are not scheduled work or claims about current capabilities. See
+the canonical [`docs/roadmap.md`](roadmap.md) for priorities and completion
+status. This file records intent so ideas survive between sessions.
 
 ## Faction multiplayer (parked until single-player is complete)
 
@@ -89,5 +90,7 @@ There is a lot of high-quality mission/description prose. Options:
 
 ## Related documents
 
+- [`docs/roadmap.md`](roadmap.md) — canonical prioritized implementation status
+  and remaining work.
 - `docs/engine-improvements.md` — engine limitations research and the
   low-risk improvement backlog with sources.

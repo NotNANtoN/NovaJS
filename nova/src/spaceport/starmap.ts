@@ -8,6 +8,11 @@ import { Menu } from "./menu";
 import { MenuControls } from "./menu_controls";
 import { shortestRoutes } from "./route_planning";
 import { createGraphicHandle, ManagedGraphic } from "../display/managed_graphic";
+import {
+    consumeInitialCenter,
+    StarmapViewState,
+    systemMarkerStyle,
+} from "./starmap_state";
 
 export { shortestRoute, shortestRoutes } from "./route_planning";
 
@@ -21,12 +26,23 @@ const SYSTEM_TEXT = new PIXI.TextStyle({
     fill: 0xffffff,
 });
 
-function drawSystem(system: SystemData, graphics: PIXI.Graphics, scale: number) {
+function drawSystem(system: SystemData, graphics: PIXI.Graphics, scale: number,
+    currentSystem: string) {
     // Use blue if the system has a planet. Otherwise, grey.
     // TODO: Check if the planet is inhabited.
     const inhabited = system.planets.length > 0;
     const outColor = inhabited ? BLUE : GREY;
     const inColor = inhabited ? 0x000044 : 0x000000;
+    const marker = systemMarkerStyle(system.id, currentSystem);
+    if (marker.current) {
+        graphics.lineStyle(
+            marker.ringWidth ?? 2,
+            marker.ringColor ?? 0xffffff,
+        );
+        graphics.beginFill(0x000000, 0);
+        graphics.drawCircle(0, 0, 4.5 * scale);
+        graphics.endFill();
+    }
     graphics.lineStyle(1, outColor);
     graphics.beginFill(outColor)
     graphics.drawCircle(0, 0, 2.7 * scale);
@@ -118,7 +134,7 @@ class SystemGraph {
 
         this.systemCircles = new Map(systems.map(s => {
             const graphics = new PIXI.Graphics();
-            drawSystem(s, graphics, this.scale);
+            drawSystem(s, graphics, this.scale, this.currentSystem);
             const container = new PIXI.Container();
             const circleContainer = new PIXI.Container();
             container.addChild(circleContainer);
@@ -249,7 +265,7 @@ class SystemGraph {
                 || this.knownSystems.has(id);
             const pos = this.scalePos(system.position);
             graphics.clear();
-            drawSystem(system, graphics, this.scale);
+            drawSystem(system, graphics, this.scale, this.currentSystem);
             container.position.set(...pos);
         }
     }
@@ -301,6 +317,7 @@ class SystemGraph {
 
 export class Starmap extends Menu<string[] /* route list of systems */> {
     private systemGraph?: SystemGraph;
+    private readonly viewState: StarmapViewState = { centeredOnce: false };
     readonly managed: ManagedGraphic = createGraphicHandle(this.container);
 
     constructor(gameData: GameData, private systemId: string,
@@ -339,7 +356,11 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
         if (!this.systemGraph) {
             throw new Error('Expected system graph to be built')
         }
-        this.systemGraph.center();
+        // A newly constructed system world centers once after the asynchronous
+        // graph build. Reopening in that same world preserves the player's pan.
+        if (consumeInitialCenter(this.viewState)) {
+            this.systemGraph.center();
+        }
         this.systemGraph.route = route;
         return super.show(route);
     }

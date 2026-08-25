@@ -1,4 +1,4 @@
-import { Patch } from 'immer';
+import { isDraft, Patch } from 'immer';
 import * as t from 'io-ts';
 import 'jasmine';
 import { GetEntity } from '../arg_types';
@@ -16,6 +16,12 @@ const BarType = t.type({ y: t.string });
 
 const SetComponent = new Component<{ s: Set<string> }>('Set');
 const SetType = t.type({ s: set(t.string) });
+const BooleanComponent = new Component<boolean>('Boolean');
+const NumberComponent = new Component<number>('Number');
+const StringComponent = new Component<string>('String');
+const NullComponent = new Component<null>('Null');
+const UndefinedMarkerComponent =
+    new Component<undefined>('UndefinedMarker');
 
 const FooDelta: OptionalComponentDelta<{ x: number }, number> = {
     componentType: FooType,
@@ -62,10 +68,48 @@ describe('Delta Plugin', () => {
         deltaMaker1.addComponent(FooComponent, FooDelta);
         deltaMaker1.addComponent(BarComponent, BarDelta);
         deltaMaker1.addComponent(SetComponent, SetDelta);
+        deltaMaker1.addComponent(BooleanComponent, {
+            componentType: t.boolean,
+        });
+        deltaMaker1.addComponent(NumberComponent, {
+            componentType: t.number,
+            deltaType: t.number,
+            applyDelta: (_value, delta) => delta,
+        });
+        deltaMaker1.addComponent(StringComponent, {
+            componentType: t.string,
+            deltaType: t.string,
+            applyDelta: (_value, delta) => delta,
+        });
+        deltaMaker1.addComponent(NullComponent, {
+            componentType: t.null,
+        });
+        deltaMaker1.addComponent(UndefinedMarkerComponent, {
+            componentType: t.undefined,
+        });
 
         deltaMaker2.addComponent(FooComponent, FooDelta);
         deltaMaker2.addComponent(BarComponent, BarDelta);
         deltaMaker2.addComponent(SetComponent, SetDelta);
+        deltaMaker2.addComponent(BooleanComponent, {
+            componentType: t.boolean,
+        });
+        deltaMaker2.addComponent(NumberComponent, {
+            componentType: t.number,
+            deltaType: t.number,
+            applyDelta: (_value, delta) => delta,
+        });
+        deltaMaker2.addComponent(StringComponent, {
+            componentType: t.string,
+            deltaType: t.string,
+            applyDelta: (_value, delta) => delta,
+        });
+        deltaMaker2.addComponent(NullComponent, {
+            componentType: t.null,
+        });
+        deltaMaker2.addComponent(UndefinedMarkerComponent, {
+            componentType: t.undefined,
+        });
     });
 
     it('sends the state of new components', () => {
@@ -273,5 +317,187 @@ describe('Delta Plugin', () => {
         const delta = deltaMaker1.getDelta(entity);
         expect(delta?.componentStates?.has('Bar')
             || delta?.componentDeltas?.has('Bar')).toBeTrue();
+    });
+
+    it('tracks an initial boolean without drafting it', () => {
+        const entity = new Entity()
+            .addComponent(BooleanComponent, true);
+
+        let delta: ReturnType<DeltaMaker['getDelta']> = undefined;
+        expect(() => {
+            delta = deltaMaker1.getDelta(entity);
+        }).not.toThrow();
+
+        expect(delta!.componentStates?.get(BooleanComponent.name)).toBeTrue();
+        expect(entity.components.get(BooleanComponent)).toBeTrue();
+        expect(isDraft(entity.components.get(BooleanComponent))).toBeFalse();
+        expect(deltaMaker1.getDelta(entity)).toBeUndefined();
+    });
+
+    it('sends primitive replacements as full states', () => {
+        const entity = new Entity()
+            .addComponent(BooleanComponent, true)
+            .addComponent(NumberComponent, 0)
+            .addComponent(StringComponent, '')
+            .addComponent(NullComponent, null);
+
+        const initial = deltaMaker1.getDelta(entity);
+        expect(initial?.componentStates).toEqual(new Map<string, unknown>([
+            [BooleanComponent.name, true],
+            [NumberComponent.name, 0],
+            [StringComponent.name, ''],
+            [NullComponent.name, null],
+        ]));
+
+        entity.components.set(BooleanComponent, true);
+        entity.components.set(NumberComponent, 0);
+        entity.components.set(StringComponent, '');
+        entity.components.set(NullComponent, null);
+        expect(deltaMaker1.getDelta(entity)).toBeUndefined();
+
+        entity.components.set(BooleanComponent, false);
+        entity.components.set(NumberComponent, 1);
+        entity.components.set(StringComponent, 'changed');
+        const replacement = deltaMaker1.getDelta(entity);
+
+        expect(replacement?.componentStates)
+            .toEqual(new Map<string, unknown>([
+                [BooleanComponent.name, false],
+                [NumberComponent.name, 1],
+                [StringComponent.name, 'changed'],
+            ]));
+        expect(replacement?.componentDeltas).toBeUndefined();
+        expect(deltaMaker1.getDelta(entity)).toBeUndefined();
+    });
+
+    it('distinguishes an absent component from a present undefined marker', () => {
+        const entity = new Entity().addComponent(FooComponent, { x: 1 });
+        deltaMaker1.getDelta(entity);
+
+        entity.components.set(UndefinedMarkerComponent, undefined);
+        const added = deltaMaker1.getDelta(entity);
+        expect(added?.componentStates?.has(UndefinedMarkerComponent.name))
+            .toBeTrue();
+        expect(added?.componentStates?.get(UndefinedMarkerComponent.name))
+            .toBeUndefined();
+    });
+
+    it('tracks primitive removal and re-addition', () => {
+        const entity = new Entity()
+            .addComponent(BooleanComponent, false);
+        deltaMaker1.getDelta(entity);
+
+        entity.components.delete(BooleanComponent);
+        const removed = deltaMaker1.getDelta(entity);
+        expect(removed?.removeComponents)
+            .toEqual(new Set([BooleanComponent.name]));
+
+        entity.components.set(BooleanComponent, false);
+        const readded = deltaMaker1.getDelta(entity);
+        expect(readded?.componentStates?.has(BooleanComponent.name)).toBeTrue();
+        expect(readded?.componentStates?.get(BooleanComponent.name)).toBeFalse();
+    });
+
+    it('applies states and deltas over falsy primitive values', () => {
+        const entity = new Entity()
+            .addComponent(BooleanComponent, false)
+            .addComponent(NumberComponent, 0)
+            .addComponent(StringComponent, '');
+
+        const stateMissing = deltaMaker2.applyDelta(entity, {
+            componentStates: new Map<string, unknown>([
+                [BooleanComponent.name, true],
+                [NumberComponent.name, 2],
+                [StringComponent.name, 'state'],
+            ]),
+        });
+        expect(stateMissing.size).toBe(0);
+        expect(entity.components.get(BooleanComponent)).toBeTrue();
+        expect(entity.components.get(NumberComponent)).toBe(2);
+        expect(entity.components.get(StringComponent)).toBe('state');
+
+        entity.components.set(NumberComponent, 0);
+        entity.components.set(StringComponent, '');
+        const deltaMissing = deltaMaker2.applyDelta(entity, {
+            componentDeltas: new Map<string, unknown>([
+                [NumberComponent.name, 3],
+                [StringComponent.name, 'delta'],
+            ]),
+        });
+        expect(deltaMissing.size).toBe(0);
+        expect(entity.components.get(NumberComponent)).toBe(3);
+        expect(entity.components.get(StringComponent)).toBe('delta');
+    });
+
+    it('retries after a component codec throws without consuming state', () => {
+        const ThrowingComponent =
+            new Component<{ value: number }>('ThrowingCodec');
+        const ValueType = t.type({ value: t.number });
+        let shouldThrow = true;
+        const ThrowingType = new t.Type<
+            { value: number },
+            unknown,
+            unknown
+        >(
+            'ThrowingType',
+            ValueType.is,
+            ValueType.validate,
+            value => {
+                if (shouldThrow) {
+                    shouldThrow = false;
+                    throw new Error('codec failed');
+                }
+                return ValueType.encode(value);
+            },
+        );
+        deltaMaker1.addComponent(ThrowingComponent, {
+            componentType: ThrowingType,
+        });
+        const entity = new Entity()
+            .addComponent(ThrowingComponent, { value: 1 });
+
+        expect(() => deltaMaker1.getDelta(entity))
+            .toThrowError('codec failed');
+        expect(entity.components.get(ThrowingComponent)).toEqual({ value: 1 });
+
+        const retry = deltaMaker1.getDelta(entity);
+        expect(retry?.componentStates?.get(ThrowingComponent.name))
+            .toEqual({ value: 1 });
+        expect(isDraft(entity.components.get(ThrowingComponent))).toBeTrue();
+    });
+
+    it('retries after a custom delta throws without leaving a revoked draft', () => {
+        const ThrowingComponent =
+            new Component<{ value: number }>('ThrowingDelta');
+        const ValueType = t.type({ value: t.number });
+        let shouldThrow = true;
+        deltaMaker1.addComponent(ThrowingComponent, {
+            componentType: ValueType,
+            getDelta: (_a, _b, patches) => {
+                if (shouldThrow) {
+                    shouldThrow = false;
+                    throw new Error('delta failed');
+                }
+                return patches.length > 0 ? patches : undefined;
+            },
+        });
+        const entity = new Entity()
+            .addComponent(ThrowingComponent, { value: 1 });
+        deltaMaker1.getDelta(entity);
+
+        entity.components.get(ThrowingComponent)!.value = 2;
+        expect(() => deltaMaker1.getDelta(entity))
+            .toThrowError('delta failed');
+        expect(entity.components.get(ThrowingComponent)!.value).toBe(2);
+        expect(isDraft(entity.components.get(ThrowingComponent))).toBeTrue();
+
+        const retry = deltaMaker1.getDelta(entity);
+        expect(retry?.componentStates?.get(ThrowingComponent.name))
+            .toEqual({ value: 2 });
+
+        entity.components.get(ThrowingComponent)!.value = 3;
+        const subsequent = deltaMaker1.getDelta(entity);
+        expect(subsequent?.componentDeltas?.has(ThrowingComponent.name))
+            .toBeTrue();
     });
 });

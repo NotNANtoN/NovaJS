@@ -11,6 +11,12 @@ export function makePlanet(planetData: PlanetData): Entity {
 
     planet.components.set(PlanetComponent, {
         id: planetData.id,
+        name: planetData.name,
+        flags: planetData.flags,
+        techLevel: planetData.techLevel,
+        specialTech: [...(planetData.specialTech ?? [])],
+        canLand: planetData.canLand,
+        inhabited: planetData.inhabited,
     });
 
     planet.components.set(MovementStateComponent, {

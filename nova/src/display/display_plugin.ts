@@ -1,11 +1,16 @@
 import { Optional } from "nova_ecs/optional";
 import { Plugin } from "nova_ecs/plugin";
 import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
+import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { System } from "nova_ecs/system";
 import * as PIXI from "pixi.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin";
 import { PlayerDeathComponent } from "../nova_plugin/death_plugin";
-import { AnimationGraphicPlugin } from "./animation_graphic_plugin";
+import { JumpStateComponent } from "../nova_plugin/jump_plugin";
+import {
+    AnimationGraphicComponent,
+    AnimationGraphicPlugin,
+} from "./animation_graphic_plugin";
 import { BeamDisplayPlugin } from "./beam_display_plugin";
 import { ExplosionPlugin } from "./explosion_plugin";
 import { FullscreenPlugin } from "./fullscreen_plugin";
@@ -36,17 +41,25 @@ const CenterShipSystem = new System({
 
 const DeathOverlaySystem = new System({
     name: 'DeathOverlaySystem',
-    args: [PlayerShipSelector, Optional(PlayerDeathComponent), Stage] as const,
-    step(_playerShip, death, stage) {
+    args: [PlayerShipSelector, Optional(PlayerDeathComponent), Stage,
+        TimeResource, Optional(AnimationGraphicComponent)] as const,
+    step(_playerShip, death, stage, time, shipGraphic) {
+        if (shipGraphic) {
+            // Keep the controllable entity for respawn and replication, but
+            // hide its intact sprite while the final explosion is visible.
+            shipGraphic.container.visible = !death;
+        }
         const existing = stage.getChildByName('PlayerDeathOverlay');
-        if (death && !existing) {
+        const messageVisible = death?.messageAt !== undefined
+            && time.time >= death.messageAt;
+        if (messageVisible && !existing) {
             const overlay = new PIXI.Container();
             overlay.name = 'PlayerDeathOverlay';
             const background = new PIXI.Graphics();
             background.beginFill(0x000000, 0.65);
             background.drawRect(0, 0, window.innerWidth, window.innerHeight);
             background.endFill();
-            const text = new PIXI.Text('You were destroyed', {
+            const text = new PIXI.Text('You are destroyed', {
                 fontFamily: 'Geneva',
                 fontSize: 28,
                 fill: 0xffffff,
@@ -56,8 +69,39 @@ const DeathOverlaySystem = new System({
             text.position.set(window.innerWidth / 2, window.innerHeight / 2);
             overlay.addChild(background, text);
             stage.addChild(overlay);
-        } else if (!death && existing) {
+        } else if (!messageVisible && existing) {
             existing.destroy({ children: true });
+        }
+    },
+});
+
+const JumpTransitionOverlaySystem = new System({
+    name: 'JumpTransitionOverlaySystem',
+    args: [PlayerShipSelector, Optional(JumpStateComponent), Stage,
+        TimeResource] as const,
+    step(_playerShip, jump, stage, time) {
+        const existing = stage.getChildByName(
+            'PlayerJumpTransition') as PIXI.Graphics | null;
+        if (!jump || jump.phase === 'spooling') {
+            existing?.destroy();
+            return;
+        }
+        const duration = Math.max(1, jump.transitionAt - jump.phaseStartedAt);
+        const progress = Math.min(
+            1,
+            Math.max(0, (time.time - jump.phaseStartedAt) / duration),
+        );
+        const alpha = jump.phase === 'departing'
+            ? 0.15 + progress * 0.85
+            : 1 - progress;
+        const flash = existing ?? new PIXI.Graphics();
+        flash.name = 'PlayerJumpTransition';
+        flash.clear();
+        flash.beginFill(0xffffff, alpha);
+        flash.drawRect(0, 0, window.innerWidth, window.innerHeight);
+        flash.endFill();
+        if (!existing) {
+            stage.addChild(flash);
         }
     },
 });
@@ -81,6 +125,7 @@ export const Display: Plugin = {
         await world.addPlugin(AnimationGraphicPlugin);
         world.addSystem(CenterShipSystem);
         world.addSystem(DeathOverlaySystem);
+        world.addSystem(JumpTransitionOverlaySystem);
         await world.addPlugin(TargetCornersPlugin);
         await world.addPlugin(ParticlesPlugin);
         await world.addPlugin(FullscreenPlugin);
@@ -106,6 +151,7 @@ export const Display: Plugin = {
 
         world.removeSystem(CenterShipSystem);
         world.removeSystem(DeathOverlaySystem);
+        world.removeSystem(JumpTransitionOverlaySystem);
 
         await world.removePlugin(AnimationGraphicPlugin);
         await world.removePlugin(StatusBarPlugin);

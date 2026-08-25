@@ -20,7 +20,11 @@ import { GameData } from "../client/gamedata/GameData";
 import { GameDataResource } from "../nova_plugin/game_data_resource";
 import { ArmorComponent, ShieldComponent } from "../nova_plugin/health_plugin";
 import { makeNpc } from "../nova_plugin/npc_plugin";
-import { PlanetDataComponent } from "../nova_plugin/planet_plugin";
+import {
+    LandingResultEvent,
+    PlanetDataComponent,
+    landingResultMessage,
+} from "../nova_plugin/planet_plugin";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin";
 import { ShipDataComponent } from "../nova_plugin/ship_plugin";
 import { Stat } from "../nova_plugin/stat";
@@ -43,6 +47,9 @@ class StatusBar {
     private radar = new PIXI.Graphics();
     radarPeriod = 200;
     private statsGraphics = new PIXI.Graphics();
+    private landingMessageContainer = new PIXI.Container();
+    private landingMessage = new PIXI.Text();
+    private landingMessageClearAt = 0;
 
     private targetContainer = new PIXI.Container();
     private noTargetContainer = new PIXI.Container();
@@ -80,8 +87,37 @@ class StatusBar {
             this.statusBarData.dataAreas.targeting.size[1] / 2;
 
         this.makeText();
+        this.makeLandingMessage();
         this.container.addChild(this.addEnemyButton.container);
         this.built = true;
+    }
+
+    private makeLandingMessage() {
+        this.landingMessageContainer.name = 'LandingMessage';
+        this.landingMessageContainer.visible = false;
+        this.landingMessageContainer.position.set(7, 405);
+        const background = new PIXI.Graphics();
+        background.name = 'LandingMessageBackground';
+        background.beginFill(0x080808, 0.82);
+        background.lineStyle(1, this.statusBarData.colors.dimText, 0.8);
+        background.drawRoundedRect(0, 0, Math.max(80, this.width - 14), 76, 4);
+        background.endFill();
+        this.landingMessage = new PIXI.Text('', {
+            fontFamily: 'Geneva',
+            fontSize: 11,
+            fill: this.statusBarData.colors.brightText,
+            wordWrap: true,
+            wordWrapWidth: Math.max(68, this.width - 26),
+            align: 'center',
+        });
+        this.landingMessage.name = 'LandingMessageText';
+        this.landingMessage.anchor.x = 0.5;
+        this.landingMessage.position.set(
+            Math.max(40, (this.width - 14) / 2),
+            8,
+        );
+        this.landingMessageContainer.addChild(background, this.landingMessage);
+        this.container.addChild(this.landingMessageContainer);
     }
 
     private makeText() {
@@ -308,8 +344,20 @@ class StatusBar {
         this.targetRenderTexture = undefined;
         this.targetRenderTextureSize = { width: 0, height: 0 };
     }
+    showLandingMessage(message: string, now: number, durationMs = 3_500) {
+        this.landingMessage.text = message;
+        this.landingMessageContainer.visible = Boolean(message);
+        this.landingMessageClearAt = message ? now + durationMs : 0;
+    }
+    updateLandingMessage(now: number) {
+        if (this.landingMessageContainer.visible
+            && now >= this.landingMessageClearAt) {
+            this.showLandingMessage('', now);
+        }
+    }
     destroy() {
         this.clearTarget();
+        this.showLandingMessage('', 0);
     }
 }
 
@@ -386,6 +434,23 @@ const DrawStatusBarTarget = new System({
     }
 })
 
+const DrawLandingMessage = new System({
+    name: 'DrawLandingMessage',
+    events: [LandingResultEvent],
+    args: [LandingResultEvent, StatusBarResource, TimeResource] as const,
+    step(result, statusBar, time) {
+        statusBar.showLandingMessage(landingResultMessage(result), time.time);
+    },
+});
+
+const ExpireLandingMessage = new System({
+    name: 'ExpireLandingMessage',
+    args: [StatusBarResource, TimeResource] as const,
+    step(statusBar, time) {
+        statusBar.updateLandingMessage(time.time);
+    },
+});
+
 export const StatusBarPlugin: Plugin = {
     name: 'StatusBar',
     async build(world) {
@@ -430,6 +495,8 @@ export const StatusBarPlugin: Plugin = {
         world.addSystem(DrawStatusBarStats);
         world.addSystem(DrawStatusBarSecondaryWeapon);
         world.addSystem(DrawStatusBarTarget);
+        world.addSystem(DrawLandingMessage);
+        world.addSystem(ExpireLandingMessage);
     },
     remove(world) {
         world.removeSystem(DrawRadar);
@@ -437,6 +504,8 @@ export const StatusBarPlugin: Plugin = {
         world.removeSystem(DrawStatusBarStats);
         world.removeSystem(DrawStatusBarSecondaryWeapon);
         world.removeSystem(DrawStatusBarTarget);
+        world.removeSystem(DrawLandingMessage);
+        world.removeSystem(ExpireLandingMessage);
 
         const stage = world.resources.get(Stage);
         const statusBar = world.resources.get(StatusBarResource);

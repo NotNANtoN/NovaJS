@@ -23,7 +23,7 @@ import { CollisionEvent, CollisionHitterComponent, CollisionVulnerabilityCompone
 import { CreateTime } from './create_time';
 import { DamagedEvent, ZeroArmorEvent } from './death_plugin';
 import { reserveEntity } from './entity_budget';
-import { FireSubs, OwnerComponent, SourceComponent, SubCounts, VulnerableToPD, WeaponConstructors, WeaponEntry } from './fire_weapon_plugin';
+import { AttackIntentComponent, FireSubs, OwnerComponent, SourceComponent, SubCounts, VulnerableToPD, WeaponConstructors, WeaponEntry, setAttackIntent } from './fire_weapon_plugin';
 import { GameDataResource } from './game_data_resource';
 import { firstOrderWithFallback, Guidance, GuidanceComponent } from './guidance';
 import { ArmorComponent, ShieldComponent } from './health_plugin';
@@ -176,6 +176,7 @@ class ProjectileWeaponEntry extends WeaponEntry {
         } else {
             projectile.components.delete(TargetComponent);
         }
+        setAttackIntent(projectile, target);
 
         if (source) {
             projectile.components.set(SourceComponent, source);
@@ -330,10 +331,10 @@ const ProjectileBlastSystem = new System({
     events: [ProjectileExplodeEvent],
     args: [ProjectileDataComponent, ProjectileBlastHull, CollisionHitterComponent,
         MovementStateComponent, Optional(OwnerComponent),
-        Optional(SourceComponent), Entities,
+        Optional(SourceComponent), Optional(AttackIntentComponent), Entities,
         ProjectileExplodeEvent] as const,
-    step(projectileData, blastHull, hitter, movement, owner, source, entities,
-        other) {
+    step(projectileData, blastHull, hitter, movement, owner, source,
+        attackIntent, entities, other) {
         const blastIgnore = new Set<string>();
         // TODO: Tag ship that was hit as immune to explosion, since it's already hit.
         if (!projectileData.blastHurtsFiringShip && owner) {
@@ -369,6 +370,9 @@ const ProjectileBlastSystem = new System({
         }
         if (owner) {
             blast.addComponent(OwnerComponent, owner);
+        }
+        if (attackIntent) {
+            blast.addComponent(AttackIntentComponent, attackIntent);
         }
         entities.set(v4(), blast);
     }

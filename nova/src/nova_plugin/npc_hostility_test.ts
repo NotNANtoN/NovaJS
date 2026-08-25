@@ -43,6 +43,10 @@ import { Angle } from 'nova_ecs/datatypes/angle';
 import { Vector } from 'nova_ecs/datatypes/vector';
 import { ShipComponent } from './ship_plugin';
 import { PlayerShipSelector } from './player_ship_plugin';
+import {
+    AttackIntentComponent,
+    SourceComponent,
+} from './fire_weapon_plugin';
 
 function government(
     id: number,
@@ -104,7 +108,80 @@ describe('NPC hostility', () => {
         expect(state.damageByVictimAttacker.size).toBe(0);
     });
 
-    it('makes the victim shoot back before the faction is provoked', async () => {
+    it('retains an accepted threat report when its victim is deleted', () => {
+        const state = createProvocationState();
+        recordDamage(state, 128, 'victim', 'player', 3, 100, 0);
+        expect(state.attackersByVictimGovernment.get(128))
+            .toEqual(new Set(['player']));
+
+        clearProvocation(state, 'victim');
+
+        expect(state.attackersByVictimGovernment.get(128))
+            .toEqual(new Set(['player']));
+        expect(state.threatReportsByGovernment.get(128)?.get('player'))
+            .toEqual(jasmine.objectContaining({
+                attacker: 'player',
+                reportingGovernment: 128,
+                reportedBy: 'victim',
+                reason: 'sustained-fire',
+                expiresAt: 60_000,
+            }));
+    });
+
+    it('keeps multiple attackers source-specific across victim cleanup', () => {
+        const state = createProvocationState();
+        recordDamage(state, 128, 'victim-a', 'attacker-a', 3, 100, 0);
+        recordDamage(state, 128, 'victim-b', 'attacker-b', 3, 100, 1_000);
+
+        clearProvocation(state, 'victim-a');
+        expect(state.threatReportsByGovernment.get(128)?.size).toBe(2);
+
+        clearProvocation(state, 'attacker-a');
+        expect(state.threatReportsByGovernment.get(128)?.has('attacker-a'))
+            .toBeFalse();
+        expect(state.threatReportsByGovernment.get(128)?.has('attacker-b'))
+            .toBeTrue();
+    });
+
+    it('expires accepted threat reports after sixty seconds', () => {
+        const state = createProvocationState();
+        recordDamage(state, 128, 'victim', 'player', 3, 100, 0);
+
+        pruneProvocations(state, new Set(['victim', 'player']), 60_000);
+
+        expect(state.threatReportsByGovernment.get(128)).toBeUndefined();
+        expect(state.attackersByVictimGovernment.get(128)).toBeUndefined();
+    });
+
+    it('tolerates grazes, accumulates real damage, and forgives old damage', () => {
+        const state = createProvocationState();
+        expect(recordDamage(
+            state, 128, 'victim', 'attacker', 1, 100, 0,
+        )).toBeFalse();
+        expect(isPersonallyProvoked(
+            state, 'victim', 'attacker',
+        )).toBeFalse();
+
+        expect(recordDamage(
+            state, 128, 'victim', 'attacker', 2, 100, 1_000,
+        )).toBeTrue();
+        expect(isPersonallyProvoked(
+            state, 'victim', 'attacker',
+        )).toBeTrue();
+
+        const forgiven = createProvocationState();
+        expect(recordDamage(
+            forgiven, 128, 'victim', 'attacker', 2, 100, 0,
+        )).toBeFalse();
+        expect(recordDamage(
+            forgiven, 128, 'victim', 'attacker', 2, 100, 60_000,
+        )).toBeFalse();
+        expect(isPersonallyProvoked(
+            forgiven, 'victim', 'attacker',
+        )).toBeFalse();
+    });
+
+    it('distinguishes deliberate fire from small untargeted hits', async () => {
         const gameData = {
             data: {
                 Govt: {
@@ -178,12 +255,72 @@ describe('NPC hostility', () => {
 
         expect(world.resources.get(ProvocationResource)!
             .attackersByVictimGovernment.size).toBe(0);
-        expect(victim.components.get(TargetComponent)!.target).toBe('player');
+        expect(victim.components.get(TargetComponent)!.target).toBeUndefined();
         expect(bystander.components.get(TargetComponent)!.target)
             .toBeUndefined();
 
-        // The retaliation survives the AI's own target evaluation instead of
-        // being cleared because the faction is not hostile yet.
+        const wrongTargetShot = new Entity('wrong-target shot')
+            .addComponent(SourceComponent, 'player')
+            .addComponent(AttackIntentComponent, {
+                target: 'already-deleted-target',
+            });
+        world.entities.set('wrong-target-shot', wrongTargetShot);
+        world.emitNow(DamagedEvent, {
+            damage: {
+                shield: 1,
+                armor: 0,
+                ionization: 0,
+                ionizationColor: 0,
+                passThroughShield: 0,
+                knockback: 0,
+            },
+            damager: 'wrong-target-shot',
+        }, ['victim']);
+        expect(victim.components.get(TargetComponent)!.target)
+            .withContext('a stale or wrong intended target is not deliberate')
+            .toBeUndefined();
+
+        const splash = new Entity('splash')
+            .addComponent(SourceComponent, 'player')
+            .addComponent(AttackIntentComponent, { target: 'victim' });
+        world.entities.set('splash', splash);
+        world.emitNow(DamagedEvent, {
+            damage: {
+                shield: 1,
+                armor: 0,
+                ionization: 0,
+                ionizationColor: 0,
+                passThroughShield: 0,
+                knockback: 0,
+            },
+            damager: 'splash',
+            fromExplosion: true,
+        }, ['victim']);
+        expect(victim.components.get(TargetComponent)!.target)
+            .withContext('splash is not deliberate even with matching intent')
+            .toBeUndefined();
+
+        const deliberateShot = new Entity('deliberate shot')
+            .addComponent(SourceComponent, 'player')
+            .addComponent(AttackIntentComponent, { target: 'victim' });
+        world.entities.set('deliberate-shot', deliberateShot);
+        world.emitNow(DamagedEvent, {
+            damage: {
+                shield: 1,
+                armor: 0,
+                ionization: 0,
+                ionizationColor: 0,
+                passThroughShield: 0,
+                knockback: 0,
+            },
+            damager: 'deliberate-shot',
+        }, ['victim']);
+        expect(victim.components.get(TargetComponent)!.target).toBe('player');
+        expect(world.resources.get(ProvocationResource)!
+            .attackersByVictimGovernment.get(128))
+            .toEqual(new Set(['player']));
+
+        // The deliberate retaliation survives the AI's own target evaluation.
         for (let i = 0; i < 5; i++) {
             await Promise.resolve();
             world.step();
@@ -200,8 +337,8 @@ describe('NPC hostility', () => {
         expect(bystander.components.get(TargetComponent)!.target)
             .toBeUndefined();
 
-        // Even sustained damage against a trader remains that trader's
-        // personal fight; broad civilian governments do not join in.
+        // Civilian attacks are visible to allied military, but civilian
+        // bystanders still do not inherit another trader's fight.
         world.emitNow(DamagedEvent, {
             damage: {
                 shield: 100,
@@ -215,7 +352,8 @@ describe('NPC hostility', () => {
         }, ['victim']);
         world.step();
         expect(world.resources.get(ProvocationResource)!
-            .attackersByVictimGovernment.size).toBe(0);
+            .attackersByVictimGovernment.get(128))
+            .toEqual(new Set(['player']));
         expect(isPersonallyProvoked(
             world.resources.get(ProvocationResource)!,
             'victim',
@@ -258,12 +396,15 @@ describe('NPC hostility', () => {
         )).toBe(false);
     });
 
-    it('only provokes the victim faction and allies after sustained damage', async () => {
+    it('alerts only retail-allied military when a civilian is verified attacked', async () => {
         const governments = new Map<string, GovernmentData>([
-            ['nova:128', government(128, [1])],
-            ['nova:129', government(129, [2], [1])],
+            ['nova:128', government(128, [1], [13])],
+            ['nova:129', government(129, [2], [13])],
             ['nova:130', government(130, [3])],
-            ['nova:131', government(131, [9], [], [1])],
+            ['nova:131', government(131, [9], [], [13])],
+            ['nova:132', government(132, [10])],
+            ['nova:133', government(133, [16])],
+            ['nova:157', government(157, [13], [1, 2, 13], [9])],
         ]);
         const gameData = {
             data: {
@@ -321,11 +462,18 @@ describe('NPC hostility', () => {
             return npc;
         };
 
-        const victim = addNpc('victim', 128, 0);
-        const ally = addNpc('ally', 129, 100);
+        const victim = addNpc('victim', 157, 0);
+        victim.components.set(NpcCombatRoleComponent, 'civilian');
+        const federation = addNpc('federation', 128, 100);
+        const auroran = addNpc('auroran', 129, 150);
         const neutral = addNpc('neutral', 130, 200);
-        const naturalEnemy = addNpc('natural-enemy', 131, 300);
-        expect(ally.components.get(NpcCombatRoleComponent)).toBe('military');
+        const pirate = addNpc('pirate', 131, 300);
+        const rebel = addNpc('rebel', 132, 350);
+        const alien = addNpc('alien', 133, 400);
+        const civilianBystander = addNpc('civilian-bystander', 157, 450);
+        civilianBystander.components.set(NpcCombatRoleComponent, 'civilian');
+        expect(federation.components.get(NpcCombatRoleComponent))
+            .toBe('military');
 
         world.emitNow(DamagedEvent, {
             damage: {
@@ -360,15 +508,12 @@ describe('NPC hostility', () => {
 
         const provocations = world.resources.get(ProvocationResource)!;
         expect(isProvoked(
-            provocations, 128, 'player',
+            provocations, 157, 'player',
             () => 'neutral',
         )).toBe(true);
         const relations = world.resources.get(GovernmentRelationResource)!;
-        expect(relations.relation(128, 129))
-            .withContext('relations remain directional')
-            .toBe('neutral');
-        expect(relations.relation(129, 128))
-            .withContext('military actor recognizes the victim as an ally')
+        expect(relations.relation(128, 157))
+            .withContext('Federation-style military recognizes traders')
             .toBe('ally');
         expect(isProvoked(
             provocations,
@@ -376,24 +521,63 @@ describe('NPC hostility', () => {
             'player',
             (actor, victimGovernment) =>
                 relations.relation(actor, victimGovernment),
-        )).withContext('ally sees verified external provocation').toBe(true);
+        )).withContext('Auroran-style military recognizes traders').toBe(true);
         expect(victim.components.get(TargetComponent)!.target)
-            .withContext('direct military victim')
+            .withContext('direct civilian victim crosses its threshold')
             .toBe('player');
-        expect(ally.components.get(TargetComponent)!.target)
-            .withContext('formal military ally')
+        expect(federation.components.get(TargetComponent)!.target)
+            .withContext('Federation-style defender')
+            .toBe('player');
+        expect(auroran.components.get(TargetComponent)!.target)
+            .withContext('Auroran-style defender')
             .toBe('player');
         expect(neutral.components.get(TargetComponent)!.target).not.toBe('player');
-        expect(naturalEnemy.components.get(TargetComponent)!.target)
-            .toBe('victim');
+        expect(rebel.components.get(TargetComponent)!.target).not.toBe('player');
+        expect(alien.components.get(TargetComponent)!.target).not.toBe('player');
+        expect(civilianBystander.components.get(TargetComponent)!.target)
+            .withContext('civilian bystanders never inherit the fight')
+            .not.toBe('player');
+        expect(pirate.components.get(TargetComponent)!.target)
+            .withContext('a natural war remains directed at its enemy')
+            .toBe('civilian-bystander');
 
         const time = world.resources.get(TimeResource)!;
+        // Federation friendly fire finishes the protected trader. It must not
+        // replace or revoke the already accepted player threat broadcast.
+        world.emitNow(DamagedEvent, {
+            damage: {
+                shield: 500,
+                armor: 500,
+                ionization: 0,
+                ionizationColor: 0,
+                passThroughShield: 1,
+                knockback: 0,
+            },
+            damager: 'federation',
+        }, ['victim']);
+        world.emitNow(DeathEvent, time, ['victim']);
+        for (let i = 0; i < 3; i++) {
+            await Promise.resolve();
+            world.step();
+        }
+        expect(world.entities.has('victim')).toBeFalse();
+        expect(federation.components.get(TargetComponent)!.target)
+            .withContext('responder retains threat after protected ship death')
+            .toBe('player');
+        expect(provocations.threatReportsByGovernment.get(157)?.get('player'))
+            .toEqual(jasmine.objectContaining({
+                reportingGovernment: 157,
+                reportedBy: 'victim',
+            }));
+        expect(provocations.threatReportsByGovernment.get(157)
+            ?.has('federation')).toBeFalse();
+
         world.emitNow(DeathEvent, time, ['player']);
         world.step();
         expect(player.components.has(PlayerDeathComponent)).toBe(true);
         expect(isProvoked(
             world.resources.get(ProvocationResource)!,
-            128,
+            157,
             'player',
             () => 'neutral',
         )).toBe(false);
@@ -409,7 +593,7 @@ describe('NPC hostility', () => {
             },
             damager: 'victim',
             fromExplosion: true,
-        }, ['ally']);
+        }, ['federation']);
         expect(world.resources.get(ProvocationResource)!
             .attackersByVictimGovernment.size).toBe(0);
 
@@ -418,7 +602,7 @@ describe('NPC hostility', () => {
         expect(player.components.has(PlayerDeathComponent)).toBe(false);
         expect(isProvoked(
             world.resources.get(ProvocationResource)!,
-            128,
+            157,
             'player',
             () => 'neutral',
         )).toBe(false);
@@ -427,7 +611,7 @@ describe('NPC hostility', () => {
         world.step();
         expect(isProvoked(
             world.resources.get(ProvocationResource)!,
-            128,
+            157,
             'player',
             () => 'neutral',
         )).toBe(false);

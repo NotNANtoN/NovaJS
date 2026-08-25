@@ -12,6 +12,8 @@ import { Query } from "nova_ecs/query";
 import { System } from "nova_ecs/system";
 import { Angle } from "nova_ecs/datatypes/angle";
 import { DeathEvent, PlayerDeathComponent } from "./death_plugin";
+import { ArmorComponent } from "./health_plugin";
+import { DestructionStartedComponent } from "./destruction_state";
 import {
     GovernmentData,
     GovernmentRelationResource,
@@ -60,7 +62,7 @@ type TargetCandidate = readonly [
     MovementState,
     { owner: string },
     GovtData | undefined,
-    { respawnAt: number, wreckPosition: [number, number] } | undefined,
+    { respawnAt?: number, wreckPosition: [number, number] } | undefined,
     { id: string },
 ];
 
@@ -109,10 +111,15 @@ function getValidTargets(
                 return false;
             }
 
-            return relationStore.relation(
+            const relation = relationStore.relation(
                 selfGovernmentId,
                 targetGovernment.id,
-            ) === "enemy" || personal || canAssistGovernment && isProvoked(
+            );
+            if (relation === "ally") {
+                return false;
+            }
+            return relation === "enemy" || personal
+                || canAssistGovernment && isProvoked(
                 provocations,
                 selfGovernmentId,
                 targetId,
@@ -127,11 +134,17 @@ export const ChooseRandomTargetAI = new System({
     args: [TargetComponent, TargetsQuery, ChooseRandomTargetComponent,
         TimeResource, UUID, MovementStateComponent, Entities, GovernmentRelationResource,
         ProvocationResource, MultiplayerData, PlatformResource,
-        GovtComponent, NpcAIComponent, NpcCombatRoleComponent] as const,
+        GovtComponent, NpcAIComponent, NpcCombatRoleComponent,
+        Optional(DestructionStartedComponent),
+        Optional(ArmorComponent)] as const,
     step(target, targets, randomTargetData, time, uuid, movementState, entities,
         relationStore, provocations, multiplayer, platform, government,
-        _npcAI, combatRole) {
+        _npcAI, combatRole, destructionStarted, armor) {
         if (platform !== "node" || multiplayer.owner !== "server") {
+            return;
+        }
+        if (destructionStarted || armor && armor.current <= 0) {
+            target.target = undefined;
             return;
         }
 
@@ -143,6 +156,11 @@ export const ChooseRandomTargetAI = new System({
             || !currentCandidate
             || currentCandidate[4] !== undefined
             || currentCandidate[3]?.id === government.id
+            || currentCandidate[3] !== undefined
+            && relationStore.relation(
+                government.id,
+                currentCandidate[3].id,
+            ) === "ally"
         )) {
             target.target = undefined;
         }
@@ -177,8 +195,7 @@ export const ChooseRandomTargetAI = new System({
         );
         const selected = validTargets
             .map(targetId => candidateByUuid.get(targetId))
-            .filter((candidate): candidate is TargetCandidate =>
-                candidate !== undefined)
+            .filter(candidate => candidate !== undefined)
             .sort((a, b) => {
                 const distanceA = a[1].position.subtract(movementState.position)
                     .lengthSquared;
@@ -195,10 +212,18 @@ export const FollowComponent = new Component<undefined>('FollowComponent');
 export const FollowAI = new System({
     name: 'FollowAndShootAI',
     args: [MovementStateComponent, TargetComponent, FollowComponent,
-        Entities, MultiplayerData, PlatformResource] as const,
-    step(movementState, target, _follow, entities, multiplayer, platform) {
+        Entities, MultiplayerData, PlatformResource,
+        Optional(DestructionStartedComponent),
+        Optional(ArmorComponent)] as const,
+    step(movementState, target, _follow, entities, multiplayer, platform,
+        destructionStarted, armor) {
         if (platform === "node" && multiplayer.owner !== "server"
             || platform === "browser" && multiplayer.owner === "server") {
+            return;
+        }
+        if (destructionStarted || armor && armor.current <= 0) {
+            movementState.turnTo = null;
+            movementState.accelerating = 0;
             return;
         }
         if (!target.target) {
@@ -220,10 +245,19 @@ export const ShootAllWeaponsAI = new System({
     name: 'ShootAllWeaponsAI',
     args: [WeaponsStateComponent, GameDataResource, TargetComponent,
         ShootAllWeaponsComponent, Entities, MultiplayerData,
-        PlatformResource] as const,
-    step(weapons, gameData, target, _shoot, entities, multiplayer, platform) {
+        PlatformResource, Optional(DestructionStartedComponent),
+        Optional(ArmorComponent)] as const,
+    step(weapons, gameData, target, _shoot, entities, multiplayer, platform,
+        destructionStarted, armor) {
         if (platform === "node" && multiplayer.owner !== "server"
             || platform === "browser" && multiplayer.owner === "server") {
+            return;
+        }
+        if (destructionStarted || armor && armor.current <= 0) {
+            for (const weapon of weapons.values()) {
+                weapon.firing = false;
+                weapon.target = undefined;
+            }
             return;
         }
         const targetUuid = target.target;
@@ -269,10 +303,17 @@ const WanderAI = new System({
     name: "NpcWanderAI",
     args: [MovementStateComponent, TargetComponent, WanderComponent,
         TimeResource, UUID, MultiplayerData, PlatformResource,
-        NpcAIComponent] as const,
-    step(movementState, target, wander, time, uuid, multiplayer, platform) {
+        NpcAIComponent, Optional(DestructionStartedComponent),
+        Optional(ArmorComponent)] as const,
+    step(movementState, target, wander, time, uuid, multiplayer, platform,
+        _npcAI, destructionStarted, armor) {
         if (platform !== "node" || multiplayer.owner !== "server"
             || target.target) {
+            return;
+        }
+        if (destructionStarted || armor && armor.current <= 0) {
+            movementState.turnTo = null;
+            movementState.accelerating = 0;
             return;
         }
         if (wander.heading === undefined || time.time >= wander.nextTurnAt) {

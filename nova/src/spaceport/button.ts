@@ -20,7 +20,7 @@ const BUTTON_IDS = new Map([
     }],
 ]);
 
-const LEFT_POS = 13.2 // TODO: infer from texture width
+const LEFT_POS = 13;
 
 export class Button {
     container = new PIXI.Container();
@@ -32,9 +32,9 @@ export class Button {
 
     // See colr resource                                                              
     private font = new Map([
-        ["normal", { fontFamily: "Geneva", fontSize: 12, fill: 0xffffff, align: 'center' } as const],
-        ["clicked", { fontFamily: "Geneva", fontSize: 12, fill: 0x808080, align: 'center' } as const],
-        ["grey", { fontFamily: "Geneva", fontSize: 12, fill: 0x262626, align: 'center' } as const],
+        ["normal", { fontFamily: "Charcoal, Geneva, Arial", fontSize: 12, fill: 0xffffff, align: 'center' } as const],
+        ["clicked", { fontFamily: "Charcoal, Geneva, Arial", fontSize: 12, fill: 0x808080, align: 'center' } as const],
+        ["grey", { fontFamily: "Charcoal, Geneva, Arial", fontSize: 12, fill: 0x262626, align: 'center' } as const],
     ]);
 
 

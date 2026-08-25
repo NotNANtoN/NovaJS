@@ -5,8 +5,8 @@ export const TITLE_MUSIC_URL = '/music/Nova%20Music.mp3';
 
 let masterVolume = readStoredVolume();
 let titleMusic: HTMLAudioElement | undefined;
-let titleMusicStopped = false;
-let gestureHandler: (() => void) | undefined;
+let titleMusicPlay: Promise<void> | undefined;
+let gestureHandlersInstalled = false;
 
 function clampVolume(volume: number): number {
     return Math.min(1, Math.max(0, volume));
@@ -50,32 +50,80 @@ export function setMasterVolume(volume: number): number {
     return masterVolume;
 }
 
-function removeGestureHandler() {
-    if (!gestureHandler || typeof window === 'undefined') {
-        return;
-    }
-    window.removeEventListener('pointerdown', gestureHandler);
-    window.removeEventListener('keydown', gestureHandler);
-    gestureHandler = undefined;
+export function getTitleMusicState() {
+    return {
+        created: titleMusic !== undefined,
+        paused: titleMusic?.paused ?? true,
+        currentTime: titleMusic?.currentTime ?? 0,
+        url: titleMusic?.src ?? TITLE_MUSIC_URL,
+        loop: titleMusic?.loop ?? true,
+        volume: titleMusic?.volume ?? masterVolume,
+        playPending: titleMusicPlay !== undefined,
+        retryArmed: gestureHandlersInstalled,
+    };
 }
 
-function playTitleMusic() {
-    if (titleMusicStopped || titleMusic || typeof Audio === 'undefined') {
+function removeGestureHandler() {
+    if (!gestureHandlersInstalled || typeof window === 'undefined') {
         return;
     }
+    window.removeEventListener('pointerdown', retryTitleMusic);
+    window.removeEventListener('keydown', retryTitleMusic);
+    gestureHandlersInstalled = false;
+}
 
-    const audio = new Audio(TITLE_MUSIC_URL);
+function installGestureHandlers() {
+    if (gestureHandlersInstalled || typeof window === 'undefined') {
+        return;
+    }
+    gestureHandlersInstalled = true;
+    window.addEventListener('pointerdown', retryTitleMusic);
+    window.addEventListener('keydown', retryTitleMusic);
+}
+
+function retryTitleMusic() {
+    void playTitleMusic();
+}
+
+async function playTitleMusic() {
+    if (titleMusicPlay || typeof Audio === 'undefined') {
+        return titleMusicPlay;
+    }
+
+    const audio = titleMusic ?? new Audio(TITLE_MUSIC_URL);
     audio.loop = true;
     audio.preload = 'auto';
     audio.volume = masterVolume;
     titleMusic = audio;
 
-    const playPromise = audio.play();
-    if (playPromise) {
-        void playPromise.catch(error => {
-            console.warn('Unable to play Nova title music', error);
-        });
+    let playback: Promise<void> | void;
+    try {
+        playback = audio.play();
+    } catch (error) {
+        audio.pause();
+        titleMusic = undefined;
+        installGestureHandlers();
+        console.warn('Unable to play Nova title music', error);
+        return;
     }
+    const attempt = Promise.resolve(playback).then(() => {
+        if (titleMusic === audio) {
+            removeGestureHandler();
+        }
+    }).catch(error => {
+        if (titleMusic === audio) {
+            audio.pause();
+            titleMusic = undefined;
+            installGestureHandlers();
+            console.warn('Unable to play Nova title music', error);
+        }
+    }).finally(() => {
+        if (titleMusicPlay === attempt) {
+            titleMusicPlay = undefined;
+        }
+    });
+    titleMusicPlay = attempt;
+    return attempt;
 }
 
 /**
@@ -83,14 +131,10 @@ function playTitleMusic() {
  * independent of the ECS worlds, since it should only play once per session.
  */
 export function startTitleMusicOnGesture() {
-    if (typeof window === 'undefined' || gestureHandler || titleMusicStopped) {
+    if (typeof window === 'undefined') {
         return;
     }
-
-    titleMusicStopped = false;
-    gestureHandler = playTitleMusic;
-    window.addEventListener('pointerdown', gestureHandler, { once: true });
-    window.addEventListener('keydown', gestureHandler, { once: true });
+    void playTitleMusic();
 }
 
 /**
@@ -98,8 +142,8 @@ export function startTitleMusicOnGesture() {
  * player ship has spawned in its first system.
  */
 export function stopTitleMusic() {
-    titleMusicStopped = true;
     removeGestureHandler();
+    titleMusicPlay = undefined;
     if (titleMusic) {
         titleMusic.pause();
         titleMusic.currentTime = 0;

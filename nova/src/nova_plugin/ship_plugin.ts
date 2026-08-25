@@ -34,7 +34,16 @@ export const ShipDataProvider = ProvideAsync({
     args: [GameDataResource, ShipComponent] as const,
     update: [ShipComponent],
     factory: async (gameData, ship) => {
-        return await gameData.data.Ship.get(ship.id);
+        const shipData = await gameData.data.Ship.get(ship.id);
+        // Death systems are synchronous. Warm both explosion records while the
+        // ship is loading so a first-ever destruction cannot silently skip its
+        // initial or final visual.
+        await Promise.all(
+            [shipData.initialExplosion, shipData.finalExplosion]
+                .filter((id): id is string => Boolean(id))
+                .map(id => gameData.data.Explosion.get(id)),
+        );
+        return shipData;
     }
 });
 

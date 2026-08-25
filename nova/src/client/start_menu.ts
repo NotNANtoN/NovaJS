@@ -14,6 +14,11 @@ import {
     containDialogFocus,
     makeThemedButton,
 } from './start_menu_dialogs';
+import {
+    RETAIL_LOGO_FRAME_DURATION_MS,
+    nextLogoFrameDeadline,
+    nextLogoFrame,
+} from './menu_logo_timing';
 
 export interface StartMenuSelection {
     playerState: PlayerState;
@@ -42,6 +47,7 @@ const MENU_STYLE = `
 type RetailMenuAssets = {
     background: string;
     logo: string;
+    logoFrameCount: number;
     buttons: Record<string, string>;
 };
 
@@ -49,11 +55,11 @@ function assetUrl(type: 'PictImage' | 'SpriteSheetImage', id: string): string {
     return `${dataPath}/${type}/${encodeURIComponent(id)}.png`;
 }
 
-function preloadImage(url: string): Promise<void> {
+function preloadImage(url: string): Promise<HTMLImageElement> {
     return new Promise((resolve, reject) => {
         const image = new Image();
         image.onload = () => {
-            void image.decode().then(() => resolve()).catch(reject);
+            void image.decode().then(() => resolve(image)).catch(reject);
         };
         image.onerror = () =>
             reject(new Error(`Failed to load menu artwork: ${url}`));
@@ -90,15 +96,20 @@ async function loadRetailMenuAssets(
         const assets = {
             background: assetUrl('PictImage', 'nova:8000'),
             logo: assetUrl('PictImage', 'nova:8010'),
+            logoFrameCount: 1,
             buttons: Object.fromEntries(buttonIds.map(id => [
                 id, assetUrl('SpriteSheetImage', `nova:${id}`),
             ])),
         };
-        await Promise.all([
+        const [, logoImage] = await Promise.all([
             preloadImage(assets.background),
             preloadImage(assets.logo),
             ...Object.values(assets.buttons).map(preloadImage),
         ]);
+        assets.logoFrameCount = Math.max(
+            1,
+            Math.floor(logoImage.naturalHeight / LOGO_FRAME_HEIGHT),
+        );
         return assets;
     } catch {
         // A server without the retail data should retain the usable DOM menu.
@@ -159,7 +170,7 @@ export class StartMenu {
     private readonly root = document.createElement('div');
     private readonly scene = document.createElement('div');
     private readonly content = document.createElement('div');
-    private logoTimer: number | undefined;
+    private logoAnimationFrame: number | undefined;
     private retailAssets: RetailMenuAssets | undefined;
     private dialogs: RetailMenuDialogs | undefined;
     private dialogCleanup: (() => void) | undefined;
@@ -209,10 +220,7 @@ export class StartMenu {
                 if (activeElement instanceof HTMLElement) {
                     activeElement.blur();
                 }
-                if (this.logoTimer !== undefined) {
-                    window.clearInterval(this.logoTimer);
-                    this.logoTimer = undefined;
-                }
+                this.stopLogoAnimation();
                 window.removeEventListener('resize', this.resizeScene);
                 this.root.remove();
                 resolvePromise({ playerState: state, continued });
@@ -271,10 +279,7 @@ export class StartMenu {
         this.dialogs?.clear();
         this.dialogCleanup?.();
         this.dialogCleanup = undefined;
-        if (this.logoTimer !== undefined) {
-            window.clearInterval(this.logoTimer);
-            this.logoTimer = undefined;
-        }
+        this.stopLogoAnimation();
         for (const artwork of this.scene.querySelectorAll(
             '[data-nova-menu-artwork]')) {
             artwork.remove();
@@ -296,6 +301,7 @@ export class StartMenu {
             `;
             const logo = document.createElement('div');
             logo.dataset.novaMenuArtwork = '';
+            logo.dataset.novaLogo = '';
             logo.setAttribute('role', 'img');
             logo.setAttribute('aria-label', 'Escape Velocity Nova');
             logo.style.cssText = `
@@ -308,13 +314,33 @@ export class StartMenu {
             // opaque by design, so it must be drawn at cölr LogoX/LogoY
             // (191,162) rather than treated as a centered transparent image.
             let logoFrame = 0;
-            const advanceLogo = () => {
+            let nextFrameAt: number | undefined;
+            const displayLogoFrame = (frame: number, now: number) => {
                 logo.style.backgroundPosition =
-                    `0 -${logoFrame * LOGO_FRAME_HEIGHT}px`;
-                logoFrame = (logoFrame + 1) % 7;
+                    `0 -${frame * LOGO_FRAME_HEIGHT}px`;
+                logo.dataset.logoFrame = String(frame);
+                logo.dataset.logoTimestamp = String(now);
             };
-            advanceLogo();
-            this.logoTimer = window.setInterval(advanceLogo, 500);
+            const advanceLogo = (now: number) => {
+                nextFrameAt ??= now + RETAIL_LOGO_FRAME_DURATION_MS;
+                if (now >= nextFrameAt) {
+                    logoFrame = nextLogoFrame(
+                        logoFrame,
+                        Math.random(),
+                        this.retailAssets?.logoFrameCount,
+                    );
+                    displayLogoFrame(logoFrame, now);
+                    nextFrameAt = nextLogoFrameDeadline(
+                        now,
+                        nextFrameAt,
+                        RETAIL_LOGO_FRAME_DURATION_MS,
+                    );
+                }
+                this.logoAnimationFrame =
+                    window.requestAnimationFrame(advanceLogo);
+            };
+            displayLogoFrame(logoFrame, performance.now());
+            this.logoAnimationFrame = window.requestAnimationFrame(advanceLogo);
             this.scene.insertBefore(title, this.content);
             this.scene.insertBefore(logo, this.content);
 
@@ -449,9 +475,9 @@ export class StartMenu {
     }
 
     private stopLogoAnimation(removeArtwork = false) {
-        if (this.logoTimer !== undefined) {
-            window.clearInterval(this.logoTimer);
-            this.logoTimer = undefined;
+        if (this.logoAnimationFrame !== undefined) {
+            window.cancelAnimationFrame(this.logoAnimationFrame);
+            this.logoAnimationFrame = undefined;
         }
         if (removeArtwork) {
             for (const artwork of this.scene.querySelectorAll(

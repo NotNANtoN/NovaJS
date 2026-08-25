@@ -13,6 +13,7 @@ import { GameDataResource } from '../nova_plugin/game_data_resource';
 import { ArmorComponent, IonizationComponent, ShieldComponent } from '../nova_plugin/health_plugin';
 import { MissionNotice } from '../nova_plugin/mission_plugin';
 import { OutfitsStateComponent } from '../nova_plugin/outfit_plugin';
+import type { PlanetType } from '../nova_plugin/planet_plugin';
 import { PlayerStateComponent } from '../nova_plugin/player_state';
 import { ShipPhysicsComponent } from '../nova_plugin/ship_plugin';
 import { SystemIdResource } from '../nova_plugin/system_id_resource';
@@ -26,7 +27,10 @@ import { MissionBbs, MissionInfo } from './mission_bbs';
 import { Outfitter } from './outfitter';
 import { Shipyard } from './shipyard';
 import { TradeCenter } from './trade';
-import { hasSpaceportService } from './availability';
+import {
+    hasSpaceportService,
+    resolveSpaceportPlanetData,
+} from './availability';
 
 export class Spaceport extends Menu<Entity> {
     private outfitter: Outfitter;
@@ -35,7 +39,9 @@ export class Spaceport extends Menu<Entity> {
     private bar: Bar;
     private tradeCenter: TradeCenter;
     private missionInfo: MissionInfo;
+    private readonly dialogContainers = new Set<PIXI.Container>();
     private data?: PlanetData;
+    private readonly id: string;
     private serviceButtons?: {
         outfitter: Button;
         shipyard: Button;
@@ -58,9 +64,12 @@ export class Spaceport extends Menu<Entity> {
         } as const,
     };
 
-    constructor(gameData: GameData, private id: string,
+    constructor(
+        gameData: GameData,
+        private readonly authoritativePlanet: PlanetType,
         controlEvents: Observable<ControlEvent>) {
         super(gameData, "nova:8500", controlEvents);
+        this.id = authoritativePlanet.id;
         this.container.name = 'Spaceport';
 
         const buttons = {
@@ -82,16 +91,21 @@ export class Spaceport extends Menu<Entity> {
                 return;
             }
             this.controls.unbind();
+            this.setActiveDialog(this.outfitter.container);
             const outfits = this.input.components.get(OutfitsStateComponent) ?? new Map();
-            this.outfitter.setPlayerState(
-                this.input.components.get(PlayerStateComponent));
-            const newOutfits = await this.outfitter.show(outfits);
-            this.input.components.set(OutfitsStateComponent, newOutfits);
-            // Delete these so they are re-created with the new outfits.
-            // TODO: Find a better way to do this.
-            this.input.components.delete(WeaponsStateComponent);
-            this.input.components.delete(ShipPhysicsComponent);
-            this.controls.bind();
+            try {
+                this.outfitter.setPlayerState(
+                    this.input.components.get(PlayerStateComponent));
+                const newOutfits = await this.outfitter.show(outfits);
+                this.input.components.set(OutfitsStateComponent, newOutfits);
+                // Delete these so they are re-created with the new outfits.
+                // TODO: Find a better way to do this.
+                this.input.components.delete(WeaponsStateComponent);
+                this.input.components.delete(ShipPhysicsComponent);
+            } finally {
+                this.setActiveDialog();
+                this.controls.bind();
+            }
         };
         buttons.outfitter.click.subscribe(showOutfitter);
 
@@ -102,47 +116,70 @@ export class Spaceport extends Menu<Entity> {
                 return;
             }
             this.controls.unbind();
-            this.shipyard.setPlayerState(
-                this.input.components.get(PlayerStateComponent));
-            const newInput = await this.shipyard.show(this.input);
-            if (newInput !== this.input) {
-                // Construct a fake system and run providers so that outfits of the new
-                // ship are provided.
-                const shipBuildWorld = new World('outfit builder');
-                shipBuildWorld.resources.set(GameDataResource, gameData);
-                shipBuildWorld.resources.set(SystemIdResource, 'nova:128');
-                await shipBuildWorld.addPlugin(SystemPlugin);
-                shipBuildWorld.entities.set('ship', newInput);
-                shipBuildWorld.step();
-                await shipBuildWorld.resources.get(AsyncSystemResource)?.done;
-                shipBuildWorld.step();
-                shipBuildWorld.entities.delete('ship');
+            this.setActiveDialog(this.shipyard.container);
+            try {
+                this.shipyard.setPlayerState(
+                    this.input.components.get(PlayerStateComponent));
+                const newInput = await this.shipyard.show(this.input);
+                if (newInput !== this.input) {
+                    // Construct a fake system and run providers so that outfits of the new
+                    // ship are provided.
+                    const shipBuildWorld = new World('outfit builder');
+                    shipBuildWorld.resources.set(GameDataResource, gameData);
+                    shipBuildWorld.resources.set(SystemIdResource, 'nova:128');
+                    await shipBuildWorld.addPlugin(SystemPlugin);
+                    shipBuildWorld.entities.set('ship', newInput);
+                    shipBuildWorld.step();
+                    await shipBuildWorld.resources.get(AsyncSystemResource)?.done;
+                    shipBuildWorld.step();
+                    shipBuildWorld.entities.delete('ship');
+                }
+                this.input = newInput;
+            } finally {
+                this.setActiveDialog();
+                this.controls.bind();
             }
-            this.input = newInput;
-
-            this.controls.bind();
         };
         buttons.shipyard.click.subscribe(showShipyard);
 
         this.missionInfo = new MissionInfo(gameData, controlEvents);
-        const showMissionInfo = async () => {
+        const showMissionInfo = async (fromMissionBoard = false) => {
             this.controls.unbind();
+            if (fromMissionBoard) {
+                this.missionBbs.suspendControls();
+            }
+            this.setActiveDialog(this.missionInfo.container);
             try {
                 await this.missionInfo.show(this.input);
             } finally {
-                this.controls.bind();
+                if (fromMissionBoard) {
+                    this.setActiveDialog(this.missionBbs.container);
+                    this.missionBbs.resumeControls();
+                } else {
+                    this.setActiveDialog();
+                    this.controls.bind();
+                }
             }
         };
         this.missionBbs = new MissionBbs(
-            gameData, this.id, controlEvents, showMissionInfo);
-        this.bar = new Bar(gameData, this.id, controlEvents, showMissionInfo);
+            gameData, this.id, controlEvents, () => showMissionInfo(true));
+        this.bar = new Bar(
+            gameData, this.id, controlEvents, () => showMissionInfo(true));
         this.tradeCenter = new TradeCenter(gameData, this.id, controlEvents);
+        this.dialogContainers.add(this.outfitter.container);
+        this.dialogContainers.add(this.shipyard.container);
+        this.dialogContainers.add(this.missionBbs.container);
+        this.dialogContainers.add(this.bar.container);
+        this.dialogContainers.add(this.tradeCenter.container);
+        this.dialogContainers.add(this.missionInfo.container);
 
         const showMissionBbs = async () => {
             this.controls.unbind();
+            this.setActiveDialog(this.missionBbs.container);
             try {
                 await this.missionBbs.show(this.input);
             } finally {
+                this.setActiveDialog();
                 this.controls.bind();
             }
         };
@@ -151,9 +188,11 @@ export class Spaceport extends Menu<Entity> {
                 return;
             }
             this.controls.unbind();
+            this.setActiveDialog(this.bar.container);
             try {
                 await this.bar.show(this.input);
             } finally {
+                this.setActiveDialog();
                 this.controls.bind();
             }
         };
@@ -162,14 +201,16 @@ export class Spaceport extends Menu<Entity> {
                 return;
             }
             this.controls.unbind();
+            this.setActiveDialog(this.tradeCenter.container);
             try {
                 await this.tradeCenter.show(this.input);
             } finally {
+                this.setActiveDialog();
                 this.controls.bind();
             }
         };
         buttons.missionBBS.click.subscribe(showMissionBbs);
-        buttons.missionLog.click.subscribe(showMissionInfo);
+        buttons.missionLog.click.subscribe(() => showMissionInfo(false));
         buttons.bar.click.subscribe(showBar);
         buttons.tradeCenter.click.subscribe(showTradeCenter);
         this.addButtons(buttons);
@@ -185,6 +226,20 @@ export class Spaceport extends Menu<Entity> {
         });
     }
 
+    get resolvedPlanetData(): PlanetData | undefined {
+        return this.data;
+    }
+
+    private setActiveDialog(active?: PIXI.Container) {
+        for (const child of this.container.children) {
+            if (this.dialogContainers.has(child as PIXI.Container)) {
+                child.visible = child === active;
+            } else {
+                child.visible = active === undefined;
+            }
+        }
+    }
+
     override async build() {
         await super.build();
         await Promise.all([
@@ -193,7 +248,9 @@ export class Spaceport extends Menu<Entity> {
             this.tradeCenter.buildPromise,
             this.missionInfo.buildPromise,
         ]);
-        const data = await this.gameData.data.Planet.get(this.id);
+        const localData = await this.gameData.data.Planet.get(this.id);
+        const data = resolveSpaceportPlanetData(
+            localData, this.authoritativePlanet);
         this.data = data;
         this.outfitter.setPlanetData(data);
         this.shipyard.setPlanetData(data);
@@ -220,7 +277,9 @@ export class Spaceport extends Menu<Entity> {
         const spaceportPict = this.gameData.spriteFromPict(data.landingPict)
         spaceportPict.position.x = -306;
         spaceportPict.position.y = -256;
-        this.container.addChild(spaceportPict)
+        // The landing landscape is an opaque 612x285 retail PICT. Keep it
+        // immediately above the Spaceport frame and below every control.
+        this.container.addChildAt(spaceportPict, 1);
         this.container.addChild(this.outfitter.container);
         this.container.addChild(this.shipyard.container);
         this.container.addChild(this.missionBbs.container);

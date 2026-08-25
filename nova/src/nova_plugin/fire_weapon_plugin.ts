@@ -13,6 +13,7 @@ import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
 import { MovementState, MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
+import { replicationPolicies } from 'nova_ecs/plugins/multiplayer_plugin';
 import { Provide } from 'nova_ecs/provide';
 import { Query } from 'nova_ecs/query';
 import { Resource } from 'nova_ecs/resource';
@@ -25,6 +26,8 @@ import { GameDataResource } from './game_data_resource';
 import { firstOrderWithFallback } from './guidance';
 import { TargetComponent } from './target_component';
 import { WeaponsStateComponent } from './weapons_state';
+import { ArmorComponent } from './health_plugin';
+import { DestructionStartedComponent } from './destruction_state';
 
 export const WeaponConstructors = new Resource<Map<WeaponData['type'],
     { new(data: WeaponData, runQuery: RunQueryFunction): WeaponEntry }>>('WeaponConstructors');
@@ -58,7 +61,7 @@ export interface WeaponLocalState {
      */
     releaseAfterStep?: boolean,
 }
-type WeaponsLocalState = DefaultMap<string, WeaponLocalState>;
+export type WeaponsLocalState = DefaultMap<string, WeaponLocalState>;
 export const WeaponsComponent = new Component<WeaponsLocalState>('WeaponsComponent')
 
 export function getDefaultWeaponLocalState(): WeaponLocalState {
@@ -168,6 +171,44 @@ function getRandomInCone(angle: number, count: number) {
 }
 
 export const SourceComponent = new Component<string>('Source');
+export interface AttackIntent {
+    target: string;
+}
+/**
+ * Immutable per-shot targeting evidence. It is intentionally server-local:
+ * the authoritative server creates its own shot from the firing ship's
+ * accepted TargetComponent and trigger state, so a client cannot attach or
+ * rewrite this evidence on an in-flight projectile.
+ */
+export const AttackIntentComponent =
+    new Component<AttackIntent>('AttackIntentComponent');
+replicationPolicies.register(AttackIntentComponent, {
+    codec: t.type({ target: t.string }),
+    authority: 'local-only',
+});
+
+export function setAttackIntent(entity: Entity, target?: string): void {
+    if (target) {
+        entity.components.set(AttackIntentComponent, { target });
+    } else {
+        entity.components.delete(AttackIntentComponent);
+    }
+}
+
+export function inheritedAttackTarget(
+    currentTarget: string | undefined,
+    attackIntent: AttackIntent | undefined,
+): string | undefined {
+    return attackIntent?.target ?? currentTarget;
+}
+
+export function attackOriginLocked(
+    destructionStarted: boolean | undefined,
+    armorCurrent: number | undefined,
+): boolean {
+    return Boolean(destructionStarted)
+        || armorCurrent !== undefined && armorCurrent <= 0;
+}
 // TODO: Fix delta system to allow stuff that isn't an object.
 const OwnerComponentType = t.type({owner: t.string});
 type OwnerComponentType = t.TypeOf<typeof OwnerComponentType>;
@@ -175,10 +216,13 @@ export const OwnerComponent = new Component<OwnerComponentType>('Owner');
 
 const FireFromEntityQuery = new Query([Optional(WeaponsComponent),
     Entities, MovementStateComponent, AnimationComponent, UUID,
-Optional(OwnerComponent), Optional(TargetComponent), GetEntity] as const, 'FireFromEntityQuery');
+    Optional(OwnerComponent), Optional(TargetComponent),
+    Optional(DestructionStartedComponent), Optional(ArmorComponent),
+    GetEntity] as const, 'FireFromEntityQuery');
 
 const SubsQuery = new Query([WeaponEntries, MovementStateComponent, Optional(SubCounts),
-    Optional(OwnerComponent), Optional(TargetComponent), GetEntity] as const);
+    Optional(OwnerComponent), Optional(TargetComponent),
+    Optional(AttackIntentComponent), GetEntity] as const);
 
 const ConstructorQuery = new Query([Entities, Emit, WeaponEntries,
     SingletonComponent, EntityBudgetResource] as const);
@@ -219,7 +263,21 @@ export abstract class WeaponEntry {
         if (!results[0]) {
             return undefined;
         }
-        let [weapons, entities, movement, animation, uuid, owner, targetVal, entity] = results[0];
+        let [
+            weapons,
+            entities,
+            movement,
+            animation,
+            uuid,
+            owner,
+            targetVal,
+            destructionStarted,
+            armor,
+            entity,
+        ] = results[0];
+        if (attackOriginLocked(destructionStarted, armor?.current)) {
+            return undefined;
+        }
         if (!owner) {
             owner = {owner: uuid};
         }
@@ -306,7 +364,15 @@ export abstract class WeaponEntry {
     }
 
     fireSubs(source: string, sourceExpired = false, position?: Position): Entity[] {
-        let [weaponEntries, movement, subCounts, owner, target, sourceEntity]
+        let [
+            weaponEntries,
+            movement,
+            subCounts,
+            owner,
+            target,
+            attackIntent,
+            sourceEntity,
+        ]
             = this.runQuery(SubsQuery, source)[0];
         if (!('submunitions' in this.data)) {
             return [];
@@ -344,7 +410,7 @@ export abstract class WeaponEntry {
                 const angle = angles[i] || new Angle(0);
                 const subEntity = subWeapon.fire(position ?? movement.position,
                     movement.rotation.add(angle), owner.owner,
-                    target?.target, source);
+                    inheritedAttackTarget(target?.target, attackIntent), source);
                 if (subEntity) {
                     subs.push(subEntity);
                     const newCounts = new DefaultMap(() => 0, subCounts);
@@ -374,18 +440,19 @@ export const FireWeaponPlugin: Plugin = {
         if (!deltaMaker) {
             throw new Error('Expected DeltaMaker to exist');
         }
-        deltaMaker.addComponent(VulnerableToPD, {
-            componentType: t.undefined,
-        });
-
         deltaMaker.addComponent(OwnerComponent, {
             componentType: OwnerComponentType,
         });
 
         world.addSystem(WeaponsComponentProvider);
         world.addComponent(WeaponsComponent);
+        // Server-local presence marker used by point-defense targeting.
+        // Undefined tuple values become null over JSON, so this must not be
+        // registered for delta serialization.
+        world.addComponent(VulnerableToPD);
         world.addComponent(OwnerComponent);
         world.addComponent(SourceComponent);
+        world.addComponent(AttackIntentComponent);
         world.resources.set(WeaponConstructors, new Map());
         const weaponConstructors = world.resources.get(WeaponConstructors)!;
 

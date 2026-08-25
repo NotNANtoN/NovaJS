@@ -266,6 +266,7 @@ export function formatMissionText(
         SYS: values.destinationSystem ?? destination,
         RET: returnDestination,
         CT: values.cargo ?? '',
+        CARGO: values.cargo ?? '',
         CQ: values.quantity === undefined ? '' : String(values.quantity),
         DL: values.deadline === undefined ? '' : String(values.deadline),
         PAY: values.pay === undefined ? '' : typeof values.pay === 'number'
@@ -304,4 +305,41 @@ export function formatMissionText(
                 : whole;
         });
     return result;
+}
+
+const UNKNOWN_MISSION_TOKEN: Readonly<Record<string, string>> = {
+    CARGO: 'cargo',
+    CT: 'cargo',
+    CQ: 'the requested quantity',
+    DST: 'the destination',
+    DSY: 'the destination system',
+    RST: 'the return destination',
+    RSY: 'the return system',
+    DL: 'the deadline',
+    PAY: 'the offered payment',
+};
+
+/** Format player-visible text without leaking plug-in tokens into the UI. */
+export function formatVisibleMissionText(
+    text: string,
+    values: MissionTextValues,
+): string {
+    return formatMissionText(text, values)
+        .replace(/<([A-Za-z][A-Za-z0-9_]*)>/g, (_whole, raw: string) =>
+            UNKNOWN_MISSION_TOKEN[raw.toUpperCase()] ?? 'mission information')
+        .replace(/\*([A-Za-z])/g, '$1')
+        .replace(/;(?=\S)/g, ' ')
+        .trim();
+}
+
+export function missionOfferDisplayText(
+    mission: { offerText: string; name: string },
+): string {
+    return mission.offerText || mission.name || 'Mission briefing unavailable.';
+}
+
+export function missionInfoDisplayText(
+    mission: { quickBrief: string },
+): string {
+    return mission.quickBrief || 'Mission briefing unavailable.';
 }

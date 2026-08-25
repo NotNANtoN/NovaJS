@@ -16,9 +16,11 @@ import {
 import { WeaponsStateComponent } from './weapons_state';
 import {
     applyWeaponTrigger,
+    clearWeaponFiringState,
     ReleaseWeaponTriggerSystem,
     WeaponsSystem,
 } from './weapon_plugin';
+import { DestructionStartedComponent } from './destruction_state';
 
 const STEP_MS = 1000 / 60;
 
@@ -51,6 +53,46 @@ function makeWeapon(
 }
 
 describe('weapon firing', () => {
+    it('clears held, burst, and quick-tap firing at destruction start', () => {
+        const shots: number[] = [];
+        const time = {
+            time: 0,
+            delta_ms: STEP_MS,
+            delta_s: STEP_MS / 1000,
+            frame: 0,
+        };
+        const entries = makeWeapon(() => false, shots, time);
+        const local = new DefaultMap<string, WeaponLocalState>(
+            getDefaultWeaponLocalState);
+        const localState = local.get('test-weapon');
+        localState.shotsOwed = 5;
+        localState.burstCount = 2;
+        localState.reloadingBurst = true;
+        localState.pressObserved = true;
+        localState.releaseAfterStep = true;
+        const state = new Map([
+            ['test-weapon', { count: 1, firing: true }],
+        ]);
+        const world = new World('weapon-destruction-lock-test');
+        world.resources.set(TimeResource, time);
+        world.resources.set(WeaponEntries, entries);
+        world.addSystem(WeaponsSystem);
+        world.entities.set('dying-ship', new Entity()
+            .addComponent(WeaponsStateComponent, state)
+            .addComponent(WeaponsComponent, local)
+            .addComponent(DestructionStartedComponent, true));
+
+        world.step();
+
+        expect(shots).toEqual([]);
+        expect(state.get('test-weapon')!.firing).toBeFalse();
+        expect(localState.shotsOwed).toBe(0);
+        expect(localState.burstCount).toBe(0);
+        expect(localState.reloadingBurst).toBeFalse();
+        expect(localState.pressObserved).toBeFalse();
+        expect(localState.releaseAfterStep).toBeFalse();
+    });
+
     it('fires held weapons at the reload cadence', () => {
         const shots: number[] = [];
         const time = {
@@ -279,6 +321,21 @@ describe('weapon trigger latch', () => {
         for (let i = 1; i < shots.length; i++) {
             expect(shots[i] - shots[i - 1]).toBeCloseTo(500, 6);
         }
+    });
+});
+
+describe('weapon destruction reset', () => {
+    it('cannot be restarted by a stale replicated firing state', () => {
+        const state = new Map([
+            ['test-weapon', { count: 1, firing: true }],
+        ]);
+        const local = new DefaultMap<string, WeaponLocalState>(
+            getDefaultWeaponLocalState);
+        clearWeaponFiringState(state, local);
+        state.get('test-weapon')!.firing = true;
+        clearWeaponFiringState(state, local);
+        expect(state.get('test-weapon')!.firing).toBeFalse();
+        expect(local.get('test-weapon').shotsOwed).toBe(0);
     });
 });
 

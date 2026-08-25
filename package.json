@@ -55,7 +55,9 @@
     },
     "scripts": {
         "build": "node scripts/build.mjs",
+        "check": "npm run build && npm test",
         "dev": "npm run build && node dist/server.js",
+        "prepare": "node scripts/install-git-hooks.mjs",
         "test": "node scripts/test.mjs",
         "typecheck": "tsc --noEmit",
         "start": "node dist/server.js"

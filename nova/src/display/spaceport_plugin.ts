@@ -1,4 +1,11 @@
-import { Emit, Entities, GetEntity, RunQuery, UUID } from 'nova_ecs/arg_types';
+import {
+    Emit,
+    Entities,
+    GetEntity,
+    GetWorld,
+    RunQuery,
+    UUID,
+} from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
 import { Entity } from 'nova_ecs/entity';
 import { Optional } from 'nova_ecs/optional';
@@ -12,7 +19,11 @@ import { ControlsSubject } from '../nova_plugin/controls_plugin';
 import { GameDataResource } from '../nova_plugin/game_data_resource';
 import { NcbRuntimeResource } from '../nova_plugin/ncb_runtime';
 import { OutfitsStateComponent } from '../nova_plugin/outfit_plugin';
-import { LandEvent, PlanetComponent } from '../nova_plugin/planet_plugin';
+import {
+    LandEvent,
+    LandingResultEvent,
+    PlanetComponent,
+} from '../nova_plugin/planet_plugin';
 import {
     MissionNotice,
     MissionRuntime,
@@ -40,8 +51,9 @@ const SpaceportProvider = Provide({
     name: "SpaceportProvider",
     provided: SpaceportComponent,
     args: [GameDataResource, ControlsSubject, Stage, PlanetComponent] as const,
-    factory(gameData, controls, stage, { id }) {
-        const spaceport = new Spaceport(gameData as GameData, id, controls);
+    factory(gameData, controls, stage, planet) {
+        const spaceport = new Spaceport(
+            gameData as GameData, planet, controls);
         stage.addChild(spaceport.container);
         return spaceport;
     }
@@ -55,27 +67,38 @@ const LandSystem = new System({
     args: [LandEvent, UUID, Entities, RunQuery, ScreenSize, GetEntity,
         Emit, SerializerResource,
         Optional(CommunicatorResource), PlayerShipSelector,
-        Optional(MultiplayerData), Optional(PlayerStoreResource),
+        Optional(MultiplayerData), GetWorld,
         Optional(PlayerStateComponent), Optional(MissionRuntimeResource),
         NcbRuntimeResource] as const,
     step({ id, uuid }, shipUuid, entities, runQuery, { x, y }, playerShip,
         emit, serializer, communicator, _playerShipSelector, playerMultiplayer,
-        playerStore, playerStateRaw, missionRuntimeRaw, ncbRuntime) {
+        world, playerStateRaw, missionRuntimeRaw, ncbRuntime) {
+        const playerStore = world.resources.get(PlayerStoreResource);
         const playerState = playerStateRaw;
         const missionRuntime = missionRuntimeRaw;
         const spaceport = runQuery(SpaceportQuery, uuid)[0]?.[0];
+        const landedPlanet = entities.get(uuid)?.components.get(
+            PlanetDataComponent);
         if (!spaceport) {
+            emit(LandingResultEvent, {
+                outcome: 'rejected',
+                reason: 'spaceport-unavailable',
+                planetName: landedPlanet?.name,
+            });
             return;
         }
 
         if (playerState && isStellarDestroyed(playerState, id)) {
             console.warn(`Cannot land at destroyed stellar ${id}`);
+            emit(LandingResultEvent, {
+                outcome: 'rejected',
+                reason: 'destroyed',
+                planetName: landedPlanet?.name,
+            });
             return;
         }
         if (playerState) {
             advanceGameDate(playerState);
-            const landedPlanet = entities.get(uuid)?.components.get(
-                PlanetDataComponent);
             playerState.lastLandedPlanet = id;
             playerState.lastLandedSystem = playerState.currentSystem;
             playerState.lastLandedPosition = landedPlanet?.position ?? [0, 0];

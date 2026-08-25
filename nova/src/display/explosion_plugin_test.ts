@@ -3,6 +3,10 @@ import {
     advanceExplosionTiming,
     explosionFrameDurationMs,
 } from './explosion_timing';
+import {
+    completeDestructionVisual,
+    registerDestructionVisual,
+} from './destruction_visual_state';
 
 describe('explosion presentation cadence', () => {
     it('converts retail FrameAdvance factors to 30 Hz frame durations', () => {
@@ -26,5 +30,17 @@ describe('explosion presentation cadence', () => {
             .toBeCloseTo(0.25, 8);
         expect(advanceExplosionTiming(state, 4 * 1000 / 30, 4, 1))
             .toEqual({ progress: 1, done: true });
+    });
+
+    it('completes destruction after every primary and secondary visual', () => {
+        const active = new Map<string, number>();
+        registerDestructionVisual(active, 'player');
+        registerDestructionVisual(active, 'player');
+        registerDestructionVisual(active, 'player');
+
+        expect(completeDestructionVisual(active, 'player')).toBeFalse();
+        expect(completeDestructionVisual(active, 'player')).toBeFalse();
+        expect(completeDestructionVisual(active, 'player')).toBeTrue();
+        expect(active.has('player')).toBeFalse();
     });
 });

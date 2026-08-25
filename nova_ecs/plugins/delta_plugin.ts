@@ -1,4 +1,4 @@
-import { applyPatches, createDraft, current, Draft, enablePatches, finishDraft, isDraft, original, setAutoFreeze } from 'immer';
+import { applyPatches, createDraft, current, enablePatches, finishDraft, isDraft, isDraftable, original, setAutoFreeze } from 'immer';
 import { Objectish, Patch } from 'immer/dist/internal';
 import * as t from 'io-ts';
 import { set } from '../datatypes/set';
@@ -135,11 +135,62 @@ export class DeltaMaker {
         const data = entity.components.get(component);
         const deltaComponent = entity.components.get(DeltaComponent);
         if (!deltaComponent
-            || deltaComponent.components.get(component) !== data) {
+            || !deltaComponent.components.has(component)
+            || !Object.is(deltaComponent.components.get(component), data)) {
             return true;
         }
         return isDraft(data)
             && current(data) !== original(data);
+    }
+
+    /**
+     * Installs the representation used as the next tracking baseline.
+     *
+     * Immer can only draft objects and arrays. Primitive component values are
+     * immutable, so their value itself is the baseline and replacement is
+     * detected through EventMap.set plus Object.is. The finally block matters:
+     * if createDraft throws for a custom immerable object, the entity still
+     * receives the usable plain value instead of retaining a revoked draft.
+     */
+    private installTrackingValue(
+        entity: Entity,
+        component: UnknownComponent,
+        value: unknown,
+    ): unknown {
+        let trackedValue = value;
+        try {
+            if (isDraftable(value)) {
+                trackedValue = createDraft(value as Objectish);
+            }
+        } finally {
+            (entity.components as EventMap<UnknownComponent, unknown>)
+                .set(component, trackedValue, true /* Silent */);
+        }
+        return trackedValue;
+    }
+
+    /**
+     * Finishes a draft and immediately replaces its revoked proxy with a valid
+     * tracking value. Callers may subsequently run codecs or custom delta
+     * functions which throw without corrupting the entity.
+     */
+    private finishAndInstall(
+        entity: Entity,
+        component: UnknownComponent,
+        data: Objectish,
+        patchListener?: (patches: Patch[]) => void,
+    ): unknown {
+        let currentData: unknown;
+        let finished = false;
+        try {
+            currentData = finishDraft(data, patchListener);
+            finished = true;
+            return currentData;
+        } finally {
+            if (finished) {
+                this.installTrackingValue(entity, component, currentData);
+            }
+        }
     }
 
     clearDirty(entity: Entity) {
@@ -213,34 +264,38 @@ export class DeltaMaker {
                 continue;
             }
 
-            // An immer draft to be used in place of the component's data
-            // for tracking changes between calls to getDelta.
-            let newDraft: Draft<unknown>;
-
-            if (deltaComponent.components.get(component) === data) {
+            const hasBaseline = deltaComponent.components.has(component);
+            const matchesBaseline = hasBaseline
+                && Object.is(deltaComponent.components.get(component), data);
+            if (matchesBaseline) {
                 // Use deltas for components we've already seen.
                 const { getDelta, deltaType } = componentDeltaFuncs;
 
                 if (isDraft(data)) {
-                    // If it's not a draft, there's no delta.
                     const originalData = original(data);
 
                     let patches: Patch[] | undefined;
-                    const currentData = finishDraft(data, (forwardPatches) => {
-                        patches = forwardPatches
-                    });
+                    const currentData = this.finishAndInstall(
+                        entity,
+                        component,
+                        data as Objectish,
+                        forwardPatches => {
+                            patches = forwardPatches;
+                        },
+                    );
                     if (!patches) {
                         throw new Error('Got no patches when calling delta');
                     }
 
-                    newDraft = createDraft(currentData as Objectish);
                     const delta = getDelta(originalData, currentData, patches);
-                    if (delta) {
+                    if (delta !== undefined) {
                         componentDeltas.set(component.name,
                             deltaType.encode(delta));
                     }
-                } else {
-                    newDraft = createDraft(data as Objectish);
+                } else if (isDraftable(data)) {
+                    // A draftable value can be plain after an inbound state
+                    // replacement. Re-establish its object tracking baseline.
+                    this.installTrackingValue(entity, component, data);
                 }
             } else {
                 // Use the full state for components we haven't seen before or which
@@ -249,13 +304,21 @@ export class DeltaMaker {
                 if (!componentType) {
                     throw new Error(`Expected to have component type for ${component.name}`);
                 }
-                componentStates.set(component.name, componentType.encode(data));
-                newDraft = createDraft(data as Objectish);
+                const currentData = isDraft(data) ? current(data) : data;
+                componentStates.set(
+                    component.name,
+                    componentType.encode(currentData),
+                );
+                if (isDraft(data)) {
+                    this.finishAndInstall(
+                        entity,
+                        component,
+                        data as Objectish,
+                    );
+                } else {
+                    this.installTrackingValue(entity, component, data);
+                }
             }
-
-            // Use setSilent instead of set to avoid triggering a 'set' event.
-            (entity.components as EventMap<UnknownComponent, unknown>)
-                .set(component, newDraft, true /* Silent */);
         }
 
         const entityComponents = new Set(entity.components.keys());
@@ -334,13 +397,13 @@ export class DeltaMaker {
 
             const { deltaType, applyDelta } = componentDeltaFuncs;
 
-            const currentData = entity.components.get(component);
-            if (!currentData) {
+            if (!entity.components.has(component)) {
                 // Cannot apply delta if the entity is missing the component.
                 // Signal that the full state should be requested.
                 missingComponents.add(component);
                 continue;
             }
+            const currentData = entity.components.get(component);
 
             const componentDelta = deltaType.decode(encodedDelta);
             if (isLeft(componentDelta)) {

@@ -5,8 +5,10 @@ import { Angle } from "nova_ecs/datatypes/angle";
 import { Position } from "nova_ecs/datatypes/position";
 import { Vector } from "nova_ecs/datatypes/vector";
 import { Entity } from "nova_ecs/entity";
+import { Optional } from "nova_ecs/optional";
 import { Plugin } from "nova_ecs/plugin";
 import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
+import { Resource } from "nova_ecs/resource";
 import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { System } from "nova_ecs/system";
 import { v4 } from "uuid";
@@ -16,7 +18,12 @@ import { ProjectileDataComponent } from "../nova_plugin/projectile_data";
 import { ProjectileExplodeEvent } from "../nova_plugin/projectile_plugin";
 import { SoundEvent } from "../nova_plugin/sound_event";
 import { AnimationGraphicComponent } from "./animation_graphic_plugin";
-import { DeathEvent, PlayerDeathSystem, ZeroArmorEvent } from "../nova_plugin/death_plugin";
+import {
+    DeathEvent,
+    PlayerDeathSystem,
+    PlayerDestructionCompleteEvent,
+    ZeroArmorEvent,
+} from "../nova_plugin/death_plugin";
 import { ShipComponent, ShipDataComponent } from "../nova_plugin/ship_plugin";
 import { DeathAISystem } from "../nova_plugin/npc_plugin";
 import { EntityBudgetResource, reserveEntity } from "../nova_plugin/entity_budget";
@@ -25,16 +32,27 @@ import {
     advanceExplosionTiming,
     ExplosionTimingState,
 } from "./explosion_timing";
+import {
+    completeDestructionVisual,
+    registerDestructionVisual,
+} from "./destruction_visual_state";
 
 
 const ExplosionState =
     new Component<ExplosionTimingState>('ExplosionState');
+const DestructionCompletionTarget =
+    new Component<string>('DestructionCompletionTarget');
+const ActiveDestructionVisuals =
+    new Resource<Map<string, number>>('ActiveDestructionVisuals');
 
 export const ExplosionSystem = new System({
     name: 'ExplosionSystem',
     args: [AnimationGraphicComponent, ExplosionDataComponent,
-        ExplosionState, TimeResource, Entities, UUID, Emit] as const,
-    step(graphic, explosionData, explosionState, time, entities, uuid, emit) {
+        ExplosionState, TimeResource, Entities, UUID, Emit,
+        ActiveDestructionVisuals,
+        Optional(DestructionCompletionTarget)] as const,
+    step(graphic, explosionData, explosionState, time, entities, uuid, emit,
+        activeDestructionVisuals, completionTarget) {
         const starting = explosionState.startTime === undefined;
         const timing = advanceExplosionTiming(
             explosionState,
@@ -52,6 +70,12 @@ export const ExplosionSystem = new System({
 
         if (timing.done) {
             entities.delete(uuid);
+            if (completionTarget && completeDestructionVisual(
+                activeDestructionVisuals,
+                completionTarget,
+            )) {
+                emit(PlayerDestructionCompleteEvent, time, [completionTarget]);
+            }
         }
     }
 });
@@ -79,8 +103,11 @@ function randomPointInCircle(r: number): Vector {
 const SecondaryExplosionSystem = new System({
     name: 'SecondaryExplosion',
     args: [SecondaryExplosionComponent, TimeResource, Entities,
-        MovementStateComponent, EntityBudgetResource] as const,
-    step(explosion, time, entities, { position }, budget) {
+        MovementStateComponent, EntityBudgetResource,
+        ActiveDestructionVisuals,
+        Optional(DestructionCompletionTarget)] as const,
+    step(explosion, time, entities, { position }, budget,
+        activeDestructionVisuals, completionTarget) {
         if (!explosion.lastTime) {
             explosion.lastTime = 0;
         }
@@ -96,9 +123,15 @@ const SecondaryExplosionSystem = new System({
         const child = makeExplosion({
             ...explosion.explosion,
             sound: null,
-        }, pos);
+        }, pos, undefined, completionTarget);
         if (reserveEntity(budget, child, 'explosion')) {
             entities.set(v4(), child);
+            if (completionTarget) {
+                registerDestructionVisual(
+                    activeDestructionVisuals,
+                    completionTarget,
+                );
+            }
         }
     }
 });
@@ -139,15 +172,19 @@ const ShipFinalExplosionSystem = new System({
     events: [DeathEvent],
     before: [PlayerDeathSystem, DeathAISystem],
     args: [ShipDataComponent, GameDataResource, MovementStateComponent,
-        Entities, EntityBudgetResource] as const,
-    step(ship, gameData, movement, entities, budget) {
+        Entities, EntityBudgetResource, UUID, Emit, TimeResource,
+        ActiveDestructionVisuals] as const,
+    step(ship, gameData, movement, entities, budget, shipUuid, emit, time,
+        activeDestructionVisuals) {
         if (!ship.finalExplosion) {
+            emit(PlayerDestructionCompleteEvent, time, [shipUuid]);
             return;
         }
         const explosionData =
             gameData.data.Explosion.getCached(ship.finalExplosion);
 
         if (!explosionData) {
+            emit(PlayerDestructionCompleteEvent, time, [shipUuid]);
             return;
         }
         let largeExplosion: ExplosionData | undefined;
@@ -157,9 +194,13 @@ const ShipFinalExplosionSystem = new System({
         const explosion = makeExplosion(
             explosionData,
             Position.fromVectorLike(movement.position),
-            largeExplosion);
+            largeExplosion,
+            shipUuid);
         if (reserveEntity(budget, explosion, 'explosion')) {
             entities.set(v4(), explosion);
+            registerDestructionVisual(activeDestructionVisuals, shipUuid);
+        } else {
+            emit(PlayerDestructionCompleteEvent, time, [shipUuid]);
         }
     }
 });
@@ -197,7 +238,7 @@ const ShipSecondaryExplosionDoneSystem = new System({
 });
 
 export function makeExplosion(explosionData: ExplosionData, position: Position,
-    secondaryExplosionData?: ExplosionData) {
+    secondaryExplosionData?: ExplosionData, completionTarget?: string) {
     const explosion = new Entity()
         .addComponent(ExplosionDataComponent, explosionData)
         .addComponent(ExplosionState, {})
@@ -215,12 +256,17 @@ export function makeExplosion(explosionData: ExplosionData, position: Position,
             period: framesToMilliseconds(30),
         });
     }
+    if (completionTarget) {
+        explosion.addComponent(
+            DestructionCompletionTarget, completionTarget);
+    }
     return explosion;
 }
 
 export const ExplosionPlugin: Plugin = {
     name: 'ExplosionPlugin',
     build(world) {
+        world.resources.set(ActiveDestructionVisuals, new Map());
         world.addSystem(ExplosionSystem);
         world.addSystem(ProjectileExplosionSystem);
         world.addSystem(SecondaryExplosionSystem);
@@ -235,5 +281,6 @@ export const ExplosionPlugin: Plugin = {
         world.removeSystem(ShipFinalExplosionSystem);
         world.removeSystem(ShipSecondaryExplosionSystem);
         world.removeSystem(ShipSecondaryExplosionDoneSystem);
+        world.resources.delete(ActiveDestructionVisuals);
     }
 }

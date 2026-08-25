@@ -2,16 +2,15 @@ import { MissionData, MissionOfferLocation } from 'novadatainterface/MissionData
 import { PlanetData } from 'novadatainterface/PlanetData';
 import { SystemData } from 'novadatainterface/SystemData';
 import { GovtData } from 'novadatainterface/GovtData';
+import { STANDARD_COMMODITIES } from 'novadatainterface/CommodityData';
 import { Entity } from 'nova_ecs/entity';
 import * as PIXI from 'pixi.js';
 import { Observable } from 'rxjs';
-import { resourceId } from '../common/resource_id';
 import { GameData } from '../client/gamedata/GameData';
 import { ControlEvent } from '../nova_plugin/controls_plugin';
 import {
     acceptMission,
     abortMission,
-    formatMissionText,
     MissionDestinationOptions,
     PendingMissionJumpComponent,
     PendingMissionSoundComponent,
@@ -19,6 +18,11 @@ import {
     ResolvedMissionDestinations,
     refuseMission,
 } from '../nova_plugin/mission_plugin';
+import {
+    formatVisibleMissionText,
+    missionInfoDisplayText,
+    missionOfferDisplayText,
+} from '../nova_plugin/mission_text';
 import { NcbRuntime } from '../nova_plugin/ncb_runtime';
 import { ShipDataComponent } from '../nova_plugin/ship_plugin';
 import {
@@ -37,10 +41,19 @@ import { OutfitsStateComponent } from '../nova_plugin/outfit_plugin';
 import {
     generateProceduralMissions,
     ProceduralMissionOffer,
+    seededRandom,
 } from '../nova_plugin/procedural_missions';
 import { Button } from './button';
 import { Menu } from './menu';
 import { MenuControls } from './menu_controls';
+import {
+    BAR_LAYOUT,
+    MISSION_BBS_LAYOUT,
+    MISSION_INFO_LAYOUT,
+    MissionPanelLayout,
+    preferRetailOffers,
+    selectionPage,
+} from './mission_bbs_layout';
 
 const MISSION_FONT = {
     title: {
@@ -80,6 +93,55 @@ interface MissionOffer {
     mission: MissionData;
     resolved: ResolvedMissionDestinations;
     available: boolean;
+}
+
+function panelPosition(
+    layout: MissionPanelLayout,
+    region: { x: number; y: number },
+) {
+    return {
+        x: region.x - layout.width / 2,
+        y: region.y - layout.height / 2,
+    };
+}
+
+function addViewportMask(
+    owner: PIXI.Container,
+    target: PIXI.Container,
+    layout: MissionPanelLayout,
+    region: { x: number; y: number; width: number; height: number },
+) {
+    const mask = new PIXI.Graphics();
+    const position = panelPosition(layout, region);
+    mask.beginFill(0xffffff);
+    mask.drawRect(position.x, position.y, region.width, region.height);
+    mask.endFill();
+    target.mask = mask;
+    owner.addChild(mask, target);
+}
+
+function preparedMission(
+    mission: MissionData,
+    seed: string,
+): MissionData {
+    const random = seededRandom(`${seed}:${mission.id}`);
+    let cargo = mission.cargo;
+    let cargoType = mission.cargoType;
+    if (cargoType === 1000) {
+        cargoType = Math.floor(random() * STANDARD_COMMODITIES.length);
+        cargo = STANDARD_COMMODITIES[cargoType]!;
+    }
+    let cargoQty = mission.cargoQty;
+    if (cargoQty <= -2) {
+        const nominal = Math.abs(cargoQty);
+        cargoQty = Math.max(1, Math.round(nominal * (0.5 + random())));
+    }
+    return {
+        ...mission,
+        cargoType,
+        cargoQty,
+        cargo: cargo?.replace(/^\*/, '') ?? null,
+    };
 }
 
 const worldCache = new WeakMap<GameData, Promise<MissionBoardWorld>>();
@@ -259,27 +321,38 @@ export class MissionInfo extends Menu<Entity> {
         mission: MissionData;
     }> = [];
     private selectionIndex = -1;
+    private firstVisible = 0;
     private readonly ncbRuntime: NcbRuntime;
 
     constructor(
         gameData: GameData,
         controlEvents: Observable<ControlEvent>,
     ) {
-        super(gameData, 'nova:8500', controlEvents);
+        super(gameData, MISSION_INFO_LAYOUT.background, controlEvents);
         this.ncbRuntime = new NcbRuntime(gameData);
-        this.abortButton = new Button(gameData, 'Abort', 65, { x: -60, y: 190 });
-        const done = new Button(gameData, 'Done', 65, { x: 60, y: 190 });
+        this.abortButton = new Button(gameData, 'Abort', 55, { x: -100, y: 50 });
+        const done = new Button(gameData, 'Done', 50, { x: 30, y: 50 });
         this.addButtons({ abort: this.abortButton, done });
         this.abortButton.click.subscribe(() => this.abortSelected());
         done.click.subscribe(this.done.bind(this));
 
         this.title.anchor.x = 0.5;
-        this.title.position.set(0, -205);
-        this.list.position.set(-290, -170);
-        this.detail.position.set(-40, -170);
-        this.status.position.set(-290, 155);
-        this.container.addChild(
-            this.title, this.list, this.detail, this.status);
+        this.title.style.fontSize = 10;
+        this.title.position.set(0, -74);
+        this.list.position.set(-226.5, -53.5);
+        this.detail.position.set(-21.5, -53.5);
+        this.status.position.set(-21.5, 18);
+        this.status.style.wordWrapWidth = 240;
+        this.container.addChild(this.title);
+        addViewportMask(
+            this.container, this.list, MISSION_INFO_LAYOUT,
+            MISSION_INFO_LAYOUT.list);
+        addViewportMask(
+            this.container, this.detail, MISSION_INFO_LAYOUT,
+            MISSION_INFO_LAYOUT.detail!);
+        addViewportMask(
+            this.container, this.status, MISSION_INFO_LAYOUT,
+            MISSION_INFO_LAYOUT.detail!);
         this.controls = new MenuControls(controlEvents, {
             up: () => this.moveSelection(-1),
             down: () => this.moveSelection(1),
@@ -324,9 +397,11 @@ export class MissionInfo extends Menu<Entity> {
             this.entries = missions.filter((entry): entry is {
                 entry: ActiveMission;
                 mission: MissionData;
-            } => entry !== undefined && entry.mission !== undefined);
+            } => entry !== undefined && entry.mission !== undefined
+                && (entry.mission.flags & 0x0400) === 0);
         }
         this.selectionIndex = this.entries.length > 0 ? 0 : -1;
+        this.firstVisible = 0;
         this.render();
     }
 
@@ -349,7 +424,8 @@ export class MissionInfo extends Menu<Entity> {
             return;
         }
         const world = this.missionWorld;
-        this.list.text = this.entries.map(({ entry, mission }, index) => {
+        const state = this.input.components.get(PlayerStateComponent);
+        const rows = this.entries.map(({ entry, mission }, index) => {
             const destinationId = entry.travelDestination
                 ?? entry.destination;
             const destination = world
@@ -358,10 +434,30 @@ export class MissionInfo extends Menu<Entity> {
                 && mission.timeLimit > 0
                 ? formatGameDate(entry.acceptedDate + mission.timeLimit)
                 : undefined;
-            return `${index === this.selectionIndex ? '▶ ' : '  '}${mission.name}`
-                + ` [${entry.state}]\n   ${destination}`
-                + (deadline ? ` — due ${deadline}` : '');
-        }).join('\n');
+            const name = formatVisibleMissionText(mission.name, {
+                destination,
+                destinationSystem: systemNameForPlanet(destinationId, world ?? {
+                    systems: [], planets: [], governments: [],
+                    planetNames: new Map(), systemNames: new Map(),
+                }),
+                cargo: mission.cargo?.replace(/^\*/, '') ?? undefined,
+                quantity: entry.cargo?.quantity,
+                pilotName: state?.pilotName,
+                shipName: state?.shipName,
+                shipType: state?.shipId,
+            });
+            return `${index === this.selectionIndex ? '▶ ' : '  '}${name}`
+                + ` [${entry.state}] — ${destination}`
+                + (deadline ? `, due ${deadline}` : '');
+        });
+        const heights = rows.map(row => Math.max(
+            14,
+            PIXI.TextMetrics.measureText(row, this.list.style).height + 3));
+        const page = selectionPage(
+            heights, this.selectionIndex, this.firstVisible,
+            MISSION_INFO_LAYOUT.list.height);
+        this.firstVisible = page.start;
+        this.list.text = rows.slice(page.start, page.end).join('\n');
         const selected = this.entries[this.selectionIndex];
         if (!selected) {
             return;
@@ -386,10 +482,8 @@ export class MissionInfo extends Menu<Entity> {
             ? formatGameDate(
                 selected.entry.acceptedDate + selected.mission.timeLimit)
             : undefined;
-        const state = this.input.components.get(PlayerStateComponent);
-        this.detail.text = formatMissionText(
-            selected.mission.quickBrief || selected.mission.briefText
-            || 'Mission briefing unavailable.',
+        this.detail.text = formatVisibleMissionText(
+            missionInfoDisplayText(selected.mission),
             {
                 destination,
                 destinationSystem,
@@ -444,13 +538,14 @@ export abstract class MissionBoard extends Menu<Entity> {
     private readonly title: PIXI.Text;
     private readonly flavor: PIXI.Text;
     private readonly list: PIXI.Text;
-    private readonly unavailableList: PIXI.Text;
     private readonly detail: PIXI.Text;
     private readonly status: PIXI.Text;
     private readonly briefingGraphic = new PIXI.Container();
+    private readonly layout: MissionPanelLayout;
     private offers: MissionOffer[] = [];
     private world?: MissionBoardWorld;
     private selectionIndex = -1;
+    private firstVisible = 0;
     private readonly planetId: string;
     private readonly offerLocation: MissionOfferLocation;
     private readonly onInfo?: () => void | Promise<void>;
@@ -458,6 +553,9 @@ export abstract class MissionBoard extends Menu<Entity> {
     private readonly acceptButton: Button;
     private showing?: Promise<Entity>;
     private refreshGeneration = 0;
+    private sessionKey?: string;
+    private shipTypeName?: string;
+    private loading = false;
 
     constructor(
         gameData: GameData,
@@ -467,8 +565,15 @@ export abstract class MissionBoard extends Menu<Entity> {
         flavorText: string,
         onInfo?: () => void | Promise<void>,
     ) {
-        super(gameData, 'nova:8500', controlEvents);
+        super(
+            gameData,
+            offerLocation === MissionOfferLocation.Bar
+                ? BAR_LAYOUT.background : MISSION_BBS_LAYOUT.background,
+            controlEvents,
+        );
         this.ncbRuntime = new NcbRuntime(gameData);
+        this.layout = offerLocation === MissionOfferLocation.Bar
+            ? BAR_LAYOUT : MISSION_BBS_LAYOUT;
         this.planetId = planetId;
         this.offerLocation = offerLocation;
         this.onInfo = onInfo;
@@ -480,31 +585,62 @@ export abstract class MissionBoard extends Menu<Entity> {
         );
         this.flavor = new PIXI.Text(flavorText, MISSION_FONT.flavor);
         this.list = new PIXI.Text('', MISSION_FONT.list);
-        this.unavailableList = new PIXI.Text(
-            '', MISSION_FONT.unavailableList);
         this.detail = new PIXI.Text('', MISSION_FONT.detail);
         this.status = new PIXI.Text('', MISSION_FONT.status);
         this.title.anchor.x = 0.5;
-        this.title.position.set(0, -210);
-        this.flavor.position.set(-210, -190);
-        this.list.position.set(-290, -125);
-        this.detail.position.set(-40, -125);
-        this.status.position.set(-290, 150);
+        this.title.style.fontSize = 10;
+        this.title.position.set(
+            0, this.layout.header.y - this.layout.height / 2);
+        this.flavor.visible = false;
+        const listPosition = panelPosition(this.layout, this.layout.list);
+        this.list.position.set(listPosition.x, listPosition.y);
+        this.list.style.wordWrapWidth = this.layout.list.width - 4;
+        if (this.layout.detail) {
+            const detailPosition = panelPosition(
+                this.layout, this.layout.detail);
+            this.detail.position.set(detailPosition.x, detailPosition.y);
+            this.detail.style.wordWrapWidth = this.layout.detail.width - 4;
+            this.status.position.set(
+                detailPosition.x,
+                detailPosition.y + this.layout.detail.height - 25);
+            this.status.style.wordWrapWidth = this.layout.detail.width - 4;
+        } else {
+            this.detail.visible = false;
+            this.status.visible = false;
+        }
 
-        const accept = new Button(gameData, 'Accept', 70, { x: -120, y: 190 });
+        const footerY = this.layout.footerY - this.layout.height / 2 + 5;
+        const buttonStart = -this.layout.width / 2 + 8;
+        const buttonGap = this.layout === BAR_LAYOUT ? 64 : 120;
+        const accept = new Button(
+            gameData, 'Accept', 35, { x: buttonStart, y: footerY });
         this.acceptButton = accept;
-        const refuse = new Button(gameData, 'Refuse', 70, { x: -40, y: 190 });
-        const info = new Button(gameData, 'Missions', 80, { x: 55, y: 190 });
-        const done = new Button(gameData, 'Done', 60, { x: 150, y: 190 });
+        const refuse = new Button(
+            gameData, 'Refuse', 35, { x: buttonStart + buttonGap, y: footerY });
+        const info = new Button(
+            gameData, 'Info', 30, { x: buttonStart + buttonGap * 2, y: footerY });
+        const done = new Button(
+            gameData, 'Done', 30, {
+                x: buttonStart + buttonGap * 3 - 5, y: footerY,
+            });
         this.addButtons({ accept, refuse, info, done });
         accept.click.subscribe(() => this.acceptSelected());
         refuse.click.subscribe(() => this.refuseSelected());
         info.click.subscribe(() => this.onInfo?.());
         done.click.subscribe(this.done.bind(this));
 
-        this.container.addChild(
-            this.title, this.flavor, this.list, this.unavailableList,
-            this.detail, this.status, this.briefingGraphic);
+        this.container.addChild(this.title, this.flavor, this.briefingGraphic);
+        addViewportMask(
+            this.container, this.list, this.layout, this.layout.list);
+        if (this.layout.detail) {
+            addViewportMask(
+                this.container, this.detail, this.layout, this.layout.detail);
+            addViewportMask(
+                this.container, this.status, this.layout, this.layout.detail);
+        } else {
+            addViewportMask(
+                this.container, this.status, this.layout, this.layout.list);
+        }
         this.controls = new MenuControls(controlEvents, {
             up: () => this.moveSelection(-1),
             down: () => this.moveSelection(1),
@@ -532,8 +668,40 @@ export abstract class MissionBoard extends Menu<Entity> {
     private async showOnce(input: Entity): Promise<Entity> {
         await this.buildPromise;
         this.setInput(input);
-        await this.refreshOffers();
-        return super.show(input);
+        const state = input.components.get(PlayerStateComponent);
+        const nextSessionKey = state
+            ? `${this.planetId}:${state.currentSystem}:${state.gameDate}`
+            : undefined;
+        const needsRefresh = nextSessionKey !== this.sessionKey;
+        if (needsRefresh) {
+            this.loading = true;
+            this.offers = [];
+            this.selectionIndex = -1;
+            this.firstVisible = 0;
+            this.list.text = 'Loading mission postings…';
+            this.detail.text = '';
+            this.status.text = '';
+            this.acceptButton.state = 'grey';
+        } else if (this.loading) {
+            this.list.text = 'Loading mission postings…';
+            this.detail.text = '';
+            this.status.text = '';
+        } else {
+            this.render();
+        }
+        const result = super.show(input);
+        if (needsRefresh) {
+            this.sessionKey = nextSessionKey;
+            void this.refreshOffers().catch(error => {
+                console.error('Unable to load mission postings', error);
+                this.loading = false;
+                this.offers = [];
+                this.list.text = 'Mission postings are temporarily unavailable.';
+                this.detail.text = '';
+                this.status.text = '';
+            });
+        }
+        return result;
     }
 
     private async refreshOffers(statusOverride?: string) {
@@ -541,10 +709,11 @@ export abstract class MissionBoard extends Menu<Entity> {
         const state = this.input.components.get(PlayerStateComponent);
         if (!state) {
             this.offers = [];
+            this.loading = false;
             this.render();
             return;
         }
-        await this.syncCargoCapacity(state);
+        this.shipTypeName = await this.syncCargoCapacity(state);
         const [world, missions] = await Promise.all([
             loadMissionWorld(this.gameData),
             loadMissionCatalog(this.gameData),
@@ -573,8 +742,12 @@ export abstract class MissionBoard extends Menu<Entity> {
             governments: world.governments,
             outfits: this.input.components.get(OutfitsStateComponent),
         }).sort((a, b) => b.displayWeight - a.displayWeight);
+        const offerSeed = this.sessionKey
+            ?? `${state.currentSystem}:${this.planetId}:${state.gameDate}`;
         const resourceOffers = offerable
-            .map(mission => ({
+            .map(sourceMission => {
+                const mission = preparedMission(sourceMission, offerSeed);
+                return {
                 mission,
                 resolved: resolveMissionDestinations(state, mission, {
                     initialPlanetId: this.planetId,
@@ -583,13 +756,17 @@ export abstract class MissionBoard extends Menu<Entity> {
                     governments: world.governments,
                     initialSystemId: state.currentSystem,
                     currentSystemId: state.currentSystem,
+                    random: seededRandom(`${offerSeed}:${mission.id}:destination`),
                 }),
-                available: true,
-            }))
+                available: mission.cargoType < 0 || mission.cargoQty === -1
+                    || mission.cargoQty <= getFreeSpace(state),
+            };
+            })
             .filter((offer): offer is MissionOffer =>
                 offer.resolved !== undefined);
         const proceduralOffers: MissionOffer[] = this.offerLocation
             === MissionOfferLocation.MissionComputer
+            && resourceOffers.length === 0
             ? generateProceduralMissions({
                 currentSystemId: state.currentSystem,
                 currentPlanetId: this.planetId,
@@ -613,9 +790,11 @@ export abstract class MissionBoard extends Menu<Entity> {
             }))
             : [];
         // The generated board is shown first, like the original Mission
-        // Computer, before data-driven mïsn resources.
-        this.offers = [...proceduralOffers, ...resourceOffers];
+        // Computer only when no usable retail mïsn resources exist.
+        this.offers = [...preferRetailOffers(resourceOffers, proceduralOffers)];
         this.selectionIndex = this.offers.length > 0 ? 0 : -1;
+        this.firstVisible = 0;
+        this.loading = false;
         this.render();
         if (statusOverride) {
             this.status.text = statusOverride;
@@ -624,18 +803,20 @@ export abstract class MissionBoard extends Menu<Entity> {
 
     private async syncCargoCapacity(
         state: PlayerState,
-    ): Promise<void> {
+    ): Promise<string | undefined> {
         const shipData = this.input.components.get(ShipDataComponent);
         if (shipData) {
             setCargoCapacity(state, shipData.cargoCapacity);
-            return;
+            return shipData.name;
         }
         try {
             const ship = await this.gameData.data.Ship.get(state.shipId);
             setCargoCapacity(state, ship.cargoCapacity);
+            return ship.name;
         } catch {
             // The persisted fallback capacity remains usable for old data
             // providers which do not expose ship cargo fields.
+            return undefined;
         }
     }
 
@@ -666,11 +847,13 @@ export abstract class MissionBoard extends Menu<Entity> {
     }
 
     private render() {
-        this.briefingGraphic.removeChildren();
+        for (const child of this.briefingGraphic.removeChildren()) {
+            child.destroy();
+        }
         if (this.offers.length === 0 || this.selectionIndex < 0) {
             this.list.text = 'No missions are available here.';
-            this.unavailableList.text = '';
             this.detail.text = '';
+            this.status.text = '';
             this.acceptButton.state = 'grey';
             return;
         }
@@ -678,17 +861,32 @@ export abstract class MissionBoard extends Menu<Entity> {
         if (!world) {
             return;
         }
-        const offerText = (offer: MissionOffer, index: number) =>
-            `${index === this.selectionIndex ? '▶ ' : '  '}`
-            + `${offer.available ? '' : '[NO ROOM] '}${offer.mission.name}`
-            + `\n   ${firstBriefLine(offer.mission)}`;
-        // Keep unavailable entries in the same line slots as the normal list,
-        // but render them in a separate grey layer so they are visibly
-        // disabled rather than merely carrying a status label.
-        this.list.text = this.offers.map((offer, index) =>
-            offer.available ? offerText(offer, index) : '\n').join('\n');
-        this.unavailableList.text = this.offers.map((offer, index) =>
-            offer.available ? '\n' : offerText(offer, index)).join('\n');
+        const state = this.input.components.get(PlayerStateComponent);
+        const valuesFor = (offer: MissionOffer) => ({
+            ...missionValues(
+                offer.mission, this.planetId, world, state?.gameDate ?? 0,
+                offer.resolved, state),
+            shipType: this.shipTypeName ?? state?.shipId,
+        });
+        const rows = this.offers.map((candidate, index) => {
+            const values = valuesFor(candidate);
+            const name = formatVisibleMissionText(
+                candidate.mission.name, values);
+            const summary = formatVisibleMissionText(
+                firstBriefLine(candidate.mission), values);
+            const body = this.layout === BAR_LAYOUT
+                ? `${name}: ${summary}` : name;
+            return `${index === this.selectionIndex ? '▶ ' : '  '}${
+                candidate.available ? '' : '[NO ROOM] '}${body}`;
+        });
+        const heights = rows.map(row => Math.max(
+            14,
+            PIXI.TextMetrics.measureText(row, this.list.style).height + 3));
+        const page = selectionPage(
+            heights, this.selectionIndex, this.firstVisible,
+            this.layout.list.height);
+        this.firstVisible = page.start;
+        this.list.text = rows.slice(page.start, page.end).join('\n');
         const offer = this.offers[this.selectionIndex];
         if (!offer) {
             return;
@@ -697,24 +895,11 @@ export abstract class MissionBoard extends Menu<Entity> {
             || offer.mission.shipGoal === 5;
         this.acceptButton.state = offer.available && !boardingUnsupported
             ? 'normal' : 'grey';
-        const state = this.input.components.get(PlayerStateComponent);
-        const values = missionValues(
-            offer.mission, this.planetId, world, state?.gameDate ?? 0,
-            offer.resolved, state);
-        this.detail.text = formatMissionText(
-            offer.mission.briefText || offer.mission.quickBrief
-            || offer.mission.offerText
-            || 'Mission briefing unavailable.',
+        const values = valuesFor(offer);
+        this.detail.text = formatVisibleMissionText(
+            missionOfferDisplayText(offer.mission),
             values,
         );
-        const briefGraphic = offer.mission.briefGraphic;
-        if (briefGraphic !== undefined && briefGraphic > 0) {
-            const graphic = this.gameData.spriteFromPict(
-                resourceId(briefGraphic));
-            graphic.position.set(205, -100);
-            graphic.scale.set(0.45);
-            this.briefingGraphic.addChild(graphic);
-        }
         this.status.text = boardingUnsupported
             ? 'Boarding missions are not supported yet.'
             : `Payment: ${offer.mission.payVal > 0
@@ -768,7 +953,12 @@ export abstract class MissionBoard extends Menu<Entity> {
         this.selectionIndex = Math.min(
             this.selectionIndex, this.offers.length - 1);
         this.render();
-        void this.refreshOffers(`Mission accepted: ${offer.mission.name}`);
+        this.status.text = `Mission accepted: ${formatVisibleMissionText(
+            offer.mission.name,
+            missionValues(
+                offer.mission, this.planetId, this.world!,
+                state.gameDate, offer.resolved, state),
+        )}`;
     }
 
     private refuseSelected() {
@@ -787,7 +977,7 @@ export abstract class MissionBoard extends Menu<Entity> {
         this.selectionIndex = Math.min(
             this.selectionIndex, this.offers.length - 1);
         this.render();
-        this.status.text = formatMissionText(
+        this.status.text = formatVisibleMissionText(
             offer.mission.refuseText || 'Mission refused.',
             missionValues(
                 offer.mission, this.planetId, this.world!, state.gameDate,

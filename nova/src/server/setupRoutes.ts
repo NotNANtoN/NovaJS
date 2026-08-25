@@ -7,6 +7,15 @@ import { GameDataInterface } from "../../../novadatainterface/GameDataInterface"
 import { NovaDataType } from "../../../novadatainterface/NovaDataInterface";
 import { PlayerStore } from "./player_store";
 
+export const IMMUTABLE_ASSET_CACHE =
+    'public, max-age=31536000, immutable';
+export const REVALIDATE_METADATA_CACHE = 'no-cache';
+
+export function gameDataCacheControl(requestPath: string): string {
+    return /\.(?:png|mp3)$/i.test(requestPath)
+        ? IMMUTABLE_ASSET_CACHE
+        : REVALIDATE_METADATA_CACHE;
+}
 
 /**
  * Serves GameData to the client
@@ -99,8 +108,8 @@ class GameDataServer {
         // expects assets to be loaded from URLs.
 
         this.app.use(gzipMiddleware);
-        this.app.use(dataPath, (_req, res, next) => {
-            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        this.app.use(dataPath, (req, res, next) => {
+            res.setHeader('Cache-Control', gameDataCacheControl(req.path));
             next();
         });
 
@@ -108,21 +117,28 @@ class GameDataServer {
         this.app.get(path.join(dataPath, ":name/:item.json"), this.requestFulfiller.bind(this));
         this.app.get(path.join(dataPath, ":name/:item.mp3"), this.requestFulfiller.bind(this));
         this.app.get(path.join(dataPath, ":name/:item"), this.requestFulfiller.bind(this));
-        this.app.get(idsPath + ".json", this.idRequestFulfiller.bind(this));
+        this.app.get(idsPath + ".json", (_req, res, next) => {
+            res.setHeader('Cache-Control', REVALIDATE_METADATA_CACHE);
+            next();
+        }, this.idRequestFulfiller.bind(this));
 
         if (this.novaDataPath) {
             this.app.get("/music/Nova%20Music.mp3", (_req, res) => {
-                res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+                res.setHeader('Cache-Control', IMMUTABLE_ASSET_CACHE);
                 res.sendFile(path.join(this.novaDataPath!, "Nova Files",
                     "Nova Music.mp3"));
             });
         }
 
         this.app.use('/preloadData.json', async (_req, res) => {
+            res.setHeader('Cache-Control', REVALIDATE_METADATA_CACHE);
             res.send(this.gameData.preloadData ? await this.gameData.preloadData : {});
         });
 
-        this.app.use(settingsPrefix,
+        this.app.use(settingsPrefix, (_req, res, next) => {
+            res.setHeader('Cache-Control', REVALIDATE_METADATA_CACHE);
+            next();
+        },
             express.static(path.dirname(this.settingsPath)));
 
         if (this.playerStore) {
@@ -193,6 +209,7 @@ class GameDataServer {
         //        const staticPath = path.join(this.appRoot, "build", "static");
         //        this.app.use("/static", express.static(staticPath));
         this.app.use("/settings/controls.json", (_req: express.Request, res: express.Response) => {
+            res.setHeader('Cache-Control', REVALIDATE_METADATA_CACHE);
             res.sendFile(this.settingsPath);
         });
 

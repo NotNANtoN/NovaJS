@@ -15,12 +15,20 @@ import { MultiRoom } from "./communication/multi_room_communicator";
 import { SocketChannelClient } from "./communication/SocketChannelClient";
 import { DebugSettings } from "./debug_settings";
 import { Display } from "./display/display_plugin";
-import { startTitleMusicOnGesture, stopTitleMusic } from "./display/music";
+import {
+    getTitleMusicState,
+    startTitleMusicOnGesture,
+    stopTitleMusic,
+} from "./display/music";
 import { PixiAppResource } from "./display/pixi_app_resource";
 import { ResizeEvent } from "./display/screen_size_plugin";
 import { Stage } from "./display/stage_resource";
 import { GameDataResource } from "./nova_plugin/game_data_resource";
-import { FinishJumpEvent } from "./nova_plugin/jump_plugin";
+import {
+    FinishJumpEvent,
+    restartJumpArrival,
+} from "./nova_plugin/jump_plugin";
+import { RespawnRelocationEvent } from "./nova_plugin/death_plugin";
 import { makeShip } from "./nova_plugin/make_ship";
 import { makeSystem } from "./nova_plugin/make_system";
 import { MultiRoomResource, NovaPlugin, SystemComponent } from "./nova_plugin/nova_plugin";
@@ -61,6 +69,7 @@ const app = new PIXI.Application({
 });
 
 (window as any).app = app;
+(window as any).novaTitleMusicState = getTitleMusicState;
 document.body.appendChild(app.view as any);
 startTitleMusicOnGesture();
 
@@ -187,7 +196,12 @@ async function leaveGameWorld() {
     system = undefined;
 }
 
-async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: string }) {
+type SystemTransitionCause = 'initial' | 'hyperjump' | 'respawn';
+
+async function transitionTo(
+    { entity, to, uuid }: { entity: Entity, to: string, uuid: string },
+    cause: SystemTransitionCause,
+) {
     if (system) {
         await leaveGameWorld();
     }
@@ -209,7 +223,10 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
     const room = multiRoom.join(to);
     await newSystem.addPlugin(multiplayer(room));
 
-    newSystem.events.get(FinishJumpEvent).subscribe(jumpTo);
+    newSystem.events.get(FinishJumpEvent).subscribe(transition =>
+        void transitionTo(transition, 'hyperjump'));
+    newSystem.events.get(RespawnRelocationEvent).subscribe(transition =>
+        void transitionTo(transition, 'respawn'));
 
     if (!world) {
         throw new Error('Game world was not initialized');
@@ -220,6 +237,11 @@ async function jumpTo({ entity, to, uuid }: { entity: Entity, to: string, uuid: 
     // Wait for the server to connect
     if (!room.peers.current.value.has('server')) {
         await firstValueFrom(room.peers.join.pipe(filter(a => a === 'server')));
+    }
+    if (cause === 'hyperjump') {
+        // World construction and room handshakes can take longer than the
+        // visual arrival phase. Start it when the destination can draw.
+        restartJumpArrival(entity);
     }
     newSystem.entities.set(uuid, entity);
     system = newSystem;
@@ -260,11 +282,11 @@ async function startGame(
     const systemId = ids.System.includes(requestedSystem)
         ? requestedSystem : 'nova:130';
 
-    await jumpTo({
+    await transitionTo({
         entity: shipEntity,
         to: systemId,
         uuid: v4(),
-    });
+    }, 'initial');
     stopTitleMusic();
     gameRunning = true;
     resumeGameplay();
@@ -380,6 +402,7 @@ async function restoreSnapshot(snapshotId: string): Promise<PlayerData | undefin
 
 async function showMainMenu(playerData: PlayerData | undefined) {
     escapeMenu.hide();
+    startTitleMusicOnGesture();
     const menu = new StartMenu(gameData, {
         compatibilityProfile,
         controls: controlSettings,

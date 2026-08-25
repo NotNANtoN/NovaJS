@@ -2,6 +2,21 @@
 
 Read-only review of the current moving snapshot at `/tmp/NovaJS`.
 
+## Status note — 2026-08-25
+
+This remains a historical read-only review; the evidence and line references
+below have not been rewritten as the working tree changed.
+
+- Finding 5's modern test/CI path is complete: Node 24, `npm test`,
+  `npm run check`, hooks, and GitHub Actions are present.
+- Finding 3 is partly complete: a component-authority registry now covers
+  critical replication paths, and primitive component replication is fixed and
+  regression-tested. Broader authority migration remains open.
+- Findings 2 and 6 are partly complete: managed graphics and several teardown
+  paths now exist, but world/plugin and PIXI ownership are not fully unified.
+- Findings 1 and 4 remain open: persistence schemas and NCB runtime adapters
+  still need consolidation.
+
 ## Highest-priority findings
 
 ### 1. Player-state persistence has several competing schemas

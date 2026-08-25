@@ -2,6 +2,7 @@ import { WeaponData } from 'novadatainterface/WeaponData';
 import { Emit, UUID } from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
 import { EcsEvent } from 'nova_ecs/events';
+import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
 import { Time, TimeResource } from 'nova_ecs/plugins/time_plugin';
@@ -9,11 +10,18 @@ import { Provide } from 'nova_ecs/provide';
 import { System } from 'nova_ecs/system';
 import { mod } from '../util/mod';
 import { ControlStateEvent } from './control_state_event';
-import { WeaponEntries, WeaponLocalState, WeaponsComponent } from './fire_weapon_plugin';
+import {
+    WeaponEntries,
+    WeaponLocalState,
+    WeaponsComponent,
+    WeaponsLocalState,
+} from './fire_weapon_plugin';
 import { GameDataResource } from './game_data_resource';
 import { PlatformResource } from './platform_plugin';
 import { PlayerShipSelector } from './player_ship_plugin';
 import { WeaponsState, WeaponsStateComponent, WeaponState } from './weapons_state';
+import { ArmorComponent } from './health_plugin';
+import { DestructionStartedComponent } from './destruction_state';
 
 /**
  * Avoid an accidental large projectile burst after a stalled tab or server.
@@ -21,6 +29,22 @@ import { WeaponsState, WeaponsStateComponent, WeaponState } from './weapons_stat
  * when a single salvo contains more than this many projectiles.
  */
 export const MAX_WEAPON_PROJECTILES_PER_STEP = 16;
+
+export function clearWeaponFiringState(
+    weaponsState: WeaponsState,
+    weaponsLocalState: WeaponsLocalState,
+): void {
+    for (const [id, state] of weaponsState) {
+        state.firing = false;
+        const localState = weaponsLocalState.get(id);
+        localState.shotsOwed = 0;
+        localState.burstCount = 0;
+        localState.reloadingBurst = false;
+        localState.wasFiring = false;
+        localState.pressObserved = false;
+        localState.releaseAfterStep = false;
+    }
+}
 
 function getWeaponCount(state: WeaponState) {
     return Math.max(0, Math.floor(state.count));
@@ -61,8 +85,15 @@ function addShotsOwed(weapon: WeaponData, state: WeaponState,
 export const WeaponsSystem = new System({
     name: 'WeaponsSystem',
     args: [WeaponsStateComponent, WeaponsComponent,
-        TimeResource, UUID, WeaponEntries] as const,
-    step(weaponsState, weaponsLocalState, time, uuid, weaponEntries) {
+        TimeResource, UUID, WeaponEntries,
+        Optional(DestructionStartedComponent),
+        Optional(ArmorComponent)] as const,
+    step(weaponsState, weaponsLocalState, time, uuid, weaponEntries,
+        destructionStarted, armor) {
+        if (destructionStarted !== undefined || armor && armor.current <= 0) {
+            clearWeaponFiringState(weaponsState, weaponsLocalState);
+            return;
+        }
         for (const [id, state] of weaponsState) {
             const localState = weaponsLocalState.get(id);
             if (state.firing) {
@@ -228,8 +259,15 @@ const ControlPlayerWeapons = new System({
     name: 'ControlPlayerWeapons',
     events: [ControlStateEvent],
     args: [ControlStateEvent, WeaponsStateComponent, WeaponsComponent,
-        ActiveSecondaryWeapon, Emit, GameDataResource, PlayerShipSelector] as const,
-    step(controlState, weaponsState, weaponsLocalState, activeSecondary, emit, gameData) {
+        ActiveSecondaryWeapon, Emit, GameDataResource,
+        Optional(DestructionStartedComponent), Optional(ArmorComponent),
+        PlayerShipSelector] as const,
+    step(controlState, weaponsState, weaponsLocalState, activeSecondary, emit,
+        gameData, destructionStarted, armor) {
+        if (destructionStarted !== undefined || armor && armor.current <= 0) {
+            clearWeaponFiringState(weaponsState, weaponsLocalState);
+            return;
+        }
         for (const [id, weaponState] of weaponsState) {
             applyWeaponTrigger(weaponState, weaponsLocalState.get(id), false);
         }

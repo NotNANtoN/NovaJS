@@ -6,8 +6,12 @@ import {
     CollisionHitter,
     CollisionHitterComponent,
 } from "./collision_interaction";
-import { DamagedEvent, PlayerDeathComponent } from "./death_plugin";
-import { OwnerComponent, SourceComponent } from "./fire_weapon_plugin";
+import { AppliedDamageEvent, PlayerDeathComponent } from "./death_plugin";
+import {
+    AttackIntentComponent,
+    OwnerComponent,
+    SourceComponent,
+} from "./fire_weapon_plugin";
 import {
     GovernmentRelation,
     GovernmentRelationResource,
@@ -43,19 +47,40 @@ interface DamageAccumulator {
     lastDamageAt: number;
 }
 
+export type ThreatReportReason = "deliberate-targeting" | "sustained-fire";
+
+/**
+ * An internal ship-to-ship security broadcast. This is combat simulation
+ * state, not player-facing comm dialogue: once accepted by a government, its
+ * lifetime is independent of the reporting victim entity.
+ */
+export interface ThreatReport {
+    attacker: string;
+    reportingGovernment: number;
+    reportedBy?: string;
+    reportedAt: number;
+    expiresAt: number;
+    reason: ThreatReportReason;
+}
+
 export interface ProvocationState {
     readonly attackersByVictimGovernment: Map<number, Set<string>>;
+    readonly threatReportsByGovernment:
+        Map<number, Map<string, ThreatReport>>;
     readonly damageByVictimAttacker: Map<string, DamageAccumulator>;
     readonly lastProvocationAt: Map<string, number>;
     readonly personalAttackersByVictim: Map<string, Map<string, number>>;
+    readonly governmentProvocationsByVictim: Map<string, Set<string>>;
 }
 
 export function createProvocationState(): ProvocationState {
     return {
         attackersByVictimGovernment: new Map(),
+        threatReportsByGovernment: new Map(),
         damageByVictimAttacker: new Map(),
         lastProvocationAt: new Map(),
         personalAttackersByVictim: new Map(),
+        governmentProvocationsByVictim: new Map(),
     };
 }
 
@@ -94,6 +119,8 @@ export function recordProvocation(
     victimGovernment: number,
     attacker: string,
     now = 0,
+    victim?: string,
+    reason: ThreatReportReason = "sustained-fire",
 ): void {
     let attackers = state.attackersByVictimGovernment.get(victimGovernment);
     if (!attackers) {
@@ -101,7 +128,29 @@ export function recordProvocation(
         state.attackersByVictimGovernment.set(victimGovernment, attackers);
     }
     attackers.add(attacker);
-    state.lastProvocationAt.set(provocationKey(victimGovernment, attacker), now);
+    let reports = state.threatReportsByGovernment.get(victimGovernment);
+    if (!reports) {
+        reports = new Map();
+        state.threatReportsByGovernment.set(victimGovernment, reports);
+    }
+    reports.set(attacker, {
+        attacker,
+        reportingGovernment: victimGovernment,
+        reportedBy: victim,
+        reportedAt: now,
+        expiresAt: now + PROVOCATION_DECAY_MS,
+        reason,
+    });
+    const key = provocationKey(victimGovernment, attacker);
+    state.lastProvocationAt.set(key, now);
+    if (victim) {
+        let provocations = state.governmentProvocationsByVictim.get(victim);
+        if (!provocations) {
+            provocations = new Set();
+            state.governmentProvocationsByVictim.set(victim, provocations);
+        }
+        provocations.add(key);
+    }
 }
 
 /**
@@ -132,21 +181,57 @@ export function recordDamage(
     accumulator.damage += damage;
     accumulator.lastDamageAt = now;
     state.damageByVictimAttacker.set(key, accumulator);
-    recordPersonalProvocation(state, victim, attacker, now);
-
-    if (!propagateToGovernment
-        || accumulator.damage < victimTotalHealth * PROVOCATION_DAMAGE_FRACTION) {
+    if (accumulator.damage < victimTotalHealth * PROVOCATION_DAMAGE_FRACTION) {
         return false;
     }
 
-    recordProvocation(state, victimGovernment, attacker, now);
+    recordPersonalProvocation(state, victim, attacker, now);
+    if (propagateToGovernment) {
+        recordProvocation(
+            state, victimGovernment, attacker, now, victim, "sustained-fire");
+    }
     return true;
+}
+
+export function recordDeliberateProvocation(
+    state: ProvocationState,
+    victimGovernment: number,
+    victim: string,
+    attacker: string,
+    now: number,
+    propagateToGovernment = true,
+): void {
+    recordPersonalProvocation(state, victim, attacker, now);
+    if (propagateToGovernment) {
+        recordProvocation(state, victimGovernment, attacker, now, victim,
+            "deliberate-targeting");
+    }
+}
+
+function clearGovernmentThreat(
+    state: ProvocationState,
+    government: number,
+    attacker: string,
+): void {
+    state.attackersByVictimGovernment.get(government)?.delete(attacker);
+    if (state.attackersByVictimGovernment.get(government)?.size === 0) {
+        state.attackersByVictimGovernment.delete(government);
+    }
+    state.threatReportsByGovernment.get(government)?.delete(attacker);
+    if (state.threatReportsByGovernment.get(government)?.size === 0) {
+        state.threatReportsByGovernment.delete(government);
+    }
+    state.lastProvocationAt.delete(provocationKey(government, attacker));
 }
 
 export function clearProvocation(
     state: ProvocationState,
     entityUuid: string,
 ): void {
+    // A victim disappearing only removes personal retaliation and report
+    // provenance. Accepted security broadcasts belong to the government and
+    // remain valid until attacker cleanup or expiry.
+    state.governmentProvocationsByVictim.delete(entityUuid);
     state.personalAttackersByVictim.delete(entityUuid);
     for (const [victim, attackers] of state.personalAttackersByVictim) {
         attackers.delete(entityUuid);
@@ -155,11 +240,19 @@ export function clearProvocation(
         }
     }
     for (const [government, attackers] of state.attackersByVictimGovernment) {
-        attackers.delete(entityUuid);
-        if (attackers.size === 0) {
-            state.attackersByVictimGovernment.delete(government);
+        if (attackers.has(entityUuid)) {
+            clearGovernmentThreat(state, government, entityUuid);
         }
-        state.lastProvocationAt.delete(provocationKey(government, entityUuid));
+    }
+    for (const [victim, keys] of state.governmentProvocationsByVictim) {
+        for (const key of [...keys]) {
+            if (key.slice(key.indexOf(":") + 1) === entityUuid) {
+                keys.delete(key);
+            }
+        }
+        if (keys.size === 0) {
+            state.governmentProvocationsByVictim.delete(victim);
+        }
     }
     for (const key of state.damageByVictimAttacker.keys()) {
         const separator = key.lastIndexOf(":");
@@ -194,13 +287,13 @@ export function pruneProvocations(
     for (const [government, attackers] of state.attackersByVictimGovernment) {
         for (const attacker of attackers) {
             if (!activeEntities.has(attacker)) {
-                attackers.delete(attacker);
-                state.lastProvocationAt.delete(
-                    provocationKey(government, attacker));
+                clearGovernmentThreat(state, government, attacker);
             }
         }
-        if (attackers.size === 0) {
-            state.attackersByVictimGovernment.delete(government);
+    }
+    for (const victim of state.governmentProvocationsByVictim.keys()) {
+        if (!activeEntities.has(victim)) {
+            state.governmentProvocationsByVictim.delete(victim);
         }
     }
     for (const [key, accumulator] of state.damageByVictimAttacker) {
@@ -215,18 +308,22 @@ export function pruneProvocations(
         }
     }
     if (now !== undefined) {
-        for (const [key, provokedAt] of state.lastProvocationAt) {
-            if (now - provokedAt < PROVOCATION_DECAY_MS) {
-                continue;
+        for (const [government, reports] of
+            [...state.threatReportsByGovernment]) {
+            for (const [attacker, report] of [...reports]) {
+                if (now < report.expiresAt) {
+                    continue;
+                }
+                const key = provocationKey(government, attacker);
+                clearGovernmentThreat(state, government, attacker);
+                for (const [victim, keys] of
+                    state.governmentProvocationsByVictim) {
+                    keys.delete(key);
+                    if (keys.size === 0) {
+                        state.governmentProvocationsByVictim.delete(victim);
+                    }
+                }
             }
-            const separator = key.indexOf(":");
-            const government = Number(key.slice(0, separator));
-            const attacker = key.slice(separator + 1);
-            state.attackersByVictimGovernment.get(government)?.delete(attacker);
-            if (state.attackersByVictimGovernment.get(government)?.size === 0) {
-                state.attackersByVictimGovernment.delete(government);
-            }
-            state.lastProvocationAt.delete(key);
         }
     }
 }
@@ -240,8 +337,9 @@ export function isProvoked(
         victimGovernment: number,
     ) => GovernmentRelation | undefined,
 ): boolean {
-    for (const [victimGovernment, attackers] of state.attackersByVictimGovernment) {
-        if (!attackers.has(target)) {
+    for (const [victimGovernment, reports] of
+        state.threatReportsByGovernment) {
+        if (!reports.has(target)) {
             continue;
         }
         if (victimGovernment === actorGovernment
@@ -263,6 +361,7 @@ type DamageSourceEntry = readonly [
     string | undefined,
     { owner: string } | undefined,
     ShipComponentData | undefined,
+    { target: string } | undefined,
 ];
 
 type ShipComponentData = {
@@ -275,10 +374,16 @@ const DamageSourcesQuery = new Query([
     Optional(SourceComponent),
     Optional(OwnerComponent),
     Optional(ShipComponent),
+    Optional(AttackIntentComponent),
 ] as const, "NpcDamageSources");
 
+interface DamageAttribution {
+    attacker: string;
+    intendedTarget?: string;
+}
+
 const damageSourceByHitter =
-    new WeakMap<CollisionHitter, string>();
+    new WeakMap<CollisionHitter, DamageAttribution>();
 
 function findShipUuid(
     start: string | undefined,
@@ -322,13 +427,16 @@ const TrackDamageSourcesSystem = new System({
     args: [DamageSourcesQuery, Entities] as const,
     step(sources, entities) {
         for (const [
-            hitter, uuid, source, owner, ship,
+            hitter, uuid, source, owner, ship, intent,
         ] of sources as DamageSourceEntry[]) {
             const attacker = findShipUuid(source, entities)
                 ?? findShipUuid(owner?.owner, entities, new Set([uuid]))
                 ?? (ship ? uuid : undefined);
             if (attacker) {
-                damageSourceByHitter.set(hitter, attacker);
+                damageSourceByHitter.set(hitter, {
+                    attacker,
+                    intendedTarget: intent?.target,
+                });
             }
         }
     },
@@ -337,14 +445,30 @@ const TrackDamageSourcesSystem = new System({
 function resolveDamageSource(
     damager: string,
     entities: EntityMap,
-): string | undefined {
+): DamageAttribution | undefined {
     const damageEntity = entities.get(damager);
     const direct = findShipUuid(damager, entities);
     if (direct) {
-        return direct;
+        return {
+            attacker: direct,
+            intendedTarget: damageEntity?.components
+                .get(AttackIntentComponent)?.target,
+        };
     }
     const hitter = damageEntity?.components.get(CollisionHitterComponent);
-    return hitter ? damageSourceByHitter.get(hitter) : undefined;
+    const tracked = hitter ? damageSourceByHitter.get(hitter) : undefined;
+    const attacker = findShipUuid(
+        damageEntity?.components.get(SourceComponent),
+        entities,
+    ) ?? findShipUuid(
+        damageEntity?.components.get(OwnerComponent)?.owner,
+        entities,
+    ) ?? tracked?.attacker;
+    return attacker ? {
+        attacker,
+        intendedTarget: damageEntity?.components
+            .get(AttackIntentComponent)?.target ?? tracked?.intendedTarget,
+    } : undefined;
 }
 
 function isValidExternalAttacker(
@@ -373,17 +497,18 @@ function isValidExternalAttacker(
     if (victimGovernment.id === attackerGovernment.id) {
         return false;
     }
-    return relations.relation(
+    const relation = relations.relation(
         victimGovernment.id,
         attackerGovernment.id,
-    ) !== "ally";
+    );
+    return relation === "enemy" || relation === "neutral";
 }
 
 const ProvocationSystem = new System({
     name: "NpcProvocation",
-    events: [DamagedEvent],
+    events: [AppliedDamageEvent],
     args: [
-        DamagedEvent,
+        AppliedDamageEvent,
         GetEntity,
         Entities,
         ProvocationResource,
@@ -394,9 +519,10 @@ const ProvocationSystem = new System({
         GovernmentRelationResource,
         Optional(NpcCombatRoleComponent),
     ] as const,
-    step({ damage, damager, scale = 1, fromExplosion }, victim, entities, provocations,
+    step({ shield: shieldDamage, armor: armorDamage, damager, fromExplosion },
+        victim, entities, provocations,
         platform, shield, armor, time, relations, combatRole) {
-        if (platform !== "node" || fromExplosion) {
+        if (platform !== "node") {
             return;
         }
 
@@ -404,34 +530,58 @@ const ProvocationSystem = new System({
         if (!victimGovernment) {
             return;
         }
+        if (shieldDamage + armorDamage <= 0) {
+            return;
+        }
 
-        const attacker = resolveDamageSource(damager, entities);
-        if (!isValidExternalAttacker(victim, attacker, entities, relations)) {
+        const attribution = resolveDamageSource(damager, entities);
+        const attacker = attribution?.attacker;
+        if (!isValidExternalAttacker(
+            victim,
+            attacker,
+            entities,
+            relations,
+        )) {
             return;
         }
 
         const totalHealth = (shield?.max ?? 0) + (armor?.max ?? 0);
-        recordDamage(
+        const propagateToGovernment =
+            combatRole === "civilian" || combatRole === "military";
+        const deliberate = !fromExplosion
+            && attribution?.intendedTarget === victim.uuid;
+        if (deliberate) {
+            recordDeliberateProvocation(
+                provocations,
+                victimGovernment.id,
+                victim.uuid,
+                attacker,
+                time.time,
+                propagateToGovernment,
+            );
+            retaliate(victim, attacker, entities, time.time);
+            return;
+        }
+
+        const thresholdCrossed = recordDamage(
             provocations,
             victimGovernment.id,
             victim.uuid,
             attacker,
-            (damage.shield + damage.armor) * scale,
+            shieldDamage + armorDamage,
             totalHealth,
             time.time,
-            combatRole === "military",
+            propagateToGovernment,
         );
-
-        retaliate(victim, attacker, entities, time.time);
+        if (thresholdCrossed) {
+            retaliate(victim, attacker, entities, time.time);
+        }
     },
 });
 
 /**
- * A ship that is shot fights back at once, as in EV Nova. The government-wide
- * provocation threshold above governs whether the rest of the faction joins
- * in; without this the victim itself would keep flying its old course until
- * its next scheduled target evaluation, up to ChooseRandomTarget's interval
- * away, which reads as the NPC ignoring being hit.
+ * Deliberately targeted fire causes immediate retaliation. Untargeted damage
+ * reaches this path only after the bounded cumulative threshold is crossed.
  */
 function retaliate(
     victim: Entity,

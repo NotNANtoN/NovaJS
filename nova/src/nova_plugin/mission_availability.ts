@@ -35,7 +35,7 @@ export interface MissionAvailabilityInput {
         PlayerState,
         'missionBits' | 'activeMissions' | 'gender' | 'exploredSystems'
     >
-        & Partial<Pick<PlayerState, 'cargoCapacity' | 'holds'>>;
+        & Partial<Pick<PlayerState, 'cargoCapacity' | 'holds' | 'shipId'>>;
     outfits?: OutfitsState;
     currentPlanet: MissionPlanetSelector;
     currentSystem: MissionSystemSelector;
@@ -98,6 +98,26 @@ function missionCargoTons(mission: MissionData): number {
     return Math.abs(mission.cargoQty);
 }
 
+function matchesAvailableShip(
+    mission: MissionData,
+    shipId: string | undefined,
+): boolean {
+    const selector = mission.availShipType;
+    // Retail uses 127 as its legacy "any ship" sentinel.
+    if (!shipId || selector <= 127) {
+        return true;
+    }
+    if (selector < 1000) {
+        return sameResourceId(shipId, novaResourceId(selector));
+    }
+    if (selector >= 1000 && selector < 2000) {
+        return !sameResourceId(shipId, novaResourceId(selector - 1000));
+    }
+    // Inherent-government selectors need parsed ship government data and are
+    // intentionally left to a later legal-record/ship metadata pass.
+    return true;
+}
+
 function missionDataFor(
     missions: MissionAvailabilityInput['missions'],
     id: string,
@@ -127,6 +147,8 @@ export function getOfferableMissions(
         .filter((mission): mission is MissionData => mission !== undefined)
         .filter(mission => !activeIds.has(mission.id))
         .filter(mission => mission.availLoc === input.offerLocation)
+        .filter(mission =>
+            matchesAvailableShip(mission, input.playerState.shipId))
         .filter(mission => {
             const planets = input.destinationPlanets
                 ? [...input.destinationPlanets]
@@ -158,6 +180,9 @@ export function getOfferableMissions(
             && (mission.availRandom >= 100
                 || clampRandom(random()) < mission.availRandom / 100))
         .filter(mission => {
+            if ((mission.flags2 & 0x0001) === 0) {
+                return true;
+            }
             if (!input.playerState.holds
                 || input.playerState.cargoCapacity === undefined) {
                 return true;

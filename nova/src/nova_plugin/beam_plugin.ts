@@ -31,7 +31,7 @@ import { CreateTime, CreateTimeArgProvider } from './create_time';
 import { DamagedEvent } from './death_plugin';
 import { reserveEntity } from './entity_budget';
 import { applyExitPoint, ExitPointData } from './exit_point';
-import { FireSubs, OwnerComponent, sampleInaccuracy, SourceComponent, WeaponConstructors, WeaponEntry } from './fire_weapon_plugin';
+import { FireSubs, OwnerComponent, sampleInaccuracy, SourceComponent, WeaponConstructors, WeaponEntry, setAttackIntent } from './fire_weapon_plugin';
 import { zeroOrderGuidance } from './guidance';
 import { SoundEvent } from './sound_event';
 import { TargetComponent } from './target_component';
@@ -246,6 +246,7 @@ class BeamWeaponEntry extends WeaponEntry {
         if (target) {
             beam.addComponent(TargetComponent, { target });
         }
+        setAttackIntent(beam, target);
 
         if (owner) {
             beam.addComponent(OwnerComponent, {owner});

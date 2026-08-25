@@ -43,6 +43,14 @@ export abstract class Menu<T> {
         }
     }
 
+    suspendControls() {
+        this.controls.unbind();
+    }
+
+    resumeControls() {
+        this.controls.bind();
+    }
+
     protected async build() { }
 
     protected setInput(input: T) {

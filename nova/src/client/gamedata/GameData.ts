@@ -26,6 +26,8 @@ import urlJoin from 'url-join';
 import { dataPath, idsPath } from '../../common/GameDataPaths';
 import PQueue from 'p-queue';
 
+const METADATA_SCHEMA_VERSION = '2';
+
 class WeaponGettable extends Gettable<WeaponData> {
     override async get(id: string, priority = 0) {
         if (id in this.data) {
@@ -87,11 +89,12 @@ export class GameData implements GameDataInterface {
     }
 
     getSettings(file: string): Promise<unknown> {
-        return this.getUrl(urlJoin("/settings", file));
+        return this.getMetadataUrl(urlJoin("/settings", file));
     }
 
     private async preload() {
-        const data = await (await fetch('/preloadData.json')).json() as PreloadData;
+        const data = await this.fetchMetadata(
+            '/preloadData.json') as PreloadData;
         for (const [uncastKey, val] of Object.entries(data)) {
             const key = uncastKey as keyof typeof data;
             const gettable = this.data[key];
@@ -110,6 +113,34 @@ export class GameData implements GameDataInterface {
         );
     }
 
+    private async fetchMetadata(url: string): Promise<unknown> {
+        // Stable JSON URLs previously shipped with one-year immutable caching.
+        // reload bypasses that stale response without invalidating large
+        // browser-cached image and audio assets.
+        const response = await fetch(url, { cache: 'reload' });
+        if (!response.ok) {
+            throw new Error(`Failed to load metadata ${url}: ${
+                response.status} ${response.statusText}`);
+        }
+        return response.json() as Promise<unknown>;
+    }
+
+    private async getMetadataUrl(
+        url: string,
+        priority = 0,
+    ): Promise<unknown> {
+        await this.preloadData;
+        // A versioned URL cannot hit the old unversioned immutable response.
+        // PIXI may cache this new URL in memory, while HTTP no-cache headers
+        // make future browser launches revalidate it normally.
+        const versionedUrl = `${url}${
+            url.includes('?') ? '&' : '?'}schema=${METADATA_SCHEMA_VERSION}`;
+        return this.loadQueue.add(
+            () => PIXI.Assets.load(versionedUrl),
+            { priority },
+        );
+    }
+
     private getDataPrefix(dataType: NovaDataType): string {
         return urlJoin(dataPath, dataType);
     }
@@ -117,21 +148,25 @@ export class GameData implements GameDataInterface {
     private addGettable<T extends BaseData | SpriteSheetFramesData>(dataType: NovaDataType): Gettable<T> {
         const dataPrefix = this.getDataPrefix(dataType);
         return new Gettable<T>(async (id: string, priority: number): Promise<T> => {
-            return (await this.getUrl(urlJoin(dataPrefix, id + ".json"), priority)) as any;
+            return (await this.getMetadataUrl(
+                urlJoin(dataPrefix, id + ".json"), priority)) as T;
         });
     }
 
     private addTextureGettable<T extends BaseData | SpriteSheetFramesData>(dataType: NovaDataType): Gettable<T> {
         const dataPrefix = this.getDataPrefix(dataType);
         return new Gettable<T>(async (id: string, priority: number): Promise<T> => {
-            return (await this.getUrl(urlJoin(dataPrefix, id + ".json"), priority) as {data: any}).data as any;
+            const result = await this.getMetadataUrl(
+                urlJoin(dataPrefix, id + ".json"), priority) as { data: T };
+            return result.data;
         });
     }
 
     private addWeaponGettable(): WeaponGettable {
         const dataPrefix = this.getDataPrefix(NovaDataType.Weapon);
         return new WeaponGettable(async (id: string, priority: number): Promise<WeaponData> => {
-            return (await this.getUrl(urlJoin(dataPrefix, id + ".json"), priority)) as any;
+            return (await this.getMetadataUrl(
+                urlJoin(dataPrefix, id + ".json"), priority)) as WeaponData;
         });
 
     }
@@ -202,7 +237,7 @@ export class GameData implements GameDataInterface {
     }
 
     private async getIds(): Promise<NovaIDs> {
-        return (await fetch(idsPath + ".json")).json() as unknown as NovaIDs;
+        return this.fetchMetadata(idsPath + ".json") as Promise<NovaIDs>;
         //const res = await ((await this.getUrl(idsPath + ".json")) as unknown) as NovaIDs;
 
         //return res;
