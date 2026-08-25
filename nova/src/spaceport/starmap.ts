@@ -6,6 +6,10 @@ import { ControlEvent } from "../nova_plugin/controls_plugin";
 import { Button } from "./button";
 import { Menu } from "./menu";
 import { MenuControls } from "./menu_controls";
+import { shortestRoutes } from "./route_planning";
+import { createGraphicHandle, ManagedGraphic } from "../display/managed_graphic";
+
+export { shortestRoute, shortestRoutes } from "./route_planning";
 
 
 const GREY = 0x666666;
@@ -31,6 +35,31 @@ function drawSystem(system: SystemData, graphics: PIXI.Graphics, scale: number) 
     graphics.endFill();
 }
 
+function normalizeKnownSystems(
+    exploredSystems: readonly string[] | undefined,
+    currentSystem: string,
+): Set<string> | undefined {
+    if (!exploredSystems || exploredSystems.length === 0) {
+        return;
+    }
+    const known = new Set(exploredSystems);
+    known.add(currentSystem);
+    return known;
+}
+
+function sameSystemSet(
+    first: Set<string> | undefined,
+    second: Set<string> | undefined,
+): boolean {
+    if (first?.size !== second?.size) {
+        return false;
+    }
+    if (!first || !second) {
+        return true;
+    }
+    return [...first].every(system => second.has(system));
+}
+
 class SystemGraph {
     readonly container = new PIXI.Container();
     private readonly graphics: PIXI.Graphics;
@@ -43,13 +72,17 @@ class SystemGraph {
     }
     private wrappedRoute: string[] = [];
     private routes: Map<string, string[]>;
+    private knownSystems?: Set<string>;
     private systemCircles: Map<string, [PIXI.Container, PIXI.Graphics]>;
     private mapContainer: PIXI.Container;
     private maskedContainer: PIXI.Container;
 
     constructor(systems: SystemData[], private currentSystem: string,
+        exploredSystems?: readonly string[],
         private size = { x: 456, y: 419 }) {
         this.systems = new Map(systems.map(s => [s.id, s]));
+        this.knownSystems = normalizeKnownSystems(
+            exploredSystems, this.currentSystem);
         this.routes = this.computeShortestPaths();
 
         this.graphics = new PIXI.Graphics();
@@ -124,6 +157,19 @@ class SystemGraph {
         this.draw();
     }
 
+    setKnownSystems(exploredSystems?: readonly string[], redraw = true) {
+        const knownSystems = normalizeKnownSystems(
+            exploredSystems, this.currentSystem);
+        if (sameSystemSet(this.knownSystems, knownSystems)) {
+            return;
+        }
+        this.knownSystems = knownSystems;
+        this.routes = this.computeShortestPaths();
+        if (redraw) {
+            this.draw();
+        }
+    }
+
     get route() {
         return this.wrappedRoute;
     }
@@ -172,6 +218,9 @@ class SystemGraph {
     }
 
     private onClickSystem(system: string) {
+        if (this.knownSystems && !this.knownSystems.has(system)) {
+            return;
+        }
         this.route = this.routes.get(system) ?? [];
     }
 
@@ -196,6 +245,8 @@ class SystemGraph {
                 console.warn(`missing system ${id}`);
                 continue;
             }
+            container.visible = !this.knownSystems
+                || this.knownSystems.has(id);
             const pos = this.scalePos(system.position);
             graphics.clear();
             drawSystem(system, graphics, this.scale);
@@ -209,6 +260,11 @@ class SystemGraph {
 
     private drawLinks() {
         for (const [source, dest] of this.links) {
+            if (this.knownSystems
+                && (!this.knownSystems.has(source.id)
+                    || !this.knownSystems.has(dest.id))) {
+                continue;
+            }
             this.drawLink(source, dest)
         }
     }
@@ -216,7 +272,9 @@ class SystemGraph {
     private drawRoute() {
         let prev = this.systems.get(this.currentSystem);
         for (const system of this.route.map(id => this.systems.get(id))) {
-            if (system) {
+            if (system && (!this.knownSystems
+                || (this.knownSystems.has(system.id)
+                    && prev && this.knownSystems.has(prev.id)))) {
                 if (prev) {
                     this.drawLink(prev, system, 0x00ff00, 3);
                 }
@@ -233,44 +291,21 @@ class SystemGraph {
     }
 
     private computeShortestPaths() {
-        // Dijkstra's
-        let frontier = new Set<string>([this.currentSystem]);
-        const paths = new Map<string, string[]>([[this.currentSystem, []]]);
-
-        while (true) {
-            const newFrontier = new Set<string>();
-            for (const id of frontier) {
-                const system = this.systems.get(id);
-                if (!system) {
-                    continue;
-                }
-
-                const path = paths.get(id);
-                if (!path) {
-                    throw new Error(`Path to ${id} should exist`);
-                }
-
-                for (const link of system.links) {
-                    if (paths.has(link)) {
-                        continue;
-                    }
-                    newFrontier.add(link);
-                    paths.set(link, [...path, link]);
-                }
-            }
-            if (newFrontier.size === 0) {
-                break;
-            }
-            frontier = newFrontier;
-        }
-        return paths;
+        return shortestRoutes(
+            [...this.systems.values()],
+            this.currentSystem,
+            this.knownSystems ? [...this.knownSystems] : undefined,
+        );
     }
 }
 
 export class Starmap extends Menu<string[] /* route list of systems */> {
     private systemGraph?: SystemGraph;
+    readonly managed: ManagedGraphic = createGraphicHandle(this.container);
 
-    constructor(gameData: GameData, private systemId: string, controlEvents: Observable<ControlEvent>) {
+    constructor(gameData: GameData, private systemId: string,
+        controlEvents: Observable<ControlEvent>,
+        private exploredSystems?: readonly string[]) {
         super(gameData, "nova:8509", controlEvents);
         this.container.name = "StarMap";
         //this.container.alpha = 0.5;
@@ -293,7 +328,8 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
         const systemIds = (await this.gameData.ids).System;
         const systems = await Promise.all(
             systemIds.map(s => this.gameData.data.System.get(s)));
-        this.systemGraph = new SystemGraph(systems, this.systemId);
+        this.systemGraph = new SystemGraph(
+            systems, this.systemId, this.exploredSystems);
         this.systemGraph.container.position.set(-290, -248);
         this.container.addChild(this.systemGraph.container);
     }
@@ -306,6 +342,21 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
         this.systemGraph.center();
         this.systemGraph.route = route;
         return super.show(route);
+    }
+
+    setExploredSystems(exploredSystems?: readonly string[]) {
+        this.exploredSystems = exploredSystems;
+        this.systemGraph?.setKnownSystems(exploredSystems);
+    }
+
+    attachTo(parent: PIXI.Container): void {
+        if (!this.managed.disposed && this.container.parent !== parent) {
+            parent.addChild(this.container);
+        }
+    }
+
+    dispose(): void {
+        this.managed.dispose();
     }
 
     override done() {

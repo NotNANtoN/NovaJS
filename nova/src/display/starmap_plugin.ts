@@ -6,29 +6,37 @@ import { ControlsSubject, EcsControlEvent } from '../nova_plugin/controls_plugin
 import { GameDataResource } from '../nova_plugin/game_data_resource';
 import { JumpRouteComponent } from '../nova_plugin/jump_plugin';
 import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin';
+import { PlayerStateComponent } from '../nova_plugin/player_state';
+import { Optional } from 'nova_ecs/optional';
 import { SystemIdResource } from '../nova_plugin/system_id_resource';
 import { Starmap } from '../spaceport/starmap';
 import { ScreenSize } from './screen_size_plugin';
 import { Stage } from './stage_resource';
+import {
+    handleMapControlEvent,
+    isMapStartEdge,
+} from './starmap_control';
 
-const StarmapResource = new Resource<Starmap>("Starmap");
+export { handleMapControlEvent, isMapStartEdge } from './starmap_control';
 
-const MapSystem = new AsyncSystem({
+export const StarmapResource = new Resource<Starmap>("Starmap");
+
+export const MapSystem = new AsyncSystem({
     name: 'MapSystem',
     events: [EcsControlEvent] as const,
     exclusive: true,
     alwaysRunOnEvents: false,
     skipIfApplyingPatches: true,
     args: [EcsControlEvent, StarmapResource, JumpRouteComponent,
-        ScreenSize, PlayerShipSelector] as const,
-    async step(controlEvent, starmap, jumpRoute, { x, y }) {
-        starmap.container.position.set(x / 2, y / 2);
-        for (const {action, state} of controlEvent) {
-            if (action === 'map' && state === 'start' &&
-                !starmap.container.visible) {
-                jumpRoute.route = await starmap.show(jumpRoute.route);
-            }
+        ScreenSize, PlayerShipSelector, Optional(PlayerStateComponent)] as const,
+    async step(controlEvent, starmap, jumpRoute, screenSize, playerState) {
+        if (!isMapStartEdge(controlEvent, starmap.container.visible)) {
+            return;
         }
+        return handleMapControlEvent(
+            controlEvent, starmap, jumpRoute, screenSize,
+            playerState as { exploredSystems?: readonly string[] } | undefined,
+        );
     }
 });
 
@@ -53,17 +61,16 @@ export const StarmapPlugin: Plugin = {
         }
 
         const starmap = new Starmap(gameData as GameData, systemId, controls);
-        stage.addChild(starmap.container);
+        starmap.attachTo(stage);
         world.resources.set(StarmapResource, starmap);
 
         world.addSystem(MapSystem);
     },
     remove(world) {
         world.removeSystem(MapSystem);
-        const stage = world.resources.get(Stage);
         const starmap = world.resources.get(StarmapResource);
-        if (stage && starmap) {
-            stage.removeChild(starmap.container);
+        if (starmap) {
+            starmap.dispose();
         }
         world.resources.delete(StarmapResource);
     }
