@@ -1,4 +1,6 @@
+import { Entity } from 'nova_ecs/entity';
 import {
+    getFireSyncLocalState,
     pushShot, appendShot, newShotsAfter } from './fire_sync';
 
 interface TestShot {
@@ -39,6 +41,34 @@ describe('fire sync buffers', () => {
             [shot(8), shot(5), shot(7), shot(6)],
             5,
         ).map(entry => entry.seq)).toEqual([6, 7, 8]);
+    });
+});
+
+describe('adopting a buffer a world was not watching for', () => {
+    it('treats existing shots as already handled', () => {
+        const log = {
+            shots: [4, 5, 6].map(seq => ({
+                seq,
+                weaponId: 'nova:128',
+                seed: 0,
+                exitIndex: 0,
+                at: 0,
+                position: undefined as never,
+                rotation: undefined as never,
+            })),
+        };
+        const state = getFireSyncLocalState(new Entity('ship'), undefined, log);
+
+        expect(newShotsAfter(log.shots, state.highestLogSeq))
+            .withContext('a hyperjump must not replay the buffer as a volley')
+            .toEqual([]);
+        expect(state.nextSeq).toBe(7);
+    });
+
+    it('still starts from the beginning for a ship that has not fired', () => {
+        const state = getFireSyncLocalState(new Entity('ship'));
+        expect(state.highestLogSeq).toBe(0);
+        expect(state.nextSeq).toBe(1);
     });
 });
 

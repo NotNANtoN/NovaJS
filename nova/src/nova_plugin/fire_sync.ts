@@ -135,10 +135,16 @@ export function getFireSyncLocalState(
     if (existing) {
         return existing;
     }
+    // Whatever is already buffered happened before this world was watching, so
+    // it counts as handled. Starting from zero instead replays the entire
+    // buffer: a pilot arriving from a hyperjump, which rebuilds the world, was
+    // met by a volley of their own shots from the system they had left, and a
+    // ship entering interest range brought its recent history with it.
+    const seen = highestSequence(intent, log);
     const state: FireSyncLocalState = {
-        nextSeq: highestSequence(intent, log) + 1,
-        highestIntentSeq: 0,
-        highestLogSeq: 0,
+        nextSeq: seen + 1,
+        highestIntentSeq: seen,
+        highestLogSeq: seen,
         spawnedSeqs: new Set(),
         acceptedAt: new Map(),
     };
