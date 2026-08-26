@@ -96,6 +96,18 @@ imply complete EV Nova retail parity.
 - [ ] Remove the Pixi `SCALE_MODE` warning by moving filtering policy to owned
   textures/renderers, with pixel-art and scaled-UI visual regressions.
 
+## Asteroids and the political map
+
+Both are implemented and covered by tests; see `docs/asteroids-and-territory.md`.
+Remaining gaps:
+
+- [ ] Ram damage from flying into an asteroid, and asteroid selection with the
+  target key.
+- [ ] NPC miners storing and selling the ore they mine.
+- [ ] Real `jünk` commodity names for ice and crystal yields.
+- [ ] Government territory that follows mission bits rather than the static
+  `gövt` owner.
+
 ## P3 optional enhancements
 
 - [ ] Prototype living planets as an opt-in layer: ambient audio, subtle landing
