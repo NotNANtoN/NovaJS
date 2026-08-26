@@ -191,6 +191,36 @@ describe('asteroids', () => {
         expect(collected.every(ore => ore!.commodity === 'metal')).toBeTrue();
     });
 
+    it('gives fragments and ore plain, unshared positions', async () => {
+        const world = await makeWorld(0);
+        const asteroid = makeAsteroid(
+            BIG_ASTEROID.id, new Position(120, -40), new Vector(0, 0));
+        asteroid.components.set(MultiplayerData, { owner: 'server' });
+        world.entities.set('rock', asteroid);
+        await settle(world);
+
+        asteroid.components.get(ArmorComponent)!.current = 0;
+        await settle(world, 5);
+
+        const spawned = [...world.entities.values()].filter(entity =>
+            entity.components.has(AsteroidComponent)
+            || entity.components.has(OreComponent));
+        expect(spawned.length).toBeGreaterThan(1);
+
+        const positions = spawned.map(entity =>
+            entity.components.get(MovementStateComponent)!.position);
+        for (const position of positions) {
+            // A leaked Immer draft is revoked once the spawning step ends, and
+            // any later read of it - such as the multiplayer serializer's -
+            // throws. Reading it here is what reproduces that crash.
+            expect(() => JSON.stringify(position)).not.toThrow();
+            expect(position.x).toBe(120);
+            expect(position.y).toBe(-40);
+        }
+        // Each entity drifts on its own, so they must not share one instance.
+        expect(new Set(positions).size).toBe(positions.length);
+    });
+
     it('scoops ore into a nearby ship\'s hold', async () => {
         const world = await makeWorld(0);
         const asteroid = makeAsteroid(

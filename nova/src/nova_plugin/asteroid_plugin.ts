@@ -278,12 +278,20 @@ const AsteroidDestroyedSystem = new System({
             return;
         }
 
+        // The dying asteroid's position is an Immer draft that is revoked when
+        // this step ends, so anything handed to a new entity has to be a plain
+        // copy or the draft leaks into that entity and throws when the
+        // multiplayer serializer next touches it. Each new entity also needs
+        // its own instance, because the movement system mutates it in place.
+        const origin = () => new Position(
+            movement.position.x, movement.position.y);
+
         for (let index = 0; index < data.fragmentCount; index++) {
             const fragmentId = data.fragments[index % data.fragments.length];
             if (!fragmentId) {
                 break;
             }
-            const fragment = makeAsteroid(fragmentId, movement.position);
+            const fragment = makeAsteroid(fragmentId, origin());
             if (!reserveEntity(budget, fragment, 'asteroid')) {
                 break;
             }
@@ -294,8 +302,7 @@ const AsteroidDestroyedSystem = new System({
         const commodity = data.yield.commodity;
         if (commodity) {
             for (const tons of oreChunkTons(data.yield.quantity)) {
-                const ore = makeOre(
-                    asteroid.id, commodity, tons, movement.position);
+                const ore = makeOre(asteroid.id, commodity, tons, origin());
                 if (!reserveEntity(budget, ore, 'asteroid')) {
                     break;
                 }
