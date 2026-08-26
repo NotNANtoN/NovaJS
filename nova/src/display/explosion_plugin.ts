@@ -1,4 +1,6 @@
 import { ExplosionData } from "novadatainterface/ExplosionData";
+import { ShipData } from "novadatainterface/ShipData";
+import { WeaponDamage } from "novadatainterface/WeaponData";
 import { Emit, Entities, GetEntity, UUID } from "nova_ecs/arg_types";
 import { Component } from "nova_ecs/component";
 import { Angle } from "nova_ecs/datatypes/angle";
@@ -11,6 +13,7 @@ import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
 import { Resource } from "nova_ecs/resource";
 import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { System } from "nova_ecs/system";
+import * as SAT from "sat";
 import { v4 } from "uuid";
 import { ExplosionDataComponent } from "../nova_plugin/animation_plugin";
 import { GameDataResource } from "../nova_plugin/game_data_resource";
@@ -24,6 +27,9 @@ import {
     PlayerDestructionCompleteEvent,
     ZeroArmorEvent,
 } from "../nova_plugin/death_plugin";
+import { BlastDamageComponent, BlastIgnoreComponent } from "../nova_plugin/blast_plugin";
+import { CompositeHull, HurtboxHullComponent } from "../nova_plugin/collisions_plugin";
+import { CollisionHitterComponent } from "../nova_plugin/collision_interaction";
 import { ShipComponent, ShipDataComponent } from "../nova_plugin/ship_plugin";
 import { DeathAISystem } from "../nova_plugin/npc_plugin";
 import { EntityBudgetResource, reserveEntity } from "../nova_plugin/entity_budget";
@@ -38,8 +44,11 @@ import {
 } from "./destruction_visual_state";
 
 
+interface ExplosionStateData extends ExplosionTimingState {
+    completionObservedAt?: number;
+}
 const ExplosionState =
-    new Component<ExplosionTimingState>('ExplosionState');
+    new Component<ExplosionStateData>('ExplosionState');
 const DestructionCompletionTarget =
     new Component<string>('DestructionCompletionTarget');
 const ActiveDestructionVisuals =
@@ -57,7 +66,11 @@ export const ExplosionSystem = new System({
         const timing = advanceExplosionTiming(
             explosionState,
             time.time,
-            Math.max(0, ...[...graphic.sprites.values()].map(s => s.frames)),
+            Math.max(
+                0,
+                ...Object.values(explosionData.animation.images)
+                    .map(image => image.frames.normal.length),
+            ),
             explosionData.rate,
         );
         if (starting) {
@@ -68,6 +81,10 @@ export const ExplosionSystem = new System({
 
         graphic.progress = timing.progress;
 
+        if (timing.done && explosionState.completionObservedAt === undefined) {
+            explosionState.completionObservedAt = time.time;
+            return;
+        }
         if (timing.done) {
             entities.delete(uuid);
             if (completionTarget && completeDestructionVisual(
@@ -79,6 +96,69 @@ export const ExplosionSystem = new System({
         }
     }
 });
+
+// Retail says a heavy ship's death blast scales with its mass but gives no
+// coefficient, so these are calibrated against the ship table: the heaviest
+// hull in the game is mass 10,000 while even a carrier carries only a couple
+// of thousand points of shield and armor. A shared coefficient for reach and
+// damage would make one Leviathan death sterilise everything on screen, so
+// reach is capped at a few hull lengths.
+const SHIP_EXPLOSION_DAMAGE_PER_MASS = 0.02;
+const SHIP_EXPLOSION_RADIUS_PER_MASS = 0.02;
+const SHIP_EXPLOSION_MAX_RADIUS = 200;
+
+export function shipExplosionBlastStrength(mass: number): number {
+    return Number.isFinite(mass) && mass > 0
+        ? mass * SHIP_EXPLOSION_DAMAGE_PER_MASS
+        : 0;
+}
+
+export function shipExplosionBlastRadius(mass: number): number {
+    return Number.isFinite(mass) && mass > 0
+        ? Math.min(mass * SHIP_EXPLOSION_RADIUS_PER_MASS,
+            SHIP_EXPLOSION_MAX_RADIUS)
+        : 0;
+}
+
+export function makeShipExplosionBlast(
+    ship: ShipData,
+    position: Position,
+    sourceUuid: string,
+): Entity | undefined {
+    if (!ship.largeExplosion) {
+        return undefined;
+    }
+    const strength = shipExplosionBlastStrength(ship.physics.mass);
+    if (strength <= 0) {
+        return undefined;
+    }
+    const damage: WeaponDamage = {
+        shield: strength,
+        armor: strength,
+        ionization: 0,
+        ionizationColor: 0,
+        passThroughShield: 0,
+        knockback: strength,
+    };
+    return new Entity(`${ship.id} Explosion Blast`)
+        .addComponent(BlastDamageComponent, damage)
+        .addComponent(BlastIgnoreComponent, new Set([sourceUuid]))
+        .addComponent(HurtboxHullComponent, new CompositeHull([
+            new SAT.Circle(new SAT.Vector(0, 0),
+                shipExplosionBlastRadius(ship.physics.mass)),
+        ]))
+        .addComponent(CollisionHitterComponent, {
+            hitTypes: new Set(['normal']),
+        })
+        .addComponent(MovementStateComponent, {
+            position: Position.fromVectorLike(position),
+            accelerating: 0,
+            rotation: new Angle(0),
+            turnBack: false,
+            turning: 0,
+            velocity: new Vector(0, 0),
+        });
+}
 
 const SecondaryExplosionComponent = new Component<{
     explosion: ExplosionData,
@@ -176,6 +256,14 @@ const ShipFinalExplosionSystem = new System({
         ActiveDestructionVisuals] as const,
     step(ship, gameData, movement, entities, budget, shipUuid, emit, time,
         activeDestructionVisuals) {
+        const blast = makeShipExplosionBlast(
+            ship,
+            movement.position,
+            shipUuid,
+        );
+        if (blast) {
+            entities.set(v4(), blast);
+        }
         if (!ship.finalExplosion) {
             emit(PlayerDestructionCompleteEvent, time, [shipUuid]);
             return;
