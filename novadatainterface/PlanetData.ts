@@ -4,6 +4,7 @@ import { TradeCommodity } from "./CommodityData";
 
 export interface PlanetData extends SpaceObjectData {
     landingPict: string;
+    hasCustomLandingPict: boolean;
     landingDesc: string;
     position: [number, number];
     /** Raw spöb flags controlling landing and spaceport services. */
@@ -31,6 +32,7 @@ export function getDefaultPlanetData(): PlanetData {
         ...getDefaultSpaceObjectData(),
         vulnerableTo: <Array<DamageType>>["planetBuster"],
         landingPict: "default",
+        hasCustomLandingPict: false,
         landingDesc: "default",
         position: [0, 0],
         // Leave raw flags unknown for synthetic/default data. Parsed spöbs

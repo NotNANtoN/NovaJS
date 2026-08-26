@@ -77,6 +77,7 @@ export async function PlanetParse(spob: SpobResource, notFoundFunction: (m: stri
         ...base,
         landingDesc: desc,
         landingPict: pictID,
+        hasCustomLandingPict: Boolean(pict),
         animation,
         vulnerableTo: <Array<DamageType>>["planetBuster"],
         physics: {

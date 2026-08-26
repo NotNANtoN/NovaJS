@@ -8,6 +8,7 @@ import { World } from 'nova_ecs/world';
 import * as PIXI from 'pixi.js';
 import { Observable } from 'rxjs';
 import { GameData } from '../client/gamedata/GameData';
+import { AnimationGraphic } from '../display/animation_graphic';
 import { ControlEvent } from '../nova_plugin/controls_plugin';
 import { GameDataResource } from '../nova_plugin/game_data_resource';
 import { ArmorComponent, IonizationComponent, ShieldComponent } from '../nova_plugin/health_plugin';
@@ -53,6 +54,11 @@ function buttonSlot(index: number) {
     const { x, firstY, pitch } = SPACEPORT_LAYOUT.buttons;
     return { x, y: firstY + index * pitch };
 }
+
+const LANDSCAPE_WIDTH = 612;
+const LANDSCAPE_HEIGHT = 285;
+const LANDSCAPE_X = -306;
+const LANDSCAPE_Y = -256;
 
 export class Spaceport extends Menu<Entity> {
     private outfitter: Outfitter;
@@ -437,12 +443,40 @@ export class Spaceport extends Menu<Entity> {
         desc.position.y = 70;
         this.container.addChild(desc);
 
-        const spaceportPict = this.gameData.spriteFromPict(data.landingPict)
-        spaceportPict.position.x = -306;
-        spaceportPict.position.y = -256;
+        let spaceportLandscape: PIXI.Container | PIXI.Sprite;
+        if (data.hasCustomLandingPict) {
+            spaceportLandscape = this.gameData.spriteFromPict(data.landingPict);
+        }
+        else {
+            const standardLandscape = new PIXI.Container();
+            const background = new PIXI.Graphics();
+            background.beginFill(0x000000);
+            background.drawRect(0, 0, LANDSCAPE_WIDTH, LANDSCAPE_HEIGHT);
+            background.endFill();
+            standardLandscape.addChild(background);
+
+            const planetGraphic = new AnimationGraphic({
+                gameData: this.gameData,
+                animation: data.animation,
+            });
+            await planetGraphic.buildPromise;
+            planetGraphic.progress = 0;
+            const scale = Math.min(
+                LANDSCAPE_WIDTH * 0.85 / planetGraphic.size.x,
+                LANDSCAPE_HEIGHT * 0.85 / planetGraphic.size.y,
+                3,
+            );
+            planetGraphic.container.position.set(
+                LANDSCAPE_WIDTH / 2, LANDSCAPE_HEIGHT / 2);
+            planetGraphic.container.scale.set(scale);
+            standardLandscape.addChild(planetGraphic.container);
+            spaceportLandscape = standardLandscape;
+        }
+        spaceportLandscape.position.x = LANDSCAPE_X;
+        spaceportLandscape.position.y = LANDSCAPE_Y;
         // The landing landscape is an opaque 612x285 retail PICT. Keep it
         // immediately above the Spaceport frame and below every control.
-        this.container.addChildAt(spaceportPict, 1);
+        this.container.addChildAt(spaceportLandscape, 1);
         this.container.addChild(this.outfitter.container);
         this.container.addChild(this.shipyard.container);
         this.container.addChild(this.missionBbs.container);
