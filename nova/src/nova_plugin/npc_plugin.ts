@@ -1,10 +1,16 @@
 import { ShipData } from "novadatainterface/ShipData";
+import { GameDataInterface } from "novadatainterface/GameDataInterface";
+import { WeaponData } from "novadatainterface/WeaponData";
 import { Entities, UUID } from "nova_ecs/arg_types";
 import { Component } from "nova_ecs/component";
 import { Plugin } from "nova_ecs/plugin";
 import { DeltaResource } from "nova_ecs/plugins/delta_plugin";
 import { MultiplayerData } from "nova_ecs/plugins/multiplayer_plugin";
-import { MovementState, MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
+import {
+    MovementPhysicsComponent,
+    MovementState,
+    MovementStateComponent,
+} from "nova_ecs/plugins/movement_plugin";
 import { Optional } from "nova_ecs/optional";
 import { PlatformResource } from "./platform_plugin";
 import { TimeResource } from "nova_ecs/plugins/time_plugin";
@@ -43,6 +49,8 @@ import type { GovtData } from "./npc_components";
 import { createMinerSystems, MiningShipProvider } from "./miner_ai";
 import { PlayerState, PlayerStateComponent } from "./player_state";
 import { isCriminal, recordFor } from "./legal_record";
+import { approachTarget } from "./flight_controller";
+import type { WeaponsState } from "./weapons_state";
 export {
     ChooseRandomTargetComponent,
     GovtComponent,
@@ -225,14 +233,60 @@ export const ChooseRandomTargetAI = new System({
 });
 
 export const FollowComponent = new Component<undefined>('FollowComponent');
+
+export const DEFAULT_COMBAT_STANDOFF = 300;
+export const COMBAT_RANGE_FRACTION = 0.6;
+export const MAX_COMBAT_STANDOFF = 600;
+
+function weaponRange(weapon: WeaponData): number | undefined {
+    if (weapon.type === "BayWeaponData"
+        || weapon.fireGroup === "pointDefense") {
+        return;
+    }
+    if (weapon.type === "BeamWeaponData") {
+        return weapon.beamAnimation.length;
+    }
+    return weapon.physics.speed * weapon.shotDuration / 1000;
+}
+
+/**
+ * Long-range weapons should influence positioning without letting an NPC
+ * exploit every last unit of nominal range, where target motion would make
+ * projectiles expire before connecting.
+ */
+export function getCombatStandoff(
+    weapons: WeaponsState | undefined,
+    gameData: GameDataInterface,
+): number {
+    let longestRange = 0;
+    for (const [id, state] of weapons ?? []) {
+        if (state.count <= 0) {
+            continue;
+        }
+        const weapon = gameData.data.Weapon.getCached(id);
+        if (!weapon) {
+            continue;
+        }
+        longestRange = Math.max(longestRange, weaponRange(weapon) ?? 0);
+    }
+    if (!(longestRange > 0)) {
+        return DEFAULT_COMBAT_STANDOFF;
+    }
+    return Math.min(
+        MAX_COMBAT_STANDOFF,
+        longestRange * COMBAT_RANGE_FRACTION,
+    );
+}
+
 export const FollowAI = new System({
     name: 'FollowAndShootAI',
-    args: [MovementStateComponent, TargetComponent, FollowComponent,
-        Entities, MultiplayerData, PlatformResource,
+    args: [MovementStateComponent, MovementPhysicsComponent, TargetComponent,
+        FollowComponent, Entities, MultiplayerData, PlatformResource,
+        Optional(WeaponsStateComponent), GameDataResource,
         Optional(DestructionStartedComponent),
         Optional(ArmorComponent)] as const,
-    step(movementState, target, _follow, entities, multiplayer, platform,
-        destructionStarted, armor) {
+    step(movementState, physics, target, _follow, entities, multiplayer,
+        platform, weapons, gameData, destructionStarted, armor) {
         if (platform === "node" && multiplayer.owner !== "server"
             || platform === "browser" && multiplayer.owner === "server") {
             return;
@@ -251,8 +305,26 @@ export const FollowAI = new System({
             movementState.accelerating = 0;
             return;
         }
-        movementState.turnTo = target.target;
-        movementState.accelerating = 1;
+        const targetMovement = entities.get(target.target)
+            ?.components.get(MovementStateComponent);
+        if (!targetMovement) {
+            movementState.turnTo = null;
+            movementState.accelerating = 0;
+            return;
+        }
+        const command = approachTarget(
+            movementState,
+            targetMovement,
+            physics,
+            { standoff: getCombatStandoff(weapons, gameData) },
+        );
+        // Once holding station the controller has no thrust to aim, so the
+        // nose would keep whatever heading braking left it with — pointing
+        // away from the target, where fixed guns are useless. Tracking the
+        // target by uuid lets the movement system keep it under the guns.
+        movementState.turnTo = command.turnTo ?? target.target;
+        movementState.accelerating = command.accelerating;
+        movementState.turnBack = command.turnBack;
     }
 });
 

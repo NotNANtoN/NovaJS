@@ -3,13 +3,17 @@ import { ShipData } from 'novadatainterface/ShipData';
 import { UUID } from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
 import { Optional } from 'nova_ecs/optional';
-import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
+import {
+    MovementPhysicsComponent,
+    MovementStateComponent,
+} from 'nova_ecs/plugins/movement_plugin';
 import { MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
 import { ProvideAsync } from 'nova_ecs/provide_async';
 import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
 import { AsteroidComponent } from './asteroid_plugin';
 import { DestructionStartedComponent } from './destruction_state';
+import { approachTarget } from './flight_controller';
 import { GameDataResource } from './game_data_resource';
 import { ArmorComponent } from './health_plugin';
 import { NpcAIComponent } from './npc_components';
@@ -144,10 +148,11 @@ function makeMinerApproachAI(follow: System) {
     return new System({
         name: 'MinerApproachAI',
         args: [MiningShipComponent, TargetComponent, MovementStateComponent,
-            AsteroidTargetsQuery, MultiplayerData, PlatformResource,
-            NpcAIComponent] as const,
+            MovementPhysicsComponent, AsteroidTargetsQuery, MultiplayerData,
+            PlatformResource, NpcAIComponent] as const,
         after: [follow],
-        step(miner, target, movement, asteroids, multiplayer, platform) {
+        step(miner, target, movement, physics, asteroids, multiplayer,
+            platform) {
             if (!miner.mining || platform !== 'node'
                 || multiplayer.owner !== 'server') {
                 return;
@@ -160,14 +165,15 @@ function makeMinerApproachAI(follow: System) {
             if (!asteroid) {
                 return;
             }
-            // Keep station off the rock instead of flying into it. Weapons
-            // keep firing because they are aimed at the target, not the
-            // heading.
-            const distance = asteroid[1].position
-                .subtract(movement.position).length;
-            if (distance < MINING_STANDOFF) {
-                movement.accelerating = 0;
-            }
+            const command = approachTarget(movement, asteroid[1], physics, {
+                standoff: MINING_STANDOFF,
+            });
+            // Holding station leaves the nose wherever braking pointed it,
+            // which is away from the rock. Track the rock instead so mining
+            // fire keeps landing.
+            movement.turnTo = command.turnTo ?? targetUuid;
+            movement.accelerating = command.accelerating;
+            movement.turnBack = command.turnBack;
         },
     });
 }

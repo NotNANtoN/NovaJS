@@ -5,7 +5,13 @@ import { Position } from 'nova_ecs/datatypes/position';
 import { Vector } from 'nova_ecs/datatypes/vector';
 import { Entity } from 'nova_ecs/entity';
 import { DeltaPlugin } from 'nova_ecs/plugins/delta_plugin';
-import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
+import {
+    advanceMovementState,
+    MovementPhysics,
+    MovementPhysicsComponent,
+    MovementStateComponent,
+    MovementType,
+} from 'nova_ecs/plugins/movement_plugin';
 import { MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { World } from 'nova_ecs/world';
@@ -15,6 +21,7 @@ import {
     createMinerSystems,
     isMiningShip,
     MINING_SEEK_RANGE,
+    MINING_STANDOFF,
     MiningShipComponent,
 } from './miner_ai';
 import { NpcAIComponent } from './npc_components';
@@ -40,6 +47,13 @@ const gameData = {
         },
     },
 } as never;
+
+const MINER_PHYSICS: MovementPhysics = {
+    acceleration: 200,
+    maxVelocity: 400,
+    movementType: MovementType.INERTIAL,
+    turnRate: 3,
+};
 
 function movementAt(x: number, y: number) {
     return {
@@ -77,7 +91,8 @@ function makeMiner(mining: boolean, target?: string) {
         .addComponent(NpcAIComponent, undefined)
         .addComponent(TargetComponent, { target })
         .addComponent(MultiplayerData, { owner: 'server' })
-        .addComponent(MovementStateComponent, movementAt(0, 0));
+        .addComponent(MovementStateComponent, movementAt(0, 0))
+        .addComponent(MovementPhysicsComponent, MINER_PHYSICS);
 }
 
 function makeRock(x: number, y: number) {
@@ -85,6 +100,19 @@ function makeRock(x: number, y: number) {
         .addComponent(AsteroidComponent, { id: 'nova:130', spin: 0 })
         .addComponent(MultiplayerData, { owner: 'server' })
         .addComponent(MovementStateComponent, movementAt(x, y));
+}
+
+function fly(world: World, miner: Entity, steps: number) {
+    for (let step = 0; step < steps; step++) {
+        world.step();
+        const movement = miner.components.get(MovementStateComponent)!;
+        Object.assign(movement, advanceMovementState(
+            movement,
+            MINER_PHYSICS,
+            1 / 60,
+            world.entities,
+        ));
+    }
 }
 
 describe('mining ships', () => {
@@ -146,18 +174,51 @@ describe('mining ships', () => {
         expect(trader.components.get(TargetComponent)!.target).toBeUndefined();
     });
 
-    it('stops closing once it is in mining range', async () => {
+    it('arrives at mining range at low speed and holds station', async () => {
         const world = await makeWorld();
         const miner = makeMiner(true);
         world.entities.set('miner', miner);
-        world.entities.set('near', makeRock(100, 0));
-        world.step();
+        const rock = makeRock(2_000, 0);
+        world.entities.set('rock', rock);
 
-        expect(miner.components.get(MovementStateComponent)!.accelerating)
-            .toBe(0);
+        fly(world, miner, 3_000);
+        const arrived = miner.components.get(MovementStateComponent)!;
+        const rockMovement = rock.components.get(MovementStateComponent)!;
+        expect(rockMovement.position.subtract(arrived.position).length)
+            .toBeGreaterThan(MINING_STANDOFF - 100);
+        expect(rockMovement.position.subtract(arrived.position).length)
+            .toBeLessThan(MINING_STANDOFF + 100);
+        expect(arrived.velocity.length).toBeLessThan(20);
+
+        fly(world, miner, 600);
+        const held = miner.components.get(MovementStateComponent)!;
+        expect(rockMovement.position.subtract(held.position).length)
+            .toBeGreaterThan(MINING_STANDOFF - 100);
+        expect(rockMovement.position.subtract(held.position).length)
+            .toBeLessThan(MINING_STANDOFF + 100);
+        expect(held.velocity.length).toBeLessThan(20);
     });
 
-    it('keeps closing while it is still far from the rock', async () => {
+    it('holds the rock under its guns once parked', async () => {
+        const world = await makeWorld();
+        const miner = makeMiner(true);
+        world.entities.set('miner', miner);
+        const rock = makeRock(2_000, 0);
+        world.entities.set('rock', rock);
+
+        fly(world, miner, 3_000);
+        const held = miner.components.get(MovementStateComponent)!;
+        const rockMovement = rock.components.get(MovementStateComponent)!;
+        // Braking leaves the nose pointing back the way the ship came, so a
+        // parked miner that stops steering cannot hit the rock it came for.
+        const toRock = rockMovement.position.subtract(held.position);
+        const facing = held.rotation.getUnitVector();
+        const alignment = (toRock.x * facing.x + toRock.y * facing.y)
+            / toRock.length;
+        expect(alignment).toBeGreaterThan(0.9);
+    });
+
+    it('does not thrust sideways while turning towards the rock', async () => {
         const world = await makeWorld();
         const miner = makeMiner(true);
         world.entities.set('miner', miner);
@@ -165,6 +226,8 @@ describe('mining ships', () => {
         world.step();
 
         expect(miner.components.get(MovementStateComponent)!.accelerating)
-            .toBe(1);
+            .toBe(0);
+        expect(miner.components.get(MovementStateComponent)!.turnTo)
+            .toEqual(new Angle(Math.PI / 2));
     });
 });
