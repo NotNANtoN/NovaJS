@@ -159,6 +159,9 @@ class GameDataServer {
                     uuid: 'persisted',
                     system: player.currentSystem,
                     savedAt: player.savedAt,
+                    // Lets a caller tell whether the state it holds is still
+                    // the newest one the store has accepted.
+                    revision: player.revision ?? 0,
                     playerState: player,
                     snapshots: player.snapshots.map(({
                         id, createdAt, reason, state,
