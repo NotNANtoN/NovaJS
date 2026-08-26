@@ -9,6 +9,16 @@ import { Query } from "nova_ecs/query";
 import { Resource } from "nova_ecs/resource";
 import { v4 as uuid } from "uuid";
 import { GameDataResource } from "./game_data_resource";
+import { Angle } from "nova_ecs/datatypes/angle";
+import { Position } from "nova_ecs/datatypes/position";
+import { Vector } from "nova_ecs/datatypes/vector";
+import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
+import { SystemData } from "novadatainterface/SystemData";
+import {
+    ArrivalPlacement,
+    ArrivalSystem,
+    chooseArrivalPlacement,
+} from "./npc_arrival";
 import { GovtComponent } from "./npc_plugin";
 import { DudeSourceComponent } from "./boarding_plugin";
 import { createArrivingTrafficState } from "./npc_traffic";
@@ -101,6 +111,14 @@ interface NpcSpawnState {
     capacity: number;
     nextSpawnAt: number;
     entries: NpcSpawnData[];
+    /** Kept so a spawn can work out where a ship arrived from. */
+    systemData?: SystemData;
+}
+
+interface ArrivalContext {
+    system: ArrivalSystem;
+    neighbours: Map<string, readonly [number, number]>;
+    stellars: (readonly [number, number])[];
 }
 
 function isWeightedShip(value: unknown): value is { id: string, weight: number } {
@@ -155,6 +173,7 @@ async function createNpc(
     gameData: GameDataInterface,
     entries: readonly NpcSpawnData[],
     budget: import('./entity_budget').EntityBudget,
+    placement?: ArrivalPlacement,
 ) {
     const npcType = pickWeighted(entries);
     if (!npcType) {
@@ -186,6 +205,15 @@ async function createNpc(
         // an interceptor or a miner.
         npc.components.set(
             NpcTrafficComponent, createArrivingTrafficState());
+        if (placement) {
+            const movement = npc.components.get(MovementStateComponent);
+            if (movement) {
+                movement.position = new Position(
+                    placement.position[0], placement.position[1]);
+                movement.rotation = new Angle(placement.rotation);
+                movement.velocity = new Vector(0, 0);
+            }
+        }
         npc.components.set(MultiplayerData, { owner: "server" });
         return npc;
     } catch (_error) {
@@ -193,6 +221,61 @@ async function createNpc(
         // spawning. The concise population log reports the resulting count.
         return undefined;
     }
+}
+
+
+/**
+ * Resolve what a ship could plausibly have arrived from: the galaxy positions
+ * of this system's hyperspace neighbours, and the stellars a ship could have
+ * lifted off from.
+ *
+ * Deliberately synchronous and cache-only. Awaiting these lookups would delay
+ * the spawn that needs them, and a cold cache is harmless: the ship simply
+ * enters on an arbitrary bearing until the data is warm.
+ */
+function arrivalContext(
+    gameData: GameDataInterface,
+    systemData: SystemData,
+): ArrivalContext {
+    const neighbours = new Map<string, readonly [number, number]>();
+    for (const link of systemData.links ?? []) {
+        const linked = gameData.data.System.getCached(link);
+        if (linked) {
+            neighbours.set(link, linked.position);
+        }
+    }
+    const stellars: (readonly [number, number])[] = [];
+    for (const id of systemData.planets ?? []) {
+        const planet = gameData.data.Planet.getCached(id);
+        if (planet) {
+            stellars.push(planet.position);
+        }
+    }
+    return {
+        system: {
+            position: systemData.position ?? [0, 0],
+            links: systemData.links ?? [],
+            planets: systemData.planets ?? [],
+        },
+        neighbours,
+        stellars,
+    };
+}
+
+function nextPlacement(
+    gameData: GameDataInterface,
+    state: NpcSpawnState,
+): ArrivalPlacement | undefined {
+    if (!state.systemData) {
+        return undefined;
+    }
+    const context = arrivalContext(gameData, state.systemData);
+    return chooseArrivalPlacement(
+        context.system,
+        context.neighbours,
+        context.stellars,
+        Math.random,
+    );
 }
 
 const NpcSpawnSystem = new AsyncSystem({
@@ -228,6 +311,7 @@ const NpcSpawnSystem = new AsyncSystem({
             state.target = getNpcTargetCount(systemData.avgShips);
             state.capacity = getNpcCapacity(state.target);
             state.entries = getSpawnEntries(systemData);
+            state.systemData = systemData;
             if (state.entries.length === 0 || state.target === 0) {
                 state.disabled = state.entries.length === 0;
                 state.nextSpawnAt = Infinity;
@@ -245,7 +329,8 @@ const NpcSpawnSystem = new AsyncSystem({
                 if (!activeWorlds.has(world)) {
                     return;
                 }
-                const npc = await createNpc(gameData, state.entries, budget);
+                const npc = await createNpc(
+                    gameData, state.entries, budget, nextPlacement(gameData, state));
                 if (!activeWorlds.has(world)) {
                     if (npc) {
                         budget.release('ship');
@@ -267,7 +352,8 @@ const NpcSpawnSystem = new AsyncSystem({
         }
 
         state.nextSpawnAt = time.time + getNpcRespawnDelay();
-        const npc = await createNpc(gameData, state.entries, budget);
+        const npc = await createNpc(
+            gameData, state.entries, budget, nextPlacement(gameData, state));
         if (!npc || !activeWorlds.has(world)) {
             if (npc && !activeWorlds.has(world)) {
                 budget.release('ship');
