@@ -25,13 +25,16 @@ import {
     CompatibilityProfileResource,
 } from './entity_budget';
 import {
+    PersistentPlayerState,
     PlayerData as PlayerDataCodec,
+    PlayerRevisionConflictError,
     PlayerStateCodec,
     PlayerStateComponent,
     PlayerStorePort,
     PlayerStoreResource,
     toPersistentPlayerState,
 } from './player_state';
+
 import { SystemIdResource } from './system_id_resource';
 
 // Kept exported here for compatibility with code that used the original
@@ -49,6 +52,38 @@ const PlayerPersistenceEntitiesQuery = new Query([
 
 interface PlayerStatePersistenceRecord {
     readonly token: string;
+    /**
+     * Revision this session last wrote. Presenting it on the next save makes
+     * the write conditional, so a session that has fallen behind - a pilot
+     * reconnecting while the previous one still flushes - cannot overwrite
+     * newer progress.
+     */
+    revision?: number;
+}
+
+/**
+ * Persists a pilot's state, dropping the write when the store has already
+ * moved past the revision this session last saw. Returns the revision to
+ * remember for the next write.
+ */
+async function saveConditionally(
+    playerStore: PlayerStorePort,
+    token: string,
+    state: PersistentPlayerState,
+    expectedRevision: number | undefined,
+): Promise<number | undefined> {
+    try {
+        const saved = await playerStore.save(
+            token, state, undefined, expectedRevision);
+        return typeof saved === 'number' ? saved : undefined;
+    } catch (error) {
+        if (error instanceof PlayerRevisionConflictError) {
+            console.warn(`Dropped a stale save for ${token}: `
+                + `${error.message}`);
+            return error.actual;
+        }
+        throw error;
+    }
 }
 
 export const PlayerStateSnapshots = new Resource<
@@ -73,8 +108,25 @@ export const ManageClientsSystem = new System({
                     if (!persistedState.currentSystem) {
                         persistedState.currentSystem = systemId;
                     }
-                    void playerStore.save(token, persistedState)
-                        .then(() => playerStore.flush())
+                    const record = snapshots.get(uuid);
+                    // The success and conflict paths both flush from the same
+                    // promise callback, so a disconnect still reaches disk in
+                    // the same turn it used to.
+                    void playerStore.save(
+                        token, persistedState, undefined,
+                        record?.token === token ? record.revision : undefined)
+                        .then(
+                            () => playerStore.flush(),
+                            error => {
+                                if (error instanceof
+                                    PlayerRevisionConflictError) {
+                                    console.warn(
+                                        `Dropped a stale disconnect save for `
+                                        + `${token}: ${error.message}`);
+                                    return playerStore.flush();
+                                }
+                                throw error;
+                            })
                         .catch(error => console.error(
                             'Failed to flush player state on disconnect', error));
                 } else if (token) {
@@ -120,9 +172,19 @@ export const PersistPlayerStateSystem = new System({
             // Copy before yielding: multiplayer may replace this Immer draft
             // before PlayerStore.save reaches its first await.
             const persistedState = toPersistentPlayerState(state);
-            snapshots.set(uuid, { token });
-            void playerStore.save(token, persistedState).catch(error =>
-                console.error('Failed to save player state', error));
+            const expected = previous?.token === token
+                ? previous.revision : undefined;
+            snapshots.set(uuid, { token, revision: previous?.revision });
+            void saveConditionally(
+                playerStore, token, persistedState, expected)
+                .then(revision => {
+                    const current = snapshots.get(uuid);
+                    if (current?.token === token) {
+                        snapshots.set(uuid, { token, revision });
+                    }
+                })
+                .catch(error =>
+                    console.error('Failed to save player state', error));
         }
     },
 });

@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
     MAX_PLAYER_SNAPSHOTS,
+    PlayerRevisionConflictError,
     PlayerStore,
 } from './player_store';
 import type { EncodedEntity } from 'nova_ecs/plugins/serializer_plugin';
@@ -93,4 +94,72 @@ describe('player snapshots', () => {
             ?.gameDate).toBe(2);
         await fs.rm(directory, { recursive: true, force: true });
     });
+});
+
+describe('player state revisions', () => {
+    async function freshStore() {
+        const directory = await fs.mkdtemp(
+            path.join(os.tmpdir(), 'novajs-player-store-revision-'));
+        return new PlayerStore(path.join(directory, 'players.json'));
+    }
+
+    it('starts at revision zero and counts every accepted write', async () => {
+        const store = await freshStore();
+        expect(await store.revision('token')).toBe(0);
+        expect(await store.save('token', stateFor(1))).toBe(1);
+        expect(await store.save('token', stateFor(2))).toBe(2);
+        expect(await store.revision('token')).toBe(2);
+    });
+
+    it('accepts a conditional save that presents the current revision',
+        async () => {
+            const store = await freshStore();
+            const first = await store.save('token', stateFor(1));
+            expect(await store.save('token', stateFor(2), undefined, first))
+                .toBe(2);
+            expect((await store.get('token'))?.gameDate).toBe(2);
+        });
+
+    it('rejects a save from a session that has fallen behind', async () => {
+        const store = await freshStore();
+        const stale = await store.save('token', stateFor(1));
+        // Another session saves in the meantime.
+        await store.save('token', stateFor(2));
+
+        await expectAsync(store.save('token', stateFor(99), undefined, stale))
+            .toBeRejectedWithError(PlayerRevisionConflictError);
+        // The newer progress survives rather than being overwritten.
+        expect((await store.get('token'))?.gameDate).toBe(2);
+    });
+
+    it('reports the revision it is actually at when rejecting', async () => {
+        const store = await freshStore();
+        await store.save('token', stateFor(1));
+        await store.save('token', stateFor(2));
+        try {
+            await store.save('token', stateFor(3), undefined, 1);
+            throw new Error('Expected a revision conflict');
+        } catch (error) {
+            const conflict = error as PlayerRevisionConflictError;
+            expect(conflict.expected).toBe(1);
+            expect(conflict.actual).toBe(2);
+        }
+    });
+
+    it('keeps revisions across a reload so a restart cannot lose them',
+        async () => {
+            const directory = await fs.mkdtemp(
+                path.join(os.tmpdir(), 'novajs-player-store-reload-'));
+            const filePath = path.join(directory, 'players.json');
+            const store = new PlayerStore(filePath);
+            await store.save('token', stateFor(1));
+            await store.save('token', stateFor(2));
+            await store.flush();
+
+            const reloaded = new PlayerStore(filePath);
+            expect(await reloaded.revision('token')).toBe(2);
+            await expectAsync(
+                reloaded.save('token', stateFor(3), undefined, 1))
+                .toBeRejectedWithError(PlayerRevisionConflictError);
+        });
 });

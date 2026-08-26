@@ -321,17 +321,40 @@ export type PlayerSnapshot = t.TypeOf<typeof PlayerSnapshotCodec>;
  * plugins. Keeping this contract beside the browser-safe codecs prevents
  * each plugin from inventing a slightly different persistence API.
  */
+/**
+ * Raised when a save is based on state the store has already moved past,
+ * which happens when a pilot reconnects while the previous session is still
+ * flushing. The newer state wins and the stale write is dropped.
+ */
+export class PlayerRevisionConflictError extends Error {
+    constructor(readonly expected: number, readonly actual: number) {
+        super(`Player state revision ${expected} is stale; `
+            + `the store is at ${actual}`);
+    }
+}
+
 export interface PlayerStorePort {
     readonly ready: Promise<void>;
     get(token: string): Promise<
-        (PersistentPlayerState & { readonly savedAt?: number }) | undefined
+        (PersistentPlayerState & {
+            readonly savedAt?: number,
+            readonly revision?: number,
+        }) | undefined
     >;
     getOrCreate(token: string): Promise<PersistentPlayerState>;
+    /**
+     * Persists a pilot's state, returning the revision the store is now at.
+     * Passing `expectedRevision` makes the write conditional so a session
+     * that has fallen behind cannot overwrite newer progress.
+     */
     save(
         token: string,
         state: PersistentPlayerState,
         ship?: t.TypeOf<typeof EncodedEntity>,
-    ): Promise<void>;
+        expectedRevision?: number,
+    ): Promise<number | void>;
+    /** The revision a conditional save must present. */
+    revision?(token: string): Promise<number>;
     snapshot(
         token: string,
         state: PersistentPlayerState,

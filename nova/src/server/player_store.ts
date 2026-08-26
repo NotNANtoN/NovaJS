@@ -10,10 +10,13 @@ import {
     PlayerSnapshotCodec,
     toPersistentPlayerState,
 } from '../nova_plugin/player_state';
+import { PlayerRevisionConflictError } from '../nova_plugin/player_state';
 import type {
     PersistentPlayerState,
     PlayerStorePort,
 } from '../nova_plugin/player_state';
+
+export { PlayerRevisionConflictError };
 import { EncodedEntity } from 'nova_ecs/plugins/serializer_plugin';
 
 const PLAYER_DATA_DIRECTORY = 'NovaJS-data';
@@ -24,7 +27,14 @@ export interface StoredPlayer extends PersistentPlayerState {
     savedAt?: number;
     ship?: EncodedEntity;
     snapshots: PlayerSnapshot[];
+    /**
+     * Incremented on every accepted write. A writer that saw an older
+     * revision is refusing to be the one that overwrites newer progress.
+     */
+    revision?: number;
 }
+
+
 
 const StoredPlayerCodec = t.intersection([
     PersistentPlayerStateCodec,
@@ -32,6 +42,7 @@ const StoredPlayerCodec = t.intersection([
         savedAt: t.number,
         ship: EncodedEntity,
         snapshots: t.array(PlayerSnapshotCodec),
+        revision: t.number,
     }),
 ]);
 
@@ -161,21 +172,40 @@ export class PlayerStore implements PlayerStorePort {
         return clonePlayer(player);
     }
 
+    /**
+     * Persists a pilot's state. Pass `expectedRevision` to make the write
+     * conditional: it is rejected if another writer has saved since that
+     * revision was read.
+     */
     async save(
         token: string,
         state: PersistentPlayerState,
         ship?: EncodedEntity,
-    ) {
+        expectedRevision?: number,
+    ): Promise<number> {
         await this.ready;
         const previous = this.players.get(token);
+        const revision = previous?.revision ?? 0;
+        if (expectedRevision !== undefined && expectedRevision !== revision) {
+            throw new PlayerRevisionConflictError(expectedRevision, revision);
+        }
         const persistedState = toPersistentPlayerState(state);
+        const next = revision + 1;
         this.players.set(token, {
             ...persistedState,
             savedAt: Date.now(),
             snapshots: previous?.snapshots.map(cloneSnapshot) ?? [],
             ...(ship === undefined ? { ship: previous?.ship } : { ship }),
+            revision: next,
         });
         this.scheduleSave();
+        return next;
+    }
+
+    /** The revision a writer must present to save over the current state. */
+    async revision(token: string): Promise<number> {
+        await this.ready;
+        return this.players.get(token)?.revision ?? 0;
     }
 
     /**
