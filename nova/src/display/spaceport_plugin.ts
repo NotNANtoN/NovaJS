@@ -31,6 +31,8 @@ import {
 } from '../nova_plugin/mission_plugin';
 import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin';
 import { PlayerStoreResource } from '../nova_plugin/player_state';
+import { refuelOnLanding } from '../nova_plugin/fuel';
+import { ShipDataComponent } from '../nova_plugin/ship_plugin';
 import {
     advanceGameDate,
     PlayerState,
@@ -99,6 +101,14 @@ const LandSystem = new System({
         }
         if (playerState) {
             advanceGameDate(playerState);
+            // Any inhabited stellar refuels; only a bare rock leaves the pilot
+            // to manage what is in the tank.
+            const tank = playerShip.components
+                .get(ShipDataComponent)?.fuelCapacity ?? 0;
+            if (tank > 0 && landedPlanet) {
+                playerState.fuel = refuelOnLanding(
+                    playerState.fuel ?? 0, tank, landedPlanet);
+            }
             playerState.lastLandedPlanet = id;
             playerState.landingCount = (playerState.landingCount ?? 0) + 1;
             playerState.lastLandedSystem = playerState.currentSystem;

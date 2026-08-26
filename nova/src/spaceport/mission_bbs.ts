@@ -549,6 +549,11 @@ export abstract class MissionBoard extends Menu<Entity> {
     private readonly briefingGraphic = new PIXI.Container();
     private readonly layout: MissionPanelLayout;
     private offers: MissionOffer[] = [];
+
+    /** How many offers are posted here, so a caller can hide an empty board. */
+    protected get offerCount(): number {
+        return this.offers.length;
+    }
     private world?: MissionBoardWorld;
     private selectionIndex = -1;
     private firstVisible = 0;

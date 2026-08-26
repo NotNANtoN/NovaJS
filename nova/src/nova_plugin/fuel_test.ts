@@ -1,12 +1,12 @@
 import 'jasmine';
 import {
-    buyFuel,
     canJump,
     clampFuel,
+    refuelOnLanding,
+    refuelsOnLanding,
     FUEL_PER_JUMP,
     fuelJumpBlocks,
     jumpsFromFuel,
-    refuelCost,
     spendJumpFuel,
 } from './fuel';
 
@@ -59,40 +59,22 @@ describe('the fuel gauge', () => {
     });
 });
 
-describe('buying fuel', () => {
-    it('costs nothing when the tank is already full', () => {
-        expect(refuelCost(300, 300)).toBe(0);
-        expect(buyFuel(300, 300, 1000).purchased).toBe(0);
+describe('refuelling on landing', () => {
+    it('fills the tank at an inhabited stellar', () => {
+        expect(refuelOnLanding(50, 300, { inhabited: true })).toBe(300);
     });
 
-    it('charges per jump and rounds a part jump up', () => {
-        expect(refuelCost(0, 300, 100)).toBe(300);
-        expect(refuelCost(250, 300, 100)).toBe(100);
+    it('leaves the tank alone at an uninhabited rock', () => {
+        expect(refuelsOnLanding({ inhabited: false })).toBeFalse();
+        expect(refuelOnLanding(50, 300, { inhabited: false })).toBe(50);
     });
 
-    it('fills the tank when the pilot can afford it', () => {
-        const result = buyFuel(0, 300, 1000, 100);
-        expect(result.fuel).toBe(300);
-        expect(result.credits).toBe(700);
-        expect(result.purchased).toBe(300);
+    it('treats a stellar of unknown habitation as inhabited', () => {
+        expect(refuelsOnLanding({})).toBeTrue();
+        expect(refuelOnLanding(0, 300, {})).toBe(300);
     });
 
-    it('buys only what the pilot can afford', () => {
-        const result = buyFuel(0, 500, 250, 100);
-        expect(result.fuel).toBe(2 * FUEL_PER_JUMP);
-        expect(result.credits).toBe(50);
-    });
-
-    it('buys nothing when the pilot is broke', () => {
-        const result = buyFuel(0, 300, 50, 100);
-        expect(result.fuel).toBe(0);
-        expect(result.credits).toBe(50);
-        expect(result.purchased).toBe(0);
-    });
-
-    it('never overfills a partly used tank', () => {
-        const result = buyFuel(250, 300, 1000, 100);
-        expect(result.fuel).toBe(300);
-        expect(result.credits).toBe(900);
+    it('never leaves more fuel than the tank holds', () => {
+        expect(refuelOnLanding(900, 300, { inhabited: false })).toBe(300);
     });
 });

@@ -9,7 +9,6 @@ import { OutfitsState } from "../nova_plugin/outfit_plugin";
 import { PlayerState } from "../nova_plugin/player_state";
 import { Button } from "./button";
 import { ShipData } from "novadatainterface/ShipData";
-import { buyFuel } from "../nova_plugin/fuel";
 import { ItemGrid, ItemTile } from "./item_grid";
 import { Menu } from "./menu";
 import { isPurchaseAvailable } from "./availability";
@@ -60,14 +59,11 @@ export class Outfitter extends Menu<OutfitsState> {
         const buttons = {
             buy: new Button(gameData, "Buy", 60, { x: -100, y: 126 }),
             sell: new Button(gameData, "Sell", 60, { x: 0, y: 126 }),
-            // Retail sells jump fuel here, under the label from STR# 150.
-            recharge: new Button(gameData, "Recharge", 80, { x: -200, y: 126 }),
             done: new Button(gameData, "Done", 60, { x: 100, y: 126 })
         };
 
         buttons.buy.click.subscribe(this.buyOutfit.bind(this));
         buttons.sell.click.subscribe(this.sellOutfit.bind(this));
-        buttons.recharge.click.subscribe(this.recharge.bind(this));
         buttons.done.click.subscribe(this.done.bind(this));
         this.addButtons(buttons);
 
@@ -138,25 +134,6 @@ export class Outfitter extends Menu<OutfitsState> {
 
     setShipData(shipData: ShipData | undefined) {
         this.shipData = shipData;
-    }
-
-    /**
-     * Top the tank up as far as the pilot's credits stretch. Retail charges
-     * per jump's worth, and refuses silently when the tank is already full.
-     */
-    private recharge() {
-        const state = this.playerState;
-        const capacity = this.shipData?.fuelCapacity ?? 0;
-        if (!state || capacity <= 0) {
-            return;
-        }
-        const result = buyFuel(state.fuel ?? 0, capacity, state.credits);
-        if (result.purchased <= 0) {
-            return;
-        }
-        state.fuel = result.fuel;
-        state.credits = result.credits;
-        this.updateCreditsText();
     }
 
     setPlanetData(planetData: PlanetData | undefined) {

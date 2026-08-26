@@ -28,6 +28,7 @@ export class Bar extends MissionBoard {
         wordWrapWidth: BAR_LAYOUT.text.width,
     });
     private readonly missionControls: MenuControls['controls'];
+    private missionsButton!: Button;
     private flavorKind: BarFlavorKind = 'news';
     private flavorIndex = 0;
     private retailStrings: RetailStringLists = {};
@@ -84,8 +85,12 @@ export class Bar extends MissionBoard {
             x: firstRow[2]!.x,
             y: firstRow[2]!.y,
         });
+        // Not the Mission BBS: STR# 150 files that label with the spaceport
+        // menu, alongside Trade Center and Outfitter. What the bar offers is
+        // the people drinking in it, so it says so, and says nothing when
+        // there is nobody to talk to.
         const missions = new Button(
-            gameData, 'Mission BBS', secondRow[0]!.width, {
+            gameData, 'Ask Around', secondRow[0]!.width, {
                 x: secondRow[0]!.x,
                 y: secondRow[0]!.y + 28,
             });
@@ -102,6 +107,7 @@ export class Bar extends MissionBoard {
             this.flavorIndex++;
             this.renderFlavor();
         });
+        this.missionsButton = missions;
         missions.click.subscribe(() => this.showMissions());
         done.click.subscribe(this.done.bind(this));
         for (const button of [gamble, holovid, hire, missions, done]) {
@@ -127,8 +133,6 @@ export class Bar extends MissionBoard {
                 ?? 'Holovid');
             hire.setText(barButtonLabel(this.retailStrings, 'hireEscort')
                 ?? 'Hire Escort');
-            missions.setText(barButtonLabel(this.retailStrings, 'missionBbs')
-                ?? 'Mission BBS');
             done.setText(barButtonLabel(this.retailStrings, 'done') ?? 'Done');
             this.renderFlavor();
         });
@@ -147,6 +151,7 @@ export class Bar extends MissionBoard {
             child.visible = false;
         }
         this.hub.visible = true;
+        this.missionsButton.state = this.offerCount > 0 ? 'normal' : 'grey';
         this.controls.controls = {
             up: () => {
                 this.flavorIndex--;
@@ -164,6 +169,9 @@ export class Bar extends MissionBoard {
     }
 
     private showMissions() {
+        if (this.offerCount === 0) {
+            return;
+        }
         this.hub.visible = false;
         for (const [child, visible] of this.inheritedVisibility) {
             child.visible = visible;

@@ -72,57 +72,25 @@ export function clampFuel(fuel: number, capacity: number): number {
 }
 
 /**
- * What a top-up costs. Retail charges per jump's worth rather than per unit,
- * and a partly used jump is rounded up so the pilot always leaves full.
+ * Whether landing here fills the tank.
+ *
+ * Refuelling is a property of the place, not a purchase. The Bible describes
+ * spöb flag 0x00000020 as "Stellar is uninhabited (no traffic control or
+ * refuelling)", and names no price for fuel anywhere, so every inhabited
+ * stellar a pilot can land on tops them up for free.
  */
-export const FUEL_PRICE_PER_JUMP = 100;
+export function refuelsOnLanding(
+    planet: { readonly inhabited?: boolean },
+): boolean {
+    return planet.inhabited !== false;
+}
 
-export function refuelCost(
+/** Fill the tank on landing, leaving a full pilot untouched. */
+export function refuelOnLanding(
     fuel: number,
     capacity: number,
-    pricePerJump = FUEL_PRICE_PER_JUMP,
+    planet: { readonly inhabited?: boolean },
 ): number {
-    const missing = Math.max(0, Math.max(0, capacity) - Math.max(0, fuel));
-    if (missing === 0) {
-        return 0;
-    }
-    return Math.ceil(missing / FUEL_PER_JUMP) * pricePerJump;
-}
-
-export interface RefuelResult {
-    fuel: number;
-    credits: number;
-    /** Units actually bought, so callers can report what happened. */
-    purchased: number;
-}
-
-/**
- * Buy as much fuel as the pilot can afford, in whole jumps. Buying nothing is
- * a valid outcome and leaves both fuel and credits untouched.
- */
-export function buyFuel(
-    fuel: number,
-    capacity: number,
-    credits: number,
-    pricePerJump = FUEL_PRICE_PER_JUMP,
-): RefuelResult {
-    const tank = Math.max(0, capacity);
-    const held = clampFuel(fuel, tank);
-    const missing = tank - held;
-    if (missing <= 0 || pricePerJump <= 0 && credits < 0) {
-        return { fuel: held, credits, purchased: 0 };
-    }
-    const wanted = Math.ceil(missing / FUEL_PER_JUMP);
-    const affordable = pricePerJump === 0
-        ? wanted
-        : Math.min(wanted, Math.floor(Math.max(0, credits) / pricePerJump));
-    if (affordable <= 0) {
-        return { fuel: held, credits, purchased: 0 };
-    }
-    const purchased = Math.min(missing, affordable * FUEL_PER_JUMP);
-    return {
-        fuel: held + purchased,
-        credits: credits - affordable * pricePerJump,
-        purchased,
-    };
+    const held = clampFuel(fuel, capacity);
+    return refuelsOnLanding(planet) ? Math.max(0, capacity) : held;
 }

@@ -67,6 +67,8 @@ export class ShipInfo extends Menu<Entity> {
     private systemName?: string;
     private governments = new Map<string, GovtData>();
     private ladders: StatusLadders = {};
+    /** STR# 4000 'All Cargo', which names each mission CargoType. */
+    private cargoNames: readonly string[] = [];
     private referenceData?: Promise<void>;
 
     constructor(
@@ -116,7 +118,7 @@ export class ShipInfo extends Menu<Entity> {
             state, shipData?.name, this.systemName, this.ladders);
         this.outfits.text = shipInfoOutfits(
             outfits, await this.outfitNames(outfits));
-        this.summary.text = shipInfoCargo(state);
+        this.summary.text = shipInfoCargo(state, this.cargoNames);
         this.missions.text = shipInfoMissions(state);
         this.standing.text = shipInfoStanding(
             state, this.governments, this.ladders);
@@ -163,6 +165,7 @@ export class ShipInfo extends Menu<Entity> {
             legal: await read('nova:134'),
             combat: await read('nova:138'),
         };
+        this.cargoNames = await read('nova:4000') ?? [];
     }
 
     private async outfitNames(
