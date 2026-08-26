@@ -18,6 +18,7 @@ import { SystemData } from "novadatainterface/SystemData";
 import { PersData } from "novadatainterface/PersData";
 import { Entity } from "nova_ecs/entity";
 import { selectPers } from "./pers";
+import { PlanetComponent } from "./planet_plugin";
 import { composeFleetRoster, formationSlot } from "./fleet";
 import {
     FleetMemberComponent,
@@ -315,13 +316,13 @@ async function createNpcGroup(
  * of this system's hyperspace neighbours, and the stellars a ship could have
  * lifted off from.
  *
- * Deliberately synchronous and cache-only. Awaiting these lookups would delay
- * the spawn that needs them, and a cold cache is harmless: the ship simply
- * enters on an arbitrary bearing until the data is warm.
+ * Live planet entities take precedence because their positions are authoritative
+ * for the world currently being populated.
  */
 function arrivalContext(
     gameData: GameDataInterface,
     systemData: SystemData,
+    world: World,
 ): ArrivalContext {
     const neighbours = new Map<string, readonly [number, number]>();
     for (const link of systemData.links ?? []) {
@@ -330,8 +331,25 @@ function arrivalContext(
             neighbours.set(link, linked.position);
         }
     }
+    const liveStellars = new Map<string, ArrivalStellarCandidate>();
+    for (const entity of world.entities.values()) {
+        const planet = entity.components.get(PlanetComponent);
+        const movement = entity.components.get(MovementStateComponent);
+        if (!planet || !movement) {
+            continue;
+        }
+        liveStellars.set(planet.id, {
+            position: [movement.position.x, movement.position.y],
+            inhabited: planet.inhabited,
+        });
+    }
     const stellars: ArrivalStellarCandidate[] = [];
     for (const id of systemData.planets ?? []) {
+        const live = liveStellars.get(id);
+        if (live) {
+            stellars.push(live);
+            continue;
+        }
         const planet = gameData.data.Planet.getCached(id);
         if (planet) {
             // A barren rock has no traffic to launch, so the inhabited flag
@@ -351,13 +369,21 @@ function arrivalContext(
     };
 }
 
+async function warmPlanetData(
+    gameData: GameDataInterface,
+    systemData: SystemData,
+): Promise<void> {
+    await Promise.all((systemData.planets ?? []).map(id =>
+        gameData.data.Planet.get(id).catch(() => undefined)));
+}
+
 /**
  * Where a warship of `government` would stand guard in this system: one of its
  * own inhabited worlds. Kept general rather than keyed to Sol, because every
  * government's navy has the same reason to circle the worlds it holds.
  *
- * Cache-only for the same reason as `arrivalContext`: a cold cache simply means
- * no patrol post this time, and the ship behaves as it did before.
+ * A cold cache simply means no patrol post this time, and the ship behaves as
+ * it did before.
  */
 function guardPost(
     gameData: GameDataInterface,
@@ -392,11 +418,12 @@ function applyPlacement(npc: Entity, placement: ArrivalPlacement): void {
 function nextPlacement(
     gameData: GameDataInterface,
     systemData: SystemData | undefined,
+    world: World,
 ): ArrivalPlacement | undefined {
     if (!systemData) {
         return undefined;
     }
-    const context = arrivalContext(gameData, systemData);
+    const context = arrivalContext(gameData, systemData, world);
     return chooseArrivalPlacement(
         context.system,
         context.neighbours,
@@ -548,6 +575,8 @@ const NpcSpawnSystem = new AsyncSystem({
                 return;
             }
 
+            await warmPlanetData(gameData, systemData);
+
             const room = Math.max(0, state.capacity - npcs.length);
             const target = state.target;
             const initialCount = Math.max(
@@ -571,7 +600,7 @@ const NpcSpawnSystem = new AsyncSystem({
                 if (spawned >= initialCount) {
                     break;
                 }
-                const placement = nextPlacement(gameData, systemData);
+                const placement = nextPlacement(gameData, systemData, world);
                 // The await must stay inside the branch: awaiting even an
                 // immediate undefined costs a tick, and a batch of spawns is
                 // expected to finish within the tick that asked for it.
@@ -610,7 +639,7 @@ const NpcSpawnSystem = new AsyncSystem({
         }
         const target = state.target;
         const existing = npcs.length;
-        const placement = nextPlacement(gameData, spawnData.systemData);
+        const placement = nextPlacement(gameData, spawnData.systemData, world);
         const named = persByGameData.get(gameData)?.length
             ? await createPersNpc(
                 gameData, world, systemId, budget, placement)

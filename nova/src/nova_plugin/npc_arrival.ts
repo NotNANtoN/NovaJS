@@ -12,10 +12,12 @@
  * the system it came from and heading inward, or it lifts off from a stellar.
  */
 
+import { JUMP_ARRIVAL_RADIUS } from './jump_plugin';
+
 export type ArrivalRandom = () => number;
 
-/** How far out a ship drops in from hyperspace. */
-export const HYPERSPACE_ENTRY_RADIUS = 6_000;
+/** Ambient traffic uses the same entry scale as a player's jump arrival. */
+export const HYPERSPACE_ENTRY_RADIUS = JUMP_ARRIVAL_RADIUS;
 
 /** How far off a stellar a launching ship appears. */
 export const STELLAR_LAUNCH_OFFSET = 700;

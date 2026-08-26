@@ -71,6 +71,13 @@ export class Spaceport extends Menu<Entity> {
         fontFamily: "Geneva", fontSize: 10, fill: 0xffff00,
         align: "left", wordWrap: true, wordWrapWidth: 420,
     } as const);
+    // The status bar, which is where a pilot would otherwise watch their fuel
+    // and credits change, is hidden behind the landing screen. One click buys
+    // every missing jump, so without a receipt the deduction looks arbitrary.
+    private rechargeNotice = new PIXI.Text("", {
+        fontFamily: "Geneva", fontSize: 10, fill: 0xffffff,
+        align: "left", wordWrap: true, wordWrapWidth: 420,
+    } as const);
 
     private font = {
         title: {
@@ -353,7 +360,7 @@ export class Spaceport extends Menu<Entity> {
             try {
                 const outfit = await this.gameData.data.Outfit.get(id);
                 if (outfit.isAutoRecharger) {
-                    this.recharge(ship);
+                    this.recharge(ship, 'Auto-recharger');
                     return;
                 }
             } catch {
@@ -368,7 +375,7 @@ export class Spaceport extends Menu<Entity> {
      * The pilot leaves with as many whole jumps as their credits stretch to,
      * and a pilot who cannot afford one is simply left as they were.
      */
-    private recharge(ship: Entity = this.input): void {
+    private recharge(ship: Entity = this.input, buyer = 'Recharged'): void {
         const state = ship.components.get(PlayerStateComponent);
         const capacity = ship.components
             .get(ShipDataComponent)?.fuelCapacity ?? 0;
@@ -376,12 +383,16 @@ export class Spaceport extends Menu<Entity> {
             || !refuelsOnLanding(this.data)) {
             return;
         }
+        const spent = state.credits;
         const result = buyFuel(state.fuel ?? 0, capacity, state.credits);
         if (result.purchased <= 0) {
             return;
         }
         state.fuel = result.fuel;
         state.credits = result.credits;
+        this.rechargeNotice.text = `${buyer} ${result.purchased} jump${
+            result.purchased === 1 ? '' : 's'} for ${
+            (spent - result.credits).toLocaleString()} cr.`;
         this.updateRechargeState();
     }
 
@@ -441,6 +452,8 @@ export class Spaceport extends Menu<Entity> {
         this.container.addChild(this.shipInfo.container);
         this.missionNotice.position.set(-210, 145);
         this.container.addChild(this.missionNotice);
+        this.rechargeNotice.position.set(-210, 175);
+        this.container.addChild(this.rechargeNotice);
     }
 
     override async show(
@@ -448,6 +461,7 @@ export class Spaceport extends Menu<Entity> {
         landingNotices: readonly MissionNotice[] = [],
     ): Promise<Entity> {
         await this.buildPromise;
+        this.rechargeNotice.text = '';
         // Retail's Auto-recharger buys the recharge on landing, so this
         // belongs to a landing and not to building the screen: build() runs
         // when the planet loads, when there is no ship to refuel.

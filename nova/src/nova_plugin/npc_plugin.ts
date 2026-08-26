@@ -457,9 +457,17 @@ function weaponRange(weapon: WeaponData): number | undefined {
         return;
     }
     if (weapon.type === "BeamWeaponData") {
-        return weapon.beamAnimation.length;
+        const range = weapon.beamAnimation?.length;
+        return typeof range === "number" && Number.isFinite(range)
+            ? range
+            : undefined;
     }
-    return weapon.physics.speed * weapon.shotDuration / 1000;
+    if (typeof weapon.physics?.speed !== "number"
+        || typeof weapon.shotDuration !== "number") {
+        return;
+    }
+    const range = weapon.physics.speed * weapon.shotDuration / 1000;
+    return Number.isFinite(range) ? range : undefined;
 }
 
 export function getMaximumWeaponRange(
@@ -752,11 +760,12 @@ export const ShootAllWeaponsComponent = new Component<undefined>('ShootAllWeapon
 export const ShootAllWeaponsAI = new System({
     name: 'ShootAllWeaponsAI',
     args: [WeaponsStateComponent, GameDataResource, TargetComponent,
-        ShootAllWeaponsComponent, Entities, MultiplayerData,
+        Optional(MovementStateComponent), ShootAllWeaponsComponent,
+        Entities, MultiplayerData,
         PlatformResource, Optional(DestructionStartedComponent),
         Optional(ArmorComponent), Optional(NpcFleeComponent)] as const,
-    step(weapons, gameData, target, _shoot, entities, multiplayer, platform,
-        destructionStarted, armor, fleeing) {
+    step(weapons, gameData, target, movement, _shoot, entities, multiplayer,
+        platform, destructionStarted, armor, fleeing) {
         if (platform === "node" && multiplayer.owner !== "server"
             || platform === "browser" && multiplayer.owner === "server") {
             return;
@@ -772,14 +781,26 @@ export const ShootAllWeaponsAI = new System({
         if (targetUuid && !entities.has(targetUuid)) {
             target.target = undefined;
         }
+        const targetMovement = target.target
+            ? entities.get(target.target)?.components
+                .get(MovementStateComponent)
+            : undefined;
+        const targetDistance = movement && targetMovement
+            ? targetMovement.position.subtract(movement.position).length
+            : undefined;
         for (const [id, weapon] of weapons) {
-            const weaponType = gameData.data.Weapon.getCached(id)?.type;
-            if (weaponType == null || weaponType === 'BayWeaponData') {
+            const weaponData = gameData.data.Weapon.getCached(id);
+            if (weaponData == null || weaponData.type === 'BayWeaponData') {
                 // do not use bay weapons yet since there is no ammo limit.
                 continue;
             };
             weapon.target = target.target;
-            weapon.firing = target.target !== undefined;
+            const pointDefense = weaponData.guidance === 'pointDefense'
+                || weaponData.guidance === 'pointDefenseBeam';
+            const range = weaponRange(weaponData);
+            weapon.firing = target.target !== undefined
+                && (pointDefense || range === undefined
+                    || targetDistance === undefined || targetDistance <= range);
         }
     }
 });

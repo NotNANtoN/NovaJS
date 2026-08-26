@@ -16,6 +16,7 @@ import { GovtComponent } from './npc_plugin';
 import { NpcSpawnPlugin } from './npc_spawn_plugin';
 import { NpcAIComponent } from './npc_hostility';
 import { NpcCombatRoleComponent } from './npc_components';
+import { PlanetComponent } from './planet_plugin';
 import { EntityBudgetResource, createEntityBudget } from './entity_budget';
 import { SystemIdResource } from './system_id_resource';
 import { DeathEvent, DeathPlugin } from './death_plugin';
@@ -178,5 +179,85 @@ describe('NPC spawning', () => {
 
         expect([...world.entities.values()].filter(entity =>
             entity.components.has(NpcAIComponent)).length).toBe(3);
+    });
+
+    it('uses live planets when the initial data cache is cold', async () => {
+        spyOn(Math, 'random').and.returnValue(0.1);
+
+        const planetPosition = [300, -200] as const;
+        const gameData = {
+            data: {
+                System: {
+                    get: async () => ({
+                        position: [0, 0],
+                        links: [],
+                        planets: ['nova:128'],
+                        avgShips: 4,
+                        npcs: [{
+                            id: 'test-npc',
+                            weight: 1,
+                            government: 1,
+                            combatRole: 'civilian',
+                            ships: [{ id: 'nova:128', weight: 1 }],
+                        }],
+                    }),
+                },
+                Planet: {
+                    get: async () => ({
+                        id: 'nova:128',
+                        position: [...planetPosition],
+                        inhabited: true,
+                    }),
+                    getCached: () => undefined,
+                },
+                Ship: {
+                    get: async () => getDefaultShipData(),
+                },
+            },
+        };
+        const world = new World('npc-cold-planet-cache-test');
+        world.resources.set(GameDataResource, gameData as never);
+        world.resources.set(SystemIdResource, 'nova:test');
+        world.resources.set(TimeResource, {
+            time: 0, delta_ms: 1000 / 60, delta_s: 1 / 60, frame: 0,
+        });
+        world.resources.set(
+            EntityBudgetResource, createEntityBudget('modern'));
+        world.entities.set('planet nova:128', new Entity('Earth')
+            .addComponent(PlanetComponent, {
+                id: 'nova:128',
+                inhabited: true,
+            })
+            .addComponent(MovementStateComponent, {
+                accelerating: 0,
+                position: new Position(...planetPosition),
+                rotation: new Angle(0),
+                turnBack: false,
+                turning: 0,
+                velocity: new Vector(0, 0),
+            }));
+        await world.addPlugin(DeltaPlugin);
+        await world.addPlugin(DeathPlugin);
+        await world.addPlugin(NpcSpawnPlugin);
+
+        world.step();
+        await settle();
+        world.step();
+        await settle();
+
+        const npcShips = [...world.entities.values()].filter(entity =>
+            entity.components.has(NpcAIComponent));
+        const localLaunches = npcShips.filter(entity => {
+            const movement = entity.components.get(MovementStateComponent);
+            if (!movement) {
+                return false;
+            }
+            return Math.abs(Math.hypot(
+                movement.position.x - planetPosition[0],
+                movement.position.y - planetPosition[1],
+            ) - 700) < 1e-6;
+        });
+
+        expect(localLaunches.length).toBeGreaterThan(0);
     });
 });

@@ -7,6 +7,10 @@ import {
     stellarLaunch,
     STELLAR_LAUNCH_OFFSET,
 } from './npc_arrival';
+import { JUMP_ARRIVAL_RADIUS } from './jump_plugin';
+import {
+    MULTIPLAYER_INTEREST_RADIUS,
+} from 'nova_ecs/plugins/multiplayer_plugin';
 
 /** Feeds a fixed sequence, so every branch is deterministic. */
 function rolls(...values: number[]): () => number {
@@ -35,6 +39,17 @@ describe('heading between two points', () => {
 });
 
 describe('arriving from hyperspace', () => {
+    it('uses the player arrival scale well inside multiplayer interest', () => {
+        expect(HYPERSPACE_ENTRY_RADIUS).toBe(JUMP_ARRIVAL_RADIUS);
+
+        const placement = hyperspaceEntry(SYSTEM, NEIGHBOURS, rolls(0))!;
+        const distance = Math.hypot(
+            placement.position[0], placement.position[1]);
+
+        expect(distance).toBeCloseTo(JUMP_ARRIVAL_RADIUS, 6);
+        expect(distance).toBeLessThan(MULTIPLAYER_INTEREST_RADIUS / 2);
+    });
+
     it('appears on the side facing the system it came from', () => {
         const placement = hyperspaceEntry(SYSTEM, NEIGHBOURS, rolls(0))!;
         // The first link is north, so the ship drops in above the system.
@@ -68,10 +83,16 @@ describe('arriving from hyperspace', () => {
 
 describe('lifting off from a stellar', () => {
     it('appears just off the stellar, heading away from it', () => {
+        expect(STELLAR_LAUNCH_OFFSET).toBe(700);
+
         const placement = stellarLaunch([500, 500], rolls(0));
         expect(placement.position[0]).toBeCloseTo(500, 6);
         expect(placement.position[1])
             .toBeCloseTo(500 - STELLAR_LAUNCH_OFFSET, 6);
+        expect(Math.hypot(
+            placement.position[0] - 500,
+            placement.position[1] - 500,
+        )).toBeCloseTo(STELLAR_LAUNCH_OFFSET, 6);
         expect(placement.rotation).toBeCloseTo(0, 6);
         expect(placement.origin).toEqual('stellar');
     });

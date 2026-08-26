@@ -69,6 +69,36 @@ const projectileGameData = {
     },
 } as never;
 
+const rangedWeaponGameData = {
+    data: {
+        Weapon: {
+            getCached: (id: string) => ({
+                short: {
+                    type: 'ProjectileWeaponData',
+                    fireGroup: 'primary',
+                    guidance: 'unguided',
+                    physics: { speed: 100 },
+                    shotDuration: 1_000,
+                },
+                long: {
+                    type: 'ProjectileWeaponData',
+                    fireGroup: 'primary',
+                    guidance: 'unguided',
+                    physics: { speed: 100 },
+                    shotDuration: 10_000,
+                },
+                pointDefense: {
+                    type: 'ProjectileWeaponData',
+                    fireGroup: 'primary',
+                    guidance: 'pointDefense',
+                    physics: { speed: 100 },
+                    shotDuration: 100,
+                },
+            }[id]),
+        },
+    },
+} as never;
+
 describe('NPC combat decisions', () => {
     it('scales Strength linearly from 30% to 100% with present shields', () => {
         expect(shieldScaledStrength({
@@ -160,6 +190,57 @@ function makeFollowWorld(withWeapon = true) {
     world.entities.set('npc', npc);
     return { world, npc, target };
 }
+
+function makeShootWorld(targetDistance: number, weaponIds: string[]) {
+    const world = new World('npc-shoot-test');
+    world.resources.set(PlatformResource, 'node');
+    world.resources.set(GameDataResource, rangedWeaponGameData);
+    world.addSystem(ShootAllWeaponsAI);
+
+    const weapons = new Map<string, { count: number, firing: boolean }>();
+    for (const id of weaponIds) {
+        weapons.set(id, { count: 1, firing: false });
+    }
+    const target = new Entity('target')
+        .addComponent(MovementStateComponent, movementAt(targetDistance, 0));
+    const npc = new Entity('npc')
+        .addComponent(MovementStateComponent, movementAt(0, 0))
+        .addComponent(WeaponsStateComponent, weapons)
+        .addComponent(TargetComponent, { target: 'target' })
+        .addComponent(ShootAllWeaponsComponent, undefined)
+        .addComponent(MultiplayerData, { owner: 'server' });
+    world.entities.set('target', target);
+    world.entities.set('npc', npc);
+    return { world, weapons };
+}
+
+describe('NPC weapon firing ranges', () => {
+    it('fires only weapons whose range reaches the target', () => {
+        const { world, weapons } = makeShootWorld(500, ['short', 'long']);
+
+        world.step();
+
+        expect(weapons.get('short')!.firing).toBeFalse();
+        expect(weapons.get('long')!.firing).toBeTrue();
+    });
+
+    it('fires all weapons when the target is inside both ranges', () => {
+        const { world, weapons } = makeShootWorld(50, ['short', 'long']);
+
+        world.step();
+
+        expect(weapons.get('short')!.firing).toBeTrue();
+        expect(weapons.get('long')!.firing).toBeTrue();
+    });
+
+    it('leaves point-defense firing independent of NPC weapon range', () => {
+        const { world, weapons } = makeShootWorld(500, ['pointDefense']);
+
+        world.step();
+
+        expect(weapons.get('pointDefense')!.firing).toBeTrue();
+    });
+});
 
 function fly(world: World, npc: Entity, steps: number) {
     let closest = Infinity;
