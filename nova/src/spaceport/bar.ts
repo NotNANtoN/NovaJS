@@ -136,7 +136,10 @@ export class Bar extends MissionBoard {
             done.setText(barButtonLabel(this.retailStrings, 'done') ?? 'Done');
             this.renderFlavor();
         });
-        this.showHub();
+        // Lay the hub out, but leave the keys alone: this runs when the
+        // spaceport is built, and binding here would leave the bar listening
+        // for its own keys while the pilot is still on the landing screen.
+        this.showHub(false);
     }
 
     override async show(input: Parameters<MissionBoard['show']>[0]) {
@@ -146,7 +149,7 @@ export class Bar extends MissionBoard {
         return showing;
     }
 
-    private showHub() {
+    private showHub(bind = true) {
         for (const child of this.inheritedVisibility.keys()) {
             child.visible = false;
         }
@@ -164,7 +167,9 @@ export class Bar extends MissionBoard {
             missions: () => this.showMissions(),
             depart: this.done.bind(this),
         };
-        this.controls.bind();
+        if (bind) {
+            this.controls.bind();
+        }
         this.renderFlavor();
     }
 

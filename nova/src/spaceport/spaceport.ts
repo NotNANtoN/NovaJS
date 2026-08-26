@@ -318,8 +318,8 @@ export class Spaceport extends Menu<Entity> {
      * "auto-refueller", whose ModVal is "ignored". It saves the trip to the
      * button rather than making the fuel any cheaper.
      */
-    private async autoRecharge(): Promise<void> {
-        const outfits = this.input.components.get(OutfitsStateComponent);
+    private async autoRecharge(ship: Entity): Promise<void> {
+        const outfits = ship.components.get(OutfitsStateComponent);
         if (!outfits?.size) {
             return;
         }
@@ -327,7 +327,7 @@ export class Spaceport extends Menu<Entity> {
             try {
                 const outfit = await this.gameData.data.Outfit.get(id);
                 if (outfit.isAutoRecharger) {
-                    this.recharge();
+                    this.recharge(ship);
                     return;
                 }
             } catch {
@@ -342,9 +342,9 @@ export class Spaceport extends Menu<Entity> {
      * The pilot leaves with as many whole jumps as their credits stretch to,
      * and a pilot who cannot afford one is simply left as they were.
      */
-    private recharge(): void {
-        const state = this.input.components.get(PlayerStateComponent);
-        const capacity = this.input.components
+    private recharge(ship: Entity = this.input): void {
+        const state = ship.components.get(PlayerStateComponent);
+        const capacity = ship.components
             .get(ShipDataComponent)?.fuelCapacity ?? 0;
         if (!state || capacity <= 0 || !this.data
             || !refuelsOnLanding(this.data)) {
@@ -389,7 +389,6 @@ export class Spaceport extends Menu<Entity> {
             hasSpaceportService(data, "commodity")
             || await this.tradeCenter.hasJunkTradeLocation();
         this.updateServiceButtons(data);
-        await this.autoRecharge();
         const title = new PIXI.Text(data.name, this.font.title);
         title.position.x = -24;
         title.position.y = 39;
@@ -422,6 +421,10 @@ export class Spaceport extends Menu<Entity> {
         landingNotices: readonly MissionNotice[] = [],
     ): Promise<Entity> {
         await this.buildPromise;
+        // Retail's Auto-recharger buys the recharge on landing, so this
+        // belongs to a landing and not to building the screen: build() runs
+        // when the planet loads, when there is no ship to refuel.
+        await this.autoRecharge(input);
         // A dialog left active by a previous landing would keep the landing
         // artwork and buttons hidden, which reads as a black screen on
         // reload. Start every landing on the landing screen itself.

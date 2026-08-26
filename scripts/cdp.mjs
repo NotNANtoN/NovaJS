@@ -181,6 +181,20 @@ export async function openPage(browserWsUrl, url) {
     await proxy.send('Runtime.enable');
     await proxy.send('Page.enable');
     await proxy.send('Log.enable');
+    // Without this, a probe that fails because the page threw reports only the
+    // missing end state, which says nothing about the cause.
+    proxy.on('Runtime.exceptionThrown', params => {
+        const details = params?.exceptionDetails;
+        console.error('[page exception] '
+            + (details?.exception?.description ?? details?.text ?? ''));
+    });
+    proxy.on('Runtime.consoleAPICalled', params => {
+        if (params?.type !== 'error') {
+            return;
+        }
+        console.error('[page console.error] ' + (params.args ?? [])
+            .map(arg => arg.description ?? arg.value ?? '').join(' '));
+    });
     return proxy;
 }
 

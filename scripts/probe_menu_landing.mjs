@@ -609,6 +609,18 @@ try {
                 spaceport.outfitter,
                 spaceport.shipyard,
             ].filter(menu => menu.controls.controlsSubscription).length,
+            // Naming the offender matters more than counting: a stray binding
+            // is what leaves a pilot unable to leave a dialog.
+            boundMenus: Object.entries({
+                spaceport,
+                bar: spaceport.bar,
+                missionBbs: spaceport.missionBbs,
+                missionInfo: spaceport.missionInfo,
+                tradeCenter: spaceport.tradeCenter,
+                outfitter: spaceport.outfitter,
+                shipyard: spaceport.shipyard,
+            }).filter(([, menu]) => menu.controls.controlsSubscription)
+                .map(([name]) => name),
             briefingGraphicChildren:
                 spaceport.missionBbs.briefingGraphic.children.length,
         };
@@ -627,7 +639,8 @@ try {
     assert.equal(initialSpaceport.barAboveLanding, true);
     assert.equal(initialSpaceport.barHitTestable, true);
     assert.equal(initialSpaceport.visibleDialogs, 0);
-    assert.equal(initialSpaceport.boundControls, 1);
+    assert.equal(initialSpaceport.boundControls, 1,
+        `bound menus: ${initialSpaceport.boundMenus.join(', ')}`);
     assert.ok(initialSpaceport.barButtonBounds.width > 0);
     await screenshot('novajs-earth-spaceport');
 
