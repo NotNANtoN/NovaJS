@@ -68,7 +68,20 @@ ignores anything at or below it, which makes a repeated packet harmless.
 
 ## Status
 
-- [ ] Deterministic seeded shots and the fire log (replaces global randomness)
-- [ ] Server-authoritative damage, death and health
-- [ ] Bandwidth: quantisation and per-client interest management
+- [x] Deterministic seeded shots and the fire log (replaces global randomness)
+- [x] Server-authoritative damage, death and health
+- [x] Bandwidth: quantisation and per-client interest management. A modelled
+      24-ship fight fell from 81 to 24 kB/s per client; reproduce with
+      `node scripts/netcode_bandwidth.mjs compare`
 - [ ] Two-browser probe proving a kill resolves for both players
+
+## Known gaps
+
+- A shot's target and source velocity are not on the wire, so a world spawning
+  from the log reconstructs them from the ship state it currently has. A guided
+  missile can therefore start its flight slightly differently on each side.
+  Hit resolution is the server's, so this is cosmetic, but it is why homing
+  shots are the first place to look if a fight looks wrong.
+- Quantised partial movement snapshots are a wire format change. A stale cached
+  browser cannot read them, so client and server have to be deployed together
+  until there is capability negotiation.
