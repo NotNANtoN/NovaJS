@@ -123,9 +123,6 @@ interface NpcSpawnState {
     entries: NpcSpawnData[];
     /** Kept so a spawn can work out where a ship arrived from. */
     systemData?: SystemData;
-    /** The named people who could turn up here, once loaded. */
-    pers?: PersData[];
-    persLoading?: boolean;
 }
 
 interface ArrivalContext {
@@ -351,12 +348,12 @@ function applyPlacement(npc: Entity, placement: ArrivalPlacement): void {
 
 function nextPlacement(
     gameData: GameDataInterface,
-    state: NpcSpawnState,
+    systemData: SystemData | undefined,
 ): ArrivalPlacement | undefined {
-    if (!state.systemData) {
+    if (!systemData) {
         return undefined;
     }
-    const context = arrivalContext(gameData, state.systemData);
+    const context = arrivalContext(gameData, systemData);
     return chooseArrivalPlacement(
         context.system,
         context.neighbours,
@@ -373,24 +370,46 @@ function nextPlacement(
  * spawn it is meant to inform. Until the list arrives, systems are populated by
  * anonymous traffic alone.
  */
-function startLoadingPers(
-    gameData: GameDataInterface,
-    state: NpcSpawnState,
-): void {
+/**
+ * The loaded people are kept here rather than on the spawn state resource.
+ * That state is handed to systems as an Immer draft whose proxy is revoked when
+ * the step ends, so an async continuation writing into it would throw.
+ */
+const persByGameData = new WeakMap<GameDataInterface, PersData[]>();
+
+/**
+ * The plain spawn table for a world, held outside the state resource for the
+ * same reason: these objects are read inside async spawn work, long after the
+ * drafts handed to a step have been revoked.
+ */
+const spawnDataByWorld = new WeakMap<World, {
+    entries: NpcSpawnData[],
+    systemData: SystemData,
+}>();
+const persLoading = new WeakSet<GameDataInterface>();
+
+/**
+ * Load the named people once, in the background.
+ *
+ * This must never be awaited on the spawn path: an await there delays the very
+ * spawn it is meant to inform. Until the list arrives, systems are populated by
+ * anonymous traffic alone.
+ */
+function startLoadingPers(gameData: GameDataInterface): void {
     const gettable = gameData.data.Pers;
-    if (state.persLoading || !gettable) {
+    if (persLoading.has(gameData) || !gettable) {
         return;
     }
-    state.persLoading = true;
+    persLoading.add(gameData);
     void (async () => {
         try {
             const ids = (await gameData.ids).Pers ?? [];
             const people = await Promise.all(
                 ids.map(id => gettable.get(id).catch(() => undefined)));
-            state.pers = people.filter(
-                (person): person is PersData => person !== undefined);
+            persByGameData.set(gameData, people.filter(
+                (person): person is PersData => person !== undefined));
         } catch (_error) {
-            state.pers = [];
+            persByGameData.set(gameData, []);
         }
     })();
 }
@@ -404,23 +423,23 @@ async function createPersNpc(
     gameData: GameDataInterface,
     world: World,
     systemId: string,
-    state: NpcSpawnState,
     budget: import('./entity_budget').EntityBudget,
     placement?: ArrivalPlacement,
 ) {
-    if (!state.pers?.length) {
+    const people = persByGameData.get(gameData);
+    if (!people?.length) {
         return undefined;
     }
     // Read the state store loosely rather than declaring it: PersPlugin owns
     // and deletes it, and a hard dependency would break world teardown.
     const states = world.resources.get(PersStateResource);
     const alive = new Set<string | number>();
-    for (const person of state.pers) {
+    for (const person of people) {
         if (states?.get(person.id)?.alive !== false) {
             alive.add(person.id);
         }
     }
-    const chosen = selectPers(state.pers, { systemId, alive });
+    const chosen = selectPers(people, { systemId, alive });
     if (!chosen) {
         return undefined;
     }
@@ -475,7 +494,7 @@ const NpcSpawnSystem = new AsyncSystem({
             state.capacity = getNpcCapacity(state.target);
             state.entries = getSpawnEntries(systemData);
             state.systemData = systemData;
-            startLoadingPers(gameData, state);
+            startLoadingPers(gameData);
             if (state.entries.length === 0 || state.target === 0) {
                 state.disabled = state.entries.length === 0;
                 state.nextSpawnAt = Infinity;
@@ -484,10 +503,18 @@ const NpcSpawnSystem = new AsyncSystem({
             }
 
             const room = Math.max(0, state.capacity - npcs.length);
+            const target = state.target;
             const initialCount = Math.max(
                 0,
-                Math.min(state.target - npcs.length, room),
+                Math.min(target - npcs.length, room),
             );
+            // Every draft read and write happens here, before the spawn loop
+            // starts awaiting. Loading ship data lets the world step again,
+            // which revokes these drafts and makes any later touch throw.
+            const entries = getSpawnEntries(systemData);
+            spawnDataByWorld.set(world, { entries, systemData });
+            const existing = npcs.length;
+            state.nextSpawnAt = time.time + getNpcRespawnDelay();
             let spawned = 0;
             for (let i = 0; i < initialCount; i++) {
                 if (!activeWorlds.has(world)) {
@@ -498,18 +525,18 @@ const NpcSpawnSystem = new AsyncSystem({
                 if (spawned >= initialCount) {
                     break;
                 }
-                const placement = nextPlacement(gameData, state);
+                const placement = nextPlacement(gameData, systemData);
                 // The await must stay inside the branch: awaiting even an
                 // immediate undefined costs a tick, and a batch of spawns is
                 // expected to finish within the tick that asked for it.
-                const named = state.pers?.length
+                const named = persByGameData.get(gameData)?.length
                     ? await createPersNpc(
-                        gameData, world, systemId, state, budget, placement)
+                        gameData, world, systemId, budget, placement)
                     : undefined;
                 const group: Array<[string, Entity]> = named
                     ? [[uuid(), named]]
                     : await createNpcGroup(
-                        gameData, state.entries, budget, placement);
+                        gameData, entries, budget, placement);
                 if (!activeWorlds.has(world)) {
                     for (const _member of group) {
                         budget.release('ship');
@@ -521,8 +548,8 @@ const NpcSpawnSystem = new AsyncSystem({
                     spawned++;
                 }
             }
-            state.nextSpawnAt = time.time + getNpcRespawnDelay();
-            console.log(`NPC spawn ${systemId}: ${npcs.length + spawned}/${state.target}`);
+            console.log(
+                `NPC spawn ${systemId}: ${existing + spawned}/${target}`);
             return;
         }
 
@@ -531,15 +558,21 @@ const NpcSpawnSystem = new AsyncSystem({
         }
 
         state.nextSpawnAt = time.time + getNpcRespawnDelay();
-        const placement = nextPlacement(gameData, state);
-        const named = state.pers?.length
+        const spawnData = spawnDataByWorld.get(world);
+        if (!spawnData) {
+            return;
+        }
+        const target = state.target;
+        const existing = npcs.length;
+        const placement = nextPlacement(gameData, spawnData.systemData);
+        const named = persByGameData.get(gameData)?.length
             ? await createPersNpc(
-                gameData, world, systemId, state, budget, placement)
+                gameData, world, systemId, budget, placement)
             : undefined;
         const group: Array<[string, Entity]> = named
             ? [[uuid(), named]]
             : await createNpcGroup(
-                gameData, state.entries, budget, placement);
+                gameData, spawnData.entries, budget, placement);
         if (group.length === 0 || !activeWorlds.has(world)) {
             if (!activeWorlds.has(world)) {
                 for (const _member of group) {
@@ -551,7 +584,8 @@ const NpcSpawnSystem = new AsyncSystem({
         for (const [id, member] of group) {
             world.entities.set(id, member);
         }
-        console.log(`NPC spawn ${systemId}: +${group.length} (${npcs.length + group.length}/${state.target})`);
+        console.log(`NPC spawn ${systemId}: +${group.length} `
+            + `(${existing + group.length}/${target})`);
     },
 });
 

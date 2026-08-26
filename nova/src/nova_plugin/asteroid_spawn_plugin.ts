@@ -140,6 +140,11 @@ const AsteroidSpawnSystem = new AsyncSystem({
                 return;
             }
             state.spawnedInitialBelt = false;
+            // Loading the asteroid table takes long enough that the world has
+            // stepped again, which revokes the drafts this step is holding.
+            // Reading `players` or `state` past this point would throw, so the
+            // belt is laid on the next tick with drafts that are still live.
+            return;
         }
 
         if (asteroids.length >= state.target) {
