@@ -18,7 +18,9 @@ import { Subject } from "rxjs";
 import { v4 } from "uuid";
 import { GameData } from "../client/gamedata/GameData";
 import { GameDataResource } from "../nova_plugin/game_data_resource";
+import { GovernmentRelationResource } from "../nova_plugin/govt_relations";
 import { ArmorComponent, ShieldComponent } from "../nova_plugin/health_plugin";
+import { GovtComponent } from "../nova_plugin/npc_components";
 import { makeNpc } from "../nova_plugin/npc_plugin";
 import {
     LandingResultEvent,
@@ -43,6 +45,7 @@ import { AnimationGraphicComponent } from "./animation_graphic_plugin";
 import { PixiAppResource } from "./pixi_app_resource";
 import { ResizeEvent } from "./screen_size_plugin";
 import { Stage } from "./stage_resource";
+import { targetLabel } from "./target_label";
 
 
 class StatusBar {
@@ -207,7 +210,12 @@ class StatusBar {
 
         this.noTargetContainer.addChild(this.text.noTarget);
 
-        this.text.targetName = new PIXI.Text("Name Placeholder", font);
+        const targetFont = font.clone();
+        targetFont.wordWrap = true;
+        targetFont.wordWrapWidth = Math.max(1, size[0] - 12);
+        targetFont.breakWords = false;
+        targetFont.lineHeight = 13;
+        this.text.targetName = new PIXI.Text("Name Placeholder", targetFont);
         this.text.targetName.anchor.x = 0.5;
         this.text.targetName.anchor.y = 0.5;
         this.text.targetName.position.x = middle[0];
@@ -329,6 +337,7 @@ class StatusBar {
         this.targetContainer.visible = true;
         this.noTargetContainer.visible = false;
         this.text.targetName.text = name;
+        this.text.targetName.position.y = name.includes('\n') ? 15 : 12;
 
         if (shield && shield > 0) {
             this.text.shield.visible = true;
@@ -464,19 +473,29 @@ const DrawStatusBarSecondaryWeapon = new System({
 });
 
 const TargetQuery = new Query([ShipDataComponent, Optional(ShieldComponent),
-    Optional(ArmorComponent), Optional(AnimationGraphicComponent)] as const);
+    Optional(ArmorComponent), Optional(AnimationGraphicComponent),
+    Optional(GovtComponent)] as const);
 const DrawStatusBarTarget = new System({
     name: 'DrawStatusBarTarget',
-    args: [StatusBarResource, TargetComponent, RunQuery, PlayerShipSelector] as const,
-    step(statusBar, { target }, runQuery) {
+    args: [StatusBarResource, TargetComponent, RunQuery,
+        GovernmentRelationResource, PlayerShipSelector] as const,
+    step(statusBar, { target }, runQuery, governments) {
         if (!target) {
             statusBar.clearTarget();
             return;
         }
         const result = runQuery(TargetQuery, target)[0];
         if (result) {
-            const [shipData, shield, armor, shipGraphic] = result;
-            statusBar.drawTarget(shipData.name, shield?.percent, armor?.percent, shipGraphic);
+            const [shipData, shield, armor, shipGraphic, government] = result;
+            const governmentData = government
+                ? governments.getCached(government.id)
+                : undefined;
+            statusBar.drawTarget(
+                targetLabel(shipData.name, governmentData),
+                shield?.percent,
+                armor?.percent,
+                shipGraphic,
+            );
         }
     }
 })
