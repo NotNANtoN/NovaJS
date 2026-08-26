@@ -113,6 +113,18 @@ export function createMissionGoalProgress(
  * A boolean array is used instead of a Set so Immer can track changes and the
  * ECS serializer can send the component between client and server worlds.
  */
+/**
+ * A standing escort contract. This lives with the persisted state rather than
+ * with EscortPlugin so that a hired wing survives a session; the plugin reads
+ * the shape from here to keep the two from drifting apart.
+ */
+export const EscortContractData = t.type({
+    id: t.string,
+    shipId: t.string,
+    dailyPay: t.number,
+});
+export type EscortContract = t.TypeOf<typeof EscortContractData>;
+
 const PlayerStateFields = t.intersection([
     t.type({
         credits: t.number,
@@ -147,6 +159,8 @@ const PlayerStateFields = t.intersection([
          * no entry falls back to its own InitialRecord.
          */
         legalRecords: t.record(t.string, t.number),
+        /** Escorts under contract, each drawing its daily pay. */
+        escorts: t.array(EscortContractData),
     }),
 ]);
 type PlayerStateFields = t.TypeOf<typeof PlayerStateFields>;
@@ -188,6 +202,7 @@ const LegacyPlayerStateFields = t.intersection([
         kills: t.number,
         fuel: t.number,
         legalRecords: t.record(t.string, t.number),
+        escorts: t.array(EscortContractData),
     }),
 ]);
 
@@ -605,7 +620,47 @@ export function advanceGameDate(state: PlayerState, days = 1): number {
         throw new Error('Game date can only advance by a non-negative integer');
     }
     state.gameDate += days;
+    for (let day = 0; day < days; day++) {
+        chargeEscortPayroll(state);
+    }
     return state.gameDate;
+}
+
+/** What a day of the pilot's hired wing costs. */
+export function escortPayrollDue(
+    state: Pick<PlayerState, 'escorts'>,
+): number {
+    return (state.escorts ?? []).reduce(
+        (sum, contract) => sum + Math.max(0, Math.floor(contract.dailyPay)), 0);
+}
+
+/**
+ * Take a day's escort pay out of the pilot's credits.
+ *
+ * An escort that cannot be paid does not work for free. Retail gives no rule
+ * for who leaves first, so the most recently hired contract is dropped until
+ * the remaining wing is affordable, which keeps the escorts a pilot has flown
+ * with longest.
+ */
+export function chargeEscortPayroll(state: PlayerState): {
+    paid: number;
+    dismissed: EscortContract[];
+} {
+    const dismissed: EscortContract[] = [];
+    let escorts = [...(state.escorts ?? [])];
+    while (escorts.length
+        && escortPayrollDue({ escorts }) > state.credits) {
+        const dropped = escorts.pop();
+        if (dropped) {
+            dismissed.unshift(dropped);
+        }
+    }
+    const paid = escortPayrollDue({ escorts });
+    if (dismissed.length) {
+        state.escorts = escorts;
+    }
+    state.credits -= paid;
+    return { paid, dismissed };
 }
 
 const MONTH_NAMES = [

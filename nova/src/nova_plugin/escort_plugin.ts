@@ -23,6 +23,11 @@ import { makeNpc } from './npc_plugin';
 import { PlatformResource } from './platform_plugin';
 import { TargetComponent } from './target_component';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
+import {
+    EscortContract,
+    EscortContractData,
+    PlayerStateComponent,
+} from './player_state';
 
 /**
  * The Bible's shïp/HireRandom definition is exact:
@@ -65,12 +70,8 @@ export function availableEscortOffers<T extends EscortOfferSource>(
     ));
 }
 
-export const EscortContractData = t.type({
-    id: t.string,
-    shipId: t.string,
-    dailyPay: t.number,
-});
-export type EscortContract = t.TypeOf<typeof EscortContractData>;
+export { EscortContractData };
+export type { EscortContract };
 
 export const EscortRosterData = t.type({
     contracts: t.array(EscortContractData),
@@ -287,6 +288,48 @@ const RemoveDismissedEscorts = new System({
     },
 });
 
+
+/**
+ * Mirror the saved contracts onto the roster component.
+ *
+ * The persisted state is the single authority: it is what reaches disk, what
+ * pays the wing each day, and what drops an escort the pilot can no longer
+ * afford. The component exists so the client can see the roster, so it is
+ * only ever written in this direction.
+ */
+export const SyncEscortRoster = new System({
+    name: 'SyncEscortRoster',
+    args: [
+        GetEntity,
+        PlayerStateComponent,
+        Optional(EscortRosterComponent),
+        PlatformResource,
+        MultiplayerData,
+    ] as const,
+    step(entity, playerState, roster, platform, multiplayer) {
+        if (platform !== 'node' || multiplayer.owner !== 'server') {
+            return;
+        }
+        const saved = playerState.escorts ?? [];
+        if (roster && sameContracts(roster.contracts, saved)) {
+            return;
+        }
+        entity.components.set(EscortRosterComponent, {
+            contracts: saved.map(contract => ({ ...contract })),
+        });
+    },
+});
+
+function sameContracts(
+    a: readonly EscortContract[],
+    b: readonly EscortContract[],
+): boolean {
+    return a.length === b.length && a.every((contract, index) =>
+        contract.id === b[index].id
+        && contract.shipId === b[index].shipId
+        && contract.dailyPay === b[index].dailyPay);
+}
+
 export const EscortPlugin: Plugin = {
     name: 'EscortPlugin',
     build(world) {
@@ -302,11 +345,13 @@ export const EscortPlugin: Plugin = {
         deltaMaker.addComponent(HiredEscortComponent, {
             componentType: HiredEscortData,
         });
+        world.addSystem(SyncEscortRoster);
         world.addSystem(SpawnHiredEscorts);
         world.addSystem(FollowEscortOwner);
         world.addSystem(RemoveDismissedEscorts);
     },
     remove(world) {
+        world.removeSystem(SyncEscortRoster);
         world.removeSystem(SpawnHiredEscorts);
         world.removeSystem(FollowEscortOwner);
         world.removeSystem(RemoveDismissedEscorts);

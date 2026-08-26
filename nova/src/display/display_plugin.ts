@@ -60,11 +60,16 @@ const DeathOverlaySystem = new System({
             background.beginFill(0x000000, 0.65);
             background.drawRect(0, 0, window.innerWidth, window.innerHeight);
             background.endFill();
-            const text = new PIXI.Text('You are destroyed', {
+            // The server decides what death means: dësc 13999 when an escape
+            // pod saved the pilot, otherwise retail's death wording. Fall back
+            // only for entities that predate an outfit inventory.
+            const text = new PIXI.Text(death?.message ?? 'You are destroyed', {
                 fontFamily: 'Geneva',
-                fontSize: 28,
+                fontSize: 22,
                 fill: 0xffffff,
                 align: 'center',
+                wordWrap: true,
+                wordWrapWidth: Math.min(560, window.innerWidth - 80),
             });
             text.anchor.set(0.5);
             text.position.set(window.innerWidth / 2, window.innerHeight / 2);
