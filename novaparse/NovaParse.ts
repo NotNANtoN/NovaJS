@@ -14,6 +14,7 @@ import { MissionData } from "novadatainterface/MissionData";
 import { ShipData } from "novadatainterface/ShipData";
 import { SpriteSheetData, SpriteSheetFramesData, SpriteSheetImageData } from "novadatainterface/SpriteSheetData";
 import { StatusBarData } from "novadatainterface/StatusBarData";
+import { AsteroidData } from "novadatainterface/AsteroidData";
 import { SystemData } from "novadatainterface/SystemData";
 import { TargetCornersData } from "novadatainterface/TargetCornersData";
 import { WeaponData } from "novadatainterface/WeaponData";
@@ -28,6 +29,8 @@ import { resourceIDNotFoundStrict, resourceIDNotFoundWarn } from "./src/parsers/
 import { ShipParseClosure, ShipPictMap, WeaponOutfitMap } from "./src/parsers/ShipParse";
 import { SpriteSheetMulti, SpriteSheetMultiParse } from "./src/parsers/SpriteSheetMultiParse";
 import { StatusBarParse } from "./src/parsers/StatusBarParse";
+import { AsteroidParse } from "./src/parsers/AsteroidParse";
+import { RoidResource } from "./src/resource_parsers/RoidResource";
 import { SystemParse } from "./src/parsers/SystemParse";
 import { MissionParse } from "./src/parsers/MissionParse";
 import { TargetCornersParse } from "./src/parsers/TargetCornersParse";
@@ -154,6 +157,7 @@ export class NovaParse implements GameDataInterface {
             StatusBar: this.buildIDsForResource(idSpace.ïntf),
             Explosion: this.buildIDsForResource(idSpace.bööm),
             Govt: this.buildIDsForResource(idSpace.gövt),
+            Asteroid: this.buildIDsForResource(idSpace.röid),
             SoundFile: this.buildIDsForResource(idSpace["snd "]),
         }
     }
@@ -181,6 +185,8 @@ export class NovaParse implements GameDataInterface {
             StatusBar: this.makeGettable<BaseResource, StatusBarData>(NovaResourceType.ïntf, StatusBarParse),
             Explosion: this.makeGettable<BoomResource, ExplosionData>(NovaResourceType.bööm, ExplosionParse),
             Govt: this.makeGettable<GovtResource, GovtData>(NovaResourceType.gövt, GovtParse),
+            Asteroid: this.makeGettable<RoidResource, AsteroidData>(
+                NovaResourceType.röid, AsteroidParse),
             SoundFile: this.makeGettable<SndResource, SoundFile>(NovaResourceType.snd, SoundFileParse),
         }
 

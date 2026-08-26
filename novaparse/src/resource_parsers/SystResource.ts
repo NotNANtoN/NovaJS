@@ -10,6 +10,8 @@ class SystResource extends BaseResource {
     dudeProbabilities: number[];
     avgShips: number;
     government: number;
+    /** Density of the system's asteroid belt, 0 through 10. */
+    asteroids: number;
     constructor(resource: Resource, idSpace: NovaResources) {
         super(resource, idSpace);
         var d = resource.data;
@@ -44,6 +46,9 @@ class SystResource extends BaseResource {
         // Govt follows AvgShips in the sÿst resource. Older fixtures may end
         // at AvgShips, in which case the system is independent.
         this.government = d.byteLength >= 104 ? d.getInt16(102) : -1;
+        // Asteroids follows Message in the sÿst resource and holds the
+        // density of the system's belt, 0 through 10.
+        this.asteroids = d.byteLength >= 108 ? d.getInt16(106) : 0;
     }
 }
 

@@ -3,6 +3,7 @@ import { DudeData } from 'novadatainterface/DudeData';
 import { CicnData } from 'novadatainterface/CicnData';
 import { CicnImageData } from 'novadatainterface/CicnImage';
 import { ExplosionData } from 'novadatainterface/ExplosionData';
+import { AsteroidData } from 'novadatainterface/AsteroidData';
 import { GovtData } from 'novadatainterface/GovtData';
 import { GameDataInterface, PreloadData } from 'novadatainterface/GameDataInterface';
 import { Gettable } from 'novadatainterface/Gettable';
@@ -78,6 +79,7 @@ export class GameData implements GameDataInterface {
             StatusBar: this.addGettable<StatusBarData>(NovaDataType.StatusBar),
             Explosion: this.addGettable<ExplosionData>(NovaDataType.Explosion),
             Govt: this.addGettable<GovtData>(NovaDataType.Govt),
+            Asteroid: this.addGettable<AsteroidData>(NovaDataType.Asteroid),
             SoundFile: this.addSoundFileGettable(),
             Sound: this.addSoundGettable(),
         };

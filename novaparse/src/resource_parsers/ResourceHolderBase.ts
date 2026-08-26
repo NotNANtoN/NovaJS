@@ -14,6 +14,7 @@ import { SpinResource } from "./SpinResource";
 import { SpobResource } from "./SpobResource";
 import { SystResource } from "./SystResource";
 import { WeapResource } from "./WeapResource";
+import { RoidResource } from "./RoidResource";
 
 
 
@@ -90,7 +91,7 @@ type NovaResources = {
     ränk: ResList<BaseResource>;
     rlë8: ResList<BaseResource>;
     rlëD: ResList<RledResource>;
-    röid: ResList<BaseResource>;
+    röid: ResList<RoidResource>;
     shän: ResList<ShanResource>;
     shïp: ResList<ShipResource>;
     "snd ": ResList<BaseResource>;

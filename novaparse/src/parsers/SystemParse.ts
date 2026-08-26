@@ -156,6 +156,7 @@ export async function SystemParse(syst: SystResource, notFoundFunction: (m: stri
         npcs,
         avgShips: syst.avgShips,
         government: syst.government,
+        asteroidDensity: Math.max(0, Math.min(10, syst.asteroids)),
     }
 
 }

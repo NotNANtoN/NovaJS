@@ -29,6 +29,8 @@ export interface SystemData extends BaseData {
     avgShips: number,
     /** Raw controlling government ID; -1 means independent. */
     government?: number,
+    /** Density of the system's asteroid belt, 0 through 10. */
+    asteroidDensity: number,
 }
 
 export function getDefaultSystemData(): SystemData {
@@ -41,5 +43,6 @@ export function getDefaultSystemData(): SystemData {
         npcs: [],
         avgShips: 0,
         government: -1,
+        asteroidDensity: 0,
     };
 }

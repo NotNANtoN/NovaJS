@@ -1,3 +1,4 @@
+import { AsteroidData } from "./AsteroidData";
 import { CicnData } from "./CicnData";
 import { CicnImageData } from "./CicnImage";
 import { DudeData } from "./DudeData";
@@ -37,6 +38,7 @@ enum NovaDataType {
     StatusBar = "StatusBar",
     Explosion = "Explosion",
     Govt = "Govt",
+    Asteroid = "Asteroid",
     SoundFile = "SoundFile",
 };
 
@@ -61,6 +63,8 @@ type NovaDataInterface = {
     Explosion: Gettable<ExplosionData>,
     /** Optional for legacy generated-data providers. */
     Govt?: Gettable<GovtData>,
+    /** Optional for legacy generated-data providers. */
+    Asteroid?: Gettable<AsteroidData>,
     SoundFile: Gettable<SoundFile>,
 }
 

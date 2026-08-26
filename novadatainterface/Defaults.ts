@@ -9,6 +9,7 @@ import { getDefaultPictData } from "./PictData";
 import { getDefaultPictImageData } from "./PictImage";
 import { getDefaultPlanetData } from "./PlanetData";
 import { getDefaultMissionData } from "./MissionData";
+import { getDefaultAsteroidData } from "./AsteroidData";
 import { getDefaultShipData } from "./ShipData";
 import { getDefaultSoundFile } from "./SoundFile";
 import { getDefaultSpriteSheetData, getDefaultSpriteSheetFrames } from "./SpriteSheetData";
@@ -38,4 +39,5 @@ export const Defaults = {
     get Explosion() { return getDefaultExplosionData() },
     get Govt() { return getDefaultGovtData() },
     get SoundFile() { return getDefaultSoundFile() },
+    get Asteroid() { return getDefaultAsteroidData() },
 }
