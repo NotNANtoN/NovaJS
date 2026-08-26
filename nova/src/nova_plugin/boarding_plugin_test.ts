@@ -15,17 +15,23 @@ import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { World } from 'nova_ecs/world';
 import {
     BOARDING_MAX_RELATIVE_SPEED,
+    BOARDING_STANDOFF,
     BOARDING_TRANSFER_RANGE,
     BoardingInventory,
     BoardingInventoryComponent,
+    BoardingOutcomeEvent,
+    BoardingRequestComponent,
     BoardingStateComponent,
     bootyCommodities,
     initialNpcInventory,
+    PlayerBoardingInputSystem,
+    PlayerBoardingSystem,
     PirateBoarderComponent,
     PirateBoardingSystem,
     plundersDisabledShips,
     plunderShip,
 } from './boarding_plugin';
+import { ControlStateEvent } from './control_state_event';
 import { DisabledComponent } from './death_plugin';
 import { ArmorComponent } from './health_plugin';
 import { NpcAIComponent } from './npc_components';
@@ -35,6 +41,7 @@ import {
     PlayerStateComponent,
 } from './player_state';
 import { PlatformResource } from './platform_plugin';
+import { PlayerShipSelector } from './player_ship_plugin';
 import { Stat } from './stat';
 import { TargetComponent } from './target_component';
 import { WeaponsStateComponent } from './weapons_state';
@@ -231,4 +238,79 @@ describe('pirate boarding', () => {
                 { cargoCapacity: 20, cost: 100_000 }, 0))
                 .toEqual({ cargoCapacity: 20, credits: 0, holds: [] });
         });
+
+    it('boards a disabled target from the player board control', () => {
+        const world = new World('player-boarding-test');
+        world.resources.set(PlatformResource, 'browser');
+        world.resources.set(TimeResource, {
+            time: 0,
+            delta_ms: 1_000 / 60,
+            delta_s: 1 / 60,
+            frame: 0,
+        });
+        world.addSystem(PlayerBoardingInputSystem);
+
+        const playerState = createInitialPlayerState();
+        playerState.credits = 100;
+        playerState.cargoCapacity = 20;
+        const player = new Entity('player')
+            .addComponent(PlayerShipSelector, undefined)
+            .addComponent(PlayerStateComponent, playerState)
+            .addComponent(TargetComponent, { target: 'victim' })
+            .addComponent(MultiplayerData, { owner: 'player' })
+            .addComponent(MovementStateComponent, movementAt(
+                new Position(0, 0)));
+        const victimInventory: BoardingInventory = {
+            cargoCapacity: 20,
+            credits: 100,
+            holds: [{
+                commodity: 'Food',
+                tons: 8,
+                isMissionCargo: false,
+            }],
+        };
+        const victim = new Entity('victim')
+            .addComponent(DisabledComponent, true)
+            .addComponent(MovementStateComponent, movementAt(
+                new Position(BOARDING_STANDOFF, 0)))
+            .addComponent(BoardingInventoryComponent, victimInventory)
+            .addComponent(ArmorComponent, new Stat({
+                current: 20,
+                max: 100,
+                recharge: 0,
+            }));
+        world.entities.set('player', player);
+        world.entities.set('victim', victim);
+
+        world.emitNow(ControlStateEvent, new Map([
+            ['board', 'start'],
+        ]));
+        expect(player.components.get(BoardingRequestComponent))
+            .toEqual({ target: 'victim', sequence: 1 });
+
+        world.resources.set(PlatformResource, 'node');
+        world.addSystem(PlayerBoardingSystem);
+        let outcome: unknown;
+        world.events.get(BoardingOutcomeEvent).subscribe(value => {
+            outcome = value;
+        });
+        world.step();
+
+        expect(outcome).toEqual({
+            boarder: 'player',
+            target: 'victim',
+            sequence: 1,
+            cargo: 8,
+            credits: 25,
+        });
+        expect(playerState.credits).toBe(125);
+        expect(playerState.holds).toEqual([{
+            commodity: 'Food',
+            tons: 8,
+            isMissionCargo: false,
+        }]);
+        expect(victimInventory.holds).toEqual([]);
+        expect(player.components.get(BoardingStateComponent))
+            .toEqual({ boarded: ['victim'] });
+    });
 });

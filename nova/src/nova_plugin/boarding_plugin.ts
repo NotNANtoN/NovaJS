@@ -41,6 +41,7 @@ import {
     FollowAI,
     ShootAllWeaponsAI,
 } from './npc_plugin';
+import { ControlStateEvent } from './control_state_event';
 import {
     CargoHold,
     PlayerState,
@@ -48,6 +49,7 @@ import {
     releaseCargo,
 } from './player_state';
 import { PlatformResource } from './platform_plugin';
+import { PlayerShipSelector } from './player_ship_plugin';
 import { ShipDataComponent } from './ship_plugin';
 import { TargetComponent } from './target_component';
 import { WeaponsStateComponent } from './weapons_state';
@@ -61,6 +63,34 @@ export const BOARDING_CREDIT_FRACTION = 0.25;
 export const DUDE_BOOTY_MONEY = 0x0040;
 
 export const PlunderEvent = new EcsEvent<{ boarder: string }>('PlunderEvent');
+
+const BoardingRequest = t.type({
+    target: t.string,
+    sequence: t.number,
+});
+export type BoardingRequest = t.TypeOf<typeof BoardingRequest>;
+export const BoardingRequestComponent =
+    new Component<BoardingRequest>('BoardingRequestComponent');
+
+const BoardingOutcome = t.type({
+    target: t.string,
+    sequence: t.number,
+    cargo: t.number,
+    credits: t.number,
+});
+export type BoardingOutcome = t.TypeOf<typeof BoardingOutcome>;
+export const BoardingOutcomeComponent =
+    new Component<BoardingOutcome>('BoardingOutcomeComponent');
+export const BoardingOutcomeEvent =
+    new EcsEvent<BoardingOutcome & { boarder: string }>(
+        'BoardingOutcomeEvent');
+
+/**
+ * Why a boarding attempt did nothing. Local to the pilot's own client: it is
+ * feedback, not game state, and never crosses the network.
+ */
+export const BoardingNoticeComponent =
+    new Component<{ text: string }>('BoardingNoticeComponent');
 
 const DudeSource = t.type({ id: t.string });
 export type DudeSource = t.TypeOf<typeof DudeSource>;
@@ -97,6 +127,23 @@ export type BoardingState = t.TypeOf<typeof BoardingState>;
 export const BoardingStateComponent =
     new Component<BoardingState>('BoardingStateComponent');
 
+replicationPolicies.register(DudeSourceComponent, {
+    codec: DudeSource,
+    authority: 'server',
+});
+replicationPolicies.register(DudeBootyComponent, {
+    codec: DudeBooty,
+    authority: 'server',
+});
+// Input crosses multiplayer as an intent; validation and transfer stay server-authoritative.
+replicationPolicies.register(BoardingRequestComponent, {
+    codec: BoardingRequest,
+    authority: 'owning-client',
+});
+replicationPolicies.register(BoardingOutcomeComponent, {
+    codec: BoardingOutcome,
+    authority: 'server',
+});
 replicationPolicies.register(BoardingInventoryComponent, {
     codec: BoardingInventory,
     authority: 'server',
@@ -308,6 +355,17 @@ export function plunderShip(
     return { cargo, credits };
 }
 
+export function isBoardingTransferReady(
+    boarder: Parameters<typeof hasArrived>[0],
+    target: Parameters<typeof hasArrived>[1],
+): boolean {
+    return hasArrived(boarder, target, {
+        standoff: BOARDING_STANDOFF,
+        tolerance: BOARDING_TOLERANCE,
+        maxSpeed: BOARDING_MAX_RELATIVE_SPEED,
+    }) && inTransferRange(boarder, target, BOARDING_TRANSFER_RANGE);
+}
+
 const DisabledBoardingTargets = new Query([
     UUID,
     DisabledComponent,
@@ -317,6 +375,101 @@ const DisabledBoardingTargets = new Query([
     Optional(DestructionStartedComponent),
     Optional(ArmorComponent),
 ] as const, 'DisabledBoardingTargets');
+
+export const PlayerBoardingInputSystem = new System({
+    name: 'PlayerBoardingInput',
+    events: [ControlStateEvent],
+    args: [
+        ControlStateEvent,
+        TargetComponent,
+        MovementStateComponent,
+        Optional(BoardingRequestComponent),
+        Optional(BoardingStateComponent),
+        DisabledBoardingTargets,
+        PlatformResource,
+        GetEntity,
+        PlayerShipSelector,
+    ] as const,
+    step(controlState, target, movement, request, boarding, disabledTargets,
+        platform, entity) {
+        if (platform !== 'browser' || controlState.get('board') !== 'start') {
+            return;
+        }
+        const targetUuid = target.target;
+        if (!targetUuid || boarding?.boarded.includes(targetUuid)) {
+            return;
+        }
+        const victim = disabledTargets.find(candidate =>
+            candidate[0] === targetUuid && candidate[1] && !candidate[5]);
+        if (!victim) {
+            entity.components.set(BoardingNoticeComponent,
+                { text: 'That ship cannot be boarded.' });
+            return;
+        }
+        // Retail expects the pilot to fly alongside themselves, so the intent
+        // is only raised from boarding range. Sending it from anywhere would
+        // leave a standing request that fires whenever the pilot happened to
+        // drift close again, possibly long after they had lost interest.
+        if (!isBoardingTransferReady(movement, victim[2])) {
+            entity.components.set(BoardingNoticeComponent,
+                { text: 'Too far away to board.' });
+            return;
+        }
+        entity.components.set(BoardingRequestComponent, {
+            target: targetUuid,
+            sequence: (request?.sequence ?? 0) + 1,
+        });
+    },
+});
+
+export const PlayerBoardingSystem = new System({
+    name: 'PlayerBoarding',
+    args: [
+        BoardingRequestComponent,
+        PlayerStateComponent,
+        MovementStateComponent,
+        MultiplayerData,
+        DisabledBoardingTargets,
+        PlatformResource,
+        Optional(BoardingStateComponent),
+        Optional(DestructionStartedComponent),
+        Optional(ArmorComponent),
+        UUID,
+        GetEntity,
+        EmitNow,
+    ] as const,
+    step(request, player, movement, multiplayer, disabledTargets, platform,
+        boarding, destructionStarted, armor, uuid, entity, emitNow) {
+        if (platform !== 'node' || multiplayer.owner === 'server'
+            || destructionStarted || armor && armor.current <= 0
+            || boarding?.boarded.includes(request.target)) {
+            return;
+        }
+        const victim = disabledTargets.find(candidate =>
+            candidate[0] === request.target && candidate[0] !== uuid
+            && candidate[1] && !candidate[5]
+            && (!candidate[6] || candidate[6]!.current > 0));
+        if (!victim || !isBoardingTransferReady(movement, victim[2])) {
+            return;
+        }
+
+        const result = plunderShip(player, victim[3], victim[4]);
+        entity.components.set(BoardingStateComponent, {
+            boarded: [...(boarding?.boarded ?? []), request.target],
+        });
+        const outcome = {
+            target: request.target,
+            sequence: request.sequence,
+            cargo: result.cargo,
+            credits: result.credits,
+        };
+        entity.components.set(BoardingOutcomeComponent, outcome);
+        emitNow(BoardingOutcomeEvent, { ...outcome, boarder: uuid }, [uuid]);
+        if (result.cargo > 0 || result.credits > 0) {
+            emitNow(PlunderEvent, { boarder: uuid }, [request.target]);
+        }
+    },
+});
 
 function ceaseFire(
     weapons: Map<string, {
@@ -408,13 +561,7 @@ export const PirateBoardingSystem = new System({
 
         ceaseFire(weapons);
         const victimMovement = victim[2];
-        const arrived = hasArrived(movement, victimMovement, {
-            standoff: BOARDING_STANDOFF,
-            tolerance: BOARDING_TOLERANCE,
-            maxSpeed: BOARDING_MAX_RELATIVE_SPEED,
-        }) && inTransferRange(
-            movement, victimMovement, BOARDING_TRANSFER_RANGE);
-        if (arrived) {
+        if (isBoardingTransferReady(movement, victimMovement)) {
             const result = plunderShip(inventory, victim[3], victim[4]);
             boarding.boarded.push(targetUuid);
             if (result.cargo > 0 || result.credits > 0) {
@@ -452,6 +599,15 @@ export const BoardingPlugin: Plugin = {
         deltaMaker.addComponent(BoardingInventoryComponent, {
             componentType: BoardingInventory,
         });
+        world.addComponent(BoardingNoticeComponent);
+        world.addComponent(BoardingRequestComponent);
+        deltaMaker.addComponent(BoardingRequestComponent, {
+            componentType: BoardingRequest,
+        });
+        world.addComponent(BoardingOutcomeComponent);
+        deltaMaker.addComponent(BoardingOutcomeComponent, {
+            componentType: BoardingOutcome,
+        });
         world.addComponent(PirateBoarderComponent);
         deltaMaker.addComponent(PirateBoarderComponent, {
             componentType: PirateBoarder,
@@ -468,11 +624,15 @@ export const BoardingPlugin: Plugin = {
             world.addSystem(DudeBootyProvider);
         }
         world.addSystem(BoardingSetupSystem);
+        world.addSystem(PlayerBoardingInputSystem);
+        world.addSystem(PlayerBoardingSystem);
         world.addSystem(PirateBoardingSystem);
     },
     remove(world) {
         world.removeSystem(DudeBootyProvider);
         world.removeSystem(BoardingSetupSystem);
+        world.removeSystem(PlayerBoardingInputSystem);
+        world.removeSystem(PlayerBoardingSystem);
         world.removeSystem(PirateBoardingSystem);
     },
 };

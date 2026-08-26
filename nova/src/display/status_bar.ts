@@ -29,7 +29,10 @@ import {
 } from "../nova_plugin/planet_plugin";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin";
 import { ShipDataComponent } from "../nova_plugin/ship_plugin";
-import { PlayerStateComponent } from "../nova_plugin/player_state";
+import {
+    PlayerState,
+    PlayerStateComponent,
+} from "../nova_plugin/player_state";
 import {
     FuelGauge,
     fuelJumpBlocks,
@@ -42,9 +45,19 @@ import { ChangeSecondaryEvent } from "../nova_plugin/weapon_plugin";
 import { Button } from "../spaceport/button";
 import { AnimationGraphic } from "./animation_graphic";
 import { AnimationGraphicComponent } from "./animation_graphic_plugin";
+import { DisabledComponent } from "../nova_plugin/death_plugin";
 import { PixiAppResource } from "./pixi_app_resource";
 import { ResizeEvent } from "./screen_size_plugin";
 import { Stage } from "./stage_resource";
+import {
+    boardingOutcomeText,
+    statusBarCargoText,
+    statusBarTargetStatus,
+} from "./status_bar_content";
+import {
+    BoardingNoticeComponent,
+    BoardingOutcomeComponent,
+} from "../nova_plugin/boarding_plugin";
 import { targetLabel } from "./target_label";
 
 
@@ -57,6 +70,7 @@ class StatusBar {
     private radar = new PIXI.Graphics();
     radarPeriod = 200;
     private statsGraphics = new PIXI.Graphics();
+    private cargoContainer = new PIXI.Container();
     private landingMessageContainer = new PIXI.Container();
     private landingMessage = new PIXI.Text();
     private landingMessageClearAt = 0;
@@ -144,6 +158,33 @@ class StatusBar {
             fill: this.statusBarData.colors.dimText,
         });
 
+        // The Bible specifies CargoArea's bounds but not its contents; use it
+        // for the pilot's credits and used-versus-total cargo summary.
+        const cargoArea = this.statusBarData.dataAreas.cargo;
+        this.cargoContainer.position.x = cargoArea.position[0];
+        this.cargoContainer.position.y = cargoArea.position[1];
+        this.container.addChild(this.cargoContainer);
+
+        const cargoRows = [
+            ['Credits:', 'cargoCredits'],
+            ['Cargo:', 'cargoSpace'],
+        ] as const;
+        cargoRows.forEach(([label, valueKey], index) => {
+            const labelText = new PIXI.Text(label, dimFont);
+            labelText.anchor.y = 0.5;
+            labelText.position.x = 6;
+            labelText.position.y = 24 + index * 36;
+            this.cargoContainer.addChild(labelText);
+
+            const valueText = new PIXI.Text('', font);
+            valueText.anchor.x = 1;
+            valueText.anchor.y = 0.5;
+            valueText.position.x = cargoArea.size[0] - 6;
+            valueText.position.y = labelText.position.y;
+            this.cargoContainer.addChild(valueText);
+            this.text[valueKey] = valueText;
+        });
+
         const secondaryWeaponContainer = new PIXI.Container();
         this.container.addChild(secondaryWeaponContainer);
         secondaryWeaponContainer.position.x =
@@ -201,6 +242,15 @@ class StatusBar {
 
         const middle = [this.statusBarData.dataAreas.targeting.size[0] / 2,
         this.statusBarData.dataAreas.targeting.size[1] / 2 - 15];
+
+        this.text.disabled = new PIXI.Text("Disabled", font);
+        this.text.disabled.anchor.x = 0.5;
+        this.text.disabled.anchor.y = 1;
+        this.text.disabled.position.x = middle[0];
+        this.text.disabled.position.y = size[1] - 3;
+        this.text.disabled.visible = false;
+
+        this.targetContainer.addChild(this.text.disabled);
 
         this.text.noTarget = new PIXI.Text("No Target", dimFont);
         this.text.noTarget.anchor.x = 0.5;
@@ -271,7 +321,8 @@ class StatusBar {
         this.statsGraphics.lineTo(pos[0] + size[0] * fullness, pos[1]);
     }
 
-    drawStats(shield: Stat, armor: Stat, fuel?: FuelGauge) {
+    drawStats(shield: Stat, armor: Stat, fuel?: FuelGauge,
+        playerState?: PlayerState) {
         this.statsGraphics.clear();
 
         const shieldFullness = Math.max(0, shield.current / shield.max);
@@ -285,6 +336,7 @@ class StatusBar {
         if (fuel) {
             this.drawFuel(fuel);
         }
+        this.drawCargo(playerState);
     }
 
     /**
@@ -318,6 +370,17 @@ class StatusBar {
         }
     }
 
+    private drawCargo(playerState?: PlayerState) {
+        if (!playerState) {
+            this.cargoContainer.visible = false;
+            return;
+        }
+        const cargo = statusBarCargoText(playerState);
+        this.text.cargoCredits.text = cargo.credits;
+        this.text.cargoSpace.text = cargo.cargo;
+        this.cargoContainer.visible = true;
+    }
+
     drawSecondary(name: string | null | undefined) {
         if (!this.built) {
             return;
@@ -333,13 +396,20 @@ class StatusBar {
     }
 
     drawTarget(name: string, shield?: number, armor?: number,
-        shipGraphic?: AnimationGraphic) {
+        shipGraphic?: AnimationGraphic, disabled = false) {
         this.targetContainer.visible = true;
         this.noTargetContainer.visible = false;
         this.text.targetName.text = name;
         this.text.targetName.position.y = name.includes('\n') ? 15 : 12;
 
-        if (shield && shield > 0) {
+        const targetStatus = statusBarTargetStatus(disabled);
+        this.text.disabled.visible = targetStatus !== undefined;
+        this.text.percent.visible = targetStatus === undefined;
+        if (targetStatus !== undefined) {
+            this.text.disabled.text = targetStatus;
+            this.text.shield.visible = false;
+            this.text.armor.visible = false;
+        } else if (shield && shield > 0) {
             this.text.shield.visible = true;
             this.text.armor.visible = false;
             this.text.percent.text = `${String(shield)}%`;
@@ -452,7 +522,7 @@ const DrawStatusBarStats = new System({
         const capacity = shipData?.fuelCapacity ?? 0;
         statusBar.drawStats(shield, armor, capacity > 0 && playerState
             ? { fuel: playerState.fuel ?? 0, capacity }
-            : undefined);
+            : undefined, playerState);
     }
 })
 
@@ -474,7 +544,7 @@ const DrawStatusBarSecondaryWeapon = new System({
 
 const TargetQuery = new Query([ShipDataComponent, Optional(ShieldComponent),
     Optional(ArmorComponent), Optional(AnimationGraphicComponent),
-    Optional(GovtComponent)] as const);
+    Optional(GovtComponent), Optional(DisabledComponent)] as const);
 const DrawStatusBarTarget = new System({
     name: 'DrawStatusBarTarget',
     args: [StatusBarResource, TargetComponent, RunQuery,
@@ -486,7 +556,7 @@ const DrawStatusBarTarget = new System({
         }
         const result = runQuery(TargetQuery, target)[0];
         if (result) {
-            const [shipData, shield, armor, shipGraphic, government] = result;
+            const [shipData, shield, armor, shipGraphic, government, disabled] = result;
             const governmentData = government
                 ? governments.getCached(government.id)
                 : undefined;
@@ -495,6 +565,7 @@ const DrawStatusBarTarget = new System({
                 shield?.percent,
                 armor?.percent,
                 shipGraphic,
+                disabled,
             );
         }
     }
@@ -526,6 +597,44 @@ const ExpireLandingMessage = new System({
     args: [StatusBarResource, TimeResource] as const,
     step(statusBar, time) {
         statusBar.updateLandingMessage(time.time);
+    },
+});
+
+
+/**
+ * Say what a boarding attempt did. Without this the pilot presses the key,
+ * the ship is plundered or refused in silence, and the game looks broken.
+ */
+const ShowBoardingNotice = new System({
+    name: 'ShowBoardingNotice',
+    args: [StatusBarResource, BoardingNoticeComponent, TimeResource, GetEntity,
+        PlayerShipSelector] as const,
+    step(statusBar, notice, time, entity) {
+        statusBar.showLandingMessage(notice.text, time.time);
+        entity.components.delete(BoardingNoticeComponent);
+    },
+});
+
+/**
+ * The outcome is replicated state rather than an event, because the server
+ * decides it and events do not cross the network. A new sequence number is
+ * therefore the only signal that another boarding has completed.
+ */
+const ShownBoardingOutcome = new Component<{ sequence: number }>(
+    'ShownBoardingOutcome');
+const ShowBoardingOutcome = new System({
+    name: 'ShowBoardingOutcome',
+    args: [StatusBarResource, BoardingOutcomeComponent,
+        Optional(ShownBoardingOutcome), TimeResource, GetEntity,
+        PlayerShipSelector] as const,
+    step(statusBar, outcome, shown, time, entity) {
+        if (shown && shown.sequence >= outcome.sequence) {
+            return;
+        }
+        entity.components.set(ShownBoardingOutcome,
+            { sequence: outcome.sequence });
+        statusBar.showLandingMessage(
+            boardingOutcomeText(outcome.cargo, outcome.credits), time.time);
     },
 });
 
@@ -572,6 +681,9 @@ export const StatusBarPlugin: Plugin = {
         world.addSystem(StatusBarResize);
         world.addSystem(DrawStatusBarStats);
         world.addSystem(DrawStatusBarSecondaryWeapon);
+        world.addComponent(ShownBoardingOutcome);
+        world.addSystem(ShowBoardingNotice);
+        world.addSystem(ShowBoardingOutcome);
         world.addSystem(DrawStatusBarTarget);
         world.addSystem(DrawLandingMessage);
         world.addSystem(ShowJumpRefusal);
