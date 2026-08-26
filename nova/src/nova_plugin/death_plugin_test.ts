@@ -503,6 +503,46 @@ describe('player death', () => {
         expect(player.components.get(ArmorComponent)!.current).toBe(0);
     });
 
+    it('kills a pilot in a world that has no browser ship marker', async () => {
+        // The authoritative world is the only one that resolves death, and it
+        // never has PlayerShipSelector: that marker means "the ship I am
+        // flying" and is set by the browser. A pilot whose death depended on it
+        // simply sat at zero armor being shot forever.
+        const time = {
+            time: 1_000,
+            delta_ms: 0,
+            delta_s: 0,
+            frame: 0,
+        };
+        const world = new World('server-side-player-death-test');
+        world.resources.set(TimeResource, time);
+        world.resources.set(PlatformResource, 'node');
+        await world.addPlugin(DeltaPlugin);
+        await world.addPlugin(DeathPlugin);
+
+        const player = new Entity('player')
+            .addComponent(PlayerStateComponent, createInitialPlayerState())
+            .addComponent(OutfitsStateComponent, new Map())
+            .addComponent(MovementStateComponent, {
+                accelerating: 0,
+                position: new Position(7, 8),
+                rotation: new Angle(0),
+                turnBack: false,
+                turning: 0,
+                velocity: new Vector(3, 3),
+            })
+            .addComponent(ArmorComponent, new Stat({
+                current: 0, recharge: 0, max: 200,
+            }));
+        world.entities.set('player', player);
+
+        world.emitNow(DeathEvent, time, ['player']);
+        world.step();
+
+        expect(player.components.get(PlayerDeathComponent)?.wreckPosition)
+            .toEqual([7, 8]);
+    });
+
     it('consumes the pod and recovers the pilot in a basic hull', async () => {
         const time = {
             time: 1_000,

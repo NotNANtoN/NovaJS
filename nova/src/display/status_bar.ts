@@ -698,6 +698,11 @@ export const StatusBarPlugin: Plugin = {
         world.removeSystem(DrawLandingMessage);
         world.removeSystem(ShowJumpRefusal);
         world.removeSystem(ExpireLandingMessage);
+        // A system left behind keeps StatusBarResource in use, and removing
+        // that resource then throws. A hyperjump rebuilds every plugin, so
+        // forgetting one of these aborted the jump and dropped the client.
+        world.removeSystem(ShowBoardingNotice);
+        world.removeSystem(ShowBoardingOutcome);
 
         const stage = world.resources.get(Stage);
         const statusBar = world.resources.get(StatusBarResource);

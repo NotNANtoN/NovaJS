@@ -28,7 +28,12 @@ import { ShipComponent, ShipDataComponent, ShipPhysicsComponent } from './ship_p
 import { PlayerShipSelector } from './player_ship_plugin';
 import { Position } from 'nova_ecs/datatypes/position';
 import { Component } from 'nova_ecs/component';
-import { GetEntity } from 'nova_ecs/arg_types';
+import { EmitFunction, GetEntity } from 'nova_ecs/arg_types';
+import { EntityMap } from 'nova_ecs/entity_map';
+import { World } from 'nova_ecs/world';
+import { ShipData } from 'novadatainterface/ShipData';
+import { OutfitsState } from './outfit_plugin';
+import { PlayerState } from './player_state';
 import {
     PlayerStateComponent,
 } from './player_state';
@@ -327,17 +332,17 @@ const KnockbackSystem = new System({
 
 // TODO: Put statuses of ship all in the same variable and make it
 // easy to reset?
-export const PlayerDeathSystem = new System({
-    name: 'PlayerDeathSystem',
-    args: [Optional(ShieldComponent), Optional(ArmorComponent),
-           Optional(IonizationComponent), MovementStateComponent,
-           PlayerShipSelector, DeathEvent, GetEntity,
-           Optional(ShipDataComponent), Optional(OutfitsStateComponent),
-           Optional(PlayerStateComponent), GetWorld,
-           PlatformResource] as const,
-    events: [DeathEvent],
-    step(_shield, _armor, _ionization, movement, _playerShip, { time }, entity,
-        ship, outfits, playerState, world, platform) {
+function resolvePlayerDeath(
+    movement: MovementState,
+    time: number,
+    entity: Entity,
+    ship: ShipData | undefined,
+    outfits: OutfitsState | undefined,
+    playerState: PlayerState | undefined,
+    world: World,
+    platform: 'node' | 'browser',
+): void {
+    {
         if (platform !== 'node'
             || entity.components.has(PlayerDeathComponent)) {
             return;
@@ -388,6 +393,45 @@ export const PlayerDeathSystem = new System({
         completePlayerDestruction(deathState, time + visualDuration);
         entity.components.set(PlayerDeathComponent, deathState);
     }
+}
+
+export const PlayerDeathSystem = new System({
+    name: 'PlayerDeathSystem',
+    args: [Optional(ShieldComponent), Optional(ArmorComponent),
+           Optional(IonizationComponent), MovementStateComponent,
+           PlayerShipSelector, DeathEvent, GetEntity,
+           Optional(ShipDataComponent), Optional(OutfitsStateComponent),
+           Optional(PlayerStateComponent), GetWorld,
+           PlatformResource] as const,
+    events: [DeathEvent],
+    step(_shield, _armor, _ionization, movement, _playerShip, { time }, entity,
+        ship, outfits, playerState, world, platform) {
+        resolvePlayerDeath(movement, time, entity, ship, outfits, playerState,
+            world, platform);
+    }
+});
+
+/**
+ * PlayerShipSelector means "the ship I am flying" and is set by the browser
+ * alone, so the authoritative world, the only one that resolves death, could
+ * never recognise a pilot: they sat at zero armor being shot forever. A
+ * replicated player state is what identifies a human's ship there.
+ *
+ * This is a second system rather than a relaxed argument on the first because
+ * widening that query reorders the scheduler, which changes when NPC hostility
+ * observes a hit.
+ */
+export const ServerPlayerDeathSystem = new System({
+    name: 'ServerPlayerDeathSystem',
+    args: [MovementStateComponent, PlayerStateComponent, DeathEvent, GetEntity,
+           Optional(ShipDataComponent), Optional(OutfitsStateComponent),
+           GetWorld, PlatformResource] as const,
+    events: [DeathEvent],
+    step(movement, playerState, { time }, entity, ship, outfits, world,
+        platform) {
+        resolvePlayerDeath(movement, time, entity, ship, outfits, playerState,
+            world, platform);
+    }
 });
 
 const PlayerDestructionCompleteSystem = new System({
@@ -418,27 +462,23 @@ const PlayerDestructionFallbackSystem = new System({
     },
 });
 
-const PlayerRespawnSystem = new System({
-    name: 'PlayerRespawnSystem',
-    args: [
-        TimeResource,
-        PlayerDeathComponent,
-        Optional(ShieldComponent),
-        Optional(ArmorComponent),
-        Optional(IonizationComponent),
-        Optional(PlayerStateComponent),
-        MovementStateComponent,
-        GetEntity,
-        Entities,
-        UUID,
-        Emit,
-        PlayerShipSelector,
-        Optional(ShipComponent),
-        GetWorld,
-        PlatformResource,
-    ] as const,
-    step(time, death, shield, armor, ionization, playerState, movement,
-        entity, entities, uuid, emit, _playerShip, shipType, world, platform) {
+function resolvePlayerRespawn(
+    time: Time,
+    death: PlayerDeathState,
+    shield: Stat | undefined,
+    armor: Stat | undefined,
+    ionization: Stat | undefined,
+    playerState: PlayerState | undefined,
+    movement: MovementState,
+    entity: Entity,
+    entities: EntityMap,
+    uuid: string,
+    emit: EmitFunction,
+    shipType: { id: string } | undefined,
+    world: World,
+    platform: 'node' | 'browser',
+): void {
+    {
         if (platform !== 'node') {
             return;
         }
@@ -545,6 +585,43 @@ const PlayerRespawnSystem = new System({
                 to,
             });
         }
+    }
+}
+
+const RESPAWN_ARGS = [
+    TimeResource,
+    PlayerDeathComponent,
+    Optional(ShieldComponent),
+    Optional(ArmorComponent),
+    Optional(IonizationComponent),
+    Optional(PlayerStateComponent),
+    MovementStateComponent,
+    GetEntity,
+    Entities,
+    UUID,
+    Emit,
+] as const;
+
+const PlayerRespawnSystem = new System({
+    name: 'PlayerRespawnSystem',
+    args: [...RESPAWN_ARGS, PlayerShipSelector, Optional(ShipComponent),
+        GetWorld, PlatformResource] as const,
+    step(time, death, shield, armor, ionization, playerState, movement,
+        entity, entities, uuid, emit, _playerShip, shipType, world, platform) {
+        resolvePlayerRespawn(time, death, shield, armor, ionization, playerState,
+            movement, entity, entities, uuid, emit, shipType, world, platform);
+    },
+});
+
+/** The authoritative twin of PlayerRespawnSystem. See ServerPlayerDeathSystem. */
+const ServerPlayerRespawnSystem = new System({
+    name: 'ServerPlayerRespawnSystem',
+    args: [...RESPAWN_ARGS, PlayerStateComponent, Optional(ShipComponent),
+        GetWorld, PlatformResource] as const,
+    step(time, death, shield, armor, ionization, _playerState, movement,
+        entity, entities, uuid, emit, playerState, shipType, world, platform) {
+        resolvePlayerRespawn(time, death, shield, armor, ionization, playerState,
+            movement, entity, entities, uuid, emit, shipType, world, platform);
     },
 });
 
@@ -566,6 +643,13 @@ export const DeathPlugin: Plugin = {
         deltaMaker.addComponent(DestructionStartedComponent, {
             componentType: t.boolean,
         });
+        // A replication policy alone does not make a component serialisable.
+        // Without this the receiving world logged "Missing component
+        // ShipExplodingComponent" and dropped every update about it.
+        world.addComponent(ExplodingComponent);
+        deltaMaker.addComponent(ExplodingComponent, {
+            componentType: t.number,
+        });
         world.addComponent(PlayerDeathComponent);
         deltaMaker.addComponent(PlayerDeathComponent, {
             componentType: PlayerDeathStateCodec,
@@ -573,22 +657,26 @@ export const DeathPlugin: Plugin = {
         world.addSystem(DamageSystem);
         world.addSystem(KnockbackSystem);
         world.addSystem(PlayerDeathSystem);
+        world.addSystem(ServerPlayerDeathSystem);
         world.addSystem(PlayerDestructionCompleteSystem);
         world.addSystem(PlayerDestructionFallbackSystem);
         world.addSystem(ShipZeroArmorSystem);
         world.addSystem(ExplodingFinishedSystem);
         world.addSystem(ShipDeathBlastSystem);
         world.addSystem(PlayerRespawnSystem);
+        world.addSystem(ServerPlayerRespawnSystem);
     },
     remove(world) {
         world.removeSystem(DamageSystem);
         world.removeSystem(KnockbackSystem);
         world.removeSystem(PlayerDeathSystem);
+        world.removeSystem(ServerPlayerDeathSystem);
         world.removeSystem(PlayerDestructionCompleteSystem);
         world.removeSystem(PlayerDestructionFallbackSystem);
         world.removeSystem(ShipZeroArmorSystem);
         world.removeSystem(ExplodingFinishedSystem);
         world.removeSystem(ShipDeathBlastSystem);
         world.removeSystem(PlayerRespawnSystem);
+        world.removeSystem(ServerPlayerRespawnSystem);
     }
 }

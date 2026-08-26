@@ -422,7 +422,7 @@ export class DeltaMaker {
         for (const componentName of delta.removeComponents ?? []) {
             const component = this.serializer.componentsByName.get(componentName);
             if (!component) {
-                console.warn(`Missing component ${component}`);
+                console.warn(`Missing component ${componentName}`);
                 continue;
             }
             entity.components.delete(component);

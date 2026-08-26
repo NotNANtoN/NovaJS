@@ -9,6 +9,7 @@ import { Query } from "nova_ecs/query";
 import { Resource } from "nova_ecs/resource";
 import { v4 as uuid } from "uuid";
 import { GameDataResource } from "./game_data_resource";
+import { resourceId } from "../common/resource_id";
 import { Angle } from "nova_ecs/datatypes/angle";
 import { Position } from "nova_ecs/datatypes/position";
 import { Vector } from "nova_ecs/datatypes/vector";
@@ -486,8 +487,11 @@ async function createPersNpc(
         return undefined;
     }
     try {
+        // A pers already names its hull with a namespace, so prefixing again
+        // asked for "nova:nova:151", missed, and gave every unique character
+        // the default hull and its placeholder sprite.
         const shipData = await gameData.data.Ship.get(
-            `nova:${chosen.shipType}`);
+            resourceId(chosen.shipType));
         const npc = makePersNpc(shipData, chosen, states?.get(chosen.id));
         if (!reserveEntity(budget, npc, 'ship')) {
             return undefined;
