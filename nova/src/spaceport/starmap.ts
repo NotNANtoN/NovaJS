@@ -1,3 +1,4 @@
+import { NebulaData } from "novadatainterface/NebulaData";
 import { SystemData } from "novadatainterface/SystemData";
 import * as PIXI from 'pixi.js';
 import { Observable } from "rxjs";
@@ -84,8 +85,27 @@ function sameSystemSet(
     return [...first].every(system => second.has(system));
 }
 
+/**
+ * Retail stores three pre-scaled copies of each nebula's artwork. Pick the
+ * one closest to the map's current scale so the background is not visibly
+ * resampled.
+ */
+export function nebulaImageForScale(
+    images: NebulaData['images'], scale: number,
+): string | null {
+    if (scale > 0.75) {
+        return images.zoom100 ?? images.zoom50 ?? images.zoom25;
+    }
+    if (scale > 0.375) {
+        return images.zoom50 ?? images.zoom100 ?? images.zoom25;
+    }
+    return images.zoom25 ?? images.zoom50 ?? images.zoom100;
+}
+
 class SystemGraph {
     readonly container = new PIXI.Container();
+    private readonly nebulaContainer = new PIXI.Container();
+    private readonly nebulaSprites: [NebulaData, PIXI.Sprite][] = [];
     private readonly territoryContainer = new PIXI.Container();
     private territorySprite?: PIXI.Sprite;
     private territoryField?: TerritoryField;
@@ -129,6 +149,9 @@ class SystemGraph {
             .on('touchmove', onDragMove);
 
         this.mapContainer = new PIXI.Container();
+        // Nebulae are background artwork, so they go under the territory
+        // shading, the links, the route and the system markers.
+        this.mapContainer.addChild(this.nebulaContainer);
         // Government territory is background shading, so it goes under the
         // links, the route and the system markers.
         this.mapContainer.addChild(this.territoryContainer);
@@ -212,6 +235,7 @@ class SystemGraph {
         this.mapContainer.cacheAsBitmap = false;
         this.scale = scale;
         this.graphics.clear();
+        this.placeNebulae();
         this.placeTerritory();
         this.drawLinks();
         this.drawRoute();
@@ -338,6 +362,25 @@ class SystemGraph {
         }
     }
 
+    addNebula(nebula: NebulaData, sprite: PIXI.Sprite) {
+        this.nebulaSprites.push([nebula, sprite]);
+        this.nebulaContainer.addChild(sprite);
+        this.placeNebulae();
+        // The map is cached as a bitmap, so it must be redrawn once the
+        // asynchronously loaded artwork arrives.
+        this.draw();
+    }
+
+    private placeNebulae() {
+        for (const [nebula, sprite] of this.nebulaSprites) {
+            const [x, y] = this.scalePos(
+                [nebula.position.x, nebula.position.y]);
+            sprite.position.set(x, y);
+            sprite.width = nebula.size.x * this.scale;
+            sprite.height = nebula.size.y * this.scale;
+        }
+    }
+
     private scalePos(pos: [number, number]): [number, number] {
         return pos.map(p => p * this.scale) as [number, number];
     }
@@ -417,9 +460,36 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
             systems, this.systemId, this.exploredSystems);
         this.systemGraph.container.position.set(-290, -248);
         this.container.addChild(this.systemGraph.container);
+        // Nebula artwork is large and purely decorative, so it is loaded
+        // after the map itself is usable.
+        void this.loadNebulae();
         // The overlay needs a government lookup per claimed system, so it is
         // filled in after the map itself is usable.
         void this.loadTerritory(systems);
+    }
+
+    private async loadNebulae() {
+        const nebulaData = this.gameData.data.Nebula;
+        if (!nebulaData) {
+            return;
+        }
+        const ids = (await this.gameData.ids).Nebula ?? [];
+        await Promise.all(ids.map(async id => {
+            try {
+                const nebula = await nebulaData.get(id);
+                const image = nebulaImageForScale(nebula.images, 2);
+                if (!image || !this.systemGraph) {
+                    return;
+                }
+                const sprite = await this.gameData.spriteFromPictAsync(image);
+                if (!this.systemGraph || this.managed.disposed) {
+                    return;
+                }
+                this.systemGraph.addNebula(nebula, sprite);
+            } catch (e) {
+                console.warn(`Could not load nebula ${id}`, e);
+            }
+        }));
     }
 
     /**
