@@ -17,6 +17,8 @@ export type Crime =
     | 'disabling'
     | 'boarding'
     | 'killing'
+    // Parsed and available, but never charged: the Bible marks gövt's
+    // ShootPenalty as "currently ignored".
     | 'shooting';
 
 /** Government id (as a resource id) to signed legal record. */

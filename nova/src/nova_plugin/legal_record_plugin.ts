@@ -21,19 +21,18 @@ import { applyCrime, Crime } from './legal_record';
 import { resolveDamageSource } from './npc_hostility';
 
 /**
- * Turns the player's shots into a lasting legal record.
+ * Turns the player's kills into a lasting legal record.
  *
- * A crime is charged once per victim per kind, so a long firefight with one
- * freighter is one shooting offence and, if it ends badly for the freighter,
- * one killing offence. The ledger is server state: only the authoritative
- * world may move a player's record.
+ * Damage only records who is shooting whom, so that a death can be blamed on
+ * the pilot who caused it; retail ignores the penalty for the shot itself.
+ * The ledger is server state: only the authoritative world may move a
+ * player's record.
  */
 
 interface VictimLedger {
     /** Player entity that last hit this victim. */
     attacker: string;
     at: number;
-    chargedShooting: boolean;
 }
 
 export class LegalLedger {
@@ -47,7 +46,7 @@ export class LegalLedger {
             existing.at = at;
             return existing;
         }
-        const ledger: VictimLedger = { attacker, at, chargedShooting: false };
+        const ledger: VictimLedger = { attacker, at };
         this.victims.set(victim, ledger);
         return ledger;
     }
@@ -119,15 +118,13 @@ const PlayerCrimeDamageSystem = new System({
         if (!player) {
             return;
         }
-        const entry = ledger.record(victimUuid, attacker, time.time);
-        if (entry.chargedShooting) {
-            return;
-        }
-        entry.chargedShooting = true;
-        const govt = fullGovernment(relations, victimGovernment.id);
-        if (govt) {
-            chargeCrime(player[1], ledger, govt, 'shooting');
-        }
+        // Note who is shooting whom so a kill can be attributed, but do not
+        // charge for the shot itself: the Bible says of gövt/ShootPenalty
+        // "Evilness from shooting one of this govt's ships (currently
+        // ignored)". Charging it made a single exchange of fire with the
+        // Federation, whose ShootPenalty of 5 all but exhausts its CrimeTol
+        // of 6, turn the pilot into a permanent fugitive.
+        ledger.record(victimUuid, attacker, time.time);
     },
 });
 

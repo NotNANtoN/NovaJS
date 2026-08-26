@@ -198,16 +198,27 @@ busy system are also untested; long fights are where performance problems have
 historically appeared.
 
 **Disabling and boarding.** Ships now fall disabled instead of always dying,
-losing flight, weapon and jump control while keeping their drift, and the
-governments retail marks with `gövt` flag `0x1000` fly in, match velocity and
-plunder cargo and credits, sparing mission cargo. Two gaps remain. Disabled
-ships never recover, because there is no authoritative in-flight repair; and
-the loot is a placeholder, a deterministic half-hold plus a small fraction of
-hull value, because the real booty table lives in `düde` flags (`0x0001`
-food through `0x0020` equipment, `0x0040` money scaled by purchase price)
-which are not parsed. Retail's per-ship chance of being disabled rather than
-destroyed is also deliberately not guessed. `gövt` flag `0x0800`, which starts
-a government's ships out as derelicts, is not wired up either.
+losing flight, weapon and jump control while keeping their drift, at the
+Bible's thresholds: a third of armour, or a tenth for the 141 warship hulls
+carrying `shïp` flag `0x0010`. The governments retail marks with `gövt` flag
+`0x1000` fly in, match velocity and plunder cargo and credits, sparing mission
+cargo.
+
+Gaps. A disabled ship slowly patches its own armour until it can limp away,
+which retail does not do — retail offers only the "repair system" outfit
+(`oütf` modtype 49, which "will occasionally repair the ship when it's
+disabled") or a rescue from a Roadside Assistance government (`gövt` flag
+`0x0010`, `përs` flag `0x0800`), reachable through the existing hail panel.
+Self-repair stands in until one of those exists, because a pilot in a hull
+without armour recharge would otherwise be stuck for good. The loot is also a
+placeholder, a deterministic half-hold plus a small fraction of hull value,
+because the real booty table lives in `düde` flags (`0x0001` food through
+`0x0020` equipment, `0x0040` money scaled by purchase price) which are not
+parsed. Retail's per-ship chance of being disabled rather than destroyed is
+deliberately not guessed, disabling and boarding do not yet cost the pilot
+legal standing even though `DisabPenalty` and `BoardPenalty` are parsed, and
+`gövt` flag `0x0800`, which starts a government's ships out as derelicts, is
+not wired up.
 
 **Teardown and GPU lifetime.** Managed graphics fixed the projectile and
 explosion leaks, but not every display object is on the managed path.

@@ -21,7 +21,9 @@ import {
 } from './death_plugin';
 import { DestructionStartedComponent } from './destruction_state';
 import {
+    disableArmorFraction,
     DISABLE_ARMOR_FRACTION,
+    TOUGH_DISABLE_ARMOR_FRACTION,
     DisabledLifecycleComponent,
     DisabledPlugin,
 } from './disabled_plugin';
@@ -60,7 +62,7 @@ async function makeWorld() {
     return world;
 }
 
-function combatShip(armor = 30) {
+function combatShip(armor = 40) {
     const movement = {
         accelerating: 1,
         position: new Position(100, 200),
@@ -115,11 +117,11 @@ describe('disabled ship lifecycle', () => {
                 damager: 'attacker',
             }, ['ship']);
 
-            expect(DISABLE_ARMOR_FRACTION).toBe(0.25);
-            expect(ship.components.get(ArmorComponent)!.current).toBe(20);
+            expect(DISABLE_ARMOR_FRACTION).toBe(0.33);
+            expect(ship.components.get(ArmorComponent)!.current).toBe(30);
             expect(ship.components.get(DisabledComponent)).toBeTrue();
             expect(ship.components.get(DisabledLifecycleComponent))
-                .toEqual({ armorFraction: 0.2 });
+                .toEqual({ armorFraction: 0.3 });
             expect(ship.components.has(JumpStateComponent)).toBeFalse();
             const movement = ship.components.get(MovementStateComponent)!;
             expect(movement.accelerating).toBe(0);
@@ -146,7 +148,7 @@ describe('disabled ship lifecycle', () => {
         }, ['ship']);
 
         world.emitNow(DamagedEvent, {
-            damage: weaponDamage(20),
+            damage: weaponDamage(30),
             damager: 'attacker',
         }, ['ship']);
         world.step();
@@ -175,6 +177,41 @@ describe('disabled ship lifecycle', () => {
             expect(ship.components.get(WeaponsStateComponent)!.get('laser')!
                 .firing).toBeFalse();
         });
+
+    it('lets a warship hull fight down to a tenth of its armour', () => {
+        // Retail sets shïp flag 0x0010 on its warships, and the Bible reads
+        // "Ship is disabled at 10% armour instead of 33%".
+        expect(disableArmorFraction({ flags: 0x0010 }))
+            .toBe(TOUGH_DISABLE_ARMOR_FRACTION);
+        expect(disableArmorFraction({ flags: 0x4130 }))
+            .toBe(TOUGH_DISABLE_ARMOR_FRACTION);
+        expect(disableArmorFraction({ flags: 0 })).toBe(DISABLE_ARMOR_FRACTION);
+        expect(disableArmorFraction(undefined)).toBe(DISABLE_ARMOR_FRACTION);
+    });
+
+    it('recovers once its armour is patched above the threshold', async () => {
+        const world = await makeWorld();
+        const ship = combatShip();
+        world.entities.set('ship', ship);
+        world.emitNow(DamagedEvent, {
+            damage: weaponDamage(10),
+            damager: 'attacker',
+        }, ['ship']);
+        expect(ship.components.get(DisabledComponent)).toBeTrue();
+
+        // Self-repair is slow, so one frame must not hand control back.
+        world.step();
+        expect(ship.components.get(DisabledComponent)).toBeTrue();
+
+        for (let frame = 0; frame < 600; frame++) {
+            world.step();
+        }
+
+        expect(ship.components.has(DisabledComponent)).toBeFalse();
+        expect(ship.components.has(DisabledLifecycleComponent)).toBeFalse();
+        expect(ship.components.get(ArmorComponent)!.current)
+            .toBeGreaterThan(33);
+    });
 
     it('does not disable before crossing the threshold', async () => {
         const world = await makeWorld();

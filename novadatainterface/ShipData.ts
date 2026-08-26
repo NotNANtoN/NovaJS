@@ -25,6 +25,8 @@ export interface ShipData extends SpaceObjectData {
      * 1=wimpy trader, 2=brave trader, 3=warship, and 4=interceptor.
      */
     inherentAI: number;
+    /** The shïp resource's miscellaneous Flags field. */
+    flags: number;
     cost: number;
     pict: string;
     desc: string;
@@ -49,6 +51,7 @@ export function getDefaultShipData(): ShipData {
         cargoCapacity: 0,
         fuelCapacity: 0,
         inherentAI: 1,
+        flags: 0,
         cost: 0,
         pict: "default",
         desc: "default",
