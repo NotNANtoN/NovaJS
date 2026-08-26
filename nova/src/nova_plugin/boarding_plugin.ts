@@ -1,7 +1,9 @@
 import * as t from 'io-ts';
 import { STANDARD_COMMODITIES } from 'novadatainterface/CommodityData';
-import { Entities, GetEntity, UUID } from 'nova_ecs/arg_types';
+import { EmitNow, Entities, GetEntity, UUID } from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
+import { Angle } from 'nova_ecs/datatypes/angle';
+import { EcsEvent } from 'nova_ecs/events';
 import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
@@ -13,6 +15,7 @@ import {
     MultiplayerData,
     replicationPolicies,
 } from 'nova_ecs/plugins/multiplayer_plugin';
+import { ProvideAsync } from 'nova_ecs/provide_async';
 import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
 import { DisabledComponent } from './death_plugin';
@@ -22,6 +25,7 @@ import {
     hasArrived,
     inTransferRange,
 } from './flight_controller';
+import { GameDataResource } from './game_data_resource';
 import {
     GovernmentData,
     GovernmentRelationResource,
@@ -53,6 +57,24 @@ export const BOARDING_TOLERANCE = 20;
 export const BOARDING_TRANSFER_RANGE = 110;
 export const BOARDING_MAX_RELATIVE_SPEED = 10;
 export const BOARDING_CREDIT_FRACTION = 0.25;
+
+export const DUDE_BOOTY_MONEY = 0x0040;
+
+export const PlunderEvent = new EcsEvent<{ boarder: string }>('PlunderEvent');
+
+const DudeSource = t.type({ id: t.string });
+export type DudeSource = t.TypeOf<typeof DudeSource>;
+/**
+ * Spawn provenance for ambient ships. `npc_spawn_plugin.ts` must attach this
+ * only for a düde-backed entry; flët entries have different booty rules.
+ */
+export const DudeSourceComponent =
+    new Component<DudeSource>('DudeSourceComponent');
+
+const DudeBooty = t.type({ flags: t.number });
+export type DudeBooty = t.TypeOf<typeof DudeBooty>;
+export const DudeBootyComponent =
+    new Component<DudeBooty>('DudeBootyComponent');
 
 const BoardingInventory = t.type({
     cargoCapacity: t.number,
@@ -99,36 +121,56 @@ export function plundersDisabledShips(
     return ((government.flags ?? 0) & GovernmentFlags.warshipsPlunder) !== 0;
 }
 
-function hashString(value: string): number {
-    let hash = 2166136261;
-    for (let index = 0; index < value.length; index++) {
-        hash ^= value.charCodeAt(index);
-        hash = Math.imul(hash, 16777619);
-    }
-    return hash >>> 0;
+export function bootyCommodities(flags: number): string[] {
+    // EV Nova Bible, düde/Flags: bits 0x0001 through 0x0020 respectively
+    // mean food, industrial goods, medical supplies, luxury goods, metal and
+    // equipment "when plundered".
+    return STANDARD_COMMODITIES.filter(
+        (_commodity, index) => (flags & (1 << index)) !== 0);
 }
 
-function initialNpcInventory(
-    uuid: string,
+export function initialNpcInventory(
     ship: { cargoCapacity: number, cost: number },
+    bootyFlags: number,
 ): BoardingInventory {
     const cargoCapacity = Math.max(0, Math.floor(ship.cargoCapacity));
+    const commodities = bootyCommodities(bootyFlags);
     const cargoTons = Math.floor(cargoCapacity / 2);
-    const commodity =
-        STANDARD_COMMODITIES[hashString(uuid) % STANDARD_COMMODITIES.length];
+    const baseTons = commodities.length > 0
+        ? Math.floor(cargoTons / commodities.length) : 0;
+    let remainder = commodities.length > 0
+        ? cargoTons % commodities.length : 0;
     return {
         cargoCapacity,
-        // NPC commerce has no manifest or account model yet. A deterministic
-        // half hold and a small fraction of hull value make boarding useful
-        // without pretending to reproduce retail's düde-specific loadouts.
-        credits: Math.max(0, Math.floor(ship.cost * 0.001)),
-        holds: cargoTons > 0 ? [{
-            commodity,
-            tons: cargoTons,
-            isMissionCargo: false,
-        }] : [],
+        // The Bible specifies that the amount depends on purchase price but
+        // does not publish retail's coefficient.
+        credits: (bootyFlags & DUDE_BOOTY_MONEY) !== 0
+            ? Math.max(0, Math.floor(ship.cost * 0.001)) : 0,
+        holds: commodities.flatMap(commodity => {
+            const tons = baseTons + (remainder-- > 0 ? 1 : 0);
+            return tons > 0 ? [{
+                commodity,
+                tons,
+                isMissionCargo: false,
+            }] : [];
+        }),
     };
 }
+
+export const DudeBootyProvider = ProvideAsync({
+    name: 'DudeBootyProvider',
+    provided: DudeBootyComponent,
+    update: [DudeSourceComponent],
+    args: [DudeSourceComponent, GameDataResource] as const,
+    async factory(source, gameData) {
+        const dudes = gameData.data.Dude;
+        if (!dudes) {
+            return { flags: 0 };
+        }
+        const dude = await dudes.get(source.id);
+        return { flags: dude.flags };
+    },
+});
 
 export const BoardingSetupSystem = new System({
     name: 'BoardingSetupSystem',
@@ -141,18 +183,24 @@ export const BoardingSetupSystem = new System({
         Optional(BoardingInventoryComponent),
         Optional(PirateBoarderComponent),
         Optional(BoardingStateComponent),
+        Optional(DudeSourceComponent),
+        Optional(DudeBootyComponent),
         GovernmentRelationResource,
         MultiplayerData,
         PlatformResource,
     ] as const,
-    step(uuid, _npc, governmentRef, ship, entity, inventory, pirate, boarding,
-        governments, multiplayer, platform) {
+    step(_uuid, _npc, governmentRef, ship, entity, inventory, pirate, boarding,
+        dudeSource, dudeBooty, governments, multiplayer, platform) {
         if (platform !== 'node' || multiplayer.owner !== 'server') {
             return;
         }
         if (!inventory) {
+            if (dudeSource && !dudeBooty) {
+                return;
+            }
             entity.components.set(
-                BoardingInventoryComponent, initialNpcInventory(uuid, ship));
+                BoardingInventoryComponent,
+                initialNpcInventory(ship, dudeBooty?.flags ?? 0));
         }
         if (pirate && boarding) {
             return;
@@ -283,6 +331,24 @@ function ceaseFire(
     }
 }
 
+function departFrom(
+    movement: {
+        accelerating: number,
+        position: { x: number, y: number },
+        turnBack: boolean,
+        turning: number,
+        turnTo?: string | Angle | null,
+    },
+    victim: { position: { x: number, y: number } },
+): void {
+    const awayX = movement.position.x - victim.position.x;
+    const awayY = movement.position.y - victim.position.y;
+    movement.turnTo = new Angle(Math.atan2(awayX, -awayY));
+    movement.accelerating = 1;
+    movement.turning = 0;
+    movement.turnBack = false;
+}
+
 export const PirateBoardingSystem = new System({
     name: 'PirateBoardingSystem',
     after: [ChooseRandomTargetAI, FollowAI, ShootAllWeaponsAI],
@@ -302,10 +368,12 @@ export const PirateBoardingSystem = new System({
         Optional(DisabledComponent),
         Optional(DestructionStartedComponent),
         Optional(ArmorComponent),
+        UUID,
+        EmitNow,
     ] as const,
     step(pirate, boarding, inventory, target, movement, physics, weapons,
         disabledTargets, entities, multiplayer, platform, _npc,
-        disabled, destructionStarted, armor) {
+        disabled, destructionStarted, armor, uuid, emitNow) {
         if (!pirate.enabled || platform !== 'node'
             || multiplayer.owner !== 'server' || disabled
             || destructionStarted
@@ -318,10 +386,16 @@ export const PirateBoardingSystem = new System({
             return;
         }
         if (boarding.boarded.includes(targetUuid)) {
-            target.target = undefined;
-            movement.accelerating = 0;
-            movement.turnTo = null;
-            ceaseFire(weapons);
+            const boarded = disabledTargets.find(candidate =>
+                candidate[0] === targetUuid);
+            if (boarded?.[3]) {
+                // Mission data proves the player can be boarded by pirates.
+                // Unlike NPC plunder, gövt 0x1000 does not say to destroy the
+                // player afterwards, so disengage instead of parking on them.
+                target.target = undefined;
+                departFrom(movement, boarded[2]);
+                ceaseFire(weapons);
+            }
             return;
         }
 
@@ -341,13 +415,15 @@ export const PirateBoardingSystem = new System({
         }) && inTransferRange(
             movement, victimMovement, BOARDING_TRANSFER_RANGE);
         if (arrived) {
-            plunderShip(inventory, victim[3], victim[4]);
+            const result = plunderShip(inventory, victim[3], victim[4]);
             boarding.boarded.push(targetUuid);
-            target.target = undefined;
-            movement.accelerating = 0;
-            movement.turning = 0;
-            movement.turnBack = false;
-            movement.turnTo = null;
+            if (result.cargo > 0 || result.credits > 0) {
+                emitNow(PlunderEvent, { boarder: uuid }, [targetUuid]);
+            }
+            if (victim[3]) {
+                target.target = undefined;
+                departFrom(movement, victimMovement);
+            }
             return;
         }
 
@@ -384,10 +460,18 @@ export const BoardingPlugin: Plugin = {
         deltaMaker.addComponent(BoardingStateComponent, {
             componentType: BoardingState,
         });
+        // Provenance and booty stay on the server: what a ship is carrying
+        // should not be readable by the client before it is boarded.
+        world.addComponent(DudeSourceComponent);
+        world.addComponent(DudeBootyComponent);
+        if (world.resources.get(GameDataResource)) {
+            world.addSystem(DudeBootyProvider);
+        }
         world.addSystem(BoardingSetupSystem);
         world.addSystem(PirateBoardingSystem);
     },
     remove(world) {
+        world.removeSystem(DudeBootyProvider);
         world.removeSystem(BoardingSetupSystem);
         world.removeSystem(PirateBoardingSystem);
     },

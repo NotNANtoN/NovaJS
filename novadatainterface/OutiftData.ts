@@ -6,6 +6,8 @@ export type OutfitPhysics = Partial<ShipPhysics> & { freeMass: number };
 
 export interface OutfitData extends BaseData {
     weapons: { [index: string]: number }, // globalID : count
+    /** oütf ModType 49: occasionally repairs a disabled ship. */
+    repairSystem?: boolean,
 
     // how it changes the physics of the ship it's attached to. Idea: What if these were allowed to be functions?
     physics: OutfitPhysics,
@@ -19,12 +21,14 @@ export interface OutfitData extends BaseData {
     onPurchase: string,
     contribute: number[],
     require: number[],
+    isEscapePod: boolean,
 }
 
 export function getDefaultOutfitData(): OutfitData {
     return {
         ...getDefaultBaseData(),
         weapons: {},
+        repairSystem: false,
         physics: {
             freeMass: 0
         },
@@ -38,5 +42,6 @@ export function getDefaultOutfitData(): OutfitData {
         onPurchase: "",
         contribute: [0, 0],
         require: [0, 0],
+        isEscapePod: false,
     }
 }

@@ -10,6 +10,7 @@ import {
     hailPromptBlock,
     payForAssistance,
     receiveAssistanceFuel,
+    receiveAssistanceRepair,
 } from './comms';
 import { FUEL_PER_JUMP } from './fuel';
 
@@ -120,6 +121,25 @@ describe('requesting assistance', () => {
         expect(decision.outcome).toBe('refused');
         expect(decision.block).toBe('cannotHelp');
     });
+
+    it('recognises a disabled pilot as needing repair', () => {
+        const decision = assistanceDecision(stranded({
+            disabled: true,
+            fuel: FUEL_PER_JUMP,
+        }));
+        expect(decision.outcome).toBe('wantsPayment');
+    });
+
+    it('always grants free roadside assistance', () => {
+        const decision = assistanceDecision(stranded({
+            disabled: true,
+            hostile: true,
+            relation: 'enemy',
+            roadsideAssistance: true,
+        }));
+        expect(decision.outcome).toBe('granted');
+        expect(decision.price).toBe(0);
+    });
 });
 
 describe('paying for a rescue', () => {
@@ -145,5 +165,11 @@ describe('receiving fuel', () => {
 
     it('never overfills the tank', () => {
         expect(receiveAssistanceFuel(250, 300)).toBe(300);
+    });
+});
+
+describe('receiving repairs', () => {
+    it('restores the hull to its maximum armour', () => {
+        expect(receiveAssistanceRepair(450)).toBe(450);
     });
 });

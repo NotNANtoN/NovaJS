@@ -27,7 +27,11 @@ export interface HailDescription {
     record: number;
     hostile: boolean;
     isEscort: boolean;
+    roadsideAssistance: boolean;
 }
+
+/** gövt Flags2 0x0010, "Roadside Assistance". */
+const ROADSIDE_ASSISTANCE_FLAG = 0x0010;
 
 /**
  * A ship with no government to speak for it is treated as an indifferent
@@ -57,5 +61,7 @@ export function describeHail(
         record,
         hostile: candidate.targetingPlayer,
         isEscort: Boolean(candidate.isEscort),
+        roadsideAssistance:
+            Boolean((govt?.flags2 ?? 0) & ROADSIDE_ASSISTANCE_FLAG),
     };
 }

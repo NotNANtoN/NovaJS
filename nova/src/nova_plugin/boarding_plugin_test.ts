@@ -19,6 +19,8 @@ import {
     BoardingInventory,
     BoardingInventoryComponent,
     BoardingStateComponent,
+    bootyCommodities,
+    initialNpcInventory,
     PirateBoarderComponent,
     PirateBoardingSystem,
     plundersDisabledShips,
@@ -161,6 +163,8 @@ describe('pirate boarding', () => {
         }]);
         expect(pirate.components.get(WeaponsStateComponent)!.get('laser')!
             .firing).toBeFalse();
+        expect(pirate.components.get(TargetComponent)!.target).toBeUndefined();
+        expect(pirateMovement.accelerating).toBe(1);
     });
 
     it('moves NPC cargo and credits without taking mission cargo', () => {
@@ -205,4 +209,26 @@ describe('pirate boarding', () => {
         expect(plundersDisabledShips({ flags: 0xe2b0 })).toBeFalse();
         expect(plundersDisabledShips({ flags: undefined })).toBeFalse();
     });
+
+    it('derives cargo and money eligibility from the spawning düde flags',
+        () => {
+            expect(bootyCommodities(0x7f)).toEqual([
+                'Food',
+                'Industrial Goods',
+                'Medical Supplies',
+                'Luxury Goods',
+                'Metal',
+                'Equipment',
+            ]);
+            expect(initialNpcInventory(
+                { cargoCapacity: 20, cost: 100_000 }, 0x40))
+                .toEqual({ cargoCapacity: 20, credits: 100, holds: [] });
+            expect(initialNpcInventory(
+                { cargoCapacity: 12, cost: 100_000 }, 0x3f).holds
+                .map(hold => hold.commodity))
+                .toEqual(bootyCommodities(0x3f));
+            expect(initialNpcInventory(
+                { cargoCapacity: 20, cost: 100_000 }, 0))
+                .toEqual({ cargoCapacity: 20, credits: 0, holds: [] });
+        });
 });

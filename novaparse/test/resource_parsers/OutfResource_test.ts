@@ -1,5 +1,5 @@
 import "jasmine";
-import { readResourceFork, ResourceMap } from "resource_fork";
+import { readResourceFork, Resource, ResourceMap } from "resource_fork";
 import { OutfResource } from "../../src/resource_parsers/OutfResource";
 import { NovaResources } from "../../src/resource_parsers/ResourceHolderBase";
 import { defaultIDSpace } from "./DefaultIDSpace";
@@ -95,6 +95,20 @@ describe("OutfResource", function() {
             ["IFF", true],
             ["energy", 1454]
         ]);
+    });
+
+    it("identifies escape pods from ModType 11", function() {
+        const data = new DataView(new ArrayBuffer(30));
+        data.setInt16(6, 11);
+        const pod = new OutfResource(
+            new Resource("oütf", 188, "Escape Pod", data),
+            idSpace,
+        );
+
+        expect(pod.modTypes).toEqual([11, 0, 0, 0]);
+        expect(pod.isEscapePod).toBeTrue();
+        expect(pod.functions).toEqual([["escape pod", true]]);
+        expect(w1.isEscapePod).toBeFalse();
     });
 
     it("should parse maximum allowed", function() {

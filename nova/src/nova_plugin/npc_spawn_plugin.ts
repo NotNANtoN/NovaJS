@@ -10,6 +10,7 @@ import { Resource } from "nova_ecs/resource";
 import { v4 as uuid } from "uuid";
 import { GameDataResource } from "./game_data_resource";
 import { GovtComponent } from "./npc_plugin";
+import { DudeSourceComponent } from "./boarding_plugin";
 import { makeNpc } from "./npc_plugin";
 import {
     NpcAIComponent,
@@ -169,6 +170,11 @@ async function createNpc(
             return undefined;
         }
         npc.components.set(GovtComponent, { id: npcType.government });
+        if (npcType.kind === "dude") {
+            // What a ship carries when boarded is a düde property, so only a
+            // düde-backed spawn can say what its booty is.
+            npc.components.set(DudeSourceComponent, { id: npcType.id });
+        }
         npc.components.set(
             NpcCombatRoleComponent,
             npcType.combatRole ?? "personal",

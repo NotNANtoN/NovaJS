@@ -163,6 +163,13 @@ export interface AssistanceRequest {
     fuel: number;
     /** The pilot's tank size; zero means the hull cannot hold fuel. */
     fuelCapacity: number;
+    /** A disabled pilot needs hull repair even when there is fuel to jump. */
+    disabled?: boolean;
+    /**
+     * gövt Flags2 0x0010: "Ships of this govt will always repair or refuel
+     * the player for free."
+     */
+    roadsideAssistance?: boolean;
     /** Whether this ship is one of the pilot's own escorts. */
     isEscort?: boolean;
     /** A sample in [0,1) deciding whether a neutral ship is feeling generous. */
@@ -179,11 +186,14 @@ export interface AssistanceRequest {
 export function assistanceDecision(
     request: AssistanceRequest,
 ): AssistanceDecision {
-    const stranded = request.fuelCapacity > 0
-        && request.fuel < FUEL_PER_JUMP;
+    const stranded = Boolean(request.disabled)
+        || request.fuelCapacity > 0 && request.fuel < FUEL_PER_JUMP;
 
     if (!stranded) {
         return { outcome: 'notInTrouble', block: 'notInTrouble', price: 0 };
+    }
+    if (request.roadsideAssistance) {
+        return { outcome: 'granted', block: 'willHelp', price: 0 };
     }
     if (request.hostile || request.relation === 'enemy') {
         return { outcome: 'mocked', block: 'inYourDreams', price: 0 };
@@ -242,4 +252,9 @@ export function receiveAssistanceFuel(
     capacity: number,
 ): number {
     return Math.min(Math.max(0, capacity), Math.max(0, fuel) + ASSISTANCE_FUEL);
+}
+
+/** Roadside assistance repairs a disabled ship completely so it can recover. */
+export function receiveAssistanceRepair(maxArmor: number): number {
+    return Math.max(0, maxArmor);
 }

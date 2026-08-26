@@ -14,12 +14,15 @@ import {
     hailPromptBlock,
     payForAssistance,
     receiveAssistanceFuel,
+    receiveAssistanceRepair,
 } from '../nova_plugin/comms';
+import { DisabledComponent } from '../nova_plugin/death_plugin';
 import {
     GovernmentRelation,
     canHailGovernment,
     getGovernmentCommName,
 } from '../nova_plugin/govt_relations';
+import { ArmorComponent } from '../nova_plugin/health_plugin';
 import { PlayerStateComponent } from '../nova_plugin/player_state';
 import { ShipDataComponent } from '../nova_plugin/ship_plugin';
 import { Button } from './button';
@@ -45,6 +48,7 @@ export interface HailTarget {
     /** True when this ship is currently fighting the pilot. */
     hostile: boolean;
     isEscort?: boolean;
+    roadsideAssistance?: boolean;
 }
 
 /**
@@ -168,12 +172,15 @@ export class Comms extends Menu<Entity> {
             record: this.record(),
             fuel: state.fuel ?? 0,
             fuelCapacity: shipData?.fuelCapacity ?? 0,
+            disabled: Boolean(
+                this.input?.components.get(DisabledComponent)),
+            roadsideAssistance: this.target?.roadsideAssistance,
             isEscort: this.target?.isEscort,
         });
         this.say(decision.block, this.priceSuffix(decision.outcome,
             decision.price));
         if (decision.outcome === 'granted') {
-            this.deliverFuel();
+            this.deliverAssistance();
         } else if (decision.outcome === 'wantsPayment') {
             this.pendingPrice = decision.price;
             this.buttons.assistance.setText('Accept Price');
@@ -198,7 +205,7 @@ export class Comms extends Menu<Entity> {
         state.credits = payment.credits;
         this.pendingPrice = 0;
         this.buttons.assistance.setText('Request Assistance');
-        this.deliverFuel();
+        this.deliverAssistance();
     }
 
     /**
@@ -206,7 +213,13 @@ export class Comms extends Menu<Entity> {
      * over first; here the transfer is immediate, which still turns a
      * stranding into a way out.
      */
-    private deliverFuel() {
+    private deliverAssistance() {
+        const armor = this.input?.components.get(ArmorComponent);
+        if (this.input?.components.get(DisabledComponent) && armor) {
+            armor.current = receiveAssistanceRepair(armor.max);
+            this.say('takeItAndGo');
+            return;
+        }
         const state = this.input?.components.get(PlayerStateComponent);
         const capacity =
             this.input?.components.get(ShipDataComponent)?.fuelCapacity ?? 0;

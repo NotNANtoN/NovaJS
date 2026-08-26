@@ -70,4 +70,13 @@ describe('describing a hail', () => {
         expect(description.hostile).toBeTrue();
         expect(description.relation).toBe('enemy');
     });
+
+    it('exposes the government roadside-assistance promise', () => {
+        const description = describeHail({
+            name: 'Vell-os Dart',
+            government: govt({ flags2: 0x0032 }),
+            targetingPlayer: false,
+        }, {});
+        expect(description.roadsideAssistance).toBeTrue();
+    });
 });

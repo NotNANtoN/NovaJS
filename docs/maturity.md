@@ -208,10 +208,14 @@ A crippled ship's shields come back but its hull does not: armour recharge is
 held to the value the disabling blow left, so nothing heals its way free. A
 full hull is the signal that somebody repaired the ship, which is what a
 respawn provides. Still missing are the two repairs retail offers — the
-"repair system" outfit (`oütf` modtype 49, which "will occasionally repair the
+"repair system" outfit (`oütf` ModType 49, which "will occasionally repair the
 ship when it's disabled") and a rescue from a Roadside Assistance government
-(`gövt` flag `0x0010`, `përs` flag `0x0800`) through the hail panel — so a
-disabled pilot currently has no way home short of dying. The loot is also a
+(`gövt` Flags2 `0x0010`) through the hail panel. A third entitlement remains
+unimplemented: `ränk` flag `0x0800`, "Ships allied with the affiliated govt
+will always repair or refuel the player for free", since rank resources are
+not exposed. (An earlier note here misattributed that to `përs` flag
+`0x0800`, which actually means "Make ship leave after accepting its
+LinkMission".) The loot is also a
 placeholder, a deterministic half-hold plus a small fraction of hull value,
 because the real booty table lives in `düde` flags (`0x0001` food through
 `0x0020` equipment, `0x0040` money scaled by purchase price) which are not

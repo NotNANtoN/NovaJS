@@ -18,6 +18,8 @@ import { GovtComponent } from './npc_components';
 import { PlatformResource } from './platform_plugin';
 import { PlayerStateComponent } from './player_state';
 import { applyCrime, Crime } from './legal_record';
+import { PlunderEvent } from './boarding_plugin';
+import { ShipDisabledEvent } from './disabled_plugin';
 import { resolveDamageSource } from './npc_hostility';
 
 /**
@@ -89,6 +91,32 @@ function chargeCrime(
         victim: victimGovernment.id,
         governments,
     });
+}
+
+const DERELICT_GOVERNMENT_FLAG = 0x0800;
+
+function chargePlayerCrime(
+    attacker: string,
+    victimGovernment: { id: number },
+    players: readonly (readonly [
+        string,
+        { legalRecords?: Record<string, number> },
+    ])[],
+    ledger: LegalLedger,
+    relations: GovernmentRelationStore,
+    crime: Crime,
+): void {
+    const player = players.find(([uuid]) => uuid === attacker);
+    const govt = fullGovernment(relations, victimGovernment.id);
+    if (!player || !govt) {
+        return;
+    }
+    // Bible, gövt Flags 0x0800: ships of other governments "don't care if
+    // you attack or board derelict govt ships".
+    if ((govt.flags ?? 0) & DERELICT_GOVERNMENT_FLAG) {
+        return;
+    }
+    chargeCrime(player[1], ledger, govt, crime);
 }
 
 const PlayerCrimeDamageSystem = new System({
@@ -164,6 +192,52 @@ const PlayerCrimeDeathSystem = new System({
     },
 });
 
+export const PlayerCrimeDisableSystem = new System({
+    name: 'PlayerCrimeDisable',
+    events: [ShipDisabledEvent],
+    args: [
+        ShipDisabledEvent,
+        GovtComponent,
+        Entities,
+        PlayersQuery,
+        LegalLedgerResource,
+        GovernmentRelationResource,
+        PlatformResource,
+    ] as const,
+    step({ damager }, victimGovernment, entities, players, ledger, relations,
+        platform) {
+        if (platform !== 'node') {
+            return;
+        }
+        const attacker = resolveDamageSource(damager, entities)?.attacker;
+        if (!attacker) {
+            return;
+        }
+        chargePlayerCrime(attacker, victimGovernment, players, ledger,
+            relations, 'disabling');
+    },
+});
+
+export const PlayerCrimeBoardingSystem = new System({
+    name: 'PlayerCrimeBoarding',
+    events: [PlunderEvent],
+    args: [
+        PlunderEvent,
+        GovtComponent,
+        PlayersQuery,
+        LegalLedgerResource,
+        GovernmentRelationResource,
+        PlatformResource,
+    ] as const,
+    step({ boarder }, victimGovernment, players, ledger, relations, platform) {
+        if (platform !== 'node') {
+            return;
+        }
+        chargePlayerCrime(boarder, victimGovernment, players, ledger,
+            relations, 'boarding');
+    },
+});
+
 /**
  * Forget victims that left the world without dying, so a long session does
  * not accumulate ledger entries for ships that jumped out.
@@ -190,6 +264,8 @@ export const LegalRecordPlugin: Plugin = {
         const ledger = new LegalLedger();
         world.resources.set(LegalLedgerResource, ledger);
         world.addSystem(PlayerCrimeDamageSystem);
+        world.addSystem(PlayerCrimeDisableSystem);
+        world.addSystem(PlayerCrimeBoardingSystem);
         world.addSystem(PlayerCrimeDeathSystem);
         world.addSystem(LedgerSweepSystem);
 

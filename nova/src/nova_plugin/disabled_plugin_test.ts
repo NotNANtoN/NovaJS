@@ -26,6 +26,8 @@ import {
     TOUGH_DISABLE_ARMOR_FRACTION,
     DisabledLifecycleComponent,
     DisabledPlugin,
+    REPAIR_ATTEMPT_INTERVAL_MS,
+    RepairSystemOutfitComponent,
 } from './disabled_plugin';
 import { ArmorComponent } from './health_plugin';
 import { JumpState, JumpStateComponent } from './jump_plugin';
@@ -227,6 +229,27 @@ describe('disabled ship lifecycle', () => {
         expect(ship.components.has(DisabledComponent)).toBeFalse();
         expect(ship.components.has(DisabledLifecycleComponent)).toBeFalse();
     });
+
+    it('occasionally lets a ModType 49 outfit restore the disabled hull',
+        async () => {
+            const world = await makeWorld();
+            const ship = combatShip()
+                .addComponent(RepairSystemOutfitComponent, { enabled: true });
+            world.entities.set('ship', ship);
+            world.emitNow(DamagedEvent, {
+                damage: weaponDamage(10),
+                damager: 'attacker',
+            }, ['ship']);
+            world.step();
+
+            spyOn(Math, 'random').and.returnValue(0);
+            world.resources.get(TimeResource)!.time =
+                REPAIR_ATTEMPT_INTERVAL_MS;
+            world.step();
+
+            expect(ship.components.get(ArmorComponent)!.current).toBe(100);
+            expect(ship.components.has(DisabledComponent)).toBeFalse();
+        });
 
     it('does not disable before crossing the threshold', async () => {
         const world = await makeWorld();

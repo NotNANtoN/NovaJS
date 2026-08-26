@@ -1,7 +1,8 @@
 import { ShipData } from 'novadatainterface/ShipData';
 import * as t from 'io-ts';
-import { GetEntity } from 'nova_ecs/arg_types';
+import { EmitNow, GetEntity, UUID } from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
+import { EcsEvent } from 'nova_ecs/events';
 import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
@@ -16,6 +17,7 @@ import {
     MultiplayerData,
     replicationPolicies,
 } from 'nova_ecs/plugins/multiplayer_plugin';
+import { ProvideAsync } from 'nova_ecs/provide_async';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { System } from 'nova_ecs/system';
 import {
@@ -25,6 +27,8 @@ import {
 import { DestructionStartedComponent } from './destruction_state';
 import { ArmorComponent } from './health_plugin';
 import { cancelJumpFlight } from './jump_plugin';
+import { GameDataResource } from './game_data_resource';
+import { OutfitsStateComponent } from './outfit_plugin';
 import { Platform, PlatformResource } from './platform_plugin';
 import { ShipComponent, ShipDataComponent } from './ship_plugin';
 import { WeaponsStateComponent } from './weapons_state';
@@ -38,6 +42,9 @@ import { WeaponsStateComponent } from './weapons_state';
 export const DISABLE_ARMOR_FRACTION = 0.33;
 export const TOUGH_DISABLE_ARMOR_FRACTION = 0.10;
 const TOUGH_HULL_FLAG = 0x0010;
+
+export const ShipDisabledEvent = new EcsEvent<{ damager: string }>(
+    'ShipDisabledEvent');
 
 export function disableArmorFraction(
     ship: Pick<ShipData, 'flags'> | undefined,
@@ -60,6 +67,38 @@ export type DisabledLifecycleState =
     t.TypeOf<typeof DisabledLifecycleState>;
 export const DisabledLifecycleComponent =
     new Component<DisabledLifecycleState>('DisabledLifecycleComponent');
+
+export const RepairSystemOutfitComponent =
+    new Component<{ enabled: boolean }>('RepairSystemOutfitComponent');
+const RepairAttemptStateComponent =
+    new Component<{ nextAttemptAt: number }>('RepairAttemptStateComponent');
+
+/** Local cadence for the Bible's deliberately non-specific "occasionally". */
+export const REPAIR_ATTEMPT_INTERVAL_MS = 5_000;
+export const REPAIR_ATTEMPT_CHANCE = 0.25;
+
+export function outfitRepairSucceeds(sample: number): boolean {
+    return sample < REPAIR_ATTEMPT_CHANCE;
+}
+
+export const RepairSystemOutfitProvider = ProvideAsync({
+    name: 'RepairSystemOutfitProvider',
+    provided: RepairSystemOutfitComponent,
+    update: [OutfitsStateComponent],
+    args: [OutfitsStateComponent, GameDataResource] as const,
+    async factory(outfits, gameData) {
+        for (const [id, state] of outfits) {
+            if (state.count <= 0) {
+                continue;
+            }
+            const outfit = await gameData.data.Outfit.get(id);
+            if (outfit.repairSystem) {
+                return { enabled: true };
+            }
+        }
+        return { enabled: false };
+    },
+});
 
 replicationPolicies.register(DisabledLifecycleComponent, {
     codec: DisabledLifecycleState,
@@ -129,9 +168,12 @@ export const DisableOnDamageSystem = new System({
         Optional(DisabledComponent),
         Optional(DisabledLifecycleComponent),
         Optional(DestructionStartedComponent),
+        EmitNow,
+        UUID,
     ] as const,
     step(damage, entity, armor, _ship, shipData, movement, physics, weapons,
-        multiplayer, platform, disabled, lifecycle, destructionStarted) {
+        multiplayer, platform, disabled, lifecycle, destructionStarted,
+        emitNow, uuid) {
         if (platform !== 'node' || disabled || lifecycle
             || destructionStarted || damage.armor <= 0 || armor.max <= 0
             || armor.current <= 0) {
@@ -150,6 +192,7 @@ export const DisableOnDamageSystem = new System({
                 suppressMovementAndWeapons(
                     entity, movement, physics, weapons);
             }
+            emitNow(ShipDisabledEvent, { damager: damage.damager }, [uuid]);
         }
     },
 });
@@ -208,6 +251,47 @@ export const DisabledPreMovementSystem = new System({
 });
 
 /**
+ * EV Nova Bible, oütf ModType 49: "repair system — will occasionally repair
+ * the ship when it's disabled". The data format does not publish a cadence,
+ * so attempts are deliberately infrequent and isolated behind exported,
+ * testable policy constants.
+ */
+export const DisabledOutfitRepairSystem = new System({
+    name: 'DisabledOutfitRepairSystem',
+    args: [
+        DisabledComponent,
+        ArmorComponent,
+        RepairSystemOutfitComponent,
+        GetEntity,
+        TimeResource,
+        PlatformResource,
+        Optional(RepairAttemptStateComponent),
+        Optional(DestructionStartedComponent),
+    ] as const,
+    step(disabled, armor, repairSystem, entity, time, platform, attempt,
+        destructionStarted) {
+        if (!disabled || !repairSystem.enabled || platform !== 'node'
+            || destructionStarted || armor.max <= 0 || armor.current <= 0) {
+            return;
+        }
+        if (!attempt) {
+            entity.components.set(RepairAttemptStateComponent, {
+                nextAttemptAt: time.time + REPAIR_ATTEMPT_INTERVAL_MS,
+            });
+            return;
+        }
+        if (time.time < attempt.nextAttemptAt) {
+            return;
+        }
+        attempt.nextAttemptAt = time.time + REPAIR_ATTEMPT_INTERVAL_MS;
+        if (outfitRepairSucceeds(Math.random())) {
+            armor.current = armor.max;
+            entity.components.delete(RepairAttemptStateComponent);
+        }
+    },
+});
+
+/**
  * Hold the hull where the disabling blow left it, and hand control back only
  * once something has restored it completely.
  *
@@ -220,6 +304,7 @@ export const DisabledPreMovementSystem = new System({
  */
 export const DisabledRecoverySystem = new System({
     name: 'DisabledRecoverySystem',
+    after: [DisabledOutfitRepairSystem],
     args: [
         DisabledComponent,
         GetEntity,
@@ -238,6 +323,7 @@ export const DisabledRecoverySystem = new System({
         if (armor.current >= armor.max) {
             entity.components.delete(DisabledComponent);
             entity.components.delete(DisabledLifecycleComponent);
+            entity.components.delete(RepairAttemptStateComponent);
             return;
         }
         if (lifecycle && armor.current > lifecycle.armorCeiling) {
@@ -260,12 +346,18 @@ export const DisabledPlugin: Plugin = {
         world.addSystem(DisableOnDamageSystem);
         world.addSystem(DisabledPreMovementSystem);
         world.addSystem(DisabledSuppressionSystem);
+        if (world.resources.get(GameDataResource)) {
+            world.addSystem(RepairSystemOutfitProvider);
+        }
+        world.addSystem(DisabledOutfitRepairSystem);
         world.addSystem(DisabledRecoverySystem);
     },
     remove(world) {
         world.removeSystem(DisableOnDamageSystem);
         world.removeSystem(DisabledPreMovementSystem);
         world.removeSystem(DisabledSuppressionSystem);
+        world.removeSystem(RepairSystemOutfitProvider);
+        world.removeSystem(DisabledOutfitRepairSystem);
         world.removeSystem(DisabledRecoverySystem);
     },
 };

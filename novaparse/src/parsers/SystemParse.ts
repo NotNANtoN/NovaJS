@@ -101,6 +101,7 @@ export async function SystemParse(syst: SystResource, notFoundFunction: (m: stri
                     weight,
                     government: dude.government,
                     combatRole: combatRoleForDudeAiType(dude.aiType),
+                    kind: "dude",
                     ships: resolveShips(
                         dude.shipTypes,
                         dude.probabilities,
@@ -128,6 +129,7 @@ export async function SystemParse(syst: SystResource, notFoundFunction: (m: stri
                     id: flet.globalID,
                     weight,
                     government: flet.government,
+                    kind: "fleet",
                     // flët resources explicitly describe coordinated military
                     // groups rather than unrelated ambient traders.
                     combatRole: "military",

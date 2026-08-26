@@ -10,6 +10,7 @@ import { Angle } from 'nova_ecs/datatypes/angle';
 import { Position } from 'nova_ecs/datatypes/position';
 import { Vector } from 'nova_ecs/datatypes/vector';
 import { ArmorComponent, ShieldComponent } from './health_plugin';
+import { DudeSourceComponent } from './boarding_plugin';
 import { GameDataResource } from './game_data_resource';
 import { GovtComponent } from './npc_plugin';
 import { NpcSpawnPlugin } from './npc_spawn_plugin';
@@ -29,6 +30,59 @@ describe('NPC spawning', () => {
         expect(combatRoleForDudeAiType(3)).toBe('military');
         expect(combatRoleForDudeAiType(4)).toBe('military');
         expect(combatRoleForDudeAiType(0)).toBe('personal');
+    });
+
+    it('marks düde-backed spawns so their booty can be looked up', async () => {
+        const spawnWorld = async (kind: 'dude' | 'fleet' | undefined) => {
+            const gameData = {
+                data: {
+                    System: {
+                        get: async () => ({
+                            avgShips: 1,
+                            npcs: [{
+                                id: 'nova:129',
+                                weight: 1,
+                                government: 1,
+                                kind,
+                                ships: [{ id: 'nova:128', weight: 1 }],
+                            }],
+                        }),
+                    },
+                    Ship: { get: async () => getDefaultShipData() },
+                },
+            };
+            const world = new World('npc-provenance-test');
+            world.resources.set(GameDataResource, gameData as never);
+            world.resources.set(SystemIdResource, 'nova:test');
+            world.resources.set(TimeResource, {
+                time: 0, delta_ms: 1000 / 60, delta_s: 1 / 60, frame: 0,
+            });
+            world.resources.set(
+                EntityBudgetResource, createEntityBudget('modern'));
+            await world.addPlugin(DeltaPlugin);
+            await world.addPlugin(DeathPlugin);
+            await world.addPlugin(NpcSpawnPlugin);
+            world.step();
+            await Promise.resolve();
+            await Promise.resolve();
+            world.step();
+            await Promise.resolve();
+            return [...world.entities.values()]
+                .filter(entity => entity.components.has(NpcAIComponent));
+        };
+
+        const dudeShips = await spawnWorld('dude');
+        expect(dudeShips.length).toBeGreaterThan(0);
+        expect(dudeShips[0].components.get(DudeSourceComponent))
+            .toEqual({ id: 'nova:129' });
+
+        // A flët names a coordinated group, not a booty class, and older
+        // generated data says nothing at all.
+        for (const kind of ['fleet', undefined] as const) {
+            const ships = await spawnWorld(kind);
+            expect(ships.length).toBeGreaterThan(0);
+            expect(ships[0].components.has(DudeSourceComponent)).toBeFalse();
+        }
     });
 
     it('keeps the target population through player respawn', async () => {

@@ -15,6 +15,12 @@ export interface NpcSpawnData {
      * Missing values from older generated data remain personal-only.
      */
     combatRole?: "civilian" | "military" | "personal",
+    /**
+     * Which resource this entry came from. Booty when boarded is a düde
+     * property, so a ship needs to know whether its id names one. Older
+     * generated data omits it and yields nothing when plundered.
+     */
+    kind?: "dude" | "fleet",
     ships: Array<NpcShipSpawnData>,
 }
 

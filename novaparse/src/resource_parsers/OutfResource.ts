@@ -59,6 +59,17 @@ class OutfResource extends BaseResource {
             this.data.byteLength >= 560 ? this.data.getUint32(556) : 0,
         ];
     }
+    get modTypes(): number[] {
+        return [6, 18, 22, 26].map(position =>
+            this.data.getInt16(position));
+    }
+    /**
+     * EV Nova Bible oütf ModType list: "11 escape pod ignored".
+     * Alternate ModType slots have the same semantics as the primary slot.
+     */
+    get isEscapePod(): boolean {
+        return this.modTypes.includes(11);
+    }
     get functions(): OutfitFunctions {
         var functions: OutfitFunctions = [];
         var modPositions = [6, 18, 22, 26];
