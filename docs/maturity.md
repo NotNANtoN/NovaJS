@@ -84,9 +84,9 @@ the raw resource holder but has no parser and no entry in
 | Bribery, surrender, taunts | the hail panel carries only the three buttons that work | cannot buy off an attacker, beg for mercy, or be taunted |
 | Ranks | `mission_text` can render `<PRK>`/`<SRK>`, but nothing supplies rank data | every rank token falls back to "captain" |
 | `AvailRecord` mission gating | the legal record exists, but mission availability does not read it yet | record-gated missions still offer regardless of standing |
-| Boarding and capture | explicitly refused for `shipGoal` 2 and 5 | plunder and ship capture missions are unacceptable by design |
+| Ship capture | explicitly refused for `shipGoal` 2 and 5 | capture missions unimplemented; plundering disabled ships now works |
 | Planet domination | no state | the dominate-stellar branch of missions is unreachable |
-| Escape pods / disabled-ship lifecycle | not modelled | ships die instead of being disabled and looted |
+| Escape pods | not modelled | the pilot always dies outright; `gövt` `0x0100` pers-ship behaviour unused |
 | Ship `inherentAI` | parsed in `ShipResource`, never reaches `ShipData` | every NPC flies the same pursuit AI regardless of its retail AI type |
 | Multiplayer gameplay | deliberately parked | the authority layer exists, the game design does not |
 
@@ -140,12 +140,17 @@ application's resource fork rather than the data files.
 
 Ordered roughly by how likely you are to hit it in a normal play session.
 
-**Trade Center — worst offender.** It reuses `PICT 8500`, the *landing*
-frame, and writes its list at y=-175, which lands inside the artwork slot.
-That is why it reads as broken. It also trades only the six standard
-commodities with no retail `junk` goods, and price levels come from
-`spöb` flags without the retail per-commodity price spread. Needs its own
-retail frame identified (candidate: `PICT 8506`) plus a layout pass.
+**Trade Center — junk goods only.** The screen now uses its own retail frame,
+`PICT 8506` (250×285, with a 240×24 title slot and a 241×214 market pane and
+no artwork slot, unlike the landing frame it used to borrow), with columns
+measured to that geometry and paging. The six standard commodities and their
+per-commodity price spread from `spöb` flags are correct. Still missing:
+retail's 23 `jünk` goods, which are not parsed at all. Their 676-byte layout
+is known — `SoldAt` 8×int16 at 0, `BoughtAt` at 16, `BasePrice` at 32, flags
+at 34, `ScanMask` at 36, names at 38 and 102, and the `BuyOn`/`SellOn`
+availability expressions at 166 and 421 — but they need a typed parser, game
+data exposure, availability-expression evaluation and buy-only/sell-only
+offer semantics. No `spöb` change is needed; the locations live in `jünk`.
 
 **Mission goals.** Cargo delivery and ferry work. Escort, defense, "destroy
 a specific ship", chained missions, and mid-mission ship/outfit mutations
@@ -166,16 +171,43 @@ pilot has visited. Not yet reflected: territory changes from mission bits
 **Bar content.** The bar currently shows only mission offers. Retail
 also has bar characters and flavour (`PICT 8504` has two panes, unmapped).
 
-**NPC AI — thinner than it looks.** Hostility propagation, combat roles and
-retaliation thresholds are tested and behave well, but the flying itself is
-one behaviour: turn towards the target, hold full throttle, fire every weapon
-in range. Nothing flees when crippled, jumps out, keeps its distance to suit
-its weapon range, flies in formation, or picks a weapon deliberately. Miners
-are the sole exception, standing off their rock. The retail `inherentAI` field
-that would distinguish a wandering trader from an interceptor is parsed but
-never reaches `ShipData`. Fleet composition, `düde`/`flët` behaviour and
-long-run population balance in a busy system are also untested; long fights
-are where performance problems have historically appeared.
+**NPC AI — better, still incomplete.** Hostility propagation, combat roles and
+retaliation thresholds are tested and behave well. Ships now fly with a shared
+velocity-matching approach controller that accounts for turn time, so they
+stand off at a distance suited to their weapon range instead of ramming, and
+they keep the target under their guns while parked. The retail `inherentAI`
+field reaches `ShipData`; its four Bible roles set standoff and decide whether
+a hull opens fire unprovoked, so freighters no longer pick fights with their
+government's enemies.
+
+Still missing, in rough order of how much they would be felt:
+
+- **Fleeing.** Nothing runs away. The Bible puts this on the government, not
+  the hull: `gövt` flag `0x0010` makes warships retreat below 25% shields, and
+  its absence means they fight to the death. A wimpy trader should also run
+  when attacked, and a brave trader should break off once its attacker is out
+  of range.
+- **Jumping out.** A warship with no enemies left should leave the system.
+- **Interceptor duties.** Retail interceptors park in orbit, buzz ships to scan
+  for illegal cargo, and act as piracy police, attacking anyone who fires on or
+  tries to board a non-enemy while they watch.
+- **Formation flying and deliberate weapon choice.**
+
+Fleet composition, `düde`/`flët` behaviour and long-run population balance in a
+busy system are also untested; long fights are where performance problems have
+historically appeared.
+
+**Disabling and boarding.** Ships now fall disabled instead of always dying,
+losing flight, weapon and jump control while keeping their drift, and the
+governments retail marks with `gövt` flag `0x1000` fly in, match velocity and
+plunder cargo and credits, sparing mission cargo. Two gaps remain. Disabled
+ships never recover, because there is no authoritative in-flight repair; and
+the loot is a placeholder, a deterministic half-hold plus a small fraction of
+hull value, because the real booty table lives in `düde` flags (`0x0001`
+food through `0x0020` equipment, `0x0040` money scaled by purchase price)
+which are not parsed. Retail's per-ship chance of being disabled rather than
+destroyed is also deliberately not guessed. `gövt` flag `0x0800`, which starts
+a government's ships out as derelicts, is not wired up either.
 
 **Teardown and GPU lifetime.** Managed graphics fixed the projectile and
 explosion leaks, but not every display object is on the managed path.

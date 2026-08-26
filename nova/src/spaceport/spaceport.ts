@@ -37,7 +37,7 @@ import { MissionBbs, MissionBoard, MissionInfo } from './mission_bbs';
 import { Outfitter } from './outfitter';
 import { ShipInfo } from './ship_info';
 import { Shipyard } from './shipyard';
-import { TradeCenter } from './trade';
+import { TradeCenter } from './trade_center';
 import {
     hasSpaceportService,
     resolveSpaceportPlanetData,
