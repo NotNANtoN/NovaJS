@@ -1,12 +1,33 @@
 import { Sound } from '@pixi/sound';
+import { Emit, UUID } from 'nova_ecs/arg_types';
 import { Plugin } from 'nova_ecs/plugin';
 import { Resource } from 'nova_ecs/resource';
+import { MovementState, MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
+import { TimeResource } from 'nova_ecs/plugins/time_plugin';
+import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
 import { SingletonComponent } from 'nova_ecs/world';
 import { GameData } from '../client/gamedata/GameData';
 import { EcsControlEvent } from '../nova_plugin/controls_plugin';
 import { GameDataResource } from '../nova_plugin/game_data_resource';
-import { SoundEvent } from '../nova_plugin/sound_event';
+import { ArmorComponent, ShieldComponent } from '../nova_plugin/health_plugin';
+import { LandEvent, LandingResultEvent } from '../nova_plugin/planet_plugin';
+import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin';
+import { OwnerComponent, VulnerableToPD } from '../nova_plugin/fire_weapon_plugin';
+import {
+    ProjectileComponent,
+    ProjectileDataComponent,
+} from '../nova_plugin/projectile_data';
+import { CycleTargetEvent } from '../nova_plugin/target_plugin';
+import { TargetComponent } from '../nova_plugin/target_component';
+import {
+    HEALTH_HIT_SOUND_ID,
+    INCOMING_MISSILE_SOUND_ID,
+    SoundEvent,
+    STELLAR_DEPARTURE_SOUND_ID,
+    STELLAR_DOCKING_SOUND_ID,
+    TARGET_SELECTION_SOUND_ID,
+} from '../nova_plugin/sound_event';
 import {
     MASTER_VOLUME_STEP,
     getMasterVolume,
@@ -17,6 +38,110 @@ const LoopingSounds = new Resource<Map<string, Sound>>('LoopingSounds');
 const LoadedSounds = new Resource<Map<string, Sound>>('LoadedSounds');
 const PendingSounds = new Resource<Map<string, Promise<Sound>>>('PendingSounds');
 export const VolumeResource = new Resource<{volume: number}>('VolumeResource');
+const HealthSoundStateResource = new Resource<HealthSoundState>(
+    'HealthSoundState');
+const IncomingMissileStateResource = new Resource<Set<string>>(
+    'IncomingMissileState');
+const StellarSoundStateResource = new Resource<StellarSoundState>(
+    'StellarSoundState');
+
+export const HEALTH_HIT_SOUND_COOLDOWN_MS = 120;
+
+export interface HealthSoundSnapshot {
+    shield?: number;
+    armor?: number;
+}
+
+export interface HealthSoundState extends HealthSoundSnapshot {
+    playerUuid?: string;
+    lastPlayedAt: number;
+}
+
+export function healthDecreased(
+    previous: HealthSoundSnapshot,
+    current: HealthSoundSnapshot,
+): boolean {
+    return (previous.shield !== undefined
+        && current.shield !== undefined
+        && current.shield < previous.shield)
+        || (previous.armor !== undefined
+        && current.armor !== undefined
+        && current.armor < previous.armor);
+}
+
+export function shouldPlayHealthHitSound(
+    previous: HealthSoundSnapshot,
+    current: HealthSoundSnapshot,
+    now: number,
+    lastPlayedAt: number,
+): boolean {
+    return healthDecreased(previous, current)
+        && now - lastPlayedAt >= HEALTH_HIT_SOUND_COOLDOWN_MS;
+}
+
+export interface IncomingMissileSnapshot {
+    target: string | undefined;
+    owner: string;
+    guidance: string;
+    vulnerableToPointDefense: boolean;
+    position: { x: number, y: number };
+    velocity: { x: number, y: number };
+}
+
+export function isInboundMissile(
+    missile: IncomingMissileSnapshot,
+    playerUuid: string,
+    playerMovement: Pick<MovementState, 'position' | 'velocity'>,
+): boolean {
+    if (missile.target !== playerUuid
+        || missile.owner === playerUuid
+        || missile.guidance !== 'guided'
+        || !missile.vulnerableToPointDefense) {
+        return false;
+    }
+
+    const toPlayerX = playerMovement.position.x - missile.position.x;
+    const toPlayerY = playerMovement.position.y - missile.position.y;
+    if (toPlayerX ** 2 + toPlayerY ** 2 === 0) {
+        return false;
+    }
+
+    const relativeVelocityX =
+        missile.velocity.x - playerMovement.velocity.x;
+    const relativeVelocityY =
+        missile.velocity.y - playerMovement.velocity.y;
+    return relativeVelocityX * toPlayerX + relativeVelocityY * toPlayerY > 0;
+}
+
+interface StellarSoundState {
+    pendingLanding: boolean;
+    awaitingDeparture: boolean;
+    playerWasPresent: boolean;
+}
+
+const PlayerHealthQuery = new Query([
+    UUID,
+    PlayerShipSelector,
+    ShieldComponent,
+    ArmorComponent,
+] as const);
+const PlayerMovementQuery = new Query([
+    UUID,
+    PlayerShipSelector,
+    MovementStateComponent,
+] as const);
+const PlayerPresenceQuery = new Query([
+    PlayerShipSelector,
+] as const);
+const IncomingProjectileQuery = new Query([
+    UUID,
+    ProjectileComponent,
+    ProjectileDataComponent,
+    TargetComponent,
+    OwnerComponent,
+    MovementStateComponent,
+    VulnerableToPD,
+] as const);
 
 function playLoadedSound(sound: Sound, id: string, loop: boolean,
     loopingSounds: Map<string, Sound>, volume: number) {
@@ -90,6 +215,138 @@ const SoundSystem = new System({
     }
 });
 
+export const TargetSelectionSoundSystem = new System({
+    name: 'TargetSelectionSoundSystem',
+    events: [CycleTargetEvent],
+    args: [CycleTargetEvent, Emit, SingletonComponent] as const,
+    step({target}, emit) {
+        if (target) {
+            emit(SoundEvent, {id: TARGET_SELECTION_SOUND_ID});
+        }
+    },
+});
+
+export const PlayerHealthSoundSystem = new System({
+    name: 'PlayerHealthSoundSystem',
+    args: [PlayerHealthQuery, TimeResource, HealthSoundStateResource,
+        Emit, SingletonComponent] as const,
+    step(players, {time}, state, emit) {
+        const player = players[0];
+        if (!player) {
+            state.playerUuid = undefined;
+            state.shield = undefined;
+            state.armor = undefined;
+            return;
+        }
+
+        const [playerUuid, _player, shield, armor] = player;
+        const current = {
+            shield: shield.current,
+            armor: armor.current,
+        };
+        if (state.playerUuid !== playerUuid) {
+            state.playerUuid = playerUuid;
+            state.shield = current.shield;
+            state.armor = current.armor;
+            return;
+        }
+
+        if (shouldPlayHealthHitSound(state, current, time, state.lastPlayedAt)) {
+            state.lastPlayedAt = time;
+            emit(SoundEvent, {id: HEALTH_HIT_SOUND_ID});
+        }
+        state.shield = current.shield;
+        state.armor = current.armor;
+    },
+});
+
+export const IncomingMissileWarningSystem = new System({
+    name: 'IncomingMissileWarningSystem',
+    args: [IncomingProjectileQuery, PlayerMovementQuery,
+        IncomingMissileStateResource, Emit, SingletonComponent] as const,
+    step(projectiles, players, warned, emit) {
+        const active = new Set(projectiles.map(([uuid]) => uuid));
+        for (const uuid of warned) {
+            if (!active.has(uuid)) {
+                warned.delete(uuid);
+            }
+        }
+
+        const player = players[0];
+        if (!player) {
+            return;
+        }
+        const [playerUuid, _player, playerMovement] = player;
+        for (const [uuid, _projectile, projectileData, target, owner,
+            movement] of projectiles) {
+            if (warned.has(uuid)) {
+                continue;
+            }
+            if (!isInboundMissile({
+                target: target.target,
+                owner: owner.owner,
+                guidance: projectileData.guidance,
+                vulnerableToPointDefense: true,
+                position: movement.position,
+                velocity: movement.velocity,
+            }, playerUuid, playerMovement)) {
+                continue;
+            }
+            warned.add(uuid);
+            emit(SoundEvent, {id: INCOMING_MISSILE_SOUND_ID});
+        }
+    },
+});
+
+export const LandingSoundRequestSystem = new System({
+    name: 'LandingSoundRequestSystem',
+    events: [LandEvent],
+    args: [LandEvent, StellarSoundStateResource, SingletonComponent] as const,
+    step(_land, state) {
+        state.pendingLanding = true;
+    },
+});
+
+const LandingSoundResultSystem = new System({
+    name: 'LandingSoundResultSystem',
+    events: [LandingResultEvent],
+    args: [LandingResultEvent, StellarSoundStateResource,
+        SingletonComponent] as const,
+    step(result, state) {
+        if (result.outcome === 'rejected') {
+            state.pendingLanding = false;
+        }
+    },
+});
+
+export const StellarSoundSystem = new System({
+    name: 'StellarSoundSystem',
+    args: [PlayerPresenceQuery, StellarSoundStateResource,
+        Emit, SingletonComponent] as const,
+    step(players, state, emit) {
+        const playerPresent = players.length > 0;
+        if (state.pendingLanding && !playerPresent) {
+            state.pendingLanding = false;
+            state.awaitingDeparture = true;
+            state.playerWasPresent = false;
+            emit(SoundEvent, {id: STELLAR_DOCKING_SOUND_ID});
+            return;
+        }
+
+        if (state.awaitingDeparture) {
+            if (!playerPresent) {
+                state.playerWasPresent = false;
+                return;
+            }
+            if (!state.playerWasPresent) {
+                state.awaitingDeparture = false;
+                emit(SoundEvent, {id: STELLAR_DEPARTURE_SOUND_ID});
+            }
+        }
+        state.playerWasPresent = playerPresent;
+    },
+});
+
 const VolumeControlSystem = new System({
     name: 'VolumeControlSystem',
     events: [EcsControlEvent],
@@ -126,8 +383,23 @@ export const SoundPlugin: Plugin = {
         world.resources.set(LoadedSounds, new Map());
         world.resources.set(PendingSounds, new Map());
         world.resources.set(VolumeResource, {volume: getMasterVolume()});
+        world.resources.set(HealthSoundStateResource, {
+            lastPlayedAt: -Infinity,
+        });
+        world.resources.set(IncomingMissileStateResource, new Set());
+        world.resources.set(StellarSoundStateResource, {
+            pendingLanding: false,
+            awaitingDeparture: false,
+            playerWasPresent: false,
+        });
         world.addSystem(SoundSystem);
         world.addSystem(VolumeControlSystem);
+        world.addSystem(TargetSelectionSoundSystem);
+        world.addSystem(PlayerHealthSoundSystem);
+        world.addSystem(IncomingMissileWarningSystem);
+        world.addSystem(LandingSoundRequestSystem);
+        world.addSystem(LandingSoundResultSystem);
+        world.addSystem(StellarSoundSystem);
     },
     remove(world) {
         const loopingSounds = world.resources.get(LoopingSounds);
@@ -138,7 +410,16 @@ export const SoundPlugin: Plugin = {
         }
         world.removeSystem(SoundSystem);
         world.removeSystem(VolumeControlSystem);
+        world.removeSystem(TargetSelectionSoundSystem);
+        world.removeSystem(PlayerHealthSoundSystem);
+        world.removeSystem(IncomingMissileWarningSystem);
+        world.removeSystem(LandingSoundRequestSystem);
+        world.removeSystem(LandingSoundResultSystem);
+        world.removeSystem(StellarSoundSystem);
         world.resources.delete(VolumeResource);
+        world.resources.delete(StellarSoundStateResource);
+        world.resources.delete(IncomingMissileStateResource);
+        world.resources.delete(HealthSoundStateResource);
         world.resources.delete(PendingSounds);
         world.resources.delete(LoadedSounds);
         world.resources.delete(LoopingSounds);
