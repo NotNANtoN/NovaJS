@@ -351,6 +351,11 @@ export class Spaceport extends Menu<Entity> {
         landingNotices: readonly MissionNotice[] = [],
     ): Promise<Entity> {
         await this.buildPromise;
+        // A dialog left active by a previous landing would keep the landing
+        // artwork and buttons hidden, which reads as a black screen on
+        // reload. Start every landing on the landing screen itself.
+        this.setActiveDialog();
+        this.controls.bind();
         this.missionNotice.text = landingNotices.length > 0
             ? landingNotices.map(notice =>
                 `${notice.kind === 'success' ? 'Mission complete' : 'Mission failed'}: `
