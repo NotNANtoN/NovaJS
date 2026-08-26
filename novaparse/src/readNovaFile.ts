@@ -19,6 +19,7 @@ import { WeapResource } from "./resource_parsers/WeapResource";
 import { SndResource } from "./resource_parsers/SndResource";
 import { $enum } from "ts-enum-util";
 import { NebuResource } from "./resource_parsers/NebuResource";
+import { StrhResource } from "./resource_parsers/StrhResource";
 import { RoidResource } from "./resource_parsers/RoidResource";
 
 
@@ -84,7 +85,7 @@ parserMap[NovaResourceType.snd] = SndResource;
 parserMap[NovaResourceType.spïn] = SpinResource;
 parserMap[NovaResourceType.spöb] = SpobResource;
 //parserMap[NovaResourceType.STR] = ;
-//parserMap[NovaResourceType.STRH] = ;
+parserMap[NovaResourceType.STRH] = StrhResource;
 parserMap[NovaResourceType.sÿst] = SystResource;
 //parserMap[NovaResourceType.vers] = ;
 parserMap[NovaResourceType.wëap] = WeapResource;

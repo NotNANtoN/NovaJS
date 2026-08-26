@@ -442,7 +442,7 @@ const TrackDamageSourcesSystem = new System({
     },
 });
 
-function resolveDamageSource(
+export function resolveDamageSource(
     damager: string,
     entities: EntityMap,
 ): DamageAttribution | undefined {

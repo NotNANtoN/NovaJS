@@ -16,6 +16,7 @@ import { SpriteSheetData, SpriteSheetFramesData, SpriteSheetImageData } from "no
 import { StatusBarData } from "novadatainterface/StatusBarData";
 import { AsteroidData } from "novadatainterface/AsteroidData";
 import { NebulaData } from "novadatainterface/NebulaData";
+import { StringListData } from "novadatainterface/StringListData";
 import { SystemData } from "novadatainterface/SystemData";
 import { TargetCornersData } from "novadatainterface/TargetCornersData";
 import { WeaponData } from "novadatainterface/WeaponData";
@@ -32,7 +33,9 @@ import { SpriteSheetMulti, SpriteSheetMultiParse } from "./src/parsers/SpriteShe
 import { StatusBarParse } from "./src/parsers/StatusBarParse";
 import { AsteroidParse } from "./src/parsers/AsteroidParse";
 import { NebulaParse } from "./src/parsers/NebulaParse";
+import { StringListParse } from "./src/parsers/StringListParse";
 import { NebuResource } from "./src/resource_parsers/NebuResource";
+import { StrhResource } from "./src/resource_parsers/StrhResource";
 import { RoidResource } from "./src/resource_parsers/RoidResource";
 import { SystemParse } from "./src/parsers/SystemParse";
 import { MissionParse } from "./src/parsers/MissionParse";
@@ -162,6 +165,7 @@ export class NovaParse implements GameDataInterface {
             Govt: this.buildIDsForResource(idSpace.gövt),
             Asteroid: this.buildIDsForResource(idSpace.röid),
             Nebula: this.buildIDsForResource(idSpace.nëbu),
+            StringList: this.buildIDsForResource(idSpace.STRH),
             SoundFile: this.buildIDsForResource(idSpace["snd "]),
         }
     }
@@ -193,6 +197,8 @@ export class NovaParse implements GameDataInterface {
                 NovaResourceType.röid, AsteroidParse),
             Nebula: this.makeGettable<NebuResource, NebulaData>(
                 NovaResourceType.nëbu, NebulaParse),
+            StringList: this.makeGettable<StrhResource, StringListData>(
+                NovaResourceType.STRH, StringListParse),
             SoundFile: this.makeGettable<SndResource, SoundFile>(NovaResourceType.snd, SoundFileParse),
         }
 
@@ -206,7 +212,11 @@ export class NovaParse implements GameDataInterface {
                 throw idSpace;
             }
 
-            var resource = <T>idSpace[resourceType][id];
+            // `STR#` is stored under the key STRH because `#` is not a valid
+            // identifier, so the enum value cannot index the id space.
+            const idSpaceKey = resourceType === NovaResourceType.STRH
+                ? "STRH" : resourceType;
+            var resource = <T>idSpace[idSpaceKey][id];
 
             // Shouldn't this just call resourceNotFoundFunction???
             if (typeof resource === "undefined") {

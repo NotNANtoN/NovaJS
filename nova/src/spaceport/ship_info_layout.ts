@@ -18,8 +18,10 @@ function slot(x: number, y: number, width: number, height: number) {
 
 export const SHIP_INFO_LAYOUT = {
     background: 'nova:8507',
-    /** Pilot and ship facts, left column of the upper pane. */
-    facts: slot(16, 12, 280, 384),
+    /** Pilot and ship facts, top of the left column of the upper pane. */
+    facts: slot(16, 12, 280, 206),
+    /** Standing with each government, under the facts. */
+    standing: slot(16, 222, 280, 174),
     /** Outfits, right column of the upper pane. */
     outfits: slot(310, 12, 292, 384),
     /** One-line cargo summary in the divider strip. */

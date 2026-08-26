@@ -5,7 +5,9 @@ import {
     shipInfoFacts,
     shipInfoMissions,
     shipInfoOutfits,
+    shipInfoStanding,
 } from './ship_info_content';
+import { getDefaultGovtData, GovtData } from 'novadatainterface/GovtData';
 import { SHIP_INFO_LAYOUT } from './ship_info_layout';
 
 function state(overrides: Partial<PlayerState> = {}): PlayerState {
@@ -112,5 +114,85 @@ describe('pilot status layout', () => {
     it('does not overlap the two upper columns', () => {
         const { facts, outfits } = SHIP_INFO_LAYOUT;
         expect(facts.x + facts.width).toBeLessThanOrEqual(outfits.x);
+    });
+});
+
+function govt(id: string, overrides: Partial<GovtData> = {}): GovtData {
+    return {
+        ...getDefaultGovtData(),
+        id,
+        name: id,
+        crimeTolerance: 20,
+        ...overrides,
+    };
+}
+
+describe('pilot standing content', () => {
+    const governments = new Map([
+        ['nova:128', govt('nova:128', {
+            name: 'Federation', mediumName: 'the Federation',
+        })],
+        ['nova:130', govt('nova:130', { name: 'Pirates' })],
+    ]);
+
+    it('reports the combat rating and kill count', () => {
+        const text = shipInfoFacts(state({ kills: 4 } as never),
+            'Shuttle', 'Sol');
+        expect(text).toContain('Combat rating: Average Ability');
+        expect(text).toContain('Ships destroyed: 4');
+    });
+
+    it('says so when nobody has an opinion', () => {
+        expect(shipInfoStanding(state(), governments))
+            .toContain('No government has an opinion of you.');
+    });
+
+    it('names each government and its verdict', () => {
+        const text = shipInfoStanding(state({
+            legalRecords: { 'nova:128': -60, 'nova:130': 25 },
+        } as never), governments);
+        expect(text).toContain('the Federation: Offender');
+        expect(text).toContain('Pirates: Good Citizen');
+    });
+
+    it('marks a government that now hunts the pilot', () => {
+        const text = shipInfoStanding(state({
+            legalRecords: { 'nova:128': -60 },
+        } as never), governments);
+        expect(text).toContain('(hunted)');
+    });
+
+    it('leaves a pilot within tolerance unhunted', () => {
+        const text = shipInfoStanding(state({
+            legalRecords: { 'nova:128': -5 },
+        } as never), governments);
+        expect(text).not.toContain('(hunted)');
+    });
+
+    it('lists the worst standing first', () => {
+        const text = shipInfoStanding(state({
+            legalRecords: { 'nova:130': 25, 'nova:128': -60 },
+        } as never), governments);
+        expect(text.indexOf('the Federation'))
+            .toBeLessThan(text.indexOf('Pirates'));
+    });
+
+    it('falls back to the raw id for an unknown government', () => {
+        const text = shipInfoStanding(state({
+            legalRecords: { 'nova:999': -30 },
+        } as never), governments);
+        expect(text).toContain('nova:999');
+    });
+
+    it('prefers the retail ladders when they are supplied', () => {
+        const text = shipInfoStanding(state({
+            legalRecords: { 'nova:128': -30 },
+        } as never), governments, { legal: ['a', 'b', 'c', 'zzz'] });
+        expect(text).toContain('the Federation: zzz');
+    });
+
+    it('keeps the standing pane inside the frame', () => {
+        const { standing, facts } = SHIP_INFO_LAYOUT;
+        expect(standing.y).toBeGreaterThanOrEqual(facts.y + facts.height);
     });
 });

@@ -1,5 +1,6 @@
 import { AsteroidData } from "./AsteroidData";
 import { NebulaData } from "./NebulaData";
+import { StringListData } from "./StringListData";
 import { CicnData } from "./CicnData";
 import { CicnImageData } from "./CicnImage";
 import { DudeData } from "./DudeData";
@@ -41,6 +42,7 @@ enum NovaDataType {
     Govt = "Govt",
     Asteroid = "Asteroid",
     Nebula = "Nebula",
+    StringList = "StringList",
     SoundFile = "SoundFile",
 };
 
@@ -69,6 +71,8 @@ type NovaDataInterface = {
     Asteroid?: Gettable<AsteroidData>,
     /** Optional for legacy generated-data providers. */
     Nebula?: Gettable<NebulaData>,
+    /** Optional for legacy generated-data providers. */
+    StringList?: Gettable<StringListData>,
     SoundFile: Gettable<SoundFile>,
 }
 

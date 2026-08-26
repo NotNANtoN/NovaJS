@@ -15,7 +15,10 @@ import {
     shipInfoFacts,
     shipInfoMissions,
     shipInfoOutfits,
+    shipInfoStanding,
+    StatusLadders,
 } from './ship_info_content';
+import { GovtData } from 'novadatainterface/GovtData';
 import { SHIP_INFO_LAYOUT } from './ship_info_layout';
 
 const SHIP_INFO_FONT = {
@@ -52,16 +55,19 @@ function addPane(
 
 /**
  * The retail pilot-status dialog, reached with the "properties" key both in
- * flight and while landed. Ranks and legal record are deliberately absent:
- * neither exists as game state yet, and inventing rows for them would
- * misreport the pilot.
+ * flight and while landed. Ranks are still absent because the ränk resources
+ * are not parsed, so there is no way to name one.
  */
 export class ShipInfo extends Menu<Entity> {
     private readonly facts: PIXI.Text;
     private readonly outfits: PIXI.Text;
     private readonly summary: PIXI.Text;
     private readonly missions: PIXI.Text;
+    private readonly standing: PIXI.Text;
     private systemName?: string;
+    private governments = new Map<string, GovtData>();
+    private ladders: StatusLadders = {};
+    private referenceData?: Promise<void>;
 
     constructor(
         gameData: GameData,
@@ -76,6 +82,8 @@ export class ShipInfo extends Menu<Entity> {
             this.container, SHIP_INFO_LAYOUT.summary, SHIP_INFO_FONT.summary);
         this.missions = addPane(
             this.container, SHIP_INFO_LAYOUT.missions, SHIP_INFO_FONT.body);
+        this.standing = addPane(
+            this.container, SHIP_INFO_LAYOUT.standing, SHIP_INFO_FONT.body);
 
         const done = new Button(
             gameData, 'Done', 50, SHIP_INFO_LAYOUT.doneButton);
@@ -103,12 +111,58 @@ export class ShipInfo extends Menu<Entity> {
         const state = this.input.components.get(PlayerStateComponent);
         const shipData = this.input.components.get(ShipDataComponent);
         const outfits = this.input.components.get(OutfitsStateComponent);
+        await this.loadReferenceData(state?.legalRecords);
         this.facts.text = shipInfoFacts(
-            state, shipData?.name, this.systemName);
+            state, shipData?.name, this.systemName, this.ladders);
         this.outfits.text = shipInfoOutfits(
             outfits, await this.outfitNames(outfits));
         this.summary.text = shipInfoCargo(state);
         this.missions.text = shipInfoMissions(state);
+        this.standing.text = shipInfoStanding(
+            state, this.governments, this.ladders);
+    }
+
+    /**
+     * Pull the retail word ladders once, then the governments the pilot has a
+     * record with. Missing resources leave the compiled-in ladders in place.
+     */
+    private async loadReferenceData(
+        records: Record<string, number> | undefined,
+    ): Promise<void> {
+        this.referenceData ??= this.loadLadders();
+        await this.referenceData;
+        await Promise.all(Object.keys(records ?? {})
+            .filter(id => !this.governments.has(id))
+            .map(async id => {
+                try {
+                    const govt = await this.gameData.data.Govt?.get(id);
+                    if (govt) {
+                        this.governments.set(id, govt);
+                    }
+                } catch {
+                    // Fall back to showing the raw government id.
+                }
+            }));
+    }
+
+    private async loadLadders(): Promise<void> {
+        const lists = this.gameData.data.StringList;
+        if (!lists) {
+            return;
+        }
+        const read = async (id: string) => {
+            try {
+                const list = await lists.get(id);
+                return list.strings.length > 0 ? list.strings : undefined;
+            } catch {
+                return undefined;
+            }
+        };
+        // STR# 134 is the legal-record ladder and 138 the combat ratings.
+        this.ladders = {
+            legal: await read('nova:134'),
+            combat: await read('nova:138'),
+        };
     }
 
     private async outfitNames(

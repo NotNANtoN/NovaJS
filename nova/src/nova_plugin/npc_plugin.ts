@@ -41,6 +41,8 @@ import {
 } from "./npc_components";
 import type { GovtData } from "./npc_components";
 import { createMinerSystems, MiningShipProvider } from "./miner_ai";
+import { PlayerState, PlayerStateComponent } from "./player_state";
+import { isCriminal, recordFor } from "./legal_record";
 export {
     ChooseRandomTargetComponent,
     GovtComponent,
@@ -56,6 +58,7 @@ const TargetsQuery = new Query([
     Optional(GovtComponent),
     Optional(PlayerDeathComponent),
     ShipComponent,
+    Optional(PlayerStateComponent),
 ] as const);
 
 type TargetCandidate = readonly [
@@ -65,6 +68,7 @@ type TargetCandidate = readonly [
     GovtData | undefined,
     { respawnAt?: number, wreckPosition: [number, number] } | undefined,
     { id: string },
+    PlayerState | undefined,
 ];
 
 function getValidTargets(
@@ -83,6 +87,8 @@ function getValidTargets(
             multiplayer,
             targetGovernment,
             playerDeath,
+            _ship,
+            playerState,
         ]) => {
             if (targetId === selfUuid) {
                 return false;
@@ -94,9 +100,18 @@ function getValidTargets(
                 provocations, selfUuid, targetId);
 
             if (multiplayer.owner !== "server") {
+                // A record past this government's tolerance makes the player
+                // a standing target, unlike a provocation which fades.
+                const record = recordFor(
+                    playerState?.legalRecords,
+                    selfGovernment.id,
+                    selfGovernment,
+                );
+                const hunted = isCriminal(
+                    record, selfGovernment.crimeTolerance ?? 0);
                 return canTargetPlayer(
                     selfGovernment,
-                    personal || canAssistGovernment && isProvoked(
+                    personal || hunted || canAssistGovernment && isProvoked(
                         provocations,
                         selfGovernmentId,
                         targetId,

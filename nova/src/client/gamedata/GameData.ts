@@ -5,6 +5,7 @@ import { CicnImageData } from 'novadatainterface/CicnImage';
 import { ExplosionData } from 'novadatainterface/ExplosionData';
 import { AsteroidData } from 'novadatainterface/AsteroidData';
 import { NebulaData } from 'novadatainterface/NebulaData';
+import { StringListData } from 'novadatainterface/StringListData';
 import { GovtData } from 'novadatainterface/GovtData';
 import { GameDataInterface, PreloadData } from 'novadatainterface/GameDataInterface';
 import { Gettable } from 'novadatainterface/Gettable';
@@ -82,6 +83,8 @@ export class GameData implements GameDataInterface {
             Govt: this.addGettable<GovtData>(NovaDataType.Govt),
             Asteroid: this.addGettable<AsteroidData>(NovaDataType.Asteroid),
             Nebula: this.addGettable<NebulaData>(NovaDataType.Nebula),
+            StringList: this.addGettable<StringListData>(
+                NovaDataType.StringList),
             SoundFile: this.addSoundFileGettable(),
             Sound: this.addSoundGettable(),
         };

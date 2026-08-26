@@ -137,6 +137,13 @@ const PlayerStateFields = t.intersection([
         daysSinceRegistration: t.number,
         /** How many times this pilot has landed; shown on the ship info. */
         landingCount: t.number,
+        /** Ships this pilot has destroyed; drives the combat rating. */
+        kills: t.number,
+        /**
+         * Signed legal record per government resource id. A government with
+         * no entry falls back to its own InitialRecord.
+         */
+        legalRecords: t.record(t.string, t.number),
     }),
 ]);
 type PlayerStateFields = t.TypeOf<typeof PlayerStateFields>;
@@ -175,6 +182,8 @@ const LegacyPlayerStateFields = t.intersection([
         registered: t.boolean,
         daysSinceRegistration: t.number,
         landingCount: t.number,
+        kills: t.number,
+        legalRecords: t.record(t.string, t.number),
     }),
 ]);
 
@@ -409,6 +418,8 @@ export function createInitialPlayerState(): PlayerState {
         destroyedStellars: [],
         activeRanks: [],
         exploredSystems: [],
+        kills: 0,
+        legalRecords: {},
         // Retail's `P` test asks whether the copy is registered. A full data
         // set is not the demo, and leaving this false hides every ship,
         // outfit and mission behind a `P` gate.

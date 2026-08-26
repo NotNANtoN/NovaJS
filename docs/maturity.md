@@ -62,7 +62,7 @@ graph LR
         A1["crön scheduled events"]
         A2["përs unique captains"]
         A3[hailing + comms]
-        A4[ranks + legal record]
+        A4[ranks]
         A5[fuel + refuelling]
         A6[boarding + capture]
         A7[planet domination]
@@ -82,12 +82,34 @@ the raw resource holder but has no parser and no entry in
 | `përs` unique captains | enumerated only, no parser, no data type | no named characters, no ship-offered missions (`AvailLoc 2`), no recurring rivals |
 | Hailing and comms | no `HailQuote` handling anywhere | cannot talk to, bribe, surrender to, or be taunted by anyone |
 | Ranks | `mission_text` can render `<PRK>`/`<SRK>`, but nothing supplies rank data | every rank token falls back to "captain" |
-| Legal record | no field, no accumulation, no checks | `AvailRecord` mission gating cannot work; no police response tiers |
+| `AvailRecord` mission gating | the legal record exists, but mission availability does not read it yet | record-gated missions still offer regardless of standing |
 | Fuel and refuelling | no fuel capacity or jump fuel anywhere | hyperjumps are unlimited and free |
 | Boarding and capture | explicitly refused for `shipGoal` 2 and 5 | plunder and ship capture missions are unacceptable by design |
 | Planet domination | no state | the dominate-stellar branch of missions is unreachable |
 | Escape pods / disabled-ship lifecycle | not modelled | ships die instead of being disabled and looted |
 | Multiplayer gameplay | deliberately parked | the authority layer exists, the game design does not |
+
+## Legal record and combat rating
+
+Both come from the pilot's own history and use the game's own wording, read
+from `STR#` 134 (legal statuses) and `STR#` 138 (combat ratings) rather than
+invented strings.
+
+- Every `gövt` now exposes `CrimeTol`, `InitialRecord` and its five crime
+  penalties, so each government judges the player by its own standards.
+- Shooting a ship charges the government's shooting penalty once per victim;
+  destroying it charges the killing penalty and raises the kill count.
+- A penalty spreads at one third strength to the victim's allies, and credits
+  its enemies the same amount, so hunting pirates improves Federation
+  standing.
+- Falling past a government's `CrimeTol` makes its ships hunt the player
+  permanently, unlike a provocation, which fades.
+- The `P` dialog lists the combat rating, kill count, and one line per
+  government with an opinion, worst first, marking who is hunting you.
+
+Still missing: `AvailRecord` mission gating, scan fines, smuggling and
+boarding penalties (no smuggling or boarding yet), and the two military rungs
+at the top of the ladder, which belong to governments the player rules.
 
 ## Needs more love and testing
 
@@ -160,7 +182,7 @@ recovery note above is gone and would have to be rebuilt.
 2. Mission goals and selectors — unblocks the actual storylines.
 3. `crön` parsing — unlocks news and time-based content, and is a
    prerequisite for a living galaxy.
-4. Ranks and legal record — cheap state that gates a surprising amount of
+4. Ranks — cheap state that gates a surprising amount of
    retail content.
 5. Fuel — small rule with a large effect on how the map feels.
 6. `përs` and hailing — the biggest remaining "the galaxy feels empty" gap.

@@ -19,6 +19,7 @@ import { getDefaultTargetCornersData } from "./TargetCornersData";
 import { getDefaultProjectileWeaponData } from "./WeaponData";
 import { getDefaultAsteroidData } from "./AsteroidData";
 import { getDefaultNebulaData } from "./NebulaData";
+import { getDefaultStringListData } from "./StringListData";
 
 // TODO: Make gettable an interface so you
 // don't have to do this awkward extension
@@ -57,6 +58,7 @@ export class MockGameData implements GameDataInterface {
         Govt: new MockGettable(getDefaultGovtData()),
         Asteroid: new MockGettable(getDefaultAsteroidData()),
         Nebula: new MockGettable(getDefaultNebulaData()),
+        StringList: new MockGettable(getDefaultStringListData()),
         Outfit: new MockGettable(getDefaultOutfitData()),
         Pict: new MockGettable(getDefaultPictData()),
         PictImage: new MockGettable(new Uint8Array(0).buffer as ArrayBuffer),

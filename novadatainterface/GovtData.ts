@@ -13,6 +13,22 @@ export interface GovtData extends BaseData {
     flags?: number;
     flags2?: number;
     scanFine?: number;
+    /** Longer name used in prose, e.g. "the Federation". */
+    mediumName?: string;
+    /**
+     * How far the player's legal record may fall before this government
+     * treats them as a criminal, and the record a new pilot starts with.
+     */
+    crimeTolerance?: number;
+    initialRecord?: number;
+    /** How much each crime costs the player's record with this government. */
+    penalties?: {
+        smuggling: number;
+        disabling: number;
+        boarding: number;
+        killing: number;
+        shooting: number;
+    };
     classes: number[];
     allies: number[];
     enemies: number[];

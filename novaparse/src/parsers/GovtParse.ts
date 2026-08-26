@@ -17,7 +17,17 @@ export interface ParsedGovtData extends BaseData {
     };
     commName: string;
     targetName: string;
+    mediumName: string;
     scanMask: number;
+    crimeTolerance: number;
+    initialRecord: number;
+    penalties: {
+        smuggling: number;
+        disabling: number;
+        boarding: number;
+        killing: number;
+        shooting: number;
+    };
 }
 
 export async function GovtParse(govt: GovtResource,
@@ -40,6 +50,16 @@ export async function GovtParse(govt: GovtResource,
         relations,
         commName: govt.commName,
         targetName: govt.targetName,
+        mediumName: govt.mediumName,
         scanMask: govt.scanMask,
+        crimeTolerance: govt.crimeTolerance,
+        initialRecord: govt.initialRecord,
+        penalties: {
+            smuggling: govt.smugglingPenalty,
+            disabling: govt.disablingPenalty,
+            boarding: govt.boardingPenalty,
+            killing: govt.killingPenalty,
+            shooting: govt.shootingPenalty,
+        },
     };
 }

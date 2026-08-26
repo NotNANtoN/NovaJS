@@ -16,6 +16,7 @@ import { StatusBarData } from "novadatainterface/StatusBarData";
 import { ExplosionData } from "novadatainterface/ExplosionData";
 import { AsteroidData } from "novadatainterface/AsteroidData";
 import { NebulaData } from "novadatainterface/NebulaData";
+import { StringListData } from "novadatainterface/StringListData";
 import { GovtData } from "novadatainterface/GovtData";
 import { PictImageData } from "novadatainterface/PictImage";
 import { getDefaultNovaIDs, NovaIDs } from "novadatainterface/NovaIDs";
@@ -61,6 +62,8 @@ class GameDataAggregator implements GameDataInterface {
             Govt: this.makeAggregator<GovtData>(NovaDataType.Govt),
             Asteroid: this.makeAggregator<AsteroidData>(NovaDataType.Asteroid),
             Nebula: this.makeAggregator<NebulaData>(NovaDataType.Nebula),
+            StringList: this.makeAggregator<StringListData>(
+                NovaDataType.StringList),
             SoundFile: this.makeAggregator<SoundFile>(NovaDataType.SoundFile),
         };
 
