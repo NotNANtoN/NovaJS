@@ -15,7 +15,11 @@ import { MissionNotice } from '../nova_plugin/mission_plugin';
 import { OutfitsStateComponent } from '../nova_plugin/outfit_plugin';
 import type { PlanetType } from '../nova_plugin/planet_plugin';
 import { PlayerStateComponent } from '../nova_plugin/player_state';
-import { buyFuel, refuelsOnLanding } from '../nova_plugin/fuel';
+import {
+    buyFuel,
+    FUEL_PRICE_PER_JUMP,
+    refuelsOnLanding,
+} from '../nova_plugin/fuel';
 import {
     ShipDataComponent,
     ShipPhysicsComponent,
@@ -301,6 +305,7 @@ export class Spaceport extends Menu<Entity> {
             return hasSpaceportService(data, SERVICE_FLAG[service]);
         });
         const column = spaceportButtonColumn(available);
+        this.updateRechargeState();
         for (const service of SPACEPORT_SERVICES) {
             const y = column.get(service);
             buttons[service].container.visible = y !== undefined;
@@ -309,6 +314,27 @@ export class Spaceport extends Menu<Entity> {
                     SPACEPORT_LAYOUT.buttons.x, y);
             }
         }
+    }
+
+    /**
+     * A pilot with a full tank, or without the price of a single jump, has
+     * nothing to buy here. Greying the button is also the only confirmation
+     * that a recharge succeeded while the status bar is hidden behind the
+     * landing screen.
+     */
+    private updateRechargeState(ship?: Entity): void {
+        const button = this.serviceButtons?.recharge;
+        // build() runs before anyone has landed, so there is no ship to read.
+        const landed = ship ?? this.input;
+        if (!button || !landed) {
+            return;
+        }
+        const state = landed.components.get(PlayerStateComponent);
+        const capacity = landed.components
+            .get(ShipDataComponent)?.fuelCapacity ?? 0;
+        const affordable = (state?.credits ?? 0) >= FUEL_PRICE_PER_JUMP;
+        const missing = capacity - (state?.fuel ?? 0) > 0;
+        button.state = missing && affordable ? 'normal' : 'grey';
     }
 
     /**
@@ -356,6 +382,7 @@ export class Spaceport extends Menu<Entity> {
         }
         state.fuel = result.fuel;
         state.credits = result.credits;
+        this.updateRechargeState();
     }
 
     private setActiveDialog(active?: PIXI.Container) {
@@ -425,6 +452,7 @@ export class Spaceport extends Menu<Entity> {
         // belongs to a landing and not to building the screen: build() runs
         // when the planet loads, when there is no ship to refuel.
         await this.autoRecharge(input);
+        this.updateRechargeState(input);
         // A dialog left active by a previous landing would keep the landing
         // artwork and buttons hidden, which reads as a black screen on
         // reload. Start every landing on the landing screen itself.

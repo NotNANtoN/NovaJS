@@ -82,6 +82,13 @@ export interface FlightCommand {
 export const DEFAULT_CAUTION = 0.95;
 export const DEFAULT_THRUST_CONE = Math.PI / 4;
 export const DEFAULT_TOLERANCE = 0.15;
+/**
+ * How large a velocity correction has to be, as a fraction of the speed being
+ * aimed for, before it is worth turning the ship to fix it rather than holding
+ * course. Anything smaller is the residue of a trajectory that is already
+ * good, and chasing it is what makes a ship weave.
+ */
+export const CRUISE_BAND = 0.15;
 
 /**
  * The distance needed to shed a speed at a given acceleration. This is the
@@ -149,15 +156,30 @@ function velocityMatchingCommand(
     settled: boolean,
 ): FlightCommand {
     const correction = desiredVelocity.subtract(self.velocity);
-    if (settled && correction.length <= limits.acceleration * 0.25) {
+    const deadband = limits.acceleration * 0.25;
+    if (settled && correction.length <= deadband) {
         return { turnTo: null, accelerating: 0, turnBack: false };
     }
 
-    const heading = angleOf(correction);
+    // A ship already travelling at close to the velocity it wants has only a
+    // small correction left, and that remainder is mostly sideways. Steering
+    // along it points the nose across the course rather than down it, so the
+    // ship crabs from side to side for the whole crossing and, against a
+    // moving target, circles it. While the correction is small next to the
+    // speed being made, hold the course itself and spend thrust only on
+    // reaching that speed; a real trajectory error is large enough to fall
+    // through to the correction below.
+    const desiredSpeed = desiredVelocity.length;
+    const cruising = desiredSpeed > 0
+        && correction.length <= Math.max(deadband, desiredSpeed * CRUISE_BAND);
+    const heading = angleOf(cruising ? desiredVelocity : correction);
     const error = Math.abs(headingError(self.rotation, heading));
+    if (error > thrustCone) {
+        return { turnTo: heading, accelerating: 0, turnBack: false };
+    }
     return {
         turnTo: heading,
-        accelerating: error <= thrustCone ? 1 : 0,
+        accelerating: cruising && self.velocity.length >= desiredSpeed ? 0 : 1,
         turnBack: false,
     };
 }

@@ -259,3 +259,64 @@ describe('transfer range', () => {
         expect(inTransferRange(still(70, 0), target, 60)).toBeFalse();
     });
 });
+
+/**
+ * Total turning and direction changes over a crossing. A ship flying to a
+ * planet should turn onto its course and stay there; a controller that chases
+ * every small velocity correction instead weaves the whole way, which is both
+ * slower and unmistakable on screen.
+ */
+function courseChurn(
+    self: FlightSituation,
+    target: { position: Position, velocity?: Vector },
+    options: { standoff: number, steps: number },
+) {
+    let position = self.position;
+    let velocity = self.velocity;
+    let rotation = self.rotation;
+    let turning = 0;
+    let reversals = 0;
+    let lastSign = 0;
+
+    for (let step = 0; step < options.steps; step++) {
+        const command = approachTarget({ position, velocity, rotation },
+            target, LIMITS, { standoff: options.standoff });
+        if (command.turnTo) {
+            const error = headingError(rotation, command.turnTo);
+            if (Math.abs(error) > 0.02) {
+                const sign = Math.sign(error);
+                if (lastSign !== 0 && sign !== lastSign) {
+                    reversals++;
+                }
+                lastSign = sign;
+            }
+            const turn = Math.sign(error)
+                * Math.min(Math.abs(error), LIMITS.turnRate * STEP);
+            turning += Math.abs(turn);
+            rotation = new Angle(rotation.angle + turn);
+        }
+        if (command.accelerating > 0) {
+            velocity = velocity.add(rotation.getUnitVector()
+                .normalize(command.accelerating * LIMITS.acceleration * STEP));
+        }
+        velocity = velocity.shortenToLength(LIMITS.maxVelocity);
+        position = position.add(velocity.scale(STEP)) as Position;
+    }
+    return { turning, reversals };
+}
+
+describe('holding a course', () => {
+    it('flies a long approach without weaving', () => {
+        // Before the cruise band this crossing cost about 57 radians of
+        // turning and 34 changes of direction: the ship crabbed the whole way
+        // because it steered along a correction that was almost all sideways.
+        const churn = courseChurn(
+            still(0, 0), { position: new Position(0, -6000) },
+            { standoff: 300, steps: 900 });
+        // What is left is the turn onto course plus the half turn needed to
+        // brake at the far end, so anything under about four radians means the
+        // ship is no longer hunting in between.
+        expect(churn.turning).toBeLessThan(4);
+        expect(churn.reversals).toBeLessThan(3);
+    });
+});
