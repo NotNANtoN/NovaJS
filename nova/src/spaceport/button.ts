@@ -38,6 +38,15 @@ export class Button {
     ]);
 
 
+    /**
+     * Relabel a button in place. Retail reuses one slot for a changing action,
+     * such as the hail panel's request turning into accepting a price. The
+     * button keeps its width so the row does not shift under the pointer.
+     */
+    setText(text: string) {
+        this.text.text = text;
+    }
+
     constructor(private gameData: GameData, text: string,
         width?: number, position?: { x: number, y: number },
         private buttonIds = BUTTON_IDS) {
