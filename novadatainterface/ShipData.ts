@@ -25,6 +25,12 @@ export interface ShipData extends SpaceObjectData {
      * 1=wimpy trader, 2=brave trader, 3=warship, and 4=interceptor.
      */
     inherentAI: number;
+    /**
+     * Combat weight from shïp/Strength. The Bible uses this value, scaled by
+     * present shields, when governments decide whether combat odds are
+     * favourable.
+     */
+    strength: number;
     /** The shïp resource's miscellaneous Flags field. */
     flags: number;
     cost: number;
@@ -51,6 +57,7 @@ export function getDefaultShipData(): ShipData {
         cargoCapacity: 0,
         fuelCapacity: 0,
         inherentAI: 1,
+        strength: 1,
         flags: 0,
         cost: 0,
         pict: "default",

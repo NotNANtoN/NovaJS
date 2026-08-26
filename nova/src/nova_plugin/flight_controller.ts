@@ -62,6 +62,14 @@ export interface ApproachOptions {
     thrustCone?: number;
 }
 
+export interface FleeOptions {
+    /** Separation to establish and hold relative to the threat. */
+    distance: number;
+    caution?: number;
+    thrustCone?: number;
+    tolerance?: number;
+}
+
 export interface FlightCommand {
     /** Absolute heading to turn to, or null to hold the current heading. */
     turnTo: Angle | null;
@@ -133,6 +141,27 @@ export function headingError(from: Angle, to: Angle): number {
     return new Angle(to.angle - from.angle).angle;
 }
 
+function velocityMatchingCommand(
+    self: FlightSituation,
+    desiredVelocity: Vector,
+    limits: FlightLimits,
+    thrustCone: number,
+    settled: boolean,
+): FlightCommand {
+    const correction = desiredVelocity.subtract(self.velocity);
+    if (settled && correction.length <= limits.acceleration * 0.25) {
+        return { turnTo: null, accelerating: 0, turnBack: false };
+    }
+
+    const heading = angleOf(correction);
+    const error = Math.abs(headingError(self.rotation, heading));
+    return {
+        turnTo: heading,
+        accelerating: error <= thrustCone ? 1 : 0,
+        turnBack: false,
+    };
+}
+
 /**
  * Steer towards a standoff distance from a target and stop there.
  *
@@ -169,25 +198,53 @@ export function approachTarget(
         : direction.scale(-arrivalSpeed(-remaining, limits, caution))
             .add(targetVelocity);
 
-    const correction = desiredVelocity.subtract(self.velocity);
-    const correctionSpeed = correction.length;
-
     // Close enough, and slow enough, to simply hold station.
-    const settled = Math.abs(remaining) <= tolerance
-        && correctionSpeed <= limits.acceleration * 0.25;
-    if (settled) {
-        return { turnTo: null, accelerating: 0, turnBack: false };
-    }
+    return velocityMatchingCommand(
+        self,
+        desiredVelocity,
+        limits,
+        thrustCone,
+        Math.abs(remaining) <= tolerance,
+    );
+}
 
-    const heading = angleOf(correction);
-    const error = Math.abs(headingError(self.rotation, heading));
-    return {
-        turnTo: heading,
-        // Thrust only once the nose is roughly where the push is wanted.
-        // Otherwise the ship would accelerate sideways while turning.
-        accelerating: error <= thrustCone ? 1 : 0,
-        turnBack: false,
-    };
+/**
+ * Establish separation from a moving threat, then hold that separation.
+ *
+ * This is the inverse of approachTarget, using the same turn-aware arrival
+ * speed and velocity correction. It therefore brakes into the requested
+ * separation instead of accelerating forever or oscillating across it.
+ */
+export function fleeFromTarget(
+    self: FlightSituation,
+    threat: FlightTarget,
+    limits: FlightLimits,
+    options: FleeOptions,
+): FlightCommand {
+    const caution = options.caution ?? DEFAULT_CAUTION;
+    const thrustCone = options.thrustCone ?? DEFAULT_THRUST_CONE;
+    const safeDistance = Math.max(0, options.distance);
+    const tolerance = options.tolerance
+        ?? Math.max(1, safeDistance * DEFAULT_TOLERANCE);
+    const fromThreat = self.position.subtract(threat.position);
+    const distance = fromThreat.length;
+    const direction = distance > 0
+        ? fromThreat.normalize(1)
+        : self.rotation.getUnitVector();
+    const remaining = safeDistance - distance;
+    const speed = arrivalSpeed(Math.abs(remaining), limits, caution);
+    const desiredVelocity = direction.scale(
+        remaining >= 0 ? speed : -speed,
+    )
+        .add(threat.velocity ?? new Vector(0, 0));
+
+    return velocityMatchingCommand(
+        self,
+        desiredVelocity,
+        limits,
+        thrustCone,
+        Math.abs(remaining) <= tolerance,
+    );
 }
 
 /**

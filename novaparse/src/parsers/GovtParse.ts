@@ -21,6 +21,7 @@ export interface ParsedGovtData extends BaseData {
     scanMask: number;
     crimeTolerance: number;
     initialRecord: number;
+    maxOdds: number;
     penalties: {
         smuggling: number;
         disabling: number;
@@ -54,6 +55,7 @@ export async function GovtParse(govt: GovtResource,
         scanMask: govt.scanMask,
         crimeTolerance: govt.crimeTolerance,
         initialRecord: govt.initialRecord,
+        maxOdds: govt.maxOdds,
         penalties: {
             smuggling: govt.smugglingPenalty,
             disabling: govt.disablingPenalty,

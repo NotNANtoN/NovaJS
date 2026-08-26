@@ -5,6 +5,7 @@ import { Vector } from 'nova_ecs/datatypes/vector';
 import {
     approachTarget,
     arrivalSpeed,
+    fleeFromTarget,
     FlightLimits,
     FlightSituation,
     hasArrived,
@@ -67,6 +68,48 @@ function fly(
         closest,
         situation: { position, velocity, rotation },
         targetPosition,
+    };
+}
+
+function flee(
+    self: FlightSituation,
+    threat: { position: Position, velocity?: Vector },
+    distance: number,
+    steps = 3_000,
+) {
+    let position = self.position;
+    let velocity = self.velocity;
+    let rotation = self.rotation;
+    let threatPosition = threat.position;
+
+    for (let step = 0; step < steps; step++) {
+        const command = fleeFromTarget(
+            { position, velocity, rotation },
+            { position: threatPosition, velocity: threat.velocity },
+            LIMITS,
+            { distance },
+        );
+        if (command.turnTo) {
+            const error = headingError(rotation, command.turnTo);
+            const turn = Math.sign(error)
+                * Math.min(Math.abs(error), LIMITS.turnRate * STEP);
+            rotation = new Angle(rotation.angle + turn);
+        }
+        if (command.accelerating > 0) {
+            velocity = velocity.add(rotation.getUnitVector()
+                .normalize(command.accelerating * LIMITS.acceleration * STEP));
+        }
+        velocity = velocity.shortenToLength(LIMITS.maxVelocity);
+        position = position.add(velocity.scale(STEP)) as Position;
+        if (threat.velocity) {
+            threatPosition = threatPosition
+                .add(threat.velocity.scale(STEP)) as Position;
+        }
+    }
+
+    return {
+        distance: position.subtract(threatPosition).length,
+        speed: velocity.subtract(threat.velocity ?? new Vector(0, 0)).length,
     };
 }
 
@@ -157,6 +200,33 @@ describe('approaching a rock', () => {
         const result = fly(still(-800, 0), { position: new Position(0, 0) },
             { standoff: 0 });
         expect(result.distance).toBeLessThan(60);
+    });
+});
+
+describe('fleeing a threat', () => {
+    it('opens the requested distance and settles without overshooting forever',
+        () => {
+            const result = flee(
+                still(100, 0),
+                { position: new Position(0, 0) },
+                600,
+            );
+            expect(result.distance).toBeGreaterThan(500);
+            expect(result.distance).toBeLessThan(700);
+            expect(result.speed).toBeLessThan(20);
+        });
+
+    it('matches a moving threat after establishing separation', () => {
+        const result = flee(
+            still(100, 0),
+            {
+                position: new Position(0, 0),
+                velocity: new Vector(20, -10),
+            },
+            500,
+        );
+        expect(result.distance).toBeGreaterThan(400);
+        expect(result.speed).toBeLessThan(20);
     });
 });
 

@@ -16,9 +16,15 @@ import { GameDataResource } from './game_data_resource';
 import { PlatformResource } from './platform_plugin';
 import {
     DEFAULT_COMBAT_STANDOFF,
+    combatOddsAreFavorable,
     FollowAI,
     FollowComponent,
     getCombatStandoff,
+    isInterceptorPiracyTarget,
+    RETREAT_SHIELD_FRACTION,
+    shieldScaledStrength,
+    shouldFleeFromAttacker,
+    shouldWarshipRetreat,
     ShootAllWeaponsAI,
     ShootAllWeaponsComponent,
 } from './npc_plugin';
@@ -26,6 +32,11 @@ import { getShipAIProfile } from './ship_ai_profile';
 import { TargetComponent } from './target_component';
 import { WeaponsStateComponent } from './weapons_state';
 import { DestructionStartedComponent } from './destruction_state';
+import { GovernmentFlags } from './govt_relations';
+import {
+    createProvocationState,
+    recordProvocation,
+} from './npc_hostility';
 
 const COMBAT_PHYSICS: MovementPhysics = {
     acceleration: 200,
@@ -57,6 +68,74 @@ const projectileGameData = {
         },
     },
 } as never;
+
+describe('NPC combat decisions', () => {
+    it('scales Strength linearly from 30% to 100% with present shields', () => {
+        expect(shieldScaledStrength({
+            strength: 1_000,
+            shield: { current: 100, max: 100 },
+        })).toBe(1_000);
+        expect(shieldScaledStrength({
+            strength: 1_000,
+            shield: { current: 50, max: 100 },
+        })).toBeCloseTo(650, 8);
+        expect(shieldScaledStrength({
+            strength: 1_000,
+            shield: { current: 0, max: 100 },
+        })).toBe(300);
+    });
+
+    it('interprets MaxOdds 100 as one-to-one and 200 as two-to-one', () => {
+        const friend = [{ strength: 100 }];
+        expect(combatOddsAreFavorable(
+            friend, [{ strength: 100 }], 100)).toBeTrue();
+        expect(combatOddsAreFavorable(
+            friend, [{ strength: 101 }], 100)).toBeFalse();
+        expect(combatOddsAreFavorable(
+            friend, [{ strength: 200 }], 200)).toBeTrue();
+        expect(combatOddsAreFavorable(
+            friend, [{ strength: 201 }], 200)).toBeFalse();
+    });
+
+    it('retreats only flag-bearing warships strictly below 25% shields', () => {
+        const warship = getShipAIProfile({ inherentAI: 3 });
+        const interceptor = getShipAIProfile({ inherentAI: 4 });
+        const retreating = { flags: GovernmentFlags.warshipsRetreat };
+        const doomed = { flags: 0 };
+
+        expect(RETREAT_SHIELD_FRACTION).toBe(0.25);
+        expect(shouldWarshipRetreat(
+            warship, retreating, { current: 24.9, max: 100 })).toBeTrue();
+        expect(shouldWarshipRetreat(
+            warship, retreating, { current: 25, max: 100 })).toBeFalse();
+        expect(shouldWarshipRetreat(
+            warship, doomed, { current: 0, max: 100 })).toBeFalse();
+        expect(shouldWarshipRetreat(
+            interceptor, retreating, { current: 0, max: 100 })).toBeFalse();
+    });
+
+    it('distinguishes wimpy and brave trader break-off rules', () => {
+        const wimpy = getShipAIProfile({ inherentAI: 1 });
+        const brave = getShipAIProfile({ inherentAI: 2 });
+        expect(shouldFleeFromAttacker(wimpy, true, 10, 500)).toBeTrue();
+        expect(shouldFleeFromAttacker(wimpy, false, 10, 500)).toBeFalse();
+        expect(shouldFleeFromAttacker(brave, true, 500, 500)).toBeFalse();
+        expect(shouldFleeFromAttacker(brave, true, 501, 500)).toBeTrue();
+    });
+
+    it('lets interceptors police attacks on neutral but not enemy ships',
+        () => {
+            const state = createProvocationState();
+            recordProvocation(state, 129, 'pirate');
+
+            expect(isInterceptorPiracyTarget(
+                state, 128, 'pirate', () => 'neutral')).toBeTrue();
+            expect(isInterceptorPiracyTarget(
+                state, 128, 'pirate', () => 'enemy')).toBeFalse();
+            expect(isInterceptorPiracyTarget(
+                state, 128, 'bystander', () => 'neutral')).toBeFalse();
+        });
+});
 
 function makeFollowWorld(withWeapon = true) {
     const world = new World('npc-follow-test');

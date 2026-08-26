@@ -21,6 +21,11 @@ export interface GovtData extends BaseData {
      */
     crimeTolerance?: number;
     initialRecord?: number;
+    /**
+     * Maximum enemy-to-friendly combat strength ratio, with 100 meaning
+     * one-to-one odds (EV Nova Bible, gövt/MaxOdds).
+     */
+    maxOdds?: number;
     /** How much each crime costs the player's record with this government. */
     penalties?: {
         smuggling: number;

@@ -13,6 +13,11 @@ export type GovernmentRelation = "ally" | "neutral" | "enemy";
 export const GovernmentFlags = {
     xenophobic: 0x0001,
     alwaysAttacksPlayer: 0x0004,
+    /**
+     * "Warships of this govt will retreat when their shields drop below 25% -
+     * otherwise they fight to the death." (EV Nova Bible, gövt/Flags)
+     */
+    warshipsRetreat: 0x0010,
     cannotHail: 0x0400,
     neverAttacksPlayer: 0x0040,
     /**

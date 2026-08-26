@@ -1,7 +1,7 @@
 import { ShipData } from "novadatainterface/ShipData";
 import { GameDataInterface } from "novadatainterface/GameDataInterface";
 import { WeaponData } from "novadatainterface/WeaponData";
-import { Entities, UUID } from "nova_ecs/arg_types";
+import { Emit, Entities, GetEntity, UUID } from "nova_ecs/arg_types";
 import { Component } from "nova_ecs/component";
 import { Plugin } from "nova_ecs/plugin";
 import { DeltaResource } from "nova_ecs/plugins/delta_plugin";
@@ -18,10 +18,11 @@ import { Query } from "nova_ecs/query";
 import { System } from "nova_ecs/system";
 import { Angle } from "nova_ecs/datatypes/angle";
 import { DeathEvent, PlayerDeathComponent } from "./death_plugin";
-import { ArmorComponent } from "./health_plugin";
+import { ArmorComponent, ShieldComponent } from "./health_plugin";
 import { DestructionStartedComponent } from "./destruction_state";
 import {
     GovernmentData,
+    GovernmentFlags,
     GovernmentRelationResource,
     GovernmentRelationStore,
     canTargetPlayer,
@@ -51,8 +52,14 @@ import type { GovtData } from "./npc_components";
 import { createMinerSystems, MiningShipProvider } from "./miner_ai";
 import { PlayerState, PlayerStateComponent } from "./player_state";
 import { isCriminal, recordFor } from "./legal_record";
-import { approachTarget } from "./flight_controller";
+import { approachTarget, fleeFromTarget } from "./flight_controller";
 import type { WeaponsState } from "./weapons_state";
+import { PlanetComponent } from "./planet_plugin";
+import {
+    InitiateJumpEvent,
+    JumpStateComponent,
+} from "./jump_plugin";
+import { SystemIdResource } from "./system_id_resource";
 export {
     ChooseRandomTargetComponent,
     GovtComponent,
@@ -68,6 +75,8 @@ const TargetsQuery = new Query([
     Optional(GovtComponent),
     Optional(PlayerDeathComponent),
     ShipComponent,
+    Optional(ShipDataComponent),
+    Optional(ShieldComponent),
     Optional(PlayerStateComponent),
 ] as const);
 
@@ -78,8 +87,41 @@ type TargetCandidate = readonly [
     GovtData | undefined,
     { respawnAt?: number, wreckPosition: [number, number] } | undefined,
     { id: string },
+    ShipData | undefined,
+    { current: number, max: number } | undefined,
     PlayerState | undefined,
 ];
+
+/**
+ * Interceptor AI is the Bible's "piracy police": it attacks a ship reported
+ * for firing on or attempting to board another non-enemy ship while watching.
+ * A world is one star system, so its live provocation reports are the
+ * interceptor's current observation scope.
+ */
+export function isInterceptorPiracyTarget(
+    provocations: ReturnType<typeof createProvocationState>,
+    selfGovernmentId: number,
+    targetId: string,
+    relationFor: (
+        actorGovernment: number,
+        victimGovernment: number,
+    ) => "ally" | "neutral" | "enemy" | undefined,
+): boolean {
+    for (const [victimGovernment, reports] of
+        provocations.threatReportsByGovernment) {
+        if (!reports.has(targetId)) {
+            continue;
+        }
+        if (victimGovernment === selfGovernmentId) {
+            return true;
+        }
+        const relation = relationFor(selfGovernmentId, victimGovernment);
+        if (relation === "ally" || relation === "neutral") {
+            return true;
+        }
+    }
+    return false;
+}
 
 function getValidTargets(
     targets: readonly TargetCandidate[],
@@ -90,6 +132,7 @@ function getValidTargets(
     provocations: ReturnType<typeof createProvocationState>,
     canAssistGovernment: boolean,
     initiatesCombat = true,
+    policesPiracy = false,
 ): string[] {
     return targets
         .filter(([
@@ -99,6 +142,8 @@ function getValidTargets(
             targetGovernment,
             playerDeath,
             _ship,
+            _shipData,
+            _shield,
             playerState,
         ]) => {
             if (targetId === selfUuid) {
@@ -109,6 +154,13 @@ function getValidTargets(
             }
             const personal = isPersonallyProvoked(
                 provocations, selfUuid, targetId);
+            const policeTarget = policesPiracy
+                && isInterceptorPiracyTarget(
+                    provocations,
+                    selfGovernmentId,
+                    targetId,
+                    (actor, victim) => relationStore.relation(actor, victim),
+                );
 
             if (multiplayer.owner !== "server") {
                 // A record past this government's tolerance makes the player
@@ -122,7 +174,8 @@ function getValidTargets(
                     record, selfGovernment.crimeTolerance ?? 0);
                 return canTargetPlayer(
                     selfGovernment,
-                    personal || hunted || canAssistGovernment && isProvoked(
+                    personal || hunted || policeTarget
+                    || canAssistGovernment && isProvoked(
                         provocations,
                         selfGovernmentId,
                         targetId,
@@ -149,6 +202,7 @@ function getValidTargets(
             // appetite for a fight: it shoots back, and helps when its own
             // side is already fighting, yet never opens fire itself.
             return relation === "enemy" && initiatesCombat || personal
+                || policeTarget
                 || canAssistGovernment && isProvoked(
                 provocations,
                 selfGovernmentId,
@@ -157,6 +211,109 @@ function getValidTargets(
             );
         })
         .map(([uuid]) => uuid);
+}
+
+export const MIN_SHIELD_STRENGTH_FRACTION = 0.3;
+export const RETREAT_SHIELD_FRACTION = 0.25;
+
+export interface CombatStrengthInput {
+    strength: number;
+    shield?: { current: number, max: number };
+}
+
+/**
+ * Bible, gövt/MaxOdds: a ship's Strength is "modified from between 30% and
+ * 100% of that value depending on the ship's present shield stat".
+ */
+export function shieldScaledStrength(
+    combatant: CombatStrengthInput,
+): number {
+    const strength = Number.isFinite(combatant.strength)
+        ? Math.max(0, combatant.strength) : 0;
+    const shieldFraction = combatant.shield && combatant.shield.max > 0
+        ? Math.max(0, Math.min(
+            1,
+            combatant.shield.current / combatant.shield.max,
+        ))
+        : 0;
+    return strength * (
+        MIN_SHIELD_STRENGTH_FRACTION
+        + (1 - MIN_SHIELD_STRENGTH_FRACTION) * shieldFraction
+    );
+}
+
+/**
+ * Bible, gövt/MaxOdds: 100 is one-to-one, 200 is two-to-one, and a ship
+ * engages only when enemy strength is within that multiple of friendly
+ * strength.
+ */
+export function combatOddsAreFavorable(
+    friends: readonly CombatStrengthInput[],
+    enemies: readonly CombatStrengthInput[],
+    maxOdds: number,
+): boolean {
+    const friendlyStrength = friends.reduce(
+        (total, ship) => total + shieldScaledStrength(ship), 0);
+    const enemyStrength = enemies.reduce(
+        (total, ship) => total + shieldScaledStrength(ship), 0);
+    if (enemyStrength <= 0) {
+        return true;
+    }
+    const odds = Number.isFinite(maxOdds) ? Math.max(0, maxOdds) : 0;
+    return friendlyStrength > 0
+        && enemyStrength * 100 <= friendlyStrength * odds;
+}
+
+export function shouldWarshipRetreat(
+    profile: ReturnType<typeof getShipAIProfile>,
+    government: Pick<GovernmentData, 'flags'>,
+    shield: { current: number, max: number } | undefined,
+): boolean {
+    return profile.role === "warship"
+        && Boolean((government.flags ?? 0) & GovernmentFlags.warshipsRetreat)
+        && Boolean(shield && shield.max > 0
+            && shield.current / shield.max < RETREAT_SHIELD_FRACTION);
+}
+
+export function shouldFleeFromAttacker(
+    profile: ReturnType<typeof getShipAIProfile>,
+    personallyProvoked: boolean,
+    attackerDistance: number,
+    weaponRange: number,
+): boolean {
+    if (!personallyProvoked) {
+        return false;
+    }
+    if (profile.fleesWhenAttacked) {
+        return true;
+    }
+    return profile.breaksOffOutOfRange
+        && attackerDistance > Math.max(0, weaponRange);
+}
+
+function combatStrengthOf(
+    candidate: TargetCandidate,
+): CombatStrengthInput | undefined {
+    const ship = candidate[6];
+    return ship ? {
+        strength: ship.strength,
+        shield: candidate[7],
+    } : undefined;
+}
+
+function hasUnresolvedTargetGovernment(
+    targets: readonly TargetCandidate[],
+    selfUuid: string,
+    selfGovernmentId: number,
+    governments: GovernmentRelationStore,
+): boolean {
+    return targets.some(candidate => {
+        const government = candidate[3];
+        return candidate[0] !== selfUuid
+            && government !== undefined
+            && government.id !== selfGovernmentId
+            && governments.getCached(government.id) === undefined;
+    });
 }
 
 export const ChooseRandomTargetAI = new System({
@@ -211,6 +368,7 @@ export const ChooseRandomTargetAI = new System({
         }
 
         randomTargetData.nextTime = time.time + randomTargetData.interval;
+        const profile = shipData ? getShipAIProfile(shipData) : undefined;
         const validTargets = getValidTargets(
             targets,
             uuid,
@@ -219,12 +377,59 @@ export const ChooseRandomTargetAI = new System({
             relationStore,
             provocations,
             combatRole === "military",
-            shipData ? getShipAIProfile(shipData).initiatesCombat : true,
+            profile?.initiatesCombat ?? true,
+            profile?.policesPiracy ?? false,
         );
+        if (hasUnresolvedTargetGovernment(
+            targets,
+            uuid,
+            government.id,
+            relationStore,
+        )) {
+            randomTargetData.nextTime = time.time + 100;
+            target.target = undefined;
+            return;
+        }
 
         const candidateByUuid = new Map(
             targets.map(candidate => [candidate[0], candidate] as const),
         );
+        if (shipData && selfGovernment.maxOdds !== undefined
+            && validTargets.length > 0) {
+            const targetIds = new Set(validTargets);
+            const friendCandidates = targets.filter(candidate => {
+                const candidateGovernment = candidate[3];
+                return candidate[0] === uuid
+                    || candidateGovernment !== undefined
+                    && (
+                        candidateGovernment.id === government.id
+                        || relationStore.relation(
+                            government.id,
+                            candidateGovernment.id,
+                        ) === "ally"
+                    );
+            });
+            const enemyCandidates = targets
+                .filter(candidate => targetIds.has(candidate[0]));
+            if ([...friendCandidates, ...enemyCandidates]
+                .some(candidate => combatStrengthOf(candidate) === undefined)) {
+                randomTargetData.nextTime = time.time + 100;
+                target.target = undefined;
+                return;
+            }
+            const friends = friendCandidates
+                .map(combatStrengthOf) as CombatStrengthInput[];
+            const enemies = enemyCandidates
+                .map(combatStrengthOf) as CombatStrengthInput[];
+            if (!combatOddsAreFavorable(
+                friends,
+                enemies,
+                selfGovernment.maxOdds,
+            )) {
+                target.target = undefined;
+                return;
+            }
+        }
         const selected = validTargets
             .map(targetId => candidateByUuid.get(targetId))
             .filter(candidate => candidate !== undefined)
@@ -257,15 +462,9 @@ function weaponRange(weapon: WeaponData): number | undefined {
     return weapon.physics.speed * weapon.shotDuration / 1000;
 }
 
-/**
- * Long-range weapons should influence positioning without letting an NPC
- * exploit every last unit of nominal range, where target motion would make
- * projectiles expire before connecting.
- */
-export function getCombatStandoff(
+export function getMaximumWeaponRange(
     weapons: WeaponsState | undefined,
     gameData: GameDataInterface,
-    standoffMultiplier = 1,
 ): number {
     let longestRange = 0;
     for (const [id, state] of weapons ?? []) {
@@ -278,6 +477,20 @@ export function getCombatStandoff(
         }
         longestRange = Math.max(longestRange, weaponRange(weapon) ?? 0);
     }
+    return longestRange;
+}
+
+/**
+ * Long-range weapons should influence positioning without letting an NPC
+ * exploit every last unit of nominal range, where target motion would make
+ * projectiles expire before connecting.
+ */
+export function getCombatStandoff(
+    weapons: WeaponsState | undefined,
+    gameData: GameDataInterface,
+    standoffMultiplier = 1,
+): number {
+    const longestRange = getMaximumWeaponRange(weapons, gameData);
     if (!(longestRange > 0)) {
         return DEFAULT_COMBAT_STANDOFF * standoffMultiplier;
     }
@@ -287,16 +500,201 @@ export function getCombatStandoff(
     );
 }
 
+export interface NpcFleeState {
+    threat: string;
+    distance: number;
+    reason: "attacked" | "out-of-range" | "retreat";
+}
+export const NpcFleeComponent =
+    new Component<NpcFleeState>("NpcFleeComponent");
+const NpcDepartureComponent =
+    new Component<undefined>("NpcDepartureComponent");
+
+function departureSystem(
+    gameData: GameDataInterface,
+    systemId: string,
+): string | undefined {
+    const destination = gameData.data.System.getCached(systemId)?.links[0];
+    if (!destination || !gameData.data.System.getCached(destination)) {
+        return undefined;
+    }
+    return destination;
+}
+
+export const NpcPurposeAI = new System({
+    name: "NpcPurposeAI",
+    after: [ChooseRandomTargetAI],
+    args: [
+        TargetComponent,
+        UUID,
+        GetEntity,
+        Entities,
+        TargetsQuery,
+        MovementStateComponent,
+        Optional(WeaponsStateComponent),
+        GameDataResource,
+        ShipDataComponent,
+        GovtComponent,
+        GovernmentRelationResource,
+        ProvocationResource,
+        Optional(ShieldComponent),
+        Optional(NpcFleeComponent),
+        Optional(NpcDepartureComponent),
+        Optional(JumpStateComponent),
+        // A world without a system id, such as a focused test harness, simply
+        // has nowhere to jump to; that must not stop NpcPlugin from loading.
+        Optional(SystemIdResource),
+        Emit,
+        MultiplayerData,
+        PlatformResource,
+        NpcAIComponent,
+        Optional(DestructionStartedComponent),
+        Optional(ArmorComponent),
+    ] as const,
+    step(target, uuid, entity, entities, targets, movement, weapons, gameData,
+        shipData, governmentRef, governments, provocations, shield, fleeing,
+        departing, jumpState, systemId, emit, multiplayer, platform, _npc,
+        destructionStarted, armor) {
+        if (platform !== "node" || multiplayer.owner !== "server"
+            || destructionStarted || armor && armor.current <= 0) {
+            entity.components.delete(NpcFleeComponent);
+            return;
+        }
+
+        const profile = getShipAIProfile(shipData);
+        const government = governments.getCached(governmentRef.id);
+        if (!government) {
+            return;
+        }
+
+        const targetId = target.target;
+        const targetEntity = targetId ? entities.get(targetId) : undefined;
+        const targetMovement = targetEntity?.components
+            .get(MovementStateComponent);
+        const targetDistance = targetMovement
+            ? targetMovement.position.subtract(movement.position).length
+            : 0;
+        const personallyProvoked = Boolean(targetId
+            && isPersonallyProvoked(provocations, uuid, targetId));
+        const weaponRange = getMaximumWeaponRange(weapons, gameData);
+        const governmentRetreat = shouldWarshipRetreat(
+            profile, government, shield);
+        const fleeFromAttacker = Boolean(targetId && targetMovement
+            && shouldFleeFromAttacker(
+                profile,
+                personallyProvoked,
+                targetDistance,
+                weaponRange,
+            ));
+
+        if (targetId && targetMovement
+            && (governmentRetreat || fleeFromAttacker)) {
+            const reason = governmentRetreat
+                ? "retreat"
+                : profile.fleesWhenAttacked ? "attacked" : "out-of-range";
+            // The Bible specifies when running starts but not a manoeuvring
+            // distance. Receding by the existing fallback combat standoff each
+            // controller step keeps the ship running until the threat breaks.
+            const state: NpcFleeState = {
+                threat: targetId,
+                distance: targetDistance + DEFAULT_COMBAT_STANDOFF,
+                reason,
+            };
+            if (fleeing) {
+                Object.assign(fleeing, state);
+            } else {
+                entity.components.set(NpcFleeComponent, state);
+            }
+        } else {
+            entity.components.delete(NpcFleeComponent);
+        }
+
+        const shouldLeave = governmentRetreat
+            || profile.jumpsWithoutEnemies && !target.target
+            && !hasUnresolvedTargetGovernment(
+                targets,
+                uuid,
+                governmentRef.id,
+                governments,
+            );
+        if (!shouldLeave || departing || jumpState || !systemId) {
+            return;
+        }
+        const destination = departureSystem(gameData, systemId);
+        if (!destination) {
+            return;
+        }
+        entity.components.set(NpcDepartureComponent, undefined);
+        emit(InitiateJumpEvent, { to: destination }, [uuid]);
+    },
+});
+
+const ParkingPlanetsQuery = new Query([
+    MovementStateComponent,
+    PlanetComponent,
+] as const, "NpcParkingPlanets");
+
+export const ParkInterceptorAI = new System({
+    name: "ParkInterceptorAI",
+    after: [NpcPurposeAI],
+    args: [
+        MovementStateComponent,
+        MovementPhysicsComponent,
+        TargetComponent,
+        ParkingPlanetsQuery,
+        ShipDataComponent,
+        MultiplayerData,
+        PlatformResource,
+        NpcAIComponent,
+        Optional(NpcFleeComponent),
+        Optional(JumpStateComponent),
+        Optional(DestructionStartedComponent),
+        Optional(ArmorComponent),
+    ] as const,
+    step(movement, physics, target, planets, shipData, multiplayer, platform,
+        _npc, fleeing, jumpState, destructionStarted, armor) {
+        const profile = getShipAIProfile(shipData);
+        if (platform !== "node" || multiplayer.owner !== "server"
+            || target.target || !profile.parksWithoutEnemies || fleeing
+            || jumpState || destructionStarted || armor && armor.current <= 0) {
+            return;
+        }
+        const planet = planets
+            .map(([candidate]) => candidate)
+            .sort((a, b) => {
+                const distanceA =
+                    a.position.subtract(movement.position).lengthSquared;
+                const distanceB =
+                    b.position.subtract(movement.position).lengthSquared;
+                return distanceA - distanceB;
+            })[0];
+        if (!planet) {
+            return;
+        }
+        // "Parks in orbit" has no radius in the Bible. The existing fallback
+        // combat standoff gives a stable nearby station without overlapping
+        // the stellar.
+        const command = approachTarget(movement, planet, physics, {
+            standoff: DEFAULT_COMBAT_STANDOFF,
+        });
+        movement.turnTo = command.turnTo;
+        movement.accelerating = command.accelerating;
+        movement.turnBack = command.turnBack;
+    },
+});
+
 export const FollowAI = new System({
     name: 'FollowAndShootAI',
     args: [MovementStateComponent, MovementPhysicsComponent, TargetComponent,
         FollowComponent, Entities, MultiplayerData, PlatformResource,
         Optional(WeaponsStateComponent), GameDataResource,
         Optional(ShipDataComponent),
+        Optional(NpcFleeComponent),
         Optional(DestructionStartedComponent),
         Optional(ArmorComponent)] as const,
     step(movementState, physics, target, _follow, entities, multiplayer,
-        platform, weapons, gameData, shipData, destructionStarted, armor) {
+        platform, weapons, gameData, shipData, fleeing, destructionStarted,
+        armor) {
         if (platform === "node" && multiplayer.owner !== "server"
             || platform === "browser" && multiplayer.owner === "server") {
             return;
@@ -322,11 +720,14 @@ export const FollowAI = new System({
             movementState.accelerating = 0;
             return;
         }
-        const command = approachTarget(
-            movementState,
-            targetMovement,
-            physics,
-            {
+        const command = fleeing?.threat === target.target
+            ? fleeFromTarget(
+                movementState,
+                targetMovement,
+                physics,
+                { distance: fleeing.distance },
+            )
+            : approachTarget(movementState, targetMovement, physics, {
                 standoff: getCombatStandoff(
                     weapons,
                     gameData,
@@ -334,13 +735,14 @@ export const FollowAI = new System({
                         ? getShipAIProfile(shipData).weaponStandoffMultiplier
                         : 1,
                 ),
-            },
-        );
+            });
         // Once holding station the controller has no thrust to aim, so the
         // nose would keep whatever heading braking left it with — pointing
         // away from the target, where fixed guns are useless. Tracking the
         // target by uuid lets the movement system keep it under the guns.
-        movementState.turnTo = command.turnTo ?? target.target;
+        movementState.turnTo = fleeing
+            ? command.turnTo
+            : command.turnTo ?? target.target;
         movementState.accelerating = command.accelerating;
         movementState.turnBack = command.turnBack;
     }
@@ -352,14 +754,14 @@ export const ShootAllWeaponsAI = new System({
     args: [WeaponsStateComponent, GameDataResource, TargetComponent,
         ShootAllWeaponsComponent, Entities, MultiplayerData,
         PlatformResource, Optional(DestructionStartedComponent),
-        Optional(ArmorComponent)] as const,
+        Optional(ArmorComponent), Optional(NpcFleeComponent)] as const,
     step(weapons, gameData, target, _shoot, entities, multiplayer, platform,
-        destructionStarted, armor) {
+        destructionStarted, armor, fleeing) {
         if (platform === "node" && multiplayer.owner !== "server"
             || platform === "browser" && multiplayer.owner === "server") {
             return;
         }
-        if (destructionStarted || armor && armor.current <= 0) {
+        if (destructionStarted || armor && armor.current <= 0 || fleeing) {
             for (const weapon of weapons.values()) {
                 weapon.firing = false;
                 weapon.target = undefined;
@@ -493,10 +895,12 @@ export const NpcPlugin: Plugin = {
         world.addSystem(NpcHostilitySystems.cleanup);
         world.addSystem(NpcHostilitySystems.playerDeathCleanup);
         world.addSystem(ChooseRandomTargetAI);
+        world.addSystem(NpcPurposeAI);
         world.addSystem(MiningShipProvider);
         world.addSystem(MinerSystems.target);
         world.addSystem(MinerSystems.approach);
         world.addSystem(WanderAI);
+        world.addSystem(ParkInterceptorAI);
         world.addSystem(FollowAI);
         world.addSystem(ShootAllWeaponsAI);
         world.addSystem(DeathAISystem);
@@ -507,10 +911,12 @@ export const NpcPlugin: Plugin = {
         world.removeSystem(NpcHostilitySystems.cleanup);
         world.removeSystem(NpcHostilitySystems.playerDeathCleanup);
         world.removeSystem(ChooseRandomTargetAI);
+        world.removeSystem(NpcPurposeAI);
         world.removeSystem(MiningShipProvider);
         world.removeSystem(MinerSystems.target);
         world.removeSystem(MinerSystems.approach);
         world.removeSystem(WanderAI);
+        world.removeSystem(ParkInterceptorAI);
         world.removeSystem(FollowAI);
         world.removeSystem(ShootAllWeaponsAI);
         world.removeSystem(DeathAISystem);
