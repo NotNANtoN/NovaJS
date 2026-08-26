@@ -19,6 +19,7 @@ import { StatusBarData } from "./StatusBarData";
 import { SystemData } from "./SystemData";
 import { TargetCornersData } from "./TargetCornersData";
 import { WeaponData } from "./WeaponData";
+import { JunkData } from "./JunkData";
 
 
 enum NovaDataType {
@@ -43,6 +44,7 @@ enum NovaDataType {
     Asteroid = "Asteroid",
     Nebula = "Nebula",
     StringList = "StringList",
+    Junk = "Junk",
     SoundFile = "SoundFile",
 };
 
@@ -73,15 +75,19 @@ type NovaDataInterface = {
     Nebula?: Gettable<NebulaData>,
     /** Optional for legacy generated-data providers. */
     StringList?: Gettable<StringListData>,
+    /** Optional for legacy generated-data providers. */
+    Junk?: Gettable<JunkData>,
     SoundFile: Gettable<SoundFile>,
 }
 
 // Some legacy GameDataInterface implementations do not serve mission data.
 // The parser, aggregator, and browser implementations do, so expose a
 // required form for callers that use one of those implementations.
-type NovaDataInterfaceWithMission = Omit<NovaDataInterface, "Mission"> & {
-    Mission: Gettable<MissionData>,
-};
+type NovaDataInterfaceWithMission =
+    Omit<NovaDataInterface, "Mission" | "Junk"> & {
+        Mission: Gettable<MissionData>,
+        Junk: Gettable<JunkData>,
+    };
 
 class NovaIDNotFoundError extends Error { };
 

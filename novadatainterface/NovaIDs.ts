@@ -3,7 +3,7 @@ import { NovaDataType } from "./NovaDataInterface";
 export type NovaIDs = {
     [index in Exclude<NovaDataType, NovaDataType.Mission | NovaDataType.Govt
     | NovaDataType.Asteroid | NovaDataType.Nebula
-    | NovaDataType.StringList>]: Array<string>
+    | NovaDataType.StringList | NovaDataType.Junk>]: Array<string>
 } & {
     // Kept optional so legacy FilesystemData providers remain source
     // compatible while they do not serve mission JSON yet.
@@ -12,6 +12,7 @@ export type NovaIDs = {
     Asteroid?: Array<string>
     Nebula?: Array<string>
     StringList?: Array<string>
+    Junk?: Array<string>
 }
 
 export function getDefaultNovaIDs(): NovaIDs {
@@ -38,5 +39,6 @@ export function getDefaultNovaIDs(): NovaIDs {
         Asteroid: [],
         Nebula: [],
         StringList: [],
+        Junk: [],
     }
 }

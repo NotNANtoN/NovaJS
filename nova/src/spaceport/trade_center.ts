@@ -18,6 +18,8 @@ import {
     heldCommodityTons,
     sellCommodity,
 } from '../nova_plugin/trade_model';
+import { ncbTestContext } from '../nova_plugin/ncb_runtime';
+import { OutfitsStateComponent } from '../nova_plugin/outfit_plugin';
 import { Button } from './button';
 import { Menu } from './menu';
 import { MenuControls } from './menu_controls';
@@ -25,9 +27,14 @@ import {
     tradeAccountText,
     tradeColumnHeadings,
     tradeEmptyText,
+    TradeDisplayOffer,
     tradeOfferRows,
     tradeSelectionText,
 } from './trade_center_content';
+import {
+    hasJunkTradeLocation as junkLocationExists,
+    junkTradeOffersAt,
+} from './trade_center_junk';
 import {
     TRADE_CENTER_LAYOUT,
     TradeRect,
@@ -105,7 +112,7 @@ export class TradeCenter extends Menu<Entity> {
     private readonly status: PIXI.Text;
     private readonly buyButton: Button;
     private readonly sellButton: Button;
-    private offers: TradeCommodity[] = [];
+    private offers: TradeDisplayOffer[] = [];
     private planet?: PlanetData;
     private selectionIndex = -1;
     private pageStart = 0;
@@ -180,6 +187,18 @@ export class TradeCenter extends Menu<Entity> {
         return super.show(input);
     }
 
+    /** Some retail jünk routes exist at spöbs without the commodity flag. */
+    async hasJunkTradeLocation(): Promise<boolean> {
+        const junkGoods = await this.loadJunkGoods();
+        return junkLocationExists(junkGoods, this.planetId);
+    }
+
+    private async loadJunkGoods() {
+        const ids = await this.gameData.ids;
+        return Promise.all(
+            (ids.Junk ?? []).map(id => this.gameData.data.Junk.get(id)));
+    }
+
     private async refresh() {
         const state = this.input.components.get(PlayerStateComponent);
         this.planet = undefined;
@@ -188,7 +207,18 @@ export class TradeCenter extends Menu<Entity> {
             await this.syncCargoCapacity(state);
             try {
                 this.planet = await this.gameData.data.Planet.get(this.planetId);
-                this.offers = [...(this.planet.tradeCommodities ?? [])];
+                const junkGoods = await this.loadJunkGoods();
+                this.offers = [
+                    ...(this.planet.tradeCommodities ?? []),
+                    ...junkTradeOffersAt(
+                        junkGoods,
+                        this.planetId,
+                        ncbTestContext(
+                            state,
+                            this.input.components.get(OutfitsStateComponent),
+                        ),
+                    ),
+                ];
             } catch {
                 // A missing stellar is displayed as an unavailable market.
             }
@@ -226,7 +256,7 @@ export class TradeCenter extends Menu<Entity> {
         this.render();
     }
 
-    private selected(): TradeCommodity | undefined {
+    private selected(): TradeDisplayOffer | undefined {
         return this.offers[this.selectionIndex];
     }
 
@@ -262,10 +292,13 @@ export class TradeCenter extends Menu<Entity> {
             })
             : '';
         this.buyButton.state = state && selected
+            && selected.canBuy !== false
             && state.credits >= selected.price
             && getFreeSpace(state) > 0 ? 'normal' : 'grey';
         this.sellButton.state = state && selected
-            && heldCommodityTons(state, selected.commodity) > 0
+            && selected.canSell !== false
+            && heldCommodityTons(
+                state, selected.cargoKey ?? selected.commodity) > 0
             ? 'normal' : 'grey';
     }
 
@@ -275,7 +308,16 @@ export class TradeCenter extends Menu<Entity> {
         if (!state || !selected) {
             return;
         }
-        const result = buyCommodity(state, selected);
+        if (selected.canBuy === false) {
+            this.transactionMessage =
+                'This stellar does not sell that special cargo.';
+            this.render();
+            return;
+        }
+        const result = buyCommodity(state, {
+            ...selected,
+            commodity: selected.cargoKey ?? selected.commodity,
+        } as TradeCommodity);
         this.transactionMessage = result.success
             ? `Bought ${result.tons}t ${selected.commodity} for ${
                 result.total.toLocaleString()} cr.`
@@ -289,7 +331,16 @@ export class TradeCenter extends Menu<Entity> {
         if (!state || !selected) {
             return;
         }
-        const result = sellCommodity(state, selected);
+        if (selected.canSell === false) {
+            this.transactionMessage =
+                'This stellar does not buy that special cargo.';
+            this.render();
+            return;
+        }
+        const result = sellCommodity(state, {
+            ...selected,
+            commodity: selected.cargoKey ?? selected.commodity,
+        } as TradeCommodity);
         this.transactionMessage = result.success
             ? `Sold ${result.tons}t ${selected.commodity} for ${
                 result.total.toLocaleString()} cr.`

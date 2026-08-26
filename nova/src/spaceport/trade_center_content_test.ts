@@ -40,6 +40,19 @@ describe('Trade Center content', () => {
         expect(tradeSelectionText(offers[2])).toContain('High price · 937');
     });
 
+    it('labels special cargo that this stellar only buys', () => {
+        expect(tradeSelectionText({
+            commodity: 'Vrenna Ice Lizard Pelts',
+            price: 750,
+            canBuy: false,
+            canSell: true,
+        })).toBe([
+            'Vrenna Ice Lizard Pelts',
+            'Special cargo · 750 cr per ton',
+            'Sell only at this stellar',
+        ].join('\n'));
+    });
+
     it('shows only the requested visible page', () => {
         const page = tradeOfferRows(offers, 2, () => 0, 1, 3);
         expect(page.commodities).not.toContain('Food');

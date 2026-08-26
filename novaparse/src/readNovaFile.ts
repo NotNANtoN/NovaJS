@@ -21,6 +21,7 @@ import { $enum } from "ts-enum-util";
 import { NebuResource } from "./resource_parsers/NebuResource";
 import { StrhResource } from "./resource_parsers/StrhResource";
 import { RoidResource } from "./resource_parsers/RoidResource";
+import { JunkResource } from "./resource_parsers/JunkResource";
 
 
 // Reads a single plugin or nova file
@@ -67,7 +68,7 @@ parserMap[NovaResourceType.düde] = DudeResource;
 parserMap[NovaResourceType.flët] = FletResource;
 parserMap[NovaResourceType.gövt] = GovtResource;
 //parserMap[NovaResourceType.ïntf] = ;
-//parserMap[NovaResourceType.jünk] = ;
+parserMap[NovaResourceType.jünk] = JunkResource;
 parserMap[NovaResourceType.mïsn] = MisnResource;
 //parserMap[NovaResourceType.nëbu] = ;
 //parserMap[NovaResourceType.öops] = ;

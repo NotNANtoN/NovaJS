@@ -19,6 +19,7 @@ import { getDefaultStatusBarData } from "./StatusBarData";
 import { getDefaultSystemData } from "./SystemData";
 import { getDefaultTargetCornersData } from "./TargetCornersData";
 import { getDefaultProjectileWeaponData } from "./WeaponData";
+import { getDefaultJunkData } from "./JunkData";
 
 // Should have one for every NovaDataType
 export const Defaults = {
@@ -44,4 +45,5 @@ export const Defaults = {
     get Asteroid() { return getDefaultAsteroidData() },
     get Nebula() { return getDefaultNebulaData() },
     get StringList() { return getDefaultStringListData() },
+    get Junk() { return getDefaultJunkData() },
 }

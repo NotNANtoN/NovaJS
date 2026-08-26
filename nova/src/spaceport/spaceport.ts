@@ -55,6 +55,7 @@ export class Spaceport extends Menu<Entity> {
     private missionBbs: MissionBbs;
     private bar: Bar;
     private tradeCenter: TradeCenter;
+    private tradeCenterAvailable = false;
     private missionInfo: MissionInfo;
     private shipInfo: ShipInfo;
     private readonly dialogContainers = new Set<PIXI.Container>();
@@ -229,7 +230,7 @@ export class Spaceport extends Menu<Entity> {
             }
         };
         const showTradeCenter = async () => {
-            if (!this.data || !hasSpaceportService(this.data, "commodity")) {
+            if (!this.data || !this.tradeCenterAvailable) {
                 return;
             }
             this.controls.unbind();
@@ -285,8 +286,10 @@ export class Spaceport extends Menu<Entity> {
         if (!buttons) {
             return;
         }
-        const available = SPACEPORT_SERVICES.filter(
-            service => hasSpaceportService(data, SERVICE_FLAG[service]));
+        const available = SPACEPORT_SERVICES.filter(service =>
+            service === "tradeCenter"
+                ? this.tradeCenterAvailable
+                : hasSpaceportService(data, SERVICE_FLAG[service]));
         const column = spaceportButtonColumn(available);
         for (const service of SPACEPORT_SERVICES) {
             const y = column.get(service);
@@ -323,6 +326,11 @@ export class Spaceport extends Menu<Entity> {
         this.data = data;
         this.outfitter.setPlanetData(data);
         this.shipyard.setPlanetData(data);
+        // Eleven retail jünk routes run through stellars that never set the
+        // commodity flag, so the exchange has to open for them too.
+        this.tradeCenterAvailable =
+            hasSpaceportService(data, "commodity")
+            || await this.tradeCenter.hasJunkTradeLocation();
         this.updateServiceButtons(data);
         const title = new PIXI.Text(data.name, this.font.title);
         title.position.x = -24;

@@ -23,6 +23,7 @@ import { StatusBarData } from 'novadatainterface/StatusBarData';
 import { SystemData } from 'novadatainterface/SystemData';
 import { TargetCornersData } from 'novadatainterface/TargetCornersData';
 import { WeaponData } from 'novadatainterface/WeaponData';
+import { JunkData } from 'novadatainterface/JunkData';
 import * as PIXI from 'pixi.js';
 import * as sound from '@pixi/sound';
 import urlJoin from 'url-join';
@@ -85,6 +86,7 @@ export class GameData implements GameDataInterface {
             Nebula: this.addGettable<NebulaData>(NovaDataType.Nebula),
             StringList: this.addGettable<StringListData>(
                 NovaDataType.StringList),
+            Junk: this.addGettable<JunkData>(NovaDataType.Junk),
             SoundFile: this.addSoundFileGettable(),
             Sound: this.addSoundGettable(),
         };

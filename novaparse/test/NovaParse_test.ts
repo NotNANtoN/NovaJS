@@ -162,6 +162,7 @@ describe("NovaParse", function() {
             armor: 45,
             energyRecharge: FPS / 100
         });
+        expect(o131.isEscapePod).toBeFalse();
     });
 
     it("Should parse projectileWeapon", async function() {

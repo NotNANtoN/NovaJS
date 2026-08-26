@@ -24,6 +24,7 @@ import { Defaults } from "novadatainterface/Defaults";
 import { CicnImageData } from "novadatainterface/CicnImage";
 import { CicnData } from "novadatainterface/CicnData";
 import { SoundFile } from "novadatainterface/SoundFile";
+import { JunkData } from "novadatainterface/JunkData";
 
 /**
  * Combines multiple GameDataInterface instances into a single GameDataInterface
@@ -64,6 +65,7 @@ class GameDataAggregator implements GameDataInterface {
             Nebula: this.makeAggregator<NebulaData>(NovaDataType.Nebula),
             StringList: this.makeAggregator<StringListData>(
                 NovaDataType.StringList),
+            Junk: this.makeAggregator<JunkData>(NovaDataType.Junk),
             SoundFile: this.makeAggregator<SoundFile>(NovaDataType.SoundFile),
         };
 

@@ -4,8 +4,11 @@ import {
 
 export interface TradeDisplayOffer {
     commodity: string;
-    priceLevel: CommodityPriceLevel;
+    cargoKey?: string;
+    priceLevel?: CommodityPriceLevel;
     price: number;
+    canBuy?: boolean;
+    canSell?: boolean;
 }
 
 export interface TradeColumnText {
@@ -64,7 +67,8 @@ export function tradeOfferRows(
         }).join('\n'),
         prices: visible.map(offer => formatNumber(offer.price)).join('\n'),
         held: visible.map(offer =>
-            formatNumber(Math.max(0, heldTons(offer.commodity)))).join('\n'),
+            formatNumber(Math.max(
+                0, heldTons(offer.cargoKey ?? offer.commodity)))).join('\n'),
     };
 }
 
@@ -74,12 +78,22 @@ export function tradeSelectionText(
     if (!offer) {
         return '';
     }
-    const priceLevel = offer.priceLevel[0]!.toUpperCase()
-        + offer.priceLevel.slice(1);
+    const price = offer.priceLevel
+        ? `${offer.priceLevel[0]!.toUpperCase()
+            + offer.priceLevel.slice(1)} price`
+        : 'Special cargo';
+    const canBuy = offer.canBuy !== false;
+    const canSell = offer.canSell !== false;
+    const availability = canBuy && canSell
+        ? undefined
+        : canBuy
+            ? 'Buy only at this stellar'
+            : 'Sell only at this stellar';
     return [
         offer.commodity,
-        `${priceLevel} price · ${formatNumber(offer.price)} cr per ton`,
-    ].join('\n');
+        `${price} · ${formatNumber(offer.price)} cr per ton`,
+        availability,
+    ].filter((line): line is string => line !== undefined).join('\n');
 }
 
 export function tradeAccountText(account: TradeAccount): string {
