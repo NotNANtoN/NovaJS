@@ -15,6 +15,7 @@ import { MissionNotice } from '../nova_plugin/mission_plugin';
 import { OutfitsStateComponent } from '../nova_plugin/outfit_plugin';
 import type { PlanetType } from '../nova_plugin/planet_plugin';
 import { PlayerStateComponent } from '../nova_plugin/player_state';
+import { buyFuel, refuelsOnLanding } from '../nova_plugin/fuel';
 import {
     ShipDataComponent,
     ShipPhysicsComponent,
@@ -96,6 +97,8 @@ export class Spaceport extends Menu<Entity> {
             bar: new Button(gameData, "Bar", 120, buttonSlot(3)),
             tradeCenter: new Button(
                 gameData, "Trade Center", 120, buttonSlot(2)),
+            // STR# 150 string 6. Retail sells fuel by the jump on landing.
+            recharge: new Button(gameData, "Recharge", 120, buttonSlot(5)),
             leave: new Button(gameData, "Leave", 120, {
                 x: SPACEPORT_LAYOUT.buttons.x,
                 y: SPACEPORT_LAYOUT.buttons.leaveY,
@@ -107,8 +110,10 @@ export class Spaceport extends Menu<Entity> {
             tradeCenter: buttons.tradeCenter,
             bar: buttons.bar,
             missionBBS: buttons.missionBBS,
+            recharge: buttons.recharge,
         };
 
+        buttons.recharge.click.subscribe(() => this.recharge());
         buttons.leave.click.subscribe(this.done.bind(this));
 
         this.outfitter = new Outfitter(gameData, controlEvents);
@@ -286,10 +291,15 @@ export class Spaceport extends Menu<Entity> {
         if (!buttons) {
             return;
         }
-        const available = SPACEPORT_SERVICES.filter(service =>
-            service === "tradeCenter"
-                ? this.tradeCenterAvailable
-                : hasSpaceportService(data, SERVICE_FLAG[service]));
+        const available = SPACEPORT_SERVICES.filter(service => {
+            if (service === "tradeCenter") {
+                return this.tradeCenterAvailable;
+            }
+            if (service === "recharge") {
+                return refuelsOnLanding(data);
+            }
+            return hasSpaceportService(data, SERVICE_FLAG[service]);
+        });
         const column = spaceportButtonColumn(available);
         for (const service of SPACEPORT_SERVICES) {
             const y = column.get(service);
@@ -299,6 +309,53 @@ export class Spaceport extends Menu<Entity> {
                     SPACEPORT_LAYOUT.buttons.x, y);
             }
         }
+    }
+
+    /**
+     * The Auto-recharger buys the recharge for the pilot on landing.
+     *
+     * Retail prices it at 5,000 credits and the Bible lists it as ModType 19,
+     * "auto-refueller", whose ModVal is "ignored". It saves the trip to the
+     * button rather than making the fuel any cheaper.
+     */
+    private async autoRecharge(): Promise<void> {
+        const outfits = this.input.components.get(OutfitsStateComponent);
+        if (!outfits?.size) {
+            return;
+        }
+        for (const id of outfits.keys()) {
+            try {
+                const outfit = await this.gameData.data.Outfit.get(id);
+                if (outfit.isAutoRecharger) {
+                    this.recharge();
+                    return;
+                }
+            } catch {
+                // An unknown outfit simply is not an auto-recharger.
+            }
+        }
+    }
+
+    /**
+     * Buy fuel by the jump.
+     *
+     * The pilot leaves with as many whole jumps as their credits stretch to,
+     * and a pilot who cannot afford one is simply left as they were.
+     */
+    private recharge(): void {
+        const state = this.input.components.get(PlayerStateComponent);
+        const capacity = this.input.components
+            .get(ShipDataComponent)?.fuelCapacity ?? 0;
+        if (!state || capacity <= 0 || !this.data
+            || !refuelsOnLanding(this.data)) {
+            return;
+        }
+        const result = buyFuel(state.fuel ?? 0, capacity, state.credits);
+        if (result.purchased <= 0) {
+            return;
+        }
+        state.fuel = result.fuel;
+        state.credits = result.credits;
     }
 
     private setActiveDialog(active?: PIXI.Container) {
@@ -332,6 +389,7 @@ export class Spaceport extends Menu<Entity> {
             hasSpaceportService(data, "commodity")
             || await this.tradeCenter.hasJunkTradeLocation();
         this.updateServiceButtons(data);
+        await this.autoRecharge();
         const title = new PIXI.Text(data.name, this.font.title);
         title.position.x = -24;
         title.position.y = 39;

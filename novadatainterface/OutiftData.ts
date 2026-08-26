@@ -22,6 +22,7 @@ export interface OutfitData extends BaseData {
     contribute: number[],
     require: number[],
     isEscapePod: boolean,
+    isAutoRecharger: boolean,
 }
 
 export function getDefaultOutfitData(): OutfitData {
@@ -43,5 +44,6 @@ export function getDefaultOutfitData(): OutfitData {
         contribute: [0, 0],
         require: [0, 0],
         isEscapePod: false,
+        isAutoRecharger: false,
     }
 }

@@ -70,6 +70,14 @@ class OutfResource extends BaseResource {
     get isEscapePod(): boolean {
         return this.modTypes.includes(11);
     }
+
+    /**
+     * ModType 19, which the Bible lists as "auto-refueller" with its ModVal
+     * "ignored": it buys the pilot's recharge for them on landing.
+     */
+    get isAutoRecharger(): boolean {
+        return this.modTypes.includes(19);
+    }
     get functions(): OutfitFunctions {
         var functions: OutfitFunctions = [];
         var modPositions = [6, 18, 22, 26];

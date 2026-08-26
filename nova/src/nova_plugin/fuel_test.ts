@@ -2,8 +2,9 @@ import 'jasmine';
 import {
     canJump,
     clampFuel,
-    refuelOnLanding,
+    refuelCost,
     refuelsOnLanding,
+    buyFuel,
     FUEL_PER_JUMP,
     fuelJumpBlocks,
     jumpsFromFuel,
@@ -59,22 +60,47 @@ describe('the fuel gauge', () => {
     });
 });
 
-describe('refuelling on landing', () => {
-    it('fills the tank at an inhabited stellar', () => {
-        expect(refuelOnLanding(50, 300, { inhabited: true })).toBe(300);
-    });
-
-    it('leaves the tank alone at an uninhabited rock', () => {
+describe('where fuel can be bought', () => {
+    it('sells at an inhabited stellar but not a bare rock', () => {
+        expect(refuelsOnLanding({ inhabited: true })).toBeTrue();
         expect(refuelsOnLanding({ inhabited: false })).toBeFalse();
-        expect(refuelOnLanding(50, 300, { inhabited: false })).toBe(50);
-    });
-
-    it('treats a stellar of unknown habitation as inhabited', () => {
         expect(refuelsOnLanding({})).toBeTrue();
-        expect(refuelOnLanding(0, 300, {})).toBe(300);
+    });
+});
+
+describe('buying fuel at 500 credits a jump', () => {
+    it('costs nothing when the tank is already full', () => {
+        expect(refuelCost(300, 300)).toBe(0);
+        expect(buyFuel(300, 300, 1000).purchased).toBe(0);
     });
 
-    it('never leaves more fuel than the tank holds', () => {
-        expect(refuelOnLanding(900, 300, { inhabited: false })).toBe(300);
+    it('charges a whole jump for a part-used one', () => {
+        expect(refuelCost(250, 300)).toBe(500);
+        expect(refuelCost(0, 300)).toBe(1500);
+    });
+
+    it('fills the tank when the pilot can afford it', () => {
+        const result = buyFuel(0, 300, 10_000);
+        expect(result.fuel).toBe(300);
+        expect(result.credits).toBe(8_500);
+        expect(result.purchased).toBe(3);
+    });
+
+    it('buys only the jumps the pilot can pay for', () => {
+        const result = buyFuel(0, 800, 1_200);
+        expect(result.purchased).toBe(2);
+        expect(result.fuel).toBe(200);
+        expect(result.credits).toBe(200);
+    });
+
+    it('buys nothing for a pilot who cannot afford one jump', () => {
+        const result = buyFuel(0, 300, 499);
+        expect(result.purchased).toBe(0);
+        expect(result.fuel).toBe(0);
+        expect(result.credits).toBe(499);
+    });
+
+    it('never overfills a partly used tank', () => {
+        expect(buyFuel(250, 300, 10_000).fuel).toBe(300);
     });
 });

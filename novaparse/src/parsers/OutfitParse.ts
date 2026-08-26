@@ -129,5 +129,6 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
         contribute: outf.contribute,
         require: outf.require,
         isEscapePod: outf.isEscapePod,
+        isAutoRecharger: outf.isAutoRecharger,
     }
 }

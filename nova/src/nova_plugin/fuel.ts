@@ -72,12 +72,11 @@ export function clampFuel(fuel: number, capacity: number): number {
 }
 
 /**
- * Whether landing here fills the tank.
+ * Where a pilot can buy fuel.
  *
- * Refuelling is a property of the place, not a purchase. The Bible describes
- * spöb flag 0x00000020 as "Stellar is uninhabited (no traffic control or
- * refuelling)", and names no price for fuel anywhere, so every inhabited
- * stellar a pilot can land on tops them up for free.
+ * The Bible describes spöb flag 0x00000020 as "Stellar is uninhabited (no
+ * traffic control or refuelling)", so every inhabited stellar sells it and a
+ * bare rock does not.
  */
 export function refuelsOnLanding(
     planet: { readonly inhabited?: boolean },
@@ -85,12 +84,60 @@ export function refuelsOnLanding(
     return planet.inhabited !== false;
 }
 
-/** Fill the tank on landing, leaving a full pilot untouched. */
-export function refuelOnLanding(
+/**
+ * What a recharge costs: 500 credits per jump, so 5 credits a unit.
+ *
+ * No retail resource carries this number and the Bible never states it, but
+ * the outfits price it for us. Solar Panels cost 15,000 credits and pay for
+ * themselves over 30 jumps of regenerated fuel, which puts a jump at 500. The
+ * Auto-recharger at 5,000 buys the same recharge automatically on landing
+ * rather than discounting it.
+ */
+export const FUEL_PRICE_PER_JUMP = 500;
+
+/** A part-used jump is charged as a whole one, so the pilot leaves full. */
+export function refuelCost(
     fuel: number,
     capacity: number,
-    planet: { readonly inhabited?: boolean },
+    pricePerJump = FUEL_PRICE_PER_JUMP,
 ): number {
-    const held = clampFuel(fuel, capacity);
-    return refuelsOnLanding(planet) ? Math.max(0, capacity) : held;
+    const missing = Math.max(0, Math.max(0, capacity) - Math.max(0, fuel));
+    if (missing === 0) {
+        return 0;
+    }
+    return Math.ceil(missing / FUEL_PER_JUMP) * pricePerJump;
+}
+
+export interface RefuelResult {
+    fuel: number;
+    credits: number;
+    /** Jumps actually bought, so a caller can report what happened. */
+    purchased: number;
+}
+
+/** Buy as many whole jumps as the pilot's credits stretch to. */
+export function buyFuel(
+    fuel: number,
+    capacity: number,
+    credits: number,
+    pricePerJump = FUEL_PRICE_PER_JUMP,
+): RefuelResult {
+    const tank = Math.max(0, capacity);
+    const held = clampFuel(fuel, tank);
+    const missing = tank - held;
+    if (missing <= 0) {
+        return { fuel: held, credits, purchased: 0 };
+    }
+    const wanted = Math.ceil(missing / FUEL_PER_JUMP);
+    const affordable = pricePerJump <= 0
+        ? wanted
+        : Math.min(wanted, Math.floor(Math.max(0, credits) / pricePerJump));
+    if (affordable <= 0) {
+        return { fuel: held, credits, purchased: 0 };
+    }
+    return {
+        fuel: clampFuel(held + affordable * FUEL_PER_JUMP, tank),
+        credits: credits - affordable * pricePerJump,
+        purchased: affordable,
+    };
 }

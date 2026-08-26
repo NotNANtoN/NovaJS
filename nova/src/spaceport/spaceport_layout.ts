@@ -32,6 +32,7 @@ export const SPACEPORT_LAYOUT = {
         firstY: centered(0, 300).y,
         /** Button art is 25px tall; 32px leaves a hairline of metal. */
         pitch: 32,
+        height: 25,
         /** Leave sits at the foot of the strip, away from the services. */
         leaveY: centered(0, 476).y,
     },
@@ -39,7 +40,7 @@ export const SPACEPORT_LAYOUT = {
 
 /** Landing services, in the order retail lists them. */
 export const SPACEPORT_SERVICES = [
-    'shipyard', 'outfitter', 'tradeCenter', 'bar', 'missionBBS',
+    'shipyard', 'outfitter', 'tradeCenter', 'bar', 'missionBBS', 'recharge',
 ] as const;
 
 export type SpaceportService = typeof SPACEPORT_SERVICES[number];
@@ -51,6 +52,8 @@ export const SERVICE_FLAG = {
     tradeCenter: 'commodity',
     bar: 'bar',
     missionBBS: 'bar',
+    // Refuelling is not a service flag: it follows whether anyone lives here.
+    recharge: 'commodity',
 } as const;
 
 /**
@@ -61,7 +64,14 @@ export const SERVICE_FLAG = {
 export function spaceportButtonColumn<T extends string>(
     visible: readonly T[],
 ): Map<T, number> {
-    const { firstY, pitch } = SPACEPORT_LAYOUT.buttons;
+    const { firstY, pitch, leaveY, height } = SPACEPORT_LAYOUT.buttons;
+    // Retail's 32px pitch fits five services above Leave. A stellar offering
+    // more than that closes the gaps just enough to stay on the strip rather
+    // than running a button off the bottom.
+    const available = leaveY - firstY - height;
+    const fitted = visible.length > 1
+        ? Math.min(pitch, Math.floor(available / (visible.length - 1)))
+        : pitch;
     return new Map(visible.map(
-        (name, index) => [name, firstY + index * pitch]));
+        (name, index) => [name, firstY + index * fitted]));
 }

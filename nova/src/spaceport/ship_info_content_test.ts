@@ -98,7 +98,7 @@ describe('naming what is in the hold', () => {
     it('shows the named cargo in the hold summary', () => {
         const state: PlayerState = createInitialPlayerState();
         state.holds = [
-            { commodity: 'Food', tons: 1 },
+            { commodity: 'Food', tons: 1, isMissionCargo: false },
             { commodity: 'm1', tons: 7, isMissionCargo: true },
         ];
         state.activeMissions = [{
