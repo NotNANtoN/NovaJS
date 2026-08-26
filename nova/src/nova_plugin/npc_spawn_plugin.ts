@@ -11,6 +11,8 @@ import { v4 as uuid } from "uuid";
 import { GameDataResource } from "./game_data_resource";
 import { GovtComponent } from "./npc_plugin";
 import { DudeSourceComponent } from "./boarding_plugin";
+import { createArrivingTrafficState } from "./npc_traffic";
+import { NpcTrafficComponent } from "./npc_traffic_plugin";
 import { makeNpc } from "./npc_plugin";
 import {
     NpcAIComponent,
@@ -179,6 +181,11 @@ async function createNpc(
             NpcCombatRoleComponent,
             npcType.combatRole ?? "personal",
         );
+        // Ambient traders are given an errand to run. The traffic system
+        // drops this marker again for anything that turns out to be a warship,
+        // an interceptor or a miner.
+        npc.components.set(
+            NpcTrafficComponent, createArrivingTrafficState());
         npc.components.set(MultiplayerData, { owner: "server" });
         return npc;
     } catch (_error) {

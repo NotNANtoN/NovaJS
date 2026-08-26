@@ -22,6 +22,7 @@ import { LegalRecordPlugin } from "./legal_record_plugin";
 import { BoardingPlugin } from "./boarding_plugin";
 import { DisabledPlugin } from "./disabled_plugin";
 import { EscortPlugin } from "./escort_plugin";
+import { NpcTrafficPlugin } from "./npc_traffic_plugin";
 import { NpcPlugin } from "./npc_plugin";
 import { OutfitPlugin } from "./outfit_plugin";
 import { PlanetPlugin } from "./planet_plugin";
@@ -66,6 +67,7 @@ export const SystemPlugin: Plugin = {
         world.addPlugin(JumpPlugin);
         world.addPlugin(MissionShipsPlugin);
         world.addPlugin(NpcPlugin);
+        world.addPlugin(NpcTrafficPlugin);
         world.addPlugin(DisabledPlugin);
         world.addPlugin(BoardingPlugin);
         world.addPlugin(EscortPlugin);
