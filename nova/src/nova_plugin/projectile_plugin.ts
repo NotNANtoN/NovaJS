@@ -7,7 +7,7 @@ import { Entity } from 'nova_ecs/entity';
 import { EcsEvent } from 'nova_ecs/events';
 import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
-import { MovementPhysicsComponent, MovementStateComponent, MovementType } from 'nova_ecs/plugins/movement_plugin';
+import { advanceMovementState, MovementPhysicsComponent, MovementStateComponent, MovementType } from 'nova_ecs/plugins/movement_plugin';
 import { MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { ProvideAsync } from "nova_ecs/provide_async";
@@ -23,7 +23,8 @@ import { CollisionEvent, CollisionHitterComponent, CollisionVulnerabilityCompone
 import { CreateTime } from './create_time';
 import { DamagedEvent, ZeroArmorEvent } from './death_plugin';
 import { reserveEntity } from './entity_budget';
-import { AttackIntentComponent, FireSubs, OwnerComponent, SourceComponent, SubCounts, VulnerableToPD, WeaponConstructors, WeaponEntry, setAttackIntent } from './fire_weapon_plugin';
+import { ExitPointData } from './exit_point';
+import { AttackIntentComponent, FireSubs, OwnerComponent, ShotCreation, ShotSeedComponent, SourceComponent, SubCounts, VulnerableToPD, WeaponConstructors, WeaponEntry, setAttackIntent } from './fire_weapon_plugin';
 import { GameDataResource } from './game_data_resource';
 import { firstOrderWithFallback, Guidance, GuidanceComponent } from './guidance';
 import { ArmorComponent, ShieldComponent } from './health_plugin';
@@ -145,7 +146,11 @@ class ProjectileWeaponEntry extends WeaponEntry {
     }
 
     fire(position: Position, angle: Angle, owner?: string, target?: string,
-        source?: string, sourceVelocity?: Vector): Entity | undefined {
+        source?: string, sourceVelocity?: Vector, _exitPointData?: ExitPointData,
+        shot?: ShotCreation): Entity | undefined {
+        if (!shot) {
+            throw new Error('Projectile shots require deterministic creation data');
+        }
 
         let velocity = new Vector(0, 0);
         if (this.data.guidance !== 'guided' && sourceVelocity) {
@@ -168,8 +173,9 @@ class ProjectileWeaponEntry extends WeaponEntry {
         movementState.turning = 0;
         movementState.turnTo = null;
 
-        projectile.components.delete(CreateTime);
+        projectile.components.set(CreateTime, shot.createdAt);
         projectile.components.delete(SubCounts);
+        projectile.components.set(ShotSeedComponent, { seed: shot.seed });
 
         if (target) {
             projectile.components.set(TargetComponent, { target });
@@ -198,6 +204,16 @@ class ProjectileWeaponEntry extends WeaponEntry {
         const shield = projectile.components.get(ShieldComponent);
         if (shield) {
             shield.current = shield.max;
+        }
+
+        if (shot.fastForwardMs > 0) {
+            const physics = projectile.components.get(MovementPhysicsComponent)!;
+            Object.assign(movementState, advanceMovementState(
+                movementState,
+                physics,
+                shot.fastForwardMs / 1000,
+                this.entities,
+            ));
         }
 
         const playerOwned = isPlayerOwnedSource(source, this.runQuery);

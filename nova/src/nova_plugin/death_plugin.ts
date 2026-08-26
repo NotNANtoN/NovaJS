@@ -15,7 +15,7 @@ import { EcsEvent } from 'nova_ecs/events';
 import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
-import { replicationPolicies } from 'nova_ecs/plugins/multiplayer_plugin';
+import { MultiplayerData, replicationPolicies } from 'nova_ecs/plugins/multiplayer_plugin';
 import { MovementPhysicsComponent, MovementState, MovementStateComponent, MovementType } from 'nova_ecs/plugins/movement_plugin';
 import { Time, TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { Query } from 'nova_ecs/query';
@@ -159,11 +159,17 @@ const DamageSystem = new System({
         Optional(ShieldComponent), Optional(ArmorComponent),
         Optional(IonizationComponent), Optional(IonizationColorComponent),
         Optional(ProjectileComponent), Optional(PlayerDeathComponent),
-        TimeResource, UUID, PlatformResource] as const,
+        TimeResource, UUID, PlatformResource,
+        Optional(MultiplayerData)] as const,
     step(emit, emitNow, { damage, scale = 1, damager, fromExplosion },
         shield, armor, ionization, ionizationColor, isProjectile, playerDeath,
-        time, uuid, platform) {
-        if (platform !== 'node' || playerDeath) {
+        time, uuid, platform, multiplayer) {
+        // A shot is not replicated: every world derives it from the same fire
+        // event and flies its own copy, so the world holding one is the only
+        // one that can resolve what happens to it. That is what lets point
+        // defence still visibly swat a missile on a client. Replicated
+        // entities, meaning ships, are the server's business alone.
+        if (playerDeath || (multiplayer && platform !== 'node')) {
             return;
         }
 

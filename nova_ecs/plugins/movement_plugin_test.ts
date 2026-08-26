@@ -7,12 +7,18 @@ import { Entity } from '../entity';
 import { System } from '../system';
 import { World } from '../world';
 import {
+    applyMovementStateDelta,
     approachVec,
+    MOVEMENT_ANGLE_QUANTUM,
+    MOVEMENT_POSITION_QUANTUM,
+    MOVEMENT_VELOCITY_QUANTUM,
     MovementPhysicsComponent,
     MovementPlugin,
     MovementStateComponent,
     MovementSystem,
     MovementType,
+    quantizedMovementDelta,
+    quantizeMovementState,
     RemoteMovementPresentationComponent,
     RemoteMovementPresentationSystem,
 } from './movement_plugin';
@@ -219,5 +225,68 @@ describe('Movement Plugin', () => {
         const expected = current.add(new Vector(3, 4).scale(2));
         expect(res.x).toBeCloseTo(expected.x);
         expect(res.y).toBeCloseTo(expected.y);
+    });
+
+    it('quantizes movement below a visible pixel and prediction step', () => {
+        const quantized = quantizeMovementState({
+            position: new Position(10.12, -5.13),
+            velocity: new Vector(19.96, -20.04),
+            rotation: new Angle(0.12349),
+            turning: 0,
+            turnBack: false,
+            accelerating: 0,
+            targetSpeed: 99.96,
+        });
+
+        expect(MOVEMENT_POSITION_QUANTUM).toBe(0.25);
+        expect(MOVEMENT_VELOCITY_QUANTUM).toBe(0.1);
+        expect(MOVEMENT_ANGLE_QUANTUM).toBe(0.001);
+        expect(quantized.position).toEqual(new Position(10, -5.25));
+        expect(quantized.velocity).toEqual(new Vector(20, -20));
+        expect(quantized.rotation.angle).toBeCloseTo(0.123, 6);
+        expect(quantized.targetSpeed).toBe(100);
+    });
+
+    it('suppresses movement fields that stay in the same quantized bucket', () => {
+        const before = {
+            position: new Position(10.01, 20.01),
+            velocity: new Vector(30.01, 40.01),
+            rotation: new Angle(0.1001),
+            turning: 0,
+            turnBack: false,
+            accelerating: 0,
+        };
+        const withinBucket = {
+            ...before,
+            position: new Position(10.02, 20.02),
+            velocity: new Vector(30.02, 40.02),
+            rotation: new Angle(0.1002),
+        };
+        expect(quantizedMovementDelta(before, withinBucket)).toBeUndefined();
+
+        const crossedPositionBucket = {
+            ...withinBucket,
+            position: new Position(10.2, 20.02),
+        };
+        const delta = quantizedMovementDelta(before, crossedPositionBucket);
+        expect(delta?.position).toEqual(new Position(10.25, 20));
+        expect(delta?.velocity).toBeUndefined();
+        expect(delta?.rotation).toBeUndefined();
+    });
+
+    it('can clear an optional movement value with a partial delta', () => {
+        const state = {
+            position: new Position(0, 0),
+            velocity: new Vector(0, 0),
+            rotation: new Angle(0),
+            turning: 0,
+            turnBack: false,
+            accelerating: 0,
+            targetSpeed: 100,
+        };
+
+        applyMovementStateDelta(state, { targetSpeed: null });
+
+        expect(state.targetSpeed).toBeUndefined();
     });
 });

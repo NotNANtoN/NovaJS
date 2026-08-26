@@ -4,9 +4,12 @@ import {
     AttackIntentComponent,
     attackOriginLocked,
     getEvenlySpacedAngles,
+    getRandomInCone,
     inheritedAttackTarget,
+    sampleInaccuracy,
     setAttackIntent,
 } from './fire_weapon_plugin';
+import { createShotRng } from './shot_rng';
 
 describe('getEvenlySpacedAngles', () => {
     it('gets an even number of evenly spaced angles', () => {
@@ -30,6 +33,18 @@ describe('getEvenlySpacedAngles', () => {
             new Angle(-1.2),
         ];
         expect(actual).toEqual(expected);
+    });
+});
+
+describe('seeded shot spread', () => {
+    it('samples identical inaccuracy for an identical seed', () => {
+        expect(sampleInaccuracy(12, createShotRng(42)))
+            .toBe(sampleInaccuracy(12, createShotRng(42)));
+    });
+
+    it('samples identical submunition cones for an identical seed', () => {
+        expect(getRandomInCone(0.5, 8, createShotRng(99)))
+            .toEqual(getRandomInCone(0.5, 8, createShotRng(99)));
     });
 });
 

@@ -31,7 +31,7 @@ import { CreateTime, CreateTimeArgProvider } from './create_time';
 import { DamagedEvent } from './death_plugin';
 import { reserveEntity } from './entity_budget';
 import { applyExitPoint, ExitPointData } from './exit_point';
-import { FireSubs, OwnerComponent, sampleInaccuracy, SourceComponent, WeaponConstructors, WeaponEntry, setAttackIntent } from './fire_weapon_plugin';
+import { FireSubs, OwnerComponent, ShotCreation, ShotSeedComponent, SourceComponent, WeaponConstructors, WeaponEntry, setAttackIntent } from './fire_weapon_plugin';
 import { zeroOrderGuidance } from './guidance';
 import { SoundEvent } from './sound_event';
 import { TargetComponent } from './target_component';
@@ -42,6 +42,7 @@ interface BeamState {
     pointToTarget?: boolean,
     exitPointData?: ExitPointData,
     length?: number,
+    inaccuracy: number,
 }
 
 export const BeamStateComponent = new Component<BeamState>('BeamState');
@@ -215,7 +216,11 @@ class BeamWeaponEntry extends WeaponEntry {
 
     fire(position: Position, angle: Angle, owner?: string, target?: string,
         source?: string, _sourceVelocity?: Vector,
-        exitPointData?: ExitPointData): Entity | undefined {
+        exitPointData?: ExitPointData,
+        shot?: ShotCreation): Entity | undefined {
+        if (!shot) {
+            throw new Error('Beam shots require deterministic creation data');
+        }
         const { width, length } = this.data.beamAnimation;
         const beamPoly = new SAT.Polygon(new SAT.Vector(0, 0), [
             new SAT.Vector(-width / 2, 0),
@@ -241,7 +246,10 @@ class BeamWeaponEntry extends WeaponEntry {
                 pointToTarget: this.data.guidance === "beamTurret" ||
                     this.data.guidance === "pointDefenseBeam",
                 length: this.data.beamAnimation.length,
-            }).addComponent(BeamDataComponent, this.data);
+                inaccuracy: shot.inaccuracy,
+            }).addComponent(BeamDataComponent, this.data)
+            .addComponent(ShotSeedComponent, { seed: shot.seed })
+            .addComponent(CreateTime, shot.createdAt);
 
         if (target) {
             beam.addComponent(TargetComponent, { target });
@@ -294,6 +302,7 @@ export const BeamSystem = new System({
             entities.delete(uuid);
         }
 
+        let resetRotation = false;
         if (source) {
             const parent = entities.get(source);
             const parentMovement = parent?.components
@@ -303,6 +312,7 @@ export const BeamSystem = new System({
                     Position.fromVectorLike(parentMovement.position);
                 movement.rotation =
                     Angle.fromAngleLike(parentMovement.rotation);
+                resetRotation = true;
 
                 if (beamState.exitPointData) {
                     const exitPoint = applyExitPoint(beamState.exitPointData,
@@ -317,10 +327,14 @@ export const BeamSystem = new System({
             const otherPos = entities.get(target.target)?.components
                 .get(MovementStateComponent)?.position;
             if (otherPos) {
-                movement.rotation = zeroOrderGuidance(movement.position, otherPos);
+                movement.rotation = zeroOrderGuidance(
+                    movement.position, otherPos).add(beamState.inaccuracy);
+                resetRotation = false;
             }
         }
-        movement.rotation = movement.rotation.add(sampleInaccuracy(beamData.accuracy));
+        if (resetRotation) {
+            movement.rotation = movement.rotation.add(beamState.inaccuracy);
+        }
     }
 });
 

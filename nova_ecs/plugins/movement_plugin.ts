@@ -8,7 +8,6 @@ import { Vector, VectorLike, VectorType } from '../datatypes/vector';
 import { Optional } from '../optional';
 import { Plugin } from '../plugin';
 import { System } from '../system';
-import { applyObjectDelta } from './delta';
 import { DeltaPlugin, DeltaResource } from './delta_plugin';
 import { Time, TimeResource, TimeSystem } from './time_plugin';
 
@@ -44,6 +43,127 @@ export const MovementState = t.intersection([t.type({
     targetSpeed: t.number,
 })]);
 export type MovementState = t.TypeOf<typeof MovementState>;
+
+export const MOVEMENT_POSITION_QUANTUM = 0.25;
+export const MOVEMENT_VELOCITY_QUANTUM = 0.1;
+export const MOVEMENT_ANGLE_QUANTUM = 0.001;
+
+export const MovementStateDelta = t.partial({
+    position: PositionType,
+    velocity: VectorType,
+    rotation: AngleType,
+    turning: t.number,
+    turnBack: t.boolean,
+    accelerating: t.number,
+    turnTo: t.union([AngleType, t.string, t.null]),
+    targetSpeed: t.union([t.number, t.null]),
+});
+export type MovementStateDelta = t.TypeOf<typeof MovementStateDelta>;
+
+function roundToQuantum(value: number, quantum: number): number {
+    const rounded = Math.round(value / quantum) * quantum;
+    return rounded === 0 ? 0 : rounded;
+}
+
+export function quantizeMovementState(state: MovementState): MovementState {
+    return {
+        position: new Position(
+            roundToQuantum(state.position.x, MOVEMENT_POSITION_QUANTUM),
+            roundToQuantum(state.position.y, MOVEMENT_POSITION_QUANTUM),
+        ),
+        velocity: new Vector(
+            roundToQuantum(state.velocity.x, MOVEMENT_VELOCITY_QUANTUM),
+            roundToQuantum(state.velocity.y, MOVEMENT_VELOCITY_QUANTUM),
+        ),
+        rotation: new Angle(
+            roundToQuantum(state.rotation.angle, MOVEMENT_ANGLE_QUANTUM)),
+        turning: state.turning,
+        turnBack: state.turnBack,
+        accelerating: state.accelerating,
+        turnTo: state.turnTo instanceof Angle
+            ? new Angle(roundToQuantum(
+                state.turnTo.angle, MOVEMENT_ANGLE_QUANTUM))
+            : state.turnTo,
+        targetSpeed: state.targetSpeed === undefined
+            ? undefined
+            : roundToQuantum(
+                state.targetSpeed, MOVEMENT_VELOCITY_QUANTUM),
+    };
+}
+
+function sameVector(
+    a: VectorLike | undefined,
+    b: VectorLike | undefined,
+): boolean {
+    return a?.x === b?.x && a?.y === b?.y;
+}
+
+function sameAngle(
+    a: Angle | string | null | undefined,
+    b: Angle | string | null | undefined,
+): boolean {
+    return a instanceof Angle && b instanceof Angle
+        ? a.angle === b.angle
+        : a === b;
+}
+
+export function quantizedMovementDelta(
+    previous: MovementState,
+    current: MovementState,
+): MovementStateDelta | undefined {
+    const a = quantizeMovementState(previous);
+    const b = quantizeMovementState(current);
+    const delta: MovementStateDelta = {};
+    if (!sameVector(a.position, b.position)) {
+        delta.position = b.position;
+    }
+    if (!sameVector(a.velocity, b.velocity)) {
+        delta.velocity = b.velocity;
+    }
+    if (a.rotation.angle !== b.rotation.angle) {
+        delta.rotation = b.rotation;
+    }
+    if (a.turning !== b.turning) {
+        delta.turning = b.turning;
+    }
+    if (a.turnBack !== b.turnBack) {
+        delta.turnBack = b.turnBack;
+    }
+    if (a.accelerating !== b.accelerating) {
+        delta.accelerating = b.accelerating;
+    }
+    if (!sameAngle(a.turnTo, b.turnTo)) {
+        delta.turnTo = b.turnTo ?? null;
+    }
+    if (a.targetSpeed !== b.targetSpeed) {
+        delta.targetSpeed = b.targetSpeed ?? null;
+    }
+    return Object.keys(delta).length > 0 ? delta : undefined;
+}
+
+function movementControlChanged(
+    previous: MovementState,
+    current: MovementState,
+): boolean {
+    return previous.turning !== current.turning
+        || previous.turnBack !== current.turnBack
+        || previous.accelerating !== current.accelerating
+        || !sameAngle(previous.turnTo, current.turnTo)
+        || previous.targetSpeed !== current.targetSpeed;
+}
+
+export function applyMovementStateDelta(
+    state: MovementState,
+    delta: MovementStateDelta,
+): void {
+    for (const [key, value] of Object.entries(delta)) {
+        if (value === null && key === 'targetSpeed') {
+            delete state.targetSpeed;
+        } else {
+            (state as unknown as Record<string, unknown>)[key] = value;
+        }
+    }
+}
 
 // Don't split this into separate position and velocity components
 // because we don't want to send predictable deltas, such as when
@@ -367,20 +487,13 @@ export const MovementPlugin: Plugin = {
 
         deltaMaker.addComponent(MovementStateComponent, {
             componentType: MovementState,
-            deltaType: MovementState,
+            deltaType: MovementStateDelta,
             getDelta(a, b) {
-                // Omit position.
-                // Send everything if a delta is detected.
-                const same = a.turning === b.turning &&
-                    a.accelerating === b.accelerating &&
-                    a.turnTo === b.turnTo;
-
-                if (same) {
-                    return;
-                }
-                return b;
+                return movementControlChanged(a, b)
+                    ? quantizeMovementState(b)
+                    : undefined;
             },
-            applyDelta: applyObjectDelta
+            applyDelta: applyMovementStateDelta,
         });
 
         deltaMaker.addComponent(MovementPhysicsComponent, {

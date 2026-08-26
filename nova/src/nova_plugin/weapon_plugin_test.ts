@@ -1,7 +1,14 @@
 import 'jasmine';
 import { Gettable } from 'novadatainterface/Gettable';
 import { getDefaultProjectileWeaponData } from 'novadatainterface/WeaponData';
+import { Angle } from 'nova_ecs/datatypes/angle';
+import { Position } from 'nova_ecs/datatypes/position';
 import { Entity } from 'nova_ecs/entity';
+import { MockCommunicator } from 'nova_ecs/plugins/mock_communicator';
+import {
+    CommunicatorResource,
+    MultiplayerData,
+} from 'nova_ecs/plugins/multiplayer_plugin';
 import { DefaultMap } from 'nova_ecs/utils';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { World } from 'nova_ecs/world';
@@ -18,11 +25,76 @@ import {
     applyWeaponTrigger,
     clearWeaponFiringState,
     ReleaseWeaponTriggerSystem,
+    weaponShotRateCeiling,
+    worldOwnsWeaponCadence,
     WeaponsSystem,
 } from './weapon_plugin';
 import { DestructionStartedComponent } from './destruction_state';
+import { PlatformResource } from './platform_plugin';
 
 const STEP_MS = 1000 / 60;
+
+function configureWeaponWorld(world: World): void {
+    world.resources.set(PlatformResource, 'node');
+    world.resources.set(CommunicatorResource, new MockCommunicator('server'));
+}
+
+describe('weapon simulation ownership', () => {
+    it('runs server-owned cadence only on the server', () => {
+        expect(worldOwnsWeaponCadence('node', 'server', 'server')).toBeTrue();
+        expect(worldOwnsWeaponCadence('browser', 'server', 'client'))
+            .toBeFalse();
+    });
+
+    it('runs client cadence only in the owning browser', () => {
+        expect(worldOwnsWeaponCadence('browser', 'client-a', 'client-a'))
+            .toBeTrue();
+        expect(worldOwnsWeaponCadence('browser', 'client-a', 'client-b'))
+            .toBeFalse();
+        expect(worldOwnsWeaponCadence('node', 'client-a', 'server')).toBeFalse();
+    });
+
+    it('does not mutate cadence state for a remotely owned ship', () => {
+        const shots: number[] = [];
+        const time = {
+            time: 0,
+            delta_ms: STEP_MS,
+            delta_s: STEP_MS / 1000,
+            frame: 0,
+        };
+        const entries = makeWeapon(() => false, shots, time);
+        const local = new DefaultMap<string, WeaponLocalState>(
+            getDefaultWeaponLocalState);
+        local.get('test-weapon').shotsOwed = 0.5;
+        const world = new World('remote-weapon-owner-test');
+        configureWeaponWorld(world);
+        world.resources.set(TimeResource, time);
+        world.resources.set(WeaponEntries, entries);
+        world.addSystem(WeaponsSystem);
+        world.entities.set('remote-player', new Entity()
+            .addComponent(WeaponsStateComponent, new Map([
+                ['test-weapon', { count: 1, firing: true }],
+            ]))
+            .addComponent(WeaponsComponent, local)
+            .addComponent(MultiplayerData, { owner: 'client' }));
+
+        world.step();
+
+        expect(shots).toEqual([]);
+        expect(local.get('test-weapon').shotsOwed).toBe(0.5);
+        expect(local.get('test-weapon').pressObserved).toBeFalse();
+    });
+});
+
+describe('fire intent rate ceiling', () => {
+    it('derives a bounded ceiling from reload and installed count', () => {
+        const weapon = getDefaultProjectileWeaponData();
+        weapon.reload = 500;
+        expect(weaponShotRateCeiling(weapon, 2)).toBe(6);
+        weapon.reload = 0;
+        expect(weaponShotRateCeiling(weapon, 1000)).toBe(240);
+    });
+});
 
 function makeWeapon(
     blocked: () => boolean,
@@ -37,12 +109,17 @@ function makeWeapon(
     configure(data);
     const entry = {
         data,
-        fireFromEntity: () => {
+        syncAsFireEvent: false,
+        fireFromEntityDetailed: () => {
             if (blocked()) {
                 return undefined;
             }
             shots.push(time.time);
-            return new Entity();
+            return {
+                entity: new Entity(),
+                position: new Position(0, 0),
+                rotation: new Angle(0),
+            };
         },
     } as unknown as WeaponEntry;
     const entries = new Gettable<WeaponEntry | undefined>(
@@ -74,12 +151,14 @@ describe('weapon firing', () => {
             ['test-weapon', { count: 1, firing: true }],
         ]);
         const world = new World('weapon-destruction-lock-test');
+        configureWeaponWorld(world);
         world.resources.set(TimeResource, time);
         world.resources.set(WeaponEntries, entries);
         world.addSystem(WeaponsSystem);
         world.entities.set('dying-ship', new Entity()
             .addComponent(WeaponsStateComponent, state)
             .addComponent(WeaponsComponent, local)
+            .addComponent(MultiplayerData, { owner: 'server' })
             .addComponent(DestructionStartedComponent, true));
 
         world.step();
@@ -105,6 +184,7 @@ describe('weapon firing', () => {
         const local = new DefaultMap<string, ReturnType<typeof getDefaultWeaponLocalState>>(
             getDefaultWeaponLocalState);
         const world = new World('weapon-cadence-test');
+        configureWeaponWorld(world);
         world.resources.set(TimeResource, time);
         world.resources.set(WeaponEntries, entries);
         world.addSystem(WeaponsSystem);
@@ -112,7 +192,8 @@ describe('weapon firing', () => {
             .addComponent(WeaponsStateComponent, new Map([
                 ['test-weapon', { count: 1, firing: true }],
             ]))
-            .addComponent(WeaponsComponent, local));
+            .addComponent(WeaponsComponent, local)
+            .addComponent(MultiplayerData, { owner: 'server' }));
 
         for (let i = 0; i < 600; i++) {
             time.time += STEP_MS;
@@ -138,6 +219,7 @@ describe('weapon firing', () => {
         const local = new DefaultMap<string, ReturnType<typeof getDefaultWeaponLocalState>>(
             getDefaultWeaponLocalState);
         const world = new World('weapon-recovery-test');
+        configureWeaponWorld(world);
         world.resources.set(TimeResource, time);
         world.resources.set(WeaponEntries, entries);
         world.addSystem(WeaponsSystem);
@@ -145,7 +227,8 @@ describe('weapon firing', () => {
             .addComponent(WeaponsStateComponent, new Map([
                 ['test-weapon', { count: 1, firing: true }],
             ]))
-            .addComponent(WeaponsComponent, local));
+            .addComponent(WeaponsComponent, local)
+            .addComponent(MultiplayerData, { owner: 'server' }));
 
         time.time += STEP_MS;
         world.step();
@@ -176,6 +259,7 @@ describe('weapon firing', () => {
         const local = new DefaultMap<string, ReturnType<typeof getDefaultWeaponLocalState>>(
             getDefaultWeaponLocalState);
         const world = new World('weapon-burst-test');
+        configureWeaponWorld(world);
         world.resources.set(TimeResource, time);
         world.resources.set(WeaponEntries, entries);
         world.addSystem(WeaponsSystem);
@@ -183,7 +267,8 @@ describe('weapon firing', () => {
             .addComponent(WeaponsStateComponent, new Map([
                 ['test-weapon', { count: 1, firing: true }],
             ]))
-            .addComponent(WeaponsComponent, local));
+            .addComponent(WeaponsComponent, local)
+            .addComponent(MultiplayerData, { owner: 'server' }));
 
         for (let i = 0; i < 20; i++) {
             time.time += STEP_MS;
@@ -221,12 +306,14 @@ describe('weapon firing', () => {
             ['test-weapon', { count: 1, firing: true }],
         ]);
         const world = new World('weapon-tap-test');
+        configureWeaponWorld(world);
         world.resources.set(TimeResource, time);
         world.resources.set(WeaponEntries, entries);
         world.addSystem(WeaponsSystem);
         world.entities.set('player', new Entity()
             .addComponent(WeaponsStateComponent, state)
-            .addComponent(WeaponsComponent, local));
+            .addComponent(WeaponsComponent, local)
+            .addComponent(MultiplayerData, { owner: 'server' }));
 
         time.time += STEP_MS;
         world.step();
@@ -259,13 +346,15 @@ describe('weapon trigger latch', () => {
             ['test-weapon', { count: 1, firing: false }],
         ]);
         const world = new World(name);
+        configureWeaponWorld(world);
         world.resources.set(TimeResource, time);
         world.resources.set(WeaponEntries, entries);
         world.addSystem(WeaponsSystem);
         world.addSystem(ReleaseWeaponTriggerSystem);
         world.entities.set('player', new Entity()
             .addComponent(WeaponsStateComponent, state)
-            .addComponent(WeaponsComponent, local));
+            .addComponent(WeaponsComponent, local)
+            .addComponent(MultiplayerData, { owner: 'server' }));
         const weaponState = state.get('test-weapon')!;
         return { shots, time, local, state, world, weaponState };
     }

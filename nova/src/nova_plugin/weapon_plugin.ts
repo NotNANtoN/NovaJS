@@ -1,27 +1,47 @@
 import { WeaponData } from 'novadatainterface/WeaponData';
-import { Emit, UUID } from 'nova_ecs/arg_types';
+import { Emit, GetEntity, UUID } from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
+import { Entity } from 'nova_ecs/entity';
 import { EcsEvent } from 'nova_ecs/events';
 import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
+import {
+    CommunicatorResource,
+    MultiplayerData,
+} from 'nova_ecs/plugins/multiplayer_plugin';
 import { Time, TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { Provide } from 'nova_ecs/provide';
 import { System } from 'nova_ecs/system';
 import { mod } from '../util/mod';
 import { ControlStateEvent } from './control_state_event';
 import {
+    FiredShot,
     WeaponEntries,
     WeaponLocalState,
     WeaponsComponent,
     WeaponsLocalState,
 } from './fire_weapon_plugin';
+import {
+    FireIntent,
+    FireIntentComponent,
+    FireIntentShot,
+    FireLog,
+    FireLogComponent,
+    FireSyncLocalState,
+    FireSyncPlugin,
+    getFireSyncLocalState,
+    makeFireLogShot,
+    newShotsAfter,
+    pushShot,
+} from './fire_sync';
 import { GameDataResource } from './game_data_resource';
 import { PlatformResource } from './platform_plugin';
 import { PlayerShipSelector } from './player_ship_plugin';
 import { WeaponsState, WeaponsStateComponent, WeaponState } from './weapons_state';
 import { ArmorComponent } from './health_plugin';
 import { DestructionStartedComponent } from './destruction_state';
+import { randomShotSeed } from './shot_rng';
 
 /**
  * Avoid an accidental large projectile burst after a stalled tab or server.
@@ -29,6 +49,51 @@ import { DestructionStartedComponent } from './destruction_state';
  * when a single salvo contains more than this many projectiles.
  */
 export const MAX_WEAPON_PROJECTILES_PER_STEP = 16;
+
+export function worldOwnsWeaponCadence(
+    platform: 'node' | 'browser',
+    owner: string,
+    communicatorUuid: string | undefined,
+): boolean {
+    return platform === 'node'
+        ? owner === 'server'
+        : communicatorUuid !== undefined && owner === communicatorUuid;
+}
+
+function recordOwnedShot(
+    entity: Entity,
+    platform: 'node' | 'browser',
+    weaponId: string,
+    seed: number,
+    exitIndex: number,
+    fired: FiredShot,
+    time: Time,
+    sync: FireSyncLocalState,
+    intent: FireIntent | undefined,
+    log: FireLog | undefined,
+): { intent: FireIntent | undefined, log: FireLog | undefined } {
+    const seq = sync.nextSeq++;
+    sync.spawnedSeqs.add(seq);
+    const event: FireIntentShot = { seq, weaponId, seed, exitIndex };
+    if (platform === 'browser') {
+        if (intent) {
+            pushShot(intent.shots, event);
+        } else {
+            intent = { shots: [event] };
+            entity.components.set(FireIntentComponent, intent);
+        }
+    } else {
+        const logged = makeFireLogShot(
+            event, time.time, fired.position, fired.rotation);
+        if (log) {
+            pushShot(log.shots, logged);
+        } else {
+            log = { shots: [logged] };
+            entity.components.set(FireLogComponent, log);
+        }
+    }
+    return { intent, log };
+}
 
 export function clearWeaponFiringState(
     weaponsState: WeaponsState,
@@ -87,13 +152,21 @@ export const WeaponsSystem = new System({
     args: [WeaponsStateComponent, WeaponsComponent,
         TimeResource, UUID, WeaponEntries,
         Optional(DestructionStartedComponent),
-        Optional(ArmorComponent)] as const,
+        Optional(ArmorComponent), MultiplayerData, PlatformResource,
+        CommunicatorResource, GetEntity,
+        Optional(FireIntentComponent), Optional(FireLogComponent)] as const,
     step(weaponsState, weaponsLocalState, time, uuid, weaponEntries,
-        destructionStarted, armor) {
+        destructionStarted, armor, multiplayer, platform, communicator, entity,
+        intent, log) {
+        if (!worldOwnsWeaponCadence(
+            platform, multiplayer.owner, communicator?.uuid)) {
+            return;
+        }
         if (destructionStarted !== undefined || armor && armor.current <= 0) {
             clearWeaponFiringState(weaponsState, weaponsLocalState);
             return;
         }
+        const sync = getFireSyncLocalState(entity, intent, log);
         for (const [id, state] of weaponsState) {
             const localState = weaponsLocalState.get(id);
             if (state.firing) {
@@ -152,10 +225,26 @@ export const WeaponsSystem = new System({
                 let fired = false;
                 if (weapon.data.fireSimultaneously) {
                     for (let copy = 0; copy < count; copy++) {
-                        fired = weapon.fireFromEntity(uuid) !== undefined || fired;
+                        const seed = randomShotSeed();
+                        const shot = weapon.fireFromEntityDetailed(uuid, seed);
+                        fired = shot !== undefined || fired;
+                        if (shot && weapon.syncAsFireEvent !== false) {
+                            ({ intent, log } = recordOwnedShot(
+                                entity, platform, id, seed,
+                                localState.exitIndex, shot, time,
+                                sync, intent, log));
+                        }
                     }
                 } else {
-                    fired = weapon.fireFromEntity(uuid) !== undefined;
+                    const seed = randomShotSeed();
+                    const shot = weapon.fireFromEntityDetailed(uuid, seed);
+                    fired = shot !== undefined;
+                    if (shot && weapon.syncAsFireEvent !== false) {
+                        ({ intent, log } = recordOwnedShot(
+                            entity, platform, id, seed,
+                            localState.exitIndex, shot, time,
+                            sync, intent, log));
+                    }
                 }
 
                 // Guidance can make a weapon unavailable (for example, a
@@ -191,6 +280,129 @@ export const WeaponsSystem = new System({
             }
         }
     }
+});
+
+export function weaponShotRateCeiling(
+    weapon: WeaponData,
+    installedCount: number,
+): number {
+    const count = Math.max(1, Math.floor(installedCount));
+    const reload = Math.max(1, weapon.reload);
+    const sustained = Math.ceil(1000 / reload) * count;
+    const burst = weapon.burstCount > 0
+        ? weapon.burstCount * count : count;
+    return Math.min(240, Math.max(count, sustained + burst));
+}
+
+function acceptsShotAt(
+    sync: FireSyncLocalState,
+    weaponId: string,
+    now: number,
+    ceiling: number,
+): boolean {
+    const cutoff = now - 1000;
+    const recent = (sync.acceptedAt.get(weaponId) ?? [])
+        .filter(at => at > cutoff);
+    if (recent.length >= ceiling) {
+        sync.acceptedAt.set(weaponId, recent);
+        return false;
+    }
+    recent.push(now);
+    sync.acceptedAt.set(weaponId, recent);
+    return true;
+}
+
+function validFireIntent(shot: FireIntentShot): boolean {
+    return Number.isSafeInteger(shot.seq) && shot.seq > 0
+        && Number.isInteger(shot.seed)
+        && shot.seed >= 0 && shot.seed <= 0xffff_ffff
+        && Number.isSafeInteger(shot.exitIndex) && shot.exitIndex >= 0;
+}
+
+export const ServerFireIntentSystem = new System({
+    name: 'ServerFireIntentSystem',
+    after: [WeaponsSystem],
+    args: [
+        FireIntentComponent,
+        WeaponsStateComponent,
+        MultiplayerData,
+        PlatformResource,
+        WeaponEntries,
+        TimeResource,
+        UUID,
+        GetEntity,
+        Optional(FireLogComponent),
+    ] as const,
+    step(intent, weapons, multiplayer, platform, weaponEntries, time, uuid,
+        entity, log) {
+        if (platform !== 'node' || multiplayer.owner === 'server') {
+            return;
+        }
+        const sync = getFireSyncLocalState(entity, intent, log);
+        for (const shot of newShotsAfter(
+            intent.shots, sync.highestIntentSeq)) {
+            sync.highestIntentSeq = shot.seq;
+            if (!validFireIntent(shot)) {
+                continue;
+            }
+            const installed = weapons.get(shot.weaponId);
+            const weapon = weaponEntries.getCached(shot.weaponId);
+            if (!installed || installed.count <= 0 || !weapon
+                || weapon.syncAsFireEvent === false
+                || !acceptsShotAt(sync, shot.weaponId, time.time,
+                    weaponShotRateCeiling(weapon.data, installed.count))) {
+                continue;
+            }
+            const fired = weapon.fireFromEntityDetailed(
+                uuid, shot.seed, true, shot.exitIndex);
+            if (!fired) {
+                continue;
+            }
+            sync.spawnedSeqs.add(shot.seq);
+            const logged = makeFireLogShot(
+                shot, time.time, fired.position, fired.rotation);
+            if (log) {
+                pushShot(log.shots, logged);
+            } else {
+                log = { shots: [logged] };
+                entity.components.set(FireLogComponent, log);
+            }
+        }
+    },
+});
+
+export const FireLogSpawnSystem = new System({
+    name: 'FireLogSpawnSystem',
+    after: [WeaponsSystem, ServerFireIntentSystem],
+    args: [
+        FireLogComponent,
+        WeaponEntries,
+        TimeResource,
+        UUID,
+        GetEntity,
+        Optional(FireIntentComponent),
+    ] as const,
+    step(log, weaponEntries, time, uuid, entity, intent) {
+        const sync = getFireSyncLocalState(entity, intent, log);
+        for (const shot of newShotsAfter(log.shots, sync.highestLogSeq)) {
+            sync.nextSeq = Math.max(sync.nextSeq, shot.seq + 1);
+            if (sync.spawnedSeqs.delete(shot.seq)) {
+                sync.highestLogSeq = shot.seq;
+                continue;
+            }
+            const weapon = weaponEntries.getCached(shot.weaponId);
+            if (!weapon || weapon.syncAsFireEvent === false) {
+                break;
+            }
+            weapon.fireFromLog(uuid, shot, time.time);
+            sync.highestLogSeq = shot.seq;
+        }
+        for (const seq of sync.spawnedSeqs) {
+            if (seq <= sync.highestLogSeq) {
+                sync.spawnedSeqs.delete(seq);
+            }
+        }
+    },
 });
 
 /**
@@ -340,8 +552,11 @@ export const WeaponPlugin: Plugin = {
             throw new Error('Expected delta maker resource to exist');
         }
 
+        world.addPlugin(FireSyncPlugin);
         world.addComponent(WeaponsStateComponent);
         world.addSystem(WeaponsSystem);
+        world.addSystem(ServerFireIntentSystem);
+        world.addSystem(FireLogSpawnSystem);
         const platform = world.resources.get(PlatformResource);
         if (platform === 'browser') {
             world.addSystem(ActiveSecondaryProvider);

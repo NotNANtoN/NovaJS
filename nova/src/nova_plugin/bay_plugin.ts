@@ -14,7 +14,7 @@ import { v4 } from 'uuid';
 import { HitboxHullComponent, HurtboxHullComponent } from './collisions_plugin';
 import { CollisionEvent, CollisionHitterComponent, CollisionVulnerabilityComponent } from './collision_interaction';
 import { ExitPointData } from './exit_point';
-import { OwnerComponent, SourceComponent, WeaponConstructors, WeaponEntry } from './fire_weapon_plugin';
+import { OwnerComponent, ShotCreation, ShotSeedComponent, SourceComponent, WeaponConstructors, WeaponEntry } from './fire_weapon_plugin';
 import { DeathAIComponent, FollowComponent, ShootAllWeaponsComponent } from './npc_plugin';
 import { ShipComponent } from './ship_plugin';
 import { TargetComponent } from './target_component';
@@ -28,6 +28,7 @@ const ReturnWhenTargetRemovedComponent = new Component<undefined>('ReturnWhenTar
 class BayWeaponEntry extends WeaponEntry {
     declare data: BayWeaponData;
     protected pointDefenseRangeSquared;
+    override readonly syncAsFireEvent = false;
     //    private factoryQueue: FactoryQueue<Entity>;
 
     constructor(data: WeaponData, runQuery: RunQueryFunction) {
@@ -76,7 +77,12 @@ class BayWeaponEntry extends WeaponEntry {
         return ship;
     }
 
-    fire(position: Position, angle: Angle, owner: string, target = undefined, source: string, sourceVelocity?: Vector, exitPointData?: ExitPointData): Entity | undefined {
+    fire(position: Position, angle: Angle, owner: string, target = undefined,
+        source: string, sourceVelocity?: Vector,
+        _exitPointData?: ExitPointData, shot?: ShotCreation): Entity | undefined {
+        if (!shot) {
+            throw new Error('Bay launches require deterministic creation data');
+        }
         const q = this.runQuery(new Query([MultiplayerData, CommunicatorResource] as const), source);
 
         // Do not fire if the owner is a multiplayer object not owned by us.
@@ -100,6 +106,7 @@ class BayWeaponEntry extends WeaponEntry {
         const ship = this.makeShip();
         ship.components.set(OwnerComponent, {owner});
         ship.components.set(SourceComponent, source);
+        ship.components.set(ShotSeedComponent, { seed: shot.seed });
         ship.components.set(TargetComponent, { target });
         ship.components.set(MovementStateComponent, {
             accelerating: 0,

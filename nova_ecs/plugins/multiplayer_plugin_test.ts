@@ -15,11 +15,14 @@ import { DeltaResource } from './delta_plugin';
 import { MockCommunicator } from './mock_communicator';
 import { SerializerResource } from './serializer_plugin';
 import {
+    applyMovementStateDelta,
+    copyMovementState,
     MovementPhysicsComponent,
     MovementPlugin,
     RemoteMovementPresentationComponent,
     MovementState,
     MovementStateComponent,
+    MovementStateDelta,
     MovementType,
 } from './movement_plugin';
 import { TimePlugin, TimeResource } from './time_plugin';
@@ -930,6 +933,7 @@ describe('Multiplayer Plugin', () => {
             .addComponent(MovementPhysicsComponent, physics));
 
         let directApplicationBackwardEstimate = 0;
+        let deliveredMovement: MovementState | undefined;
         network.onDeliver = (destination, rawMessage) => {
             if (destination !== 'client') {
                 return;
@@ -938,17 +942,28 @@ describe('Multiplayer Plugin', () => {
             if (!isRight(decodedMessage)) {
                 return;
             }
+            const encodedState = decodedMessage.right.state?.get(npcUuid)
+                ?.components.find(
+                    ([name]) => name === MovementStateComponent.name)?.[1];
+            const decodedState = MovementState.decode(encodedState);
+            if (isRight(decodedState)) {
+                deliveredMovement = decodedState.right;
+            }
             const delta = decodedMessage.right.delta?.get(npcUuid);
             const encodedMovement = delta?.componentDeltas
                 ?.get(MovementStateComponent.name);
-            const decodedMovement = MovementState.decode(encodedMovement);
+            const decodedMovement = MovementStateDelta.decode(encodedMovement);
             const timestamp = decodedMessage.right.movementTimestamps
                 ?.get(npcUuid);
-            if (isRight(decodedMovement) && timestamp !== undefined) {
+            if (isRight(decodedMovement) && deliveredMovement
+                && timestamp !== undefined) {
+                deliveredMovement = copyMovementState(deliveredMovement);
+                applyMovementStateDelta(
+                    deliveredMovement, decodedMovement.right);
                 const age = client.resources.get(TimeResource)!.time - timestamp;
                 directApplicationBackwardEstimate = Math.max(
                     directApplicationBackwardEstimate,
-                    Math.max(0, decodedMovement.right.velocity.x * age / 1000),
+                    Math.max(0, deliveredMovement.velocity.x * age / 1000),
                 );
             }
         };
@@ -1282,5 +1297,80 @@ describe('Multiplayer Plugin', () => {
 
         const nonMultiplaer = world1.entities.get(testUuid)?.components.get(NonMultiplayer);
         expect(isDraft(nonMultiplaer)).toBeFalse();
+    });
+
+    it('sends full state on interest entry and removes state on exit', () => {
+        world1.singletonEntity.components.get(Comms)!.admins =
+            new Set(['world1 uuid']);
+        world2.singletonEntity.components.get(Comms)!.admins =
+            new Set(['world1 uuid']);
+        const movementAt = (x: number): MovementState => ({
+            position: new Position(x, 0),
+            velocity: new Vector(0, 0),
+            rotation: new Angle(0),
+            turning: 0,
+            turnBack: false,
+            accelerating: 0,
+        });
+        world1.entities.set('client-centre', new Entity()
+            .addComponent(MultiplayerData, { owner: 'world2 uuid' })
+            .addComponent(MovementStateComponent, movementAt(0)));
+        world1.entities.set('inside', new Entity()
+            .addComponent(MultiplayerData, { owner: 'world1 uuid' })
+            .addComponent(MovementStateComponent, movementAt(5_900))
+            .addComponent(BarComponent, { y: 'complete inside state' }));
+        world1.entities.set('outside', new Entity()
+            .addComponent(MultiplayerData, { owner: 'world1 uuid' })
+            .addComponent(MovementStateComponent, movementAt(6_100))
+            .addComponent(BarComponent, { y: 'complete entering state' }));
+
+        world1.step();
+        world2.step();
+
+        expect(world2.entities.has('inside')).toBeTrue();
+        expect(world2.entities.has('outside')).toBeFalse();
+
+        world1.entities.get('outside')!.components
+            .get(MovementStateComponent)!.position = new Position(5_999, 0);
+        world1.step();
+        world2.step();
+
+        expect(world2.entities.get('outside')?.components.get(BarComponent))
+            .toEqual({ y: 'complete entering state' });
+
+        world1.entities.get('outside')!.components
+            .get(MovementStateComponent)!.position = new Position(6_100, 0);
+        world1.step();
+        world2.step();
+
+        expect(world2.entities.has('outside')).toBeFalse();
+    });
+
+    it('never filters an entity owned by the receiving peer', () => {
+        world1.singletonEntity.components.get(Comms)!.admins =
+            new Set(['world1 uuid']);
+        world2.singletonEntity.components.get(Comms)!.admins =
+            new Set(['world1 uuid']);
+        const movementAt = (x: number): MovementState => ({
+            position: new Position(x, 0),
+            velocity: new Vector(0, 0),
+            rotation: new Angle(0),
+            turning: 0,
+            turnBack: false,
+            accelerating: 0,
+        });
+        world1.entities.set('client-centre', new Entity()
+            .addComponent(MultiplayerData, { owner: 'world2 uuid' })
+            .addComponent(MovementStateComponent, movementAt(0)));
+        world1.entities.set('far-owned', new Entity()
+            .addComponent(MultiplayerData, { owner: 'world2 uuid' })
+            .addComponent(MovementStateComponent, movementAt(9_000))
+            .addComponent(BarComponent, { y: 'owned at any distance' }));
+
+        world1.step();
+        world2.step();
+
+        expect(world2.entities.get('far-owned')?.components.get(BarComponent))
+            .toEqual({ y: 'owned at any distance' });
     });
 });

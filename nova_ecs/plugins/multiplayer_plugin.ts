@@ -5,6 +5,7 @@ import { BehaviorSubject, Observable, Subject } from 'rxjs';
 import { Emit, Entities, GetEntity, UUID } from '../arg_types';
 import { Component } from '../component';
 import { map } from '../datatypes/map';
+import { BOUNDARY } from '../datatypes/position';
 import { set } from '../datatypes/set';
 import { Entity } from '../entity';
 import { EcsEvent } from '../events';
@@ -21,9 +22,13 @@ import {
     SerializerResource,
 } from './serializer_plugin';
 import {
+    applyMovementStateDelta,
     copyMovementState,
     MovementState,
     MovementStateComponent,
+    MovementStateDelta,
+    quantizedMovementDelta,
+    quantizeMovementState,
     queueRemoteMovementSnapshot,
     RemoteMovementPresentationComponent,
 } from './movement_plugin';
@@ -103,6 +108,22 @@ export const Message = t.partial({
 export type Message = t.TypeOf<typeof Message>;
 
 export const MultiplayerData = new Component<{ owner: string }>('MultiplayerData');
+export const MULTIPLAYER_INTEREST_RADIUS = 6_000;
+
+function wrappedAxisDistance(a: number, b: number): number {
+    const direct = Math.abs(a - b);
+    return Math.min(direct, BOUNDARY * 2 - direct);
+}
+
+function positionsWithinInterest(
+    a: MovementState,
+    b: MovementState,
+): boolean {
+    const x = wrappedAxisDistance(a.position.x, b.position.x);
+    const y = wrappedAxisDistance(a.position.y, b.position.y);
+    return x * x + y * y
+        <= MULTIPLAYER_INTEREST_RADIUS * MULTIPLAYER_INTEREST_RADIUS;
+}
 
 export interface MessageWithSource<M> {
     message: M,
@@ -507,9 +528,23 @@ function filterEncodedEntity(
 ): EncodedEntity {
     return {
         ...encodedEntity,
-        components: encodedEntity.components.filter(([name]) =>
-            canSendFullState(name, localUuid, isAdmin, owner)),
+        components: encodedEntity.components
+            .filter(([name]) =>
+                canSendFullState(name, localUuid, isAdmin, owner))
+            .map(([name, value]) => [
+                name,
+                name === MovementStateComponent.name
+                    ? quantizeEncodedMovement(value)
+                    : value,
+            ] as [string, unknown]),
     };
+}
+
+function quantizeEncodedMovement(value: unknown): unknown {
+    const decoded = MovementState.decode(value);
+    return isLeft(decoded)
+        ? value
+        : MovementState.encode(quantizeMovementState(decoded.right));
 }
 
 function owningClientDelta(
@@ -621,7 +656,10 @@ function canApplyMovementInbound(
     return localIsAdmin && source === owner;
 }
 
-function separateMovementSnapshot(entityDelta: EntityDelta): {
+function separateMovementSnapshot(
+    entityDelta: EntityDelta,
+    entity: Entity,
+): {
     delta: EntityDelta | undefined;
     movement: MovementState | undefined;
 } {
@@ -630,9 +668,19 @@ function separateMovementSnapshot(entityDelta: EntityDelta): {
         ?? entityDelta.componentStates?.get(MovementStateComponent.name);
     let movement: MovementState | undefined;
     if (encodedMovement !== undefined) {
-        const decoded = MovementState.decode(encodedMovement);
-        if (!isLeft(decoded)) {
-            movement = decoded.right;
+        const decodedState = MovementState.decode(encodedMovement);
+        if (!isLeft(decodedState)) {
+            movement = decodedState.right;
+        } else {
+            const decodedDelta = MovementStateDelta.decode(encodedMovement);
+            const base = entity.components
+                .get(RemoteMovementPresentationComponent)
+                ?.snapshots.at(-1)?.state
+                ?? entity.components.get(MovementStateComponent);
+            if (!isLeft(decodedDelta) && base) {
+                movement = copyMovementState(base);
+                applyMovementStateDelta(movement, decodedDelta.right);
+            }
         }
     }
 
@@ -664,7 +712,13 @@ function filterOutboundDelta(
 ): EntityDelta | undefined {
     const componentStates = new Map(
         [...entityDelta.componentStates ?? []]
-            .filter(([name]) => canSendOutbound(name, localUuid, isAdmin, owner)),
+            .filter(([name]) => canSendOutbound(name, localUuid, isAdmin, owner))
+            .map(([name, value]) => [
+                name,
+                name === MovementStateComponent.name
+                    ? quantizeEncodedMovement(value)
+                    : value,
+            ] as [string, unknown]),
     );
     const componentDeltas = new Map(
         [...entityDelta.componentDeltas ?? []]
@@ -752,6 +806,7 @@ export function multiplayer(communicator: Communicator,
     warn: (message: string) => void = console.warn): Plugin {
     const MultiplayerQuery = new Query([UUID, GetEntity, MultiplayerData] as const);
     const lastMovementSnapshotAt = new Map<string, number>();
+    const lastMovementWireState = new Map<string, MovementState>();
     const nextMovementSequenceByEntity = new Map<string, number>();
     const latestInboundMovement = new Map<string, {
         source: string;
@@ -763,6 +818,7 @@ export function multiplayer(communicator: Communicator,
         offset: number;
         lastMappedTime?: number;
     }>();
+    const interestedEntitiesByPeer = new Map<string, Set<string>>();
     const deferredOwnerWeaponIntent = new Map<string, Map<string, boolean>>();
     const movementSnapshotIntervalMs = 100;
     let messageSubscription: { unsubscribe(): void } | undefined;
@@ -776,6 +832,7 @@ export function multiplayer(communicator: Communicator,
 
     function clearMovementLifecycle(uuid: string): void {
         lastMovementSnapshotAt.delete(uuid);
+        lastMovementWireState.delete(uuid);
         nextMovementSequenceByEntity.delete(uuid);
         latestInboundMovement.delete(uuid);
     }
@@ -982,6 +1039,31 @@ export function multiplayer(communicator: Communicator,
             const entityMap = new Map(query.map(([uuid, entity, data]) =>
                 [uuid, { entity, data }]));
             const entityUuids = new Set(entityMap.keys());
+            function interestedEntityUuids(peer: string): Set<string> {
+                const centres = [...entityMap.values()]
+                    .filter(({ entity }) => entity.components
+                        .get(MultiplayerData)?.owner === peer)
+                    .map(({ entity }) =>
+                        entity.components.get(MovementStateComponent))
+                    .filter((movement): movement is MovementState =>
+                        movement !== undefined);
+                if (centres.length === 0) {
+                    return new Set(entityMap.keys());
+                }
+                return new Set([...entityMap]
+                    .filter(([, { entity }]) => {
+                        if (entity.components.get(MultiplayerData)?.owner
+                            === peer) {
+                            return true;
+                        }
+                        const movement = entity.components
+                            .get(MovementStateComponent);
+                        return movement === undefined
+                            || centres.some(centre =>
+                                positionsWithinInterest(centre, movement));
+                    })
+                    .map(([uuid]) => uuid));
+            }
             // Capture local weapon edges before applying inbound state. A
             // merge may make the eventual value equal to its new tracking
             // baseline; the edge must still be emitted (especially keyup).
@@ -1050,6 +1132,11 @@ export function multiplayer(communicator: Communicator,
                         uuidsToSend = [...message.requestState.uuids].filter(
                             uuid => entityUuids.has(uuid));
                     }
+                    if (isAdmin) {
+                        const interested = interestedEntityUuids(source);
+                        uuidsToSend = uuidsToSend.filter(
+                            uuid => interested.has(uuid));
+                    }
 
                     const stateMovementTimestamps = new Map<string, number>();
                     const stateMovementSequences = new Map<string, number>();
@@ -1081,6 +1168,14 @@ export function multiplayer(communicator: Communicator,
                         movementTimestamps: stateMovementTimestamps,
                         movementSequences: stateMovementSequences,
                     }, source);
+                    if (isAdmin) {
+                        const known = interestedEntitiesByPeer.get(source)
+                            ?? new Set<string>();
+                        for (const uuid of state.keys()) {
+                            known.add(uuid);
+                        }
+                        interestedEntitiesByPeer.set(source, known);
+                    }
                 }
 
                 // Remove entities
@@ -1343,7 +1438,7 @@ export function multiplayer(communicator: Communicator,
                         let movement: ReturnType<typeof movementMetadata>
                             | undefined;
                         if (delta && containsMovementState(delta)) {
-                            const separated = separateMovementSnapshot(delta);
+                            const separated = separateMovementSnapshot(delta, entity);
                             movement = movementMetadata(source, uuid, message);
                             movementAccepted = movementCanApply
                                 && separated.movement !== undefined
@@ -1517,6 +1612,11 @@ export function multiplayer(communicator: Communicator,
                 if (entity.components.has(MovementStateComponent)) {
                     markMovement(uuid);
                     lastMovementSnapshotAt.set(uuid, localTime);
+                    lastMovementWireState.set(
+                        uuid,
+                        quantizeMovementState(
+                            entity.components.get(MovementStateComponent)!),
+                    );
                 }
             }
 
@@ -1582,12 +1682,16 @@ export function multiplayer(communicator: Communicator,
                         };
                     }
                 }
+                const movement = entity.components.get(MovementStateComponent);
                 if (entityDelta && containsMovementState(entityDelta)) {
                     markMovement(uuid);
                     lastMovementSnapshotAt.set(uuid, localTime);
+                    if (movement) {
+                        lastMovementWireState.set(
+                            uuid, quantizeMovementState(movement));
+                    }
                 }
 
-                const movement = entity.components.get(MovementStateComponent);
                 const movementIsActive = movement
                     && (movement.velocity.lengthSquared > 1e-9
                         || movement.accelerating !== 0
@@ -1604,16 +1708,24 @@ export function multiplayer(communicator: Communicator,
                     && (lastSnapshot === undefined
                         || localTime - lastSnapshot >= movementSnapshotIntervalMs);
                 if (periodicSnapshotDue && movement) {
-                    const snapshotDelta: EntityDelta = {
-                        componentDeltas: new Map([[
-                            MovementStateComponent.name,
-                            MovementState.encode(copyMovementState(movement)),
-                        ]]),
-                    };
-                    entityDelta = entityDelta
-                        ? mergeEntityDeltas(entityDelta, snapshotDelta)
-                        : snapshotDelta;
-                    markMovement(uuid);
+                    const previous = lastMovementWireState.get(uuid);
+                    const snapshot = previous
+                        ? quantizedMovementDelta(previous, movement)
+                        : quantizeMovementState(movement);
+                    if (snapshot) {
+                        const snapshotDelta: EntityDelta = {
+                            componentDeltas: new Map([[
+                                MovementStateComponent.name,
+                                MovementStateDelta.encode(snapshot),
+                            ]]),
+                        };
+                        entityDelta = entityDelta
+                            ? mergeEntityDeltas(entityDelta, snapshotDelta)
+                            : snapshotDelta;
+                        markMovement(uuid);
+                        lastMovementWireState.set(
+                            uuid, quantizeMovementState(movement));
+                    }
                     lastMovementSnapshotAt.set(uuid, localTime);
                 }
                 if (entityDelta) {
@@ -1654,8 +1766,95 @@ export function multiplayer(communicator: Communicator,
                 send = true;
             }
 
-            if (send) {
-                // Only send if there's something to send.
+            function sendInterestManagedChanges(peer: string): void {
+                const interested = interestedEntityUuids(peer);
+                const previous = interestedEntitiesByPeer.get(peer)
+                    ?? new Set<string>();
+                const entering = setDifference(interested, previous);
+                const leaving = setDifference(previous, interested);
+                const peerState = new Map(
+                    [...state].filter(([uuid]) => interested.has(uuid)));
+                for (const uuid of entering) {
+                    if (peerState.has(uuid)) {
+                        continue;
+                    }
+                    const entry = entityMap.get(uuid);
+                    if (!entry) {
+                        continue;
+                    }
+                    peerState.set(uuid, filterEncodedEntity(
+                        serializer.encode(entry.entity),
+                        comms.uuid!,
+                        isAdmin,
+                        entry.entity.components
+                            .get(MultiplayerData)?.owner ?? '',
+                    ));
+                }
+                const peerDelta = new Map([...delta].filter(([uuid]) =>
+                    interested.has(uuid) && !entering.has(uuid)));
+                const peerRemove = new Set([
+                    ...remove.filter(uuid => previous.has(uuid)),
+                    ...leaving,
+                ]);
+                const movementUuids = new Set<string>();
+                for (const [uuid, entityDelta] of peerDelta) {
+                    if (containsMovementState(entityDelta)) {
+                        movementUuids.add(uuid);
+                    }
+                }
+                for (const [uuid, encodedEntity] of peerState) {
+                    if (encodedEntity.components.some(
+                        ([name]) => name === MovementStateComponent.name)) {
+                        movementUuids.add(uuid);
+                    }
+                }
+                const peerMovementTimestamps = new Map<string, number>();
+                const peerMovementSequences = new Map<string, number>();
+                for (const uuid of movementUuids) {
+                    peerMovementTimestamps.set(
+                        uuid, movementTimestamps.get(uuid) ?? localTime);
+                    peerMovementSequences.set(
+                        uuid,
+                        movementSequences.get(uuid)
+                            ?? nextMovementSequence(uuid),
+                    );
+                }
+
+                const peerChanges: Message = {};
+                let peerSend = false;
+                if (peerDelta.size > 0) {
+                    peerChanges.delta = peerDelta;
+                    peerSend = true;
+                }
+                if (peerState.size > 0) {
+                    peerChanges.state = peerState;
+                    peerSend = true;
+                }
+                if (peerMovementTimestamps.size > 0) {
+                    peerChanges.movementTimestamps = peerMovementTimestamps;
+                    peerChanges.movementSequences = peerMovementSequences;
+                }
+                if (peerRemove.size > 0) {
+                    peerChanges.remove = [...peerRemove];
+                    peerSend = true;
+                }
+                if (ownedUuids.length > 0) {
+                    peerChanges.ownedUuids = ownedUuids;
+                    peerSend = true;
+                }
+                interestedEntitiesByPeer.set(peer, interested);
+                if (peerSend) {
+                    sendMessage(peerChanges, peer);
+                }
+            }
+
+            if (isAdmin) {
+                for (const peer of communicator.peers.current.value) {
+                    if (peer !== comms.uuid) {
+                        sendInterestManagedChanges(peer);
+                    }
+                }
+            } else if (send) {
                 sendMessage(changes);
             }
         }
@@ -1702,6 +1901,7 @@ export function multiplayer(communicator: Communicator,
         });
         peerLeaveSubscription = communicator.peers.leave.subscribe(peer => {
             sourceClockOffsets.delete(peer);
+            interestedEntitiesByPeer.delete(peer);
             for (const [uuid, movement] of latestInboundMovement) {
                 if (movement.source === peer) {
                     latestInboundMovement.delete(uuid);
