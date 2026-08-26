@@ -144,8 +144,8 @@ describe("ShipResource", function() {
         expect(s1.armorRecharge).toEqual(20);
     });
 
-    it("should parse energy", function() {
-        expect(s1.energy).toEqual(21);
+    it("should parse fuelCapacity", function() {
+        expect(s1.fuelCapacity).toEqual(21);
     });
 
     it("should parse energyRecharge", function() {

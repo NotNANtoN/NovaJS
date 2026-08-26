@@ -27,6 +27,8 @@ import { GameDataResource } from "./game_data_resource";
 import { ArmorComponent } from "./health_plugin";
 import { PlayerShipSelector } from "./player_ship_plugin";
 import { advanceGameDate, PlayerStateComponent } from "./player_state";
+import { canJump, spendJumpFuel } from "./fuel";
+import { ShipDataComponent } from "./ship_plugin";
 import { ControlPlayerShip } from "./ship_controller_plugin";
 import { SoundEvent } from "./sound_event";
 import { SystemIdResource } from "./system_id_resource";
@@ -43,6 +45,13 @@ export interface InitiateJump {
     to: string /* system uuid */,
 }
 export const InitiateJumpEvent = new EcsEvent<InitiateJump>('InitiateJumpEvent');
+
+/** Raised when a jump the pilot asked for cannot happen. */
+export interface JumpRefusal {
+    reason: string;
+}
+export const JumpRefusedEvent =
+    new EcsEvent<JumpRefusal>('JumpRefusedEvent');
 
 const JumpRouteCodec = t.type({ route: t.array(t.string) });
 export type JumpRoute = t.TypeOf<typeof JumpRouteCodec>;
@@ -265,11 +274,21 @@ const PlayerJumpControl = new System({
     events: [ControlStateEvent],
     args: [ControlStateEvent, Emit, UUID, SystemIdResource, JumpRouteComponent,
         Optional(JumpStateComponent), Optional(ArmorComponent),
-        GameDataResource, GetEntity, TimeResource, PlayerShipSelector] as const,
+        GameDataResource, GetEntity, TimeResource,
+        Optional(PlayerStateComponent), Optional(ShipDataComponent),
+        PlayerShipSelector] as const,
     step(controlState, emit, uuid, systemId, jumpRoute, jumpState, armor,
-        gameData, entity, time) {
+        gameData, entity, time, playerState, shipData) {
         if (controlState.get('hyperjump') !== 'start' || jumpState
             || armor && armor.current <= 0) {
+            return;
+        }
+        // A hull with no tank at all is not fuel limited; only refuse when
+        // the ship has a tank and it cannot pay for the jump.
+        if (playerState && (shipData?.fuelCapacity ?? 0) > 0
+            && !canJump(playerState.fuel ?? 0)) {
+            emit(JumpRefusedEvent, { reason: 'fuel' });
+            emit(SoundEvent, { id: 'nova:153' });
             return;
         }
         const nextSystem = jumpRoute.route[0];
@@ -419,6 +438,11 @@ const JumpLifecycleSystem = new System({
 
             route.route = consumeCompletedHop(route.route, state.to);
             if (playerState) {
+                if (state.requiresAdjacency) {
+                    // Hypergates and mission jumps move the ship without
+                    // spending the pilot's own fuel.
+                    playerState.fuel = spendJumpFuel(playerState.fuel ?? 0);
+                }
                 advanceGameDate(playerState);
                 playerState.currentSystem = state.to;
                 if (!playerState.exploredSystems.includes(state.to)) {

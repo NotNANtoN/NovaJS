@@ -163,7 +163,7 @@ export async function ShipParse(ship: ShipResource,
         shieldRecharge: ship.shieldRecharge * FPS / 1000, // Recharge per second
         armor: ship.armor,
         armorRecharge: ship.armorRecharge * FPS / 1000,
-        energy: ship.energy,
+        energy: ship.fuelCapacity,
         energyRecharge: FPS / ship.energyRecharge, // Frames per unit -> units per second
         ionization: ship.ionization,
         deionize: ship.deionize / 100 * FPS, // 100 is 1 point of ion energy per 1/30th of a second (evn bible)
@@ -181,6 +181,7 @@ export async function ShipParse(ship: ShipResource,
     return {
         physics,
         cargoCapacity: Math.abs(ship.cargoSpace),
+        fuelCapacity: Math.max(0, ship.fuelCapacity),
         cost: ship.cost,
         pict: pictID,
         desc: desc,

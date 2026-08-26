@@ -20,7 +20,7 @@ class ShipResource extends BaseResource {
     acceleration: number;
     speed: number;
     turnRate: number;
-    energy: number;
+    fuelCapacity: number;
     freeSpace: number;
     armor: number;
     shieldRecharge: number;
@@ -77,7 +77,10 @@ class ShipResource extends BaseResource {
         this.acceleration = d.getInt16(4);
         this.speed = d.getInt16(6);
         this.turnRate = d.getInt16(8);
-        this.energy = d.getInt16(10);
+        // Offset 10 is the ship's jump fuel, not a weapon energy pool: every
+        // retail value is a multiple of 100 and the Bible counts 100 units to
+        // one hyperspace jump.
+        this.fuelCapacity = d.getInt16(10);
         this.freeSpace = d.getInt16(12);
         this.armor = d.getInt16(14);
         this.shieldRecharge = d.getInt16(16);

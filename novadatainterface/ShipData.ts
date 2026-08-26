@@ -18,6 +18,8 @@ export interface ShipData extends SpaceObjectData {
     physics: ShipPhysics;
     /** Total cargo hold capacity in tons, including cargo expansions. */
     cargoCapacity: number;
+    /** Jump fuel capacity in units; retail spends 100 units per jump. */
+    fuelCapacity: number;
     cost: number;
     pict: string;
     desc: string;
@@ -40,6 +42,7 @@ export function getDefaultShipData(): ShipData {
         ...getDefaultSpaceObjectData(),
         physics: getDefaultShipPhysics(),
         cargoCapacity: 0,
+        fuelCapacity: 0,
         cost: 0,
         pict: "default",
         desc: "default",

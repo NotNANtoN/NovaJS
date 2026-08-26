@@ -1,5 +1,6 @@
 import { Either } from 'fp-ts/Either';
 import * as t from 'io-ts';
+import { FUEL_PER_JUMP } from './fuel';
 import { Errors } from 'io-ts';
 import { Component } from 'nova_ecs/component';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
@@ -139,6 +140,8 @@ const PlayerStateFields = t.intersection([
         landingCount: t.number,
         /** Ships this pilot has destroyed; drives the combat rating. */
         kills: t.number,
+        /** Jump fuel in retail units; 100 units is one hyperspace jump. */
+        fuel: t.number,
         /**
          * Signed legal record per government resource id. A government with
          * no entry falls back to its own InitialRecord.
@@ -183,6 +186,7 @@ const LegacyPlayerStateFields = t.intersection([
         daysSinceRegistration: t.number,
         landingCount: t.number,
         kills: t.number,
+        fuel: t.number,
         legalRecords: t.record(t.string, t.number),
     }),
 ]);
@@ -419,6 +423,8 @@ export function createInitialPlayerState(): PlayerState {
         activeRanks: [],
         exploredSystems: [],
         kills: 0,
+        // A new pilot's Shuttle carries three jumps.
+        fuel: 3 * FUEL_PER_JUMP,
         legalRecords: {},
         // Retail's `P` test asks whether the copy is registered. A full data
         // set is not the demo, and leaving this false hides every ship,

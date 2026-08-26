@@ -15,7 +15,10 @@ import { MissionNotice } from '../nova_plugin/mission_plugin';
 import { OutfitsStateComponent } from '../nova_plugin/outfit_plugin';
 import type { PlanetType } from '../nova_plugin/planet_plugin';
 import { PlayerStateComponent } from '../nova_plugin/player_state';
-import { ShipPhysicsComponent } from '../nova_plugin/ship_plugin';
+import {
+    ShipDataComponent,
+    ShipPhysicsComponent,
+} from '../nova_plugin/ship_plugin';
 import { SystemIdResource } from '../nova_plugin/system_id_resource';
 import { SystemPlugin } from '../nova_plugin/system_plugin';
 import { WeaponsStateComponent } from '../nova_plugin/weapons_state';
@@ -118,6 +121,8 @@ export class Spaceport extends Menu<Entity> {
             try {
                 this.outfitter.setPlayerState(
                     this.input.components.get(PlayerStateComponent));
+                this.outfitter.setShipData(
+                    this.input.components.get(ShipDataComponent));
                 const newOutfits = await this.outfitter.show(outfits);
                 this.input.components.set(OutfitsStateComponent, newOutfits);
                 // Delete these so they are re-created with the new outfits.

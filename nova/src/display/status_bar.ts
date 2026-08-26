@@ -27,6 +27,13 @@ import {
 } from "../nova_plugin/planet_plugin";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin";
 import { ShipDataComponent } from "../nova_plugin/ship_plugin";
+import { PlayerStateComponent } from "../nova_plugin/player_state";
+import {
+    FuelGauge,
+    fuelJumpBlocks,
+    INSUFFICIENT_FUEL_MESSAGE,
+} from "../nova_plugin/fuel";
+import { JumpRefusedEvent } from "../nova_plugin/jump_plugin";
 import { Stat } from "../nova_plugin/stat";
 import { TargetComponent } from "../nova_plugin/target_component";
 import { ChangeSecondaryEvent } from "../nova_plugin/weapon_plugin";
@@ -256,7 +263,7 @@ class StatusBar {
         this.statsGraphics.lineTo(pos[0] + size[0] * fullness, pos[1]);
     }
 
-    drawStats(shield: Stat, armor: Stat) {
+    drawStats(shield: Stat, armor: Stat, fuel?: FuelGauge) {
         this.statsGraphics.clear();
 
         const shieldFullness = Math.max(0, shield.current / shield.max);
@@ -266,6 +273,41 @@ class StatusBar {
         const armorFullness = Math.max(0, armor.current / armor.max);
         this.drawLine(this.statusBarData.dataAreas.armor,
             this.statusBarData.colors.armor, armorFullness);
+
+        if (fuel) {
+            this.drawFuel(fuel);
+        }
+    }
+
+    /**
+     * Retail draws fuel as one block per jump, which is why the interface
+     * resource carries two colours: whole jumps are bright, and the fuel left
+     * over from a partly spent jump is dim.
+     */
+    private drawFuel(fuel: FuelGauge) {
+        const area = this.statusBarData.dataAreas.fuel;
+        const jumps = fuelJumpBlocks(fuel);
+        if (jumps.total <= 0) {
+            return;
+        }
+        const gap = jumps.total > 1 ? 2 : 0;
+        const width = (area.size[0] - gap * (jumps.total - 1)) / jumps.total;
+        const y = area.position[1] + area.size[1] / 2;
+        for (let index = 0; index < jumps.total; index++) {
+            const filled = index < jumps.full;
+            const partial = index === jumps.full && jumps.partial > 0;
+            if (!filled && !partial) {
+                continue;
+            }
+            const color = filled
+                ? this.statusBarData.colors.fuelFull
+                : this.statusBarData.colors.fuelPartial;
+            const x = area.position[0] + index * (width + gap);
+            const length = filled ? width : width * jumps.partial;
+            this.statsGraphics.lineStyle(area.size[1], color);
+            this.statsGraphics.moveTo(x, y);
+            this.statsGraphics.lineTo(x + length, y);
+        }
     }
 
     drawSecondary(name: string | null | undefined) {
@@ -394,9 +436,14 @@ const DrawRadar = new System({
 
 const DrawStatusBarStats = new System({
     name: 'DrawStatusBarStats',
-    args: [StatusBarResource, ShieldComponent, ArmorComponent, PlayerShipSelector] as const,
-    step(statusBar, shield, armor) {
-        statusBar.drawStats(shield, armor);
+    args: [StatusBarResource, ShieldComponent, ArmorComponent,
+        Optional(PlayerStateComponent), Optional(ShipDataComponent),
+        PlayerShipSelector] as const,
+    step(statusBar, shield, armor, playerState, shipData) {
+        const capacity = shipData?.fuelCapacity ?? 0;
+        statusBar.drawStats(shield, armor, capacity > 0 && playerState
+            ? { fuel: playerState.fuel ?? 0, capacity }
+            : undefined);
     }
 })
 
@@ -440,6 +487,18 @@ const DrawLandingMessage = new System({
     args: [LandingResultEvent, StatusBarResource, TimeResource] as const,
     step(result, statusBar, time) {
         statusBar.showLandingMessage(landingResultMessage(result), time.time);
+    },
+});
+
+const ShowJumpRefusal = new System({
+    name: 'ShowJumpRefusal',
+    events: [JumpRefusedEvent],
+    args: [JumpRefusedEvent, StatusBarResource, TimeResource,
+        PlayerShipSelector] as const,
+    step(refusal, statusBar, time) {
+        if (refusal.reason === 'fuel') {
+            statusBar.showLandingMessage(INSUFFICIENT_FUEL_MESSAGE, time.time);
+        }
     },
 });
 
@@ -496,6 +555,7 @@ export const StatusBarPlugin: Plugin = {
         world.addSystem(DrawStatusBarSecondaryWeapon);
         world.addSystem(DrawStatusBarTarget);
         world.addSystem(DrawLandingMessage);
+        world.addSystem(ShowJumpRefusal);
         world.addSystem(ExpireLandingMessage);
     },
     remove(world) {
@@ -505,6 +565,7 @@ export const StatusBarPlugin: Plugin = {
         world.removeSystem(DrawStatusBarSecondaryWeapon);
         world.removeSystem(DrawStatusBarTarget);
         world.removeSystem(DrawLandingMessage);
+        world.removeSystem(ShowJumpRefusal);
         world.removeSystem(ExpireLandingMessage);
 
         const stage = world.resources.get(Stage);
