@@ -1,15 +1,9 @@
-# A Linode instance also gets a usable default hostname such as
-# <ip-with-dashes>.ip.linodeusercontent.com, so a separate domain purchase is
-# not required for Let's Encrypt.
-{$CADDY_HOSTNAME} {
-    # The browser authenticates the page first; its cached Basic credentials
-    # are then sent with the WebSocket upgrade request as well.
-    basic_auth {
-        {$CADDY_BASIC_AUTH_USER} {$CADDY_BASIC_AUTH_HASH}
-    }
+# This is the safe bootstrap configuration. The host updater renders this
+# file from /opt/novajs/.env when a hostname and Basic Auth hash are supplied.
+:80 {
+    @novajs_health path /__novajs_health
+    respond @novajs_health 204
 
-    # reverse_proxy preserves the Upgrade request, so the same site block
-    # handles the game's WebSocket connection and ordinary HTTP requests.
-    encode gzip
+    # Internal-testing fallback: HTTP on the IP, without Basic Auth.
     reverse_proxy novajs:8200
 }

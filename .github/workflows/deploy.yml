@@ -6,6 +6,10 @@ on:
       - feat-performance-and-modernization
   workflow_dispatch:
 
+concurrency:
+  group: novajs-deploy
+  cancel-in-progress: false
+
 jobs:
   quality:
     runs-on: ubuntu-latest
@@ -35,6 +39,7 @@ jobs:
       packages: write
     outputs:
       image: ${{ steps.image.outputs.name }}:${{ github.sha }}
+      image_name: ${{ steps.image.outputs.name }}
     steps:
       - uses: actions/checkout@v4.2.2
       - name: Normalize image name
@@ -53,112 +58,288 @@ jobs:
         with:
           context: .
           push: true
-          tags: ${{ steps.image.outputs.name }}:${{ github.sha }}
+          tags: |
+            ${{ steps.image.outputs.name }}:${{ github.sha }}
+            ${{ steps.image.outputs.name }}:latest
 
-  deploy:
+  provision:
     needs: publish
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: read
+    outputs:
+      instance_id: ${{ steps.instance.outputs.instance_id }}
+      ipv4: ${{ steps.instance.outputs.ipv4 }}
     steps:
       - uses: actions/checkout@v4.2.2
-      - name: Prepare SSH
-        id: ssh
+      - name: Find or create Linode
+        id: instance
         env:
-          LINODE_HOST: ${{ secrets.LINODE_HOST }}
-          LINODE_KNOWN_HOSTS: ${{ secrets.LINODE_KNOWN_HOSTS }}
-          LINODE_SSH_PRIVATE_KEY: ${{ secrets.LINODE_SSH_PRIVATE_KEY }}
+          IMAGE_REPOSITORY: ${{ needs.publish.outputs.image_name }}
+          LINODE_API_TOKEN: ${{ secrets.LINODE_API_TOKEN }}
+          NOVA_DATA_SHA256: ${{ secrets.NOVA_DATA_SHA256 }}
+          LINODE_BASE_URL: ${{ secrets.LINODE_BASE_URL }}
+          LINODE_REGION: ${{ secrets.LINODE_REGION || 'us-east-1' }}
+          LINODE_BUCKET_NAME: ${{ secrets.LINODE_BUCKET_NAME }}
+          LINODE_OBJECT_NAME: ${{ secrets.LINODE_OBJECT_NAME }}
+          LINODE_BUCKET_KEY: ${{ secrets.LINODE_BUCKET_KEY }}
+          LINODE_SECRET_KEY: ${{ secrets.LINODE_SECRET_KEY }}
         run: |
-          ssh_dir="$RUNNER_TEMP/novajs-ssh"
-          install -m 700 -d "$ssh_dir"
-          printf '%s\n' "$LINODE_SSH_PRIVATE_KEY" > "$ssh_dir/id_ed25519"
-          printf '%s\n' "$LINODE_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
-          chmod 600 "$ssh_dir/id_ed25519" "$ssh_dir/known_hosts"
-          printf 'dir=%s\n' "$ssh_dir" >> "$GITHUB_OUTPUT"
-      - name: Log in to GHCR on host
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_ACTOR: ${{ github.actor }}
-          LINODE_HOST: ${{ secrets.LINODE_HOST }}
-          LINODE_SSH_USER: ${{ secrets.LINODE_SSH_USER }}
-          SSH_DIR: ${{ steps.ssh.outputs.dir }}
-        run: |
-          ssh_options=(
-            -i "$SSH_DIR/id_ed25519"
-            -o BatchMode=yes
-            -o IdentitiesOnly=yes
-            -o StrictHostKeyChecking=yes
-            -o UserKnownHostsFile="$SSH_DIR/known_hosts"
-          )
-          printf '%s' "$GITHUB_TOKEN" | ssh "${ssh_options[@]}" \
-            "$LINODE_SSH_USER@$LINODE_HOST" \
-            "docker login ghcr.io --username '$GITHUB_ACTOR' --password-stdin"
-      - name: Copy deployment configuration
-        env:
-          LINODE_HOST: ${{ secrets.LINODE_HOST }}
-          LINODE_SSH_USER: ${{ secrets.LINODE_SSH_USER }}
-          LINODE_DEPLOY_PATH: ${{ secrets.LINODE_DEPLOY_PATH }}
-          SSH_DIR: ${{ steps.ssh.outputs.dir }}
-        run: |
-          ssh_options=(
-            -i "$SSH_DIR/id_ed25519"
-            -o BatchMode=yes
-            -o IdentitiesOnly=yes
-            -o StrictHostKeyChecking=yes
-            -o UserKnownHostsFile="$SSH_DIR/known_hosts"
-          )
-          remote="$LINODE_SSH_USER@$LINODE_HOST"
-          ssh "${ssh_options[@]}" "$remote" \
-            "mkdir -p '$LINODE_DEPLOY_PATH/scripts'"
-          scp "${ssh_options[@]}" \
-            docker-compose.yml Caddyfile \
-            "$remote:$LINODE_DEPLOY_PATH/"
-          scp "${ssh_options[@]}" \
-            scripts/fetch_nova_data.sh \
-            "$remote:$LINODE_DEPLOY_PATH/scripts/"
-      - name: Deploy image
-        env:
-          IMAGE: ${{ needs.publish.outputs.image }}
-          LINODE_HOST: ${{ secrets.LINODE_HOST }}
-          LINODE_SSH_USER: ${{ secrets.LINODE_SSH_USER }}
-          LINODE_DEPLOY_PATH: ${{ secrets.LINODE_DEPLOY_PATH }}
-          SSH_DIR: ${{ steps.ssh.outputs.dir }}
-        run: |
-          ssh_options=(
-            -i "$SSH_DIR/id_ed25519"
-            -o BatchMode=yes
-            -o IdentitiesOnly=yes
-            -o StrictHostKeyChecking=yes
-            -o UserKnownHostsFile="$SSH_DIR/known_hosts"
-          )
-          remote="$LINODE_SSH_USER@$LINODE_HOST"
-          deploy_path="$(printf '%q' "$LINODE_DEPLOY_PATH")"
-          image="$(printf '%q' "$IMAGE")"
-          ssh "${ssh_options[@]}" "$remote" \
-            "set -euo pipefail
-            cd $deploy_path
-            chmod 0755 scripts/fetch_nova_data.sh
-            set -a
-            . ./.env
-            set +a
-            export NOVA_IMAGE=$image
-            data_dir=\${NOVA_DATA_DIR:-/var/lib/novajs/Nova_Data}
-            if [ ! -d \"\$data_dir/Nova Files\" ] ||
-                [ ! -d \"\$data_dir/Plug-ins\" ]; then
-              ./scripts/fetch_nova_data.sh
+          set -Eeuo pipefail
+
+          if [[ -z "$LINODE_API_TOKEN" ]]; then
+            printf '%s\n' 'LINODE_API_TOKEN is required.' >&2
+            exit 1
+          fi
+
+          api_url='https://api.linode.com/v4'
+          label='novajs'
+          auth_header="Authorization: Bearer ${LINODE_API_TOKEN}"
+          instances="$(mktemp)"
+          post_response="$(mktemp)"
+          instance_response="$(mktemp)"
+          trap 'rm -f "$instances" "$post_response" "$instance_response"' EXIT
+
+          query_instances() {
+            local destination="$1"
+            curl --fail-with-body --silent --show-error \
+              --retry 3 --retry-delay 2 --retry-all-errors \
+              -H "$auth_header" -H 'Accept: application/json' \
+              "${api_url}/linode/instances?label=${label}&page_size=100" \
+              >"$destination"
+          }
+
+          resolve_single_instance() {
+            local source="$1"
+            local count
+            count="$(jq -er '.data | length' "$source")"
+            if [[ "$count" -gt 1 ]]; then
+              printf 'More than one Linode has label %s; refusing to create another.\n' \
+                "$label" >&2
+              jq '{data: [.data[] | {id, label, status, ipv4}]}' "$source" >&2
+              return 2
             fi
-            docker compose pull novajs caddy
-            docker compose up -d --force-recreate --remove-orphans \
-              --scale novajs=1
-            for attempt in \$(seq 1 30); do
-              if curl --fail --silent --show-error --max-time 5 \
-                  http://127.0.0.1:8200/ >/dev/null; then
-                exit 0
+            if [[ "$count" -eq 0 ]]; then
+              return 1
+            fi
+            jq -er '.data[0].id' "$source"
+          }
+
+          query_instances "$instances"
+          if instance_id="$(resolve_single_instance "$instances")"; then
+            printf 'Using existing Linode %s.\n' "$instance_id"
+          else
+            resolve_status=$?
+            if [[ "$resolve_status" -eq 2 ]]; then
+              exit 1
+            fi
+
+            required_data_values=(
+              NOVA_DATA_SHA256
+              LINODE_BASE_URL
+              LINODE_REGION
+              LINODE_BUCKET_NAME
+              LINODE_OBJECT_NAME
+              LINODE_BUCKET_KEY
+              LINODE_SECRET_KEY
+            )
+            missing_data_values=()
+            for variable in "${required_data_values[@]}"; do
+              if [[ -z "${!variable:-}" ]]; then
+                missing_data_values+=("$variable")
               fi
-              sleep 2
             done
-            docker compose ps
-            docker compose logs --tail=100 novajs caddy
-            printf '%s\n' 'NovaJS health check failed.' >&2
-            exit 1"
+            if (( ${#missing_data_values[@]} > 0 )); then
+              printf 'Cannot create Linode; required data values are empty: %s\n' \
+                "${missing_data_values[*]}" >&2
+              exit 1
+            fi
+
+            invalid_data_values=()
+            for variable in "${required_data_values[@]}"; do
+              if [[ "${!variable:-}" == *[!A-Za-z0-9._:/+@=-]* ]]; then
+                invalid_data_values+=("$variable")
+              fi
+            done
+            if (( ${#invalid_data_values[@]} > 0 )); then
+              printf 'Cannot create Linode; data values contain unsupported characters: %s\n' \
+                "${invalid_data_values[*]}" >&2
+              printf '%s\n' \
+                'Use only letters, digits, . _ : / + @ = -; whitespace, quotes, #, and newlines are not allowed.' \
+                >&2
+              exit 1
+            fi
+
+            compose_b64="$(base64 -w 0 docker-compose.yml)"
+            caddyfile_b64="$(base64 -w 0 Caddyfile)"
+            fetch_b64="$(base64 -w 0 scripts/fetch_nova_data.sh)"
+            render_caddy_b64="$(base64 -w 0 deploy/render_caddyfile.sh)"
+            updater_b64="$(base64 -w 0 deploy/novajs-updater.sh)"
+            service_b64="$(base64 -w 0 deploy/novajs-updater.service)"
+            timer_b64="$(base64 -w 0 deploy/novajs-updater.timer)"
+            nova_image="${IMAGE_REPOSITORY}:latest"
+            export COMPOSE_B64="$compose_b64"
+            export CADDYFILE_B64="$caddyfile_b64"
+            export FETCH_B64="$fetch_b64"
+            export RENDER_CADDY_B64="$render_caddy_b64"
+            export UPDATER_B64="$updater_b64"
+            export SERVICE_B64="$service_b64"
+            export TIMER_B64="$timer_b64"
+            export NOVA_IMAGE="$nova_image"
+            cloud_init="$(
+              python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          template = Path("deploy/cloud-init.yaml").read_text()
+          values = {
+              "COMPOSE_B64": os.environ["COMPOSE_B64"],
+              "CADDYFILE_B64": os.environ["CADDYFILE_B64"],
+              "FETCH_B64": os.environ["FETCH_B64"],
+              "RENDER_CADDY_B64": os.environ["RENDER_CADDY_B64"],
+              "UPDATER_B64": os.environ["UPDATER_B64"],
+              "SERVICE_B64": os.environ["SERVICE_B64"],
+              "TIMER_B64": os.environ["TIMER_B64"],
+              "NOVA_IMAGE": os.environ["NOVA_IMAGE"],
+              "NOVA_DATA_SHA256": os.environ["NOVA_DATA_SHA256"],
+              "LINODE_BASE_URL": os.environ["LINODE_BASE_URL"],
+              "LINODE_REGION": os.environ["LINODE_REGION"],
+              "LINODE_BUCKET_NAME": os.environ["LINODE_BUCKET_NAME"],
+              "LINODE_OBJECT_NAME": os.environ["LINODE_OBJECT_NAME"],
+              "LINODE_BUCKET_KEY": os.environ["LINODE_BUCKET_KEY"],
+              "LINODE_SECRET_KEY": os.environ["LINODE_SECRET_KEY"],
+          }
+          placeholders = {}
+          for name, value in values.items():
+              marker = f"@{name}@"
+              if marker not in template:
+                  raise SystemExit(f"missing cloud-init marker: {marker}")
+              placeholder = f"\x00{name}\x00"
+              template = template.replace(marker, placeholder)
+              placeholders[placeholder] = value
+          for placeholder, value in placeholders.items():
+              template = template.replace(placeholder, value)
+          print(template, end="")
+          PY
+            )"
+            user_data="$(printf '%s' "$cloud_init" | base64 -w 0)"
+            root_password="$(openssl rand -hex 32)"
+            payload="$(
+              jq -n \
+                --arg label "$label" \
+                --arg region 'us-east' \
+                --arg type 'g6-standard-1' \
+                --arg image 'linode/ubuntu24.04' \
+                --arg root_pass "$root_password" \
+                --arg user_data "$user_data" \
+                '{
+                  label: $label,
+                  region: $region,
+                  type: $type,
+                  image: $image,
+                  root_pass: $root_pass,
+                  metadata: {user_data: $user_data}
+                }'
+            )"
+
+            # Do not retry this POST: a timeout can mean Linode accepted it.
+            # Re-query by label before deciding whether the operation failed.
+            if curl --fail-with-body --silent --show-error \
+                --connect-timeout 15 --max-time 90 \
+                -X POST -H "$auth_header" \
+                -H 'Content-Type: application/json' \
+                --data-binary "$payload" \
+                "${api_url}/linode/instances" >"$post_response"; then
+              if ! instance_id="$(jq -er '.id' "$post_response")"; then
+                printf '%s\n' \
+                  'Linode create returned no instance ID; checking by label.' \
+                  >&2
+                query_instances "$instances"
+                instance_id="$(resolve_single_instance "$instances")"
+              fi
+              printf 'Created Linode %s.\n' "$instance_id"
+            else
+              printf '%s\n' \
+                'Linode create did not return success; checking by label.' \
+                >&2
+              query_instances "$instances"
+              if ! instance_id="$(resolve_single_instance "$instances")"; then
+                printf '%s\n' \
+                  'Create outcome is unknown and no single novajs instance was found; refusing to retry.' \
+                  >&2
+                exit 1
+              fi
+              printf 'Using Linode %s after the create response failed.\n' \
+                "$instance_id"
+            fi
+          fi
+
+          ipv4=''
+          for _ in $(seq 1 60); do
+            if ! curl --fail-with-body --silent --show-error \
+                --retry 3 --retry-delay 2 --retry-all-errors \
+                -H "$auth_header" -H 'Accept: application/json' \
+                "${api_url}/linode/instances/${instance_id}" \
+                >"$instance_response"; then
+              printf '%s\n' 'Unable to read the Linode while waiting for IPv4.' >&2
+              exit 1
+            fi
+            ipv4="$(jq -r '.ipv4[0] // empty' "$instance_response")"
+            if [[ "$ipv4" =~ ^[0-9]+(\.[0-9]+){3}$ ]]; then
+              break
+            fi
+            sleep 5
+          done
+          if [[ -z "$ipv4" ]]; then
+            printf 'Linode %s did not receive a public IPv4 in time.\n' \
+              "$instance_id" >&2
+            jq '{id, label, status, ipv4}' "$instance_response" >&2
+            exit 1
+          fi
+
+          printf 'instance_id=%s\n' "$instance_id" >>"$GITHUB_OUTPUT"
+          printf 'ipv4=%s\n' "$ipv4" >>"$GITHUB_OUTPUT"
+
+  health:
+    needs: [publish, provision]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      INSTANCE_ID: ${{ needs.provision.outputs.instance_id }}
+      INSTANCE_IPV4: ${{ needs.provision.outputs.ipv4 }}
+      LINODE_API_TOKEN: ${{ secrets.LINODE_API_TOKEN }}
+    steps:
+      - name: Poll public readiness endpoint
+        run: |
+          set -Eeuo pipefail
+          health_url="http://${INSTANCE_IPV4}/__novajs_health"
+          deadline=$((SECONDS + 900))
+
+          while (( SECONDS < deadline )); do
+            status="$(
+              curl --silent --output /dev/null --write-out '%{http_code}' \
+                --connect-timeout 5 --max-time 10 "$health_url" || true
+            )"
+            if [[ "$status" == '204' ]]; then
+              printf 'External readiness probe passed for %s.\n' \
+                "$INSTANCE_IPV4"
+              exit 0
+            fi
+            sleep 10
+          done
+
+          printf 'External readiness probe failed for %s after 15 minutes.\n' \
+            "$INSTANCE_IPV4" >&2
+          curl --verbose --connect-timeout 5 --max-time 10 \
+            "$health_url" >/dev/null || true
+          printf '%s\n' 'Linode API state:' >&2
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${LINODE_API_TOKEN}" \
+            -H 'Accept: application/json' \
+            "https://api.linode.com/v4/linode/instances/${INSTANCE_ID}" |
+            jq '{id, label, status, ipv4}' >&2 || true
+          printf '%s\n' \
+            'No SSH diagnostics are attempted; inspect cloud-init and updater logs in Linode Lish.' \
+            >&2
+          exit 1

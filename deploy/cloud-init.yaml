@@ -1,0 +1,92 @@
+#cloud-config
+package_update: true
+packages:
+  - awscli
+  - ca-certificates
+  - curl
+  - docker-compose-v2
+  - docker.io
+  - jq
+  - ufw
+  - unattended-upgrades
+  - zstd
+
+write_files:
+  - path: /opt/novajs/docker-compose.yml
+    owner: root:root
+    permissions: '0644'
+    encoding: b64
+    content: '@COMPOSE_B64@'
+  - path: /opt/novajs/Caddyfile
+    owner: root:root
+    permissions: '0644'
+    encoding: b64
+    content: '@CADDYFILE_B64@'
+  - path: /opt/novajs/scripts/fetch_nova_data.sh
+    owner: root:root
+    permissions: '0755'
+    encoding: b64
+    content: '@FETCH_B64@'
+  - path: /opt/novajs/scripts/render_caddyfile.sh
+    owner: root:root
+    permissions: '0755'
+    encoding: b64
+    content: '@RENDER_CADDY_B64@'
+  - path: /opt/novajs/scripts/novajs-updater.sh
+    owner: root:root
+    permissions: '0755'
+    encoding: b64
+    content: '@UPDATER_B64@'
+  - path: /etc/systemd/system/novajs-updater.service
+    owner: root:root
+    permissions: '0644'
+    encoding: b64
+    content: '@SERVICE_B64@'
+  - path: /etc/systemd/system/novajs-updater.timer
+    owner: root:root
+    permissions: '0644'
+    encoding: b64
+    content: '@TIMER_B64@'
+  - path: /opt/novajs/.env.template
+    owner: root:root
+    permissions: '0600'
+    content: |
+      NOVA_IMAGE=@NOVA_IMAGE@
+      NOVA_DATA_DIR=/var/lib/novajs/Nova_Data
+
+      # Leave these blank for the internal HTTP fallback. Set all three
+      # Caddy values for public HTTPS with Basic Auth.
+      CADDY_HOSTNAME=
+      CADDY_BASIC_AUTH_USER=
+      CADDY_BASIC_AUTH_HASH=
+
+      # The retail game data stays on the host and is never put in the image.
+      NOVA_DATA_URL=
+      NOVA_DATA_SHA256=@NOVA_DATA_SHA256@
+      LINODE_BASE_URL=@LINODE_BASE_URL@
+      LINODE_REGION=@LINODE_REGION@
+      LINODE_BUCKET_NAME=@LINODE_BUCKET_NAME@
+      LINODE_OBJECT_NAME=@LINODE_OBJECT_NAME@
+      LINODE_BUCKET_KEY=@LINODE_BUCKET_KEY@
+      LINODE_SECRET_KEY=@LINODE_SECRET_KEY@
+  - path: /etc/ssh/sshd_config.d/novajs-bootstrap.conf
+    owner: root:root
+    permissions: '0644'
+    content: |
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PermitRootLogin prohibit-password
+
+runcmd:
+  - [bash, -c, 'set -eu; install -d -m 0755 /opt/novajs/scripts /var/lib/novajs']
+  - [bash, -c, 'if [ ! -e /opt/novajs/.env ]; then install -m 0600 /opt/novajs/.env.template /opt/novajs/.env; fi']
+  - [systemctl, enable, --now, docker]
+  - [systemctl, daemon-reload]
+  - [bash, -c, 'systemctl reload ssh 2>/dev/null || true']
+  - [ufw, default, deny, incoming]
+  - [ufw, default, allow, outgoing]
+  - [ufw, allow, 80/tcp]
+  - [ufw, allow, 443/tcp]
+  - [ufw, --force, enable]
+  - [systemctl, enable, novajs-updater.timer]
+  - [systemctl, start, novajs-updater.timer]

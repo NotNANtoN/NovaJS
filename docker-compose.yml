@@ -44,10 +44,6 @@ services:
     depends_on:
       novajs:
         condition: service_healthy
-    environment:
-      CADDY_HOSTNAME: ${CADDY_HOSTNAME:?CADDY_HOSTNAME must be set}
-      CADDY_BASIC_AUTH_USER: ${CADDY_BASIC_AUTH_USER:?CADDY_BASIC_AUTH_USER must be set}
-      CADDY_BASIC_AUTH_HASH: ${CADDY_BASIC_AUTH_HASH:?CADDY_BASIC_AUTH_HASH must be set}
     ports:
       - "80:80"
       - "443:443"

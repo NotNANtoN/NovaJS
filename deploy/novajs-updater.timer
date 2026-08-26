@@ -1,0 +1,12 @@
+[Unit]
+Description=Check for a new NovaJS image
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=5min
+RandomizedDelaySec=30s
+Persistent=true
+Unit=novajs-updater.service
+
+[Install]
+WantedBy=timers.target
