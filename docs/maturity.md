@@ -1,7 +1,7 @@
 # Maturity map
 
 An honest read of how finished each part of the engine is, as of
-2026-08-25. `docs/roadmap.md` says what to do next; this document says how
+2026-08-26. `docs/roadmap.md` says what to do next; this document says how
 much to trust what already exists.
 
 Grades:
@@ -45,6 +45,8 @@ graph LR
     end
     subgraph "Works, thin"
         T0[asteroids + mining]
+        T7[jump fuel + refuelling]
+        T8[hailing: assistance]
         T1[mission offer/accept/abort]
         T2[NPC AI + hostility]
         T3[hyperjump + starmap routes]
@@ -61,9 +63,8 @@ graph LR
     subgraph Absent
         A1["crön scheduled events"]
         A2["përs unique captains"]
-        A3[hailing + comms]
+        A3[comms: bribe, surrender, taunts]
         A4[ranks]
-        A5[fuel + refuelling]
         A6[boarding + capture]
         A7[planet domination]
         A8[multiplayer gameplay]
@@ -80,13 +81,13 @@ the raw resource holder but has no parser and no entry in
 | --- | --- | --- |
 | `crön` scheduled events | enumerated in `ResourceHolderBase`, no parser, no data type | no galactic clock: no news, no evolving background events, no time-gated story beats |
 | `përs` unique captains | enumerated only, no parser, no data type | no named characters, no ship-offered missions (`AvailLoc 2`), no recurring rivals |
-| Hailing and comms | no `HailQuote` handling anywhere | cannot talk to, bribe, surrender to, or be taunted by anyone |
+| Bribery, surrender, taunts | the hail panel carries only the three buttons that work | cannot buy off an attacker, beg for mercy, or be taunted |
 | Ranks | `mission_text` can render `<PRK>`/`<SRK>`, but nothing supplies rank data | every rank token falls back to "captain" |
 | `AvailRecord` mission gating | the legal record exists, but mission availability does not read it yet | record-gated missions still offer regardless of standing |
-| Fuel and refuelling | no fuel capacity or jump fuel anywhere | hyperjumps are unlimited and free |
 | Boarding and capture | explicitly refused for `shipGoal` 2 and 5 | plunder and ship capture missions are unacceptable by design |
 | Planet domination | no state | the dominate-stellar branch of missions is unreachable |
 | Escape pods / disabled-ship lifecycle | not modelled | ships die instead of being disabled and looted |
+| Ship `inherentAI` | parsed in `ShipResource`, never reaches `ShipData` | every NPC flies the same pursuit AI regardless of its retail AI type |
 | Multiplayer gameplay | deliberately parked | the authority layer exists, the game design does not |
 
 ## Legal record and combat rating
@@ -110,6 +111,30 @@ invented strings.
 Still missing: `AvailRecord` mission gating, scan fines, smuggling and
 boarding penalties (no smuggling or boarding yet), and the two military rungs
 at the top of the ladder, which belong to governments the player rules.
+
+## Jump fuel and hailing
+
+Both landed on 2026-08-26.
+
+- The `shïp` field at offset 10 was mislabelled `energy` and fed a physics
+  stat nothing read. Every retail value is a multiple of 100 and the Shuttle's
+  300 is its three jumps, so it is the fuel tank: it is now parsed as
+  `fuelCapacity`.
+- A jump spends 100 units. An empty tank refuses the jump with retail's own
+  `STR#` 2002 line. Hypergate and mission jumps are free, as in retail.
+- The status bar draws one block per jump in the gauge slot the interface
+  resource always reserved, bright for whole jumps and dim for a part one.
+- **Recharge** on the outfitter buys fuel at 100 credits per jump. Planets
+  without an outfitter cannot refuel you, so stranding is real.
+- Hailing a ship with the hail key opens a comms panel whose every line comes
+  from `STR#` 3000, using retail's blocks of five phrasings. **Request
+  Assistance** is the way out of a stranding: allies and well-regarded pilots
+  are helped free, strangers may want 500 credits, enemies mock you.
+
+Still missing: the rescuer transfers fuel instantly instead of flying over;
+Offer Bribe and Beg For Mercy need bribery and surrender mechanics; the panel
+uses `PICT 8508` on inference, since retail's dialog item lists live in the
+application's resource fork rather than the data files.
 
 ## Needs more love and testing
 
@@ -141,10 +166,16 @@ pilot has visited. Not yet reflected: territory changes from mission bits
 **Bar content.** The bar currently shows only mission offers. Retail
 also has bar characters and flavour (`PICT 8504` has two panes, unmapped).
 
-**NPC AI.** Combat roles and hostility propagation are tested, but fleet
-composition, `düde`/`flët` behavior, retreat, jump-out, and long-run
-population balance in a busy system are not. Long fights are where
-performance and leak problems have historically appeared.
+**NPC AI — thinner than it looks.** Hostility propagation, combat roles and
+retaliation thresholds are tested and behave well, but the flying itself is
+one behaviour: turn towards the target, hold full throttle, fire every weapon
+in range. Nothing flees when crippled, jumps out, keeps its distance to suit
+its weapon range, flies in formation, or picks a weapon deliberately. Miners
+are the sole exception, standing off their rock. The retail `inherentAI` field
+that would distinguish a wandering trader from an interceptor is parsed but
+never reaches `ShipData`. Fleet composition, `düde`/`flët` behaviour and
+long-run population balance in a busy system are also untested; long fights
+are where performance problems have historically appeared.
 
 **Teardown and GPU lifetime.** Managed graphics fixed the projectile and
 explosion leaks, but not every display object is on the managed path.
@@ -184,5 +215,7 @@ recovery note above is gone and would have to be rebuilt.
    prerequisite for a living galaxy.
 4. Ranks — cheap state that gates a surprising amount of
    retail content.
-5. Fuel — small rule with a large effect on how the map feels.
-6. `përs` and hailing — the biggest remaining "the galaxy feels empty" gap.
+5. NPC AI depth — plumb `inherentAI` through and add fleeing and jump-out;
+   the cheapest large gain in how alive a fight feels.
+6. `përs` unique captains — the biggest remaining "the galaxy feels empty"
+   gap, and now that hailing exists they have somewhere to speak.
