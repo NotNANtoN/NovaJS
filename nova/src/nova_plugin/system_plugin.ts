@@ -17,6 +17,7 @@ import { IonizedPlugin } from "./ionization_plugin";
 import { JumpPlugin } from "./jump_plugin";
 import { MissionPlugin } from "./mission_plugin";
 import { MissionShipsPlugin } from "./mission_ship_plugin";
+import { AsteroidPlugin } from "./asteroid_plugin";
 import { NpcPlugin } from "./npc_plugin";
 import { OutfitPlugin } from "./outfit_plugin";
 import { PlanetPlugin } from "./planet_plugin";
@@ -61,6 +62,7 @@ export const SystemPlugin: Plugin = {
         world.addPlugin(JumpPlugin);
         world.addPlugin(MissionShipsPlugin);
         world.addPlugin(NpcPlugin);
+        world.addPlugin(AsteroidPlugin);
         world.addPlugin(IonizedPlugin);
         world.addPlugin(BlastPlugin);
     }

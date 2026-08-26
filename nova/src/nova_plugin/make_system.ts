@@ -11,6 +11,7 @@ import {
     EntityBudgetResource,
 } from "./entity_budget";
 import { makePlanet } from "./make_planet";
+import { AsteroidSpawnPlugin } from "./asteroid_spawn_plugin";
 import { NpcSpawnPlugin } from "./npc_spawn_plugin";
 import {
     PlayerStoreResource,
@@ -74,6 +75,9 @@ export function makeSystem(
         // NPC population is authoritative on the server. Browser-created
         // system worlds must not independently generate ships.
         world.addPlugin(NpcSpawnPlugin);
+        // Asteroid population is authoritative on the server for the same
+        // reason NPC population is.
+        world.addPlugin(AsteroidSpawnPlugin);
     }
 
     return world;

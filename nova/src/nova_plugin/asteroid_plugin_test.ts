@@ -1,0 +1,247 @@
+import 'jasmine';
+import { getDefaultAsteroidData } from 'novadatainterface/AsteroidData';
+import { Angle } from 'nova_ecs/datatypes/angle';
+import { Position } from 'nova_ecs/datatypes/position';
+import { Vector } from 'nova_ecs/datatypes/vector';
+import { Entity } from 'nova_ecs/entity';
+import { DeltaPlugin } from 'nova_ecs/plugins/delta_plugin';
+import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
+import { MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
+import { TimeResource } from 'nova_ecs/plugins/time_plugin';
+import { World } from 'nova_ecs/world';
+import {
+    AsteroidComponent,
+    asteroidCountForDensity,
+    AsteroidPlugin,
+    makeAsteroid,
+    OreComponent,
+    oreChunkTons,
+} from './asteroid_plugin';
+import { AsteroidSpawnPlugin } from './asteroid_spawn_plugin';
+import { createEntityBudget, EntityBudgetResource } from './entity_budget';
+import { GameDataResource } from './game_data_resource';
+import { ArmorComponent } from './health_plugin';
+import { PlatformResource } from './platform_plugin';
+import { createInitialPlayerState, PlayerStateComponent } from './player_state';
+import { SystemIdResource } from './system_id_resource';
+
+const BIG_ASTEROID = {
+    ...getDefaultAsteroidData(),
+    id: 'nova:131',
+    name: 'Metal Huge',
+    strength: 300,
+    prevalence: 25,
+    yield: { commodity: 'metal', quantity: 16 },
+    fragments: ['nova:130'],
+    fragmentCount: 2,
+};
+
+const SMALL_ASTEROID = {
+    ...getDefaultAsteroidData(),
+    id: 'nova:130',
+    name: 'Metal Big',
+    strength: 175,
+    prevalence: 50,
+    yield: { commodity: 'metal', quantity: 12 },
+};
+
+function makeGameData(density: number) {
+    const asteroids = new Map([
+        [BIG_ASTEROID.id, BIG_ASTEROID],
+        [SMALL_ASTEROID.id, SMALL_ASTEROID],
+    ]);
+    return {
+        ids: Promise.resolve({ Asteroid: [...asteroids.keys()] }),
+        data: {
+            System: { get: async () => ({ asteroidDensity: density }) },
+            Asteroid: {
+                get: async (id: string) => {
+                    const data = asteroids.get(id);
+                    if (!data) {
+                        throw new Error(`no asteroid ${id}`);
+                    }
+                    return data;
+                },
+            },
+        },
+    };
+}
+
+async function makeWorld(density: number) {
+    const world = new World('asteroid-test');
+    world.resources.set(GameDataResource, makeGameData(density) as never);
+    world.resources.set(SystemIdResource, 'nova:test');
+    world.resources.set(TimeResource, {
+        time: 0, delta_ms: 1000 / 60, delta_s: 1 / 60, frame: 0,
+    });
+    world.resources.set(EntityBudgetResource, createEntityBudget('modern'));
+    world.resources.set(PlatformResource, 'node');
+    await world.addPlugin(DeltaPlugin);
+    await world.addPlugin(AsteroidPlugin);
+    await world.addPlugin(AsteroidSpawnPlugin);
+    return world;
+}
+
+/** Steps the world enough times for asynchronous providers to settle. */
+async function settle(world: World, steps = 20) {
+    for (let step = 0; step < steps; step++) {
+        world.step();
+        await Promise.resolve();
+    }
+}
+
+function asteroidCount(world: World): number {
+    return [...world.entities.values()]
+        .filter(entity => entity.components.has(AsteroidComponent)).length;
+}
+
+function ores(world: World) {
+    return [...world.entities.values()]
+        .map(entity => entity.components.get(OreComponent))
+        .filter(ore => ore !== undefined);
+}
+
+function playerAt(position: Position, cargoCapacity: number) {
+    const playerState = createInitialPlayerState();
+    playerState.cargoCapacity = cargoCapacity;
+    return new Entity()
+        .addComponent(PlayerStateComponent, playerState)
+        .addComponent(MultiplayerData, { owner: 'player' })
+        .addComponent(MovementStateComponent, {
+            accelerating: 0,
+            position,
+            rotation: new Angle(0),
+            turnBack: false,
+            turning: 0,
+            velocity: new Vector(0, 0),
+        });
+}
+
+function heldTons(world: World, commodity: string): number {
+    // Player state is mutated through an Immer draft, so it has to be read
+    // back from the entity rather than from the object handed to the world.
+    const state = world.entities.get('player')!
+        .components.get(PlayerStateComponent)!;
+    return state.holds
+        .filter(hold => hold.commodity === commodity)
+        .reduce((total, hold) => total + hold.tons, 0);
+}
+
+describe('asteroids', () => {
+    it('scales the belt with the system density', () => {
+        expect(asteroidCountForDensity(0)).toBe(0);
+        expect(asteroidCountForDensity(2)).toBe(4);
+        expect(asteroidCountForDensity(10)).toBe(20);
+        // Retail stores 0-10; anything larger is clamped.
+        expect(asteroidCountForDensity(100)).toBe(20);
+    });
+
+    it('splits a yield into whole ton chunks', () => {
+        expect(oreChunkTons(0)).toEqual([]);
+        expect(oreChunkTons(2)).toEqual([1, 1]);
+        expect(oreChunkTons(16)).toEqual([4, 4, 4, 4]);
+        expect(oreChunkTons(6)).toEqual([2, 2, 1, 1]);
+        expect(oreChunkTons(6).reduce((a, b) => a + b, 0)).toBe(6);
+    });
+
+    it('populates a belt in a system with asteroids', async () => {
+        const world = await makeWorld(3);
+        await settle(world);
+        expect(asteroidCount(world)).toBe(asteroidCountForDensity(3));
+    });
+
+    it('leaves systems without asteroids empty', async () => {
+        const world = await makeWorld(0);
+        await settle(world);
+        expect(asteroidCount(world)).toBe(0);
+    });
+
+    it('tumbles asteroids so their sprite frame advances', async () => {
+        const world = await makeWorld(1);
+        await settle(world);
+        const asteroid = [...world.entities.values()]
+            .find(entity => entity.components.has(AsteroidComponent))!;
+        asteroid.components.set(AsteroidComponent, {
+            id: BIG_ASTEROID.id, spin: 1,
+        });
+        const movement = asteroid.components.get(MovementStateComponent)!;
+        movement.rotation = new Angle(0);
+        await settle(world, 5);
+        expect(asteroid.components.get(MovementStateComponent)!.rotation.angle)
+            .toBeGreaterThan(0);
+    });
+
+    it('breaks into fragments and ore when destroyed', async () => {
+        const world = await makeWorld(0);
+        const asteroid = makeAsteroid(
+            BIG_ASTEROID.id, new Position(0, 0), new Vector(0, 0));
+        asteroid.components.set(MultiplayerData, { owner: 'server' });
+        world.entities.set('rock', asteroid);
+        await settle(world);
+
+        asteroid.components.get(ArmorComponent)!.current = 0;
+        await settle(world, 5);
+
+        expect(world.entities.has('rock')).toBeFalse();
+        expect(asteroidCount(world)).toBe(BIG_ASTEROID.fragmentCount);
+        const collected = ores(world);
+        expect(collected.length).toBeGreaterThan(0);
+        expect(collected.reduce((total, ore) => total + ore!.tons, 0))
+            .toBe(BIG_ASTEROID.yield.quantity);
+        expect(collected.every(ore => ore!.commodity === 'metal')).toBeTrue();
+    });
+
+    it('scoops ore into a nearby ship\'s hold', async () => {
+        const world = await makeWorld(0);
+        const asteroid = makeAsteroid(
+            SMALL_ASTEROID.id, new Position(0, 0), new Vector(0, 0));
+        asteroid.components.set(MultiplayerData, { owner: 'server' });
+        world.entities.set('rock', asteroid);
+
+        world.addComponent(PlayerStateComponent);
+        world.entities.set('player', playerAt(new Position(0, 0), 100));
+        await settle(world);
+
+        asteroid.components.get(ArmorComponent)!.current = 0;
+        await settle(world, 10);
+
+        expect(heldTons(world, 'metal')).toBe(SMALL_ASTEROID.yield.quantity);
+        expect(ores(world).length).toBe(0);
+    });
+
+    it('leaves ore floating when the hold is full', async () => {
+        const world = await makeWorld(0);
+        const asteroid = makeAsteroid(
+            SMALL_ASTEROID.id, new Position(0, 0), new Vector(0, 0));
+        asteroid.components.set(MultiplayerData, { owner: 'server' });
+        world.entities.set('rock', asteroid);
+
+        world.addComponent(PlayerStateComponent);
+        world.entities.set('player', playerAt(new Position(0, 0), 4));
+        await settle(world);
+
+        asteroid.components.get(ArmorComponent)!.current = 0;
+        await settle(world, 10);
+
+        expect(heldTons(world, 'metal')).toBe(4);
+        expect(ores(world).length).toBeGreaterThan(0);
+    });
+
+    it('does not scoop ore for a distant ship', async () => {
+        const world = await makeWorld(0);
+        const asteroid = makeAsteroid(
+            SMALL_ASTEROID.id, new Position(0, 0), new Vector(0, 0));
+        asteroid.components.set(MultiplayerData, { owner: 'server' });
+        world.entities.set('rock', asteroid);
+
+        world.addComponent(PlayerStateComponent);
+        world.entities.set('player', playerAt(new Position(5_000, 0), 100));
+        await settle(world);
+
+        asteroid.components.get(ArmorComponent)!.current = 0;
+        await settle(world, 10);
+
+        expect(heldTons(world, 'metal')).toBe(0);
+        expect(ores(world).length).toBeGreaterThan(0);
+    });
+});
