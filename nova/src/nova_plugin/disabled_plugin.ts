@@ -310,14 +310,12 @@ export const DisabledRecoverySystem = new System({
         GetEntity,
         ArmorComponent,
         Optional(DisabledLifecycleComponent),
-        Optional(MultiplayerData),
         PlatformResource,
         Optional(DestructionStartedComponent),
     ] as const,
-    step(disabled, entity, armor, lifecycle, multiplayer, platform,
-        destructionStarted) {
-        if (!disabled || destructionStarted
-            || !ownsSimulation(platform, multiplayer) || armor.max <= 0) {
+    step(disabled, entity, armor, lifecycle, platform, destructionStarted) {
+        if (!disabled || destructionStarted || platform !== 'node'
+            || armor.max <= 0) {
             return;
         }
         if (armor.current >= armor.max) {

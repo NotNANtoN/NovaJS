@@ -19,9 +19,16 @@ class Box<T> {
     }
 }
 
+/**
+ * How much of a stat's range has to change before it is worth interrupting the
+ * send interval. A hit takes a visible bite out of a bar; recharge creeps.
+ */
+const SHARP_CHANGE_FRACTION = 0.01;
+
 export class Stat {
     [immerable] = true;
     lastSent = 0;
+    private lastSentCurrent: number;
     private wrappedCurrent: Box<number>;
     private wrappedRecharge: Box<number>;
     private wrappedMax: Box<number>;
@@ -37,10 +44,27 @@ export class Stat {
         this.wrappedRecharge = new Box(recharge);
         this.wrappedMax = new Box(max);
         this.wrappedMin = new Box(min ?? 0);
+        this.lastSentCurrent = current;
+    }
+
+    /**
+     * Whether the value has moved far enough that waiting for the next send
+     * interval would be visible to a player. Deliberately non-destructive:
+     * `getDelta` clears the change flags, so it cannot be used to ask.
+     */
+    get changedSharply() {
+        const range = this.max - this.min;
+        return range > 0
+            && Math.abs(this.current - this.lastSentCurrent)
+                >= range * SHARP_CHANGE_FRACTION;
     }
 
     step(delta: number) {
-        this.wrappedCurrent.wrappedVal = Math.max(this.min,
+        // Through the setter, so recharge is reported as a change and reaches
+        // clients: they no longer compute health themselves. `getStatDelta`
+        // throttles the result, so this does not put a stat on the wire per
+        // frame.
+        this.current = Math.max(this.min,
             Math.min(this.max, this.current + this.recharge * delta));
     }
 
@@ -54,6 +78,7 @@ export class Stat {
         let changed = false;
         if (this.wrappedCurrent.changed) {
             delta.current = this.current;
+            this.lastSentCurrent = this.current;
             this.wrappedCurrent.changed = false;
             changed = true;
         }
@@ -158,7 +183,10 @@ export type PartialStat = t.TypeOf<typeof PartialStat>;
 
 export function getStatDelta(_a: Stat, b: Stat): PartialStat | undefined {
     const now = new Date().getTime();
-    if (b.lastSent + SEND_INTERVAL < now) {
+    // Health is server authority, so a client only learns it was hit when this
+    // arrives. Waiting out the send interval would leave the bar a second
+    // behind the fight, while recharge can wait: it is why the interval exists.
+    if (b.lastSent + SEND_INTERVAL < now || b.changedSharply) {
         b.lastSent = now;
         return b.getDelta();
     }

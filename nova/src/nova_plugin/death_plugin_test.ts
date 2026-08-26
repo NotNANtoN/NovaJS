@@ -9,7 +9,11 @@ import {
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { Entity } from 'nova_ecs/entity';
 import { World } from 'nova_ecs/world';
-import { ArmorComponent, ShieldComponent } from './health_plugin';
+import {
+    ArmorComponent,
+    HealthPlugin,
+    ShieldComponent,
+} from './health_plugin';
 import {
     createInitialPlayerState,
     PlayerStateComponent,
@@ -53,6 +57,40 @@ import {
 import { MockCommunicator } from 'nova_ecs/plugins/mock_communicator';
 import { OutfitsStateComponent } from './outfit_plugin';
 import { GameDataResource } from './game_data_resource';
+import { PlatformResource } from './platform_plugin';
+
+async function makeNetworkedCombatWorlds() {
+    const serverCommunicator = new MockCommunicator('server');
+    const clientCommunicator = new MockCommunicator('client');
+    const peers = new Map([
+        ['server', serverCommunicator],
+        ['client', clientCommunicator],
+    ]);
+    serverCommunicator.mockPeers = peers;
+    clientCommunicator.mockPeers = peers;
+    serverCommunicator.peers.current.next(new Set(peers.keys()));
+    clientCommunicator.peers.current.next(new Set(peers.keys()));
+
+    const serverTime = {
+        time: 0, delta_ms: 0, delta_s: 0, frame: 0,
+    };
+    const clientTime = { ...serverTime };
+    const server = new World('combat-server');
+    server.resources.set(TimeResource, serverTime);
+    server.resources.set(PlatformResource, 'node');
+    await server.addPlugin(multiplayer(serverCommunicator));
+    await server.addPlugin(HealthPlugin);
+    await server.addPlugin(DeathPlugin);
+
+    const client = new World('combat-client');
+    client.resources.set(TimeResource, clientTime);
+    client.resources.set(PlatformResource, 'browser');
+    await client.addPlugin(multiplayer(clientCommunicator));
+    await client.addPlugin(HealthPlugin);
+    await client.addPlugin(DeathPlugin);
+
+    return { client, server };
+}
 
 describe('player death', () => {
     it('shows the message only after the final explosion lifetime', () => {
@@ -132,6 +170,159 @@ describe('player death', () => {
         })]);
     });
 
+    it('rejects a client-authored health delta', async () => {
+        const { client, server } = await makeNetworkedCombatWorlds();
+        const serverShield = new Stat({
+            current: 100, recharge: 0, max: 100,
+        });
+        server.entities.set('ship', new Entity('ship')
+            .addComponent(MultiplayerData, { owner: 'client' })
+            .addComponent(ShieldComponent, serverShield));
+
+        for (let frame = 0; frame < 3; frame++) {
+            server.step();
+            client.step();
+        }
+        const clientShield = client.entities.get('ship')?.components
+            .get(ShieldComponent);
+        expect(clientShield?.current).toBe(100);
+
+        clientShield!.current = 1;
+        clientShield!.lastSent = 0;
+        client.step();
+        server.step();
+
+        expect(server.entities.get('ship')?.components
+            .get(ShieldComponent)?.current).toBe(100);
+    });
+
+    it('replicates server-applied damage without client prediction',
+        async () => {
+            const { client, server } = await makeNetworkedCombatWorlds();
+            const serverShield = new Stat({
+                current: 100, recharge: 0, max: 100,
+            });
+            server.entities.set('ship', new Entity('ship')
+                .addComponent(MultiplayerData, { owner: 'client' })
+                .addComponent(ShieldComponent, serverShield));
+            for (let frame = 0; frame < 3; frame++) {
+                server.step();
+                client.step();
+            }
+            const damage = {
+                shield: 25,
+                armor: 0,
+                ionization: 0,
+                ionizationColor: 0,
+                passThroughShield: 0,
+                knockback: 0,
+            };
+            const clientShield = client.entities.get('ship')!.components
+                .get(ShieldComponent)!;
+
+            client.emitNow(DamagedEvent, {
+                damage,
+                damager: 'projectile',
+            }, ['ship']);
+            expect(clientShield.current).toBe(100);
+
+            server.emitNow(DamagedEvent, {
+                damage,
+                damager: 'projectile',
+            }, ['ship']);
+            const currentServerShield = server.entities.get('ship')!.components
+                .get(ShieldComponent)!;
+            expect(currentServerShield.current).toBe(75);
+            currentServerShield.lastSent = 0;
+            server.step();
+            client.step();
+
+            expect(client.entities.get('ship')?.components
+                .get(ShieldComponent)?.current).toBe(75);
+        });
+
+    it('recharges health only on the server and replicates the result',
+        async () => {
+            const { client, server } = await makeNetworkedCombatWorlds();
+            server.entities.set('ship', new Entity('ship')
+                .addComponent(MultiplayerData, { owner: 'client' })
+                .addComponent(ShieldComponent, new Stat({
+                    current: 50, recharge: 10, max: 100,
+                })));
+            for (let frame = 0; frame < 3; frame++) {
+                server.step();
+                client.step();
+            }
+
+            client.resources.get(TimeResource)!.delta_s = 1;
+            client.step();
+            expect(client.entities.get('ship')?.components
+                .get(ShieldComponent)?.current).toBe(50);
+
+            server.resources.get(TimeResource)!.delta_s = 1;
+            const serverShield = server.entities.get('ship')!.components
+                .get(ShieldComponent)!;
+            serverShield.lastSent = 0;
+            server.step();
+            server.resources.get(TimeResource)!.delta_s = 0;
+            server.entities.get('ship')!.components
+                .get(ShieldComponent)!.lastSent = 0;
+            server.step();
+            client.step();
+
+            expect(server.entities.get('ship')?.components
+                .get(ShieldComponent)?.current).toBe(60);
+            expect(client.entities.get('ship')?.components
+                .get(ShieldComponent)?.current).toBe(60);
+        });
+
+    it('resolves a fatal hit in exactly one world', async () => {
+        const { client, server } = await makeNetworkedCombatWorlds();
+        const makeTarget = () => new Entity('ship')
+            .addComponent(MultiplayerData, { owner: 'client' })
+            .addComponent(ShipDataComponent, {
+                ...getDefaultShipData(),
+                deathDelay: 0,
+            })
+            .addComponent(ArmorComponent, new Stat({
+                current: 10, recharge: 0, max: 10,
+            }));
+        server.entities.set('ship', makeTarget());
+        client.entities.set('ship', makeTarget());
+        let serverDeaths = 0;
+        let clientDeaths = 0;
+        server.events.get(DeathEvent).subscribe(() => serverDeaths++);
+        client.events.get(DeathEvent).subscribe(() => clientDeaths++);
+        const fatalDamage = {
+            shield: 0,
+            armor: 10,
+            ionization: 0,
+            ionizationColor: 0,
+            passThroughShield: 1,
+            knockback: 0,
+        };
+
+        client.emitNow(DamagedEvent, {
+            damage: fatalDamage,
+            damager: 'projectile',
+        }, ['ship']);
+        server.emitNow(DamagedEvent, {
+            damage: fatalDamage,
+            damager: 'projectile',
+        }, ['ship']);
+        server.step();
+        client.step();
+        server.resources.get(TimeResource)!.time = 1;
+        client.resources.get(TimeResource)!.time = 1;
+        server.step();
+        client.step();
+        server.step();
+        client.step();
+
+        expect(serverDeaths).toBe(1);
+        expect(clientDeaths).toBe(0);
+    });
+
     it('marks destruction on the zero-armour event step', async () => {
         const world = new World('destruction-start-marker-test');
         world.resources.set(TimeResource, {
@@ -185,11 +376,13 @@ describe('player death', () => {
         };
         const server = new World('destruction-server');
         server.resources.set(TimeResource, time);
+        server.resources.set(PlatformResource, 'node');
         await server.addPlugin(multiplayer(serverCommunicator));
         await server.addPlugin(DeathPlugin);
 
         const client = new World('destruction-client');
         client.resources.set(TimeResource, { ...time });
+        client.resources.set(PlatformResource, 'browser');
         await client.addPlugin(multiplayer(clientCommunicator));
         await client.addPlugin(DeathPlugin);
 

@@ -19,6 +19,7 @@ import { replicationPolicies } from 'nova_ecs/plugins/multiplayer_plugin';
 import { MovementPhysicsComponent, MovementState, MovementStateComponent, MovementType } from 'nova_ecs/plugins/movement_plugin';
 import { Time, TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { Query } from 'nova_ecs/query';
+import { v4 } from 'uuid';
 import { System } from 'nova_ecs/system';
 import { BlastDamageComponent } from './blast_plugin';
 import { ArmorComponent, IonizationColorComponent, IonizationComponent, ShieldComponent } from './health_plugin';
@@ -47,7 +48,9 @@ import {
     applyOutfitPhysics,
     OutfitsStateComponent,
 } from './outfit_plugin';
+import { PlatformPlugin, PlatformResource } from './platform_plugin';
 import { Stat } from './stat';
+import { makeShipExplosionBlast } from './ship_death_blast';
 
 // const DamageQuery = new Query([Optional(ShieldComponent), Optional(ArmorComponent),
 // Optional(IonizationComponent), Optional(IonizationColorComponent),
@@ -156,11 +159,11 @@ const DamageSystem = new System({
         Optional(ShieldComponent), Optional(ArmorComponent),
         Optional(IonizationComponent), Optional(IonizationColorComponent),
         Optional(ProjectileComponent), Optional(PlayerDeathComponent),
-        TimeResource, UUID] as const,
+        TimeResource, UUID, PlatformResource] as const,
     step(emit, emitNow, { damage, scale = 1, damager, fromExplosion },
         shield, armor, ionization, ionizationColor, isProjectile, playerDeath,
-        time, uuid) {
-        if (playerDeath) {
+        time, uuid, platform) {
+        if (platform !== 'node' || playerDeath) {
             return;
         }
 
@@ -213,13 +216,22 @@ const DamageSystem = new System({
     }
 });
 
-const ExplodingComponent = new Component<number>('ShipExplodingComponent');
+export const ExplodingComponent =
+    new Component<number>('ShipExplodingComponent');
+replicationPolicies.register(ExplodingComponent, {
+    codec: t.number,
+    authority: 'server',
+});
 const ShipZeroArmorSystem = new System({
     name: 'ShipZeroArmorSystem',
     args: [ShipDataComponent, ZeroArmorEvent, GetEntity,
-        Optional(DisableOnZeroArmorComponent)] as const,
+        Optional(DisableOnZeroArmorComponent),
+        PlatformResource] as const,
     events: [ZeroArmorEvent],
-    step(ship, zeroArmorTime, {components}, disableInstead) {
+    step(ship, zeroArmorTime, {components}, disableInstead, platform) {
+        if (platform !== 'node') {
+            return;
+        }
         components.set(DestructionStartedComponent, true);
         if (disableInstead) {
             components.set(DisabledComponent, true);
@@ -236,11 +248,36 @@ const ShipZeroArmorSystem = new System({
 
 const ExplodingFinishedSystem = new System({
     name: 'ExplodingFinishedSystem',
-    args: [TimeResource, ExplodingComponent, GetEntity, UUID, Emit] as const,
-    step(time, endExplosionTime, entity, uuid, emit) {
+    args: [TimeResource, ExplodingComponent, GetEntity, UUID, Emit,
+        PlatformResource] as const,
+    step(time, endExplosionTime, entity, uuid, emit, platform) {
+        if (platform !== 'node') {
+            return;
+        }
         if (endExplosionTime < time.time) {
             entity.components.delete(ExplodingComponent);
             emit(DeathEvent, time, [uuid]);
+        }
+    }
+});
+
+/**
+ * A heavy ship's death blast has to be authored where damage is resolved. It
+ * used to be created by the display plugin, which meant it existed only in the
+ * browser and, now that damage is server-authoritative, would have hurt nobody.
+ */
+const ShipDeathBlastSystem = new System({
+    name: 'ShipDeathBlastSystem',
+    events: [DeathEvent],
+    args: [ShipDataComponent, MovementStateComponent, Entities, UUID,
+        PlatformResource] as const,
+    step(ship, movement, entities, uuid, platform) {
+        if (platform !== 'node') {
+            return;
+        }
+        const blast = makeShipExplosionBlast(ship, movement.position, uuid);
+        if (blast) {
+            entities.set(v4(), blast);
         }
     }
 });
@@ -290,11 +327,13 @@ export const PlayerDeathSystem = new System({
            Optional(IonizationComponent), MovementStateComponent,
            PlayerShipSelector, DeathEvent, GetEntity,
            Optional(ShipDataComponent), Optional(OutfitsStateComponent),
-           Optional(PlayerStateComponent), GetWorld] as const,
+           Optional(PlayerStateComponent), GetWorld,
+           PlatformResource] as const,
     events: [DeathEvent],
     step(_shield, _armor, _ionization, movement, _playerShip, { time }, entity,
-        ship, outfits, playerState, world) {
-        if (entity.components.has(PlayerDeathComponent)) {
+        ship, outfits, playerState, world, platform) {
+        if (platform !== 'node'
+            || entity.components.has(PlayerDeathComponent)) {
             return;
         }
         movement.velocity = new Vector(0, 0);
@@ -338,12 +377,9 @@ export const PlayerDeathSystem = new System({
             } : {}),
             ...(escapePodOutfitId ? { escapePodOutfitId } : {}),
         };
-        // Node worlds do not install the Pixi explosion completion system.
-        // Use the same resource-derived visual lifetime for authoritative
-        // respawn state; browsers finish on the actual rendered completion.
-        if (typeof window === 'undefined') {
-            completePlayerDestruction(deathState, time + visualDuration);
-        }
+        // Authoritative worlds do not install the Pixi completion system, so
+        // derive stable message and respawn timing from the same visual data.
+        completePlayerDestruction(deathState, time + visualDuration);
         entity.components.set(PlayerDeathComponent, deathState);
     }
 });
@@ -351,16 +387,24 @@ export const PlayerDeathSystem = new System({
 const PlayerDestructionCompleteSystem = new System({
     name: 'PlayerDestructionCompleteSystem',
     events: [PlayerDestructionCompleteEvent],
-    args: [PlayerDestructionCompleteEvent, PlayerDeathComponent] as const,
-    step({ time }, death) {
+    args: [PlayerDestructionCompleteEvent, PlayerDeathComponent,
+        PlatformResource] as const,
+    step({ time }, death, platform) {
+        if (platform !== 'node') {
+            return;
+        }
         completePlayerDestruction(death, time);
     },
 });
 
 const PlayerDestructionFallbackSystem = new System({
     name: 'PlayerDestructionFallbackSystem',
-    args: [TimeResource, PlayerDeathComponent] as const,
-    step(time, death) {
+    args: [TimeResource, PlayerDeathComponent,
+        PlatformResource] as const,
+    step(time, death, platform) {
+        if (platform !== 'node') {
+            return;
+        }
         if (death.messageAt === undefined
             && time.time >= death.visualFallbackAt) {
             completePlayerDestruction(death, time.time);
@@ -385,9 +429,13 @@ const PlayerRespawnSystem = new System({
         PlayerShipSelector,
         Optional(ShipComponent),
         GetWorld,
+        PlatformResource,
     ] as const,
     step(time, death, shield, armor, ionization, playerState, movement,
-        entity, entities, uuid, emit, _playerShip, shipType, world) {
+        entity, entities, uuid, emit, _playerShip, shipType, world, platform) {
+        if (platform !== 'node') {
+            return;
+        }
         if (death.respawnAt === undefined || time.time < death.respawnAt) {
             movement.position = new Position(...death.wreckPosition);
             movement.velocity = new Vector(0, 0);
@@ -497,6 +545,9 @@ const PlayerRespawnSystem = new System({
 export const DeathPlugin: Plugin = {
     name: 'DeathPlugin',
     build(world) {
+        if (!world.resources.has(PlatformResource)) {
+            world.addPlugin(PlatformPlugin);
+        }
         const deltaMaker = world.resources.get(DeltaResource);
         if (!deltaMaker) {
             throw new Error('Expected delta maker resource to exist');
@@ -520,6 +571,7 @@ export const DeathPlugin: Plugin = {
         world.addSystem(PlayerDestructionFallbackSystem);
         world.addSystem(ShipZeroArmorSystem);
         world.addSystem(ExplodingFinishedSystem);
+        world.addSystem(ShipDeathBlastSystem);
         world.addSystem(PlayerRespawnSystem);
     },
     remove(world) {
@@ -530,6 +582,7 @@ export const DeathPlugin: Plugin = {
         world.removeSystem(PlayerDestructionFallbackSystem);
         world.removeSystem(ShipZeroArmorSystem);
         world.removeSystem(ExplodingFinishedSystem);
+        world.removeSystem(ShipDeathBlastSystem);
         world.removeSystem(PlayerRespawnSystem);
     }
 }

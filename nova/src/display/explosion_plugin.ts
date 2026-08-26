@@ -1,6 +1,5 @@
 import { ExplosionData } from "novadatainterface/ExplosionData";
 import { ShipData } from "novadatainterface/ShipData";
-import { WeaponDamage } from "novadatainterface/WeaponData";
 import { Emit, Entities, GetEntity, UUID } from "nova_ecs/arg_types";
 import { Component } from "nova_ecs/component";
 import { Angle } from "nova_ecs/datatypes/angle";
@@ -13,7 +12,7 @@ import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
 import { Resource } from "nova_ecs/resource";
 import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { System } from "nova_ecs/system";
-import * as SAT from "sat";
+import { SingletonComponent } from "nova_ecs/world";
 import { v4 } from "uuid";
 import { ExplosionDataComponent } from "../nova_plugin/animation_plugin";
 import { GameDataResource } from "../nova_plugin/game_data_resource";
@@ -22,16 +21,12 @@ import { ProjectileExplodeEvent } from "../nova_plugin/projectile_plugin";
 import { SoundEvent } from "../nova_plugin/sound_event";
 import { AnimationGraphicComponent } from "./animation_graphic_plugin";
 import {
-    DeathEvent,
-    PlayerDeathSystem,
+    DisabledComponent,
+    PlayerDeathComponent,
     PlayerDestructionCompleteEvent,
-    ZeroArmorEvent,
 } from "../nova_plugin/death_plugin";
-import { BlastDamageComponent, BlastIgnoreComponent } from "../nova_plugin/blast_plugin";
-import { CompositeHull, HurtboxHullComponent } from "../nova_plugin/collisions_plugin";
-import { CollisionHitterComponent } from "../nova_plugin/collision_interaction";
+import { DestructionStartedComponent } from "../nova_plugin/destruction_state";
 import { ShipComponent, ShipDataComponent } from "../nova_plugin/ship_plugin";
-import { DeathAISystem } from "../nova_plugin/npc_plugin";
 import { EntityBudgetResource, reserveEntity } from "../nova_plugin/entity_budget";
 import { framesToMilliseconds } from "novaparse/src/parsers/Constants";
 import {
@@ -96,69 +91,6 @@ export const ExplosionSystem = new System({
         }
     }
 });
-
-// Retail says a heavy ship's death blast scales with its mass but gives no
-// coefficient, so these are calibrated against the ship table: the heaviest
-// hull in the game is mass 10,000 while even a carrier carries only a couple
-// of thousand points of shield and armor. A shared coefficient for reach and
-// damage would make one Leviathan death sterilise everything on screen, so
-// reach is capped at a few hull lengths.
-const SHIP_EXPLOSION_DAMAGE_PER_MASS = 0.02;
-const SHIP_EXPLOSION_RADIUS_PER_MASS = 0.02;
-const SHIP_EXPLOSION_MAX_RADIUS = 200;
-
-export function shipExplosionBlastStrength(mass: number): number {
-    return Number.isFinite(mass) && mass > 0
-        ? mass * SHIP_EXPLOSION_DAMAGE_PER_MASS
-        : 0;
-}
-
-export function shipExplosionBlastRadius(mass: number): number {
-    return Number.isFinite(mass) && mass > 0
-        ? Math.min(mass * SHIP_EXPLOSION_RADIUS_PER_MASS,
-            SHIP_EXPLOSION_MAX_RADIUS)
-        : 0;
-}
-
-export function makeShipExplosionBlast(
-    ship: ShipData,
-    position: Position,
-    sourceUuid: string,
-): Entity | undefined {
-    if (!ship.largeExplosion) {
-        return undefined;
-    }
-    const strength = shipExplosionBlastStrength(ship.physics.mass);
-    if (strength <= 0) {
-        return undefined;
-    }
-    const damage: WeaponDamage = {
-        shield: strength,
-        armor: strength,
-        ionization: 0,
-        ionizationColor: 0,
-        passThroughShield: 0,
-        knockback: strength,
-    };
-    return new Entity(`${ship.id} Explosion Blast`)
-        .addComponent(BlastDamageComponent, damage)
-        .addComponent(BlastIgnoreComponent, new Set([sourceUuid]))
-        .addComponent(HurtboxHullComponent, new CompositeHull([
-            new SAT.Circle(new SAT.Vector(0, 0),
-                shipExplosionBlastRadius(ship.physics.mass)),
-        ]))
-        .addComponent(CollisionHitterComponent, {
-            hitTypes: new Set(['normal']),
-        })
-        .addComponent(MovementStateComponent, {
-            position: Position.fromVectorLike(position),
-            accelerating: 0,
-            rotation: new Angle(0),
-            turnBack: false,
-            turning: 0,
-            velocity: new Vector(0, 0),
-        });
-}
 
 const SecondaryExplosionComponent = new Component<{
     explosion: ExplosionData,
@@ -247,59 +179,120 @@ const ProjectileExplosionSystem = new System({
     }
 });
 
-const ShipFinalExplosionSystem = new System({
-    name: 'ShipFinalExplosionSystem',
-    events: [DeathEvent],
-    before: [PlayerDeathSystem, DeathAISystem],
-    args: [ShipDataComponent, GameDataResource, MovementStateComponent,
-        Entities, EntityBudgetResource, UUID, Emit, TimeResource,
-        ActiveDestructionVisuals] as const,
-    step(ship, gameData, movement, entities, budget, shipUuid, emit, time,
-        activeDestructionVisuals) {
-        const blast = makeShipExplosionBlast(
-            ship,
-            movement.position,
-            shipUuid,
-        );
-        if (blast) {
-            entities.set(v4(), blast);
-        }
-        if (!ship.finalExplosion) {
-            emit(PlayerDestructionCompleteEvent, time, [shipUuid]);
-            return;
-        }
-        const explosionData =
-            gameData.data.Explosion.getCached(ship.finalExplosion);
+/**
+ * A ship whose destruction has been seen, so its final explosion can still be
+ * placed after the server has removed the wreck. The position is refreshed
+ * while the ship lives, because it keeps drifting as it comes apart.
+ */
+const DyingShips = new Resource<Map<string, {
+    ship: ShipData,
+    position: Position,
+}>>('DyingShips');
+/** Local marker: this ship's final explosion has already been played. */
+const FinalExplosionShown = new Component<true>('FinalExplosionShown');
 
-        if (!explosionData) {
-            emit(PlayerDestructionCompleteEvent, time, [shipUuid]);
+function playFinalExplosion(
+    ship: ShipData,
+    position: Position,
+    shipUuid: string,
+    gameData: { data: { Explosion: { getCached(id: string): ExplosionData | undefined } } },
+    entities: { set(uuid: string, entity: Entity): unknown },
+    budget: Parameters<typeof reserveEntity>[0],
+    activeDestructionVisuals: Map<string, number>,
+): boolean {
+    const explosionData = ship.finalExplosion
+        ? gameData.data.Explosion.getCached(ship.finalExplosion)
+        : undefined;
+    if (!explosionData) {
+        return false;
+    }
+    const explosion = makeExplosion(
+        explosionData,
+        position,
+        ship.largeExplosion ? explosionData : undefined,
+        shipUuid);
+    if (!reserveEntity(budget, explosion, 'explosion')) {
+        return false;
+    }
+    entities.set(v4(), explosion);
+    registerDestructionVisual(activeDestructionVisuals, shipUuid);
+    return true;
+}
+
+export const TrackDyingShips = new System({
+    name: 'TrackDyingShips',
+    args: [ShipDataComponent, DestructionStartedComponent,
+        MovementStateComponent, UUID, DyingShips,
+        Optional(FinalExplosionShown)] as const,
+    step(ship, _destructionStarted, movement, uuid, dying, shown) {
+        if (shown) {
             return;
         }
-        let largeExplosion: ExplosionData | undefined;
-        if (ship.largeExplosion) {
-            largeExplosion = explosionData;
+        dying.set(uuid, {
+            ship,
+            position: Position.fromVectorLike(movement.position),
+        });
+    }
+});
+
+/**
+ * The pilot's own wreck is not removed, so its death is announced by the
+ * replicated death marker rather than by the entity disappearing.
+ */
+const PlayerFinalExplosionSystem = new System({
+    name: 'PlayerFinalExplosionSystem',
+    args: [ShipDataComponent, PlayerDeathComponent, MovementStateComponent,
+        GameDataResource, Entities, EntityBudgetResource, UUID, GetEntity,
+        Emit, TimeResource, ActiveDestructionVisuals, DyingShips,
+        Optional(FinalExplosionShown)] as const,
+    step(ship, _death, movement, gameData, entities, budget, shipUuid, entity,
+        emit, time, activeDestructionVisuals, dying, shown) {
+        if (shown) {
+            return;
         }
-        const explosion = makeExplosion(
-            explosionData,
-            Position.fromVectorLike(movement.position),
-            largeExplosion,
-            shipUuid);
-        if (reserveEntity(budget, explosion, 'explosion')) {
-            entities.set(v4(), explosion);
-            registerDestructionVisual(activeDestructionVisuals, shipUuid);
-        } else {
+        entity.components.set(FinalExplosionShown, true);
+        dying.delete(shipUuid);
+        if (!playFinalExplosion(ship, Position.fromVectorLike(movement.position),
+            shipUuid, gameData, entities, budget, activeDestructionVisuals)) {
             emit(PlayerDestructionCompleteEvent, time, [shipUuid]);
         }
     }
 });
 
+/**
+ * Any other wreck is removed by the server once it is destroyed, and that
+ * removal is the only notice a client gets that the ship is gone for good.
+ */
+export const ShipFinalExplosionSystem = new System({
+    name: 'ShipFinalExplosionSystem',
+    args: [Entities, DyingShips, GameDataResource, EntityBudgetResource,
+        ActiveDestructionVisuals, SingletonComponent] as const,
+    step(entities, dying, gameData, budget, activeDestructionVisuals) {
+        for (const [uuid, entry] of [...dying]) {
+            if (entities.has(uuid)) {
+                continue;
+            }
+            dying.delete(uuid);
+            playFinalExplosion(entry.ship, entry.position, uuid, gameData,
+                entities, budget, activeDestructionVisuals);
+        }
+    }
+});
+
 // TODO: Sample collisions in the convex hull of the ship
+/**
+ * Damage and death are resolved on the server, so `ZeroArmorEvent` and
+ * `DeathEvent` never reach a browser. The dying flicker is therefore driven by
+ * the replicated destruction marker instead: its arrival is what tells a client
+ * that a ship has begun to come apart.
+ */
 const ShipSecondaryExplosionSystem = new System({
     name: 'ShipSecondaryExplosionSystem',
-    events: [ZeroArmorEvent],
-    args: [ShipDataComponent, GetEntity, GameDataResource] as const,
-    step(ship, {components}, gameData) {
-        if (ship.initialExplosion == null) {
+    args: [ShipDataComponent, DestructionStartedComponent, GetEntity,
+        Optional(DisabledComponent), GameDataResource] as const,
+    step(ship, _destructionStarted, {components}, disabled, gameData) {
+        if (ship.initialExplosion == null || disabled
+            || components.has(SecondaryExplosionComponent)) {
             return;
         }
 
@@ -318,8 +311,7 @@ const ShipSecondaryExplosionSystem = new System({
 
 const ShipSecondaryExplosionDoneSystem = new System({
     name: 'ShipSecondaryExplosionDoneSystem',
-    args: [GetEntity] as const,
-    events: [DeathEvent],
+    args: [GetEntity, FinalExplosionShown] as const,
     step(entity) {
         entity.components.delete(SecondaryExplosionComponent);
     }
@@ -355,9 +347,13 @@ export const ExplosionPlugin: Plugin = {
     name: 'ExplosionPlugin',
     build(world) {
         world.resources.set(ActiveDestructionVisuals, new Map());
+        world.resources.set(DyingShips, new Map());
+        world.addComponent(FinalExplosionShown);
         world.addSystem(ExplosionSystem);
         world.addSystem(ProjectileExplosionSystem);
         world.addSystem(SecondaryExplosionSystem);
+        world.addSystem(TrackDyingShips);
+        world.addSystem(PlayerFinalExplosionSystem);
         world.addSystem(ShipFinalExplosionSystem);
         world.addSystem(ShipSecondaryExplosionSystem);
         world.addSystem(ShipSecondaryExplosionDoneSystem);
@@ -366,9 +362,12 @@ export const ExplosionPlugin: Plugin = {
         world.removeSystem(ExplosionSystem);
         world.removeSystem(ProjectileExplosionSystem);
         world.removeSystem(SecondaryExplosionSystem);
+        world.removeSystem(TrackDyingShips);
+        world.removeSystem(PlayerFinalExplosionSystem);
         world.removeSystem(ShipFinalExplosionSystem);
         world.removeSystem(ShipSecondaryExplosionSystem);
         world.removeSystem(ShipSecondaryExplosionDoneSystem);
         world.resources.delete(ActiveDestructionVisuals);
+        world.resources.delete(DyingShips);
     }
 }

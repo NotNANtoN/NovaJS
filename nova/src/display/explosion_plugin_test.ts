@@ -1,9 +1,5 @@
 import 'jasmine';
 import {
-    shipExplosionBlastRadius,
-    shipExplosionBlastStrength,
-} from './explosion_plugin';
-import {
     advanceExplosionTiming,
     explosionFrameDurationMs,
 } from './explosion_timing';
@@ -20,7 +16,11 @@ import { getDefaultExplosionData } from 'novadatainterface/ExplosionData';
 import {
     ExplosionSystem,
     makeExplosion,
+    ShipFinalExplosionSystem,
+    TrackDyingShips,
 } from './explosion_plugin';
+import { getDefaultShipData } from 'novadatainterface/ShipData';
+import { EntityBudget } from '../nova_plugin/entity_budget';
 
 describe('explosion presentation cadence', () => {
     it('converts retail FrameAdvance factors to 30 Hz frame durations', () => {
@@ -109,22 +109,38 @@ describe('explosion presentation cadence', () => {
         step();
         expect(world.entities.has('explosion')).toBeFalse();
     });
-});
 
-describe('ship death blast scale', () => {
-    it('grows with mass', () => {
-        expect(shipExplosionBlastStrength(500)).toBeCloseTo(10, 8);
-        expect(shipExplosionBlastRadius(500)).toBeCloseTo(10, 8);
-    });
+    it('explodes a wreck the server has already removed', () => {
+        // A client never sees DeathEvent, because damage and death are
+        // resolved on the server. The wreck disappearing is its only notice.
+        const explosionData = getDefaultExplosionData();
+        const ship = getDefaultShipData();
+        ship.finalExplosion = 'nova:128';
+        const gameData = {
+            data: { Explosion: { getCached: () => explosionData } },
+        };
+        const world = new World('wreck-removal-test');
+        const dying = new Map();
+        const movement = { position: new Position(120, -40) };
 
-    it('caps the reach of the heaviest hulls', () => {
-        // The Leviathan is mass 10,000; an uncapped radius would reach
-        // further than the visible screen.
-        expect(shipExplosionBlastRadius(10_000)).toEqual(200);
-    });
+        TrackDyingShips.step(ship, true, movement as never, 'wreck', dying,
+            undefined);
+        expect(dying.get('wreck').position)
+            .toEqual(new Position(120, -40));
 
-    it('ignores a missing or nonsense mass', () => {
-        expect(shipExplosionBlastStrength(0)).toEqual(0);
-        expect(shipExplosionBlastRadius(Number.NaN)).toEqual(0);
+        // Still flying: nothing to play yet.
+        world.entities.set('wreck', makeExplosion(
+            explosionData, new Position(0, 0)));
+        ShipFinalExplosionSystem.step(world.entities, dying,
+            gameData as never, new EntityBudget(), new Map(), undefined);
+        expect(dying.has('wreck')).toBeTrue();
+
+        const before = world.entities.size;
+        world.entities.delete('wreck');
+        ShipFinalExplosionSystem.step(world.entities, dying,
+            gameData as never, new EntityBudget(), new Map(), undefined);
+        expect(dying.has('wreck')).toBeFalse();
+        expect([...world.entities.keys()].filter(key => key !== 'wreck').length)
+            .toEqual(before);
     });
 });
