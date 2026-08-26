@@ -1,5 +1,9 @@
 # NovaJS roadmap
 
+See [`docs/engine-overview.md`](engine-overview.md) for how the engine
+works and [`docs/maturity.md`](maturity.md) for how far each area can be
+trusted today.
+
 Canonical status and work order as of 2026-08-25. Checked items have focused
 automated regression coverage or a repository-level build/CI check; they do not
 imply complete EV Nova retail parity.
@@ -39,12 +43,31 @@ imply complete EV Nova retail parity.
   restart, snapshot restore, and malformed-data tests pass.
 - [ ] Preserve and validate saved ship snapshots across process restart; add a
   round-trip test covering ship, cargo, outfits, missions, date, and position.
-- [ ] Consolidate NCB test context and side effects behind one runtime adapter;
-  prove identical behavior for BBS accept/refuse, landing, expiration, and
-  scripted operations before deleting the duplicate adapters.
-- [ ] Move player-state and mission mutations to an authoritative validation
+- [x] Consolidate NCB mutation semantics behind one detached transaction
+  runtime and ordered ECS effect queue; route BBS, landing, expiration,
+  ship-goal, shipyard, outfitter, and trade intents through the shared local
+  mutation boundary.
+- [x] Move player-state and mission mutations to an authoritative validation
   boundary; test forged availability, cargo, credits, mission, and ship-change
-  inputs before enabling those paths for multiplayer.
+  network commands before enabling those paths for multiplayer.
+  - [x] Add the strict intent-only protocol, capability negotiation, monotonic
+    revisions, durable reconciliation, replay idempotency, remote purchase
+    adapter, and negotiated raw-replication lock.
+  - [x] Issue stable resolved retail/procedural mission offers server-side and
+    move offer accept/refuse, active-mission abort, landing completion/failure,
+    expiration, ship goals, rewards, date, and arrival snapshots behind the
+    revisioned authority session.
+  - [x] Move jump-route/date and death/respawn state transitions behind the
+    server authority session, advertise `worldLifecycle`, and enable strict
+    new/new negotiation. Accepted jumps commit at begin before presentation;
+    death relocation is server-detected and server-completed. Legacy peers
+    retain owner-authoritative compatibility for all fields.
+  - [x] Harden the strict boundary with server-selected, retryable capability
+    negotiation; token-keyed serialized CAS sessions; authoritative new-pilot
+    creation and entity binding; reconnect-stable offer scopes; durable pending
+    death state; generation-bound world transfers; and a server movement
+    validation shadow used by landing. Legacy mutation authority is now an
+    explicit, disabled-by-default deployment policy.
 - [ ] Add explicit migration/version handling for every persisted schema change,
   including rollback-safe fixtures from currently supported pilot files.
 
