@@ -17,6 +17,12 @@ import { SystemData } from "novadatainterface/SystemData";
 import { PersData } from "novadatainterface/PersData";
 import { Entity } from "nova_ecs/entity";
 import { selectPers } from "./pers";
+import { composeFleetRoster, formationSlot } from "./fleet";
+import {
+    FleetMemberComponent,
+    worldFormationPosition,
+} from "./fleet_plugin";
+import { TargetComponent } from "./target_component";
 import { makePersNpc, PersStateResource } from "./pers_plugin";
 import {
     ArrivalPlacement,
@@ -176,23 +182,16 @@ function getSpawnEntries(systemData: {
     return Array.isArray(legacy) ? legacy.filter(isNpcSpawnData) : [];
 }
 
-async function createNpc(
+async function buildNpc(
     gameData: GameDataInterface,
-    entries: readonly NpcSpawnData[],
+    npcType: NpcSpawnData,
+    shipId: string,
     budget: import('./entity_budget').EntityBudget,
     placement?: ArrivalPlacement,
+    fleet?: boolean,
 ) {
-    const npcType = pickWeighted(entries);
-    if (!npcType) {
-        return undefined;
-    }
-    const shipType = pickWeighted(npcType.ships);
-    if (!shipType) {
-        return undefined;
-    }
-
     try {
-        const shipData = await gameData.data.Ship.get(shipType.id);
+        const shipData = await gameData.data.Ship.get(shipId);
         const npc = makeNpc(shipData);
         if (!reserveEntity(budget, npc, 'ship')) {
             return undefined;
@@ -209,9 +208,12 @@ async function createNpc(
         );
         // Ambient traders are given an errand to run. The traffic system
         // drops this marker again for anything that turns out to be a warship,
-        // an interceptor or a miner.
-        npc.components.set(
-            NpcTrafficComponent, createArrivingTrafficState());
+        // an interceptor or a miner. A fleet is already going somewhere as a
+        // group, so its members are not given errands of their own.
+        if (!fleet) {
+            npc.components.set(
+                NpcTrafficComponent, createArrivingTrafficState());
+        }
         if (placement) {
             applyPlacement(npc, placement);
         }
@@ -224,6 +226,79 @@ async function createNpc(
     }
 }
 
+
+/**
+ * Spawn one ambient entry, which may be a whole flët rather than a lone hull.
+ *
+ * Returns the uuids alongside the entities because an escort has to be told the
+ * uuid of the leader it is escorting, which means the group has to agree on
+ * those names before any of it is published to the world.
+ */
+async function createNpcGroup(
+    gameData: GameDataInterface,
+    entries: readonly NpcSpawnData[],
+    budget: import('./entity_budget').EntityBudget,
+    placement?: ArrivalPlacement,
+): Promise<Array<[string, Entity]>> {
+    const npcType = pickWeighted(entries);
+    if (!npcType) {
+        return [];
+    }
+    if (!npcType.fleet) {
+        const shipType = pickWeighted(npcType.ships);
+        const npc = shipType && await buildNpc(
+            gameData, npcType, shipType.id, budget, placement);
+        return npc ? [[uuid(), npc]] : [];
+    }
+
+    const roster = composeFleetRoster({
+        leaderShipId: npcType.fleet.leader.id,
+        escorts: npcType.fleet.escorts.map(escort => ({
+            shipId: escort.id,
+            min: escort.min,
+            max: escort.max,
+        })),
+    });
+    const leader = await buildNpc(
+        gameData, npcType, roster.leaderShipId, budget, placement, true);
+    if (!leader) {
+        return [];
+    }
+    const leaderUuid = uuid();
+    const fleetId = uuid();
+    leader.components.set(FleetMemberComponent, {
+        fleetId, leaderUuid, role: 'leader' as const, slot: -1,
+    });
+    leader.components.set(TargetComponent, { target: undefined });
+    const group: Array<[string, Entity]> = [[leaderUuid, leader]];
+
+    const leaderMovement = leader.components.get(MovementStateComponent);
+    for (const [slot, shipId] of roster.escortShipIds.entries()) {
+        // An escort that does not fit in the entity budget is simply left out:
+        // a smaller wing is better than refusing to spawn the fleet at all.
+        let station: ArrivalPlacement | undefined;
+        if (leaderMovement && placement) {
+            const world = worldFormationPosition(
+                leaderMovement, formationSlot(slot));
+            station = {
+                position: [world.x, world.y],
+                rotation: placement.rotation,
+                origin: placement.origin,
+            };
+        }
+        const escort = await buildNpc(
+            gameData, npcType, shipId, budget, station, true);
+        if (!escort) {
+            continue;
+        }
+        escort.components.set(FleetMemberComponent, {
+            fleetId, leaderUuid, role: 'escort' as const, slot,
+        });
+        escort.components.set(TargetComponent, { target: undefined });
+        group.push([uuid(), escort]);
+    }
+    return group;
+}
 
 /**
  * Resolve what a ship could plausibly have arrived from: the galaxy positions
@@ -418,6 +493,11 @@ const NpcSpawnSystem = new AsyncSystem({
                 if (!activeWorlds.has(world)) {
                     return;
                 }
+                // A fleet fills several slots at once, so the target is
+                // measured in ships rather than in spawn attempts.
+                if (spawned >= initialCount) {
+                    break;
+                }
                 const placement = nextPlacement(gameData, state);
                 // The await must stay inside the branch: awaiting even an
                 // immediate undefined costs a tick, and a batch of spawns is
@@ -426,16 +506,18 @@ const NpcSpawnSystem = new AsyncSystem({
                     ? await createPersNpc(
                         gameData, world, systemId, state, budget, placement)
                     : undefined;
-                const npc = named ?? await createNpc(
+                const group: Array<[string, Entity]> = named
+                    ? [[uuid(), named]]
+                    : await createNpcGroup(
                         gameData, state.entries, budget, placement);
                 if (!activeWorlds.has(world)) {
-                    if (npc) {
+                    for (const _member of group) {
                         budget.release('ship');
                     }
                     return;
                 }
-                if (npc) {
-                    world.entities.set(uuid(), npc);
+                for (const [id, member] of group) {
+                    world.entities.set(id, member);
                     spawned++;
                 }
             }
@@ -454,16 +536,22 @@ const NpcSpawnSystem = new AsyncSystem({
             ? await createPersNpc(
                 gameData, world, systemId, state, budget, placement)
             : undefined;
-        const npc = named
-            ?? await createNpc(gameData, state.entries, budget, placement);
-        if (!npc || !activeWorlds.has(world)) {
-            if (npc && !activeWorlds.has(world)) {
-                budget.release('ship');
+        const group: Array<[string, Entity]> = named
+            ? [[uuid(), named]]
+            : await createNpcGroup(
+                gameData, state.entries, budget, placement);
+        if (group.length === 0 || !activeWorlds.has(world)) {
+            if (!activeWorlds.has(world)) {
+                for (const _member of group) {
+                    budget.release('ship');
+                }
             }
             return;
         }
-        world.entities.set(uuid(), npc);
-        console.log(`NPC spawn ${systemId}: +1 (${npcs.length + 1}/${state.target})`);
+        for (const [id, member] of group) {
+            world.entities.set(id, member);
+        }
+        console.log(`NPC spawn ${systemId}: +${group.length} (${npcs.length + group.length}/${state.target})`);
     },
 });
 

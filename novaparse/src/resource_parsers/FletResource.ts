@@ -2,6 +2,18 @@ import { Resource } from "resource_fork";
 import { NovaResources } from "./ResourceHolderBase";
 import { BaseResource } from "./NovaResourceBase";
 
+/**
+ * CFletResource stores 15 meaningful words followed by a 256-byte
+ * null-terminated expression. Retail records are 306 bytes: the final 16
+ * bytes are zero padding after Flags.
+ *
+ * The offsets below are intentionally kept beside the parser. They are
+ * verified against every retail flët record, rather than inferred from the
+ * similarly shaped düde resource.
+ */
+export const FLET_APPEAR_ON_BYTES = 256;
+export const FLET_MEANINGFUL_BYTES = 290;
+
 class FletResource extends BaseResource {
     leadShipType: number;
     escortTypes: number[];
@@ -17,8 +29,8 @@ class FletResource extends BaseResource {
         super(resource, idSpace);
         var d = this.data;
 
-        // The fixed layout is documented by CFletResource::Save. The
-        // appearance condition is a 256-byte, null-terminated string.
+        // EV Nova Bible, "The flët resource": LeadShipType, EscortType x4,
+        // Min x4, Max x4, Govt, LinkSyst, AppearOn, Quote, and Flags.
         this.leadShipType = d.getInt16(0);
         this.escortTypes = [];
         this.minEscorts = [];
@@ -31,7 +43,7 @@ class FletResource extends BaseResource {
         this.government = d.getInt16(26);
         this.linkSyst = d.getInt16(28);
         this.appearOn = "";
-        for (var j = 0; j < 256; j++) {
+        for (var j = 0; j < FLET_APPEAR_ON_BYTES; j++) {
             var c = d.getUint8(30 + j);
             if (c === 0) {
                 break;

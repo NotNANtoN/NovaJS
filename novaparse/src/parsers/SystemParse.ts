@@ -1,6 +1,8 @@
 import { SystResource } from "../resource_parsers/SystResource";
 import {
     NpcShipSpawnData,
+    NpcFleetEscortSpawnData,
+    NpcFleetSpawnData,
     NpcSpawnData,
     SystemData,
 } from "novadatainterface/SystemData";
@@ -47,6 +49,69 @@ function resolveShips(
         ships.push({ id: ship.globalID, weight });
     }
     return ships;
+}
+
+function resolveFleet(
+    flet: {
+        leadShipType: number,
+        escortTypes: number[],
+        minEscorts: number[],
+        maxEscorts: number[],
+    },
+    idSpace: NovaResources,
+    notFoundFunction: (message: string) => void,
+    context: string,
+): {
+    fallbackShips: NpcShipSpawnData[],
+    fleet?: NpcFleetSpawnData,
+} {
+    const activeEscortIndexes = flet.escortTypes
+        .map((_type, index) => index)
+        .filter(index => flet.minEscorts[index] > 0
+            || flet.maxEscorts[index] > 0);
+    const shipTypes = [
+        flet.leadShipType,
+        ...activeEscortIndexes.map(index => flet.escortTypes[index]),
+    ];
+    const fallbackShips = resolveShips(
+        shipTypes,
+        shipTypes.map(() => 1),
+        idSpace,
+        notFoundFunction,
+        context,
+    );
+    const leader = resolveShips(
+        [flet.leadShipType],
+        [1],
+        idSpace,
+        () => { /* Reported by the fallback resolution above. */ },
+        context,
+    )[0];
+    if (!leader) {
+        return { fallbackShips };
+    }
+
+    const escorts: NpcFleetEscortSpawnData[] = [];
+    for (const index of activeEscortIndexes) {
+        const escort = resolveShips(
+            [flet.escortTypes[index]],
+            [1],
+            idSpace,
+            () => { /* Reported by the fallback resolution above. */ },
+            context,
+        )[0];
+        if (escort) {
+            escorts.push({
+                ...escort,
+                min: flet.minEscorts[index],
+                max: flet.maxEscorts[index],
+            });
+        }
+    }
+    return {
+        fallbackShips,
+        fleet: { leader, escorts },
+    };
 }
 
 
@@ -119,12 +184,12 @@ export async function SystemParse(syst: SystResource, notFoundFunction: (m: stri
             var flet = syst.idSpace.flët[-localID];
             if (flet) {
                 dudes.push({ id: flet.globalID, weight });
-                // A flët has no per-ship probabilities. Include its lead ship
-                // and active escort classes as equally likely fallback spawn
-                // choices. Slots with no escorts are intentionally ignored.
-                const activeEscorts = flet.escortTypes.filter((_type, index) =>
-                    flet.minEscorts[index] > 0 || flet.maxEscorts[index] > 0);
-                const shipTypes = [flet.leadShipType, ...activeEscorts];
+                const resolved = resolveFleet(
+                    flet,
+                    syst.idSpace,
+                    notFoundFunction,
+                    "flët " + flet.globalID,
+                );
                 npcs.push({
                     id: flet.globalID,
                     weight,
@@ -133,13 +198,10 @@ export async function SystemParse(syst: SystResource, notFoundFunction: (m: stri
                     // flët resources explicitly describe coordinated military
                     // groups rather than unrelated ambient traders.
                     combatRole: "military",
-                    ships: resolveShips(
-                        shipTypes,
-                        shipTypes.map(() => 1),
-                        syst.idSpace,
-                        notFoundFunction,
-                        "flët " + flet.globalID,
-                    ),
+                    fleet: resolved.fleet,
+                    // Keep the old flattened candidates for consumers that
+                    // have not learned the additive fleet field yet.
+                    ships: resolved.fallbackShips,
                 });
             }
             else {

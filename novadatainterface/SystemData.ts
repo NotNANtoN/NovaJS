@@ -6,6 +6,21 @@ export interface NpcShipSpawnData {
     weight: number,
 }
 
+export interface NpcFleetEscortSpawnData extends NpcShipSpawnData {
+    min: number,
+    max: number,
+}
+
+/**
+ * The normalized roster carried by a flët spawn entry. `ships` remains on
+ * NpcSpawnData for older consumers; this additive field is what lets an
+ * authoritative spawner create one leader and its rolled escorts together.
+ */
+export interface NpcFleetSpawnData {
+    leader: NpcShipSpawnData,
+    escorts: Array<NpcFleetEscortSpawnData>,
+}
+
 export interface NpcSpawnData {
     id: string,
     weight: number,
@@ -21,6 +36,8 @@ export interface NpcSpawnData {
      * generated data omits it and yields nothing when plundered.
      */
     kind?: "dude" | "fleet",
+    /** Present for flët entries; absent for ordinary düde entries. */
+    fleet?: NpcFleetSpawnData,
     ships: Array<NpcShipSpawnData>,
 }
 

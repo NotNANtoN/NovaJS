@@ -23,6 +23,19 @@ import { PlayerShipSelector } from './player_ship_plugin';
 import { Stat } from './stat';
 import { combatRoleForDudeAiType } from 'novaparse/src/parsers/SystemParse';
 
+/**
+ * Let the spawner's pending work finish.
+ *
+ * Counting individual microtasks here would tie the test to how deeply the
+ * spawn path happens to nest its awaits, so any honest refactor of that path
+ * would fail the test without any change in behavior.
+ */
+async function settle(): Promise<void> {
+    for (let drain = 0; drain < 16; drain++) {
+        await Promise.resolve();
+    }
+}
+
 describe('NPC spawning', () => {
     it('derives defense eligibility from retail düde AI roles', () => {
         expect(combatRoleForDudeAiType(1)).toBe('civilian');
@@ -63,10 +76,9 @@ describe('NPC spawning', () => {
             await world.addPlugin(DeathPlugin);
             await world.addPlugin(NpcSpawnPlugin);
             world.step();
-            await Promise.resolve();
-            await Promise.resolve();
+            await settle();
             world.step();
-            await Promise.resolve();
+            await settle();
             return [...world.entities.values()]
                 .filter(entity => entity.components.has(NpcAIComponent));
         };
@@ -128,10 +140,9 @@ describe('NPC spawning', () => {
         }
 
         world.step();
-        await Promise.resolve();
-        await Promise.resolve();
+        await settle();
         world.step();
-        await Promise.resolve();
+        await settle();
 
         const npcCount = [...world.entities.values()].filter(entity =>
             entity.components.has(NpcAIComponent)).length;
@@ -162,7 +173,7 @@ describe('NPC spawning', () => {
         world.step();
         time.time = 2_500;
         world.step();
-        await Promise.resolve();
+        await settle();
         world.step();
 
         expect([...world.entities.values()].filter(entity =>
