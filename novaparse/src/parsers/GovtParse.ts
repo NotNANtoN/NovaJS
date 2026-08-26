@@ -3,6 +3,7 @@ import { GovtResource } from "../resource_parsers/GovtResource";
 import { BaseParse } from "./BaseParse";
 
 export interface ParsedGovtData extends BaseData {
+    color: number;
     flags: number;
     flags2: number;
     scanFine: number;
@@ -29,6 +30,7 @@ export async function GovtParse(govt: GovtResource,
     };
     return {
         ...base,
+        color: govt.color & 0xffffff,
         flags: govt.flags,
         flags2: govt.flags2,
         scanFine: govt.scanFine,

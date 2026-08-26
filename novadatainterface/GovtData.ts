@@ -8,6 +8,8 @@ import { BaseData, getDefaultBaseData } from "./BaseData";
  * can be consumed by the same resolver.
  */
 export interface GovtData extends BaseData {
+    /** Map colour used for this government's territory, as 0xRRGGBB. */
+    color?: number;
     flags?: number;
     flags2?: number;
     scanFine?: number;
