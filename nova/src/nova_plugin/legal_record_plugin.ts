@@ -274,6 +274,17 @@ export const LegalRecordPlugin: Plugin = {
             void loadGovernments(gameData, ledger);
         }
     },
+    // Without this the crime systems outlived the plugin, and tearing a system
+    // down threw as soon as NpcPlugin dropped the government relations these
+    // still claimed to use.
+    remove(world) {
+        world.removeSystem(PlayerCrimeDamageSystem);
+        world.removeSystem(PlayerCrimeDisableSystem);
+        world.removeSystem(PlayerCrimeBoardingSystem);
+        world.removeSystem(PlayerCrimeDeathSystem);
+        world.removeSystem(LedgerSweepSystem);
+        world.resources.delete(LegalLedgerResource);
+    },
 };
 
 async function loadGovernments(

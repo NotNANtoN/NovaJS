@@ -11,9 +11,11 @@ import {
 import {
     LegalLedger,
     LegalLedgerResource,
+    LegalRecordPlugin,
     PlayerCrimeBoardingSystem,
     PlayerCrimeDisableSystem,
 } from './legal_record_plugin';
+import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { GovtComponent } from './npc_components';
 import { PlatformResource } from './platform_plugin';
 import {
@@ -87,5 +89,22 @@ describe('legal record crime events', () => {
 
         expect(player.components.get(PlayerStateComponent)!
             .legalRecords?.['nova:128']).toBeUndefined();
+    });
+});
+
+describe('tearing the legal record plugin down', () => {
+    it('releases the government relations it claimed', async () => {
+        const { world } = makeWorld(government());
+        world.resources.set(TimeResource, { time: 0, delta_ms: 0, delta_s: 0 });
+        await world.addPlugin(LegalRecordPlugin);
+
+        // Reproduces the server crash: NpcPlugin drops these on teardown, and
+        // the world refuses while a crime system still names them.
+        expect(() => world.resources.delete(GovernmentRelationResource))
+            .toThrow();
+
+        await world.removePlugin(LegalRecordPlugin);
+        expect(() => world.resources.delete(GovernmentRelationResource))
+            .not.toThrow();
     });
 });
