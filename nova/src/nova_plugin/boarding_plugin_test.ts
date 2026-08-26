@@ -1,0 +1,208 @@
+import 'jasmine';
+import { Angle } from 'nova_ecs/datatypes/angle';
+import { Position } from 'nova_ecs/datatypes/position';
+import { Vector } from 'nova_ecs/datatypes/vector';
+import { Entity } from 'nova_ecs/entity';
+import { DeltaPlugin } from 'nova_ecs/plugins/delta_plugin';
+import {
+    MovementPhysicsComponent,
+    MovementPlugin,
+    MovementStateComponent,
+    MovementType,
+} from 'nova_ecs/plugins/movement_plugin';
+import { MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
+import { TimeResource } from 'nova_ecs/plugins/time_plugin';
+import { World } from 'nova_ecs/world';
+import {
+    BOARDING_MAX_RELATIVE_SPEED,
+    BOARDING_TRANSFER_RANGE,
+    BoardingInventory,
+    BoardingInventoryComponent,
+    BoardingStateComponent,
+    PirateBoarderComponent,
+    PirateBoardingSystem,
+    plundersDisabledShips,
+    plunderShip,
+} from './boarding_plugin';
+import { DisabledComponent } from './death_plugin';
+import { ArmorComponent } from './health_plugin';
+import { NpcAIComponent } from './npc_components';
+import {
+    allocateCargo,
+    createInitialPlayerState,
+    PlayerStateComponent,
+} from './player_state';
+import { PlatformResource } from './platform_plugin';
+import { Stat } from './stat';
+import { TargetComponent } from './target_component';
+import { WeaponsStateComponent } from './weapons_state';
+
+function movementAt(
+    position: Position,
+    velocity = new Vector(0, 0),
+    rotation = new Angle(0),
+) {
+    return {
+        accelerating: 0,
+        position,
+        rotation,
+        turnBack: false,
+        turning: 0,
+        velocity,
+    };
+}
+
+async function makeWorld() {
+    const world = new World('boarding-test');
+    world.resources.set(TimeResource, {
+        time: 0,
+        delta_ms: 1_000 / 60,
+        delta_s: 1 / 60,
+        frame: 0,
+    });
+    world.resources.set(PlatformResource, 'node');
+    await world.addPlugin(DeltaPlugin);
+    await world.addPlugin(MovementPlugin);
+    world.addSystem(PirateBoardingSystem);
+    return world;
+}
+
+function pirateAt(position: Position, target: string) {
+    const inventory: BoardingInventory = {
+        cargoCapacity: 20,
+        credits: 0,
+        holds: [],
+    };
+    return new Entity('pirate')
+        .addComponent(NpcAIComponent, undefined)
+        .addComponent(PirateBoarderComponent, { enabled: true })
+        .addComponent(BoardingStateComponent, { boarded: [] })
+        .addComponent(BoardingInventoryComponent, inventory)
+        .addComponent(TargetComponent, { target })
+        .addComponent(MultiplayerData, { owner: 'server' })
+        .addComponent(MovementStateComponent, movementAt(
+            position, new Vector(0, 0), new Angle(Math.PI / 2)))
+        .addComponent(MovementPhysicsComponent, {
+            acceleration: 100,
+            maxVelocity: 160,
+            movementType: MovementType.INERTIAL,
+            turnRate: 3,
+        })
+        .addComponent(ArmorComponent, new Stat({
+            current: 100,
+            max: 100,
+            recharge: 0,
+        }))
+        .addComponent(WeaponsStateComponent, new Map([
+            ['laser', { count: 1, firing: true, target }],
+        ]));
+}
+
+describe('pirate boarding', () => {
+    it('flies alongside a drifting disabled player before plundering', async () => {
+        const world = await makeWorld();
+        const playerState = createInitialPlayerState();
+        playerState.credits = 100;
+        playerState.cargoCapacity = 20;
+        allocateCargo(playerState, {
+            commodity: 'Food',
+            tons: 8,
+            isMissionCargo: false,
+        });
+        allocateCargo(playerState, {
+            commodity: 'mission:rescue',
+            tons: 2,
+            isMissionCargo: true,
+        });
+        const victim = new Entity('victim')
+            .addComponent(DisabledComponent, true)
+            .addComponent(PlayerStateComponent, playerState)
+            .addComponent(MovementStateComponent, movementAt(
+                new Position(1_200, 0), new Vector(8, 0)))
+            .addComponent(ArmorComponent, new Stat({
+                current: 20,
+                max: 100,
+                recharge: 0,
+            }));
+        const pirate = pirateAt(new Position(0, 0), 'victim');
+        world.entities.set('victim', victim);
+        world.entities.set('pirate', pirate);
+
+        let steps = 0;
+        while (!pirate.components.get(BoardingStateComponent)!
+            .boarded.includes('victim') && steps < 2_400) {
+            world.step();
+            steps++;
+        }
+
+        expect(steps).toBeLessThan(2_400);
+        const pirateMovement =
+            pirate.components.get(MovementStateComponent)!;
+        const victimMovement =
+            victim.components.get(MovementStateComponent)!;
+        expect(victimMovement.position.subtract(pirateMovement.position).length)
+            .toBeLessThanOrEqual(BOARDING_TRANSFER_RANGE);
+        expect(victimMovement.velocity.subtract(pirateMovement.velocity).length)
+            .toBeLessThanOrEqual(BOARDING_MAX_RELATIVE_SPEED);
+
+        const playerAfter = victim.components.get(PlayerStateComponent)!;
+        expect(playerAfter.credits).toBe(75);
+        expect(playerAfter.holds.find(hold => hold.commodity === 'Food'))
+            .toBeUndefined();
+        expect(playerAfter.holds.find(
+            hold => hold.commodity === 'mission:rescue')?.tons).toBe(2);
+        const pirateInventory =
+            pirate.components.get(BoardingInventoryComponent)!;
+        expect(pirateInventory.credits).toBe(25);
+        expect(pirateInventory.holds).toEqual([{
+            commodity: 'Food',
+            tons: 8,
+            isMissionCargo: false,
+        }]);
+        expect(pirate.components.get(WeaponsStateComponent)!.get('laser')!
+            .firing).toBeFalse();
+    });
+
+    it('moves NPC cargo and credits without taking mission cargo', () => {
+        const boarder: BoardingInventory = {
+            cargoCapacity: 5,
+            credits: 10,
+            holds: [],
+        };
+        const victim: BoardingInventory = {
+            cargoCapacity: 20,
+            credits: 80,
+            holds: [
+                { commodity: 'Metal', tons: 7, isMissionCargo: false },
+                { commodity: 'mission:aid', tons: 3, isMissionCargo: true },
+            ],
+        };
+
+        expect(plunderShip(boarder, undefined, victim))
+            .toEqual({ cargo: 5, credits: 20 });
+        expect(boarder).toEqual({
+            cargoCapacity: 5,
+            credits: 30,
+            holds: [
+                { commodity: 'Metal', tons: 5, isMissionCargo: false },
+            ],
+        });
+        expect(victim).toEqual({
+            cargoCapacity: 20,
+            credits: 60,
+            holds: [
+                { commodity: 'Metal', tons: 2, isMissionCargo: false },
+                { commodity: 'mission:aid', tons: 3, isMissionCargo: true },
+            ],
+        });
+    });
+
+    it('recognises plunderers by the retail flag, not by name', () => {
+        // Retail's Marauder government carries 0xf293 and boards, while it
+        // never says "pirate"; the Federation's 0xe2b0 lacks the bit.
+        expect(plundersDisabledShips({ flags: 0xf293 })).toBeTrue();
+        expect(plundersDisabledShips({ flags: 0xf2b3 })).toBeTrue();
+        expect(plundersDisabledShips({ flags: 0xe2b0 })).toBeFalse();
+        expect(plundersDisabledShips({ flags: undefined })).toBeFalse();
+    });
+});

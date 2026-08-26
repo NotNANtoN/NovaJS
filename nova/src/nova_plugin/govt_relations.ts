@@ -15,6 +15,13 @@ export const GovernmentFlags = {
     alwaysAttacksPlayer: 0x0004,
     cannotHail: 0x0400,
     neverAttacksPlayer: 0x0040,
+    /**
+     * "Warships will plunder non-mission, non-player enemies before destroying
+     * them" (Bible, gövt/Flags). Retail sets it on the raiders that board:
+     * Pirate, Marauder, Houseless Warriors, Spanner, Family Moash and the
+     * bounty hunters' guild.
+     */
+    warshipsPlunder: 0x1000,
 } as const;
 
 export interface GovernmentData extends GovtData {
