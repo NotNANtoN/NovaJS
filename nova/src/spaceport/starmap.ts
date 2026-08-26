@@ -3,6 +3,7 @@ import * as PIXI from 'pixi.js';
 import { Observable } from "rxjs";
 import { GameData } from "../client/gamedata/GameData";
 import { ControlEvent } from "../nova_plugin/controls_plugin";
+import { resourceId } from "../common/resource_id";
 import { Button } from "./button";
 import { Menu } from "./menu";
 import { MenuControls } from "./menu_controls";
@@ -13,11 +14,18 @@ import {
     StarmapViewState,
     systemMarkerStyle,
 } from "./starmap_state";
+import {
+    computeTerritoryField,
+    TerritoryField,
+    TerritoryPoint,
+} from "./territory_field";
 
 export { shortestRoute, shortestRoutes } from "./route_planning";
 
 
 const GREY = 0x666666;
+/** Keeps the political overlay readable without hiding links or markers. */
+const TERRITORY_ALPHA = 0.55;
 const BLUE = 0x0000BB;
 const SYSTEM_TEXT = new PIXI.TextStyle({
     fontFamily: 'Geneva',
@@ -78,6 +86,10 @@ function sameSystemSet(
 
 class SystemGraph {
     readonly container = new PIXI.Container();
+    private readonly territoryContainer = new PIXI.Container();
+    private territorySprite?: PIXI.Sprite;
+    private territoryField?: TerritoryField;
+    private territoryPoints: TerritoryPoint[] = [];
     private readonly graphics: PIXI.Graphics;
     private readonly links: [SystemData, SystemData][];
     private readonly systems: Map<string, SystemData>;
@@ -117,6 +129,9 @@ class SystemGraph {
             .on('touchmove', onDragMove);
 
         this.mapContainer = new PIXI.Container();
+        // Government territory is background shading, so it goes under the
+        // links, the route and the system markers.
+        this.mapContainer.addChild(this.territoryContainer);
         this.mapContainer.addChild(this.graphics);
 
         this.maskedContainer = new PIXI.Container();
@@ -181,6 +196,9 @@ class SystemGraph {
         }
         this.knownSystems = knownSystems;
         this.routes = this.computeShortestPaths();
+        if (this.territoryPoints.length > 0) {
+            this.rebuildTerritory();
+        }
         if (redraw) {
             this.draw();
         }
@@ -194,6 +212,7 @@ class SystemGraph {
         this.mapContainer.cacheAsBitmap = false;
         this.scale = scale;
         this.graphics.clear();
+        this.placeTerritory();
         this.drawLinks();
         this.drawRoute();
         this.placeSystems();
@@ -251,6 +270,55 @@ class SystemGraph {
             }
         }
         return linksMap.values();
+    }
+
+    /**
+     * Colours in the space controlled by each government. Only systems the
+     * pilot has visited contribute, so the overlay cannot reveal unexplored
+     * space.
+     */
+    setTerritory(points: readonly TerritoryPoint[]) {
+        this.territoryPoints = [...points];
+        this.rebuildTerritory();
+    }
+
+    private rebuildTerritory() {
+        const visible = this.territoryPoints.filter(point =>
+            !this.knownSystems || point.systemId === undefined
+            || this.knownSystems.has(point.systemId));
+        this.territoryField = computeTerritoryField(visible);
+        if (this.territorySprite) {
+            this.territoryContainer.removeChild(this.territorySprite);
+            this.territorySprite.destroy({ texture: true, baseTexture: true });
+            this.territorySprite = undefined;
+        }
+        const field = this.territoryField;
+        if (field) {
+            const texture = PIXI.Texture.fromBuffer(
+                new Uint8Array(field.pixels), field.width, field.height);
+            // Linear filtering is what turns the coarse field into the
+            // smooth gradient between neighbouring governments.
+            texture.baseTexture.scaleMode = PIXI.SCALE_MODES.LINEAR;
+            const sprite = new PIXI.Sprite(texture);
+            sprite.alpha = TERRITORY_ALPHA;
+            this.territorySprite = sprite;
+            this.territoryContainer.addChild(sprite);
+        }
+        // The map is cached as a bitmap, so it has to be redrawn once the
+        // asynchronously loaded colours arrive.
+        this.draw();
+    }
+
+    private placeTerritory() {
+        const field = this.territoryField;
+        const sprite = this.territorySprite;
+        if (!field || !sprite) {
+            return;
+        }
+        const [x, y] = this.scalePos([field.origin.x, field.origin.y]);
+        sprite.position.set(x, y);
+        sprite.width = field.size.x * this.scale;
+        sprite.height = field.size.y * this.scale;
     }
 
     private placeSystems() {
@@ -349,6 +417,51 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
             systems, this.systemId, this.exploredSystems);
         this.systemGraph.container.position.set(-290, -248);
         this.container.addChild(this.systemGraph.container);
+        // The overlay needs a government lookup per claimed system, so it is
+        // filled in after the map itself is usable.
+        void this.loadTerritory(systems);
+    }
+
+    /**
+     * Territory colours come from each controlling government's `gövt` map
+     * colour, which is the colour retail uses for that empire.
+     */
+    private async loadTerritory(systems: readonly SystemData[]) {
+        const govtData = this.gameData.data.Govt;
+        if (!govtData) {
+            return;
+        }
+        const claimed = systems.filter(system =>
+            system.government !== undefined && system.government >= 128);
+        const colors = new Map<number, number | undefined>();
+        const governments = [...new Set(claimed.map(
+            system => system.government as number))];
+        await Promise.all(governments.map(async government => {
+            try {
+                const govt = await govtData.get(resourceId(government));
+                colors.set(government, govt.color);
+            } catch (error) {
+                console.warn(`Could not load government ${government}`, error);
+                colors.set(government, undefined);
+            }
+        }));
+        if (!this.systemGraph || this.managed.disposed) {
+            return;
+        }
+        const points: TerritoryPoint[] = [];
+        for (const system of claimed) {
+            const color = colors.get(system.government as number);
+            if (color === undefined) {
+                continue;
+            }
+            points.push({
+                x: system.position[0],
+                y: system.position[1],
+                color,
+                systemId: system.id,
+            });
+        }
+        this.systemGraph.setTerritory(points);
     }
 
     override async show(route: string[]) {
