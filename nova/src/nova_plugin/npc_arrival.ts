@@ -21,11 +21,11 @@ export const HYPERSPACE_ENTRY_RADIUS = 6_000;
 export const STELLAR_LAUNCH_OFFSET = 700;
 
 /**
- * Fraction of ambient traffic that lifts off from a stellar rather than
- * arriving from hyperspace. Traffic reads best as mostly local coming and
- * going, with arrivals from outside as the minority.
+ * Deliberate presentation policy, not a retail value: most ambient traffic
+ * should be visible near local stellars while edge arrivals remain common
+ * enough to preserve the neighbouring-system feature.
  */
-export const STELLAR_LAUNCH_SHARE = 0.5;
+export const STELLAR_LAUNCH_SHARE = 0.7;
 
 export interface ArrivalPlacement {
     position: [number, number];
@@ -40,6 +40,20 @@ export interface ArrivalSystem {
     planets: readonly string[];
 }
 
+/**
+ * A caller that has loaded stellar metadata can mark a candidate inhabited.
+ * Tuple candidates remain supported because the current spawn context only
+ * carries positions.
+ */
+export interface ArrivalStellar {
+    position: readonly [number, number];
+    inhabited?: boolean;
+}
+
+export type ArrivalStellarCandidate =
+    | readonly [number, number]
+    | ArrivalStellar;
+
 function sample(random: ArrivalRandom): number {
     const value = random();
     return Number.isFinite(value) ? Math.min(0.999999, Math.max(0, value)) : 0;
@@ -50,6 +64,18 @@ function pick<T>(items: readonly T[], random: ArrivalRandom): T | undefined {
         return undefined;
     }
     return items[Math.floor(sample(random) * items.length)];
+}
+
+function stellarPosition(
+    candidate: ArrivalStellarCandidate,
+): readonly [number, number] {
+    return 'position' in candidate ? candidate.position : candidate;
+}
+
+function stellarMetadata(
+    candidate: ArrivalStellarCandidate,
+): boolean | undefined {
+    return 'position' in candidate ? candidate.inhabited : undefined;
 }
 
 /** Nova measures headings from straight up, turning clockwise. */
@@ -115,14 +141,24 @@ export function stellarLaunch(
 export function chooseArrivalPlacement(
     system: ArrivalSystem,
     neighbourPositions: ReadonlyMap<string, readonly [number, number]>,
-    stellarPositions: readonly (readonly [number, number])[],
+    stellarPositions: readonly ArrivalStellarCandidate[],
     random: ArrivalRandom,
     launchShare = STELLAR_LAUNCH_SHARE,
 ): ArrivalPlacement | undefined {
-    if (stellarPositions.length > 0 && sample(random) < launchShare) {
-        const stellar = pick(stellarPositions, random);
+    const candidates = stellarPositions.map(candidate => ({
+        position: stellarPosition(candidate),
+        inhabited: stellarMetadata(candidate),
+    }));
+    const hasMetadata = candidates.some(
+        candidate => candidate.inhabited !== undefined);
+    const inhabited = candidates.filter(candidate => candidate.inhabited === true);
+    const launchCandidates = inhabited.length > 0
+        ? inhabited
+        : hasMetadata ? [] : candidates;
+    if (launchCandidates.length > 0 && sample(random) < launchShare) {
+        const stellar = pick(launchCandidates, random);
         if (stellar) {
-            return stellarLaunch(stellar, random);
+            return stellarLaunch(stellar.position, random);
         }
     }
     return hyperspaceEntry(system, neighbourPositions, random);

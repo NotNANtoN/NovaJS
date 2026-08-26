@@ -78,6 +78,16 @@ describe('lifting off from a stellar', () => {
 });
 
 describe('choosing how a ship enters', () => {
+    it('uses the deliberate local-launch share by default', () => {
+        const local = chooseArrivalPlacement(
+            SYSTEM, NEIGHBOURS, [[500, 500]], rolls(0.69, 0, 0))!;
+        const edge = chooseArrivalPlacement(
+            SYSTEM, NEIGHBOURS, [[500, 500]], rolls(0.7, 0))!;
+
+        expect(local.origin).toEqual('stellar');
+        expect(edge.origin).toEqual('hyperspace');
+    });
+
     it('lifts off from a stellar when the roll falls below the share', () => {
         const placement = chooseArrivalPlacement(
             SYSTEM, NEIGHBOURS, [[500, 500]], rolls(0.1, 0, 0), 0.5)!;
@@ -87,6 +97,36 @@ describe('choosing how a ship enters', () => {
     it('arrives from hyperspace when the roll falls above the share', () => {
         const placement = chooseArrivalPlacement(
             SYSTEM, NEIGHBOURS, [[500, 500]], rolls(0.9, 0), 0.5)!;
+        expect(placement.origin).toEqual('hyperspace');
+    });
+
+    it('prefers candidates explicitly marked as inhabited', () => {
+        const placement = chooseArrivalPlacement(
+            SYSTEM,
+            NEIGHBOURS,
+            [
+                { position: [900, 900], inhabited: false },
+                { position: [500, 500], inhabited: true },
+            ],
+            rolls(0.1, 0, 0),
+            0.5,
+        )!;
+
+        expect(placement.origin).toEqual('stellar');
+        expect(placement.position[0]).toBeCloseTo(500, 6);
+        expect(placement.position[1])
+            .toBeCloseTo(500 - STELLAR_LAUNCH_OFFSET, 6);
+    });
+
+    it('uses hyperspace when metadata says every stellar is barren', () => {
+        const placement = chooseArrivalPlacement(
+            SYSTEM,
+            NEIGHBOURS,
+            [{ position: [500, 500], inhabited: false }],
+            rolls(0.1, 0, 0),
+            0.5,
+        )!;
+
         expect(placement.origin).toEqual('hyperspace');
     });
 

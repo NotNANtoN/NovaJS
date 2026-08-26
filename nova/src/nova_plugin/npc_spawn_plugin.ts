@@ -26,6 +26,7 @@ import { TargetComponent } from "./target_component";
 import { makePersNpc, PersStateResource } from "./pers_plugin";
 import {
     ArrivalPlacement,
+    ArrivalStellarCandidate,
     ArrivalSystem,
     chooseArrivalPlacement,
 } from "./npc_arrival";
@@ -33,6 +34,7 @@ import { GovtComponent } from "./npc_plugin";
 import { DudeSourceComponent } from "./boarding_plugin";
 import { createArrivingTrafficState } from "./npc_traffic";
 import { NpcTrafficComponent } from "./npc_traffic_plugin";
+import { DEFAULT_PATROL_RADIUS, PatrolComponent } from "./patrol_plugin";
 import { makeNpc } from "./npc_plugin";
 import {
     NpcAIComponent,
@@ -128,7 +130,7 @@ interface NpcSpawnState {
 interface ArrivalContext {
     system: ArrivalSystem;
     neighbours: Map<string, readonly [number, number]>;
-    stellars: (readonly [number, number])[];
+    stellars: ArrivalStellarCandidate[];
 }
 
 function isWeightedShip(value: unknown): value is { id: string, weight: number } {
@@ -186,6 +188,7 @@ async function buildNpc(
     budget: import('./entity_budget').EntityBudget,
     placement?: ArrivalPlacement,
     fleet?: boolean,
+    post?: [number, number],
 ) {
     try {
         const shipData = await gameData.data.Ship.get(shipId);
@@ -210,6 +213,13 @@ async function buildNpc(
         if (!fleet) {
             npc.components.set(
                 NpcTrafficComponent, createArrivingTrafficState());
+        }
+        // A navy ship guards its own world instead of running errands. A fleet
+        // is already flying as a group and keeps its formation.
+        if (post && !fleet && npcType.combatRole === 'military') {
+            npc.components.delete(NpcTrafficComponent);
+            npc.components.set(PatrolComponent,
+                { guardPost: post, radius: DEFAULT_PATROL_RADIUS });
         }
         if (placement) {
             applyPlacement(npc, placement);
@@ -236,15 +246,17 @@ async function createNpcGroup(
     entries: readonly NpcSpawnData[],
     budget: import('./entity_budget').EntityBudget,
     placement?: ArrivalPlacement,
+    systemData?: SystemData,
 ): Promise<Array<[string, Entity]>> {
     const npcType = pickWeighted(entries);
     if (!npcType) {
         return [];
     }
+    const post = guardPost(gameData, systemData, npcType.government);
     if (!npcType.fleet) {
         const shipType = pickWeighted(npcType.ships);
         const npc = shipType && await buildNpc(
-            gameData, npcType, shipType.id, budget, placement);
+            gameData, npcType, shipType.id, budget, placement, false, post);
         return npc ? [[uuid(), npc]] : [];
     }
 
@@ -317,11 +329,14 @@ function arrivalContext(
             neighbours.set(link, linked.position);
         }
     }
-    const stellars: (readonly [number, number])[] = [];
+    const stellars: ArrivalStellarCandidate[] = [];
     for (const id of systemData.planets ?? []) {
         const planet = gameData.data.Planet.getCached(id);
         if (planet) {
-            stellars.push(planet.position);
+            // A barren rock has no traffic to launch, so the inhabited flag
+            // decides which stellars can be a departure point.
+            stellars.push(
+                { position: planet.position, inhabited: planet.inhabited });
         }
     }
     return {
@@ -333,6 +348,33 @@ function arrivalContext(
         neighbours,
         stellars,
     };
+}
+
+/**
+ * Where a warship of `government` would stand guard in this system: one of its
+ * own inhabited worlds. Kept general rather than keyed to Sol, because every
+ * government's navy has the same reason to circle the worlds it holds.
+ *
+ * Cache-only for the same reason as `arrivalContext`: a cold cache simply means
+ * no patrol post this time, and the ship behaves as it did before.
+ */
+function guardPost(
+    gameData: GameDataInterface,
+    systemData: SystemData | undefined,
+    government: number | undefined,
+): [number, number] | undefined {
+    if (!systemData || government === undefined || government < 0) {
+        return undefined;
+    }
+    const posts: [number, number][] = [];
+    for (const id of systemData.planets ?? []) {
+        const planet = gameData.data.Planet.getCached(id);
+        if (planet && planet.inhabited
+            && planet.government === government) {
+            posts.push([planet.position[0], planet.position[1]]);
+        }
+    }
+    return posts[Math.floor(Math.random() * posts.length)];
 }
 
 function applyPlacement(npc: Entity, placement: ArrivalPlacement): void {
@@ -536,7 +578,7 @@ const NpcSpawnSystem = new AsyncSystem({
                 const group: Array<[string, Entity]> = named
                     ? [[uuid(), named]]
                     : await createNpcGroup(
-                        gameData, entries, budget, placement);
+                        gameData, entries, budget, placement, systemData);
                 if (!activeWorlds.has(world)) {
                     for (const _member of group) {
                         budget.release('ship');
@@ -572,7 +614,8 @@ const NpcSpawnSystem = new AsyncSystem({
         const group: Array<[string, Entity]> = named
             ? [[uuid(), named]]
             : await createNpcGroup(
-                gameData, spawnData.entries, budget, placement);
+                gameData, spawnData.entries, budget, placement,
+                spawnData.systemData);
         if (group.length === 0 || !activeWorlds.has(world)) {
             if (!activeWorlds.has(world)) {
                 for (const _member of group) {
