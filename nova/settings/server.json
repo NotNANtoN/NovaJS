@@ -1,5 +1,5 @@
 {
-  "port": 8000,
+  "port": 8200,
   "relativeDataPath": "Nova_Data",
   "https": false,
   "compatibilityProfile": "modern"
