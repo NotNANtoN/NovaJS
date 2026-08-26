@@ -40,6 +40,7 @@ import {
     NpcCombatRoleComponent,
 } from "./npc_components";
 import type { GovtData } from "./npc_components";
+import { createMinerSystems, MiningShipProvider } from "./miner_ai";
 export {
     ChooseRandomTargetComponent,
     GovtComponent,
@@ -357,6 +358,15 @@ export function makeNpc(shipData: ShipData) {
     return ship;
 }
 
+/**
+ * Built here rather than in miner_ai.ts so that module does not have to
+ * import this one back, which would leave the ordering markers undefined.
+ */
+const MinerSystems = createMinerSystems({
+    chooseTarget: ChooseRandomTargetAI,
+    follow: FollowAI,
+});
+
 export const NpcPlugin: Plugin = {
     name: 'NpcPlugin',
     build(world) {
@@ -378,6 +388,9 @@ export const NpcPlugin: Plugin = {
         world.addSystem(NpcHostilitySystems.cleanup);
         world.addSystem(NpcHostilitySystems.playerDeathCleanup);
         world.addSystem(ChooseRandomTargetAI);
+        world.addSystem(MiningShipProvider);
+        world.addSystem(MinerSystems.target);
+        world.addSystem(MinerSystems.approach);
         world.addSystem(WanderAI);
         world.addSystem(FollowAI);
         world.addSystem(ShootAllWeaponsAI);
@@ -389,6 +402,9 @@ export const NpcPlugin: Plugin = {
         world.removeSystem(NpcHostilitySystems.cleanup);
         world.removeSystem(NpcHostilitySystems.playerDeathCleanup);
         world.removeSystem(ChooseRandomTargetAI);
+        world.removeSystem(MiningShipProvider);
+        world.removeSystem(MinerSystems.target);
+        world.removeSystem(MinerSystems.approach);
         world.removeSystem(WanderAI);
         world.removeSystem(FollowAI);
         world.removeSystem(ShootAllWeaponsAI);
