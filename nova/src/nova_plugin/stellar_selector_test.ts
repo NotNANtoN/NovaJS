@@ -75,14 +75,30 @@ describe('stellar selector', () => {
     });
 
     it('resolves AvailStel adjacent-system selectors 5000-7047', () => {
-        // 5129 is 5000 + the specific system ID 129.
+        // System resource 129 has zero-based index 1.
         expect(sorted(getStellarSelectorCandidates(
-            5129, context, 'availability')))
+            5001, context, 'availability')))
             .toEqual(['nova:128', 'nova:130']);
         expect(matchesStellarSelector(
-            5129, context.planets![0]!, context, 'availability')).toBeTrue();
+            5001, context.planets![0]!, context, 'availability')).toBeTrue();
         expect(matchesStellarSelector(
-            5129, context.planets![1]!, context, 'availability')).toBeFalse();
+            5001, context.planets![1]!, context, 'availability')).toBeFalse();
+    });
+
+    it('decodes the zero-based system index used by retail AvailStel 5016', () => {
+        const retailContext: StellarSelectorContext = {
+            planets: [
+                { id: 'nova:200', inhabited: true, systemId: 'nova:144' },
+                { id: 'nova:201', inhabited: true, systemId: 'nova:145' },
+            ],
+            systems: [
+                { id: 'nova:144', links: ['nova:145'], planets: ['nova:200'] },
+                { id: 'nova:145', links: ['nova:144'], planets: ['nova:201'] },
+            ],
+        };
+        expect(getStellarSelectorCandidates(
+            5016, retailContext, 'availability'))
+            .toEqual(['nova:201']);
     });
 
     it('resolves any and random stellar selectors', () => {

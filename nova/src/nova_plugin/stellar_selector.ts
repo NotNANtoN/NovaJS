@@ -399,6 +399,8 @@ function availabilityPlanetCandidates(
     }
     if (selectorValue >= SYSTEM_ADJACENCY_MIN
         && selectorValue <= SYSTEM_ADJACENCY_MAX) {
+        // EV Nova Bible, mïsn/AvailStel 5000-7047:
+        // "Stellar in a system adjacent to specific system."
         const encodedSystem = selectorValue - SYSTEM_ADJACENCY_MIN;
         return planets
             .filter(planet => {

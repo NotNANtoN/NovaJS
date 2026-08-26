@@ -9,6 +9,7 @@ export type MissionGoalEvent =
     | 'boarded'
     | 'observed'
     | 'lost'
+    | 'chasedOff'
     | 'escortSafe';
 
 /**
@@ -43,6 +44,9 @@ export function advanceMissionGoal(
         case 'lost':
             next.lost++;
             break;
+        case 'chasedOff':
+            next.lost++;
+            break;
         case 'escortSafe':
             break;
     }
@@ -67,8 +71,8 @@ export function goalIsMet(
         case 2:
             return progress.boarded >= progress.total;
         case 3:
-            // Escort is checked when the player reaches the mission
-            // destination. A lost escort permanently prevents completion.
+            // EV Nova Bible, mïsn/ShipGoal 3:
+            // "Escort them (keep them from getting killed)."
             return event === 'escortSafe'
                 && progress.lost === 0
                 && progress.destroyed === 0;
@@ -81,6 +85,8 @@ export function goalIsMet(
             // current UI until boarding exists.
             return progress.boarded >= progress.total;
         case 6:
+            // EV Nova Bible, mïsn/ShipGoal 6: "Chase them off (either kill
+            // them or scare the into jumping out of the system)."
             return progress.destroyed + progress.lost >= progress.total;
         default:
             return false;

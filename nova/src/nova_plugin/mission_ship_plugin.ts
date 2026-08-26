@@ -42,6 +42,7 @@ import { SystemIdResource } from './system_id_resource';
 import { MissionRuntime, MissionRuntimeResource } from './mission_plugin';
 import { EntityBudgetResource, reserveEntity } from './entity_budget';
 import { PlanetComponent } from './planet_plugin';
+import { FinishJumpEvent } from './jump_plugin';
 
 export interface MissionShipData {
     missionUuid: string;
@@ -80,6 +81,13 @@ const StellarTargetsQuery = new Query([
 function sameId(a: string | undefined, b: string): boolean {
     return a !== undefined
         && (a === b || a.replace(/^.*:/, '') === b.replace(/^.*:/, ''));
+}
+
+export function missionShipAppearsInSystem(
+    shipSystem: string | undefined,
+    currentSystem: string,
+): boolean {
+    return shipSystem === '*' || sameId(shipSystem, currentSystem);
 }
 
 function missionIdFor(
@@ -225,7 +233,8 @@ const MissionShipSpawnSystem = new AsyncSystem({
             const token = playerTokenFor(multiplayer, store);
             for (const entry of state.activeMissions) {
                 if (entry.state !== 'active' || !entry.shipSystem
-                    || !sameId(entry.shipSystem, systemId)) {
+                    || !missionShipAppearsInSystem(
+                        entry.shipSystem, systemId)) {
                     continue;
                 }
                 const mission = await loadMission(gameData, entry);
@@ -387,6 +396,36 @@ const MissionShipDeathSystem = new System({
     },
 });
 
+const MissionShipChaseOffSystem = new System({
+    name: 'MissionShipGoalChaseOff',
+    events: [FinishJumpEvent],
+    args: [
+        FinishJumpEvent,
+        MissionPlayersQuery,
+        Optional(PlayerStoreResource),
+        MissionRuntimeResource,
+        PlatformResource,
+    ] as const,
+    step(jump, players, playerStore, runtime, platform) {
+        if (platform !== 'node') {
+            return;
+        }
+        const missionShip = jump.entity.components.get(MissionShipComponent);
+        if (!missionShip) {
+            return;
+        }
+        const player = findPlayer(
+            players, missionShip.playerToken, playerStore);
+        if (!player) {
+            return;
+        }
+        // EV Nova Bible, mïsn/ShipGoal 6: "Chase them off (either kill them
+        // or scare the into jumping out of the system)."
+        void runtime.recordShipGoal(
+            player[2], missionShip.missionUuid, 'chasedOff');
+    },
+});
+
 const MissionShipDisabledSystem = new System({
     name: 'MissionShipGoalDisabled',
     args: [
@@ -496,6 +535,7 @@ export const MissionShipsPlugin: Plugin = {
         // in those worlds.
         if (world.resources.has(PlayerStoreResource)) {
             world.addSystem(MissionShipDeathSystem);
+            world.addSystem(MissionShipChaseOffSystem);
             world.addSystem(MissionShipDisabledSystem);
             world.addSystem(MissionShipObservationSystem);
             world.addSystem(MissionShipCleanupSystem);
@@ -508,6 +548,7 @@ export const MissionShipsPlugin: Plugin = {
         world.removeSystem(MissionShipSpawnSystem);
         world.removeSystem(MissionShipBehaviorSystem);
         world.removeSystem(MissionShipDeathSystem);
+        world.removeSystem(MissionShipChaseOffSystem);
         world.removeSystem(MissionShipDisabledSystem);
         world.removeSystem(MissionShipObservationSystem);
         world.removeSystem(MissionShipCleanupSystem);

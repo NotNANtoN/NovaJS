@@ -202,12 +202,18 @@ export function resolveMissionDestinations(
 
     let shipSystem: string | undefined;
     if (mission.shipCount >= 0 || mission.shipSyst !== -1) {
+        // EV Nova Bible, mïsn/ShipSyst -6: "Whatever system the player is in
+        // (i.e. follow him around)." Unlike random/fixed selectors, this one
+        // must remain dynamic after acceptance.
+        if (mission.shipSyst === -6) {
+            shipSystem = '*';
+        }
         const systemResolution = resolveSystemSelector(mission.shipSyst, {
             ...baseContext,
             travelPlanetId: travelDestination === '*' ? undefined : travelDestination,
             returnPlanetId: returnDestination === '*' ? undefined : returnDestination,
         });
-        shipSystem = systemResolution.selected;
+        shipSystem ??= systemResolution.selected;
         if (!shipSystem && options.systems === undefined
             && mission.shipSyst >= 128 && mission.shipSyst <= 2175) {
             shipSystem = resourceId(mission.shipSyst);
@@ -578,6 +584,8 @@ export class MissionRuntime {
                     runMissionSetExpression(
                         mission.onShipDone, state, console.warn, context);
                 }
+                // EV Nova Bible, mïsn/OnSuccess: "Control bit set expression
+                // which is evaluated when the mission is completed successfully."
                 runMissionSetExpression(
                     mission.onSuccess, state, console.warn, context);
                 if (mission.payVal > 0) {
@@ -633,11 +641,24 @@ export class MissionRuntime {
         if (!progress) {
             return false;
         }
-        // A destroyed escort counts as "lost", while a destroyed target
-        // counts toward both destroy and chase-off goals.
-        const effectiveEvent = mission.shipGoal === 3 ? 'lost' : event;
+        if (event === 'chasedOff' && mission.shipGoal !== 6) {
+            return false;
+        }
+        // A destroyed escort counts as lost. Destroyed targets count toward
+        // both destroy-all and chase-off goals.
+        const effectiveEvent = mission.shipGoal === 3
+            && event === 'destroyed' ? 'lost' : event;
         entry.shipGoalProgress = advanceMissionGoal(
             progress, effectiveEvent);
+        if (mission.shipGoal === 3 && effectiveEvent === 'lost') {
+            // EV Nova Bible, mïsn/ShipGoal 3:
+            // "Escort them (keep them from getting killed)."
+            runMissionSetExpression(
+                mission.onFailure, state, console.warn, context);
+            entry.state = 'failed';
+            releaseMissionCargo(state, entry.missionId);
+            return false;
+        }
         if (entry.shipGoalProgress.completed
             && !entry.shipGoalProgress.shipDoneApplied) {
             entry.shipGoalProgress.shipDoneApplied = true;

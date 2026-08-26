@@ -35,4 +35,12 @@ describe('mission goal progress', () => {
         expect(observe.observed).toBe(1);
         expect(observe.completed).toBe(true);
     });
+
+    it('completes chase-off goals from kills and hyperspace departures', () => {
+        let defend = newMissionGoal(6, 2);
+        defend = advanceMissionGoal(defend, 'destroyed');
+        expect(defend.completed).toBe(false);
+        defend = advanceMissionGoal(defend, 'chasedOff');
+        expect(defend.completed).toBe(true);
+    });
 });
