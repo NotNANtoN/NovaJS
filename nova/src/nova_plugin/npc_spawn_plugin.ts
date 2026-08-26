@@ -14,6 +14,10 @@ import { Position } from "nova_ecs/datatypes/position";
 import { Vector } from "nova_ecs/datatypes/vector";
 import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
 import { SystemData } from "novadatainterface/SystemData";
+import { PersData } from "novadatainterface/PersData";
+import { Entity } from "nova_ecs/entity";
+import { selectPers } from "./pers";
+import { makePersNpc, PersStateResource } from "./pers_plugin";
 import {
     ArrivalPlacement,
     ArrivalSystem,
@@ -113,6 +117,9 @@ interface NpcSpawnState {
     entries: NpcSpawnData[];
     /** Kept so a spawn can work out where a ship arrived from. */
     systemData?: SystemData;
+    /** The named people who could turn up here, once loaded. */
+    pers?: PersData[];
+    persLoading?: boolean;
 }
 
 interface ArrivalContext {
@@ -206,13 +213,7 @@ async function createNpc(
         npc.components.set(
             NpcTrafficComponent, createArrivingTrafficState());
         if (placement) {
-            const movement = npc.components.get(MovementStateComponent);
-            if (movement) {
-                movement.position = new Position(
-                    placement.position[0], placement.position[1]);
-                movement.rotation = new Angle(placement.rotation);
-                movement.velocity = new Vector(0, 0);
-            }
+            applyPlacement(npc, placement);
         }
         npc.components.set(MultiplayerData, { owner: "server" });
         return npc;
@@ -262,6 +263,17 @@ function arrivalContext(
     };
 }
 
+function applyPlacement(npc: Entity, placement: ArrivalPlacement): void {
+    const movement = npc.components.get(MovementStateComponent);
+    if (!movement) {
+        return;
+    }
+    movement.position = new Position(
+        placement.position[0], placement.position[1]);
+    movement.rotation = new Angle(placement.rotation);
+    movement.velocity = new Vector(0, 0);
+}
+
 function nextPlacement(
     gameData: GameDataInterface,
     state: NpcSpawnState,
@@ -276,6 +288,82 @@ function nextPlacement(
         context.stellars,
         Math.random,
     );
+}
+
+
+/**
+ * Load the named people once, in the background.
+ *
+ * This must never be awaited on the spawn path: an await there delays the very
+ * spawn it is meant to inform. Until the list arrives, systems are populated by
+ * anonymous traffic alone.
+ */
+function startLoadingPers(
+    gameData: GameDataInterface,
+    state: NpcSpawnState,
+): void {
+    const gettable = gameData.data.Pers;
+    if (state.persLoading || !gettable) {
+        return;
+    }
+    state.persLoading = true;
+    void (async () => {
+        try {
+            const ids = (await gameData.ids).Pers ?? [];
+            const people = await Promise.all(
+                ids.map(id => gettable.get(id).catch(() => undefined)));
+            state.pers = people.filter(
+                (person): person is PersData => person !== undefined);
+        } catch (_error) {
+            state.pers = [];
+        }
+    })();
+}
+
+/**
+ * Try to make this spawn somebody in particular. The Bible is explicit: "When
+ * ships are created, there is a 5% chance that a specific AI-person will also
+ * be created", and selectPers applies that roll.
+ */
+async function createPersNpc(
+    gameData: GameDataInterface,
+    world: World,
+    systemId: string,
+    state: NpcSpawnState,
+    budget: import('./entity_budget').EntityBudget,
+    placement?: ArrivalPlacement,
+) {
+    if (!state.pers?.length) {
+        return undefined;
+    }
+    // Read the state store loosely rather than declaring it: PersPlugin owns
+    // and deletes it, and a hard dependency would break world teardown.
+    const states = world.resources.get(PersStateResource);
+    const alive = new Set<string | number>();
+    for (const person of state.pers) {
+        if (states?.get(person.id)?.alive !== false) {
+            alive.add(person.id);
+        }
+    }
+    const chosen = selectPers(state.pers, { systemId, alive });
+    if (!chosen) {
+        return undefined;
+    }
+    try {
+        const shipData = await gameData.data.Ship.get(
+            `nova:${chosen.shipType}`);
+        const npc = makePersNpc(shipData, chosen, states?.get(chosen.id));
+        if (!reserveEntity(budget, npc, 'ship')) {
+            return undefined;
+        }
+        if (placement) {
+            applyPlacement(npc, placement);
+        }
+        npc.components.set(MultiplayerData, { owner: "server" });
+        return npc;
+    } catch (_error) {
+        return undefined;
+    }
 }
 
 const NpcSpawnSystem = new AsyncSystem({
@@ -312,6 +400,7 @@ const NpcSpawnSystem = new AsyncSystem({
             state.capacity = getNpcCapacity(state.target);
             state.entries = getSpawnEntries(systemData);
             state.systemData = systemData;
+            startLoadingPers(gameData, state);
             if (state.entries.length === 0 || state.target === 0) {
                 state.disabled = state.entries.length === 0;
                 state.nextSpawnAt = Infinity;
@@ -329,8 +418,16 @@ const NpcSpawnSystem = new AsyncSystem({
                 if (!activeWorlds.has(world)) {
                     return;
                 }
-                const npc = await createNpc(
-                    gameData, state.entries, budget, nextPlacement(gameData, state));
+                const placement = nextPlacement(gameData, state);
+                // The await must stay inside the branch: awaiting even an
+                // immediate undefined costs a tick, and a batch of spawns is
+                // expected to finish within the tick that asked for it.
+                const named = state.pers?.length
+                    ? await createPersNpc(
+                        gameData, world, systemId, state, budget, placement)
+                    : undefined;
+                const npc = named ?? await createNpc(
+                        gameData, state.entries, budget, placement);
                 if (!activeWorlds.has(world)) {
                     if (npc) {
                         budget.release('ship');
@@ -352,8 +449,13 @@ const NpcSpawnSystem = new AsyncSystem({
         }
 
         state.nextSpawnAt = time.time + getNpcRespawnDelay();
-        const npc = await createNpc(
-            gameData, state.entries, budget, nextPlacement(gameData, state));
+        const placement = nextPlacement(gameData, state);
+        const named = state.pers?.length
+            ? await createPersNpc(
+                gameData, world, systemId, state, budget, placement)
+            : undefined;
+        const npc = named
+            ?? await createNpc(gameData, state.entries, budget, placement);
         if (!npc || !activeWorlds.has(world)) {
             if (npc && !activeWorlds.has(world)) {
                 budget.release('ship');

@@ -25,6 +25,7 @@ import { CicnImageData } from "novadatainterface/CicnImage";
 import { CicnData } from "novadatainterface/CicnData";
 import { SoundFile } from "novadatainterface/SoundFile";
 import { JunkData } from "novadatainterface/JunkData";
+import { PersData } from "novadatainterface/PersData";
 
 /**
  * Combines multiple GameDataInterface instances into a single GameDataInterface
@@ -66,6 +67,7 @@ class GameDataAggregator implements GameDataInterface {
             StringList: this.makeAggregator<StringListData>(
                 NovaDataType.StringList),
             Junk: this.makeAggregator<JunkData>(NovaDataType.Junk),
+            Pers: this.makeAggregator<PersData>(NovaDataType.Pers),
             SoundFile: this.makeAggregator<SoundFile>(NovaDataType.SoundFile),
         };
 

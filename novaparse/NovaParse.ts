@@ -61,6 +61,9 @@ import { SoundFile } from "novadatainterface/SoundFile";
 import { JunkData } from "novadatainterface/JunkData";
 import { JunkParse } from "./src/parsers/JunkParse";
 import { JunkResource } from "./src/resource_parsers/JunkResource";
+import { PersData } from "novadatainterface/PersData";
+import { PersParse } from "./src/parsers/PersParse";
+import { PersResource } from "./src/resource_parsers/PersResource";
 
 
 type ParseFunction<T extends BaseResource, O> = (resource: T, errorFunc: (message: string) => void) => Promise<O>;
@@ -170,6 +173,7 @@ export class NovaParse implements GameDataInterface {
             Nebula: this.buildIDsForResource(idSpace.nëbu),
             StringList: this.buildIDsForResource(idSpace.STRH),
             Junk: this.buildIDsForResource(idSpace.jünk),
+            Pers: this.buildIDsForResource(idSpace.përs),
             SoundFile: this.buildIDsForResource(idSpace["snd "]),
         }
     }
@@ -205,6 +209,8 @@ export class NovaParse implements GameDataInterface {
                 NovaResourceType.STRH, StringListParse),
             Junk: this.makeGettable<JunkResource, JunkData>(
                 NovaResourceType.jünk, JunkParse),
+            Pers: this.makeGettable<PersResource, PersData>(
+                NovaResourceType.përs, PersParse),
             SoundFile: this.makeGettable<SndResource, SoundFile>(NovaResourceType.snd, SoundFileParse),
         }
 

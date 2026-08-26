@@ -24,6 +24,7 @@ import { SystemData } from 'novadatainterface/SystemData';
 import { TargetCornersData } from 'novadatainterface/TargetCornersData';
 import { WeaponData } from 'novadatainterface/WeaponData';
 import { JunkData } from 'novadatainterface/JunkData';
+import { PersData } from 'novadatainterface/PersData';
 import * as PIXI from 'pixi.js';
 import * as sound from '@pixi/sound';
 import urlJoin from 'url-join';
@@ -87,6 +88,7 @@ export class GameData implements GameDataInterface {
             StringList: this.addGettable<StringListData>(
                 NovaDataType.StringList),
             Junk: this.addGettable<JunkData>(NovaDataType.Junk),
+            Pers: this.addGettable<PersData>(NovaDataType.Pers),
             SoundFile: this.addSoundFileGettable(),
             Sound: this.addSoundGettable(),
         };

@@ -17,6 +17,7 @@ import { WeapResource } from "./WeapResource";
 import { NebuResource } from "./NebuResource";
 import { RoidResource } from "./RoidResource";
 import { JunkResource } from "./JunkResource";
+import { PersResource } from "./PersResource";
 
 
 
@@ -88,7 +89,7 @@ type NovaResources = {
     nëbu: ResList<NebuResource>;
     öops: ResList<BaseResource>;
     oütf: ResList<OutfResource>;
-    përs: ResList<BaseResource>;
+    përs: ResList<PersResource>;
     PICT: ResList<PictResource>;
     ränk: ResList<BaseResource>;
     rlë8: ResList<BaseResource>;

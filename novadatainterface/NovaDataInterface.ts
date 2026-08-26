@@ -20,6 +20,7 @@ import { SystemData } from "./SystemData";
 import { TargetCornersData } from "./TargetCornersData";
 import { WeaponData } from "./WeaponData";
 import { JunkData } from "./JunkData";
+import { PersData } from "./PersData";
 
 
 enum NovaDataType {
@@ -45,6 +46,7 @@ enum NovaDataType {
     Nebula = "Nebula",
     StringList = "StringList",
     Junk = "Junk",
+    Pers = "Pers",
     SoundFile = "SoundFile",
 };
 
@@ -77,6 +79,8 @@ type NovaDataInterface = {
     StringList?: Gettable<StringListData>,
     /** Optional for legacy generated-data providers. */
     Junk?: Gettable<JunkData>,
+    /** Optional for legacy generated-data providers. */
+    Pers?: Gettable<PersData>,
     SoundFile: Gettable<SoundFile>,
 }
 

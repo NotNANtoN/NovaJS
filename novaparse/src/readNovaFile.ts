@@ -22,6 +22,7 @@ import { NebuResource } from "./resource_parsers/NebuResource";
 import { StrhResource } from "./resource_parsers/StrhResource";
 import { RoidResource } from "./resource_parsers/RoidResource";
 import { JunkResource } from "./resource_parsers/JunkResource";
+import { PersResource } from "./resource_parsers/PersResource";
 
 
 // Reads a single plugin or nova file
@@ -73,7 +74,7 @@ parserMap[NovaResourceType.mïsn] = MisnResource;
 //parserMap[NovaResourceType.nëbu] = ;
 //parserMap[NovaResourceType.öops] = ;
 parserMap[NovaResourceType.oütf] = OutfResource;
-//parserMap[NovaResourceType.përs] = ;
+parserMap[NovaResourceType.përs] = PersResource;
 parserMap[NovaResourceType.PICT] = PictResource;
 //parserMap[NovaResourceType.ränk] = ;
 //parserMap[NovaResourceType.rlë8] = ;
