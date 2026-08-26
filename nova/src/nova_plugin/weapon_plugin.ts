@@ -153,7 +153,9 @@ export const WeaponsSystem = new System({
         TimeResource, UUID, WeaponEntries,
         Optional(DestructionStartedComponent),
         Optional(ArmorComponent), MultiplayerData, PlatformResource,
-        CommunicatorResource, GetEntity,
+        // Only the client worlds have a communicator; the server world and the
+        // single-player world run without one.
+        Optional(CommunicatorResource), GetEntity,
         Optional(FireIntentComponent), Optional(FireLogComponent)] as const,
     step(weaponsState, weaponsLocalState, time, uuid, weaponEntries,
         destructionStarted, armor, multiplayer, platform, communicator, entity,
