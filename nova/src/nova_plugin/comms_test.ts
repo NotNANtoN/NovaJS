@@ -3,6 +3,7 @@ import {
     ASSISTANCE_FUEL,
     ASSISTANCE_PRICE,
     assistanceDecision,
+    assistanceGenerosity,
     AssistanceRequest,
     COMMS_BLOCK_SIZE,
     CommsBlock,
@@ -75,6 +76,13 @@ function stranded(over: Partial<AssistanceRequest> = {}): AssistanceRequest {
 }
 
 describe('requesting assistance', () => {
+    it('keeps a helper\'s mood stable across request worlds', () => {
+        const first = assistanceGenerosity('pilot', 'helper');
+        expect(assistanceGenerosity('pilot', 'helper')).toBe(first);
+        expect(first).toBeGreaterThanOrEqual(0);
+        expect(first).toBeLessThan(1);
+    });
+
     it('tells a pilot who can still jump that nothing is wrong', () => {
         const decision = assistanceDecision(stranded({ fuel: FUEL_PER_JUMP }));
         expect(decision.outcome).toBe('notInTrouble');

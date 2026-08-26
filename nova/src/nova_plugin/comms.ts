@@ -80,6 +80,22 @@ export function commsLineIndex(
 }
 
 /**
+ * Keep a ship's mood stable between the browser preview and the authoritative
+ * request without allowing the browser to choose any server-side condition.
+ */
+export function assistanceGenerosity(
+    pilotUuid: string,
+    helperUuid: string,
+): number {
+    let hash = 2166136261;
+    for (const character of `${pilotUuid}:${helperUuid}`) {
+        hash ^= character.charCodeAt(0);
+        hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0) / 0x1_0000_0000;
+}
+
+/**
  * How a ship answers being hailed at all. Retail escalates the warmth of the
  * greeting with the pilot's standing, and a ship already fighting the pilot
  * sneers instead.

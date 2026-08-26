@@ -6,15 +6,13 @@ import { ControlEvent } from '../nova_plugin/controls_plugin';
 import {
     ASSISTANCE_PRICE,
     assistanceDecision,
+    assistanceGenerosity,
     AssistanceOutcome,
     COMMS_CHANNEL_STRING_LIST,
     COMMS_STRING_LIST,
     CommsBlockName,
     commsLineIndex,
     hailPromptBlock,
-    payForAssistance,
-    receiveAssistanceFuel,
-    receiveAssistanceRepair,
 } from '../nova_plugin/comms';
 import { DisabledComponent } from '../nova_plugin/death_plugin';
 import {
@@ -22,9 +20,14 @@ import {
     canHailGovernment,
     getGovernmentCommName,
 } from '../nova_plugin/govt_relations';
-import { ArmorComponent } from '../nova_plugin/health_plugin';
 import { PlayerStateComponent } from '../nova_plugin/player_state';
 import { ShipDataComponent } from '../nova_plugin/ship_plugin';
+import { TargetComponent } from '../nova_plugin/target_component';
+import {
+    AssistanceFailureReason,
+    AssistanceOutcomeComponent,
+    AssistanceRequestComponent,
+} from '../nova_plugin/assistance_plugin';
 import { Button } from './button';
 import { COMMS_LAYOUT, commsButtonSlots } from './comms_panel_layout';
 import { Menu } from './menu';
@@ -71,6 +74,10 @@ export class Comms extends Menu<Entity> {
     private channelLines?: readonly string[];
     /** Set while a rescuer is waiting to be paid. */
     private pendingPrice = 0;
+    private hailedUuid?: string;
+    private assistanceHelper?: string;
+    private assistanceSequence?: number;
+    private assistancePoll?: ReturnType<typeof setInterval>;
 
     constructor(gameData: GameData, controlEvents: Observable<ControlEvent>) {
         super(gameData, COMMS_LAYOUT.background, controlEvents);
@@ -108,8 +115,12 @@ export class Comms extends Menu<Entity> {
 
     override async show(input: Entity): Promise<Entity> {
         await this.buildPromise;
+        this.stopAssistanceOutcomePolling();
         this.setInput(input);
+        this.hailedUuid = input.components.get(TargetComponent)?.target;
         this.pendingPrice = 0;
+        this.assistanceHelper = undefined;
+        this.assistanceSequence = undefined;
         this.buttons.assistance.setText('Request Assistance');
         await this.loadLines();
         this.openChannel();
@@ -159,13 +170,15 @@ export class Comms extends Menu<Entity> {
     private requestAssistance() {
         const state = this.input?.components.get(PlayerStateComponent);
         const shipData = this.input?.components.get(ShipDataComponent);
-        if (!state) {
+        const helper = this.hailedUuid;
+        if (!state || !helper) {
             return;
         }
         if (this.pendingPrice > 0) {
             this.acceptPrice(this.pendingPrice);
             return;
         }
+        const request = this.input.components.get(AssistanceRequestComponent);
         const decision = assistanceDecision({
             relation: this.relation(),
             hostile: this.target?.hostile ?? false,
@@ -176,11 +189,12 @@ export class Comms extends Menu<Entity> {
                 this.input?.components.get(DisabledComponent)),
             roadsideAssistance: this.target?.roadsideAssistance,
             isEscort: this.target?.isEscort,
+            generosity: assistanceGenerosity(this.input.uuid, helper),
         });
         this.say(decision.block, this.priceSuffix(decision.outcome,
             decision.price));
         if (decision.outcome === 'granted') {
-            this.deliverAssistance();
+            this.submitAssistance('request', helper, request?.sequence ?? 0);
         } else if (decision.outcome === 'wantsPayment') {
             this.pendingPrice = decision.price;
             this.buttons.assistance.setText('Accept Price');
@@ -197,37 +211,93 @@ export class Comms extends Menu<Entity> {
         if (!state) {
             return;
         }
-        const payment = payForAssistance(state.credits, price);
-        this.say(payment.block);
-        if (!payment.paid) {
+        if (state.credits < price) {
+            this.say('cannotAfford');
             return;
         }
-        state.credits = payment.credits;
+        const helper = this.hailedUuid;
+        if (!helper) {
+            return;
+        }
+        const request = this.input.components.get(AssistanceRequestComponent);
         this.pendingPrice = 0;
         this.buttons.assistance.setText('Request Assistance');
-        this.deliverAssistance();
+        this.submitAssistance('accept', helper, request?.sequence ?? 0);
     }
 
-    /**
-     * The rescuer hands over one jump's worth of fuel. Retail flies the ship
-     * over first; here the transfer is immediate, which still turns a
-     * stranding into a way out.
-     */
-    private deliverAssistance() {
-        const armor = this.input?.components.get(ArmorComponent);
-        if (this.input?.components.get(DisabledComponent) && armor) {
-            armor.current = receiveAssistanceRepair(armor.max);
+    private submitAssistance(
+        action: 'request' | 'accept',
+        helper: string,
+        previousSequence: number,
+    ) {
+        if (!this.input) {
+            return;
+        }
+        const sequence = previousSequence + 1;
+        this.input.components.set(AssistanceRequestComponent, {
+            helper,
+            sequence,
+            action,
+        });
+        this.assistanceHelper = helper;
+        this.assistanceSequence = sequence;
+        this.say('onMyWay');
+        this.startAssistanceOutcomePolling();
+    }
+
+    private startAssistanceOutcomePolling() {
+        this.stopAssistanceOutcomePolling();
+        this.assistancePoll = setInterval(
+            this.updateAssistanceOutcome.bind(this), 100);
+    }
+
+    private stopAssistanceOutcomePolling() {
+        if (this.assistancePoll !== undefined) {
+            clearInterval(this.assistancePoll);
+            this.assistancePoll = undefined;
+        }
+    }
+
+    private updateAssistanceOutcome() {
+        const helper = this.assistanceHelper;
+        const sequence = this.assistanceSequence;
+        const outcome = this.input?.components.get(
+            AssistanceOutcomeComponent);
+        if (!helper || sequence === undefined || !outcome
+            || outcome.helper !== helper || outcome.sequence < sequence
+            || outcome.phase === 'approaching') {
+            return;
+        }
+        if (outcome.phase === 'completed') {
             this.say('takeItAndGo');
-            return;
+        } else {
+            this.say(this.failureBlock(outcome.reason));
         }
-        const state = this.input?.components.get(PlayerStateComponent);
-        const capacity =
-            this.input?.components.get(ShipDataComponent)?.fuelCapacity ?? 0;
-        if (!state || capacity <= 0) {
-            return;
+        this.stopAssistanceOutcomePolling();
+    }
+
+    private failureBlock(
+        reason: AssistanceFailureReason | undefined,
+    ): CommsBlockName {
+        switch (reason) {
+            case 'cannot-afford':
+                return 'cannotAfford';
+            case 'hostile':
+                return 'inYourDreams';
+            case 'not-stranded':
+                return 'notInTrouble';
+            case 'payment-required':
+                return 'helpForPay';
+            case 'refused':
+                return 'tooBusy';
+            default:
+                return 'cannotHelp';
         }
-        state.fuel = receiveAssistanceFuel(state.fuel ?? 0, capacity);
-        this.say('takeItAndGo');
+    }
+
+    protected override done() {
+        this.stopAssistanceOutcomePolling();
+        super.done();
     }
 
     private async loadLines() {
