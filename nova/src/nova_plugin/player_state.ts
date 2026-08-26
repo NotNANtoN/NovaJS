@@ -409,7 +409,10 @@ export function createInitialPlayerState(): PlayerState {
         destroyedStellars: [],
         activeRanks: [],
         exploredSystems: [],
-        registered: false,
+        // Retail's `P` test asks whether the copy is registered. A full data
+        // set is not the demo, and leaving this false hides every ship,
+        // outfit and mission behind a `P` gate.
+        registered: true,
     });
 }
 

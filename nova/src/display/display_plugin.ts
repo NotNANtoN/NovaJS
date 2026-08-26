@@ -15,6 +15,7 @@ import { BeamDisplayPlugin } from "./beam_display_plugin";
 import { ExplosionPlugin } from "./explosion_plugin";
 import { FullscreenPlugin } from "./fullscreen_plugin";
 import { ParticlesPlugin } from "./particles_plugin";
+import { PilotDialogsPlugin } from "./pilot_dialogs_plugin";
 import { PlanetCornersPlugin } from "./planet_corners_plugin";
 import { ScreenSizePlugin } from "./screen_size_plugin";
 import { ShipAnimationPlugin } from "./ship_animation_plugin";
@@ -134,12 +135,14 @@ export const Display: Plugin = {
         await world.addPlugin(PlanetCornersPlugin);
         await world.addPlugin(SpaceportPlugin);
         await world.addPlugin(StarmapPlugin);
+        await world.addPlugin(PilotDialogsPlugin);
         await world.addPlugin(SoundPlugin);
         await world.addPlugin(ShipAnimationPlugin);
     },
     async remove(world) {
         await world.removePlugin(ShipAnimationPlugin);
         await world.removePlugin(SoundPlugin);
+        await world.removePlugin(PilotDialogsPlugin);
         await world.removePlugin(StarmapPlugin);
         await world.removePlugin(SpaceportPlugin);
         await world.removePlugin(PlanetCornersPlugin);

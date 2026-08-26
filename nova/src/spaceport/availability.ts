@@ -5,7 +5,8 @@ import { evaluateTestExpression } from "../nova_plugin/ncb";
 import { ncbTestContext } from "../nova_plugin/ncb_runtime";
 import type { PlayerState } from "../nova_plugin/player_state";
 
-type PurchaseData = Pick<ShipData | OutfitData, "techLevel" | "availabilityNCB">;
+type PurchaseData = Pick<ShipData | OutfitData, "techLevel" | "availabilityNCB">
+    & { readonly displayWeight?: number };
 
 export interface AuthoritativePlanetMetadata {
     id: string;
@@ -93,6 +94,11 @@ export function isPurchaseAvailable(
         | readonly boolean[] = new Set(),
     outfits?: ReadonlyMap<string, unknown>,
 ): boolean {
+    // Retail orders a shipyard by display weight and never stocks an entry
+    // whose weight is zero. Those entries are the NPC-only variant hulls.
+    if (item.displayWeight !== undefined && item.displayWeight <= 0) {
+        return false;
+    }
     if (!hasRequiredTechnology(item.techLevel, planet)) {
         return false;
     }

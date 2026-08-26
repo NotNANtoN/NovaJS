@@ -64,7 +64,6 @@ export class Shipyard extends Menu<Entity> {
         this.pictContainer.position.x = 174;
         this.pictContainer.position.y = -152.5;
         this.container.addChild(this.pictContainer);
-        this.build();
     }
 
     protected override async build() {
@@ -122,6 +121,9 @@ export class Shipyard extends Menu<Entity> {
     }
 
     private async refreshGrid() {
+        // The grid is built asynchronously, so the planet can arrive first.
+        // Waiting keeps that case from leaving the unfiltered initial grid up.
+        await this.buildPromise;
         if (!this.itemGrid || !this.planetData) {
             return;
         }
@@ -155,10 +157,8 @@ export class Shipyard extends Menu<Entity> {
 
         // Set Description
         this.text.description.text = shipTile.item.desc;
-        // ShipData does not currently expose cost; use the field when the
-        // data interface grows it, while keeping old data playable.
-        const cost = (shipTile.item as any).cost ?? 0;
-        this.text.price.text = formatPrice(Math.max(0, Math.floor(cost)));
+        this.text.price.text = formatPrice(
+            Math.max(0, Math.floor(shipTile.item.cost)));
         this.updateCreditsText();
     }
 
@@ -185,9 +185,7 @@ export class Shipyard extends Menu<Entity> {
             return;
         }
 
-        // ShipData does not expose cost yet; this is intentionally defensive
-        // until the data-interface change lands.
-        const cost = Math.max(0, Math.floor((selection as any).cost ?? 0));
+        const cost = Math.max(0, Math.floor(selection.cost));
         if (this.playerState.credits < cost) {
             console.warn(`Not enough credits to buy ship ${selection.id}`);
             return;

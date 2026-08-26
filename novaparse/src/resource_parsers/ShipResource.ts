@@ -111,7 +111,9 @@ class ShipResource extends BaseResource {
         this.maxGuns = d.getInt16(42);
         this.maxTurrets = d.getInt16(44);
         this.techLevel = d.getInt16(46);
-        this.cost = d.getInt16(50);
+        // Cost is a 32-bit field. Reading only its low half made every
+        // expensive hull cost a few thousand credits, or a negative amount.
+        this.cost = d.getInt32(48);
         this.deathDelay = d.getInt16(52);
         this.armorRecharge = d.getInt16(54);
 

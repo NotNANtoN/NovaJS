@@ -9,6 +9,7 @@ import { Button } from "./button";
 import { Menu } from "./menu";
 import { MenuControls } from "./menu_controls";
 import { shortestRoutes } from "./route_planning";
+import { MAP_WELL, mapWellOrigin } from "./starmap_layout";
 import { createGraphicHandle, ManagedGraphic } from "../display/managed_graphic";
 import {
     consumeInitialCenter,
@@ -127,7 +128,7 @@ class SystemGraph {
 
     constructor(systems: SystemData[], private currentSystem: string,
         exploredSystems?: readonly string[],
-        private size = { x: 456, y: 419 }) {
+        private size = MAP_WELL.size) {
         this.systems = new Map(systems.map(s => [s.id, s]));
         this.knownSystems = normalizeKnownSystems(
             exploredSystems, this.currentSystem);
@@ -458,7 +459,8 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
             systemIds.map(s => this.gameData.data.System.get(s)));
         this.systemGraph = new SystemGraph(
             systems, this.systemId, this.exploredSystems);
-        this.systemGraph.container.position.set(-290, -248);
+        const well = mapWellOrigin();
+        this.systemGraph.container.position.set(well.x, well.y);
         this.container.addChild(this.systemGraph.container);
         // Nebula artwork is large and purely decorative, so it is loaded
         // after the map itself is usable.

@@ -160,6 +160,9 @@ export class Outfitter extends Menu<OutfitsState> {
     }
 
     private async refreshGrid() {
+        // The grid is built asynchronously, so the planet can arrive first.
+        // Waiting keeps that case from leaving the unfiltered initial grid up.
+        await this.buildPromise;
         if (!this.itemGrid || !this.planetData) {
             return;
         }

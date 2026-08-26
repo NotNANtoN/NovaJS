@@ -34,6 +34,27 @@ describe('spaceport availability', () => {
             new Set([424]))).toBe(true);
     });
 
+    it('never stocks a variant hull with no display weight', () => {
+        expect(isPurchaseAvailable({
+            techLevel: 1,
+            availabilityNCB: '',
+            displayWeight: 0,
+        }, planet)).toBe(false);
+        expect(isPurchaseAvailable({
+            techLevel: 1,
+            availabilityNCB: '',
+            displayWeight: 189,
+        }, planet)).toBe(true);
+    });
+
+    it('treats a registered pilot as passing the P test', () => {
+        const state = createInitialPlayerState();
+        expect(isPurchaseAvailable({
+            techLevel: 1,
+            availabilityNCB: 'P30',
+        }, planet, state)).toBe(true);
+    });
+
     it('evaluates player-derived NCB context beyond mission bits', () => {
         const state = createInitialPlayerState();
         state.exploredSystems = ['nova:130'];

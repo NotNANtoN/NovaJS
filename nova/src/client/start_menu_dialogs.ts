@@ -84,7 +84,7 @@ const DEFAULT_CONTROL_CODES: Readonly<Record<string, unknown>> = {
     land: 'KeyL',
     depart: ['Escape', 'KeyD'],
     properties: 'KeyP',
-    missions: 'KeyM',
+    missions: 'KeyI',
     fullscreen: 'Enter',
     volumeUp: 'Equal',
     volumeDown: 'Minus',
