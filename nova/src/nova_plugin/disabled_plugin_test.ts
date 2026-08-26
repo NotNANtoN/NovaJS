@@ -121,7 +121,7 @@ describe('disabled ship lifecycle', () => {
             expect(ship.components.get(ArmorComponent)!.current).toBe(30);
             expect(ship.components.get(DisabledComponent)).toBeTrue();
             expect(ship.components.get(DisabledLifecycleComponent))
-                .toEqual({ armorFraction: 0.3 });
+                .toEqual({ armorFraction: 0.3, armorCeiling: 30 });
             expect(ship.components.has(JumpStateComponent)).toBeFalse();
             const movement = ship.components.get(MovementStateComponent)!;
             expect(movement.accelerating).toBe(0);
@@ -189,7 +189,28 @@ describe('disabled ship lifecycle', () => {
         expect(disableArmorFraction(undefined)).toBe(DISABLE_ARMOR_FRACTION);
     });
 
-    it('recovers once its armour is patched above the threshold', async () => {
+    it('holds the hull at its ceiling so it cannot heal itself free',
+        async () => {
+            const world = await makeWorld();
+            const ship = combatShip();
+            ship.components.get(ArmorComponent)!.recharge = 20;
+            world.entities.set('ship', ship);
+            world.emitNow(DamagedEvent, {
+                damage: weaponDamage(10),
+                damager: 'attacker',
+            }, ['ship']);
+            expect(ship.components.get(DisabledComponent)).toBeTrue();
+
+            for (let frame = 0; frame < 600; frame++) {
+                world.step();
+            }
+
+            // A generous armour recharge must not undo the disablement.
+            expect(ship.components.get(ArmorComponent)!.current).toBe(30);
+            expect(ship.components.get(DisabledComponent)).toBeTrue();
+        });
+
+    it('flies again once a repair fills the hull', async () => {
         const world = await makeWorld();
         const ship = combatShip();
         world.entities.set('ship', ship);
@@ -199,18 +220,12 @@ describe('disabled ship lifecycle', () => {
         }, ['ship']);
         expect(ship.components.get(DisabledComponent)).toBeTrue();
 
-        // Self-repair is slow, so one frame must not hand control back.
+        const armor = ship.components.get(ArmorComponent)!;
+        armor.current = armor.max;
         world.step();
-        expect(ship.components.get(DisabledComponent)).toBeTrue();
-
-        for (let frame = 0; frame < 600; frame++) {
-            world.step();
-        }
 
         expect(ship.components.has(DisabledComponent)).toBeFalse();
         expect(ship.components.has(DisabledLifecycleComponent)).toBeFalse();
-        expect(ship.components.get(ArmorComponent)!.current)
-            .toBeGreaterThan(33);
     });
 
     it('does not disable before crossing the threshold', async () => {

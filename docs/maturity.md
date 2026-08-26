@@ -204,13 +204,14 @@ carrying `shïp` flag `0x0010`. The governments retail marks with `gövt` flag
 `0x1000` fly in, match velocity and plunder cargo and credits, sparing mission
 cargo.
 
-Gaps. A disabled ship slowly patches its own armour until it can limp away,
-which retail does not do — retail offers only the "repair system" outfit
-(`oütf` modtype 49, which "will occasionally repair the ship when it's
-disabled") or a rescue from a Roadside Assistance government (`gövt` flag
-`0x0010`, `përs` flag `0x0800`), reachable through the existing hail panel.
-Self-repair stands in until one of those exists, because a pilot in a hull
-without armour recharge would otherwise be stuck for good. The loot is also a
+A crippled ship's shields come back but its hull does not: armour recharge is
+held to the value the disabling blow left, so nothing heals its way free. A
+full hull is the signal that somebody repaired the ship, which is what a
+respawn provides. Still missing are the two repairs retail offers — the
+"repair system" outfit (`oütf` modtype 49, which "will occasionally repair the
+ship when it's disabled") and a rescue from a Roadside Assistance government
+(`gövt` flag `0x0010`, `përs` flag `0x0800`) through the hail panel — so a
+disabled pilot currently has no way home short of dying. The loot is also a
 placeholder, a deterministic half-hold plus a small fraction of hull value,
 because the real booty table lives in `düde` flags (`0x0001` food through
 `0x0020` equipment, `0x0040` money scaled by purchase price) which are not
