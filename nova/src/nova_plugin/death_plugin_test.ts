@@ -37,7 +37,10 @@ import { Stat } from './stat';
 import { BlastDamageComponent } from './blast_plugin';
 import { DestructionStartedComponent } from './destruction_state';
 import { getDefaultShipData } from 'novadatainterface/ShipData';
-import { ShipDataComponent } from './ship_plugin';
+import {
+    ShipComponent,
+    ShipDataComponent,
+} from './ship_plugin';
 import {
     JumpRouteComponent,
     JumpState,
@@ -48,6 +51,8 @@ import {
     MultiplayerData,
 } from 'nova_ecs/plugins/multiplayer_plugin';
 import { MockCommunicator } from 'nova_ecs/plugins/mock_communicator';
+import { OutfitsStateComponent } from './outfit_plugin';
+import { GameDataResource } from './game_data_resource';
 
 describe('player death', () => {
     it('shows the message only after the final explosion lifetime', () => {
@@ -238,9 +243,12 @@ describe('player death', () => {
             .has(DestructionStartedComponent)).toBeFalse();
         expect(client.entities.get('player')?.components
             .has(PlayerDeathComponent)).toBeFalse();
+        expect(ship.components.has(DisabledComponent)).toBeFalse();
+        expect(client.entities.get('player')?.components
+            .has(DisabledComponent)).toBeFalse();
     });
 
-    it('holds the wreck, then respawns at the last landed position', async () => {
+    it('holds a pilot without an escape pod in the game-over state', async () => {
         const time = {
             time: 1_000,
             delta_ms: 0,
@@ -259,6 +267,7 @@ describe('player death', () => {
         const player = new Entity('player')
             .addComponent(PlayerShipSelector, undefined)
             .addComponent(PlayerStateComponent, state)
+            .addComponent(OutfitsStateComponent, new Map())
             .addComponent(MovementStateComponent, {
                 accelerating: 0,
                 position: new Position(42, 24),
@@ -288,14 +297,138 @@ describe('player death', () => {
         expect(player.components.get(MovementStateComponent)!.position)
             .toEqual(new Position(42, 24));
 
+        time.time = death!.messageAt! + PLAYER_DEATH_MESSAGE_HOLD_MS;
+        world.step();
+
+        expect(death?.outcome).toBe('killed');
+        expect(death?.message).toBe('Captain has been killed');
+        expect(death?.respawnAt).toBeUndefined();
+        expect(player.components.has(PlayerDeathComponent)).toBe(true);
+        expect(player.components.get(MovementStateComponent)!.position)
+            .toEqual(new Position(42, 24));
+        expect(player.components.get(ShieldComponent)!.current).toBe(0);
+        expect(player.components.get(ArmorComponent)!.current).toBe(0);
+    });
+
+    it('consumes the pod and recovers the pilot in a basic hull', async () => {
+        const time = {
+            time: 1_000,
+            delta_ms: 0,
+            delta_s: 0,
+            frame: 0,
+        };
+        const state = createInitialPlayerState();
+        state.shipId = 'nova:200';
+        state.lastLandedPosition = [321, -123];
+        state.holds = [{
+            commodity: 'Food',
+            tons: 5,
+            isMissionCargo: false,
+        }];
+        state.kills = 7;
+        const basicHull = {
+            ...getDefaultShipData(),
+            id: 'nova:128',
+            name: 'Shuttle',
+            cargoCapacity: 10,
+            fuelCapacity: 300,
+            physics: {
+                ...getDefaultShipData().physics,
+                shield: 30,
+                armor: 30,
+                ionization: 10,
+            },
+            outfits: {
+                'nova:128': 1,
+            },
+        };
+        const outfitData = {
+            pod: {
+                isEscapePod: true,
+                physics: { freeMass: 1 },
+            },
+            'nova:128': {
+                isEscapePod: false,
+                physics: { freeMass: 1 },
+            },
+        } as const;
+
+        const world = new World('escape-pod-death-test');
+        world.resources.set(TimeResource, time);
+        world.resources.set(GameDataResource, {
+            data: {
+                Explosion: { getCached: () => undefined },
+                Outfit: {
+                    getCached: (id: keyof typeof outfitData) =>
+                        outfitData[id],
+                },
+                Ship: {
+                    get: async () => basicHull,
+                    getCached: () => basicHull,
+                },
+            },
+        } as never);
+        await world.addPlugin(DeltaPlugin);
+        await world.addPlugin(DeathPlugin);
+
+        const player = new Entity('player')
+            .addComponent(PlayerShipSelector, undefined)
+            .addComponent(PlayerStateComponent, state)
+            .addComponent(ShipComponent, { id: 'nova:200' })
+            .addComponent(ShipDataComponent, {
+                ...getDefaultShipData(),
+                id: 'nova:200',
+            })
+            .addComponent(OutfitsStateComponent, new Map([
+                ['pod', { count: 1 }],
+                ['old-weapon', { count: 2 }],
+            ]))
+            .addComponent(MovementStateComponent, {
+                accelerating: 1,
+                position: new Position(42, 24),
+                rotation: new Angle(0),
+                turnBack: false,
+                turning: 1,
+                turnTo: new Angle(1),
+                velocity: new Vector(4, 5),
+            })
+            .addComponent(ShieldComponent, new Stat({
+                current: 0, recharge: 0, max: 100,
+            }))
+            .addComponent(ArmorComponent, new Stat({
+                current: 0, recharge: 0, max: 200,
+            }))
+            .addComponent(DisabledComponent, true)
+            .addComponent(DestructionStartedComponent, true);
+        world.entities.set('player', player);
+
+        world.emitNow(DeathEvent, time, ['player']);
+        world.step();
+        const death = player.components.get(PlayerDeathComponent);
+        expect(death?.outcome).toBe('escaped');
+        expect(death?.escapePodOutfitId).toBe('pod');
+        expect(death?.message).toContain('a passing prospector');
+
         time.time = death!.respawnAt!;
         world.step();
 
-        expect(player.components.has(PlayerDeathComponent)).toBe(false);
-        expect(player.components.get(MovementStateComponent)!.position)
+        expect(player.components.has(PlayerDeathComponent)).toBeFalse();
+        expect(player.components.has(DisabledComponent)).toBeFalse();
+        expect(player.components.has(DestructionStartedComponent)).toBeFalse();
+        expect(player.components.get(ShipComponent)?.id).toBe('nova:128');
+        expect(player.components.get(OutfitsStateComponent)).toEqual(new Map([
+            ['nova:128', { count: 1 }],
+        ]));
+        expect(state.shipId).toBe('nova:128');
+        expect(state.holds).toEqual([]);
+        expect(state.kills).toBe(7);
+        expect(player.components.get(MovementStateComponent)?.position)
             .toEqual(new Position(321, -123));
-        expect(player.components.get(ShieldComponent)!.current).toBe(100);
-        expect(player.components.get(ArmorComponent)!.current).toBe(200);
+        expect(player.components.get(MovementStateComponent)?.accelerating)
+            .toBe(0);
+        expect(player.components.get(MovementStateComponent)?.turning).toBe(0);
+        expect(player.components.get(ShieldComponent)?.current).toBe(30);
+        expect(player.components.get(ArmorComponent)?.current).toBe(30);
     });
 
     it('silently relocates cross-system respawns without jump state', async () => {

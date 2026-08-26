@@ -36,6 +36,18 @@ import { GameDataResource } from './game_data_resource';
 import { framesToMilliseconds } from 'novaparse/src/parsers/Constants';
 import { DestructionStartedComponent } from './destruction_state';
 import { deImmerify } from '../util/deimmerify';
+import {
+    BASIC_ESCAPE_POD_SHIP_ID,
+    ESCAPE_POD_RETAIL_MESSAGE,
+    findEscapePodOutfit,
+    killedPilotMessage,
+    recoverPilotAfterEscapePod,
+} from './escape_pod';
+import {
+    applyOutfitPhysics,
+    OutfitsStateComponent,
+} from './outfit_plugin';
+import { Stat } from './stat';
 
 // const DamageQuery = new Query([Optional(ShieldComponent), Optional(ArmorComponent),
 // Optional(IonizationComponent), Optional(IonizationColorComponent),
@@ -63,6 +75,12 @@ const PlayerDeathStateCodec = t.intersection([
     t.partial({
         messageAt: t.number,
         respawnAt: t.number,
+        outcome: t.union([
+            t.literal('escaped'),
+            t.literal('killed'),
+        ]),
+        message: t.string,
+        escapePodOutfitId: t.string,
     }),
 ]);
 export type PlayerDeathState = t.TypeOf<typeof PlayerDeathStateCodec>;
@@ -126,7 +144,9 @@ export function completePlayerDestruction(
         return;
     }
     death.messageAt = completedAt;
-    death.respawnAt = completedAt + PLAYER_DEATH_MESSAGE_HOLD_MS;
+    if (death.outcome !== 'killed') {
+        death.respawnAt = completedAt + PLAYER_DEATH_MESSAGE_HOLD_MS;
+    }
 }
 
 const DamageSystem = new System({
@@ -269,10 +289,11 @@ export const PlayerDeathSystem = new System({
     args: [Optional(ShieldComponent), Optional(ArmorComponent),
            Optional(IonizationComponent), MovementStateComponent,
            PlayerShipSelector, DeathEvent, GetEntity,
-           Optional(ShipDataComponent), GetWorld] as const,
+           Optional(ShipDataComponent), Optional(OutfitsStateComponent),
+           Optional(PlayerStateComponent), GetWorld] as const,
     events: [DeathEvent],
     step(_shield, _armor, _ionization, movement, _playerShip, { time }, entity,
-        ship, world) {
+        ship, outfits, playerState, world) {
         if (entity.components.has(PlayerDeathComponent)) {
             return;
         }
@@ -287,10 +308,35 @@ export const PlayerDeathSystem = new System({
                 ?.data.Explosion.getCached(ship.finalExplosion)
             : undefined;
         const visualDuration = explosionVisualDurationMs(explosion);
+        const gameData = world.resources.get(GameDataResource);
+        const escapePodOutfitId = outfits && gameData
+            ? findEscapePodOutfit(
+                outfits,
+                id => gameData.data.Outfit.getCached(id),
+            )
+            : undefined;
+        if (escapePodOutfitId) {
+            // Start fetching the replacement hull during the explosion so the
+            // synchronous respawn step never has to guess at its retail data.
+            void gameData?.data.Ship.get(BASIC_ESCAPE_POD_SHIP_ID)
+                .catch(error => console.warn(
+                    'Could not load the escape-pod recovery hull', error));
+        }
         const deathState: PlayerDeathState = {
             wreckPosition: [movement.position.x, movement.position.y],
             visualFallbackAt: time + visualDuration
                 + PLAYER_DEATH_VISUAL_FALLBACK_GRACE_MS,
+            // Old snapshots and lightweight test entities can predate outfit
+            // inventory. Preserve their former respawn behavior; a real
+            // player ship always has an explicit (possibly empty) inventory.
+            ...(outfits ? {
+                outcome: escapePodOutfitId ? 'escaped' as const
+                    : 'killed' as const,
+                message: escapePodOutfitId
+                    ? ESCAPE_POD_RETAIL_MESSAGE
+                    : killedPilotMessage(playerState?.pilotName ?? 'Pilot'),
+            } : {}),
+            ...(escapePodOutfitId ? { escapePodOutfitId } : {}),
         };
         // Node worlds do not install the Pixi explosion completion system.
         // Use the same resource-derived visual lifetime for authoritative
@@ -337,19 +383,86 @@ const PlayerRespawnSystem = new System({
         UUID,
         Emit,
         PlayerShipSelector,
+        Optional(ShipComponent),
+        GetWorld,
     ] as const,
     step(time, death, shield, armor, ionization, playerState, movement,
-        entity, entities, uuid, emit) {
+        entity, entities, uuid, emit, _playerShip, shipType, world) {
         if (death.respawnAt === undefined || time.time < death.respawnAt) {
             movement.position = new Position(...death.wreckPosition);
             movement.velocity = new Vector(0, 0);
             return;
+        }
+        if (death.outcome === 'escaped') {
+            const gameData = world.resources.get(GameDataResource);
+            const basicHull = gameData?.data.Ship.getCached(
+                BASIC_ESCAPE_POD_SHIP_ID);
+            if (!gameData || !basicHull || !playerState || !shipType) {
+                movement.position = new Position(...death.wreckPosition);
+                movement.velocity = new Vector(0, 0);
+                return;
+            }
+            const defaultOutfits = Object.entries(basicHull.outfits)
+                .map(([id, count]) => {
+                    const outfit = gameData.data.Outfit.getCached(id);
+                    return outfit ? [outfit, count] as const : undefined;
+                });
+            if (defaultOutfits.some(entry => entry === undefined)) {
+                movement.position = new Position(...death.wreckPosition);
+                movement.velocity = new Vector(0, 0);
+                return;
+            }
+
+            const recovery = recoverPilotAfterEscapePod(
+                playerState, basicHull);
+            playerState.shipId = recovery.playerState.shipId;
+            playerState.cargoCapacity =
+                recovery.playerState.cargoCapacity;
+            playerState.holds = recovery.playerState.holds;
+            playerState.fuel = recovery.playerState.fuel;
+            playerState.activeMissions =
+                recovery.playerState.activeMissions;
+
+            const physics = applyOutfitPhysics(
+                basicHull.physics,
+                defaultOutfits as Array<NonNullable<
+                    (typeof defaultOutfits)[number]
+                >>,
+            );
+            entity.components.set(ShipComponent, {
+                id: recovery.playerState.shipId,
+            });
+            entity.components.set(ShipDataComponent, basicHull);
+            entity.components.set(
+                OutfitsStateComponent, recovery.outfits);
+            entity.components.set(ShipPhysicsComponent, physics);
+            entity.components.set(ShieldComponent, new Stat({
+                current: physics.shield,
+                max: physics.shield,
+                min: -physics.shield * 0.05,
+                recharge: physics.shieldRecharge,
+            }));
+            entity.components.set(ArmorComponent, new Stat({
+                current: physics.armor,
+                max: physics.armor,
+                min: 0,
+                recharge: physics.armorRecharge,
+            }));
+            entity.components.set(IonizationComponent, new Stat({
+                current: 0,
+                max: physics.ionization,
+                min: 0,
+                recharge: -physics.deionize,
+            }));
         }
         const position: [number, number] =
             playerState?.lastLandedPosition ?? [0, 0];
         cancelJumpFlight(entity, movement);
         movement.position = new Position(...position);
         movement.velocity = new Vector(0, 0);
+        movement.accelerating = 0;
+        movement.turning = 0;
+        movement.turnTo = null;
         if (shield) {
             shield.current = shield.max;
         }
@@ -364,6 +477,7 @@ const PlayerRespawnSystem = new System({
         if (playerState && to) {
             playerState.currentSystem = to;
         }
+        entity.components.delete(DisabledComponent);
         entity.components.delete(DestructionStartedComponent);
         entity.components.delete(PlayerDeathComponent);
         if (from && to && from !== to) {
