@@ -3,7 +3,12 @@ import { getDefaultShipData } from 'novadatainterface/ShipData';
 import { DeltaPlugin } from 'nova_ecs/plugins/delta_plugin';
 import { Entity } from 'nova_ecs/entity';
 import { MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
-import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
+import {
+    MovementPhysicsComponent,
+    MovementPlugin,
+    MovementStateComponent,
+    MovementType,
+} from 'nova_ecs/plugins/movement_plugin';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { World } from 'nova_ecs/world';
 import { Angle } from 'nova_ecs/datatypes/angle';
@@ -19,8 +24,14 @@ import { NpcCombatRoleComponent } from './npc_components';
 import { PlanetComponent } from './planet_plugin';
 import { EntityBudgetResource, createEntityBudget } from './entity_budget';
 import { SystemIdResource } from './system_id_resource';
+import {
+    JUMP_ARRIVAL_MS,
+    JumpPlugin,
+    JumpStateComponent,
+} from './jump_plugin';
 import { DeathEvent, DeathPlugin } from './death_plugin';
 import { PlayerShipSelector } from './player_ship_plugin';
+import { PlatformResource } from './platform_plugin';
 import { Stat } from './stat';
 import { combatRoleForDudeAiType } from 'novaparse/src/parsers/SystemParse';
 
@@ -260,4 +271,74 @@ describe('NPC spawning', () => {
 
         expect(localLaunches.length).toBeGreaterThan(0);
     });
+
+    it('animates hyperspace arrivals before returning them to normal flight',
+        async () => {
+            const gameData = {
+                data: {
+                    System: {
+                        get: async () => ({
+                            position: [0, 0],
+                            links: [],
+                            planets: [],
+                            avgShips: 1,
+                            npcs: [{
+                                id: 'test-npc',
+                                weight: 1,
+                                government: 1,
+                                combatRole: 'civilian',
+                                ships: [{ id: 'nova:128', weight: 1 }],
+                            }],
+                        }),
+                    },
+                    Ship: {
+                        get: async () => getDefaultShipData(),
+                    },
+                },
+            };
+            const time = {
+                time: 0,
+                delta_ms: 1_000 / 60,
+                delta_s: 1 / 60,
+                frame: 0,
+            };
+            const world = new World('npc-arrival-jump-test');
+            world.resources.set(GameDataResource, gameData as never);
+            world.resources.set(SystemIdResource, 'nova:test');
+            world.resources.set(PlatformResource, 'node');
+            world.resources.set(TimeResource, time);
+            world.resources.set(
+                EntityBudgetResource, createEntityBudget('modern'));
+            await world.addPlugin(DeltaPlugin);
+            await world.addPlugin(MovementPlugin);
+            await world.addPlugin(JumpPlugin);
+            await world.addPlugin(NpcSpawnPlugin);
+
+            world.step();
+            await settle();
+            world.step();
+            await settle();
+
+            const npc = [...world.entities.values()].find(entity =>
+                entity.components.has(NpcAIComponent));
+            expect(npc).toBeDefined();
+            expect(npc?.components.get(JumpStateComponent)?.phase)
+                .toBe('arriving');
+
+            if (!npc) {
+                return;
+            }
+            npc.components.set(MovementPhysicsComponent, {
+                acceleration: 1,
+                maxVelocity: 40,
+                movementType: MovementType.INERTIAL,
+                turnRate: 1,
+            });
+            time.time = JUMP_ARRIVAL_MS;
+            time.delta_s = 0;
+            world.step();
+
+            expect(world.entities.has(npc.uuid)).toBeTrue();
+            expect(npc.components.has(JumpStateComponent)).toBeFalse();
+        });
 });

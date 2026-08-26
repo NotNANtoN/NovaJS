@@ -26,6 +26,7 @@ import {
     inTransferRange,
 } from './flight_controller';
 import { GameDataResource } from './game_data_resource';
+import { JumpStateComponent } from './jump_plugin';
 import {
     GovernmentData,
     GovernmentRelationResource,
@@ -521,16 +522,18 @@ export const PirateBoardingSystem = new System({
         Optional(DisabledComponent),
         Optional(DestructionStartedComponent),
         Optional(ArmorComponent),
+        Optional(JumpStateComponent),
         UUID,
         EmitNow,
     ] as const,
     step(pirate, boarding, inventory, target, movement, physics, weapons,
         disabledTargets, entities, multiplayer, platform, _npc,
-        disabled, destructionStarted, armor, uuid, emitNow) {
+        disabled, destructionStarted, armor, jumpState, uuid, emitNow) {
         if (!pirate.enabled || platform !== 'node'
             || multiplayer.owner !== 'server' || disabled
             || destructionStarted
-            || armor && armor.current <= 0) {
+            || armor && armor.current <= 0
+            || jumpState) {
             return;
         }
 

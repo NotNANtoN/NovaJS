@@ -1,11 +1,16 @@
 import 'jasmine';
 import {
     JUMP_ARRIVAL_END_SPEED_MULTIPLIER,
+    JUMP_ARRIVAL_RADIUS,
     JUMP_ARRIVAL_MS,
     JUMP_ARRIVAL_SPEED_MULTIPLIER,
     JUMP_BAM_MS,
     JUMP_DEPARTURE_SPEED_MULTIPLIER,
     JUMP_SPOOL_MS,
+    NPC_JUMP_TIMEOUT_MS,
+    SYSTEM_DEPARTURE_RADIUS,
+    InitiateJumpEvent,
+    JumpPlugin,
     JumpStateComponent,
     applyJumpFlightMovement,
     calculateJumpArrival,
@@ -17,14 +22,80 @@ import {
     pendingJumpTransition,
     routeChangeCancelsJump,
 } from './jump_plugin';
+import { DeltaPlugin } from 'nova_ecs/plugins/delta_plugin';
 import { Position } from 'nova_ecs/datatypes/position';
 import { Vector } from 'nova_ecs/datatypes/vector';
 import { Angle } from 'nova_ecs/datatypes/angle';
 import { Entity } from 'nova_ecs/entity';
 import {
+    MovementPhysics,
+    MovementPhysicsComponent,
     MovementState,
+    MovementStateComponent,
+    MovementPlugin,
     RemoteMovementPresentationComponent,
+    MovementType,
 } from 'nova_ecs/plugins/movement_plugin';
+import { MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
+import { TimeResource } from 'nova_ecs/plugins/time_plugin';
+import { World } from 'nova_ecs/world';
+import { NpcAIComponent } from './npc_components';
+import { PlayerShipSelector } from './player_ship_plugin';
+import { SystemIdResource } from './system_id_resource';
+import { GameDataResource } from './game_data_resource';
+import { PlatformResource } from './platform_plugin';
+
+const NPC_PHYSICS: MovementPhysics = {
+    acceleration: 100,
+    maxVelocity: 40,
+    movementType: MovementType.INERTIAL,
+    turnRate: 3,
+};
+
+function npcMovementAt(x: number, y: number): MovementState {
+    return {
+        position: new Position(x, y),
+        velocity: new Vector(0, 0),
+        rotation: new Angle(0),
+        turning: 0,
+        turnBack: false,
+        accelerating: 0,
+    };
+}
+
+function npcJumpEntity(
+    x = 100,
+    y = 0,
+): Entity {
+    return new Entity('npc')
+        .addComponent(NpcAIComponent, undefined)
+        .addComponent(MultiplayerData, { owner: 'server' })
+        .addComponent(MovementStateComponent, npcMovementAt(x, y))
+        .addComponent(MovementPhysicsComponent, NPC_PHYSICS);
+}
+
+async function npcJumpWorld() {
+    const world = new World('npc-jump-test');
+    world.resources.set(PlatformResource, 'node');
+    world.resources.set(GameDataResource, {
+        data: {
+            System: {
+                getCached: () => undefined,
+            },
+        },
+    } as never);
+    world.resources.set(SystemIdResource, 'nova:source');
+    world.resources.set(TimeResource, {
+        time: 0,
+        delta_ms: 10,
+        delta_s: 0.01,
+        frame: 0,
+    });
+    await world.addPlugin(DeltaPlugin);
+    await world.addPlugin(MovementPlugin);
+    await world.addPlugin(JumpPlugin);
+    return world;
+}
 
 describe('hyperjump lifecycle', () => {
     it('spools, performs the departure BAM, then holds arrival controls', () => {
@@ -166,6 +237,142 @@ describe('hyperjump lifecycle', () => {
         expect(movement.turnBack).toBeFalse();
         expect(movement.turnTo).toBeNull();
         expect(movement.targetSpeed).toBe(30);
+    });
+});
+
+describe('NPC hyperjump lifecycle', () => {
+    it('starts from InitiateJumpEvent, spools, and gains speed', async () => {
+        const world = await npcJumpWorld();
+        const npc = npcJumpEntity();
+        world.entities.set('npc', npc);
+
+        world.emitNow(InitiateJumpEvent, { to: 'nova:next' }, ['npc']);
+        expect(npc.components.get(JumpStateComponent)?.phase)
+            .toBe('spooling');
+
+        world.step();
+        const spoolingSpeed = npc.components
+            .get(MovementStateComponent)!.velocity.length;
+        expect(spoolingSpeed).toBeGreaterThan(0);
+
+        const time = world.resources.get(TimeResource)!;
+        time.time = JUMP_SPOOL_MS;
+        world.step();
+
+        expect(npc.components.get(JumpStateComponent)?.phase)
+            .toBe('departing');
+        expect(npc.components.get(MovementStateComponent)!.velocity.length)
+            .toBeGreaterThan(spoolingSpeed);
+    });
+
+    it('keeps departing NPCs until they exceed the system radius', async () => {
+        const world = await npcJumpWorld();
+        const npc = npcJumpEntity(SYSTEM_DEPARTURE_RADIUS - 1, 0);
+        npc.components.set(JumpStateComponent, {
+            from: 'nova:source',
+            to: 'nova:next',
+            phase: 'departing',
+            phaseStartedAt: 0,
+            transitionAt: JUMP_BAM_MS,
+            requiresAdjacency: false,
+            arrivalSoundPending: false,
+            createdAt: 0,
+        });
+        world.entities.set('npc', npc);
+
+        const time = world.resources.get(TimeResource)!;
+        time.time = JUMP_SPOOL_MS + JUMP_BAM_MS + 1;
+        time.delta_s = 0;
+        world.step();
+        expect(world.entities.has('npc')).toBeTrue();
+
+        npc.components.get(MovementStateComponent)!.position =
+            new Position(SYSTEM_DEPARTURE_RADIUS + 1, 0);
+        world.step();
+        expect(world.entities.has('npc')).toBeFalse();
+    });
+
+    it('removes a departing NPC after the timeout fallback', async () => {
+        const world = await npcJumpWorld();
+        const npc = npcJumpEntity();
+        npc.components.set(JumpStateComponent, {
+            from: 'nova:source',
+            to: 'nova:next',
+            phase: 'departing',
+            phaseStartedAt: 0,
+            transitionAt: JUMP_BAM_MS,
+            requiresAdjacency: false,
+            arrivalSoundPending: false,
+            createdAt: 0,
+        });
+        world.entities.set('npc', npc);
+
+        const time = world.resources.get(TimeResource)!;
+        time.time = NPC_JUMP_TIMEOUT_MS;
+        time.delta_s = 0;
+        world.step();
+
+        expect(world.entities.has('npc')).toBeFalse();
+    });
+
+    it('clears arrival state without applying the departure removal rule',
+        async () => {
+            const world = await npcJumpWorld();
+            const npc = npcJumpEntity(0, -JUMP_ARRIVAL_RADIUS);
+            npc.components.get(MovementStateComponent)!.rotation =
+                new Angle(Math.PI);
+            npc.components.set(JumpStateComponent, {
+                from: '',
+                to: '',
+                phase: 'arriving',
+                phaseStartedAt: 0,
+                transitionAt: JUMP_ARRIVAL_MS,
+                requiresAdjacency: false,
+                arrivalSoundPending: false,
+                createdAt: 0,
+            });
+            world.entities.set('npc', npc);
+
+            const time = world.resources.get(TimeResource)!;
+            world.step();
+            expect(world.entities.has('npc')).toBeTrue();
+            expect(npc.components.has(JumpStateComponent)).toBeTrue();
+
+            time.time = JUMP_ARRIVAL_MS;
+            time.delta_s = 0;
+            world.step();
+
+            expect(world.entities.has('npc')).toBeTrue();
+            expect(npc.components.has(JumpStateComponent)).toBeFalse();
+        });
+
+    it('does not drive a player through the NPC lifecycle', async () => {
+        const world = await npcJumpWorld();
+        const player = new Entity('player')
+            .addComponent(PlayerShipSelector, undefined)
+            .addComponent(NpcAIComponent, undefined)
+            .addComponent(MovementStateComponent, npcMovementAt(100, 0))
+            .addComponent(MovementPhysicsComponent, NPC_PHYSICS)
+            .addComponent(JumpStateComponent, {
+                from: 'nova:source',
+                to: 'nova:next',
+                phase: 'departing',
+                phaseStartedAt: 0,
+                transitionAt: JUMP_BAM_MS,
+                requiresAdjacency: false,
+                arrivalSoundPending: false,
+                createdAt: 0,
+            });
+        world.entities.set('player', player);
+
+        const time = world.resources.get(TimeResource)!;
+        time.time = JUMP_BAM_MS + 1;
+        world.step();
+
+        expect(player.components.get(JumpStateComponent)?.phase)
+            .toBe('departing');
+        expect(player.components.get(MovementStateComponent)!.velocity.length)
+            .toBe(0);
     });
 });
 

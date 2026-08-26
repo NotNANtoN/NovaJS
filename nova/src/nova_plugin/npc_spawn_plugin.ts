@@ -45,6 +45,10 @@ import {
 import { SystemIdResource } from "./system_id_resource";
 import { SingletonComponent, World } from "nova_ecs/world";
 import { EntityBudgetResource, reserveEntity } from "./entity_budget";
+import {
+    JUMP_ARRIVAL_MS,
+    JumpStateComponent,
+} from './jump_plugin';
 
 
 export const NPC_RESPAWN_INTERVAL_MS = 3_000;
@@ -191,6 +195,7 @@ async function buildNpc(
     placement?: ArrivalPlacement,
     fleet?: boolean,
     post?: [number, number],
+    now = 0,
 ) {
     try {
         const shipData = await gameData.data.Ship.get(shipId);
@@ -224,7 +229,7 @@ async function buildNpc(
                 { guardPost: post, radius: DEFAULT_PATROL_RADIUS });
         }
         if (placement) {
-            applyPlacement(npc, placement);
+            applyPlacement(npc, placement, now);
         }
         npc.components.set(MultiplayerData, { owner: "server" });
         return npc;
@@ -249,6 +254,7 @@ async function createNpcGroup(
     budget: import('./entity_budget').EntityBudget,
     placement?: ArrivalPlacement,
     systemData?: SystemData,
+    now = 0,
 ): Promise<Array<[string, Entity]>> {
     const npcType = pickWeighted(entries);
     if (!npcType) {
@@ -258,7 +264,7 @@ async function createNpcGroup(
     if (!npcType.fleet) {
         const shipType = pickWeighted(npcType.ships);
         const npc = shipType && await buildNpc(
-            gameData, npcType, shipType.id, budget, placement, false, post);
+            gameData, npcType, shipType.id, budget, placement, false, post, now);
         return npc ? [[uuid(), npc]] : [];
     }
 
@@ -271,7 +277,8 @@ async function createNpcGroup(
         })),
     });
     const leader = await buildNpc(
-        gameData, npcType, roster.leaderShipId, budget, placement, true);
+        gameData, npcType, roster.leaderShipId, budget, placement, true,
+        undefined, now);
     if (!leader) {
         return [];
     }
@@ -298,7 +305,7 @@ async function createNpcGroup(
             };
         }
         const escort = await buildNpc(
-            gameData, npcType, shipId, budget, station, true);
+            gameData, npcType, shipId, budget, station, true, undefined, now);
         if (!escort) {
             continue;
         }
@@ -404,7 +411,11 @@ function guardPost(
     return posts[Math.floor(Math.random() * posts.length)];
 }
 
-function applyPlacement(npc: Entity, placement: ArrivalPlacement): void {
+function applyPlacement(
+    npc: Entity,
+    placement: ArrivalPlacement,
+    now: number,
+): void {
     const movement = npc.components.get(MovementStateComponent);
     if (!movement) {
         return;
@@ -413,6 +424,18 @@ function applyPlacement(npc: Entity, placement: ArrivalPlacement): void {
         placement.position[0], placement.position[1]);
     movement.rotation = new Angle(placement.rotation);
     movement.velocity = new Vector(0, 0);
+    if (placement.origin === 'hyperspace') {
+        npc.components.set(JumpStateComponent, {
+            from: '',
+            to: '',
+            phase: 'arriving',
+            phaseStartedAt: now,
+            transitionAt: now + JUMP_ARRIVAL_MS,
+            requiresAdjacency: false,
+            arrivalSoundPending: false,
+            createdAt: now,
+        });
+    }
 }
 
 function nextPlacement(
@@ -495,6 +518,7 @@ async function createPersNpc(
     systemId: string,
     budget: import('./entity_budget').EntityBudget,
     placement?: ArrivalPlacement,
+    now = 0,
 ) {
     const people = persByGameData.get(gameData);
     if (!people?.length) {
@@ -524,7 +548,7 @@ async function createPersNpc(
             return undefined;
         }
         if (placement) {
-            applyPlacement(npc, placement);
+            applyPlacement(npc, placement, now);
         }
         npc.components.set(MultiplayerData, { owner: "server" });
         return npc;
@@ -606,12 +630,14 @@ const NpcSpawnSystem = new AsyncSystem({
                 // expected to finish within the tick that asked for it.
                 const named = persByGameData.get(gameData)?.length
                     ? await createPersNpc(
-                        gameData, world, systemId, budget, placement)
+                        gameData, world, systemId, budget, placement,
+                        time.time)
                     : undefined;
                 const group: Array<[string, Entity]> = named
                     ? [[uuid(), named]]
                     : await createNpcGroup(
-                        gameData, entries, budget, placement, systemData);
+                        gameData, entries, budget, placement, systemData,
+                        time.time);
                 if (!activeWorlds.has(world)) {
                     for (const _member of group) {
                         budget.release('ship');
@@ -642,13 +668,13 @@ const NpcSpawnSystem = new AsyncSystem({
         const placement = nextPlacement(gameData, spawnData.systemData, world);
         const named = persByGameData.get(gameData)?.length
             ? await createPersNpc(
-                gameData, world, systemId, budget, placement)
+                gameData, world, systemId, budget, placement, time.time)
             : undefined;
         const group: Array<[string, Entity]> = named
             ? [[uuid(), named]]
             : await createNpcGroup(
                 gameData, spawnData.entries, budget, placement,
-                spawnData.systemData);
+                spawnData.systemData, time.time);
         if (group.length === 0 || !activeWorlds.has(world)) {
             if (!activeWorlds.has(world)) {
                 for (const _member of group) {

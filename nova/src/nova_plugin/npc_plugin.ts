@@ -699,10 +699,11 @@ export const FollowAI = new System({
         Optional(ShipDataComponent),
         Optional(NpcFleeComponent),
         Optional(DestructionStartedComponent),
-        Optional(ArmorComponent)] as const,
+        Optional(ArmorComponent),
+        Optional(JumpStateComponent)] as const,
     step(movementState, physics, target, _follow, entities, multiplayer,
         platform, weapons, gameData, shipData, fleeing, destructionStarted,
-        armor) {
+        armor, jumpState) {
         if (platform === "node" && multiplayer.owner !== "server"
             || platform === "browser" && multiplayer.owner === "server") {
             return;
@@ -710,6 +711,9 @@ export const FollowAI = new System({
         if (destructionStarted || armor && armor.current <= 0) {
             movementState.turnTo = null;
             movementState.accelerating = 0;
+            return;
+        }
+        if (jumpState) {
             return;
         }
         if (!target.target) {
@@ -833,9 +837,9 @@ const WanderAI = new System({
     args: [MovementStateComponent, TargetComponent, WanderComponent,
         TimeResource, UUID, MultiplayerData, PlatformResource,
         NpcAIComponent, Optional(DestructionStartedComponent),
-        Optional(ArmorComponent)] as const,
+        Optional(ArmorComponent), Optional(JumpStateComponent)] as const,
     step(movementState, target, wander, time, uuid, multiplayer, platform,
-        _npcAI, destructionStarted, armor) {
+        _npcAI, destructionStarted, armor, jumpState) {
         if (platform !== "node" || multiplayer.owner !== "server"
             || target.target) {
             return;
@@ -843,6 +847,9 @@ const WanderAI = new System({
         if (destructionStarted || armor && armor.current <= 0) {
             movementState.turnTo = null;
             movementState.accelerating = 0;
+            return;
+        }
+        if (jumpState) {
             return;
         }
         if (wander.heading === undefined || time.time >= wander.nextTurnAt) {

@@ -16,6 +16,7 @@ import { DestructionStartedComponent } from './destruction_state';
 import { approachTarget } from './flight_controller';
 import { GameDataResource } from './game_data_resource';
 import { ArmorComponent } from './health_plugin';
+import { JumpStateComponent } from './jump_plugin';
 import { NpcAIComponent } from './npc_components';
 import { PlatformResource } from './platform_plugin';
 import { ShipDataComponent } from './ship_plugin';
@@ -149,12 +150,16 @@ function makeMinerApproachAI(follow: System) {
         name: 'MinerApproachAI',
         args: [MiningShipComponent, TargetComponent, MovementStateComponent,
             MovementPhysicsComponent, AsteroidTargetsQuery, MultiplayerData,
-            PlatformResource, NpcAIComponent] as const,
+            PlatformResource, NpcAIComponent,
+            Optional(JumpStateComponent)] as const,
         after: [follow],
         step(miner, target, movement, physics, asteroids, multiplayer,
-            platform) {
+            platform, jumpState) {
             if (!miner.mining || platform !== 'node'
                 || multiplayer.owner !== 'server') {
+                return;
+            }
+            if (jumpState) {
                 return;
             }
             const targetUuid = target.target;

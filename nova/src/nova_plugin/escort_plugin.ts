@@ -19,6 +19,7 @@ import { System } from 'nova_ecs/system';
 import { v4 as uuid } from 'uuid';
 import { GameDataResource } from './game_data_resource';
 import { approachTarget } from './flight_controller';
+import { JumpStateComponent } from './jump_plugin';
 import { makeNpc } from './npc_plugin';
 import { PlatformResource } from './platform_plugin';
 import { TargetComponent } from './target_component';
@@ -245,10 +246,15 @@ const FollowEscortOwner = new System({
         MovementPhysicsComponent,
         Entities,
         Optional(TargetComponent),
+        Optional(JumpStateComponent),
         PlatformResource,
     ] as const,
-    step(escort, movement, physics, entities, combatTarget, platform) {
+    step(escort, movement, physics, entities, combatTarget, jumpState,
+        platform) {
         if (platform !== 'node' || combatTarget?.target) {
+            return;
+        }
+        if (jumpState) {
             return;
         }
         const ownerMovement = entities.get(escort.ownerUuid)

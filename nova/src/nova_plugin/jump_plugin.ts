@@ -3,7 +3,7 @@ import { SystemData } from "novadatainterface/SystemData";
 import { Emit, Entities, GetEntity, UUID } from "nova_ecs/arg_types";
 import { Component } from "nova_ecs/component";
 import { Angle } from "nova_ecs/datatypes/angle";
-import { Position } from "nova_ecs/datatypes/position";
+import { BOUNDARY, Position } from "nova_ecs/datatypes/position";
 import { Vector } from "nova_ecs/datatypes/vector";
 import { Entity } from "nova_ecs/entity";
 import { EcsEvent } from "nova_ecs/events";
@@ -12,13 +12,17 @@ import { Optional } from "nova_ecs/optional";
 import { DeltaResource } from "nova_ecs/plugins/delta_plugin";
 import {
     MovementPhysicsComponent,
+    MovementPhysics,
     RemoteMovementPresentationComponent,
     MovementState,
     MovementStateComponent,
     MovementSystem,
 } from "nova_ecs/plugins/movement_plugin";
-import { replicationPolicies } from "nova_ecs/plugins/multiplayer_plugin";
-import { TimeResource, wallClockNow } from "nova_ecs/plugins/time_plugin";
+import {
+    MultiplayerData,
+    replicationPolicies,
+} from "nova_ecs/plugins/multiplayer_plugin";
+import { Time, TimeResource, wallClockNow } from "nova_ecs/plugins/time_plugin";
 import { Provide } from "nova_ecs/provide";
 import { System } from "nova_ecs/system";
 import { deImmerify } from "../util/deimmerify";
@@ -32,14 +36,20 @@ import { ShipDataComponent } from "./ship_plugin";
 import { ControlPlayerShip } from "./ship_controller_plugin";
 import { SoundEvent } from "./sound_event";
 import { SystemIdResource } from "./system_id_resource";
+import { NpcAIComponent } from "./npc_components";
+import { PlatformResource } from "./platform_plugin";
 
 export const JUMP_SPOOL_MS = 1_200;
 export const JUMP_BAM_MS = 180;
+export const JUMP_STREAK_MS = 400;
 export const JUMP_ARRIVAL_MS = 900;
 export const JUMP_ARRIVAL_RADIUS = 1_400;
 export const JUMP_DEPARTURE_SPEED_MULTIPLIER = 3.5;
 export const JUMP_ARRIVAL_SPEED_MULTIPLIER = 3;
 export const JUMP_ARRIVAL_END_SPEED_MULTIPLIER = 0.65;
+// Match the radar/interest radius so ships leave view before vanishing.
+export const SYSTEM_DEPARTURE_RADIUS = 6_000;
+export const NPC_JUMP_TIMEOUT_MS = 30_000;
 
 export interface InitiateJump {
     to: string /* system uuid */,
@@ -69,19 +79,24 @@ const JumpRouteProvider = Provide({
     }
 });
 
-const JumpStateCodec = t.type({
-    from: t.string,
-    to: t.string,
-    phase: t.union([
-        t.literal('spooling'),
-        t.literal('departing'),
-        t.literal('arriving'),
-    ]),
-    phaseStartedAt: t.number,
-    transitionAt: t.number,
-    requiresAdjacency: t.boolean,
-    arrivalSoundPending: t.boolean,
-});
+const JumpStateCodec = t.intersection([
+    t.type({
+        from: t.string,
+        to: t.string,
+        phase: t.union([
+            t.literal('spooling'),
+            t.literal('departing'),
+            t.literal('arriving'),
+        ]),
+        phaseStartedAt: t.number,
+        transitionAt: t.number,
+        requiresAdjacency: t.boolean,
+        arrivalSoundPending: t.boolean,
+    }),
+    t.partial({
+        createdAt: t.number,
+    }),
+]);
 export type JumpState = t.TypeOf<typeof JumpStateCodec>;
 export const JumpStateComponent = new Component<JumpState>(
     'JumpStateComponent');
@@ -251,6 +266,77 @@ export function applyJumpFlightMovement(
     movement.targetSpeed = speed;
 }
 
+function wrappedAxisDistance(a: number, b: number): number {
+    const direct = Math.abs(a - b);
+    return Math.min(direct, BOUNDARY * 2 - direct);
+}
+
+export function distanceFromSystemOrigin(position: Position): number {
+    return Math.hypot(
+        wrappedAxisDistance(position.x, 0),
+        wrappedAxisDistance(position.y, 0),
+    );
+}
+
+export function advanceJumpFlight(
+    state: JumpState,
+    movement: MovementState,
+    physics: Pick<MovementPhysics, 'maxVelocity'>,
+    time: Pick<Time, 'time' | 'delta_s'>,
+    direction: Vector,
+    onBeginDeparture?: () => void,
+): JumpTransition {
+    if (state.phase === 'spooling') {
+        if (pendingJumpTransition(state, time.time)
+            === 'begin-departure') {
+            state.phase = 'departing';
+            state.phaseStartedAt = time.time;
+            state.transitionAt = time.time + JUMP_BAM_MS;
+            onBeginDeparture?.();
+        }
+        applyJumpFlightMovement(
+            movement,
+            direction,
+            jumpFlightSpeed(
+                state.phase,
+                time.time - state.phaseStartedAt,
+                physics.maxVelocity,
+            ),
+            time.delta_s,
+            true,
+        );
+        return 'none';
+    }
+
+    if (state.phase === 'departing') {
+        applyJumpFlightMovement(
+            movement,
+            direction,
+            jumpFlightSpeed(
+                state.phase,
+                time.time - state.phaseStartedAt,
+                physics.maxVelocity,
+            ),
+            time.delta_s,
+            true,
+        );
+        return pendingJumpTransition(state, time.time);
+    }
+
+    applyJumpFlightMovement(
+        movement,
+        direction,
+        jumpFlightSpeed(
+            state.phase,
+            time.time - state.phaseStartedAt,
+            physics.maxVelocity,
+        ),
+        time.delta_s,
+        false,
+    );
+    return pendingJumpTransition(state, time.time);
+}
+
 export function cancelJumpFlight(
     entity: Entity,
     movement: MovementState,
@@ -310,6 +396,7 @@ const PlayerJumpControl = new System({
             transitionAt: time.time + JUMP_SPOOL_MS,
             requiresAdjacency: true,
             arrivalSoundPending: false,
+            createdAt: time.time,
         };
         entity.components.set(JumpStateComponent, state);
         entity.components.delete(RemoteMovementPresentationComponent);
@@ -341,6 +428,7 @@ const InitiateJumpSystem = new System({
             transitionAt: time.time + JUMP_SPOOL_MS,
             requiresAdjacency: false,
             arrivalSoundPending: false,
+            createdAt: time.time,
         };
         entity.components.set(JumpStateComponent, state);
         entity.components.delete(RemoteMovementPresentationComponent);
@@ -398,41 +486,20 @@ const JumpLifecycleSystem = new System({
             ? direction.normalize()
             : new Vector(0, -1);
 
+        const transition = advanceJumpFlight(
+            state,
+            movement,
+            physics,
+            time,
+            travelDirection,
+            () => emit(SoundEvent, { id: 'nova:130' }),
+        );
         if (state.phase === 'spooling') {
-            if (pendingJumpTransition(state, time.time)
-                === 'begin-departure') {
-                state.phase = 'departing';
-                state.phaseStartedAt = time.time;
-                state.transitionAt = time.time + JUMP_BAM_MS;
-                emit(SoundEvent, { id: 'nova:130' });
-            }
-            applyJumpFlightMovement(
-                movement,
-                travelDirection,
-                jumpFlightSpeed(
-                    state.phase,
-                    time.time - state.phaseStartedAt,
-                    physics.maxVelocity,
-                ),
-                time.delta_s,
-                true,
-            );
             return;
         }
 
         if (state.phase === 'departing') {
-            applyJumpFlightMovement(
-                movement,
-                travelDirection,
-                jumpFlightSpeed(
-                    state.phase,
-                    time.time - state.phaseStartedAt,
-                    physics.maxVelocity,
-                ),
-                time.delta_s,
-                true,
-            );
-            if (pendingJumpTransition(state, time.time) !== 'transfer') {
+            if (transition !== 'transfer') {
                 return;
             }
 
@@ -477,24 +544,64 @@ const JumpLifecycleSystem = new System({
             return;
         }
 
-        applyJumpFlightMovement(
-            movement,
-            travelDirection,
-            jumpFlightSpeed(
-                state.phase,
-                time.time - state.phaseStartedAt,
-                physics.maxVelocity,
-            ),
-            time.delta_s,
-            false,
-        );
         if (state.arrivalSoundPending) {
             state.arrivalSoundPending = false;
             emit(SoundEvent, { id: 'nova:302' });
         }
-        if (pendingJumpTransition(state, time.time) === 'finish-arrival') {
+        if (transition === 'finish-arrival') {
             movement.turnTo = null;
             entity.components.delete(JumpStateComponent);
+        }
+    },
+});
+
+export const NpcJumpLifecycleSystem = new System({
+    name: 'NpcJumpLifecycleSystem',
+    after: [MovementSystem],
+    args: [
+        JumpStateComponent,
+        MovementStateComponent,
+        MovementPhysicsComponent,
+        NpcAIComponent,
+        MultiplayerData,
+        PlatformResource,
+        Entities,
+        UUID,
+        GetEntity,
+        TimeResource,
+    ] as const,
+    step(state, movement, physics, _npc, multiplayer, platform, entities,
+        uuid, entity, time) {
+        if (entity.components.has(PlayerShipSelector)) {
+            return;
+        }
+        if (platform !== 'node' || multiplayer.owner !== 'server') {
+            return;
+        }
+        const direction = state.phase === 'arriving'
+            ? movement.rotation.getUnitVector()
+            : movement.position.lengthSquared > 0
+                ? movement.position.normalize()
+                : movement.rotation.getUnitVector();
+        const transition = advanceJumpFlight(
+            state, movement, physics, time, direction);
+
+        if (state.phase === 'arriving') {
+            if (transition === 'finish-arrival') {
+                movement.turnTo = null;
+                entity.components.delete(JumpStateComponent);
+            }
+            return;
+        }
+
+        if (state.phase !== 'departing') {
+            return;
+        }
+        const createdAt = state.createdAt ?? state.phaseStartedAt;
+        const timedOut = time.time - createdAt >= NPC_JUMP_TIMEOUT_MS;
+        if (distanceFromSystemOrigin(movement.position)
+            > SYSTEM_DEPARTURE_RADIUS || timedOut) {
+            entities.delete(uuid);
         }
     },
 });
@@ -518,6 +625,7 @@ export const JumpPlugin: Plugin = {
         world.addSystem(InitiateJumpSystem);
         world.addSystem(PlayerJumpControl);
         world.addSystem(JumpLifecycleSystem);
+        world.addSystem(NpcJumpLifecycleSystem);
         world.addSystem(JumpRouteProvider);
     }
 };
