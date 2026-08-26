@@ -36,7 +36,10 @@ class SpobResource extends BaseResource {
             d.getInt16(18)
         ];
         this.government = d.getInt16(20);
-        this.landingPictID = d.getUint16(24);
+        // Signed: retail stores -1 for "no custom landing picture", which
+        // read as unsigned becomes 65535 and then looks like a real resource
+        // ID. Resource IDs never exceed 32767, so this is lossless.
+        this.landingPictID = d.getInt16(24);
         this.landingDescID = this.id;
         this.tradeCommodities = getTradeCommodities(this.flags);
     }

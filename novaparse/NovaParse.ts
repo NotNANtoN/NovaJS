@@ -15,6 +15,7 @@ import { ShipData } from "novadatainterface/ShipData";
 import { SpriteSheetData, SpriteSheetFramesData, SpriteSheetImageData } from "novadatainterface/SpriteSheetData";
 import { StatusBarData } from "novadatainterface/StatusBarData";
 import { AsteroidData } from "novadatainterface/AsteroidData";
+import { NebulaData } from "novadatainterface/NebulaData";
 import { SystemData } from "novadatainterface/SystemData";
 import { TargetCornersData } from "novadatainterface/TargetCornersData";
 import { WeaponData } from "novadatainterface/WeaponData";
@@ -30,6 +31,8 @@ import { ShipParseClosure, ShipPictMap, WeaponOutfitMap } from "./src/parsers/Sh
 import { SpriteSheetMulti, SpriteSheetMultiParse } from "./src/parsers/SpriteSheetMultiParse";
 import { StatusBarParse } from "./src/parsers/StatusBarParse";
 import { AsteroidParse } from "./src/parsers/AsteroidParse";
+import { NebulaParse } from "./src/parsers/NebulaParse";
+import { NebuResource } from "./src/resource_parsers/NebuResource";
 import { RoidResource } from "./src/resource_parsers/RoidResource";
 import { SystemParse } from "./src/parsers/SystemParse";
 import { MissionParse } from "./src/parsers/MissionParse";
@@ -158,6 +161,7 @@ export class NovaParse implements GameDataInterface {
             Explosion: this.buildIDsForResource(idSpace.bööm),
             Govt: this.buildIDsForResource(idSpace.gövt),
             Asteroid: this.buildIDsForResource(idSpace.röid),
+            Nebula: this.buildIDsForResource(idSpace.nëbu),
             SoundFile: this.buildIDsForResource(idSpace["snd "]),
         }
     }
@@ -187,6 +191,8 @@ export class NovaParse implements GameDataInterface {
             Govt: this.makeGettable<GovtResource, GovtData>(NovaResourceType.gövt, GovtParse),
             Asteroid: this.makeGettable<RoidResource, AsteroidData>(
                 NovaResourceType.röid, AsteroidParse),
+            Nebula: this.makeGettable<NebuResource, NebulaData>(
+                NovaResourceType.nëbu, NebulaParse),
             SoundFile: this.makeGettable<SndResource, SoundFile>(NovaResourceType.snd, SoundFileParse),
         }
 

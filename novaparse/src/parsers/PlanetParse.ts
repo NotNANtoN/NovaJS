@@ -35,7 +35,13 @@ export async function PlanetParse(spob: SpobResource, notFoundFunction: (m: stri
         pictID = pict.globalID;
     }
     else {
-        notFoundFunction("No matching PICT for spöb of id " + base.id);
+        if (spob.landingPictID >= 128) {
+            // A custom picture was requested but is absent from the data.
+            notFoundFunction("No matching PICT for spöb of id " + base.id);
+        }
+        // Otherwise the spöb declares no custom picture (-1, or a reserved
+        // value below 128) and retail composes a standard landscape, which
+        // this engine does not yet generate.
         pictID = defaultPictData.id;
     }
 
