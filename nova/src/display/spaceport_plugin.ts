@@ -100,6 +100,7 @@ const LandSystem = new System({
         if (playerState) {
             advanceGameDate(playerState);
             playerState.lastLandedPlanet = id;
+            playerState.landingCount = (playerState.landingCount ?? 0) + 1;
             playerState.lastLandedSystem = playerState.currentSystem;
             playerState.lastLandedPosition = landedPlanet?.position ?? [0, 0];
         }

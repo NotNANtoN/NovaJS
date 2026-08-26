@@ -8,18 +8,53 @@ import {
 } from './mission_bbs_layout';
 
 describe('retail mission dialog layout', () => {
-    it('uses the measured retail PICTs and content wells', () => {
-        expect(MISSION_BBS_LAYOUT).toEqual(jasmine.objectContaining({
-            background: 'nova:8505',
-            width: 510,
-            height: 201,
-            list: { x: 10, y: 30, width: 210, height: 144 },
-            detail: { x: 229, y: 30, width: 275, height: 124 },
-        }));
+    // The opaque black slots in each retail PICT, measured from the
+    // artwork. Every text region must sit inside one of them, or the text
+    // spills onto the surrounding metal.
+    type Rect = { x: number; y: number; width: number; height: number };
+    const expectInside = (region: Rect | undefined, slot: Rect) => {
+        expect(region).toBeDefined();
+        expect(region!.x).toBeGreaterThanOrEqual(slot.x);
+        expect(region!.y).toBeGreaterThanOrEqual(slot.y);
+        expect(region!.x + region!.width)
+            .toBeLessThanOrEqual(slot.x + slot.width);
+        expect(region!.y + region!.height)
+            .toBeLessThanOrEqual(slot.y + slot.height);
+    };
+
+    it('keeps every mission computer region inside a retail slot', () => {
+        expect(MISSION_BBS_LAYOUT.background).toBe('nova:8505');
+        expect(MISSION_BBS_LAYOUT.width).toBe(510);
+        expect(MISSION_BBS_LAYOUT.height).toBe(201);
+        expectInside(MISSION_BBS_LAYOUT.header,
+            { x: 10, y: 2, width: 400, height: 17 });
+        expectInside(MISSION_BBS_LAYOUT.list,
+            { x: 6, y: 26, width: 214, height: 148 });
+        expectInside(MISSION_BBS_LAYOUT.detailHeader,
+            { x: 225, y: 26, width: 279, height: 29 });
+        expectInside(MISSION_BBS_LAYOUT.detail,
+            { x: 225, y: 57, width: 279, height: 97 });
+    });
+
+    it('uses both title slots of the mission info frame', () => {
         expect(MISSION_INFO_LAYOUT.background).toBe('nova:8517');
-        expect(MISSION_INFO_LAYOUT.list).toEqual(
-            { x: 9, y: 24, width: 195, height: 95 });
+        expectInside(MISSION_INFO_LAYOUT.header,
+            { x: 7, y: 2, width: 197, height: 13 });
+        expectInside(MISSION_INFO_LAYOUT.detailHeader,
+            { x: 340, y: 3, width: 124, height: 12 });
+        expectInside(MISSION_INFO_LAYOUT.list,
+            { x: 6, y: 20, width: 198, height: 88 });
+        expectInside(MISSION_INFO_LAYOUT.detail,
+            { x: 210, y: 20, width: 254, height: 99 });
+    });
+
+    it('treats the bar frame as one pane with no list column', () => {
         expect(BAR_LAYOUT.background).toBe('nova:8503');
+        expect(BAR_LAYOUT.detail).toBeUndefined();
+        expectInside(BAR_LAYOUT.header,
+            { x: 5, y: 2, width: 248, height: 118 });
+        expectInside(BAR_LAYOUT.list,
+            { x: 5, y: 2, width: 248, height: 118 });
     });
 
     it('follows first, middle, and last variable-height selections', () => {

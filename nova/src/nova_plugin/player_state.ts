@@ -135,6 +135,8 @@ const PlayerStateFields = t.intersection([
     t.partial({
         registered: t.boolean,
         daysSinceRegistration: t.number,
+        /** How many times this pilot has landed; shown on the ship info. */
+        landingCount: t.number,
     }),
 ]);
 type PlayerStateFields = t.TypeOf<typeof PlayerStateFields>;
@@ -172,6 +174,7 @@ const LegacyPlayerStateFields = t.intersection([
         exploredSystems: t.array(t.string),
         registered: t.boolean,
         daysSinceRegistration: t.number,
+        landingCount: t.number,
     }),
 ]);
 

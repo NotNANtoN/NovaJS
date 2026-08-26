@@ -20,17 +20,31 @@ import { SystemIdResource } from '../nova_plugin/system_id_resource';
 import { SystemPlugin } from '../nova_plugin/system_plugin';
 import { WeaponsStateComponent } from '../nova_plugin/weapons_state';
 import { Button } from './button';
+import {
+    SERVICE_FLAG,
+    SPACEPORT_LAYOUT,
+    SPACEPORT_SERVICES,
+    spaceportButtonColumn,
+    SpaceportService,
+} from './spaceport_layout';
 import { Bar } from './bar';
 import { Menu } from './menu';
 import { MenuControls } from './menu_controls';
 import { MissionBbs, MissionInfo } from './mission_bbs';
 import { Outfitter } from './outfitter';
+import { ShipInfo } from './ship_info';
 import { Shipyard } from './shipyard';
 import { TradeCenter } from './trade';
 import {
     hasSpaceportService,
     resolveSpaceportPlanetData,
 } from './availability';
+
+/** Initial slot for a service button before the column is laid out. */
+function buttonSlot(index: number) {
+    const { x, firstY, pitch } = SPACEPORT_LAYOUT.buttons;
+    return { x, y: firstY + index * pitch };
+}
 
 export class Spaceport extends Menu<Entity> {
     private outfitter: Outfitter;
@@ -39,15 +53,11 @@ export class Spaceport extends Menu<Entity> {
     private bar: Bar;
     private tradeCenter: TradeCenter;
     private missionInfo: MissionInfo;
+    private shipInfo: ShipInfo;
     private readonly dialogContainers = new Set<PIXI.Container>();
     private data?: PlanetData;
     private readonly id: string;
-    private serviceButtons?: {
-        outfitter: Button;
-        shipyard: Button;
-        tradeCenter: Button;
-        bar: Button;
-    };
+    private serviceButtons?: Record<SpaceportService, Button>;
     private missionNotice = new PIXI.Text("", {
         fontFamily: "Geneva", fontSize: 10, fill: 0xffff00,
         align: "left", wordWrap: true, wordWrapWidth: 420,
@@ -73,15 +83,27 @@ export class Spaceport extends Menu<Entity> {
         this.container.name = 'Spaceport';
 
         const buttons = {
-            outfitter: new Button(gameData, "Outfitter", 120, { x: 160, y: 116 }),
-            shipyard: new Button(gameData, "Shipyard", 120, { x: 160, y: 74 }),
-            missionBBS: new Button(gameData, "Mission BBS", 120, { x: 160, y: 32 }),
-            bar: new Button(gameData, "Bar", 120, { x: 160, y: -10 }),
-            tradeCenter: new Button(gameData, "Trade Center", 120, { x: 160, y: -52 }),
-            missionLog: new Button(gameData, "Mission Log", 120, { x: 160, y: -94 }),
-            leave: new Button(gameData, "Leave", 120, { x: 160, y: 200 })
+            // Positions come from the metal strip measured on PICT 8500;
+            // the column is re-laid out per stellar in updateServiceButtons.
+            outfitter: new Button(gameData, "Outfitter", 120, buttonSlot(1)),
+            shipyard: new Button(gameData, "Shipyard", 120, buttonSlot(0)),
+            missionBBS: new Button(
+                gameData, "Mission BBS", 120, buttonSlot(4)),
+            bar: new Button(gameData, "Bar", 120, buttonSlot(3)),
+            tradeCenter: new Button(
+                gameData, "Trade Center", 120, buttonSlot(2)),
+            leave: new Button(gameData, "Leave", 120, {
+                x: SPACEPORT_LAYOUT.buttons.x,
+                y: SPACEPORT_LAYOUT.buttons.leaveY,
+            })
         };
-        this.serviceButtons = buttons;
+        this.serviceButtons = {
+            shipyard: buttons.shipyard,
+            outfitter: buttons.outfitter,
+            tradeCenter: buttons.tradeCenter,
+            bar: buttons.bar,
+            missionBBS: buttons.missionBBS,
+        };
 
         buttons.leave.click.subscribe(this.done.bind(this));
 
@@ -210,12 +232,26 @@ export class Spaceport extends Menu<Entity> {
             }
         };
         buttons.missionBBS.click.subscribe(showMissionBbs);
-        buttons.missionLog.click.subscribe(() => showMissionInfo(false));
         buttons.bar.click.subscribe(showBar);
         buttons.tradeCenter.click.subscribe(showTradeCenter);
         this.addButtons(buttons);
 
+        this.shipInfo = new ShipInfo(gameData, controlEvents);
+        this.dialogContainers.add(this.shipInfo.container);
+        const showShipInfo = async () => {
+            this.controls.unbind();
+            this.setActiveDialog(this.shipInfo.container);
+            try {
+                this.shipInfo.setSystemName(this.data?.name);
+                await this.shipInfo.show(this.input);
+            } finally {
+                this.setActiveDialog();
+                this.controls.bind();
+            }
+        };
+
         this.controls = new MenuControls(controlEvents, {
+            properties: showShipInfo,
             outfitter: showOutfitter,
             shipyard: showShipyard,
             missionBBS: showMissionBbs,
@@ -228,6 +264,28 @@ export class Spaceport extends Menu<Entity> {
 
     get resolvedPlanetData(): PlanetData | undefined {
         return this.data;
+    }
+
+    /**
+     * Retail lists the services a stellar offers top to bottom and omits the
+     * rest, so the remaining buttons move up instead of leaving a hole.
+     */
+    private updateServiceButtons(data: PlanetData) {
+        const buttons = this.serviceButtons;
+        if (!buttons) {
+            return;
+        }
+        const available = SPACEPORT_SERVICES.filter(
+            service => hasSpaceportService(data, SERVICE_FLAG[service]));
+        const column = spaceportButtonColumn(available);
+        for (const service of SPACEPORT_SERVICES) {
+            const y = column.get(service);
+            buttons[service].container.visible = y !== undefined;
+            if (y !== undefined) {
+                buttons[service].container.position.set(
+                    SPACEPORT_LAYOUT.buttons.x, y);
+            }
+        }
     }
 
     private setActiveDialog(active?: PIXI.Container) {
@@ -247,6 +305,7 @@ export class Spaceport extends Menu<Entity> {
             this.bar.buildPromise,
             this.tradeCenter.buildPromise,
             this.missionInfo.buildPromise,
+            this.shipInfo.buildPromise,
         ]);
         const localData = await this.gameData.data.Planet.get(this.id);
         const data = resolveSpaceportPlanetData(
@@ -254,16 +313,7 @@ export class Spaceport extends Menu<Entity> {
         this.data = data;
         this.outfitter.setPlanetData(data);
         this.shipyard.setPlanetData(data);
-        if (this.serviceButtons) {
-            this.serviceButtons.outfitter.container.visible =
-                hasSpaceportService(data, "outfitter");
-            this.serviceButtons.shipyard.container.visible =
-                hasSpaceportService(data, "shipyard");
-            this.serviceButtons.tradeCenter.container.visible =
-                hasSpaceportService(data, "commodity");
-            this.serviceButtons.bar.container.visible =
-                hasSpaceportService(data, "bar");
-        }
+        this.updateServiceButtons(data);
         const title = new PIXI.Text(data.name, this.font.title);
         title.position.x = -24;
         title.position.y = 39;
@@ -286,6 +336,7 @@ export class Spaceport extends Menu<Entity> {
         this.container.addChild(this.bar.container);
         this.container.addChild(this.tradeCenter.container);
         this.container.addChild(this.missionInfo.container);
+        this.container.addChild(this.shipInfo.container);
         this.missionNotice.position.set(-210, 145);
         this.container.addChild(this.missionNotice);
     }
