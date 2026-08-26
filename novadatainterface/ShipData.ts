@@ -33,6 +33,16 @@ export interface ShipData extends SpaceObjectData {
     strength: number;
     /** The shïp resource's miscellaneous Flags field. */
     flags: number;
+    /**
+     * Percent chance this hull is offered for hire in a bar on a given day
+     * (EV Nova Bible, shïp/HireRandom). Zero means never.
+     */
+    hireRandom: number;
+    /**
+     * Which of the four escort categories the escort menu files this hull
+     * under: 0 fighter, 1 medium ship, 2 warship, -1 decide at runtime.
+     */
+    escortType: number;
     cost: number;
     pict: string;
     desc: string;
@@ -59,6 +69,8 @@ export function getDefaultShipData(): ShipData {
         inherentAI: 1,
         strength: 1,
         flags: 0,
+        hireRandom: 0,
+        escortType: -1,
         cost: 0,
         pict: "default",
         desc: "default",
