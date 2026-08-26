@@ -1,0 +1,164 @@
+name: Deploy NovaJS
+
+on:
+  push:
+    branches:
+      - feat-performance-and-modernization
+  workflow_dispatch:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-node@v4.4.0
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2.1.2
+        with:
+          bun-version: 1.4.0
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Typecheck
+        continue-on-error: true
+        run: npm run typecheck
+      - name: Run supported test suite
+        run: npm test
+
+  publish:
+    needs: quality
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.image.outputs.name }}:${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - name: Normalize image name
+        id: image
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          image_name="ghcr.io/$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          printf 'name=%s\n' "$image_name" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6.18.0
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.image.outputs.name }}:${{ github.sha }}
+
+  deploy:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - name: Prepare SSH
+        id: ssh
+        env:
+          LINODE_HOST: ${{ secrets.LINODE_HOST }}
+          LINODE_KNOWN_HOSTS: ${{ secrets.LINODE_KNOWN_HOSTS }}
+          LINODE_SSH_PRIVATE_KEY: ${{ secrets.LINODE_SSH_PRIVATE_KEY }}
+        run: |
+          ssh_dir="$RUNNER_TEMP/novajs-ssh"
+          install -m 700 -d "$ssh_dir"
+          printf '%s\n' "$LINODE_SSH_PRIVATE_KEY" > "$ssh_dir/id_ed25519"
+          printf '%s\n' "$LINODE_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          chmod 600 "$ssh_dir/id_ed25519" "$ssh_dir/known_hosts"
+          printf 'dir=%s\n' "$ssh_dir" >> "$GITHUB_OUTPUT"
+      - name: Log in to GHCR on host
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          LINODE_HOST: ${{ secrets.LINODE_HOST }}
+          LINODE_SSH_USER: ${{ secrets.LINODE_SSH_USER }}
+          SSH_DIR: ${{ steps.ssh.outputs.dir }}
+        run: |
+          ssh_options=(
+            -i "$SSH_DIR/id_ed25519"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$SSH_DIR/known_hosts"
+          )
+          printf '%s' "$GITHUB_TOKEN" | ssh "${ssh_options[@]}" \
+            "$LINODE_SSH_USER@$LINODE_HOST" \
+            "docker login ghcr.io --username '$GITHUB_ACTOR' --password-stdin"
+      - name: Copy deployment configuration
+        env:
+          LINODE_HOST: ${{ secrets.LINODE_HOST }}
+          LINODE_SSH_USER: ${{ secrets.LINODE_SSH_USER }}
+          LINODE_DEPLOY_PATH: ${{ secrets.LINODE_DEPLOY_PATH }}
+          SSH_DIR: ${{ steps.ssh.outputs.dir }}
+        run: |
+          ssh_options=(
+            -i "$SSH_DIR/id_ed25519"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$SSH_DIR/known_hosts"
+          )
+          remote="$LINODE_SSH_USER@$LINODE_HOST"
+          ssh "${ssh_options[@]}" "$remote" \
+            "mkdir -p '$LINODE_DEPLOY_PATH/scripts'"
+          scp "${ssh_options[@]}" \
+            docker-compose.yml Caddyfile \
+            "$remote:$LINODE_DEPLOY_PATH/"
+          scp "${ssh_options[@]}" \
+            scripts/fetch_nova_data.sh \
+            "$remote:$LINODE_DEPLOY_PATH/scripts/"
+      - name: Deploy image
+        env:
+          IMAGE: ${{ needs.publish.outputs.image }}
+          LINODE_HOST: ${{ secrets.LINODE_HOST }}
+          LINODE_SSH_USER: ${{ secrets.LINODE_SSH_USER }}
+          LINODE_DEPLOY_PATH: ${{ secrets.LINODE_DEPLOY_PATH }}
+          SSH_DIR: ${{ steps.ssh.outputs.dir }}
+        run: |
+          ssh_options=(
+            -i "$SSH_DIR/id_ed25519"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$SSH_DIR/known_hosts"
+          )
+          remote="$LINODE_SSH_USER@$LINODE_HOST"
+          deploy_path="$(printf '%q' "$LINODE_DEPLOY_PATH")"
+          image="$(printf '%q' "$IMAGE")"
+          ssh "${ssh_options[@]}" "$remote" \
+            "set -euo pipefail
+            cd $deploy_path
+            chmod 0755 scripts/fetch_nova_data.sh
+            set -a
+            . ./.env
+            set +a
+            export NOVA_IMAGE=$image
+            data_dir=\${NOVA_DATA_DIR:-/var/lib/novajs/Nova_Data}
+            if [ ! -d \"\$data_dir/Nova Files\" ] ||
+                [ ! -d \"\$data_dir/Plug-ins\" ]; then
+              ./scripts/fetch_nova_data.sh
+            fi
+            docker compose pull novajs caddy
+            docker compose up -d --force-recreate --remove-orphans \
+              --scale novajs=1
+            for attempt in \$(seq 1 30); do
+              if curl --fail --silent --show-error --max-time 5 \
+                  http://127.0.0.1:8200/ >/dev/null; then
+                exit 0
+              fi
+              sleep 2
+            done
+            docker compose ps
+            docker compose logs --tail=100 novajs caddy
+            printf '%s\n' 'NovaJS health check failed.' >&2
+            exit 1"

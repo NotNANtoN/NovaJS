@@ -1,0 +1,11 @@
+node_modules/
+dist/
+nova/Nova_Data/
+.git/
+.github/
+.githooks/
+docs/
+test/
+webtesting/
+*.log
+.DS_Store

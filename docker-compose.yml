@@ -1,0 +1,74 @@
+services:
+  novajs:
+    image: ${NOVA_IMAGE:?NOVA_IMAGE must be set}
+    restart: unless-stopped
+    init: true
+    environment:
+      NOVA_PORT: "8200"
+      NOVA_PLAYER_DATA: /var/lib/novajs/players.json
+    volumes:
+      - type: bind
+        source: ${NOVA_DATA_DIR:-/var/lib/novajs/Nova_Data}
+        target: /app/nova/Nova_Data
+        read_only: true
+      - player_data:/var/lib/novajs
+    expose:
+      - "8200"
+    ports:
+      - "127.0.0.1:8200:8200"
+    mem_limit: 1400m
+    memswap_limit: 1400m
+    deploy:
+      # The authoritative world is in memory; two replicas would silently
+      # split players into different galaxies instead of sharing one world.
+      replicas: 1
+      resources:
+        limits:
+          memory: 1400M
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:8200/').then(response =>
+          process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      novajs:
+        condition: service_healthy
+    environment:
+      CADDY_HOSTNAME: ${CADDY_HOSTNAME:?CADDY_HOSTNAME must be set}
+      CADDY_BASIC_AUTH_USER: ${CADDY_BASIC_AUTH_USER:?CADDY_BASIC_AUTH_USER must be set}
+      CADDY_BASIC_AUTH_HASH: ${CADDY_BASIC_AUTH_HASH:?CADDY_BASIC_AUTH_HASH must be set}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - type: bind
+        source: ./Caddyfile
+        target: /etc/caddy/Caddyfile
+        read_only: true
+      - caddy_data:/data
+      - caddy_config:/config
+    mem_limit: 128m
+    memswap_limit: 128m
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+volumes:
+  player_data:
+    name: novajs_player_data
+  caddy_data:
+    name: novajs_caddy_data
+  caddy_config:
+    name: novajs_caddy_config
