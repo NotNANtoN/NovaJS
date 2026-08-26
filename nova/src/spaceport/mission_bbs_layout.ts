@@ -106,3 +106,48 @@ export function selectionPage(
     }
     return { start, end };
 }
+
+
+/**
+ * Builds the bar's single-offer view.
+ *
+ * The bar has one narrow pane, so listing every offer's name and summary
+ * truncates all of them. Retail shows one patron's proposition at a time, so
+ * this renders the selected offer in full and says how to reach the others.
+ */
+export function barOfferView(
+    offer: { name: string, text: string } | undefined,
+    index: number,
+    total: number,
+): string {
+    if (!offer || total === 0) {
+        return 'Nobody here has work for you.';
+    }
+    const heading = total > 1
+        ? `${offer.name}   (${index + 1} of ${total}, up/down to browse)`
+        : offer.name;
+    return `${heading}\n\n${offer.text}`;
+}
+
+/**
+ * Drops whole trailing lines that do not fit a pane and marks the cut, so
+ * long text ends in an ellipsis rather than being sliced mid-glyph by the
+ * viewport mask.
+ */
+export function fitLinesToHeight(
+    text: string,
+    lineHeights: readonly number[],
+    viewportHeight: number,
+): string {
+    const lines = text.split('\n');
+    let used = 0;
+    for (let index = 0; index < lines.length; index++) {
+        used += lineHeights[index] ?? 0;
+        if (used > viewportHeight) {
+            const kept = lines.slice(0, Math.max(1, index));
+            kept.push('...');
+            return kept.join('\n');
+        }
+    }
+    return text;
+}

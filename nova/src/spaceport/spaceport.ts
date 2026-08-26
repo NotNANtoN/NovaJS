@@ -30,7 +30,7 @@ import {
 import { Bar } from './bar';
 import { Menu } from './menu';
 import { MenuControls } from './menu_controls';
-import { MissionBbs, MissionInfo } from './mission_bbs';
+import { MissionBbs, MissionBoard, MissionInfo } from './mission_bbs';
 import { Outfitter } from './outfitter';
 import { ShipInfo } from './ship_info';
 import { Shipyard } from './shipyard';
@@ -165,18 +165,22 @@ export class Spaceport extends Menu<Entity> {
         buttons.shipyard.click.subscribe(showShipyard);
 
         this.missionInfo = new MissionInfo(gameData, controlEvents);
-        const showMissionInfo = async (fromMissionBoard = false) => {
+        /**
+         * `from` is the board the mission log was opened from, so control and
+         * visibility return to that board rather than always to the mission
+         * computer. Getting this wrong leaves the bar's pending show() behind
+         * a hidden container, which cannot then be closed.
+         */
+        const showMissionInfo = async (from?: MissionBoard) => {
             this.controls.unbind();
-            if (fromMissionBoard) {
-                this.missionBbs.suspendControls();
-            }
+            from?.suspendControls();
             this.setActiveDialog(this.missionInfo.container);
             try {
                 await this.missionInfo.show(this.input);
             } finally {
-                if (fromMissionBoard) {
-                    this.setActiveDialog(this.missionBbs.container);
-                    this.missionBbs.resumeControls();
+                if (from) {
+                    this.setActiveDialog(from.container);
+                    from.resumeControls();
                 } else {
                     this.setActiveDialog();
                     this.controls.bind();
@@ -184,9 +188,10 @@ export class Spaceport extends Menu<Entity> {
             }
         };
         this.missionBbs = new MissionBbs(
-            gameData, this.id, controlEvents, () => showMissionInfo(true));
+            gameData, this.id, controlEvents,
+            () => showMissionInfo(this.missionBbs));
         this.bar = new Bar(
-            gameData, this.id, controlEvents, () => showMissionInfo(true));
+            gameData, this.id, controlEvents, () => showMissionInfo(this.bar));
         this.tradeCenter = new TradeCenter(gameData, this.id, controlEvents);
         this.dialogContainers.add(this.outfitter.container);
         this.dialogContainers.add(this.shipyard.container);
@@ -257,7 +262,7 @@ export class Spaceport extends Menu<Entity> {
             missionBBS: showMissionBbs,
             bar: showBar,
             tradeCenter: showTradeCenter,
-            missions: showMissionInfo,
+            missions: () => showMissionInfo(),
             depart: this.done.bind(this),
         });
     }

@@ -1,6 +1,8 @@
 import 'jasmine';
 import {
+    barOfferView,
     BAR_LAYOUT,
+    fitLinesToHeight,
     MISSION_BBS_LAYOUT,
     MISSION_INFO_LAYOUT,
     preferRetailOffers,
@@ -81,5 +83,44 @@ describe('retail mission dialog layout', () => {
             .toEqual(['retail']);
         expect(preferRetailOffers([], ['synthetic']))
             .toEqual(['synthetic']);
+    });
+});
+
+describe('bar offer view', () => {
+    const offer = { name: 'A Quiet Word', text: 'Deliver this crate.' };
+
+    it('says nothing is on offer when the bar is empty', () => {
+        expect(barOfferView(undefined, 0, 0))
+            .toBe('Nobody here has work for you.');
+    });
+
+    it('shows one offer in full rather than a truncated list', () => {
+        const view = barOfferView(offer, 0, 1);
+        expect(view).toContain('A Quiet Word');
+        expect(view).toContain('Deliver this crate.');
+        // With a single offer there is nothing to browse.
+        expect(view).not.toContain('of 1');
+    });
+
+    it('says how to reach the other offers', () => {
+        const view = barOfferView(offer, 1, 3);
+        expect(view).toContain('2 of 3');
+        expect(view).toContain('up/down');
+    });
+});
+
+describe('fitLinesToHeight', () => {
+    it('keeps text that fits', () => {
+        expect(fitLinesToHeight('one\ntwo', [10, 10], 40)).toBe('one\ntwo');
+    });
+
+    it('marks where longer text was cut', () => {
+        const fitted = fitLinesToHeight(
+            'one\ntwo\nthree\nfour', [10, 10, 10, 10], 25);
+        expect(fitted).toBe('one\ntwo\n...');
+    });
+
+    it('always keeps at least the first line', () => {
+        expect(fitLinesToHeight('only', [40], 10)).toBe('only\n...');
     });
 });

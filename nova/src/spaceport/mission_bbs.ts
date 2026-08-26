@@ -7,6 +7,7 @@ import { Entity } from 'nova_ecs/entity';
 import * as PIXI from 'pixi.js';
 import { Observable } from 'rxjs';
 import { GameData } from '../client/gamedata/GameData';
+import { resourceId } from '../common/resource_id';
 import { ControlEvent } from '../nova_plugin/controls_plugin';
 import {
     acceptMission,
@@ -47,7 +48,9 @@ import { Button } from './button';
 import { Menu } from './menu';
 import { MenuControls } from './menu_controls';
 import {
+    barOfferView,
     BAR_LAYOUT,
+    fitLinesToHeight,
     MISSION_BBS_LAYOUT,
     MISSION_INFO_LAYOUT,
     MissionPanelLayout,
@@ -534,6 +537,9 @@ export class MissionInfo extends Menu<Entity> {
  * Shared BBS/bar implementation. The two public subclasses only select the
  * Bible AvailLoc and their flavor copy.
  */
+/** Height reserved for the status line under a text pane. */
+const STATUS_HEIGHT = 16;
+
 export abstract class MissionBoard extends Menu<Entity> {
     private readonly title: PIXI.Text;
     private readonly flavor: PIXI.Text;
@@ -551,6 +557,7 @@ export abstract class MissionBoard extends Menu<Entity> {
     private readonly onInfo?: () => void | Promise<void>;
     private readonly ncbRuntime: NcbRuntime;
     private readonly acceptButton: Button;
+    private refuseButton?: Button;
     private showing?: Promise<Entity>;
     private refreshGeneration = 0;
     private sessionKey?: string;
@@ -605,8 +612,13 @@ export abstract class MissionBoard extends Menu<Entity> {
                 detailPosition.y + this.layout.detail.height - 25);
             this.status.style.wordWrapWidth = this.layout.detail.width - 4;
         } else {
+            // A single-pane board (the bar) has nowhere to put a detail
+            // column, so the status line sits at the foot of the one pane.
             this.detail.visible = false;
-            this.status.visible = false;
+            this.status.position.set(
+                listPosition.x,
+                listPosition.y + this.layout.list.height - STATUS_HEIGHT);
+            this.status.style.wordWrapWidth = this.layout.list.width - 4;
         }
 
         const footerY = this.layout.footerY - this.layout.height / 2 + 5;
@@ -617,6 +629,7 @@ export abstract class MissionBoard extends Menu<Entity> {
         this.acceptButton = accept;
         const refuse = new Button(
             gameData, 'Refuse', 35, { x: buttonStart + buttonGap, y: footerY });
+        this.refuseButton = refuse;
         const info = new Button(
             gameData, 'Info', 30, { x: buttonStart + buttonGap * 2, y: footerY });
         const done = new Button(
@@ -652,6 +665,12 @@ export abstract class MissionBoard extends Menu<Entity> {
 
     override async show(input: Entity): Promise<Entity> {
         if (this.showing) {
+            // A previous show() is still pending. Its container may have been
+            // hidden while another dialog was on top, so make this board
+            // visible and interactive again instead of handing back a promise
+            // nothing can close.
+            this.container.visible = true;
+            this.resumeControls();
             return this.showing;
         }
         const showing = this.showOnce(input);
@@ -820,6 +839,13 @@ export abstract class MissionBoard extends Menu<Entity> {
         }
     }
 
+    /** Vertical room the status line needs at the foot of a pane. */
+    private get listTextHeight(): number {
+        return this.layout.detail
+            ? this.layout.list.height
+            : this.layout.list.height - STATUS_HEIGHT;
+    }
+
     private moveSelection(delta: number) {
         if (this.offers.length === 0) {
             return;
@@ -846,6 +872,13 @@ export abstract class MissionBoard extends Menu<Entity> {
         };
     }
 
+    /** Trims text that would spill past the bottom of the list pane. */
+    private fitToListPane(text: string): string {
+        const heights = text.split('\n').map(line => PIXI.TextMetrics
+            .measureText(line || ' ', this.list.style).height);
+        return fitLinesToHeight(text, heights, this.listTextHeight);
+    }
+
     private render() {
         for (const child of this.briefingGraphic.removeChildren()) {
             child.destroy();
@@ -855,7 +888,15 @@ export abstract class MissionBoard extends Menu<Entity> {
             this.detail.text = '';
             this.status.text = '';
             this.acceptButton.state = 'grey';
+            // Info stays live because it opens the mission log, which is
+            // useful with nothing on offer.
+            if (this.refuseButton) {
+                this.refuseButton.state = 'grey';
+            }
             return;
+        }
+        if (this.refuseButton) {
+            this.refuseButton.state = 'normal';
         }
         const world = this.world;
         if (!world) {
@@ -882,14 +923,29 @@ export abstract class MissionBoard extends Menu<Entity> {
         const heights = rows.map(row => Math.max(
             14,
             PIXI.TextMetrics.measureText(row, this.list.style).height + 3));
-        const page = selectionPage(
-            heights, this.selectionIndex, this.firstVisible,
-            this.layout.list.height);
-        this.firstVisible = page.start;
-        this.list.text = rows.slice(page.start, page.end).join('\n');
         const offer = this.offers[this.selectionIndex];
         if (!offer) {
             return;
+        }
+        if (this.layout.detail) {
+            const page = selectionPage(
+                heights, this.selectionIndex, this.firstVisible,
+                this.listTextHeight);
+            this.firstVisible = page.start;
+            this.list.text = rows.slice(page.start, page.end).join('\n');
+        } else {
+            this.firstVisible = this.selectionIndex;
+            this.list.text = this.fitToListPane(barOfferView(
+                {
+                    name: formatVisibleMissionText(
+                        offer.mission.name, valuesFor(offer)),
+                    text: formatVisibleMissionText(
+                        missionOfferDisplayText(offer.mission),
+                        valuesFor(offer)),
+                },
+                this.selectionIndex,
+                this.offers.length,
+            ));
         }
         const boardingUnsupported = offer.mission.shipGoal === 2
             || offer.mission.shipGoal === 5;
