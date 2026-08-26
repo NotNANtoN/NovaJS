@@ -20,6 +20,11 @@ export interface ShipData extends SpaceObjectData {
     cargoCapacity: number;
     /** Jump fuel capacity in units; retail spends 100 units per jump. */
     fuelCapacity: number;
+    /**
+     * Retail shïp AI type. Nova's data stores the Bible's ordered roles as
+     * 1=wimpy trader, 2=brave trader, 3=warship, and 4=interceptor.
+     */
+    inherentAI: number;
     cost: number;
     pict: string;
     desc: string;
@@ -43,6 +48,7 @@ export function getDefaultShipData(): ShipData {
         physics: getDefaultShipPhysics(),
         cargoCapacity: 0,
         fuelCapacity: 0,
+        inherentAI: 1,
         cost: 0,
         pict: "default",
         desc: "default",

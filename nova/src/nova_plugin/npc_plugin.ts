@@ -27,6 +27,8 @@ import {
     canTargetPlayer,
 } from "./govt_relations";
 import { makeShip } from "./make_ship";
+import { getShipAIProfile } from "./ship_ai_profile";
+import { ShipDataComponent } from "./ship_plugin";
 import { ShipComponent } from "./ship_plugin";
 import { TargetComponent } from "./target_component";
 import { WeaponsStateComponent } from "./weapons_state";
@@ -87,6 +89,7 @@ function getValidTargets(
     relationStore: GovernmentRelationStore,
     provocations: ReturnType<typeof createProvocationState>,
     canAssistGovernment: boolean,
+    initiatesCombat = true,
 ): string[] {
     return targets
         .filter(([
@@ -142,7 +145,10 @@ function getValidTargets(
             if (relation === "ally") {
                 return false;
             }
-            return relation === "enemy" || personal
+            // A trader hull shares its government's enemies but not its
+            // appetite for a fight: it shoots back, and helps when its own
+            // side is already fighting, yet never opens fire itself.
+            return relation === "enemy" && initiatesCombat || personal
                 || canAssistGovernment && isProvoked(
                 provocations,
                 selfGovernmentId,
@@ -159,11 +165,12 @@ export const ChooseRandomTargetAI = new System({
         TimeResource, UUID, MovementStateComponent, Entities, GovernmentRelationResource,
         ProvocationResource, MultiplayerData, PlatformResource,
         GovtComponent, NpcAIComponent, NpcCombatRoleComponent,
+        Optional(ShipDataComponent),
         Optional(DestructionStartedComponent),
         Optional(ArmorComponent)] as const,
     step(target, targets, randomTargetData, time, uuid, movementState, entities,
         relationStore, provocations, multiplayer, platform, government,
-        _npcAI, combatRole, destructionStarted, armor) {
+        _npcAI, combatRole, shipData, destructionStarted, armor) {
         if (platform !== "node" || multiplayer.owner !== "server") {
             return;
         }
@@ -212,6 +219,7 @@ export const ChooseRandomTargetAI = new System({
             relationStore,
             provocations,
             combatRole === "military",
+            shipData ? getShipAIProfile(shipData).initiatesCombat : true,
         );
 
         const candidateByUuid = new Map(
@@ -257,6 +265,7 @@ function weaponRange(weapon: WeaponData): number | undefined {
 export function getCombatStandoff(
     weapons: WeaponsState | undefined,
     gameData: GameDataInterface,
+    standoffMultiplier = 1,
 ): number {
     let longestRange = 0;
     for (const [id, state] of weapons ?? []) {
@@ -270,11 +279,11 @@ export function getCombatStandoff(
         longestRange = Math.max(longestRange, weaponRange(weapon) ?? 0);
     }
     if (!(longestRange > 0)) {
-        return DEFAULT_COMBAT_STANDOFF;
+        return DEFAULT_COMBAT_STANDOFF * standoffMultiplier;
     }
     return Math.min(
         MAX_COMBAT_STANDOFF,
-        longestRange * COMBAT_RANGE_FRACTION,
+        longestRange * COMBAT_RANGE_FRACTION * standoffMultiplier,
     );
 }
 
@@ -283,10 +292,11 @@ export const FollowAI = new System({
     args: [MovementStateComponent, MovementPhysicsComponent, TargetComponent,
         FollowComponent, Entities, MultiplayerData, PlatformResource,
         Optional(WeaponsStateComponent), GameDataResource,
+        Optional(ShipDataComponent),
         Optional(DestructionStartedComponent),
         Optional(ArmorComponent)] as const,
     step(movementState, physics, target, _follow, entities, multiplayer,
-        platform, weapons, gameData, destructionStarted, armor) {
+        platform, weapons, gameData, shipData, destructionStarted, armor) {
         if (platform === "node" && multiplayer.owner !== "server"
             || platform === "browser" && multiplayer.owner === "server") {
             return;
@@ -316,7 +326,15 @@ export const FollowAI = new System({
             movementState,
             targetMovement,
             physics,
-            { standoff: getCombatStandoff(weapons, gameData) },
+            {
+                standoff: getCombatStandoff(
+                    weapons,
+                    gameData,
+                    shipData
+                        ? getShipAIProfile(shipData).weaponStandoffMultiplier
+                        : 1,
+                ),
+            },
         );
         // Once holding station the controller has no thrust to aim, so the
         // nose would keep whatever heading braking left it with — pointing

@@ -22,6 +22,7 @@ import {
     ShootAllWeaponsAI,
     ShootAllWeaponsComponent,
 } from './npc_plugin';
+import { getShipAIProfile } from './ship_ai_profile';
 import { TargetComponent } from './target_component';
 import { WeaponsStateComponent } from './weapons_state';
 import { DestructionStartedComponent } from './destruction_state';
@@ -110,6 +111,20 @@ describe('NPC combat flying', () => {
         expect(getCombatStandoff(weapons, projectileGameData)).toBe(600);
         expect(getCombatStandoff(undefined, projectileGameData))
             .toBe(DEFAULT_COMBAT_STANDOFF);
+    });
+
+    it('lets an interceptor hull close further than a freighter', () => {
+        const weapons = new Map([
+            ['gun', { count: 1, firing: true }],
+        ]);
+        const interceptor = getShipAIProfile({ inherentAI: 4 });
+        const freighter = getShipAIProfile({ inherentAI: 1 });
+        const closer = getCombatStandoff(
+            weapons, projectileGameData,
+            interceptor.weaponStandoffMultiplier);
+        const farther = getCombatStandoff(
+            weapons, projectileGameData, freighter.weaponStandoffMultiplier);
+        expect(closer).toBeLessThan(farther);
     });
 
     it('closes into weapon range without ramming and settles there', () => {
