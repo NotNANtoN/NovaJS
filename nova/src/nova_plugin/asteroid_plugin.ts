@@ -38,8 +38,13 @@ import { Stat } from './stat';
 const ASTEROID_DRIFT_SPEED = 30;
 /** Radius of the belt around the system centre. */
 const ASTEROID_BELT_RADIUS = 4_000;
-/** Asteroids spawned per point of a system's density field. */
-const ASTEROIDS_PER_DENSITY = 2;
+/**
+ * Asteroids spawned per point of a system's density field. Retail caps a
+ * system at 16 rocks, so a maximum-density field fills that budget exactly.
+ */
+const ASTEROIDS_PER_DENSITY = 1.6;
+/** Retail's per-system asteroid limit. */
+export const MAX_ASTEROIDS_PER_SYSTEM = 16;
 /** Radians per second an asteroid tumbles. */
 const ASTEROID_MAX_SPIN = 0.6;
 /** Ore floats slower than the rock it came from. */
@@ -81,11 +86,16 @@ function randomSpin(max: number): number {
     return (Math.random() * 2 - 1) * max;
 }
 
+/**
+ * How many rocks a system keeps around the player. A system with any density
+ * at all keeps at least one, so a sparse field is still a field.
+ */
 export function asteroidCountForDensity(density: number): number {
     if (!Number.isFinite(density) || density <= 0) {
         return 0;
     }
-    return Math.round(Math.min(10, density) * ASTEROIDS_PER_DENSITY);
+    const count = Math.round(Math.min(10, density) * ASTEROIDS_PER_DENSITY);
+    return Math.min(MAX_ASTEROIDS_PER_SYSTEM, Math.max(1, count));
 }
 
 /**

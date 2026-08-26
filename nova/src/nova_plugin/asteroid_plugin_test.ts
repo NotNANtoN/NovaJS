@@ -17,7 +17,14 @@ import {
     OreComponent,
     oreChunkTons,
 } from './asteroid_plugin';
-import { AsteroidSpawnPlugin } from './asteroid_spawn_plugin';
+import {
+    ASTEROID_CULL_RADIUS,
+    ASTEROID_SPAWN_MAX_RADIUS,
+    ASTEROID_SPAWN_MIN_RADIUS,
+    AsteroidSpawnPlugin,
+    isBeyondCull,
+    ringPosition,
+} from './asteroid_spawn_plugin';
 import { createEntityBudget, EntityBudgetResource } from './entity_budget';
 import { GameDataResource } from './game_data_resource';
 import { ArmorComponent } from './health_plugin';
@@ -130,10 +137,15 @@ function heldTons(world: World, commodity: string): number {
 describe('asteroids', () => {
     it('scales the belt with the system density', () => {
         expect(asteroidCountForDensity(0)).toBe(0);
-        expect(asteroidCountForDensity(2)).toBe(4);
-        expect(asteroidCountForDensity(10)).toBe(20);
+        expect(asteroidCountForDensity(2)).toBe(3);
+        // A maximum-density field fills retail's per-system budget.
+        expect(asteroidCountForDensity(10)).toBe(16);
         // Retail stores 0-10; anything larger is clamped.
-        expect(asteroidCountForDensity(100)).toBe(20);
+        expect(asteroidCountForDensity(100)).toBe(16);
+    });
+
+    it('keeps a rock in the thinnest field', () => {
+        expect(asteroidCountForDensity(0.1)).toBe(1);
     });
 
     it('splits a yield into whole ton chunks', () => {
@@ -148,6 +160,43 @@ describe('asteroids', () => {
         const world = await makeWorld(3);
         await settle(world);
         expect(asteroidCount(world)).toBe(asteroidCountForDensity(3));
+    });
+
+    it('places new rocks in a ring just outside the view', () => {
+        const centre = { x: 500, y: -200 };
+        for (let attempt = 0; attempt < 50; attempt++) {
+            const spot = ringPosition(centre);
+            const distance = Math.hypot(spot.x - centre.x, spot.y - centre.y);
+            expect(distance).toBeGreaterThanOrEqual(
+                ASTEROID_SPAWN_MIN_RADIUS - 1);
+            expect(distance).toBeLessThanOrEqual(
+                ASTEROID_SPAWN_MAX_RADIUS + 1);
+        }
+    });
+
+    it('culls only rocks that fell far behind the pilot', () => {
+        const centre = { x: 0, y: 0 };
+        expect(isBeyondCull({ x: 0, y: 0 }, centre)).toBeFalse();
+        expect(isBeyondCull(
+            { x: ASTEROID_CULL_RADIUS - 1, y: 0 }, centre)).toBeFalse();
+        expect(isBeyondCull(
+            { x: ASTEROID_CULL_RADIUS + 1, y: 0 }, centre)).toBeTrue();
+    });
+
+    it('spawns the field within reach of the pilot', async () => {
+        const world = await makeWorld(4);
+        world.entities.set(
+            'pilot', playerAt(new Position(0, 0), 100));
+        await settle(world);
+        const positions = [...world.entities.values()]
+            .filter(entity => entity.components.has(AsteroidComponent))
+            .map(entity =>
+                entity.components.get(MovementStateComponent)!.position);
+        expect(positions.length).toBeGreaterThan(0);
+        for (const spot of positions) {
+            expect(Math.hypot(spot.x, spot.y))
+                .toBeLessThanOrEqual(ASTEROID_CULL_RADIUS);
+        }
     });
 
     it('leaves systems without asteroids empty', async () => {

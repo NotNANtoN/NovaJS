@@ -1,4 +1,4 @@
-import { GetWorld } from 'nova_ecs/arg_types';
+import { GetWorld, UUID } from 'nova_ecs/arg_types';
 import { AsyncSystem } from 'nova_ecs/async_system';
 import { Position } from 'nova_ecs/datatypes/position';
 import { Plugin } from 'nova_ecs/plugin';
@@ -14,6 +14,10 @@ import {
     asteroidCountForDensity,
     makeAsteroid,
 } from './asteroid_plugin';
+import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
+import { PlayerStateComponent } from './player_state';
+import { System } from 'nova_ecs/system';
+import { Entities } from 'nova_ecs/arg_types';
 import { EntityBudgetResource, reserveEntity } from './entity_budget';
 import { GameDataResource } from './game_data_resource';
 import { pickWeighted } from './npc_spawn_plugin';
@@ -22,7 +26,24 @@ import { SystemIdResource } from './system_id_resource';
 /** How often the belt is topped back up after asteroids are mined out. */
 export const ASTEROID_RESPAWN_INTERVAL_MS = 20_000;
 
+/**
+ * A field is only a field if you meet it. Retail keeps its sixteen rocks
+ * around the ship rather than sprinkling them over the whole system, so they
+ * drift into view constantly instead of hiding in empty space. New rocks
+ * appear in a ring just outside the view and are recycled once they fall far
+ * behind.
+ */
+export const ASTEROID_SPAWN_MIN_RADIUS = 700;
+export const ASTEROID_SPAWN_MAX_RADIUS = 1_500;
+export const ASTEROID_CULL_RADIUS = 2_600;
+
 const AsteroidsQuery = new Query([AsteroidComponent] as const, 'Asteroids');
+const AsteroidPositionsQuery = new Query([
+    UUID, MovementStateComponent, AsteroidComponent,
+] as const, 'AsteroidPositions');
+const AsteroidFieldPlayersQuery = new Query([
+    MovementStateComponent, PlayerStateComponent,
+] as const, 'AsteroidFieldPlayers');
 
 interface AsteroidSpawnState {
     initialized: boolean;
@@ -46,16 +67,39 @@ function beltPosition(): Position {
         Math.cos(angle) * radius, Math.sin(angle) * radius);
 }
 
+/** A point in the ring just outside the view around a given centre. */
+export function ringPosition(
+    centre: { x: number, y: number },
+    minRadius = ASTEROID_SPAWN_MIN_RADIUS,
+    maxRadius = ASTEROID_SPAWN_MAX_RADIUS,
+): Position {
+    const angle = Math.random() * 2 * Math.PI;
+    const radius = minRadius + Math.random() * (maxRadius - minRadius);
+    return new Position(
+        centre.x + Math.cos(angle) * radius,
+        centre.y + Math.sin(angle) * radius);
+}
+
+export function isBeyondCull(
+    position: { x: number, y: number },
+    centre: { x: number, y: number },
+    cullRadius = ASTEROID_CULL_RADIUS,
+): boolean {
+    const dx = position.x - centre.x;
+    const dy = position.y - centre.y;
+    return dx * dx + dy * dy > cullRadius * cullRadius;
+}
+
 const activeWorlds = new WeakSet<World>();
 
 const AsteroidSpawnSystem = new AsyncSystem({
     name: 'AsteroidSpawn',
     args: [SingletonComponent, GameDataResource, SystemIdResource,
         TimeResource, AsteroidSpawnStateResource, AsteroidsQuery, GetWorld,
-        EntityBudgetResource] as const,
+        EntityBudgetResource, AsteroidFieldPlayersQuery] as const,
     exclusive: true,
     async step(_singleton, gameData, systemId, time, state, asteroids, world,
-        budget) {
+        budget, players) {
         if (!activeWorlds.has(world) || state.disabled) {
             return;
         }
@@ -112,12 +156,18 @@ const AsteroidSpawnSystem = new AsyncSystem({
         state.nextSpawnAt = time.time + ASTEROID_RESPAWN_INTERVAL_MS;
         state.spawnedInitialBelt = true;
 
+        // Place the field around the pilot when there is one, so the rocks
+        // are met rather than merely present somewhere in the system.
+        const centre = players[0]?.[0].position;
+
         for (let index = 0; index < missing; index++) {
             const type = pickWeighted(state.types);
             if (!type) {
                 break;
             }
-            const asteroid = makeAsteroid(type.id, beltPosition());
+            const asteroid = makeAsteroid(
+                type.id,
+                centre ? ringPosition(centre) : beltPosition());
             if (!reserveEntity(budget, asteroid, 'asteroid')) {
                 break;
             }
@@ -128,6 +178,38 @@ const AsteroidSpawnSystem = new AsyncSystem({
             }
             asteroid.components.set(MultiplayerData, { owner: 'server' });
             world.entities.set(uuid(), asteroid);
+        }
+    },
+});
+
+/**
+ * Move a rock that has drifted far behind the pilot back into the ring ahead
+ * of them. Recycling keeps the field alive without spending entity budget.
+ */
+const AsteroidRecycleSystem = new System({
+    name: 'AsteroidRecycle',
+    args: [
+        SingletonComponent,
+        AsteroidPositionsQuery,
+        AsteroidFieldPlayersQuery,
+        Entities,
+    ] as const,
+    step(_singleton, asteroids, players, entities) {
+        const centre = players[0]?.[0].position;
+        if (!centre) {
+            return;
+        }
+        for (const [uuid, movement] of asteroids) {
+            if (!isBeyondCull(movement.position, centre)) {
+                continue;
+            }
+            const entity = entities.get(uuid);
+            const state = entity?.components.get(MovementStateComponent);
+            if (!state) {
+                continue;
+            }
+            const moved = ringPosition(centre);
+            state.position = moved;
         }
     },
 });
@@ -145,10 +227,12 @@ export const AsteroidSpawnPlugin: Plugin = {
             spawnedInitialBelt: false,
         });
         world.addSystem(AsteroidSpawnSystem);
+        world.addSystem(AsteroidRecycleSystem);
     },
     remove(world) {
         activeWorlds.delete(world);
         world.removeSystem(AsteroidSpawnSystem);
+        world.removeSystem(AsteroidRecycleSystem);
         world.resources.delete(AsteroidSpawnStateResource);
     },
 };
