@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
+import { packedPngPlugin } from './packed_png_plugin.mjs';
 
 const root = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 
@@ -57,6 +58,7 @@ for (const [index, test] of tests.entries()) {
         await build({
             entryPoints: [test],
             bundle: true,
+            plugins: [packedPngPlugin(root)],
             format: 'cjs',
             platform: 'node',
             target: 'node24',

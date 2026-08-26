@@ -1,34 +1,15 @@
 import { existsSync, readFileSync } from "node:fs";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
+import { packedPngPlugin } from "./packed_png_plugin.mjs";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const distPath = path.join(projectRoot, "dist");
 
 await mkdir(distPath, { recursive: true });
 
-const packedPngPlugin = {
-    name: "pack-bazel-pngs",
-    setup(buildContext) {
-        buildContext.onResolve(
-            { filter: /^novadatainterface\/default_(pict|rled)$/ },
-            ({ path: modulePath }) => ({
-                namespace: "packed-png",
-                path: path.join(projectRoot, `${modulePath}.png`),
-            }));
-        buildContext.onLoad(
-            { filter: /\.png$/, namespace: "packed-png" },
-            async ({ path: pngPath }) => {
-                const png = await readFile(pngPath);
-                return {
-                    contents: `export default new Uint8Array(${JSON.stringify([...png])})`,
-                    loader: "js",
-                };
-            });
-    },
-};
 
 // Bun/npm may install a second copy of the @pixi/* packages nested inside
 // node_modules/pixi.js/node_modules. Both copies then register handlers on
@@ -64,7 +45,7 @@ const commonOptions = {
     absWorkingDir: projectRoot,
     bundle: true,
     logLevel: "info",
-    plugins: [packedPngPlugin, dedupePixiPlugin],
+    plugins: [packedPngPlugin(projectRoot), dedupePixiPlugin],
     resolveExtensions: [".mjs", ".js", ".ts", ".tsx", ".jsx"],
     sourcemap: true,
     sourcesContent: true,
