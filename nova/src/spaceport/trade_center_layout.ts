@@ -1,13 +1,13 @@
 /**
- * Geometry for the retail Trade Center frame, PICT 8506 (250x285).
+ * Geometry for the retail Trade Center frame, PICT 8510 (426x252).
  *
- * The artwork contains a title slot at x=5 y=4 240x24 and a single market
- * pane at x=4 y=32 241x214. The metal strip below y=246 carries the buttons.
- * Unlike PICT 8500, this frame has no landscape slot for the list to cover.
+ * The artwork has an upper black pane at x=39 y=9 350x175, a short lower
+ * black strip at x=39 y=189 350x25, and a metal button footer beginning at
+ * y=214. Coordinates exposed below are centered on the PIXI background.
  */
 export const TRADE_CENTER_FRAME = {
-    width: 250,
-    height: 285,
+    width: 426,
+    height: 252,
 } as const;
 
 const CENTER_X = TRADE_CENTER_FRAME.width / 2;
@@ -36,25 +36,45 @@ function centered(
 
 /** Measured opaque-black slots in the PICT, exposed for geometry tests. */
 export const TRADE_CENTER_SLOTS = {
-    title: centered(5, 4, 240, 24),
-    market: centered(4, 32, 241, 214),
-    footer: centered(0, 246, 250, 39),
+    title: centered(39, 9, 350, 175),
+    market: centered(39, 9, 350, 175),
+    account: centered(39, 189, 350, 25),
+    footer: centered(0, 214, 426, 38),
 } as const;
 
+export const TRADE_COMMODITY_COLUMN_WIDTH = 220;
+export const TRADE_COMMODITY_GLYPH_GUTTER_WIDTH = 12;
+export const TRADE_COMMODITY_TEXT_WIDTH =
+    TRADE_COMMODITY_COLUMN_WIDTH - TRADE_COMMODITY_GLYPH_GUTTER_WIDTH;
+export const TRADE_CENTER_ROW_PITCH = 12;
+
 export const TRADE_CENTER_LAYOUT = {
-    background: 'nova:8506',
-    title: centered(9, 7, 232, 18),
-    commodityHeading: centered(10, 36, 124, 14),
-    priceHeading: centered(136, 36, 65, 14),
-    heldHeading: centered(203, 36, 36, 14),
-    commodityList: centered(10, 52, 124, 84),
-    priceList: centered(136, 52, 65, 84),
-    heldList: centered(203, 52, 36, 84),
-    detail: centered(10, 142, 229, 32),
-    status: centered(10, 180, 229, 60),
-    visibleRows: 7,
-    footerY: 253 - CENTER_Y,
+    background: 'nova:8510',
+    title: centered(45, 10, 338, 14),
+    commodityHeading: centered(
+        45, 26, TRADE_COMMODITY_COLUMN_WIDTH, TRADE_CENTER_ROW_PITCH),
+    heldHeading: centered(276, 26, 48, 12),
+    priceHeading: centered(331, 26, 52, 12),
+    commodityGlyphs: centered(
+        45, 40, TRADE_COMMODITY_GLYPH_GUTTER_WIDTH, 60),
+    commodityList: centered(
+        45 + TRADE_COMMODITY_GLYPH_GUTTER_WIDTH,
+        40,
+        TRADE_COMMODITY_TEXT_WIDTH,
+        60,
+    ),
+    heldList: centered(276, 40, 48, 60),
+    priceList: centered(331, 40, 52, 60),
+    detail: centered(45, 104, 338, 32),
+    status: centered(45, 138, 338, 46),
+    visibleRows: 5,
+    footerY: 221 - CENTER_Y,
 } as const;
+
+/** Match the y coordinates produced by Geneva's 12px joined-line layout. */
+export function tradeRowY(region: Pick<TradeRect, 'y'>, row: number): number {
+    return region.y + Math.max(0, Math.floor(row)) * TRADE_CENTER_ROW_PITCH;
+}
 
 export interface TradePage {
     start: number;

@@ -15,6 +15,7 @@ type Outfit = {
 
 class ShipResource extends BaseResource {
     pictID: number;
+    targetPictID: number;
     cargoSpace: number;
     shield: number;
     acceleration: number;
@@ -71,6 +72,7 @@ class ShipResource extends BaseResource {
 
         var d = this.data;
         this.pictID = this.id - 128 + 5000;
+        this.targetPictID = this.id - 128 + 3000;
 
         this.cargoSpace = d.getInt16(0);
         this.shield = d.getInt16(2);

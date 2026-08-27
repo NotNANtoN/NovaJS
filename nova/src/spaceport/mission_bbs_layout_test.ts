@@ -4,6 +4,7 @@ import {
     BAR_LAYOUT,
     fitLinesToHeight,
     MISSION_BBS_LAYOUT,
+    MISSION_BBS_HEADER_TEXT,
     MISSION_INFO_LAYOUT,
     preferRetailOffers,
     selectionPage,
@@ -36,6 +37,17 @@ describe('retail mission dialog layout', () => {
             { x: 225, y: 26, width: 279, height: 29 });
         expectInside(MISSION_BBS_LAYOUT.detail,
             { x: 225, y: 57, width: 279, height: 97 });
+    });
+
+    it('keeps the right-aligned date inside a separate header slot', () => {
+        const header = MISSION_BBS_LAYOUT.header;
+        const title = MISSION_BBS_HEADER_TEXT.title;
+        const date = MISSION_BBS_HEADER_TEXT.date;
+        expectInside(title, header);
+        expectInside(date, header);
+        expect(title.x + title.width).toBeLessThanOrEqual(date.x);
+        expect(date.x + date.width)
+            .toBe(header.x + header.width - 2);
     });
 
     it('uses both title slots of the mission info frame', () => {

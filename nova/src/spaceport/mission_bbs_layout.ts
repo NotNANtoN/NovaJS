@@ -15,6 +15,11 @@ export interface MissionPanelLayout {
     footerY: number;
 }
 
+export interface MissionHeaderTextLayout {
+    title: { x: number; y: number; width: number; height: number };
+    date: { x: number; y: number; width: number; height: number };
+}
+
 // Slots: header 10,2 400x17; list 6,26 214x148; detail title 225,26 279x29;
 // detail 225,57 279x97.
 export const MISSION_BBS_LAYOUT: MissionPanelLayout = {
@@ -26,6 +31,15 @@ export const MISSION_BBS_LAYOUT: MissionPanelLayout = {
     list: { x: 10, y: 30, width: 206, height: 140 },
     detail: { x: 229, y: 60, width: 271, height: 91 },
     footerY: 176,
+};
+
+/**
+ * The header leaves a six-pixel gap between the left title and right date.
+ * Both slots are inset from the measured header's x=12..408 bounds.
+ */
+export const MISSION_BBS_HEADER_TEXT: MissionHeaderTextLayout = {
+    title: { x: 14, y: 4, width: 250, height: 15 },
+    date: { x: 270, y: 4, width: 136, height: 15 },
 };
 
 // Slots: list title 7,2 197x13; detail title 340,3 124x12;

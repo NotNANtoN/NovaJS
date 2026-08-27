@@ -29,16 +29,24 @@ import {
     tradeEmptyText,
     TradeDisplayOffer,
     tradeOfferRows,
+    tradePriceRows,
     tradeSelectionText,
 } from './trade_center_content';
+import {
+    TRADE_GLYPH_COLOR,
+    TRADE_GLYPH_SIZE,
+    tradeCommodityGlyph,
+} from './trade_center_glyphs';
 import {
     hasJunkTradeLocation as junkLocationExists,
     junkTradeOffersAt,
 } from './trade_center_junk';
 import {
     TRADE_CENTER_LAYOUT,
+    TRADE_CENTER_ROW_PITCH,
     TradeRect,
     tradeButtonSlots,
+    tradeRowY,
     tradeSelectionPage,
 } from './trade_center_layout';
 
@@ -63,7 +71,7 @@ const TRADE_FONT = {
     } as const,
     status: {
         fontFamily: 'Geneva', fontSize: 10, fill: 0xffff00,
-        align: 'left', wordWrap: true, lineHeight: 12,
+        align: 'left', wordWrap: true, lineHeight: 10,
     } as const,
 };
 
@@ -95,8 +103,61 @@ function addPane(
     return text;
 }
 
+function addRowTextPool(
+    owner: PIXI.Container,
+    region: TradeRect,
+    style: PIXI.TextStyle | Partial<PIXI.ITextStyle>,
+    count: number,
+): PIXI.Text[] {
+    const mask = new PIXI.Graphics();
+    mask.beginFill(0xffffff);
+    mask.drawRect(region.x, region.y, region.width, region.height);
+    mask.endFill();
+    owner.addChild(mask);
+    return Array.from({ length: count }, (_, row) => {
+        const text = new PIXI.Text('', style);
+        text.position.set(region.x + region.width, tradeRowY(region, row));
+        text.anchor.x = 1;
+        text.mask = mask;
+        owner.addChild(text);
+        return text;
+    });
+}
+
+function addGlyphPool(
+    owner: PIXI.Container,
+    region: TradeRect,
+    count: number,
+): PIXI.Graphics[] {
+    const mask = new PIXI.Graphics();
+    mask.beginFill(0xffffff);
+    mask.drawRect(region.x, region.y, region.width, region.height);
+    mask.endFill();
+    owner.addChild(mask);
+    const x = region.x + Math.floor((region.width - TRADE_GLYPH_SIZE) / 2);
+    const yOffset = Math.floor(
+        (TRADE_CENTER_ROW_PITCH - TRADE_GLYPH_SIZE) / 2);
+    return Array.from({ length: count }, (_, row) => {
+        const graphics = new PIXI.Graphics();
+        graphics.position.set(x, tradeRowY(region, row) + yOffset);
+        graphics.mask = mask;
+        owner.addChild(graphics);
+        return graphics;
+    });
+}
+
+function ordinaryCargoTons(state: PlayerState): number {
+    const commodities = new Set(
+        state.holds
+            .filter(hold => !hold.isMissionCargo)
+            .map(hold => hold.commodity),
+    );
+    return [...commodities].reduce(
+        (total, commodity) => total + heldCommodityTons(state, commodity), 0);
+}
+
 /**
- * Retail's compact commodity exchange. PICT 8506 provides one list pane, so
+ * Retail's compact commodity exchange. PICT 8510 provides one list pane, so
  * synchronized text columns keep prices and quantities aligned without
  * relying on spaces in Geneva.
  */
@@ -106,8 +167,9 @@ export class TradeCenter extends Menu<Entity> {
     private readonly priceHeading: PIXI.Text;
     private readonly heldHeading: PIXI.Text;
     private readonly commodityList: PIXI.Text;
-    private readonly priceList: PIXI.Text;
     private readonly heldList: PIXI.Text;
+    private readonly priceRows: PIXI.Text[];
+    private readonly commodityGlyphs: PIXI.Graphics[];
     private readonly detail: PIXI.Text;
     private readonly status: PIXI.Text;
     private readonly buyButton: Button;
@@ -129,20 +191,28 @@ export class TradeCenter extends Menu<Entity> {
         this.commodityHeading = addPane(
             this.container, TRADE_CENTER_LAYOUT.commodityHeading,
             TRADE_FONT.heading);
-        this.priceHeading = addPane(
-            this.container, TRADE_CENTER_LAYOUT.priceHeading,
-            TRADE_FONT.heading, 'right');
         this.heldHeading = addPane(
             this.container, TRADE_CENTER_LAYOUT.heldHeading,
             TRADE_FONT.heading, 'right');
+        this.priceHeading = addPane(
+            this.container, TRADE_CENTER_LAYOUT.priceHeading,
+            TRADE_FONT.heading, 'right');
         this.commodityList = addPane(
             this.container, TRADE_CENTER_LAYOUT.commodityList, TRADE_FONT.list);
-        this.priceList = addPane(
-            this.container, TRADE_CENTER_LAYOUT.priceList,
-            TRADE_FONT.list, 'right');
         this.heldList = addPane(
             this.container, TRADE_CENTER_LAYOUT.heldList,
             TRADE_FONT.list, 'right');
+        this.priceRows = addRowTextPool(
+            this.container,
+            TRADE_CENTER_LAYOUT.priceList,
+            TRADE_FONT.list,
+            TRADE_CENTER_LAYOUT.visibleRows,
+        );
+        this.commodityGlyphs = addGlyphPool(
+            this.container,
+            TRADE_CENTER_LAYOUT.commodityGlyphs,
+            TRADE_CENTER_LAYOUT.visibleRows,
+        );
         this.detail = addPane(
             this.container, TRADE_CENTER_LAYOUT.detail, TRADE_FONT.detail);
         this.status = addPane(
@@ -150,8 +220,8 @@ export class TradeCenter extends Menu<Entity> {
 
         const headings = tradeColumnHeadings();
         this.commodityHeading.text = headings.commodities;
-        this.priceHeading.text = headings.prices;
         this.heldHeading.text = headings.held;
+        this.priceHeading.text = headings.prices;
 
         const [buySlot, sellSlot, doneSlot] =
             tradeButtonSlots([48, 48, 38]);
@@ -276,8 +346,27 @@ export class TradeCenter extends Menu<Entity> {
             page.end,
         );
         this.commodityList.text = rows.commodities;
-        this.priceList.text = rows.prices;
         this.heldList.text = rows.held;
+        const priceRows = tradePriceRows(
+            this.offers, page.start, page.end);
+        for (const [rowIndex, text] of this.priceRows.entries()) {
+            const price = priceRows[rowIndex];
+            text.text = price?.text ?? '';
+            text.visible = price !== undefined;
+            if (price) {
+                text.style.fill = price.color;
+            }
+        }
+        const visibleOffers = this.offers.slice(page.start, page.end);
+        for (const [rowIndex, graphics] of this.commodityGlyphs.entries()) {
+            const offer = visibleOffers[rowIndex];
+            graphics.clear();
+            graphics.visible = offer !== undefined;
+            if (offer) {
+                tradeCommodityGlyph(offer.commodity)(
+                    graphics, TRADE_GLYPH_COLOR);
+            }
+        }
 
         const selected = this.selected();
         this.detail.text = selected
@@ -288,6 +377,7 @@ export class TradeCenter extends Menu<Entity> {
                 credits: state.credits,
                 cargoTons: cargoTons(state),
                 cargoCapacity: state.cargoCapacity,
+                heldCommodityTons: ordinaryCargoTons(state),
                 transactionMessage: this.transactionMessage,
             })
             : '';

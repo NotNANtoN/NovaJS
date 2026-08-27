@@ -80,6 +80,7 @@ export class NovaParse implements GameDataInterface {
     private shipParser: (s: ShipResource, m: (message: string) => void) => Promise<ShipData>;
 
     private shipPICTMap: ShipPictMap;
+    private targetPICTMap: ShipPictMap;
     private weaponOutfitMap: WeaponOutfitMap;
     resourceNotFoundFunction: (message: string) => void;
     public data: NovaDataInterfaceWithMission;
@@ -115,8 +116,12 @@ export class NovaParse implements GameDataInterface {
         this.idSpace.catch((_e: Error) => { });
 
         this.shipPICTMap = this.makeShipPictMap();
+        this.targetPICTMap = this.makeShipPictMap(
+            ship => ship.targetPictID, false, null);
         this.weaponOutfitMap = this.makeWeaponOutfitMap();
-        this.shipParser = ShipParseClosure(this.shipPICTMap, this.weaponOutfitMap, this.idSpace);
+        this.shipParser = ShipParseClosure(
+            this.shipPICTMap, this.targetPICTMap,
+            this.weaponOutfitMap, this.idSpace);
 
 
         // Holds spriteSheetMulti which gets split up
@@ -239,9 +244,16 @@ export class NovaParse implements GameDataInterface {
         });
     }
 
-    // shïps whose corresponding PICT does not exist
-    // use the PICT of the first shïp that had the same baseImage ID
-    private async makeShipPictMap(): ShipPictMap {
+    /**
+     * Ships whose corresponding PICT does not exist use the PICT of the
+     * lowest-numbered ship with the same base rlëD image. This is shared by
+     * the 5000-series shipyard art and the 3000-series targeting art.
+     */
+    private async makeShipPictMap(
+        pictID = (ship: ShipResource) => ship.pictID,
+        reportMissingShan = true,
+        missingBaseFallback: string | null = "default",
+    ): ShipPictMap {
         var idSpace = await this.idSpace;
         if (idSpace instanceof Error) {
             return {};
@@ -253,10 +265,13 @@ export class NovaParse implements GameDataInterface {
         // maps baseImage ids to pict ids
         var baseImagePICTMap: { [index: string]: string } = {};
 
-        // Populate baseImagePICTMap
-        for (let shipGlobalID in idSpace.shïp) {
-            var ship = idSpace.shïp[shipGlobalID];
-            var pict = ship.idSpace.PICT[ship.pictID];
+        const ships = Object.values(idSpace.shïp)
+            .sort((left, right) => left.id - right.id
+                || left.globalID.localeCompare(right.globalID));
+
+        // Populate baseImagePICTMap in numeric order.
+        for (const ship of ships) {
+            var pict = ship.idSpace.PICT[pictID(ship)];
 
             if (!pict) {
                 continue; // Ship has no corresponding pict, so don't set anything.
@@ -264,7 +279,10 @@ export class NovaParse implements GameDataInterface {
 
             var shan = ship.idSpace.shän[ship.id];
             if (!shan) {
-                this.resourceNotFoundFunction("shïp id " + ship.globalID + " missing shan");
+                if (reportMissingShan) {
+                    this.resourceNotFoundFunction(
+                        "shïp id " + ship.globalID + " missing shan");
+                }
                 continue; // If it's not found, there's no baseImage to map from
             }
             var baseImageLocalID = shan.images.baseImage.ID;
@@ -282,9 +300,9 @@ export class NovaParse implements GameDataInterface {
         }
 
         // Populate shipPICTMap
-        for (let shipGlobalID in idSpace.shïp) {
-            var ship = idSpace.shïp[shipGlobalID];
-            var pict = ship.idSpace.PICT[ship.pictID];
+        for (const ship of ships) {
+            const shipGlobalID = ship.globalID;
+            var pict = ship.idSpace.PICT[pictID(ship)];
 
             if (pict) {
                 // Then there is a pict for this ship.
@@ -301,9 +319,12 @@ export class NovaParse implements GameDataInterface {
                 var baseImageLocalID = shan.images.baseImage.ID;
                 var baseImageGlobalID = shan.idSpace.rlëD[baseImageLocalID]?.globalID;
                 if (baseImageGlobalID) {
-                    shipPICTMap[shipGlobalID] = baseImagePICTMap[baseImageGlobalID];
-                } else {
-                    shipPICTMap[shipGlobalID] = "default";
+                    const sharedPict = baseImagePICTMap[baseImageGlobalID];
+                    if (sharedPict) {
+                        shipPICTMap[shipGlobalID] = sharedPict;
+                    }
+                } else if (missingBaseFallback) {
+                    shipPICTMap[shipGlobalID] = missingBaseFallback;
                 }
             }
         }

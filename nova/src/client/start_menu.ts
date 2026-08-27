@@ -19,6 +19,17 @@ import {
     nextLogoFrameDeadline,
     nextLogoFrame,
 } from './menu_logo_timing';
+import {
+    MenuRolloverEvent,
+    MenuRolloverState,
+    PilotStatBlock,
+    PilotTargetPictureCache,
+    RetailMenuAction,
+    buildPilotStatBlock,
+    menuRolloverFrame,
+    nextMenuRolloverState,
+    requestPilotTargetPicture,
+} from './start_menu_model';
 
 export interface StartMenuSelection {
     playerState: PlayerState;
@@ -37,6 +48,39 @@ export interface StartMenuOptions {
 const DESIGN_WIDTH = 1024;
 const DESIGN_HEIGHT = 768;
 const LOGO_FRAME_HEIGHT = 209;
+const ROLLOVER_WIDTH = 136;
+const ROLLOVER_HEIGHT = 98;
+export const PILOT_STATS_RED = '#98000e';
+export const PILOT_TARGET_PICT_SLOT = {
+    left: 458,
+    top: 646,
+    width: 112,
+    height: 56,
+} as const;
+
+const RETAIL_BUTTON_SPECS = [
+    ['New Pilot', '8050', 120, 61, 349, 400],
+    ['Open Pilot', '8051', 99, 60, 344, 464],
+    ['Quit Nova', '8052', 100, 60, 345, 528],
+    ['Enter Ship', '8053', 120, 60, 555, 401],
+    ['Set Prefs', '8054', 99, 61, 581, 464],
+    ['About Nova', '8055', 98, 60, 580, 528],
+] as const;
+
+function retailRolloverPosition(): { left: number; top: number } {
+    const left = Math.min(...RETAIL_BUTTON_SPECS.map(spec => spec[4]));
+    const right = Math.max(
+        ...RETAIL_BUTTON_SPECS.map(spec => spec[4] + spec[2]),
+    );
+    const top = Math.min(...RETAIL_BUTTON_SPECS.map(spec => spec[5]));
+    const bottom = Math.max(
+        ...RETAIL_BUTTON_SPECS.map(spec => spec[5] + spec[3]),
+    );
+    return {
+        left: Math.round((left + right - ROLLOVER_WIDTH) / 2),
+        top: Math.round((top + bottom - ROLLOVER_HEIGHT) / 2),
+    };
+}
 
 const MENU_STYLE = `
     position: fixed; inset: 0; z-index: 1000; overflow: hidden;
@@ -49,6 +93,7 @@ type RetailMenuAssets = {
     logo: string;
     logoFrameCount: number;
     buttons: Record<string, string>;
+    rollover?: string;
 };
 
 function assetUrl(type: 'PictImage' | 'SpriteSheetImage', id: string): string {
@@ -100,6 +145,7 @@ async function loadRetailMenuAssets(
             buttons: Object.fromEntries(buttonIds.map(id => [
                 id, assetUrl('SpriteSheetImage', `nova:${id}`),
             ])),
+            rollover: undefined as string | undefined,
         };
         const [, logoImage] = await Promise.all([
             preloadImage(assets.background),
@@ -110,6 +156,18 @@ async function loadRetailMenuAssets(
             1,
             Math.floor(logoImage.naturalHeight / LOGO_FRAME_HEIGHT),
         );
+        // The rollover is optional. A missing or undecodable rlëD 8020 must
+        // not demote an otherwise complete retail menu to the DOM fallback.
+        if (has('SpriteSheetImage', 'nova:8020')) {
+            try {
+                await gameData.data.SpriteSheetImage.get('nova:8020');
+                const rollover = assetUrl('SpriteSheetImage', 'nova:8020');
+                await preloadImage(rollover);
+                assets.rollover = rollover;
+            } catch {
+                assets.rollover = undefined;
+            }
+        }
         return assets;
     } catch {
         // A server without the retail data should retain the usable DOM menu.
@@ -118,12 +176,13 @@ async function loadRetailMenuAssets(
 }
 
 function makeRetailButton(
-    text: string,
+    text: RetailMenuAction,
     spriteUrl: string,
     width: number,
     height: number,
     x: number,
     y: number,
+    onRollover?: (event: MenuRolloverEvent) => void,
 ): HTMLButtonElement {
     const button = document.createElement('button');
     button.type = 'button';
@@ -143,21 +202,69 @@ function makeRetailButton(
             button.style.backgroundPosition = `${-width * frame}px 0`;
         }
     };
-    button.addEventListener('mouseenter', () => setFrame(1));
-    button.addEventListener('mouseleave', () => setFrame(0));
+    button.addEventListener('mouseenter', () => {
+        setFrame(1);
+        onRollover?.({ type: 'pointer-enter', action: text });
+    });
+    button.addEventListener('mouseleave', () => {
+        setFrame(0);
+        onRollover?.({ type: 'pointer-leave', action: text });
+    });
     button.addEventListener('focus', () => {
         button.style.outline = '1px solid #e6c3a0';
         button.style.outlineOffset = '2px';
         setFrame(1);
+        onRollover?.({ type: 'focus', action: text });
     });
     button.addEventListener('blur', () => {
         button.style.outline = '';
         button.style.outlineOffset = '';
         setFrame(0);
+        onRollover?.({ type: 'blur', action: text });
     });
     button.addEventListener('mousedown', () => setFrame(1));
     button.addEventListener('mouseup', () => setFrame(1));
     return button;
+}
+
+export function makePilotStatBlockElement(
+    stats: PilotStatBlock | undefined,
+): HTMLElement | undefined {
+    if (!stats) {
+        return undefined;
+    }
+    const section = document.createElement('section');
+    section.dataset.pilotStats = '';
+    section.setAttribute('aria-label', 'Pilot statistics');
+    section.style.cssText = `
+      position: absolute; left: 336px; top: 608px; width: 392px;
+      display: grid; grid-template-columns: 145px 105px;
+      justify-content: space-between; color: ${PILOT_STATS_RED};
+      text-align: left; font: 10px/12px Geneva, Arial, sans-serif;
+      text-shadow: 0 0 1px #280000;
+    `;
+    const makeColumn = (fields: readonly {
+        label: string;
+        value: string;
+    }[]) => {
+        const list = document.createElement('dl');
+        list.style.cssText = 'margin: 0; padding: 0;';
+        for (const field of fields) {
+            const row = document.createElement('div');
+            row.style.cssText = 'margin: 0 0 7px;';
+            const label = document.createElement('dt');
+            label.textContent = field.label;
+            label.style.cssText = 'margin: 0; font-weight: 400;';
+            const value = document.createElement('dd');
+            value.textContent = field.value;
+            value.style.cssText = 'margin: 0; font-weight: 400;';
+            row.append(label, value);
+            list.appendChild(row);
+        }
+        return list;
+    };
+    section.append(makeColumn(stats.left), makeColumn(stats.right));
+    return section;
 }
 
 /**
@@ -174,6 +281,9 @@ export class StartMenu {
     private retailAssets: RetailMenuAssets | undefined;
     private dialogs: RetailMenuDialogs | undefined;
     private dialogCleanup: (() => void) | undefined;
+    private menuRenderVersion = 0;
+    private readonly targetPictImages =
+        new PilotTargetPictureCache<HTMLImageElement>();
     private readonly resizeScene = () => {
         const scale = Math.min(
             window.innerWidth / DESIGN_WIDTH,
@@ -211,6 +321,7 @@ export class StartMenu {
     ): Promise<StartMenuSelection> {
         let current = playerData?.playerState;
         let savedAt = playerData?.savedAt;
+        let currentIsNew = false;
         const snapshots = playerData?.snapshots ?? [];
         return new Promise(resolvePromise => {
             const resolve = (state: PlayerState, continued: boolean) => {
@@ -228,11 +339,19 @@ export class StartMenu {
             void loadRetailMenuAssets(this.gameData).then(retailAssets => {
                 this.retailAssets = retailAssets;
                 let showMainMenu: (focusLabel?: string) => void;
+                const onNewPilotCreated = (state: PlayerState) => {
+                    current = state;
+                    savedAt = undefined;
+                    currentIsNew = true;
+                    showMainMenu('New Pilot');
+                };
                 showMainMenu = (focusLabel?: string) => this.renderMainMenu(
                         current,
                         snapshots,
                         savedAt,
                         resolve,
+                        !currentIsNew,
+                        onNewPilotCreated,
                         showMainMenu,
                         focusLabel,
                     );
@@ -254,6 +373,7 @@ export class StartMenu {
                     onPilotSelected: (state, selectedAt) => {
                         current = state;
                         savedAt = selectedAt;
+                        currentIsNew = false;
                         showMainMenu('Open Pilot');
                     },
                 });
@@ -262,6 +382,8 @@ export class StartMenu {
                     snapshots,
                     savedAt,
                     resolve,
+                    !currentIsNew,
+                    onNewPilotCreated,
                     showMainMenu,
                 );
             });
@@ -273,9 +395,12 @@ export class StartMenu {
         snapshots: PlayerSnapshotSummary[],
         savedAt: number | undefined,
         resolve: (state: PlayerState, continued: boolean) => void,
+        continued: boolean,
+        onNewPilotCreated: (state: PlayerState) => void,
         showMainMenu: (focusLabel?: string) => void,
         focusLabel?: string,
     ) {
+        const renderVersion = ++this.menuRenderVersion;
         this.dialogs?.clear();
         this.dialogCleanup?.();
         this.dialogCleanup = undefined;
@@ -344,28 +469,64 @@ export class StartMenu {
             this.scene.insertBefore(title, this.content);
             this.scene.insertBefore(logo, this.content);
 
-            const buttonSpecs = [
-                ['New Pilot', '8050', 120, 61, 349, 400],
-                ['Open Pilot', '8051', 99, 60, 344, 464],
-                ['Quit Nova', '8052', 100, 60, 345, 528],
-                ['Enter Ship', '8053', 120, 60, 555, 401],
-                ['Set Prefs', '8054', 99, 61, 581, 464],
-                ['About Nova', '8055', 98, 60, 580, 528],
-            ] as const;
-            for (const [label, id, width, height, x, y] of buttonSpecs) {
+            let rolloverState: MenuRolloverState = {};
+            let rollover: HTMLDivElement | undefined;
+            const displayRolloverFrame = () => {
+                if (!rollover) {
+                    return;
+                }
+                const frame = menuRolloverFrame(rolloverState);
+                rollover.style.backgroundPosition =
+                    `${-ROLLOVER_WIDTH * frame}px 0`;
+                rollover.dataset.rolloverFrame = String(frame);
+            };
+            const updateRollover = (event: MenuRolloverEvent) => {
+                rolloverState = nextMenuRolloverState(rolloverState, event);
+                if (event.type === 'pointer-leave' || event.type === 'blur') {
+                    // Browser transitions dispatch leave/blur before the next
+                    // enter/focus. Rendering after that event pair prevents a
+                    // one-frame flash of the idle art between buttons.
+                    queueMicrotask(displayRolloverFrame);
+                } else {
+                    displayRolloverFrame();
+                }
+            };
+            if (this.retailAssets.rollover) {
+                const position = retailRolloverPosition();
+                rollover = document.createElement('div');
+                rollover.dataset.menuRollover = '';
+                rollover.setAttribute('aria-hidden', 'true');
+                rollover.style.cssText = `
+                  position: absolute; left: ${position.left}px;
+                  top: ${position.top}px; width: ${ROLLOVER_WIDTH}px;
+                  height: ${ROLLOVER_HEIGHT}px; pointer-events: none;
+                  background: transparent
+                    url("${this.retailAssets.rollover}") 0 0 /
+                    ${ROLLOVER_WIDTH * 7}px auto no-repeat;
+                `;
+                displayRolloverFrame();
+                this.content.appendChild(rollover);
+            }
+            for (const [
+                label, id, width, height, x, y,
+            ] of RETAIL_BUTTON_SPECS) {
                 const button = makeRetailButton(
                     label, this.retailAssets.buttons[id],
-                    width, height, x, y);
+                    width, height, x, y,
+                    rollover ? updateRollover : undefined);
                 button.dataset.menuAction = label;
                 if (id === '8050') {
-                    button.addEventListener('click', () =>
+                    button.addEventListener('click', () => {
+                        this.menuRenderVersion++;
                         this.showNameEntry(
-                            resolve,
+                            onNewPilotCreated,
                             () => showMainMenu('New Pilot'),
-                        ));
+                        );
+                    });
                 } else if (id === '8051') {
                     button.title = 'Choose a saved pilot or snapshot';
                     button.addEventListener('click', () => {
+                        this.menuRenderVersion++;
                         this.stopLogoAnimation(true);
                         this.dialogs?.showOpenPilot(
                             existing,
@@ -375,6 +536,7 @@ export class StartMenu {
                     });
                 } else if (id === '8052') {
                     button.addEventListener('click', () => {
+                        this.menuRenderVersion++;
                         this.stopLogoAnimation(true);
                         this.dialogs?.showQuit();
                     });
@@ -390,22 +552,52 @@ export class StartMenu {
                     }
                     button.addEventListener('click', () => {
                         if (existing) {
-                            resolve(existing, true);
+                            resolve(existing, continued);
                         }
                     });
                 } else if (id === '8054') {
                     button.addEventListener('click', () => {
+                        this.menuRenderVersion++;
                         this.stopLogoAnimation(true);
                         this.dialogs?.showPreferences();
                     });
                 } else if (id === '8055') {
                     button.addEventListener('click', () => {
+                        this.menuRenderVersion++;
                         this.stopLogoAnimation(true);
                         this.dialogs?.showAbout();
                     });
                 }
                 this.content.appendChild(button);
             }
+            void buildPilotStatBlock(existing, this.gameData)
+                .then(stats => {
+                    if (renderVersion !== this.menuRenderVersion
+                        || !this.root.isConnected
+                        || !this.content.querySelector('[data-menu-action]')) {
+                        return;
+                    }
+                    if (!stats) {
+                        return;
+                    }
+                    const statBlock = makePilotStatBlockElement(stats);
+                    if (statBlock) {
+                        this.content.appendChild(statBlock);
+                        void this.targetPictureFor(stats).then(image => {
+                            if (!image
+                                || renderVersion !== this.menuRenderVersion
+                                || !this.root.isConnected
+                                || !this.content.querySelector(
+                                    '[data-menu-action]')) {
+                                return;
+                            }
+                            this.content.appendChild(image);
+                        });
+                    }
+                })
+                .catch(() => {
+                    // A malformed old save should not make the menu unusable.
+                });
         } else {
             this.scene.style.backgroundImage = '';
             this.content.style.cssText = `
@@ -439,23 +631,28 @@ export class StartMenu {
                 }
                 button.addEventListener('click', () => {
                     if (label === 'New Pilot') {
+                        this.menuRenderVersion++;
                         this.showNameEntry(
-                            resolve,
+                            onNewPilotCreated,
                             () => showMainMenu('New Pilot'),
                         );
                     } else if (label === 'Enter Ship' && existing) {
-                        resolve(existing, true);
+                        resolve(existing, continued);
                     } else if (label === 'Open Pilot') {
+                        this.menuRenderVersion++;
                         this.dialogs?.showOpenPilot(
                             existing,
                             snapshots,
                             savedAt,
                         );
                     } else if (label === 'Set Prefs') {
+                        this.menuRenderVersion++;
                         this.dialogs?.showPreferences();
                     } else if (label === 'Quit Nova') {
+                        this.menuRenderVersion++;
                         this.dialogs?.showQuit();
                     } else if (label === 'About Nova') {
+                        this.menuRenderVersion++;
                         this.dialogs?.showAbout();
                     }
                 });
@@ -487,8 +684,44 @@ export class StartMenu {
         }
     }
 
+    private targetPictureFor(
+        stats: PilotStatBlock,
+    ): Promise<HTMLImageElement | undefined> {
+        return this.targetPictImages.get(stats, current =>
+            requestPilotTargetPicture(current, this.gameData)
+                .then(async targetPict => {
+                    if (!targetPict) {
+                        return undefined;
+                    }
+                    const image = await preloadImage(
+                        assetUrl('PictImage', targetPict),
+                    );
+                    image.dataset.pilotTargetPict = targetPict;
+                    image.alt = `${
+                        current.left.find(
+                            field => field.label === 'Ship Class',
+                        )?.value ?? 'Pilot ship'
+                    } targeting silhouette`;
+                    image.style.cssText = `
+                      position: absolute;
+                      left: ${PILOT_TARGET_PICT_SLOT.left
+                        + PILOT_TARGET_PICT_SLOT.width / 2}px;
+                      top: ${PILOT_TARGET_PICT_SLOT.top
+                        + PILOT_TARGET_PICT_SLOT.height / 2}px;
+                      width: auto; height: auto;
+                      max-width: ${PILOT_TARGET_PICT_SLOT.width}px;
+                      max-height: ${PILOT_TARGET_PICT_SLOT.height}px;
+                      transform: translate(-50%, -50%);
+                      object-fit: contain; pointer-events: none;
+                    `;
+                    return image;
+                })
+                .catch(() => undefined),
+        );
+    }
+
     private showNameEntry(
-        resolve: (state: PlayerState, continued: boolean) => void,
+        onCreated: (state: PlayerState) => void,
         showMainMenu: () => void,
     ) {
         this.dialogs?.clear();
@@ -557,7 +790,7 @@ export class StartMenu {
             const state = createInitialPlayerState();
             const name = input.value.trim();
             state.pilotName = name || 'Captain';
-            resolve(state, false);
+            onCreated(state);
         };
         const goBack = () => {
             input.blur();

@@ -15,6 +15,7 @@ import { Stage } from './stage_resource';
 import {
     handleMapControlEvent,
     isMapStartEdge,
+    MapPlayerState,
 } from './starmap_control';
 
 export { handleMapControlEvent, isMapStartEdge } from './starmap_control';
@@ -35,7 +36,7 @@ export const MapSystem = new AsyncSystem({
         }
         return handleMapControlEvent(
             controlEvent, starmap, jumpRoute, screenSize,
-            playerState as { exploredSystems?: readonly string[] } | undefined,
+            playerState as MapPlayerState | undefined,
         );
     }
 });

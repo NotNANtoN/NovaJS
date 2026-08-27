@@ -30,10 +30,13 @@ import { SystemPlugin } from '../nova_plugin/system_plugin';
 import { WeaponsStateComponent } from '../nova_plugin/weapons_state';
 import { Button } from './button';
 import {
+    SERVICE_COLUMN,
     SERVICE_FLAG,
     SPACEPORT_LAYOUT,
+    SPACEPORT_SERVICE_COLUMNS,
     SPACEPORT_SERVICES,
     spaceportButtonColumn,
+    SpaceportButtonColumn,
     SpaceportService,
 } from './spaceport_layout';
 import { Bar } from './bar';
@@ -50,8 +53,9 @@ import {
 } from './availability';
 
 /** Initial slot for a service button before the column is laid out. */
-function buttonSlot(index: number) {
-    const { x, firstY, pitch } = SPACEPORT_LAYOUT.buttons;
+function buttonSlot(column: SpaceportButtonColumn, index: number) {
+    const { firstY, pitch } = SPACEPORT_LAYOUT.buttons;
+    const { x } = SPACEPORT_LAYOUT.buttons[column];
     return { x, y: firstY + index * pitch };
 }
 
@@ -59,6 +63,14 @@ const LANDSCAPE_WIDTH = 612;
 const LANDSCAPE_HEIGHT = 285;
 const LANDSCAPE_X = -306;
 const LANDSCAPE_Y = -256;
+
+/**
+ * Each opener closes its dialog in a `finally`, so a rejected `show()` looks
+ * exactly like a screen that never opened. Log it instead of discarding it.
+ */
+function reportDialogFailure(dialog: string, error: unknown) {
+    console.error(`Spaceport ${dialog} failed to open`, error);
+}
 
 export class Spaceport extends Menu<Entity> {
     private outfitter: Outfitter;
@@ -107,17 +119,29 @@ export class Spaceport extends Menu<Entity> {
         const buttons = {
             // Positions come from the metal strip measured on PICT 8500;
             // the column is re-laid out per stellar in updateServiceButtons.
-            outfitter: new Button(gameData, "Outfitter", 120, buttonSlot(1)),
-            shipyard: new Button(gameData, "Shipyard", 120, buttonSlot(0)),
+            outfitter: new Button(
+                gameData, "Outfitter", SPACEPORT_LAYOUT.buttons.right.width,
+                buttonSlot('right', 1)),
+            shipyard: new Button(
+                gameData, "Shipyard", SPACEPORT_LAYOUT.buttons.right.width,
+                buttonSlot('right', 0)),
             missionBBS: new Button(
-                gameData, "Mission BBS", 120, buttonSlot(4)),
-            bar: new Button(gameData, "Bar", 120, buttonSlot(3)),
+                gameData, "Mission BBS", SPACEPORT_LAYOUT.buttons.left.width,
+                buttonSlot('left', 1)),
+            bar: new Button(
+                gameData, "Bar", SPACEPORT_LAYOUT.buttons.left.width,
+                buttonSlot('left', 0)),
             tradeCenter: new Button(
-                gameData, "Trade Center", 120, buttonSlot(2)),
+                gameData, "Trade Center",
+                SPACEPORT_LAYOUT.buttons.left.width,
+                buttonSlot('left', 2)),
             // STR# 150 string 6. Retail sells fuel by the jump on landing.
-            recharge: new Button(gameData, "Recharge", 120, buttonSlot(5)),
-            leave: new Button(gameData, "Leave", 120, {
-                x: SPACEPORT_LAYOUT.buttons.x,
+            recharge: new Button(
+                gameData, "Recharge", SPACEPORT_LAYOUT.buttons.right.width,
+                buttonSlot('right', 2)),
+            leave: new Button(
+                gameData, "Leave", SPACEPORT_LAYOUT.buttons.right.width, {
+                x: SPACEPORT_LAYOUT.buttons.right.x,
                 y: SPACEPORT_LAYOUT.buttons.leaveY,
             })
         };
@@ -152,6 +176,8 @@ export class Spaceport extends Menu<Entity> {
                 // TODO: Find a better way to do this.
                 this.input.components.delete(WeaponsStateComponent);
                 this.input.components.delete(ShipPhysicsComponent);
+            } catch (error) {
+                reportDialogFailure('outfitter', error);
             } finally {
                 this.setActiveDialog();
                 this.controls.bind();
@@ -185,6 +211,8 @@ export class Spaceport extends Menu<Entity> {
                     shipBuildWorld.entities.delete('ship');
                 }
                 this.input = newInput;
+            } catch (error) {
+                reportDialogFailure('shipyard', error);
             } finally {
                 this.setActiveDialog();
                 this.controls.bind();
@@ -205,6 +233,8 @@ export class Spaceport extends Menu<Entity> {
             this.setActiveDialog(this.missionInfo.container);
             try {
                 await this.missionInfo.show(this.input);
+            } catch (error) {
+                reportDialogFailure('mission log', error);
             } finally {
                 if (from) {
                     this.setActiveDialog(from.container);
@@ -233,6 +263,8 @@ export class Spaceport extends Menu<Entity> {
             this.setActiveDialog(this.missionBbs.container);
             try {
                 await this.missionBbs.show(this.input);
+            } catch (error) {
+                reportDialogFailure('mission BBS', error);
             } finally {
                 this.setActiveDialog();
                 this.controls.bind();
@@ -246,6 +278,8 @@ export class Spaceport extends Menu<Entity> {
             this.setActiveDialog(this.bar.container);
             try {
                 await this.bar.show(this.input);
+            } catch (error) {
+                reportDialogFailure('bar', error);
             } finally {
                 this.setActiveDialog();
                 this.controls.bind();
@@ -259,6 +293,8 @@ export class Spaceport extends Menu<Entity> {
             this.setActiveDialog(this.tradeCenter.container);
             try {
                 await this.tradeCenter.show(this.input);
+            } catch (error) {
+                reportDialogFailure('trade center', error);
             } finally {
                 this.setActiveDialog();
                 this.controls.bind();
@@ -277,6 +313,8 @@ export class Spaceport extends Menu<Entity> {
             try {
                 this.shipInfo.setSystemName(this.data?.name);
                 await this.shipInfo.show(this.input);
+            } catch (error) {
+                reportDialogFailure('ship info', error);
             } finally {
                 this.setActiveDialog();
                 this.controls.bind();
@@ -300,8 +338,8 @@ export class Spaceport extends Menu<Entity> {
     }
 
     /**
-     * Retail lists the services a stellar offers top to bottom and omits the
-     * rest, so the remaining buttons move up instead of leaving a hole.
+     * Retail omits unavailable services independently in each metal strip, so
+     * a missing button only closes the gap in its own column.
      */
     private updateServiceButtons(data: PlanetData) {
         const buttons = this.serviceButtons;
@@ -317,14 +355,23 @@ export class Spaceport extends Menu<Entity> {
             }
             return hasSpaceportService(data, SERVICE_FLAG[service]);
         });
-        const column = spaceportButtonColumn(available);
+        const availableSet = new Set(available);
+        const columns = {
+            left: spaceportButtonColumn<SpaceportService>(
+                SPACEPORT_SERVICE_COLUMNS.left.filter(
+                    service => availableSet.has(service))),
+            right: spaceportButtonColumn<SpaceportService>(
+                SPACEPORT_SERVICE_COLUMNS.right.filter(
+                    service => availableSet.has(service))),
+        };
         this.updateRechargeState();
         for (const service of SPACEPORT_SERVICES) {
-            const y = column.get(service);
+            const column = SERVICE_COLUMN[service];
+            const y = columns[column].get(service);
             buttons[service].container.visible = y !== undefined;
             if (y !== undefined) {
                 buttons[service].container.position.set(
-                    SPACEPORT_LAYOUT.buttons.x, y);
+                    SPACEPORT_LAYOUT.buttons[column].x, y);
             }
         }
     }

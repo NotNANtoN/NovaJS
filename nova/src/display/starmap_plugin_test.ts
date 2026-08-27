@@ -13,6 +13,7 @@ describe('starmap control handling', () => {
                 position: { set: jasmine.createSpy('position.set') },
             },
             setExploredSystems: jasmine.createSpy('setExploredSystems'),
+            setPlayerState: jasmine.createSpy('setPlayerState'),
             show: jasmine.createSpy('show').and.returnValue(Promise.resolve([])),
         };
     }
@@ -48,6 +49,7 @@ describe('starmap control handling', () => {
         );
 
         expect(starmap.setExploredSystems).not.toHaveBeenCalled();
+        expect(starmap.setPlayerState).not.toHaveBeenCalled();
         expect(starmap.container.position.set).not.toHaveBeenCalled();
         expect(starmap.show).not.toHaveBeenCalled();
     });
@@ -60,6 +62,7 @@ describe('starmap control handling', () => {
         );
 
         expect(starmap.setExploredSystems).toHaveBeenCalledWith(undefined);
+        expect(starmap.setPlayerState).toHaveBeenCalledWith(undefined);
         expect(starmap.container.position.set).toHaveBeenCalledWith(400, 300);
         expect(starmap.show).toHaveBeenCalledWith([]);
     });

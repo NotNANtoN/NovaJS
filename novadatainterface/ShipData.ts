@@ -45,6 +45,10 @@ export interface ShipData extends SpaceObjectData {
     escortType: number;
     cost: number;
     pict: string;
+    /** Fixed retail targeting art; absent when no suitable PICT can be found. */
+    targetPict?: string;
+    /** The smaller second line shown beneath the ship name when targeted. */
+    subtitle: string;
     desc: string;
     outfits: { [index: string]: number }
     initialExplosion: string | null;
@@ -73,6 +77,8 @@ export function getDefaultShipData(): ShipData {
         escortType: -1,
         cost: 0,
         pict: "default",
+        targetPict: undefined,
+        subtitle: "",
         desc: "default",
         outfits: {},
         initialExplosion: null,

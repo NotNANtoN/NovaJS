@@ -5,10 +5,15 @@
  * artwork slot (x=3 y=3 612x285), the stellar name slot (x=152 y=293
  * 311x29) and the description panel (x=141 y=325 322x192). The two metal
  * areas flanking the description panel carry no slot, because retail draws
- * the service buttons straight onto the metal. Only the right-hand strip
- * (x=463..615, y=293..517) is wide enough for a 120px button.
+ * the service buttons straight onto the metal.
  *
  * Coordinates below are centered on the dialog, matching Menu containers.
+ *
+ * Pixel-column measurements of the supplied retail renders, mapped back to
+ * this 618px-wide PICT, put the left metal strip at x=3..141 (138px) and the
+ * right strip at x=463..615 (152px). Button caps are 13px each, so the
+ * renderer's 120px middle is 146px overall: it fits on the right, while the
+ * left column uses a 112px middle for a 138px overall button.
  */
 export const SPACEPORT_FRAME = {
     width: 618,
@@ -26,9 +31,17 @@ export const SPACEPORT_LAYOUT = {
     artwork: centered(3, 3),
     title: { ...centered(152 + 311 / 2, 297), width: 311 },
     description: { ...centered(141 + 10, 325 + 10), width: 301 },
-    /** Top-left origin of the button column, on the right metal strip. */
     buttons: {
-        x: centered(469, 0).x,
+        /** The left button's full 138px span fits x=3..141. */
+        left: {
+            x: centered(3, 0).x,
+            width: 112,
+        },
+        /** The right button's full 146px span fits x=469..615. */
+        right: {
+            x: centered(469, 0).x,
+            width: 120,
+        },
         firstY: centered(0, 300).y,
         /** Button art is 25px tall; 32px leaves a hairline of metal. */
         pitch: 32,
@@ -45,6 +58,25 @@ export const SPACEPORT_SERVICES = [
 
 export type SpaceportService = typeof SPACEPORT_SERVICES[number];
 
+/** Retail's fixed service-to-strip assignment. */
+export const SPACEPORT_SERVICE_COLUMNS = {
+    left: ['bar', 'missionBBS', 'tradeCenter'],
+    right: ['shipyard', 'outfitter', 'recharge'],
+} as const;
+
+export type SpaceportButtonColumn = keyof typeof SPACEPORT_SERVICE_COLUMNS;
+
+export const SERVICE_COLUMN: Record<
+    SpaceportService, SpaceportButtonColumn
+> = {
+    shipyard: 'right',
+    outfitter: 'right',
+    tradeCenter: 'left',
+    bar: 'left',
+    missionBBS: 'left',
+    recharge: 'right',
+};
+
 /** The spöb service flag backing each button, where one exists. */
 export const SERVICE_FLAG = {
     shipyard: 'shipyard',
@@ -57,9 +89,9 @@ export const SERVICE_FLAG = {
 } as const;
 
 /**
- * Retail lists the services top to bottom and simply omits the ones a
- * stellar does not offer, so the remaining buttons move up rather than
- * leaving a hole in the column.
+ * Retail simply omits unavailable services, so the remaining buttons move up
+ * rather than leaving a hole. Call this once for each metal-strip column so
+ * a missing service only closes the gap in its own column.
  */
 export function spaceportButtonColumn<T extends string>(
     visible: readonly T[],

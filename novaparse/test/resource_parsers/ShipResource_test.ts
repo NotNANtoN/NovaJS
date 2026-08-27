@@ -30,6 +30,10 @@ describe("ShipResource", function() {
         expect(s1.subtitle).toEqual("the subtitle");
     });
 
+    it("should derive the retail targeting PICT id", function() {
+        expect(s1.targetPictID).toEqual(3000);
+    });
+
     it("should parse commName", function() {
         expect(s1.commName).toEqual("the comm name");
     });

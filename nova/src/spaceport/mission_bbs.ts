@@ -52,6 +52,7 @@ import {
     BAR_LAYOUT,
     fitLinesToHeight,
     MISSION_BBS_LAYOUT,
+    MISSION_BBS_HEADER_TEXT,
     MISSION_INFO_LAYOUT,
     MissionPanelLayout,
     preferRetailOffers,
@@ -542,6 +543,7 @@ const STATUS_HEIGHT = 16;
 
 export abstract class MissionBoard extends Menu<Entity> {
     private readonly title: PIXI.Text;
+    private readonly date?: PIXI.Text;
     private readonly flavor: PIXI.Text;
     private readonly list: PIXI.Text;
     private readonly detail: PIXI.Text;
@@ -595,14 +597,36 @@ export abstract class MissionBoard extends Menu<Entity> {
                 ? 'The Bar' : 'Mission Computer',
             MISSION_FONT.title,
         );
+        this.date = offerLocation === MissionOfferLocation.MissionComputer
+            ? new PIXI.Text('', MISSION_FONT.title)
+            : undefined;
         this.flavor = new PIXI.Text(flavorText, MISSION_FONT.flavor);
         this.list = new PIXI.Text('', MISSION_FONT.list);
         this.detail = new PIXI.Text('', MISSION_FONT.detail);
         this.status = new PIXI.Text('', MISSION_FONT.status);
-        this.title.anchor.x = 0.5;
         this.title.style.fontSize = 10;
-        this.title.position.set(
-            0, this.layout.header.y - this.layout.height / 2);
+        const headerPosition = panelPosition(
+            this.layout, this.layout.header);
+        if (this.date) {
+            const titleSlot = MISSION_BBS_HEADER_TEXT.title;
+            this.title.anchor.x = 0;
+            this.title.position.set(
+                headerPosition.x + titleSlot.x - this.layout.header.x,
+                headerPosition.y + titleSlot.y - this.layout.header.y,
+            );
+            this.date.anchor.x = 1;
+            this.date.style.fontSize = 10;
+            const dateSlot = MISSION_BBS_HEADER_TEXT.date;
+            this.date.position.set(
+                headerPosition.x + dateSlot.x - this.layout.header.x
+                    + dateSlot.width,
+                headerPosition.y + dateSlot.y - this.layout.header.y,
+            );
+        } else {
+            this.title.anchor.x = 0.5;
+            this.title.position.set(
+                0, this.layout.header.y - this.layout.height / 2);
+        }
         this.flavor.visible = false;
         const listPosition = panelPosition(this.layout, this.layout.list);
         this.list.position.set(listPosition.x, listPosition.y);
@@ -647,7 +671,11 @@ export abstract class MissionBoard extends Menu<Entity> {
         info.click.subscribe(() => this.onInfo?.());
         done.click.subscribe(this.done.bind(this));
 
-        this.container.addChild(this.title, this.flavor, this.briefingGraphic);
+        this.container.addChild(this.title);
+        if (this.date) {
+            this.container.addChild(this.date);
+        }
+        this.container.addChild(this.flavor, this.briefingGraphic);
         addViewportMask(
             this.container, this.list, this.layout, this.layout.list);
         if (this.layout.detail) {
@@ -693,6 +721,9 @@ export abstract class MissionBoard extends Menu<Entity> {
         await this.buildPromise;
         this.setInput(input);
         const state = input.components.get(PlayerStateComponent);
+        if (this.date) {
+            this.date.text = state ? formatGameDate(state.gameDate) : '';
+        }
         const nextSessionKey = state
             ? `${this.planetId}:${state.currentSystem}:${state.gameDate}`
             : undefined;
@@ -888,6 +919,10 @@ export abstract class MissionBoard extends Menu<Entity> {
         for (const child of this.briefingGraphic.removeChildren()) {
             child.destroy();
         }
+        const state = this.input.components.get(PlayerStateComponent);
+        if (this.date) {
+            this.date.text = state ? formatGameDate(state.gameDate) : '';
+        }
         if (this.offers.length === 0 || this.selectionIndex < 0) {
             this.list.text = 'No missions are available here.';
             this.detail.text = '';
@@ -907,7 +942,6 @@ export abstract class MissionBoard extends Menu<Entity> {
         if (!world) {
             return;
         }
-        const state = this.input.components.get(PlayerStateComponent);
         const valuesFor = (offer: MissionOffer) => ({
             ...missionValues(
                 offer.mission, this.planetId, world, state?.gameDate ?? 0,

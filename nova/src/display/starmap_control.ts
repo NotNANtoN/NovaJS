@@ -1,4 +1,5 @@
 import type { ControlEvent } from '../nova_plugin/controls_plugin';
+import type { StarmapPlayerState } from '../spaceport/starmap_state';
 
 export interface StarmapControlTarget {
     readonly container: {
@@ -8,6 +9,7 @@ export interface StarmapControlTarget {
         };
     };
     setExploredSystems(exploredSystems?: readonly string[]): void;
+    setPlayerState?(playerState?: StarmapPlayerState): void;
     show(route: string[]): Promise<string[]>;
 }
 
@@ -20,9 +22,7 @@ export interface MapScreenSize {
     y: number;
 }
 
-export interface MapPlayerState {
-    exploredSystems?: readonly string[];
-}
+export type MapPlayerState = StarmapPlayerState;
 
 export function isMapStartEdge(
     controlEvent: readonly ControlEvent[],
@@ -43,6 +43,7 @@ export async function handleMapControlEvent(
         return;
     }
     starmap.container.position.set(screenSize.x / 2, screenSize.y / 2);
+    starmap.setPlayerState?.(playerState);
     starmap.setExploredSystems(playerState?.exploredSystems);
     jumpRoute.route = await starmap.show(jumpRoute.route);
 }

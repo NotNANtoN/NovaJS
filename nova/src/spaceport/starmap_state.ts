@@ -2,6 +2,13 @@ export interface StarmapViewState {
     centeredOnce: boolean;
 }
 
+export interface StarmapPlayerState {
+    currentSystem?: string;
+    gameDate?: number;
+    legalRecords?: Readonly<Record<string, number>>;
+    exploredSystems?: readonly string[];
+}
+
 export function consumeInitialCenter(state: StarmapViewState): boolean {
     if (state.centeredOnce) {
         return false;

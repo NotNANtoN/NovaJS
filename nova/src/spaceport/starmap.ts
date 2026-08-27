@@ -1,5 +1,7 @@
 import { NebulaData } from "novadatainterface/NebulaData";
+import { PlanetData } from "novadatainterface/PlanetData";
 import { SystemData } from "novadatainterface/SystemData";
+import { GovtData } from "novadatainterface/GovtData";
 import * as PIXI from 'pixi.js';
 import { Observable } from "rxjs";
 import { GameData } from "../client/gamedata/GameData";
@@ -8,14 +10,30 @@ import { resourceId } from "../common/resource_id";
 import { Button } from "./button";
 import { Menu } from "./menu";
 import { MenuControls } from "./menu_controls";
+import { formatGameDate } from "../nova_plugin/player_state";
 import { shortestRoutes } from "./route_planning";
-import { MAP_WELL, mapWellOrigin } from "./starmap_layout";
+import {
+    MAP_WELL,
+    mapWellOrigin,
+    STARMAP_LAYOUT,
+} from "./starmap_layout";
 import { createGraphicHandle, ManagedGraphic } from "../display/managed_graphic";
 import {
     consumeInitialCenter,
+    StarmapPlayerState,
     StarmapViewState,
     systemMarkerStyle,
 } from "./starmap_state";
+import {
+    starmapPanelData,
+    starmapPanelText,
+} from './starmap_content';
+import {
+    clampMapScale,
+    MAP_SCALE_DEFAULT,
+    mapScaleForWheel,
+    zoomedMapPosition,
+} from './starmap_zoom';
 import {
     computeTerritoryField,
     TerritoryField,
@@ -35,6 +53,49 @@ const SYSTEM_TEXT = new PIXI.TextStyle({
     align: 'left',
     fill: 0xffffff,
 });
+const STARMAP_HEADING = new PIXI.TextStyle({
+    fontFamily: 'Geneva',
+    fontSize: 12,
+    align: 'left',
+    fill: 0xffffff,
+});
+const STARMAP_BODY = new PIXI.TextStyle({
+    fontFamily: 'Geneva',
+    fontSize: 10,
+    align: 'left',
+    fill: 0xffffff,
+    wordWrap: true,
+});
+const STARMAP_BOTTOM = new PIXI.TextStyle({
+    fontFamily: 'Geneva',
+    fontSize: 10,
+    align: 'left',
+    fill: 0xffffff,
+    wordWrap: true,
+});
+const STARMAP_DATE = new PIXI.TextStyle({
+    fontFamily: 'Geneva',
+    fontSize: 10,
+    align: 'right',
+    fill: 0xffffff,
+});
+
+function addMaskedText(
+    owner: PIXI.Container,
+    region: { x: number; y: number; width: number; height: number },
+    style: PIXI.TextStyle,
+): PIXI.Text {
+    const text = new PIXI.Text('', style);
+    text.position.set(region.x, region.y);
+    text.style.wordWrapWidth = region.width;
+    const mask = new PIXI.Graphics();
+    mask.beginFill(0xffffff);
+    mask.drawRect(region.x, region.y, region.width, region.height);
+    mask.endFill();
+    text.mask = mask;
+    owner.addChild(mask, text);
+    return text;
+}
 
 function drawSystem(system: SystemData, graphics: PIXI.Graphics, scale: number,
     currentSystem: string) {
@@ -114,9 +175,9 @@ class SystemGraph {
     private readonly graphics: PIXI.Graphics;
     private readonly links: [SystemData, SystemData][];
     private readonly systems: Map<string, SystemData>;
-    private scale = 2;
+    private scale = MAP_SCALE_DEFAULT;
+    private wheelBound = false;
     private dragData?: {
-        data: PIXI.FederatedPointerEvent,
         offset: PIXI.Point,
     }
     private wrappedRoute: string[] = [];
@@ -126,8 +187,12 @@ class SystemGraph {
     private mapContainer: PIXI.Container;
     private maskedContainer: PIXI.Container;
 
-    constructor(systems: SystemData[], private currentSystem: string,
+    constructor(
+        systems: SystemData[],
+        private currentSystem: string,
         exploredSystems?: readonly string[],
+        private readonly onSystemSelected: (systemId: string) => void = () => {},
+        private readonly isVisible: () => boolean = () => true,
         private size = MAP_WELL.size) {
         this.systems = new Map(systems.map(s => [s.id, s]));
         this.knownSystems = normalizeKnownSystems(
@@ -137,6 +202,8 @@ class SystemGraph {
         this.graphics = new PIXI.Graphics();
 
         this.container.interactive = true;
+        this.container.hitArea = new PIXI.Rectangle(
+            0, 0, size.x, size.y);
         const onDragStart = this.onDragStart.bind(this);
         const onDragMove = this.onDragMove.bind(this);
         const onDragEnd = this.onDragEnd.bind(this);
@@ -234,7 +301,7 @@ class SystemGraph {
 
     draw(scale = this.scale) {
         this.mapContainer.cacheAsBitmap = false;
-        this.scale = scale;
+        this.scale = clampMapScale(scale);
         this.graphics.clear();
         this.placeNebulae();
         this.placeTerritory();
@@ -244,24 +311,39 @@ class SystemGraph {
         this.mapContainer.cacheAsBitmap = true;
     }
 
-    private onDragStart(event: PIXI.FederatedPointerEvent) {
-        //const dragPos = event.data.getLocalPosition(this.container);
+    bindWheel() {
+        if (this.wheelBound) {
+            return;
+        }
+        this.container.on('wheel', this.onWheel, this);
+        this.wheelBound = true;
+    }
 
+    unbindWheel() {
+        if (!this.wheelBound) {
+            return;
+        }
+        this.container.off('wheel', this.onWheel, this);
+        this.wheelBound = false;
+    }
+
+    private onDragStart(event: PIXI.FederatedPointerEvent) {
+        const dragPos = this.container.toLocal(event.global);
         const offset = new PIXI.Point(
-            this.mapContainer.position.x - event.x,
-            this.mapContainer.position.y - event.y,
+            this.mapContainer.position.x - dragPos.x,
+            this.mapContainer.position.y - dragPos.y,
         );
         this.dragData = {
-            data: event,
             offset,
         }
     }
 
-    private onDragMove() {
+    private onDragMove(event: PIXI.FederatedPointerEvent) {
         if (this.dragData) {
+            const dragPos = this.container.toLocal(event.global);
             this.mapContainer.position.set(
-                this.dragData.data.x + this.dragData.offset.x,
-                this.dragData.data.y + this.dragData.offset.y,
+                dragPos.x + this.dragData.offset.x,
+                dragPos.y + this.dragData.offset.y,
             );
         }
     }
@@ -277,11 +359,43 @@ class SystemGraph {
         this.updateTransform();
     }
 
+    private onWheel(event: PIXI.FederatedWheelEvent) {
+        if (!this.isVisible()) {
+            return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        event.nativeEvent.preventDefault();
+        const nextScale = mapScaleForWheel(this.scale, event.deltaY);
+        if (nextScale === this.scale) {
+            return;
+        }
+        const pointer = this.container.toLocal(event.global);
+        const nextPosition = zoomedMapPosition(
+            this.mapContainer.position,
+            pointer,
+            this.scale,
+            nextScale,
+        );
+        this.draw(nextScale);
+        this.mapContainer.position.set(nextPosition.x, nextPosition.y);
+        this.updateTransform();
+    }
+
     private onClickSystem(system: string) {
         if (this.knownSystems && !this.knownSystems.has(system)) {
             return;
         }
         this.route = this.routes.get(system) ?? [];
+        this.onSystemSelected(system);
+    }
+
+    isKnown(systemId: string): boolean {
+        return !this.knownSystems || this.knownSystems.has(systemId);
+    }
+
+    getSystem(systemId: string): SystemData | undefined {
+        return this.systems.get(systemId);
     }
 
     private getUniqueLinks() {
@@ -430,6 +544,17 @@ class SystemGraph {
 export class Starmap extends Menu<string[] /* route list of systems */> {
     private systemGraph?: SystemGraph;
     private readonly viewState: StarmapViewState = { centeredOnce: false };
+    private readonly planetDataCache =
+        new Map<string, Promise<readonly PlanetData[]>>();
+    private readonly governmentDataCache =
+        new Map<string, Promise<GovtData | undefined>>();
+    private selectedSystemId?: string;
+    private playerState?: StarmapPlayerState;
+    private panelRequest = 0;
+    private readonly panelHeading: PIXI.Text;
+    private readonly panelBody: PIXI.Text;
+    private readonly panelBottom: PIXI.Text;
+    private readonly panelDate: PIXI.Text;
     readonly managed: ManagedGraphic = createGraphicHandle(this.container);
 
     constructor(gameData: GameData, private systemId: string,
@@ -437,6 +562,26 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
         private exploredSystems?: readonly string[]) {
         super(gameData, "nova:8509", controlEvents);
         this.container.name = "StarMap";
+        this.panelHeading = addMaskedText(
+            this.container,
+            STARMAP_LAYOUT.rightHeading,
+            STARMAP_HEADING,
+        );
+        this.panelBody = addMaskedText(
+            this.container,
+            STARMAP_LAYOUT.rightBody,
+            STARMAP_BODY,
+        );
+        this.panelBottom = addMaskedText(
+            this.container,
+            STARMAP_LAYOUT.bottomFacts,
+            STARMAP_BOTTOM,
+        );
+        this.panelDate = addMaskedText(
+            this.container,
+            STARMAP_LAYOUT.date,
+            STARMAP_DATE,
+        );
         //this.container.alpha = 0.5;
         const buttons = {
             done: new Button(gameData, "Done", 120, { x: 150, y: 220 }),
@@ -458,7 +603,12 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
         const systems = await Promise.all(
             systemIds.map(s => this.gameData.data.System.get(s)));
         this.systemGraph = new SystemGraph(
-            systems, this.systemId, this.exploredSystems);
+            systems,
+            this.systemId,
+            this.exploredSystems,
+            this.selectSystem.bind(this),
+            () => this.container.visible,
+        );
         const well = mapWellOrigin();
         this.systemGraph.container.position.set(well.x, well.y);
         this.container.addChild(this.systemGraph.container);
@@ -479,7 +629,10 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
         await Promise.all(ids.map(async id => {
             try {
                 const nebula = await nebulaData.get(id);
-                const image = nebulaImageForScale(nebula.images, 2);
+                // Keep one cached nebula asset while zooming; the sprite is
+                // rescaled with the map instead of reloading on every wheel.
+                const image = nebulaImageForScale(
+                    nebula.images, MAP_SCALE_DEFAULT);
                 if (!image || !this.systemGraph) {
                     return;
                 }
@@ -546,13 +699,36 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
         if (consumeInitialCenter(this.viewState)) {
             this.systemGraph.center();
         }
+        this.selectedSystemId ??= this.currentSystemId();
+        void this.renderPanel(this.selectedSystemId);
         this.systemGraph.route = route;
-        return super.show(route);
+        this.systemGraph.bindWheel();
+        try {
+            return await super.show(route);
+        } finally {
+            this.systemGraph.unbindWheel();
+        }
+    }
+
+    setPlayerState(playerState?: StarmapPlayerState) {
+        this.playerState = playerState
+            ? {
+                ...playerState,
+                legalRecords: playerState.legalRecords
+                    ? { ...playerState.legalRecords } : undefined,
+            }
+            : undefined;
+        if (this.container.visible && this.selectedSystemId) {
+            void this.renderPanel(this.selectedSystemId);
+        }
     }
 
     setExploredSystems(exploredSystems?: readonly string[]) {
         this.exploredSystems = exploredSystems;
         this.systemGraph?.setKnownSystems(exploredSystems);
+        if (this.container.visible && this.selectedSystemId) {
+            void this.renderPanel(this.selectedSystemId);
+        }
     }
 
     attachTo(parent: PIXI.Container): void {
@@ -562,6 +738,7 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
     }
 
     dispose(): void {
+        this.systemGraph?.unbindWheel();
         this.managed.dispose();
     }
 
@@ -570,5 +747,107 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
             this.input = this.systemGraph.route;
         }
         super.done();
+    }
+
+    private currentSystemId(): string {
+        return this.playerState?.currentSystem ?? this.systemId;
+    }
+
+    private selectSystem(systemId: string) {
+        this.selectedSystemId = systemId;
+        void this.renderPanel(systemId);
+    }
+
+    private setPanelLoading(
+        system: SystemData | undefined,
+        known: boolean,
+    ) {
+        const heading = system?.id === this.currentSystemId()
+            ? 'Current System' : 'Selected System';
+        this.panelHeading.text = `${heading}:`;
+        this.panelBody.text = known ? system?.name ?? '' : '';
+        this.panelBottom.text = '';
+        this.panelDate.text = formatGameDate(
+            this.playerState?.gameDate ?? 0);
+    }
+
+    private setPanelData(panel: ReturnType<typeof starmapPanelData>) {
+        const text = starmapPanelText(panel);
+        this.panelHeading.text = text.heading;
+        this.panelBody.text = text.body;
+        this.panelBottom.text = text.bottom;
+        this.panelDate.text = text.date;
+    }
+
+    private async planetsFor(
+        system: SystemData,
+    ): Promise<readonly PlanetData[]> {
+        const cached = this.planetDataCache.get(system.id);
+        if (cached) {
+            return cached;
+        }
+        const load = Promise.all(system.planets.map(async id => {
+            try {
+                return await this.gameData.data.Planet.get(id);
+            } catch {
+                return undefined;
+            }
+        })).then(planets => planets.filter(
+            (planet): planet is PlanetData => planet !== undefined));
+        this.planetDataCache.set(system.id, load);
+        return load;
+    }
+
+    private async governmentFor(
+        system: SystemData,
+    ): Promise<GovtData | undefined> {
+        if (system.government === undefined || system.government < 0) {
+            return undefined;
+        }
+        const id = resourceId(system.government);
+        const cached = this.governmentDataCache.get(id);
+        if (cached) {
+            return cached;
+        }
+        const load = (async () => {
+            try {
+                return await this.gameData.data.Govt?.get(id);
+            } catch {
+                return undefined;
+            }
+        })();
+        this.governmentDataCache.set(id, load);
+        return load;
+    }
+
+    private async renderPanel(systemId: string) {
+        const request = ++this.panelRequest;
+        const graph = this.systemGraph;
+        if (!graph) {
+            return;
+        }
+        const system = graph.getSystem(systemId);
+        const known = !!system && graph.isKnown(systemId);
+        this.setPanelLoading(system, known);
+        if (!system || !known) {
+            return;
+        }
+        const [planets, government] = await Promise.all([
+            this.planetsFor(system),
+            this.governmentFor(system),
+        ]);
+        if (request !== this.panelRequest
+            || this.selectedSystemId !== systemId) {
+            return;
+        }
+        this.setPanelData(starmapPanelData({
+            system,
+            currentSystemId: this.currentSystemId(),
+            known,
+            planets,
+            government,
+            legalRecords: this.playerState?.legalRecords,
+            gameDate: this.playerState?.gameDate ?? 0,
+        }));
     }
 }

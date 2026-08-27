@@ -4,6 +4,14 @@ export interface TargetGovernmentNames {
     targetName?: string;
 }
 
+export interface TargetLabelPieces {
+    name: string;
+    subtitle?: string;
+    government?: string;
+}
+
+export const TARGET_GOVERNMENT_MAX_LENGTH = 8;
+
 function nonEmpty(value: string | undefined): string | undefined {
     const trimmed = value?.trim();
     return trimmed || undefined;
@@ -44,16 +52,40 @@ export function namesItsGovernment(
 }
 
 /**
- * The targeting pane is only 176 units wide in the retail interface, so the
- * government gets its own line rather than competing with the ship name.
+ * Keep the association text inside the right-hand side of the 176-unit target
+ * status row. A government's TargetName is already its authored short form;
+ * any resolved name that is still too long is clipped as a final safeguard.
  */
+export function abbreviateTargetGovernment(
+    government: TargetGovernmentNames | undefined,
+    maxLength = TARGET_GOVERNMENT_MAX_LENGTH,
+): string | undefined {
+    const name = targetGovernmentName(government);
+    if (!name || maxLength <= 0) {
+        return undefined;
+    }
+    if (name.length <= maxLength) {
+        return name;
+    }
+    if (maxLength === 1) {
+        return '…';
+    }
+    return `${name.slice(0, maxLength - 1).trimEnd()}…`;
+}
+
 export function targetLabel(
     shipName: string,
+    subtitle: string | undefined,
     government: TargetGovernmentNames | undefined,
-): string {
+): TargetLabelPieces {
+    const label: TargetLabelPieces = {
+        name: shipName,
+        subtitle: nonEmpty(subtitle),
+    };
     const governmentName = targetGovernmentName(government);
     if (!governmentName || namesItsGovernment(shipName, governmentName)) {
-        return shipName;
+        return label;
     }
-    return `${shipName}\n${governmentName}`;
+    label.government = abbreviateTargetGovernment(government);
+    return label;
 }

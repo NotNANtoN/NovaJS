@@ -13,12 +13,14 @@ export type ShipPictMap = Promise<{ [index: string]: string }>;
 export type WeaponOutfitMap = ShipPictMap;
 
 export function ShipParseClosure(shipPictMap: ShipPictMap,
+    targetPictMap: ShipPictMap,
     weaponOutfitMap: WeaponOutfitMap,
     globalIDSpacePromise: Promise<NovaResources | Error>): (s: ShipResource, m: (message: string) => void) => Promise<ShipData> {
 
     // Returns the function ShipParse with shipPictMap already assigned
     return function(ship: ShipResource, notFoundFunction: (m: string) => void) {
-        return ShipParse(ship, notFoundFunction, shipPictMap, weaponOutfitMap, globalIDSpacePromise);
+        return ShipParse(ship, notFoundFunction, shipPictMap, targetPictMap,
+            weaponOutfitMap, globalIDSpacePromise);
     }
 
 }
@@ -26,6 +28,7 @@ export function ShipParseClosure(shipPictMap: ShipPictMap,
 export async function ShipParse(ship: ShipResource,
     notFoundFunction: (message: string) => void,
     shipPictMap: ShipPictMap,
+    targetPictMap: ShipPictMap,
     weaponOutfitMap: WeaponOutfitMap,
     globalIDSpacePromise: Promise<NovaResources | Error>): Promise<ShipData> {
 
@@ -36,6 +39,9 @@ export async function ShipParse(ship: ShipResource,
     }
 
     var base: BaseData = await BaseParse(ship, notFoundFunction);
+    const exactTargetPict = ship.idSpace.PICT[ship.targetPictID];
+    const targetPictID = exactTargetPict?.globalID
+        ?? (await targetPictMap)[base.id];
 
     var desc: string;
     var descResource = ship.idSpace.dësc[ship.descID];
@@ -189,6 +195,8 @@ export async function ShipParse(ship: ShipResource,
         escortType: ship.escortType,
         cost: ship.cost,
         pict: pictID,
+        targetPict: targetPictID,
+        subtitle: ship.subtitle,
         desc: desc,
         outfits,
         initialExplosion: initialExplosionID,

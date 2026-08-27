@@ -85,15 +85,14 @@ export function refuelsOnLanding(
 }
 
 /**
- * What a recharge costs: 500 credits per jump, so 5 credits a unit.
+ * What a recharge costs: 100 credits per jump, so 1 credit a unit.
  *
  * No retail resource carries this number and the Bible never states it, but
- * the outfits price it for us. Solar Panels cost 15,000 credits and pay for
- * themselves over 30 jumps of regenerated fuel, which puts a jump at 500. The
- * Auto-recharger at 5,000 buys the same recharge automatically on landing
- * rather than discounting it.
+ * the retail landing screen charges 100 credits per jump. The
+ * Auto-recharger buys the same recharge automatically on landing rather than
+ * discounting it.
  */
-export const FUEL_PRICE_PER_JUMP = 500;
+export const FUEL_PRICE_PER_JUMP = 100;
 
 /** A part-used jump is charged as a whole one, so the pilot leaves full. */
 export function refuelCost(

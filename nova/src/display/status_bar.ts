@@ -38,7 +38,10 @@ import {
     fuelJumpBlocks,
     INSUFFICIENT_FUEL_MESSAGE,
 } from "../nova_plugin/fuel";
-import { JumpRefusedEvent } from "../nova_plugin/jump_plugin";
+import {
+    JumpRefusedEvent,
+    JumpRouteComponent,
+} from "../nova_plugin/jump_plugin";
 import { Stat } from "../nova_plugin/stat";
 import { TargetComponent } from "../nova_plugin/target_component";
 import { ChangeSecondaryEvent } from "../nova_plugin/weapon_plugin";
@@ -52,13 +55,14 @@ import { Stage } from "./stage_resource";
 import {
     boardingOutcomeText,
     statusBarCargoText,
-    statusBarTargetStatus,
+    statusBarNavigationText,
+    statusBarTargetHealth,
 } from "./status_bar_content";
 import {
     BoardingNoticeComponent,
     BoardingOutcomeComponent,
 } from "../nova_plugin/boarding_plugin";
-import { targetLabel } from "./target_label";
+import { targetLabel, TargetLabelPieces } from "./target_label";
 
 
 class StatusBar {
@@ -71,6 +75,7 @@ class StatusBar {
     radarPeriod = 200;
     private statsGraphics = new PIXI.Graphics();
     private cargoContainer = new PIXI.Container();
+    private navigationContainer = new PIXI.Container();
     private landingMessageContainer = new PIXI.Container();
     private landingMessage = new PIXI.Text();
     private landingMessageClearAt = 0;
@@ -80,6 +85,12 @@ class StatusBar {
     private targetSprite = new PIXI.Sprite();
     private targetRenderTexture?: PIXI.RenderTexture;
     private targetRenderTextureSize = { width: 0, height: 0 };
+    private requestedTargetPict?: string;
+    private readyTargetPict?: string;
+    private targetPictRequest = 0;
+    private navigationHop?: string;
+    private navigationRequest = 0;
+    private cargoNames: readonly string[] = [];
 
     private text: { [index: string]: PIXI.Text } = {};
     private addEnemyButton: Button;
@@ -111,9 +122,20 @@ class StatusBar {
             this.statusBarData.dataAreas.targeting.size[1] / 2;
 
         this.makeText();
+        void this.loadCargoNames();
         this.makeLandingMessage();
         this.container.addChild(this.addEnemyButton.container);
         this.built = true;
+    }
+
+    private async loadCargoNames() {
+        try {
+            const cargoNames = await this.gameData.data.StringList
+                .get('nova:4000');
+            this.cargoNames = cargoNames.strings;
+        } catch {
+            this.cargoNames = [];
+        }
     }
 
     private makeLandingMessage() {
@@ -158,23 +180,41 @@ class StatusBar {
             fill: this.statusBarData.colors.dimText,
         });
 
-        // The Bible specifies CargoArea's bounds but not its contents; use it
-        // for the pilot's credits and used-versus-total cargo summary.
+        const navigationArea = this.statusBarData.dataAreas.navigation;
+        this.navigationContainer.position.set(
+            navigationArea.position[0], navigationArea.position[1]);
+        this.navigationContainer.visible = false;
+        this.container.addChild(this.navigationContainer);
+
+        this.text.navigationHeading = new PIXI.Text('Hyperspace', dimFont);
+        this.text.navigationHeading.anchor.set(0.5, 0.5);
+        this.text.navigationHeading.position.set(
+            navigationArea.size[0] / 2, 8);
+        this.navigationContainer.addChild(this.text.navigationHeading);
+
+        this.text.navigationDestination = new PIXI.Text('', font);
+        this.text.navigationDestination.anchor.set(0.5, 0.5);
+        this.text.navigationDestination.position.set(
+            navigationArea.size[0] / 2, 23);
+        this.navigationContainer.addChild(this.text.navigationDestination);
+
         const cargoArea = this.statusBarData.dataAreas.cargo;
         this.cargoContainer.position.x = cargoArea.position[0];
         this.cargoContainer.position.y = cargoArea.position[1];
         this.container.addChild(this.cargoContainer);
 
         const cargoRows = [
+            ['Free:', 'cargoFree'],
+            ['Special:', 'cargoSpecial'],
             ['Credits:', 'cargoCredits'],
-            ['Cargo:', 'cargoSpace'],
         ] as const;
         cargoRows.forEach(([label, valueKey], index) => {
             const labelText = new PIXI.Text(label, dimFont);
             labelText.anchor.y = 0.5;
             labelText.position.x = 6;
-            labelText.position.y = 24 + index * 36;
+            labelText.position.y = (index + 0.5) * cargoArea.size[1] / 3;
             this.cargoContainer.addChild(labelText);
+            this.text[`${valueKey}Label`] = labelText;
 
             const valueText = new PIXI.Text('', font);
             valueText.anchor.x = 1;
@@ -269,13 +309,23 @@ class StatusBar {
         this.text.targetName.anchor.x = 0.5;
         this.text.targetName.anchor.y = 0.5;
         this.text.targetName.position.x = middle[0];
-        this.text.targetName.position.y = 12;
+        this.text.targetName.position.y = 9;
 
         this.targetContainer.addChild(this.text.targetName);
 
-        this.text.targetImagePlaceholder = new PIXI.Text("No target image", dimFont);
-        this.text.targetImagePlaceholder.anchor.x = 0.5;
-        this.text.targetImagePlaceholder.anchor.y = 0.5;
+        const subtitleFont = font.clone();
+        subtitleFont.fontSize = 10;
+        subtitleFont.wordWrap = true;
+        subtitleFont.wordWrapWidth = Math.max(1, size[0] - 12);
+        this.text.targetSubtitle = new PIXI.Text('', subtitleFont);
+        this.text.targetSubtitle.anchor.set(0.5, 0.5);
+        this.text.targetSubtitle.position.set(middle[0], 22);
+        this.targetContainer.addChild(this.text.targetSubtitle);
+
+        this.text.targetGovernment = new PIXI.Text('', dimFont);
+        this.text.targetGovernment.anchor.set(1, 1);
+        this.text.targetGovernment.position.set(size[0] - 6, size[1] - 3);
+        this.targetContainer.addChild(this.text.targetGovernment);
     }
 
     drawRadar(source: Position, ships: Iterable<readonly [string, MovementState, ShipData]>,
@@ -375,10 +425,48 @@ class StatusBar {
             this.cargoContainer.visible = false;
             return;
         }
-        const cargo = statusBarCargoText(playerState);
+        const cargo = statusBarCargoText(playerState, this.cargoNames);
+        this.text.cargoFree.text = cargo.free;
+        this.text.cargoSpecial.text = cargo.special ?? '';
+        this.text.cargoSpecial.visible = cargo.special !== undefined;
+        this.text.cargoSpecialLabel.visible = cargo.special !== undefined;
         this.text.cargoCredits.text = cargo.credits;
-        this.text.cargoSpace.text = cargo.cargo;
         this.cargoContainer.visible = true;
+    }
+
+    drawNavigation(route: readonly string[]) {
+        const firstHop = route[0];
+        if (firstHop === this.navigationHop) {
+            return;
+        }
+
+        this.navigationHop = firstHop;
+        const request = ++this.navigationRequest;
+        this.navigationContainer.visible = false;
+        if (!firstHop) {
+            return;
+        }
+
+        void this.gameData.data.System.get(firstHop)
+            .then(system => {
+                if (request !== this.navigationRequest
+                    || firstHop !== this.navigationHop) {
+                    return;
+                }
+                const navigation = statusBarNavigationText(
+                    [firstHop], system.name);
+                if (!navigation) {
+                    return;
+                }
+                this.text.navigationHeading.text = navigation.heading;
+                this.text.navigationDestination.text = navigation.destination;
+                this.navigationContainer.visible = true;
+            })
+            .catch(() => {
+                if (request === this.navigationRequest) {
+                    this.navigationContainer.visible = false;
+                }
+            });
     }
 
     drawSecondary(name: string | null | undefined) {
@@ -395,72 +483,130 @@ class StatusBar {
         }
     }
 
-    drawTarget(name: string, shield?: number, armor?: number,
-        shipGraphic?: AnimationGraphic, disabled = false) {
+    drawTarget(label: TargetLabelPieces, shield?: number, armor?: number,
+        targetPict?: string, shipGraphic?: AnimationGraphic,
+        disabled = false) {
         this.targetContainer.visible = true;
         this.noTargetContainer.visible = false;
-        this.text.targetName.text = name;
-        this.text.targetName.position.y = name.includes('\n') ? 15 : 12;
+        this.text.targetName.text = label.name;
+        this.text.targetSubtitle.text = label.subtitle ?? '';
+        this.text.targetSubtitle.visible = label.subtitle !== undefined;
+        this.text.targetGovernment.text = label.government ?? '';
+        this.text.targetGovernment.visible = label.government !== undefined;
 
-        const targetStatus = statusBarTargetStatus(disabled);
-        this.text.disabled.visible = targetStatus !== undefined;
-        this.text.percent.visible = targetStatus === undefined;
-        if (targetStatus !== undefined) {
-            this.text.disabled.text = targetStatus;
-            this.text.shield.visible = false;
-            this.text.armor.visible = false;
-        } else if (shield && shield > 0) {
-            this.text.shield.visible = true;
-            this.text.armor.visible = false;
-            this.text.percent.text = `${String(shield)}%`;
-        } else if (typeof armor === 'number') {
-            this.text.shield.visible = false;
-            this.text.armor.visible = true;
-            this.text.percent.text = `${String(armor)}%`;
-        } else {
-            this.text.shield.visible = false;
-            this.text.armor.visible = false;
-        }
+        const health = statusBarTargetHealth(disabled, shield, armor);
+        this.text.disabled.visible = health.status !== undefined;
+        this.text.disabled.text = health.status ?? '';
+        this.text.shield.visible = health.label === 'Shield:';
+        this.text.armor.visible = health.label === 'Armor:';
+        this.text.percent.visible = health.percent !== undefined;
+        this.text.percent.text = health.percent ?? '';
 
-        if (shipGraphic) {
-            const shipContainer = shipGraphic?.container;
-            const { x: width, y: height } = shipGraphic.size;
-            if (!this.targetRenderTexture) {
-                const baseRenderTexture = new PIXI.BaseRenderTexture({ width, height });
-                this.targetRenderTexture = new PIXI.RenderTexture(baseRenderTexture);
-                this.targetRenderTextureSize = { width, height };
-            } else if (this.targetRenderTextureSize.width !== width
-                || this.targetRenderTextureSize.height !== height) {
-                this.targetRenderTexture.resize(width, height);
-                this.targetRenderTextureSize = { width, height };
-            }
-
-            shipContainer.setTransform();
-            shipContainer.position.x = width / 2;
-            shipContainer.position.y = height / 2;
-            const renderTexture = this.targetRenderTexture!;
-            this.renderer.render(shipContainer, {
-                renderTexture,
-            });
-            this.targetSprite.texture = renderTexture;
-            let scale = 1;
-            const maxSize = 110;
-            const targetMaxDim = Math.max(shipGraphic.size.x, shipGraphic.size.y);
-            if (targetMaxDim > maxSize) {
-                scale = maxSize / targetMaxDim;
-            }
-            this.targetSprite.scale.set(scale, scale);
-            this.targetSprite.visible = true;
-        } else {
-            this.targetSprite.visible = false;
-        }
-
+        this.drawTargetImage(
+            targetPict, shipGraphic, label.subtitle !== undefined);
     }
+
+    private drawTargetImage(
+        targetPict: string | undefined,
+        shipGraphic: AnimationGraphic | undefined,
+        hasSubtitle: boolean,
+    ) {
+        if (targetPict && targetPict !== this.requestedTargetPict) {
+            this.requestedTargetPict = targetPict;
+            this.readyTargetPict = undefined;
+            const request = ++this.targetPictRequest;
+            void this.gameData.textureFromPictAsync(targetPict)
+                .then(texture => {
+                    if (request !== this.targetPictRequest
+                        || targetPict !== this.requestedTargetPict) {
+                        return;
+                    }
+                    this.targetSprite.texture = texture;
+                    this.readyTargetPict = targetPict;
+                    this.layoutTargetSprite(
+                        texture.width, texture.height, hasSubtitle);
+                    this.targetSprite.visible = true;
+                })
+                .catch(() => {
+                    // Keep using the live animation snapshot for this target.
+                });
+        } else if (!targetPict && this.requestedTargetPict) {
+            this.requestedTargetPict = undefined;
+            this.readyTargetPict = undefined;
+            this.targetPictRequest++;
+        }
+
+        if (targetPict && this.readyTargetPict === targetPict) {
+            this.layoutTargetSprite(
+                this.targetSprite.texture.width,
+                this.targetSprite.texture.height,
+                hasSubtitle);
+            this.targetSprite.visible = true;
+            return;
+        }
+
+        this.drawLiveTarget(shipGraphic, hasSubtitle);
+    }
+
+    private drawLiveTarget(
+        shipGraphic: AnimationGraphic | undefined,
+        hasSubtitle: boolean,
+    ) {
+        if (!shipGraphic) {
+            this.targetSprite.visible = false;
+            return;
+        }
+
+        const shipContainer = shipGraphic.container;
+        const { x: width, y: height } = shipGraphic.size;
+        if (!this.targetRenderTexture) {
+            const baseRenderTexture = new PIXI.BaseRenderTexture({
+                width, height,
+            });
+            this.targetRenderTexture = new PIXI.RenderTexture(
+                baseRenderTexture);
+            this.targetRenderTextureSize = { width, height };
+        } else if (this.targetRenderTextureSize.width !== width
+            || this.targetRenderTextureSize.height !== height) {
+            this.targetRenderTexture.resize(width, height);
+            this.targetRenderTextureSize = { width, height };
+        }
+
+        shipContainer.setTransform();
+        shipContainer.position.set(width / 2, height / 2);
+        const renderTexture = this.targetRenderTexture;
+        this.renderer.render(shipContainer, { renderTexture });
+        this.targetSprite.texture = renderTexture;
+        this.layoutTargetSprite(width, height, hasSubtitle);
+        this.targetSprite.visible = true;
+    }
+
+    private layoutTargetSprite(
+        width: number,
+        height: number,
+        hasSubtitle: boolean,
+    ) {
+        const area = this.statusBarData.dataAreas.targeting;
+        const top = hasSubtitle ? 29 : 18;
+        const bottom = area.size[1] - 18;
+        const availableHeight = Math.max(1, bottom - top);
+        const availableWidth = Math.max(1, area.size[0] - 12);
+        const scale = width > 0 && height > 0
+            ? Math.min(1, availableWidth / width, availableHeight / height)
+            : 1;
+        this.targetSprite.scale.set(scale);
+        this.targetSprite.position.set(
+            area.size[0] / 2, top + availableHeight / 2);
+    }
+
     clearTarget() {
         this.targetContainer.visible = false;
         this.noTargetContainer.visible = true;
         this.targetSprite.visible = false;
         this.targetSprite.texture = PIXI.Texture.EMPTY;
+        this.requestedTargetPict = undefined;
+        this.readyTargetPict = undefined;
+        this.targetPictRequest++;
         this.targetRenderTexture?.destroy(true);
         this.targetRenderTexture = undefined;
         this.targetRenderTextureSize = { width: 0, height: 0 };
@@ -561,15 +707,26 @@ const DrawStatusBarTarget = new System({
                 ? governments.getCached(government.id)
                 : undefined;
             statusBar.drawTarget(
-                targetLabel(shipData.name, governmentData),
+                targetLabel(
+                    shipData.name, shipData.subtitle, governmentData),
                 shield?.percent,
                 armor?.percent,
+                shipData.targetPict,
                 shipGraphic,
                 disabled,
             );
         }
     }
 })
+
+const DrawStatusBarNavigation = new System({
+    name: 'DrawStatusBarNavigation',
+    args: [StatusBarResource, JumpRouteComponent,
+        PlayerShipSelector] as const,
+    step(statusBar, jumpRoute) {
+        statusBar.drawNavigation(jumpRoute.route);
+    },
+});
 
 const DrawLandingMessage = new System({
     name: 'DrawLandingMessage',
@@ -681,6 +838,7 @@ export const StatusBarPlugin: Plugin = {
         world.addSystem(StatusBarResize);
         world.addSystem(DrawStatusBarStats);
         world.addSystem(DrawStatusBarSecondaryWeapon);
+        world.addSystem(DrawStatusBarNavigation);
         world.addComponent(ShownBoardingOutcome);
         world.addSystem(ShowBoardingNotice);
         world.addSystem(ShowBoardingOutcome);
@@ -694,6 +852,7 @@ export const StatusBarPlugin: Plugin = {
         world.removeSystem(StatusBarResize);
         world.removeSystem(DrawStatusBarStats);
         world.removeSystem(DrawStatusBarSecondaryWeapon);
+        world.removeSystem(DrawStatusBarNavigation);
         world.removeSystem(DrawStatusBarTarget);
         world.removeSystem(DrawLandingMessage);
         world.removeSystem(ShowJumpRefusal);

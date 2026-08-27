@@ -16,6 +16,7 @@ import { getDefaultStatusBarColors, getDefaultStatusBarDataAreas } from "../../n
 import { WeaponData } from "../../novadatainterface/WeaponData";
 import { NovaParse } from "../NovaParse";
 import { FPS, ShipTurnRateConversionFactor, ShipVelocityConversionFactor } from "../src/parsers/Constants";
+import { ShipParse } from "../src/parsers/ShipParse";
 import { getPNG } from "./resource_parsers/PNGCompare";
 import { fixturePath } from "../../test/fixture_path";
 
@@ -64,6 +65,7 @@ describe("NovaParse", function() {
         }
 
         expect(s128.pict).toEqual("nova:5000");
+        expect(s128.subtitle).toEqual("the subtitle");
         expect(s128.desc).toEqual("a contrived description");
         expect(s128.physics.shield).toEqual(17);
         expect(s128.physics.shieldRecharge).toEqual(18 * FPS / 1000);
@@ -82,6 +84,37 @@ describe("NovaParse", function() {
         expect(s128.displayWeight).toEqual(128);
         expect(s128.deathDelay).toEqual(67 / 30);
         expect(s128.largeExplosion).toEqual(true);
+    });
+
+    it("resolves targeting art by exact id and same-base fallback", async function() {
+        const idSpace = await np.idSpace;
+        if (idSpace instanceof Error) {
+            fail(idSpace);
+            return;
+        }
+
+        const ship128 = idSpace.shïp["nova:128"];
+        const ship129 = idSpace.shïp["nova:129"];
+        ship128.idSpace.PICT[ship128.targetPictID] = {
+            globalID: "nova:3000",
+        } as any;
+
+        const targetMap = await (np as any).makeShipPictMap(
+            (ship: { targetPictID: number }) => ship.targetPictID, false, null);
+        const exact = await ShipParse(
+            ship128, fail, (np as any).shipPICTMap,
+            Promise.resolve(targetMap), (np as any).weaponOutfitMap, np.idSpace);
+        const fallback = await ShipParse(
+            ship129, fail, (np as any).shipPICTMap,
+            Promise.resolve(targetMap), (np as any).weaponOutfitMap, np.idSpace);
+        const unresolved = await ShipParse(
+            idSpace.shïp["nova:130"], () => { },
+            (np as any).shipPICTMap, Promise.resolve(targetMap),
+            (np as any).weaponOutfitMap, np.idSpace);
+
+        expect(exact.targetPict).toEqual("nova:3000");
+        expect(fallback.targetPict).toEqual("nova:3000");
+        expect(unresolved.targetPict).toBeUndefined();
     });
 
     it("Should parse the right pict ID for ships with the same baseImage", async function() {
