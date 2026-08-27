@@ -171,72 +171,6 @@ export type PlayerState = PlayerStateFields & {
     readonly freeSpace: number;
 };
 
-/**
- * Decode both current state and the phase-one state shape. The output always
- * has the current cargo fields, so callers do not need optional checks after a
- * player has crossed the persistence/wire boundary.
- */
-const LegacyPlayerStateFields = t.intersection([
-    t.type({
-        credits: t.number,
-        missionBits: t.array(t.boolean),
-        gameDate: t.number,
-        activeMissions: t.array(ActiveMissionDetails),
-        shipId: t.string,
-        currentSystem: t.string,
-    }),
-    t.partial({
-        cargoCapacity: t.number,
-        holds: t.array(CargoHold),
-        pilotName: t.string,
-        shipName: t.string,
-        gender: t.union([t.literal('male'), t.literal('female')]),
-        lastLandedPlanet: t.string,
-        lastLandedSystem: t.string,
-        lastLandedPosition: t.tuple([t.number, t.number]),
-        destroyedStellars: t.array(t.string),
-        activeRanks: t.array(t.number),
-        exploredSystems: t.array(t.string),
-        registered: t.boolean,
-        daysSinceRegistration: t.number,
-        landingCount: t.number,
-        kills: t.number,
-        fuel: t.number,
-        legalRecords: t.record(t.string, t.number),
-        escorts: t.array(EscortContractData),
-        diedAt: t.number,
-    }),
-]);
-
-function decodePersistentPlayerState(
-    value: unknown,
-    context: t.Context,
-): Either<Errors, PersistentPlayerState> {
-    const decoded = LegacyPlayerStateFields.validate(value, context);
-    if (decoded._tag === 'Left') {
-        return decoded;
-    }
-    const state = {
-        ...decoded.right,
-        cargoCapacity: Number.isFinite(decoded.right.cargoCapacity)
-            ? decoded.right.cargoCapacity
-            : DEFAULT_CARGO_CAPACITY,
-        holds: decoded.right.holds ?? [],
-        pilotName: decoded.right.pilotName ?? 'Captain',
-        shipName: decoded.right.shipName ?? 'Nova',
-        gender: decoded.right.gender ?? 'male',
-        lastLandedPlanet: decoded.right.lastLandedPlanet ?? 'nova:128',
-        lastLandedSystem: decoded.right.lastLandedSystem
-            ?? decoded.right.currentSystem,
-        lastLandedPosition: decoded.right.lastLandedPosition ?? [0, 0],
-        destroyedStellars: decoded.right.destroyedStellars ?? [],
-        activeRanks: decoded.right.activeRanks ?? [],
-        exploredSystems: decoded.right.exploredSystems ?? [],
-    } as PersistentPlayerState;
-    migrateMissionCargo(state);
-    return t.success(state);
-}
-
 function encodePersistentPlayerState(
     state: PersistentPlayerState,
 ): PersistentPlayerState {
@@ -254,7 +188,7 @@ export const PersistentPlayerStateCodec =
     new t.Type<PersistentPlayerState>(
     'PersistentPlayerStateCodec',
     (value): value is PersistentPlayerState => PlayerStateFields.is(value),
-    decodePersistentPlayerState,
+    (value, context) => PlayerStateFields.validate(value, context),
     encodePersistentPlayerState,
 );
 
@@ -265,7 +199,7 @@ export const PlayerStateCodec = new t.Type<
     'PlayerStateCodec',
     (value): value is PlayerState => PlayerStateFields.is(value),
     (value, context) => {
-        const decoded = decodePersistentPlayerState(value, context);
+        const decoded = PersistentPlayerStateCodec.validate(value, context);
         if (decoded._tag === 'Left') {
             return decoded;
         }
@@ -363,14 +297,28 @@ export class PlayerRevisionConflictError extends Error {
     }
 }
 
+/**
+ * Why a pilot's saved data is being withheld. `record` is one unreadable
+ * pilot; `file` is an unreadable store, which withholds every pilot.
+ */
+export const PlayerQuarantine = t.union([
+    t.literal('none'),
+    t.literal('record'),
+    t.literal('file'),
+]);
+export type PlayerQuarantine = t.TypeOf<typeof PlayerQuarantine>;
+
+/** A pilot's persisted state together with the store's own bookkeeping. */
+export type StoredPlayerRecord = PersistentPlayerState & {
+    readonly savedAt?: number,
+    readonly revision?: number,
+    readonly ship?: t.TypeOf<typeof EncodedEntity>,
+    readonly snapshots?: readonly PlayerSnapshot[],
+};
+
 export interface PlayerStorePort {
     readonly ready: Promise<void>;
-    get(token: string): Promise<
-        (PersistentPlayerState & {
-            readonly savedAt?: number,
-            readonly revision?: number,
-        }) | undefined
-    >;
+    get(token: string): Promise<StoredPlayerRecord | undefined>;
     getOrCreate(token: string): Promise<PersistentPlayerState>;
     /**
      * Persists a pilot's state, returning the revision the store is now at.
@@ -385,6 +333,12 @@ export interface PlayerStorePort {
     ): Promise<number | void>;
     /** The revision a conditional save must present. */
     revision?(token: string): Promise<number>;
+    /**
+     * Whether a pilot's saved data was held back rather than served. A
+     * quarantined token refuses every write, so callers must tell the pilot
+     * instead of letting them play a session that cannot be saved.
+     */
+    quarantine?(token: string): Promise<PlayerQuarantine>;
     snapshot(
         token: string,
         state: PersistentPlayerState,
@@ -395,7 +349,7 @@ export interface PlayerStorePort {
     restoreSnapshot(
         token: string,
         snapshotId: string,
-    ): Promise<{ readonly currentSystem: string } | undefined>;
+    ): Promise<StoredPlayerRecord | undefined>;
     bindPeer(peerId: string, token: string): void;
     getTokenForPeer(peerId: string): string | undefined;
     flush(): Promise<void>;
@@ -416,6 +370,11 @@ export const PlayerData = t.intersection([
         playerState: PlayerStateCodec,
         ship: EncodedEntity,
         snapshots: t.array(PlayerSnapshotSummary),
+        /**
+         * Set when saved data was withheld rather than served. The pilot must
+         * be told, because a session started over it cannot be saved.
+         */
+        quarantine: PlayerQuarantine,
     }),
 ]);
 export type PlayerData = t.TypeOf<typeof PlayerData>;
@@ -597,24 +556,6 @@ export function releaseMissionCargo(
     missionId: string,
 ): number {
     return releaseCargo(state, missionId, Infinity, true);
-}
-
-function migrateMissionCargo(state: Pick<PlayerState, 'activeMissions' | 'holds'>) {
-    for (const mission of state.activeMissions) {
-        if (mission.state !== 'active' || !mission.cargo
-            || mission.cargo.quantity <= 0
-            || state.holds.some(hold =>
-                hold.isMissionCargo && hold.commodity === mission.missionId)) {
-            continue;
-        }
-        // Old saves stored cargo only on ActiveMission. Keep it in the hold
-        // during migration; a later capacity sync can expose it as full.
-        state.holds.push({
-            commodity: mission.missionId,
-            tons: mission.cargo.quantity,
-            isMissionCargo: true,
-        });
-    }
 }
 
 export function advanceGameDate(state: PlayerState, days = 1): number {

@@ -28,12 +28,15 @@ import {
     PersistentPlayerState,
     PlayerData as PlayerDataCodec,
     PlayerRevisionConflictError,
-    PlayerStateCodec,
     PlayerStateComponent,
     PlayerStorePort,
     PlayerStoreResource,
     toPersistentPlayerState,
 } from './player_state';
+import {
+    makePlayerData,
+    summarizeSnapshots,
+} from './player_data_projection';
 
 import { SystemIdResource } from './system_id_resource';
 
@@ -242,30 +245,23 @@ export const ServerPlugin: Plugin = {
             void Promise.all([
                 playerStore.get(token),
                 playerStore.getSnapshots(token),
-            ]).then(([state, snapshots]) => {
-                const data: PlayerData = {
-                    uuid: peer,
-                    snapshots: snapshots.map(({
-                        id, createdAt, reason, state: snapshotState,
-                    }) => ({
-                        id,
-                        createdAt,
-                        reason,
-                        pilotName: snapshotState.pilotName,
-                        currentSystem: snapshotState.currentSystem,
-                    })),
-                };
-                if (state) {
-                    const decodedState = PlayerStateCodec.decode(state);
-                    if (decodedState._tag === 'Left') {
-                        throw new Error(
-                            `Invalid persisted player state for ${token}`,
-                        );
-                    }
-                    data.system = state.currentSystem;
-                    data.savedAt = state.savedAt;
-                    data.playerState = decodedState.right;
-                }
+                playerStore.quarantine?.(token)
+                    ?? Promise.resolve('none' as const),
+            ]).then(([state, snapshots, quarantine]) => {
+                const data = state
+                    ? makePlayerData(peer, {
+                        state,
+                        savedAt: state.savedAt,
+                        ship: state.ship,
+                        snapshots,
+                        quarantine,
+                    })
+                    : quarantine !== 'none'
+                        ? makePlayerData(peer, { quarantine })
+                        : {
+                            uuid: peer,
+                            snapshots: summarizeSnapshots(snapshots),
+                        };
                 communicator.sendMessage(PlayerData.encode(data), peer);
             });
         });

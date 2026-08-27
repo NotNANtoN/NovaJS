@@ -1,9 +1,11 @@
 import {
     createInitialPlayerState,
     PlayerData,
+    PlayerQuarantine,
     PlayerState,
     PlayerSnapshotSummary,
 } from '../nova_plugin/player_state';
+import { EncodedEntity } from 'nova_ecs/plugins/serializer_plugin';
 import type { GameDataInterface } from 'novadatainterface/GameDataInterface';
 import { artworkUrl } from './artwork_url';
 import {
@@ -33,6 +35,7 @@ import {
 
 export interface StartMenuSelection {
     playerState: PlayerState;
+    ship?: EncodedEntity;
     continued: boolean;
 }
 
@@ -50,6 +53,7 @@ const DESIGN_HEIGHT = 768;
 const LOGO_FRAME_HEIGHT = 209;
 const ROLLOVER_WIDTH = 136;
 const ROLLOVER_HEIGHT = 98;
+const INITIAL_PLAYER_STATE = createInitialPlayerState();
 export const PILOT_STATS_RED = '#98000e';
 export const PILOT_TARGET_PICT_SLOT = {
     left: 458,
@@ -64,6 +68,32 @@ export function pilotDeathNotice(
     return state?.diedAt === undefined
         ? undefined
         : 'PILOT DECEASED — LOAD A SAVED PILOT OR CREATE A NEW PILOT';
+}
+
+export function pilotQuarantineNotice(
+    quarantine: PlayerQuarantine | undefined,
+): string | undefined {
+    if (quarantine === 'record') {
+        return 'THIS PILOT\'S SAVE COULD NOT BE READ — NOTHING WAS DELETED. '
+            + 'OPEN A SAVED PILOT, AND PLEASE REPORT THIS.';
+    }
+    if (quarantine === 'file') {
+        return 'PILOT DATA COULD NOT BE READ — NOTHING WAS DELETED, BUT '
+            + 'NOTHING CAN BE SAVED. PLEASE REPORT THIS.';
+    }
+    return undefined;
+}
+
+export function isStartMenuActionDisabled(
+    action: RetailMenuAction,
+    state: PlayerState | undefined,
+    quarantine: PlayerQuarantine | undefined,
+): boolean {
+    const blocked = quarantine === 'record' || quarantine === 'file';
+    if (blocked && (action === 'New Pilot' || action === 'Enter Ship')) {
+        return true;
+    }
+    return action === 'Enter Ship' && !canEnterShip(state);
 }
 
 const RETAIL_BUTTON_SPECS = [
@@ -337,12 +367,18 @@ export class StartMenu {
         restoreSnapshot?: RestoreSnapshot,
     ): Promise<StartMenuSelection> {
         let current = playerData?.playerState;
+        let currentShip = playerData?.ship;
+        const quarantine = playerData?.quarantine;
         let savedAt = playerData?.savedAt;
         let currentIsNew = false;
         const snapshots = playerData?.snapshots ?? [];
         return new Promise(resolvePromise => {
             let resolved = false;
-            const resolve = (state: PlayerState, continued: boolean) => {
+            const resolve = (
+                state: PlayerState,
+                continued: boolean,
+                ship?: EncodedEntity,
+            ) => {
                 if (resolved) {
                     return;
                 }
@@ -356,17 +392,20 @@ export class StartMenu {
                 this.stopLogoAnimation();
                 window.removeEventListener('resize', this.resizeScene);
                 this.root.remove();
-                resolvePromise({ playerState: state, continued });
+                resolvePromise({ playerState: state, ship, continued });
             };
             let showMainMenu: (focusLabel?: string) => void;
             const onNewPilotCreated = (state: PlayerState) => {
                 current = state;
+                currentShip = undefined;
                 savedAt = undefined;
                 currentIsNew = true;
                 showMainMenu('New Pilot');
             };
             showMainMenu = (focusLabel?: string) => this.renderMainMenu(
                     current,
+                    currentShip,
+                    quarantine,
                     snapshots,
                     savedAt,
                     resolve,
@@ -390,8 +429,9 @@ export class StartMenu {
                     }
                 },
                 onBack: showMainMenu,
-                onPilotSelected: (state, selectedAt) => {
+                onPilotSelected: (state, selectedAt, ship) => {
                     current = state;
+                    currentShip = ship;
                     savedAt = selectedAt;
                     currentIsNew = false;
                     showMainMenu('Open Pilot');
@@ -432,9 +472,15 @@ export class StartMenu {
 
     private renderMainMenu(
         existing: PlayerState | undefined,
+        existingShip: EncodedEntity | undefined,
+        quarantine: PlayerQuarantine | undefined,
         snapshots: PlayerSnapshotSummary[],
         savedAt: number | undefined,
-        resolve: (state: PlayerState, continued: boolean) => void,
+        resolve: (
+            state: PlayerState,
+            continued: boolean,
+            ship?: EncodedEntity,
+        ) => void,
         continued: boolean,
         onNewPilotCreated: (state: PlayerState) => void,
         showMainMenu: (focusLabel?: string) => void,
@@ -453,6 +499,7 @@ export class StartMenu {
         this.content.style.cssText = `
           position: absolute; inset: 0; text-align: center;
         `;
+        const quarantineNotice = pilotQuarantineNotice(quarantine);
         if (menuPresentationForRetailAssets(this.retailAssetStatus) === 'retail'
             && this.retailAssets) {
             this.scene.style.backgroundImage =
@@ -556,8 +603,16 @@ export class StartMenu {
                     width, height, x, y,
                     rollover ? updateRollover : undefined);
                 button.dataset.menuAction = label;
+                button.disabled = isStartMenuActionDisabled(
+                    label, existing, quarantine);
                 if (id === '8050') {
+                    if (button.disabled && quarantineNotice) {
+                        button.title = quarantineNotice;
+                    }
                     button.addEventListener('click', () => {
+                        if (button.disabled) {
+                            return;
+                        }
                         this.menuRenderVersion++;
                         this.showNameEntry(
                             onNewPilotCreated,
@@ -571,6 +626,7 @@ export class StartMenu {
                         this.stopLogoAnimation(true);
                         this.dialogs?.showOpenPilot(
                             existing,
+                            existingShip,
                             snapshots,
                             savedAt,
                         );
@@ -582,19 +638,14 @@ export class StartMenu {
                         this.dialogs?.showQuit();
                     });
                 } else if (id === '8053') {
-                    button.disabled = !canEnterShip(existing);
-                    button.title = pilotDeathNotice(existing)
+                    button.title = quarantineNotice
+                        ?? pilotDeathNotice(existing)
                         ?? (existing
                             ? 'Enter the ship with the selected pilot'
                             : 'No saved pilot selected');
-                    if (button.disabled) {
-                        button.style.opacity = '.48';
-                        button.style.filter = 'grayscale(.8)';
-                        button.style.cursor = 'default';
-                    }
                     button.addEventListener('click', () => {
-                        if (canEnterShip(existing)) {
-                            resolve(existing, continued);
+                        if (!button.disabled && canEnterShip(existing)) {
+                            resolve(existing, continued, existingShip);
                         }
                     });
                 } else if (id === '8054') {
@@ -610,7 +661,23 @@ export class StartMenu {
                         this.dialogs?.showAbout();
                     });
                 }
+                if (button.disabled) {
+                    button.style.opacity = '.48';
+                    button.style.filter = 'grayscale(.8)';
+                    button.style.cursor = 'default';
+                }
                 this.content.appendChild(button);
+            }
+            if (quarantineNotice) {
+                const notice = document.createElement('p');
+                notice.dataset.pilotQuarantine = '';
+                notice.textContent = quarantineNotice;
+                notice.style.cssText = `
+                  position: absolute; left: 300px; top: 604px; width: 424px;
+                  margin: 0; color: ${PILOT_STATS_RED};
+                  font: 11px/14px Geneva, Arial, sans-serif;
+                `;
+                this.content.appendChild(notice);
             }
             void buildPilotStatBlock(existing, this.gameData)
                 .then(stats => {
@@ -657,10 +724,15 @@ export class StartMenu {
             title.style.cssText = 'margin: 0 0 26px; letter-spacing: .08em;';
             fallback.appendChild(title);
             const deathNotice = pilotDeathNotice(existing);
-            if (deathNotice) {
+            const noticeText = quarantineNotice ?? deathNotice;
+            if (noticeText) {
                 const notice = document.createElement('p');
-                notice.dataset.pilotDeath = '';
-                notice.textContent = deathNotice;
+                if (quarantineNotice) {
+                    notice.dataset.pilotQuarantine = '';
+                } else {
+                    notice.dataset.pilotDeath = '';
+                }
+                notice.textContent = noticeText;
                 notice.style.cssText = `
                   margin: -12px 0 20px; color: ${PILOT_STATS_RED};
                   font: 12px/15px Geneva, Arial, sans-serif;
@@ -682,23 +754,29 @@ export class StartMenu {
             for (const label of labels) {
                 const button = makeThemedButton(label);
                 button.dataset.menuAction = label;
-                if (label === 'Enter Ship') {
-                    button.disabled = !canEnterShip(existing);
+                button.disabled = isStartMenuActionDisabled(
+                    label, existing, quarantine);
+                if (button.disabled) {
+                    button.title = quarantineNotice
+                        ?? pilotDeathNotice(existing)
+                        ?? 'No saved pilot selected';
                 }
                 button.addEventListener('click', () => {
-                    if (label === 'New Pilot') {
+                    if (label === 'New Pilot' && !button.disabled) {
                         this.menuRenderVersion++;
                         this.showNameEntry(
                             onNewPilotCreated,
                             () => showMainMenu('New Pilot'),
                         );
                     } else if (label === 'Enter Ship'
+                        && !button.disabled
                         && canEnterShip(existing)) {
-                        resolve(existing, continued);
+                        resolve(existing, continued, existingShip);
                     } else if (label === 'Open Pilot') {
                         this.menuRenderVersion++;
                         this.dialogs?.showOpenPilot(
                             existing,
+                            existingShip,
                             snapshots,
                             savedAt,
                         );
@@ -812,7 +890,7 @@ export class StartMenu {
         input.maxLength = 32;
         input.autocomplete = 'off';
         input.placeholder = 'Pilot name';
-        input.value = 'Captain';
+        input.value = INITIAL_PLAYER_STATE.pilotName;
         input.style.cssText = `
           box-sizing: border-box; width: 100%; height: 43px; margin: 0 0 17px;
           padding: 7px 12px; color: #fff8e8; caret-color: #f0c2a2;
@@ -846,7 +924,7 @@ export class StartMenu {
         const submit = () => {
             const state = createInitialPlayerState();
             const name = input.value.trim();
-            state.pilotName = name || 'Captain';
+            state.pilotName = name || INITIAL_PLAYER_STATE.pilotName;
             onCreated(state);
         };
         const goBack = () => {

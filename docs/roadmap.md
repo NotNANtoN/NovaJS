@@ -4,9 +4,16 @@ See [`docs/engine-overview.md`](engine-overview.md) for how the engine
 works and [`docs/maturity.md`](maturity.md) for how far each area can be
 trusted today.
 
-Canonical status and work order as of 2026-08-25. Checked items have focused
+Canonical status and work order as of 2026-08-27. Checked items have focused
 automated regression coverage or a repository-level build/CI check; they do not
 imply complete EV Nova retail parity.
+
+The server-authoritative player mutation items below were checked off before
+the 2026-08-26 reboot described in [`docs/maturity.md`](maturity.md), and the
+code did not survive it. They are unchecked again because nothing in the tree
+implements them: there are no mutation sessions, no intent-only protocol, no
+capability negotiation, and no remote mutation port. Verify against the code
+before checking any of them again.
 
 ## Completed/current foundation
 
@@ -35,41 +42,72 @@ imply complete EV Nova retail parity.
   authority regression tests.
 - [x] Focused persistence, input-edge, held-fire, cache, render-lifecycle, and
   performance hardening covered by the current supported test suite.
+- [x] Token-only Linode deployment from GitHub Actions: no manual SSH step,
+  host-side deploy assets refreshed from the image and rolled back if unhealthy,
+  HTTPS that survives a host recreate, per-IP request and bandwidth limits,
+  nightly pilot-data backups to object storage, and lossless WebP artwork. See
+  [`docs/DEPLOY.md`](DEPLOY.md).
+- [x] Time to a usable main menu no longer depends on the 9.4 MB title music or
+  the full artwork set: the menu renders immediately and upgrades to retail
+  presentation as assets arrive.
+- [x] Jump feel: braking before a jump, streaks and charge audio driven by the
+  speed the jump actually adds, a silent departure for distant ships, and the
+  arrival bang at the end of the flash rather than an explosion at its start.
+- [x] Killed pilots end the session after the explosion, return to the menu, and
+  cannot be flown again until a save is loaded.
 
 ## P0 correctness and data safety remaining
 
-- [ ] Define one canonical persisted `PlayerState` codec and one `PlayerStore`
+- [x] Define one canonical persisted `PlayerState` codec and one `PlayerStore`
   port; remove duplicate projections/defaults/fingerprints only after migration,
-  restart, snapshot restore, and malformed-data tests pass.
-- [ ] Preserve and validate saved ship snapshots across process restart; add a
+  restart, snapshot restore, and malformed-data tests pass. The port now
+  declares what it actually returns, HTTP and peer responses go through one
+  whitelisting projection so store bookkeeping cannot leak, and menu/client
+  defaults come from `createInitialPlayerState()`.
+- [x] Preserve and validate saved ship snapshots across process restart; add a
   round-trip test covering ship, cargo, outfits, missions, date, and position.
+  Stored ships are decoded component by component, so one obsolete component
+  cannot discard a hull; session-lifecycle components are excluded by name; a
+  hull that no longer matches falls back to a fresh ship. The stored ship is
+  refreshed when the pilot leaves a spaceport, which is what makes Outfitter
+  and Shipyard purchases survive a reload.
 - [x] Consolidate NCB mutation semantics behind one detached transaction
   runtime and ordered ECS effect queue; route BBS, landing, expiration,
   ship-goal, shipyard, outfitter, and trade intents through the shared local
   mutation boundary.
-- [x] Move player-state and mission mutations to an authoritative validation
+- [ ] Move player-state and mission mutations to an authoritative validation
   boundary; test forged availability, cargo, credits, mission, and ship-change
   network commands before enabling those paths for multiplayer.
-  - [x] Add the strict intent-only protocol, capability negotiation, monotonic
+  - [ ] Add the strict intent-only protocol, capability negotiation, monotonic
     revisions, durable reconciliation, replay idempotency, remote purchase
-    adapter, and negotiated raw-replication lock.
-  - [x] Issue stable resolved retail/procedural mission offers server-side and
+    adapter, and negotiated raw-replication lock. Monotonic per-token revisions
+    with conflict rejection do exist in the store; the rest does not.
+  - [ ] Issue stable resolved retail/procedural mission offers server-side and
     move offer accept/refuse, active-mission abort, landing completion/failure,
     expiration, ship goals, rewards, date, and arrival snapshots behind the
     revisioned authority session.
-  - [x] Move jump-route/date and death/respawn state transitions behind the
+  - [ ] Move jump-route/date and death/respawn state transitions behind the
     server authority session, advertise `worldLifecycle`, and enable strict
     new/new negotiation. Accepted jumps commit at begin before presentation;
     death relocation is server-detected and server-completed. Legacy peers
     retain owner-authoritative compatibility for all fields.
-  - [x] Harden the strict boundary with server-selected, retryable capability
+  - [ ] Harden the strict boundary with server-selected, retryable capability
     negotiation; token-keyed serialized CAS sessions; authoritative new-pilot
     creation and entity binding; reconnect-stable offer scopes; durable pending
     death state; generation-bound world transfers; and a server movement
     validation shadow used by landing. Legacy mutation authority is now an
     explicit, disabled-by-default deployment policy.
-- [ ] Add explicit migration/version handling for every persisted schema change,
-  including rollback-safe fixtures from currently supported pilot files.
+- [x] Add explicit migration/version handling for every persisted schema change,
+  including rollback-safe fixtures from currently supported pilot files. Records
+  carry `schemaVersion`, an ordered migration registry upgrades unversioned
+  pilots in place, and a record written by newer code is refused rather than
+  downgraded.
+- [x] Never destroy pilot data that cannot be read. An undecodable file or
+  record is quarantined verbatim, writes for that token are refused, and the
+  menu says so and blocks New Pilot and Enter Ship so nothing is overwritten.
+  A single malformed snapshot is dropped without taking the pilot with it.
+- [x] Flush pending writes on `SIGTERM`/`SIGINT`, and recover the write chain
+  after a failed write instead of silently dropping every later save.
 
 ## P1 single-player retail completeness
 

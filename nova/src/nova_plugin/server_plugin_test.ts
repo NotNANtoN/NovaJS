@@ -6,11 +6,15 @@ import { multiplayer, MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugi
 import { Component } from 'nova_ecs/component';
 import { Entity } from 'nova_ecs/entity';
 import { World } from 'nova_ecs/world';
+import { EncodedEntity } from 'nova_ecs/plugins/serializer_plugin';
+import { MultiRoom } from '../communication/multi_room_communicator';
 import {
     ManageClientsSystem,
     PersistPlayerStateSystem,
+    PlayerData,
     PlayerStateSnapshots,
     RemovedPeerEvent,
+    ServerPlugin,
 } from './server_plugin';
 import {
     createInitialPlayerState,
@@ -19,7 +23,10 @@ import {
     PlayerStatePlugin,
     PlayerStoreResource,
 } from './player_state';
+import { GameDataResource } from './game_data_resource';
+import { MultiRoomResource } from './nova_plugin';
 import { SystemIdResource } from './system_id_resource';
+import { MockGameData } from 'novadatainterface/MockGameData';
 
 const NonPersistentComponent = new Component<{ value: number }>(
     'ServerPluginTestNonPersistent');
@@ -149,5 +156,99 @@ describe('server player persistence', () => {
         expect(store.saves.at(-1)?.state.credits).toBe(77_777);
         expect(store.flushes).toBe(1);
         expect(world.entities.has('player')).toBeFalse();
+    });
+});
+
+describe('server player bootstrap', () => {
+    it('sends the stored ship when a peer joins', async () => {
+        const peers = new Map<string, MockCommunicator>();
+        const server = new MockCommunicator('server', peers) as
+            MockCommunicator & {
+                getPlayerToken(peer: string): string | undefined;
+            };
+        server.getPlayerToken = () => 'pilot';
+        const client = new MockCommunicator('client', peers);
+        peers.set('server', server);
+        peers.set('client', client);
+        const state = createInitialPlayerState();
+        const ship: EncodedEntity = {
+            name: 'Shuttle',
+            components: [['Ship', { id: state.shipId }]],
+        };
+        const store = {
+            ready: Promise.resolve(),
+            bindPeer: jasmine.createSpy('bindPeer'),
+            getTokenForPeer: () => 'pilot',
+            get: async () => ({
+                ...state,
+                savedAt: 123,
+                ship,
+            }),
+            getSnapshots: async () => [],
+        };
+        const world = new World('server bootstrap test');
+        world.resources.set(GameDataResource, new MockGameData());
+        world.resources.set(MultiRoomResource, new MultiRoom(server));
+        world.resources.set(PlayerStoreResource, store as any);
+        await world.addPlugin(multiplayer(server));
+        await world.addPlugin(ServerPlugin);
+
+        server.peers.current.next(new Set(['client']));
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        const sent = client.allMessages
+            .map(value => (value as { message?: unknown }).message)
+            .map(value => PlayerData.decode(value))
+            .find(decoded => decoded._tag === 'Right');
+        expect(sent?._tag).toBe('Right');
+        if (sent?._tag !== 'Right') {
+            return;
+        }
+        expect(sent.right.ship).toEqual(ship);
+        expect(sent.right.playerState?.shipId).toBe(state.shipId);
+        expect(store.bindPeer).toHaveBeenCalledOnceWith('client', 'pilot');
+    });
+
+    it('reports a quarantined pilot when no state can be served', async () => {
+        const peers = new Map<string, MockCommunicator>();
+        const server = new MockCommunicator('server', peers) as
+            MockCommunicator & {
+                getPlayerToken(peer: string): string | undefined;
+            };
+        server.getPlayerToken = () => 'pilot';
+        const client = new MockCommunicator('client', peers);
+        peers.set('server', server);
+        peers.set('client', client);
+        const store = {
+            ready: Promise.resolve(),
+            bindPeer: jasmine.createSpy('bindPeer'),
+            getTokenForPeer: () => 'pilot',
+            get: async () => undefined,
+            getSnapshots: async () => [],
+            quarantine: async () => 'record' as const,
+        };
+        const world = new World('quarantined bootstrap test');
+        world.resources.set(GameDataResource, new MockGameData());
+        world.resources.set(MultiRoomResource, new MultiRoom(server));
+        world.resources.set(PlayerStoreResource, store as any);
+        await world.addPlugin(multiplayer(server));
+        await world.addPlugin(ServerPlugin);
+
+        server.peers.current.next(new Set(['client']));
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        const sent = client.allMessages
+            .map(value => (value as { message?: unknown }).message)
+            .map(value => PlayerData.decode(value))
+            .find(decoded => decoded._tag === 'Right'
+                && decoded.right.quarantine === 'record');
+        expect(sent?._tag).toBe('Right');
+        if (sent?._tag !== 'Right') {
+            return;
+        }
+        expect(sent.right).toEqual({
+            uuid: 'client',
+            quarantine: 'record',
+        });
     });
 });

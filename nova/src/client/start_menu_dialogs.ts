@@ -2,6 +2,8 @@ import type {
     PlayerSnapshotSummary,
     PlayerState,
 } from '../nova_plugin/player_state';
+import { createInitialPlayerState } from '../nova_plugin/player_state';
+import type { EncodedEntity } from 'nova_ecs/plugins/serializer_plugin';
 import {
     getMasterVolume,
     setMasterVolume,
@@ -39,6 +41,7 @@ const FIELD_STYLE = `
     background: linear-gradient(#090707, #1b0e0c);
     box-shadow: inset 0 2px 6px rgba(0, 0, 0, .78);
 `;
+const INITIAL_PLAYER_STATE = createInitialPlayerState();
 
 const CONTROL_LABELS: Readonly<Record<string, string>> = {
     accelerate: 'Accelerate',
@@ -100,6 +103,7 @@ export interface PilotChoice {
     savedAt?: number;
     reason?: PlayerSnapshotSummary['reason'];
     state?: PlayerState;
+    ship?: EncodedEntity;
 }
 
 export interface ControlReferenceEntry {
@@ -114,9 +118,16 @@ export interface RetailDialogOptions {
     resolveSystemName?: (systemId: string) => Promise<string | undefined>;
     restoreSnapshot?: (
         snapshotId: string,
-    ) => Promise<{ playerState?: PlayerState } | undefined>;
+    ) => Promise<{
+        playerState?: PlayerState;
+        ship?: EncodedEntity;
+    } | undefined>;
     onBack: (actionLabel: string) => void;
-    onPilotSelected: (state: PlayerState, savedAt?: number) => void;
+    onPilotSelected: (
+        state: PlayerState,
+        savedAt?: number,
+        ship?: EncodedEntity,
+    ) => void;
 }
 
 function humanizeKey(code: string): string {
@@ -190,6 +201,7 @@ export function buildPilotChoices(
     current: PlayerState | undefined,
     snapshots: readonly PlayerSnapshotSummary[],
     savedAt?: number,
+    currentShip?: EncodedEntity,
 ): PilotChoice[] {
     const latestSnapshotTime = snapshots.reduce<number | undefined>(
         (latest, snapshot) => latest === undefined
@@ -201,10 +213,12 @@ export function buildPilotChoices(
         choices.push({
             kind: 'current',
             id: 'current',
-            pilotName: current.pilotName || 'Captain',
-            currentSystem: current.currentSystem || 'nova:130',
+            pilotName: current.pilotName || INITIAL_PLAYER_STATE.pilotName,
+            currentSystem: current.currentSystem
+                || INITIAL_PLAYER_STATE.currentSystem,
             savedAt: savedAt ?? latestSnapshotTime,
             state: current,
+            ship: currentShip,
         });
     }
     choices.push(...[...snapshots]
@@ -212,9 +226,13 @@ export function buildPilotChoices(
         .map(snapshot => ({
             kind: 'snapshot' as const,
             id: snapshot.id,
-            pilotName: snapshot.pilotName ?? current?.pilotName ?? 'Captain',
+            pilotName: snapshot.pilotName
+                ?? current?.pilotName
+                ?? INITIAL_PLAYER_STATE.pilotName,
             currentSystem:
-                snapshot.currentSystem ?? current?.currentSystem ?? 'nova:130',
+                snapshot.currentSystem
+                ?? current?.currentSystem
+                ?? INITIAL_PLAYER_STATE.currentSystem,
             savedAt: snapshot.createdAt,
             reason: snapshot.reason,
         })));
@@ -358,12 +376,14 @@ export class RetailMenuDialogs {
 
     showOpenPilot(
         current: PlayerState | undefined,
+        currentShip: EncodedEntity | undefined,
         snapshots: readonly PlayerSnapshotSummary[],
         savedAt?: number,
     ) {
         this.clear();
         this.options.content.replaceChildren();
-        const choices = buildPilotChoices(current, snapshots, savedAt);
+        const choices = buildPilotChoices(
+            current, snapshots, savedAt, currentShip);
         const dialog = document.createElement('section');
         dialog.tabIndex = -1;
         dialog.setAttribute('role', 'dialog');
@@ -484,7 +504,8 @@ export class RetailMenuDialogs {
             }
             select.disabled = true;
             if (selected.kind === 'current' && selected.state) {
-                this.options.onPilotSelected(selected.state, selected.savedAt);
+                this.options.onPilotSelected(
+                    selected.state, selected.savedAt, selected.ship);
                 return;
             }
             if (!this.options.restoreSnapshot) {
@@ -499,6 +520,7 @@ export class RetailMenuDialogs {
                     this.options.onPilotSelected(
                         restored.playerState,
                         selected.savedAt,
+                        restored.ship,
                     );
                     return;
                 }

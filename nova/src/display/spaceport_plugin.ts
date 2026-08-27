@@ -42,6 +42,7 @@ import { PlanetDataComponent } from '../nova_plugin/planet_plugin';
 import { Spaceport } from '../spaceport/spaceport';
 import { deImmerify } from '../util/deimmerify';
 import { ResizeEvent, ScreenSize } from './screen_size_plugin';
+import { persistDeparture } from './spaceport_departure';
 import { Stage } from './stage_resource';
 
 
@@ -142,6 +143,14 @@ const LandSystem = new System({
                 });
             }
             entities.set(shipUuid, newShip);
+            if (playerStore && playerMultiplayer) {
+                void persistDeparture(
+                    playerStore,
+                    playerStore.getTokenForPeer(playerMultiplayer.owner),
+                    newShip,
+                    playerState,
+                    entity => serializer.encode(entity));
+            }
             })
             .catch((error: unknown) =>
                 console.error('Mission landing processing failed', error));

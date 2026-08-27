@@ -8,6 +8,7 @@ import { NovaDataType } from "../../../novadatainterface/NovaDataInterface";
 import { PlayerStore } from "./player_store";
 import { setupHttpLimiter } from './http_limiter';
 import { LosslessWebPCache } from './lossless_webp';
+import { makePlayerData } from '../nova_plugin/player_data_projection';
 
 export const IMMUTABLE_ASSET_CACHE =
     'public, max-age=31536000, immutable';
@@ -157,29 +158,24 @@ class GameDataServer {
                     res.status(400).send('Missing player token');
                     return;
                 }
-                const player = await this.playerStore!.get(token);
-                if (!player) {
+                const [player, quarantine] = await Promise.all([
+                    this.playerStore!.get(token),
+                    this.playerStore!.quarantine?.(token)
+                        ?? Promise.resolve('none' as const),
+                ]);
+                if (!player && quarantine === 'none') {
                     res.status(404).send('Player not found');
                     return;
                 }
-                res.send({
-                    uuid: 'persisted',
-                    system: player.currentSystem,
-                    savedAt: player.savedAt,
-                    // Lets a caller tell whether the state it holds is still
-                    // the newest one the store has accepted.
-                    revision: player.revision ?? 0,
-                    playerState: player,
-                    snapshots: player.snapshots.map(({
-                        id, createdAt, reason, state,
-                    }) => ({
-                        id,
-                        createdAt,
-                        reason,
-                        pilotName: state.pilotName,
-                        currentSystem: state.currentSystem,
-                    })),
-                });
+                res.send(makePlayerData('persisted', {
+                    ...(player === undefined ? {} : {
+                        state: player,
+                        savedAt: player.savedAt,
+                        ship: player.ship,
+                        snapshots: player.snapshots,
+                    }),
+                    quarantine,
+                }));
             });
             this.app.get('/player/snapshots', async (req, res) => {
                 const token = typeof req.query.token === 'string'
@@ -211,7 +207,12 @@ class GameDataServer {
                         res.status(404).send('Snapshot not found');
                         return;
                     }
-                    res.send(player);
+                    res.send(makePlayerData('persisted', {
+                        state: player,
+                        savedAt: player.savedAt,
+                        ship: player.ship,
+                        snapshots: player.snapshots,
+                    }));
                 });
         }
 

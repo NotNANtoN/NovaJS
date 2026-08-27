@@ -92,6 +92,42 @@ let world: World;
 const repl = new NovaRepl();
 const playerStore = new PlayerStore();
 
+const SHUTDOWN_TIMEOUT_MS = 5_000;
+let shuttingDown = false;
+
+async function shutdown(signal: 'SIGINT' | 'SIGTERM') {
+    if (shuttingDown) {
+        return;
+    }
+    shuttingDown = true;
+    const exitCode = signal === 'SIGINT' ? 130 : 143;
+    let timeout: NodeJS.Timeout | undefined;
+    try {
+        await Promise.race([
+            playerStore.flush(),
+            new Promise<never>((_, reject) => {
+                timeout = setTimeout(() => {
+                    reject(new Error('Timed out flushing player data'));
+                }, SHUTDOWN_TIMEOUT_MS);
+            }),
+        ]);
+    } catch (error) {
+        console.error(`Failed to flush player data during ${signal}`, error);
+    } finally {
+        if (timeout !== undefined) {
+            clearTimeout(timeout);
+        }
+        process.exit(exitCode);
+    }
+}
+
+process.on('SIGTERM', () => {
+    void shutdown('SIGTERM');
+});
+process.on('SIGINT', () => {
+    void shutdown('SIGINT');
+});
+
 let communicator: CommunicatorServer;
 async function startGame() {
     // This also creates the default data file before asset parsing starts.

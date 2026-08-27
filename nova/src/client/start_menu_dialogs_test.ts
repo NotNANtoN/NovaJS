@@ -1,12 +1,15 @@
 import { createInitialPlayerState } from '../nova_plugin/player_state';
+import { EncodedEntity } from 'nova_ecs/plugins/serializer_plugin';
 import {
     buildPilotChoices,
     canEnterShip,
     controlReference,
 } from './start_menu_dialogs';
 import {
+    isStartMenuActionDisabled,
     menuPresentationForRetailAssets,
     pilotDeathNotice,
+    pilotQuarantineNotice,
 } from './start_menu';
 
 describe('start menu action state', () => {
@@ -38,10 +41,49 @@ describe('start menu action state', () => {
         }]).map(choice => choice.id)).toEqual(['landing']);
     });
 
+    it('describes record and file quarantine distinctly', () => {
+        const record = pilotQuarantineNotice('record');
+        const file = pilotQuarantineNotice('file');
+        expect(record).not.toBe(file);
+        // The pilot must be told their save still exists, or they will
+        // assume it is gone and start over.
+        for (const notice of [record, file]) {
+            expect(notice).toContain('NOTHING WAS DELETED');
+            expect(notice).toContain('REPORT THIS');
+        }
+        // Only a whole-file failure makes saving impossible.
+        expect(file).toContain('NOTHING CAN BE SAVED');
+        expect(record).not.toContain('NOTHING CAN BE SAVED');
+        expect(pilotQuarantineNotice('none')).toBeUndefined();
+        expect(pilotQuarantineNotice(undefined)).toBeUndefined();
+    });
+
+    it('blocks play actions but keeps recovery available during quarantine',
+        () => {
+        for (const quarantine of ['record', 'file'] as const) {
+            expect(isStartMenuActionDisabled(
+                'New Pilot', undefined, quarantine)).toBeTrue();
+            expect(isStartMenuActionDisabled(
+                'Enter Ship', createInitialPlayerState(), quarantine))
+                .toBeTrue();
+            expect(isStartMenuActionDisabled(
+                'Open Pilot', undefined, quarantine)).toBeFalse();
+            expect(isStartMenuActionDisabled(
+                'Quit Nova', undefined, quarantine)).toBeFalse();
+            expect(isStartMenuActionDisabled(
+                'Set Prefs', undefined, quarantine)).toBeFalse();
+            expect(isStartMenuActionDisabled(
+                'About Nova', undefined, quarantine)).toBeFalse();
+        }
+    });
+
     it('lists the current pilot first and snapshots newest-first', () => {
         const current = createInitialPlayerState();
         current.pilotName = 'Current Captain';
         current.currentSystem = 'nova:130';
+        const ship: EncodedEntity = {
+            components: [['Ship', { id: current.shipId }]],
+        };
 
         const choices = buildPilotChoices(current, [
             {
@@ -58,7 +100,7 @@ describe('start menu action state', () => {
                 pilotName: 'Newer Captain',
                 currentSystem: 'nova:136',
             },
-        ]);
+        ], undefined, ship);
 
         expect(choices.map(choice => choice.id))
             .toEqual(['current', 'newer', 'older']);
@@ -66,6 +108,7 @@ describe('start menu action state', () => {
             pilotName: 'Current Captain',
             currentSystem: 'nova:130',
             savedAt: 200,
+            ship,
         }));
         expect(choices[1]).toEqual(jasmine.objectContaining({
             pilotName: 'Newer Captain',

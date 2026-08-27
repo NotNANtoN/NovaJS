@@ -23,7 +23,11 @@ rest of this document used to claim**:
 - The server-authoritative player mutation wave: token-owned mutation
   sessions, strict mutation authority, and the remote mutation port.
 - The versioned player persistence wave built on it: per-token CAS,
-  quarantine, and shutdown flushing.
+  quarantine, and shutdown flushing. **Rebuilt on 2026-08-27**, on the
+  existing store rather than on mutation sessions: `schemaVersion` with an
+  ordered migration registry, quarantine of unreadable files and records with
+  a menu that refuses to overwrite them, signal flushing, a recoverable write
+  chain, and saved-ship round trips.
 - Atomic NCB effects, and the in-flight pilot dialogs that opened the
   mission log and ship info with a keypress.
 

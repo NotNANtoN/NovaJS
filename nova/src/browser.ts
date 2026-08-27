@@ -1,7 +1,6 @@
 import { Entity } from "nova_ecs/entity";
-import { Position } from "nova_ecs/datatypes/position";
-import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
 import { multiplayer, MultiplayerData } from "nova_ecs/plugins/multiplayer_plugin";
+import { SerializerResource } from "nova_ecs/plugins/serializer_plugin";
 import { resetWallClock, TimeResource } from "nova_ecs/plugins/time_plugin";
 import { World } from "nova_ecs/world";
 import { isRight } from "fp-ts/Either";
@@ -44,8 +43,13 @@ import {
     PlayerState,
     PlayerStateComponent,
     PlayerStateResource,
+    createInitialPlayerState,
     setCargoCapacity,
 } from "./nova_plugin/player_state";
+import {
+    placeShipAtLanding,
+    restoreStoredShip,
+} from "./nova_plugin/restore_stored_ship";
 import { SystemIdResource } from "./nova_plugin/system_id_resource";
 import {
     EscapeMenu,
@@ -53,7 +57,7 @@ import {
     StartMenuSelection,
 } from "./client/start_menu";
 
-
+const INITIAL_PLAYER_STATE = createInitialPlayerState();
 const gameData = new GameData();
 (window as any).gameData = gameData;
 (window as any).PIXI = PIXI;
@@ -162,6 +166,10 @@ let gamePaused = true;
 let tickerInstalled = false;
 let mainRoomJoined = false;
 let mainMenuTransitioning = false;
+// Tracked by uuid rather than by reference: a shipyard purchase replaces the
+// entity under the same key, and the menu must carry the ship the pilot
+// actually owns now.
+let playerShipUuid: string | undefined;
 
 function resetGameplayClocks() {
     for (const gameplayWorld of [world, system]) {
@@ -203,9 +211,14 @@ async function leaveGameWorld() {
 }
 
 type SystemTransitionCause = 'initial' | 'hyperjump' | 'respawn';
+type TransitionEntity = Entity | ((newSystem: World) => Entity);
 
 async function transitionTo(
-    { entity, to, uuid }: { entity: Entity, to: string, uuid: string },
+    { entity, to, uuid }: {
+        entity: TransitionEntity,
+        to: string,
+        uuid: string,
+    },
     cause: SystemTransitionCause,
 ) {
     if (system) {
@@ -213,6 +226,8 @@ async function transitionTo(
     }
 
     const newSystem = makeSystem(to, gameData, undefined, compatibilityProfile);
+    const transitionEntity = typeof entity === 'function'
+        ? entity(newSystem) : entity;
     (window as any).novaDebug = new DebugSettings(newSystem, (window as any).novaDebug);
 
     (window as any).system = newSystem;
@@ -238,12 +253,12 @@ async function transitionTo(
             if (playerUuid !== uuid || !gameRunning) {
                 return;
             }
-            const death = entity.components.get(PlayerDeathComponent);
+            const death = transitionEntity.components.get(PlayerDeathComponent);
             if (death?.outcome !== 'killed') {
                 return;
             }
             void returnToMainMenu(
-                entity.components.get(PlayerStateComponent));
+                transitionEntity.components.get(PlayerStateComponent));
         });
 
     if (!world) {
@@ -259,9 +274,9 @@ async function transitionTo(
     if (cause === 'hyperjump') {
         // World construction and room handshakes can take longer than the
         // visual arrival phase. Start it when the destination can draw.
-        restartJumpArrival(entity);
+        restartJumpArrival(transitionEntity);
     }
-    newSystem.entities.set(uuid, entity);
+    newSystem.entities.set(uuid, transitionEntity);
     system = newSystem;
     resetGameplayClocks();
 }
@@ -282,28 +297,49 @@ async function startGame(
     const playerState = selection.playerState;
     const requestedShip = playerState.shipId;
     const shipId = ids.Ship.includes(requestedShip)
-        ? requestedShip : 'nova:128';
+        ? requestedShip : INITIAL_PLAYER_STATE.shipId;
     const shipData = await gameData.data.Ship.get(shipId);
     setCargoCapacity(playerState, shipData.cargoCapacity);
-    const shipEntity = makeShip(shipData);
-    const movement = shipEntity.components.get(MovementStateComponent);
-    if (movement) {
-        movement.position = new Position(...playerState.lastLandedPosition);
-    }
-    shipEntity.components.set(PlayerStateComponent, playerState);
     world.resources.set(PlayerStateResource, playerState);
-    shipEntity.components.set(MultiplayerData, {
-        owner: communicator.uuid!
-    });
-    shipEntity.components.set(PlayerShipSelector, undefined);
-    const requestedSystem = playerState.currentSystem || 'nova:130';
+    const preparePlayerShip = (newSystem: World) => {
+        const fallback = makeShip(shipData);
+        const serializer = newSystem.resources.get(SerializerResource);
+        const result = serializer
+            ? restoreStoredShip(
+                serializer, selection.ship, fallback, shipId)
+            : {
+                entity: fallback,
+                restored: false,
+                skippedComponents: [],
+                fallbackReason: selection.ship === undefined
+                    ? undefined : 'invalid-entity' as const,
+            };
+        if (result.skippedComponents.length > 0) {
+            console.warn(`Skipped stored ship components: ${
+                result.skippedComponents.join(', ')}`);
+        }
+        if (selection.ship !== undefined && !result.restored) {
+            console.warn('Stored ship was unusable; using a fresh hull');
+        }
+        const shipEntity = result.entity;
+        placeShipAtLanding(shipEntity, playerState.lastLandedPosition);
+        shipEntity.components.set(PlayerStateComponent, playerState);
+        shipEntity.components.set(MultiplayerData, {
+            owner: communicator.uuid!,
+        });
+        shipEntity.components.set(PlayerShipSelector, undefined);
+        return shipEntity;
+    };
+    const requestedSystem = playerState.currentSystem
+        || INITIAL_PLAYER_STATE.currentSystem;
     const systemId = ids.System.includes(requestedSystem)
-        ? requestedSystem : 'nova:130';
+        ? requestedSystem : INITIAL_PLAYER_STATE.currentSystem;
 
+    playerShipUuid = v4();
     await transitionTo({
-        entity: shipEntity,
+        entity: preparePlayerShip,
         to: systemId,
-        uuid: v4(),
+        uuid: playerShipUuid,
     }, 'initial');
     stopTitleMusic();
     gameRunning = true;
@@ -408,13 +444,7 @@ async function restoreSnapshot(snapshotId: string): Promise<PlayerData | undefin
     if (!response.ok) {
         return undefined;
     }
-    const restored = await response.json() as Record<string, unknown>;
-    const decoded = PlayerData.decode({
-        uuid: communicator.uuid ?? 'client',
-        system: restored.currentSystem,
-        savedAt: restored.savedAt,
-        playerState: restored,
-    });
+    const decoded = PlayerData.decode(await response.json() as unknown);
     return isRight(decoded) ? decoded.right : undefined;
 }
 
@@ -439,6 +469,16 @@ async function returnToMainMenu(playerState?: PlayerState) {
     try {
         const currentState = playerState
             ?? world?.resources.get(PlayerStateResource);
+        const serializer = system?.resources.get(SerializerResource);
+        let currentShip;
+        try {
+            const liveShip = playerShipUuid
+                ? system?.entities.get(playerShipUuid) : undefined;
+            currentShip = serializer && liveShip
+                ? serializer.encode(liveShip) : undefined;
+        } catch (error) {
+            console.warn('Could not retain the current ship for the menu', error);
+        }
         const currentPlayerData = currentState
             ? {
                 uuid: communicator.uuid ?? 'client',
@@ -446,9 +486,11 @@ async function returnToMainMenu(playerState?: PlayerState) {
                 savedAt: Date.now(),
                 playerState: currentState,
                 snapshots: await loadSnapshotSummaries(),
+                ...(currentShip === undefined ? {} : { ship: currentShip }),
             }
             : await playerDataPromise;
         await leaveGameWorld();
+        playerShipUuid = undefined;
         if (mainRoomJoined) {
             multiRoom.leave('main room');
             mainRoomJoined = false;

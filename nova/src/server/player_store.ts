@@ -13,8 +13,13 @@ import {
 import { PlayerRevisionConflictError } from '../nova_plugin/player_state';
 import type {
     PersistentPlayerState,
+    PlayerQuarantine,
     PlayerStorePort,
 } from '../nova_plugin/player_state';
+import {
+    CURRENT_PLAYER_RECORD_SCHEMA_VERSION,
+    migratePlayerRecord,
+} from '../nova_plugin/player_state_migrations';
 
 export { PlayerRevisionConflictError };
 import { EncodedEntity } from 'nova_ecs/plugins/serializer_plugin';
@@ -24,6 +29,7 @@ const PLAYER_DATA_FILE = 'players.json';
 export const MAX_PLAYER_SNAPSHOTS = 10;
 
 export interface StoredPlayer extends PersistentPlayerState {
+    schemaVersion: typeof CURRENT_PLAYER_RECORD_SCHEMA_VERSION;
     savedAt?: number;
     ship?: EncodedEntity;
     snapshots: PlayerSnapshot[];
@@ -38,10 +44,13 @@ export interface StoredPlayer extends PersistentPlayerState {
 
 const StoredPlayerCodec = t.intersection([
     PersistentPlayerStateCodec,
+    t.type({
+        schemaVersion: t.literal(CURRENT_PLAYER_RECORD_SCHEMA_VERSION),
+        snapshots: t.array(PlayerSnapshotCodec),
+    }),
     t.partial({
         savedAt: t.number,
         ship: EncodedEntity,
-        snapshots: t.array(PlayerSnapshotCodec),
         revision: t.number,
     }),
 ]);
@@ -57,6 +66,7 @@ function defaultPlayerDataPath() {
 function initialPlayerState(): StoredPlayer {
     return {
         ...createInitialPlayerState(),
+        schemaVersion: CURRENT_PLAYER_RECORD_SCHEMA_VERSION,
         snapshots: [],
     };
 }
@@ -90,12 +100,28 @@ function normalizePlayer(
     const state = toPersistentPlayerState(player);
     return {
         ...state,
+        schemaVersion: CURRENT_PLAYER_RECORD_SCHEMA_VERSION,
         ...(player.savedAt === undefined ? {} : { savedAt: player.savedAt }),
         ...(player.ship === undefined
             ? {}
             : { ship: JSON.parse(JSON.stringify(player.ship)) as EncodedEntity }),
         snapshots: (player.snapshots ?? []).map(cloneSnapshot),
+        ...(player.revision === undefined
+            ? {}
+            : { revision: player.revision }),
     };
+}
+
+export class PlayerRecordQuarantinedError extends Error {
+    constructor(readonly token: string) {
+        super(`Player record '${token}' is quarantined`);
+    }
+}
+
+export class PlayerDataFileQuarantinedError extends Error {
+    constructor(readonly filePath: string) {
+        super(`Player data file '${filePath}' is quarantined`);
+    }
 }
 
 /**
@@ -109,10 +135,12 @@ export class PlayerStore implements PlayerStorePort {
     readonly filePath: string;
     readonly ready: Promise<void>;
     private players = new Map<string, StoredPlayer>();
+    private quarantinedPlayers = new Map<string, unknown>();
     private peerTokens = new Map<string, string>();
     private saveTimer?: NodeJS.Timeout;
     private writePromise: Promise<void> = Promise.resolve();
     private dirty = false;
+    private fileQuarantined = false;
     private snapshotSequence = 0;
 
     constructor(filePath = defaultPlayerDataPath()) {
@@ -137,20 +165,61 @@ export class PlayerStore implements PlayerStorePort {
         try {
             raw = JSON.parse(serialized) as unknown;
         } catch {
-            console.warn(`Ignoring invalid player data in ${this.filePath}`);
+            this.fileQuarantined = true;
+            console.error(`Quarantining invalid player data file `
+                + `'${this.filePath}'`);
             return;
         }
         if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-            console.warn(`Ignoring invalid player data in ${this.filePath}`);
+            this.fileQuarantined = true;
+            console.error(`Quarantining invalid player data file `
+                + `'${this.filePath}'`);
             return;
         }
 
         for (const [token, value] of Object.entries(raw)) {
-            const decoded = StoredPlayerCodec.decode(value);
+            const migration = migratePlayerRecord(value);
+            if (migration.kind === 'future') {
+                console.error(`Quarantining player record '${token}': `
+                    + `schema version ${migration.version} is newer than `
+                    + `${CURRENT_PLAYER_RECORD_SCHEMA_VERSION}`);
+                this.quarantinedPlayers.set(token, value);
+                continue;
+            }
+            if (migration.kind === 'invalid-version'
+                || !migration.value
+                || typeof migration.value !== 'object'
+                || Array.isArray(migration.value)) {
+                console.warn(`Quarantining invalid player record '${token}'`);
+                this.quarantinedPlayers.set(token, value);
+                continue;
+            }
+            const migrated = migration.value as Record<string, unknown>;
+            const snapshots: PlayerSnapshot[] = [];
+            if (Array.isArray(migrated.snapshots)) {
+                for (const [index, snapshot] of
+                    migrated.snapshots.entries()) {
+                    const decodedSnapshot =
+                        PlayerSnapshotCodec.decode(snapshot);
+                    if (decodedSnapshot._tag === 'Right') {
+                        snapshots.push(cloneSnapshot(decodedSnapshot.right));
+                    } else {
+                        console.warn(`Dropping invalid snapshot ${index} `
+                            + `from player record '${token}'`);
+                    }
+                }
+            }
+            const decoded = StoredPlayerCodec.decode({
+                ...migrated,
+                snapshots: Array.isArray(migrated.snapshots)
+                    ? snapshots
+                    : migrated.snapshots,
+            });
             if (decoded._tag === 'Right') {
                 this.players.set(token, normalizePlayer(decoded.right));
             } else {
-                console.warn(`Ignoring invalid player record '${token}'`);
+                console.warn(`Quarantining invalid player record '${token}'`);
+                this.quarantinedPlayers.set(token, value);
             }
         }
     }
@@ -163,6 +232,7 @@ export class PlayerStore implements PlayerStorePort {
 
     async getOrCreate(token: string): Promise<StoredPlayer> {
         await this.ready;
+        this.assertWritable(token);
         let player = this.players.get(token);
         if (!player) {
             player = initialPlayerState();
@@ -184,6 +254,7 @@ export class PlayerStore implements PlayerStorePort {
         expectedRevision?: number,
     ): Promise<number> {
         await this.ready;
+        this.assertWritable(token);
         const previous = this.players.get(token);
         const revision = previous?.revision ?? 0;
         if (expectedRevision !== undefined && expectedRevision !== revision) {
@@ -193,6 +264,7 @@ export class PlayerStore implements PlayerStorePort {
         const next = revision + 1;
         this.players.set(token, {
             ...persistedState,
+            schemaVersion: CURRENT_PLAYER_RECORD_SCHEMA_VERSION,
             savedAt: Date.now(),
             snapshots: previous?.snapshots.map(cloneSnapshot) ?? [],
             ...(ship === undefined ? { ship: previous?.ship } : { ship }),
@@ -268,8 +340,15 @@ export class PlayerStore implements PlayerStorePort {
         delete restored.diedAt;
         this.players.set(token, {
             ...restored,
+            schemaVersion: CURRENT_PLAYER_RECORD_SCHEMA_VERSION,
             savedAt: Date.now(),
+            // A restore is a write. Advancing the revision makes a session
+            // holding the pre-restore value fail instead of overwriting it.
+            revision: (player.revision ?? 0) + 1,
             snapshots: player.snapshots.map(cloneSnapshot),
+            // A snapshot taken before ships were stored has none. Keeping the
+            // newer ship would pair it with an older pilot's state, so the
+            // hull is rebuilt from the restored shipId instead.
             ...(snapshot.ship === undefined
                 ? {}
                 : {
@@ -303,29 +382,71 @@ export class PlayerStore implements PlayerStorePort {
 
     async flush() {
         await this.ready;
-        if (this.saveTimer !== undefined) {
-            clearTimeout(this.saveTimer);
-            this.saveTimer = undefined;
+        while (true) {
+            if (this.saveTimer !== undefined) {
+                clearTimeout(this.saveTimer);
+                this.saveTimer = undefined;
+            }
+            if (!this.dirty) {
+                await this.writePromise;
+                if (!this.dirty) {
+                    return;
+                }
+                continue;
+            }
+            this.dirty = false;
+            const write = this.writePromise.then(() => this.writeFile());
+            this.writePromise = write.catch(() => {
+                this.dirty = true;
+            });
+            await write;
         }
-        if (!this.dirty) {
-            await this.writePromise;
-            return;
-        }
-        this.dirty = false;
-        this.writePromise = this.writePromise.then(() => this.writeFile());
-        await this.writePromise;
     }
 
     private async writeFile() {
+        if (this.fileQuarantined) {
+            throw new PlayerDataFileQuarantinedError(this.filePath);
+        }
         await fs.mkdir(path.dirname(this.filePath), { recursive: true });
-        const contents = JSON.stringify(Object.fromEntries(this.players), null, 2)
-            + '\n';
+        const records: Record<string, unknown> =
+            Object.fromEntries(this.quarantinedPlayers);
+        for (const [token, player] of this.players) {
+            records[token] = player;
+        }
+        const contents = JSON.stringify(records, null, 2) + '\n';
         const temporaryPath = `${this.filePath}.${process.pid}.${Date.now()}.tmp`;
-        await fs.writeFile(temporaryPath, contents, {
-            encoding: 'utf8',
-            mode: 0o600,
-        });
-        await fs.rename(temporaryPath, this.filePath);
+        let renamed = false;
+        try {
+            await fs.writeFile(temporaryPath, contents, {
+                encoding: 'utf8',
+                mode: 0o600,
+            });
+            await fs.rename(temporaryPath, this.filePath);
+            renamed = true;
+        } finally {
+            if (!renamed) {
+                await fs.rm(temporaryPath, { force: true }).catch(() => {
+                    // Cleanup must not replace the persistence failure.
+                });
+            }
+        }
+    }
+
+    async quarantine(token: string): Promise<PlayerQuarantine> {
+        await this.ready;
+        if (this.fileQuarantined) {
+            return 'file';
+        }
+        return this.quarantinedPlayers.has(token) ? 'record' : 'none';
+    }
+
+    private assertWritable(token: string) {
+        if (this.fileQuarantined) {
+            throw new PlayerDataFileQuarantinedError(this.filePath);
+        }
+        if (this.quarantinedPlayers.has(token)) {
+            throw new PlayerRecordQuarantinedError(token);
+        }
     }
 }
 

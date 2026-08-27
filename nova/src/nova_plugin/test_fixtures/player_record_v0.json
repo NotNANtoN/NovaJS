@@ -1,0 +1,18 @@
+{
+    "credits": 4321,
+    "missionBits": [],
+    "gameDate": 27,
+    "activeMissions": [
+        {
+            "missionId": "nova:fixture-mission",
+            "state": "active",
+            "cargo": {
+                "type": 1,
+                "quantity": 3
+            }
+        }
+    ],
+    "shipId": "nova:128",
+    "currentSystem": "nova:777",
+    "snapshots": []
+}
