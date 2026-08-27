@@ -51,6 +51,22 @@ export const JUMP_ARRIVAL_END_SPEED_MULTIPLIER = 0.65;
 // Match the radar/interest radius so ships leave view before vanishing.
 export const SYSTEM_DEPARTURE_RADIUS = 6_000;
 export const NPC_JUMP_TIMEOUT_MS = 30_000;
+// Retail snd 130 is "Warp out": the bang as the arrival flash collapses.
+export const JUMP_ARRIVAL_SOUND_ID = 'nova:130';
+
+/**
+ * Consumes the pending arrival bang. It belongs at the end of the arrival
+ * flash, and must sound only once even if the phase is evaluated again.
+ */
+export function takeArrivalSound(
+    state: { arrivalSoundPending: boolean },
+): string | undefined {
+    if (!state.arrivalSoundPending) {
+        return undefined;
+    }
+    state.arrivalSoundPending = false;
+    return JUMP_ARRIVAL_SOUND_ID;
+}
 
 export interface InitiateJump {
     to: string /* system uuid */,
@@ -610,11 +626,11 @@ const JumpLifecycleSystem = new System({
             return;
         }
 
-        if (state.arrivalSoundPending) {
-            state.arrivalSoundPending = false;
-            emit(SoundEvent, { id: 'nova:302' });
-        }
         if (transition === 'finish-arrival') {
+            const arrivalSound = takeArrivalSound(state);
+            if (arrivalSound) {
+                emit(SoundEvent, { id: arrivalSound });
+            }
             movement.turnTo = null;
             entity.components.delete(JumpStateComponent);
         }

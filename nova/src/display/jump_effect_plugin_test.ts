@@ -2,6 +2,7 @@ import 'jasmine';
 import { Angle } from 'nova_ecs/datatypes/angle';
 import { Position } from 'nova_ecs/datatypes/position';
 import { Vector } from 'nova_ecs/datatypes/vector';
+import { Emit } from 'nova_ecs/arg_types';
 import { MovementState } from 'nova_ecs/plugins/movement_plugin';
 import {
     JumpState,
@@ -64,67 +65,16 @@ function jump(
 }
 
 describe('other-ship jump effects', () => {
-    it('emits charging and departure sounds once per phase', () => {
-        const sounds: string[] = [];
-        const emit = (_event: unknown, data: unknown) => {
-            const sound = data as { id?: string };
-            if (sound.id) {
-                sounds.push(sound.id);
-            }
-        };
-        const shipMovement = movementAt(100, 0);
-        const playerMovement = movementAt(0, 0);
-        const shipGraphic = graphic();
-        const seen = new Map<string, JumpState['phase']>();
-        const players = [[undefined, playerMovement]];
-
-        JumpEffectSystem.step(
-            { id: 'ship' } as never,
-            shipMovement,
-            PHYSICS as never,
-            shipGraphic as never,
-            jump('braking', 800) as never,
-            undefined,
-            { time: 0 } as never,
-            'ship',
-            emit as never,
-            players as never,
-            seen,
-        );
-        JumpEffectSystem.step(
-            { id: 'ship' } as never,
-            shipMovement,
-            PHYSICS as never,
-            shipGraphic as never,
-            jump('spooling', 1_200) as never,
-            undefined,
-            { time: 10 } as never,
-            'ship',
-            emit as never,
-            players as never,
-            seen,
-        );
-        JumpEffectSystem.step(
-            { id: 'ship' } as never,
-            shipMovement,
-            PHYSICS as never,
-            shipGraphic as never,
-            jump('departing', 180) as never,
-            undefined,
-            { time: 10 } as never,
-            'ship',
-            emit as never,
-            players as never,
-            seen,
-        );
-
-        expect(sounds).toEqual(['nova:128', 'nova:130']);
+    it('cannot make a sound for another ship', () => {
+        // The sound system plays every event at master volume regardless of
+        // where the source is, so this system must stay soundless.
+        expect(JumpEffectSystem.args as readonly unknown[])
+            .not.toContain(Emit);
     });
 
     it('grows the departure streak with actual speed', () => {
         const shipMovement = movementAt(100, 0);
         const shipGraphic = graphic();
-        const seen = new Map<string, JumpState['phase']>();
         const step = (state: JumpState, time: number) =>
             JumpEffectSystem.step(
                 { id: 'ship' } as never,
@@ -134,10 +84,6 @@ describe('other-ship jump effects', () => {
                 state as never,
                 undefined,
                 { time } as never,
-                'ship',
-                (() => undefined) as never,
-                [] as never,
-                seen,
             );
 
         step(jump('braking', 800), 0);
@@ -182,10 +128,6 @@ describe('other-ship jump effects', () => {
             undefined,
             undefined,
             { time: 0 } as never,
-            'ship',
-            (() => undefined) as never,
-            [] as never,
-            seen,
         );
         expect(shipGraphic.container.scale.y).toBe(1);
         expect(shipGraphic.container.alpha).toBe(1);

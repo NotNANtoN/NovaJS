@@ -2,6 +2,7 @@ import 'jasmine';
 import {
     JUMP_ARRIVAL_END_SPEED_MULTIPLIER,
     JUMP_ARRIVAL_RADIUS,
+    JUMP_ARRIVAL_SOUND_ID,
     JUMP_ARRIVAL_MS,
     JUMP_ARRIVAL_SPEED_MULTIPLIER,
     JUMP_BAM_MS,
@@ -22,6 +23,7 @@ import {
     jumpFlightSpeed,
     pendingJumpTransition,
     routeChangeCancelsJump,
+    takeArrivalSound,
 } from './jump_plugin';
 import { DeltaPlugin } from 'nova_ecs/plugins/delta_plugin';
 import { Position } from 'nova_ecs/datatypes/position';
@@ -260,6 +262,20 @@ describe('hyperjump lifecycle', () => {
         expect(movement.turnBack).toBeFalse();
         expect(movement.turnTo).toBeNull();
         expect(movement.targetSpeed).toBe(30);
+    });
+});
+
+describe('arrival bang', () => {
+    it('is a warp sound rather than an explosion', () => {
+        // snd 302 "ShipBreaksUp" used to play here.
+        expect(JUMP_ARRIVAL_SOUND_ID).toBe('nova:130');
+    });
+
+    it('sounds once and only when pending', () => {
+        const state = { arrivalSoundPending: true };
+        expect(takeArrivalSound(state)).toBe(JUMP_ARRIVAL_SOUND_ID);
+        expect(state.arrivalSoundPending).toBeFalse();
+        expect(takeArrivalSound(state)).toBeUndefined();
     });
 });
 
