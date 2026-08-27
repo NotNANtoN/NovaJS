@@ -2,6 +2,8 @@ import * as t from 'io-ts';
 import { Entities, UUID } from 'nova_ecs/arg_types';
 import { AsyncSystem } from 'nova_ecs/async_system';
 import { Component } from 'nova_ecs/component';
+import { plainSnapshot } from 'nova_ecs/draft_snapshot';
+import { Entity } from 'nova_ecs/entity';
 import { DeathEvent } from './death_plugin';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
 import { MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
@@ -177,6 +179,41 @@ function playerTokenFor(
     return store?.getTokenForPeer(player.owner) ?? player.owner;
 }
 
+/**
+ * Read everything the spawn loop needs out of the world up front, detached
+ * from the component drafts it came from.
+ *
+ * The loop awaits mission, düde, and ship data. Each await lets the world step
+ * again, which revokes any draft read beforehand and makes the next touch of
+ * it throw — which used to take the whole server process down.
+ */
+export function collectMissionSpawnCandidates(
+    entities: Iterable<readonly [string, Entity]>,
+    store: PlayerStorePort | undefined,
+    systemId: string,
+): Array<{
+    playerUuid: string,
+    token: string,
+    missions: PlayerState['activeMissions'],
+}> {
+    return [...entities].flatMap(([uuid, entity]) => {
+        const multiplayer = entity.components.get(MultiplayerData);
+        const state = entity.components.get(PlayerStateComponent);
+        if (!multiplayer || !state) {
+            return [];
+        }
+        return [{
+            playerUuid: uuid,
+            token: playerTokenFor(multiplayer, store),
+            missions: state.activeMissions
+                .filter(entry => entry.state === 'active'
+                    && entry.shipSystem
+                    && missionShipAppearsInSystem(entry.shipSystem, systemId))
+                .map(entry => plainSnapshot(entry)),
+        }];
+    });
+}
+
 function findPlayer(
     players: readonly (readonly [
         string, { owner: string }, PlayerState
@@ -222,21 +259,11 @@ const MissionShipSpawnSystem = new AsyncSystem({
                     missionShip !== undefined)
                 .map(missionShip =>
                     `${missionShip.playerToken}:${missionShip.missionUuid}`));
-        const players = [...entities].flatMap(([uuid, entity]) => {
-            const multiplayer = entity.components.get(MultiplayerData);
-            const state = entity.components.get(PlayerStateComponent);
-            return multiplayer && state
-                ? [[uuid, multiplayer, state] as const] : [];
-        });
+        const players = collectMissionSpawnCandidates(
+            entities, store, systemId);
 
-        for (const [playerUuid, multiplayer, state] of players) {
-            const token = playerTokenFor(multiplayer, store);
-            for (const entry of state.activeMissions) {
-                if (entry.state !== 'active' || !entry.shipSystem
-                    || !missionShipAppearsInSystem(
-                        entry.shipSystem, systemId)) {
-                    continue;
-                }
+        for (const { playerUuid, token, missions } of players) {
+            for (const entry of missions) {
                 const mission = await loadMission(gameData, entry);
                 if (!mission || mission.shipCount <= 0
                     || mission.shipGoal < 0) {

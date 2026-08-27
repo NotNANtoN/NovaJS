@@ -1,3 +1,4 @@
+import { Entities, UUID } from 'nova_ecs/arg_types';
 import { AsyncSystem } from 'nova_ecs/async_system';
 import { Plugin } from 'nova_ecs/plugin';
 import { Resource } from 'nova_ecs/resource';
@@ -29,14 +30,25 @@ export const MapSystem = new AsyncSystem({
     alwaysRunOnEvents: false,
     skipIfApplyingPatches: true,
     args: [EcsControlEvent, StarmapResource, JumpRouteComponent,
-        ScreenSize, PlayerShipSelector, Optional(PlayerStateComponent)] as const,
-    async step(controlEvent, starmap, jumpRoute, screenSize, playerState) {
+        ScreenSize, Entities, UUID, PlayerShipSelector,
+        Optional(PlayerStateComponent)] as const,
+    async step(controlEvent, starmap, jumpRoute, screenSize, entities, uuid,
+        playerState) {
         if (!isMapStartEdge(controlEvent, starmap.container.visible)) {
             return;
         }
         return handleMapControlEvent(
             controlEvent, starmap, jumpRoute, screenSize,
             playerState as MapPlayerState | undefined,
+            // Resolved after the map closes, because the component read on the
+            // way in belongs to a step that has long since ended.
+            route => {
+                const live = entities.get(uuid)
+                    ?.components.get(JumpRouteComponent);
+                if (live) {
+                    live.route = route;
+                }
+            },
         );
     }
 });

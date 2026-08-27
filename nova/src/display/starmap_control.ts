@@ -1,3 +1,4 @@
+import { plainSnapshot } from 'nova_ecs/draft_snapshot';
 import type { ControlEvent } from '../nova_plugin/controls_plugin';
 import type { StarmapPlayerState } from '../spaceport/starmap_state';
 
@@ -32,18 +33,29 @@ export function isMapStartEdge(
         action === 'map' && state === 'start');
 }
 
+/**
+ * The map stays open across many world steps, so nothing read out of a
+ * component may be kept: the pilot state is handed over as a copy, and the
+ * chosen route is written through `applyRoute`, which resolves the component
+ * again after the map closes. Assigning to the `jumpRoute` read on the way in
+ * would throw on a revoked draft and lose the route with it.
+ */
 export async function handleMapControlEvent(
     controlEvent: readonly ControlEvent[],
     starmap: StarmapControlTarget,
     jumpRoute: MapJumpRoute,
     screenSize: MapScreenSize,
     playerState: MapPlayerState | undefined,
+    applyRoute: (route: string[]) => void = route => {
+        jumpRoute.route = route;
+    },
 ): Promise<void> {
     if (!isMapStartEdge(controlEvent, starmap.container.visible)) {
         return;
     }
     starmap.container.position.set(screenSize.x / 2, screenSize.y / 2);
-    starmap.setPlayerState?.(playerState);
-    starmap.setExploredSystems(playerState?.exploredSystems);
-    jumpRoute.route = await starmap.show(jumpRoute.route);
+    const state = plainSnapshot(playerState);
+    starmap.setPlayerState?.(state);
+    starmap.setExploredSystems(state?.exploredSystems);
+    applyRoute(await starmap.show([...jumpRoute.route]));
 }

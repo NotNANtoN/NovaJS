@@ -20,6 +20,7 @@ import {
 } from './ship_info_content';
 import { GovtData } from 'novadatainterface/GovtData';
 import { SHIP_INFO_LAYOUT } from './ship_info_layout';
+import { plainSnapshot } from 'nova_ecs/draft_snapshot';
 
 const SHIP_INFO_FONT = {
     heading: {
@@ -110,9 +111,14 @@ export class ShipInfo extends Menu<Entity> {
     }
 
     private async render() {
-        const state = this.input.components.get(PlayerStateComponent);
-        const shipData = this.input.components.get(ShipDataComponent);
-        const outfits = this.input.components.get(OutfitsStateComponent);
+        // Copied before the first await: loading governments and outfit names
+        // lets the world step, which revokes these component drafts.
+        const state = plainSnapshot(
+            this.input.components.get(PlayerStateComponent));
+        const shipData = plainSnapshot(
+            this.input.components.get(ShipDataComponent));
+        const outfits = plainSnapshot(
+            this.input.components.get(OutfitsStateComponent));
         await this.loadReferenceData(state?.legalRecords);
         this.facts.text = shipInfoFacts(
             state, shipData?.name, this.systemName, this.ladders);

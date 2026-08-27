@@ -17,6 +17,11 @@ import {
     STELLAR_DEPARTURE_SOUND_ID,
     TARGET_SELECTION_SOUND_ID,
 } from '../nova_plugin/sound_event';
+import {
+    distanceAttenuation,
+    soundDistance,
+    worldSoundVolume,
+} from './sound_attenuation';
 import { getDefaultProjectileWeaponData } from
     'novadatainterface/WeaponData';
 
@@ -119,5 +124,43 @@ describe('browser sound effects', () => {
             STELLAR_DOCKING_SOUND_ID,
             STELLAR_DEPARTURE_SOUND_ID,
         ]);
+    });
+});
+
+describe('world sound attenuation', () => {
+    it('keeps your own ship and the visible area at full volume', () => {
+        const here = new Position(1_000, -2_000);
+        expect(worldSoundVolume(1, here, here)).toBe(1);
+        expect(worldSoundVolume(1, new Position(1_400, -2_000), here)).toBe(1);
+    });
+
+    it('silences a ship breaking up on the far side of the system', () => {
+        // The complaint this fixes: a distant hull coming apart sounded
+        // exactly like the player's own destruction.
+        const player = new Position(0, 0);
+        expect(worldSoundVolume(1, new Position(5_000, 0), player)).toBe(0);
+        const halfway = worldSoundVolume(1, new Position(2_850, 0), player);
+        expect(halfway).toBeGreaterThan(0.4);
+        expect(halfway).toBeLessThan(0.6);
+    });
+
+    it('scales the master volume rather than replacing it', () => {
+        const quiet = worldSoundVolume(0.5, new Position(2_850, 0),
+            new Position(0, 0));
+        expect(quiet).toBeGreaterThan(0.2);
+        expect(quiet).toBeLessThan(0.3);
+    });
+
+    it('leaves a placeless sound alone', () => {
+        // UI beeps and cockpit warnings have no position in the world.
+        expect(worldSoundVolume(0.8, undefined, new Position(0, 0))).toBe(0.8);
+        expect(worldSoundVolume(0.8, new Position(9_000, 0), undefined))
+            .toBe(0.8);
+    });
+
+    it('measures across the wrapping edge of the system', () => {
+        // Two points either side of the seam are neighbours, not 20000 apart.
+        expect(distanceAttenuation(soundDistance(
+            { x: -9_900, y: 0 }, { x: 9_900, y: 0 }))).toBe(1);
     });
 });

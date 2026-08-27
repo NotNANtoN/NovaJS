@@ -32,6 +32,7 @@ import {
     PlayerDestructionCompleteEvent,
     RespawnRelocationEvent,
 } from "./nova_plugin/death_plugin";
+import { plainSnapshot } from 'nova_ecs/draft_snapshot';
 import { makeShip } from "./nova_plugin/make_ship";
 import { makeSystem } from "./nova_plugin/make_system";
 import { MultiRoomResource, NovaPlugin, SystemComponent } from "./nova_plugin/nova_plugin";
@@ -253,12 +254,15 @@ async function transitionTo(
             if (playerUuid !== uuid || !gameRunning) {
                 return;
             }
-            const death = transitionEntity.components.get(PlayerDeathComponent);
+            // Buying a ship replaces the entity under this uuid, so the
+            // captured one can be a hull the pilot no longer flies.
+            const ship = newSystem.entities.get(uuid) ?? transitionEntity;
+            const death = ship.components.get(PlayerDeathComponent);
             if (death?.outcome !== 'killed') {
                 return;
             }
             void returnToMainMenu(
-                transitionEntity.components.get(PlayerStateComponent));
+                ship.components.get(PlayerStateComponent));
         });
 
     if (!world) {
@@ -467,8 +471,10 @@ async function returnToMainMenu(playerState?: PlayerState) {
     gamePaused = true;
     gameRunning = false;
     try {
-        const currentState = playerState
-            ?? world?.resources.get(PlayerStateResource);
+        // Leaving the world steps it once more, which revokes any component
+        // draft the caller read this out of. The menu reads it afterwards.
+        const currentState = plainSnapshot(playerState
+            ?? world?.resources.get(PlayerStateResource));
         const serializer = system?.resources.get(SerializerResource);
         let currentShip;
         try {

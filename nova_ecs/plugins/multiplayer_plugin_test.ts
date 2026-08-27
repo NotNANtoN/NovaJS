@@ -367,6 +367,28 @@ describe('Multiplayer Plugin', () => {
         expect(forwarded).toBe(1);
     });
 
+    it('survives the server removing an entity in the step it appeared', () => {
+        // A client builds its own planets, so the server can order one removed
+        // in the very step it first exists. This used to throw, and because it
+        // throws inside world.step() the whole game stopped advancing.
+        world2.singletonEntity.components.get(Comms)!.admins =
+            new Set(['world1 uuid']);
+        const uuid = 'planet nova:465';
+        world2.entities.set(uuid, new Entity()
+            .addComponent(MultiplayerData, { owner: 'world2 uuid' })
+            .addComponent(BarComponent, { y: 'a planet' }));
+        world2.singletonEntity.components.get(Comms)!.messages.push({
+            source: 'world1 uuid',
+            message: { remove: [uuid] } as never,
+        });
+
+        expect(() => world2.step()).not.toThrow();
+        expect(world2.entities.has(uuid)).toBeFalse();
+
+        // The world keeps running afterwards.
+        expect(() => world2.step()).not.toThrow();
+    });
+
     it('does not let admin deltas overwrite client-owned movement state', () => {
         world1.singletonEntity.components.get(Comms)!.admins =
             new Set(['world1 uuid']);

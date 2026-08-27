@@ -10,6 +10,7 @@ import {
     TRAFFIC_DWELL_MIN_MS,
     TRAFFIC_LANDING_MAX_SPEED_SQUARED,
     TRAFFIC_LANDING_RANGE_SQUARED,
+    TRAFFIC_APPROACH_STANDOFF,
 } from './npc_traffic';
 
 const earth = {
@@ -21,6 +22,19 @@ const earth = {
 };
 
 describe('NPC traffic decisions', () => {
+    it('docks over the body rather than out in open space', () => {
+        // A docking ship simply stops existing, so vanishing hundreds of
+        // units short of the stellar looks like a ship blinking out.
+        const approaching = decideTrafficLanding(
+            earth.uuid, earth, 400 ** 2, 0);
+        expect(approaching).toBe('wait');
+
+        expect(decideTrafficLanding(earth.uuid, earth, 100 ** 2, 0))
+            .toBe('land');
+        expect(TRAFFIC_APPROACH_STANDOFF)
+            .toBeLessThan(Math.sqrt(TRAFFIC_LANDING_RANGE_SQUARED));
+    });
+
     it('chooses only valid stellars with deterministic sampling', () => {
         const selected = chooseTrafficDestination([
             {

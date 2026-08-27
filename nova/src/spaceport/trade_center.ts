@@ -41,6 +41,7 @@ import {
     hasJunkTradeLocation as junkLocationExists,
     junkTradeOffersAt,
 } from './trade_center_junk';
+import { plainSnapshot } from 'nova_ecs/draft_snapshot';
 import {
     TRADE_CENTER_LAYOUT,
     TRADE_CENTER_ROW_PITCH,
@@ -270,11 +271,18 @@ export class TradeCenter extends Menu<Entity> {
     }
 
     private async refresh() {
-        const state = this.input.components.get(PlayerStateComponent);
         this.planet = undefined;
         this.offers = [];
+        const shipId = this.input.components
+            .get(PlayerStateComponent)?.shipId;
+        if (shipId !== undefined) {
+            await this.syncCargoCapacity(shipId);
+        }
+        // Copied once the capacity is written, because the awaits below let
+        // the world step, which revokes the component draft.
+        const state = plainSnapshot(
+            this.input.components.get(PlayerStateComponent));
         if (state) {
-            await this.syncCargoCapacity(state);
             try {
                 this.planet = await this.gameData.data.Planet.get(this.planetId);
                 const junkGoods = await this.loadJunkGoods();
@@ -298,17 +306,26 @@ export class TradeCenter extends Menu<Entity> {
         this.render();
     }
 
-    private async syncCargoCapacity(state: PlayerState) {
+    /**
+     * Capacity is written to the component as it stands after the await,
+     * because loading ship data lets the world step: a draft read beforehand
+     * is revoked by then, and writing to a copy would drop the change.
+     */
+    private async syncCargoCapacity(shipId: string) {
         const shipData = this.input.components.get(ShipDataComponent);
-        if (shipData) {
-            setCargoCapacity(state, shipData.cargoCapacity);
-            return;
+        let capacity = shipData?.cargoCapacity;
+        if (capacity === undefined) {
+            try {
+                capacity = (await this.gameData.data.Ship.get(shipId))
+                    .cargoCapacity;
+            } catch {
+                // Keep the capacity restored from the player save.
+                return;
+            }
         }
-        try {
-            const ship = await this.gameData.data.Ship.get(state.shipId);
-            setCargoCapacity(state, ship.cargoCapacity);
-        } catch {
-            // Keep the capacity restored from the player save.
+        const live = this.input.components.get(PlayerStateComponent);
+        if (live) {
+            setCargoCapacity(live, capacity);
         }
     }
 

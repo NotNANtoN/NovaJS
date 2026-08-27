@@ -1,8 +1,10 @@
 import 'jasmine';
 import type { ControlEvent } from '../nova_plugin/controls_plugin';
+import { createDraft, finishDraft } from 'immer';
 import {
     handleMapControlEvent,
     isMapStartEdge,
+    MapPlayerState,
 } from './starmap_control';
 
 describe('starmap control handling', () => {
@@ -80,5 +82,39 @@ describe('starmap control handling', () => {
 
         expect(starmap.show).toHaveBeenCalledWith(remaining);
         expect(result).toEqual(remaining);
+    });
+
+    it('keeps the pilot state and route usable once the map closes', async () => {
+        // The map stays open across many world steps, so the drafts it was
+        // opened with are revoked by the time it returns a route.
+        const starmap = makeStarmap();
+        const chosen = ['nova:140'];
+        starmap.show.and.returnValue(Promise.resolve(chosen));
+        const playerState = createDraft({
+            exploredSystems: ['nova:130'],
+        }) as MapPlayerState;
+        const jumpRoute = createDraft({ route: ['nova:131'] });
+        let applied: string[] | undefined;
+
+        const finished = handleMapControlEvent(
+            [{ action: 'map', state: 'start' }],
+            starmap,
+            jumpRoute,
+            { x: 800, y: 600 },
+            playerState,
+            route => {
+                applied = route;
+            },
+        );
+        // End the step the map was opened from.
+        finishDraft(playerState);
+        finishDraft(jumpRoute);
+        await finished;
+
+        expect(applied).toEqual(chosen);
+        expect(starmap.show).toHaveBeenCalledWith(['nova:131']);
+        // The map was handed a copy, so it can still read it while open.
+        const handed = starmap.setPlayerState.calls.mostRecent().args[0];
+        expect(handed?.exploredSystems).toEqual(['nova:130']);
     });
 });

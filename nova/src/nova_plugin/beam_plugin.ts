@@ -271,6 +271,7 @@ class BeamWeaponEntry extends WeaponEntry {
             this.emit(SoundEvent, {
                 id: this.data.sound,
                 loop: this.data.loopSound,
+                position: { x: position.x, y: position.y },
             });
         }
         return beam;

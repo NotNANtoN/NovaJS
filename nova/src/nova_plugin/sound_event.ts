@@ -15,4 +15,14 @@ export const INCOMING_MISSILE_SOUND_ID = 'nova:371';
 export const STELLAR_DOCKING_SOUND_ID = 'nova:390';
 export const STELLAR_DEPARTURE_SOUND_ID = STELLAR_DOCKING_SOUND_ID;
 
-export const SoundEvent = new EcsEvent<{ id: string, loop?: boolean }>('WeaponFire');
+/**
+ * `position` places the sound in the system, so it can be attenuated by how
+ * far away it happened. Omit it for sounds that belong to the pilot rather
+ * than to a place: UI feedback, cockpit warnings, and their own hyperspace
+ * transitions.
+ */
+export const SoundEvent = new EcsEvent<{
+    id: string,
+    loop?: boolean,
+    position?: { x: number, y: number },
+}>('WeaponFire');

@@ -47,6 +47,7 @@ import { Outfitter } from './outfitter';
 import { ShipInfo } from './ship_info';
 import { Shipyard } from './shipyard';
 import { TradeCenter } from './trade_center';
+import { plainSnapshot } from 'nova_ecs/draft_snapshot';
 import {
     hasSpaceportService,
     resolveSpaceportPlanetData,
@@ -164,14 +165,24 @@ export class Spaceport extends Menu<Entity> {
             }
             this.controls.unbind();
             this.setActiveDialog(this.outfitter.container);
-            const outfits = this.input.components.get(OutfitsStateComponent) ?? new Map();
+            // The dialog holds these for its whole session, which spans many
+            // world steps, so it is given copies and its results are written
+            // back explicitly. A retained draft would be revoked, and the
+            // credits it deducts would be lost with it.
+            const outfits = plainSnapshot(
+                this.input.components.get(OutfitsStateComponent)) ?? new Map();
+            const playerState = plainSnapshot(
+                this.input.components.get(PlayerStateComponent));
             try {
-                this.outfitter.setPlayerState(
-                    this.input.components.get(PlayerStateComponent));
-                this.outfitter.setShipData(
-                    this.input.components.get(ShipDataComponent));
+                this.outfitter.setPlayerState(playerState);
+                this.outfitter.setShipData(plainSnapshot(
+                    this.input.components.get(ShipDataComponent)));
                 const newOutfits = await this.outfitter.show(outfits);
                 this.input.components.set(OutfitsStateComponent, newOutfits);
+                if (playerState) {
+                    this.input.components.set(
+                        PlayerStateComponent, playerState);
+                }
                 // Delete these so they are re-created with the new outfits.
                 // TODO: Find a better way to do this.
                 this.input.components.delete(WeaponsStateComponent);
@@ -194,8 +205,10 @@ export class Spaceport extends Menu<Entity> {
             this.controls.unbind();
             this.setActiveDialog(this.shipyard.container);
             try {
-                this.shipyard.setPlayerState(
-                    this.input.components.get(PlayerStateComponent));
+                // Copied for the same reason as the outfitter above. The
+                // shipyard writes the state back itself when a hull is bought.
+                this.shipyard.setPlayerState(plainSnapshot(
+                    this.input.components.get(PlayerStateComponent)));
                 const newInput = await this.shipyard.show(this.input);
                 if (newInput !== this.input) {
                     // Construct a fake system and run providers so that outfits of the new

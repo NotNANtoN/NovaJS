@@ -25,6 +25,7 @@ import {
     STELLAR_DOCKING_SOUND_ID,
     TARGET_SELECTION_SOUND_ID,
 } from '../nova_plugin/sound_event';
+import { worldSoundVolume } from './sound_attenuation';
 import {
     MASTER_VOLUME_STEP,
     getMasterVolume,
@@ -136,10 +137,19 @@ const SoundSystem = new System({
     name: 'SoundSystem',
     events: [SoundEvent],
     args: [SoundEvent, GameDataResource, LoopingSounds, LoadedSounds,
-        PendingSounds, VolumeResource, SingletonComponent] as const,
-    step({ id, loop = false }, gameData, loopingSounds, loadedSounds,
-        pendingSounds, {volume}) {
+        PendingSounds, VolumeResource, PlayerMovementQuery,
+        SingletonComponent] as const,
+    step({ id, loop = false, position }, gameData, loopingSounds, loadedSounds,
+        pendingSounds, {volume: masterVolume}, players) {
         if (loop && loopingSounds.has(id)) {
+            return;
+        }
+
+        const attenuation = worldSoundVolume(
+            1, position, players[0]?.[2].position);
+        const volume = masterVolume * attenuation;
+        if (volume <= 0) {
+            // Too far away to hear, so do not even fetch the sound.
             return;
         }
 
@@ -159,7 +169,7 @@ const SoundSystem = new System({
         void pending.then(sound => {
             loadedSounds.set(id, sound);
             playLoadedSound(sound, id, loop, loopingSounds,
-                getMasterVolume());
+                getMasterVolume() * attenuation);
         }).catch(error => {
             console.warn(`Unable to load sound ${id}`, error);
         }).finally(() => {

@@ -16,9 +16,12 @@ import { getDefaultExplosionData } from 'novadatainterface/ExplosionData';
 import {
     ExplosionSystem,
     makeExplosion,
+    PlayerDestructionVisualFallbackSystem,
     ShipFinalExplosionSystem,
     TrackDyingShips,
 } from './explosion_plugin';
+import { Entity } from 'nova_ecs/entity';
+import { PlayerDeathState } from '../nova_plugin/death_plugin';
 import { getDefaultShipData } from 'novadatainterface/ShipData';
 import { EntityBudget } from '../nova_plugin/entity_budget';
 
@@ -97,6 +100,7 @@ describe('explosion presentation cadence', () => {
             'explosion',
             world.emit.bind(world),
             new Map(),
+            { position: new Position(0, 0) } as never,
             undefined,
         );
 
@@ -108,6 +112,61 @@ describe('explosion presentation cadence', () => {
         time.time += 1;
         step();
         expect(world.entities.has('explosion')).toBeFalse();
+    });
+
+    it('sends a killed pilot onward even if the visual never finishes', () => {
+        // The return to the main menu hangs off this announcement, so a sprite
+        // sheet that never loads must not strand the pilot at the wreck.
+        const death: PlayerDeathState = {
+            wreckPosition: [0, 0],
+            visualFallbackAt: 5_000,
+            outcome: 'killed',
+        };
+        const entity = new Entity('wreck');
+        const active = new Map<string, number>();
+        registerDestructionVisual(active, 'player');
+        const emitted: Array<{ playerUuid: string }> = [];
+        const time: Time = { time: 0, delta_ms: 0, delta_s: 0, frame: 0 };
+        const emit = ((_event: unknown, value: { playerUuid: string }) =>
+            emitted.push(value)) as never;
+        const step = () => PlayerDestructionVisualFallbackSystem.step(
+            death, time, 'player', emit, entity, active,
+            entity.componentsByName.get('DestructionFallbackFired') as
+                true | undefined,
+        );
+
+        step();
+        expect(emitted.length).toBe(0);
+
+        time.time = 5_000;
+        step();
+        expect(emitted).toEqual([
+            jasmine.objectContaining({ playerUuid: 'player', time: 5_000 }),
+        ]);
+        // A late-finishing explosion must not announce the same death twice.
+        expect(active.has('player')).toBeFalse();
+
+        step();
+        expect(emitted.length).toBe(1);
+    });
+
+    it('leaves an escaped pilot to the escape-pod respawn', () => {
+        const death: PlayerDeathState = {
+            wreckPosition: [0, 0],
+            visualFallbackAt: 0,
+            outcome: 'escaped',
+        };
+        const emitted: unknown[] = [];
+        PlayerDestructionVisualFallbackSystem.step(
+            death,
+            { time: 10_000, delta_ms: 0, delta_s: 0, frame: 0 },
+            'player',
+            ((_event: unknown, value: unknown) => emitted.push(value)) as never,
+            new Entity('wreck'),
+            new Map(),
+            undefined,
+        );
+        expect(emitted.length).toBe(0);
     });
 
     it('explodes a wreck the server has already removed', () => {

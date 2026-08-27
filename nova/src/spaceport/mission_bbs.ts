@@ -47,6 +47,7 @@ import {
 import { Button } from './button';
 import { Menu } from './menu';
 import { MenuControls } from './menu_controls';
+import { plainSnapshot } from 'nova_ecs/draft_snapshot';
 import {
     barOfferView,
     BAR_LAYOUT,
@@ -374,7 +375,11 @@ export class MissionInfo extends Menu<Entity> {
     }
 
     private async refresh() {
-        const state = this.input.components.get(PlayerStateComponent);
+        // The mission log is available in flight, so the world keeps stepping
+        // while this awaits. Copy the state, and with it the mission entries
+        // kept in `this.entries`, before that revokes the draft.
+        const state = plainSnapshot(
+            this.input.components.get(PlayerStateComponent));
         this.entries = [];
         try {
             this.missionWorld = await loadMissionWorld(this.gameData);
@@ -761,14 +766,25 @@ export abstract class MissionBoard extends Menu<Entity> {
 
     private async refreshOffers(statusOverride?: string) {
         const generation = ++this.refreshGeneration;
-        const state = this.input.components.get(PlayerStateComponent);
+        const shipId = this.input.components
+            .get(PlayerStateComponent)?.shipId;
+        if (shipId === undefined) {
+            this.offers = [];
+            this.loading = false;
+            this.render();
+            return;
+        }
+        this.shipTypeName = await this.syncCargoCapacity(shipId);
+        // Copied once the capacity is written, because the awaits below let
+        // the world step, which revokes the component draft.
+        const state = plainSnapshot(
+            this.input.components.get(PlayerStateComponent));
         if (!state) {
             this.offers = [];
             this.loading = false;
             this.render();
             return;
         }
-        this.shipTypeName = await this.syncCargoCapacity(state);
         const [world, missions] = await Promise.all([
             loadMissionWorld(this.gameData),
             loadMissionCatalog(this.gameData),
@@ -856,17 +872,28 @@ export abstract class MissionBoard extends Menu<Entity> {
         }
     }
 
+    /**
+     * Capacity is written to the component as it stands after the await,
+     * because loading ship data lets the world step: a draft read beforehand
+     * is revoked by then, and writing to a copy would drop the change.
+     */
     private async syncCargoCapacity(
-        state: PlayerState,
+        shipId: string,
     ): Promise<string | undefined> {
+        const applyCapacity = (capacity: number) => {
+            const live = this.input.components.get(PlayerStateComponent);
+            if (live) {
+                setCargoCapacity(live, capacity);
+            }
+        };
         const shipData = this.input.components.get(ShipDataComponent);
         if (shipData) {
-            setCargoCapacity(state, shipData.cargoCapacity);
+            applyCapacity(shipData.cargoCapacity);
             return shipData.name;
         }
         try {
-            const ship = await this.gameData.data.Ship.get(state.shipId);
-            setCargoCapacity(state, ship.cargoCapacity);
+            const ship = await this.gameData.data.Ship.get(shipId);
+            applyCapacity(ship.cargoCapacity);
             return ship.name;
         } catch {
             // The persisted fallback capacity remains usable for old data

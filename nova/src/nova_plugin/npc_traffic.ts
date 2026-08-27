@@ -8,7 +8,12 @@
 
 export type TrafficRandom = () => number;
 
-export type TrafficPhase = 'arriving' | 'travelling' | 'departing';
+export type TrafficPhase =
+    | 'arriving'
+    | 'travelling'
+    /** Parked at a stellar for its stay, in plain sight. */
+    | 'docked'
+    | 'departing';
 
 export interface NpcTrafficState {
     phase: TrafficPhase;
@@ -30,14 +35,19 @@ export type TrafficLandingDecision =
     | 'land'
     | 'depart';
 
-/** Retail's player landing range, reused for NPC docking. */
-export const TRAFFIC_LANDING_RANGE = 500;
+/**
+ * A docking ship stops existing, so it has to be visually over the stellar
+ * when that happens. The player's own landing range of 500 is far too wide
+ * here: it let traders blink out in open space, several ship lengths short of
+ * the body, which reads as ships appearing and vanishing for no reason.
+ */
+export const TRAFFIC_LANDING_RANGE = 150;
 export const TRAFFIC_LANDING_RANGE_SQUARED =
     TRAFFIC_LANDING_RANGE ** 2;
 /** Retail's player landing speed limit, reused for NPC docking. */
 export const TRAFFIC_LANDING_MAX_SPEED_SQUARED = 3_000;
-/** Stop short of the body, then enter the final landing range slowly. */
-export const TRAFFIC_APPROACH_STANDOFF = 350;
+/** Fly onto the body rather than halting outside the docking range. */
+export const TRAFFIC_APPROACH_STANDOFF = 60;
 
 /**
  * These times are simulation policy, not resource fields documented by the

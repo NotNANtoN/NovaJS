@@ -53,10 +53,10 @@ export const ExplosionSystem = new System({
     name: 'ExplosionSystem',
     args: [AnimationGraphicComponent, ExplosionDataComponent,
         ExplosionState, TimeResource, Entities, UUID, Emit,
-        ActiveDestructionVisuals,
+        ActiveDestructionVisuals, MovementStateComponent,
         Optional(DestructionCompletionTarget)] as const,
     step(graphic, explosionData, explosionState, time, entities, uuid, emit,
-        activeDestructionVisuals, completionTarget) {
+        activeDestructionVisuals, movement, completionTarget) {
         const starting = explosionState.startTime === undefined;
         const timing = advanceExplosionTiming(
             explosionState,
@@ -70,7 +70,13 @@ export const ExplosionSystem = new System({
         );
         if (starting) {
             if (explosionData.sound) {
-                emit(SoundEvent, { id: explosionData.sound })
+                emit(SoundEvent, {
+                    id: explosionData.sound,
+                    position: {
+                        x: movement.position.x,
+                        y: movement.position.y,
+                    },
+                });
             }
         }
 
@@ -323,6 +329,37 @@ const ShipSecondaryExplosionDoneSystem = new System({
     }
 });
 
+/** Local marker: the fallback below has already announced this death. */
+const DestructionFallbackFired = new Component<true>('DestructionFallbackFired');
+
+/**
+ * Returning a killed pilot to the main menu hangs off the destruction visual
+ * completing, and that visual depends on a sprite sheet that may never finish
+ * loading, or on an explosion that was never placed. The server-side fallback
+ * cannot help, because only this world drives the presentation. Once the
+ * visual is overdue, announce the death anyway so the pilot is never stranded
+ * at the wreck.
+ */
+export const PlayerDestructionVisualFallbackSystem = new System({
+    name: 'PlayerDestructionVisualFallbackSystem',
+    args: [PlayerDeathComponent, TimeResource, UUID, Emit, GetEntity,
+        ActiveDestructionVisuals, Optional(DestructionFallbackFired)] as const,
+    step(death, time, uuid, emit, entity, activeDestructionVisuals, fired) {
+        if (fired || death.outcome !== 'killed'
+            || time.time < death.visualFallbackAt) {
+            return;
+        }
+        entity.components.set(DestructionFallbackFired, true);
+        // Drop any still-pending registration so a late-finishing explosion
+        // does not announce the same death a second time.
+        activeDestructionVisuals.delete(uuid);
+        emit(PlayerDestructionCompleteEvent, {
+            ...time,
+            playerUuid: uuid,
+        }, [uuid]);
+    },
+});
+
 export function makeExplosion(explosionData: ExplosionData, position: Position,
     secondaryExplosionData?: ExplosionData, completionTarget?: string) {
     const explosion = new Entity()
@@ -355,6 +392,7 @@ export const ExplosionPlugin: Plugin = {
         world.resources.set(ActiveDestructionVisuals, new Map());
         world.resources.set(DyingShips, new Map());
         world.addComponent(FinalExplosionShown);
+        world.addComponent(DestructionFallbackFired);
         world.addSystem(ExplosionSystem);
         world.addSystem(ProjectileExplosionSystem);
         world.addSystem(SecondaryExplosionSystem);
@@ -363,6 +401,7 @@ export const ExplosionPlugin: Plugin = {
         world.addSystem(ShipFinalExplosionSystem);
         world.addSystem(ShipSecondaryExplosionSystem);
         world.addSystem(ShipSecondaryExplosionDoneSystem);
+        world.addSystem(PlayerDestructionVisualFallbackSystem);
     },
     remove(world) {
         world.removeSystem(ExplosionSystem);
@@ -373,6 +412,7 @@ export const ExplosionPlugin: Plugin = {
         world.removeSystem(ShipFinalExplosionSystem);
         world.removeSystem(ShipSecondaryExplosionSystem);
         world.removeSystem(ShipSecondaryExplosionDoneSystem);
+        world.removeSystem(PlayerDestructionVisualFallbackSystem);
         world.resources.delete(ActiveDestructionVisuals);
         world.resources.delete(DyingShips);
     }

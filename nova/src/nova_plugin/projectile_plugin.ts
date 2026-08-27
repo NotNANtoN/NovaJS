@@ -228,6 +228,10 @@ class ProjectileWeaponEntry extends WeaponEntry {
             this.emit(SoundEvent, {
                 id: this.data.sound,
                 loop: this.data.loopSound,
+                position: {
+                    x: movementState.position.x,
+                    y: movementState.position.y,
+                },
             });
         }
 

@@ -28,7 +28,6 @@ import {
     NpcTrafficComponent,
     NpcTrafficPlugin,
     NpcTrafficRandomResource,
-    NpcTrafficResource,
 } from './npc_traffic_plugin';
 import {
     createArrivingTrafficState,
@@ -191,26 +190,30 @@ describe('NPC traffic ECS lifecycle', () => {
         time.time = 1_000;
         world.step();
 
-        expect(world.entities.has('trader')).toBeFalse();
-        const runtime = world.resources.get(NpcTrafficResource)!;
-        expect(runtime.docked.size).toBe(1);
-        const docked = [...runtime.docked.values()][0];
-        expect(docked.stellarId).toBe('nova:128');
-        expect(docked.launchAt).toBeGreaterThan(time.time);
+        // The ship stays in the world, parked at the stellar, rather than
+        // blinking out of existence next to the player.
+        expect(world.entities.has('trader')).toBeTrue();
+        const docked = trader.components.get(NpcTrafficComponent)!;
+        expect(docked.phase).toBe('docked');
+        expect(docked.destination).toBe('planet earth');
+        expect(docked.readyAt).toBeGreaterThan(time.time);
+        expect(movement.velocity).toEqual(new Vector(0, 0));
+        expect(movement.accelerating).toBe(0);
 
-        time.time = docked.launchAt;
+        // It holds still for the whole stay.
+        time.time = docked.readyAt - 1;
+        world.step();
+        expect(trader.components.get(NpcTrafficComponent)?.phase)
+            .toBe('docked');
+
+        time.time = docked.readyAt;
         world.step();
 
-        const launched = [...world.entities.values()].find(entity =>
-            entity.components.has(NpcTrafficComponent));
-        expect(launched).toBeDefined();
-        expect(launched?.components.get(MultiplayerData))
+        const launched = trader.components.get(NpcTrafficComponent)!;
+        expect(launched.phase).toBe('travelling');
+        expect(launched.destination).toBe('planet zeta');
+        expect(trader.components.get(MultiplayerData))
             .toEqual({ owner: 'server' });
-        expect(launched?.components.get(NpcTrafficComponent)?.phase)
-            .toBe('travelling');
-        expect(launched?.components.get(NpcTrafficComponent)?.destination)
-            .toBe('planet zeta');
-        expect(runtime.docked.size).toBe(0);
     });
 
     it('marks a traffic ship as arriving after a hyperspace transfer', async () => {

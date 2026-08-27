@@ -1132,6 +1132,11 @@ export function multiplayer(communicator: Communicator,
                         uuidsToSend = [...message.requestState.uuids].filter(
                             uuid => entityUuids.has(uuid));
                     }
+                    // The filters above use the start-of-step snapshot, which
+                    // can still name an entity a peer removed earlier in this
+                    // same step.
+                    uuidsToSend = uuidsToSend.filter(
+                        uuid => entityMap.has(uuid));
                     if (isAdmin) {
                         const interested = interestedEntityUuids(source);
                         uuidsToSend = uuidsToSend.filter(
@@ -1141,12 +1146,7 @@ export function multiplayer(communicator: Communicator,
                     const stateMovementTimestamps = new Map<string, number>();
                     const stateMovementSequences = new Map<string, number>();
                     const state = new Map(uuidsToSend.map(entityUuid => {
-                        const entry = entityMap.get(entityUuid);
-                        if (!entry) {
-                            // They have already been filtered above, so this would
-                            // be an error.
-                            throw new Error(`Expected entity ${entityUuid} to exist`);
-                        }
+                        const entry = entityMap.get(entityUuid)!;
                         const { entity } = entry;
                         const owner = entity.components
                             .get(MultiplayerData)?.owner ?? '';
@@ -1553,9 +1553,14 @@ export function multiplayer(communicator: Communicator,
                 ...comms.lastEntities,
             ]);
 
-            // Entities added by us in the current step
+            // Entities added by us in the current step. `entityUuids` is a
+            // snapshot taken before inbound messages were applied, so an
+            // entity that a peer removed during this same step is still
+            // listed here while already gone from `entityMap`. Announcing it
+            // would describe an entity that no longer exists.
             const addedEntities = setDifference(entityUuids,
-                new Set([...comms.lastEntities.keys(), ...added.keys()]));
+                new Set([...comms.lastEntities.keys(), ...added.keys(),
+                    ...removed]));
             // Entities removed by us in the current step
             const removedEntities = setDifference(
                 new Set([...comms.lastEntities.keys()]),
@@ -1596,7 +1601,12 @@ export function multiplayer(communicator: Communicator,
             for (const uuid of addedEntities) {
                 const val = entityMap.get(uuid);
                 if (!val) {
-                    throw new Error(`Expected to have entity ${uuid}`);
+                    // This runs inside world.step(), so throwing would abort
+                    // the rest of the frame and stall the game outright. An
+                    // entity that disappeared mid-step simply has nothing to
+                    // announce.
+                    warn(`No entity to announce for ${uuid}`);
+                    continue;
                 }
                 const { entity } = val;
                 if (!isAdmin && val.data.owner !== comms.uuid) {
