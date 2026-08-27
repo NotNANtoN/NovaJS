@@ -245,7 +245,17 @@ jobs:
           print(template, end="")
           PY
             )"
-            user_data="$(printf '%s' "$cloud_init" | base64 -w 0)"
+            # Linode caps decoded user_data at 16 KiB and this cloud-config is
+            # around 21 KiB, so hand cloud-init the gzip stream it accepts.
+            user_data="$(printf '%s' "$cloud_init" | gzip -9 -n | base64 -w 0)"
+            user_data_bytes="$(printf '%s' "$user_data" | base64 -d | wc -c)"
+            if (( user_data_bytes > 16384 )); then
+              printf 'Compressed cloud-init is %s bytes; Linode allows 16384.\n' \
+                "$user_data_bytes" >&2
+              exit 1
+            fi
+            printf 'cloud-init payload is %s compressed bytes.\n' \
+              "$user_data_bytes"
             # Linode rejects a root password that does not mix character
             # classes, and a hex string is only lowercase and digits.
             root_password="Nv1!$(openssl rand -base64 33 | tr -d '\n=')"
