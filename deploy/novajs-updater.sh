@@ -178,10 +178,25 @@ validate_deploy_assets() {
 
     validate_shell_assets "$candidate_dir"
     "${candidate_compose[@]}" config --quiet >/dev/null
-    "${candidate_compose[@]}" pull caddy
-    # The Caddy image has no entrypoint, so the binary name is part of the
-    # command that replaces the image's default.
-    "${candidate_compose[@]}" run --rm --no-deps caddy \
+
+    local caddy_image
+    caddy_image="$("${candidate_compose[@]}" config --images \
+        | grep -m1 caddy)"
+    if [[ -z "$caddy_image" ]]; then
+        printf 'Could not determine the Caddy image to validate with.\n' >&2
+        return 1
+    fi
+    docker pull --quiet "$caddy_image" >/dev/null
+
+    # Deliberately not `docker compose run`: compose names the project after
+    # the directory, so validating from a fresh temporary directory created a
+    # new docker network every run. Those are never torn down, and once the
+    # address pool was subnetted out every later update failed. A plain
+    # container needs no project and no network. The Caddy image has no
+    # entrypoint, so the binary name is part of the command.
+    docker run --rm --network none \
+        -v "${candidate_dir}/Caddyfile:/etc/caddy/Caddyfile:ro" \
+        "$caddy_image" \
         caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 }
 
