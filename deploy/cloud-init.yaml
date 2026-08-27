@@ -1,12 +1,12 @@
 #cloud-config
 package_update: true
 packages:
-  - awscli
   - ca-certificates
   - curl
   - docker-compose-v2
   - docker.io
   - jq
+  - s3cmd
   - ufw
   - unattended-upgrades
   - zstd

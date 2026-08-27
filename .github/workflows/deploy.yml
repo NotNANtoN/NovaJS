@@ -375,6 +375,7 @@ jobs:
             exit 1
           fi
 
+          printf 'Linode %s is reachable at %s.\n' "$instance_id" "$ipv4"
           printf 'instance_id=%s\n' "$instance_id" >>"$GITHUB_OUTPUT"
           printf 'ipv4=%s\n' "$ipv4" >>"$GITHUB_OUTPUT"
 

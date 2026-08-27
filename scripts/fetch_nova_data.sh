@@ -105,17 +105,22 @@ if [[ -n "${NOVA_DATA_URL:-}" ]]; then
     curl --fail --location --retry 3 --retry-delay 2 \
         --silent --show-error --output "$archive_path" "$NOVA_DATA_URL"
 else
-    command -v aws >/dev/null 2>&1 || {
-        printf '%s\n' 'aws CLI is required for Linode Object Storage.' >&2
+    # Ubuntu 24.04 dropped the awscli package, so use s3cmd, which is still
+    # packaged and speaks the same S3 API that Linode Object Storage exposes.
+    command -v s3cmd >/dev/null 2>&1 || {
+        printf '%s\n' 's3cmd is required for Linode Object Storage.' >&2
         exit 1
     }
-    AWS_ACCESS_KEY_ID="$LINODE_BUCKET_KEY" \
-        AWS_SECRET_ACCESS_KEY="$LINODE_SECRET_KEY" \
-        AWS_DEFAULT_REGION="${LINODE_REGION:-us-east-1}" \
-        AWS_EC2_METADATA_DISABLED=true \
-        aws s3 cp \
-        "s3://${LINODE_BUCKET_NAME}/${LINODE_OBJECT_NAME}" "$archive_path" \
-        --endpoint-url "$LINODE_BASE_URL"
+    endpoint_host="${LINODE_BASE_URL#*://}"
+    endpoint_host="${endpoint_host%/}"
+    s3cmd \
+        --host="$endpoint_host" \
+        --host-bucket="%(bucket)s.${endpoint_host}" \
+        --access_key="$LINODE_BUCKET_KEY" \
+        --secret_key="$LINODE_SECRET_KEY" \
+        --region="${LINODE_REGION:-us-east-1}" \
+        --no-progress --force \
+        get "s3://${LINODE_BUCKET_NAME}/${LINODE_OBJECT_NAME}" "$archive_path"
 fi
 
 actual="$(sha256_file "$archive_path")"

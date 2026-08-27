@@ -82,10 +82,25 @@ fi
 # so a restrictive local mode cannot prevent the container from starting.
 chmod -R a+rX "$data_dir"
 
+# GHCR answers 401 to an unauthenticated manifest read even for a public
+# package, so ask for the anonymous pull token it expects.
+registry_token="$(
+    curl --fail --silent --show-error \
+        --retry 3 --retry-delay 2 --retry-all-errors \
+        "https://ghcr.io/token?service=ghcr.io&scope=repository:${image_repository}:pull" |
+        jq -r '.token // empty'
+)"
+if [[ -z "$registry_token" ]]; then
+    printf 'Could not obtain an anonymous GHCR pull token for %s.\n' \
+        "$image_repository" >&2
+    exit 1
+fi
+
 manifest_headers="$(mktemp)"
 manifest_url="https://ghcr.io/v2/${image_repository}/manifests/${image_tag}"
 if ! curl --fail --silent --show-error --location \
     --retry 3 --retry-delay 2 --retry-all-errors \
+    -H "Authorization: Bearer ${registry_token}" \
     -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
     -D "$manifest_headers" -o /dev/null "$manifest_url"; then
     printf '%s\n' \
