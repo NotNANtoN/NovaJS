@@ -145,8 +145,12 @@ describe('other-ship jump effects', () => {
 
         shipMovement.velocity = new Vector(0, -MAX_VELOCITY);
         step(jump('spooling', 1_200), 1_200);
+        expect(shipGraphic.container.scale.y).toBe(1);
+
+        shipMovement.velocity = new Vector(0, -MAX_VELOCITY * 2);
+        step(jump('spooling', 1_200), 1_300);
         expect(shipGraphic.container.scale.y).toBeGreaterThan(1);
-        expect(shipGraphic.container.scale.y).toBeLessThan(2);
+        expect(shipGraphic.container.scale.y).toBeLessThan(4);
 
         shipMovement.velocity = new Vector(
             0,
@@ -192,12 +196,13 @@ describe('other-ship jump effects', () => {
             MAX_VELOCITY * JUMP_DEPARTURE_SPEED_MULTIPLIER;
 
         expect(departureStretchFactor(0, MAX_VELOCITY)).toBe(0);
-        expect(departureStretchFactor(MAX_VELOCITY, MAX_VELOCITY))
-            .toBeCloseTo(1 / JUMP_DEPARTURE_SPEED_MULTIPLIER, 8);
+        // Ordinary top speed is not hyperspace acceleration, so a ship that
+        // cruises into a jump shows no streak at all.
+        expect(departureStretchFactor(MAX_VELOCITY, MAX_VELOCITY)).toBe(0);
         expect(departureStretchFactor(
-            hyperspaceSpeed * 0.99,
+            (MAX_VELOCITY + hyperspaceSpeed) / 2,
             MAX_VELOCITY,
-        )).toBeCloseTo(0.99, 8);
+        )).toBeCloseTo(0.5, 8);
         expect(departureStretchFactor(
             hyperspaceSpeed,
             MAX_VELOCITY,

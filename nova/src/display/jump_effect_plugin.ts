@@ -66,16 +66,22 @@ function arrivalProgress(
     );
 }
 
+/**
+ * Measures only the speed a ship carries beyond its ordinary top speed, so
+ * cruising into a jump shows no streak and the stretch grows purely with the
+ * hyperspace boost.
+ */
 export function departureStretchFactor(
     speed: number,
     maxVelocity: number,
 ): number {
-    const hyperspaceSpeed = Math.max(0, maxVelocity)
-        * JUMP_DEPARTURE_SPEED_MULTIPLIER;
-    if (hyperspaceSpeed === 0) {
+    const cruiseSpeed = Math.max(0, maxVelocity);
+    const boostRange = cruiseSpeed
+        * (JUMP_DEPARTURE_SPEED_MULTIPLIER - 1);
+    if (boostRange === 0) {
         return 0;
     }
-    return Math.max(0, Math.min(1, speed / hyperspaceSpeed));
+    return Math.max(0, Math.min(1, (speed - cruiseSpeed) / boostRange));
 }
 
 function departureAlpha(
