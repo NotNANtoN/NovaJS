@@ -246,7 +246,9 @@ jobs:
           PY
             )"
             user_data="$(printf '%s' "$cloud_init" | base64 -w 0)"
-            root_password="$(openssl rand -hex 32)"
+            # Linode rejects a root password that does not mix character
+            # classes, and a hex string is only lowercase and digits.
+            root_password="Nv1!$(openssl rand -base64 33 | tr -d '\n=')"
             payload="$(
               jq -n \
                 --arg label "$label" \
@@ -285,6 +287,8 @@ jobs:
               printf '%s\n' \
                 'Linode create did not return success; checking by label.' \
                 >&2
+              # Without the response body a rejected payload is unreadable.
+              jq -r '.errors // .' "$post_response" >&2 || cat "$post_response" >&2
               query_instances "$instances"
               if ! instance_id="$(resolve_single_instance "$instances")"; then
                 printf '%s\n' \
