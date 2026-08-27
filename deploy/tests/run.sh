@@ -109,6 +109,67 @@ EOF
     ((tests_run += 1))
 }
 
+hostname_case() {
+    local name="$1"
+    local route_source="$2"
+    local configured="$3"
+    local mode="${4:-0644}"
+    local fake_bin="${work_dir}/${name}-bin"
+    local env_file="${work_dir}/${name}.env"
+
+    mkdir -p "$fake_bin"
+    cat >"${fake_bin}/ip" <<'EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+if [[ -z "$ROUTE_SOURCE" ]]; then
+    exit 1
+fi
+printf 'local 1.1.1.1 dev eth0 src %s uid 0 \cache\n' "$ROUTE_SOURCE"
+EOF
+    chmod +x "${fake_bin}/ip"
+    printf 'NOVA_IMAGE=ghcr.io/example/novajs:latest\nCADDY_HOSTNAME=%s\n' \
+        "$configured" >"$env_file"
+    chmod "$mode" "$env_file"
+
+    PATH="${fake_bin}:${PATH}" ROUTE_SOURCE="$route_source" \
+        "$repo_root/deploy/novajs-updater.sh" \
+        --ensure-hostname "$env_file" >/dev/null 2>&1
+    printf '%s\n' "$env_file"
+}
+
+test_hostname_detection() {
+    local env_file
+
+    env_file="$(hostname_case public '66.175.210.138' '')"
+    assert_contains "$env_file" 'CADDY_HOSTNAME=66.175.210.138'
+
+    # A hand-set hostname outranks whatever the interface reports.
+    env_file="$(hostname_case configured '66.175.210.138' 'game.example.com')"
+    assert_contains "$env_file" 'CADDY_HOSTNAME=game.example.com'
+    assert_not_contains "$env_file" '66.175.210.138'
+
+    # A private or missing address must not become a certificate subject.
+    env_file="$(hostname_case private '192.168.1.20' '')"
+    assert_contains "$env_file" 'CADDY_HOSTNAME='
+    assert_not_contains "$env_file" '192.168.1.20'
+
+    env_file="$(hostname_case carrier '100.64.3.9' '')"
+    assert_not_contains "$env_file" '100.64.3.9'
+
+    env_file="$(hostname_case absent '' '')"
+    assert_contains "$env_file" 'CADDY_HOSTNAME='
+
+    # Credentials live in this file, so rewriting it must not widen access.
+    env_file="$(hostname_case perms '66.175.210.138' '' 0600)"
+    assert_contains "$env_file" 'CADDY_HOSTNAME=66.175.210.138'
+    local mode
+    mode="$(stat -f '%Lp' "$env_file" 2>/dev/null || stat -c '%a' "$env_file")"
+    if [[ "$mode" != '600' ]]; then
+        fail "${env_file} became mode ${mode} instead of 600"
+    fi
+    ((tests_run += 1))
+}
+
 test_backup_retention() {
     local fake_bin="${work_dir}/backup-bin"
     local env_file="${work_dir}/backup.env"
@@ -169,5 +230,6 @@ EOF
 
 test_caddy_rendering
 test_asset_validation_rejects_bad_compose
+test_hostname_detection
 test_backup_retention
 printf 'Ran %s deployment test groups; 0 failed.\n' "$tests_run"

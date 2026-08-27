@@ -14,9 +14,10 @@ Two facts remain deliberately host-specific:
 
 - The retail Nova data is copyrighted and is not in Git or the image. Its
   archive is uploaded to Object Storage before the workflow runs.
-- `CADDY_HOSTNAME` selects the public hostname or IP certificate. It is
-  entered only in `/opt/novajs/.env` because a new Linode's IP is not known
-  when cloud-init is submitted.
+- `CADDY_HOSTNAME` selects the public hostname or IP certificate. A new
+  Linode's IP is not known when cloud-init is submitted, so the updater fills
+  the value in with the instance's own public IPv4 on its first run. Only a
+  DNS name has to be entered by hand.
 
 Until the data is available, the updater does not start either application
 container. This makes a first boot fail closed rather than serving a game
@@ -224,10 +225,16 @@ Password SSH is disabled; the firewall allows key-only SSH and ports 80/443.
 
 ### Configure HTTPS on an IP or hostname
 
-Set the public Linode IP in `/opt/novajs/.env`:
+HTTPS on the bare IP needs no action. While `CADDY_HOSTNAME` is empty, the
+updater reads the source address of the host's default route — on Linode the
+public address is bound straight to the instance interface — and writes it into
+`/opt/novajs/.env`, so a recreated instance comes back with HTTPS unattended.
+A private or absent address is never written, which leaves plain HTTP serving.
+
+Set the value by hand only to override it, for example with a DNS name:
 
 ```dotenv
-CADDY_HOSTNAME=66.175.210.138
+CADDY_HOSTNAME=game.example.com
 CADDY_BASIC_AUTH_USER=
 CADDY_BASIC_AUTH_HASH=
 ```
@@ -308,8 +315,9 @@ curl --include http://66.175.210.138/__novajs_health
 curl --fail https://66.175.210.138/
 ```
 
-With an empty `CADDY_HOSTNAME`, the safe fallback remains unauthenticated HTTP
-only. This lets a fresh instance start before its assigned IP is entered.
+When no public address can be detected and none is configured, the safe
+fallback remains unauthenticated HTTP only, so a host with an unexpected
+network layout still serves the game.
 
 ### Change the data source later
 
@@ -522,9 +530,9 @@ restored file. Starting NovaJS reloads it before accepting players.
   through Actions only when a new instance is created, then stored in its
   `.env`. Anyone with root/Lish access to the Linode can read them, so protect
   Cloud Manager access and rotate the keys if the host is compromised.
-- **Bootstrap fallback:** blank Caddy values intentionally produce
-  unauthenticated HTTP on the IP so missing presentation values do not prevent
-  data/bootstrap diagnosis. Set `CADDY_HOSTNAME` to encrypt public traffic.
+- **Bootstrap fallback:** when no public address is detected or configured,
+  Caddy intentionally serves unauthenticated HTTP so missing presentation
+  values do not prevent data/bootstrap diagnosis.
 - **Readiness endpoint:** `/__novajs_health` is intentionally unauthenticated
   on port 80 and reveals only readiness. It is not an authenticated game
   health check.
@@ -536,8 +544,9 @@ restored file. Starting NovaJS reloads it before accepting players.
   scope. The workflow never calls a destructive endpoint, but the token itself
   must still be protected and rotated if exposed.
 - **Host-specific TLS name:** the Linode IP is assigned after cloud-init is
-  submitted, and API access does not select a DNS name. `CADDY_HOSTNAME`
-  therefore remains an explicit one-time host setting.
+  submitted, and API access does not select a DNS name. The updater therefore
+  derives the IP on the host itself; `CADDY_HOSTNAME` only has to be set by
+  hand for a DNS name.
 
 ## What has not been verified here
 

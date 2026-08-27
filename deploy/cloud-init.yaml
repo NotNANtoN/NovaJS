@@ -69,7 +69,9 @@ write_files:
       NOVA_IMAGE=@NOVA_IMAGE@
       NOVA_DATA_DIR=/var/lib/novajs/Nova_Data
 
-      # Set this to a hostname or public IP for HTTPS. HTTP always remains up.
+      # Left empty, the updater fills this with the instance's own public IPv4
+      # so HTTPS comes up unattended. Set a real hostname to override. HTTP
+      # always remains up either way.
       CADDY_HOSTNAME=
       CADDY_BASIC_AUTH_USER=
       CADDY_BASIC_AUTH_HASH=

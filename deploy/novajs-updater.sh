@@ -95,6 +95,79 @@ validate_shell_assets() {
     done
 }
 
+is_private_ipv4() {
+    local first
+    local second
+
+    IFS='.' read -r first second _ _ <<<"$1"
+    if (( 10#$first == 0 || 10#$first == 10 || 10#$first == 127 \
+        || 10#$first >= 224 )); then
+        return 0
+    fi
+    if (( 10#$first == 169 && 10#$second == 254 )); then
+        return 0
+    fi
+    if (( 10#$first == 172 && 10#$second >= 16 && 10#$second <= 31 )); then
+        return 0
+    fi
+    if (( 10#$first == 192 && 10#$second == 168 )); then
+        return 0
+    fi
+    if (( 10#$first == 100 && 10#$second >= 64 && 10#$second <= 127 )); then
+        return 0
+    fi
+    return 1
+}
+
+# Linode binds the public address straight to the instance interface, so the
+# source address of the default route is the address players connect to.
+detect_public_ipv4() {
+    local address
+
+    address="$(
+        ip -4 -oneline route get 1.1.1.1 2>/dev/null |
+            sed -n 's/.*[[:space:]]src[[:space:]]\{1,\}\([0-9.]\{1,\}\).*/\1/p' |
+            head -n 1
+    )"
+    if [[ ! "$address" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] \
+        || is_private_ipv4 "$address"; then
+        return 1
+    fi
+    printf '%s\n' "$address"
+}
+
+# HTTPS would otherwise exist only where a human edited .env by hand, so a
+# recreated instance would quietly fall back to cleartext.
+ensure_caddy_hostname() {
+    local file="$1"
+    local configured
+    local detected
+    local temporary
+
+    configured="$(sed -n 's/^[[:space:]]*CADDY_HOSTNAME=//p' "$file" \
+        | tail -n 1)"
+    if [[ -n "$configured" ]]; then
+        return 0
+    fi
+    if ! detected="$(detect_public_ipv4)"; then
+        printf '%s\n' \
+            'No public IPv4 was detected; serving plain HTTP only.' >&2
+        return 0
+    fi
+
+    # mktemp keeps the credentials in .env unreadable to other users.
+    temporary="$(mktemp "${file}.XXXXXX")"
+    if grep -q '^[[:space:]]*CADDY_HOSTNAME=' "$file"; then
+        sed "s|^[[:space:]]*CADDY_HOSTNAME=.*|CADDY_HOSTNAME=${detected}|" \
+            "$file" >"$temporary"
+    else
+        cat "$file" >"$temporary"
+        printf 'CADDY_HOSTNAME=%s\n' "$detected" >>"$temporary"
+    fi
+    mv "$temporary" "$file"
+    printf 'Enabled HTTPS for the detected public address %s.\n' "$detected"
+}
+
 validate_deploy_assets() {
     local candidate_dir="$1"
     local candidate_compose=(
@@ -120,8 +193,17 @@ if [[ "${1:-}" == '--validate-assets' ]]; then
     validate_deploy_assets "$2"
     exit 0
 fi
+if [[ "${1:-}" == '--ensure-hostname' ]]; then
+    if [[ $# -ne 2 ]]; then
+        printf 'Usage: %s --ensure-hostname ENV_FILE\n' "$0" >&2
+        exit 2
+    fi
+    ensure_caddy_hostname "$2"
+    exit 0
+fi
 if (( $# > 0 )); then
-    printf 'Usage: %s [--validate-assets DIRECTORY]\n' "$0" >&2
+    printf 'Usage: %s [--validate-assets DIRECTORY | --ensure-hostname FILE]\n' \
+        "$0" >&2
     exit 2
 fi
 
@@ -136,6 +218,8 @@ if [[ ! -f "$env_file" ]]; then
         "$env_file" >&2
     exit 1
 fi
+
+ensure_caddy_hostname "$env_file"
 
 set -a
 # shellcheck disable=SC1090
@@ -336,11 +420,13 @@ if [[ "$needs_deploy" -eq 1 ]]; then
     "${compose[@]}" up -d --force-recreate --remove-orphans --scale novajs=1
 
     ready=0
+    # Probes before the listeners bind are expected, so they stay quiet. The
+    # reason is reported once below if the deployment never becomes ready.
     for _ in $(seq 1 180); do
-        if curl --fail --silent --show-error --max-time 5 \
-            http://127.0.0.1:8200/ >/dev/null \
-            && curl --fail --silent --show-error --max-time 5 \
-                http://127.0.0.1/__novajs_health >/dev/null; then
+        if curl --fail --silent --max-time 5 \
+            http://127.0.0.1:8200/ >/dev/null 2>&1 \
+            && curl --fail --silent --max-time 5 \
+                http://127.0.0.1/__novajs_health >/dev/null 2>&1; then
             ready=1
             break
         fi
@@ -349,6 +435,10 @@ if [[ "$needs_deploy" -eq 1 ]]; then
 
     if [[ "$ready" -ne 1 ]] || ! service_running caddy; then
         printf '%s\n' 'NovaJS deployment did not become healthy.' >&2
+        curl --fail --silent --show-error --max-time 5 \
+            http://127.0.0.1:8200/ >/dev/null || true
+        curl --fail --silent --show-error --max-time 5 \
+            http://127.0.0.1/__novajs_health >/dev/null || true
         "${compose[@]}" ps >&2 || true
         "${compose[@]}" logs --tail=100 novajs caddy >&2 || true
         exit 1
