@@ -106,8 +106,10 @@ validate_deploy_assets() {
     validate_shell_assets "$candidate_dir"
     "${candidate_compose[@]}" config --quiet >/dev/null
     "${candidate_compose[@]}" pull caddy
+    # The Caddy image has no entrypoint, so the binary name is part of the
+    # command that replaces the image's default.
     "${candidate_compose[@]}" run --rm --no-deps caddy \
-        validate --config /etc/caddy/Caddyfile --adapter caddyfile
+        caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 }
 
 if [[ "${1:-}" == '--validate-assets' ]]; then
