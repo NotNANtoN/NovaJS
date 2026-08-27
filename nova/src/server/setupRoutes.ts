@@ -6,6 +6,7 @@ import { idsPath, dataPath, settingsPrefix } from "../common/GameDataPaths";
 import { GameDataInterface } from "../../../novadatainterface/GameDataInterface";
 import { NovaDataType } from "../../../novadatainterface/NovaDataInterface";
 import { PlayerStore } from "./player_store";
+import { setupHttpLimiter } from './http_limiter';
 
 export const IMMUTABLE_ASSET_CACHE =
     'public, max-age=31536000, immutable';
@@ -107,6 +108,7 @@ class GameDataServer {
         // NOTE: This can not be converted to RPCs because PIXI.js
         // expects assets to be loaded from URLs.
 
+        setupHttpLimiter(this.app);
         this.app.use(gzipMiddleware);
         this.app.use(dataPath, (req, res, next) => {
             res.setHeader('Cache-Control', gameDataCacheControl(req.path));

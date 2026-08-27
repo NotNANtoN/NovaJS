@@ -6,6 +6,19 @@ services:
     environment:
       NOVA_PORT: "8200"
       NOVA_PLAYER_DATA: /var/lib/novajs/players.json
+      NOVA_HTTP_LIMIT_ENABLED: "${NOVA_HTTP_LIMIT_ENABLED:-true}"
+      NOVA_HTTP_RATE_LIMIT_REQUESTS:
+        "${NOVA_HTTP_RATE_LIMIT_REQUESTS:-180}"
+      NOVA_HTTP_RATE_LIMIT_WINDOW_MS:
+        "${NOVA_HTTP_RATE_LIMIT_WINDOW_MS:-60000}"
+      NOVA_HTTP_BYTE_LIMIT_BYTES:
+        "${NOVA_HTTP_BYTE_LIMIT_BYTES:-209715200}"
+      NOVA_HTTP_BYTE_LIMIT_WINDOW_MS:
+        "${NOVA_HTTP_BYTE_LIMIT_WINDOW_MS:-600000}"
+      NOVA_HTTP_LIMIT_CLIENT_TTL_MS:
+        "${NOVA_HTTP_LIMIT_CLIENT_TTL_MS:-900000}"
+      NOVA_HTTP_LIMIT_MAX_CLIENTS:
+        "${NOVA_HTTP_LIMIT_MAX_CLIENTS:-4096}"
     volumes:
       - type: bind
         source: ${NOVA_DATA_DIR:-/var/lib/novajs/Nova_Data}

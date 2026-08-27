@@ -175,6 +175,41 @@ package public means anyone can pull and inspect the image. A private package
 would require a separate host-side read credential, which this design does not
 provision.
 
+## HTTP abuse limits
+
+Compose enables per-client HTTP request and response-byte limits. The defaults
+allow 180 requests per 60 seconds and 209715200 bytes (200 MiB) per 600000
+milliseconds (10 minutes). A cold load uses about 12 requests and 2.5 MiB;
+the larger byte allowance leaves room for the deferred 9.4 MiB music file,
+gameplay assets, and a few players sharing one NAT address.
+
+Set any of these values in `/opt/novajs/.env` and restart through the updater:
+
+```dotenv
+NOVA_HTTP_LIMIT_ENABLED=true
+NOVA_HTTP_RATE_LIMIT_REQUESTS=180
+NOVA_HTTP_RATE_LIMIT_WINDOW_MS=60000
+NOVA_HTTP_BYTE_LIMIT_BYTES=209715200
+NOVA_HTTP_BYTE_LIMIT_WINDOW_MS=600000
+NOVA_HTTP_LIMIT_CLIENT_TTL_MS=900000
+NOVA_HTTP_LIMIT_MAX_CLIENTS=4096
+```
+
+`NOVA_HTTP_LIMIT_CLIENT_TTL_MS` controls stale-client eviction. Once
+`NOVA_HTTP_LIMIT_MAX_CLIENTS` active entries are tracked, previously unseen
+addresses receive `429` until capacity becomes available. Invalid, zero, or
+negative numeric values stop startup rather than silently weakening the limit.
+
+For unrestricted local single-player development, disable the limiter:
+
+```bash
+NOVA_HTTP_LIMIT_ENABLED=false npm run dev
+```
+
+The public readiness path at `/__novajs_health` and WebSocket upgrades are
+not limited. The readiness response is produced by Caddy without reaching the
+Express process.
+
 ## First bootstrap
 
 The API request supplies a random root password and the workflow deliberately
