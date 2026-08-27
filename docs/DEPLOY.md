@@ -10,12 +10,13 @@ configuration needed to bootstrap a new host. The API token must have Linodes
 read/write permission. Data secrets are written only into the new host's
 0600 `/opt/novajs/.env`; they are not printed by the workflow.
 
-Two facts remain deliberately manual:
+Two facts remain deliberately host-specific:
 
 - The retail Nova data is copyrighted and is not in Git or the image. Its
   archive is uploaded to Object Storage before the workflow runs.
-- A public HTTPS deployment needs a DNS hostname and a Caddy Basic Auth
-  bcrypt hash. Those values are also entered only in `/opt/novajs/.env`.
+- `CADDY_HOSTNAME` selects the public hostname or IP certificate. It is
+  entered only in `/opt/novajs/.env` because a new Linode's IP is not known
+  when cloud-init is submitted.
 
 Until the data is available, the updater does not start either application
 container. This makes a first boot fail closed rather than serving a game
@@ -42,13 +43,13 @@ non-retriable create request and post-timeout label recheck explicit.
    `POST /v4/linode/instances` call with an Ubuntu 24.04 image, the 2 GB
    `g6-standard-1` plan in `us-east`, and base64-encoded cloud-init in
    `metadata.user_data`.
-4. Cloud-init installs Docker, the Compose plugin, AWS CLI, `zstd`, `ufw`, and
-   unattended upgrades. It writes Compose, Caddy, the data-fetch script, the
-   updater, and its systemd service and timer under `/opt/novajs`, and creates
-   `.env` from the data-source secrets.
-5. The host updater fetches and verifies the retail data before it pulls or
-   starts NovaJS. It then starts one `novajs` container and Caddy. Player data
-   remains in the named `novajs_player_data` volume.
+4. Cloud-init installs Docker, the Compose plugin, `s3cmd`, `zstd`, `ufw`,
+   and unattended upgrades. It writes the initial deployment assets and
+   updater and backup systemd timers, then creates `.env`.
+5. Every updater run pulls the exact manifest digest behind `NOVA_IMAGE`,
+   extracts the matching host assets from the image, validates and installs
+   them, fetches the retail data, and starts one `novajs` container and Caddy.
+   Player data remains in the named `novajs_player_data` volume.
 6. The workflow waits for an IPv4 address and polls the public
    `http://INSTANCE_IP/__novajs_health` endpoint for up to 15 minutes.
 
@@ -59,39 +60,39 @@ never deletes, powers off, or replaces an instance. If the post-create query
 does not find exactly one instance, the job fails rather than risking a
 duplicate.
 
-Cloud-init only runs automatically when an instance is created. An existing
-instance with the `novajs` label is reused but is not retrofitted through the
-Linode API. If that instance came from the old SSH-based setup, migrate it
-manually in Lish before relying on this workflow; do not delete it to force
-recreation.
+Cloud-init only runs automatically when an instance is created. After the
+one-time updater bootstrap documented below, an existing instance refreshes
+all version-controlled host assets from each image without CI SSH access.
 
 ## One-time setup
 
 Complete these steps in order. The workflow has no SSH key or SSH-based
 deployment step; Lish is only needed for later manual host changes.
 
-### 1. Create the Object Storage bucket and read-only key
+### 1. Create the Object Storage bucket and runtime key
 
 In Linode Cloud Manager, create the bucket in the Object Storage cluster you
-intend to use. Create an access key scoped to that bucket with read-only
+intend to use. Create an access key scoped to that bucket with read/write
 permission, and record its access key, secret key, bucket name, and
-S3-compatible endpoint. The normal endpoint and region pair is:
+S3-compatible endpoint. The updater reads the retail archive; the nightly
+backup needs permission to put and delete player backups. The normal endpoint
+and region pair is:
 
 ```text
 LINODE_BASE_URL=https://us-east-1.linodeobjects.com
 LINODE_REGION=us-east-1
 ```
 
-The host only needs to read the archive. The upload script needs write access,
-so use a separate temporary bucket-scoped write key for the upload below, then
-revoke it. Do not use that write key as `LINODE_BUCKET_KEY` or
-`LINODE_SECRET_KEY` in GitHub.
+The same bucket-scoped runtime key can upload the initial archive. A separate
+temporary upload key is still preferable if another operator prepares it, but
+the host key cannot be read-only because backup upload and retention pruning
+would fail visibly in `novajs-player-backup.service`.
 
 ### 2. Build and upload the data archive
 
 The archive must contain `Nova Files` and `Plug-ins` directly at its top
 level, not inside an extra directory. Install the AWS CLI on the workstation,
-then run this from the repository root with the temporary write key:
+then run this from the repository root with a bucket-scoped write key:
 
 ```bash
 export NOVA_DATA_DIR="$PWD/nova/Nova_Data"
@@ -99,15 +100,15 @@ export LINODE_BASE_URL='https://us-east-1.linodeobjects.com'
 export LINODE_REGION='us-east-1'
 export LINODE_BUCKET_NAME='novajs-assets'
 export LINODE_OBJECT_NAME='novajs/nova-data.tar.gz'
-export LINODE_BUCKET_KEY='temporary-upload-access-key'
-export LINODE_SECRET_KEY='temporary-upload-secret-key'
+export LINODE_BUCKET_KEY='bucket-access-key'
+export LINODE_SECRET_KEY='bucket-secret-key'
 ./scripts/upload_nova_data.sh
 ```
 
 The script builds the archive, uploads it, and prints `Archive SHA256`.
 `NOVA_DATA_SHA256` is the SHA-256 of the archive file itself, not of the
-extracted directory. Record that value, revoke the temporary write key, and
-use the bucket-scoped read-only key for the GitHub secrets in the next step.
+extracted directory. Record that value. If a temporary key uploaded it,
+revoke that key and use the bucket-scoped runtime key for GitHub secrets.
 
 ### 3. Set the GitHub Actions secrets
 
@@ -135,8 +136,8 @@ admin means changing that account's keys rather than touching the server. To
 throw the host away and rebuild it from scratch, run the workflow manually
 with **recreate_instance** checked; everything on it, saved pilots included,
 is deleted.
-`LINODE_BUCKET_KEY` and `LINODE_SECRET_KEY` must be the bucket-scoped
-read-only runtime key. `LINODE_REGION` is optional and defaults to
+`LINODE_BUCKET_KEY` and `LINODE_SECRET_KEY` must be the bucket-scoped runtime
+key with read, write, and delete access. `LINODE_REGION` is optional and defaults to
 `us-east-1` when omitted. The other seven names are required for a new
 instance. Do not add quotes to the secret values. The workflow supports
 `/`, `+`, `=`, and `@`, but rejects whitespace, quotes, `#`, newlines, and
@@ -217,19 +218,57 @@ Express process.
 The API request supplies a random root password and the workflow deliberately
 does not print it. A fresh instance receives the data configuration in
 `/opt/novajs/.env` and should fetch the archive automatically. To configure
-the optional host-only Caddy values, use the Linode Cloud Manager's **Reset
-Root Password** operation, then open the instance's **Lish Console** and log
-in as `root`. The cloud-init firewall allows only ports 80 and 443, and
-password SSH is disabled; Lish is the supported bootstrap access path.
+host-only values, connect as root with one of the GitHub account's published
+SSH keys. Lish and a reset root password are the break-glass alternative.
+Password SSH is disabled; the firewall allows key-only SSH and ports 80/443.
 
-### Configure HTTPS and Basic Auth
+### Configure HTTPS on an IP or hostname
 
-For an internal test, leave these values blank. The updater then renders a
-plain HTTP Caddy site on the IP without Basic Auth. This is not safe for a
-public game: traffic, credentials, and game content are not protected by TLS.
+Set the public Linode IP in `/opt/novajs/.env`:
 
-For the normal public configuration, set a hostname that resolves to the
-Linode and set both Basic Auth values:
+```dotenv
+CADDY_HOSTNAME=66.175.210.138
+CADDY_BASIC_AUTH_USER=
+CADDY_BASIC_AUTH_HASH=
+```
+
+An IP literal gets a Let's Encrypt six-day certificate from the `shortlived`
+ACME profile. A DNS hostname gets Caddy's normal certificate configuration
+instead. `default_sni` is set to the configured value so clients without SNI
+do not make the container select its private Docker IP.
+
+For an IP, the generated HTTPS site is:
+
+```caddyfile
+{
+    default_sni 66.175.210.138
+}
+
+https://66.175.210.138 {
+    tls {
+        issuer acme {
+            profile shortlived
+            disable_tlsalpn_challenge
+        }
+    }
+    encode gzip
+    reverse_proxy novajs:8200
+}
+```
+
+The separate `:80` site always serves both `/__novajs_health` and the game
+without authentication. It is installed before Caddy starts ACME issuance,
+so an ACME outage or rejected order does not take HTTP or deployment health
+offline. `disable_tlsalpn_challenge` forces HTTP-01 because Caddy upstream has
+had TLS-ALPN interoperability failures for IP identifiers. Port 80 must remain
+public for validation.
+
+The Compose image is pinned to `caddy:2.11.4-alpine`. The floating
+`caddy:2-alpine` tag currently resolves to the same version and is new enough,
+but the explicit patch version makes that verified behavior repeatable.
+
+Leave both Basic Auth values blank for this public game. They remain available
+for a private deployment:
 
 ```dotenv
 CADDY_HOSTNAME=game.example.com
@@ -240,19 +279,14 @@ CADDY_BASIC_AUTH_HASH='$2a$14$PASTE_THE_BCRYPT_HASH_HERE'
 Generate the hash without putting the plaintext password in Git or `.env`:
 
 ```bash
-docker run --rm caddy:2-alpine caddy hash-password \
+docker run --rm caddy:2.11.4-alpine caddy hash-password \
   --plaintext 'choose-a-long-private-password'
 ```
 
-Caddy obtains a certificate automatically when the hostname resolves to the
-Linode and ports 80 and 443 are reachable. The host updater renders
-`/opt/novajs/Caddyfile` from these values; edit `.env`, not the generated
-Caddyfile. The hash contains `$` characters, so retain the single quotes in
-`.env`.
-
 If only one of the two Basic Auth values is set, the host remains available
 without authentication and the updater logs a warning. This is a deliberate
-safe-to-boot fallback, but it is not a public deployment configuration.
+safe-to-boot fallback. Basic Auth applies only to HTTPS; HTTP remains public
+to preserve the certificate-failure fallback.
 
 Start the first deployment immediately:
 
@@ -262,10 +296,20 @@ systemctl start novajs-updater.service
 journalctl -u novajs-updater.service -n 100 -f
 ```
 
-The service first runs `scripts/fetch_nova_data.sh`, then pulls the public
-GHCR image, and only then runs Compose. It waits for the app's existing
-`GET /` health check before accepting the deployment. A later workflow run
-will find the same instance and the external health job should pass.
+Confirm issuance and its six-day validity:
+
+```bash
+journalctl -u novajs-updater.service -n 200
+docker compose -f /opt/novajs/docker-compose.yml logs --tail=200 caddy
+openssl s_client -connect 66.175.210.138:443 \
+  -servername 66.175.210.138 </dev/null 2>/dev/null \
+  | openssl x509 -noout -issuer -subject -dates
+curl --include http://66.175.210.138/__novajs_health
+curl --fail https://66.175.210.138/
+```
+
+With an empty `CADDY_HOSTNAME`, the safe fallback remains unauthenticated HTTP
+only. This lets a fresh instance start before its assigned IP is entered.
 
 ### Change the data source later
 
@@ -313,21 +357,67 @@ no dedicated health route. It is useful because Caddy has a
 `depends_on: service_healthy` relationship with the app, so Caddy can expose
 that path only after the app's local health check has passed.
 
-When a hostname and Basic Auth are configured, ordinary external requests
-may redirect from HTTP to HTTPS or return `401` without credentials. The
-workflow does not know the private Basic Auth password and therefore does
-not probe the game page. The open synthetic readiness path on port 80 is the
-bounded external assertion. It does not replace checking the authenticated
-HTTPS page and WebSocket from a browser.
+HTTP never redirects automatically because it is the certificate-failure
+fallback. When Basic Auth is configured, only HTTPS returns `401` without
+credentials. The workflow still probes the open synthetic readiness path.
 
 ## Continuous updates
 
 A successful workflow publishes a new commit-SHA image and moves the public
-`latest` tag. The host timer reads the manifest digest from the anonymous
-GHCR registry API, compares it with
-`/opt/novajs/.deployed-image-digest`, and deploys only when needed. It also
-retries an incomplete data bootstrap or stopped container on the next timer
-run.
+`latest` tag. On every run, the host timer resolves that tag through the
+anonymous GHCR API and pulls the returned digest, not the mutable tag. It
+extracts `/usr/local/share/novajs/deploy` from that exact image into staging.
+This directory contains Compose, the Caddy bootstrap, helper scripts, the
+updater, and systemd units, so host behavior is atomic with application code.
+
+Before installation, every staged shell script must pass `bash -n`, Compose
+must pass `docker compose config`, and the rendered Caddyfile must pass
+`caddy validate`. The updater backs up every prior target, installs Compose,
+Caddy, and non-updater helpers, and deploys the exact image digest. It
+replaces its own script and systemd units only after NovaJS and Caddy are
+healthy. Any failure first restores the complete previous asset set. `.env`,
+retail data, Docker certificate state, and `novajs_player_data` are never
+overwritten.
+
+A script can pass `bash -n` and still contain a semantic bug. Deferring the
+self-update means such a script cannot interrupt the deployment that installs
+it, but it could fail on the next timer run. To recover, extract
+`scripts/novajs-updater.sh` from a known-good commit-SHA image with the
+bootstrap procedure below, install it, and start the service.
+
+### Bootstrap an existing frozen-cloud-init host once
+
+The already-running host cannot learn this extraction mechanism from its old
+updater. After this commit's image is public, connect with a root SSH key
+published by the repository owner's GitHub account. Set the IP and verify the
+existing Object Storage key has read, write, and delete permission. Then
+install only the new updater:
+
+```bash
+cd /opt/novajs
+sed -i 's/^CADDY_HOSTNAME=.*/CADDY_HOSTNAME=66.175.210.138/' .env
+set -a
+. ./.env
+set +a
+docker pull "$NOVA_IMAGE"
+bootstrap_container="$(docker create "$NOVA_IMAGE")"
+bootstrap_dir="$(mktemp -d)"
+docker cp \
+  "${bootstrap_container}:/usr/local/share/novajs/deploy/." \
+  "$bootstrap_dir"
+docker rm "$bootstrap_container"
+bash -n "$bootstrap_dir/scripts/novajs-updater.sh"
+install -m 0755 "$bootstrap_dir/scripts/novajs-updater.sh" \
+  /opt/novajs/scripts/novajs-updater.sh
+rm -rf "$bootstrap_dir"
+systemctl start novajs-updater.service
+journalctl -u novajs-updater.service -n 200 -f
+```
+
+This is the only manual retrofit. The new updater installs all remaining
+assets and enables the backup timer. Prefer an immutable commit-SHA image for
+break-glass recovery; change `NOVA_IMAGE` in `.env` to that SHA tag before
+running the same extraction commands.
 
 The updater does not overwrite `.env`, the retail data, or the named player
 volume. A failed image pull leaves the currently running containers in place.
@@ -356,23 +446,72 @@ continue running that version. To resume continuous deployment, change the
 line back to `:latest` and start the service again. Rollback does not touch
 the retail data or `novajs_player_data`.
 
-## Back up player data
+## Back up and restore player data
 
-The authoritative game world is in memory. Player progress is debounced to
-`players.json` in the named `novajs_player_data` volume. A simple root-owned
-nightly copy is still appropriate for this small deployment:
+`novajs-player-backup.timer` runs nightly at 03:17 UTC with up to 15 minutes
+of jitter. It mounts `novajs_player_data` read-only in a short-lived
+`alpine:3.22` container, copies `players.json` to a private temporary
+directory, validates that it is a JSON object, and uploads a key such as:
+
+```text
+novajs/player-backups/players-2026-08-27T03-22-14Z.json
+```
+
+`PlayerStore` writes a new temporary file and publishes it with atomic
+`rename(2)`. The backup opens only the published path, so it reads one
+complete old or new inode, never a file being modified. It does not stop or
+restart the game. Backups older than 14 days are deleted after each successful
+upload. Inspect success, upload errors, and pruning in journald:
 
 ```bash
-install -d -m 700 /var/backups/novajs
-crontab -e
+systemctl status novajs-player-backup.timer
+journalctl -u novajs-player-backup.service -n 100
+systemctl start novajs-player-backup.service
 ```
 
-Add this line to root's crontab. The escaped percent signs are required by
-cron:
+Defaults can be overridden in `/opt/novajs/.env`:
 
-```cron
-17 3 * * * /usr/bin/docker run --rm -v novajs_player_data:/data:ro -v /var/backups/novajs:/backup alpine:3.22 sh -c 'if [ -f /data/players.json ]; then cp /data/players.json "/backup/players-$(date +\%F).json"; fi; find /backup -type f -name "players-*.json" -mtime +30 -delete'
+```dotenv
+NOVA_PLAYER_BACKUP_PREFIX=novajs/player-backups
+NOVA_PLAYER_BACKUP_RETENTION_DAYS=14
 ```
+
+To restore, select and download a backup to a root-only host path, stop the
+Compose application, replace the file through a one-shot volume mount, and
+start the application again:
+
+```bash
+cd /opt/novajs
+set -a
+. ./.env
+set +a
+endpoint_host="${LINODE_BASE_URL#*://}"
+endpoint_host="${endpoint_host%/}"
+install -d -m 0700 /var/backups/novajs-restore
+s3cmd --host="$endpoint_host" \
+  --host-bucket="%(bucket)s.${endpoint_host}" \
+  --access_key="$LINODE_BUCKET_KEY" \
+  --secret_key="$LINODE_SECRET_KEY" \
+  --region="${LINODE_REGION:-us-east-1}" \
+  get \
+  "s3://${LINODE_BUCKET_NAME}/novajs/player-backups/players-TIMESTAMP.json" \
+  /var/backups/novajs-restore/players.json
+jq -e 'type == "object"' /var/backups/novajs-restore/players.json
+docker compose stop novajs caddy
+docker run --rm \
+  -v novajs_player_data:/data \
+  -v /var/backups/novajs-restore:/restore:ro \
+  alpine:3.22 \
+  sh -c 'cp /restore/players.json /data/players.json \
+    && chmod 0600 /data/players.json \
+    && chown 1000:1000 /data/players.json'
+docker compose up -d
+rm -rf /var/backups/novajs-restore
+```
+
+If `NOVA_PLAYER_BACKUP_PREFIX` was changed, use that prefix in the object URL.
+Stopping first prevents the in-memory world from immediately overwriting the
+restored file. Starting NovaJS reloads it before accepting players.
 
 ## Security and operational tradeoffs
 
@@ -385,23 +524,20 @@ cron:
   Cloud Manager access and rotate the keys if the host is compromised.
 - **Bootstrap fallback:** blank Caddy values intentionally produce
   unauthenticated HTTP on the IP so missing presentation values do not prevent
-  data/bootstrap diagnosis. Use it only on a restricted test instance; set
-  the hostname and both auth values before sharing the URL.
+  data/bootstrap diagnosis. Set `CADDY_HOSTNAME` to encrypt public traffic.
 - **Readiness endpoint:** `/__novajs_health` is intentionally unauthenticated
   on port 80 and reveals only readiness. It is not an authenticated game
   health check.
 - **No CI SSH:** the workflow has no inbound SSH dependency and no host-key
-  trust decision. Cloud-init disables password SSH and UFW allows only 80/443.
-  If SSH is enabled later for administration, add a key manually, verify the
-  fingerprint in Lish or the Linode console, and use strict known-host
-  checking. Do not reintroduce an Actions SSH deploy path without reviewing
-  the secret model.
+  trust decision. Cloud-init disables password SSH and allows port 22 only for
+  the public keys fetched from the GitHub account. Use strict host-key
+  checking for manual administration. Do not add SSH to Actions.
 - **API token:** the token can create and list Linodes within its Linode
   scope. The workflow never calls a destructive endpoint, but the token itself
   must still be protected and rotated if exposed.
-- **No automatic DNS provisioning:** Linode API access does not grant DNS or
-  know the desired public hostname. Those Caddy values therefore remain
-  explicit host-side steps.
+- **Host-specific TLS name:** the Linode IP is assigned after cloud-init is
+  submitted, and API access does not select a DNS name. `CADDY_HOSTNAME`
+  therefore remains an explicit one-time host setting.
 
 ## What has not been verified here
 
@@ -417,10 +553,12 @@ run a deployment. The first real run should verify:
 4. The archive checksum and Object Storage values allow a complete fetch, and
    `Nova Files` and `Plug-ins` are directly under
    `/var/lib/novajs/Nova_Data`.
-5. The configured hostname resolves to the instance and Caddy obtains a
-   certificate. Test the authenticated HTTPS page and WebSocket separately.
+5. Caddy obtains a browser-trusted six-day certificate for the configured IP
+   or a normal certificate for a configured hostname. Test HTTPS and its
+   WebSocket from a browser.
 6. The Actions health job receives HTTP 204 from
    `http://INSTANCE_IP/__novajs_health`.
+7. The backup timer uploads an object and can delete an expired test backup.
 
 The app's direct local health check remains `http://127.0.0.1:8200/`; there is
 no application `/health` route.
@@ -477,16 +615,15 @@ curl --include http://127.0.0.1/__novajs_health
 
 The usual causes are a missing `Nova Files` or `Plug-ins` directory, a
 directory one level too deep, restrictive data permissions, a Caddy hostname
-that does not resolve to the VM, or incomplete Basic Auth values. The
-updater normalizes data permissions for the unprivileged `node` container
-after a successful fetch.
+that does not resolve to the VM, a configured IP that does not match the
+public interface, or incomplete Basic Auth values. The updater normalizes data
+permissions for the unprivileged `node` container after a successful fetch.
 
 ### The workflow health job timed out
 
 The job can inspect only the public readiness path and Linode API state. Use
-Lish to inspect `cloud-final` and `novajs-updater` logs. A `401`, HTTP
-redirect, or TLS certificate error from the game URL is not itself a failure
-of the workflow probe; the probe uses the unauthenticated HTTP readiness
-path. If that path is not `204`, Caddy has not started or the host firewall,
-cloud-init, data fetch, app health check, or Caddy configuration needs
-attention.
+Lish to inspect `cloud-final` and `novajs-updater` logs. A TLS certificate
+error from the game URL is not itself a failure of the workflow probe; the
+probe uses the unauthenticated HTTP readiness path. If that path is not `204`,
+Caddy has not started or the host firewall, cloud-init, data fetch, app health
+check, or Caddy configuration needs attention.

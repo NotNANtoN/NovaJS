@@ -1,0 +1,11 @@
+[Unit]
+Description=Back up NovaJS player saves nightly
+
+[Timer]
+OnCalendar=*-*-* 03:17:00 UTC
+RandomizedDelaySec=15min
+Persistent=true
+Unit=novajs-player-backup.service
+
+[Install]
+WantedBy=timers.target

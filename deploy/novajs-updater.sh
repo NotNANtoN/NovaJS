@@ -5,27 +5,123 @@ deploy_dir="${NOVA_DEPLOY_DIR:-/opt/novajs}"
 env_file="${NOVA_ENV_FILE:-${deploy_dir}/.env}"
 state_file="${deploy_dir}/.deployed-image-digest"
 lock_file='/run/lock/novajs-updater.lock'
+asset_root='/usr/local/share/novajs/deploy'
 manifest_headers=''
-caddy_backup=''
-caddy_existed=0
+staging_dir=''
+backup_dir=''
+extract_container=''
+assets_installed=0
 deployment_succeeded=0
+backup_timer_was_enabled=0
+asset_sources=()
+asset_targets=()
+asset_modes=()
+asset_existed=()
+
+restore_assets() {
+    local index
+
+    for ((index = ${#asset_targets[@]} - 1; index >= 0; index--)); do
+        if [[ "${asset_existed[$index]}" -eq 1 ]]; then
+            install -m "${asset_modes[$index]}" \
+                "${backup_dir}/${index}" "${asset_targets[$index]}"
+        else
+            rm -f "${asset_targets[$index]}"
+        fi
+    done
+    systemctl daemon-reload 2>/dev/null || true
+    if [[ "$backup_timer_was_enabled" -eq 0 ]]; then
+        systemctl disable --now novajs-player-backup.timer \
+            >/dev/null 2>&1 || true
+    fi
+    printf '%s\n' 'Restored the previous NovaJS deployment assets.' >&2
+}
 
 cleanup() {
+    local exit_status=$?
+
+    trap - EXIT
+    set +e
+    if [[ -n "$extract_container" ]]; then
+        docker rm -f "$extract_container" >/dev/null 2>&1 || true
+    fi
+    if [[ "$deployment_succeeded" -eq 0 \
+        && "$assets_installed" -eq 1 ]]; then
+        restore_assets
+    fi
     if [[ -n "$manifest_headers" ]]; then
         rm -f "$manifest_headers"
     fi
-    if [[ "$deployment_succeeded" -eq 0 && -n "$caddy_backup" ]]; then
-        if [[ "$caddy_existed" -eq 1 ]]; then
-            install -m 0644 "$caddy_backup" "${deploy_dir}/Caddyfile"
-        else
-            rm -f "${deploy_dir}/Caddyfile"
-        fi
+    if [[ -n "$staging_dir" ]]; then
+        rm -rf "$staging_dir"
     fi
-    if [[ -n "$caddy_backup" ]]; then
-        rm -f "$caddy_backup"
+    if [[ -n "$backup_dir" ]]; then
+        rm -rf "$backup_dir"
     fi
+    exit "$exit_status"
 }
 trap cleanup EXIT
+
+validate_shell_assets() {
+    local candidate_dir="$1"
+    local script
+    local required
+    local scripts=()
+
+    required=(
+        docker-compose.yml
+        Caddyfile
+        scripts/fetch_nova_data.sh
+        scripts/render_caddyfile.sh
+        scripts/novajs-updater.sh
+        scripts/backup_player_data.sh
+        systemd/novajs-updater.service
+        systemd/novajs-updater.timer
+        systemd/novajs-player-backup.service
+        systemd/novajs-player-backup.timer
+    )
+    for required in "${required[@]}"; do
+        if [[ ! -f "${candidate_dir}/${required}" ]]; then
+            printf 'Image deployment assets are missing %s.\n' "$required" >&2
+            return 1
+        fi
+    done
+
+    shopt -s nullglob
+    scripts=("${candidate_dir}"/scripts/*.sh)
+    shopt -u nullglob
+    for script in "${scripts[@]}"; do
+        bash -n "$script"
+    done
+}
+
+validate_deploy_assets() {
+    local candidate_dir="$1"
+    local candidate_compose=(
+        docker compose
+        --project-directory "$candidate_dir"
+        -f "${candidate_dir}/docker-compose.yml"
+    )
+
+    validate_shell_assets "$candidate_dir"
+    "${candidate_compose[@]}" config --quiet >/dev/null
+    "${candidate_compose[@]}" pull caddy
+    "${candidate_compose[@]}" run --rm --no-deps caddy \
+        validate --config /etc/caddy/Caddyfile --adapter caddyfile
+}
+
+if [[ "${1:-}" == '--validate-assets' ]]; then
+    if [[ $# -ne 2 ]]; then
+        printf 'Usage: %s --validate-assets DIRECTORY\n' "$0" >&2
+        exit 2
+    fi
+    validate_deploy_assets "$2"
+    exit 0
+fi
+if (( $# > 0 )); then
+    printf 'Usage: %s [--validate-assets DIRECTORY]\n' "$0" >&2
+    exit 2
+fi
 
 exec 9>"$lock_file"
 if ! flock -n 9; then
@@ -49,45 +145,36 @@ if [[ -z "${NOVA_IMAGE:-}" ]]; then
     exit 1
 fi
 
-case "$NOVA_IMAGE" in
+configured_image="$NOVA_IMAGE"
+case "$configured_image" in
     ghcr.io/*:*)
         ;;
     *)
         printf 'NOVA_IMAGE must be a ghcr.io image with a tag: %s\n' \
-            "$NOVA_IMAGE" >&2
+            "$configured_image" >&2
         exit 1
         ;;
 esac
 
-image_path="${NOVA_IMAGE#ghcr.io/}"
+image_path="${configured_image#ghcr.io/}"
 image_repository="${image_path%:*}"
 image_tag="${image_path##*:}"
 if [[ -z "$image_repository" || -z "$image_tag" \
     || "$image_repository" =~ [^a-z0-9._/-] \
     || "$image_tag" =~ [^a-zA-Z0-9._-] ]]; then
     printf 'NOVA_IMAGE contains an unsupported repository or tag: %s\n' \
-        "$NOVA_IMAGE" >&2
+        "$configured_image" >&2
     exit 1
 fi
-
-data_dir="${NOVA_DATA_DIR:-/var/lib/novajs/Nova_Data}"
-if ! "$deploy_dir/scripts/fetch_nova_data.sh"; then
-    printf '%s\n' \
-        'Nova data is not ready; the application will not be started.' >&2
-    exit 1
-fi
-
-# The runtime image uses the unprivileged node user. Archives normally contain
-# readable retail files, but normalize permissions after a successful install
-# so a restrictive local mode cannot prevent the container from starting.
-chmod -R a+rX "$data_dir"
 
 # GHCR answers 401 to an unauthenticated manifest read even for a public
 # package, so ask for the anonymous pull token it expects.
+token_url='https://ghcr.io/token?service=ghcr.io'
+token_url+="&scope=repository:${image_repository}:pull"
 registry_token="$(
     curl --fail --silent --show-error \
         --retry 3 --retry-delay 2 --retry-all-errors \
-        "https://ghcr.io/token?service=ghcr.io&scope=repository:${image_repository}:pull" |
+        "$token_url" |
         jq -r '.token // empty'
 )"
 if [[ -z "$registry_token" ]]; then
@@ -98,10 +185,14 @@ fi
 
 manifest_headers="$(mktemp)"
 manifest_url="https://ghcr.io/v2/${image_repository}/manifests/${image_tag}"
+manifest_accept='application/vnd.oci.image.index.v1+json'
+manifest_accept+=', application/vnd.docker.distribution.manifest.list.v2+json'
+manifest_accept+=', application/vnd.oci.image.manifest.v1+json'
+manifest_accept+=', application/vnd.docker.distribution.manifest.v2+json'
 if ! curl --fail --silent --show-error --location \
     --retry 3 --retry-delay 2 --retry-all-errors \
     -H "Authorization: Bearer ${registry_token}" \
-    -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+    -H "Accept: ${manifest_accept}" \
     -D "$manifest_headers" -o /dev/null "$manifest_url"; then
     printf '%s\n' \
         'Could not read the GHCR manifest. The package must be public,' \
@@ -115,28 +206,94 @@ remote_digest="$(
 )"
 if [[ ! "$remote_digest" =~ ^sha256:[[:xdigit:]]{64}$ ]]; then
     printf 'GHCR did not return a usable manifest digest for %s.\n' \
-        "$NOVA_IMAGE" >&2
+        "$configured_image" >&2
     exit 1
 fi
 
-caddy_existed=0
-if [[ -f "${deploy_dir}/Caddyfile" ]]; then
-    caddy_existed=1
-    caddy_backup="$(mktemp)"
-    cp "${deploy_dir}/Caddyfile" "$caddy_backup"
-fi
-before_caddy_digest=''
-if [[ "$caddy_existed" -eq 1 ]]; then
-    before_caddy_digest="$(sha256sum "${deploy_dir}/Caddyfile" | awk '{print $1}')"
-fi
-"$deploy_dir/scripts/render_caddyfile.sh"
-after_caddy_digest="$(sha256sum "${deploy_dir}/Caddyfile" | awk '{print $1}')"
-caddy_changed=0
-if [[ "$before_caddy_digest" != "$after_caddy_digest" ]]; then
-    caddy_changed=1
-fi
+target_image="ghcr.io/${image_repository}@${remote_digest}"
+printf 'Refreshing deployment assets from %s.\n' "$target_image"
+docker pull "$target_image"
+staging_dir="$(mktemp -d)"
+extract_container="$(docker create "$target_image")"
+docker cp "${extract_container}:${asset_root}/." "$staging_dir"
+docker rm "$extract_container" >/dev/null
+extract_container=''
 
-compose=(docker compose)
+export NOVA_IMAGE="$target_image"
+validate_shell_assets "$staging_dir"
+NOVA_DEPLOY_DIR="$staging_dir" \
+    bash "${staging_dir}/scripts/render_caddyfile.sh"
+validate_deploy_assets "$staging_dir"
+
+asset_sources=(
+    "${staging_dir}/docker-compose.yml"
+    "${staging_dir}/Caddyfile"
+    "${staging_dir}/scripts/fetch_nova_data.sh"
+    "${staging_dir}/scripts/render_caddyfile.sh"
+    "${staging_dir}/scripts/backup_player_data.sh"
+    "${staging_dir}/scripts/novajs-updater.sh"
+    "${staging_dir}/systemd/novajs-updater.service"
+    "${staging_dir}/systemd/novajs-updater.timer"
+    "${staging_dir}/systemd/novajs-player-backup.service"
+    "${staging_dir}/systemd/novajs-player-backup.timer"
+)
+asset_targets=(
+    "${deploy_dir}/docker-compose.yml"
+    "${deploy_dir}/Caddyfile"
+    "${deploy_dir}/scripts/fetch_nova_data.sh"
+    "${deploy_dir}/scripts/render_caddyfile.sh"
+    "${deploy_dir}/scripts/backup_player_data.sh"
+    "${deploy_dir}/scripts/novajs-updater.sh"
+    /etc/systemd/system/novajs-updater.service
+    /etc/systemd/system/novajs-updater.timer
+    /etc/systemd/system/novajs-player-backup.service
+    /etc/systemd/system/novajs-player-backup.timer
+)
+asset_modes=(0644 0644 0755 0755 0755 0755 0644 0644 0644 0644)
+
+backup_dir="$(mktemp -d)"
+if systemctl is-enabled --quiet novajs-player-backup.timer 2>/dev/null; then
+    backup_timer_was_enabled=1
+fi
+assets_changed=0
+for index in "${!asset_targets[@]}"; do
+    if [[ -f "${asset_targets[$index]}" ]]; then
+        asset_existed[$index]=1
+        cp -p "${asset_targets[$index]}" "${backup_dir}/${index}"
+        if ! cmp -s "${asset_sources[$index]}" "${asset_targets[$index]}"; then
+            assets_changed=1
+        fi
+    else
+        asset_existed[$index]=0
+        assets_changed=1
+    fi
+done
+
+assets_installed=1
+for index in "${!asset_targets[@]}"; do
+    if [[ "${asset_targets[$index]}" == "${deploy_dir}/scripts/novajs-updater.sh" \
+        || "${asset_targets[$index]}" == /etc/systemd/system/* ]]; then
+        continue
+    fi
+    install -m "${asset_modes[$index]}" \
+        "${asset_sources[$index]}" "${asset_targets[$index]}"
+done
+
+if ! "${deploy_dir}/scripts/fetch_nova_data.sh"; then
+    printf '%s\n' \
+        'Nova data is not ready; the application will not be started.' >&2
+    exit 1
+fi
+data_dir="${NOVA_DATA_DIR:-/var/lib/novajs/Nova_Data}"
+# The runtime image uses the unprivileged node user. Normalize successful
+# archive installs so restrictive source modes cannot block startup.
+chmod -R a+rX "$data_dir"
+
+compose=(
+    docker compose
+    --project-directory "$deploy_dir"
+    -f "${deploy_dir}/docker-compose.yml"
+)
 service_running() {
     local service="$1"
     local container_id
@@ -164,40 +321,56 @@ if [[ -f "$state_file" ]]; then
 fi
 
 needs_deploy=0
-if [[ "$current_digest" != "$remote_digest" ]] \
+if [[ "$current_digest" != "$remote_digest" \
+    || "$assets_changed" -eq 1 ]] \
     || ! service_running novajs \
-    || ! service_running caddy \
-    || [[ "$caddy_changed" -eq 1 ]]; then
+    || ! service_running caddy; then
     needs_deploy=1
 fi
 
-if [[ "$needs_deploy" -eq 0 ]]; then
-    printf 'NovaJS %s is already deployed.\n' "$remote_digest"
-    exit 0
-fi
+if [[ "$needs_deploy" -eq 1 ]]; then
+    printf 'Deploying %s (%s).\n' "$configured_image" "$remote_digest"
+    "${compose[@]}" pull caddy
+    "${compose[@]}" up -d --force-recreate --remove-orphans --scale novajs=1
 
-printf 'Deploying %s (%s).\n' "$NOVA_IMAGE" "$remote_digest"
-"${compose[@]}" pull novajs caddy
-"${compose[@]}" up -d --force-recreate --remove-orphans --scale novajs=1
+    ready=0
+    for _ in $(seq 1 180); do
+        if curl --fail --silent --show-error --max-time 5 \
+            http://127.0.0.1:8200/ >/dev/null \
+            && curl --fail --silent --show-error --max-time 5 \
+                http://127.0.0.1/__novajs_health >/dev/null; then
+            ready=1
+            break
+        fi
+        sleep 2
+    done
 
-ready=0
-for _ in $(seq 1 180); do
-    if curl --fail --silent --show-error --max-time 5 \
-        http://127.0.0.1:8200/ >/dev/null; then
-        ready=1
-        break
+    if [[ "$ready" -ne 1 ]] || ! service_running caddy; then
+        printf '%s\n' 'NovaJS deployment did not become healthy.' >&2
+        "${compose[@]}" ps >&2 || true
+        "${compose[@]}" logs --tail=100 novajs caddy >&2 || true
+        exit 1
     fi
-    sleep 2
-done
-
-if [[ "$ready" -ne 1 ]] || ! service_running caddy; then
-    printf '%s\n' 'NovaJS deployment did not become healthy.' >&2
-    "${compose[@]}" ps >&2 || true
-    "${compose[@]}" logs --tail=100 novajs caddy >&2 || true
-    exit 1
 fi
+
+# Replace the updater only after this process proved the candidate assets and
+# application healthy. A future run can be recovered from an immutable image.
+for index in "${!asset_targets[@]}"; do
+    if [[ "${asset_targets[$index]}" != "${deploy_dir}/scripts/novajs-updater.sh" \
+        && "${asset_targets[$index]}" != /etc/systemd/system/* ]]; then
+        continue
+    fi
+    install -m "${asset_modes[$index]}" \
+        "${asset_sources[$index]}" "${asset_targets[$index]}"
+done
+systemctl daemon-reload
+systemctl enable --now novajs-player-backup.timer
 
 printf '%s\n' "$remote_digest" >"$state_file"
 chmod 0644 "$state_file"
 deployment_succeeded=1
-printf 'NovaJS deployment is healthy at %s.\n' "$remote_digest"
+if [[ "$needs_deploy" -eq 1 ]]; then
+    printf 'NovaJS deployment is healthy at %s.\n' "$remote_digest"
+else
+    printf 'NovaJS %s and its host assets are current.\n' "$remote_digest"
+fi

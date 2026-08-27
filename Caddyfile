@@ -1,9 +1,8 @@
-# This is the safe bootstrap configuration. The host updater renders this
-# file from /opt/novajs/.env when a hostname and Basic Auth hash are supplied.
+# This safe bootstrap stays on HTTP until the updater renders host settings.
 :80 {
     @novajs_health path /__novajs_health
     respond @novajs_health 204
 
-    # Internal-testing fallback: HTTP on the IP, without Basic Auth.
+    encode gzip
     reverse_proxy novajs:8200
 }

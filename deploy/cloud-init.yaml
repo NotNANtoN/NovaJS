@@ -37,6 +37,11 @@ write_files:
     permissions: '0755'
     encoding: b64
     content: '@UPDATER_B64@'
+  - path: /opt/novajs/scripts/backup_player_data.sh
+    owner: root:root
+    permissions: '0755'
+    encoding: b64
+    content: '@BACKUP_B64@'
   - path: /etc/systemd/system/novajs-updater.service
     owner: root:root
     permissions: '0644'
@@ -47,6 +52,16 @@ write_files:
     permissions: '0644'
     encoding: b64
     content: '@TIMER_B64@'
+  - path: /etc/systemd/system/novajs-player-backup.service
+    owner: root:root
+    permissions: '0644'
+    encoding: b64
+    content: '@BACKUP_SERVICE_B64@'
+  - path: /etc/systemd/system/novajs-player-backup.timer
+    owner: root:root
+    permissions: '0644'
+    encoding: b64
+    content: '@BACKUP_TIMER_B64@'
   - path: /opt/novajs/.env.template
     owner: root:root
     permissions: '0600'
@@ -54,11 +69,13 @@ write_files:
       NOVA_IMAGE=@NOVA_IMAGE@
       NOVA_DATA_DIR=/var/lib/novajs/Nova_Data
 
-      # Leave these blank for the internal HTTP fallback. Set all three
-      # Caddy values for public HTTPS with Basic Auth.
+      # Set this to a hostname or public IP for HTTPS. HTTP always remains up.
       CADDY_HOSTNAME=
       CADDY_BASIC_AUTH_USER=
       CADDY_BASIC_AUTH_HASH=
+
+      NOVA_PLAYER_BACKUP_PREFIX=novajs/player-backups
+      NOVA_PLAYER_BACKUP_RETENTION_DAYS=14
 
       # The retail game data stays on the host and is never put in the image.
       NOVA_DATA_URL=
@@ -94,3 +111,4 @@ runcmd:
   - [ufw, --force, enable]
   - [systemctl, enable, novajs-updater.timer]
   - [systemctl, start, novajs-updater.timer]
+  - [systemctl, enable, --now, novajs-player-backup.timer]

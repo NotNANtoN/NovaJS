@@ -24,8 +24,17 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/nova/src/index.html ./nova/src/index.html
 COPY --from=build /app/nova/settings ./nova/settings
+COPY docker-compose.yml Caddyfile /usr/local/share/novajs/deploy/
+COPY scripts/fetch_nova_data.sh deploy/render_caddyfile.sh \
+    deploy/novajs-updater.sh deploy/backup_player_data.sh \
+    /usr/local/share/novajs/deploy/scripts/
+COPY deploy/novajs-updater.service deploy/novajs-updater.timer \
+    deploy/novajs-player-backup.service \
+    deploy/novajs-player-backup.timer \
+    /usr/local/share/novajs/deploy/systemd/
 
-RUN mkdir -p /app/nova/objects /var/lib/novajs \
+RUN chmod 0755 /usr/local/share/novajs/deploy/scripts/*.sh \
+    && mkdir -p /app/nova/objects /var/lib/novajs \
     && chown -R node:node /app /var/lib/novajs
 
 USER node

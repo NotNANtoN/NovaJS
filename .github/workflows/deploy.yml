@@ -35,6 +35,8 @@ jobs:
       - name: Typecheck
         continue-on-error: true
         run: npm run typecheck
+      - name: Test deployment scripts
+        run: deploy/tests/run.sh
       - name: Run supported test suite
         run: npm test
 
@@ -238,16 +240,26 @@ jobs:
             fetch_b64="$(base64 -w 0 scripts/fetch_nova_data.sh)"
             render_caddy_b64="$(base64 -w 0 deploy/render_caddyfile.sh)"
             updater_b64="$(base64 -w 0 deploy/novajs-updater.sh)"
+            backup_b64="$(base64 -w 0 deploy/backup_player_data.sh)"
             service_b64="$(base64 -w 0 deploy/novajs-updater.service)"
             timer_b64="$(base64 -w 0 deploy/novajs-updater.timer)"
+            backup_service_b64="$(
+              base64 -w 0 deploy/novajs-player-backup.service
+            )"
+            backup_timer_b64="$(
+              base64 -w 0 deploy/novajs-player-backup.timer
+            )"
             nova_image="${IMAGE_REPOSITORY}:latest"
             export COMPOSE_B64="$compose_b64"
             export CADDYFILE_B64="$caddyfile_b64"
             export FETCH_B64="$fetch_b64"
             export RENDER_CADDY_B64="$render_caddy_b64"
             export UPDATER_B64="$updater_b64"
+            export BACKUP_B64="$backup_b64"
             export SERVICE_B64="$service_b64"
             export TIMER_B64="$timer_b64"
+            export BACKUP_SERVICE_B64="$backup_service_b64"
+            export BACKUP_TIMER_B64="$backup_timer_b64"
             export NOVA_IMAGE="$nova_image"
             cloud_init="$(
               python3 - <<'PY'
@@ -261,8 +273,11 @@ jobs:
               "FETCH_B64": os.environ["FETCH_B64"],
               "RENDER_CADDY_B64": os.environ["RENDER_CADDY_B64"],
               "UPDATER_B64": os.environ["UPDATER_B64"],
+              "BACKUP_B64": os.environ["BACKUP_B64"],
               "SERVICE_B64": os.environ["SERVICE_B64"],
               "TIMER_B64": os.environ["TIMER_B64"],
+              "BACKUP_SERVICE_B64": os.environ["BACKUP_SERVICE_B64"],
+              "BACKUP_TIMER_B64": os.environ["BACKUP_TIMER_B64"],
               "NOVA_IMAGE": os.environ["NOVA_IMAGE"],
               "ADMIN_SSH_KEYS_URL": os.environ["ADMIN_SSH_KEYS_URL"],
               "NOVA_DATA_SHA256": os.environ["NOVA_DATA_SHA256"],
@@ -286,8 +301,8 @@ jobs:
           print(template, end="")
           PY
             )"
-            # Linode caps decoded user_data at 16 KiB and this cloud-config is
-            # around 21 KiB, so hand cloud-init the gzip stream it accepts.
+            # Linode caps decoded user_data at 16 KiB. Hand cloud-init the
+            # gzip stream it accepts so embedded bootstrap scripts fit.
             user_data="$(printf '%s' "$cloud_init" | gzip -9 -n | base64 -w 0)"
             user_data_bytes="$(printf '%s' "$user_data" | base64 -d | wc -c)"
             if (( user_data_bytes > 16384 )); then

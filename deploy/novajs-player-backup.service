@@ -1,0 +1,11 @@
+[Unit]
+Description=Back up NovaJS player saves to Object Storage
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/novajs
+ExecStart=/opt/novajs/scripts/backup_player_data.sh
