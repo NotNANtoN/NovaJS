@@ -5,7 +5,10 @@ import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { System } from "nova_ecs/system";
 import * as PIXI from "pixi.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin";
-import { PlayerDeathComponent } from "../nova_plugin/death_plugin";
+import {
+    PlayerDeathComponent,
+    shouldShowDeathOverlay,
+} from "../nova_plugin/death_plugin";
 import { JumpStateComponent } from "../nova_plugin/jump_plugin";
 import {
     AnimationGraphicComponent,
@@ -52,8 +55,7 @@ const DeathOverlaySystem = new System({
             shipGraphic.container.visible = !death;
         }
         const existing = stage.getChildByName('PlayerDeathOverlay');
-        const messageVisible = death?.messageAt !== undefined
-            && time.time >= death.messageAt;
+        const messageVisible = shouldShowDeathOverlay(death, time.time);
         if (messageVisible && !existing) {
             const overlay = new PIXI.Container();
             overlay.name = 'PlayerDeathOverlay';
@@ -61,9 +63,6 @@ const DeathOverlaySystem = new System({
             background.beginFill(0x000000, 0.65);
             background.drawRect(0, 0, window.innerWidth, window.innerHeight);
             background.endFill();
-            // The server decides what death means: dësc 13999 when an escape
-            // pod saved the pilot, otherwise retail's death wording. Fall back
-            // only for entities that predate an outfit inventory.
             const text = new PIXI.Text(death?.message ?? 'You are destroyed', {
                 fontFamily: 'Geneva',
                 fontSize: 22,

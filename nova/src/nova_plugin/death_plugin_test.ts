@@ -31,6 +31,8 @@ import {
     ZeroArmorEvent,
     completePlayerDestruction,
     explosionVisualDurationMs,
+    recordPlayerDeath,
+    shouldShowDeathOverlay,
 } from './death_plugin';
 import { System } from 'nova_ecs/system';
 import { PlayerShipSelector } from './player_ship_plugin';
@@ -93,6 +95,39 @@ async function makeNetworkedCombatWorlds() {
 }
 
 describe('player death', () => {
+    it('marks only killed pilots as dead', () => {
+        const killed = createInitialPlayerState();
+        const escaped = createInitialPlayerState();
+
+        recordPlayerDeath(killed, 'killed', 12_345);
+        recordPlayerDeath(escaped, 'escaped', 12_345);
+
+        expect(killed.diedAt).toBe(12_345);
+        expect(escaped.diedAt).toBeUndefined();
+    });
+
+    it('shows the message overlay only for an escaped pilot', () => {
+        const death = {
+            wreckPosition: [0, 0] as [number, number],
+            visualFallbackAt: 100,
+            messageAt: 50,
+            message: 'Escape pod rescue',
+        };
+
+        expect(shouldShowDeathOverlay({
+            ...death,
+            outcome: 'escaped',
+        }, 50)).toBeTrue();
+        expect(shouldShowDeathOverlay({
+            ...death,
+            outcome: 'killed',
+        }, 50)).toBeFalse();
+        expect(shouldShowDeathOverlay({
+            ...death,
+            outcome: 'escaped',
+        }, 49)).toBeFalse();
+    });
+
     it('shows the message only after the final explosion lifetime', () => {
         const visualMs = explosionVisualDurationMs({
             id: 'nova:133',
@@ -441,7 +476,8 @@ describe('player death', () => {
             .has(DisabledComponent)).toBeFalse();
     });
 
-    it('holds a pilot without an escape pod in the game-over state', async () => {
+    it('marks a killed pilot without showing or scheduling a respawn',
+        async () => {
         const time = {
             time: 1_000,
             delta_ms: 0,
@@ -494,8 +530,9 @@ describe('player death', () => {
         world.step();
 
         expect(death?.outcome).toBe('killed');
-        expect(death?.message).toBe('Captain has been killed');
+        expect(death?.message).toBeUndefined();
         expect(death?.respawnAt).toBeUndefined();
+        expect(state.diedAt).toEqual(jasmine.any(Number));
         expect(player.components.has(PlayerDeathComponent)).toBe(true);
         expect(player.components.get(MovementStateComponent)!.position)
             .toEqual(new Position(42, 24));
@@ -641,6 +678,7 @@ describe('player death', () => {
         expect(death?.outcome).toBe('escaped');
         expect(death?.escapePodOutfitId).toBe('pod');
         expect(death?.message).toContain('a passing prospector');
+        expect(state.diedAt).toBeUndefined();
 
         time.time = death!.respawnAt!;
         world.step();

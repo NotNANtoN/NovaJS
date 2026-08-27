@@ -28,7 +28,11 @@ import {
     FinishJumpEvent,
     restartJumpArrival,
 } from "./nova_plugin/jump_plugin";
-import { RespawnRelocationEvent } from "./nova_plugin/death_plugin";
+import {
+    PlayerDeathComponent,
+    PlayerDestructionCompleteEvent,
+    RespawnRelocationEvent,
+} from "./nova_plugin/death_plugin";
 import { makeShip } from "./nova_plugin/make_ship";
 import { makeSystem } from "./nova_plugin/make_system";
 import { MultiRoomResource, NovaPlugin, SystemComponent } from "./nova_plugin/nova_plugin";
@@ -37,6 +41,7 @@ import { CompatibilityProfile } from "./nova_plugin/entity_budget";
 import {
     PlayerData,
     PlayerSnapshotSummary,
+    PlayerState,
     PlayerStateComponent,
     PlayerStateResource,
     setCargoCapacity,
@@ -156,6 +161,7 @@ let gameRunning = false;
 let gamePaused = true;
 let tickerInstalled = false;
 let mainRoomJoined = false;
+let mainMenuTransitioning = false;
 
 function resetGameplayClocks() {
     for (const gameplayWorld of [world, system]) {
@@ -227,6 +233,18 @@ async function transitionTo(
         void transitionTo(transition, 'hyperjump'));
     newSystem.events.get(RespawnRelocationEvent).subscribe(transition =>
         void transitionTo(transition, 'respawn'));
+    newSystem.events.get(PlayerDestructionCompleteEvent)
+        .subscribe(({ playerUuid }) => {
+            if (playerUuid !== uuid || !gameRunning) {
+                return;
+            }
+            const death = entity.components.get(PlayerDeathComponent);
+            if (death?.outcome !== 'killed') {
+                return;
+            }
+            void returnToMainMenu(
+                entity.components.get(PlayerStateComponent));
+        });
 
     if (!world) {
         throw new Error('Game world was not initialized');
@@ -411,25 +429,34 @@ async function showMainMenu(playerData: PlayerData | undefined) {
     await startGame(selection);
 }
 
-async function returnToMainMenu() {
+async function returnToMainMenu(playerState?: PlayerState) {
+    if (!gameRunning || mainMenuTransitioning) {
+        return;
+    }
+    mainMenuTransitioning = true;
     gamePaused = true;
     gameRunning = false;
-    const currentState = world?.resources.get(PlayerStateResource);
-    const currentPlayerData = currentState
-        ? {
-            uuid: communicator.uuid ?? 'client',
-            system: currentState.currentSystem,
-            savedAt: Date.now(),
-            playerState: currentState,
-            snapshots: await loadSnapshotSummaries(),
+    try {
+        const currentState = playerState
+            ?? world?.resources.get(PlayerStateResource);
+        const currentPlayerData = currentState
+            ? {
+                uuid: communicator.uuid ?? 'client',
+                system: currentState.currentSystem,
+                savedAt: Date.now(),
+                playerState: currentState,
+                snapshots: await loadSnapshotSummaries(),
+            }
+            : await playerDataPromise;
+        await leaveGameWorld();
+        if (mainRoomJoined) {
+            multiRoom.leave('main room');
+            mainRoomJoined = false;
         }
-        : await playerDataPromise;
-    await leaveGameWorld();
-    if (mainRoomJoined) {
-        multiRoom.leave('main room');
-        mainRoomJoined = false;
+        await showMainMenu(currentPlayerData);
+    } finally {
+        mainMenuTransitioning = false;
     }
-    await showMainMenu(currentPlayerData);
 }
 
 const escapeMenu = new EscapeMenu(

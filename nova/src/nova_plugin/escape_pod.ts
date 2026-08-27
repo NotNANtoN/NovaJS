@@ -17,11 +17,6 @@ export const ESCAPE_POD_RETAIL_MESSAGE =
     + 'where you work several dreary odd jobs to scratch up enough money to '
     + 'buy a new ship and once again begin roaming the spaceways...';
 
-/** STR# 2002, string 277, is retail's pilot-death wording. */
-export function killedPilotMessage(pilotName: string): string {
-    return `${pilotName} has been killed`;
-}
-
 export function findEscapePodOutfit(
     outfits: ReadonlyMap<string, { readonly count: number }>,
     getOutfit: (id: string) =>

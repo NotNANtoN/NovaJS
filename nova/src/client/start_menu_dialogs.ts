@@ -197,7 +197,7 @@ export function buildPilotChoices(
         undefined,
     );
     const choices: PilotChoice[] = [];
-    if (current) {
+    if (canEnterShip(current)) {
         choices.push({
             kind: 'current',
             id: 'current',
@@ -221,8 +221,10 @@ export function buildPilotChoices(
     return choices;
 }
 
-export function canEnterShip(state: PlayerState | undefined): boolean {
-    return state !== undefined;
+export function canEnterShip(
+    state: PlayerState | undefined,
+): state is PlayerState {
+    return state !== undefined && state.diedAt === undefined;
 }
 
 export function makeThemedButton(text: string): HTMLButtonElement {

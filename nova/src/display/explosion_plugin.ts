@@ -86,7 +86,10 @@ export const ExplosionSystem = new System({
                 activeDestructionVisuals,
                 completionTarget,
             )) {
-                emit(PlayerDestructionCompleteEvent, time, [completionTarget]);
+                emit(PlayerDestructionCompleteEvent, {
+                    ...time,
+                    playerUuid: completionTarget,
+                }, [completionTarget]);
             }
         }
     }
@@ -254,7 +257,10 @@ const PlayerFinalExplosionSystem = new System({
         dying.delete(shipUuid);
         if (!playFinalExplosion(ship, Position.fromVectorLike(movement.position),
             shipUuid, gameData, entities, budget, activeDestructionVisuals)) {
-            emit(PlayerDestructionCompleteEvent, time, [shipUuid]);
+            emit(PlayerDestructionCompleteEvent, {
+                ...time,
+                playerUuid: shipUuid,
+            }, [shipUuid]);
         }
     }
 });

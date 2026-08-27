@@ -161,6 +161,7 @@ const PlayerStateFields = t.intersection([
         legalRecords: t.record(t.string, t.number),
         /** Escorts under contract, each drawing its daily pay. */
         escorts: t.array(EscortContractData),
+        diedAt: t.number,
     }),
 ]);
 type PlayerStateFields = t.TypeOf<typeof PlayerStateFields>;
@@ -203,6 +204,7 @@ const LegacyPlayerStateFields = t.intersection([
         fuel: t.number,
         legalRecords: t.record(t.string, t.number),
         escorts: t.array(EscortContractData),
+        diedAt: t.number,
     }),
 ]);
 

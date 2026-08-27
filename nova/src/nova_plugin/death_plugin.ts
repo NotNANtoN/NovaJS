@@ -46,7 +46,6 @@ import {
     BASIC_ESCAPE_POD_SHIP_ID,
     ESCAPE_POD_RETAIL_MESSAGE,
     findEscapePodOutfit,
-    killedPilotMessage,
     recoverPilotAfterEscapePod,
 } from './escape_pod';
 import {
@@ -125,8 +124,31 @@ export const AppliedDamageEvent = new EcsEvent<{
     fromExplosion?: boolean,
 }>('AppliedDamageEvent');
 
+export interface PlayerDestructionComplete extends Time {
+    playerUuid: string;
+}
 export const PlayerDestructionCompleteEvent =
-    new EcsEvent<Time>('PlayerDestructionCompleteEvent');
+    new EcsEvent<PlayerDestructionComplete>(
+        'PlayerDestructionCompleteEvent');
+
+export function recordPlayerDeath(
+    state: PlayerState,
+    outcome: NonNullable<PlayerDeathState['outcome']>,
+    diedAt: number,
+): void {
+    if (outcome === 'killed') {
+        state.diedAt = diedAt;
+    }
+}
+
+export function shouldShowDeathOverlay(
+    death: PlayerDeathState | undefined,
+    time: number,
+): boolean {
+    return death?.outcome === 'escaped'
+        && death.messageAt !== undefined
+        && time >= death.messageAt;
+}
 
 export function explosionVisualDurationMs(
     explosion: ExplosionData | undefined,
@@ -365,6 +387,9 @@ function resolvePlayerDeath(
                 id => gameData.data.Outfit.getCached(id),
             )
             : undefined;
+        const outcome = outfits
+            ? escapePodOutfitId ? 'escaped' as const : 'killed' as const
+            : undefined;
         if (escapePodOutfitId) {
             // Start fetching the replacement hull during the explosion so the
             // synchronous respawn step never has to guess at its retail data.
@@ -379,15 +404,15 @@ function resolvePlayerDeath(
             // Old snapshots and lightweight test entities can predate outfit
             // inventory. Preserve their former respawn behavior; a real
             // player ship always has an explicit (possibly empty) inventory.
-            ...(outfits ? {
-                outcome: escapePodOutfitId ? 'escaped' as const
-                    : 'killed' as const,
-                message: escapePodOutfitId
-                    ? ESCAPE_POD_RETAIL_MESSAGE
-                    : killedPilotMessage(playerState?.pilotName ?? 'Pilot'),
-            } : {}),
+            ...(outcome ? { outcome } : {}),
+            ...(outcome === 'escaped'
+                ? { message: ESCAPE_POD_RETAIL_MESSAGE }
+                : {}),
             ...(escapePodOutfitId ? { escapePodOutfitId } : {}),
         };
+        if (playerState && outcome) {
+            recordPlayerDeath(playerState, outcome, Date.now());
+        }
         // Authoritative worlds do not install the Pixi completion system, so
         // derive stable message and respawn timing from the same visual data.
         completePlayerDestruction(deathState, time + visualDuration);

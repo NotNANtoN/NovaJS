@@ -94,6 +94,24 @@ describe('player snapshots', () => {
             ?.gameDate).toBe(2);
         await fs.rm(directory, { recursive: true, force: true });
     });
+
+    it('clears the death marker when restoring a snapshot', async () => {
+        const directory = await fs.mkdtemp(
+            path.join(os.tmpdir(), 'novajs-player-store-death-'));
+        const store = new PlayerStore(path.join(directory, 'players.json'));
+        const state = stateFor(1);
+        const snapshot = await store.snapshot('pilot', state);
+        await store.save('pilot', {
+            ...state,
+            diedAt: 12_345,
+        });
+
+        const restored = await store.restoreSnapshot('pilot', snapshot.id);
+
+        expect(restored?.diedAt).toBeUndefined();
+        expect((await store.get('pilot'))?.diedAt).toBeUndefined();
+        await fs.rm(directory, { recursive: true, force: true });
+    });
 });
 
 describe('player state revisions', () => {

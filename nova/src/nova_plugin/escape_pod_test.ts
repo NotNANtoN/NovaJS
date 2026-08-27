@@ -2,7 +2,6 @@ import { getDefaultShipData } from 'novadatainterface/ShipData';
 import {
     ESCAPE_POD_RETAIL_MESSAGE,
     findEscapePodOutfit,
-    killedPilotMessage,
     persEscapePodDisposition,
     recoverPilotAfterEscapePod,
 } from './escape_pod';
@@ -70,8 +69,7 @@ describe('escape pod rules', () => {
         expect(state.holds.length).toBe(2);
     });
 
-    it('uses retail death and rescue wording', () => {
-        expect(killedPilotMessage('Alex')).toBe('Alex has been killed');
+    it('uses the retail escape-pod rescue wording', () => {
         expect(ESCAPE_POD_RETAIL_MESSAGE).toContain(
             'a passing prospector picks up your distress beacon');
         expect(ESCAPE_POD_RETAIL_MESSAGE).toContain(

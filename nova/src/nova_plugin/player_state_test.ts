@@ -23,4 +23,13 @@ describe('toPersistentPlayerState', () => {
         expect(persisted?.activeMissions[0].missionId).toBe('nova:test');
         expect(JSON.stringify(persisted)).toContain('nova:test');
     });
+
+    it('preserves an optional pilot death marker', () => {
+        const state = createInitialPlayerState();
+        state.diedAt = 12_345;
+
+        expect(toPersistentPlayerState(state).diedAt).toBe(12_345);
+        expect(toPersistentPlayerState(createInitialPlayerState()).diedAt)
+            .toBeUndefined();
+    });
 });

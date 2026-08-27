@@ -265,6 +265,7 @@ export class PlayerStore implements PlayerStorePort {
             return undefined;
         }
         const restored = clonePlayerState(snapshot.state);
+        delete restored.diedAt;
         this.players.set(token, {
             ...restored,
             savedAt: Date.now(),

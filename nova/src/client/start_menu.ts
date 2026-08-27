@@ -58,6 +58,14 @@ export const PILOT_TARGET_PICT_SLOT = {
     height: 56,
 } as const;
 
+export function pilotDeathNotice(
+    state: PlayerState | undefined,
+): string | undefined {
+    return state?.diedAt === undefined
+        ? undefined
+        : 'PILOT DECEASED — LOAD A SAVED PILOT OR CREATE A NEW PILOT';
+}
+
 const RETAIL_BUTTON_SPECS = [
     ['New Pilot', '8050', 120, 61, 349, 400],
     ['Open Pilot', '8051', 99, 60, 344, 464],
@@ -229,6 +237,7 @@ function makeRetailButton(
 
 export function makePilotStatBlockElement(
     stats: PilotStatBlock | undefined,
+    deathNotice?: string,
 ): HTMLElement | undefined {
     if (!stats) {
         return undefined;
@@ -264,6 +273,16 @@ export function makePilotStatBlockElement(
         return list;
     };
     section.append(makeColumn(stats.left), makeColumn(stats.right));
+    if (deathNotice) {
+        const notice = document.createElement('p');
+        notice.dataset.pilotDeath = '';
+        notice.textContent = deathNotice;
+        notice.style.cssText = `
+          grid-column: 1 / -1; margin: 1px 0 0; color: ${PILOT_STATS_RED};
+          font: 10px/12px Geneva, Arial, sans-serif;
+        `;
+        section.appendChild(notice);
+    }
     return section;
 }
 
@@ -542,16 +561,17 @@ export class StartMenu {
                     });
                 } else if (id === '8053') {
                     button.disabled = !canEnterShip(existing);
-                    button.title = existing
-                        ? 'Enter the ship with the selected pilot'
-                        : 'No saved pilot selected';
+                    button.title = pilotDeathNotice(existing)
+                        ?? (existing
+                            ? 'Enter the ship with the selected pilot'
+                            : 'No saved pilot selected');
                     if (button.disabled) {
                         button.style.opacity = '.48';
                         button.style.filter = 'grayscale(.8)';
                         button.style.cursor = 'default';
                     }
                     button.addEventListener('click', () => {
-                        if (existing) {
+                        if (canEnterShip(existing)) {
                             resolve(existing, continued);
                         }
                     });
@@ -580,7 +600,10 @@ export class StartMenu {
                     if (!stats) {
                         return;
                     }
-                    const statBlock = makePilotStatBlockElement(stats);
+                    const statBlock = makePilotStatBlockElement(
+                        stats,
+                        pilotDeathNotice(existing),
+                    );
                     if (statBlock) {
                         this.content.appendChild(statBlock);
                         void this.targetPictureFor(stats).then(image => {
@@ -611,6 +634,17 @@ export class StartMenu {
             title.textContent = 'Escape Velocity Nova';
             title.style.cssText = 'margin: 0 0 26px; letter-spacing: .08em;';
             fallback.appendChild(title);
+            const deathNotice = pilotDeathNotice(existing);
+            if (deathNotice) {
+                const notice = document.createElement('p');
+                notice.dataset.pilotDeath = '';
+                notice.textContent = deathNotice;
+                notice.style.cssText = `
+                  margin: -12px 0 20px; color: ${PILOT_STATS_RED};
+                  font: 12px/15px Geneva, Arial, sans-serif;
+                `;
+                fallback.appendChild(notice);
+            }
             const actions = document.createElement('div');
             actions.style.cssText = `
               display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
@@ -636,7 +670,8 @@ export class StartMenu {
                             onNewPilotCreated,
                             () => showMainMenu('New Pilot'),
                         );
-                    } else if (label === 'Enter Ship' && existing) {
+                    } else if (label === 'Enter Ship'
+                        && canEnterShip(existing)) {
                         resolve(existing, continued);
                     } else if (label === 'Open Pilot') {
                         this.menuRenderVersion++;
