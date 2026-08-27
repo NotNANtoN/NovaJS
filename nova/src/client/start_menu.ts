@@ -104,6 +104,19 @@ type RetailMenuAssets = {
     rollover?: string;
 };
 
+type RetailMenuLoad = {
+    assets: RetailMenuAssets;
+    rollover: Promise<string | undefined>;
+};
+
+export type RetailMenuAssetStatus = 'loading' | 'ready' | 'unavailable';
+
+export function menuPresentationForRetailAssets(
+    status: RetailMenuAssetStatus,
+): 'fallback' | 'retail' {
+    return status === 'ready' ? 'retail' : 'fallback';
+}
+
 function assetUrl(type: 'PictImage' | 'SpriteSheetImage', id: string): string {
     return `${dataPath}/${type}/${encodeURIComponent(id)}.png`;
 }
@@ -122,7 +135,7 @@ function preloadImage(url: string): Promise<HTMLImageElement> {
 
 async function loadRetailMenuAssets(
     gameData: GameDataInterface | undefined,
-): Promise<RetailMenuAssets | undefined> {
+): Promise<RetailMenuLoad | undefined> {
     if (!gameData) {
         return undefined;
     }
@@ -138,14 +151,6 @@ async function loadRetailMenuAssets(
             || buttonIds.some(id => !has('SpriteSheetImage', `nova:${id}`))) {
             return undefined;
         }
-        // Check the actual served resources too. IDs can be present while a
-        // parser has failed to produce a particular image.
-        await Promise.all([
-            gameData.data.PictImage.get('nova:8000'),
-            gameData.data.PictImage.get('nova:8010'),
-            ...buttonIds.map(id =>
-                gameData.data.SpriteSheetImage.get(`nova:${id}`)),
-        ]);
         const assets = {
             background: assetUrl('PictImage', 'nova:8000'),
             logo: assetUrl('PictImage', 'nova:8010'),
@@ -155,6 +160,9 @@ async function loadRetailMenuAssets(
             ])),
             rollover: undefined as string | undefined,
         };
+        const rollover = has('SpriteSheetImage', 'nova:8020')
+            ? assetUrl('SpriteSheetImage', 'nova:8020')
+            : undefined;
         const [, logoImage] = await Promise.all([
             preloadImage(assets.background),
             preloadImage(assets.logo),
@@ -164,19 +172,12 @@ async function loadRetailMenuAssets(
             1,
             Math.floor(logoImage.naturalHeight / LOGO_FRAME_HEIGHT),
         );
-        // The rollover is optional. A missing or undecodable rlëD 8020 must
-        // not demote an otherwise complete retail menu to the DOM fallback.
-        if (has('SpriteSheetImage', 'nova:8020')) {
-            try {
-                await gameData.data.SpriteSheetImage.get('nova:8020');
-                const rollover = assetUrl('SpriteSheetImage', 'nova:8020');
-                await preloadImage(rollover);
-                assets.rollover = rollover;
-            } catch {
-                assets.rollover = undefined;
-            }
-        }
-        return assets;
+        const rolloverLoad = rollover
+            ? preloadImage(rollover)
+                .then(() => rollover)
+                .catch(() => undefined)
+            : Promise.resolve(undefined);
+        return { assets, rollover: rolloverLoad };
     } catch {
         // A server without the retail data should retain the usable DOM menu.
         return undefined;
@@ -298,6 +299,7 @@ export class StartMenu {
     private readonly content = document.createElement('div');
     private logoAnimationFrame: number | undefined;
     private retailAssets: RetailMenuAssets | undefined;
+    private retailAssetStatus: RetailMenuAssetStatus = 'loading';
     private dialogs: RetailMenuDialogs | undefined;
     private dialogCleanup: (() => void) | undefined;
     private menuRenderVersion = 0;
@@ -343,7 +345,12 @@ export class StartMenu {
         let currentIsNew = false;
         const snapshots = playerData?.snapshots ?? [];
         return new Promise(resolvePromise => {
+            let resolved = false;
             const resolve = (state: PlayerState, continued: boolean) => {
+                if (resolved) {
+                    return;
+                }
+                resolved = true;
                 this.dialogs?.clear();
                 this.dialogCleanup?.();
                 const activeElement = document.activeElement;
@@ -355,48 +362,14 @@ export class StartMenu {
                 this.root.remove();
                 resolvePromise({ playerState: state, continued });
             };
-            void loadRetailMenuAssets(this.gameData).then(retailAssets => {
-                this.retailAssets = retailAssets;
-                let showMainMenu: (focusLabel?: string) => void;
-                const onNewPilotCreated = (state: PlayerState) => {
-                    current = state;
-                    savedAt = undefined;
-                    currentIsNew = true;
-                    showMainMenu('New Pilot');
-                };
-                showMainMenu = (focusLabel?: string) => this.renderMainMenu(
-                        current,
-                        snapshots,
-                        savedAt,
-                        resolve,
-                        !currentIsNew,
-                        onNewPilotCreated,
-                        showMainMenu,
-                        focusLabel,
-                    );
-                this.dialogs = new RetailMenuDialogs({
-                    content: this.content,
-                    compatibilityProfile:
-                        this.options.compatibilityProfile ?? 'modern',
-                    controls: this.options.controls,
-                    restoreSnapshot,
-                    resolveSystemName: async systemId => {
-                        try {
-                            return (await this.gameData?.data.System.get(systemId))
-                                ?.name;
-                        } catch {
-                            return undefined;
-                        }
-                    },
-                    onBack: showMainMenu,
-                    onPilotSelected: (state, selectedAt) => {
-                        current = state;
-                        savedAt = selectedAt;
-                        currentIsNew = false;
-                        showMainMenu('Open Pilot');
-                    },
-                });
-                this.renderMainMenu(
+            let showMainMenu: (focusLabel?: string) => void;
+            const onNewPilotCreated = (state: PlayerState) => {
+                current = state;
+                savedAt = undefined;
+                currentIsNew = true;
+                showMainMenu('New Pilot');
+            };
+            showMainMenu = (focusLabel?: string) => this.renderMainMenu(
                     current,
                     snapshots,
                     savedAt,
@@ -404,7 +377,59 @@ export class StartMenu {
                     !currentIsNew,
                     onNewPilotCreated,
                     showMainMenu,
+                    focusLabel,
                 );
+            this.dialogs = new RetailMenuDialogs({
+                content: this.content,
+                compatibilityProfile:
+                    this.options.compatibilityProfile ?? 'modern',
+                controls: this.options.controls,
+                restoreSnapshot,
+                resolveSystemName: async systemId => {
+                    try {
+                        return (await this.gameData?.data.System.get(systemId))
+                            ?.name;
+                    } catch {
+                        return undefined;
+                    }
+                },
+                onBack: showMainMenu,
+                onPilotSelected: (state, selectedAt) => {
+                    current = state;
+                    savedAt = selectedAt;
+                    currentIsNew = false;
+                    showMainMenu('Open Pilot');
+                },
+            });
+            const upgradeVisibleMenu = () => {
+                if (!this.root.isConnected
+                    || !this.content.querySelector('[data-menu-action]')) {
+                    return;
+                }
+                const activeElement = document.activeElement;
+                const focusLabel = activeElement instanceof HTMLElement
+                    && this.content.contains(activeElement)
+                    ? activeElement.dataset.menuAction
+                    : undefined;
+                showMainMenu(focusLabel);
+            };
+            showMainMenu();
+            void loadRetailMenuAssets(this.gameData).then(retailLoad => {
+                if (!retailLoad) {
+                    this.retailAssetStatus = 'unavailable';
+                    return;
+                }
+                this.retailAssets = retailLoad.assets;
+                this.retailAssetStatus = 'ready';
+                upgradeVisibleMenu();
+                void retailLoad.rollover.then(rollover => {
+                    if (!rollover
+                        || this.retailAssets !== retailLoad.assets) {
+                        return;
+                    }
+                    retailLoad.assets.rollover = rollover;
+                    upgradeVisibleMenu();
+                });
             });
         });
     }
@@ -432,7 +457,8 @@ export class StartMenu {
         this.content.style.cssText = `
           position: absolute; inset: 0; text-align: center;
         `;
-        if (this.retailAssets) {
+        if (menuPresentationForRetailAssets(this.retailAssetStatus) === 'retail'
+            && this.retailAssets) {
             this.scene.style.backgroundImage =
                 `url("${this.retailAssets.background}")`;
             const title = document.createElement('h1');

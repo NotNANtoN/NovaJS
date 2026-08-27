@@ -4,9 +4,19 @@ import {
     canEnterShip,
     controlReference,
 } from './start_menu_dialogs';
-import { pilotDeathNotice } from './start_menu';
+import {
+    menuPresentationForRetailAssets,
+    pilotDeathNotice,
+} from './start_menu';
 
 describe('start menu action state', () => {
+    it('shows the usable fallback while retail artwork loads', () => {
+        expect(menuPresentationForRetailAssets('loading')).toBe('fallback');
+        expect(menuPresentationForRetailAssets('ready')).toBe('retail');
+        expect(menuPresentationForRetailAssets('unavailable'))
+            .toBe('fallback');
+    });
+
     it('only enables Enter Ship when a pilot is selected', () => {
         expect(canEnterShip(undefined)).toBeFalse();
         expect(canEnterShip(createInitialPlayerState())).toBeTrue();

@@ -8,6 +8,13 @@ let titleMusic: HTMLAudioElement | undefined;
 let titleMusicPlay: Promise<void> | undefined;
 let gestureHandlersInstalled = false;
 
+function hasPriorUserActivation(): boolean {
+    if (typeof navigator === 'undefined') {
+        return false;
+    }
+    return navigator.userActivation?.hasBeenActive ?? false;
+}
+
 function clampVolume(volume: number): number {
     return Math.min(1, Math.max(0, volume));
 }
@@ -85,22 +92,29 @@ function retryTitleMusic() {
     void playTitleMusic();
 }
 
+function abortTitleMusicDownload(audio: HTMLAudioElement) {
+    audio.pause();
+    audio.removeAttribute('src');
+    audio.load();
+}
+
 async function playTitleMusic() {
     if (titleMusicPlay || typeof Audio === 'undefined') {
         return titleMusicPlay;
     }
 
-    const audio = titleMusic ?? new Audio(TITLE_MUSIC_URL);
+    const audio = titleMusic ?? new Audio();
     audio.loop = true;
     audio.preload = 'auto';
     audio.volume = masterVolume;
+    audio.src = TITLE_MUSIC_URL;
     titleMusic = audio;
 
     let playback: Promise<void> | void;
     try {
         playback = audio.play();
     } catch (error) {
-        audio.pause();
+        abortTitleMusicDownload(audio);
         titleMusic = undefined;
         installGestureHandlers();
         console.warn('Unable to play Nova title music', error);
@@ -112,7 +126,7 @@ async function playTitleMusic() {
         }
     }).catch(error => {
         if (titleMusic === audio) {
-            audio.pause();
+            abortTitleMusicDownload(audio);
             titleMusic = undefined;
             installGestureHandlers();
             console.warn('Unable to play Nova title music', error);
@@ -134,7 +148,11 @@ export function startTitleMusicOnGesture() {
     if (typeof window === 'undefined') {
         return;
     }
-    void playTitleMusic();
+    if (hasPriorUserActivation()) {
+        void playTitleMusic();
+    } else {
+        installGestureHandlers();
+    }
 }
 
 /**
@@ -145,7 +163,7 @@ export function stopTitleMusic() {
     removeGestureHandler();
     titleMusicPlay = undefined;
     if (titleMusic) {
-        titleMusic.pause();
+        abortTitleMusicDownload(titleMusic);
         titleMusic.currentTime = 0;
         titleMusic = undefined;
     }

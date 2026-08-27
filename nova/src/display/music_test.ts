@@ -9,7 +9,7 @@ import {
 class FakeAudio {
     static instances: FakeAudio[] = [];
     static plays: Array<() => Promise<void>> = [];
-    readonly src: string;
+    src = '';
     loop = false;
     preload = '';
     volume = 1;
@@ -17,9 +17,10 @@ class FakeAudio {
     paused = false;
     playCalls = 0;
     pauseCalls = 0;
+    loadCalls = 0;
+    removedAttributes: string[] = [];
 
-    constructor(src: string) {
-        this.src = src;
+    constructor() {
         FakeAudio.instances.push(this);
     }
 
@@ -32,6 +33,17 @@ class FakeAudio {
     pause() {
         this.pauseCalls++;
         this.paused = true;
+    }
+
+    removeAttribute(attribute: string) {
+        this.removedAttributes.push(attribute);
+        if (attribute === 'src') {
+            this.src = '';
+        }
+    }
+
+    load() {
+        this.loadCalls++;
     }
 }
 
@@ -59,8 +71,12 @@ describe('title music', () => {
         delete (globalThis as any).Audio;
     });
 
-    it('starts immediately with retail URL, loop, and master volume', async () => {
+    it('does not assign the source before a browser gesture', async () => {
         startTitleMusicOnGesture();
+        await settle();
+        expect(FakeAudio.instances.length).toBe(0);
+
+        eventWindow.dispatchEvent(new Event('pointerdown'));
         await settle();
         const audio = FakeAudio.instances[0]!;
         expect(audio.src).toBe(TITLE_MUSIC_URL);
@@ -74,14 +90,19 @@ describe('title music', () => {
         expect(audio.playCalls).toBe(1);
     });
 
-    it('retries after rejection and suppresses duplicate gestures', async () => {
+    it('aborts a rejected download before retrying', async () => {
         FakeAudio.plays.push(
             () => Promise.reject(new Error('autoplay blocked')),
             () => Promise.resolve(),
         );
         startTitleMusicOnGesture();
+        eventWindow.dispatchEvent(new Event('pointerdown'));
         await settle();
         expect(FakeAudio.instances.length).toBe(1);
+        const rejected = FakeAudio.instances[0]!;
+        expect(rejected.src).toBe('');
+        expect(rejected.removedAttributes).toContain('src');
+        expect(rejected.loadCalls).toBe(1);
 
         eventWindow.dispatchEvent(new Event('pointerdown'));
         eventWindow.dispatchEvent(new Event('keydown'));
@@ -92,6 +113,7 @@ describe('title music', () => {
 
     it('stops, rewinds, and can restart on a later main menu', async () => {
         startTitleMusicOnGesture();
+        eventWindow.dispatchEvent(new Event('pointerdown'));
         await settle();
         const first = FakeAudio.instances[0]!;
         stopTitleMusic();
@@ -99,6 +121,7 @@ describe('title music', () => {
         expect(first.currentTime).toBe(0);
 
         startTitleMusicOnGesture();
+        eventWindow.dispatchEvent(new Event('pointerdown'));
         await settle();
         expect(FakeAudio.instances.length).toBe(2);
         expect(FakeAudio.instances[1]!.playCalls).toBe(1);
