@@ -147,8 +147,24 @@ jobs:
               --retry 3 --retry-delay 2 --retry-all-errors \
               -X DELETE -H "$auth_header" \
               "${api_url}/linode/instances/${doomed_id}" >/dev/null
-            # The label frees up with the instance, so re-read before creating.
-            query_instances "$instances"
+            # The list endpoint keeps returning the deleted Linode for a few
+            # seconds, so wait for the label to free up rather than reading an
+            # instance that is already gone.
+            deleted=0
+            for _ in $(seq 1 36); do
+              query_instances "$instances"
+              if [[ "$(jq -er '.data | length' "$instances")" -eq 0 ]]; then
+                deleted=1
+                break
+              fi
+              sleep 5
+            done
+            if [[ "$deleted" -eq 0 ]]; then
+              printf 'Linode %s is still listed after deletion; stopping.\n' \
+                "$doomed_id" >&2
+              exit 1
+            fi
+            printf 'Linode %s is gone.\n' "$doomed_id"
           fi
 
           if instance_id="$(resolve_single_instance "$instances")"; then
