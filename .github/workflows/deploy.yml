@@ -76,7 +76,8 @@ jobs:
         id: instance
         env:
           IMAGE_REPOSITORY: ${{ needs.publish.outputs.image_name }}
-          LINODE_API_TOKEN: ${{ secrets.LINODE_API_TOKEN }}
+          LINODE_API_TOKEN: >-
+            ${{ secrets.LINODE_API_TOKEN || secrets.LINODE_API_KEY }}
           NOVA_DATA_SHA256: ${{ secrets.NOVA_DATA_SHA256 }}
           LINODE_BASE_URL: ${{ secrets.LINODE_BASE_URL }}
           LINODE_REGION: ${{ secrets.LINODE_REGION || 'us-east-1' }}
@@ -308,7 +309,8 @@ jobs:
     env:
       INSTANCE_ID: ${{ needs.provision.outputs.instance_id }}
       INSTANCE_IPV4: ${{ needs.provision.outputs.ipv4 }}
-      LINODE_API_TOKEN: ${{ secrets.LINODE_API_TOKEN }}
+      LINODE_API_TOKEN: >-
+        ${{ secrets.LINODE_API_TOKEN || secrets.LINODE_API_KEY }}
     steps:
       - name: Poll public readiness endpoint
         run: |

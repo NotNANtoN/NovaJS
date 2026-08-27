@@ -125,7 +125,8 @@ LINODE_BUCKET_KEY
 LINODE_SECRET_KEY
 ```
 
-`LINODE_API_TOKEN` must have **Linodes: Read/Write** permission.
+`LINODE_API_TOKEN` must have **Linodes: Read/Write** permission; the workflow
+also accepts it under the name `LINODE_API_KEY`.
 `LINODE_BUCKET_KEY` and `LINODE_SECRET_KEY` must be the bucket-scoped
 read-only runtime key. `LINODE_REGION` is optional and defaults to
 `us-east-1` when omitted. The other seven names are required for a new
