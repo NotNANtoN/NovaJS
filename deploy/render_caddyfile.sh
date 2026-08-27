@@ -50,6 +50,10 @@ if [[ -n "$hostname" ]]; then
     cat >"$temporary" <<EOF
 {
     default_sni ${hostname}
+    # Caddy's generated redirect otherwise shadows the plain HTTP listener
+    # below, which must answer the health probe with 204 and must keep
+    # serving the game when certificate issuance fails.
+    auto_https disable_redirects
 }
 
 EOF
