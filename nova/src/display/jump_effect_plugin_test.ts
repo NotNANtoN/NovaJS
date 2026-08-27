@@ -6,10 +6,16 @@ import { MovementState } from 'nova_ecs/plugins/movement_plugin';
 import {
     JumpState,
     JUMP_ARRIVAL_MS,
-    JUMP_STREAK_MS,
+    JUMP_DEPARTURE_SPEED_MULTIPLIER,
     SYSTEM_DEPARTURE_RADIUS,
 } from '../nova_plugin/jump_plugin';
-import { JumpEffectSystem } from './jump_effect_plugin';
+import {
+    JumpEffectSystem,
+    departureStretchFactor,
+} from './jump_effect_plugin';
+
+const MAX_VELOCITY = 40;
+const PHYSICS = {maxVelocity: MAX_VELOCITY};
 
 function movementAt(x: number, y: number): MovementState {
     return {
@@ -58,7 +64,7 @@ function jump(
 }
 
 describe('other-ship jump effects', () => {
-    it('emits spool and departure sounds once per phase', () => {
+    it('emits charging and departure sounds once per phase', () => {
         const sounds: string[] = [];
         const emit = (_event: unknown, data: unknown) => {
             const sound = data as { id?: string };
@@ -75,8 +81,9 @@ describe('other-ship jump effects', () => {
         JumpEffectSystem.step(
             { id: 'ship' } as never,
             shipMovement,
+            PHYSICS as never,
             shipGraphic as never,
-            jump('spooling', JUMP_STREAK_MS) as never,
+            jump('braking', 800) as never,
             undefined,
             { time: 0 } as never,
             'ship',
@@ -87,8 +94,9 @@ describe('other-ship jump effects', () => {
         JumpEffectSystem.step(
             { id: 'ship' } as never,
             shipMovement,
+            PHYSICS as never,
             shipGraphic as never,
-            jump('spooling', JUMP_STREAK_MS) as never,
+            jump('spooling', 1_200) as never,
             undefined,
             { time: 10 } as never,
             'ship',
@@ -99,8 +107,9 @@ describe('other-ship jump effects', () => {
         JumpEffectSystem.step(
             { id: 'ship' } as never,
             shipMovement,
+            PHYSICS as never,
             shipGraphic as never,
-            jump('departing', JUMP_STREAK_MS) as never,
+            jump('departing', 180) as never,
             undefined,
             { time: 10 } as never,
             'ship',
@@ -112,7 +121,7 @@ describe('other-ship jump effects', () => {
         expect(sounds).toEqual(['nova:128', 'nova:130']);
     });
 
-    it('stretches and fades departure and mirrors it on arrival', () => {
+    it('grows the departure streak with actual speed', () => {
         const shipMovement = movementAt(100, 0);
         const shipGraphic = graphic();
         const seen = new Map<string, JumpState['phase']>();
@@ -120,6 +129,7 @@ describe('other-ship jump effects', () => {
             JumpEffectSystem.step(
                 { id: 'ship' } as never,
                 shipMovement,
+                PHYSICS as never,
                 shipGraphic as never,
                 state as never,
                 undefined,
@@ -130,16 +140,27 @@ describe('other-ship jump effects', () => {
                 seen,
             );
 
-        step(jump('departing', JUMP_STREAK_MS), 0);
+        step(jump('braking', 800), 0);
         expect(shipGraphic.container.scale.y).toBe(1);
-        step(jump('departing', JUMP_STREAK_MS), JUMP_STREAK_MS * 5);
+
+        shipMovement.velocity = new Vector(0, -MAX_VELOCITY);
+        step(jump('spooling', 1_200), 1_200);
+        expect(shipGraphic.container.scale.y).toBeGreaterThan(1);
+        expect(shipGraphic.container.scale.y).toBeLessThan(2);
+
+        shipMovement.velocity = new Vector(
+            0,
+            -MAX_VELOCITY * JUMP_DEPARTURE_SPEED_MULTIPLIER,
+        );
+        step(jump('departing', 180), 0);
         expect(shipGraphic.container.scale.y).toBe(4);
         expect(shipGraphic.container.alpha).toBeGreaterThan(0);
         shipMovement.position = new Position(
             SYSTEM_DEPARTURE_RADIUS - 1, 0);
-        step(jump('departing', JUMP_STREAK_MS), JUMP_STREAK_MS * 5);
+        step(jump('departing', 180), 180);
         expect(shipGraphic.container.alpha).toBeLessThan(0.01);
 
+        shipMovement.position = new Position(100, 0);
         step(jump('arriving', JUMP_ARRIVAL_MS), 0);
         expect(shipGraphic.container.scale.y).toBe(4);
         expect(shipGraphic.container.alpha).toBe(0);
@@ -152,6 +173,7 @@ describe('other-ship jump effects', () => {
         JumpEffectSystem.step(
             { id: 'ship' } as never,
             shipMovement,
+            PHYSICS as never,
             shipGraphic as never,
             undefined,
             undefined,
@@ -163,5 +185,22 @@ describe('other-ship jump effects', () => {
         );
         expect(shipGraphic.container.scale.y).toBe(1);
         expect(shipGraphic.container.alpha).toBe(1);
+    });
+
+    it('reaches full departure stretch only at hyperspace speed', () => {
+        const hyperspaceSpeed =
+            MAX_VELOCITY * JUMP_DEPARTURE_SPEED_MULTIPLIER;
+
+        expect(departureStretchFactor(0, MAX_VELOCITY)).toBe(0);
+        expect(departureStretchFactor(MAX_VELOCITY, MAX_VELOCITY))
+            .toBeCloseTo(1 / JUMP_DEPARTURE_SPEED_MULTIPLIER, 8);
+        expect(departureStretchFactor(
+            hyperspaceSpeed * 0.99,
+            MAX_VELOCITY,
+        )).toBeCloseTo(0.99, 8);
+        expect(departureStretchFactor(
+            hyperspaceSpeed,
+            MAX_VELOCITY,
+        )).toBe(1);
     });
 });

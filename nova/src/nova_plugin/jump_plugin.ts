@@ -40,8 +40,9 @@ import { NpcAIComponent } from "./npc_components";
 import { PlatformResource } from "./platform_plugin";
 
 export const JUMP_SPOOL_MS = 1_200;
+export const JUMP_BRAKE_MS = 800;
+export const JUMP_BRAKE_SPEED_THRESHOLD = 0.05;
 export const JUMP_BAM_MS = 180;
-export const JUMP_STREAK_MS = 400;
 export const JUMP_ARRIVAL_MS = 900;
 export const JUMP_ARRIVAL_RADIUS = 1_400;
 export const JUMP_DEPARTURE_SPEED_MULTIPLIER = 3.5;
@@ -84,6 +85,7 @@ const JumpStateCodec = t.intersection([
         from: t.string,
         to: t.string,
         phase: t.union([
+            t.literal('braking'),
             t.literal('spooling'),
             t.literal('departing'),
             t.literal('arriving'),
@@ -107,6 +109,7 @@ replicationPolicies.register(JumpStateComponent, {
 
 export type JumpTransition =
     | 'none'
+    | 'begin-spooling'
     | 'begin-departure'
     | 'transfer'
     | 'finish-arrival';
@@ -119,6 +122,8 @@ export function pendingJumpTransition(
         return 'none';
     }
     switch (state.phase) {
+        case 'braking':
+            return 'begin-spooling';
         case 'spooling':
             return 'begin-departure';
         case 'departing':
@@ -218,6 +223,9 @@ export function jumpFlightSpeed(
     maxVelocity: number,
 ): number {
     const safeMax = Math.max(0, maxVelocity);
+    if (phase === 'braking') {
+        return 0;
+    }
     if (phase === 'departing') {
         return safeMax * JUMP_DEPARTURE_SPEED_MULTIPLIER;
     }
@@ -225,12 +233,8 @@ export function jumpFlightSpeed(
         ? JUMP_SPOOL_MS : JUMP_ARRIVAL_MS;
     const progress = Math.max(0, Math.min(1, elapsedMs / duration));
     if (phase === 'spooling') {
-        // A quadratic ramp reads as a rapid launch without teleporting a
-        // stationary ship to full hyperjump speed on the first frame.
         const eased = progress * progress;
-        return safeMax * (
-            0.45 + (JUMP_DEPARTURE_SPEED_MULTIPLIER - 0.45) * eased
-        );
+        return safeMax * JUMP_DEPARTURE_SPEED_MULTIPLIER * eased;
     }
     // Smoothly bleed the arrival boost down to an ordinary controllable speed.
     const eased = progress * progress * (3 - 2 * progress);
@@ -247,8 +251,16 @@ export function applyJumpFlightMovement(
     speed: number,
     deltaSeconds: number,
     showThrust: boolean,
+    snapRotation: boolean,
 ): void {
-    const velocity = direction.scale(Math.max(0, speed));
+    const alignment = snapRotation
+        ? 1
+        : Math.max(0, Math.min(
+            1,
+            movement.rotation.getUnitVector().dot(direction),
+        ));
+    const appliedSpeed = Math.max(0, speed) * alignment;
+    const velocity = direction.scale(appliedSpeed);
     // MovementSystem has already integrated this frame at its normal capped
     // velocity. Correct that integration to the bounded jump-flight velocity,
     // then publish the same velocity as authoritative world state.
@@ -258,12 +270,14 @@ export function applyJumpFlightMovement(
         Math.max(0, deltaSeconds),
     ) as Position;
     movement.velocity = velocity;
-    movement.rotation = direction.angle;
+    if (snapRotation) {
+        movement.rotation = direction.angle;
+    }
     movement.turning = 0;
     movement.turnBack = false;
     movement.turnTo = direction.angle;
     movement.accelerating = showThrust ? 1 : 0;
-    movement.targetSpeed = speed;
+    movement.targetSpeed = appliedSpeed;
 }
 
 function wrappedAxisDistance(a: number, b: number): number {
@@ -278,6 +292,26 @@ export function distanceFromSystemOrigin(position: Position): number {
     );
 }
 
+function applyJumpBrakingControls(
+    movement: MovementState,
+    maxVelocity: number,
+): void {
+    const brakeSpeed = Math.max(0, maxVelocity)
+        * JUMP_BRAKE_SPEED_THRESHOLD;
+    if (movement.velocity.length <= brakeSpeed) {
+        movement.accelerating = 0;
+        return;
+    }
+    movement.turning = 0;
+    movement.turnTo = null;
+    movement.turnBack = true;
+    const reverse = movement.velocity.normalize(-1);
+    movement.accelerating = Math.max(
+        0,
+        movement.rotation.getUnitVector().dot(reverse),
+    );
+}
+
 export function advanceJumpFlight(
     state: JumpState,
     movement: MovementState,
@@ -286,6 +320,19 @@ export function advanceJumpFlight(
     direction: Vector,
     onBeginDeparture?: () => void,
 ): JumpTransition {
+    if (state.phase === 'braking') {
+        const brakeSpeed = Math.max(0, physics.maxVelocity)
+            * JUMP_BRAKE_SPEED_THRESHOLD;
+        const brakeComplete = movement.velocity.length <= brakeSpeed
+            || pendingJumpTransition(state, time.time) === 'begin-spooling';
+        if (!brakeComplete) {
+            return 'none';
+        }
+        state.phase = 'spooling';
+        state.phaseStartedAt = time.time;
+        state.transitionAt = time.time + JUMP_SPOOL_MS;
+    }
+
     if (state.phase === 'spooling') {
         if (pendingJumpTransition(state, time.time)
             === 'begin-departure') {
@@ -304,6 +351,7 @@ export function advanceJumpFlight(
             ),
             time.delta_s,
             true,
+            state.phase === 'departing',
         );
         return 'none';
     }
@@ -319,6 +367,7 @@ export function advanceJumpFlight(
             ),
             time.delta_s,
             true,
+            true,
         );
         return pendingJumpTransition(state, time.time);
     }
@@ -333,6 +382,7 @@ export function advanceJumpFlight(
         ),
         time.delta_s,
         false,
+        true,
     );
     return pendingJumpTransition(state, time.time);
 }
@@ -391,9 +441,9 @@ const PlayerJumpControl = new System({
         const state: JumpState = {
             from: systemId,
             to: nextSystem,
-            phase: 'spooling',
+            phase: 'braking',
             phaseStartedAt: time.time,
-            transitionAt: time.time + JUMP_SPOOL_MS,
+            transitionAt: time.time + JUMP_BRAKE_MS,
             requiresAdjacency: true,
             arrivalSoundPending: false,
             createdAt: time.time,
@@ -423,9 +473,9 @@ const InitiateJumpSystem = new System({
         const state: JumpState = {
             from,
             to,
-            phase: 'spooling',
+            phase: 'braking',
             phaseStartedAt: time.time,
-            transitionAt: time.time + JUMP_SPOOL_MS,
+            transitionAt: time.time + JUMP_BRAKE_MS,
             requiresAdjacency: false,
             arrivalSoundPending: false,
             createdAt: time.time,
@@ -433,6 +483,22 @@ const InitiateJumpSystem = new System({
         entity.components.set(JumpStateComponent, state);
         entity.components.delete(RemoteMovementPresentationComponent);
         emit(SoundEvent, { id: 'nova:128' });
+    },
+});
+
+const JumpBrakeControlSystem = new System({
+    name: 'JumpBrakeControlSystem',
+    after: [ControlPlayerShip],
+    before: [MovementSystem],
+    args: [
+        JumpStateComponent,
+        MovementStateComponent,
+        MovementPhysicsComponent,
+    ] as const,
+    step(state, movement, physics) {
+        if (state.phase === 'braking') {
+            applyJumpBrakingControls(movement, physics.maxVelocity);
+        }
     },
 });
 
@@ -464,7 +530,7 @@ const JumpLifecycleSystem = new System({
         const source = gameData.data.System.getCached(state.from);
         const destination = gameData.data.System.getCached(state.to);
         if (routeChangeCancelsJump(state, route.route)) {
-            // An explicit route change while spooling cancels the old jump
+            // An explicit route change before departure cancels the old jump
             // without discarding the newly selected route.
             cancelJumpFlight(entity, movement);
             return;
@@ -494,7 +560,7 @@ const JumpLifecycleSystem = new System({
             travelDirection,
             () => emit(SoundEvent, { id: 'nova:130' }),
         );
-        if (state.phase === 'spooling') {
+        if (state.phase === 'braking' || state.phase === 'spooling') {
             return;
         }
 
@@ -624,6 +690,7 @@ export const JumpPlugin: Plugin = {
         });
         world.addSystem(InitiateJumpSystem);
         world.addSystem(PlayerJumpControl);
+        world.addSystem(JumpBrakeControlSystem);
         world.addSystem(JumpLifecycleSystem);
         world.addSystem(NpcJumpLifecycleSystem);
         world.addSystem(JumpRouteProvider);

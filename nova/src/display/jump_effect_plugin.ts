@@ -5,7 +5,10 @@ import { Plugin } from 'nova_ecs/plugin';
 import { Query } from 'nova_ecs/query';
 import { Resource } from 'nova_ecs/resource';
 import { System } from 'nova_ecs/system';
-import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
+import {
+    MovementPhysicsComponent,
+    MovementStateComponent,
+} from 'nova_ecs/plugins/movement_plugin';
 import { MULTIPLAYER_INTEREST_RADIUS } from
     'nova_ecs/plugins/multiplayer_plugin';
 import { SingletonComponent } from 'nova_ecs/world';
@@ -14,7 +17,7 @@ import {
     JumpState,
     JumpStateComponent,
     JUMP_ARRIVAL_MS,
-    JUMP_STREAK_MS,
+    JUMP_DEPARTURE_SPEED_MULTIPLIER,
     SYSTEM_DEPARTURE_RADIUS,
     distanceFromSystemOrigin,
 } from '../nova_plugin/jump_plugin';
@@ -49,19 +52,10 @@ function isNearPlayer(
     });
 }
 
-function progressFor(
-    jump: Pick<JumpState, 'phase' | 'phaseStartedAt' | 'transitionAt'>,
+function arrivalProgress(
+    jump: Pick<JumpState, 'phaseStartedAt' | 'transitionAt'>,
     now: number,
 ): number {
-    if (jump.phase === 'departing') {
-        return Math.min(
-            1,
-            Math.max(
-                0,
-                (now - jump.phaseStartedAt) / JUMP_STREAK_MS,
-            ),
-        );
-    }
     const duration = Math.max(
         1,
         jump.transitionAt - jump.phaseStartedAt || JUMP_ARRIVAL_MS,
@@ -70,6 +64,18 @@ function progressFor(
         1,
         Math.max(0, (now - jump.phaseStartedAt) / duration),
     );
+}
+
+export function departureStretchFactor(
+    speed: number,
+    maxVelocity: number,
+): number {
+    const hyperspaceSpeed = Math.max(0, maxVelocity)
+        * JUMP_DEPARTURE_SPEED_MULTIPLIER;
+    if (hyperspaceSpeed === 0) {
+        return 0;
+    }
+    return Math.max(0, Math.min(1, speed / hyperspaceSpeed));
 }
 
 function departureAlpha(
@@ -115,7 +121,7 @@ function applyJumpGraphic(
     jump: JumpState,
     progress: number,
 ): void {
-    const departure = jump.phase === 'departing';
+    const departure = jump.phase !== 'arriving';
     const longitudinal = departure
         ? 1 + progress * 3
         : 4 - progress * 3;
@@ -138,6 +144,7 @@ export const JumpEffectSystem = new System({
     args: [
         ShipComponent,
         MovementStateComponent,
+        MovementPhysicsComponent,
         AnimationGraphicComponent,
         Optional(JumpStateComponent),
         Optional(PlayerShipSelector),
@@ -150,6 +157,7 @@ export const JumpEffectSystem = new System({
     step(
         _ship,
         movement,
+        physics,
         graphic,
         jump,
         playerShip,
@@ -172,25 +180,27 @@ export const JumpEffectSystem = new System({
         const previousPhase = seen.get(uuid);
         if (previousPhase !== jump.phase) {
             seen.set(uuid, jump.phase);
-            if ((jump.phase === 'spooling' || jump.phase === 'departing')
+            const startsCharging = jump.phase === 'braking'
+                || jump.phase === 'spooling' && previousPhase === undefined;
+            if ((startsCharging || jump.phase === 'departing')
                 && isNearPlayer(movement, players)) {
                 emit(SoundEvent, {
-                    id: jump.phase === 'spooling'
+                    id: startsCharging
                         ? 'nova:128' : 'nova:130',
                 });
             }
-        }
-
-        if (jump.phase === 'spooling') {
-            resetGraphic(graphic);
-            return;
         }
 
         applyJumpGraphic(
             graphic,
             movement,
             jump,
-            progressFor(jump, time.time),
+            jump.phase === 'arriving'
+                ? arrivalProgress(jump, time.time)
+                : departureStretchFactor(
+                    movement.velocity.length,
+                    physics.maxVelocity,
+                ),
         );
     },
 });

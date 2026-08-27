@@ -5,6 +5,7 @@ import {
     JUMP_ARRIVAL_MS,
     JUMP_ARRIVAL_SPEED_MULTIPLIER,
     JUMP_BAM_MS,
+    JUMP_BRAKE_MS,
     JUMP_DEPARTURE_SPEED_MULTIPLIER,
     JUMP_SPOOL_MS,
     NPC_JUMP_TIMEOUT_MS,
@@ -98,19 +99,28 @@ async function npcJumpWorld() {
 }
 
 describe('hyperjump lifecycle', () => {
-    it('spools, performs the departure BAM, then holds arrival controls', () => {
+    it('brakes, spools, performs the departure BAM, then arrives', () => {
+        const braking = {
+            phase: 'braking' as const,
+            transitionAt: JUMP_BRAKE_MS,
+        };
+        expect(pendingJumpTransition(braking, JUMP_BRAKE_MS - 1))
+            .toBe('none');
+        expect(pendingJumpTransition(braking, JUMP_BRAKE_MS))
+            .toBe('begin-spooling');
+
         const spooling = {
             phase: 'spooling' as const,
-            transitionAt: JUMP_SPOOL_MS,
+            transitionAt: JUMP_BRAKE_MS + JUMP_SPOOL_MS,
         };
-        expect(pendingJumpTransition(spooling, JUMP_SPOOL_MS - 1))
+        expect(pendingJumpTransition(spooling, spooling.transitionAt - 1))
             .toBe('none');
-        expect(pendingJumpTransition(spooling, JUMP_SPOOL_MS))
+        expect(pendingJumpTransition(spooling, spooling.transitionAt))
             .toBe('begin-departure');
 
         const departing = {
             phase: 'departing' as const,
-            transitionAt: JUMP_SPOOL_MS + JUMP_BAM_MS,
+            transitionAt: spooling.transitionAt + JUMP_BAM_MS,
         };
         expect(pendingJumpTransition(
             departing, departing.transitionAt - 1)).toBe('none');
@@ -159,8 +169,9 @@ describe('hyperjump lifecycle', () => {
 
     it('ramps departure above cruise and eases arrival back down', () => {
         const maxVelocity = 40;
+        expect(jumpFlightSpeed('braking', 0, maxVelocity)).toBe(0);
         expect(jumpFlightSpeed('spooling', 0, maxVelocity))
-            .toBeCloseTo(18, 8);
+            .toBe(0);
         expect(jumpFlightSpeed('spooling', JUMP_SPOOL_MS, maxVelocity))
             .toBeCloseTo(
                 maxVelocity * JUMP_DEPARTURE_SPEED_MULTIPLIER, 8);
@@ -191,7 +202,7 @@ describe('hyperjump lifecycle', () => {
             turnTo: null,
         };
         applyJumpFlightMovement(
-            movement, new Vector(1, 0), 30, 0.1, true);
+            movement, new Vector(1, 0), 30, 0.1, true, true);
         // MovementSystem already moved 1 unit at speed 10. The correction adds
         // 2 more, matching a single 0.1 s integration at jump speed 30.
         expect(movement.position.x).toBeCloseTo(3, 8);
@@ -202,6 +213,18 @@ describe('hyperjump lifecycle', () => {
         expect(movement.turnBack).toBeFalse();
         expect(movement.accelerating).toBe(1);
         expect(movement.turnTo).toEqual(new Vector(1, 0).angle);
+    });
+
+    it('turns into the spool heading before applying jump speed', () => {
+        const movement = npcMovementAt(0, 0);
+
+        applyJumpFlightMovement(
+            movement, new Vector(1, 0), 30, 0.1, true, false);
+
+        expect(movement.rotation).toEqual(new Angle(0));
+        expect(movement.turnTo).toEqual(new Vector(1, 0).angle);
+        expect(movement.velocity.length).toBe(0);
+        expect(movement.targetSpeed).toBe(0);
     });
 
     it('cancels jump flight and stale remote presentation on death', () => {
@@ -241,19 +264,54 @@ describe('hyperjump lifecycle', () => {
 });
 
 describe('NPC hyperjump lifecycle', () => {
-    it('starts from InitiateJumpEvent, spools, and gains speed', async () => {
+    it('brakes a moving ship before spooling', async () => {
+        const world = await npcJumpWorld();
+        const npc = npcJumpEntity();
+        const movement = npc.components.get(MovementStateComponent)!;
+        movement.velocity = new Vector(0, -20);
+        world.entities.set('npc', npc);
+
+        world.emitNow(InitiateJumpEvent, { to: 'nova:next' }, ['npc']);
+        expect(npc.components.get(JumpStateComponent)?.phase)
+            .toBe('braking');
+
+        world.step();
+        expect(npc.components.get(JumpStateComponent)?.phase)
+            .toBe('braking');
+        expect(movement.turnBack).toBeTrue();
+        expect(movement.turnTo).toBeNull();
+
+        const time = world.resources.get(TimeResource)!;
+        for (let now = 10; now < JUMP_BRAKE_MS; now += 10) {
+            time.time = now;
+            world.step();
+        }
+        expect(movement.velocity.length).toBeLessThan(20);
+        expect(npc.components.get(JumpStateComponent)?.phase)
+            .toBe('braking');
+
+        time.time = JUMP_BRAKE_MS;
+        world.step();
+        expect(npc.components.get(JumpStateComponent)?.phase)
+            .toBe('spooling');
+    });
+
+    it('starts a stationary ship spooling promptly and gains speed',
+        async () => {
         const world = await npcJumpWorld();
         const npc = npcJumpEntity();
         world.entities.set('npc', npc);
 
         world.emitNow(InitiateJumpEvent, { to: 'nova:next' }, ['npc']);
         expect(npc.components.get(JumpStateComponent)?.phase)
-            .toBe('spooling');
+            .toBe('braking');
 
         world.step();
+        expect(npc.components.get(JumpStateComponent)?.phase)
+            .toBe('spooling');
         const spoolingSpeed = npc.components
             .get(MovementStateComponent)!.velocity.length;
-        expect(spoolingSpeed).toBeGreaterThan(0);
+        expect(spoolingSpeed).toBe(0);
 
         const time = world.resources.get(TimeResource)!;
         time.time = JUMP_SPOOL_MS;

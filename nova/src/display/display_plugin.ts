@@ -89,7 +89,8 @@ const JumpTransitionOverlaySystem = new System({
     step(_playerShip, jump, stage, time) {
         const existing = stage.getChildByName(
             'PlayerJumpTransition') as PIXI.Graphics | null;
-        if (!jump || jump.phase === 'spooling') {
+        if (!jump || jump.phase === 'braking'
+            || jump.phase === 'spooling') {
             existing?.destroy();
             return;
         }
