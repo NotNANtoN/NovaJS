@@ -7,13 +7,14 @@ import { GameDataInterface } from "../../../novadatainterface/GameDataInterface"
 import { NovaDataType } from "../../../novadatainterface/NovaDataInterface";
 import { PlayerStore } from "./player_store";
 import { setupHttpLimiter } from './http_limiter';
+import { LosslessWebPCache } from './lossless_webp';
 
 export const IMMUTABLE_ASSET_CACHE =
     'public, max-age=31536000, immutable';
 export const REVALIDATE_METADATA_CACHE = 'no-cache';
 
 export function gameDataCacheControl(requestPath: string): string {
-    return /\.(?:png|mp3)$/i.test(requestPath)
+    return /\.(?:png|webp|mp3)$/i.test(requestPath)
         ? IMMUTABLE_ASSET_CACHE
         : REVALIDATE_METADATA_CACHE;
 }
@@ -31,7 +32,7 @@ function gzipMiddleware(req: express.Request, res: express.Response,
     const acceptedEncoding = req.headers['accept-encoding'];
     if (typeof acceptedEncoding !== 'string'
         || !/\bgzip\b/i.test(acceptedEncoding)
-        || /\.(?:png|mp3)(?:$|\?)/i.test(req.path)) {
+        || /\.(?:png|webp|mp3)(?:$|\?)/i.test(req.path)) {
         next();
         return;
     }
@@ -90,6 +91,8 @@ function gzipMiddleware(req: express.Request, res: express.Response,
 
 // This is a helper class used by `setupRoutes`
 class GameDataServer {
+    private readonly losslessWebP = new LosslessWebPCache();
+
     constructor(
         private readonly gameData: GameDataInterface,
         private readonly app: Express,
@@ -116,6 +119,8 @@ class GameDataServer {
         });
 
         this.app.get(path.join(dataPath, ":name/:item.png"), this.requestFulfiller.bind(this));
+        this.app.get(path.join(dataPath, ":name/:item.webp"),
+            this.requestFulfiller.bind(this));
         this.app.get(path.join(dataPath, ":name/:item.json"), this.requestFulfiller.bind(this));
         this.app.get(path.join(dataPath, ":name/:item.mp3"), this.requestFulfiller.bind(this));
         this.app.get(path.join(dataPath, ":name/:item"), this.requestFulfiller.bind(this));
@@ -237,6 +242,7 @@ class GameDataServer {
     private async requestFulfiller(req: express.Request, res: express.Response): Promise<void> {
         const name: string = req.params.name;
         const item: string = req.params.item;
+        const wantsWebP = /\.webp$/i.test(req.path);
 
         // TODO: Replace with protobufs
         var dataGettable = this.gameData.data[name as NovaDataType];
@@ -244,7 +250,16 @@ class GameDataServer {
         if (dataGettable) {
             let data = await dataGettable.get(item);
             if (data instanceof ArrayBuffer) {
-                res.send(Buffer.from(data));
+                const buffer = Buffer.from(data);
+                if (wantsWebP) {
+                    const webP = await this.losslessWebP.get(
+                        `${name}\0${item}`,
+                        buffer,
+                    );
+                    res.type('webp').send(webP);
+                } else {
+                    res.send(buffer);
+                }
             }
             else {
                 res.send(data);

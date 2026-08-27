@@ -30,6 +30,7 @@ import * as sound from '@pixi/sound';
 import urlJoin from 'url-join';
 import { dataPath, idsPath } from '../../common/GameDataPaths';
 import PQueue from 'p-queue';
+import { artworkUrl } from '../artwork_url';
 
 const METADATA_SCHEMA_VERSION = '2';
 
@@ -183,9 +184,11 @@ export class GameData implements GameDataInterface {
     }
 
     private addPictGettable<T extends PictImageData | SpriteSheetImageData>(dataType: NovaDataType): Gettable<T> {
-        var dataPrefix = this.getDataPrefix(dataType);
         return new Gettable<T>(async (id: string, priority: number): Promise<T> => {
-            return <T>((await this.getUrl(urlJoin(dataPrefix, id) + ".png", priority)) as Buffer).buffer;
+            return <T>((await this.getUrl(
+                artworkUrl(dataType, id),
+                priority,
+            )) as Buffer).buffer;
         });
     }
 
@@ -198,7 +201,7 @@ export class GameData implements GameDataInterface {
     }
 
     private url(id: string): string {
-        return urlJoin(dataPath, NovaDataType.PictImage, id + ".png");
+        return artworkUrl(NovaDataType.PictImage, id);
     }
 
     textureFromPict(id: string): PIXI.Texture {
@@ -222,7 +225,7 @@ export class GameData implements GameDataInterface {
     }
 
     async textureFromCicn(id: string): Promise<PIXI.Texture> {
-        const cicnPath = urlJoin(dataPath, NovaDataType.CicnImage, id + ".png");
+        const cicnPath = artworkUrl(NovaDataType.CicnImage, id);
         await this.data.CicnImage.get(id);
         return PIXI.Texture.from(cicnPath);
     }

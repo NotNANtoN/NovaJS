@@ -5,7 +5,7 @@ import {
     PlayerSnapshotSummary,
 } from '../nova_plugin/player_state';
 import type { GameDataInterface } from 'novadatainterface/GameDataInterface';
-import { dataPath } from '../common/GameDataPaths';
+import { artworkUrl } from './artwork_url';
 import {
     CompatibilityProfileName,
     PANEL_STYLE,
@@ -117,10 +117,6 @@ export function menuPresentationForRetailAssets(
     return status === 'ready' ? 'retail' : 'fallback';
 }
 
-function assetUrl(type: 'PictImage' | 'SpriteSheetImage', id: string): string {
-    return `${dataPath}/${type}/${encodeURIComponent(id)}.png`;
-}
-
 function preloadImage(url: string): Promise<HTMLImageElement> {
     return new Promise((resolve, reject) => {
         const image = new Image();
@@ -152,16 +148,16 @@ async function loadRetailMenuAssets(
             return undefined;
         }
         const assets = {
-            background: assetUrl('PictImage', 'nova:8000'),
-            logo: assetUrl('PictImage', 'nova:8010'),
+            background: artworkUrl('PictImage', 'nova:8000'),
+            logo: artworkUrl('PictImage', 'nova:8010'),
             logoFrameCount: 1,
             buttons: Object.fromEntries(buttonIds.map(id => [
-                id, assetUrl('SpriteSheetImage', `nova:${id}`),
+                id, artworkUrl('SpriteSheetImage', `nova:${id}`),
             ])),
             rollover: undefined as string | undefined,
         };
         const rollover = has('SpriteSheetImage', 'nova:8020')
-            ? assetUrl('SpriteSheetImage', 'nova:8020')
+            ? artworkUrl('SpriteSheetImage', 'nova:8020')
             : undefined;
         const [, logoImage] = await Promise.all([
             preloadImage(assets.background),
@@ -755,7 +751,7 @@ export class StartMenu {
                         return undefined;
                     }
                     const image = await preloadImage(
-                        assetUrl('PictImage', targetPict),
+                        artworkUrl('PictImage', targetPict),
                     );
                     image.dataset.pilotTargetPict = targetPict;
                     image.alt = `${

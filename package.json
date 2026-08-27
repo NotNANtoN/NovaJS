@@ -72,6 +72,7 @@
         "pixi.js": "7.1.4",
         "pngjs": "^7.0.0",
         "rxjs": "^7.8.2",
+        "sharp": "^0.35.4",
         "supports-color": "^9.3.1",
         "ts-enum-util": "^4.0.2",
         "uuid": "^9.0.1",

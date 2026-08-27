@@ -76,7 +76,7 @@ await Promise.all([
     build({
         ...commonOptions,
         entryPoints: [path.join(projectRoot, "nova/server.ts")],
-        external: ["ws"],
+        external: ["sharp", "ws"],
         keepNames: true,
         outfile: path.join(distPath, "server.js"),
         platform: "node",

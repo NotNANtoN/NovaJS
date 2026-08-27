@@ -62,7 +62,7 @@ for (const [index, test] of tests.entries()) {
             format: 'cjs',
             platform: 'node',
             target: 'node24',
-            external: ['jasmine'],
+            external: ['jasmine', 'sharp'],
             outfile: output,
             tsconfig: path.join(root, 'tsconfig.json'),
             logLevel: 'error',
