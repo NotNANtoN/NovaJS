@@ -178,20 +178,22 @@ provision.
 ## HTTP abuse limits
 
 Compose enables per-client HTTP request and response-byte limits. The defaults
-allow 180 requests per 60 seconds and 209715200 bytes (200 MiB) per 600000
-milliseconds (10 minutes). A cold load uses about 12 requests and 2.5 MiB;
-the larger byte allowance leaves room for the deferred 9.4 MiB music file,
-gameplay assets, and a few players sharing one NAT address.
+provide a 1200-request burst that refills over 60 seconds, and 209715200 bytes
+(200 MiB) per rolling 3600000 milliseconds (one hour). A measured cold launch
+and 40 seconds of play used 215 requests and about 12 MiB. The defaults leave
+ample request headroom and permit about 16 such sessions per hour from one IP,
+including a few players sharing one NAT address. A 10-minute byte window would
+have allowed one abusive IP to transfer roughly 1.2 GiB per hour.
 
 Set any of these values in `/opt/novajs/.env` and restart through the updater:
 
 ```dotenv
 NOVA_HTTP_LIMIT_ENABLED=true
-NOVA_HTTP_RATE_LIMIT_REQUESTS=180
+NOVA_HTTP_RATE_LIMIT_REQUESTS=1200
 NOVA_HTTP_RATE_LIMIT_WINDOW_MS=60000
 NOVA_HTTP_BYTE_LIMIT_BYTES=209715200
-NOVA_HTTP_BYTE_LIMIT_WINDOW_MS=600000
-NOVA_HTTP_LIMIT_CLIENT_TTL_MS=900000
+NOVA_HTTP_BYTE_LIMIT_WINDOW_MS=3600000
+NOVA_HTTP_LIMIT_CLIENT_TTL_MS=3900000
 NOVA_HTTP_LIMIT_MAX_CLIENTS=4096
 ```
 

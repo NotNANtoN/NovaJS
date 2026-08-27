@@ -35,10 +35,10 @@ async function withServer(
 }
 
 describe('HTTP limiter', () => {
-    it('allows a normal page-load burst', () => {
+    it('allows the measured 215-request cold session burst', () => {
         const limiter = new HttpLimiter(DEFAULT_HTTP_LIMIT_OPTIONS);
 
-        for (let request = 0; request < 24; request++) {
+        for (let request = 0; request < 215; request++) {
             expect(limiter.check('player', 0).allowed).toBeTrue();
         }
     });

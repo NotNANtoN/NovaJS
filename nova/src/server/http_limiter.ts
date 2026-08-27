@@ -4,16 +4,16 @@ import { Express } from 'express';
 export const HTTP_LIMIT_HEALTH_PATH = '/__novajs_health';
 const REJECTION_BODY = 'Too many requests\n';
 
-// A cold load is about 12 requests and 2.5 MiB. 180 requests/minute leaves
-// room for several players behind one NAT while bounding one-core CPU work.
-// 200 MiB/10 minutes covers several cold loads, deferred 9.4 MiB music, and
-// sustained play, but throttles repeated multi-megabyte asset downloads.
+// A measured cold launch and 40 seconds of play used 215 requests and 12 MiB.
+// A 1,200-request bucket refilling at 20/s leaves ample burst headroom. The
+// one-hour 200 MiB budget permits about 16 such cold sessions per IP, while
+// avoiding the roughly 1.2 GiB/hour that a 10-minute window would permit.
 export const DEFAULT_HTTP_LIMIT_OPTIONS: HttpLimitOptions = {
-    requestLimit: 180,
+    requestLimit: 1_200,
     requestWindowMs: 60_000,
     byteLimit: 200 * 1024 * 1024,
-    byteWindowMs: 10 * 60_000,
-    clientTtlMs: 15 * 60_000,
+    byteWindowMs: 60 * 60_000,
+    clientTtlMs: 65 * 60_000,
     maxClients: 4_096,
     cleanupIntervalMs: 60_000,
 };
@@ -293,9 +293,8 @@ export function setupHttpLimiter(
     environment: NodeJS.ProcessEnv = process.env,
     now: () => number = Date.now,
 ): HttpLimiter | undefined {
-    // Public requests have exactly one Caddy hop. Port 8200 is bound only to
-    // host loopback for deployment checks, so forwarded headers are not
-    // directly user-controlled even though the container also uses `expose`.
+    // Only Caddy publishes public ports. The app is exposed on Docker's
+    // internal network, so public requests have exactly one trusted proxy hop.
     app.set('trust proxy', 1);
 
     if (!httpLimitEnabled(environment)) {
