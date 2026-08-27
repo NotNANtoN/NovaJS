@@ -5,6 +5,13 @@ on:
     branches:
       - feat-performance-and-modernization
   workflow_dispatch:
+    inputs:
+      recreate_instance:
+        description: >-
+          Delete the existing novajs Linode and provision a fresh one.
+          Everything on the host, including saved pilots, is lost.
+        type: boolean
+        default: false
 
 concurrency:
   group: novajs-deploy
@@ -78,6 +85,11 @@ jobs:
           IMAGE_REPOSITORY: ${{ needs.publish.outputs.image_name }}
           LINODE_API_TOKEN: >-
             ${{ secrets.LINODE_API_TOKEN || secrets.LINODE_API_KEY }}
+          RECREATE_INSTANCE: ${{ inputs.recreate_instance }}
+          # The host trusts whichever keys this GitHub account publishes, so
+          # admin access stays reproducible instead of a hand-added key.
+          ADMIN_SSH_KEYS_URL: >-
+            https://github.com/${{ github.repository_owner }}.keys
           NOVA_DATA_SHA256: ${{ secrets.NOVA_DATA_SHA256 }}
           LINODE_BASE_URL: ${{ secrets.LINODE_BASE_URL }}
           LINODE_REGION: ${{ secrets.LINODE_REGION || 'us-east-1' }}
@@ -127,6 +139,18 @@ jobs:
           }
 
           query_instances "$instances"
+          if [[ "$RECREATE_INSTANCE" == 'true' ]] \
+              && doomed_id="$(resolve_single_instance "$instances")"; then
+            printf 'Deleting Linode %s before provisioning a fresh one.\n' \
+              "$doomed_id"
+            curl --fail-with-body --silent --show-error \
+              --retry 3 --retry-delay 2 --retry-all-errors \
+              -X DELETE -H "$auth_header" \
+              "${api_url}/linode/instances/${doomed_id}" >/dev/null
+            # The label frees up with the instance, so re-read before creating.
+            query_instances "$instances"
+          fi
+
           if instance_id="$(resolve_single_instance "$instances")"; then
             printf 'Using existing Linode %s.\n' "$instance_id"
           else
@@ -224,6 +248,7 @@ jobs:
               "SERVICE_B64": os.environ["SERVICE_B64"],
               "TIMER_B64": os.environ["TIMER_B64"],
               "NOVA_IMAGE": os.environ["NOVA_IMAGE"],
+              "ADMIN_SSH_KEYS_URL": os.environ["ADMIN_SSH_KEYS_URL"],
               "NOVA_DATA_SHA256": os.environ["NOVA_DATA_SHA256"],
               "LINODE_BASE_URL": os.environ["LINODE_BASE_URL"],
               "LINODE_REGION": os.environ["LINODE_REGION"],

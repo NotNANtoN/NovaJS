@@ -79,12 +79,16 @@ write_files:
 
 runcmd:
   - [bash, -c, 'set -eu; install -d -m 0755 /opt/novajs/scripts /var/lib/novajs']
+  # Key-only root access for reading cloud-init and updater logs. The trusted
+  # keys come from the deploying GitHub account, so nothing is hand-installed.
+  - [bash, -c, 'set -eu; install -d -m 0700 /root/.ssh; if curl --fail --silent --show-error --max-time 30 "@ADMIN_SSH_KEYS_URL@" -o /tmp/admin_keys && [ -s /tmp/admin_keys ]; then install -m 0600 /tmp/admin_keys /root/.ssh/authorized_keys; fi; rm -f /tmp/admin_keys']
   - [bash, -c, 'if [ ! -e /opt/novajs/.env ]; then install -m 0600 /opt/novajs/.env.template /opt/novajs/.env; fi']
   - [systemctl, enable, --now, docker]
   - [systemctl, daemon-reload]
   - [bash, -c, 'systemctl reload ssh 2>/dev/null || true']
   - [ufw, default, deny, incoming]
   - [ufw, default, allow, outgoing]
+  - [ufw, allow, 22/tcp]
   - [ufw, allow, 80/tcp]
   - [ufw, allow, 443/tcp]
   - [ufw, --force, enable]

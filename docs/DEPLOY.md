@@ -127,6 +127,14 @@ LINODE_SECRET_KEY
 
 `LINODE_API_TOKEN` must have **Linodes: Read/Write** permission; the workflow
 also accepts it under the name `LINODE_API_KEY`.
+
+The host installs the public SSH keys published by the GitHub account that
+owns the repository (`https://github.com/<owner>.keys`) for root, key-only
+access, and opens port 22. Nothing else can log in, and adding or revoking an
+admin means changing that account's keys rather than touching the server. To
+throw the host away and rebuild it from scratch, run the workflow manually
+with **recreate_instance** checked; everything on it, saved pilots included,
+is deleted.
 `LINODE_BUCKET_KEY` and `LINODE_SECRET_KEY` must be the bucket-scoped
 read-only runtime key. `LINODE_REGION` is optional and defaults to
 `us-east-1` when omitted. The other seven names are required for a new
