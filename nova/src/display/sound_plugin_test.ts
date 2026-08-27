@@ -4,18 +4,13 @@ import { Angle } from 'nova_ecs/datatypes/angle';
 import { Position } from 'nova_ecs/datatypes/position';
 import { Vector } from 'nova_ecs/datatypes/vector';
 import { MovementState } from 'nova_ecs/plugins/movement_plugin';
-import { Stat } from '../nova_plugin/stat';
 import {
-    HEALTH_HIT_SOUND_COOLDOWN_MS,
-    HealthSoundState,
     IncomingMissileWarningSystem,
     LandingSoundRequestSystem,
-    PlayerHealthSoundSystem,
     StellarSoundSystem,
     TargetSelectionSoundSystem,
 } from './sound_plugin';
 import {
-    HEALTH_HIT_SOUND_ID,
     INCOMING_MISSILE_SOUND_ID,
     SoundEvent,
     STELLAR_DOCKING_SOUND_ID,
@@ -52,26 +47,6 @@ function movement(
 }
 
 describe('browser sound effects', () => {
-    it('plays one health sound for a replicated drop, not once per frame', () => {
-        const {sounds, emit} = soundCollector();
-        const shield = new Stat({current: 100, max: 100, recharge: 0});
-        const armor = new Stat({current: 100, max: 100, recharge: 0});
-        const players = [['player', undefined, shield, armor]];
-        const state: HealthSoundState = {lastPlayedAt: -Infinity};
-        const time = {time: 100, delta_ms: 0, delta_s: 0, frame: 0};
-
-        PlayerHealthSoundSystem.step(
-            players as never, time, state, emit, undefined);
-        shield.current = 80;
-        PlayerHealthSoundSystem.step(
-            players as never, time, state, emit, undefined);
-        time.time += HEALTH_HIT_SOUND_COOLDOWN_MS / 2;
-        PlayerHealthSoundSystem.step(
-            players as never, time, state, emit, undefined);
-
-        expect(sounds).toEqual([HEALTH_HIT_SOUND_ID]);
-    });
-
     it('plays a sound when a target is selected', () => {
         const {sounds, emit} = soundCollector();
 

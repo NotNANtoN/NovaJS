@@ -3,14 +3,12 @@ import { Emit, UUID } from 'nova_ecs/arg_types';
 import { Plugin } from 'nova_ecs/plugin';
 import { Resource } from 'nova_ecs/resource';
 import { MovementState, MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
-import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
 import { SingletonComponent } from 'nova_ecs/world';
 import { GameData } from '../client/gamedata/GameData';
 import { EcsControlEvent } from '../nova_plugin/controls_plugin';
 import { GameDataResource } from '../nova_plugin/game_data_resource';
-import { ArmorComponent, ShieldComponent } from '../nova_plugin/health_plugin';
 import { LandEvent, LandingResultEvent } from '../nova_plugin/planet_plugin';
 import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin';
 import { OwnerComponent, VulnerableToPD } from '../nova_plugin/fire_weapon_plugin';
@@ -21,7 +19,6 @@ import {
 import { CycleTargetEvent } from '../nova_plugin/target_plugin';
 import { TargetComponent } from '../nova_plugin/target_component';
 import {
-    HEALTH_HIT_SOUND_ID,
     INCOMING_MISSILE_SOUND_ID,
     SoundEvent,
     STELLAR_DEPARTURE_SOUND_ID,
@@ -38,46 +35,10 @@ const LoopingSounds = new Resource<Map<string, Sound>>('LoopingSounds');
 const LoadedSounds = new Resource<Map<string, Sound>>('LoadedSounds');
 const PendingSounds = new Resource<Map<string, Promise<Sound>>>('PendingSounds');
 export const VolumeResource = new Resource<{volume: number}>('VolumeResource');
-const HealthSoundStateResource = new Resource<HealthSoundState>(
-    'HealthSoundState');
 const IncomingMissileStateResource = new Resource<Set<string>>(
     'IncomingMissileState');
 const StellarSoundStateResource = new Resource<StellarSoundState>(
     'StellarSoundState');
-
-export const HEALTH_HIT_SOUND_COOLDOWN_MS = 120;
-
-export interface HealthSoundSnapshot {
-    shield?: number;
-    armor?: number;
-}
-
-export interface HealthSoundState extends HealthSoundSnapshot {
-    playerUuid?: string;
-    lastPlayedAt: number;
-}
-
-export function healthDecreased(
-    previous: HealthSoundSnapshot,
-    current: HealthSoundSnapshot,
-): boolean {
-    return (previous.shield !== undefined
-        && current.shield !== undefined
-        && current.shield < previous.shield)
-        || (previous.armor !== undefined
-        && current.armor !== undefined
-        && current.armor < previous.armor);
-}
-
-export function shouldPlayHealthHitSound(
-    previous: HealthSoundSnapshot,
-    current: HealthSoundSnapshot,
-    now: number,
-    lastPlayedAt: number,
-): boolean {
-    return healthDecreased(previous, current)
-        && now - lastPlayedAt >= HEALTH_HIT_SOUND_COOLDOWN_MS;
-}
 
 export interface IncomingMissileSnapshot {
     target: string | undefined;
@@ -119,12 +80,6 @@ interface StellarSoundState {
     playerWasPresent: boolean;
 }
 
-const PlayerHealthQuery = new Query([
-    UUID,
-    PlayerShipSelector,
-    ShieldComponent,
-    ArmorComponent,
-] as const);
 const PlayerMovementQuery = new Query([
     UUID,
     PlayerShipSelector,
@@ -223,40 +178,6 @@ export const TargetSelectionSoundSystem = new System({
         if (target) {
             emit(SoundEvent, {id: TARGET_SELECTION_SOUND_ID});
         }
-    },
-});
-
-export const PlayerHealthSoundSystem = new System({
-    name: 'PlayerHealthSoundSystem',
-    args: [PlayerHealthQuery, TimeResource, HealthSoundStateResource,
-        Emit, SingletonComponent] as const,
-    step(players, {time}, state, emit) {
-        const player = players[0];
-        if (!player) {
-            state.playerUuid = undefined;
-            state.shield = undefined;
-            state.armor = undefined;
-            return;
-        }
-
-        const [playerUuid, _player, shield, armor] = player;
-        const current = {
-            shield: shield.current,
-            armor: armor.current,
-        };
-        if (state.playerUuid !== playerUuid) {
-            state.playerUuid = playerUuid;
-            state.shield = current.shield;
-            state.armor = current.armor;
-            return;
-        }
-
-        if (shouldPlayHealthHitSound(state, current, time, state.lastPlayedAt)) {
-            state.lastPlayedAt = time;
-            emit(SoundEvent, {id: HEALTH_HIT_SOUND_ID});
-        }
-        state.shield = current.shield;
-        state.armor = current.armor;
     },
 });
 
@@ -383,9 +304,6 @@ export const SoundPlugin: Plugin = {
         world.resources.set(LoadedSounds, new Map());
         world.resources.set(PendingSounds, new Map());
         world.resources.set(VolumeResource, {volume: getMasterVolume()});
-        world.resources.set(HealthSoundStateResource, {
-            lastPlayedAt: -Infinity,
-        });
         world.resources.set(IncomingMissileStateResource, new Set());
         world.resources.set(StellarSoundStateResource, {
             pendingLanding: false,
@@ -395,7 +313,6 @@ export const SoundPlugin: Plugin = {
         world.addSystem(SoundSystem);
         world.addSystem(VolumeControlSystem);
         world.addSystem(TargetSelectionSoundSystem);
-        world.addSystem(PlayerHealthSoundSystem);
         world.addSystem(IncomingMissileWarningSystem);
         world.addSystem(LandingSoundRequestSystem);
         world.addSystem(LandingSoundResultSystem);
@@ -411,7 +328,6 @@ export const SoundPlugin: Plugin = {
         world.removeSystem(SoundSystem);
         world.removeSystem(VolumeControlSystem);
         world.removeSystem(TargetSelectionSoundSystem);
-        world.removeSystem(PlayerHealthSoundSystem);
         world.removeSystem(IncomingMissileWarningSystem);
         world.removeSystem(LandingSoundRequestSystem);
         world.removeSystem(LandingSoundResultSystem);
@@ -419,7 +335,6 @@ export const SoundPlugin: Plugin = {
         world.resources.delete(VolumeResource);
         world.resources.delete(StellarSoundStateResource);
         world.resources.delete(IncomingMissileStateResource);
-        world.resources.delete(HealthSoundStateResource);
         world.resources.delete(PendingSounds);
         world.resources.delete(LoadedSounds);
         world.resources.delete(LoopingSounds);
