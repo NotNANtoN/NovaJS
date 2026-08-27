@@ -1,8 +1,12 @@
 import "jasmine";
 import * as path from "path";
+import { skipWithoutRetailData } from "../../test/retail_data";
 
 describe("retail jünk pipeline", () => {
     it("exposes all retail goods as typed game data", async () => {
+        if (skipWithoutRetailData()) {
+            return;
+        }
         // lamejs assigns these CommonJS globals while NovaParse's sound parser
         // is bundled by the focused-test runner.
         for (const name of [

@@ -1,6 +1,7 @@
 import "jasmine";
 import * as path from "path";
 import { Resource } from "resource_fork";
+import { skipWithoutRetailData } from "../../../test/retail_data";
 import { getEmptyNovaResources } from "./ResourceHolderBase";
 import { PersResource } from "./PersResource";
 
@@ -79,6 +80,9 @@ describe("PersResource", () => {
     });
 
     it("parses all 516 retail persons through NovaParse", async () => {
+        if (skipWithoutRetailData()) {
+            return;
+        }
         for (const name of [
             "Lame", "Presets", "GainAnalysis", "QuantizePVT", "Quantize",
             "Takehiro", "Reservoir", "MPEGMode", "BitStream",
