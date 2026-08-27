@@ -163,7 +163,9 @@ test_hostname_detection() {
     env_file="$(hostname_case perms '66.175.210.138' '' 0600)"
     assert_contains "$env_file" 'CADDY_HOSTNAME=66.175.210.138'
     local mode
-    mode="$(stat -f '%Lp' "$env_file" 2>/dev/null || stat -c '%a' "$env_file")"
+    # GNU stat must come first: it accepts -f as --file-system and succeeds,
+    # so a BSD-first probe never falls through and reports a filesystem dump.
+    mode="$(stat -c '%a' "$env_file" 2>/dev/null || stat -f '%Lp' "$env_file")"
     if [[ "$mode" != '600' ]]; then
         fail "${env_file} became mode ${mode} instead of 600"
     fi
