@@ -156,6 +156,28 @@ jobs:
               exit 1
             fi
 
+            # A copy-paste into the secret editor easily carries a trailing
+            # newline, and NOVA_DATA_SHA256 is usually pasted straight from
+            # `sha256sum`, which prints "<hash>  <file>". Normalize both rather
+            # than baking the stray characters into cloud-init.
+            for variable in "${required_data_values[@]}"; do
+              value="${!variable:-}"
+              value="${value//$'\r'/}"
+              value="${value#"${value%%[![:space:]]*}"}"
+              value="${value%"${value##*[![:space:]]}"}"
+              if [[ "$variable" == 'NOVA_DATA_SHA256' ]]; then
+                value="${value%%[[:space:]]*}"
+              fi
+              printf -v "$variable" '%s' "$value"
+              export "${variable?}"
+            done
+
+            if [[ ! "$NOVA_DATA_SHA256" =~ ^[A-Fa-f0-9]{64}$ ]]; then
+              printf '%s\n' \
+                'NOVA_DATA_SHA256 must be the 64-character hex digest of the data archive.' >&2
+              exit 1
+            fi
+
             invalid_data_values=()
             for variable in "${required_data_values[@]}"; do
               if [[ "${!variable:-}" == *[!A-Za-z0-9._:/+@=-]* ]]; then
