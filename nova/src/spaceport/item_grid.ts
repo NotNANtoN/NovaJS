@@ -142,7 +142,7 @@ const BOX_COUNT = [4, 5];
 export class ItemGrid<I extends Item> {
     public activeTile = new BehaviorSubject<ItemTile<I> | undefined>(undefined);
     public container = new PIXI.Container();
-    private selectionIndex = -1;
+    private wrappedSelectionIndex = -1;
     private scroll = 0;
     private tilesDict = new Map<string, ItemTile<I>>();
     private tiles: ItemTile<I>[];
@@ -158,20 +158,37 @@ export class ItemGrid<I extends Item> {
     }
 
     get selection() {
-        return this.items[this.selectionIndex];
+        return this.items[this.wrappedSelectionIndex];
     }
 
     set selection(item) {
-        this.selectionIndex = this.items.indexOf(item);
+        this.wrappedSelectionIndex = this.items.indexOf(item);
         this.drawGrid();
     }
 
+    get selectionIndex(): number {
+        return this.wrappedSelectionIndex;
+    }
+
+    set selectionIndex(index: number) {
+        this.wrappedSelectionIndex = Math.max(-1, Math.min(this.items.length - 1, index));
+        this.drawGrid();
+    }
+
+    get itemCount(): number {
+        return this.items.length;
+    }
+
     tileClicked(tile: ItemTile<I>) {
-        this.selectionIndex = this.tiles.indexOf(tile);
+        this.wrappedSelectionIndex = this.tiles.indexOf(tile);
         this.drawGrid();
     }
 
     drawGrid() {
+        if (this.wrappedSelectionIndex === -1 && this.items.length > 0) {
+            this.wrappedSelectionIndex = 0;
+        }
+
         // Hide everything first. Reveal them later
         this.tiles.forEach(function(t) {
             t.hide();
@@ -186,7 +203,7 @@ export class ItemGrid<I extends Item> {
             let ycount = Math.floor(i / BOX_COUNT[0]);
 
             tile.show();
-            if (itemIndex === this.selectionIndex) {
+            if (itemIndex === this.wrappedSelectionIndex) {
                 tile.active = true;
                 // send which one is selected
                 this.activeTile.next(tile);
@@ -218,69 +235,69 @@ export class ItemGrid<I extends Item> {
     }
 
     left() {
-        if (this.selectionIndex === -1) {
-            this.selectionIndex = Math.min(BOX_COUNT[0] * BOX_COUNT[1],
+        if (this.wrappedSelectionIndex === -1) {
+            this.wrappedSelectionIndex = Math.min(BOX_COUNT[0] * BOX_COUNT[1],
                 this.items.length);
         }
         else {
-            this.selectionIndex -= 1;
-            if (this.selectionIndex < 0) {
-                this.selectionIndex = 0;
+            this.wrappedSelectionIndex -= 1;
+            if (this.wrappedSelectionIndex < 0) {
+                this.wrappedSelectionIndex = 0;
             }
         }
 
-        if (this.scroll * BOX_COUNT[0] > this.selectionIndex) {
+        if (this.scroll * BOX_COUNT[0] > this.wrappedSelectionIndex) {
             this.scroll -= 1;
         }
         this.drawGrid();
     }
 
     right() {
-        if (this.selectionIndex === -1) {
-            this.selectionIndex = 0;
+        if (this.wrappedSelectionIndex === -1) {
+            this.wrappedSelectionIndex = 0;
         }
         else {
-            this.selectionIndex += 1;
-            if (this.selectionIndex > this.items.length - 1) {
-                this.selectionIndex = this.items.length - 1;
+            this.wrappedSelectionIndex += 1;
+            if (this.wrappedSelectionIndex > this.items.length - 1) {
+                this.wrappedSelectionIndex = this.items.length - 1;
             }
 
         }
         if (this.scroll * BOX_COUNT[0] +
-            BOX_COUNT[0] * BOX_COUNT[1] <= this.selectionIndex) {
+            BOX_COUNT[0] * BOX_COUNT[1] <= this.wrappedSelectionIndex) {
             this.scroll += 1;
         }
         this.drawGrid();
     }
 
     up() {
-        if (this.selectionIndex === -1) {
-            this.selectionIndex = Math.min(BOX_COUNT[0] * BOX_COUNT[1],
+        if (this.wrappedSelectionIndex === -1) {
+            this.wrappedSelectionIndex = Math.min(BOX_COUNT[0] * BOX_COUNT[1],
                 this.items.length);
         }
-        else if (this.selectionIndex - BOX_COUNT[0] >= 0) {
-            this.selectionIndex -= BOX_COUNT[0];
+        else if (this.wrappedSelectionIndex - BOX_COUNT[0] >= 0) {
+            this.wrappedSelectionIndex -= BOX_COUNT[0];
         }
 
-        if (this.scroll * BOX_COUNT[0] > this.selectionIndex) {
+        if (this.scroll * BOX_COUNT[0] > this.wrappedSelectionIndex) {
             this.scroll -= 1;
         }
         this.drawGrid();
     }
 
     down() {
-        if (this.selectionIndex === -1) {
-            this.selectionIndex = 0;
+        if (this.wrappedSelectionIndex === -1) {
+            this.wrappedSelectionIndex = 0;
         }
-        else if (this.selectionIndex + BOX_COUNT[0] < this.items.length) {
-            this.selectionIndex += BOX_COUNT[0];
+        else if (this.wrappedSelectionIndex + BOX_COUNT[0] < this.items.length) {
+            this.wrappedSelectionIndex += BOX_COUNT[0];
         }
         else {
-            this.selectionIndex = this.items.length - 1;
+            this.wrappedSelectionIndex = this.items.length - 1;
         }
 
         if (this.scroll * BOX_COUNT[0] +
-            BOX_COUNT[0] * BOX_COUNT[1] <= this.selectionIndex) {
+            BOX_COUNT[0] * BOX_COUNT[1] <= this.wrappedSelectionIndex) {
             this.scroll += 1;
         }
 

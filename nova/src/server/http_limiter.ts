@@ -9,9 +9,9 @@ const REJECTION_BODY = 'Too many requests\n';
 // one-hour 200 MiB budget permits about 16 such cold sessions per IP, while
 // avoiding the roughly 1.2 GiB/hour that a 10-minute window would permit.
 export const DEFAULT_HTTP_LIMIT_OPTIONS: HttpLimitOptions = {
-    requestLimit: 1_200,
+    requestLimit: 5_000,
     requestWindowMs: 60_000,
-    byteLimit: 200 * 1024 * 1024,
+    byteLimit: 500 * 1024 * 1024,
     byteWindowMs: 60 * 60_000,
     clientTtlMs: 65 * 60_000,
     maxClients: 4_096,

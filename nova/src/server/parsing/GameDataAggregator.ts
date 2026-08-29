@@ -148,10 +148,24 @@ class GameDataAggregator implements GameDataInterface {
         const outfit = this.preloadResource(NovaDataType.Outfit);
         const ships = this.preloadResource(NovaDataType.Ship);
         const systems = this.preloadResource(NovaDataType.System);
-        // Missions are numerous and are loaded on demand.
+        const planets = this.preloadResource(NovaDataType.Planet);
+        const govts = this.preloadResource(NovaDataType.Govt);
+        const weapons = this.preloadResource(NovaDataType.Weapon);
+        const missions = this.preloadResource(NovaDataType.Mission);
+        const stringLists = this.preloadResource(NovaDataType.StringList);
+        const junks = this.preloadResource(NovaDataType.Junk);
+        const pers = this.preloadResource(NovaDataType.Pers);
+
         preloadData.Outfit = await outfit;
         preloadData.Ship = await ships;
         preloadData.System = await systems;
+        preloadData.Planet = await planets;
+        preloadData.Govt = await govts;
+        preloadData.Weapon = await weapons;
+        preloadData.Mission = await missions;
+        preloadData.StringList = await stringLists;
+        preloadData.Junk = await junks;
+        preloadData.Pers = await pers;
         return preloadData;
     }
 

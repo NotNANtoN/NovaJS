@@ -52,6 +52,12 @@ export class ShipyardInfoDialog extends Menu<ShipData> {
         const done = new Button(gameData, 'Done', 50, DONE_BUTTON);
         this.addButtons({ done });
         done.click.subscribe(this.done.bind(this));
+
+        this.controls.controls = {
+            depart: this.done.bind(this),
+            buy: this.done.bind(this),
+            properties: this.done.bind(this),
+        };
     }
 
     override async show(ship: ShipData): Promise<ShipData> {
@@ -64,18 +70,37 @@ export class ShipyardInfoDialog extends Menu<ShipData> {
         this.title.text = shipyardInfoTitle(ship);
         this.leftSpecs.text = shipyardInfoLeftColumn(ship);
         this.middleSpecs.text = shipyardInfoMiddleColumn(ship);
-        this.weaponsSpecs.text = await shipyardInfoWeaponsColumn(
-            ship,
-            id => this.gameData.data.Outfit.get(id),
-            id => this.gameData.data.Weapon.get(id),
-        );
+        try {
+            this.weaponsSpecs.text = await shipyardInfoWeaponsColumn(
+                ship,
+                id => this.gameData.data.Outfit.get(id),
+                id => this.gameData.data.Weapon.get(id),
+            );
+        } catch (error) {
+            console.warn('Failed to load shipyard weapons info', error);
+            this.weaponsSpecs.text = 'Standard Weapons\n\nNone';
+        }
 
         this.pictContainer.removeChildren();
         const pictId = shipyardInfoPictId(ship);
-        const sprite = await this.gameData.spriteFromPictAsync(pictId);
-        sprite.anchor.set(0.5);
-        const scale = pictDisplayScale(sprite.width, sprite.height);
-        sprite.scale.set(scale);
-        this.pictContainer.addChild(sprite);
+        try {
+            const sprite = await this.gameData.spriteFromPictAsync(pictId);
+            sprite.anchor.set(0.5);
+            const scale = pictDisplayScale(sprite.width, sprite.height);
+            sprite.scale.set(scale);
+            this.pictContainer.addChild(sprite);
+        } catch (error) {
+            console.warn(`Failed to load shipyard info pict ${pictId}`, error);
+            if (ship.pict && ship.pict !== pictId) {
+                try {
+                    const fallback = await this.gameData.spriteFromPictAsync(ship.pict);
+                    fallback.anchor.set(0.5);
+                    fallback.scale.set(pictDisplayScale(fallback.width, fallback.height));
+                    this.pictContainer.addChild(fallback);
+                } catch {
+                    // Ignore missing fallback
+                }
+            }
+        }
     }
 }

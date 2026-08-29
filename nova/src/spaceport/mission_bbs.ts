@@ -160,6 +160,7 @@ async function loadMissionWorld(gameData: GameData): Promise<MissionBoardWorld> 
     }
 
     const promise = (async () => {
+        await gameData.preloadData;
         const ids = await gameData.ids;
         const systems = (await Promise.all((ids.System ?? []).map(async id => {
             try {
@@ -220,10 +221,18 @@ async function loadMissionCatalog(
     }
 
     const promise = (async () => {
+        await gameData.preloadData;
+        const missionGettable = gameData.data.Mission;
+        if (!missionGettable) {
+            return new Map<string, MissionData>();
+        }
+        if (Object.keys(missionGettable.gotten).length > 0) {
+            return new Map(Object.entries(missionGettable.gotten));
+        }
         const ids = await gameData.ids;
         const entries = await Promise.all((ids.Mission ?? []).map(async id => {
             try {
-                return [id, await gameData.data.Mission.get(id)] as const;
+                return [id, await missionGettable.get(id)] as const;
             } catch {
                 return undefined;
             }

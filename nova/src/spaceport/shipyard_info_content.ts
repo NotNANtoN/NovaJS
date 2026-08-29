@@ -84,19 +84,30 @@ export async function standardWeaponsLines(
     weaponLookup: WeaponLookup,
 ): Promise<string[]> {
     const lines: string[] = [];
-    const sortedIds = Object.keys(outfits).sort();
+    const sortedIds = Object.keys(outfits ?? {}).sort();
     for (const id of sortedIds) {
         const count = outfits[id];
-        const outfit = await outfitLookup.get(id);
-        const weapons = outfit.weapons ?? {};
-        if (Object.keys(weapons).length > 0) {
-            for (const [weaponId, weaponCount] of Object.entries(weapons)) {
-                const weapon = await weaponLookup.get(weaponId);
-                const total = count * weaponCount;
-                lines.push(total > 1 ? `${total}x ${weapon.name}` : weapon.name);
+        try {
+            const outfit = await outfitLookup.get(id);
+            if (!outfit) {
+                continue;
             }
-        } else {
-            lines.push(count > 1 ? `${count}x ${outfit.name}` : outfit.name);
+            const weapons = outfit.weapons ?? {};
+            if (Object.keys(weapons).length > 0) {
+                for (const [weaponId, weaponCount] of Object.entries(weapons)) {
+                    try {
+                        const weapon = await weaponLookup.get(weaponId);
+                        const total = count * weaponCount;
+                        lines.push(total > 1 ? `${total}x ${weapon?.name ?? 'Weapon'}` : (weapon?.name ?? 'Weapon'));
+                    } catch {
+                        lines.push(count > 1 ? `${count}x ${outfit.name}` : outfit.name);
+                    }
+                }
+            } else if (outfit.name) {
+                lines.push(count > 1 ? `${count}x ${outfit.name}` : outfit.name);
+            }
+        } catch {
+            // Ignore missing outfit
         }
     }
     return lines;

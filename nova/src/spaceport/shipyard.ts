@@ -88,6 +88,7 @@ export class Shipyard extends Menu<Entity> {
             up: () => itemGrid.up(),
             down: () => itemGrid.down(),
             buy: this.buyShip.bind(this),
+            properties: () => this.showInfo(),
             depart: this.done.bind(this),
         };
     }
@@ -146,12 +147,17 @@ export class Shipyard extends Menu<Entity> {
             up: () => itemGrid.up(),
             down: () => itemGrid.down(),
             buy: this.buyShip.bind(this),
+            properties: () => this.showInfo(),
             depart: this.done.bind(this),
         };
     }
 
     private async showInfo() {
-        const selection = this.itemGrid?.selection;
+        let selection = this.itemGrid?.selection;
+        if (!selection && this.itemGrid && this.itemGrid.itemCount > 0) {
+            this.itemGrid.selectionIndex = 0;
+            selection = this.itemGrid.selection;
+        }
         if (!selection) {
             return;
         }
@@ -159,6 +165,8 @@ export class Shipyard extends Menu<Entity> {
         this.container.addChild(this.infoDialog.container);
         try {
             await this.infoDialog.show(selection);
+        } catch (error) {
+            console.warn('Failed to display shipyard info dialog', error);
         } finally {
             this.container.removeChild(this.infoDialog.container);
             this.resumeControls();
