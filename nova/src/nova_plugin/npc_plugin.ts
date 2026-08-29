@@ -280,15 +280,30 @@ export function shouldFleeFromAttacker(
     personallyProvoked: boolean,
     attackerDistance: number,
     weaponRange: number,
+    shield?: { current: number, max: number },
 ): boolean {
     if (!personallyProvoked) {
         return false;
     }
-    if (profile.fleesWhenAttacked) {
+    // An unarmed ship cannot defend itself and must flee.
+    if (!(weaponRange > 0)) {
         return true;
     }
-    return profile.breaksOffOutOfRange
-        && attackerDistance > Math.max(0, weaponRange);
+    const shieldFraction = shield && shield.max > 0
+        ? shield.current / shield.max
+        : undefined;
+    // Wimpy traders defend themselves while shields hold, but retreat when shields drop low.
+    if (profile.fleesWhenAttacked) {
+        return shieldFraction !== undefined
+            ? shieldFraction < 0.5
+            : true;
+    }
+    // Brave traders fight back until shields are critical or attacker is well out of range.
+    if (profile.breaksOffOutOfRange) {
+        return (shieldFraction !== undefined && shieldFraction < 0.25)
+            || attackerDistance > Math.max(DEFAULT_COMBAT_STANDOFF, weaponRange * 1.5);
+    }
+    return false;
 }
 
 function combatStrengthOf(
@@ -460,9 +475,7 @@ export const ChooseRandomTargetAI = new System({
 
 export const FollowComponent = new Component<undefined>('FollowComponent');
 
-export const DEFAULT_COMBAT_STANDOFF = 300;
-export const COMBAT_RANGE_FRACTION = 0.6;
-export const MAX_COMBAT_STANDOFF = 600;
+export const DEFAULT_COMBAT_STANDOFF = 250;
 
 function weaponRange(weapon: WeaponData): number | undefined {
     if (weapon.type === "BayWeaponData"
@@ -502,23 +515,61 @@ export function getMaximumWeaponRange(
 }
 
 /**
- * Long-range weapons should influence positioning without letting an NPC
- * exploit every last unit of nominal range, where target motion would make
- * projectiles expire before connecting.
+ * Determine the effective engagement range from the ship's actual weapon loadout.
+ * If the ship carries primary forward guns/beams, use the shortest primary range so
+ * all primary forward weapons can bear. Otherwise, fall back to secondary weapons.
+ */
+export function getEffectiveWeaponRange(
+    weapons: WeaponsState | undefined,
+    gameData: GameDataInterface,
+): number | undefined {
+    let primaryRange: number | undefined;
+    let secondaryRange: number | undefined;
+
+    for (const [id, state] of weapons ?? []) {
+        if (state.count <= 0) {
+            continue;
+        }
+        const weapon = gameData.data.Weapon.getCached(id);
+        if (!weapon) {
+            continue;
+        }
+        const range = weaponRange(weapon);
+        if (range === undefined || range <= 0) {
+            continue;
+        }
+
+        if (weapon.fireGroup === "primary") {
+            primaryRange = primaryRange === undefined
+                ? range
+                : Math.min(primaryRange, range);
+        } else {
+            secondaryRange = secondaryRange === undefined
+                ? range
+                : Math.max(secondaryRange, range);
+        }
+    }
+
+    return primaryRange ?? secondaryRange;
+}
+
+/**
+ * Combat standoff is determined dynamically by the ship's installed weapons loadout
+ * and ship AI profile. Ships with short-range blasters (e.g. Thunderbirds, Light Blasters)
+ * close in aggressively, while ships with long-range weapons (Heavy Blasters, Railguns)
+ * hold appropriate standoff distance without being constrained by an arbitrary hard cap.
  */
 export function getCombatStandoff(
     weapons: WeaponsState | undefined,
     gameData: GameDataInterface,
     standoffMultiplier = 1,
 ): number {
-    const longestRange = getMaximumWeaponRange(weapons, gameData);
-    if (!(longestRange > 0)) {
+    const effectiveRange = getEffectiveWeaponRange(weapons, gameData);
+    if (effectiveRange === undefined || !(effectiveRange > 0)) {
         return DEFAULT_COMBAT_STANDOFF * standoffMultiplier;
     }
-    return Math.min(
-        MAX_COMBAT_STANDOFF,
-        longestRange * COMBAT_RANGE_FRACTION * standoffMultiplier,
-    );
+    const baseFraction = 0.75;
+    return Math.max(80, effectiveRange * baseFraction * standoffMultiplier);
 }
 
 export interface NpcFleeState {
@@ -530,6 +581,17 @@ export const NpcFleeComponent =
     new Component<NpcFleeState>("NpcFleeComponent");
 const NpcDepartureComponent =
     new Component<undefined>("NpcDepartureComponent");
+
+export interface WanderState {
+    heading?: number;
+    nextTurnAt: number;
+    enteredAt?: number;
+}
+
+export const WanderComponent =
+    new Component<WanderState>('NpcWanderComponent');
+
+export const WARSHIP_SEARCH_DURATION_MS = 30_000;
 
 function departureSystem(
     gameData: GameDataInterface,
@@ -571,11 +633,13 @@ export const NpcPurposeAI = new System({
         NpcAIComponent,
         Optional(DestructionStartedComponent),
         Optional(ArmorComponent),
+        TimeResource,
+        Optional(WanderComponent),
     ] as const,
     step(target, uuid, entity, entities, targets, movement, weapons, gameData,
         shipData, governmentRef, governments, provocations, shield, fleeing,
         departing, jumpState, systemId, emit, multiplayer, platform, _npc,
-        destructionStarted, armor) {
+        destructionStarted, armor, time, wander) {
         if (platform !== "node" || multiplayer.owner !== "server"
             || destructionStarted || armor && armor.current <= 0) {
             entity.components.delete(NpcFleeComponent);
@@ -606,6 +670,7 @@ export const NpcPurposeAI = new System({
                 personallyProvoked,
                 targetDistance,
                 weaponRange,
+                shield,
             ));
 
         if (targetId && targetMovement
@@ -630,8 +695,10 @@ export const NpcPurposeAI = new System({
             entity.components.delete(NpcFleeComponent);
         }
 
+        const searchElapsed = wander?.enteredAt !== undefined
+            && time.time - wander.enteredAt >= WARSHIP_SEARCH_DURATION_MS;
         const shouldLeave = governmentRetreat
-            || profile.jumpsWithoutEnemies && !target.target
+            || profile.jumpsWithoutEnemies && !target.target && searchElapsed
             && !hasUnresolvedTargetGovernment(
                 targets,
                 uuid,
@@ -767,7 +834,7 @@ export const FollowAI = new System({
         // target by uuid lets the movement system keep it under the guns.
         movementState.turnTo = fleeing
             ? command.turnTo
-            : command.turnTo ?? target.target;
+            : (command.turnTo ?? target.target);
         movementState.accelerating = command.accelerating;
         movementState.turnBack = command.turnBack;
     }
@@ -782,12 +849,12 @@ export const ShootAllWeaponsAI = new System({
         PlatformResource, Optional(DestructionStartedComponent),
         Optional(ArmorComponent), Optional(NpcFleeComponent)] as const,
     step(weapons, gameData, target, movement, _shoot, entities, multiplayer,
-        platform, destructionStarted, armor, fleeing) {
+        platform, destructionStarted, armor, _fleeing) {
         if (platform === "node" && multiplayer.owner !== "server"
             || platform === "browser" && multiplayer.owner === "server") {
             return;
         }
-        if (destructionStarted || armor && armor.current <= 0 || fleeing) {
+        if (destructionStarted || armor && armor.current <= 0) {
             for (const weapon of weapons.values()) {
                 weapon.firing = false;
                 weapon.target = undefined;
@@ -798,10 +865,11 @@ export const ShootAllWeaponsAI = new System({
         if (targetUuid && !entities.has(targetUuid)) {
             target.target = undefined;
         }
-        const targetMovement = target.target
-            ? entities.get(target.target)?.components
-                .get(MovementStateComponent)
+        const targetEntity = target.target
+            ? entities.get(target.target)
             : undefined;
+        const targetMovement = targetEntity?.components
+            .get(MovementStateComponent);
         const targetDistance = movement && targetMovement
             ? targetMovement.position.subtract(movement.position).length
             : undefined;
@@ -815,20 +883,42 @@ export const ShootAllWeaponsAI = new System({
             const pointDefense = weaponData.guidance === 'pointDefense'
                 || weaponData.guidance === 'pointDefenseBeam';
             const range = weaponRange(weaponData);
-            weapon.firing = target.target !== undefined
-                && (pointDefense || range === undefined
-                    || targetDistance === undefined || targetDistance <= range);
+            const inRange = pointDefense || range === undefined
+                || targetDistance === undefined || targetDistance <= range;
+
+            if (!target.target || !inRange) {
+                weapon.firing = false;
+                continue;
+            }
+
+            if (pointDefense) {
+                weapon.firing = true;
+                continue;
+            }
+
+            // Check firing arc for directional / fixed weapons
+            let canBear = true;
+            if (movement && targetMovement) {
+                const angleToTarget = targetMovement.position.subtract(movement.position).angle;
+                const angleDiff = Math.abs(movement.rotation.distanceTo(angleToTarget).angle);
+                const guidance = 'guidance' in weaponData ? weaponData.guidance : undefined;
+
+                if (guidance === 'turret' || guidance === 'beamTurret' || guidance === 'guided') {
+                    canBear = true;
+                } else if (guidance === 'rearQuadrant') {
+                    canBear = angleDiff > (Math.PI * 0.65);
+                } else if (guidance === 'sidesQuadrant') {
+                    canBear = angleDiff > (Math.PI * 0.25) && angleDiff < (Math.PI * 0.75);
+                } else {
+                    // Fixed forward guns, unguided, rockets, frontQuadrant, fixed beams
+                    canBear = angleDiff < (Math.PI * 0.35);
+                }
+            }
+
+            weapon.firing = canBear;
         }
     }
 });
-
-interface WanderState {
-    heading?: number;
-    nextTurnAt: number;
-}
-
-export const WanderComponent =
-    new Component<WanderState>('NpcWanderComponent');
 
 function hashUuid(uuid: string): number {
     let hash = 2166136261;
@@ -864,6 +954,9 @@ const WanderAI = new System({
         }
         if (jumpState) {
             return;
+        }
+        if (wander.enteredAt === undefined) {
+            wander.enteredAt = time.time;
         }
         if (wander.heading === undefined || time.time >= wander.nextTurnAt) {
             wander.heading = getWanderHeading(uuid, time.time);

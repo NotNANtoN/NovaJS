@@ -147,10 +147,11 @@ describe('NPC combat decisions', () => {
     it('distinguishes wimpy and brave trader break-off rules', () => {
         const wimpy = getShipAIProfile({ inherentAI: 1 });
         const brave = getShipAIProfile({ inherentAI: 2 });
-        expect(shouldFleeFromAttacker(wimpy, true, 10, 500)).toBeTrue();
+        expect(shouldFleeFromAttacker(wimpy, true, 10, 500, { current: 40, max: 100 })).toBeTrue();
+        expect(shouldFleeFromAttacker(wimpy, true, 10, 500, { current: 80, max: 100 })).toBeFalse();
         expect(shouldFleeFromAttacker(wimpy, false, 10, 500)).toBeFalse();
-        expect(shouldFleeFromAttacker(brave, true, 500, 500)).toBeFalse();
-        expect(shouldFleeFromAttacker(brave, true, 501, 500)).toBeTrue();
+        expect(shouldFleeFromAttacker(brave, true, 500, 500, { current: 100, max: 100 })).toBeFalse();
+        expect(shouldFleeFromAttacker(brave, true, 800, 500, { current: 100, max: 100 })).toBeTrue();
     });
 
     it('lets interceptors police attacks on neutral but not enemy ships',
@@ -203,8 +204,10 @@ function makeShootWorld(targetDistance: number, weaponIds: string[]) {
     }
     const target = new Entity('target')
         .addComponent(MovementStateComponent, movementAt(targetDistance, 0));
+    const npcMovement = movementAt(0, 0);
+    npcMovement.rotation = new Angle(Math.PI / 2);
     const npc = new Entity('npc')
-        .addComponent(MovementStateComponent, movementAt(0, 0))
+        .addComponent(MovementStateComponent, npcMovement)
         .addComponent(WeaponsStateComponent, weapons)
         .addComponent(TargetComponent, { target: 'target' })
         .addComponent(ShootAllWeaponsComponent, undefined)
@@ -264,13 +267,26 @@ function fly(world: World, npc: Entity, steps: number) {
 }
 
 describe('NPC combat flying', () => {
-    it('uses a conservative fraction of cached weapon range', () => {
+    it('uses a fraction of cached weapon range based on loadout', () => {
         const weapons = new Map([
             ['gun', { count: 1, firing: true }],
         ]);
-        expect(getCombatStandoff(weapons, projectileGameData)).toBe(600);
+        expect(getCombatStandoff(weapons, projectileGameData)).toBe(750);
         expect(getCombatStandoff(undefined, projectileGameData))
             .toBe(DEFAULT_COMBAT_STANDOFF);
+    });
+
+    it('scales combat range to weapon loadout (short vs long range)', () => {
+        const shortRange = new Map([
+            ['short', { count: 1, firing: true }],
+        ]);
+        const longRange = new Map([
+            ['long', { count: 1, firing: true }],
+        ]);
+        // short weapon range = 100 * 1000 / 1000 = 100 -> 100 * 0.75 = 75 (clamped to min 80)
+        expect(getCombatStandoff(shortRange, rangedWeaponGameData)).toBe(80);
+        // long weapon range = 100 * 10000 / 1000 = 1000 -> 1000 * 0.75 = 750
+        expect(getCombatStandoff(longRange, rangedWeaponGameData)).toBe(750);
     });
 
     it('lets an interceptor hull close further than a freighter', () => {
@@ -294,11 +310,11 @@ describe('NPC combat flying', () => {
         const targetMovement = target.components.get(MovementStateComponent)!;
 
         expect(targetMovement.position.subtract(movement.position).length)
-            .toBeGreaterThan(500);
+            .toBeGreaterThan(650);
         expect(targetMovement.position.subtract(movement.position).length)
-            .toBeLessThan(700);
+            .toBeLessThan(850);
         expect(movement.velocity.length).toBeLessThan(20);
-        expect(closest).toBeGreaterThan(450);
+        expect(closest).toBeGreaterThan(600);
     });
 
     it('falls back to a close combat distance without weapon data', () => {
