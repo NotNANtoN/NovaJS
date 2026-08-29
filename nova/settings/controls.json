@@ -23,6 +23,7 @@
   "afterburner": "KeyZ",
   "hail": "KeyY",
   "board": "KeyB",
+  "transferEnergy": ["KeyU", "KeyK"],
   "escorts": "KeyE",
   "holdPosition": "KeyV",
   "attack": "KeyF",

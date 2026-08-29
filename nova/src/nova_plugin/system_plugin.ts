@@ -20,6 +20,7 @@ import { MissionShipsPlugin } from "./mission_ship_plugin";
 import { AsteroidPlugin } from "./asteroid_plugin";
 import { LegalRecordPlugin } from "./legal_record_plugin";
 import { BoardingPlugin } from "./boarding_plugin";
+import { EnergyTransferPlugin } from "./energy_transfer_plugin";
 import { AssistancePlugin } from "./assistance_plugin";
 import { DisabledPlugin } from "./disabled_plugin";
 import { EscortPlugin } from "./escort_plugin";
@@ -77,6 +78,7 @@ export const SystemPlugin: Plugin = {
     world.addPlugin(NpcTrafficPlugin);
         world.addPlugin(DisabledPlugin);
         world.addPlugin(BoardingPlugin);
+        world.addPlugin(EnergyTransferPlugin);
         world.addPlugin(AssistancePlugin);
         world.addPlugin(EscortPlugin);
         world.addPlugin(AsteroidPlugin);

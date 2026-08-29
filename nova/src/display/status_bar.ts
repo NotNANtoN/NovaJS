@@ -713,7 +713,8 @@ const DrawStatusBarSecondaryWeapon = new System({
 
 const TargetQuery = new Query([ShipDataComponent, Optional(ShieldComponent),
     Optional(ArmorComponent), Optional(AnimationGraphicComponent),
-    Optional(GovtComponent), Optional(DisabledComponent)] as const);
+    Optional(GovtComponent), Optional(DisabledComponent),
+    Optional(PlayerStateComponent)] as const);
 const DrawStatusBarTarget = new System({
     name: 'DrawStatusBarTarget',
     args: [StatusBarResource, TargetComponent, RunQuery,
@@ -725,13 +726,16 @@ const DrawStatusBarTarget = new System({
         }
         const result = runQuery(TargetQuery, target)[0];
         if (result) {
-            const [shipData, shield, armor, shipGraphic, government, disabled] = result;
+            const [shipData, shield, armor, shipGraphic, government, disabled, playerState] = result;
             const governmentData = government
                 ? governments.getCached(government.id)
                 : undefined;
+            const subtitle = playerState?.pilotName
+                ? `Capt. ${playerState.pilotName}`
+                : shipData.subtitle;
             statusBar.drawTarget(
                 targetLabel(
-                    shipData.name, shipData.subtitle, governmentData),
+                    shipData.name, subtitle, governmentData),
                 shield?.percent,
                 armor?.percent,
                 shipData.targetPict,

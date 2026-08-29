@@ -1,4 +1,4 @@
-import { Entities, GetEntity, UUID } from 'nova_ecs/arg_types';
+import { Entities, GetEntity, GetWorld, UUID } from 'nova_ecs/arg_types';
 import { AsyncSystem } from 'nova_ecs/async_system';
 import { Plugin } from 'nova_ecs/plugin';
 import { Resource } from 'nova_ecs/resource';
@@ -13,8 +13,10 @@ import { SystemIdResource } from '../nova_plugin/system_id_resource';
 import { MissionInfo } from '../spaceport/mission_bbs';
 import { ShipInfo } from '../spaceport/ship_info';
 import { Comms } from '../spaceport/comms_panel';
+import { PlayerChatDialog } from '../spaceport/player_chat_dialog';
 import { TargetComponent } from '../nova_plugin/target_component';
 import { GovtComponent } from '../nova_plugin/npc_components';
+import { MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
 import {
     GovernmentRelationResource,
     GovernmentRelationStore,
@@ -39,6 +41,7 @@ export {
 export const ShipInfoResource = new Resource<ShipInfo>('ShipInfo');
 export const MissionLogResource = new Resource<MissionInfo>('MissionLog');
 export const CommsResource = new Resource<Comms>('Comms');
+export const PlayerChatDialogResource = new Resource<PlayerChatDialog>('PlayerChatDialog');
 
 /** Retail's "P" pilot status, available in flight as well as when landed. */
 export const ShipInfoSystem = new AsyncSystem({
@@ -80,18 +83,31 @@ export const CommsSystem = new AsyncSystem({
     exclusive: true,
     alwaysRunOnEvents: false,
     skipIfApplyingPatches: true,
-    args: [EcsControlEvent, CommsResource, ScreenSize, GetEntity, UUID,
+    args: [EcsControlEvent, CommsResource, PlayerChatDialogResource, ScreenSize, GetEntity, UUID,
         TargetComponent, Entities, GovernmentRelationResource,
-        PlayerShipSelector] as const,
-    async step(controlEvent, comms, screenSize, entity, uuid, target, entities,
-        governments) {
-        if (!isDialogStartEdge(controlEvent, 'hail', comms.container.visible)) {
+        PlayerShipSelector, GetWorld] as const,
+    async step(controlEvent, comms, playerChatDialog, screenSize, entity, uuid, target, entities,
+        governments, _playerSelector, world) {
+        if (!isDialogStartEdge(controlEvent, 'hail', comms.container.visible || playerChatDialog.container.visible)) {
             return;
         }
         const hailed = target.target
             ? entities.get(target.target) : undefined;
         const shipData = hailed?.components.get(ShipDataComponent);
         if (!hailed || !shipData) {
+            return;
+        }
+        const multiplayer = hailed.components.get(MultiplayerData);
+        if (multiplayer && multiplayer.owner !== 'server' && multiplayer.owner !== uuid) {
+            const hailedPlayerState = hailed.components.get(PlayerStateComponent);
+            const pilotName = hailedPlayerState?.pilotName || 'Captain';
+            playerChatDialog.setTarget({
+                peerUuid: multiplayer.owner,
+                pilotName,
+                shipName: shipData.name,
+            }, world);
+            playerChatDialog.container.position.set(screenSize.x / 2, screenSize.y / 2);
+            await playerChatDialog.show(entity);
             return;
         }
         const govtId = hailed.components.get(GovtComponent)?.id;
@@ -151,6 +167,10 @@ export const PilotDialogsPlugin: Plugin = {
         stage.addChild(comms.container);
         world.resources.set(CommsResource, comms);
 
+        const playerChatDialog = new PlayerChatDialog(gameData as GameData, controls);
+        stage.addChild(playerChatDialog.container);
+        world.resources.set(PlayerChatDialogResource, playerChatDialog);
+
         // Hailing needs the government cache. Plugin build order is not
         // guaranteed, so seed it here rather than skipping the dialog when the
         // NPC plugin has not been built yet.
@@ -171,6 +191,9 @@ export const PilotDialogsPlugin: Plugin = {
         const comms = world.resources.get(CommsResource);
         comms?.container.parent?.removeChild(comms.container);
         world.resources.delete(CommsResource);
+        const playerChatDialog = world.resources.get(PlayerChatDialogResource);
+        playerChatDialog?.container.parent?.removeChild(playerChatDialog.container);
+        world.resources.delete(PlayerChatDialogResource);
         const shipInfo = world.resources.get(ShipInfoResource);
         shipInfo?.container.parent?.removeChild(shipInfo.container);
         world.resources.delete(ShipInfoResource);

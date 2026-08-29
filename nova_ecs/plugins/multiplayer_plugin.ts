@@ -90,6 +90,18 @@ export interface Communicator {
     sendMessage(message: unknown, destination?: string | Set<string>): void;
 }
 
+export const ChatMessageEntry = t.type({
+    id: t.string,
+    from: t.string,
+    fromName: t.string,
+    to: t.string,
+    text: t.string,
+    time: t.number,
+});
+export type ChatMessageEntry = t.TypeOf<typeof ChatMessageEntry>;
+
+export const ChatMessageEvent = new EcsEvent<ChatMessageEntry>('ChatMessageEvent');
+
 export const Message = t.partial({
     delta: map(t.string /* Entity UUID */, EntityDelta),
     state: map(t.string /* Entity UUID */, EncodedEntity),
@@ -104,6 +116,7 @@ export const Message = t.partial({
     ownedUuids: t.array(t.string),
     admins: set(t.string),
     peers: set(t.string),
+    chat: t.array(ChatMessageEntry),
 });
 export type Message = t.TypeOf<typeof Message>;
 
@@ -138,6 +151,7 @@ export const Comms = new Component<{
     lastEntities: Map<string, string>, // entity, owner
     messages: MessageWithSource<Message>[],
     initialStateRequested: boolean,
+    outboundChat?: ChatMessageEntry[],
 }>('Comms');
 
 
@@ -1109,6 +1123,7 @@ export function multiplayer(communicator: Communicator,
             const relayedStates = new Map<string, EncodedEntity>();
             const movementTimestamps = new Map<string, number>();
             const movementSequences = new Map<string, number>();
+            const relayedChat: ChatMessageEntry[] = [];
 
             // Apply changes from messages
             for (const { source, message } of comms.messages) {
@@ -1121,6 +1136,19 @@ export function multiplayer(communicator: Communicator,
                 // Set admins
                 if (peerIsAdmin && message.admins) {
                     comms.admins = message.admins;
+                }
+
+                // Handle chat messages
+                if (message.chat && message.chat.length > 0) {
+                    for (const entry of message.chat) {
+                        if (isAdmin) {
+                            relayedChat.push(entry);
+                        } else {
+                            if (entry.to === comms.uuid || entry.to === 'all' || entry.from === comms.uuid) {
+                                emit(ChatMessageEvent, entry);
+                            }
+                        }
+                    }
                 }
 
                 // Send requested states
@@ -1758,6 +1786,13 @@ export function multiplayer(communicator: Communicator,
             // Also release entities removed outside the multiplayer system.
             deltaMaker.untrackExcept(ownedEntities);
 
+            const outboundChat = [...(comms.outboundChat ?? []), ...relayedChat];
+            comms.outboundChat = [];
+            if (outboundChat.length > 0) {
+                changes.chat = outboundChat;
+                send = true;
+            }
+
             const changes: Message = {};
 
             let send = false;
@@ -1860,6 +1895,11 @@ export function multiplayer(communicator: Communicator,
                     peerChanges.ownedUuids = ownedUuids;
                     peerSend = true;
                 }
+                const peerChat = outboundChat.filter(c => c.to === 'all' || c.to === peer || c.from === peer);
+                if (peerChat.length > 0) {
+                    peerChanges.chat = peerChat;
+                    peerSend = true;
+                }
                 interestedEntitiesByPeer.set(peer, interested);
                 if (peerSend) {
                     sendMessage(peerChanges, peer);
@@ -1912,6 +1952,7 @@ export function multiplayer(communicator: Communicator,
             stateRequests: new Map(),
             messages: [],
             initialStateRequested: false,
+            outboundChat: [],
         });
 
         messageSubscription = communicator.messages.subscribe(message => {
@@ -1946,5 +1987,23 @@ export function multiplayer(communicator: Communicator,
             world.removeSystem(MessageSystem);
         },
     }
+}
+
+export function broadcastChat(world: World, chat: { to: string, fromName?: string, text: string }) {
+    const comms = world.singletonEntity.components.get(Comms);
+    if (!comms || !comms.uuid) {
+        return;
+    }
+    const entry: ChatMessageEntry = {
+        id: v4(),
+        from: comms.uuid,
+        fromName: chat.fromName ?? 'Captain',
+        to: chat.to,
+        text: chat.text,
+        time: Date.now(),
+    };
+    comms.outboundChat ??= [];
+    comms.outboundChat.push(entry);
+    world.emit(ChatMessageEvent, entry);
 }
 
