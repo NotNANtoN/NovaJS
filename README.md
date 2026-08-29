@@ -12,7 +12,6 @@ This is an experiment in making Escape Velocity Nova run in the browser. Escape 
 #### Controls (mostly standard EV Nova):
 * Arrow keys to move
 * Spacebar to fire
-* **There is a button on the right side of the screen to add enemy ships.**
 * L while moving slowly over a planet to land
 * Tab to select a target
 * W to choose a secondary weapon

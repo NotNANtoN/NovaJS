@@ -29,10 +29,13 @@ import {
     MovementStateDelta,
     quantizedMovementDelta,
     quantizeMovementState,
+    GuidanceTargetTrackComponent,
+    queueGuidanceTargetSnapshot,
     queueRemoteMovementSnapshot,
     RemoteMovementPresentationComponent,
 } from './movement_plugin';
 import { TimeResource, wallClockNow } from './time_plugin';
+import { v4 } from 'uuid';
 
 export class Peers {
     readonly current: BehaviorSubject<Set<string>>;
@@ -1020,8 +1023,20 @@ export function multiplayer(communicator: Communicator,
                 owner: string,
             ): void {
                 if (isAdmin && source === owner) {
-                    lastMovementWireState.set(
-                        uuid, quantizeMovementState(movementState));
+                    const quantized = quantizeMovementState(movementState);
+                    lastMovementWireState.set(uuid, quantized);
+                    const entity = entities.get(uuid);
+                    if (!entity) {
+                        return;
+                    }
+                    let track = entity.components.get(
+                        GuidanceTargetTrackComponent);
+                    if (!track) {
+                        track = { snapshots: [] };
+                        entity.components.set(
+                            GuidanceTargetTrackComponent, track);
+                    }
+                    queueGuidanceTargetSnapshot(track, quantized, localTime);
                 }
             }
 
@@ -1826,14 +1841,14 @@ export function multiplayer(communicator: Communicator,
 
             const outboundChat = [...(comms.outboundChat ?? []), ...relayedChat];
             comms.outboundChat = [];
-            if (outboundChat.length > 0) {
-                changes.chat = outboundChat;
-                send = true;
-            }
 
             const changes: Message = {};
 
             let send = false;
+            if (outboundChat.length > 0) {
+                changes.chat = outboundChat;
+                send = true;
+            }
             if (delta.size > 0) {
                 changes.delta = delta;
                 send = true;

@@ -8,6 +8,7 @@ import { System } from '../system';
 import { World } from '../world';
 import {
     applyMovementStateDelta,
+    advanceMovementState,
     approachVec,
     MOVEMENT_ANGLE_QUANTUM,
     MOVEMENT_POSITION_QUANTUM,
@@ -21,6 +22,7 @@ import {
     quantizeMovementState,
     RemoteMovementPresentationComponent,
     RemoteMovementPresentationSystem,
+    sampleGuidanceTarget,
     sampleRemoteMovement,
 } from './movement_plugin';
 import { MAX_WALL_CLOCK_DELTA_MS, TimePlugin } from './time_plugin';
@@ -215,6 +217,71 @@ describe('Movement Plugin', () => {
         world.step();
 
         expect(positions).toEqual([0]);
+    });
+
+    it('samples guidance from remote snapshots instead of live movement', () => {
+        const target = new Entity()
+            .addComponent(MovementStateComponent, {
+                position: new Position(900, 0),
+                accelerating: 0,
+                rotation: new Angle(0),
+                turnBack: false,
+                turning: 0,
+                velocity: new Vector(0, 0),
+            })
+            .addComponent(MovementPhysicsComponent, {
+                acceleration: 100,
+                maxVelocity: 500,
+                turnRate: 50,
+                movementType: MovementType.INERTIAL,
+            })
+            .addComponent(RemoteMovementPresentationComponent, {
+                snapshots: [{
+                    serverTime: 100,
+                    state: {
+                        position: new Position(100, 0),
+                        accelerating: 0,
+                        rotation: new Angle(0),
+                        turnBack: false,
+                        turning: 0,
+                        velocity: new Vector(0, 0),
+                    },
+                }],
+            });
+        world.entities.set('target', target);
+
+        const sampled = sampleGuidanceTarget(
+            target, 100, world.entities);
+
+        expect(sampled?.position).toEqual(new Position(100, 0));
+        expect(sampled?.position).not.toEqual(new Position(900, 0));
+    });
+
+    it('applies onStep guidance while advancing inertialess movement', () => {
+        const state = {
+            position: new Position(0, 0),
+            accelerating: 0,
+            rotation: new Angle(0),
+            turnBack: false,
+            turning: 0,
+            velocity: new Vector(0, -10),
+            targetSpeed: 10,
+        };
+        const physics = {
+            acceleration: 100,
+            maxVelocity: 100,
+            turnRate: 2,
+            movementType: MovementType.INERTIALESS,
+        };
+
+        const straight = advanceMovementState(
+            state, physics, 0.5, world.entities);
+        const guided = advanceMovementState(
+            state, physics, 0.5, world.entities,
+            movement => movement.turnTo = new Angle(Math.PI / 2));
+
+        expect(guided.rotation.angle).not.toBeCloseTo(straight.rotation.angle);
+        expect(guided.velocity.x).not.toBeCloseTo(straight.velocity.x);
     });
 
     it('approachVec approaches a target vector', () => {

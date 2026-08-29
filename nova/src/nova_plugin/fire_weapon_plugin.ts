@@ -308,7 +308,8 @@ export abstract class WeaponEntry {
     }
 
     fireFromEntityDetailed(source: string, seed: number,
-        inaccuracy = true, exitIndex?: number): FiredShot | undefined {
+        inaccuracy = true, exitIndex?: number,
+        extras?: { entityId?: string, target?: string }): FiredShot | undefined {
         // TODO: This is expensive. Cache queries for different sources in nova_ecs or
         // add a 'number of shots' argument.
         const results = this.runQuery(FireFromEntityQuery, source);
@@ -334,7 +335,7 @@ export abstract class WeaponEntry {
         if (!owner) {
             owner = {owner: uuid};
         }
-        let target = targetVal?.target;
+        let target = extras?.target ?? targetVal?.target;
         let weapon: WeaponLocalState;
         if (exitIndex !== undefined) {
             weapon = {
@@ -425,6 +426,7 @@ export abstract class WeaponEntry {
                 inaccuracy: inaccuracyOffset,
                 createdAt: time.time,
                 fastForwardMs: 0,
+                entityId: extras?.entityId,
             });
         if (!shot) {
             return undefined;

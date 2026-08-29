@@ -31,6 +31,8 @@ import {
     WeaponsStateComponent,
 } from '../../nova/src/nova_plugin/weapons_state';
 import {
+    broadcastChat,
+    ChatMessageEvent,
     Comms,
     Communicator,
     Message,
@@ -1438,5 +1440,34 @@ describe('Multiplayer Plugin', () => {
         expect(world1.entities.has('player2')).toBeTrue();
         expect(world1.entities.get('player2')?.components.get(BarComponent))
             .toEqual({ y: 'player two returned' });
+    });
+
+    it('queues outbound chat without throwing and delivers it to the peer', () => {
+        const received: string[] = [];
+        world1.addSystem(new System({
+            name: 'ChatReport',
+            events: [ChatMessageEvent],
+            args: [ChatMessageEvent] as const,
+            step(entry) {
+                received.push(entry.text);
+            },
+        }));
+
+        expect(() => broadcastChat(world2, {
+            to: 'world1 uuid',
+            fromName: 'Anton',
+            text: 'hello there',
+        })).not.toThrow();
+
+        const queued = world2.singletonEntity.components.get(Comms)!.outboundChat;
+        expect(queued?.map(entry => entry.text)).toEqual(['hello there']);
+        expect(queued?.[0].id).toBeTruthy();
+
+        world2.step();
+        world1.step();
+
+        expect(received).toEqual(['hello there']);
+        expect(world2.singletonEntity.components.get(Comms)!.outboundChat)
+            .toEqual([]);
     });
 });

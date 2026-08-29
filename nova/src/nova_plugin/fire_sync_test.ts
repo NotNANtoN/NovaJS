@@ -3,6 +3,7 @@ import { Angle } from 'nova_ecs/datatypes/angle';
 import { Position } from 'nova_ecs/datatypes/position';
 import { Vector } from 'nova_ecs/datatypes/vector';
 import {
+    FireIntentShot,
     fireLogReplayTiming,
     getFireSyncLocalState,
     loggedShotEntityId,
@@ -146,5 +147,22 @@ describe('logged shot identity', () => {
         expect(logged.target).toBe('victim');
         expect(logged.inaccuracy).toBe(0.02);
         expect(logged.position).toEqual(new Position(10, 20));
+    });
+});
+
+describe('fire intent target', () => {
+    it('decodes the optional target field', () => {
+        const decoded = FireIntentShot.decode({
+            seq: 4,
+            weaponId: 'nova:128',
+            seed: 12,
+            exitIndex: 0,
+            target: 'victim',
+        });
+
+        expect(decoded._tag).toBe('Right');
+        if (decoded._tag === 'Right') {
+            expect(decoded.right.target).toBe('victim');
+        }
     });
 });

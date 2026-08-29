@@ -5,6 +5,7 @@ import { Component } from '../component';
 import { Angle, AngleType } from '../datatypes/angle';
 import { BOUNDARY, Position, PositionType } from '../datatypes/position';
 import { Vector, VectorLike, VectorType } from '../datatypes/vector';
+import { Entity } from '../entity';
 import { Optional } from '../optional';
 import { Plugin } from '../plugin';
 import { System } from '../system';
@@ -188,6 +189,13 @@ export interface RemoteMovementPresentation {
 export const RemoteMovementPresentationComponent =
     new Component<RemoteMovementPresentation>('RemoteMovementPresentation');
 
+export interface GuidanceTargetTrack {
+    snapshots: MovementSnapshot[];
+}
+
+export const GuidanceTargetTrackComponent =
+    new Component<GuidanceTargetTrack>('GuidanceTargetTrack');
+
 export const REMOTE_INTERPOLATION_DELAY_MS = 200;
 export const REMOTE_MAX_EXTRAPOLATION_MS = 100;
 
@@ -240,6 +248,42 @@ export function queueRemoteMovementSnapshot(
     }
 }
 
+export function queueGuidanceTargetSnapshot(
+    track: GuidanceTargetTrack,
+    state: MovementState,
+    serverTime: number,
+    sequence?: number,
+): void {
+    const snapshot = {
+        state: copyMovementState(state),
+        serverTime,
+        sequence,
+    };
+    const existing = track.snapshots.findIndex(
+        candidate => (sequence !== undefined
+            && candidate.sequence === sequence)
+            || candidate.serverTime === serverTime);
+    if (existing >= 0) {
+        track.snapshots[existing] = snapshot;
+    } else {
+        track.snapshots.push(snapshot);
+    }
+    track.snapshots.sort((a, b) => {
+        if (a.sequence !== undefined && b.sequence !== undefined
+            && a.sequence !== b.sequence) {
+            return a.sequence - b.sequence;
+        }
+        return a.serverTime - b.serverTime;
+    });
+    const latestServerTime = Math.max(
+        ...track.snapshots.map(snapshot => snapshot.serverTime));
+    track.snapshots = track.snapshots.filter(snapshot =>
+        snapshot.serverTime > latestServerTime - 4000);
+    if (track.snapshots.length > 64) {
+        track.snapshots.splice(0, track.snapshots.length - 64);
+    }
+}
+
 const WORLD_PERIOD = BOUNDARY * 2;
 
 function shortestWrappedDelta(from: number, to: number): number {
@@ -288,9 +332,15 @@ export function advanceMovementState(
     physics: MovementPhysics,
     delta_s: number,
     entities: EntityMap,
+    onStep?: (
+        state: MovementState,
+        stepSeconds: number,
+        elapsedSeconds: number,
+    ) => void,
 ): MovementState {
     const advanced = copyMovementState(state);
     let remaining = Math.max(0, delta_s);
+    let elapsed = 0;
     while (remaining > 0) {
         const step = Math.min(remaining, 1 / 60);
         const time: Time = {
@@ -299,12 +349,14 @@ export function advanceMovementState(
             delta_ms: step * 1000,
             frame: 0,
         };
+        onStep?.(advanced, step, elapsed);
         if (physics.movementType === MovementType.INERTIAL) {
             inertialControls(advanced, physics, time, entities);
         } else if (physics.movementType === MovementType.INERTIALESS) {
             inertialessControls(advanced, physics, time, entities);
         }
         remaining -= step;
+        elapsed += step;
     }
     return advanced;
 }
@@ -340,6 +392,31 @@ export function sampleRemoteMovement(
     );
     return advanceMovementState(
         latest.state, physics, extrapolationMs / 1000, entities);
+}
+
+export function sampleGuidanceTarget(
+    targetEntity: Entity,
+    atTime: number,
+    entities: EntityMap,
+): MovementState | undefined {
+    const movement = targetEntity.components.get(MovementStateComponent);
+    const physics = targetEntity.components.get(MovementPhysicsComponent)
+        ?? {
+            acceleration: 0,
+            maxVelocity: Infinity,
+            turnRate: 0,
+            movementType: MovementType.INERTIAL,
+        };
+    const presentation = targetEntity.components
+        .get(RemoteMovementPresentationComponent);
+    if (presentation?.snapshots.length) {
+        return sampleRemoteMovement(presentation, atTime, physics, entities);
+    }
+    const track = targetEntity.components.get(GuidanceTargetTrackComponent);
+    if (track?.snapshots.length) {
+        return sampleRemoteMovement(track, atTime, physics, entities);
+    }
+    return movement ? copyMovementState(movement) : undefined;
 }
 
 export const MovementSystem = new System({
@@ -517,6 +594,7 @@ export const MovementPlugin: Plugin = {
         world.addComponent(MovementPhysicsComponent);
         world.addComponent(MovementStateComponent);
         world.addComponent(RemoteMovementPresentationComponent);
+        world.addComponent(GuidanceTargetTrackComponent);
         world.addSystem(MovementSystem);
         world.addSystem(RemoteMovementPresentationSystem);
     }

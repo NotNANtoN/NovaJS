@@ -10,12 +10,17 @@ import { replicationPolicies } from 'nova_ecs/plugins/multiplayer_plugin';
 
 export const FIRE_BUFFER_SIZE = 16;
 
-export const FireIntentShot = t.type({
-    seq: t.number,
-    weaponId: t.string,
-    seed: t.number,
-    exitIndex: t.number,
-});
+export const FireIntentShot = t.intersection([
+    t.type({
+        seq: t.number,
+        weaponId: t.string,
+        seed: t.number,
+        exitIndex: t.number,
+    }),
+    t.partial({
+        target: t.string,
+    }),
+]);
 export type FireIntentShot = t.TypeOf<typeof FireIntentShot>;
 
 export const FireIntent = t.type({

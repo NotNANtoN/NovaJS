@@ -77,11 +77,9 @@ ignores anything at or below it, which makes a repeated packet harmless.
 
 ## Known gaps
 
-- A shot's target and source velocity are not on the wire, so a world spawning
-  from the log reconstructs them from the ship state it currently has. A guided
-  missile can therefore start its flight slightly differently on each side.
-  Hit resolution is the server's, so this is cosmetic, but it is why homing
-  shots are the first place to look if a fight looks wrong.
+- Guided shots steer from a target snapshot track delayed by the remote
+  interpolation window, so every instance follows the same path. Hit
+  resolution remains server-authoritative.
 - Quantised partial movement snapshots are a wire format change. A stale cached
   browser cannot read them, so client and server have to be deployed together
   until there is capability negotiation.

@@ -31,6 +31,7 @@ import {
     FireSyncLocalState,
     FireSyncPlugin,
     getFireSyncLocalState,
+    loggedShotEntityId,
     makeFireLogShot,
     newShotsAfter,
     pushShot,
@@ -75,6 +76,9 @@ function recordOwnedShot(
     const seq = sync.nextSeq++;
     sync.spawnedSeqs.add(seq);
     const event: FireIntentShot = { seq, weaponId, seed, exitIndex };
+    if (fired.target !== undefined) {
+        event.target = fired.target;
+    }
     if (platform === 'browser') {
         if (intent) {
             pushShot(intent.shots, event);
@@ -97,6 +101,17 @@ function recordOwnedShot(
         }
     }
     return { intent, log };
+}
+
+function fireEventEntityId(
+    weapon: { syncAsFireEvent: boolean },
+    source: string,
+    seq: number,
+): { entityId: string } | undefined {
+    if (weapon.syncAsFireEvent === false) {
+        return undefined;
+    }
+    return { entityId: loggedShotEntityId(source, seq) };
 }
 
 export function clearWeaponFiringState(
@@ -232,7 +247,13 @@ export const WeaponsSystem = new System({
                 if (weapon.data.fireSimultaneously) {
                     for (let copy = 0; copy < count; copy++) {
                         const seed = randomShotSeed();
-                        const shot = weapon.fireFromEntityDetailed(uuid, seed);
+                        const shot = weapon.fireFromEntityDetailed(
+                            uuid,
+                            seed,
+                            true,
+                            undefined,
+                            fireEventEntityId(weapon, uuid, sync.nextSeq),
+                        );
                         fired = shot !== undefined || fired;
                         if (shot && weapon.syncAsFireEvent !== false) {
                             ({ intent, log } = recordOwnedShot(
@@ -243,7 +264,13 @@ export const WeaponsSystem = new System({
                     }
                 } else {
                     const seed = randomShotSeed();
-                    const shot = weapon.fireFromEntityDetailed(uuid, seed);
+                    const shot = weapon.fireFromEntityDetailed(
+                        uuid,
+                        seed,
+                        true,
+                        undefined,
+                        fireEventEntityId(weapon, uuid, sync.nextSeq),
+                    );
                     fired = shot !== undefined;
                     if (shot && weapon.syncAsFireEvent !== false) {
                         ({ intent, log } = recordOwnedShot(
@@ -360,7 +387,15 @@ export const ServerFireIntentSystem = new System({
                 continue;
             }
             const fired = weapon.fireFromEntityDetailed(
-                uuid, shot.seed, true, shot.exitIndex);
+                uuid,
+                shot.seed,
+                true,
+                shot.exitIndex,
+                {
+                    entityId: loggedShotEntityId(uuid, shot.seq),
+                    target: shot.target,
+                },
+            );
             if (!fired) {
                 continue;
             }

@@ -188,9 +188,10 @@ export class PlayerChatDialog extends Menu<Entity> {
             if (!this.container.visible) {
                 return;
             }
-            if (e.key === 'Enter') {
+            if (e.key === 'Enter' || e.code === 'Enter' || e.code === 'NumpadEnter') {
                 e.preventDefault();
                 e.stopPropagation();
+                e.stopImmediatePropagation();
                 this.sendMessage();
                 return;
             }

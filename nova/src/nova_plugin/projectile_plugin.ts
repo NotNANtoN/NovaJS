@@ -7,7 +7,19 @@ import { Entity } from 'nova_ecs/entity';
 import { EcsEvent } from 'nova_ecs/events';
 import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
-import { advanceMovementState, MovementPhysicsComponent, MovementStateComponent, MovementType } from 'nova_ecs/plugins/movement_plugin';
+import {
+    advanceMovementState,
+    GuidanceTargetTrackComponent,
+    MovementPhysicsComponent,
+    MovementStateComponent,
+    MovementType,
+    MovementSystem,
+    queueGuidanceTargetSnapshot,
+    REMOTE_INTERPOLATION_DELAY_MS,
+    RemoteMovementPresentationComponent,
+    RemoteMovementPresentationSystem,
+    sampleGuidanceTarget,
+} from 'nova_ecs/plugins/movement_plugin';
 import { MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { ProvideAsync } from "nova_ecs/provide_async";
@@ -27,6 +39,7 @@ import { ExitPointData } from './exit_point';
 import { AttackIntentComponent, FireSubs, OwnerComponent, ShotCreation, ShotSeedComponent, SourceComponent, SubCounts, VulnerableToPD, WeaponConstructors, WeaponEntry, setAttackIntent } from './fire_weapon_plugin';
 import { GameDataResource } from './game_data_resource';
 import { firstOrderWithFallback, Guidance, GuidanceComponent } from './guidance';
+import { PlatformResource } from './platform_plugin';
 import { ArmorComponent, ShieldComponent } from './health_plugin';
 import { ProjectileBlastHull, ProjectileComponent, ProjectileDataComponent } from './projectile_data';
 import { ReturnToQueueComponent } from './return_to_queue_plugin';
@@ -212,11 +225,36 @@ class ProjectileWeaponEntry extends WeaponEntry {
 
         if (shot.fastForwardMs > 0) {
             const physics = projectile.components.get(MovementPhysicsComponent)!;
+            const guidance = projectile.components.get(GuidanceComponent);
+            const targetEntity = target
+                ? this.entities.get(target)
+                : undefined;
+            const onStep = guidance && targetEntity
+                ? (state: typeof movementState, _stepSeconds: number,
+                    elapsedSeconds: number) => {
+                    const targetMovement = sampleGuidanceTarget(
+                        targetEntity,
+                        shot.createdAt + elapsedSeconds * 1000
+                            - REMOTE_INTERPOLATION_DELAY_MS,
+                        this.entities,
+                    );
+                    if (targetMovement) {
+                        state.turnTo = firstOrderWithFallback(
+                            state.position,
+                            state.velocity,
+                            targetMovement.position,
+                            targetMovement.velocity,
+                            this.data.shotSpeed,
+                        );
+                    }
+                }
+                : undefined;
             Object.assign(movementState, advanceMovementState(
                 movementState,
                 physics,
                 shot.fastForwardMs / 1000,
                 this.entities,
+                onStep,
             ));
         }
 
@@ -263,17 +301,48 @@ const ProjectileLifespanSystem = new System({
     },
 });
 
+const RecordGuidanceTrackSystem = new System({
+    name: 'RecordGuidanceTrackSystem',
+    args: [MovementStateComponent,
+        Optional(RemoteMovementPresentationComponent),
+        Optional(MultiplayerData), TimeResource, PlatformResource,
+        GetEntity] as const,
+    after: [MovementSystem, RemoteMovementPresentationSystem],
+    step(movement, presentation, multiplayer, time, platform, entity) {
+        if (presentation) {
+            return;
+        }
+        if (platform === 'node' && multiplayer?.owner
+            && multiplayer.owner !== 'server') {
+            return;
+        }
+        let track = entity.components.get(GuidanceTargetTrackComponent);
+        if (!track) {
+            track = { snapshots: [] };
+            entity.components.set(GuidanceTargetTrackComponent, track);
+        }
+        queueGuidanceTargetSnapshot(track, movement, time.time);
+    },
+});
+
 const ProjectileGuidanceSystem = new System({
     name: 'ProjectileGuidanceSystem',
     args: [MovementStateComponent, TargetComponent,
-        Entities, ProjectileDataComponent] as const,
-    step(movementState, { target }, entities, projectileData) {
+        Entities, ProjectileDataComponent, TimeResource] as const,
+    before: [MovementSystem],
+    step(movementState, { target }, entities, projectileData, time) {
         if (!target) {
             return;
         }
         const targetEntity = entities.get(target);
-        const targetMovement = targetEntity?.components.get(MovementStateComponent);
-
+        if (!targetEntity) {
+            return;
+        }
+        const targetMovement = sampleGuidanceTarget(
+            targetEntity,
+            time.time - REMOTE_INTERPOLATION_DELAY_MS,
+            entities,
+        );
         if (!targetMovement) {
             return;
         }
@@ -420,6 +489,7 @@ export const ProjectilePlugin: Plugin = {
         }
         weaponConstructors.set('ProjectileWeaponData', ProjectileWeaponEntry);
 
+        world.addSystem(RecordGuidanceTrackSystem);
         world.addSystem(ProjectileGuidanceSystem);
         world.addSystem(ProjectileLifespanSystem);
         world.addSystem(ProjectileCollisionSystem);
