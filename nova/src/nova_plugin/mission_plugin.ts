@@ -276,7 +276,9 @@ export function acceptMission(
         return undefined;
     }
     const pickupDestination = resolved.travelDestination;
-    const destination = mission.returnStel === -1 && mission.dropOffMode === 0
+    // DropOffMode 0 unloads at TravelStel. Completing only at ReturnStel
+    // made passenger ferries ignore the planet named in the offer.
+    const destination = mission.returnStel === -1 || mission.dropOffMode === 0
         ? resolved.travelDestination
         : resolved.returnDestination;
 
@@ -362,6 +364,38 @@ function destinationMatches(destination: string | undefined, planetId: string) {
         || destination.replace(/^.*:/, '') === planetId.replace(/^.*:/, '');
 }
 
+function missionEntryKey(entry: ActiveMission): string {
+    return `${entry.missionId}:${entry.acceptedDate ?? 'legacy'}`;
+}
+
+/**
+ * Whether this landing pays out the mission.
+ *
+ * Passenger/cargo drop-offs complete at TravelStel (the planet the log
+ * shows). Other missions must land at ReturnStel after visiting TravelStel
+ * when those planets differ.
+ */
+function landingCompletesMission(
+    entry: ActiveMission,
+    mission: MissionData,
+    planetId: string,
+): boolean {
+    const travel = missionTravelDestination(entry);
+    const atTravel = destinationMatches(travel, planetId);
+    const atCompletion = destinationMatches(entry.destination, planetId);
+    if (mission.dropOffMode === 0) {
+        return atTravel || atCompletion;
+    }
+    if (!atCompletion) {
+        return false;
+    }
+    const travelRequired = Boolean(travel)
+        && travel !== '*'
+        && mission.travelStel !== -1
+        && !destinationMatches(travel, entry.destination);
+    return !travelRequired || entry.travelVisited === true || atTravel;
+}
+
 function isExpired(state: PlayerState, entry: ActiveMission, mission: MissionData) {
     return mission.timeLimit > 0
         && entry.acceptedDate !== undefined
@@ -425,8 +459,24 @@ function missionTextValues(
 
 export class MissionRuntime {
     private missionCache = new Map<string, Promise<MissionData | undefined>>();
-    private inFlight = new Set<string>();
+    private entryWork = new Map<string, Promise<unknown>>();
     private checkedDates = new WeakMap<object, number>();
+
+    /**
+     * Expiration and landing share this queue so a date check in flight
+     * cannot skip the landing that should complete the same mission.
+     */
+    private runExclusive<T>(key: string, work: () => Promise<T>): Promise<T> {
+        const previous = this.entryWork.get(key) ?? Promise.resolve();
+        const next = previous.then(work, work);
+        this.entryWork.set(key, next);
+        void next.finally(() => {
+            if (this.entryWork.get(key) === next) {
+                this.entryWork.delete(key);
+            }
+        });
+        return next;
+    }
 
     // TODO: Validate mission mutations on the server before accepting
     // untrusted client-side state as authoritative.
@@ -498,28 +548,22 @@ export class MissionRuntime {
         context: MissionSetContext = {},
     ): Promise<void> {
         const entries = [...state.activeMissions];
-        for (const entry of entries) {
+        await Promise.all(entries.map(entry => {
             if (entry.state !== 'active' || entry.acceptedDate === undefined) {
-                continue;
+                return undefined;
             }
-            const key = `${entry.missionId}:${entry.acceptedDate}`;
-            if (this.inFlight.has(key)) {
-                continue;
-            }
-            this.inFlight.add(key);
-            try {
+            return this.runExclusive(missionEntryKey(entry), async () => {
                 const mission = await this.getMissionForEntry(entry);
-                if (!mission || !isExpired(state, entry, mission)) {
-                    continue;
+                if (!mission || entry.state !== 'active'
+                    || !isExpired(state, entry, mission)) {
+                    return;
                 }
                 runMissionSetExpression(mission.onFailure, state, console.warn,
                     context);
                 entry.state = 'failed';
                 releaseMissionCargo(state, entry.missionId);
-            } finally {
-                this.inFlight.delete(key);
-            }
-        }
+            });
+        }));
     }
 
     /**
@@ -535,15 +579,10 @@ export class MissionRuntime {
         const notices: MissionNotice[] = [];
         const entries = [...state.activeMissions];
         for (const entry of entries) {
-            const key = `${entry.missionId}:${entry.acceptedDate ?? 'legacy'}`;
-            if (this.inFlight.has(key)) {
-                continue;
-            }
-            this.inFlight.add(key);
-            try {
+            await this.runExclusive(missionEntryKey(entry), async () => {
                 const mission = await this.getMissionForEntry(entry);
                 if (!mission) {
-                    continue;
+                    return;
                 }
                 if (entry.state === 'failed') {
                     const destinationName = await this.missionName(
@@ -561,12 +600,18 @@ export class MissionRuntime {
                         ),
                     });
                     this.removeEntry(state, entry);
-                    continue;
+                    return;
                 }
 
-                if (entry.state !== 'active'
-                    || !destinationMatches(entry.destination, planetId)) {
-                    continue;
+                if (entry.state !== 'active') {
+                    return;
+                }
+                if (destinationMatches(
+                    missionTravelDestination(entry), planetId)) {
+                    entry.travelVisited = true;
+                }
+                if (!landingCompletesMission(entry, mission, planetId)) {
+                    return;
                 }
 
                 let goalProgress = missionGoalProgress(entry, mission);
@@ -576,7 +621,7 @@ export class MissionRuntime {
                     entry.shipGoalProgress = goalProgress;
                 }
                 if (goalProgress && !goalProgress.completed) {
-                    continue;
+                    return;
                 }
 
                 if (goalProgress && !goalProgress.shipDoneApplied) {
@@ -605,12 +650,10 @@ export class MissionRuntime {
                         missionTextValues(
                             state, entry, mission,
                             destinationName, returnDestinationName),
-                    ),
-                });
+                        ),
+                    });
                 this.removeEntry(state, entry);
-            } finally {
-                this.inFlight.delete(key);
-            }
+            });
         }
         return notices;
     }

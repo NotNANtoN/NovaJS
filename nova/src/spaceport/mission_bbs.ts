@@ -512,6 +512,8 @@ export class MissionInfo extends Menu<Entity> {
         );
         this.detail.text += `\n\nDestination: ${destination}`
             + (destinationSystem ? ` (${destinationSystem})` : '')
+            + (returnDestination && returnDestination !== destination
+                ? `\nReturn: ${returnDestination}` : '')
             + (deadline ? `\nDeadline: ${deadline}` : '\nNo deadline');
         this.status.text = selected.entry.state === 'failed'
             ? 'This mission has failed. Land anywhere to dismiss the report.'

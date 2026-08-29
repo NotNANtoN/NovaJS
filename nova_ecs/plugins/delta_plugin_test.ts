@@ -398,6 +398,18 @@ describe('Delta Plugin', () => {
         expect(readded?.componentStates?.get(BooleanComponent.name)).toBeFalse();
     });
 
+    it('does not advertise removal of components it does not replicate', () => {
+        const LocalOnly = new Component<{ n: number }>('LocalOnly');
+        const entity = new Entity()
+            .addComponent(FooComponent, { x: 1 })
+            .addComponent(LocalOnly, { n: 1 });
+        world1.entities.set('local-only uuid', entity);
+        deltaMaker1.getDelta(entity);
+        entity.components.delete(LocalOnly);
+        const delta = deltaMaker1.getDelta(entity);
+        expect(delta).toBeUndefined();
+    });
+
     it('applies states and deltas over falsy primitive values', () => {
         const entity = new Entity()
             .addComponent(BooleanComponent, false)

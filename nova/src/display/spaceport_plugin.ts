@@ -98,32 +98,37 @@ const LandSystem = new System({
             });
             return;
         }
-        if (playerState) {
-            advanceGameDate(playerState);
-            playerState.lastLandedPlanet = id;
-            playerState.landingCount = (playerState.landingCount ?? 0) + 1;
-            playerState.lastLandedSystem = playerState.currentSystem;
-            playerState.lastLandedPosition = landedPlanet?.position ?? [0, 0];
+        deImmerify(playerShip);
+        const landingState = playerShip.components.get(PlayerStateComponent)
+            ?? playerState;
+        if (landingState) {
+            landingState.lastLandedPlanet = id;
+            landingState.landingCount = (landingState.landingCount ?? 0) + 1;
+            landingState.lastLandedSystem = landingState.currentSystem;
+            landingState.lastLandedPosition = landedPlanet?.position ?? [0, 0];
         }
         entities.delete(shipUuid);
-        deImmerify(playerShip);
 
         spaceport.container.position.x = x / 2;
         spaceport.container.position.y = y / 2;
-        const landingState = playerShip.components.get(PlayerStateComponent);
         const outfits = playerShip.components.get(OutfitsStateComponent);
+        // Complete missions against the arrival date. Advancing the day
+        // first made ferries expire on the landing that should pay them.
         const landingNotices = landingState && missionRuntime
             ? missionRuntime.processLanding(
                 landingState, id, ncbRuntime.setContext(playerShip, landingState))
             : Promise.resolve([]);
         void landingNotices.then((notices: MissionNotice[]) => {
-            if (playerState && playerStore && playerMultiplayer
+            if (landingState) {
+                advanceGameDate(landingState);
+            }
+            if (landingState && playerStore && playerMultiplayer
                 && communicator) {
                 const store = playerStore;
                 const token = store.getTokenForPeer(playerMultiplayer.owner);
                 if (token) {
                     const ship = serializer.encode(playerShip);
-                    void store.snapshot(token, playerState, ship)
+                    void store.snapshot(token, landingState, ship)
                         .catch(error => console.error(
                             'Landing snapshot failed', error));
                 }

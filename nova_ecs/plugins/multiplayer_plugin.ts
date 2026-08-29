@@ -1180,9 +1180,14 @@ export function multiplayer(communicator: Communicator,
 
                 // Remove entities
                 for (const uuid of message.remove ?? []) {
-                    if (entityMap.has(uuid) &&
-                        (entityMap.get(uuid)?.data.owner === source || peerIsAdmin)) {
-                        const removedEntity = entityMap.get(uuid)?.entity;
+                    const existing = entityMap.get(uuid);
+                    if (!existing) {
+                        // Never replicated into this client's interest window,
+                        // or already gone locally.
+                        continue;
+                    }
+                    if (existing.data.owner === source || peerIsAdmin) {
+                        const removedEntity = existing.entity;
                         if (removedEntity) {
                             deltaMaker.untrack(removedEntity);
                         }

@@ -24,4 +24,20 @@ describe('plainSnapshot', () => {
         expect(plainSnapshot(value)).toBe(value);
         expect(plainSnapshot(undefined)).toBeUndefined();
     });
+
+    it('keeps nested fields readable after the draft is revoked', () => {
+        const draft = createDraft({
+            credits: 5_000,
+            diedAt: 12_345,
+            legalRecords: { 'nova:151': -40 },
+            activeMissions: [{ missionId: 'nova:1', state: 'active' }],
+        });
+        const copy = plainSnapshot(draft);
+        finishDraft(draft);
+        expect(() => draft.credits).toThrow();
+        expect(copy.credits).toBe(5_000);
+        expect(copy.diedAt).toBe(12_345);
+        expect(copy.activeMissions[0].missionId).toBe('nova:1');
+        expect(copy.legalRecords['nova:151']).toBe(-40);
+    });
 });

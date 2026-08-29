@@ -66,7 +66,13 @@ export const PILOT_TARGET_PICT_SLOT = {
 export function pilotDeathNotice(
     state: PlayerState | undefined,
 ): string | undefined {
-    return state?.diedAt === undefined
+    let diedAt: number | undefined;
+    try {
+        diedAt = state?.diedAt;
+    } catch {
+        return 'PILOT DECEASED — LOAD A SAVED PILOT OR CREATE A NEW PILOT';
+    }
+    return diedAt === undefined
         ? undefined
         : 'PILOT DECEASED — LOAD A SAVED PILOT OR CREATE A NEW PILOT';
 }

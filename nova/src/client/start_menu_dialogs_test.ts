@@ -1,5 +1,6 @@
 import { createInitialPlayerState } from '../nova_plugin/player_state';
 import { EncodedEntity } from 'nova_ecs/plugins/serializer_plugin';
+import { createDraft, finishDraft } from 'immer';
 import {
     buildPilotChoices,
     canEnterShip,
@@ -39,6 +40,17 @@ describe('start menu action state', () => {
             createdAt: 10_000,
             reason: 'landing',
         }]).map(choice => choice.id)).toEqual(['landing']);
+    });
+
+    it('does not throw when a revoked death draft reaches the menu', () => {
+        const draft = createDraft(createInitialPlayerState());
+        draft.diedAt = 12_345;
+        finishDraft(draft);
+        expect(() => draft.diedAt).toThrow();
+        expect(() => canEnterShip(draft)).not.toThrow();
+        expect(canEnterShip(draft)).toBeFalse();
+        expect(() => pilotDeathNotice(draft)).not.toThrow();
+        expect(pilotDeathNotice(draft)).toContain('LOAD A SAVED PILOT');
     });
 
     it('describes record and file quarantine distinctly', () => {

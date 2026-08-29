@@ -58,6 +58,9 @@ const ActiveMissionDetails = t.intersection([
         destination: t.string,
         travelDestination: t.string,
         returnDestination: t.string,
+        // Set when the pilot lands at TravelStel. ReturnStel completions
+        // require this so a story mission cannot pay out without the visit.
+        travelVisited: t.boolean,
         shipSystem: t.string,
         cargo: MissionCargo,
         acceptedDate: t.number,

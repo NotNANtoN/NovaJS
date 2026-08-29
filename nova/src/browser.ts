@@ -58,6 +58,7 @@ import {
     PlayerStateResource,
     createInitialPlayerState,
     setCargoCapacity,
+    decodePlayerState,
 } from "./nova_plugin/player_state";
 import {
     placeShipAtLanding,
@@ -78,7 +79,7 @@ const gameData = new GameData();
 
 const pixelRatio = window.devicePixelRatio || 1;
 PIXI.settings.RESOLUTION = pixelRatio;
-PIXI.settings.SCALE_MODE = PIXI.SCALE_MODES.LINEAR;
+PIXI.BaseTexture.defaultOptions.scaleMode = PIXI.SCALE_MODES.LINEAR;
 
 // TODO: Using WebGL 1 (instead of 2) seems to make the game smoother, but
 // this will likely change in the future.
@@ -276,8 +277,8 @@ async function transitionTo(
             if (death?.outcome !== 'killed') {
                 return;
             }
-            void returnToMainMenu(
-                ship.components.get(PlayerStateComponent));
+            void returnToMainMenu(plainSnapshot(
+                ship.components.get(PlayerStateComponent)));
         });
 
     if (!world) {
@@ -527,8 +528,14 @@ async function returnToMainMenu(playerState?: PlayerState) {
     try {
         // Leaving the world steps it once more, which revokes any component
         // draft the caller read this out of. The menu reads it afterwards.
-        const currentState = plainSnapshot(playerState
+        // JSON-detach through the persistence codec so nested arrays cannot
+        // remain draft proxies that throw on the death notice.
+        const raw = plainSnapshot(playerState
             ?? world?.resources.get(PlayerStateResource));
+        const decoded = raw ? decodePlayerState(raw) : undefined;
+        const currentState = decoded && isRight(decoded)
+            ? decoded.right
+            : raw;
         const serializer = system?.resources.get(SerializerResource);
         let currentShip;
         try {

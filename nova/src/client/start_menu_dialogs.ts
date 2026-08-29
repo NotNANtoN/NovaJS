@@ -242,7 +242,14 @@ export function buildPilotChoices(
 export function canEnterShip(
     state: PlayerState | undefined,
 ): state is PlayerState {
-    return state !== undefined && state.diedAt === undefined;
+    if (state === undefined) {
+        return false;
+    }
+    try {
+        return state.diedAt === undefined;
+    } catch {
+        return false;
+    }
 }
 
 export function makeThemedButton(text: string): HTMLButtonElement {

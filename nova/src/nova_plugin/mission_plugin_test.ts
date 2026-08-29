@@ -230,7 +230,12 @@ describe('mission runtime', () => {
             initialPlanetId: 'nova:128',
             planets: [{ id: 'nova:128' }, { id: 'nova:408' }],
         });
-        await new MissionRuntime(fakeGameData(vellos2)).processLanding(
+        const runtime = new MissionRuntime(fakeGameData(vellos2));
+        await runtime.processLanding(state, 'nova:408');
+        expect(state.activeMissions.length).toBe(1);
+        expect(state.missionBits[351]).toBe(false);
+
+        await runtime.processLanding(
             state, 'nova:128', { onStartMission: () => undefined });
 
         expect(state.missionBits[351]).toBe(true);
@@ -286,5 +291,108 @@ describe('mission runtime', () => {
         expect(state.credits).toBe(10_500);
         expect(state.activeMissions).toEqual([]);
         expect(getFreeSpace(state)).toBe(10);
+    });
+
+    it('completes a passenger ferry on landing at TravelStel', async () => {
+        const mission = {
+            ...getDefaultMissionData(),
+            id: 'proc:ferry:0',
+            name: 'Ferry 2 passengers to Destination',
+            returnStel: 130,
+            travelStel: 131,
+            cargoType: 0,
+            cargoQty: 2,
+            cargo: 'passengers',
+            dropOffMode: 0,
+            payVal: 800,
+            timeLimit: 3,
+            compText: 'Passengers delivered.',
+        };
+        const state = createInitialPlayerState();
+        const accepted = acceptMission(state, mission, {
+            initialPlanetId: 'nova:130',
+            planets: [{ id: 'nova:130' }, { id: 'nova:131' }],
+        });
+        expect(accepted?.destination).toBe('nova:131');
+        expect(accepted?.travelDestination).toBe('nova:131');
+        expect(accepted?.returnDestination).toBe('nova:130');
+
+        const notices = await new MissionRuntime(fakeGameData(mission))
+            .processLanding(state, 'nova:131');
+        expect(notices[0]?.kind).toBe('success');
+        expect(notices[0]?.text).toBe('Passengers delivered.');
+        expect(state.credits).toBe(10_800);
+        expect(state.activeMissions).toEqual([]);
+        expect(getFreeSpace(state)).toBe(10);
+    });
+
+    it('still completes a drop-off whose stored destination is ReturnStel', async () => {
+        const mission = {
+            ...getDefaultMissionData(),
+            id: 'proc:ferry:stale',
+            name: 'Ferry 2 passengers to Destination',
+            returnStel: 130,
+            travelStel: 131,
+            cargoType: 0,
+            cargoQty: 2,
+            cargo: 'passengers',
+            dropOffMode: 0,
+            payVal: 400,
+        };
+        const state = createInitialPlayerState();
+        const accepted = acceptMission(state, mission, {
+            initialPlanetId: 'nova:130',
+            planets: [{ id: 'nova:130' }, { id: 'nova:131' }],
+        });
+        expect(accepted).toBeDefined();
+        accepted!.destination = 'nova:130';
+        accepted!.missionData = mission;
+
+        const notices = await new MissionRuntime(fakeGameData(mission))
+            .processLanding(state, 'nova:131');
+        expect(notices[0]?.kind).toBe('success');
+        expect(state.activeMissions).toEqual([]);
+    });
+
+    it('completes a landing even if expiration is already loading the mission', async () => {
+        const mission = {
+            ...getDefaultMissionData(),
+            id: 'nova:204',
+            travelStel: 131,
+            returnStel: 131,
+            dropOffMode: 0,
+            payVal: 100,
+        };
+        let releaseLoad: () => void = () => undefined;
+        const pending = new Promise<void>(resolve => {
+            releaseLoad = resolve;
+        });
+        const runtime = new MissionRuntime({
+            data: {
+                Mission: {
+                    get: async () => {
+                        await pending;
+                        return mission;
+                    },
+                },
+                Planet: {
+                    get: async (id: string) => ({ id, name: 'Destination' }),
+                },
+            },
+            ids: Promise.resolve({} as never),
+        } as unknown as GameDataInterface);
+        const state = createInitialPlayerState();
+        acceptMission(state, mission, {
+            initialPlanetId: 'nova:130',
+            planets: [{ id: 'nova:130' }, { id: 'nova:131' }],
+        });
+        const expiration = runtime.checkDate(state);
+        expect(expiration).toBeDefined();
+        const landing = runtime.processLanding(state, 'nova:131');
+        releaseLoad();
+        const notices = await landing;
+        await expiration;
+        expect(notices[0]?.kind).toBe('success');
+        expect(state.activeMissions).toEqual([]);
     });
 });

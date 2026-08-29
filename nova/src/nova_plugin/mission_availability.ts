@@ -247,8 +247,9 @@ export function resolveStellarSelector(
 /**
  * Resolve the completion destination used by phase-one cargo missions.
  *
- * ReturnStel is authoritative when present. For a mission with no return
- * stellar and a travel drop-off, TravelStel is the useful completion point.
+ * Drop-off missions complete at TravelStel. ReturnStel is only the
+ * completion point when the mission is not a travel drop-off and a return
+ * stellar is actually set.
  */
 export function resolveMissionCompletionDestination(
     mission: MissionData,
@@ -260,7 +261,7 @@ export function resolveMissionCompletionDestination(
         random?: () => number;
     } = {},
 ): string | '*' | undefined {
-    const selector = mission.returnStel === -1 && mission.dropOffMode === 0
+    const selector = mission.returnStel === -1 || mission.dropOffMode === 0
         ? mission.travelStel
         : mission.returnStel;
     return resolveStellarSelector(selector, {

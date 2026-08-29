@@ -321,15 +321,18 @@ export class DeltaMaker {
             }
         }
 
-        const entityComponents = new Set(entity.components.keys());
+        const entityComponents = new Set([...entity.components.keys()]
+            .filter(component => this.componentDeltas.has(component)));
 
-        // Mark removed components as removed
+        // Only replicated components belong in the baseline. A server-only
+        // marker such as NpcTrafficComponent would otherwise appear in
+        // removeComponents, and clients warn "Missing component".
         const deltaComponentSet = new Set([...deltaComponent.components.keys()])
         const removedComponents = new Set(
             [...setDifference(deltaComponentSet, entityComponents)]
                 .map(component => component.name));
-        // Update the components list
-        deltaComponent.components = new Map(entity.components);
+        deltaComponent.components = new Map([...entity.components]
+            .filter(([component]) => this.componentDeltas.has(component)));
 
         const entityDelta: EntityDelta = {};
         if (componentStates.size > 0) {
