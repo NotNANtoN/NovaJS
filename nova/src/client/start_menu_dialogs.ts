@@ -102,8 +102,38 @@ export interface PilotChoice {
     currentSystem: string;
     savedAt?: number;
     reason?: PlayerSnapshotSummary['reason'];
+    diedAt?: number;
     state?: PlayerState;
     ship?: EncodedEntity;
+}
+
+export function shouldArchivePilot(
+    state: PlayerState | undefined,
+    currentIsNew: boolean,
+    savedAt: number | undefined,
+): boolean {
+    if (state === undefined) {
+        return false;
+    }
+    return !currentIsNew || savedAt !== undefined;
+}
+
+function pilotChoiceSortKey(choice: PilotChoice): [number, number] {
+    const deceased = choice.diedAt !== undefined ? 1 : 0;
+    const lastUsed = choice.savedAt
+        ?? (choice.kind === 'current' ? Number.MAX_SAFE_INTEGER : 0);
+    return [deceased, -lastUsed];
+}
+
+function sortPilotChoices(choices: PilotChoice[]): PilotChoice[] {
+    return [...choices].sort((left, right) => {
+        const [leftDeceased, leftUsed] = pilotChoiceSortKey(left);
+        const [rightDeceased, rightUsed] = pilotChoiceSortKey(right);
+        if (leftDeceased !== rightDeceased) {
+            return leftDeceased - rightDeceased;
+        }
+        return leftUsed - rightUsed;
+    });
 }
 
 export interface ControlReferenceEntry {
@@ -203,28 +233,22 @@ export function buildPilotChoices(
     savedAt?: number,
     currentShip?: EncodedEntity,
 ): PilotChoice[] {
-    const latestSnapshotTime = snapshots.reduce<number | undefined>(
-        (latest, snapshot) => latest === undefined
-            ? snapshot.createdAt : Math.max(latest, snapshot.createdAt),
-        undefined,
-    );
     const choices: PilotChoice[] = [];
-    if (canEnterShip(current)) {
+    if (current && canEnterShip(current)) {
         choices.push({
             kind: 'current',
             id: 'current',
             pilotName: current.pilotName || INITIAL_PLAYER_STATE.pilotName,
             currentSystem: current.currentSystem
                 || INITIAL_PLAYER_STATE.currentSystem,
-            savedAt: savedAt ?? latestSnapshotTime,
+            savedAt: savedAt ?? Date.now(),
             state: current,
             ship: currentShip,
         });
     }
-    choices.push(...[...snapshots]
-        .sort((left, right) => right.createdAt - left.createdAt)
-        .map(snapshot => ({
-            kind: 'snapshot' as const,
+    for (const snapshot of snapshots) {
+        choices.push({
+            kind: 'snapshot',
             id: snapshot.id,
             pilotName: snapshot.pilotName
                 ?? current?.pilotName
@@ -235,8 +259,10 @@ export function buildPilotChoices(
                 ?? INITIAL_PLAYER_STATE.currentSystem,
             savedAt: snapshot.createdAt,
             reason: snapshot.reason,
-        })));
-    return choices;
+            diedAt: snapshot.diedAt,
+        });
+    }
+    return sortPilotChoices(choices);
 }
 
 export function canEnterShip(
@@ -386,11 +412,10 @@ export class RetailMenuDialogs {
         currentShip: EncodedEntity | undefined,
         snapshots: readonly PlayerSnapshotSummary[],
         savedAt?: number,
+        loadSnapshots?: () => Promise<readonly PlayerSnapshotSummary[]>,
     ) {
         this.clear();
         this.options.content.replaceChildren();
-        const choices = buildPilotChoices(
-            current, snapshots, savedAt, currentShip);
         const dialog = document.createElement('section');
         dialog.tabIndex = -1;
         dialog.setAttribute('role', 'dialog');
@@ -403,7 +428,8 @@ export class RetailMenuDialogs {
         `;
         const [heading, subtitle] = makeHeading(
             'OPEN PILOT',
-            'Choose the current save or restore one of its retained snapshots.',
+            'Living pilots appear first, most recently used at the top. '
+            + 'Deceased pilots remain available for restore.',
         );
         heading.id = 'nova-open-pilot-heading';
         const list = document.createElement('div');
@@ -419,8 +445,12 @@ export class RetailMenuDialogs {
           min-height: 18px; margin: 10px 0 -5px; color: #edc777;
           font: 13px Geneva, Arial, sans-serif;
         `;
-        let selected = choices[0];
+        let choices: PilotChoice[] = [];
+        let selected: PilotChoice | undefined;
         const rows: HTMLButtonElement[] = [];
+        const select = makeThemedButton('Select Pilot');
+        const back = makeThemedButton('Back');
+        const goBack = () => this.options.onBack('Open Pilot');
         const updateSelection = (choice: PilotChoice) => {
             selected = choice;
             for (const [index, row] of rows.entries()) {
@@ -431,12 +461,24 @@ export class RetailMenuDialogs {
                     ? 'linear-gradient(90deg, #581a17, #2b1110)'
                     : 'linear-gradient(90deg, #181414, #0d0b0b)';
             }
+            const deceased = choice.diedAt !== undefined;
+            select.disabled = choices.length === 0
+                || (deceased && choice.kind === 'current');
+            select.style.opacity = select.disabled ? '.5' : '';
+            select.style.cursor = select.disabled ? 'default' : 'pointer';
         };
-        for (const choice of choices) {
-            const row = document.createElement('button');
-            row.type = 'button';
-            row.setAttribute('role', 'radio');
-            row.style.cssText = `
+        const renderChoices = (
+            nextSnapshots: readonly PlayerSnapshotSummary[],
+        ) => {
+            choices = buildPilotChoices(
+                current, nextSnapshots, savedAt, currentShip);
+            list.replaceChildren();
+            rows.length = 0;
+            for (const choice of choices) {
+                const row = document.createElement('button');
+                row.type = 'button';
+                row.setAttribute('role', 'radio');
+                row.style.cssText = `
               box-sizing: border-box; display: grid; width: 100%; margin: 0 0 7px;
               padding: 10px 12px; grid-template-columns: 1.2fr 1fr;
               gap: 5px 15px; border: 1px solid #4d4943; border-radius: 2px;
@@ -444,67 +486,81 @@ export class RetailMenuDialogs {
               background: linear-gradient(90deg, #181414, #0d0b0b);
               font-family: Geneva, Arial, sans-serif;
             `;
-            const name = document.createElement('strong');
-            name.textContent = choice.pilotName;
-            name.style.cssText =
-                'color: #f4d4bd; font-size: 16px; letter-spacing: .04em;';
-            const kind = document.createElement('span');
-            kind.textContent = choice.kind === 'current'
-                ? 'CURRENT PILOT'
-                : `${choice.reason === 'manual' ? 'MANUAL' : 'LANDING'} SNAPSHOT`;
-            kind.style.cssText =
-                'color: #b9aa99; font-size: 11px; text-align: right;';
-            const date = document.createElement('span');
-            date.textContent = formatDate(choice.savedAt);
-            date.style.cssText = 'font-size: 12px; color: #c9c1b4;';
-            const location = document.createElement('span');
-            location.textContent = choice.currentSystem;
-            location.dataset.systemId = choice.currentSystem;
-            location.style.cssText =
-                'font-size: 12px; color: #d7b98d; text-align: right;';
-            row.append(name, kind, date, location);
-            row.addEventListener('click', () => updateSelection(choice));
-            row.addEventListener('keydown', event => {
-                if (event.key === 'Enter') {
-                    event.preventDefault();
+                if (choice.diedAt !== undefined) {
+                    row.style.opacity = '.72';
+                }
+                const name = document.createElement('strong');
+                name.textContent = choice.pilotName;
+                name.style.cssText =
+                    'color: #f4d4bd; font-size: 16px; letter-spacing: .04em;';
+                const kind = document.createElement('span');
+                if (choice.diedAt !== undefined) {
+                    kind.textContent = 'DECEASED';
+                    kind.style.cssText =
+                        'color: #d17a6f; font-size: 11px; text-align: right;';
+                } else if (choice.kind === 'current') {
+                    kind.textContent = 'CURRENT PILOT';
+                    kind.style.cssText =
+                        'color: #b9aa99; font-size: 11px; text-align: right;';
+                } else {
+                    kind.textContent = choice.reason === 'manual'
+                        ? 'MANUAL SNAPSHOT'
+                        : 'LANDING SNAPSHOT';
+                    kind.style.cssText =
+                        'color: #b9aa99; font-size: 11px; text-align: right;';
+                }
+                const date = document.createElement('span');
+                date.textContent = formatDate(choice.savedAt);
+                date.style.cssText = 'font-size: 12px; color: #c9c1b4;';
+                const location = document.createElement('span');
+                location.textContent = choice.currentSystem;
+                location.dataset.systemId = choice.currentSystem;
+                location.style.cssText =
+                    'font-size: 12px; color: #d7b98d; text-align: right;';
+                row.append(name, kind, date, location);
+                row.addEventListener('click', () => updateSelection(choice));
+                row.addEventListener('keydown', event => {
+                    if (event.key === 'Enter') {
+                        event.preventDefault();
+                        updateSelection(choice);
+                        select.click();
+                    }
+                });
+                row.addEventListener('dblclick', () => {
                     updateSelection(choice);
                     select.click();
+                });
+                rows.push(row);
+                list.appendChild(row);
+                if (this.options.resolveSystemName) {
+                    void this.options.resolveSystemName(choice.currentSystem)
+                        .then(systemName => {
+                            if (systemName && location.isConnected) {
+                                location.textContent = systemName;
+                                location.title = choice.currentSystem;
+                            }
+                        });
                 }
-            });
-            row.addEventListener('dblclick', () => {
-                updateSelection(choice);
-                select.click();
-            });
-            rows.push(row);
-            list.appendChild(row);
-            if (this.options.resolveSystemName) {
-                void this.options.resolveSystemName(choice.currentSystem)
-                    .then(systemName => {
-                        if (systemName && location.isConnected) {
-                            location.textContent = systemName;
-                            location.title = choice.currentSystem;
-                        }
-                    });
             }
-        }
-        if (choices.length === 0) {
-            const empty = document.createElement('p');
-            empty.textContent =
-                'No saved pilot was found. Return and choose New Pilot to begin.';
-            empty.style.cssText = `
+            if (choices.length === 0) {
+                const empty = document.createElement('p');
+                empty.textContent =
+                    'No saved pilot was found. Return and choose New Pilot to begin.';
+                empty.style.cssText = `
               margin: 112px 30px; color: #cfc7b8;
               font: 15px/1.5 Geneva, Arial, sans-serif; text-align: center;
             `;
-            list.appendChild(empty);
-        }
-        const select = makeThemedButton('Select Pilot');
-        select.disabled = choices.length === 0;
-        if (select.disabled) {
-            select.style.opacity = '.5';
-            select.style.cursor = 'default';
-        }
-        const back = makeThemedButton('Back');
-        const goBack = () => this.options.onBack('Open Pilot');
+                list.appendChild(empty);
+            }
+            select.disabled = choices.length === 0;
+            if (select.disabled) {
+                select.style.opacity = '.5';
+                select.style.cursor = 'default';
+            } else {
+                updateSelection(choices[0]);
+                rows[0]?.focus();
+            }
+        };
         select.addEventListener('click', async () => {
             if (!selected) {
                 return;
@@ -546,10 +602,20 @@ export class RetailMenuDialogs {
             makeActions(select, back),
         );
         this.options.content.appendChild(dialog);
-        if (rows[0]) {
-            updateSelection(choices[0]);
-            rows[0].focus();
+        if (loadSnapshots) {
+            status.textContent = 'Loading saved pilots…';
+            void loadSnapshots()
+                .then(renderChoices)
+                .catch(() => renderChoices(snapshots))
+                .finally(() => {
+                    if (status.textContent === 'Loading saved pilots…') {
+                        status.textContent = '';
+                    }
+                });
         } else {
+            renderChoices(snapshots);
+        }
+        if (!rows[0]) {
             back.focus();
         }
         this.cleanup = containDialogFocus(dialog, goBack, select);

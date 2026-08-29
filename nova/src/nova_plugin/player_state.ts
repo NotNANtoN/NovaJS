@@ -266,6 +266,7 @@ export const PlayerSnapshotSummary = t.intersection([
     t.partial({
         pilotName: t.string,
         currentSystem: t.string,
+        diedAt: t.number,
     }),
 ]);
 export type PlayerSnapshotSummary = t.TypeOf<typeof PlayerSnapshotSummary>;
@@ -343,6 +344,16 @@ export interface PlayerStorePort {
      */
     quarantine?(token: string): Promise<PlayerQuarantine>;
     snapshot(
+        token: string,
+        state: PersistentPlayerState,
+        ship?: t.TypeOf<typeof EncodedEntity>,
+        reason?: PlayerSnapshot['reason'],
+    ): Promise<PlayerSnapshot>;
+    /**
+     * Retain pilot state in snapshot history without making it the active save.
+     * Used when switching pilots from the main menu.
+     */
+    archiveSnapshot(
         token: string,
         state: PersistentPlayerState,
         ship?: t.TypeOf<typeof EncodedEntity>,

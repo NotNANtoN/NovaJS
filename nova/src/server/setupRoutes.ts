@@ -9,7 +9,10 @@ import { NovaDataType } from "../../../novadatainterface/NovaDataInterface";
 import { PlayerStore } from "./player_store";
 import { setupHttpLimiter } from './http_limiter';
 import { LosslessWebPCache } from './lossless_webp';
-import { makePlayerData } from '../nova_plugin/player_data_projection';
+import {
+    makePlayerData,
+    summarizeSnapshot,
+} from '../nova_plugin/player_data_projection';
 
 export const IMMUTABLE_ASSET_CACHE =
     'public, max-age=31536000, immutable';
@@ -151,7 +154,7 @@ class GameDataServer {
             express.static(path.dirname(this.settingsPath)));
 
         if (this.playerStore) {
-            this.app.use(express.json());
+            this.app.use(express.json({ limit: '10mb' }));
             this.app.get('/player/state', async (req, res) => {
                 const token = typeof req.query.token === 'string'
                     ? req.query.token : undefined;
@@ -186,13 +189,61 @@ class GameDataServer {
                     return;
                 }
                 const snapshots = await this.playerStore!.getSnapshots(token);
-                res.send(snapshots.map(({ id, createdAt, reason, state }) => ({
-                    id,
-                    createdAt,
-                    reason,
-                    pilotName: state.pilotName,
-                    currentSystem: state.currentSystem,
-                })));
+                res.send(snapshots.map(summarizeSnapshot));
+            });
+            this.app.post('/player/snapshots', async (req, res) => {
+                const token = typeof req.body?.token === 'string'
+                    ? req.body.token : undefined;
+                if (!token) {
+                    res.status(400).send('Missing player token');
+                    return;
+                }
+                const state = req.body?.state;
+                if (!state || typeof state !== 'object') {
+                    res.status(400).send('Missing pilot state');
+                    return;
+                }
+                const reason = req.body?.reason === 'landing'
+                    || req.body?.reason === 'manual'
+                    ? req.body.reason
+                    : 'manual';
+                const ship = req.body?.ship;
+                const encodedShip = ship && typeof ship === 'object'
+                    ? ship
+                    : undefined;
+                try {
+                    await this.playerStore!.archiveSnapshot(
+                        token,
+                        state,
+                        encodedShip,
+                        reason,
+                    );
+                } catch (error) {
+                    console.error('Pilot archive failed', error);
+                    res.status(500).send('Pilot archive failed');
+                    return;
+                }
+                const replaceCurrent = req.body?.replaceCurrent;
+                if (replaceCurrent && typeof replaceCurrent === 'object') {
+                    const replaceShip = req.body?.replaceShip;
+                    const encodedReplaceShip = replaceShip
+                        && typeof replaceShip === 'object'
+                        ? replaceShip
+                        : undefined;
+                    try {
+                        await this.playerStore!.save(
+                            token,
+                            replaceCurrent,
+                            encodedReplaceShip,
+                        );
+                    } catch (error) {
+                        console.error('Pilot switch save failed', error);
+                        res.status(500).send('Pilot switch save failed');
+                        return;
+                    }
+                }
+                const snapshots = await this.playerStore!.getSnapshots(token);
+                res.send(snapshots.map(summarizeSnapshot));
             });
             this.app.post('/player/snapshots/:snapshotId/restore',
                 async (req, res) => {

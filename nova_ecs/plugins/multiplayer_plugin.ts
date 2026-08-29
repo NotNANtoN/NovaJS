@@ -2062,6 +2062,6 @@ export function broadcastChat(world: World, chat: { to: string, fromName?: strin
     };
     comms.outboundChat ??= [];
     comms.outboundChat.push(entry);
-    world.emit(ChatMessageEvent, entry);
+    world.emitNow(ChatMessageEvent, entry);
 }
 

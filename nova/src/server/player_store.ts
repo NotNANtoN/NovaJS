@@ -316,6 +316,44 @@ export class PlayerStore implements PlayerStorePort {
         return cloneSnapshot(snapshot);
     }
 
+    /**
+     * Add a snapshot without updating the active pilot save. Used when the
+     * menu archives one pilot before selecting another.
+     */
+    async archiveSnapshot(
+        token: string,
+        state: PersistentPlayerState,
+        ship?: EncodedEntity,
+        reason: PlayerSnapshot['reason'] = 'manual',
+    ): Promise<PlayerSnapshot> {
+        await this.ready;
+        this.assertWritable(token);
+        await this.getOrCreate(token);
+        const persistedState = toPersistentPlayerState(state);
+        const player = this.players.get(token);
+        if (!player) {
+            throw new Error(`Missing player ${token} after creating record`);
+        }
+        const createdAt = Date.now();
+        const snapshot: PlayerSnapshot = {
+            id: `${createdAt}-${++this.snapshotSequence}`,
+            createdAt,
+            reason,
+            state: clonePlayerState(persistedState),
+            ...(ship === undefined
+                ? {}
+                : {
+                    ship: JSON.parse(JSON.stringify(ship)) as EncodedEntity,
+                }),
+        };
+        player.snapshots = [
+            ...player.snapshots,
+            snapshot,
+        ].slice(-MAX_PLAYER_SNAPSHOTS);
+        this.scheduleSave();
+        return cloneSnapshot(snapshot);
+    }
+
     async getSnapshots(token: string): Promise<PlayerSnapshot[]> {
         await this.ready;
         return (this.players.get(token)?.snapshots ?? []).map(cloneSnapshot);

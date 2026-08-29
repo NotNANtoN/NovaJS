@@ -62,16 +62,24 @@ function projectPlayerState(raw: unknown): PlayerState {
     return projected.right;
 }
 
-export function summarizeSnapshots(
-    snapshots: readonly PlayerSnapshot[],
-): PlayerSnapshotSummary[] {
-    return snapshots.map(({ id, createdAt, reason, state }) => ({
+export function summarizeSnapshot(
+    snapshot: PlayerSnapshot,
+): PlayerSnapshotSummary {
+    const { id, createdAt, reason, state } = snapshot;
+    return {
         id,
         createdAt,
         reason,
         pilotName: state.pilotName,
         currentSystem: state.currentSystem,
-    }));
+        ...(state.diedAt === undefined ? {} : { diedAt: state.diedAt }),
+    };
+}
+
+export function summarizeSnapshots(
+    snapshots: readonly PlayerSnapshot[],
+): PlayerSnapshotSummary[] {
+    return snapshots.map(summarizeSnapshot);
 }
 
 export function makePlayerData(

@@ -2,6 +2,8 @@ import { Plugin } from 'nova_ecs/plugin';
 import { Resource } from 'nova_ecs/resource';
 import { System } from 'nova_ecs/system';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
+import { SingletonComponent } from 'nova_ecs/world';
+import { Optional } from 'nova_ecs/optional';
 import {
     ChatMessageEntry,
     ChatMessageEvent,
@@ -13,6 +15,9 @@ import { ScreenSize } from './screen_size_plugin';
 
 export const ChatHistoryResource =
     new Resource<Map<string, ChatMessageEntry[]>>('ChatHistoryResource');
+
+export const SeenChatIdsResource =
+    new Resource<Set<string>>('SeenChatIdsResource');
 
 interface ActiveHudMessage {
     entry: ChatMessageEntry;
@@ -44,12 +49,23 @@ export const ChatReceiveSystem = new System({
         ChatMessageEvent,
         ChatHistoryResource,
         ChatHudMessagesResource,
+        SeenChatIdsResource,
         Stage,
         TimeResource,
+        SingletonComponent,
+        Optional(Comms),
     ] as const,
-    step(entry, historyMap, hudMessages, stage, time) {
-        // Record in history
-        const key = entry.from;
+    step(entry, historyMap, hudMessages, seenIds, stage, time, _singleton, comms) {
+        if (entry.id && seenIds.has(entry.id)) {
+            return;
+        }
+        if (entry.id) {
+            seenIds.add(entry.id);
+        }
+
+        // Record in history under the conversation partner
+        const myUuid = comms?.uuid;
+        const key = (myUuid && entry.from === myUuid) ? entry.to : entry.from;
         let history = historyMap.get(key);
         if (!history) {
             history = [];
@@ -131,6 +147,9 @@ export const ChatFeedPlugin: Plugin = {
         }
         if (!world.resources.has(ChatHudMessagesResource)) {
             world.resources.set(ChatHudMessagesResource, []);
+        }
+        if (!world.resources.has(SeenChatIdsResource)) {
+            world.resources.set(SeenChatIdsResource, new Set());
         }
         world.addSystem(ChatReceiveSystem);
         world.addSystem(ChatHudUpdateSystem);

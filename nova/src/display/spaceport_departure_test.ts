@@ -35,6 +35,9 @@ function storeSpy(saves: RecordedSave[], fail = false): PlayerStorePort {
         async snapshot() {
             throw new Error('not used');
         },
+        async archiveSnapshot() {
+            throw new Error('not used');
+        },
         async getSnapshots() {
             return [];
         },

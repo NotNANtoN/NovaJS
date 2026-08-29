@@ -2,6 +2,7 @@ import { AsyncSystemResource } from "nova_ecs/async_system";
 import { Entity } from "nova_ecs/entity";
 import { Comms, multiplayer, MultiplayerData } from "nova_ecs/plugins/multiplayer_plugin";
 import { SerializerResource } from "nova_ecs/plugins/serializer_plugin";
+import type { EncodedEntity } from "nova_ecs/plugins/serializer_plugin";
 import { resetWallClock, TimeResource } from "nova_ecs/plugins/time_plugin";
 import { World } from "nova_ecs/world";
 import { isRight } from "fp-ts/Either";
@@ -473,7 +474,7 @@ async function startGame(
     }
 }
 
-async function loadSnapshotSummaries() {
+async function loadSnapshotSummaries(): Promise<PlayerSnapshotSummary[]> {
     try {
         const response = await fetch(
             `/player/snapshots?token=${encodeURIComponent(channel.playerToken)}`);
@@ -491,6 +492,64 @@ async function loadSnapshotSummaries() {
     } catch {
         return [];
     }
+}
+
+async function archivePilotSnapshot(request: {
+    state: PlayerState;
+    ship?: EncodedEntity;
+    replaceCurrent?: PlayerState;
+    replaceShip?: EncodedEntity;
+}): Promise<PlayerSnapshotSummary[] | undefined> {
+    try {
+        const response = await fetch('/player/snapshots', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                token: channel.playerToken,
+                state: plainSnapshot(request.state),
+                ...(request.ship === undefined
+                    ? {}
+                    : { ship: request.ship }),
+                ...(request.replaceCurrent === undefined
+                    ? {}
+                    : { replaceCurrent: plainSnapshot(request.replaceCurrent) }),
+                ...(request.replaceShip === undefined
+                    ? {}
+                    : { replaceShip: request.replaceShip }),
+                reason: 'manual',
+            }),
+        });
+        if (!response.ok) {
+            return undefined;
+        }
+        const raw = await response.json() as unknown;
+        if (!Array.isArray(raw)) {
+            return undefined;
+        }
+        return raw
+            .map(value => PlayerSnapshotSummary.decode(value))
+            .filter(isRight)
+            .map(decoded => decoded.right);
+    } catch {
+        return undefined;
+    }
+}
+
+async function archiveDeathPilotIfNeeded(
+    state: PlayerState,
+    ship?: EncodedEntity,
+): Promise<PlayerSnapshotSummary[] | undefined> {
+    if (state.diedAt === undefined) {
+        return undefined;
+    }
+    const existing = await loadSnapshotSummaries();
+    const alreadyArchived = existing.some(snapshot =>
+        snapshot.diedAt === state.diedAt
+        && snapshot.pilotName === state.pilotName);
+    if (alreadyArchived) {
+        return existing;
+    }
+    return archivePilotSnapshot({ state, ship });
 }
 
 async function restoreSnapshot(snapshotId: string): Promise<PlayerData | undefined> {
@@ -514,7 +573,12 @@ async function showMainMenu(playerData: PlayerData | undefined) {
         compatibilityProfile,
         controls: controlSettings,
     });
-    const selection = await menu.show(playerData, restoreSnapshot);
+    const selection = await menu.show(
+        playerData,
+        restoreSnapshot,
+        loadSnapshotSummaries,
+        archivePilotSnapshot,
+    );
     await startGame(selection);
 }
 
@@ -552,7 +616,9 @@ async function returnToMainMenu(playerState?: PlayerState) {
                 system: currentState.currentSystem,
                 savedAt: Date.now(),
                 playerState: currentState,
-                snapshots: await loadSnapshotSummaries(),
+                snapshots: await archiveDeathPilotIfNeeded(
+                    currentState, currentShip)
+                    ?? await loadSnapshotSummaries(),
                 ...(currentShip === undefined ? {} : { ship: currentShip }),
             }
             : await playerDataPromise;

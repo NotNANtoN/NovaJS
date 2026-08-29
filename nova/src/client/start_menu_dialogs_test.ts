@@ -5,6 +5,7 @@ import {
     buildPilotChoices,
     canEnterShip,
     controlReference,
+    shouldArchivePilot,
 } from './start_menu_dialogs';
 import {
     isStartMenuActionDisabled,
@@ -39,7 +40,15 @@ describe('start menu action state', () => {
             id: 'landing',
             createdAt: 10_000,
             reason: 'landing',
+            pilotName: 'Restored Captain',
         }]).map(choice => choice.id)).toEqual(['landing']);
+    });
+
+    it('archives only pilots that were saved or continued', () => {
+        const fresh = createInitialPlayerState();
+        expect(shouldArchivePilot(fresh, true, undefined)).toBeFalse();
+        expect(shouldArchivePilot(fresh, false, undefined)).toBeTrue();
+        expect(shouldArchivePilot(fresh, true, 1_000)).toBeTrue();
     });
 
     it('does not throw when a revoked death draft reaches the menu', () => {
@@ -89,7 +98,7 @@ describe('start menu action state', () => {
         }
     });
 
-    it('lists the current pilot first and snapshots newest-first', () => {
+    it('sorts living pilots by last used and lists deceased last', () => {
         const current = createInitialPlayerState();
         current.pilotName = 'Current Captain';
         current.currentSystem = 'nova:130';
@@ -112,19 +121,27 @@ describe('start menu action state', () => {
                 pilotName: 'Newer Captain',
                 currentSystem: 'nova:136',
             },
-        ], undefined, ship);
+            {
+                id: 'dead',
+                createdAt: 500,
+                reason: 'manual',
+                pilotName: 'Dead Captain',
+                currentSystem: 'nova:138',
+                diedAt: 12_345,
+            },
+        ], 150, ship);
 
         expect(choices.map(choice => choice.id))
-            .toEqual(['current', 'newer', 'older']);
-        expect(choices[0]).toEqual(jasmine.objectContaining({
+            .toEqual(['newer', 'current', 'older', 'dead']);
+        expect(choices[1]).toEqual(jasmine.objectContaining({
             pilotName: 'Current Captain',
             currentSystem: 'nova:130',
-            savedAt: 200,
+            savedAt: 150,
             ship,
         }));
-        expect(choices[1]).toEqual(jasmine.objectContaining({
-            pilotName: 'Newer Captain',
-            currentSystem: 'nova:136',
+        expect(choices[3]).toEqual(jasmine.objectContaining({
+            pilotName: 'Dead Captain',
+            diedAt: 12_345,
         }));
     });
 

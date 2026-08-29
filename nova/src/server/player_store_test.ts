@@ -71,6 +71,30 @@ describe('player snapshots', () => {
         await fs.rm(directory, { recursive: true, force: true });
     });
 
+    it('archives a pilot without replacing the active save', async () => {
+        const directory = await fs.mkdtemp(
+            path.join(os.tmpdir(), 'novajs-player-store-'));
+        const filePath = path.join(directory, 'players.json');
+        const store = new PlayerStore(filePath);
+        await store.ready;
+        const active = stateFor(3);
+        active.pilotName = 'Active Captain';
+        await store.save('pilot', active);
+        const archived = stateFor(7);
+        archived.pilotName = 'Archived Captain';
+        archived.diedAt = 99;
+
+        const snapshot = await store.archiveSnapshot(
+            'pilot', archived, undefined, 'manual');
+        const current = await store.get('pilot');
+
+        expect(snapshot.state.pilotName).toBe('Archived Captain');
+        expect(snapshot.state.diedAt).toBe(99);
+        expect(current?.pilotName).toBe('Active Captain');
+        expect(current?.gameDate).toBe(3);
+        await fs.rm(directory, { recursive: true, force: true });
+    });
+
     it('rotates snapshots and restores an older retained state', async () => {
         const directory = await fs.mkdtemp(
             path.join(os.tmpdir(), 'novajs-player-store-'));

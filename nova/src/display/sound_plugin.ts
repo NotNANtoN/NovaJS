@@ -39,8 +39,6 @@ const PendingSounds = new Resource<Map<string, Promise<Sound>>>('PendingSounds')
 export const VolumeResource = new Resource<{volume: number}>('VolumeResource');
 const IncomingMissileStateResource = new Resource<Set<string>>(
     'IncomingMissileState');
-const HostileLockStateResource = new Resource<Set<string>>(
-    'HostileLockState');
 const StellarSoundStateResource = new Resource<StellarSoundState>(
     'StellarSoundState');
 
@@ -101,19 +99,6 @@ const IncomingProjectileQuery = new Query([
     MovementStateComponent,
     VulnerableToPD,
 ] as const);
-const HostileLockQuery = new Query([
-    UUID,
-    TargetComponent,
-    ShipComponent,
-] as const);
-
-export function isHostileLockOnPlayer(
-    lockerUuid: string,
-    target: string | undefined,
-    playerUuid: string,
-): boolean {
-    return lockerUuid !== playerUuid && target === playerUuid;
-}
 
 function playLoadedSound(sound: Sound, id: string, loop: boolean,
     loopingSounds: Map<string, Sound>, volume: number) {
@@ -245,42 +230,6 @@ export const IncomingMissileWarningSystem = new System({
     },
 });
 
-export const HostileLockWarningSystem = new System({
-    name: 'HostileLockWarningSystem',
-    args: [HostileLockQuery, PlayerMovementQuery,
-        HostileLockStateResource, Emit, SingletonComponent] as const,
-    step(lockers, players, warned, emit) {
-        const player = players[0];
-        if (!player) {
-            warned.clear();
-            return;
-        }
-        const playerUuid = player[0];
-        const active = new Set<string>();
-        let acquired = false;
-        for (const [uuid, target] of lockers) {
-            if (!isHostileLockOnPlayer(uuid, target.target, playerUuid)) {
-                continue;
-            }
-            active.add(uuid);
-            if (!warned.has(uuid)) {
-                acquired = true;
-            }
-        }
-        for (const uuid of [...warned]) {
-            if (!active.has(uuid)) {
-                warned.delete(uuid);
-            }
-        }
-        for (const uuid of active) {
-            warned.add(uuid);
-        }
-        if (acquired) {
-            emit(SoundEvent, {id: INCOMING_MISSILE_SOUND_ID});
-        }
-    },
-});
-
 export const LandingSoundRequestSystem = new System({
     name: 'LandingSoundRequestSystem',
     events: [LandEvent],
@@ -367,7 +316,6 @@ export const SoundPlugin: Plugin = {
         world.resources.set(PendingSounds, new Map());
         world.resources.set(VolumeResource, {volume: getMasterVolume()});
         world.resources.set(IncomingMissileStateResource, new Set());
-        world.resources.set(HostileLockStateResource, new Set());
         world.resources.set(StellarSoundStateResource, {
             pendingLanding: false,
             awaitingDeparture: false,
@@ -377,7 +325,6 @@ export const SoundPlugin: Plugin = {
         world.addSystem(VolumeControlSystem);
         world.addSystem(TargetSelectionSoundSystem);
         world.addSystem(IncomingMissileWarningSystem);
-        world.addSystem(HostileLockWarningSystem);
         world.addSystem(LandingSoundRequestSystem);
         world.addSystem(LandingSoundResultSystem);
         world.addSystem(StellarSoundSystem);
@@ -393,14 +340,12 @@ export const SoundPlugin: Plugin = {
         world.removeSystem(VolumeControlSystem);
         world.removeSystem(TargetSelectionSoundSystem);
         world.removeSystem(IncomingMissileWarningSystem);
-        world.removeSystem(HostileLockWarningSystem);
         world.removeSystem(LandingSoundRequestSystem);
         world.removeSystem(LandingSoundResultSystem);
         world.removeSystem(StellarSoundSystem);
         world.resources.delete(VolumeResource);
         world.resources.delete(StellarSoundStateResource);
         world.resources.delete(IncomingMissileStateResource);
-        world.resources.delete(HostileLockStateResource);
         world.resources.delete(PendingSounds);
         world.resources.delete(LoadedSounds);
         world.resources.delete(LoopingSounds);

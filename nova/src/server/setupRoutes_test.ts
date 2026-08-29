@@ -117,6 +117,69 @@ describe('/player/state', () => {
         expect(body.snapshots[0].ship).toBeUndefined();
     });
 
+    it('archives a pilot without replacing the active save unless asked',
+        async () => {
+        const active = createInitialPlayerState();
+        active.pilotName = 'Active Captain';
+        active.gameDate = 5;
+        await playerStore.save('pilot', active);
+
+        const archived = createInitialPlayerState();
+        archived.pilotName = 'Archived Captain';
+        archived.gameDate = 9;
+        const response = await fetch(`${baseUrl}/player/snapshots`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                token: 'pilot',
+                state: archived,
+                reason: 'manual',
+            }),
+        });
+        const summaries = await response.json() as Array<Record<string, unknown>>;
+
+        expect(response.status).toBe(200);
+        expect(summaries).toEqual([
+            jasmine.objectContaining({
+                pilotName: 'Archived Captain',
+                reason: 'manual',
+            }),
+        ]);
+
+        const current = await fetch(`${baseUrl}/player/state?token=pilot`);
+        const body = await current.json() as Record<string, any>;
+        expect(body.playerState.pilotName).toBe('Active Captain');
+        expect(body.playerState.gameDate).toBe(5);
+    });
+
+    it('can archive one pilot and replace the active save in one request',
+        async () => {
+        const previous = createInitialPlayerState();
+        previous.pilotName = 'Previous Captain';
+        await playerStore.save('pilot', previous);
+        const replacement = createInitialPlayerState();
+        replacement.pilotName = 'Replacement Captain';
+
+        const response = await fetch(`${baseUrl}/player/snapshots`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                token: 'pilot',
+                state: previous,
+                replaceCurrent: replacement,
+                reason: 'manual',
+            }),
+        });
+
+        expect(response.status).toBe(200);
+        const current = await fetch(`${baseUrl}/player/state?token=pilot`);
+        const body = await current.json() as Record<string, any>;
+        expect(body.playerState.pilotName).toBe('Replacement Captain');
+        expect(body.snapshots).toEqual([
+            jasmine.objectContaining({ pilotName: 'Previous Captain' }),
+        ]);
+    });
+
     it('returns the snapshot ship in the restore response', async () => {
         const state = createInitialPlayerState();
         state.gameDate = 22;

@@ -7,8 +7,11 @@ import * as PIXI from "pixi.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin";
 import { ShipComponent } from "../nova_plugin/ship_plugin";
 import { TargetComponent } from "../nova_plugin/target_component";
+import { OwnerComponent, VulnerableToPD } from "../nova_plugin/fire_weapon_plugin";
+import { ProjectileComponent, ProjectileDataComponent } from "../nova_plugin/projectile_data";
 import { UUID } from "nova_ecs/arg_types";
 import { Query } from "nova_ecs/query";
+import { isInboundMissile } from "./sound_plugin";
 import {
     PlayerDeathComponent,
     shouldShowDeathOverlay,
@@ -118,10 +121,14 @@ const JumpTransitionOverlaySystem = new System({
     },
 });
 
-const HostileLockersQuery = new Query([
+const IncomingMissileOverlayQuery = new Query([
     UUID,
+    ProjectileComponent,
+    ProjectileDataComponent,
     TargetComponent,
-    ShipComponent,
+    OwnerComponent,
+    MovementStateComponent,
+    VulnerableToPD,
 ] as const);
 
 const HOSTILE_LOCK_OVERLAY = 'HostileLockWarning';
@@ -151,23 +158,32 @@ function drawHostileLockCorners(
     graphics.lineTo(inset, height - inset - arm);
 }
 
-const HostileLockOverlaySystem = new System({
-    name: 'HostileLockOverlaySystem',
+const MissileWarningOverlaySystem = new System({
+    name: 'MissileWarningOverlaySystem',
     args: [
         UUID,
         PlayerShipSelector,
+        MovementStateComponent,
         Stage,
         TimeResource,
         Optional(PlayerDeathComponent),
         Optional(StatusBarResource),
-        HostileLockersQuery,
+        IncomingMissileOverlayQuery,
     ] as const,
-    step(playerUuid, _player, stage, time, death, statusBar, lockers) {
-        const locked = !death && lockers.some(([uuid, target]) =>
-            uuid !== playerUuid && target.target === playerUuid);
+    step(playerUuid, _player, playerMovement, stage, time, death, statusBar, missiles) {
+        const hasInboundMissile = !death && missiles.some(([uuid, _proj, data, target, owner, movement]) =>
+            isInboundMissile({
+                target: target.target,
+                owner: owner.owner,
+                guidance: data.guidance,
+                vulnerableToPointDefense: true,
+                position: movement.position,
+                velocity: movement.velocity,
+            }, playerUuid, playerMovement)
+        );
         const existing = stage.getChildByName(
             HOSTILE_LOCK_OVERLAY) as PIXI.Graphics | null;
-        if (!locked) {
+        if (!hasInboundMissile) {
             existing?.destroy();
             return;
         }
@@ -203,7 +219,7 @@ export const Display: Plugin = {
         world.addSystem(CenterShipSystem);
         world.addSystem(DeathOverlaySystem);
         world.addSystem(JumpTransitionOverlaySystem);
-        world.addSystem(HostileLockOverlaySystem);
+        world.addSystem(MissileWarningOverlaySystem);
         await world.addPlugin(TargetCornersPlugin);
         await world.addPlugin(ChatFeedPlugin);
         await world.addPlugin(ParticlesPlugin);
@@ -234,7 +250,7 @@ export const Display: Plugin = {
         world.removeSystem(CenterShipSystem);
         world.removeSystem(DeathOverlaySystem);
         world.removeSystem(JumpTransitionOverlaySystem);
-        world.removeSystem(HostileLockOverlaySystem);
+        world.removeSystem(MissileWarningOverlaySystem);
 
         await world.removePlugin(JumpEffectPlugin);
         await world.removePlugin(AnimationGraphicPlugin);

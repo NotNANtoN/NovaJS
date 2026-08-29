@@ -155,24 +155,6 @@ export class PlayerChatDialog extends Menu<Entity> {
             text,
         });
 
-        // Add to local history map as well
-        const historyMap = this.world.resources.get(ChatHistoryResource);
-        if (historyMap) {
-            let history = historyMap.get(this.target.peerUuid);
-            if (!history) {
-                history = [];
-                historyMap.set(this.target.peerUuid, history);
-            }
-            history.push({
-                id: String(Date.now()),
-                from: 'me',
-                fromName: myName,
-                to: this.target.peerUuid,
-                text,
-                time: Date.now(),
-            });
-        }
-
         this.currentDraft = '';
         this.updateView();
     }

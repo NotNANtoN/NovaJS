@@ -16,6 +16,7 @@ import {
     canEnterShip,
     containDialogFocus,
     makeThemedButton,
+    shouldArchivePilot,
 } from './start_menu_dialogs';
 import {
     RETAIL_LOGO_FRAME_DURATION_MS,
@@ -43,6 +44,19 @@ export interface StartMenuSelection {
 export type RestoreSnapshot = (
     snapshotId: string,
 ) => Promise<PlayerData | undefined>;
+
+export type LoadSnapshotSummaries = () => Promise<PlayerSnapshotSummary[]>;
+
+export interface ArchivePilotRequest {
+    state: PlayerState;
+    ship?: EncodedEntity;
+    replaceCurrent?: PlayerState;
+    replaceShip?: EncodedEntity;
+}
+
+export type ArchivePilot = (
+    request: ArchivePilotRequest,
+) => Promise<PlayerSnapshotSummary[] | undefined>;
 
 export interface StartMenuOptions {
     compatibilityProfile?: CompatibilityProfileName;
@@ -372,13 +386,26 @@ export class StartMenu {
     async show(
         playerData: PlayerData | undefined,
         restoreSnapshot?: RestoreSnapshot,
+        loadSnapshotSummaries?: LoadSnapshotSummaries,
+        archivePilot?: ArchivePilot,
     ): Promise<StartMenuSelection> {
         let current = playerData?.playerState;
         let currentShip = playerData?.ship;
         const quarantine = playerData?.quarantine;
         let savedAt = playerData?.savedAt;
         let currentIsNew = false;
-        const snapshots = playerData?.snapshots ?? [];
+        const snapshots: PlayerSnapshotSummary[] = [
+            ...(playerData?.snapshots ?? []),
+        ];
+        const refreshSnapshots = async () => {
+            if (!loadSnapshotSummaries) {
+                return snapshots;
+            }
+            const loaded = await loadSnapshotSummaries();
+            snapshots.length = 0;
+            snapshots.push(...loaded);
+            return snapshots;
+        };
         return new Promise(resolvePromise => {
             let resolved = false;
             const resolve = (
@@ -404,11 +431,32 @@ export class StartMenu {
             };
             let showMainMenu: (focusLabel?: string) => void;
             const onNewPilotCreated = (state: PlayerState) => {
-                current = state;
-                currentShip = undefined;
-                savedAt = undefined;
-                currentIsNew = true;
-                showMainMenu('New Pilot');
+                const previous = current;
+                const previousShip = currentShip;
+                const archive = shouldArchivePilot(
+                    previous, currentIsNew, savedAt);
+                const applyNewPilot = () => {
+                    current = state;
+                    currentShip = undefined;
+                    savedAt = undefined;
+                    currentIsNew = true;
+                    showMainMenu('New Pilot');
+                };
+                if (!archive || !archivePilot || !previous) {
+                    applyNewPilot();
+                    return;
+                }
+                void archivePilot({
+                    state: previous,
+                    ship: previousShip,
+                    replaceCurrent: state,
+                }).then(updated => {
+                    if (updated) {
+                        snapshots.length = 0;
+                        snapshots.push(...updated);
+                    }
+                    applyNewPilot();
+                }).catch(() => applyNewPilot());
             };
             showMainMenu = (focusLabel?: string) => this.renderMainMenu(
                     current,
@@ -421,6 +469,7 @@ export class StartMenu {
                     onNewPilotCreated,
                     showMainMenu,
                     focusLabel,
+                    refreshSnapshots,
                 );
             this.dialogs = new RetailMenuDialogs({
                 content: this.content,
@@ -442,7 +491,8 @@ export class StartMenu {
                     currentShip = ship;
                     savedAt = selectedAt;
                     currentIsNew = false;
-                    showMainMenu('Open Pilot');
+                    void refreshSnapshots().finally(() =>
+                        showMainMenu('Open Pilot'));
                 },
             });
             const upgradeVisibleMenu = () => {
@@ -493,6 +543,7 @@ export class StartMenu {
         onNewPilotCreated: (state: PlayerState) => void,
         showMainMenu: (focusLabel?: string) => void,
         focusLabel?: string,
+        refreshSnapshots?: () => Promise<readonly PlayerSnapshotSummary[]>,
     ) {
         const renderVersion = ++this.menuRenderVersion;
         this.dialogs?.clear();
@@ -637,6 +688,7 @@ export class StartMenu {
                             existingShip,
                             snapshots,
                             savedAt,
+                            refreshSnapshots,
                         );
                     });
                 } else if (id === '8052') {
@@ -787,6 +839,7 @@ export class StartMenu {
                             existingShip,
                             snapshots,
                             savedAt,
+                            refreshSnapshots,
                         );
                     } else if (label === 'Set Prefs') {
                         this.menuRenderVersion++;
