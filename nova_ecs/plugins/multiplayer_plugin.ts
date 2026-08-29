@@ -1219,6 +1219,9 @@ export function multiplayer(communicator: Communicator,
                         warn(`'${source}' tried to replace existing entity '${uuid}'`);
                         continue;
                     }
+                    if (!existingEntry) {
+                        clearMovementLifecycle(uuid);
+                    }
                     const decodedOwnerBeforeSanitize = decodedEntity.components
                         .get(MultiplayerData)?.owner ?? '';
                     if (!existingEntry
@@ -1917,9 +1920,15 @@ export function multiplayer(communicator: Communicator,
         peerLeaveSubscription = communicator.peers.leave.subscribe(peer => {
             sourceClockOffsets.delete(peer);
             interestedEntitiesByPeer.delete(peer);
-            for (const [uuid, movement] of latestInboundMovement) {
+            for (const [uuid, movement] of [...latestInboundMovement]) {
                 if (movement.source === peer) {
                     latestInboundMovement.delete(uuid);
+                }
+            }
+            for (const [uuid, entity] of [...world.entities]) {
+                if (entity.components.get(MultiplayerData)?.owner === peer) {
+                    world.entities.delete(uuid);
+                    clearMovementLifecycle(uuid);
                 }
             }
         });

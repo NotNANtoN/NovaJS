@@ -1395,4 +1395,46 @@ describe('Multiplayer Plugin', () => {
         expect(world2.entities.get('far-owned')?.components.get(BarComponent))
             .toEqual({ y: 'owned at any distance' });
     });
+
+    it('removes entities owned by a leaving peer and accepts re-introduced state', () => {
+        world1.singletonEntity.components.get(Comms)!.admins =
+            new Set(['world1 uuid']);
+        world2.singletonEntity.components.get(Comms)!.admins =
+            new Set(['world1 uuid']);
+
+        world2.entities.set('player2', new Entity()
+            .addComponent(MultiplayerData, { owner: 'world2 uuid' })
+            .addComponent(BarComponent, { y: 'player two' }));
+
+        world2.step();
+        world1.step();
+
+        expect(world1.entities.has('player2')).toBeTrue();
+
+        // Simulate world2 leaving the room
+        world2.entities.delete('player2');
+        world1Communicator.peers.leave.next('world2 uuid');
+        expect(world1.entities.has('player2')).toBeFalse();
+
+        // Re-introduce player2 from a fresh world session
+        world1.step();
+        world1Communicator.peers.join.next('world2 uuid');
+        const world2Fresh = new World('world2Fresh');
+        world2Fresh.addPlugin(multiplayer(world2Communicator, err => { throw new Error(err); }));
+        world2Fresh.addComponent(BarComponent);
+        const world2FreshDelta = world2Fresh.resources.get(DeltaResource)!;
+        world2FreshDelta.addComponent(BarComponent, { componentType: t.type({ y: t.string }) });
+        world2Fresh.singletonEntity.components.get(Comms)!.admins =
+            new Set(['world1 uuid']);
+
+        world2Fresh.entities.set('player2', new Entity()
+            .addComponent(MultiplayerData, { owner: 'world2 uuid' })
+            .addComponent(BarComponent, { y: 'player two returned' }));
+        world2Fresh.step();
+        world1.step();
+
+        expect(world1.entities.has('player2')).toBeTrue();
+        expect(world1.entities.get('player2')?.components.get(BarComponent))
+            .toEqual({ y: 'player two returned' });
+    });
 });
