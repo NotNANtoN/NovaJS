@@ -441,11 +441,6 @@ export abstract class WeaponEntry {
         if (attackOriginLocked(destructionStarted, armor?.current)) {
             return undefined;
         }
-        const fastForwardMs = Math.max(0, now - shot.at);
-        if ('shotDuration' in this.data
-            && fastForwardMs >= this.data.shotDuration) {
-            return undefined;
-        }
         const inaccuracy = sampleInaccuracy(
             this.data.accuracy, createShotRng(shot.seed));
         const { exitPointData } = getNextExitpoint(
@@ -469,8 +464,8 @@ export abstract class WeaponEntry {
             {
                 seed: shot.seed,
                 inaccuracy,
-                createdAt: shot.at,
-                fastForwardMs,
+                createdAt: now,
+                fastForwardMs: 0,
             },
         );
     }
