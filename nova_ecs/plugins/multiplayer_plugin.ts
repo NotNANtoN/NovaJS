@@ -35,7 +35,6 @@ import {
     RemoteMovementPresentationComponent,
 } from './movement_plugin';
 import { TimeResource, wallClockNow } from './time_plugin';
-import { v4 } from 'uuid';
 
 export class Peers {
     readonly current: BehaviorSubject<Set<string>>;
@@ -2041,13 +2040,20 @@ export function multiplayer(communicator: Communicator,
     }
 }
 
+function newChatMessageId(from: string): string {
+    if (typeof globalThis.crypto?.randomUUID === 'function') {
+        return globalThis.crypto.randomUUID();
+    }
+    return `${from}:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export function broadcastChat(world: World, chat: { to: string, fromName?: string, text: string }) {
     const comms = world.singletonEntity.components.get(Comms);
     if (!comms || !comms.uuid) {
         return;
     }
     const entry: ChatMessageEntry = {
-        id: v4(),
+        id: newChatMessageId(comms.uuid),
         from: comms.uuid,
         fromName: chat.fromName ?? 'Captain',
         to: chat.to,

@@ -1,5 +1,6 @@
 import * as express from "express";
 import { Express } from "express";
+import fs from 'fs';
 import * as path from 'path';
 import { gzip } from "zlib";
 import { idsPath, dataPath, settingsPrefix } from "../common/GameDataPaths";
@@ -236,7 +237,13 @@ class GameDataServer {
 
         this.app.use("/", (_req: express.Request, res: express.Response) => {
             res.setHeader('Cache-Control', 'no-cache');
-            res.sendFile(this.htmlPath);
+            let html = fs.readFileSync(this.htmlPath, 'utf8');
+            const bundleVersion = Math.floor(
+                fs.statSync(this.bundlePath).mtimeMs);
+            html = html.replace(
+                'browser_bundle.js',
+                `browser_bundle.js?v=${bundleVersion}`);
+            res.type('html').send(html);
         });
     }
 
