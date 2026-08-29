@@ -393,8 +393,12 @@ export const FireLogSpawnSystem = new System({
                 continue;
             }
             const weapon = weaponEntries.getCached(shot.weaponId);
-            if (!weapon || weapon.syncAsFireEvent === false) {
+            if (!weapon) {
                 break;
+            }
+            if (weapon.syncAsFireEvent === false) {
+                sync.highestLogSeq = shot.seq;
+                continue;
             }
             weapon.fireFromLog(uuid, shot, time.time);
             sync.highestLogSeq = shot.seq;

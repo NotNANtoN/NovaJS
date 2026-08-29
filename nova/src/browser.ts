@@ -299,7 +299,10 @@ async function transitionTo(
     newSystem.entities.set(uuid, transitionEntity);
     system = newSystem;
     resetGameplayClocks();
-    const combatWarmup = warmFlightAssets({
+    // Combat art loads in the background so the first shots still draw,
+    // without holding the cockpit until every hull and weapon in the system
+    // has a texture. The overlay only covers the player hull and planets.
+    void warmFlightAssets({
         gameData,
         systemId: to,
         playerShipId: transitionEntity.components.get(ShipComponent)?.id,
@@ -319,7 +322,6 @@ async function transitionTo(
                 if (pending) {
                     await pending.done;
                 }
-                await combatWarmup;
             },
             entities: () => newSystem.entities,
             playerUuid: uuid,
@@ -330,8 +332,6 @@ async function transitionTo(
         });
         resetGameplayClocks();
         newStage.visible = true;
-    } else {
-        await combatWarmup;
     }
 }
 

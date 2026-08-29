@@ -5,6 +5,10 @@ import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { System } from "nova_ecs/system";
 import * as PIXI from "pixi.js";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin";
+import { ShipComponent } from "../nova_plugin/ship_plugin";
+import { TargetComponent } from "../nova_plugin/target_component";
+import { UUID } from "nova_ecs/arg_types";
+import { Query } from "nova_ecs/query";
 import {
     PlayerDeathComponent,
     shouldShowDeathOverlay,
@@ -113,6 +117,70 @@ const JumpTransitionOverlaySystem = new System({
     },
 });
 
+const HostileLockersQuery = new Query([
+    UUID,
+    TargetComponent,
+    ShipComponent,
+] as const);
+
+const HOSTILE_LOCK_OVERLAY = 'HostileLockWarning';
+
+function drawHostileLockCorners(
+    graphics: PIXI.Graphics,
+    width: number,
+    height: number,
+    timeMs: number,
+) {
+    const pulse = 0.4 + 0.45 * Math.abs(Math.sin(timeMs / 160));
+    const inset = 12;
+    const arm = Math.min(56, Math.max(28, Math.min(width, height) * 0.08));
+    graphics.clear();
+    graphics.lineStyle(4, 0xff2020, pulse);
+    graphics.moveTo(inset, inset + arm);
+    graphics.lineTo(inset, inset);
+    graphics.lineTo(inset + arm, inset);
+    graphics.moveTo(width - inset - arm, inset);
+    graphics.lineTo(width - inset, inset);
+    graphics.lineTo(width - inset, inset + arm);
+    graphics.moveTo(width - inset, height - inset - arm);
+    graphics.lineTo(width - inset, height - inset);
+    graphics.lineTo(width - inset - arm, height - inset);
+    graphics.moveTo(inset + arm, height - inset);
+    graphics.lineTo(inset, height - inset);
+    graphics.lineTo(inset, height - inset - arm);
+}
+
+const HostileLockOverlaySystem = new System({
+    name: 'HostileLockOverlaySystem',
+    args: [
+        UUID,
+        PlayerShipSelector,
+        Stage,
+        TimeResource,
+        Optional(PlayerDeathComponent),
+        Optional(StatusBarResource),
+        HostileLockersQuery,
+    ] as const,
+    step(playerUuid, _player, stage, time, death, statusBar, lockers) {
+        const locked = !death && lockers.some(([uuid, target]) =>
+            uuid !== playerUuid && target.target === playerUuid);
+        const existing = stage.getChildByName(
+            HOSTILE_LOCK_OVERLAY) as PIXI.Graphics | null;
+        if (!locked) {
+            existing?.destroy();
+            return;
+        }
+        const width = Math.max(1, window.innerWidth - (statusBar?.width ?? 0));
+        const height = window.innerHeight;
+        const overlay = existing ?? new PIXI.Graphics();
+        overlay.name = HOSTILE_LOCK_OVERLAY;
+        drawHostileLockCorners(overlay, width, height, time.time);
+        if (!existing) {
+            stage.addChild(overlay);
+        }
+    },
+});
+
 const starfieldPlugin = starfield();
 
 export const Display: Plugin = {
@@ -134,6 +202,7 @@ export const Display: Plugin = {
         world.addSystem(CenterShipSystem);
         world.addSystem(DeathOverlaySystem);
         world.addSystem(JumpTransitionOverlaySystem);
+        world.addSystem(HostileLockOverlaySystem);
         await world.addPlugin(TargetCornersPlugin);
         await world.addPlugin(ParticlesPlugin);
         await world.addPlugin(FullscreenPlugin);
@@ -162,6 +231,7 @@ export const Display: Plugin = {
         world.removeSystem(CenterShipSystem);
         world.removeSystem(DeathOverlaySystem);
         world.removeSystem(JumpTransitionOverlaySystem);
+        world.removeSystem(HostileLockOverlaySystem);
 
         await world.removePlugin(JumpEffectPlugin);
         await world.removePlugin(AnimationGraphicPlugin);

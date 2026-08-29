@@ -61,9 +61,10 @@ export function flightSceneReadiness(
 }
 
 export function isFlightSceneReady(readiness: FlightSceneReadiness): boolean {
-    return readiness.playerReady
-        && readiness.planetsReady
-        && readiness.drawnReady;
+    // Nearby NPC hulls and asteroids keep streaming in after the snapshot.
+    // Waiting for every sprite holds the cockpit on first load (and on
+    // every jump) even when the player's ship and the planets are drawn.
+    return readiness.playerReady && readiness.planetsReady;
 }
 
 export interface WaitForFlightScene {

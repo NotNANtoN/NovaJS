@@ -5,6 +5,7 @@ import { Position } from 'nova_ecs/datatypes/position';
 import { Vector } from 'nova_ecs/datatypes/vector';
 import { MovementState } from 'nova_ecs/plugins/movement_plugin';
 import {
+    HostileLockWarningSystem,
     IncomingMissileWarningSystem,
     LandingSoundRequestSystem,
     StellarSoundSystem,
@@ -83,6 +84,21 @@ describe('browser sound effects', () => {
             projectiles as never, players as never, warned, emit, undefined);
 
         expect(sounds).toEqual([INCOMING_MISSILE_SOUND_ID]);
+    });
+
+    it('warns once when a ship first locks the player', () => {
+        const {sounds, emit} = soundCollector();
+        const lockers = [['pirate', {target: 'player'}, undefined]];
+        const players = [['player', undefined, movement(0, 0, 0, 0)]];
+        const warned = new Set<string>();
+
+        HostileLockWarningSystem.step(
+            lockers as never, players as never, warned, emit, undefined);
+        HostileLockWarningSystem.step(
+            lockers as never, players as never, warned, emit, undefined);
+
+        expect(sounds).toEqual([INCOMING_MISSILE_SOUND_ID]);
+        expect([...warned]).toEqual(['pirate']);
     });
 
     it('does not warn for a guided projectile moving away from the player', () => {

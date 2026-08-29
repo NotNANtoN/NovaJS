@@ -5,6 +5,7 @@ import { Optional } from "nova_ecs/optional";
 import { Plugin } from "nova_ecs/plugin";
 import { DeltaResource } from "nova_ecs/plugins/delta_plugin";
 import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
+import { replicationPolicies } from "nova_ecs/plugins/multiplayer_plugin";
 import { Provide } from "nova_ecs/provide";
 import { Query } from "nova_ecs/query";
 import { System } from "nova_ecs/system";
@@ -107,6 +108,11 @@ const TargetRemovedSystem = new System({
     }
 });
 
+replicationPolicies.register(TargetComponent, {
+    codec: Target,
+    authority: 'entity-owner',
+});
+
 export const TargetPlugin: Plugin = {
     name: "TargetPlugin",
     build(world) {
@@ -118,6 +124,7 @@ export const TargetPlugin: Plugin = {
         deltaMaker.addComponent(TargetComponent, {
             componentType: Target,
         });
+        world.addComponent(TargetComponent);
 
         world.addSystem(TargetIndexProvider);
         world.addSystem(ChooseTargetSystem);

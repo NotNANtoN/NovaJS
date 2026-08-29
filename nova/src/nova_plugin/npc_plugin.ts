@@ -386,15 +386,29 @@ export const ChooseRandomTargetAI = new System({
             government.id,
             relationStore,
         )) {
+            // Incomplete government JSON must not dump a live lock. Retry
+            // picking a *new* target shortly; keep whoever we already have.
             randomTargetData.nextTime = time.time + 100;
-            target.target = undefined;
+            return;
+        }
+
+        const defending = Boolean(target.target
+            && isPersonallyProvoked(provocations, uuid, target.target)
+            && entities.has(target.target));
+        const returningFire = validTargets.some(id =>
+            isPersonallyProvoked(provocations, uuid, id));
+        if (defending) {
+            // MaxOdds is for opening a fight, not for dropping one you are
+            // already in. A freighter that just got shot would otherwise
+            // decide the player is too strong and wander off.
+            randomTargetData.nextTime = time.time + randomTargetData.interval;
             return;
         }
 
         const candidateByUuid = new Map(
             targets.map(candidate => [candidate[0], candidate] as const),
         );
-        if (shipData && selfGovernment.maxOdds !== undefined
+        if (!returningFire && shipData && selfGovernment.maxOdds !== undefined
             && validTargets.length > 0) {
             const targetIds = new Set(validTargets);
             const friendCandidates = targets.filter(candidate => {
@@ -414,7 +428,6 @@ export const ChooseRandomTargetAI = new System({
             if ([...friendCandidates, ...enemyCandidates]
                 .some(candidate => combatStrengthOf(candidate) === undefined)) {
                 randomTargetData.nextTime = time.time + 100;
-                target.target = undefined;
                 return;
             }
             const friends = friendCandidates

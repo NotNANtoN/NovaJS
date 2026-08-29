@@ -45,7 +45,7 @@ describe('fire sync buffers', () => {
 });
 
 describe('adopting a buffer a world was not watching for', () => {
-    it('treats existing shots as already handled', () => {
+    it('replays the live log tail so observers see in-flight shots', () => {
         const log = {
             shots: [4, 5, 6].map(seq => ({
                 seq,
@@ -59,10 +59,12 @@ describe('adopting a buffer a world was not watching for', () => {
         };
         const state = getFireSyncLocalState(new Entity('ship'), undefined, log);
 
-        expect(newShotsAfter(log.shots, state.highestLogSeq))
-            .withContext('a hyperjump must not replay the buffer as a volley')
-            .toEqual([]);
+        expect(newShotsAfter(log.shots, state.highestLogSeq)
+            .map(shot => shot.seq))
+            .withContext('NPC FireLog is the only way observers see shots')
+            .toEqual([4, 5, 6]);
         expect(state.nextSeq).toBe(7);
+        expect(state.highestIntentSeq).toBe(6);
     });
 
     it('still starts from the beginning for a ship that has not fired', () => {

@@ -1,6 +1,5 @@
 import 'jasmine';
 import { Entity } from 'nova_ecs/entity';
-import { AsteroidComponent } from '../nova_plugin/asteroid_plugin';
 import { PlanetComponent } from '../nova_plugin/planet_plugin';
 import { ShipComponent } from '../nova_plugin/ship_plugin';
 import { AnimationGraphicComponent } from './animation_graphic_plugin';
@@ -55,20 +54,12 @@ describe('flight scene readiness', () => {
         expect(isFlightSceneReady(readiness)).toBeFalse();
     });
 
-    it('waits for nearby ships and asteroids already in the world', () => {
+    it('does not wait for nearby ships and asteroids already in the world', () => {
         const entities = new Map<string, Entity>([
             ['player', ship('nova:128', true)],
             ['planet nova:128', planet('nova:128', true)],
             ['trader', ship('nova:129')],
         ]);
-        expect(isFlightSceneReady(
-            flightSceneReadiness(entities, 'player', 1))).toBeFalse();
-
-        entities.set('trader', ship('nova:129', true));
-        const asteroid = new Entity();
-        asteroid.components.set(AsteroidComponent, { id: 'nova:400' } as never);
-        asteroid.components.set(AnimationGraphicComponent, {} as never);
-        entities.set('roid', asteroid);
         expect(isFlightSceneReady(
             flightSceneReadiness(entities, 'player', 1))).toBeTrue();
     });
@@ -92,9 +83,6 @@ describe('flight scene readiness', () => {
                         entities.set('player', ship('nova:128', true));
                         entities.set('planet nova:128', planet('nova:128', true));
                     }
-                    if (steps === 4) {
-                        entities.set('trader', ship('nova:129', true));
-                    }
                 },
                 entities: () => entities,
                 playerUuid: 'player',
@@ -110,6 +98,6 @@ describe('flight scene readiness', () => {
             });
 
             expect(ready).toBeTrue();
-            expect(steps).toBeGreaterThanOrEqual(4);
+            expect(steps).toBeGreaterThanOrEqual(2);
         });
 });

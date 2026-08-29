@@ -596,14 +596,16 @@ function retaliate(
     if (!target) {
         return;
     }
-    if (target.target === attacker || !entities.has(attacker)) {
+    if (!entities.has(attacker)) {
         return;
     }
     target.target = attacker;
     const chooseTarget = victim.components.get(ChooseRandomTargetComponent);
     if (chooseTarget) {
         // Hold the attacker for one interval instead of reverting to the
-        // nearest valid target on the very next evaluation.
+        // nearest valid target on the very next evaluation. Refresh even
+        // when already locked so MaxOdds cannot dump the fight the moment
+        // the previous interval elapses.
         chooseTarget.nextTime = now + chooseTarget.interval;
     }
 }

@@ -328,14 +328,24 @@ class StatusBar {
         this.targetContainer.addChild(this.text.targetGovernment);
     }
 
-    drawRadar(source: Position, ships: Iterable<readonly [string, MovementState, ShipData]>,
-        planets: Iterable<readonly [string, MovementState, PlanetData]>) {
+    drawRadar(source: Position, playerUuid: string,
+        ships: Iterable<readonly [string, MovementState, ShipData, string | undefined]>,
+        planets: Iterable<readonly [string, MovementState, PlanetData]>,
+        now = 0) {
         this.radar.clear();
         this.drawDot(source, this.statusBarData.colors.brightRadar, source);
 
-        for (const [, { position }] of ships) {
-            const color = this.statusBarData.colors.dimRadar;
-            this.drawDot(position, color, source);
+        const alert = 0.45 + 0.55 * Math.abs(Math.sin(now / 160));
+        for (const [uuid, { position }, , locking] of ships) {
+            if (uuid === playerUuid) {
+                continue;
+            }
+            const lockingPlayer = locking === playerUuid;
+            const color = lockingPlayer
+                ? 0xff2020
+                : this.statusBarData.colors.dimRadar;
+            this.drawDot(position, color, source, lockingPlayer
+                ? (alert > 0.7 ? 3 : 2) : 1);
         }
 
         for (const [, { position }] of planets) {
@@ -644,16 +654,29 @@ const RadarTime = new Component<{ lastTime: number }>('RadarTime');
 const DrawRadar = new System({
     name: 'DrawRadar',
     args: [Optional(RadarTime), TimeResource, StatusBarResource, MovementStateComponent,
-    new Query([UUID, MovementStateComponent, ShipDataComponent] as const),
+    new Query([UUID, MovementStateComponent, ShipDataComponent,
+        Optional(TargetComponent)] as const),
     new Query([UUID, MovementStateComponent, PlanetDataComponent] as const),
-        GetEntity, PlayerShipSelector] as const,
-    step(radarTime, { time }, statusBar, { position }, ships, planets, entity) {
+        GetEntity, UUID, PlayerShipSelector] as const,
+    step(radarTime, { time }, statusBar, { position }, ships, planets, entity,
+        playerUuid) {
         if (!radarTime) {
             radarTime = { lastTime: 0 };
             entity.components.set(RadarTime, radarTime);
         }
-        if (time - radarTime.lastTime > statusBar.radarPeriod) {
-            statusBar.drawRadar(position, ships, planets);
+        const contacts: Array<readonly [
+            string, MovementState, ShipData, string | undefined,
+        ]> = [];
+        let lockingPlayer = false;
+        for (const [uuid, movement, shipData, target] of ships) {
+            contacts.push([uuid, movement, shipData, target?.target]);
+            if (uuid !== playerUuid && target?.target === playerUuid) {
+                lockingPlayer = true;
+            }
+        }
+        if (lockingPlayer
+            || time - radarTime.lastTime > statusBar.radarPeriod) {
+            statusBar.drawRadar(position, playerUuid, contacts, planets, time);
             radarTime.lastTime = time;
         }
     }

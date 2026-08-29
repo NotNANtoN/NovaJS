@@ -135,16 +135,18 @@ export function getFireSyncLocalState(
     if (existing) {
         return existing;
     }
-    // Whatever is already buffered happened before this world was watching, so
-    // it counts as handled. Starting from zero instead replays the entire
-    // buffer: a pilot arriving from a hyperjump, which rebuilds the world, was
-    // met by a volley of their own shots from the system they had left, and a
-    // ship entering interest range brought its recent history with it.
+    // Sequence numbers must not rewind, but the log of *other* ships is the
+    // only way observers ever see their shots: projectiles are not replicated.
+    // Marking the buffer as already handled hid the first volley (and any
+    // in-flight rounds when a ship entered interest). fireFromLog already
+    // skips shots whose lifetime has elapsed, so replaying the live tail is
+    // safe. Intent stays at `seen` so a rebuilt local world does not re-queue
+    // the player's own trigger events.
     const seen = highestSequence(intent, log);
     const state: FireSyncLocalState = {
         nextSeq: seen + 1,
         highestIntentSeq: seen,
-        highestLogSeq: seen,
+        highestLogSeq: 0,
         spawnedSeqs: new Set(),
         acceptedAt: new Map(),
     };
