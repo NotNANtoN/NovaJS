@@ -7,7 +7,7 @@ import {
 } from 'novaparse/src/parsers/Constants';
 import { displayName } from 'novaparse/src/parsers/displayName';
 
-export const SHIPYARD_INFO_PICT_MAX = { width: 590, height: 400 } as const;
+export const SHIPYARD_INFO_PICT_MAX = { width: 580, height: 280 } as const;
 
 export function qualitativeRating(raw: number): string {
     if (raw < 150) {

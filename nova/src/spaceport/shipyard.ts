@@ -19,6 +19,7 @@ import { FONT, formatPrice } from './outfitter';
 import { isPurchaseAvailable } from './availability';
 import { PlanetData } from 'novadatainterface/PlanetData';
 import { ShipyardInfoDialog } from './shipyard_info_dialog';
+import { shipyardInfoPictId } from './shipyard_info_content';
 
 
 export class Shipyard extends Menu<Entity> {
@@ -122,6 +123,12 @@ export class Shipyard extends Menu<Entity> {
             ));
         }
         ships.sort((a, b) => b.displayWeight - a.displayWeight);
+        for (const ship of ships) {
+            const pictId = shipyardInfoPictId(ship);
+            if (pictId) {
+                void this.gameData.textureFromPictAsync(pictId, 50).catch(() => {});
+            }
+        }
         const itemGrid = new ItemGrid(this.gameData, ships);
         return itemGrid;
     }

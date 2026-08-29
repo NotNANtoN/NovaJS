@@ -5,7 +5,7 @@ export type WebPEncode = (png: Buffer) => Promise<Buffer>;
 export async function encodeLosslessWebP(png: Buffer): Promise<Buffer> {
     return sharp(png)
         .webp({
-            effort: 4,
+            effort: 0,
             lossless: true,
         })
         .toBuffer();

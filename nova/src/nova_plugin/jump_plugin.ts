@@ -249,7 +249,7 @@ export function jumpFlightSpeed(
         ? JUMP_SPOOL_MS : JUMP_ARRIVAL_MS;
     const progress = Math.max(0, Math.min(1, elapsedMs / duration));
     if (phase === 'spooling') {
-        const eased = progress * progress;
+        const eased = progress * progress * progress;
         return safeMax * JUMP_DEPARTURE_SPEED_MULTIPLIER * eased;
     }
     // Smoothly bleed the arrival boost down to an ordinary controllable speed.
@@ -316,6 +316,9 @@ function applyJumpBrakingControls(
         * JUMP_BRAKE_SPEED_THRESHOLD;
     if (movement.velocity.length <= brakeSpeed) {
         movement.accelerating = 0;
+        movement.turning = 0;
+        movement.turnBack = false;
+        movement.turnTo = null;
         return;
     }
     movement.turning = 0;
@@ -335,6 +338,7 @@ export function advanceJumpFlight(
     time: Pick<Time, 'time' | 'delta_s'>,
     direction: Vector,
     onBeginDeparture?: () => void,
+    onBeginSpooling?: () => void,
 ): JumpTransition {
     if (state.phase === 'braking') {
         const brakeSpeed = Math.max(0, physics.maxVelocity)
@@ -347,6 +351,7 @@ export function advanceJumpFlight(
         state.phase = 'spooling';
         state.phaseStartedAt = time.time;
         state.transitionAt = time.time + JUMP_SPOOL_MS;
+        onBeginSpooling?.();
     }
 
     if (state.phase === 'spooling') {
@@ -466,7 +471,6 @@ const PlayerJumpControl = new System({
         };
         entity.components.set(JumpStateComponent, state);
         entity.components.delete(RemoteMovementPresentationComponent);
-        emit(SoundEvent, { id: 'nova:128' });
     }
 });
 
@@ -498,7 +502,6 @@ const InitiateJumpSystem = new System({
         };
         entity.components.set(JumpStateComponent, state);
         entity.components.delete(RemoteMovementPresentationComponent);
-        emit(SoundEvent, { id: 'nova:128' });
     },
 });
 
@@ -575,6 +578,7 @@ const JumpLifecycleSystem = new System({
             time,
             travelDirection,
             () => emit(SoundEvent, { id: 'nova:130' }),
+            () => emit(SoundEvent, { id: 'nova:128' }),
         );
         if (state.phase === 'braking' || state.phase === 'spooling') {
             return;

@@ -72,7 +72,7 @@ describe('shipyard info spec columns', () => {
     it('never scales pict art up, only down', () => {
         expect(pictDisplayScale(200, 100)).toEqual(1);
         expect(pictDisplayScale(1180, 800)).toBeLessThan(1);
-        expect(pictDisplayScale(1180, 800)).toEqual(590 / 1180);
+        expect(pictDisplayScale(1180, 800)).toEqual(280 / 800);
     });
 });
 

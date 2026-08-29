@@ -35,11 +35,11 @@ export class ShipyardInfoDialog extends Menu<ShipData> {
         this.title.anchor.set(0.5, 0);
         this.title.position.set(0, -248);
 
-        this.pictContainer.position.set(0, -40);
+        this.pictContainer.position.set(0, -75);
 
-        this.leftSpecs.position.set(-280, 120);
-        this.middleSpecs.position.set(-90, 120);
-        this.weaponsSpecs.position.set(100, 120);
+        this.leftSpecs.position.set(-280, 95);
+        this.middleSpecs.position.set(-90, 95);
+        this.weaponsSpecs.position.set(100, 95);
 
         this.container.addChild(
             this.title,

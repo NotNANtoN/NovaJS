@@ -97,11 +97,11 @@ function applyJumpGraphic(
 ): void {
     const departure = jump.phase !== 'arriving';
     const longitudinal = departure
-        ? 1 + progress * 3
-        : 4 - progress * 3;
+        ? 1 + progress * 1.5
+        : 1 + (1 - progress) * 1.5;
     const transverse = departure
-        ? 1 - progress * 0.35
-        : 0.65 + progress * 0.35;
+        ? 1 - progress * 0.15
+        : 0.85 + progress * 0.15;
     graphic.container.rotation = movement.rotation.angle;
     graphic.container.scale.set(transverse, longitudinal);
     graphic.container.alpha = departure
@@ -130,16 +130,13 @@ export const JumpEffectSystem = new System({
         physics,
         graphic,
         jump,
-        playerShip,
+        _playerShip,
         time,
     ) {
         if (graphic.managed.disposed) {
             return;
         }
-        // Other ships jump silently. The sound system has no distance
-        // attenuation, so any sound emitted here played at full volume for
-        // ships far outside the view.
-        if (playerShip || !jump) {
+        if (!jump) {
             resetGraphic(graphic);
             return;
         }

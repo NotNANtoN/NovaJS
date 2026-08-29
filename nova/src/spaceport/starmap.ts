@@ -20,10 +20,12 @@ import {
 import { createGraphicHandle, ManagedGraphic } from "../display/managed_graphic";
 import {
     consumeInitialCenter,
+    MissionMarkerType,
     StarmapPlayerState,
     StarmapViewState,
     systemMarkerStyle,
 } from "./starmap_state";
+import type { ActiveMission } from "../nova_plugin/player_state";
 import {
     starmapPanelData,
     starmapPanelText,
@@ -97,8 +99,95 @@ function addMaskedText(
     return text;
 }
 
-function drawSystem(system: SystemData, graphics: PIXI.Graphics, scale: number,
-    currentSystem: string) {
+export function getMissionDestinationMarkers(
+    activeMissions: readonly ActiveMission[] | undefined,
+    systems: readonly SystemData[],
+): Map<string, MissionMarkerType> {
+    const markers = new Map<string, MissionMarkerType>();
+    if (!activeMissions || activeMissions.length === 0) {
+        return markers;
+    }
+
+    const planetToSystem = new Map<string, string>();
+    for (const sys of systems) {
+        for (const planetId of sys.planets ?? []) {
+            planetToSystem.set(planetId, sys.id);
+            const barePlanetId = planetId.replace(/^.*:/, '');
+            planetToSystem.set(barePlanetId, sys.id);
+        }
+    }
+
+    const systemIds = new Set(systems.map(s => s.id));
+    const bareSystemIds = new Map(systems.map(s => [s.id.replace(/^.*:/, ''), s.id]));
+
+    const resolveSystem = (targetId: string | undefined): string | undefined => {
+        if (!targetId || targetId === '*') {
+            return undefined;
+        }
+        if (systemIds.has(targetId)) {
+            return targetId;
+        }
+        if (planetToSystem.has(targetId)) {
+            return planetToSystem.get(targetId);
+        }
+        const bare = targetId.replace(/^.*:/, '');
+        if (bareSystemIds.has(bare)) {
+            return bareSystemIds.get(bare);
+        }
+        if (planetToSystem.has(bare)) {
+            return planetToSystem.get(bare);
+        }
+        return undefined;
+    };
+
+    for (const mission of activeMissions) {
+        if (mission.state !== 'active') {
+            continue;
+        }
+        let targetSystem: string | undefined;
+        if (!mission.travelVisited && mission.travelDestination) {
+            targetSystem = resolveSystem(mission.travelDestination);
+        } else if (mission.travelVisited && mission.returnDestination) {
+            targetSystem = resolveSystem(mission.returnDestination);
+        } else if (mission.shipSystem) {
+            targetSystem = resolveSystem(mission.shipSystem);
+        } else if (mission.destination) {
+            targetSystem = resolveSystem(mission.destination);
+        }
+
+        if (!targetSystem) {
+            continue;
+        }
+
+        const isPassenger = mission.cargo?.type === 1001
+            || mission.missionData?.cargoType === 1001
+            || String(mission.missionData?.cargo).toLowerCase().includes('passenger');
+        const isCargo = !isPassenger && (
+            Boolean(mission.cargo)
+            || (mission.missionData?.cargoType !== undefined && mission.missionData?.cargoType >= 0)
+        );
+        const markerType: MissionMarkerType = isPassenger
+            ? 'passenger'
+            : (isCargo ? 'cargo' : 'storyline');
+
+        const existing = markers.get(targetSystem);
+        if (!existing
+            || markerType === 'storyline'
+            || (markerType === 'cargo' && existing === 'passenger')) {
+            markers.set(targetSystem, markerType);
+        }
+    }
+
+    return markers;
+}
+
+function drawSystem(
+    system: SystemData,
+    graphics: PIXI.Graphics,
+    scale: number,
+    currentSystem: string,
+    missionMarker?: MissionMarkerType,
+) {
     // Use blue if the system has a planet. Otherwise, grey.
     // TODO: Check if the planet is inhabited.
     const inhabited = system.planets.length > 0;
@@ -115,11 +204,43 @@ function drawSystem(system: SystemData, graphics: PIXI.Graphics, scale: number,
         graphics.endFill();
     }
     graphics.lineStyle(1, outColor);
-    graphics.beginFill(outColor)
+    graphics.beginFill(outColor);
     graphics.drawCircle(0, 0, 2.7 * scale);
     graphics.beginFill(inColor);
     graphics.drawCircle(0, 0, 1.8 * scale);
     graphics.endFill();
+
+    if (missionMarker) {
+        const markerColor = missionMarker === 'passenger'
+            ? 0x00d4ff   // Cyan / Sky Blue for passengers
+            : (missionMarker === 'cargo'
+                ? 0xffaa00 // Amber Orange for cargo / delivery
+                : 0xff2222); // Vivid Red for storyline / special
+        graphics.lineStyle(1, 0x000000);
+        graphics.beginFill(markerColor);
+        if (missionMarker === 'passenger') {
+            // Diamond for passenger
+            graphics.moveTo(0, -9.5 * scale);
+            graphics.lineTo(3.5 * scale, -6.5 * scale);
+            graphics.lineTo(0, -3.5 * scale);
+            graphics.lineTo(-3.5 * scale, -6.5 * scale);
+            graphics.closePath();
+        } else if (missionMarker === 'cargo') {
+            // Downward pointing triangle for cargo delivery
+            graphics.moveTo(0, -3.8 * scale);
+            graphics.lineTo(-4 * scale, -9.2 * scale);
+            graphics.lineTo(4 * scale, -9.2 * scale);
+            graphics.closePath();
+        } else {
+            // Sharp chevron / inverted triangle for main storyline
+            graphics.moveTo(0, -3.2 * scale);
+            graphics.lineTo(-4.5 * scale, -9.8 * scale);
+            graphics.lineTo(0, -7.5 * scale);
+            graphics.lineTo(4.5 * scale, -9.8 * scale);
+            graphics.closePath();
+        }
+        graphics.endFill();
+    }
 }
 
 function normalizeKnownSystems(
@@ -186,6 +307,7 @@ class SystemGraph {
     private systemCircles: Map<string, [PIXI.Container, PIXI.Graphics]>;
     private mapContainer: PIXI.Container;
     private maskedContainer: PIXI.Container;
+    private missionMarkers = new Map<string, MissionMarkerType>();
 
     constructor(
         systems: SystemData[],
@@ -290,6 +412,14 @@ class SystemGraph {
         if (this.territoryPoints.length > 0) {
             this.rebuildTerritory();
         }
+        if (redraw) {
+            this.draw();
+        }
+    }
+
+    setMissionMarkers(activeMissions?: readonly ActiveMission[], redraw = true) {
+        this.missionMarkers = getMissionDestinationMarkers(
+            activeMissions, [...this.systems.values()]);
         if (redraw) {
             this.draw();
         }
@@ -472,7 +602,7 @@ class SystemGraph {
                 || this.knownSystems.has(id);
             const pos = this.scalePos(system.position);
             graphics.clear();
-            drawSystem(system, graphics, this.scale, this.currentSystem);
+            drawSystem(system, graphics, this.scale, this.currentSystem, this.missionMarkers.get(id));
             container.position.set(...pos);
         }
     }
@@ -716,8 +846,11 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
                 ...playerState,
                 legalRecords: playerState.legalRecords
                     ? { ...playerState.legalRecords } : undefined,
+                activeMissions: playerState.activeMissions
+                    ? [...playerState.activeMissions] : undefined,
             }
             : undefined;
+        this.systemGraph?.setMissionMarkers(playerState?.activeMissions, false);
         if (this.container.visible && this.selectedSystemId) {
             void this.renderPanel(this.selectedSystemId);
         }

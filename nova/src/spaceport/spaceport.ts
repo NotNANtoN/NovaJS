@@ -47,6 +47,7 @@ import { Outfitter } from './outfitter';
 import { ShipInfo } from './ship_info';
 import { Shipyard } from './shipyard';
 import { TradeCenter } from './trade_center';
+import { LandingNoticeDialog } from './landing_notice_dialog';
 import { plainSnapshot } from 'nova_ecs/draft_snapshot';
 import {
     hasSpaceportService,
@@ -82,6 +83,7 @@ export class Spaceport extends Menu<Entity> {
     private tradeCenterAvailable = false;
     private missionInfo: MissionInfo;
     private shipInfo: ShipInfo;
+    private landingNoticeDialog: LandingNoticeDialog;
     private readonly dialogContainers = new Set<PIXI.Container>();
     private data?: PlanetData;
     private readonly id: string;
@@ -234,6 +236,7 @@ export class Spaceport extends Menu<Entity> {
         buttons.shipyard.click.subscribe(showShipyard);
 
         this.missionInfo = new MissionInfo(gameData, controlEvents);
+        this.landingNoticeDialog = new LandingNoticeDialog(gameData, controlEvents);
         /**
          * `from` is the board the mission log was opened from, so control and
          * visibility return to that board rather than always to the mission
@@ -270,6 +273,7 @@ export class Spaceport extends Menu<Entity> {
         this.dialogContainers.add(this.bar.container);
         this.dialogContainers.add(this.tradeCenter.container);
         this.dialogContainers.add(this.missionInfo.container);
+        this.dialogContainers.add(this.landingNoticeDialog.container);
 
         const showMissionBbs = async () => {
             this.controls.unbind();
@@ -480,6 +484,7 @@ export class Spaceport extends Menu<Entity> {
             this.tradeCenter.buildPromise,
             this.missionInfo.buildPromise,
             this.shipInfo.buildPromise,
+            this.landingNoticeDialog.buildPromise,
         ]);
         const localData = await this.gameData.data.Planet.get(this.id);
         const data = resolveSpaceportPlanetData(
@@ -544,6 +549,7 @@ export class Spaceport extends Menu<Entity> {
         this.container.addChild(this.tradeCenter.container);
         this.container.addChild(this.missionInfo.container);
         this.container.addChild(this.shipInfo.container);
+        this.container.addChild(this.landingNoticeDialog.container);
         this.missionNotice.position.set(-210, 145);
         this.container.addChild(this.missionNotice);
         this.rechargeNotice.position.set(-210, 175);
@@ -566,11 +572,22 @@ export class Spaceport extends Menu<Entity> {
         // reload. Start every landing on the landing screen itself.
         this.setActiveDialog();
         this.controls.bind();
-        this.missionNotice.text = landingNotices.length > 0
-            ? landingNotices.map(notice =>
-                `${notice.kind === 'success' ? 'Mission complete' : 'Mission failed'}: `
-                + notice.text).join('\n\n')
-            : '';
+        this.missionNotice.text = '';
+
+        if (landingNotices.length > 0) {
+            this.controls.unbind();
+            for (const notice of landingNotices) {
+                this.setActiveDialog(this.landingNoticeDialog.container);
+                try {
+                    await this.landingNoticeDialog.show(notice);
+                } catch (error) {
+                    reportDialogFailure('landing notice', error);
+                }
+            }
+            this.setActiveDialog();
+            this.controls.bind();
+        }
+
         return super.show(input);
     }
 

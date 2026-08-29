@@ -660,7 +660,7 @@ export abstract class MissionBoard extends Menu<Entity> {
             this.detail.style.wordWrapWidth = this.layout.detail.width - 4;
             this.status.position.set(
                 detailPosition.x,
-                detailPosition.y + this.layout.detail.height - 25);
+                detailPosition.y + this.layout.detail.height - STATUS_HEIGHT);
             this.status.style.wordWrapWidth = this.layout.detail.width - 4;
         } else {
             // A single-pane board (the bar) has nowhere to put a detail
@@ -672,7 +672,7 @@ export abstract class MissionBoard extends Menu<Entity> {
             this.status.style.wordWrapWidth = this.layout.list.width - 4;
         }
 
-        const footerY = this.layout.footerY - this.layout.height / 2 + 5;
+        const footerY = this.layout.footerY - this.layout.height / 2;
         const buttonStart = -this.layout.width / 2 + 8;
         const buttonGap = this.layout === BAR_LAYOUT ? 64 : 120;
         const accept = new Button(
@@ -1043,7 +1043,7 @@ export abstract class MissionBoard extends Menu<Entity> {
         this.acceptButton.state = offer.available && !boardingUnsupported
             ? 'normal' : 'grey';
         const values = valuesFor(offer);
-        this.detail.text = formatVisibleMissionText(
+        const detailText = formatVisibleMissionText(
             missionOfferDisplayText(offer.mission),
             values,
         );
@@ -1052,6 +1052,14 @@ export abstract class MissionBoard extends Menu<Entity> {
             : `Payment: ${offer.mission.payVal > 0
                 ? `${offer.mission.payVal.toLocaleString()} cr` : 'none'}`
                 + (offer.mission.cargo ? `  Cargo: ${offer.mission.cargo}` : '');
+        if (this.layout.detail) {
+            const availableHeight = this.layout.detail.height - STATUS_HEIGHT - 4;
+            const heights = detailText.split('\n').map(line => PIXI.TextMetrics
+                .measureText(line || ' ', this.detail.style).height);
+            this.detail.text = fitLinesToHeight(detailText, heights, availableHeight);
+        } else {
+            this.detail.text = detailText;
+        }
     }
 
     private acceptSelected() {

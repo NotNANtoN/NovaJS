@@ -1,12 +1,17 @@
+import type { ActiveMission } from '../nova_plugin/player_state';
+
 export interface StarmapViewState {
     centeredOnce: boolean;
 }
+
+export type MissionMarkerType = 'passenger' | 'cargo' | 'storyline';
 
 export interface StarmapPlayerState {
     currentSystem?: string;
     gameDate?: number;
     legalRecords?: Readonly<Record<string, number>>;
     exploredSystems?: readonly string[];
+    activeMissions?: readonly ActiveMission[];
 }
 
 export function consumeInitialCenter(state: StarmapViewState): boolean {

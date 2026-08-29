@@ -28,9 +28,9 @@ export const MISSION_BBS_LAYOUT: MissionPanelLayout = {
     height: 201,
     header: { x: 12, y: 4, width: 396, height: 15 },
     detailHeader: { x: 229, y: 30, width: 271, height: 22 },
-    list: { x: 10, y: 30, width: 206, height: 140 },
+    list: { x: 10, y: 30, width: 206, height: 136 },
     detail: { x: 229, y: 60, width: 271, height: 91 },
-    footerY: 176,
+    footerY: 168,
 };
 
 /**
