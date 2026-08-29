@@ -26,6 +26,11 @@ export interface ShipData extends SpaceObjectData {
      */
     inherentAI: number;
     /**
+     * Government this hull belongs to. AvailShipType 2128-2383 and
+     * 3128-3383 compare against this field, not the system's government.
+     */
+    inherentGovt: number;
+    /**
      * Combat weight from shïp/Strength. The Bible uses this value, scaled by
      * present shields, when governments decide whether combat odds are
      * favourable.
@@ -80,6 +85,7 @@ export function getDefaultShipData(): ShipData {
         cargoCapacity: 0,
         fuelCapacity: 0,
         inherentAI: 1,
+        inherentGovt: -1,
         strength: 1,
         flags: 0,
         hireRandom: 0,

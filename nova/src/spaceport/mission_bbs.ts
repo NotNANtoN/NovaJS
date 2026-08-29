@@ -18,6 +18,7 @@ import {
     resolveMissionDestinations,
     ResolvedMissionDestinations,
     refuseMission,
+    startPendingNcbMissions,
 } from '../nova_plugin/mission_plugin';
 import {
     formatVisibleMissionText,
@@ -536,7 +537,12 @@ export class MissionInfo extends Menu<Entity> {
                 this.input.components.set(OutfitsStateComponent, ncb.outfits);
             }
             this.status.text = 'Mission aborted.';
-            void this.refresh();
+            void startPendingNcbMissions(this.gameData, state, {
+                initialPlanetId: state.lastLandedPlanet,
+                initialSystemId: state.currentSystem,
+                currentSystemId: state.currentSystem,
+                ncb,
+            }).then(() => this.refresh());
         }
     }
 }
@@ -776,7 +782,8 @@ export abstract class MissionBoard extends Menu<Entity> {
             this.render();
             return;
         }
-        this.shipTypeName = await this.syncCargoCapacity(shipId);
+        const ship = await this.syncCargoCapacity(shipId);
+        this.shipTypeName = ship.name;
         // Copied once the capacity is written, because the awaits below let
         // the world step, which revokes the component draft.
         const state = plainSnapshot(
@@ -814,6 +821,7 @@ export abstract class MissionBoard extends Menu<Entity> {
             destinationSystems: world.systems,
             governments: world.governments,
             outfits: this.input.components.get(OutfitsStateComponent),
+            playerShipGovt: ship.inherentGovt,
         }).sort((a, b) => b.displayWeight - a.displayWeight);
         const offerSeed = this.sessionKey
             ?? `${state.currentSystem}:${this.planetId}:${state.gameDate}`;
@@ -881,7 +889,7 @@ export abstract class MissionBoard extends Menu<Entity> {
      */
     private async syncCargoCapacity(
         shipId: string,
-    ): Promise<string | undefined> {
+    ): Promise<{ name?: string, inherentGovt?: number }> {
         const applyCapacity = (capacity: number) => {
             const live = this.input.components.get(PlayerStateComponent);
             if (live) {
@@ -891,16 +899,22 @@ export abstract class MissionBoard extends Menu<Entity> {
         const shipData = this.input.components.get(ShipDataComponent);
         if (shipData) {
             applyCapacity(shipData.cargoCapacity);
-            return shipData.name;
+            return {
+                name: shipData.name,
+                inherentGovt: shipData.inherentGovt,
+            };
         }
         try {
             const ship = await this.gameData.data.Ship.get(shipId);
             applyCapacity(ship.cargoCapacity);
-            return ship.name;
+            return {
+                name: ship.name,
+                inherentGovt: ship.inherentGovt,
+            };
         } catch {
             // The persisted fallback capacity remains usable for old data
             // providers which do not expose ship cargo fields.
-            return undefined;
+            return {};
         }
     }
 
@@ -1069,6 +1083,10 @@ export abstract class MissionBoard extends Menu<Entity> {
                 : 'This mission cannot be accepted.';
             return;
         }
+        void startPendingNcbMissions(this.gameData, state, {
+            ...this.destinationOptions(state, offer.resolved),
+            ncb,
+        });
         if (ncb.outfits) {
             this.input.components.set(OutfitsStateComponent, ncb.outfits);
         }
@@ -1093,6 +1111,10 @@ export abstract class MissionBoard extends Menu<Entity> {
         }
         const ncb = this.ncbRuntime.setContext(this.input, state);
         refuseMission(state, offer.mission, undefined, ncb);
+        void startPendingNcbMissions(this.gameData, state, {
+            ...this.destinationOptions(state, offer.resolved),
+            ncb,
+        });
         if (ncb.outfits) {
             this.input.components.set(OutfitsStateComponent, ncb.outfits);
         }

@@ -173,4 +173,77 @@ describe('mission availability', () => {
         expect(getOfferableMissions(input).map(mission => mission.id))
             .toEqual(['nova:203', 'nova:207', 'nova:209']);
     });
+
+    it('gates offers on AvailRecord with the current stellar government', () => {
+        const mission = {
+            ...getDefaultMissionData(),
+            id: 'nova:220',
+            availRecord: 10,
+            travelStel: -1,
+            returnStel: -1,
+        };
+        const input = makeInput(mission);
+        input.currentPlanet = {
+            id: 'nova:128', inhabited: true, government: 128,
+        };
+        expect(getOfferableMissions(input)).toEqual([]);
+        input.playerState.legalRecords = { 'nova:128': 10 };
+        expect(getOfferableMissions(input)).toEqual([mission]);
+        mission.availRecord = -20;
+        expect(getOfferableMissions(input)).toEqual([]);
+        input.playerState.legalRecords = { 'nova:128': -25 };
+        expect(getOfferableMissions(input)).toEqual([mission]);
+    });
+
+    it('keeps domination AvailRecord missions closed', () => {
+        const mission = {
+            ...getDefaultMissionData(),
+            id: 'nova:221',
+            availRecord: -32000,
+            travelStel: -1,
+            returnStel: -1,
+        };
+        expect(getOfferableMissions(makeInput(mission))).toEqual([]);
+        mission.availRecord = -32001;
+        expect(getOfferableMissions(makeInput(mission))).toEqual([]);
+    });
+
+    it('gates offers on AvailRating ladder index and kill thresholds', () => {
+        const mission = {
+            ...getDefaultMissionData(),
+            id: 'nova:222',
+            availRating: 2,
+            travelStel: -1,
+            returnStel: -1,
+        };
+        const input = makeInput(mission);
+        expect(getOfferableMissions(input)).toEqual([]);
+        input.playerState.kills = 2;
+        expect(getOfferableMissions(input)).toEqual([mission]);
+        mission.availRating = 100;
+        expect(getOfferableMissions(input)).toEqual([]);
+        input.playerState.kills = 100;
+        expect(getOfferableMissions(input)).toEqual([mission]);
+    });
+
+    it('gates inherent-government AvailShipType when the hull govt is known', () => {
+        const mission = {
+            ...getDefaultMissionData(),
+            id: 'nova:223',
+            availShipType: 2128,
+            travelStel: -1,
+            returnStel: -1,
+        };
+        const input = makeInput(mission);
+        input.playerState.shipId = 'nova:128';
+        expect(getOfferableMissions(input)).toEqual([mission]);
+        input.playerShipGovt = 129;
+        expect(getOfferableMissions(input)).toEqual([]);
+        input.playerShipGovt = 128;
+        expect(getOfferableMissions(input)).toEqual([mission]);
+        mission.availShipType = 3128;
+        expect(getOfferableMissions(input)).toEqual([]);
+        input.playerShipGovt = 129;
+        expect(getOfferableMissions(input)).toEqual([mission]);
+    });
 });

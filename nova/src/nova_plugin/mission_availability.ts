@@ -1,3 +1,4 @@
+import { GovtData } from 'novadatainterface/GovtData';
 import { MissionData, MissionOfferLocation } from 'novadatainterface/MissionData';
 import { getFreeSpace } from './player_state';
 import type { PlayerState } from './player_state';
@@ -5,8 +6,10 @@ import { evaluateTestExpression } from './ncb';
 import { ncbTestContext } from './ncb_runtime';
 import type { OutfitsState } from './outfit_plugin';
 import { clampRandom } from '../common/random';
+import { combatRatingIndex, recordFor } from './legal_record';
 import {
     GovernmentRelation,
+    governmentIndex,
     matchesStellarSelector,
     novaResourceId,
     resolveStellarSelector as resolveSelector,
@@ -35,8 +38,11 @@ export interface MissionAvailabilityInput {
         PlayerState,
         'missionBits' | 'activeMissions' | 'gender' | 'exploredSystems'
     >
-        & Partial<Pick<PlayerState, 'cargoCapacity' | 'holds' | 'shipId'>>;
+        & Partial<Pick<PlayerState,
+            'cargoCapacity' | 'holds' | 'shipId' | 'legalRecords' | 'kills'>>;
     outfits?: OutfitsState;
+    /** Inherent government of the ship the pilot is flying, when known. */
+    playerShipGovt?: number;
     currentPlanet: MissionPlanetSelector;
     currentSystem: MissionSystemSelector;
     offerLocation: MissionOfferLocation;
@@ -91,6 +97,105 @@ function destinationIsSatisfiable(
     );
 }
 
+/** Bible AvailRecord sentinels for planet domination, which we do not model. */
+const DOMINATED_THIS_STELLAR = -32000;
+const DOMINATED_ANY_STELLAR = -32001;
+
+function controllingGovernment(
+    planet: MissionPlanetSelector,
+    system: MissionSystemSelector,
+): number {
+    if (planet.government !== undefined && planet.government >= 128) {
+        return planet.government;
+    }
+    if (system.government !== undefined && system.government >= 128) {
+        return system.government;
+    }
+    // Independent systems use government 128's record, per Appendix II.
+    return 128;
+}
+
+function govtForId(
+    governments: readonly GovernmentRelation[] | undefined,
+    governmentId: string,
+): Pick<GovtData, 'initialRecord'> | undefined {
+    if (!governments) {
+        return undefined;
+    }
+    for (const govt of governments) {
+        if (govt.id !== undefined
+            && sameResourceId(String(govt.id), governmentId)) {
+            return govt as Pick<GovtData, 'initialRecord'>;
+        }
+        if (govt.index !== undefined
+            && governmentIndex(governmentId) === govt.index) {
+            return govt as Pick<GovtData, 'initialRecord'>;
+        }
+    }
+    return undefined;
+}
+
+function storedRecord(
+    records: PlayerState['legalRecords'] | undefined,
+    governmentId: string,
+    govt?: Pick<GovtData, 'initialRecord'>,
+): number {
+    if (records) {
+        const exact = records[governmentId];
+        if (exact !== undefined) {
+            return exact;
+        }
+        for (const [key, value] of Object.entries(records)) {
+            if (sameResourceId(key, governmentId)) {
+                return value;
+            }
+        }
+    }
+    return recordFor(records, governmentId, govt);
+}
+
+/**
+ * EV Nova Bible, mïsn/AvailRecord: 0 is ignored, a positive value is a
+ * minimum standing, a negative value is a maximum (more criminal) standing.
+ * Dominated-stellar sentinels stay closed until domination exists.
+ */
+function matchesAvailRecord(
+    mission: MissionData,
+    input: MissionAvailabilityInput,
+): boolean {
+    const required = mission.availRecord;
+    if (required === 0) {
+        return true;
+    }
+    if (required === DOMINATED_THIS_STELLAR
+        || required === DOMINATED_ANY_STELLAR) {
+        return false;
+    }
+    const governmentId = novaResourceId(
+        controllingGovernment(input.currentPlanet, input.currentSystem));
+    const record = storedRecord(
+        input.playerState.legalRecords,
+        governmentId,
+        govtForId(input.governments, governmentId));
+    return required > 0 ? record >= required : record <= required;
+}
+
+/**
+ * EV Nova Bible, mïsn/AvailRating: -1 is ignored. Small values are STR# 138
+ * ladder indexes; values at or above 100 are the Appendix I kill thresholds.
+ */
+function matchesAvailRating(mission: MissionData, kills: number | undefined) {
+    const required = mission.availRating;
+    if (required < 0) {
+        return true;
+    }
+    const killCount = kills ?? 0;
+    if (required >= 100) {
+        return killCount >= required;
+    }
+    return combatRatingIndex(killCount) >= required;
+}
+
 function missionCargoTons(mission: MissionData): number {
     if (mission.cargoType < 0 || mission.cargoQty === -1) {
         return 0;
@@ -101,6 +206,7 @@ function missionCargoTons(mission: MissionData): number {
 function matchesAvailableShip(
     mission: MissionData,
     shipId: string | undefined,
+    playerShipGovt?: number,
 ): boolean {
     const selector = mission.availShipType;
     // Retail uses 127 as its legacy "any ship" sentinel.
@@ -113,8 +219,22 @@ function matchesAvailableShip(
     if (selector >= 1000 && selector < 2000) {
         return !sameResourceId(shipId, novaResourceId(selector - 1000));
     }
-    // Inherent-government selectors need parsed ship government data and are
-    // intentionally left to a later legal-record/ship metadata pass.
+    if (selector >= 2128 && selector <= 2383) {
+        if (playerShipGovt === undefined || playerShipGovt < 128) {
+            return true;
+        }
+        return sameResourceId(
+            novaResourceId(playerShipGovt),
+            novaResourceId(selector - 2000));
+    }
+    if (selector >= 3128 && selector <= 3383) {
+        if (playerShipGovt === undefined || playerShipGovt < 128) {
+            return true;
+        }
+        return !sameResourceId(
+            novaResourceId(playerShipGovt),
+            novaResourceId(selector - 3000));
+    }
     return true;
 }
 
@@ -148,7 +268,11 @@ export function getOfferableMissions(
         .filter(mission => !activeIds.has(mission.id))
         .filter(mission => mission.availLoc === input.offerLocation)
         .filter(mission =>
-            matchesAvailableShip(mission, input.playerState.shipId))
+            matchesAvailableShip(
+                mission, input.playerState.shipId, input.playerShipGovt))
+        .filter(mission => matchesAvailRecord(mission, input))
+        .filter(mission =>
+            matchesAvailRating(mission, input.playerState.kills))
         .filter(mission => {
             const planets = input.destinationPlanets
                 ? [...input.destinationPlanets]

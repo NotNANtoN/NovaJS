@@ -1,5 +1,5 @@
 import { executeSetOperations, parseSetExpression } from './ncb';
-import { createNcbHandlers } from './ncb_handlers';
+import { createNcbHandlers, takePendingMissionStarts } from './ncb_handlers';
 import { createInitialPlayerState } from './player_state';
 
 describe('NCB game handlers', () => {
@@ -52,5 +52,17 @@ describe('NCB game handlers', () => {
         expect(outfits.get('nova:22')?.count).toBe(2);
         expect(state.currentSystem).toBe('nova:333');
         expect(movedTo).toBe('nova:333');
+    });
+
+    it('queues catalog mission ids from NCB S for later start', () => {
+        const state = createInitialPlayerState();
+        const handlers = createNcbHandlers({ state });
+        executeSetOperations(
+            parseSetExpression('S797'),
+            state.missionBits,
+            { handlers },
+        );
+        expect(takePendingMissionStarts(state)).toEqual([797]);
+        expect(takePendingMissionStarts(state)).toEqual([]);
     });
 });

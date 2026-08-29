@@ -122,6 +122,21 @@ function activeMissionId(
         ?.missionId ?? wanted;
 }
 
+const pendingMissionStarts = new WeakMap<PlayerState, number[]>();
+
+function queueMissionStart(state: PlayerState, id: number) {
+    const queued = pendingMissionStarts.get(state) ?? [];
+    queued.push(id);
+    pendingMissionStarts.set(state, queued);
+}
+
+/** Drain NCB `S` ids queued while a set expression ran on this pilot. */
+export function takePendingMissionStarts(state: PlayerState): number[] {
+    const queued = pendingMissionStarts.get(state) ?? [];
+    pendingMissionStarts.delete(state);
+    return queued;
+}
+
 /**
  * Build the game-side callbacks for NCB's non-bit operators. Keeping this
  * separate from the parser lets tests exercise the operations without
@@ -154,7 +169,10 @@ export function createNcbHandlers(
         regenerateStellar: operation =>
             regenerateStellar(context.state, operation.id),
         exploreSystem: operation => exploreSystem(context.state, operation.id),
-        startMission: operation => context.onStartMission?.(operation.id),
+        startMission: operation => {
+            context.onStartMission?.(operation.id);
+            queueMissionStart(context.state, operation.id);
+        },
         abortMission: operation => {
             context.onAbortMission?.(operation.id);
             if (!context.onAbortMission) {

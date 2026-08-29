@@ -8,6 +8,7 @@ import {
     MissionRuntime,
     abortMission,
     acceptMission,
+    startPendingNcbMissions,
 } from './mission_plugin';
 import {
     createInitialPlayerState,
@@ -15,10 +16,24 @@ import {
 } from './player_state';
 import { getOfferableMissions } from './mission_availability';
 
-function fakeGameData(mission: MissionData): GameDataInterface {
+function fakeGameData(...missions: MissionData[]): GameDataInterface {
+    const byId = new Map<string, MissionData>();
+    for (const mission of missions) {
+        byId.set(mission.id, mission);
+        byId.set(mission.id.replace(/^.*:/, ''), mission);
+    }
     return {
         data: {
-            Mission: { get: async () => mission },
+            Mission: {
+                get: async (id: string) => {
+                    const found = byId.get(id)
+                        ?? byId.get(id.replace(/^.*:/, ''));
+                    if (!found) {
+                        throw new Error(`missing mission ${id}`);
+                    }
+                    return found;
+                },
+            },
             Planet: {
                 get: async (id: string) => ({
                     id,
@@ -214,6 +229,13 @@ describe('mission runtime', () => {
             availLoc: MissionOfferLocation.MainSpaceport,
             availBits: 'b351 & !(b352 | b4444)',
         };
+        const followUp = {
+            ...getDefaultMissionData(),
+            id: 'nova:797',
+            name: 'Vellos follow-up',
+            travelStel: 128,
+            returnStel: 128,
+        };
         const state = createInitialPlayerState();
         const offers = () => getOfferableMissions({
             missionIds: [vellos3.id],
@@ -230,15 +252,16 @@ describe('mission runtime', () => {
             initialPlanetId: 'nova:128',
             planets: [{ id: 'nova:128' }, { id: 'nova:408' }],
         });
-        const runtime = new MissionRuntime(fakeGameData(vellos2));
+        const runtime = new MissionRuntime(fakeGameData(vellos2, followUp));
         await runtime.processLanding(state, 'nova:408');
         expect(state.activeMissions.length).toBe(1);
         expect(state.missionBits[351]).toBe(false);
 
-        await runtime.processLanding(
-            state, 'nova:128', { onStartMission: () => undefined });
+        await runtime.processLanding(state, 'nova:128');
 
         expect(state.missionBits[351]).toBe(true);
+        expect(state.activeMissions.map(entry => entry.missionId))
+            .toEqual(['nova:797']);
         expect(offers()).toEqual([vellos3]);
     });
 
@@ -394,5 +417,90 @@ describe('mission runtime', () => {
         await expiration;
         expect(notices[0]?.kind).toBe('success');
         expect(state.activeMissions).toEqual([]);
+    });
+
+    it('picks up delayed cargo at TravelStel and pays out at ReturnStel', async () => {
+        const mission = {
+            ...getDefaultMissionData(),
+            id: 'nova:205',
+            travelStel: 131,
+            returnStel: 130,
+            cargoType: 0,
+            cargoQty: 3,
+            pickupMode: 1,
+            dropOffMode: 1,
+            payVal: 200,
+        };
+        const state = createInitialPlayerState();
+        const accepted = acceptMission(state, mission, {
+            initialPlanetId: 'nova:130',
+            planets: [{ id: 'nova:130' }, { id: 'nova:131' }],
+        });
+        expect(accepted?.cargo?.quantity).toBe(3);
+        expect(getFreeSpace(state)).toBe(10);
+
+        const runtime = new MissionRuntime(fakeGameData(mission));
+        await runtime.processLanding(state, 'nova:131');
+        expect(getFreeSpace(state)).toBe(7);
+        expect(state.activeMissions.length).toBe(1);
+
+        const notices = await runtime.processLanding(state, 'nova:130');
+        expect(notices[0]?.kind).toBe('success');
+        expect(state.credits).toBe(10_200);
+        expect(state.activeMissions).toEqual([]);
+        expect(getFreeSpace(state)).toBe(10);
+    });
+
+    it('advances the date and legal record when a mission pays out', async () => {
+        const mission = {
+            ...getDefaultMissionData(),
+            id: 'nova:206',
+            travelStel: 131,
+            returnStel: 131,
+            dropOffMode: 0,
+            payVal: 50,
+            datePostInc: 4,
+            compGovt: 128,
+            compReward: 12,
+        };
+        const state = createInitialPlayerState();
+        acceptMission(state, mission, {
+            initialPlanetId: 'nova:130',
+            planets: [{ id: 'nova:130' }, { id: 'nova:131' }],
+        });
+        const notices = await new MissionRuntime(fakeGameData(mission))
+            .processLanding(state, 'nova:131');
+        expect(notices[0]?.kind).toBe('success');
+        expect(state.gameDate).toBe(4);
+        expect(state.legalRecords['nova:128']).toBe(12);
+        expect(state.credits).toBe(10_050);
+    });
+
+    it('starts a catalog mission queued by OnAbort', async () => {
+        const mission = {
+            ...getDefaultMissionData(),
+            id: 'nova:207',
+            travelStel: -1,
+            returnStel: -1,
+            canAbort: true,
+            onAbort: 'S208',
+        };
+        const followUp = {
+            ...getDefaultMissionData(),
+            id: 'nova:208',
+            travelStel: -1,
+            returnStel: -1,
+        };
+        const state = createInitialPlayerState();
+        const accepted = acceptMission(state, mission, {
+            initialPlanetId: 'nova:130',
+        });
+        expect(abortMission(state, accepted!, mission)).toBe(true);
+        await startPendingNcbMissions(
+            fakeGameData(mission, followUp), state, {
+                initialPlanetId: 'nova:130',
+            });
+        expect(state.activeMissions.map(entry => entry.missionId))
+            .toEqual(['nova:208']);
     });
 });

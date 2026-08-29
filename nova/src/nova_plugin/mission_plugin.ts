@@ -15,9 +15,14 @@ import {
     executeSetOperations,
     parseSetExpression,
 } from './ncb';
-import { createNcbHandlers, NcbHandlerContext } from './ncb_handlers';
+import {
+    createNcbHandlers,
+    NcbHandlerContext,
+    takePendingMissionStarts,
+} from './ncb_handlers';
 import {
     ActiveMission,
+    advanceGameDate,
     allocateCargo,
     createMissionGoalProgress,
     getFreeSpace,
@@ -245,6 +250,92 @@ function missionCargo(
     };
 }
 
+function pickupAtTravel(mission: MissionData): boolean {
+    return mission.pickupMode > 0;
+}
+
+function missionHoldsCargo(state: PlayerState, missionId: string): boolean {
+    return state.holds.some(hold =>
+        hold.isMissionCargo && hold.commodity === missionId);
+}
+
+function applyMissionCompletionRewards(
+    state: PlayerState,
+    mission: MissionData,
+) {
+    if (mission.payVal > 0) {
+        state.credits += mission.payVal;
+    } else if (mission.payVal < -1) {
+        console.warn(`Mission pay value ${mission.payVal} is not implemented`);
+    }
+    if (mission.datePostInc > 0) {
+        advanceGameDate(state, mission.datePostInc);
+    }
+    if (mission.compGovt >= 128 && mission.compReward !== 0) {
+        const governmentId = resourceId(mission.compGovt);
+        const records = { ...state.legalRecords };
+        records[governmentId] = (records[governmentId] ?? 0) + mission.compReward;
+        state.legalRecords = records;
+    }
+}
+
+const MAX_NCB_MISSION_STARTS = 16;
+
+function alreadyActive(state: PlayerState, missionId: string): boolean {
+    return state.activeMissions.some(entry =>
+        entry.state === 'active'
+        && (entry.missionId === missionId
+            || entry.missionId.replace(/^.*:/, '')
+                === missionId.replace(/^.*:/, '')));
+}
+
+/**
+ * Start missions queued by NCB `S` while a set expression ran.
+ *
+ * Story OnSuccess strings auto-start the next mïsn even when it is not on
+ * the current BBS page. `S` still no-ops for boarding missions, full logs,
+ * and destinations that cannot be resolved.
+ */
+export async function startPendingNcbMissions(
+    gameData: GameDataInterface,
+    state: PlayerState,
+    options: MissionDestinationOptions = { initialPlanetId: '' },
+): Promise<void> {
+    const seen = new Set<string>();
+    let queued = takePendingMissionStarts(state);
+    let guard = 0;
+    while (queued.length > 0 && guard < MAX_NCB_MISSION_STARTS) {
+        guard += 1;
+        for (const id of queued) {
+            const missionId = resourceId(id);
+            if (seen.has(missionId) || alreadyActive(state, missionId)) {
+                continue;
+            }
+            seen.add(missionId);
+            let mission: MissionData | undefined;
+            try {
+                mission = await gameData.data.Mission.get(missionId);
+            } catch (error) {
+                console.warn(`NCB S${id}: could not load mission`, error);
+                continue;
+            }
+            if (!mission) {
+                continue;
+            }
+            acceptMission(state, mission, {
+                ...options,
+                initialPlanetId: options.initialPlanetId
+                    || state.lastLandedPlanet,
+                initialSystemId: options.initialSystemId
+                    ?? state.currentSystem,
+                currentSystemId: options.currentSystemId
+                    ?? state.currentSystem,
+            });
+        }
+        queued = takePendingMissionStarts(state);
+    }
+}
+
 /**
  * Add a mission to PlayerState after running its OnAccept expression.
  *
@@ -283,11 +374,12 @@ export function acceptMission(
         : resolved.returnDestination;
 
     const cargo = missionCargo(mission, pickupDestination);
-    if (cargo && getFreeSpace(state) < cargo.quantity) {
+    const loadOnAccept = cargo && !pickupAtTravel(mission);
+    if (loadOnAccept && getFreeSpace(state) < cargo.quantity) {
         console.warn(`Cannot accept mission ${mission.id}: not enough cargo space`);
         return undefined;
     }
-    if (cargo && !allocateCargo(state, {
+    if (loadOnAccept && !allocateCargo(state, {
         commodity: mission.id,
         tons: cargo.quantity,
         isMissionCargo: true,
@@ -562,6 +654,12 @@ export class MissionRuntime {
                     context);
                 entry.state = 'failed';
                 releaseMissionCargo(state, entry.missionId);
+                await startPendingNcbMissions(this.gameData, state, {
+                    initialPlanetId: state.lastLandedPlanet,
+                    initialSystemId: state.currentSystem,
+                    currentSystemId: state.currentSystem,
+                    ncb: context,
+                });
             });
         }));
     }
@@ -606,9 +704,23 @@ export class MissionRuntime {
                 if (entry.state !== 'active') {
                     return;
                 }
-                if (destinationMatches(
-                    missionTravelDestination(entry), planetId)) {
+                const atTravel = destinationMatches(
+                    missionTravelDestination(entry), planetId);
+                if (atTravel) {
                     entry.travelVisited = true;
+                }
+                if (atTravel && pickupAtTravel(mission) && entry.cargo
+                    && !missionHoldsCargo(state, entry.missionId)) {
+                    if (getFreeSpace(state) < entry.cargo.quantity
+                        || !allocateCargo(state, {
+                            commodity: entry.missionId,
+                            tons: entry.cargo.quantity,
+                            isMissionCargo: true,
+                        })) {
+                        return;
+                    }
+                    // Pickup and drop-off are different landings.
+                    return;
                 }
                 if (!landingCompletesMission(entry, mission, planetId)) {
                     return;
@@ -633,11 +745,7 @@ export class MissionRuntime {
                 // which is evaluated when the mission is completed successfully."
                 runMissionSetExpression(
                     mission.onSuccess, state, console.warn, context);
-                if (mission.payVal > 0) {
-                    state.credits += mission.payVal;
-                } else if (mission.payVal < -1) {
-                    console.warn(`Mission pay value ${mission.payVal} is not implemented`);
-                }
+                applyMissionCompletionRewards(state, mission);
                 const destinationName = await this.missionName(
                     missionTravelDestination(entry));
                 const returnDestinationName = await this.missionName(
@@ -653,6 +761,12 @@ export class MissionRuntime {
                         ),
                     });
                 this.removeEntry(state, entry);
+                await startPendingNcbMissions(this.gameData, state, {
+                    initialPlanetId: planetId,
+                    initialSystemId: state.currentSystem,
+                    currentSystemId: state.currentSystem,
+                    ncb: context,
+                });
             });
         }
         return notices;
@@ -700,6 +814,12 @@ export class MissionRuntime {
                 mission.onFailure, state, console.warn, context);
             entry.state = 'failed';
             releaseMissionCargo(state, entry.missionId);
+            await startPendingNcbMissions(this.gameData, state, {
+                initialPlanetId: state.lastLandedPlanet,
+                initialSystemId: state.currentSystem,
+                currentSystemId: state.currentSystem,
+                ncb: context,
+            });
             return false;
         }
         if (entry.shipGoalProgress.completed
@@ -707,6 +827,12 @@ export class MissionRuntime {
             entry.shipGoalProgress.shipDoneApplied = true;
             runMissionSetExpression(
                 mission.onShipDone, state, console.warn, context);
+            await startPendingNcbMissions(this.gameData, state, {
+                initialPlanetId: state.lastLandedPlanet,
+                initialSystemId: state.currentSystem,
+                currentSystemId: state.currentSystem,
+                ncb: context,
+            });
         }
         return entry.shipGoalProgress.completed;
     }

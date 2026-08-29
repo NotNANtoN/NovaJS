@@ -149,7 +149,6 @@ The project is organized as a monorepo and has several subpackages:
 ## Known bugs and limitations
 * **Retail assets are not included.** Supply your own EV Nova data files; extracted assets must not be redistributed.
 * Full `tsc --noEmit` still reports legacy type and dependency debt. `npm run typecheck` is diagnostic and non-gating; `npm run check` is the required supported check.
-* Pixi currently emits a `SCALE_MODE` warning from the legacy global setting.
 * The richer retail Bar content associated with resource 8504 is not yet mapped.
 * The Node test harness skips a small, named set of browser-, legacy-loader-, or native-environment-specific tests.
 * Mission and storyline coverage is incomplete as described above, and plug-in compatibility is not comprehensive.
