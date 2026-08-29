@@ -117,6 +117,39 @@ describe("NovaParse", function() {
         expect(unresolved.targetPict).toBeUndefined();
     });
 
+    it("Should parse infoPict from the ship dësc graphic field", async function() {
+        const idSpace = await np.idSpace;
+        if (idSpace instanceof Error) {
+            fail(idSpace);
+            return;
+        }
+        const ship128 = idSpace.shïp["nova:128"];
+        const desc = ship128.idSpace.dësc[ship128.descID];
+        const graphic = desc?.graphic ?? -1;
+        const expected = graphic > 0
+            ? ship128.idSpace.PICT[graphic]?.globalID ?? null
+            : null;
+        expect(s128.infoPict).toEqual(expected);
+        if (expected) {
+            expect(s128.infoPict).not.toEqual(s128.pict);
+        }
+    });
+
+    it("Should parse shipyard info fields from the shïp resource", async function() {
+        const idSpace = await np.idSpace;
+        if (idSpace instanceof Error) {
+            fail(idSpace);
+            return;
+        }
+        const ship128 = idSpace.shïp["nova:128"];
+        expect(s128.longName).toEqual(ship128.longName);
+        expect(s128.length).toEqual(ship128.length);
+        expect(s128.crew).toEqual(ship128.crew);
+        expect(s128.freeSpace).toEqual(ship128.freeSpace);
+        expect(s128.maxGuns).toEqual(ship128.maxGuns);
+        expect(s128.maxTurrets).toEqual(ship128.maxTurrets);
+    });
+
     it("Should parse the right pict ID for ships with the same baseImage", async function() {
         // Ships with the same baseImage as a previous ship that don't have a pictID defined for them get
         // the same pictID as the previous ship's

@@ -1,5 +1,6 @@
+import { AsyncSystemResource } from "nova_ecs/async_system";
 import { Entity } from "nova_ecs/entity";
-import { multiplayer, MultiplayerData } from "nova_ecs/plugins/multiplayer_plugin";
+import { Comms, multiplayer, MultiplayerData } from "nova_ecs/plugins/multiplayer_plugin";
 import { SerializerResource } from "nova_ecs/plugins/serializer_plugin";
 import { resetWallClock, TimeResource } from "nova_ecs/plugins/time_plugin";
 import { World } from "nova_ecs/world";
@@ -14,6 +15,15 @@ import { MultiRoom } from "./communication/multi_room_communicator";
 import { SocketChannelClient } from "./communication/SocketChannelClient";
 import { DebugSettings } from "./debug_settings";
 import { Display } from "./display/display_plugin";
+import {
+    outfitIdsFromState,
+    warmFlightAssets,
+} from "./display/flight_asset_warmup";
+import {
+    hideEnteringOverlay,
+    showEnteringOverlay,
+} from "./display/flight_load_overlay";
+import { waitForFlightScene } from "./display/flight_scene_ready";
 import {
     getTitleMusicState,
     startTitleMusicOnGesture,
@@ -33,9 +43,11 @@ import {
     RespawnRelocationEvent,
 } from "./nova_plugin/death_plugin";
 import { plainSnapshot } from 'nova_ecs/draft_snapshot';
+import { WeaponEntries } from "./nova_plugin/fire_weapon_plugin";
 import { makeShip } from "./nova_plugin/make_ship";
 import { makeSystem } from "./nova_plugin/make_system";
 import { MultiRoomResource, NovaPlugin, SystemComponent } from "./nova_plugin/nova_plugin";
+import { OutfitsStateComponent } from "./nova_plugin/outfit_plugin";
 import { PlayerShipSelector } from "./nova_plugin/player_ship_plugin";
 import { CompatibilityProfile } from "./nova_plugin/entity_budget";
 import {
@@ -52,6 +64,7 @@ import {
     restoreStoredShip,
 } from "./nova_plugin/restore_stored_ship";
 import { SystemIdResource } from "./nova_plugin/system_id_resource";
+import { ShipComponent } from "./nova_plugin/ship_plugin";
 import {
     EscapeMenu,
     StartMenu,
@@ -240,7 +253,9 @@ async function transitionTo(
         throw new Error('World did not have Pixi Stage');
     }
     app.stage.addChild(newStage);
-    newStage.visible = true;
+    // Reveal only once hulls and stellars have sprites. Otherwise Enter Ship
+    // cuts to an empty starfield and things pop in one atlas later.
+    newStage.visible = cause !== 'initial';
 
     const room = multiRoom.join(to);
     await newSystem.addPlugin(multiplayer(room));
@@ -283,12 +298,48 @@ async function transitionTo(
     newSystem.entities.set(uuid, transitionEntity);
     system = newSystem;
     resetGameplayClocks();
+    const combatWarmup = warmFlightAssets({
+        gameData,
+        systemId: to,
+        playerShipId: transitionEntity.components.get(ShipComponent)?.id,
+        extraOutfitIds: outfitIdsFromState(
+            transitionEntity.components.get(OutfitsStateComponent)),
+        weaponEntries: newSystem.resources.get(WeaponEntries),
+    });
+    if (cause === 'initial') {
+        const systemData = await gameData.data.System.get(to).catch(() => undefined);
+        if (systemData?.name) {
+            showEnteringOverlay(`Entering ${systemData.name}`);
+        }
+        await waitForFlightScene({
+            step: () => world?.step(),
+            afterStep: async () => {
+                const pending = newSystem.resources.get(AsyncSystemResource);
+                if (pending) {
+                    await pending.done;
+                }
+                await combatWarmup;
+            },
+            entities: () => newSystem.entities,
+            playerUuid: uuid,
+            expectedPlanetCount: systemData?.planets.length ?? 0,
+            snapshotRequested: () => Boolean(
+                newSystem.singletonEntity.components.get(Comms)
+                    ?.initialStateRequested),
+        });
+        resetGameplayClocks();
+        newStage.visible = true;
+    } else {
+        await combatWarmup;
+    }
 }
 
 async function startGame(
     selection: StartMenuSelection,
 ) {
-    await waitForCommunicatorUuid();
+    showEnteringOverlay();
+    try {
+        await waitForCommunicatorUuid();
     world = new World();
     world.resources.set(GameDataResource, gameData);
     await world.addPlugin(multiplayer(multiRoom.join('main room')));
@@ -348,6 +399,9 @@ async function startGame(
     stopTitleMusic();
     gameRunning = true;
     resumeGameplay();
+    } finally {
+        hideEnteringOverlay();
+    }
 
     // if (activeSystem) {
     //     await activeSystem.addPlugin(Display);

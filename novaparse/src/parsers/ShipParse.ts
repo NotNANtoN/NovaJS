@@ -12,6 +12,17 @@ import { ShanParse } from "./ShanParse";
 export type ShipPictMap = Promise<{ [index: string]: string }>;
 export type WeaponOutfitMap = ShipPictMap;
 
+/** Resolve marketing PICT from the ship dësc's Graphic field. */
+export function resolveShipInfoPict(
+    ship: ShipResource,
+    descResource: { graphic: number } | undefined,
+): string | null {
+    const infoGraphic = descResource?.graphic ?? -1;
+    return infoGraphic > 0
+        ? (ship.idSpace.PICT[infoGraphic]?.globalID ?? null)
+        : null;
+}
+
 export function ShipParseClosure(shipPictMap: ShipPictMap,
     targetPictMap: ShipPictMap,
     weaponOutfitMap: WeaponOutfitMap,
@@ -45,6 +56,7 @@ export async function ShipParse(ship: ShipResource,
 
     var desc: string;
     var descResource = ship.idSpace.dësc[ship.descID];
+    const infoPict = resolveShipInfoPict(ship, descResource);
     if (descResource) {
         desc = descResource.text;
     }
@@ -195,7 +207,14 @@ export async function ShipParse(ship: ShipResource,
         escortType: ship.escortType,
         cost: ship.cost,
         pict: pictID,
+        infoPict,
         targetPict: targetPictID,
+        longName: ship.longName,
+        length: ship.length,
+        crew: ship.crew,
+        freeSpace: ship.freeSpace,
+        maxGuns: ship.maxGuns,
+        maxTurrets: ship.maxTurrets,
         subtitle: ship.subtitle,
         desc: desc,
         outfits,

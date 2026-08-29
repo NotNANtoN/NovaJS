@@ -45,8 +45,17 @@ export interface ShipData extends SpaceObjectData {
     escortType: number;
     cost: number;
     pict: string;
+    /** Marketing art from the ship dësc's Graphic field; absent when unset. */
+    infoPict: string | null;
     /** Fixed retail targeting art; absent when no suitable PICT can be found. */
     targetPict?: string;
+    longName: string;
+    length: number;
+    crew: number;
+    /** Raw outfit space before stock outfits are subtracted. */
+    freeSpace: number;
+    maxGuns: number;
+    maxTurrets: number;
     /** The smaller second line shown beneath the ship name when targeted. */
     subtitle: string;
     desc: string;
@@ -77,7 +86,14 @@ export function getDefaultShipData(): ShipData {
         escortType: -1,
         cost: 0,
         pict: "default",
+        infoPict: null,
         targetPict: undefined,
+        longName: "",
+        length: 0,
+        crew: 0,
+        freeSpace: 0,
+        maxGuns: 0,
+        maxTurrets: 0,
         subtitle: "",
         desc: "default",
         outfits: {},

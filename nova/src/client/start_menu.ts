@@ -8,6 +8,7 @@ import {
 import { EncodedEntity } from 'nova_ecs/plugins/serializer_plugin';
 import type { GameDataInterface } from 'novadatainterface/GameDataInterface';
 import { artworkUrl } from './artwork_url';
+import { showEnteringOverlay } from '../display/flight_load_overlay';
 import {
     CompatibilityProfileName,
     PANEL_STYLE,
@@ -391,6 +392,7 @@ export class StartMenu {
                 }
                 this.stopLogoAnimation();
                 window.removeEventListener('resize', this.resizeScene);
+                showEnteringOverlay();
                 this.root.remove();
                 resolvePromise({ playerState: state, ship, continued });
             };

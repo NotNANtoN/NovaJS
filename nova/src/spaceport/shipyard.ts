@@ -18,11 +18,13 @@ import { Menu } from './menu';
 import { FONT, formatPrice } from './outfitter';
 import { isPurchaseAvailable } from './availability';
 import { PlanetData } from 'novadatainterface/PlanetData';
+import { ShipyardInfoDialog } from './shipyard_info_dialog';
 
 
 export class Shipyard extends Menu<Entity> {
     private pictContainer = new PIXI.Container();
     itemGrid?: ItemGrid<ShipData>;
+    private readonly infoDialog: ShipyardInfoDialog;
     private text = {
         description: new PIXI.Text("", FONT.normal),
         itemPrice: new PIXI.Text("Price:", FONT.normal),
@@ -37,12 +39,15 @@ export class Shipyard extends Menu<Entity> {
     constructor(gameData: GameData,
         controlEvents: Observable<ControlEvent>) {
         super(gameData, "nova:8502", controlEvents);
+        this.infoDialog = new ShipyardInfoDialog(gameData, controlEvents);
         const buttons = {
-            buy: new Button(gameData, "Buy", 60, { x: -20, y: 126 }),
-            done: new Button(gameData, "Done", 60, { x: 100, y: 126 }),
+            info: new Button(gameData, "Info", 63, { x: -129, y: 128 }),
+            buy: new Button(gameData, "Buy Ship", 83, { x: -17, y: 128 }),
+            done: new Button(gameData, "Done", 83, { x: 98, y: 128 }),
         };
         this.addButtons(buttons);
 
+        buttons.info.click.subscribe(() => this.showInfo());
         buttons.buy.click.subscribe(this.buyShip.bind(this));
         buttons.done.click.subscribe(this.done.bind(this));
 
@@ -143,6 +148,21 @@ export class Shipyard extends Menu<Entity> {
             buy: this.buyShip.bind(this),
             depart: this.done.bind(this),
         };
+    }
+
+    private async showInfo() {
+        const selection = this.itemGrid?.selection;
+        if (!selection) {
+            return;
+        }
+        this.suspendControls();
+        this.container.addChild(this.infoDialog.container);
+        try {
+            await this.infoDialog.show(selection);
+        } finally {
+            this.container.removeChild(this.infoDialog.container);
+            this.resumeControls();
+        }
     }
 
     private setShipSelected(shipTile: ItemTile<ShipData> | undefined) {
