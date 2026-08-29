@@ -16,7 +16,7 @@ import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
 import { MultiplayerData, replicationPolicies } from 'nova_ecs/plugins/multiplayer_plugin';
-import { MovementPhysicsComponent, MovementState, MovementStateComponent, MovementType } from 'nova_ecs/plugins/movement_plugin';
+import { MovementPhysicsComponent, MovementState, MovementStateComponent, MovementType, RemoteMovementPresentationComponent } from 'nova_ecs/plugins/movement_plugin';
 import { Time, TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { Query } from 'nova_ecs/query';
 import { v4 } from 'uuid';
@@ -52,7 +52,7 @@ import {
     applyOutfitPhysics,
     OutfitsStateComponent,
 } from './outfit_plugin';
-import { PlatformPlugin, PlatformResource } from './platform_plugin';
+import { Platform, PlatformPlugin, PlatformResource } from './platform_plugin';
 import { Stat } from './stat';
 import { makeShipExplosionBlast } from './ship_death_blast';
 
@@ -316,12 +316,37 @@ const ShipDeathBlastSystem = new System({
 });
 
 const MovementQuery = new Query([MovementStateComponent, Optional(BlastDamageComponent)] as const);
+function authorsMovementState(
+    platform: Platform,
+    owner: string | undefined,
+    isRemotePresentation: boolean,
+): boolean {
+    if (isRemotePresentation) {
+        return false;
+    }
+    if (owner === undefined) {
+        return true;
+    }
+    if (platform === 'node') {
+        return owner === 'server';
+    }
+    // Owning clients keep knockback. Observer copies are skipped above.
+    return owner !== 'server';
+}
+
 const KnockbackSystem = new System({
     name: 'KnockbackSystem',
     events: [DamagedEvent],
     args: [DamagedEvent, MovementStateComponent, MovementPhysicsComponent,
-        Optional(ShipPhysicsComponent), RunQuery] as const,
-    step({ damage, damager, scale = 1 }, movementState, movementPhysics, shipPhysics, runQuery) {
+        Optional(ShipPhysicsComponent), RunQuery,
+        Optional(MultiplayerData), PlatformResource,
+        Optional(RemoteMovementPresentationComponent)] as const,
+    step({ damage, damager, scale = 1 }, movementState, movementPhysics,
+        shipPhysics, runQuery, multiplayer, platform, presentation) {
+        if (!authorsMovementState(
+            platform, multiplayer?.owner, presentation !== undefined)) {
+            return;
+        }
         const val = runQuery(MovementQuery, damager);
         if (!val[0]) {
             return;

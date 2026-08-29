@@ -84,7 +84,11 @@ function recordOwnedShot(
         }
     } else {
         const logged = makeFireLogShot(
-            event, time.time, fired.position, fired.rotation);
+            event, time.time, fired.position, fired.rotation, {
+                sourceVelocity: fired.sourceVelocity,
+                target: fired.target,
+                inaccuracy: fired.inaccuracy,
+            });
         if (log) {
             pushShot(log.shots, logged);
         } else {
@@ -362,7 +366,11 @@ export const ServerFireIntentSystem = new System({
             }
             sync.spawnedSeqs.add(shot.seq);
             const logged = makeFireLogShot(
-                shot, time.time, fired.position, fired.rotation);
+                shot, time.time, fired.position, fired.rotation, {
+                    sourceVelocity: fired.sourceVelocity,
+                    target: fired.target,
+                    inaccuracy: fired.inaccuracy,
+                });
             if (log) {
                 pushShot(log.shots, logged);
             } else {

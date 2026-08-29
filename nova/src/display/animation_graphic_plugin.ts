@@ -3,7 +3,11 @@ import { Component } from "nova_ecs/component";
 import { AddEvent, DeleteEvent } from "nova_ecs/events";
 import { Optional } from "nova_ecs/optional";
 import { Plugin } from "nova_ecs/plugin";
-import { MovementStateComponent, MovementSystem } from "nova_ecs/plugins/movement_plugin";
+import {
+    MovementStateComponent,
+    MovementSystem,
+    RemoteMovementPresentationSystem,
+} from "nova_ecs/plugins/movement_plugin";
 import { Provide } from "nova_ecs/provide";
 import { ProvideAsync } from "nova_ecs/provide_async";
 import { System } from "nova_ecs/system";
@@ -91,7 +95,7 @@ export const ObjectDrawSystem = new System({
         graphic.container.position.y = movementState.position.y;
         graphic.rotation = movementState.rotation.angle;
     },
-    after: [MovementSystem],
+    after: [MovementSystem, RemoteMovementPresentationSystem],
 });
 
 const AnimationGraphicCleanup = new System({

@@ -91,9 +91,9 @@ describe('Energy transfer plugin', () => {
         expect(source.components.get(PlayerStateComponent)?.fuel).toBe(200);
         expect(target.components.get(PlayerStateComponent)?.fuel).toBe(150);
         expect(source.components.get(BoardingNoticeComponent)?.text)
-            .toContain('Transferred 100 energy to Capt. Bob');
+            .toContain('Transferred 100 energy to Bob');
         expect(target.components.get(BoardingNoticeComponent)?.text)
-            .toContain('Received 100 energy from Capt. Alice');
+            .toContain('Received 100 energy from Alice');
     });
 
     it('rejects transfer if target is too far away', () => {

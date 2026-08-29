@@ -221,6 +221,9 @@ class BeamWeaponEntry extends WeaponEntry {
         if (!shot) {
             throw new Error('Beam shots require deterministic creation data');
         }
+        if (shot.entityId && this.entities.has(shot.entityId)) {
+            return this.entities.get(shot.entityId);
+        }
         const { width, length } = this.data.beamAnimation;
         const beamPoly = new SAT.Polygon(new SAT.Vector(0, 0), [
             new SAT.Vector(-width / 2, 0),
@@ -266,7 +269,7 @@ class BeamWeaponEntry extends WeaponEntry {
         if (!reserveEntity(this.budget, beam, 'beam')) {
             return undefined;
         }
-        this.entities.set(v4(), beam);
+        this.entities.set(shot.entityId ?? v4(), beam);
         if (this.data.sound) {
             this.emit(SoundEvent, {
                 id: this.data.sound,

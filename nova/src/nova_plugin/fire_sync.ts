@@ -2,6 +2,7 @@ import * as t from 'io-ts';
 import { Component } from 'nova_ecs/component';
 import { Angle, AngleType } from 'nova_ecs/datatypes/angle';
 import { Position, PositionType } from 'nova_ecs/datatypes/position';
+import { Vector, VectorType } from 'nova_ecs/datatypes/vector';
 import { Entity } from 'nova_ecs/entity';
 import { Plugin } from 'nova_ecs/plugin';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
@@ -24,15 +25,22 @@ export type FireIntent = t.TypeOf<typeof FireIntent>;
 export const FireIntentComponent =
     new Component<FireIntent>('FireIntentComponent');
 
-export const FireLogShot = t.type({
-    seq: t.number,
-    weaponId: t.string,
-    seed: t.number,
-    exitIndex: t.number,
-    at: t.number,
-    position: PositionType,
-    rotation: AngleType,
-});
+export const FireLogShot = t.intersection([
+    t.type({
+        seq: t.number,
+        weaponId: t.string,
+        seed: t.number,
+        exitIndex: t.number,
+        at: t.number,
+        position: PositionType,
+        rotation: AngleType,
+    }),
+    t.partial({
+        sourceVelocity: VectorType,
+        target: t.string,
+        inaccuracy: t.number,
+    }),
+]);
 export type FireLogShot = t.TypeOf<typeof FireLogShot>;
 
 export const FireLog = t.type({
@@ -154,18 +162,69 @@ export function getFireSyncLocalState(
     return state;
 }
 
+export function loggedShotEntityId(source: string, seq: number): string {
+    return `shot:${source}:${seq}`;
+}
+
+export interface FireLogReplayTiming {
+    expired: boolean;
+    createdAt: number;
+    fastForwardMs: number;
+}
+
+/**
+ * Map a logged muzzle time onto the local clock. `createdAt` stays the
+ * authoritative fire stamp so lifespan ends together; `fastForwardMs` is how
+ * far the shot has already flown when this world first sees it.
+ */
+export function fireLogReplayTiming(
+    shotAt: number,
+    now: number,
+    durationMs: number,
+): FireLogReplayTiming {
+    if (!Number.isFinite(shotAt) || !Number.isFinite(now)
+        || !Number.isFinite(durationMs) || durationMs <= 0) {
+        return { expired: true, createdAt: shotAt, fastForwardMs: 0 };
+    }
+    const age = now - shotAt;
+    if (age >= durationMs) {
+        return { expired: true, createdAt: shotAt, fastForwardMs: durationMs };
+    }
+    return {
+        expired: false,
+        createdAt: shotAt,
+        fastForwardMs: Math.max(0, age),
+    };
+}
+
 export function makeFireLogShot(
     shot: FireIntentShot,
     at: number,
     position: Position,
     rotation: Angle,
+    extras: {
+        sourceVelocity?: Vector,
+        target?: string,
+        inaccuracy?: number,
+    } = {},
 ): FireLogShot {
-    return {
+    const logged: FireLogShot = {
         ...shot,
         at,
         position: Position.fromVectorLike(position),
         rotation: Angle.fromAngleLike(rotation),
     };
+    if (extras.sourceVelocity) {
+        logged.sourceVelocity = new Vector(
+            extras.sourceVelocity.x, extras.sourceVelocity.y);
+    }
+    if (extras.target) {
+        logged.target = extras.target;
+    }
+    if (extras.inaccuracy !== undefined) {
+        logged.inaccuracy = extras.inaccuracy;
+    }
+    return logged;
 }
 
 export const FireSyncPlugin: Plugin = {

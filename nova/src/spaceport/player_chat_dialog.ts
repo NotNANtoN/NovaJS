@@ -116,7 +116,7 @@ export class PlayerChatDialog extends Menu<Entity> {
         if (!this.target) {
             return;
         }
-        const name = `Capt. ${this.target.pilotName}`;
+        const name = this.target.pilotName;
         this.headerText.text = `Channel open to ${name} (${this.target.shipName})`;
 
         const historyMap = this.world?.resources.get(ChatHistoryResource);
@@ -126,7 +126,7 @@ export class PlayerChatDialog extends Menu<Entity> {
             this.logText.text = 'No recent messages. Type below to transmit.';
         } else {
             const recent = history.slice(-5);
-            this.logText.text = recent.map(m => `[Capt. ${m.fromName}]: ${m.text}`).join('\n');
+            this.logText.text = recent.map(m => `[${m.fromName}]: ${m.text}`).join('\n');
         }
 
         this.updateInputDisplay();

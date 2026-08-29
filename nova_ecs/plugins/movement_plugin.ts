@@ -3,7 +3,7 @@ import { Entities } from '../arg_types';
 import { EntityMap } from '../entity_map';
 import { Component } from '../component';
 import { Angle, AngleType } from '../datatypes/angle';
-import { Position, PositionType } from '../datatypes/position';
+import { BOUNDARY, Position, PositionType } from '../datatypes/position';
 import { Vector, VectorLike, VectorType } from '../datatypes/vector';
 import { Optional } from '../optional';
 import { Plugin } from '../plugin';
@@ -240,6 +240,18 @@ export function queueRemoteMovementSnapshot(
     }
 }
 
+const WORLD_PERIOD = BOUNDARY * 2;
+
+function shortestWrappedDelta(from: number, to: number): number {
+    let delta = to - from;
+    if (delta > BOUNDARY) {
+        delta -= WORLD_PERIOD;
+    } else if (delta < -BOUNDARY) {
+        delta += WORLD_PERIOD;
+    }
+    return delta;
+}
+
 function interpolateMovementState(
     before: MovementState,
     after: MovementState,
@@ -250,8 +262,10 @@ function interpolateMovementState(
     const discrete = amount < 1 ? before : after;
     return {
         position: new Position(
-            before.position.x * inverse + after.position.x * amount,
-            before.position.y * inverse + after.position.y * amount,
+            before.position.x + shortestWrappedDelta(
+                before.position.x, after.position.x) * amount,
+            before.position.y + shortestWrappedDelta(
+                before.position.y, after.position.y) * amount,
         ),
         velocity: new Vector(
             before.velocity.x * inverse + after.velocity.x * amount,

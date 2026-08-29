@@ -731,7 +731,7 @@ const DrawStatusBarTarget = new System({
                 ? governments.getCached(government.id)
                 : undefined;
             const subtitle = playerState?.pilotName
-                ? `Capt. ${playerState.pilotName}`
+                ? playerState.pilotName
                 : shipData.subtitle;
             statusBar.drawTarget(
                 targetLabel(

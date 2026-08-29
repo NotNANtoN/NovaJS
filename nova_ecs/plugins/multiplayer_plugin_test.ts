@@ -885,7 +885,9 @@ describe('Multiplayer Plugin', () => {
                 return;
             }
             const movement = decoded.right.delta?.get(uuid)
-                ?.componentDeltas?.has(MovementStateComponent.name);
+                ?.componentDeltas?.has(MovementStateComponent.name)
+                || decoded.right.delta?.get(uuid)
+                    ?.componentStates?.has(MovementStateComponent.name);
             if (movement) {
                 relayedSentAt = decoded.right.sentAt;
                 relayedMovementTime = decoded.right.movementTimestamps!.get(uuid);

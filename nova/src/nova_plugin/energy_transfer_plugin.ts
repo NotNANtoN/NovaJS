@@ -170,7 +170,7 @@ export const ServerEnergyTransferSystem = new System({
 
             // Notify recipient
             if (targetEntity) {
-                const senderName = sourcePlayer.pilotName ? `Capt. ${sourcePlayer.pilotName}` : 'a friendly ship';
+                const senderName = sourcePlayer.pilotName || 'a friendly ship';
                 targetEntity.components.set(BoardingNoticeComponent, {
                     text: `Received ${transferAmount} energy from ${senderName}.`,
                 });
@@ -179,8 +179,7 @@ export const ServerEnergyTransferSystem = new System({
 
         // Notify sender
         const recipientName = targetPlayer?.pilotName
-            ? `Capt. ${targetPlayer.pilotName}`
-            : (targetShipData?.name || 'target ship');
+            || (targetShipData?.name || 'target ship');
         entity.components.set(BoardingNoticeComponent, {
             text: `Transferred ${transferAmount} energy to ${recipientName}.`,
         });

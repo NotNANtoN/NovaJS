@@ -29,7 +29,7 @@ import { TargetComponent } from './target_component';
 import { WeaponsStateComponent } from './weapons_state';
 import { ArmorComponent } from './health_plugin';
 import { DestructionStartedComponent } from './destruction_state';
-import { FireLogShot } from './fire_sync';
+import { FireLogShot, fireLogReplayTiming, loggedShotEntityId } from './fire_sync';
 import { createShotRng, ShotRng } from './shot_rng';
 
 export const WeaponConstructors = new Resource<Map<WeaponData['type'],
@@ -262,12 +262,16 @@ export interface ShotCreation {
     inaccuracy: number;
     createdAt: number;
     fastForwardMs: number;
+    entityId?: string;
 }
 
 export interface FiredShot {
     entity: Entity;
     position: Position;
     rotation: Angle;
+    sourceVelocity: Vector;
+    target?: string;
+    inaccuracy: number;
 }
 
 export abstract class WeaponEntry {
@@ -411,7 +415,6 @@ export abstract class WeaponEntry {
             // TODO: Blindspots
         }
 
-        const baseRotation = Angle.fromAngleLike(angle);
         const inaccuracyOffset = inaccuracy
             ? sampleInaccuracy(this.data.accuracy, createShotRng(seed))
             : 0;
@@ -423,15 +426,32 @@ export abstract class WeaponEntry {
                 createdAt: time.time,
                 fastForwardMs: 0,
             });
-        return shot ? {
+        if (!shot) {
+            return undefined;
+        }
+        const spawned = shot.components.get(MovementStateComponent);
+        return {
             entity: shot,
-            position: Position.fromVectorLike(exitPoint),
-            rotation: baseRotation,
-        } : undefined;
+            position: spawned
+                ? Position.fromVectorLike(spawned.position)
+                : Position.fromVectorLike(exitPoint),
+            rotation: spawned
+                ? Angle.fromAngleLike(spawned.rotation)
+                : angle.add(inaccuracyOffset),
+            sourceVelocity: new Vector(movement.velocity.x, movement.velocity.y),
+            target,
+            inaccuracy: inaccuracyOffset,
+        };
     }
 
     fireFromLog(source: string, shot: FireLogShot,
         now: number): Entity | undefined {
+        const duration = 'shotDuration' in this.data
+            ? this.data.shotDuration : 0;
+        const timing = fireLogReplayTiming(shot.at, now, duration);
+        if (timing.expired) {
+            return undefined;
+        }
         const result = this.runQuery(FireLogSourceQuery, source)[0];
         if (!result) {
             return undefined;
@@ -441,8 +461,6 @@ export abstract class WeaponEntry {
         if (attackOriginLocked(destructionStarted, armor?.current)) {
             return undefined;
         }
-        const inaccuracy = sampleInaccuracy(
-            this.data.accuracy, createShotRng(shot.seed));
         const { exitPointData } = getNextExitpoint(
             movement,
             animation,
@@ -453,19 +471,23 @@ export abstract class WeaponEntry {
             },
             shot.exitIndex,
         );
+        const sourceVelocity = shot.sourceVelocity
+            ? new Vector(shot.sourceVelocity.x, shot.sourceVelocity.y)
+            : movement.velocity;
         return this.fire(
             Position.fromVectorLike(shot.position),
-            Angle.fromAngleLike(shot.rotation).add(inaccuracy),
+            Angle.fromAngleLike(shot.rotation),
             owner?.owner ?? source,
-            target?.target,
+            shot.target ?? target?.target,
             source,
-            movement.velocity,
+            sourceVelocity,
             exitPointData,
             {
                 seed: shot.seed,
-                inaccuracy,
-                createdAt: now,
-                fastForwardMs: 0,
+                inaccuracy: shot.inaccuracy ?? 0,
+                createdAt: timing.createdAt,
+                fastForwardMs: timing.fastForwardMs,
+                entityId: loggedShotEntityId(source, shot.seq),
             },
         );
     }

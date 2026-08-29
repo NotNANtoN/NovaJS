@@ -847,4 +847,99 @@ describe('player death', () => {
                 .toBeGreaterThan(index * 10);
         }
     });
+
+    it('does not knock a client-owned ship on the server', async () => {
+        const world = new World('server-knockback-authority');
+        world.resources.set(TimeResource, {
+            time: 0, delta_ms: 16, delta_s: 0.016, frame: 0,
+        });
+        await world.addPlugin(DeltaPlugin);
+        await world.addPlugin(DeathPlugin);
+        world.resources.set(PlatformResource, 'node');
+        world.entities.set('shooter', new Entity('shooter')
+            .addComponent(MovementStateComponent, {
+                accelerating: 0,
+                position: new Position(0, 0),
+                rotation: new Angle(0),
+                turnBack: false,
+                turning: 0,
+                velocity: new Vector(10, 0),
+            }));
+        world.entities.set('victim', new Entity('victim')
+            .addComponent(MultiplayerData, { owner: 'player' })
+            .addComponent(MovementStateComponent, {
+                accelerating: 0,
+                position: new Position(0, 0),
+                rotation: new Angle(0),
+                turnBack: false,
+                turning: 0,
+                velocity: new Vector(10, 0),
+            })
+            .addComponent(MovementPhysicsComponent, {
+                acceleration: 0,
+                maxVelocity: 200,
+                turnRate: 0,
+                movementType: MovementType.INERTIAL,
+            }));
+        world.emitNow(DamagedEvent, {
+            damage: {
+                shield: 0,
+                armor: 0,
+                ionization: 0,
+                ionizationColor: 0,
+                passThroughShield: 0,
+                knockback: 10,
+            },
+            damager: 'shooter',
+        }, ['victim']);
+        expect(world.entities.get('victim')!.components
+            .get(MovementStateComponent)!.velocity.x).toBe(10);
+    });
+
+    it('does not knock a remotely presented ship', async () => {
+        const world = new World('remote-knockback-authority');
+        world.resources.set(TimeResource, {
+            time: 0, delta_ms: 16, delta_s: 0.016, frame: 0,
+        });
+        await world.addPlugin(DeltaPlugin);
+        await world.addPlugin(DeathPlugin);
+        world.entities.set('shooter', new Entity('shooter')
+            .addComponent(MovementStateComponent, {
+                accelerating: 0,
+                position: new Position(0, 0),
+                rotation: new Angle(0),
+                turnBack: false,
+                turning: 0,
+                velocity: new Vector(10, 0),
+            }));
+        world.entities.set('victim', new Entity('victim')
+            .addComponent(RemoteMovementPresentationComponent, { snapshots: [] })
+            .addComponent(MovementStateComponent, {
+                accelerating: 0,
+                position: new Position(0, 0),
+                rotation: new Angle(0),
+                turnBack: false,
+                turning: 0,
+                velocity: new Vector(10, 0),
+            })
+            .addComponent(MovementPhysicsComponent, {
+                acceleration: 0,
+                maxVelocity: 200,
+                turnRate: 0,
+                movementType: MovementType.INERTIAL,
+            }));
+        world.emitNow(DamagedEvent, {
+            damage: {
+                shield: 0,
+                armor: 0,
+                ionization: 0,
+                ionizationColor: 0,
+                passThroughShield: 0,
+                knockback: 10,
+            },
+            damager: 'shooter',
+        }, ['victim']);
+        expect(world.entities.get('victim')!.components
+            .get(MovementStateComponent)!.velocity.x).toBe(10);
+    });
 });

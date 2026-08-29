@@ -161,6 +161,10 @@ class ProjectileWeaponEntry extends WeaponEntry {
                 .scale(this.data.physics.speed));
         }
 
+        if (shot.entityId && this.entities.has(shot.entityId)) {
+            return this.entities.get(shot.entityId);
+        }
+
         const projectile = this.factoryQueue.dequeue();
         if (!projectile) {
             return undefined;
@@ -223,7 +227,7 @@ class ProjectileWeaponEntry extends WeaponEntry {
             this.factoryQueue.enqueue(projectile);
             return undefined;
         }
-        this.entities.set(v4(), projectile);
+        this.entities.set(shot.entityId ?? v4(), projectile);
         if (this.data.sound) {
             this.emit(SoundEvent, {
                 id: this.data.sound,

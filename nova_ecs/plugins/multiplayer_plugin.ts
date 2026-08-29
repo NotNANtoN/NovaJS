@@ -677,9 +677,9 @@ function separateMovementSnapshot(
     delta: EntityDelta | undefined;
     movement: MovementState | undefined;
 } {
-    const encodedMovement = entityDelta.componentDeltas
+    const encodedMovement = entityDelta.componentStates
         ?.get(MovementStateComponent.name)
-        ?? entityDelta.componentStates?.get(MovementStateComponent.name);
+        ?? entityDelta.componentDeltas?.get(MovementStateComponent.name);
     let movement: MovementState | undefined;
     if (encodedMovement !== undefined) {
         const decodedState = MovementState.decode(encodedMovement);
@@ -1013,6 +1013,49 @@ export function multiplayer(communicator: Communicator,
                 }
             }
 
+            function rememberOwnerMovement(
+                uuid: string,
+                movementState: MovementState,
+                source: string,
+                owner: string,
+            ): void {
+                if (isAdmin && source === owner) {
+                    lastMovementWireState.set(
+                        uuid, quantizeMovementState(movementState));
+                }
+            }
+
+            function encodeReplicatedEntity(
+                entity: Entity,
+                uuid: string,
+                owner: string,
+            ): EncodedEntity {
+                const encoded = filterEncodedEntity(
+                    serializer.encode(entity),
+                    comms.uuid!,
+                    isAdmin,
+                    owner,
+                );
+                // The server may have integrated or knocked this ship locally
+                // for hit detection. Observers must see the owner's last
+                // accepted pose, not that competing copy.
+                if (!isAdmin || owner === comms.uuid) {
+                    return encoded;
+                }
+                const ownerMovement = lastMovementWireState.get(uuid);
+                if (!ownerMovement) {
+                    return encoded;
+                }
+                return {
+                    ...encoded,
+                    components: encoded.components.map(([name, value]) => (
+                        name === MovementStateComponent.name
+                            ? [name, MovementState.encode(ownerMovement)]
+                            : [name, value]
+                    ) as [string, unknown]),
+                };
+            }
+
             function randomAdmin() {
                 const remoteAdmins = [...comms.admins]
                     .filter(admin => admin !== comms.uuid);
@@ -1183,12 +1226,8 @@ export function multiplayer(communicator: Communicator,
                             stateMovementSequences.set(
                                 entityUuid, nextMovementSequence(entityUuid));
                         }
-                        return [entityUuid, filterEncodedEntity(
-                            serializer.encode(entity),
-                            comms.uuid!,
-                            isAdmin,
-                            owner,
-                        )];
+                        return [entityUuid, encodeReplicatedEntity(
+                            entity, entityUuid, owner)];
                     }));
 
                     sendMessage({
@@ -1387,6 +1426,10 @@ export function multiplayer(communicator: Communicator,
                             movement.sequence,
                         );
                     }
+                    if (decodedMovement && movementAccepted) {
+                        rememberOwnerMovement(
+                            uuid, decodedMovement, source, decodedOwner);
+                    }
 
                     const multiplayerData = entity.components.get(MultiplayerData);
                     if (!multiplayerData) {
@@ -1412,12 +1455,8 @@ export function multiplayer(communicator: Communicator,
                         // Forward the authoritative basis for a newly seen
                         // client-owned entity. Its movement metadata is
                         // restamped below just like a delta relay.
-                        relayedStates.set(uuid, filterEncodedEntity(
-                            serializer.encode(entity),
-                            comms.uuid!,
-                            isAdmin,
-                            multiplayerData.owner,
-                        ));
+                        relayedStates.set(uuid, encodeReplicatedEntity(
+                            entity, uuid, multiplayerData.owner));
                         if (entity.components.has(MovementStateComponent)) {
                             markMovement(uuid);
                         }
@@ -1507,6 +1546,10 @@ export function multiplayer(communicator: Communicator,
                                     movement.presentationTime,
                                     movement.sequence,
                                 );
+                            }
+                            if (separated.movement && movementAccepted) {
+                                rememberOwnerMovement(
+                                    uuid, separated.movement, source, owner);
                             }
                         }
                         if (delta) {
@@ -1619,12 +1662,8 @@ export function multiplayer(communicator: Communicator,
                     relayedStates.delete(uuid);
                     continue;
                 }
-                relayedStates.set(uuid, filterEncodedEntity(
-                    serializer.encode(entry.entity),
-                    comms.uuid!,
-                    isAdmin,
-                    entry.data.owner,
-                ));
+                relayedStates.set(uuid, encodeReplicatedEntity(
+                    entry.entity, uuid, entry.data.owner));
             }
 
             const delta = new Map<string, EntityDelta>(relayedDeltas);
@@ -1649,12 +1688,8 @@ export function multiplayer(communicator: Communicator,
                     continue;
                 }
 
-                state.set(uuid, filterEncodedEntity(
-                    serializer.encode(entity),
-                    comms.uuid,
-                    isAdmin,
-                    val.data.owner,
-                ));
+                state.set(uuid, encodeReplicatedEntity(
+                    entity, uuid, val.data.owner));
                 if (entity.components.has(MovementStateComponent)) {
                     markMovement(uuid);
                     lastMovementSnapshotAt.set(uuid, localTime);
@@ -1754,23 +1789,26 @@ export function multiplayer(communicator: Communicator,
                     && (lastSnapshot === undefined
                         || localTime - lastSnapshot >= movementSnapshotIntervalMs);
                 if (periodicSnapshotDue && movement) {
+                    const snapshot = quantizeMovementState(movement);
                     const previous = lastMovementWireState.get(uuid);
-                    const snapshot = previous
-                        ? quantizedMovementDelta(previous, movement)
-                        : quantizeMovementState(movement);
-                    if (snapshot) {
+                    const changed = previous === undefined
+                        || quantizedMovementDelta(previous, movement)
+                            !== undefined;
+                    if (changed) {
+                        // Send a complete pose, not a partial delta. A
+                        // velocity-only server mutation (knockback) must not
+                        // survive once the owner publishes again.
                         const snapshotDelta: EntityDelta = {
-                            componentDeltas: new Map([[
+                            componentStates: new Map([[
                                 MovementStateComponent.name,
-                                MovementStateDelta.encode(snapshot),
+                                MovementState.encode(snapshot),
                             ]]),
                         };
                         entityDelta = entityDelta
                             ? mergeEntityDeltas(entityDelta, snapshotDelta)
                             : snapshotDelta;
                         markMovement(uuid);
-                        lastMovementWireState.set(
-                            uuid, quantizeMovementState(movement));
+                        lastMovementWireState.set(uuid, snapshot);
                     }
                     lastMovementSnapshotAt.set(uuid, localTime);
                 }
@@ -1835,10 +1873,9 @@ export function multiplayer(communicator: Communicator,
                     if (!entry) {
                         continue;
                     }
-                    peerState.set(uuid, filterEncodedEntity(
-                        serializer.encode(entry.entity),
-                        comms.uuid!,
-                        isAdmin,
+                    peerState.set(uuid, encodeReplicatedEntity(
+                        entry.entity,
+                        uuid,
                         entry.entity.components
                             .get(MultiplayerData)?.owner ?? '',
                     ));

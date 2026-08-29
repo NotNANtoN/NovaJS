@@ -1,6 +1,12 @@
 import { Entity } from 'nova_ecs/entity';
+import { Angle } from 'nova_ecs/datatypes/angle';
+import { Position } from 'nova_ecs/datatypes/position';
+import { Vector } from 'nova_ecs/datatypes/vector';
 import {
+    fireLogReplayTiming,
     getFireSyncLocalState,
+    loggedShotEntityId,
+    makeFireLogShot,
     pushShot, appendShot, newShotsAfter } from './fire_sync';
 
 interface TestShot {
@@ -91,5 +97,54 @@ describe('appending a shot in place', () => {
         const shots = [{ seq: 1 }, { seq: 2 }];
         pushShot(shots, { seq: 2 }, 3);
         expect(shots.map(shot => shot.seq)).toEqual([1, 2]);
+    });
+});
+
+describe('fire log replay timing', () => {
+    it('fast-forwards by the age of the logged shot', () => {
+        expect(fireLogReplayTiming(1_000, 1_250, 2_000)).toEqual({
+            expired: false,
+            createdAt: 1_000,
+            fastForwardMs: 250,
+        });
+    });
+
+    it('does not rewind a shot that has not been fired yet locally', () => {
+        expect(fireLogReplayTiming(1_000, 900, 2_000)).toEqual({
+            expired: false,
+            createdAt: 1_000,
+            fastForwardMs: 0,
+        });
+    });
+
+    it('skips a shot whose lifetime has already elapsed', () => {
+        expect(fireLogReplayTiming(1_000, 3_000, 1_500).expired).toBeTrue();
+    });
+});
+
+describe('logged shot identity', () => {
+    it('is stable for the same source and sequence', () => {
+        expect(loggedShotEntityId('ship-a', 7))
+            .toBe(loggedShotEntityId('ship-a', 7));
+        expect(loggedShotEntityId('ship-a', 7))
+            .not.toBe(loggedShotEntityId('ship-b', 7));
+    });
+
+    it('records source velocity and target on the logged shot', () => {
+        const logged = makeFireLogShot(
+            { seq: 3, weaponId: 'nova:128', seed: 9, exitIndex: 1 },
+            500,
+            new Position(10, 20),
+            new Angle(0.5),
+            {
+                sourceVelocity: new Vector(3, -4),
+                target: 'victim',
+                inaccuracy: 0.02,
+            },
+        );
+        expect(logged.sourceVelocity).toEqual(new Vector(3, -4));
+        expect(logged.target).toBe('victim');
+        expect(logged.inaccuracy).toBe(0.02);
+        expect(logged.position).toEqual(new Position(10, 20));
     });
 });

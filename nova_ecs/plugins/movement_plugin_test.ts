@@ -21,6 +21,7 @@ import {
     quantizeMovementState,
     RemoteMovementPresentationComponent,
     RemoteMovementPresentationSystem,
+    sampleRemoteMovement,
 } from './movement_plugin';
 import { MAX_WALL_CLOCK_DELTA_MS, TimePlugin } from './time_plugin';
 
@@ -272,6 +273,31 @@ describe('Movement Plugin', () => {
         expect(delta?.position).toEqual(new Position(10.25, 20));
         expect(delta?.velocity).toBeUndefined();
         expect(delta?.rotation).toBeUndefined();
+    });
+
+    it('interpolates remote movement across the system wrap', () => {
+        const physics = {
+            maxVelocity: 500,
+            turnRate: 1,
+            acceleration: 1,
+            movementType: MovementType.INERTIAL,
+        };
+        const pose = (x: number) => ({
+            position: new Position(x, 0),
+            velocity: new Vector(0, 0),
+            rotation: new Angle(0),
+            turning: 0,
+            turnBack: false,
+            accelerating: 0,
+        });
+        const sampled = sampleRemoteMovement({
+            snapshots: [
+                { serverTime: 0, state: pose(9900) },
+                { serverTime: 100, state: pose(-9900) },
+            ],
+        }, 50, physics, world.entities);
+        expect(sampled).toBeDefined();
+        expect(Math.abs(sampled!.position.x)).toBeGreaterThan(9000);
     });
 
     it('can clear an optional movement value with a partial delta', () => {

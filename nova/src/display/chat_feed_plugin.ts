@@ -68,7 +68,7 @@ export const ChatReceiveSystem = new System({
 
         if (typeof document !== 'undefined') {
             const sender = entry.fromName?.trim() || 'Captain';
-            const formatted = `[Capt. ${sender}]: ${entry.text}`;
+            const formatted = `[${sender}]: ${entry.text}`;
             const textSprite = new PIXI.Text(formatted, CHAT_FONT);
             container.addChild(textSprite);
 
