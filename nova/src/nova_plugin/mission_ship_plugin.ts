@@ -432,6 +432,7 @@ const MissionShipChaseOffSystem = new System({
         Optional(PlayerStoreResource),
         MissionRuntimeResource,
         PlatformResource,
+        SingletonComponent,
     ] as const,
     step(jump, players, playerStore, runtime, platform) {
         if (platform !== 'node') {

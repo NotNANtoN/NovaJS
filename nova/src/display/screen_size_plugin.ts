@@ -2,6 +2,7 @@ import { Resource } from 'nova_ecs/resource';
 import { EcsEvent } from 'nova_ecs/events';
 import { Plugin } from 'nova_ecs/plugin';
 import { System } from 'nova_ecs/system';
+import { SingletonComponent } from 'nova_ecs/world';
 
 export const ResizeEvent = new EcsEvent<{ x: number, y: number }>('Resize');
 export const ScreenSize = new Resource<{ x: number, y: number }>('ScreenSize');
@@ -9,7 +10,7 @@ export const ScreenSize = new Resource<{ x: number, y: number }>('ScreenSize');
 const ResizeSystem = new System({
     name: 'ResizeSystem',
     events: [ResizeEvent],
-    args: [ResizeEvent, ScreenSize] as const,
+    args: [ResizeEvent, ScreenSize, SingletonComponent] as const,
     step({ x, y }, screenSize) {
         screenSize.x = x;
         screenSize.y = y;

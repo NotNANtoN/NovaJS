@@ -424,7 +424,7 @@ function findShipUuid(
 const TrackDamageSourcesSystem = new System({
     name: "TrackNpcDamageSources",
     before: [CollisionSystem],
-    args: [DamageSourcesQuery, Entities] as const,
+    args: [DamageSourcesQuery, Entities, SingletonComponent] as const,
     step(sources, entities) {
         for (const [
             hitter, uuid, source, owner, ship, intent,

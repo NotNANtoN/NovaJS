@@ -7,6 +7,7 @@ import { Plugin } from "nova_ecs/plugin";
 import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
 import { Resource } from "nova_ecs/resource";
 import { System } from "nova_ecs/system";
+import { SingletonComponent } from "nova_ecs/world";
 import * as PIXI from "pixi.js";
 import RBush, { BBox } from "rbush";
 import { alea } from 'seedrandom';
@@ -184,7 +185,7 @@ export function starfield({ density = 0.00002,
     const StarfieldResize = new System({
         name: 'StarfieldResize',
         events: [ResizeEvent],
-        args: [StarfieldResource, ResizeEvent] as const,
+        args: [StarfieldResource, ResizeEvent, SingletonComponent] as const,
         step(starfield, { x, y }) {
             starfield.resize(x, y);
         }

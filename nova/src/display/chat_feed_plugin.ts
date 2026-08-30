@@ -104,6 +104,7 @@ export const ChatHudUpdateSystem = new System({
         Stage,
         TimeResource,
         ScreenSize,
+        SingletonComponent,
     ] as const,
     step(hudMessages, stage, time, screenSize) {
         const container = stage.getChildByName('ChatHudContainer') as PIXI.Container | null;

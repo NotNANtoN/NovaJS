@@ -7,6 +7,7 @@ import { Query } from 'nova_ecs/query';
 import { Resource } from 'nova_ecs/resource';
 import { System } from 'nova_ecs/system';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
+import { SingletonComponent } from 'nova_ecs/world';
 
 import { AppliedDamageEvent, DeathEvent } from './death_plugin';
 import { GameDataResource } from './game_data_resource';
@@ -244,7 +245,7 @@ export const PlayerCrimeBoardingSystem = new System({
  */
 const LedgerSweepSystem = new System({
     name: 'LegalLedgerSweep',
-    args: [LegalLedgerResource, Entities, TimeResource, PlatformResource] as const,
+    args: [LegalLedgerResource, Entities, TimeResource, PlatformResource, SingletonComponent] as const,
     step(ledger, entities, time, platform) {
         if (platform !== 'node') {
             return;

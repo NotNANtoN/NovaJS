@@ -12,6 +12,7 @@ import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { Query } from "nova_ecs/query";
 import { Resource } from "nova_ecs/resource";
 import { System } from "nova_ecs/system";
+import { SingletonComponent } from "nova_ecs/world";
 import * as PIXI from "pixi.js";
 import { GameData } from "../client/gamedata/GameData";
 import { GameDataResource } from "../nova_plugin/game_data_resource";
@@ -631,7 +632,7 @@ export const StatusBarResource = new Resource<StatusBar>('StatusBar');
 const StatusBarResize = new System({
     name: 'StatusBarResize',
     events: [ResizeEvent],
-    args: [StatusBarResource, ResizeEvent] as const,
+    args: [StatusBarResource, ResizeEvent, SingletonComponent] as const,
     step({ container }, { x }) {
         container.position.x = x - container.width + 1;
         container.position.y = 0;
@@ -746,7 +747,7 @@ const DrawStatusBarNavigation = new System({
 const DrawLandingMessage = new System({
     name: 'DrawLandingMessage',
     events: [LandingResultEvent],
-    args: [LandingResultEvent, StatusBarResource, TimeResource] as const,
+    args: [LandingResultEvent, StatusBarResource, TimeResource, SingletonComponent] as const,
     step(result, statusBar, time) {
         statusBar.showLandingMessage(landingResultMessage(result), time.time);
     },
@@ -766,7 +767,7 @@ const ShowJumpRefusal = new System({
 
 const ExpireLandingMessage = new System({
     name: 'ExpireLandingMessage',
-    args: [StatusBarResource, TimeResource] as const,
+    args: [StatusBarResource, TimeResource, SingletonComponent] as const,
     step(statusBar, time) {
         statusBar.updateLandingMessage(time.time);
     },
