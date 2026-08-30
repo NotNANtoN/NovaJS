@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { execSync } from "node:child_process";
 import { build } from "esbuild";
 import { packedPngPlugin } from "./packed_png_plugin.mjs";
 
@@ -9,6 +10,16 @@ const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 const distPath = path.join(projectRoot, "dist");
 
 await mkdir(distPath, { recursive: true });
+
+let commitHash = "dev";
+let commitMessage = "local development";
+let commitDate = new Date().toISOString().slice(0, 10);
+
+try {
+    commitHash = execSync("git rev-parse --short HEAD", { cwd: projectRoot, encoding: "utf8" }).trim();
+    commitMessage = execSync('git log -1 --format="%s"', { cwd: projectRoot, encoding: "utf8" }).trim();
+    commitDate = execSync('git log -1 --format="%cd" --date=short', { cwd: projectRoot, encoding: "utf8" }).trim();
+} catch {}
 
 
 // Bun/npm may install a second copy of the @pixi/* packages nested inside
@@ -44,6 +55,11 @@ const dedupePixiPlugin = {
 const commonOptions = {
     absWorkingDir: projectRoot,
     bundle: true,
+    define: {
+        __BUILD_COMMIT__: JSON.stringify(commitHash),
+        __BUILD_MESSAGE__: JSON.stringify(commitMessage),
+        __BUILD_DATE__: JSON.stringify(commitDate),
+    },
     logLevel: "info",
     plugins: [packedPngPlugin(projectRoot), dedupePixiPlugin],
     resolveExtensions: [".mjs", ".js", ".ts", ".tsx", ".jsx"],

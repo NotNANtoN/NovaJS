@@ -8,6 +8,7 @@ import {
     getMasterVolume,
     setMasterVolume,
 } from '../display/music';
+import { getBuildInfo } from './build_info';
 
 export const THEMED_BUTTON_STYLE = `
     box-sizing: border-box; min-height: 40px; padding: 7px 20px;
@@ -812,6 +813,7 @@ export class RetailMenuDialogs {
             'Credits and preservation context',
         );
         heading.id = 'nova-about-heading';
+        const buildInfo = getBuildInfo();
         const credits = document.createElement('div');
         credits.style.cssText = `
           ${FIELD_STYLE} padding: 17px 20px; color: #d3ccbf;
@@ -820,7 +822,7 @@ export class RetailMenuDialogs {
         credits.innerHTML = `
           <h3 style="margin:0 0 5px;color:#efc9ac;font-size:15px;
               letter-spacing:.08em">ORIGINAL ESCAPE VELOCITY: NOVA</h3>
-          <p style="margin:0 0 15px">
+          <p style="margin:0 0 12px">
             Created by Matt Burch and ATMOS Software; published by Ambrosia
             Software. Original game names, artwork, writing, and other
             materials are credited to their respective creators and rights
@@ -833,7 +835,7 @@ export class RetailMenuDialogs {
             Soulanille, maintained separately from the original commercial
             release for engineering and preservation purposes.
           </p>
-          <p style="margin:0">
+          <p style="margin:0 0 14px">
             <a href="https://github.com/mattsoulanille/NovaJS"
               target="_blank" rel="noopener noreferrer"
               style="color:#efb77f">Upstream NovaJS</a>
@@ -841,6 +843,12 @@ export class RetailMenuDialogs {
             <a href="https://github.com/NotNANtoN/NovaJS"
               target="_blank" rel="noopener noreferrer"
               style="color:#efb77f">This fork</a>
+          </p>
+          <h3 style="margin:0 0 5px;color:#efc9ac;font-size:13px;
+              letter-spacing:.08em">BUILD INFORMATION</h3>
+          <p style="margin:0;font-size:12px;color:#cfc8ba;line-height:1.4">
+            <span style="color:#e0a472">Commit:</span> <code>${buildInfo.commit}</code> — ${buildInfo.message}<br>
+            <span style="color:#e0a472">Updated:</span> ${buildInfo.date}
           </p>
         `;
         const note = document.createElement('p');
