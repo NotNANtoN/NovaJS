@@ -145,33 +145,19 @@ class GameDataAggregator implements GameDataInterface {
             }
         }
 
-        const outfit = this.preloadResource(NovaDataType.Outfit);
-        const ships = this.preloadResource(NovaDataType.Ship);
-        const systems = this.preloadResource(NovaDataType.System);
-        const planets = this.preloadResource(NovaDataType.Planet);
-        const govts = this.preloadResource(NovaDataType.Govt);
-        const weapons = this.preloadResource(NovaDataType.Weapon);
-        const missions = this.preloadResource(NovaDataType.Mission);
-        const stringLists = this.preloadResource(NovaDataType.StringList);
-        const junks = this.preloadResource(NovaDataType.Junk);
-        const pers = this.preloadResource(NovaDataType.Pers);
-        const explosions = this.preloadResource(NovaDataType.Explosion);
-        const spriteSheetFrames = this.preloadResource(NovaDataType.SpriteSheetFrames);
-        const targetCorners = this.preloadResource(NovaDataType.TargetCorners);
-
-        preloadData.Outfit = await outfit;
-        preloadData.Ship = await ships;
-        preloadData.System = await systems;
-        preloadData.Planet = await planets;
-        preloadData.Govt = await govts;
-        preloadData.Weapon = await weapons;
-        preloadData.Mission = await missions;
-        preloadData.StringList = await stringLists;
-        preloadData.Junk = await junks;
-        preloadData.Pers = await pers;
-        preloadData.Explosion = await explosions;
-        preloadData.SpriteSheetFrames = await spriteSheetFrames;
-        preloadData.TargetCorners = await targetCorners;
+        preloadData.Outfit = await this.preloadResource(NovaDataType.Outfit);
+        preloadData.Ship = await this.preloadResource(NovaDataType.Ship);
+        preloadData.System = await this.preloadResource(NovaDataType.System);
+        preloadData.Planet = await this.preloadResource(NovaDataType.Planet);
+        preloadData.Govt = await this.preloadResource(NovaDataType.Govt);
+        preloadData.Weapon = await this.preloadResource(NovaDataType.Weapon);
+        preloadData.Mission = await this.preloadResource(NovaDataType.Mission);
+        preloadData.StringList = await this.preloadResource(NovaDataType.StringList);
+        preloadData.Junk = await this.preloadResource(NovaDataType.Junk);
+        preloadData.Pers = await this.preloadResource(NovaDataType.Pers);
+        preloadData.Explosion = await this.preloadResource(NovaDataType.Explosion);
+        preloadData.SpriteSheetFrames = await this.preloadResource(NovaDataType.SpriteSheetFrames);
+        preloadData.TargetCorners = await this.preloadResource(NovaDataType.TargetCorners);
         return preloadData;
     }
 
@@ -179,10 +165,17 @@ class GameDataAggregator implements GameDataInterface {
         const allIds = await this.ids;
         const ids = allIds[dataType] ?? [];
 
-        const loaded = await Promise.all(ids.map(async (id) => {
-            const data = await this.data[dataType]!.get(id);
-            return [id, data];
-        }));
+        const CHUNK_SIZE = 32;
+        const loaded: Array<[string, any]> = [];
+        for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+            const chunk = ids.slice(i, i + CHUNK_SIZE);
+            const chunkResults = await Promise.all(chunk.map(async (id) => {
+                const data = await this.data[dataType]!.get(id);
+                return [id, data] as const;
+            }));
+            loaded.push(...chunkResults);
+        }
+
         return Object.fromEntries(loaded) as {
             [index: string]: GettableData<NovaDataInterface[Data]>
         };
