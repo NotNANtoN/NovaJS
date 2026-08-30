@@ -155,6 +155,9 @@ class GameDataAggregator implements GameDataInterface {
         const stringLists = this.preloadResource(NovaDataType.StringList);
         const junks = this.preloadResource(NovaDataType.Junk);
         const pers = this.preloadResource(NovaDataType.Pers);
+        const explosions = this.preloadResource(NovaDataType.Explosion);
+        const spriteSheetFrames = this.preloadResource(NovaDataType.SpriteSheetFrames);
+        const targetCorners = this.preloadResource(NovaDataType.TargetCorners);
 
         preloadData.Outfit = await outfit;
         preloadData.Ship = await ships;
@@ -166,6 +169,9 @@ class GameDataAggregator implements GameDataInterface {
         preloadData.StringList = await stringLists;
         preloadData.Junk = await junks;
         preloadData.Pers = await pers;
+        preloadData.Explosion = await explosions;
+        preloadData.SpriteSheetFrames = await spriteSheetFrames;
+        preloadData.TargetCorners = await targetCorners;
         return preloadData;
     }
 

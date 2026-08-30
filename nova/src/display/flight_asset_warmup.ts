@@ -161,6 +161,26 @@ export async function warmFlightAssets({
         await visitOutfit(outfitId);
     }
 
+    // Preload all weapon entries and explosion sprite sheets in the game so any
+    // ship jumping in (such as a Thunderbird with lances or cruisers with heavy beams)
+    // has its WeaponEntries initialized and its combat textures cached immediately.
+    const allIds = await tryGet(() => gameData.ids);
+    if (allIds?.Weapon) {
+        for (const weaponId of allIds.Weapon) {
+            await visitWeapon(weaponId);
+        }
+    }
+    if (allIds?.Explosion) {
+        for (const explosionId of allIds.Explosion) {
+            await visitExplosion(explosionId);
+        }
+    }
+    if (allIds?.Ship) {
+        for (const shipId of allIds.Ship) {
+            await visitShip(shipId);
+        }
+    }
+
     await Promise.all([...sheets].map(async id => {
         const frames = await tryGet(() =>
             gameData.data.SpriteSheetFrames.get(id));
