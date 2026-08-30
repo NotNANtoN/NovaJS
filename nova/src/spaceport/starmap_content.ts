@@ -31,6 +31,7 @@ export interface StarmapPanelInput {
     government?: GovtData;
     legalRecords?: Readonly<Record<string, number>>;
     gameDate?: number;
+    transmissions?: readonly string[];
 }
 
 export interface StarmapPanelData {
@@ -43,6 +44,7 @@ export interface StarmapPanelData {
     ports: string[];
     navigationHazards?: string;
     date?: string;
+    transmissions?: string[];
 }
 
 /**
@@ -175,6 +177,7 @@ export function starmapPanelData(
         ports: starmapPorts(planets),
         navigationHazards: navigationHazard(input.system.asteroidDensity),
         date,
+        transmissions: input.transmissions ? [...input.transmissions] : undefined,
     };
 }
 
@@ -218,6 +221,9 @@ export function starmapPanelText(
         panel.government ?? 'Independent',
         ...(panel.legalStatus
             ? ['', 'Legal Status:', panel.legalStatus]
+            : []),
+        ...(panel.transmissions && panel.transmissions.length > 0
+            ? ['', 'Active Transmissions:', ...panel.transmissions]
             : []),
         '',
         'Goods Traded:',

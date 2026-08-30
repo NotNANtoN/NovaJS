@@ -137,11 +137,11 @@ function heldTons(world: World, commodity: string): number {
 describe('asteroids', () => {
     it('scales the belt with the system density', () => {
         expect(asteroidCountForDensity(0)).toBe(0);
-        expect(asteroidCountForDensity(2)).toBe(3);
-        // A maximum-density field fills retail's per-system budget.
-        expect(asteroidCountForDensity(10)).toBe(16);
-        // Retail stores 0-10; anything larger is clamped.
-        expect(asteroidCountForDensity(100)).toBe(16);
+        expect(asteroidCountForDensity(2)).toBe(6);
+        // A maximum-density field fills the modern per-system budget.
+        expect(asteroidCountForDensity(10)).toBe(32);
+        // Anything larger is clamped.
+        expect(asteroidCountForDensity(100)).toBe(32);
     });
 
     it('keeps a rock in the thinnest field', () => {

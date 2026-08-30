@@ -176,6 +176,20 @@ describe('starmap information content', () => {
         expect(text.bottom).not.toContain('Navigation Hazards');
     });
 
+    it('includes active transmissions in the panel body when present', () => {
+        const text = starmapPanelText(starmapPanelData({
+            system,
+            currentSystemId: system.id,
+            known: true,
+            planets: [port],
+            government,
+            transmissions: ['[SOS] Captain Jack: MAYDAY', '[PILOT] Commander Sarah: in orbit'],
+        }));
+        expect(text.body).toContain('Active Transmissions:');
+        expect(text.body).toContain('[SOS] Captain Jack: MAYDAY');
+        expect(text.body).toContain('[PILOT] Commander Sarah: in orbit');
+    });
+
     it('truncates long port lists between stellar names', () => {
         expect(formatStarmapPorts(
             ['Viking', 'Spacedock II', 'A Very Long Stellar Name'], 22,

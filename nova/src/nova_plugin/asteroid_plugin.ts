@@ -39,12 +39,12 @@ const ASTEROID_DRIFT_SPEED = 30;
 /** Radius of the belt around the system centre. */
 const ASTEROID_BELT_RADIUS = 4_000;
 /**
- * Asteroids spawned per point of a system's density field. Retail caps a
- * system at 16 rocks, so a maximum-density field fills that budget exactly.
+ * Asteroids spawned per point of a system's density field. Modern fields double
+ * classic density to fill wide resolutions nicely while respecting system scale.
  */
-const ASTEROIDS_PER_DENSITY = 1.6;
-/** Retail's per-system asteroid limit. */
-export const MAX_ASTEROIDS_PER_SYSTEM = 16;
+const ASTEROIDS_PER_DENSITY = 3.2;
+/** Per-system asteroid limit for modern viewports. */
+export const MAX_ASTEROIDS_PER_SYSTEM = 32;
 /** Radians per second an asteroid tumbles. */
 const ASTEROID_MAX_SPIN = 0.6;
 /** Ore floats slower than the rock it came from. */

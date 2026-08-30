@@ -54,6 +54,7 @@ import { PlayerShipSelector } from './player_ship_plugin';
 import { ShipComponent, ShipDataComponent } from './ship_plugin';
 import { TargetComponent } from './target_component';
 import { WeaponsStateComponent } from './weapons_state';
+import { DerelictComponent } from './derelict_plugin';
 
 export const BOARDING_STANDOFF = 80;
 export const BOARDING_TOLERANCE = 20;
@@ -383,6 +384,7 @@ const DisabledBoardingTargets = new Query([
     Optional(ArmorComponent),
     Optional(ShipDataComponent),
     Optional(ShipComponent),
+    Optional(DerelictComponent),
 ] as const, 'DisabledBoardingTargets');
 
 export const PlayerBoardingInputSystem = new System({
@@ -471,15 +473,19 @@ export const PlayerBoardingSystem = new System({
         let capturedShip: string | undefined;
         let resisted: boolean | undefined;
 
+        const isDerelict = Boolean(victim[9]);
         if (isNpc && (victimShip || victimShipData)) {
             const victimShipId = victimShip?.id ?? victimShipData?.id ?? 'nova:128';
-            const shipName = victimShipData?.name ?? 'Ship';
+            const rawName = victimShipData?.name ?? 'Ship';
+            const shipName = isDerelict ? `Derelict ${rawName}` : rawName;
             const currentEscorts = player.escorts ?? [];
             const maxEscorts = 6;
             if (currentEscorts.length < maxEscorts) {
                 const playerCrew = (player.kills ?? 0) > 10 ? 25 : 15;
-                const victimCrew = victimShipData?.crew ?? 5;
-                const captureChance = Math.min(0.9, Math.max(0.35, (playerCrew + 10) / (playerCrew + victimCrew + 10)));
+                const victimCrew = isDerelict ? 0 : (victimShipData?.crew ?? 5);
+                const captureChance = isDerelict
+                    ? 0.85
+                    : Math.min(0.9, Math.max(0.35, (playerCrew + 10) / (playerCrew + victimCrew + 10)));
                 if (Math.random() < captureChance) {
                     const dailyPay = Math.max(10, Math.floor((victimShipData?.cost ?? 50000) * 0.001));
                     const newContract = {

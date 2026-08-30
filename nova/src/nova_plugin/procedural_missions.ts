@@ -8,7 +8,26 @@ import {
 } from 'novadatainterface/MissionData';
 import { clampRandom } from '../common/random';
 
-export type ProceduralMissionType = 'cargo' | 'rush' | 'passenger';
+export type ProceduralMissionType = 'cargo' | 'rush' | 'passenger' | 'bounty';
+
+const OUTLAW_NAMES = [
+    "Vance 'Reaper' Stone",
+    "Captain Silas Drake",
+    "Kallum the Red",
+    "Dread Corsair Vane",
+    "Renegade Ace Hawke",
+    "Syndicate Raider Jax",
+    "Baron Von Kroll",
+    "Black Nova Marauder",
+];
+
+const OUTLAW_SHIPS = [
+    { id: 'nova:132', name: 'Pirate Viper' },
+    { id: 'nova:133', name: 'Valkyrie' },
+    { id: 'nova:134', name: 'Thunderbird' },
+    { id: 'nova:141', name: 'Heavy Raider' },
+    { id: 'nova:144', name: 'Marauder' },
+];
 
 export interface ProceduralSystem {
     id: string;
@@ -198,9 +217,52 @@ export function generateProceduralMissions(
         const candidate = candidates[
             Math.floor(clampRandom(random()) * candidates.length)]!;
         const kindRoll = clampRandom(random());
-        const type: ProceduralMissionType = kindRoll < 0.2
+        if (kindRoll < 0.15) {
+            const outlaw = OUTLAW_NAMES[Math.floor(clampRandom(random()) * OUTLAW_NAMES.length)];
+            const outlawShip = OUTLAW_SHIPS[Math.floor(clampRandom(random()) * OUTLAW_SHIPS.length)];
+            const pay = Math.max(15_000, Math.round(
+                20_000 + candidate.distance * 12_000 + clampRandom(random()) * 25_000));
+            const title = `BOUNTY: ${outlaw} (${outlawShip.name})`;
+            const briefText = `A bounty of ${pay} credits has been posted for the destruction of ${outlaw}, piloting a ${outlawShip.name} last sighted in the ${candidate.systemId} system. Terminate the target to collect.`;
+            const deadline = Math.max(6, candidate.distance * 5);
+            const mission: MissionData = {
+                ...getDefaultMissionData(),
+                id: `proc:${boardSeed}:${index}`,
+                prefix: 'proc',
+                name: title,
+                availStel: -1,
+                availLoc: 0,
+                availRandom: 100,
+                travelStel: -1,
+                returnStel: -1,
+                destination: -1,
+                returnDestination: -1,
+                payVal: pay,
+                pay,
+                briefText,
+                quickBrief: `Bounty: ${outlaw} (${pay} cr)`,
+                offerText: briefText,
+                timeLimit: deadline,
+                shipGoal: 1,
+                shipCount: 1,
+                shipSyst: candidate.systemId,
+                shipId: outlawShip.id,
+                canAbort: true,
+                displayWeight: 1,
+            };
+            offers.push({
+                mission,
+                destinationPlanetId: candidate.planet.id,
+                destinationSystemId: candidate.systemId,
+                jumpDistance: candidate.distance,
+                type: 'bounty',
+                available: true,
+            });
+            continue;
+        }
+        const type: ProceduralMissionType = kindRoll < 0.35
             ? 'passenger'
-            : kindRoll < 0.5 ? 'rush' : 'cargo';
+            : kindRoll < 0.65 ? 'rush' : 'cargo';
         const commodity = randomCommodity(random);
         const normalMaximum = type === 'passenger'
             ? Math.min(4, Math.max(1, freeSpace))

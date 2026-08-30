@@ -56,5 +56,30 @@ describe('procedural mission generation', () => {
         expect(nextDate.map(offer => offer.mission.id))
             .not.toEqual(first.map(offer => offer.mission.id));
     });
+
+    it('generates bounty missions with target ship goals and high payouts', () => {
+        let foundBounty = false;
+        for (let day = 0; day < 20; day++) {
+            const offers = generateProceduralMissions({
+                currentSystemId: 'nova:1',
+                currentPlanetId: 'nova:10',
+                gameDate: day,
+                systems,
+                planets,
+                freeSpace: 10,
+            });
+            const bounty = offers.find(o => o.type === 'bounty');
+            if (bounty) {
+                foundBounty = true;
+                expect(bounty.available).toBe(true);
+                expect(bounty.mission.shipGoal).toBe(1);
+                expect(bounty.mission.shipCount).toBe(1);
+                expect(bounty.mission.name).toContain('BOUNTY:');
+                expect(bounty.mission.payVal).toBeGreaterThanOrEqual(15_000);
+                break;
+            }
+        }
+        expect(foundBounty).toBe(true);
+    });
 });
 

@@ -181,12 +181,19 @@ export function getMissionDestinationMarkers(
     return markers;
 }
 
+export interface StarmapPlayerMarker {
+    name: string;
+    systemId: string;
+    kind?: 'coords' | 'sos' | 'normal';
+}
+
 function drawSystem(
     system: SystemData,
     graphics: PIXI.Graphics,
     scale: number,
     currentSystem: string,
     missionMarker?: MissionMarkerType,
+    playerMarkers?: readonly StarmapPlayerMarker[],
 ) {
     // Use blue if the system has a planet. Otherwise, grey.
     // TODO: Check if the planet is inhabited.
@@ -209,6 +216,19 @@ function drawSystem(
     graphics.beginFill(inColor);
     graphics.drawCircle(0, 0, 1.8 * scale);
     graphics.endFill();
+
+    if (playerMarkers && playerMarkers.length > 0) {
+        const hasSos = playerMarkers.some(p => p.kind === 'sos');
+        const markerColor = hasSos ? 0xff4400 : 0x28ffaa;
+        graphics.lineStyle(1, 0x000000);
+        graphics.beginFill(markerColor);
+        // Draw player chevron / beacon symbol on top right of the system circle
+        graphics.moveTo(5 * scale, -5 * scale);
+        graphics.lineTo(8.5 * scale, -8.5 * scale);
+        graphics.lineTo(8.5 * scale, -2.5 * scale);
+        graphics.closePath();
+        graphics.endFill();
+    }
 
     if (missionMarker) {
         const markerColor = missionMarker === 'passenger'
@@ -417,6 +437,24 @@ class SystemGraph {
         }
     }
 
+    private playerMarkers = new Map<string, StarmapPlayerMarker[]>();
+
+    setPlayerMarkers(markers: readonly StarmapPlayerMarker[] | undefined, redraw = true) {
+        const bySystem = new Map<string, StarmapPlayerMarker[]>();
+        for (const m of markers ?? []) {
+            let list = bySystem.get(m.systemId);
+            if (!list) {
+                list = [];
+                bySystem.set(m.systemId, list);
+            }
+            list.push(m);
+        }
+        this.playerMarkers = bySystem;
+        if (redraw) {
+            this.draw();
+        }
+    }
+
     setMissionMarkers(activeMissions?: readonly ActiveMission[], redraw = true) {
         this.missionMarkers = getMissionDestinationMarkers(
             activeMissions, [...this.systems.values()]);
@@ -602,7 +640,7 @@ class SystemGraph {
                 || this.knownSystems.has(id);
             const pos = this.scalePos(system.position);
             graphics.clear();
-            drawSystem(system, graphics, this.scale, this.currentSystem, this.missionMarkers.get(id));
+            drawSystem(system, graphics, this.scale, this.currentSystem, this.missionMarkers.get(id), this.playerMarkers.get(id));
             container.position.set(...pos);
         }
     }
@@ -840,6 +878,16 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
         }
     }
 
+    private playerMarkersList: readonly StarmapPlayerMarker[] = [];
+
+    setPlayerMarkers(markers?: readonly StarmapPlayerMarker[]) {
+        this.playerMarkersList = markers ?? [];
+        this.systemGraph?.setPlayerMarkers(markers);
+        if (this.container.visible && this.selectedSystemId) {
+            void this.renderPanel(this.selectedSystemId);
+        }
+    }
+
     setPlayerState(playerState?: StarmapPlayerState) {
         this.playerState = playerState
             ? {
@@ -973,6 +1021,10 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
             || this.selectedSystemId !== systemId) {
             return;
         }
+        const transmissions = this.playerMarkersList
+            .filter(p => p.systemId === systemId)
+            .map(p => `[${p.kind === 'sos' ? 'SOS' : 'PILOT'}] ${p.name}`);
+
         this.setPanelData(starmapPanelData({
             system,
             currentSystemId: this.currentSystemId(),
@@ -981,6 +1033,7 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
             government,
             legalRecords: this.playerState?.legalRecords,
             gameDate: this.playerState?.gameDate ?? 0,
+            transmissions,
         }));
     }
 }

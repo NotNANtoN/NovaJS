@@ -1,6 +1,7 @@
 import { plainSnapshot } from 'nova_ecs/draft_snapshot';
 import type { ControlEvent } from '../nova_plugin/controls_plugin';
 import type { StarmapPlayerState } from '../spaceport/starmap_state';
+import type { StarmapPlayerMarker } from '../spaceport/starmap';
 
 export interface StarmapControlTarget {
     readonly container: {
@@ -11,6 +12,7 @@ export interface StarmapControlTarget {
     };
     setExploredSystems(exploredSystems?: readonly string[]): void;
     setPlayerState?(playerState?: StarmapPlayerState): void;
+    setPlayerMarkers?(playerMarkers?: readonly StarmapPlayerMarker[]): void;
     show(route: string[]): Promise<string[]>;
 }
 
@@ -49,6 +51,7 @@ export async function handleMapControlEvent(
     applyRoute: (route: string[]) => void = route => {
         jumpRoute.route = route;
     },
+    playerMarkers?: readonly StarmapPlayerMarker[],
 ): Promise<void> {
     if (!isMapStartEdge(controlEvent, starmap.container.visible)) {
         return;
@@ -57,5 +60,6 @@ export async function handleMapControlEvent(
     const state = plainSnapshot(playerState);
     starmap.setPlayerState?.(state);
     starmap.setExploredSystems(state?.exploredSystems);
+    starmap.setPlayerMarkers?.(playerMarkers);
     applyRoute(await starmap.show([...jumpRoute.route]));
 }

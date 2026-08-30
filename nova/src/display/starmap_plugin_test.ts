@@ -16,6 +16,7 @@ describe('starmap control handling', () => {
             },
             setExploredSystems: jasmine.createSpy('setExploredSystems'),
             setPlayerState: jasmine.createSpy('setPlayerState'),
+            setPlayerMarkers: jasmine.createSpy('setPlayerMarkers'),
             show: jasmine.createSpy('show').and.returnValue(Promise.resolve([])),
         };
     }
@@ -82,6 +83,23 @@ describe('starmap control handling', () => {
 
         expect(starmap.show).toHaveBeenCalledWith(remaining);
         expect(result).toEqual(remaining);
+    });
+
+    it('passes player markers through to the starmap', async () => {
+        const starmap = makeStarmap();
+        const markers = [{ name: 'Pilot-1', systemId: 'nova:130', kind: 'sos' as const }];
+        const jumpRoute = { route: [] };
+        await handleMapControlEvent(
+            [{ action: 'map', state: 'start' }],
+            starmap,
+            jumpRoute,
+            { x: 800, y: 600 },
+            undefined,
+            undefined,
+            markers,
+        );
+
+        expect(starmap.setPlayerMarkers).toHaveBeenCalledWith(markers);
     });
 
     it('keeps the pilot state and route usable once the map closes', async () => {

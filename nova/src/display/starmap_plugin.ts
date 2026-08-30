@@ -10,7 +10,8 @@ import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin';
 import { PlayerStateComponent } from '../nova_plugin/player_state';
 import { Optional } from 'nova_ecs/optional';
 import { SystemIdResource } from '../nova_plugin/system_id_resource';
-import { Starmap } from '../spaceport/starmap';
+import { Starmap, StarmapPlayerMarker } from '../spaceport/starmap';
+import { ChatHistoryResource } from './chat_feed_plugin';
 import { ScreenSize } from './screen_size_plugin';
 import { Stage } from './stage_resource';
 import {
@@ -31,11 +32,24 @@ export const MapSystem = new AsyncSystem({
     skipIfApplyingPatches: true,
     args: [EcsControlEvent, StarmapResource, JumpRouteComponent,
         ScreenSize, Entities, UUID, PlayerShipSelector,
-        Optional(PlayerStateComponent)] as const,
+        Optional(PlayerStateComponent), Optional(ChatHistoryResource)] as const,
     async step(controlEvent, starmap, jumpRoute, screenSize, entities, uuid,
-        playerState) {
+        playerState, chatHistory) {
         if (!isMapStartEdge(controlEvent, starmap.container.visible)) {
             return;
+        }
+        const playerMarkers: StarmapPlayerMarker[] = [];
+        if (chatHistory) {
+            for (const [, entries] of chatHistory) {
+                const latest = entries[entries.length - 1];
+                if (latest?.system) {
+                    playerMarkers.push({
+                        name: latest.fromName || 'Captain',
+                        systemId: latest.system,
+                        kind: latest.kind ?? 'normal',
+                    });
+                }
+            }
         }
         return handleMapControlEvent(
             controlEvent, starmap, jumpRoute, screenSize,
@@ -49,6 +63,7 @@ export const MapSystem = new AsyncSystem({
                     live.route = route;
                 }
             },
+            playerMarkers,
         );
     }
 });
