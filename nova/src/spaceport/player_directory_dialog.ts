@@ -77,15 +77,23 @@ export class PlayerDirectoryDialog extends Menu<string | undefined> {
         this.addButtons({ plot: this.plotCourseButton, done: doneButton });
 
         this.plotCourseButton.click.subscribe(() => {
-            this.done(this.selectedSystem);
+            this.input = this.selectedSystem;
+            this.done();
         });
         doneButton.click.subscribe(() => {
-            this.done(undefined);
+            this.input = undefined;
+            this.done();
         });
 
         this.controls = new MenuControls(controlEvents, {
-            depart: () => this.done(undefined),
-            properties: () => this.done(undefined),
+            depart: () => {
+                this.input = undefined;
+                this.done();
+            },
+            properties: () => {
+                this.input = undefined;
+                this.done();
+            },
         });
     }
 
@@ -130,8 +138,9 @@ export class PlayerDirectoryDialog extends Menu<string | undefined> {
         }
     }
 
-    override async show(): Promise<string | undefined> {
+    override async show(input?: string | undefined): Promise<string | undefined> {
+        this.input = input;
         void this.refresh();
-        return super.show();
+        return super.show(input);
     }
 }

@@ -149,6 +149,7 @@ export class GameData implements GameDataInterface {
                 throw error;
             }
         }
+        throw new Error(`Failed to load metadata ${url} after ${maxRetries} attempts`);
     }
 
     private async getMetadataUrl(

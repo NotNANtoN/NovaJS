@@ -245,7 +245,7 @@ export function generateProceduralMissions(
                 timeLimit: deadline,
                 shipGoal: 1,
                 shipCount: 1,
-                shipSyst: candidate.systemId,
+                shipSyst: parseInt(candidate.systemId.replace(/^.*:/, ''), 10) || -6,
                 shipId: outlawShip.id,
                 canAbort: true,
                 displayWeight: 1,

@@ -485,7 +485,7 @@ export const HandleEscortDestruction = new System({
     },
 });
 
-const RemoveDismissedEscorts = new System({
+export const RemoveDismissedEscorts = new System({
     name: 'RemoveDismissedEscorts',
     args: [
         HiredEscortComponent,

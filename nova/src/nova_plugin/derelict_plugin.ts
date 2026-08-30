@@ -61,8 +61,8 @@ export function makeDerelict(
         turnBack: false,
     });
     ship.components.set(ArmorComponent, new Stat({
-        current: Math.max(15, Math.floor((shipData.shieldAndArmor?.armor ?? 50) * 0.4)),
-        max: shipData.shieldAndArmor?.armor ?? 50,
+        current: Math.max(15, Math.floor((shipData.armor ?? 50) * 0.4)),
+        max: shipData.armor ?? 50,
         recharge: 0,
     }));
     ship.components.set(MultiplayerData, { owner: 'server' });

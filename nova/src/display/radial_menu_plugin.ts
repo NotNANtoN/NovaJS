@@ -33,7 +33,7 @@ const RADIAL_OPTIONS: RadialOption[] = [
         sublabel: 'Comms (Y)',
         icon: '📡',
         action: (world) => {
-            world.emitNow(EcsControlEvent, new Map([['hail', true]]));
+            world.emitNow(EcsControlEvent, [{ action: 'hail', state: 'start' }]);
         },
     },
     {
@@ -87,7 +87,7 @@ const RADIAL_OPTIONS: RadialOption[] = [
         sublabel: 'Starmap (M)',
         icon: '🗺️',
         action: (world) => {
-            world.emitNow(EcsControlEvent, new Map([['map', true]]));
+            world.emitNow(EcsControlEvent, [{ action: 'map', state: 'start' }]);
         },
     },
     {
@@ -96,7 +96,7 @@ const RADIAL_OPTIONS: RadialOption[] = [
         sublabel: 'Status (P)',
         icon: '👥',
         action: (world) => {
-            world.emitNow(EcsControlEvent, new Map([['properties', true]]));
+            world.emitNow(EcsControlEvent, [{ action: 'properties', state: 'start' }]);
         },
     },
 ];
@@ -393,7 +393,7 @@ export class RadialMenu {
         }
     }
 
-    private executeCurrent() {
+    executeCurrent() {
         if (this.selectedIndex >= 0 && this.onAction) {
             const opt = RADIAL_OPTIONS[this.selectedIndex];
             this.onAction(opt);
@@ -418,19 +418,18 @@ export const RadialMenuSystem = new System({
         GetWorld,
         SingletonComponent,
     ] as const,
-    step(controlEvent, menu, screenSize, entity, uuid, world) {
-        if (controlEvent.has('radialMenu')) {
-            const isStart = controlEvent.get('radialMenu');
-            if (isStart) {
-                if (menu.container.visible) {
-                    menu.hide();
-                } else {
-                    menu.show(screenSize.x / 2, screenSize.y / 2);
-                    menu.onAction = (opt) => opt.action(world, entity, uuid);
-                }
+    step(controlEvents, menu, screenSize, entity, uuid, world) {
+        const hasRadial = controlEvents.some(e => e.action === 'radialMenu' && e.state === 'start');
+        if (hasRadial) {
+            if (menu.container.visible) {
+                menu.hide();
+            } else {
+                menu.show(screenSize.x / 2, screenSize.y / 2);
+                menu.onAction = (opt) => opt.action(world, entity, uuid);
             }
         }
-        if (controlEvent.has('sos') && controlEvent.get('sos')) {
+        const hasSos = controlEvents.some(e => e.action === 'sos' && e.state === 'start');
+        if (hasSos) {
             sendDistressBeacon(world, entity);
         }
     },
