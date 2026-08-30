@@ -58,6 +58,7 @@ import {
     BoardingNoticeComponent,
     BoardingOutcomeComponent,
 } from "../nova_plugin/boarding_plugin";
+import { EscortOrderNoticeComponent } from "../nova_plugin/escort_plugin";
 import { targetLabel, TargetLabelPieces } from "./target_label";
 
 
@@ -788,6 +789,16 @@ const ShowBoardingNotice = new System({
     },
 });
 
+const ShowEscortOrderNotice = new System({
+    name: 'ShowEscortOrderNotice',
+    args: [StatusBarResource, EscortOrderNoticeComponent, TimeResource, GetEntity,
+        PlayerShipSelector] as const,
+    step(statusBar, notice, time, entity) {
+        statusBar.showLandingMessage(notice.text, time.time);
+        entity.components.delete(EscortOrderNoticeComponent);
+    },
+});
+
 /**
  * The outcome is replicated state rather than an event, because the server
  * decides it and events do not cross the network. A new sequence number is
@@ -852,6 +863,7 @@ export const StatusBarPlugin: Plugin = {
         world.addSystem(DrawStatusBarNavigation);
         world.addComponent(ShownBoardingOutcome);
         world.addSystem(ShowBoardingNotice);
+        world.addSystem(ShowEscortOrderNotice);
         world.addSystem(ShowBoardingOutcome);
         world.addSystem(DrawStatusBarTarget);
         world.addSystem(DrawLandingMessage);
@@ -872,6 +884,7 @@ export const StatusBarPlugin: Plugin = {
         // that resource then throws. A hyperjump rebuilds every plugin, so
         // forgetting one of these aborted the jump and dropped the client.
         world.removeSystem(ShowBoardingNotice);
+        world.removeSystem(ShowEscortOrderNotice);
         world.removeSystem(ShowBoardingOutcome);
 
         const stage = world.resources.get(Stage);

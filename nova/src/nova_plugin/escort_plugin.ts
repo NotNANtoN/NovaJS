@@ -8,6 +8,7 @@ import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
 import {
     MultiplayerData,
+    replicationPolicies,
 } from 'nova_ecs/plugins/multiplayer_plugin';
 import {
     MovementPhysicsComponent,
@@ -25,6 +26,8 @@ import { PlatformResource } from './platform_plugin';
 import { TargetComponent } from './target_component';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
 import { DeathEvent } from './death_plugin';
+import { ControlStateEvent } from './control_state_event';
+import { PlayerShipSelector } from './player_ship_plugin';
 import {
     EscortContract,
     EscortContractData,
@@ -149,6 +152,36 @@ export function dismissEscort(
     };
 }
 
+export const EscortMode = t.union([
+    t.literal('formation'),
+    t.literal('attack'),
+    t.literal('defend'),
+    t.literal('hold'),
+]);
+export type EscortMode = t.TypeOf<typeof EscortMode>;
+
+export const EscortOrderData = t.intersection([
+    t.type({
+        mode: EscortMode,
+        sequence: t.number,
+    }),
+    t.partial({
+        targetUuid: t.string,
+    }),
+]);
+export type EscortOrderData = t.TypeOf<typeof EscortOrderData>;
+
+export const EscortOrderComponent =
+    new Component<EscortOrderData>('EscortOrderComponent');
+
+export const EscortOrderNoticeComponent =
+    new Component<{ text: string; sequence: number }>('EscortOrderNoticeComponent');
+
+replicationPolicies.register(EscortOrderComponent, {
+    codec: EscortOrderData,
+    authority: 'owning-client',
+});
+
 const HiredEscortData = t.type({
     ownerUuid: t.string,
     contractId: t.string,
@@ -239,6 +272,61 @@ const SpawnHiredEscorts = new AsyncSystem({
     },
 });
 
+export const PlayerEscortCommandInputSystem = new System({
+    name: 'PlayerEscortCommandInputSystem',
+    events: [ControlStateEvent],
+    args: [
+        ControlStateEvent,
+        TargetComponent,
+        Optional(EscortOrderComponent),
+        GetEntity,
+        PlatformResource,
+        PlayerShipSelector,
+    ] as const,
+    step(controlState, target, currentOrder, entity, platform) {
+        if (platform !== 'browser') {
+            return;
+        }
+        let mode: EscortMode | undefined;
+        let noticeText: string | undefined;
+
+        if (controlState.get('attack') === 'start') {
+            if (target.target) {
+                mode = 'attack';
+                noticeText = 'Escorts: Focus fire on target';
+            } else {
+                entity.components.set(EscortOrderNoticeComponent, {
+                    text: 'Escorts: No target selected',
+                    sequence: (currentOrder?.sequence ?? 0) + 1,
+                });
+                return;
+            }
+        } else if (controlState.get('defend') === 'start') {
+            mode = 'defend';
+            noticeText = 'Escorts: Defending flagship';
+        } else if (controlState.get('holdPosition') === 'start') {
+            mode = 'hold';
+            noticeText = 'Escorts: Holding position';
+        } else if (controlState.get('formation') === 'start') {
+            mode = 'formation';
+            noticeText = 'Escorts: Returning to formation';
+        }
+
+        if (mode) {
+            const sequence = (currentOrder?.sequence ?? 0) + 1;
+            entity.components.set(EscortOrderComponent, {
+                mode,
+                sequence,
+                targetUuid: mode === 'attack' ? target.target : undefined,
+            });
+            entity.components.set(EscortOrderNoticeComponent, {
+                text: noticeText ?? '',
+                sequence,
+            });
+        }
+    },
+});
+
 const FollowEscortOwner = new System({
     name: 'FollowEscortOwner',
     args: [
@@ -258,8 +346,20 @@ const FollowEscortOwner = new System({
         if (jumpState) {
             return;
         }
-        const ownerMovement = entities.get(escort.ownerUuid)
-            ?.components.get(MovementStateComponent);
+        const owner = entities.get(escort.ownerUuid);
+        if (!owner) {
+            movement.accelerating = 0;
+            movement.turnTo = null;
+            return;
+        }
+        const ownerOrder = owner.components.get(EscortOrderComponent);
+        if (ownerOrder?.mode === 'hold') {
+            movement.accelerating = 0;
+            movement.turnTo = null;
+            movement.turnBack = false;
+            return;
+        }
+        const ownerMovement = owner.components.get(MovementStateComponent);
         if (!ownerMovement) {
             movement.accelerating = 0;
             movement.turnTo = null;
@@ -291,6 +391,51 @@ export const EscortDefenseSystem = new System({
         if (!owner) {
             return;
         }
+        const order = owner.components.get(EscortOrderComponent);
+        const mode = order?.mode ?? 'defend';
+
+        if (mode === 'hold') {
+            target.target = undefined;
+            return;
+        }
+
+        if (mode === 'formation') {
+            if (target.target && !entities.has(target.target)) {
+                target.target = undefined;
+            }
+            return;
+        }
+
+        if (mode === 'attack') {
+            const attackTarget = order?.targetUuid ?? owner.components.get(TargetComponent)?.target;
+            if (attackTarget && entities.has(attackTarget) && attackTarget !== escort.ownerUuid) {
+                const targetEscort = entities.get(attackTarget)?.components.get(HiredEscortComponent);
+                if (targetEscort?.ownerUuid !== escort.ownerUuid) {
+                    target.target = attackTarget;
+                    return;
+                }
+            }
+            if (target.target && !entities.has(target.target)) {
+                target.target = undefined;
+            }
+            return;
+        }
+
+        // Defend mode
+        let attackerUuid: string | undefined;
+        for (const [entityUuid, entity] of entities) {
+            if (entityUuid === escort.ownerUuid || entityUuid === escort.contractId) continue;
+            const entityTarget = entity.components.get(TargetComponent)?.target;
+            if (entityTarget === escort.ownerUuid) {
+                attackerUuid = entityUuid;
+                break;
+            }
+        }
+        if (attackerUuid) {
+            target.target = attackerUuid;
+            return;
+        }
+
         const ownerTarget = owner.components.get(TargetComponent)?.target;
         if (ownerTarget && entities.has(ownerTarget) && ownerTarget !== escort.ownerUuid) {
             const targetEscort = entities.get(ownerTarget)?.components.get(HiredEscortComponent);
@@ -408,6 +553,8 @@ export const EscortPlugin: Plugin = {
     build(world) {
         world.addComponent(EscortRosterComponent);
         world.addComponent(HiredEscortComponent);
+        world.addComponent(EscortOrderComponent);
+        world.addComponent(EscortOrderNoticeComponent);
         const deltaMaker = world.resources.get(DeltaResource);
         if (!deltaMaker) {
             throw new Error('Expected delta maker resource to exist');
@@ -418,7 +565,11 @@ export const EscortPlugin: Plugin = {
         deltaMaker.addComponent(HiredEscortComponent, {
             componentType: HiredEscortData,
         });
+        deltaMaker.addComponent(EscortOrderComponent, {
+            componentType: EscortOrderData,
+        });
         world.addSystem(SyncEscortRoster);
+        world.addSystem(PlayerEscortCommandInputSystem);
         world.addSystem(SpawnHiredEscorts);
         world.addSystem(FollowEscortOwner);
         world.addSystem(EscortDefenseSystem);
@@ -427,6 +578,7 @@ export const EscortPlugin: Plugin = {
     },
     remove(world) {
         world.removeSystem(SyncEscortRoster);
+        world.removeSystem(PlayerEscortCommandInputSystem);
         world.removeSystem(SpawnHiredEscorts);
         world.removeSystem(FollowEscortOwner);
         world.removeSystem(EscortDefenseSystem);

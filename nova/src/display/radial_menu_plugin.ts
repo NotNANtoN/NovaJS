@@ -92,6 +92,50 @@ const RADIAL_OPTIONS: RadialOption[] = [
     },
 ];
 
+export function computeRadialSelection(
+    dx: number,
+    dy: number,
+    numOptions: number,
+    innerRadius = 45,
+    outerRadius = 145,
+): number {
+    const dist = Math.hypot(dx, dy);
+    if (dist < innerRadius || dist > outerRadius + 40) {
+        return -1;
+    }
+    const arc = (Math.PI * 2) / numOptions;
+    let angle = Math.atan2(dy, dx) + Math.PI / 2;
+    if (angle < 0) angle += Math.PI * 2;
+    return Math.floor(angle / arc) % numOptions;
+}
+
+export function cycleRadialIndex(
+    currentIndex: number,
+    delta: number,
+    numOptions: number,
+): number {
+    if (currentIndex < 0) {
+        return delta > 0 ? 0 : numOptions - 1;
+    }
+    return (currentIndex + delta + numOptions) % numOptions;
+}
+
+export function gamepadRadialSelection(
+    axisX: number,
+    axisY: number,
+    numOptions: number,
+    threshold = 0.4,
+): number | undefined {
+    const dist = Math.hypot(axisX, axisY);
+    if (dist <= threshold) {
+        return undefined;
+    }
+    const arc = (Math.PI * 2) / numOptions;
+    let angle = Math.atan2(axisY, axisX) + Math.PI / 2;
+    if (angle < 0) angle += Math.PI * 2;
+    return Math.floor(angle / arc) % numOptions;
+}
+
 export function sendDistressBeacon(world: World, playerEntity?: any) {
     const mov = playerEntity?.components.get(MovementStateComponent);
     const state = playerEntity?.components.get(PlayerStateComponent);
@@ -173,7 +217,7 @@ export class RadialMenu {
 
         for (let i = 0; i < RADIAL_OPTIONS.length; i++) {
             const opt = RADIAL_OPTIONS[i];
-            const text = new PIXI.Text(`${opt.icon} ${opt.label.split(' ')[0]}`, {
+            const text = new PIXI.Text(`[${i + 1}] ${opt.icon} ${opt.label.split(' ')[0]}`, {
                 fontFamily: 'Geneva, Arial, sans-serif',
                 fontSize: 11,
                 fill: 0xffffff,
@@ -195,6 +239,67 @@ export class RadialMenu {
             if (!this.container.visible || e.button !== 0) return;
             this.executeCurrent();
         });
+
+        window.addEventListener('keydown', (e) => {
+            if (!this.container.visible) return;
+
+            const num = parseInt(e.key, 10);
+            if (!isNaN(num) && num >= 1 && num <= RADIAL_OPTIONS.length) {
+                e.preventDefault();
+                e.stopPropagation();
+                this.executeIndex(num - 1);
+                return;
+            }
+
+            if (e.code === 'ArrowDown' || e.code === 'ArrowRight' || e.code === 'Tab') {
+                e.preventDefault();
+                e.stopPropagation();
+                this.cycleSelection(1);
+                return;
+            }
+
+            if (e.code === 'ArrowUp' || e.code === 'ArrowLeft') {
+                e.preventDefault();
+                e.stopPropagation();
+                this.cycleSelection(-1);
+                return;
+            }
+
+            if (e.code === 'Enter' || e.code === 'Space') {
+                e.preventDefault();
+                e.stopPropagation();
+                if (this.selectedIndex >= 0) {
+                    this.executeCurrent();
+                }
+                return;
+            }
+
+            if (e.code === 'Escape' || e.code === 'KeyQ') {
+                e.preventDefault();
+                e.stopPropagation();
+                this.hide();
+                return;
+            }
+        });
+    }
+
+    selectIndex(index: number) {
+        if (index < 0 || index >= RADIAL_OPTIONS.length) {
+            this.selectedIndex = -1;
+        } else {
+            this.selectedIndex = index;
+        }
+        this.drawWheel();
+    }
+
+    cycleSelection(delta: number) {
+        this.selectedIndex = cycleRadialIndex(this.selectedIndex, delta, RADIAL_OPTIONS.length);
+        this.drawWheel();
+    }
+
+    executeIndex(index: number) {
+        this.selectIndex(index);
+        this.executeCurrent();
     }
 
     show(centerX: number, centerY: number) {
@@ -212,20 +317,13 @@ export class RadialMenu {
     private updateSelection() {
         const dx = this.mousePos.x - this.center.x;
         const dy = this.mousePos.y - this.center.y;
-        const dist = Math.hypot(dx, dy);
-
-        const numOptions = RADIAL_OPTIONS.length;
-        const arc = (Math.PI * 2) / numOptions;
-
-        if (dist < this.innerRadius || dist > this.outerRadius + 40) {
-            this.selectedIndex = -1;
-        } else {
-            // angle between 0 and 2*PI, starting from top (-PI/2)
-            let angle = Math.atan2(dy, dx) + Math.PI / 2;
-            if (angle < 0) angle += Math.PI * 2;
-            this.selectedIndex = Math.floor(angle / arc) % numOptions;
-        }
-
+        this.selectedIndex = computeRadialSelection(
+            dx,
+            dy,
+            RADIAL_OPTIONS.length,
+            this.innerRadius,
+            this.outerRadius,
+        );
         this.drawWheel();
     }
 
@@ -329,6 +427,38 @@ export const RadialMenuSystem = new System({
     },
 });
 
+export const RadialGamepadSystem = new System({
+    name: 'RadialGamepadSystem',
+    args: [RadialMenuResource, SingletonComponent] as const,
+    step(menu) {
+        if (!menu.container.visible || typeof navigator === 'undefined' || !navigator.getGamepads) {
+            return;
+        }
+        const gamepads = navigator.getGamepads();
+        for (let g = 0; g < gamepads.length; g++) {
+            const pad = gamepads[g];
+            if (!pad) continue;
+            // Left Stick direction
+            const axisX = pad.axes[0] ?? 0;
+            const axisY = pad.axes[1] ?? 0;
+            const selection = gamepadRadialSelection(axisX, axisY, RADIAL_OPTIONS.length);
+            if (selection !== undefined) {
+                menu.selectIndex(selection);
+            }
+            // Button 0 (A / Cross) -> Execute
+            if (pad.buttons[0]?.pressed) {
+                menu.executeCurrent();
+                break;
+            }
+            // Button 1 (B / Circle) -> Close
+            if (pad.buttons[1]?.pressed || pad.buttons[8]?.pressed || pad.buttons[9]?.pressed) {
+                menu.hide();
+                break;
+            }
+        }
+    },
+});
+
 export const RadialMenuPlugin: Plugin = {
     name: 'RadialMenuPlugin',
     build(world) {
@@ -340,9 +470,11 @@ export const RadialMenuPlugin: Plugin = {
         stage.addChild(menu.container);
         world.resources.set(RadialMenuResource, menu);
         world.addSystem(RadialMenuSystem);
+        world.addSystem(RadialGamepadSystem);
     },
     remove(world) {
         world.removeSystem(RadialMenuSystem);
+        world.removeSystem(RadialGamepadSystem);
         const menu = world.resources.get(RadialMenuResource);
         if (menu) {
             menu.container.destroy({ children: true });

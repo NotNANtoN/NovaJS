@@ -15,13 +15,18 @@ import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { World } from 'nova_ecs/world';
 import { DeathEvent } from './death_plugin';
 import { GameDataResource } from './game_data_resource';
+import { ControlStateEvent } from './control_state_event';
+import { PlayerShipSelector } from './player_ship_plugin';
 import {
     EscortDefenseSystem,
+    EscortOrderComponent,
+    EscortOrderNoticeComponent,
     EscortPlugin,
     EscortRoster,
     EscortRosterComponent,
     HandleEscortDestruction,
     HiredEscortComponent,
+    PlayerEscortCommandInputSystem,
     RemoveDismissedEscorts,
     SyncEscortRoster,
     availableEscortOffers,
@@ -271,5 +276,123 @@ describe('EscortDefenseSystem', () => {
         world.step();
 
         expect(escort1.components.get(TargetComponent)?.target).toBeUndefined();
+    });
+
+    it('clears escort target when owner is in hold mode', async () => {
+        const world = await escortTestWorld('escort-hold-mode-test');
+
+        const player = new Entity('player')
+            .addComponent(TargetComponent, { target: 'enemy-ship' })
+            .addComponent(EscortOrderComponent, { mode: 'hold', sequence: 1 })
+            .addComponent(MultiplayerData, { owner: 'client-1' });
+
+        const escort = new Entity('escort-1')
+            .addComponent(HiredEscortComponent, {
+                ownerUuid: 'player',
+                contractId: 'contract-1',
+                slot: 0,
+            })
+            .addComponent(TargetComponent, { target: 'enemy-ship' })
+            .addComponent(MultiplayerData, { owner: 'server' });
+
+        world.entities.set('player', player);
+        world.entities.set('escort-1', escort);
+        world.entities.set('enemy-ship', new Entity('enemy-ship'));
+
+        world.step();
+
+        expect(escort.components.get(TargetComponent)?.target).toBeUndefined();
+    });
+
+    it('prioritizes enemies actively attacking the owner in defend mode', async () => {
+        const world = await escortTestWorld('escort-defend-attacker-test');
+
+        const player = new Entity('player')
+            .addComponent(TargetComponent, { target: undefined })
+            .addComponent(EscortOrderComponent, { mode: 'defend', sequence: 1 })
+            .addComponent(MultiplayerData, { owner: 'client-1' });
+
+        const escort = new Entity('escort-1')
+            .addComponent(HiredEscortComponent, {
+                ownerUuid: 'player',
+                contractId: 'contract-1',
+                slot: 0,
+            })
+            .addComponent(TargetComponent, { target: undefined })
+            .addComponent(MultiplayerData, { owner: 'server' });
+
+        const attacker = new Entity('attacker')
+            .addComponent(TargetComponent, { target: 'player' })
+            .addComponent(MultiplayerData, { owner: 'server' });
+
+        world.entities.set('player', player);
+        world.entities.set('escort-1', escort);
+        world.entities.set('attacker', attacker);
+
+        world.step();
+
+        expect(escort.components.get(TargetComponent)?.target).toBe('attacker');
+    });
+});
+
+describe('PlayerEscortCommandInputSystem', () => {
+    it('sets attack order when player has a target and presses attack (KeyF)', async () => {
+        const world = new World('escort-command-input-test');
+        world.resources.set(PlatformResource, 'browser');
+
+        const player = new Entity('player')
+            .addComponent(PlayerShipSelector, undefined)
+            .addComponent(TargetComponent, { target: 'enemy-1' });
+
+        world.entities.set('player', player);
+        world.addSystem(PlayerEscortCommandInputSystem);
+
+        world.emitNow(ControlStateEvent, new Map([['attack', 'start']]), ['player']);
+
+        const order = player.components.get(EscortOrderComponent);
+        expect(order).toEqual({
+            mode: 'attack',
+            sequence: 1,
+            targetUuid: 'enemy-1',
+        });
+        expect(player.components.get(EscortOrderNoticeComponent)?.text).toBe('Escorts: Focus fire on target');
+    });
+
+    it('gives notice when player presses attack (KeyF) without a target', async () => {
+        const world = new World('escort-command-no-target-test');
+        world.resources.set(PlatformResource, 'browser');
+
+        const player = new Entity('player')
+            .addComponent(PlayerShipSelector, undefined)
+            .addComponent(TargetComponent, { target: undefined });
+
+        world.entities.set('player', player);
+        world.addSystem(PlayerEscortCommandInputSystem);
+
+        world.emitNow(ControlStateEvent, new Map([['attack', 'start']]), ['player']);
+
+        expect(player.components.has(EscortOrderComponent)).toBeFalse();
+        expect(player.components.get(EscortOrderNoticeComponent)?.text).toBe('Escorts: No target selected');
+    });
+
+    it('sets hold, defend, and formation orders upon control inputs', async () => {
+        const world = new World('escort-commands-all-test');
+        world.resources.set(PlatformResource, 'browser');
+
+        const player = new Entity('player')
+            .addComponent(PlayerShipSelector, undefined)
+            .addComponent(TargetComponent, { target: undefined });
+
+        world.entities.set('player', player);
+        world.addSystem(PlayerEscortCommandInputSystem);
+
+        world.emitNow(ControlStateEvent, new Map([['defend', 'start']]), ['player']);
+        expect(player.components.get(EscortOrderComponent)?.mode).toBe('defend');
+
+        world.emitNow(ControlStateEvent, new Map([['holdPosition', 'start']]), ['player']);
+        expect(player.components.get(EscortOrderComponent)?.mode).toBe('hold');
+
+        world.emitNow(ControlStateEvent, new Map([['formation', 'start']]), ['player']);
+        expect(player.components.get(EscortOrderComponent)?.mode).toBe('formation');
     });
 });
