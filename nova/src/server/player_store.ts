@@ -397,6 +397,40 @@ export class PlayerStore implements PlayerStorePort {
         return clonePlayer(this.players.get(token)!);
     }
 
+    async getAllPilotsSummary(): Promise<Array<{
+        token: string;
+        pilotName: string;
+        shipName: string;
+        shipId: string;
+        currentSystem: string;
+        lastLandedPlanet?: string;
+        lastLandedSystem?: string;
+        kills: number;
+        credits: number;
+        savedAt?: number;
+        isOnline: boolean;
+    }>> {
+        await this.ready;
+        const onlineTokens = new Set(this.peerTokens.values());
+        const entries = [];
+        for (const [token, player] of this.players) {
+            entries.push({
+                token,
+                pilotName: player.pilotName || 'Unknown Pilot',
+                shipName: player.shipName || 'Vessel',
+                shipId: player.shipId || 'nova:128',
+                currentSystem: player.currentSystem || 'nova:130',
+                lastLandedPlanet: player.lastLandedPlanet,
+                lastLandedSystem: player.lastLandedSystem,
+                kills: player.kills ?? 0,
+                credits: player.credits ?? 0,
+                savedAt: player.savedAt,
+                isOnline: onlineTokens.has(token),
+            });
+        }
+        return entries;
+    }
+
     bindPeer(peerId: string, token: string) {
         this.peerTokens.set(peerId, token);
     }

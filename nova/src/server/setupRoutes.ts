@@ -266,6 +266,15 @@ class GameDataServer {
                         snapshots: player.snapshots,
                     }));
                 });
+            this.app.get('/api/galaxy/pilots', async (_req, res) => {
+                try {
+                    const list = await this.playerStore!.getAllPilotsSummary?.() ?? [];
+                    res.json(list);
+                } catch (error) {
+                    console.error('Failed to get pilot directory', error);
+                    res.status(500).send('Failed to get pilot directory');
+                }
+            });
         }
 
         //        // This has to be here or else sourcemaps don't work!

@@ -23,6 +23,7 @@ FROM node:24-bookworm-slim AS runtime
 
 ENV NODE_ENV=production \
     NOVA_PORT=8200 \
+    NODE_OPTIONS="--max-old-space-size=1400" \
     NOVA_PLAYER_DATA=/var/lib/novajs/players.json
 
 WORKDIR /app

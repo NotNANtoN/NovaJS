@@ -6,7 +6,7 @@ import {
 } from './radial_menu_plugin';
 
 describe('Radial menu pure helpers', () => {
-    const NUM_OPTIONS = 7;
+    const NUM_OPTIONS = 8;
 
     describe('computeRadialSelection', () => {
         it('returns -1 when within deadzone or too far', () => {
@@ -31,12 +31,12 @@ describe('Radial menu pure helpers', () => {
         it('cycles forward and wraps', () => {
             expect(cycleRadialIndex(-1, 1, NUM_OPTIONS)).toBe(0);
             expect(cycleRadialIndex(0, 1, NUM_OPTIONS)).toBe(1);
-            expect(cycleRadialIndex(6, 1, NUM_OPTIONS)).toBe(0);
+            expect(cycleRadialIndex(7, 1, NUM_OPTIONS)).toBe(0);
         });
 
         it('cycles backward and wraps', () => {
-            expect(cycleRadialIndex(-1, -1, NUM_OPTIONS)).toBe(6);
-            expect(cycleRadialIndex(0, -1, NUM_OPTIONS)).toBe(6);
+            expect(cycleRadialIndex(-1, -1, NUM_OPTIONS)).toBe(7);
+            expect(cycleRadialIndex(0, -1, NUM_OPTIONS)).toBe(7);
             expect(cycleRadialIndex(3, -1, NUM_OPTIONS)).toBe(2);
         });
     });

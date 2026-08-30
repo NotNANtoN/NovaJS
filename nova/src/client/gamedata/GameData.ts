@@ -125,16 +125,30 @@ export class GameData implements GameDataInterface {
         );
     }
 
-    private async fetchMetadata(url: string): Promise<unknown> {
+    private async fetchMetadata(url: string, maxRetries = 4, delayMs = 1200): Promise<unknown> {
         // Stable JSON URLs previously shipped with one-year immutable caching.
         // reload bypasses that stale response without invalidating large
         // browser-cached image and audio assets.
-        const response = await fetch(url, { cache: 'reload' });
-        if (!response.ok) {
-            throw new Error(`Failed to load metadata ${url}: ${
-                response.status} ${response.statusText}`);
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            try {
+                const response = await fetch(url, { cache: 'reload' });
+                if (response.ok) {
+                    return await response.json() as Promise<unknown>;
+                }
+                if (attempt < maxRetries && (response.status === 502 || response.status === 503 || response.status === 504 || response.status === 404)) {
+                    await new Promise(resolve => setTimeout(resolve, delayMs * (attempt + 1)));
+                    continue;
+                }
+                throw new Error(`Failed to load metadata ${url}: ${
+                    response.status} ${response.statusText}`);
+            } catch (error) {
+                if (attempt < maxRetries) {
+                    await new Promise(resolve => setTimeout(resolve, delayMs * (attempt + 1)));
+                    continue;
+                }
+                throw error;
+            }
         }
-        return response.json() as Promise<unknown>;
     }
 
     private async getMetadataUrl(

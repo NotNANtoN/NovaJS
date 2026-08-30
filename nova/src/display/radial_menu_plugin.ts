@@ -90,6 +90,15 @@ const RADIAL_OPTIONS: RadialOption[] = [
             world.emitNow(EcsControlEvent, new Map([['map', true]]));
         },
     },
+    {
+        id: 'directory',
+        label: 'PILOT ROSTER',
+        sublabel: 'Status (P)',
+        icon: '👥',
+        action: (world) => {
+            world.emitNow(EcsControlEvent, new Map([['properties', true]]));
+        },
+    },
 ];
 
 export function computeRadialSelection(

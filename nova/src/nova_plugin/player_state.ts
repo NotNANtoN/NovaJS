@@ -320,6 +320,20 @@ export type StoredPlayerRecord = PersistentPlayerState & {
     readonly snapshots?: readonly PlayerSnapshot[],
 };
 
+export interface PilotDirectoryEntry {
+    token: string;
+    pilotName: string;
+    shipName: string;
+    shipId: string;
+    currentSystem: string;
+    lastLandedPlanet?: string;
+    lastLandedSystem?: string;
+    kills: number;
+    credits: number;
+    savedAt?: number;
+    isOnline: boolean;
+}
+
 export interface PlayerStorePort {
     readonly ready: Promise<void>;
     get(token: string): Promise<StoredPlayerRecord | undefined>;
@@ -364,6 +378,7 @@ export interface PlayerStorePort {
         token: string,
         snapshotId: string,
     ): Promise<StoredPlayerRecord | undefined>;
+    getAllPilotsSummary?(): Promise<PilotDirectoryEntry[]>;
     bindPeer(peerId: string, token: string): void;
     getTokenForPeer(peerId: string): string | undefined;
     flush(): Promise<void>;
