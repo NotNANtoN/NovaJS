@@ -9,9 +9,11 @@ export interface BuildInfo {
 }
 
 export function getBuildInfo(): BuildInfo {
+    const now = new Date();
+    const fallbackDate = now.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
     return {
-        commit: typeof __BUILD_COMMIT__ !== 'undefined' ? __BUILD_COMMIT__ : 'dev',
-        message: typeof __BUILD_MESSAGE__ !== 'undefined' ? __BUILD_MESSAGE__ : 'local development',
-        date: typeof __BUILD_DATE__ !== 'undefined' ? __BUILD_DATE__ : new Date().toISOString().slice(0, 10),
+        commit: typeof __BUILD_COMMIT__ !== 'undefined' && __BUILD_COMMIT__ ? __BUILD_COMMIT__ : 'dev',
+        message: typeof __BUILD_MESSAGE__ !== 'undefined' && __BUILD_MESSAGE__ ? __BUILD_MESSAGE__ : 'local development',
+        date: typeof __BUILD_DATE__ !== 'undefined' && __BUILD_DATE__ ? __BUILD_DATE__ : fallbackDate,
     };
 }

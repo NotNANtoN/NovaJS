@@ -2,6 +2,14 @@ FROM oven/bun:1.4.0 AS build
 
 WORKDIR /app
 
+ARG BUILD_COMMIT=""
+ARG BUILD_MESSAGE=""
+ARG BUILD_DATE=""
+
+ENV BUILD_COMMIT=$BUILD_COMMIT \
+    BUILD_MESSAGE=$BUILD_MESSAGE \
+    BUILD_DATE=$BUILD_DATE
+
 COPY package.json bun.lock ./
 # The package's prepare hook installs local Git hooks, which are not part of
 # the container and must not run during dependency installation.

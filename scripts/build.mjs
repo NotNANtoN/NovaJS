@@ -11,15 +11,31 @@ const distPath = path.join(projectRoot, "dist");
 
 await mkdir(distPath, { recursive: true });
 
-let commitHash = "dev";
-let commitMessage = "local development";
-let commitDate = new Date().toISOString().slice(0, 10);
+let commitHash = process.env.BUILD_COMMIT || process.env.GITHUB_SHA?.slice(0, 7) || "dev";
+let commitMessage = process.env.BUILD_MESSAGE || "";
+let commitDate = process.env.BUILD_DATE || "";
 
-try {
-    commitHash = execSync("git rev-parse --short HEAD", { cwd: projectRoot, encoding: "utf8" }).trim();
-    commitMessage = execSync('git log -1 --format="%s"', { cwd: projectRoot, encoding: "utf8" }).trim();
-    commitDate = execSync('git log -1 --format="%cd" --date=short', { cwd: projectRoot, encoding: "utf8" }).trim();
-} catch {}
+if (commitHash === "dev" || !commitMessage || !commitDate) {
+    try {
+        if (commitHash === "dev") {
+            commitHash = execSync("git rev-parse --short HEAD", { cwd: projectRoot, encoding: "utf8" }).trim();
+        }
+        if (!commitMessage) {
+            commitMessage = execSync('git log -1 --format="%s"', { cwd: projectRoot, encoding: "utf8" }).trim();
+        }
+        if (!commitDate) {
+            commitDate = execSync('git log -1 --format="%cd" --date=format:"%Y-%m-%d %H:%M %z"', { cwd: projectRoot, encoding: "utf8" }).trim();
+        }
+    } catch {}
+}
+
+if (!commitMessage) {
+    commitMessage = "local development";
+}
+if (!commitDate) {
+    const now = new Date();
+    commitDate = now.toISOString().replace("T", " ").slice(0, 16) + " UTC";
+}
 
 
 // Bun/npm may install a second copy of the @pixi/* packages nested inside
