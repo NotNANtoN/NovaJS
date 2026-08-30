@@ -51,15 +51,6 @@ jobs:
       image_name: ${{ steps.image.outputs.name }}
     steps:
       - uses: actions/checkout@v4.2.2
-      - name: Extract build metadata
-        id: meta
-        run: |
-          commit_short="$(git rev-parse --short HEAD 2>/dev/null || printf '%.7s' '${{ github.sha }}')"
-          commit_msg="$(git log -1 --format='%s' 2>/dev/null || echo 'Deploy NovaJS')"
-          build_date="$(date -u '+%Y-%m-%d %H:%M UTC')"
-          printf 'commit=%s\n' "$commit_short" >> "$GITHUB_OUTPUT"
-          printf 'msg=%s\n' "$commit_msg" >> "$GITHUB_OUTPUT"
-          printf 'date=%s\n' "$build_date" >> "$GITHUB_OUTPUT"
       - name: Normalize image name
         id: image
         env:
@@ -76,10 +67,6 @@ jobs:
         with:
           context: .
           push: true
-          build-args: |
-            BUILD_COMMIT=${{ steps.meta.outputs.commit }}
-            BUILD_MESSAGE=${{ steps.meta.outputs.msg }}
-            BUILD_DATE=${{ steps.meta.outputs.date }}
           tags: |
             ${{ steps.image.outputs.name }}:${{ github.sha }}
             ${{ steps.image.outputs.name }}:latest

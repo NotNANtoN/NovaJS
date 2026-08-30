@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,30 +8,40 @@ import { packedPngPlugin } from "./packed_png_plugin.mjs";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const distPath = path.join(projectRoot, "dist");
+const buildInfoFile = path.join(projectRoot, "nova/src/client/build_info.json");
 
 await mkdir(distPath, { recursive: true });
 
-let commitHash = process.env.BUILD_COMMIT || process.env.GITHUB_SHA?.slice(0, 7) || "dev";
+let commitHash = process.env.BUILD_COMMIT || process.env.GITHUB_SHA?.slice(0, 7) || "";
 let commitMessage = process.env.BUILD_MESSAGE || "";
 let commitDate = process.env.BUILD_DATE || "";
 
-if (commitHash === "dev" || !commitMessage || !commitDate) {
+// Try git first if available
+try {
+    if (!commitHash) {
+        commitHash = execSync("git rev-parse --short HEAD", { cwd: projectRoot, encoding: "utf8" }).trim();
+    }
+    if (!commitMessage) {
+        commitMessage = execSync('git log -1 --format="%s"', { cwd: projectRoot, encoding: "utf8" }).trim();
+    }
+    if (!commitDate) {
+        commitDate = execSync('git log -1 --format="%cd" --date=format:"%Y-%m-%d %H:%M %z"', { cwd: projectRoot, encoding: "utf8" }).trim();
+    }
+    writeFileSync(buildInfoFile, JSON.stringify({ commit: commitHash, message: commitMessage, date: commitDate }, null, 2) + "\n");
+} catch {}
+
+// Fallback to checked-in build_info.json if git was not present (e.g. inside Docker)
+if ((!commitHash || commitHash === "dev" || !commitMessage || !commitDate) && existsSync(buildInfoFile)) {
     try {
-        if (commitHash === "dev") {
-            commitHash = execSync("git rev-parse --short HEAD", { cwd: projectRoot, encoding: "utf8" }).trim();
-        }
-        if (!commitMessage) {
-            commitMessage = execSync('git log -1 --format="%s"', { cwd: projectRoot, encoding: "utf8" }).trim();
-        }
-        if (!commitDate) {
-            commitDate = execSync('git log -1 --format="%cd" --date=format:"%Y-%m-%d %H:%M %z"', { cwd: projectRoot, encoding: "utf8" }).trim();
-        }
+        const cached = JSON.parse(readFileSync(buildInfoFile, "utf8"));
+        commitHash = commitHash || cached.commit;
+        commitMessage = commitMessage || cached.message;
+        commitDate = commitDate || cached.date;
     } catch {}
 }
 
-if (!commitMessage) {
-    commitMessage = "local development";
-}
+commitHash = commitHash || "dev";
+commitMessage = commitMessage || "local development";
 if (!commitDate) {
     const now = new Date();
     commitDate = now.toISOString().replace("T", " ").slice(0, 16) + " UTC";
