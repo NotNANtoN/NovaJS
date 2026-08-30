@@ -144,8 +144,10 @@ async function startGame() {
         throw new Error("Expected novaparse worker to be defined");
     }
     const gameData = new GameDataAggregator([filesystemData, novaFileData]);
-    repl.repl.context.gameData = gameData;
-    repl.repl.context.makeShip = makeShip;
+    if (repl.repl) {
+        repl.repl.context.gameData = gameData;
+        repl.repl.context.makeShip = makeShip;
+    }
 
     setupRoutes(gameData, app, htmlPath, bundlePath, bundleMapPath,
         clientSettingsPath, novaDataPath, playerStore);
@@ -166,32 +168,36 @@ async function startGame() {
     world.resources.set(MultiRoomResource, multiRoom);
     await world.addPlugin(NovaPlugin);
 
-    repl.repl.context.world = world;
+    if (repl.repl) {
+        repl.repl.context.world = world;
+    }
 
     await world.addPlugin(ServerPlugin);
-    repl.repl.context.addEnemy = async (id?: string) => {
-        // System worlds are created lazily by ServerPlugin and stored as
-        // SystemComponent on entities of the root world.
-        let systemWorld: World | undefined;
-        for (const entity of world.entities.values()) {
-            systemWorld = entity.components.get(SystemComponent);
-            if (systemWorld) {
-                break;
+    if (repl.repl) {
+        repl.repl.context.addEnemy = async (id?: string) => {
+            // System worlds are created lazily by ServerPlugin and stored as
+            // SystemComponent on entities of the root world.
+            let systemWorld: World | undefined;
+            for (const entity of world.entities.values()) {
+                systemWorld = entity.components.get(SystemComponent);
+                if (systemWorld) {
+                    break;
+                }
             }
-        }
-        if (!systemWorld) {
-            console.log('No active system world yet. '
-                + 'A client must connect before enemies can be added.');
-            return;
-        }
-        const ids = await gameData.ids;
-        id = id ?? ids.Ship[Math.floor(Math.random() * ids.Ship.length)];
-        const randomShip = await gameData.data.Ship.get(id);
-        const ship = makeShip(randomShip);
-        ship.components.set(MultiplayerData, {
-            owner: 'server',
-        });
-        systemWorld.entities.set(v4(), ship);
+            if (!systemWorld) {
+                console.log('No active system world yet. '
+                    + 'A client must connect before enemies can be added.');
+                return;
+            }
+            const ids = await gameData.ids;
+            id = id ?? ids.Ship[Math.floor(Math.random() * ids.Ship.length)];
+            const randomShip = await gameData.data.Ship.get(id);
+            const ship = makeShip(randomShip);
+            ship.components.set(MultiplayerData, {
+                owner: 'server',
+            });
+            systemWorld.entities.set(v4(), ship);
+        };
     }
 
     stepper();
