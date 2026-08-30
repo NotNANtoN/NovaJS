@@ -5,6 +5,7 @@ import * as PIXI from 'pixi.js';
 import { GameData } from '../client/gamedata/GameData';
 import { ControlEvent } from '../nova_plugin/controls_plugin';
 import { PlayerStateComponent } from '../nova_plugin/player_state';
+import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import {
     broadcastChat,
     ChatMessageEntry,
@@ -80,10 +81,12 @@ export class PlayerChatDialog extends Menu<Entity> {
         this.container.addChild(this.inputText);
 
         const sendButton = new Button(gameData, 'Send', 55, { x: 105, y: 26 });
+        const shareCoordsButton = new Button(gameData, 'Share Coords', 85, { x: -25, y: 74 });
         const closeButton = new Button(gameData, 'Close Channel', 85, { x: 75, y: 74 });
-        this.addButtons({ send: sendButton, close: closeButton });
+        this.addButtons({ send: sendButton, shareCoords: shareCoordsButton, close: closeButton });
 
         sendButton.click.subscribe(() => this.sendMessage());
+        shareCoordsButton.click.subscribe(() => this.shareCoordinates());
         closeButton.click.subscribe(() => this.done());
 
         this.controls = new MenuControls(controlEvents, {
@@ -156,6 +159,31 @@ export class PlayerChatDialog extends Menu<Entity> {
         });
 
         this.currentDraft = '';
+        this.updateView();
+    }
+
+    private shareCoordinates() {
+        if (!this.target || !this.world || !this.input) {
+            return;
+        }
+        const myState = this.input.components.get(PlayerStateComponent);
+        const myMovement = this.input.components.get(MovementStateComponent);
+        const myName = myState?.pilotName || 'Captain';
+        const systemId = myState?.currentSystem || 'nova:130';
+        const coords: [number, number] = [
+            Math.round(myMovement?.position.x ?? 0),
+            Math.round(myMovement?.position.y ?? 0),
+        ];
+        const text = `Position in ${systemId}: (${coords[0]}, ${coords[1]})`;
+
+        broadcastChat(this.world, {
+            to: this.target.peerUuid,
+            fromName: myName,
+            text,
+            kind: 'coords',
+            system: systemId,
+            coords,
+        });
         this.updateView();
     }
 

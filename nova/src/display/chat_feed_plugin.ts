@@ -84,8 +84,25 @@ export const ChatReceiveSystem = new System({
 
         if (typeof document !== 'undefined') {
             const sender = entry.fromName?.trim() || 'Captain';
-            const formatted = `[${sender}]: ${entry.text}`;
-            const textSprite = new PIXI.Text(formatted, CHAT_FONT);
+            let formatted = `[${sender}]: ${entry.text}`;
+            let font = CHAT_FONT;
+            if (entry.kind === 'sos') {
+                formatted = `[SOS] ${sender}: ${entry.text}`;
+                font = {
+                    ...CHAT_FONT,
+                    fill: 0xff6633,
+                    stroke: 0x220000,
+                    strokeThickness: 4,
+                };
+            } else if (entry.kind === 'coords') {
+                formatted = `[NAV] ${sender}: ${entry.text}`;
+                font = {
+                    ...CHAT_FONT,
+                    fill: 0x44ddff,
+                    stroke: 0x001122,
+                };
+            }
+            const textSprite = new PIXI.Text(formatted, font);
             container.addChild(textSprite);
 
             hudMessages.push({

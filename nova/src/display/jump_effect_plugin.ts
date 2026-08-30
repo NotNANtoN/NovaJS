@@ -2,6 +2,9 @@ import { Position } from 'nova_ecs/datatypes/position';
 import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
 import { System } from 'nova_ecs/system';
+import { Resource } from 'nova_ecs/resource';
+import { SingletonComponent } from 'nova_ecs/world';
+import * as PIXI from 'pixi.js';
 import {
     MovementPhysicsComponent,
     MovementStateComponent,
@@ -19,6 +22,18 @@ import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin';
 import { ShipComponent } from '../nova_plugin/ship_plugin';
 import { AnimationGraphicComponent, ObjectDrawSystem } from
     './animation_graphic_plugin';
+import { Space } from './space_resource';
+import { attachGraphic, ManagedGraphic } from './managed_graphic';
+
+const JumpWakeGraphics = new Resource<ManagedGraphic>('JumpWakeGraphics');
+
+const ClearJumpWakes = new System({
+    name: 'ClearJumpWakes',
+    args: [JumpWakeGraphics, SingletonComponent] as const,
+    step(wakeHandle) {
+        (wakeHandle.root as PIXI.Graphics).clear();
+    }
+});
 
 function arrivalProgress(
     jump: Pick<JumpState, 'phaseStartedAt' | 'transitionAt'>,
@@ -114,7 +129,7 @@ function applyJumpGraphic(
 
 export const JumpEffectSystem = new System({
     name: 'JumpEffectSystem',
-    after: [ObjectDrawSystem],
+    after: [ClearJumpWakes, ObjectDrawSystem],
     args: [
         ShipComponent,
         MovementStateComponent,
@@ -123,6 +138,7 @@ export const JumpEffectSystem = new System({
         Optional(JumpStateComponent),
         Optional(PlayerShipSelector),
         TimeResource,
+        Optional(JumpWakeGraphics),
     ] as const,
     step(
         _ship,
@@ -132,6 +148,7 @@ export const JumpEffectSystem = new System({
         jump,
         _playerShip,
         time,
+        wakeHandle,
     ) {
         if (graphic.managed.disposed) {
             return;
@@ -141,26 +158,51 @@ export const JumpEffectSystem = new System({
             return;
         }
 
+        const isArriving = jump.phase === 'arriving';
+        const progress = isArriving
+            ? arrivalProgress(jump, time.time)
+            : departureStretchFactor(
+                movement.velocity.length,
+                physics.maxVelocity,
+            );
+
         applyJumpGraphic(
             graphic,
             movement,
             jump,
-            jump.phase === 'arriving'
-                ? arrivalProgress(jump, time.time)
-                : departureStretchFactor(
-                    movement.velocity.length,
-                    physics.maxVelocity,
-                ),
+            progress,
         );
+
+        if (wakeHandle && isArriving && progress < 0.92) {
+            const wakeGraphics = wakeHandle.root as PIXI.Graphics;
+            const alpha = (1 - progress) * 0.75;
+            const radius = 20 + progress * 70;
+            wakeGraphics.lineStyle(2 + (1 - progress) * 2, 0x55ccff, alpha);
+            wakeGraphics.drawEllipse(movement.position.x, movement.position.y, radius * 0.75, radius);
+            wakeGraphics.lineStyle(1, 0xffffff, alpha * 0.9);
+            wakeGraphics.drawCircle(movement.position.x, movement.position.y, radius * 0.35);
+        }
     },
 });
 
 export const JumpEffectPlugin: Plugin = {
     name: 'JumpEffectPlugin',
     build(world) {
+        const space = world.resources.get(Space);
+        if (!space) {
+            throw new Error('Expected space resource');
+        }
+        const wakeGraphics = new PIXI.Graphics();
+        wakeGraphics.name = 'JumpWakeGraphics';
+        wakeGraphics.zIndex = 10;
+        world.resources.set(JumpWakeGraphics, attachGraphic(space, wakeGraphics));
+        world.addSystem(ClearJumpWakes);
         world.addSystem(JumpEffectSystem);
     },
     remove(world) {
+        world.resources.get(JumpWakeGraphics)?.dispose();
         world.removeSystem(JumpEffectSystem);
+        world.removeSystem(ClearJumpWakes);
+        world.resources.delete(JumpWakeGraphics);
     },
 };

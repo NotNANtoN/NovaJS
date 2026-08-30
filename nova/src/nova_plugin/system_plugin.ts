@@ -5,6 +5,7 @@ import { TimePlugin } from "nova_ecs/plugins/time_plugin";
 import { AnimationPlugin } from "./animation_plugin";
 import { BayPlugin } from "./bay_plugin";
 import { BeamPlugin } from "./beam_plugin";
+import { JettisonPlugin } from "./jettison_plugin";
 import { BlastPlugin } from "./blast_plugin";
 import { CollisionsPlugin } from './collisions_plugin';
 import { ControlsPlugin } from "./controls_plugin";
@@ -85,6 +86,7 @@ export const SystemPlugin: Plugin = {
         world.addPlugin(LegalRecordPlugin);
         world.addPlugin(IonizedPlugin);
         world.addPlugin(BlastPlugin);
+        world.addPlugin(JettisonPlugin);
     }
 };
 

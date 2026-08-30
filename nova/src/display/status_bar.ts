@@ -807,7 +807,14 @@ const ShowBoardingOutcome = new System({
         entity.components.set(ShownBoardingOutcome,
             { sequence: outcome.sequence });
         statusBar.showLandingMessage(
-            boardingOutcomeText(outcome.cargo, outcome.credits), time.time);
+            boardingOutcomeText(
+                outcome.cargo,
+                outcome.credits,
+                outcome.capturedShip,
+                outcome.resisted,
+            ),
+            time.time,
+        );
     },
 });
 

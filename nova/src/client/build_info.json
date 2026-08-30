@@ -1,5 +1,5 @@
 {
-  "commit": "8207689e",
-  "message": "Persist build metadata in build_info.json for container builds.",
-  "date": "2026-08-30 02:53 +0200"
+  "commit": "83fea089",
+  "message": "Preload and cache all weapon entries, beam/projectile sheets, and explosion assets.",
+  "date": "2026-08-30 03:06 +0200"
 }

@@ -43,4 +43,36 @@ describe('Chat feed plugin', () => {
         expect(history?.get('peer-1')?.length).toBe(1);
         expect(history?.get('peer-1')?.[0].text).toBe('Hello from Sol system!');
     });
+
+    it('receives SOS beacons and navigation coordinate broadcasts', () => {
+        world.emitNow(ChatMessageEvent, {
+            id: '2',
+            from: 'peer-2',
+            fromName: 'Pilot',
+            to: 'all',
+            text: 'Disabled near Sol!',
+            time: 1000,
+            kind: 'sos',
+            system: 'nova:130',
+            coords: [100, 200],
+        });
+
+        world.emitNow(ChatMessageEvent, {
+            id: '3',
+            from: 'peer-3',
+            fromName: 'Scout',
+            to: 'all',
+            text: 'Position in nova:130: (500, -300)',
+            time: 1000,
+            kind: 'coords',
+            system: 'nova:130',
+            coords: [500, -300],
+        });
+
+        const history = world.resources.get(ChatHistoryResource);
+        expect(history?.get('peer-2')?.length).toBe(1);
+        expect(history?.get('peer-2')?.[0].kind).toBe('sos');
+        expect(history?.get('peer-3')?.length).toBe(1);
+        expect(history?.get('peer-3')?.[0].kind).toBe('coords');
+    });
 });

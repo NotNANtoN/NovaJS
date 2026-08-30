@@ -92,14 +92,21 @@ export interface Communicator {
     sendMessage(message: unknown, destination?: string | Set<string>): void;
 }
 
-export const ChatMessageEntry = t.type({
-    id: t.string,
-    from: t.string,
-    fromName: t.string,
-    to: t.string,
-    text: t.string,
-    time: t.number,
-});
+export const ChatMessageEntry = t.intersection([
+    t.type({
+        id: t.string,
+        from: t.string,
+        fromName: t.string,
+        to: t.string,
+        text: t.string,
+        time: t.number,
+    }),
+    t.partial({
+        kind: t.union([t.literal('chat'), t.literal('sos'), t.literal('coords')]),
+        system: t.string,
+        coords: t.tuple([t.number, t.number]),
+    }),
+]);
 export type ChatMessageEntry = t.TypeOf<typeof ChatMessageEntry>;
 
 export const ChatMessageEvent = new EcsEvent<ChatMessageEntry>('ChatMessageEvent');
@@ -2047,7 +2054,14 @@ function newChatMessageId(from: string): string {
     return `${from}:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`;
 }
 
-export function broadcastChat(world: World, chat: { to: string, fromName?: string, text: string }) {
+export function broadcastChat(world: World, chat: {
+    to: string;
+    fromName?: string;
+    text: string;
+    kind?: 'chat' | 'sos' | 'coords';
+    system?: string;
+    coords?: [number, number];
+}) {
     const comms = world.singletonEntity.components.get(Comms);
     if (!comms || !comms.uuid) {
         return;
@@ -2059,6 +2073,9 @@ export function broadcastChat(world: World, chat: { to: string, fromName?: strin
         to: chat.to,
         text: chat.text,
         time: Date.now(),
+        ...(chat.kind ? { kind: chat.kind } : {}),
+        ...(chat.system ? { system: chat.system } : {}),
+        ...(chat.coords ? { coords: chat.coords } : {}),
     };
     comms.outboundChat ??= [];
     comms.outboundChat.push(entry);

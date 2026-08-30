@@ -44,6 +44,8 @@ import { PlatformResource } from './platform_plugin';
 import { PlayerShipSelector } from './player_ship_plugin';
 import { Stat } from './stat';
 import { TargetComponent } from './target_component';
+import { ShipComponent, ShipDataComponent } from './ship_plugin';
+import { getDefaultShipData } from 'novadatainterface/ShipData';
 import { WeaponsStateComponent } from './weapons_state';
 
 function movementAt(
@@ -312,5 +314,58 @@ describe('pirate boarding', () => {
         expect(victimInventory.holds).toEqual([]);
         expect(player.components.get(BoardingStateComponent))
             .toEqual({ boarded: ['victim'] });
+    });
+
+    it('captures a disabled NPC ship into player escorts when boarded', () => {
+        const world = new World('player-capture-test');
+        world.resources.set(PlatformResource, 'node');
+        world.resources.set(TimeResource, {
+            time: 0,
+            delta_ms: 1_000 / 60,
+            delta_s: 1 / 60,
+            frame: 0,
+        });
+
+        const playerState = createInitialPlayerState();
+        playerState.credits = 100;
+        playerState.cargoCapacity = 20;
+        playerState.kills = 50;
+        const player = new Entity('player')
+            .addComponent(PlayerShipSelector, undefined)
+            .addComponent(PlayerStateComponent, playerState)
+            .addComponent(MultiplayerData, { owner: 'player' })
+            .addComponent(MovementStateComponent, movementAt(new Position(0, 0)))
+            .addComponent(BoardingRequestComponent, { target: 'victim', sequence: 1 });
+
+        const shipData = {
+            ...getDefaultShipData(),
+            id: 'nova:130',
+            name: 'Kestrel',
+            crew: 5,
+            cost: 200_000,
+        };
+
+        const victim = new Entity('victim')
+            .addComponent(DisabledComponent, true)
+            .addComponent(MovementStateComponent, movementAt(new Position(BOARDING_STANDOFF, 0)))
+            .addComponent(ShipComponent, { id: 'nova:130' })
+            .addComponent(ShipDataComponent, shipData)
+            .addComponent(ArmorComponent, new Stat({ current: 20, max: 100, recharge: 0 }));
+
+        world.entities.set('player', player);
+        world.entities.set('victim', victim);
+        world.addSystem(PlayerBoardingSystem);
+
+        let outcome: any;
+        world.events.get(BoardingOutcomeEvent).subscribe(value => {
+            outcome = value;
+        });
+        world.step();
+
+        expect(outcome.target).toBe('victim');
+        expect(outcome.capturedShip).toBe('Kestrel');
+        expect(playerState.escorts?.length).toBe(1);
+        expect(playerState.escorts?.[0].shipId).toBe('nova:130');
+        expect(world.entities.has('victim')).toBeFalse();
     });
 });

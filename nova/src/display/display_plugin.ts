@@ -39,6 +39,7 @@ import { StarmapPlugin } from "./starmap_plugin";
 import { StatusBarResource, StatusBarPlugin } from "./status_bar";
 import { TargetCornersPlugin } from "./target_corners_plugin";
 import { ChatFeedPlugin } from "./chat_feed_plugin";
+import { RadialMenuPlugin } from "./radial_menu_plugin";
 
 
 const CenterShipSystem = new System({
@@ -222,6 +223,7 @@ export const Display: Plugin = {
         world.addSystem(MissileWarningOverlaySystem);
         await world.addPlugin(TargetCornersPlugin);
         await world.addPlugin(ChatFeedPlugin);
+        await world.addPlugin(RadialMenuPlugin);
         await world.addPlugin(ParticlesPlugin);
         await world.addPlugin(FullscreenPlugin);
         await world.addPlugin(ExplosionPlugin);
@@ -244,6 +246,7 @@ export const Display: Plugin = {
         await world.removePlugin(ExplosionPlugin);
         await world.removePlugin(FullscreenPlugin);
         await world.removePlugin(ParticlesPlugin);
+        await world.removePlugin(RadialMenuPlugin);
         await world.removePlugin(ChatFeedPlugin);
         await world.removePlugin(TargetCornersPlugin);
 

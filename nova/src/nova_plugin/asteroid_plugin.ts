@@ -134,7 +134,7 @@ export function makeAsteroid(
     return asteroid;
 }
 
-function makeOre(
+export function makeOre(
     asteroidId: string, commodity: string, tons: number, position: Position,
 ): Entity {
     const ore = new Entity(`ore ${commodity}`);

@@ -51,7 +51,7 @@ import {
 } from './player_state';
 import { PlatformResource } from './platform_plugin';
 import { PlayerShipSelector } from './player_ship_plugin';
-import { ShipDataComponent } from './ship_plugin';
+import { ShipComponent, ShipDataComponent } from './ship_plugin';
 import { TargetComponent } from './target_component';
 import { WeaponsStateComponent } from './weapons_state';
 
@@ -73,12 +73,18 @@ export type BoardingRequest = t.TypeOf<typeof BoardingRequest>;
 export const BoardingRequestComponent =
     new Component<BoardingRequest>('BoardingRequestComponent');
 
-const BoardingOutcome = t.type({
-    target: t.string,
-    sequence: t.number,
-    cargo: t.number,
-    credits: t.number,
-});
+const BoardingOutcome = t.intersection([
+    t.type({
+        target: t.string,
+        sequence: t.number,
+        cargo: t.number,
+        credits: t.number,
+    }),
+    t.partial({
+        capturedShip: t.string,
+        resisted: t.boolean,
+    }),
+]);
 export type BoardingOutcome = t.TypeOf<typeof BoardingOutcome>;
 export const BoardingOutcomeComponent =
     new Component<BoardingOutcome>('BoardingOutcomeComponent');
@@ -375,6 +381,8 @@ const DisabledBoardingTargets = new Query([
     Optional(BoardingInventoryComponent),
     Optional(DestructionStartedComponent),
     Optional(ArmorComponent),
+    Optional(ShipDataComponent),
+    Optional(ShipComponent),
 ] as const, 'DisabledBoardingTargets');
 
 export const PlayerBoardingInputSystem = new System({
@@ -438,9 +446,10 @@ export const PlayerBoardingSystem = new System({
         UUID,
         GetEntity,
         EmitNow,
+        Entities,
     ] as const,
     step(request, player, movement, multiplayer, disabledTargets, platform,
-        boarding, destructionStarted, armor, uuid, entity, emitNow) {
+        boarding, destructionStarted, armor, uuid, entity, emitNow, entities) {
         if (platform !== 'node' || multiplayer.owner === 'server'
             || destructionStarted || armor && armor.current <= 0
             || boarding?.boarded.includes(request.target)) {
@@ -455,6 +464,38 @@ export const PlayerBoardingSystem = new System({
         }
 
         const result = plunderShip(player, victim[3], victim[4]);
+        const isNpc = !victim[3];
+        const victimShipData = victim[7];
+        const victimShip = victim[8];
+
+        let capturedShip: string | undefined;
+        let resisted: boolean | undefined;
+
+        if (isNpc && (victimShip || victimShipData)) {
+            const victimShipId = victimShip?.id ?? victimShipData?.id ?? 'nova:128';
+            const shipName = victimShipData?.name ?? 'Ship';
+            const currentEscorts = player.escorts ?? [];
+            const maxEscorts = 6;
+            if (currentEscorts.length < maxEscorts) {
+                const playerCrew = (player.kills ?? 0) > 10 ? 25 : 15;
+                const victimCrew = victimShipData?.crew ?? 5;
+                const captureChance = Math.min(0.9, Math.max(0.35, (playerCrew + 10) / (playerCrew + victimCrew + 10)));
+                if (Math.random() < captureChance) {
+                    const dailyPay = Math.max(10, Math.floor((victimShipData?.cost ?? 50000) * 0.001));
+                    const newContract = {
+                        id: `capture-${uuid}-${Date.now()}`,
+                        shipId: victimShipId,
+                        dailyPay,
+                    };
+                    player.escorts = [...currentEscorts, newContract];
+                    capturedShip = shipName;
+                    entities.delete(request.target);
+                } else {
+                    resisted = true;
+                }
+            }
+        }
+
         entity.components.set(BoardingStateComponent, {
             boarded: [...(boarding?.boarded ?? []), request.target],
         });
@@ -463,6 +504,8 @@ export const PlayerBoardingSystem = new System({
             sequence: request.sequence,
             cargo: result.cargo,
             credits: result.credits,
+            ...(capturedShip ? { capturedShip } : {}),
+            ...(resisted ? { resisted } : {}),
         };
         entity.components.set(BoardingOutcomeComponent, outcome);
         emitNow(BoardingOutcomeEvent, { ...outcome, boarder: uuid }, [uuid]);

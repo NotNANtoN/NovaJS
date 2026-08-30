@@ -95,7 +95,12 @@ export function statusBarTargetHealth(
  * What a completed boarding took. A hull with nothing left to take is a real
  * outcome and has to read as one, or the pilot cannot tell it from a failure.
  */
-export function boardingOutcomeText(cargo: number, credits: number): string {
+export function boardingOutcomeText(
+    cargo: number,
+    credits: number,
+    capturedShip?: string,
+    resisted?: boolean,
+): string {
     const taken: string[] = [];
     if (cargo > 0) {
         taken.push(`${formatNumber(cargo)} tons of cargo`);
@@ -103,6 +108,17 @@ export function boardingOutcomeText(cargo: number, credits: number): string {
     if (credits > 0) {
         taken.push(`${formatCredits(credits)} cr`);
     }
+
+    if (capturedShip) {
+        const extra = taken.length > 0 ? ` (plundered ${taken.join(' and ')})` : '';
+        return `Boarded: captured ${capturedShip} into fleet!${extra}`;
+    }
+
+    if (resisted) {
+        const extra = taken.length > 0 ? ` Plundered ${taken.join(' and ')}.` : '';
+        return `Boarded: crew resisted capture.${extra}`;
+    }
+
     return taken.length === 0
         ? 'Boarded: nothing worth taking.'
         : `Boarded: took ${taken.join(' and ')}.`;
