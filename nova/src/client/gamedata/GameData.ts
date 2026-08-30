@@ -185,10 +185,18 @@ export class GameData implements GameDataInterface {
 
     private addPictGettable<T extends PictImageData | SpriteSheetImageData>(dataType: NovaDataType): Gettable<T> {
         return new Gettable<T>(async (id: string, priority: number): Promise<T> => {
-            return <T>((await this.getUrl(
+            const result = await this.getUrl(
                 artworkUrl(dataType, id),
                 priority,
-            )) as Buffer).buffer;
+            );
+            if (result instanceof ArrayBuffer) {
+                return result as T;
+            }
+            if (result && typeof result === 'object' && 'buffer' in result
+                && (result as { buffer: unknown }).buffer instanceof ArrayBuffer) {
+                return (result as { buffer: ArrayBuffer }).buffer as T;
+            }
+            return new ArrayBuffer(0) as T;
         });
     }
 
@@ -226,7 +234,14 @@ export class GameData implements GameDataInterface {
 
     async textureFromCicn(id: string): Promise<PIXI.Texture> {
         const cicnPath = artworkUrl(NovaDataType.CicnImage, id);
-        await this.data.CicnImage.get(id);
+        try {
+            const loaded = await this.getUrl(cicnPath);
+            if (loaded instanceof PIXI.Texture) {
+                return loaded;
+            }
+        } catch {
+            // fallback below
+        }
         return PIXI.Texture.from(cicnPath);
     }
 

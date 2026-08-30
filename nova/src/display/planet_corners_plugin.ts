@@ -33,6 +33,7 @@ const DrawPlanetCornersSystem = new System({
             return;
         }
 
+        targetCorners.setStyle("neutral");
         targetCorners.step(time.time, target, targetGraphic.size);
         targetCorners.setPosition(targetGraphic.container.position);
         targetCorners.visible = true;
