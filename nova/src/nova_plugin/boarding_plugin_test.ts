@@ -360,6 +360,7 @@ describe('pirate boarding', () => {
         world.events.get(BoardingOutcomeEvent).subscribe(value => {
             outcome = value;
         });
+        spyOn(Math, 'random').and.returnValue(0.1);
         world.step();
 
         expect(outcome.target).toBe('victim');
@@ -367,5 +368,57 @@ describe('pirate boarding', () => {
         expect(playerState.escorts?.length).toBe(1);
         expect(playerState.escorts?.[0].shipId).toBe('nova:130');
         expect(world.entities.has('victim')).toBeFalse();
+    });
+
+    it('reports resisted when capture roll fails', () => {
+        const world = new World('player-capture-resist-test');
+        world.resources.set(PlatformResource, 'node');
+        world.resources.set(TimeResource, {
+            time: 0,
+            delta_ms: 1_000 / 60,
+            delta_s: 1 / 60,
+            frame: 0,
+        });
+
+        const playerState = createInitialPlayerState();
+        const player = new Entity('player')
+            .addComponent(PlayerShipSelector, undefined)
+            .addComponent(PlayerStateComponent, playerState)
+            .addComponent(MultiplayerData, { owner: 'player' })
+            .addComponent(MovementStateComponent, movementAt(new Position(0, 0)))
+            .addComponent(BoardingRequestComponent, { target: 'victim', sequence: 1 });
+
+        const shipData = {
+            ...getDefaultShipData(),
+            id: 'nova:130',
+            name: 'Kestrel',
+            crew: 50,
+            cost: 200_000,
+        };
+
+        const victim = new Entity('victim')
+            .addComponent(DisabledComponent, true)
+            .addComponent(MovementStateComponent, movementAt(new Position(BOARDING_STANDOFF, 0)))
+            .addComponent(ShipComponent, { id: 'nova:130' })
+            .addComponent(ShipDataComponent, shipData)
+            .addComponent(ArmorComponent, new Stat({ current: 20, max: 100, recharge: 0 }));
+
+        world.entities.set('player', player);
+        world.entities.set('victim', victim);
+        world.addSystem(PlayerBoardingSystem);
+
+        let outcome: any;
+        world.events.get(BoardingOutcomeEvent).subscribe(value => {
+            outcome = value;
+        });
+
+        spyOn(Math, 'random').and.returnValue(0.99);
+        world.step();
+
+        expect(outcome.target).toBe('victim');
+        expect(outcome.resisted).toBeTrue();
+        expect(outcome.capturedShip).toBeUndefined();
+        expect(playerState.escorts?.length ?? 0).toBe(0);
+        expect(world.entities.has('victim')).toBeTrue();
     });
 });

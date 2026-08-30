@@ -1,16 +1,29 @@
 import 'jasmine';
+import { MockGameData } from 'novadatainterface/MockGameData';
 import { getDefaultShipData } from 'novadatainterface/ShipData';
 import { Angle } from 'nova_ecs/datatypes/angle';
 import { Position } from 'nova_ecs/datatypes/position';
 import { Vector } from 'nova_ecs/datatypes/vector';
+import { Entity } from 'nova_ecs/entity';
+import { DeltaPlugin } from 'nova_ecs/plugins/delta_plugin';
 import {
     MovementState,
     MovementStateComponent,
 } from 'nova_ecs/plugins/movement_plugin';
 import { MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
+import { TimeResource } from 'nova_ecs/plugins/time_plugin';
+import { World } from 'nova_ecs/world';
+import { DeathEvent } from './death_plugin';
+import { GameDataResource } from './game_data_resource';
 import {
+    EscortDefenseSystem,
+    EscortPlugin,
     EscortRoster,
+    EscortRosterComponent,
+    HandleEscortDestruction,
     HiredEscortComponent,
+    RemoveDismissedEscorts,
+    SyncEscortRoster,
     availableEscortOffers,
     dismissEscort,
     escortPayroll,
@@ -19,6 +32,9 @@ import {
     makeHiredEscort,
 } from './escort_plugin';
 import { NpcAIComponent } from './npc_plugin';
+import { PlatformResource } from './platform_plugin';
+import { PlayerStateComponent, createInitialPlayerState } from './player_state';
+import { TargetComponent } from './target_component';
 
 function movementAt(x: number, y: number): MovementState {
     return {
@@ -29,6 +45,21 @@ function movementAt(x: number, y: number): MovementState {
         turning: 0,
         velocity: new Vector(4, -2),
     };
+}
+
+async function escortTestWorld(name: string): Promise<World> {
+    const world = new World(name);
+    world.resources.set(PlatformResource, 'node');
+    world.resources.set(GameDataResource, new MockGameData());
+    world.resources.set(TimeResource, {
+        time: 1000,
+        delta_ms: 1000 / 60,
+        delta_s: 1 / 60,
+        frame: 1,
+    });
+    await world.addPlugin(DeltaPlugin);
+    await world.addPlugin(EscortPlugin);
+    return world;
 }
 
 describe('retail escort availability', () => {
@@ -123,5 +154,122 @@ describe('hired escort entities', () => {
         const movement = escort.components.get(MovementStateComponent)!;
         expect(movement.position).not.toEqual(owner.position);
         expect(movement.velocity).toEqual(owner.velocity);
+    });
+});
+
+describe('SyncEscortRoster', () => {
+    it('syncs player state escorts to EscortRosterComponent on node for client-owned player entities', async () => {
+        const world = await escortTestWorld('sync-escort-roster-test');
+
+        const state = createInitialPlayerState();
+        state.escorts = [{ id: 'contract-1', shipId: 'nova:128', dailyPay: 50 }];
+
+        const player = new Entity('player')
+            .addComponent(PlayerStateComponent, state)
+            .addComponent(MultiplayerData, { owner: 'client-1' });
+
+        world.entities.set('player', player);
+        world.step();
+
+        const roster = player.components.get(EscortRosterComponent);
+        expect(roster).toBeDefined();
+        expect(roster?.contracts).toEqual([{ id: 'contract-1', shipId: 'nova:128', dailyPay: 50 }]);
+    });
+});
+
+describe('HandleEscortDestruction', () => {
+    it('removes the destroyed escort contract from playerState and roster upon DeathEvent', async () => {
+        const world = await escortTestWorld('escort-destruction-test');
+
+        const state = createInitialPlayerState();
+        state.escorts = [
+            { id: 'contract-1', shipId: 'nova:128', dailyPay: 50 },
+            { id: 'contract-2', shipId: 'nova:130', dailyPay: 100 },
+        ];
+
+        const player = new Entity('player')
+            .addComponent(PlayerStateComponent, state)
+            .addComponent(EscortRosterComponent, { contracts: [...state.escorts] })
+            .addComponent(MultiplayerData, { owner: 'client-1' });
+
+        const escort = new Entity('escort-1')
+            .addComponent(HiredEscortComponent, {
+                ownerUuid: 'player',
+                contractId: 'contract-1',
+                slot: 0,
+            })
+            .addComponent(MultiplayerData, { owner: 'server' });
+
+        world.entities.set('player', player);
+        world.entities.set('escort-1', escort);
+
+        world.emitNow(DeathEvent, { time: 1000, delta_ms: 16, delta_s: 0.016, frame: 1 }, ['escort-1']);
+
+        expect(player.components.get(PlayerStateComponent)?.escorts).toEqual([
+            { id: 'contract-2', shipId: 'nova:130', dailyPay: 100 },
+        ]);
+        expect(player.components.get(EscortRosterComponent)?.contracts).toEqual([
+            { id: 'contract-2', shipId: 'nova:130', dailyPay: 100 },
+        ]);
+    });
+});
+
+describe('EscortDefenseSystem', () => {
+    it('copies owner target to escort when owner acquires an enemy target', async () => {
+        const world = await escortTestWorld('escort-defense-test');
+
+        const player = new Entity('player')
+            .addComponent(TargetComponent, { target: 'enemy-ship' })
+            .addComponent(MultiplayerData, { owner: 'client-1' });
+
+        const escort = new Entity('escort-1')
+            .addComponent(HiredEscortComponent, {
+                ownerUuid: 'player',
+                contractId: 'contract-1',
+                slot: 0,
+            })
+            .addComponent(TargetComponent, { target: undefined })
+            .addComponent(MultiplayerData, { owner: 'server' });
+
+        world.entities.set('player', player);
+        world.entities.set('escort-1', escort);
+        world.entities.set('enemy-ship', new Entity('enemy-ship'));
+
+        world.step();
+
+        expect(escort.components.get(TargetComponent)?.target).toBe('enemy-ship');
+    });
+
+    it('does not target the owner or other escorts of the same fleet', async () => {
+        const world = await escortTestWorld('escort-no-friendly-fire-test');
+
+        const player = new Entity('player')
+            .addComponent(TargetComponent, { target: 'escort-2' })
+            .addComponent(MultiplayerData, { owner: 'client-1' });
+
+        const escort1 = new Entity('escort-1')
+            .addComponent(HiredEscortComponent, {
+                ownerUuid: 'player',
+                contractId: 'contract-1',
+                slot: 0,
+            })
+            .addComponent(TargetComponent, { target: undefined })
+            .addComponent(MultiplayerData, { owner: 'server' });
+
+        const escort2 = new Entity('escort-2')
+            .addComponent(HiredEscortComponent, {
+                ownerUuid: 'player',
+                contractId: 'contract-2',
+                slot: 1,
+            })
+            .addComponent(MultiplayerData, { owner: 'server' });
+
+        world.entities.set('player', player);
+        world.entities.set('escort-1', escort1);
+        world.entities.set('escort-2', escort2);
+
+        world.step();
+
+        expect(escort1.components.get(TargetComponent)?.target).toBeUndefined();
     });
 });

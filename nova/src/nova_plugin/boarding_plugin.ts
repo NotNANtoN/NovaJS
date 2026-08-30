@@ -488,6 +488,7 @@ export const PlayerBoardingSystem = new System({
                         dailyPay,
                     };
                     player.escorts = [...currentEscorts, newContract];
+                    entity.components.set(PlayerStateComponent, player);
                     capturedShip = shipName;
                     entities.delete(request.target);
                 } else {

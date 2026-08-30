@@ -24,6 +24,7 @@ import { makeNpc } from './npc_plugin';
 import { PlatformResource } from './platform_plugin';
 import { TargetComponent } from './target_component';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
+import { DeathEvent } from './death_plugin';
 import {
     EscortContract,
     EscortContractData,
@@ -273,6 +274,72 @@ const FollowEscortOwner = new System({
     },
 });
 
+export const EscortDefenseSystem = new System({
+    name: 'EscortDefenseSystem',
+    args: [
+        HiredEscortComponent,
+        TargetComponent,
+        Entities,
+        MultiplayerData,
+        PlatformResource,
+    ] as const,
+    step(escort, target, entities, multiplayer, platform) {
+        if (platform !== 'node' || multiplayer.owner !== 'server') {
+            return;
+        }
+        const owner = entities.get(escort.ownerUuid);
+        if (!owner) {
+            return;
+        }
+        const ownerTarget = owner.components.get(TargetComponent)?.target;
+        if (ownerTarget && entities.has(ownerTarget) && ownerTarget !== escort.ownerUuid) {
+            const targetEscort = entities.get(ownerTarget)?.components.get(HiredEscortComponent);
+            if (targetEscort?.ownerUuid !== escort.ownerUuid) {
+                target.target = ownerTarget;
+                return;
+            }
+        }
+        if (target.target && !entities.has(target.target)) {
+            target.target = undefined;
+        }
+    },
+});
+
+export const HandleEscortDestruction = new System({
+    name: 'HandleEscortDestruction',
+    events: [DeathEvent],
+    args: [
+        HiredEscortComponent,
+        DeathEvent,
+        Entities,
+        PlatformResource,
+    ] as const,
+    step(escort, _death, entities, platform) {
+        if (platform !== 'node') {
+            return;
+        }
+        const owner = entities.get(escort.ownerUuid);
+        if (!owner) {
+            return;
+        }
+        const playerState = owner.components.get(PlayerStateComponent);
+        if (playerState && playerState.escorts) {
+            playerState.escorts = playerState.escorts.filter(
+                contract => contract.id !== escort.contractId,
+            );
+            owner.components.set(PlayerStateComponent, playerState);
+        }
+        const roster = owner.components.get(EscortRosterComponent);
+        if (roster) {
+            owner.components.set(EscortRosterComponent, {
+                contracts: roster.contracts.filter(
+                    contract => contract.id !== escort.contractId,
+                ),
+            });
+        }
+    },
+});
+
 const RemoveDismissedEscorts = new System({
     name: 'RemoveDismissedEscorts',
     args: [
@@ -313,7 +380,7 @@ export const SyncEscortRoster = new System({
         MultiplayerData,
     ] as const,
     step(entity, playerState, roster, platform, multiplayer) {
-        if (platform !== 'node' || multiplayer.owner !== 'server') {
+        if (platform !== 'node' || multiplayer.owner === 'server') {
             return;
         }
         const saved = playerState.escorts ?? [];
@@ -354,12 +421,16 @@ export const EscortPlugin: Plugin = {
         world.addSystem(SyncEscortRoster);
         world.addSystem(SpawnHiredEscorts);
         world.addSystem(FollowEscortOwner);
+        world.addSystem(EscortDefenseSystem);
+        world.addSystem(HandleEscortDestruction);
         world.addSystem(RemoveDismissedEscorts);
     },
     remove(world) {
         world.removeSystem(SyncEscortRoster);
         world.removeSystem(SpawnHiredEscorts);
         world.removeSystem(FollowEscortOwner);
+        world.removeSystem(EscortDefenseSystem);
+        world.removeSystem(HandleEscortDestruction);
         world.removeSystem(RemoveDismissedEscorts);
     },
 };
