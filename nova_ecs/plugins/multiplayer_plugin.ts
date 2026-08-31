@@ -102,7 +102,7 @@ export const ChatMessageEntry = t.intersection([
         time: t.number,
     }),
     t.partial({
-        kind: t.union([t.literal('chat'), t.literal('sos'), t.literal('coords')]),
+        kind: t.union([t.literal('chat'), t.literal('sos'), t.literal('coords'), t.literal('security'), t.literal('chatter')]),
         system: t.string,
         coords: t.tuple([t.number, t.number]),
     }),

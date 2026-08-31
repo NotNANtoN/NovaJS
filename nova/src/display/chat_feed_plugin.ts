@@ -101,6 +101,22 @@ export const ChatReceiveSystem = new System({
                     fill: 0x44ddff,
                     stroke: 0x001122,
                 };
+            } else if (entry.kind === 'security') {
+                formatted = `[SEC] ${sender}: ${entry.text}`;
+                font = {
+                    ...CHAT_FONT,
+                    fill: 0xffdd44,
+                    stroke: 0x221100,
+                    strokeThickness: 3,
+                };
+            } else if (entry.kind === 'chatter') {
+                formatted = `[COMMS] ${sender}: "${entry.text}"`;
+                font = {
+                    ...CHAT_FONT,
+                    fill: 0x88eebb,
+                    stroke: 0x002211,
+                    strokeThickness: 3,
+                };
             }
             const textSprite = new PIXI.Text(formatted, font);
             container.addChild(textSprite);

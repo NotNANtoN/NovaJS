@@ -187,6 +187,46 @@ function getSpawnEntries(systemData: {
     return Array.isArray(legacy) ? legacy.filter(isNpcSpawnData) : [];
 }
 
+const AURORAN_ACE_NAMES = [
+    'Dechanik', 'Blood Honor', "Frunch'eck", 'Talons of Integrity',
+    "Warrior's Pride", 'Doomblade', "Warrior's Path", 'Gjinchar',
+    "Swordsman's Song", 'Ytrack',
+];
+
+const PIRATE_ACE_NAMES = [
+    'Howling Wolf', 'Hell-Hound', 'Old Grey Fox', 'Black Dragon',
+    'Footpad', 'Silent Footfall', 'Ball and Chain', 'Raven Stone',
+    'Lone Horseman', 'Old Veteran',
+];
+
+const FEDERATION_ACE_NAMES = [
+    'Resolute', 'Vigilant', 'Dauntless', 'Omata Kane', 'Thunderer',
+    'Valiant', 'Defender', 'Centurion', 'Lexington', 'Intrepid',
+];
+
+const POLARIS_ACE_NAMES = [
+    "Nil'kem", "Kel'ar", "Ver'a Se", "Mu'ao", "Kha'r", "Trel'a",
+];
+
+function chooseAceName(govtId: string | number, role?: string): string | undefined {
+    const gid = String(govtId);
+    if (Math.random() < 0.45) {
+        if (gid === 'nova:132' || gid === '132') {
+            return AURORAN_ACE_NAMES[Math.floor(Math.random() * AURORAN_ACE_NAMES.length)];
+        }
+        if (gid === 'nova:130' || gid === '130' || role === 'pirate') {
+            return PIRATE_ACE_NAMES[Math.floor(Math.random() * PIRATE_ACE_NAMES.length)];
+        }
+        if (gid === 'nova:128' || gid === '128') {
+            return FEDERATION_ACE_NAMES[Math.floor(Math.random() * FEDERATION_ACE_NAMES.length)];
+        }
+        if (gid === 'nova:133' || gid === '133') {
+            return POLARIS_ACE_NAMES[Math.floor(Math.random() * POLARIS_ACE_NAMES.length)];
+        }
+    }
+    return undefined;
+}
+
 async function buildNpc(
     gameData: GameDataInterface,
     npcType: NpcSpawnData,
@@ -202,6 +242,10 @@ async function buildNpc(
         const npc = makeNpc(shipData);
         if (!reserveEntity(budget, npc, 'ship')) {
             return undefined;
+        }
+        const aceName = chooseAceName(npcType.government, npcType.combatRole);
+        if (aceName) {
+            npc.name = `${aceName} (${shipData.name})`;
         }
         npc.components.set(GovtComponent, { id: npcType.government });
         if (npcType.kind === "dude") {

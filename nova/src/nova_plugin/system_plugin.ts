@@ -17,6 +17,7 @@ import { HealthPlugin } from "./health_plugin";
 import { IonizedPlugin } from "./ionization_plugin";
 import { JumpPlugin } from "./jump_plugin";
 import { DerelictPlugin } from "./derelict_plugin";
+import { NpcInteractionPlugin } from "./npc_interaction_plugin";
 import { MissionPlugin } from "./mission_plugin";
 import { MissionShipsPlugin } from "./mission_ship_plugin";
 import { AsteroidPlugin } from "./asteroid_plugin";
@@ -89,6 +90,7 @@ export const SystemPlugin: Plugin = {
         world.addPlugin(BlastPlugin);
         world.addPlugin(JettisonPlugin);
         world.addPlugin(DerelictPlugin);
+        world.addPlugin(NpcInteractionPlugin);
     }
 };
 
