@@ -768,6 +768,9 @@ export const ParkInterceptorAI = new System({
         movement.turnTo = command.turnTo;
         movement.accelerating = command.accelerating;
         movement.turnBack = command.turnBack;
+        if (command.turnTo === null && !command.turnBack) {
+            movement.turning = 0;
+        }
     },
 });
 
@@ -837,6 +840,9 @@ export const FollowAI = new System({
             : (command.turnTo ?? target.target);
         movementState.accelerating = command.accelerating;
         movementState.turnBack = command.turnBack;
+        if (movementState.turnTo === null && !command.turnBack) {
+            movementState.turning = 0;
+        }
     }
 });
 

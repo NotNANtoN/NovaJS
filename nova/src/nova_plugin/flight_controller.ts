@@ -156,7 +156,7 @@ function velocityMatchingCommand(
     settled: boolean,
 ): FlightCommand {
     const correction = desiredVelocity.subtract(self.velocity);
-    const deadband = limits.acceleration * 0.25;
+    const deadband = Math.max(15, limits.acceleration * 0.25);
     if (settled && correction.length <= deadband) {
         return { turnTo: null, accelerating: 0, turnBack: false };
     }

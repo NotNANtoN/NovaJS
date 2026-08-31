@@ -525,11 +525,15 @@ function handleTurning(state: MovementState, physics: MovementPhysics,
         }
         if (angle) {
             turnToAngle(state, physics, time, angle);
+        } else {
+            state.turning = 0;
         }
     } else if (state.turnBack) {
         if (state.velocity.length > 0) {
             let reverseAngle = state.velocity.angle.add(Math.PI);
             turnToAngle(state, physics, time, reverseAngle);
+        } else {
+            state.turning = 0;
         }
     }
 

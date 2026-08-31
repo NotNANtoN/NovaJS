@@ -232,6 +232,9 @@ export const FleetCohesionSystem = new System({
         movement.turnTo = command.turnTo;
         movement.accelerating = command.accelerating;
         movement.turnBack = command.turnBack;
+        if (command.turnTo === null && !command.turnBack) {
+            movement.turning = 0;
+        }
     },
 });
 

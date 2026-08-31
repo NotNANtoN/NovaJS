@@ -246,6 +246,7 @@ const NpcTrafficFlightSystem = new System({
             // into a planet, but a ship that simply stops existing next to you
             // reads as a bug, so it waits out its stay where it can be seen.
             movement.turnTo = null;
+            movement.turning = 0;
             movement.accelerating = 0;
             movement.velocity = new Vector(0, 0);
             if (time.time < traffic.readyAt) {
@@ -278,6 +279,7 @@ const NpcTrafficFlightSystem = new System({
         if (traffic.phase === 'arriving') {
             if (time.time < traffic.readyAt) {
                 movement.turnTo = null;
+                movement.turning = 0;
                 movement.accelerating = 0;
                 return;
             }
@@ -364,6 +366,7 @@ const NpcTrafficFlightSystem = new System({
             traffic.destination = planet[0];
             traffic.readyAt = time.time + trafficDwellDuration(random);
             movement.turnTo = null;
+            movement.turning = 0;
             movement.accelerating = 0;
             movement.velocity = new Vector(0, 0);
             return;
@@ -377,6 +380,9 @@ const NpcTrafficFlightSystem = new System({
         movement.turnTo = command.turnTo;
         movement.accelerating = command.accelerating;
         movement.turnBack = command.turnBack;
+        if (command.turnTo === null && !command.turnBack) {
+            movement.turning = 0;
+        }
     },
 });
 
