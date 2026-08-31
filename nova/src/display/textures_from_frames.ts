@@ -6,6 +6,11 @@ import { preferredArtworkPath } from "../client/artwork_url";
 
 const atlasTextures = new Map<string, Promise<PIXI.Texture>>();
 const framesCache = new WeakMap<SpriteSheetFramesData, Promise<PIXI.Texture[]>>();
+const resolvedFramesCache = new WeakMap<SpriteSheetFramesData, PIXI.Texture[]>();
+
+export function getTexturesFromFramesCached(framesData: SpriteSheetFramesData): PIXI.Texture[] | undefined {
+    return resolvedFramesCache.get(framesData);
+}
 
 function resolveAtlasUrl(image: string) {
     if (image.startsWith('/') || /^[a-z][a-z\d+.-]*:\/\//i.test(image)) {
@@ -31,6 +36,10 @@ function loadAtlasTexture(url: string) {
 }
 
 export async function texturesFromFrames(framesData: SpriteSheetFramesData): Promise<PIXI.Texture[]> {
+    const syncCached = resolvedFramesCache.get(framesData);
+    if (syncCached) {
+        return syncCached;
+    }
     let cached = framesCache.get(framesData);
     if (cached) {
         return await cached;
@@ -42,11 +51,13 @@ export async function texturesFromFrames(framesData: SpriteSheetFramesData): Pro
         if (framesData.meta?.image) {
             try {
                 const atlas = await loadAtlasTexture(resolveAtlasUrl(framesData.meta.image));
-                return frameNames.map(frameName => {
+                const textures = frameNames.map(frameName => {
                     const { x, y, w, h } = framesData.frames[frameName].frame;
                     return new PIXI.Texture(
                         atlas.baseTexture, new PIXI.Rectangle(x, y, w, h));
                 });
+                resolvedFramesCache.set(framesData, textures);
+                return textures;
             } catch (error) {
                 // Fall back to the legacy endpoint-per-frame behavior if the atlas
                 // is unavailable.
@@ -54,7 +65,9 @@ export async function texturesFromFrames(framesData: SpriteSheetFramesData): Pro
             }
         }
 
-        return frameNames.map(frameName => PIXI.Texture.from(frameName));
+        const textures = frameNames.map(frameName => PIXI.Texture.from(frameName));
+        resolvedFramesCache.set(framesData, textures);
+        return textures;
     })();
 
     framesCache.set(framesData, promise);

@@ -2,7 +2,7 @@ import { AnimationImage } from "novadatainterface/Animation";
 import { GameDataInterface } from "novadatainterface/GameDataInterface";
 import * as PIXI from "pixi.js";
 import { AnimationImageIndex } from "novadatainterface/Animation";
-import { texturesFromFrames } from "./textures_from_frames";
+import { getTexturesFromFramesCached, texturesFromFrames } from "./textures_from_frames";
 import { mod } from "../util/mod";
 import { getFrameAndAngle } from "../util/get_frame_and_angle";
 
@@ -28,22 +28,33 @@ export class SpriteSheetSprite {
         this.wrappedRotation = 0;
         this.pixiSprite.blendMode = image.blendMode;
 
-        const loadTextures = async () => {
-            const framesData = await this.gameData.data
-                .SpriteSheetFrames.get(this.image.id);
-            this.textures = await texturesFromFrames(framesData);
+        this.pixiSprite.anchor.x = 0.5;
+        this.pixiSprite.anchor.y = 0.5;
+
+        const cachedFramesData = (this.gameData.data.SpriteSheetFrames as unknown as { gotten?: Record<string, import('novadatainterface/SpriteSheetData').SpriteSheetFramesData> })?.gotten?.[this.image.id];
+        const syncTextures = cachedFramesData ? getTexturesFromFramesCached(cachedFramesData) : undefined;
+        if (syncTextures) {
+            this.textures = syncTextures;
             this.size.x = Math.max(0, ...this.textures.map(t => t.width));
             this.size.y = Math.max(0, ...this.textures.map(t => t.height));
             this.frames = this.textures.length;
-            if (this.wrappedRotation !== 0) {
-                this.rotation = this.wrappedRotation;
-            }
-            return this;
+            this.frame = this.textureSet.start;
+            this.buildPromise = Promise.resolve(this);
+        } else {
+            const loadTextures = async () => {
+                const framesData = await this.gameData.data
+                    .SpriteSheetFrames.get(this.image.id);
+                this.textures = await texturesFromFrames(framesData);
+                this.size.x = Math.max(0, ...this.textures.map(t => t.width));
+                this.size.y = Math.max(0, ...this.textures.map(t => t.height));
+                this.frames = this.textures.length;
+                if (this.wrappedRotation !== 0) {
+                    this.rotation = this.wrappedRotation;
+                }
+                return this;
+            };
+            this.buildPromise = loadTextures();
         }
-
-        this.pixiSprite.anchor.x = 0.5;
-        this.pixiSprite.anchor.y = 0.5;
-        this.buildPromise = loadTextures();
     }
 
     setFramesToUse(frames: string) {

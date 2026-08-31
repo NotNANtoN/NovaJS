@@ -120,31 +120,60 @@ const AnimationGraphicCleanup = new System({
     }
 });
 
-const AnimationGraphicInsert = new System({
-    name: 'AnimationGraphicInsert',
+const SyncAnimationGraphicInsert = new System({
+    name: 'SyncAnimationGraphicInsert',
     events: [AddEvent],
-    args: [AnimationGraphicComponent, Space] as const,
-    step(graphic, space) {
-        if (!graphic.managed.disposed) {
-            graphic.attachTo(space);
+    args: [AnimationComponent, GameDataResource, Space, MovementStateComponent, GetEntity, Optional(AnimationGraphicComponent)] as const,
+    step(animation, gameData, space, movementState, entity, existingGraphic) {
+        if (existingGraphic) {
+            if (!existingGraphic.managed.disposed) {
+                existingGraphic.attachTo(space);
+                existingGraphic.container.position.x = movementState.position.x;
+                existingGraphic.container.position.y = movementState.position.y;
+                existingGraphic.rotation = movementState.rotation.angle;
+            }
+            return;
         }
+
+        const graphic = new AnimationGraphic({
+            gameData: currentIfDraft(gameData)!,
+            animation: currentIfDraft(animation)!,
+        });
+
+        // Order sprites
+        if (entity.components.has(PlayerShipSelector)) {
+            graphic.container.zIndex = 10;
+        } else if (entity.components.has(ProjectileComponent)) {
+            graphic.container.zIndex = 9;
+        } else if (entity.components.has(ShipComponent)) {
+            graphic.container.zIndex = 8;
+        } else if (entity.components.has(PlanetComponent)) {
+            graphic.container.zIndex = -10;
+        }
+
+        graphic.attachTo(space);
+        graphic.container.position.x = movementState.position.x;
+        graphic.container.position.y = movementState.position.y;
+        graphic.rotation = movementState.rotation.angle;
+        entity.components.set(AnimationGraphicComponent, graphic);
+        entity.components.set(AnimationGraphicLoadedComponent, graphic);
     }
 });
 
 export const AnimationGraphicPlugin: Plugin = {
     name: 'AnimationGraphicPlugin',
     build(world) {
+        world.addSystem(SyncAnimationGraphicInsert);
         world.addSystem(AnimationGraphicLoader);
         world.addSystem(AnimationGraphicProvider);
         world.addSystem(ObjectDrawSystem);
         world.addSystem(AnimationGraphicCleanup);
-        world.addSystem(AnimationGraphicInsert);
     },
     remove(world) {
+        world.removeSystem(SyncAnimationGraphicInsert);
         world.removeSystem(AnimationGraphicLoader);
         world.removeSystem(AnimationGraphicProvider);
         world.removeSystem(ObjectDrawSystem);
         world.removeSystem(AnimationGraphicCleanup);
-        world.removeSystem(AnimationGraphicInsert);
     }
 }
