@@ -165,4 +165,17 @@ describe('spaceport availability', () => {
         expect(hasRequiredTechnology(0, resolved)).toBe(false);
         expect(hasSpaceportService(resolved, 'bar')).toBe(false);
     });
+
+    it('correctly maps Tau Prime services with flags 67', () => {
+        const tauPrime = resolveSpaceportPlanetData(getDefaultPlanetData(), {
+            id: 'nova:151',
+            name: 'Tau Prime',
+            flags: 67, // 0x43: canLand, commodity, bar
+            techLevel: 0,
+        });
+        expect(hasSpaceportService(tauPrime, 'outfitter')).toBe(false);
+        expect(hasSpaceportService(tauPrime, 'shipyard')).toBe(false);
+        expect(hasSpaceportService(tauPrime, 'commodity')).toBe(true);
+        expect(hasSpaceportService(tauPrime, 'bar')).toBe(true);
+    });
 });

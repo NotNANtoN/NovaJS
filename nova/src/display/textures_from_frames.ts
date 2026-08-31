@@ -5,6 +5,7 @@ import urlJoin from "url-join";
 import { preferredArtworkPath } from "../client/artwork_url";
 
 const atlasTextures = new Map<string, Promise<PIXI.Texture>>();
+const framesCache = new WeakMap<SpriteSheetFramesData, Promise<PIXI.Texture[]>>();
 
 function resolveAtlasUrl(image: string) {
     if (image.startsWith('/') || /^[a-z][a-z\d+.-]*:\/\//i.test(image)) {
@@ -29,23 +30,33 @@ function loadAtlasTexture(url: string) {
     return atlas;
 }
 
-export async function texturesFromFrames(framesData: SpriteSheetFramesData) {
-    const frameNames = Object.keys(framesData.frames);
-
-    if (framesData.meta?.image) {
-        try {
-            const atlas = await loadAtlasTexture(resolveAtlasUrl(framesData.meta.image));
-            return frameNames.map(frameName => {
-                const { x, y, w, h } = framesData.frames[frameName].frame;
-                return new PIXI.Texture(
-                    atlas.baseTexture, new PIXI.Rectangle(x, y, w, h));
-            });
-        } catch (error) {
-            // Fall back to the legacy endpoint-per-frame behavior if the atlas
-            // is unavailable.
-            console.warn('Failed to load sprite sheet atlas', error);
-        }
+export async function texturesFromFrames(framesData: SpriteSheetFramesData): Promise<PIXI.Texture[]> {
+    let cached = framesCache.get(framesData);
+    if (cached) {
+        return await cached;
     }
 
-    return frameNames.map(frameName => PIXI.Texture.from(frameName));
+    const promise = (async () => {
+        const frameNames = Object.keys(framesData.frames);
+
+        if (framesData.meta?.image) {
+            try {
+                const atlas = await loadAtlasTexture(resolveAtlasUrl(framesData.meta.image));
+                return frameNames.map(frameName => {
+                    const { x, y, w, h } = framesData.frames[frameName].frame;
+                    return new PIXI.Texture(
+                        atlas.baseTexture, new PIXI.Rectangle(x, y, w, h));
+                });
+            } catch (error) {
+                // Fall back to the legacy endpoint-per-frame behavior if the atlas
+                // is unavailable.
+                console.warn('Failed to load sprite sheet atlas', error);
+            }
+        }
+
+        return frameNames.map(frameName => PIXI.Texture.from(frameName));
+    })();
+
+    framesCache.set(framesData, promise);
+    return await promise;
 }

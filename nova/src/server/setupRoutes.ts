@@ -326,7 +326,7 @@ class GameDataServer {
                     );
                     res.type('webp').send(webP);
                 } else {
-                    res.send(buffer);
+                    res.type('png').send(buffer);
                 }
             }
             else {

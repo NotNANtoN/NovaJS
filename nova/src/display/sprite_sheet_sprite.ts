@@ -35,6 +35,9 @@ export class SpriteSheetSprite {
             this.size.x = Math.max(0, ...this.textures.map(t => t.width));
             this.size.y = Math.max(0, ...this.textures.map(t => t.height));
             this.frames = this.textures.length;
+            if (this.wrappedRotation !== 0) {
+                this.rotation = this.wrappedRotation;
+            }
             return this;
         }
 

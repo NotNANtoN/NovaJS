@@ -58,13 +58,17 @@ const AnimationGraphicLoader = ProvideAsync({
 export const AnimationGraphicProvider = Provide({
     name: "AnimationGraphicProvider",
     provided: AnimationGraphicComponent,
-    args: [AnimationGraphicLoadedComponent, Space, Entities, UUID] as const,
-    factory(graphic, space, entities, uuid) {
+    args: [AnimationGraphicLoadedComponent, Space, Entities, UUID, Optional(ReturnToQueueComponent)] as const,
+    factory(graphic, space, entities, uuid, recyclable) {
         // Only add the graphic to the container if the entity still exists
         if (entities.has(uuid)) {
             graphic.attachTo(space);
         } else {
-            graphic.dispose();
+            if (recyclable) {
+                graphic.detach();
+            } else {
+                graphic.dispose();
+            }
             console.log(`Not adding graphic for ${uuid} since it is no longer in the system`);
         }
         return graphic;
@@ -121,7 +125,9 @@ const AnimationGraphicInsert = new System({
     events: [AddEvent],
     args: [AnimationGraphicComponent, Space] as const,
     step(graphic, space) {
-        graphic.attachTo(space);
+        if (!graphic.managed.disposed) {
+            graphic.attachTo(space);
+        }
     }
 });
 

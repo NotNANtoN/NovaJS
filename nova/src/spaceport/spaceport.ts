@@ -338,6 +338,9 @@ export class Spaceport extends Menu<Entity> {
             }
         };
 
+        this.addButtons(buttons);
+        this.updateServiceButtons(this.authoritativePlanet as unknown as PlanetData);
+
         this.controls = new MenuControls(controlEvents, {
             properties: showShipInfo,
             outfitter: showOutfitter,
@@ -472,6 +475,12 @@ export class Spaceport extends Menu<Entity> {
                 child.visible = child === active;
             } else {
                 child.visible = active === undefined;
+            }
+        }
+        if (active === undefined) {
+            const planetData = this.data ?? (this.authoritativePlanet as unknown as PlanetData);
+            if (planetData) {
+                this.updateServiceButtons(planetData);
             }
         }
     }
