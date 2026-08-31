@@ -166,19 +166,13 @@ export async function warmFlightAssets({
     // has its WeaponEntries initialized and its combat textures cached immediately.
     const allIds = await tryGet(() => gameData.ids);
     if (allIds?.Weapon) {
-        for (const weaponId of allIds.Weapon) {
-            await visitWeapon(weaponId);
-        }
+        await Promise.all(allIds.Weapon.map(id => visitWeapon(id)));
     }
     if (allIds?.Explosion) {
-        for (const explosionId of allIds.Explosion) {
-            await visitExplosion(explosionId);
-        }
+        await Promise.all(allIds.Explosion.map(id => visitExplosion(id)));
     }
     if (allIds?.Ship) {
-        for (const shipId of allIds.Ship) {
-            await visitShip(shipId);
-        }
+        await Promise.all(allIds.Ship.map(id => visitShip(id)));
     }
 
     await Promise.all([...sheets].map(async id => {

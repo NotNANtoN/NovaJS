@@ -445,6 +445,10 @@ export const FireLogSpawnSystem = new System({
             }
             weapon.fireFromLog(uuid, shot, time.time);
             sync.highestLogSeq = shot.seq;
+
+            if ((globalThis as any).debugCombat || (globalThis as any).novaDebug?.debugCombat) {
+                console.log(`[Combat Remote] Spawned shot seq=${shot.seq} weapon=${shot.weaponId} from ${uuid} at (${Math.round(shot.position[0])}, ${Math.round(shot.position[1])})`);
+            }
         }
         for (const seq of sync.spawnedSeqs) {
             if (seq <= sync.highestLogSeq) {

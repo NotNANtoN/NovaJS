@@ -119,8 +119,16 @@ export class GameData implements GameDataInterface {
 
     private async getUrl(url: string, priority = 0): Promise<unknown> {
         // Binary payloads are never represented in preloadData.
+        if (PIXI.utils.TextureCache[url]) {
+            return PIXI.utils.TextureCache[url];
+        }
         return this.loadQueue.add(
-            () => PIXI.Assets.load(url),
+            () => {
+                if (PIXI.utils.TextureCache[url]) {
+                    return PIXI.utils.TextureCache[url];
+                }
+                return PIXI.Assets.load(url);
+            },
             { priority },
         );
     }
@@ -228,17 +236,24 @@ export class GameData implements GameDataInterface {
     }
 
     textureFromPict(id: string): PIXI.Texture {
-        return PIXI.Texture.from(this.url(id));
+        const pictPath = this.url(id);
+        return PIXI.utils.TextureCache[pictPath] ?? PIXI.Texture.from(pictPath);
     }
 
     spriteFromPict(id: string) {
-        return PIXI.Sprite.from(this.url(id));
+        return new PIXI.Sprite(this.textureFromPict(id));
     }
 
-    async textureFromPictAsync(id: string, priority?: number) {
+    async textureFromPictAsync(id: string, priority?: number): Promise<PIXI.Texture> {
         const pictPath = this.url(id);
-        await this.data.PictImage.get(id, priority);
-        return PIXI.Texture.from(pictPath);
+        if (PIXI.utils.TextureCache[pictPath]) {
+            return PIXI.utils.TextureCache[pictPath];
+        }
+        const loaded = await this.getUrl(pictPath, priority);
+        if (loaded instanceof PIXI.Texture) {
+            return loaded;
+        }
+        return PIXI.utils.TextureCache[pictPath] ?? PIXI.Texture.from(pictPath);
     }
 
     async spriteFromPictAsync(id: string, priority?: number) {

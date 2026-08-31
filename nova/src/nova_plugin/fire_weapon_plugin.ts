@@ -604,7 +604,22 @@ export const FireWeaponPlugin: Plugin = {
         world.resources.set(WeaponConstructors, new Map());
         const weaponConstructors = world.resources.get(WeaponConstructors)!;
 
+        const createWeaponEntrySync = (id: string): WeaponEntry | undefined => {
+            const cachedData = (gameData.data.Weapon as unknown as { gotten?: Record<string, WeaponData> })?.gotten?.[id];
+            if (cachedData) {
+                const construct = weaponConstructors.get(cachedData.type);
+                if (construct) {
+                    return new construct(cachedData, runQuery);
+                }
+            }
+            return undefined;
+        };
+
         const weaponEntries = new Gettable<WeaponEntry | undefined>(async id => {
+            const syncEntry = createWeaponEntrySync(id);
+            if (syncEntry) {
+                return syncEntry;
+            }
             const data = await gameData.data.Weapon.get(id);
             const construct = weaponConstructors.get(data.type);
             if (!construct) {
@@ -612,6 +627,18 @@ export const FireWeaponPlugin: Plugin = {
             }
             return new construct(data, runQuery);
         });
+
+        // Prepopulate weaponEntries for all weapons already loaded in gameData
+        const weaponGotten = (gameData.data.Weapon as unknown as { gotten?: Record<string, WeaponData> })?.gotten;
+        if (weaponGotten) {
+            for (const [id, data] of Object.entries(weaponGotten)) {
+                const construct = weaponConstructors.get(data.type);
+                if (construct) {
+                    weaponEntries.gotten[id] = new construct(data, runQuery);
+                }
+            }
+        }
+
         world.resources.set(WeaponEntries, weaponEntries);
 
         world.resources.set(FireSubs, (id: string, source: string,

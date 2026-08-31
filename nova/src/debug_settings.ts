@@ -4,10 +4,12 @@ import { ConvexHullDisplayPlugin } from "./display/convex_hull_display_plugin";
 
 export class DebugSettings {
     private wrappedShowCollisionShapes = false;
+    public debugCombat = false;
 
     constructor(public world: World, settings?: DebugSettings) {
         if (settings) {
             this.showCollisionShapes = settings.showCollisionShapes;
+            this.debugCombat = settings.debugCombat;
         }
     }
 
