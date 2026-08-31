@@ -34,12 +34,12 @@ export const MapSystem = new AsyncSystem({
         ScreenSize, Entities, UUID, PlayerShipSelector,
         Optional(PlayerStateComponent), Optional(ChatHistoryResource)] as const,
     async step(controlEvent, starmap, jumpRoute, screenSize, entities, uuid,
-        playerState, chatHistory) {
+        _playerShipSelector, playerState, chatHistory) {
         if (!isMapStartEdge(controlEvent, starmap.container.visible)) {
             return;
         }
         const playerMarkers: StarmapPlayerMarker[] = [];
-        if (chatHistory) {
+        if (chatHistory instanceof Map) {
             for (const [, entries] of chatHistory) {
                 const latest = entries[entries.length - 1];
                 if (latest?.system) {
