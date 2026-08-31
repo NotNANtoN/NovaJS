@@ -14,11 +14,11 @@ export type BudgetKind =
  * sizes: entities that cannot be created are rejected at their spawn point.
  */
 export const CLASSIC_ENTITY_LIMITS: Readonly<Record<BudgetKind, number>> = {
-    ship: 64,
-    projectile: 128,
-    beam: 64,
-    explosion: 32,
-    asteroid: 16,
+    ship: 128,
+    projectile: 512,
+    beam: 256,
+    explosion: 128,
+    asteroid: 64,
 };
 
 /**
@@ -26,7 +26,7 @@ export const CLASSIC_ENTITY_LIMITS: Readonly<Record<BudgetKind, number>> = {
  * player's input. NPC fire must not be able to make the player's weapon
  * appear jammed.
  */
-export const PLAYER_PROJECTILE_RESERVE = 16;
+export const PLAYER_PROJECTILE_RESERVE = 64;
 
 /**
  * Modern mode keeps simulation entities unbounded. Explosions are presentation
@@ -34,7 +34,7 @@ export const PLAYER_PROJECTILE_RESERVE = 16;
  * taking down the simulation without deleting a mission ship.
  */
 export const MODERN_COSMETIC_LIMITS: Readonly<Partial<Record<BudgetKind, number>>> = {
-    explosion: 64,
+    explosion: 256,
 };
 
 export class EntityBudget {

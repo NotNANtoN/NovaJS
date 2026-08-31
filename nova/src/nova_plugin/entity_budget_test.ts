@@ -42,7 +42,7 @@ describe('entity budgets', () => {
         const budget = createEntityBudget('modern');
         const entity = { components: { set: () => undefined } };
 
-        for (let i = 0; i < 64; i++) {
+        for (let i = 0; i < 256; i++) {
             expect(reserveEntity(budget, entity, 'explosion')).toBe(true);
         }
         expect(reserveEntity(budget, entity, 'explosion')).toBe(false);

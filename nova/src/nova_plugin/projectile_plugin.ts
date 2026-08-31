@@ -154,7 +154,7 @@ class ProjectileWeaponEntry extends WeaponEntry {
             }
 
             return projectile;
-        }, 1);
+        }, 16);
         queueHolder.queue = this.factoryQueue;
     }
 
