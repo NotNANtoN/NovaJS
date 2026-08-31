@@ -106,25 +106,16 @@ function applyJumpGraphic(
         },
         sprites: Map<string, { pixiSprite: { rotation: number } }>,
     },
-    movement: { rotation: { angle: number } },
+    movement: { position: { x: number, y: number } },
     jump: JumpState,
     progress: number,
 ): void {
     const departure = jump.phase !== 'arriving';
-    const longitudinal = departure
-        ? 1 + progress * 1.5
-        : 1 + (1 - progress) * 1.5;
-    const transverse = departure
-        ? 1 - progress * 0.15
-        : 0.85 + progress * 0.15;
-    graphic.container.rotation = movement.rotation.angle;
-    graphic.container.scale.set(transverse, longitudinal);
+    graphic.container.rotation = 0;
+    graphic.container.scale.set(1, 1);
     graphic.container.alpha = departure
         ? departureAlpha(movement)
         : progress;
-    for (const sprite of graphic.sprites.values()) {
-        sprite.pixiSprite.rotation -= movement.rotation.angle;
-    }
 }
 
 export const JumpEffectSystem = new System({

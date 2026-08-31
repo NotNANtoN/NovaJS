@@ -590,10 +590,7 @@ class SystemGraph {
     }
 
     private rebuildTerritory() {
-        const visible = this.territoryPoints.filter(point =>
-            !this.knownSystems || point.systemId === undefined
-            || this.knownSystems.has(point.systemId));
-        this.territoryField = computeTerritoryField(visible);
+        this.territoryField = computeTerritoryField(this.territoryPoints);
         if (this.territorySprite) {
             this.territoryContainer.removeChild(this.territorySprite);
             this.territorySprite.destroy({ texture: true, baseTexture: true });
@@ -636,8 +633,7 @@ class SystemGraph {
                 console.warn(`missing system ${id}`);
                 continue;
             }
-            container.visible = !this.knownSystems
-                || this.knownSystems.has(id);
+            container.visible = true;
             const pos = this.scalePos(system.position);
             graphics.clear();
             drawSystem(system, graphics, this.scale, this.currentSystem, this.missionMarkers.get(id), this.playerMarkers.get(id));
@@ -670,21 +666,14 @@ class SystemGraph {
 
     private drawLinks() {
         for (const [source, dest] of this.links) {
-            if (this.knownSystems
-                && (!this.knownSystems.has(source.id)
-                    || !this.knownSystems.has(dest.id))) {
-                continue;
-            }
-            this.drawLink(source, dest)
+            this.drawLink(source, dest);
         }
     }
 
     private drawRoute() {
         let prev = this.systems.get(this.currentSystem);
         for (const system of this.route.map(id => this.systems.get(id))) {
-            if (system && (!this.knownSystems
-                || (this.knownSystems.has(system.id)
-                    && prev && this.knownSystems.has(prev.id)))) {
+            if (system) {
                 if (prev) {
                     this.drawLink(prev, system, 0x00ff00, 3);
                 }
@@ -704,7 +693,6 @@ class SystemGraph {
         return shortestRoutes(
             [...this.systems.values()],
             this.currentSystem,
-            this.knownSystems ? [...this.knownSystems] : undefined,
         );
     }
 }

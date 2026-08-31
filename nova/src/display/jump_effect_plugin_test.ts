@@ -72,7 +72,7 @@ describe('other-ship jump effects', () => {
             .not.toContain(Emit);
     });
 
-    it('grows the departure streak with actual speed', () => {
+    it('handles alpha fading and resets scale on jump states', () => {
         const shipMovement = movementAt(100, 0);
         const shipGraphic = graphic();
         const step = (state: JumpState, time: number) =>
@@ -95,15 +95,14 @@ describe('other-ship jump effects', () => {
 
         shipMovement.velocity = new Vector(0, -MAX_VELOCITY * 2);
         step(jump('spooling', 1_200), 1_300);
-        expect(shipGraphic.container.scale.y).toBeGreaterThan(1);
-        expect(shipGraphic.container.scale.y).toBeLessThan(2.5);
+        expect(shipGraphic.container.scale.y).toBe(1);
 
         shipMovement.velocity = new Vector(
             0,
             -MAX_VELOCITY * JUMP_DEPARTURE_SPEED_MULTIPLIER,
         );
         step(jump('departing', 180), 0);
-        expect(shipGraphic.container.scale.y).toBe(2.5);
+        expect(shipGraphic.container.scale.y).toBe(1);
         expect(shipGraphic.container.alpha).toBeGreaterThan(0);
         shipMovement.position = new Position(
             SYSTEM_DEPARTURE_RADIUS - 1, 0);
@@ -112,7 +111,7 @@ describe('other-ship jump effects', () => {
 
         shipMovement.position = new Position(100, 0);
         step(jump('arriving', JUMP_ARRIVAL_MS), 0);
-        expect(shipGraphic.container.scale.y).toBe(2.5);
+        expect(shipGraphic.container.scale.y).toBe(1);
         expect(shipGraphic.container.alpha).toBe(0);
         step(jump('arriving', JUMP_ARRIVAL_MS), JUMP_ARRIVAL_MS);
         expect(shipGraphic.container.scale.y).toBe(1);
