@@ -11,7 +11,15 @@ import { PlayerShipSelector } from './player_ship_plugin';
 import { PlayerStateComponent, createInitialPlayerState } from './player_state';
 import { GovtComponent } from './npc_plugin';
 import { NpcCombatRoleComponent } from './npc_components';
-import { NpcInteractionPlugin, SecurityScanResource } from './npc_interaction_plugin';
+import { NpcTrafficComponent } from './npc_traffic_plugin';
+import { MiningShipComponent } from './miner_ai';
+import { PlanetComponent } from './planet_plugin';
+import { ShieldComponent } from './health_plugin';
+import { Stat } from './stat';
+import { TargetComponent } from './target_component';
+import { ShipDataComponent } from './ship_plugin';
+import { getDefaultShipData } from 'novadatainterface/ShipData';
+import { NpcInteractionPlugin, AmbientChatterStateResource } from './npc_interaction_plugin';
 
 describe('NpcInteractionPlugin', () => {
     let world: World;
@@ -97,5 +105,73 @@ describe('NpcInteractionPlugin', () => {
         // Step again immediately: should not emit a second scan
         world.step();
         expect(receivedMessages.length).toBe(1);
+    });
+
+    it('emits contextual trader radio chatter referencing real destination planets', () => {
+        const planet = new Entity('Earth')
+            .addComponent(PlanetComponent, { id: 'nova:128', name: 'Earth' });
+
+        const trader = new Entity('Starling Freighter')
+            .addComponent(ShipDataComponent, { ...getDefaultShipData(), name: 'Starling Freighter' })
+            .addComponent(NpcTrafficComponent, { phase: 'travelling', destination: 'earth-uuid', readyAt: 0 })
+            .addComponent(MovementStateComponent, {
+                position: new Position(500, 0),
+                velocity: new Vector(100, 0),
+                rotation: new Angle(0),
+                accelerating: 1,
+                turning: 0,
+                turnBack: false,
+            });
+
+        world.entities.set('earth-uuid', planet);
+        world.entities.set('trader-uuid', trader);
+
+        const chatterState = world.resources.get(AmbientChatterStateResource)!;
+        chatterState.nextChatterAt = 0; // Trigger immediately
+
+        world.step();
+
+        const chatter = receivedMessages.find(m => m.kind === 'chatter');
+        expect(chatter).toBeDefined();
+        expect(chatter?.fromName).toBe('Starling Freighter');
+        expect(chatter?.text).toContain('Earth');
+    });
+
+    it('emits dynamic SOS distress signals naming the attacking vessel when shields drop', () => {
+        const attacker = new Entity('Pirate Marauder')
+            .addComponent(ShipDataComponent, { ...getDefaultShipData(), name: 'Pirate Marauder' })
+            .addComponent(MovementStateComponent, {
+                position: new Position(100, 100),
+                velocity: new Vector(0, 0),
+                rotation: new Angle(0),
+                accelerating: 0,
+                turning: 0,
+                turnBack: false,
+            });
+
+        const victim = new Entity('Solar Wind (Freighter)')
+            .addComponent(ShipDataComponent, { ...getDefaultShipData(), name: 'Solar Wind (Freighter)' })
+            .addComponent(NpcTrafficComponent, { phase: 'travelling', readyAt: 0 })
+            .addComponent(TargetComponent, { target: 'attacker-uuid' })
+            .addComponent(ShieldComponent, new Stat({ current: 20, max: 100, recharge: 1 })) // 20% shield
+            .addComponent(MovementStateComponent, {
+                position: new Position(120, 100),
+                velocity: new Vector(0, 0),
+                rotation: new Angle(0),
+                accelerating: 0,
+                turning: 0,
+                turnBack: false,
+            });
+
+        world.entities.set('attacker-uuid', attacker);
+        world.entities.set('victim-uuid', victim);
+
+        world.step();
+
+        const sos = receivedMessages.find(m => m.kind === 'sos');
+        expect(sos).toBeDefined();
+        expect(sos?.fromName).toBe('Solar Wind (Freighter)');
+        expect(sos?.text).toContain('Pirate Marauder');
+        expect(sos?.text).toContain('20%');
     });
 });

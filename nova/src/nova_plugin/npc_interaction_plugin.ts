@@ -8,22 +8,28 @@ import { System } from 'nova_ecs/system';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { SingletonComponent } from 'nova_ecs/world';
 import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
-import { ChatMessageEvent, ChatMessageEntry, MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
+import { ChatMessageEvent, ChatMessageEntry } from 'nova_ecs/plugins/multiplayer_plugin';
 import { PlayerShipSelector } from './player_ship_plugin';
 import { PlayerStateComponent } from './player_state';
 import { ShipDataComponent } from './ship_plugin';
 import { GovtComponent } from './npc_plugin';
 import { NpcCombatRoleComponent } from './npc_components';
 import { NpcTrafficComponent } from './npc_traffic_plugin';
+import { MiningShipComponent } from './miner_ai';
+import { PlanetComponent } from './planet_plugin';
 import { ShieldComponent } from './health_plugin';
 import { TargetComponent } from './target_component';
 import { SystemIdResource } from './system_id_resource';
 import { v4 } from 'uuid';
+import type { ShipData } from 'novadatainterface/ShipData';
+import type { NpcTrafficState } from './npc_traffic';
+import type { EntityMap } from 'nova_ecs/entity_map';
+import type { Entity } from 'nova_ecs/entity';
 
 const SCAN_DISTANCE = 480;
 const SCAN_COOLDOWN_MS = 90_000;
-const CHATTER_INTERVAL_MIN_MS = 25_000;
-const CHATTER_INTERVAL_MAX_MS = 45_000;
+const CHATTER_INTERVAL_MIN_MS = 22_000;
+const CHATTER_INTERVAL_MAX_MS = 40_000;
 
 interface SecurityScanState {
     lastScanByPatrol: Map<string /* patrolUuid */, number /* time */>;
@@ -56,71 +62,147 @@ const PatrolQuery = new Query([
     GetEntity,
 ] as const, 'PatrolQuery');
 
+const PlanetQuery = new Query([
+    UUID,
+    PlanetComponent,
+] as const, 'PlanetQuery');
+
 const NpcShipQuery = new Query([
     UUID,
     MovementStateComponent,
     ShipDataComponent,
     Optional(GovtComponent),
+    Optional(NpcCombatRoleComponent),
     Optional(NpcTrafficComponent),
+    Optional(MiningShipComponent),
     Optional(ShieldComponent),
     Optional(TargetComponent),
     GetEntity,
 ] as const, 'NpcShipQuery');
 
-const FEDERATION_SCAN_CLEAN = [
-    'Vessel scanned. No contraband or illegal weapons detected. You may proceed, Captain.',
-    'Security scan complete. All systems within Federation regulations. Safe travels.',
-    'Customs scan clean. Maintain sublight velocity until clear of the orbital lanes.',
-];
-
-const FEDERATION_SCAN_BOUNTY = [
-    'Alert: Wanted fugitive detected on sensors! Power down weapons and surrender!',
-    'Security breach! Known offender identified. Stand down immediately!',
-];
-
-const AURORAN_PATROL_LINES = [
-    'Warrior\'s Pride: Maintain your course and keep your weapons cold, outsider.',
-    'Auroran Patrol: Honor the clan laws in this space and you will not be harmed.',
-    'Patrol Vessel: State your clan and purpose in our territory.',
-];
-
-const POLARIS_PATROL_LINES = [
-    'Polaris Vessel: Telemetric resonance verified. Harmony preserved.',
-    'Patrol Scout: Bio-signatures cataloged. Safe transit through our space.',
-];
-
-const REBEL_PATROL_LINES = [
-    'Rebel Patrol: Transponder verified. Fly free, friend.',
-    'Freedom Scout: Space is clear ahead. Watch for Federation battlefleets.',
-];
-
-const TRADER_CHATTER = [
-    'Heavy Freighter: Approaching planetary orbit with a bulk shipment of industrial parts.',
-    'Merchant: Clear lanes along the hypergate route today. Good flying.',
-    'Cargo Hauler: Just topped off fuel at the orbital spaceport. Moving out.',
-    'Transport: Watch out for raiders near the outer jump points.',
-    'Civilian Courier: En route to destination. All systems nominal.',
-];
-
-const MINER_CHATTER = [
-    'Mining Vessel: High-yield metal asteroid located in the outer belt.',
-    'Prospector: Excavation beam active on rich ore deposit.',
-    'Ore Freighter: Full cargo hold of titanium ore, returning to spaceport.',
-];
-
-const PIRATE_CHATTER = [
-    'Marauder: Unmarked merchant vessels on radar... closing in.',
-    'Raider: Keep eyes open for stragglers near the asteroid field.',
-];
-
-const DISTRESS_CALLS = [
-    'Under heavy fire! Requesting urgent assistance in this sector!',
-    'Mayday, mayday! Hostiles closing in, shields critical!',
-    'Taking direct hull hits! Any available vessels, please assist!',
-];
-
 function pickRandom<T>(items: readonly T[]): T {
     return items[Math.floor(Math.random() * items.length)];
+}
+
+function generateContextualChatter(
+    _uuid: string,
+    entity: Entity,
+    shipData: ShipData,
+    traffic: NpcTrafficState | undefined,
+    miner: { mining: boolean } | undefined,
+    govtId: string,
+    role: string | undefined,
+    targetUuid: string | undefined,
+    entities: EntityMap,
+    planetNames: Map<string, string>,
+): { text: string; sender: string; kind: 'chatter' | 'security' } {
+    const sender = entity.name || shipData.name || 'Merchant';
+    const shipName = shipData.name || 'Vessel';
+
+    // 1. Combat engagement / hunting chatter
+    if (targetUuid && entities.has(targetUuid)) {
+        const targetEntity = entities.get(targetUuid);
+        const targetName = targetEntity?.name || 'target';
+
+        if (govtId === 'nova:130' || govtId === '130' || role === 'pirate' || sender.toLowerCase().includes('pirate') || sender.toLowerCase().includes('raider')) {
+            const pirateLines = [
+                `Radar lock on that ${targetName}. Power down shields and eject your cargo!`,
+                `Easy mark spotted: ${targetName}. Surrender your cargo hold or be blasted to scrap!`,
+                `Closing in on ${targetName}. Cut your sublight engines immediately!`,
+            ];
+            return { text: pickRandom(pirateLines), sender, kind: 'chatter' };
+        }
+        if (role === 'military') {
+            const militaryLines = [
+                `Engaging hostile contact ${targetName}! Weapons free!`,
+                `Target acquired: ${targetName}. Commencing tactical interception!`,
+                `Hostile ${targetName} under active engagement. Maintain battle formation!`,
+            ];
+            return { text: pickRandom(militaryLines), sender, kind: 'security' };
+        }
+    }
+
+    // 2. Mining ship operations
+    if (miner?.mining) {
+        if (targetUuid && entities.has(targetUuid)) {
+            const asteroidName = entities.get(targetUuid)?.name || 'asteroid';
+            const miningLines = [
+                `Excavation beam locked on ${asteroidName}. Harvesting high-grade metallic ore.`,
+                `Excavating mineral veins on ${asteroidName}. Core integrity stable.`,
+                `Drill laser active on ${asteroidName}. Extracting industrial minerals.`,
+            ];
+            return { text: pickRandom(miningLines), sender, kind: 'chatter' };
+        }
+        return {
+            text: 'Mining laser engaged on dense asteroid core. Commencing excavation.',
+            sender,
+            kind: 'chatter',
+        };
+    }
+    if (miner) {
+        const prospectingLines = [
+            'Prospecting sensor sweep active. Scanning local belt for high-density deposits.',
+            'Surveying asteroid belt. Looking for rich titanium and iron clusters.',
+        ];
+        return { text: pickRandom(prospectingLines), sender, kind: 'chatter' };
+    }
+
+    // 3. Traffic / Trader flight phases
+    if (traffic) {
+        if (traffic.phase === 'travelling' && traffic.destination) {
+            const destinationName = planetNames.get(traffic.destination) || 'orbital destination';
+            const travellingLines = [
+                `Inbound approach vector to ${destinationName} established. Sublight cruise nominal.`,
+                `En route to ${destinationName} with trade cargo. Flight corridor is clear.`,
+                `On final descent approach to ${destinationName}. Docking transponder active.`,
+                `Navigational lock on ${destinationName}. Speed within orbital approach limits.`,
+            ];
+            return { text: pickRandom(travellingLines), sender, kind: 'chatter' };
+        }
+        if (traffic.phase === 'docked') {
+            const planetName = traffic.destination
+                ? (planetNames.get(traffic.destination) || 'orbital station')
+                : 'orbital station';
+            const dockedLines = [
+                `Docked in orbital transfer at ${planetName}. Commencing cargo discharge and refueling.`,
+                `Customs cleared at ${planetName}. Trade manifest submitted to port authority.`,
+                `Turnaround in progress at ${planetName}. Loading outbound shipment.`,
+            ];
+            return { text: pickRandom(dockedLines), sender, kind: 'chatter' };
+        }
+        if (traffic.phase === 'arriving') {
+            return {
+                text: 'Hyperspace jump complete. Synchronizing local navigation beacons.',
+                sender,
+                kind: 'chatter',
+            };
+        }
+        if (traffic.phase === 'departing') {
+            return {
+                text: 'Cleared for departure from orbital grid. Spooling hyperdrive.',
+                sender,
+                kind: 'chatter',
+            };
+        }
+    }
+
+    // 4. Military patrol ambient radio
+    if (role === 'military') {
+        const patrolLines = [
+            'System patrol sweep active. All orbital corridors remain secure.',
+            'Maintaining standard patrol vector. No hostile contacts on scanner.',
+            'Sector scan nominal. Navigational lanes clear of pirate activity.',
+        ];
+        return { text: pickRandom(patrolLines), sender, kind: 'security' };
+    }
+
+    // 5. Default commercial traffic
+    const defaultLines = [
+        `Clear skies on the shipping lanes today. All systems green on ${shipName}.`,
+        'Sublight cruise nominal. Maintaining standard commercial flight vector.',
+        'Long-range sensors clear. Safe flying to all captains in sector.',
+    ];
+    return { text: pickRandom(defaultLines), sender, kind: 'chatter' };
 }
 
 export const NpcSecurityScanSystem = new System({
@@ -140,7 +222,7 @@ export const NpcSecurityScanSystem = new System({
         }
 
         const now = time.time;
-        for (const [playerUuid, playerMovement, _selector, playerState] of players) {
+        for (const [playerUuid, playerMovement, _selector, playerState, playerShipData] of players) {
             for (const [patrolUuid, patrolMovement, govt, role, patrolEntity] of patrols) {
                 if (role !== 'military') {
                     continue;
@@ -159,24 +241,37 @@ export const NpcSecurityScanSystem = new System({
                     const patrolName = patrolEntity.name || 'Patrol';
                     let text = '';
                     const govtId = String(govt.id);
+                    const playerShipName = playerShipData?.name || 'vessel';
 
                     if (govtId === 'nova:128' || govtId === '128') {
                         // Federation
                         const record = playerState.legalRecord ?? 0;
-                        text = record < 0
-                            ? pickRandom(FEDERATION_SCAN_BOUNTY)
-                            : pickRandom(FEDERATION_SCAN_CLEAN);
+                        if (record < 0) {
+                            text = `Alert: Wanted fugitive on ${playerShipName}! Power down engines and surrender immediately!`;
+                        } else {
+                            const cleanLines = [
+                                `Customs scan of ${playerShipName}: No contraband or illegal weapons detected. You may proceed, Captain.`,
+                                `Security scan complete on ${playerShipName}. All systems within Federation regulations. Safe travels.`,
+                                `Vessel registry for ${playerShipName} verified. Flight corridor clearance granted.`,
+                            ];
+                            text = pickRandom(cleanLines);
+                        }
                     } else if (govtId === 'nova:132' || govtId === '132') {
                         // Auroran
-                        text = pickRandom(AURORAN_PATROL_LINES);
+                        const auroranLines = [
+                            `Warrior's Pride: Maintain your course on ${playerShipName} and keep your weapons cold, outsider.`,
+                            `Auroran Patrol: Honor the clan laws in this space and you will not be harmed.`,
+                            `Patrol Scout: Transponder for ${playerShipName} logged. Do not provoke our clan ships.`,
+                        ];
+                        text = pickRandom(auroranLines);
                     } else if (govtId === 'nova:133' || govtId === '133') {
                         // Polaris
-                        text = pickRandom(POLARIS_PATROL_LINES);
+                        text = `Polaris Vessel: Bio-signatures on ${playerShipName} cataloged. Telemetric harmony preserved.`;
                     } else if (govtId === 'nova:129' || govtId === '129') {
                         // Rebel
-                        text = pickRandom(REBEL_PATROL_LINES);
+                        text = `Rebel Patrol: Transponder for ${playerShipName} verified. Fly free, friend.`;
                     } else {
-                        text = 'Security scan complete. All clear.';
+                        text = `Security scan of ${playerShipName} complete. All clear.`;
                     }
 
                     const entry: ChatMessageEntry = {
@@ -200,13 +295,15 @@ export const NpcAmbientChatterSystem = new System({
     name: 'NpcAmbientChatterSystem',
     args: [
         NpcShipQuery,
+        PlanetQuery,
+        Entities,
         AmbientChatterStateResource,
         TimeResource,
         Emit,
         Optional(SystemIdResource),
         SingletonComponent,
     ] as const,
-    step(npcs, chatterState, time, emit, systemId) {
+    step(npcs, planets, entities, chatterState, time, emit, systemId) {
         const now = time.time;
         if (now < chatterState.nextChatterAt) {
             return;
@@ -219,37 +316,46 @@ export const NpcAmbientChatterSystem = new System({
             return;
         }
 
-        // Filter out non-player NPCs that are intact
-        const candidates = npcs.filter(([, , , , , , , entity]) =>
+        const candidates = npcs.filter(([, , , , , , , , , entity]) =>
             !entity.components.has(PlayerShipSelector));
         if (candidates.length === 0) {
             return;
         }
 
-        const [uuid, _pos, shipData, govt, _traffic, _shield, _target, entity] =
-            pickRandom(candidates);
-
-        let lines = TRADER_CHATTER;
-        const nameLower = (shipData.name || '').toLowerCase();
-        const govtId = String(govt?.id ?? '');
-
-        if (nameLower.includes('miner') || nameLower.includes('excavator')) {
-            lines = MINER_CHATTER;
-        } else if (govtId === 'nova:130' || govtId === '130' || nameLower.includes('pirate') || nameLower.includes('raider')) {
-            lines = PIRATE_CHATTER;
+        const planetNames = new Map<string, string>();
+        for (const [planetUuid, planet] of planets) {
+            planetNames.set(planetUuid, planet.name || planet.id);
         }
 
-        const text = pickRandom(lines);
-        const senderName = entity.name || shipData.name || 'Merchant';
+        const [uuid, _pos, shipData, govt, role, traffic, miner, _shield, target, entity] =
+            pickRandom(candidates);
+
+        const govtId = String(govt?.id ?? '');
+        const message = generateContextualChatter(
+            uuid,
+            entity,
+            shipData,
+            traffic,
+            miner,
+            govtId,
+            role,
+            target?.target,
+            entities,
+            planetNames,
+        );
+
+        if (!message) {
+            return;
+        }
 
         const entry: ChatMessageEntry = {
             id: v4(),
             from: uuid,
-            fromName: senderName,
+            fromName: message.sender,
             to: 'all',
-            text,
+            text: message.text,
             time: now,
-            kind: 'chatter',
+            kind: message.kind,
             system: systemId,
         };
         emit(ChatMessageEvent, entry);
@@ -260,21 +366,21 @@ export const NpcDistressSystem = new System({
     name: 'NpcDistressSystem',
     args: [
         NpcShipQuery,
+        Entities,
         AmbientChatterStateResource,
         TimeResource,
         Emit,
         Optional(SystemIdResource),
         SingletonComponent,
     ] as const,
-    step(npcs, chatterState, time, emit, systemId) {
+    step(npcs, entities, chatterState, time, emit, systemId) {
         const now = time.time;
-        for (const [uuid, _pos, shipData, _govt, traffic, shield, target, entity] of npcs) {
+        for (const [uuid, pos, shipData, _govt, _role, _traffic, _miner, shield, target, entity] of npcs) {
             if (entity.components.has(PlayerShipSelector)) {
                 continue;
             }
 
-            // Only civilian / trader ships that are attacked and low on shields
-            if (!traffic || !shield || !target?.target) {
+            if (!shield || !target?.target || !entities.has(target.target)) {
                 continue;
             }
 
@@ -284,13 +390,23 @@ export const NpcDistressSystem = new System({
             }
 
             const lastDistress = chatterState.lastDistressByShip.get(uuid) ?? 0;
-            if (now - lastDistress < 60_000) {
+            if (now - lastDistress < 45_000) {
                 continue;
             }
             chatterState.lastDistressByShip.set(uuid, now);
 
-            const text = pickRandom(DISTRESS_CALLS);
+            const attacker = entities.get(target.target);
+            const attackerName = attacker?.name || 'hostiles';
             const senderName = entity.name || shipData.name || 'Merchant';
+            const pct = Math.max(0, Math.round(shieldPct * 100));
+
+            const distressLines = [
+                `Mayday! Taking heavy fire from ${attackerName}! Shields down to ${pct}%! Requesting immediate backup!`,
+                `Under direct attack by ${attackerName}! Shields at ${pct}% near (${Math.round(pos.position.x)}, ${Math.round(pos.position.y)})!`,
+                `Hostile engagement: ${attackerName} is firing on our vessel! Shields at ${pct}%, please assist!`,
+            ];
+
+            const text = pickRandom(distressLines);
 
             const entry: ChatMessageEntry = {
                 id: v4(),
@@ -317,7 +433,7 @@ export const NpcInteractionPlugin: Plugin = {
         }
         if (!world.resources.has(AmbientChatterStateResource)) {
             world.resources.set(AmbientChatterStateResource, {
-                nextChatterAt: 10_000,
+                nextChatterAt: 12_000,
                 lastDistressByShip: new Map(),
             });
         }
