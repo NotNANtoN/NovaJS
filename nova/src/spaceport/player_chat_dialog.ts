@@ -229,7 +229,9 @@ export class PlayerChatDialog extends Menu<Entity> {
                 }
             }
         };
-        window.addEventListener('keydown', this.keyListener, true);
+        if (typeof window !== 'undefined') {
+            window.addEventListener('keydown', this.keyListener, true);
+        }
     }
 
     private unbindKeyboard() {
@@ -237,7 +239,7 @@ export class PlayerChatDialog extends Menu<Entity> {
             clearInterval(this.cursorTimer);
             this.cursorTimer = undefined;
         }
-        if (this.keyListener) {
+        if (this.keyListener && typeof window !== 'undefined') {
             window.removeEventListener('keydown', this.keyListener, true);
             this.keyListener = undefined;
         }

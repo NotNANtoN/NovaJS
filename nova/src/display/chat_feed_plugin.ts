@@ -42,6 +42,9 @@ const CHAT_FONT = {
     wordWrapWidth: 380,
 } as const;
 
+const MAX_HUD_MESSAGES = 6;
+const MIN_HUD_TOP_Y = 20;
+
 export const ChatReceiveSystem = new System({
     name: 'ChatReceiveSystem',
     events: [ChatMessageEvent],
@@ -121,6 +124,14 @@ export const ChatReceiveSystem = new System({
             const textSprite = new PIXI.Text(formatted, font);
             container.addChild(textSprite);
 
+            while (hudMessages.length >= MAX_HUD_MESSAGES) {
+                const oldest = hudMessages.shift();
+                if (oldest) {
+                    container.removeChild(oldest.textSprite);
+                    oldest.textSprite.destroy();
+                }
+            }
+
             hudMessages.push({
                 entry,
                 textSprite,
@@ -164,10 +175,16 @@ export const ChatHudUpdateSystem = new System({
 
         // Layout messages from bottom-left stacking upward
         const startX = 20;
-        let currentY = screenSize.y - 35;
+        let currentY = Math.max(MIN_HUD_TOP_Y, screenSize.y - 35);
         for (let i = hudMessages.length - 1; i >= 0; i--) {
             const item = hudMessages[i];
-            item.textSprite.position.set(startX, currentY - item.textSprite.height);
+            const targetY = currentY - item.textSprite.height;
+            if (targetY < MIN_HUD_TOP_Y) {
+                item.textSprite.visible = false;
+                continue;
+            }
+            item.textSprite.visible = true;
+            item.textSprite.position.set(startX, targetY);
             currentY -= item.textSprite.height + 4;
         }
     },

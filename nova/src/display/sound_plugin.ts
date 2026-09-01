@@ -168,6 +168,9 @@ const SoundSystem = new System({
         }
 
         void pending.then(sound => {
+            if (!sound) {
+                return;
+            }
             loadedSounds.set(id, sound);
             playLoadedSound(sound, id, loop, loopingSounds,
                 getMasterVolume() * attenuation);

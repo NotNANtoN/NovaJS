@@ -17,9 +17,12 @@ import { NpcCombatRoleComponent } from './npc_components';
 import { NpcTrafficComponent } from './npc_traffic_plugin';
 import { MiningShipComponent } from './miner_ai';
 import { PlanetComponent } from './planet_plugin';
-import { ShieldComponent } from './health_plugin';
+import { ArmorComponent, ShieldComponent } from './health_plugin';
 import { TargetComponent } from './target_component';
 import { SystemIdResource } from './system_id_resource';
+import { DisabledComponent, PlayerDeathComponent } from './death_plugin';
+import { DestructionStartedComponent } from './destruction_state';
+import { JumpStateComponent } from './jump_plugin';
 import { v4 } from 'uuid';
 import type { ShipData } from 'novadatainterface/ShipData';
 import type { NpcTrafficState } from './npc_traffic';
@@ -46,12 +49,33 @@ interface AmbientChatterState {
 export const AmbientChatterStateResource =
     new Resource<AmbientChatterState>('AmbientChatterStateResource');
 
+function isShipOperational(
+    disabled?: unknown,
+    destructionStarted?: unknown,
+    armor?: { current: number },
+    jump?: unknown,
+    playerDeath?: unknown,
+): boolean {
+    if (disabled !== undefined || destructionStarted !== undefined || jump !== undefined || playerDeath !== undefined) {
+        return false;
+    }
+    if (armor && armor.current <= 0) {
+        return false;
+    }
+    return true;
+}
+
 const PlayerQuery = new Query([
     UUID,
     MovementStateComponent,
     PlayerShipSelector,
     PlayerStateComponent,
     Optional(ShipDataComponent),
+    Optional(DisabledComponent),
+    Optional(DestructionStartedComponent),
+    Optional(ArmorComponent),
+    Optional(JumpStateComponent),
+    Optional(PlayerDeathComponent),
 ] as const, 'PlayerQuery');
 
 const PatrolQuery = new Query([
@@ -60,6 +84,10 @@ const PatrolQuery = new Query([
     GovtComponent,
     NpcCombatRoleComponent,
     GetEntity,
+    Optional(DisabledComponent),
+    Optional(DestructionStartedComponent),
+    Optional(ArmorComponent),
+    Optional(JumpStateComponent),
 ] as const, 'PatrolQuery');
 
 const PlanetQuery = new Query([
@@ -78,6 +106,10 @@ const NpcShipQuery = new Query([
     Optional(ShieldComponent),
     Optional(TargetComponent),
     GetEntity,
+    Optional(DisabledComponent),
+    Optional(DestructionStartedComponent),
+    Optional(ArmorComponent),
+    Optional(JumpStateComponent),
 ] as const, 'NpcShipQuery');
 
 function pickRandom<T>(items: readonly T[]): T {
@@ -102,23 +134,38 @@ function generateContextualChatter(
     // 1. Combat engagement / hunting chatter
     if (targetUuid && entities.has(targetUuid)) {
         const targetEntity = entities.get(targetUuid);
-        const targetName = targetEntity?.name || 'target';
+        const targetArmor = targetEntity?.components.get(ArmorComponent);
+        const targetDisabled = targetEntity?.components.has(DisabledComponent);
+        const targetDestroyed = targetEntity?.components.has(DestructionStartedComponent)
+            || (targetArmor && targetArmor.current <= 0);
 
-        if (govtId === 'nova:130' || govtId === '130' || role === 'pirate' || sender.toLowerCase().includes('pirate') || sender.toLowerCase().includes('raider')) {
-            const pirateLines = [
-                `Radar lock on that ${targetName}. Power down shields and eject your cargo!`,
-                `Easy mark spotted: ${targetName}. Surrender your cargo hold or be blasted to scrap!`,
-                `Closing in on ${targetName}. Cut your sublight engines immediately!`,
-            ];
-            return { text: pickRandom(pirateLines), sender, kind: 'chatter' };
-        }
-        if (role === 'military') {
-            const militaryLines = [
-                `Engaging hostile contact ${targetName}! Weapons free!`,
-                `Target acquired: ${targetName}. Commencing tactical interception!`,
-                `Hostile ${targetName} under active engagement. Maintain battle formation!`,
-            ];
-            return { text: pickRandom(militaryLines), sender, kind: 'security' };
+        if (targetEntity && !targetDestroyed) {
+            const targetName = targetEntity.name || 'target';
+
+            if (targetDisabled) {
+                const plunderLines = [
+                    `Target ${targetName} disabled! Prepare boarding party for cargo extraction!`,
+                    `${targetName} is dead in the water. Commencing salvage lock.`,
+                ];
+                return { text: pickRandom(plunderLines), sender, kind: 'chatter' };
+            }
+
+            if (govtId === 'nova:130' || govtId === '130' || role === 'pirate' || sender.toLowerCase().includes('pirate') || sender.toLowerCase().includes('raider')) {
+                const pirateLines = [
+                    `Radar lock on that ${targetName}. Power down shields and eject your cargo!`,
+                    `Easy mark spotted: ${targetName}. Surrender your cargo hold or be blasted to scrap!`,
+                    `Closing in on ${targetName}. Cut your sublight engines immediately!`,
+                ];
+                return { text: pickRandom(pirateLines), sender, kind: 'chatter' };
+            }
+            if (role === 'military') {
+                const militaryLines = [
+                    `Engaging hostile contact ${targetName}! Weapons free!`,
+                    `Target acquired: ${targetName}. Commencing tactical interception!`,
+                    `Hostile ${targetName} under active engagement. Maintain battle formation!`,
+                ];
+                return { text: pickRandom(militaryLines), sender, kind: 'security' };
+            }
         }
     }
 
@@ -222,9 +269,48 @@ export const NpcSecurityScanSystem = new System({
         }
 
         const now = time.time;
-        for (const [playerUuid, playerMovement, _selector, playerState, playerShipData] of players) {
-            for (const [patrolUuid, patrolMovement, govt, role, patrolEntity] of patrols) {
+        for (const [
+            playerUuid,
+            playerMovement,
+            _selector,
+            playerState,
+            playerShipData,
+            playerDisabled,
+            playerDestructionStarted,
+            playerArmor,
+            playerJump,
+            playerDeath,
+        ] of players) {
+            if (!isShipOperational(
+                playerDisabled,
+                playerDestructionStarted,
+                playerArmor,
+                playerJump,
+                playerDeath,
+            )) {
+                continue;
+            }
+
+            for (const [
+                patrolUuid,
+                patrolMovement,
+                govt,
+                role,
+                patrolEntity,
+                patrolDisabled,
+                patrolDestructionStarted,
+                patrolArmor,
+                patrolJump,
+            ] of patrols) {
                 if (role !== 'military') {
+                    continue;
+                }
+                if (!isShipOperational(
+                    patrolDisabled,
+                    patrolDestructionStarted,
+                    patrolArmor,
+                    patrolJump,
+                )) {
                     continue;
                 }
 
@@ -316,8 +402,13 @@ export const NpcAmbientChatterSystem = new System({
             return;
         }
 
-        const candidates = npcs.filter(([, , , , , , , , , entity]) =>
-            !entity.components.has(PlayerShipSelector));
+        const candidates = npcs.filter(([
+            , , , , , , , , , entity,
+            disabled, destructionStarted, armor, jump,
+        ]) =>
+            !entity.components.has(PlayerShipSelector)
+            && isShipOperational(disabled, destructionStarted, armor, jump));
+
         if (candidates.length === 0) {
             return;
         }
@@ -375,12 +466,36 @@ export const NpcDistressSystem = new System({
     ] as const,
     step(npcs, entities, chatterState, time, emit, systemId) {
         const now = time.time;
-        for (const [uuid, pos, shipData, _govt, _role, _traffic, _miner, shield, target, entity] of npcs) {
+        for (const [
+            uuid,
+            pos,
+            shipData,
+            _govt,
+            _role,
+            _traffic,
+            _miner,
+            shield,
+            target,
+            entity,
+            disabled,
+            destructionStarted,
+            armor,
+            jump,
+        ] of npcs) {
             if (entity.components.has(PlayerShipSelector)) {
                 continue;
             }
 
+            if (!isShipOperational(disabled, destructionStarted, armor, jump)) {
+                continue;
+            }
+
             if (!shield || !target?.target || !entities.has(target.target)) {
+                continue;
+            }
+
+            const attacker = entities.get(target.target);
+            if (!attacker || attacker.components.has(DestructionStartedComponent)) {
                 continue;
             }
 
@@ -395,8 +510,7 @@ export const NpcDistressSystem = new System({
             }
             chatterState.lastDistressByShip.set(uuid, now);
 
-            const attacker = entities.get(target.target);
-            const attackerName = attacker?.name || 'hostiles';
+            const attackerName = attacker.name || 'hostiles';
             const senderName = entity.name || shipData.name || 'Merchant';
             const pct = Math.max(0, Math.round(shieldPct * 100));
 

@@ -336,6 +336,12 @@ export abstract class WeaponEntry {
             owner = {owner: uuid};
         }
         let target = extras?.target ?? targetVal?.target;
+        if (target && !entities.has(target)) {
+            target = undefined;
+            if (targetVal) {
+                targetVal.target = undefined;
+            }
+        }
         let weapon: WeaponLocalState;
         if (exitIndex !== undefined) {
             weapon = {

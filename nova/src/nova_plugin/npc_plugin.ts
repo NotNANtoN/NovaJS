@@ -653,18 +653,22 @@ export const NpcPurposeAI = new System({
         }
 
         const targetId = target.target;
-        const targetEntity = targetId ? entities.get(targetId) : undefined;
+        if (targetId && !entities.has(targetId)) {
+            target.target = undefined;
+        }
+        const activeTargetId = target.target;
+        const targetEntity = activeTargetId ? entities.get(activeTargetId) : undefined;
         const targetMovement = targetEntity?.components
             .get(MovementStateComponent);
         const targetDistance = targetMovement
             ? targetMovement.position.subtract(movement.position).length
             : 0;
-        const personallyProvoked = Boolean(targetId
-            && isPersonallyProvoked(provocations, uuid, targetId));
+        const personallyProvoked = Boolean(activeTargetId
+            && isPersonallyProvoked(provocations, uuid, activeTargetId));
         const weaponRange = getMaximumWeaponRange(weapons, gameData);
         const governmentRetreat = shouldWarshipRetreat(
             profile, government, shield);
-        const fleeFromAttacker = Boolean(targetId && targetMovement
+        const fleeFromAttacker = Boolean(activeTargetId && targetMovement
             && shouldFleeFromAttacker(
                 profile,
                 personallyProvoked,
@@ -673,7 +677,7 @@ export const NpcPurposeAI = new System({
                 shield,
             ));
 
-        if (targetId && targetMovement
+        if (activeTargetId && targetMovement
             && (governmentRetreat || fleeFromAttacker)) {
             const reason = governmentRetreat
                 ? "retreat"
@@ -682,7 +686,7 @@ export const NpcPurposeAI = new System({
             // distance. Receding by the existing fallback combat standoff each
             // controller step keeps the ship running until the threat breaks.
             const state: NpcFleeState = {
-                threat: targetId,
+                threat: activeTargetId,
                 distance: targetDistance + DEFAULT_COMBAT_STANDOFF,
                 reason,
             };

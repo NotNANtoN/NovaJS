@@ -32,8 +32,11 @@ export function applyOutfitPhysics(basePhysics: ShipPhysics,
         for (const [outfit, count] of outfits) {
             for (const [uncast, val] of Object.entries(outfit.physics)) {
                 const key = uncast as keyof OutfitPhysics;
-                if (basePhysics.hasOwnProperty(key)) {
-                    if (typeof val === 'number') {
+                if (typeof val === 'number') {
+                    if (key === 'freeMass') {
+                        basePhysics.freeMass = (basePhysics.freeMass ?? 0) - val * count;
+                        basePhysics.mass = (basePhysics.mass ?? 0) + val * count;
+                    } else if (basePhysics.hasOwnProperty(key)) {
                         (basePhysics[key] as number) += val * count;
                     }
                 }
