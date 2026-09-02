@@ -16,6 +16,9 @@ import { GameDataResource } from './game_data_resource';
 import { PlatformResource } from './platform_plugin';
 import {
     DEFAULT_COMBAT_STANDOFF,
+    calculateLeadAimAngle,
+    getPrimaryForwardWeapon,
+    getShipCombatTactic,
     combatOddsAreFavorable,
     FollowAI,
     FollowComponent,
@@ -368,5 +371,107 @@ describe('NPC destruction lockout', () => {
 
         expect(weapon.firing).toBeFalse();
         expect(weapon.target).toBeUndefined();
+    });
+});
+
+describe("NPC combat tactics and analytical lead aiming", () => {
+    it("calculates forward lead angle ahead of moving targets for projectile weapons", () => {
+        const sourcePos = new Position(0, 0);
+        const sourceVel = new Vector(0, 0);
+        // Target at (0, 300) moving right along +x at 200 units/s
+        const targetPos = new Position(0, 300);
+        const targetVel = new Vector(200, 0);
+        const weapon = {
+            type: "ProjectileWeaponData",
+            shotSpeed: 500,
+        } as any;
+
+        const lead = calculateLeadAimAngle(sourcePos, sourceVel, targetPos, targetVel, weapon);
+        const zeroOrderAngle = targetPos.subtract(sourcePos).angle;
+
+        // Lead angle must lead the target in the +x direction (angle > zeroOrderAngle)
+        expect(lead.angle).toBeGreaterThan(zeroOrderAngle.angle);
+    });
+
+    it("uses direct targeting for instantaneous beam weapons", () => {
+        const sourcePos = new Position(0, 0);
+        const sourceVel = new Vector(0, 0);
+        const targetPos = new Position(100, 200);
+        const targetVel = new Vector(150, -50);
+        const beamWeapon = {
+            type: "BeamWeaponData",
+            guidance: "beam",
+        } as any;
+
+        const lead = calculateLeadAimAngle(sourcePos, sourceVel, targetPos, targetVel, beamWeapon);
+        const directAngle = targetPos.subtract(sourcePos).angle;
+        expect(lead.angle).toBeCloseTo(directAngle.angle, 6);
+    });
+
+    it("assigns tactical fighting styles based on ship class, mass, and loadouts", () => {
+        const interceptorShip = {
+            inherentAI: 4,
+            physics: { mass: 200, speed: 450, turnRate: 3.5 },
+            cargoCapacity: 10,
+            maxGuns: 4,
+        } as any;
+        expect(getShipCombatTactic(interceptorShip, undefined, projectileGameData)).toBe("dogfight");
+
+        const capitalShip = {
+            inherentAI: 3,
+            physics: { mass: 10000, speed: 100, turnRate: 0.8 },
+            cargoCapacity: 80,
+            maxGuns: 6,
+        } as any;
+        expect(getShipCombatTactic(capitalShip, undefined, projectileGameData)).toBe("broadside");
+
+        const traderShip = {
+            inherentAI: 1,
+            physics: { mass: 1500, speed: 200, turnRate: 1.5 },
+            cargoCapacity: 250,
+            maxGuns: 2,
+        } as any;
+        expect(getShipCombatTactic(traderShip, undefined, projectileGameData)).toBe("defensive");
+
+        const beamWeapons = new Map([
+            ["beam", { count: 2, firing: false }],
+        ]);
+        const beamGameData = {
+            data: {
+                Weapon: {
+                    getCached: (id: string) => ({
+                        type: "BeamWeaponData",
+                        fireGroup: "primary",
+                        guidance: "beam",
+                        physics: { speed: 800 },
+                        shotDuration: 1000,
+                    }),
+                },
+            },
+        } as any;
+        const skirmisherShip = {
+            inherentAI: 3,
+            physics: { mass: 800, speed: 300, turnRate: 2.2 },
+            cargoCapacity: 40,
+            maxGuns: 4,
+        } as any;
+        expect(getShipCombatTactic(skirmisherShip, beamWeapons, beamGameData)).toBe("skirmish");
+    });
+
+    it("tightens forward gun firing arc so ships do not fire 45 degrees off-axis", () => {
+        const { world, weapons } = makeShootWorld(300, ["long"]);
+        const npc = world.entities.get("npc")!;
+        const movement = npc.components.get(MovementStateComponent)!;
+
+        // Point NPC 45 degrees away from target (target is at angle PI/2, NPC points at PI/4)
+        movement.rotation = new Angle(Math.PI / 4);
+        world.step();
+        // In the old system (arc = 63 deg), this fired. In the new system (arc = 10 deg), it must NOT fire!
+        expect(weapons.get("long")!.firing).toBeFalse();
+
+        // When rotated directly toward the target, it fires
+        movement.rotation = new Angle(Math.PI / 2);
+        world.step();
+        expect(weapons.get("long")!.firing).toBeTrue();
     });
 });

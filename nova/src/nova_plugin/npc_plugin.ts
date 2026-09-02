@@ -53,6 +53,9 @@ import { createMinerSystems, MiningShipProvider } from "./miner_ai";
 import { PlayerState, PlayerStateComponent } from "./player_state";
 import { isCriminal, recordFor } from "./legal_record";
 import { approachTarget, fleeFromTarget } from "./flight_controller";
+import { firstOrderWithFallback } from "./guidance";
+import { Position } from "nova_ecs/datatypes/position";
+import { Vector } from "nova_ecs/datatypes/vector";
 import type { WeaponsState } from "./weapons_state";
 import { PlanetComponent } from "./planet_plugin";
 import {
@@ -778,6 +781,79 @@ export const ParkInterceptorAI = new System({
     },
 });
 
+
+export function getPrimaryForwardWeapon(
+    weapons: WeaponsState | undefined,
+    gameData: GameDataInterface,
+): WeaponData | undefined {
+    for (const [id, state] of weapons ?? []) {
+        if (state.count <= 0) continue;
+        const weapon = gameData.data.Weapon.getCached(id);
+        if (!weapon || weapon.type === "BayWeaponData") continue;
+        const guidance = "guidance" in weapon ? weapon.guidance : undefined;
+        if (guidance === "turret" || guidance === "beamTurret" || guidance === "guided"
+            || guidance === "rearQuadrant" || guidance === "pointDefense" || guidance === "pointDefenseBeam") {
+            continue;
+        }
+        return weapon;
+    }
+    return undefined;
+}
+
+export function calculateLeadAimAngle(
+    sourcePosition: Position,
+    sourceVelocity: Vector,
+    targetPosition: Position,
+    targetVelocity: Vector,
+    weaponData?: WeaponData,
+): Angle {
+    if (!weaponData || weaponData.type === "BeamWeaponData") {
+        return targetPosition.subtract(sourcePosition).angle;
+    }
+    const shotSpeed = weaponData.shotSpeed
+        ?? (weaponData as any).physics?.speed
+        ?? 300;
+    if (!(shotSpeed > 0)) {
+        return targetPosition.subtract(sourcePosition).angle;
+    }
+    return firstOrderWithFallback(
+        sourcePosition,
+        sourceVelocity,
+        targetPosition,
+        targetVelocity,
+        shotSpeed,
+    );
+}
+
+export type CombatTactic =
+    | "dogfight"   // Fast interceptors / fighters: strafe passes and breakaway
+    | "skirmish"   // Long-range beam escorts: standoff kiting, backpedal
+    | "broadside"  // Heavy dreadnoughts / warships: steady platform, turret arcs
+    | "defensive"; // Armed freighters & traders: hold formation, retreat
+
+export function getShipCombatTactic(
+    shipData: ShipData | undefined,
+    weapons: WeaponsState | undefined,
+    gameData: GameDataInterface,
+): CombatTactic {
+    if (!shipData) {
+        return "dogfight";
+    }
+    const inherentAI = shipData.inherentAI;
+    if (inherentAI === 1 || inherentAI === 2 || (shipData.cargoCapacity > 100 && shipData.maxGuns <= 2)) {
+        return "defensive";
+    }
+    if (shipData.physics.mass >= 3000 || shipData.physics.turnRate < 1.2) {
+        return "broadside";
+    }
+    const primary = getPrimaryForwardWeapon(weapons, gameData);
+    const range = getEffectiveWeaponRange(weapons, gameData) ?? 600;
+    if (primary?.type === "BeamWeaponData" || range >= 700) {
+        return "skirmish";
+    }
+    return "dogfight";
+}
+
 export const FollowAI = new System({
     name: 'FollowAndShootAI',
     args: [MovementStateComponent, MovementPhysicsComponent, TargetComponent,
@@ -819,32 +895,57 @@ export const FollowAI = new System({
             movementState.accelerating = 0;
             return;
         }
-        const command = fleeing?.threat === target.target
-            ? fleeFromTarget(
+        const toTarget = targetMovement.position.subtract(movementState.position);
+        const distance = toTarget.length;
+        const primaryWeapon = getPrimaryForwardWeapon(weapons, gameData);
+        const effectiveRange = getEffectiveWeaponRange(weapons, gameData) ?? 600;
+        const leadAngle = calculateLeadAimAngle(
+            movementState.position,
+            movementState.velocity,
+            targetMovement.position,
+            targetMovement.velocity,
+            primaryWeapon,
+        );
+        const tactic = getShipCombatTactic(shipData, weapons, gameData);
+        const standoffMultiplier = shipData
+            ? getShipAIProfile(shipData).weaponStandoffMultiplier
+            : 1;
+        const baseStandoff = getCombatStandoff(weapons, gameData, standoffMultiplier);
+
+        if (fleeing?.threat === target.target) {
+            const command = fleeFromTarget(
                 movementState,
                 targetMovement,
                 physics,
                 { distance: fleeing.distance },
-            )
-            : approachTarget(movementState, targetMovement, physics, {
-                standoff: getCombatStandoff(
-                    weapons,
-                    gameData,
-                    shipData
-                        ? getShipAIProfile(shipData).weaponStandoffMultiplier
-                        : 1,
-                ),
+            );
+            movementState.turnTo = command.turnTo;
+            movementState.accelerating = command.accelerating;
+            movementState.turnBack = command.turnBack;
+        } else if (tactic === "skirmish" && distance < baseStandoff * 0.5) {
+            // Skirmisher kiting: reverse burn while keeping nose on lead angle
+            movementState.turnTo = leadAngle;
+            movementState.accelerating = 0;
+            movementState.turnBack = true;
+        } else if (tactic === "dogfight" && shipData && distance < 140) {
+            // Dogfighter breakaway: bank away laterally to avoid ramming
+            const breakAngle = leadAngle.add(Math.PI * 0.6);
+            movementState.turnTo = breakAngle;
+            movementState.accelerating = 1;
+            movementState.turnBack = false;
+        } else {
+            const standoff = tactic === "dogfight" && shipData
+                ? Math.max(150, baseStandoff * 0.75)
+                : baseStandoff;
+            const command = approachTarget(movementState, targetMovement, physics, {
+                standoff,
             });
-        // Once holding station the controller has no thrust to aim, so the
-        // nose would keep whatever heading braking left it with — pointing
-        // away from the target, where fixed guns are useless. Tracking the
-        // target by uuid lets the movement system keep it under the guns.
-        movementState.turnTo = fleeing
-            ? command.turnTo
-            : (command.turnTo ?? target.target);
-        movementState.accelerating = command.accelerating;
-        movementState.turnBack = command.turnBack;
-        if (movementState.turnTo === null && !command.turnBack) {
+            movementState.turnTo = command.turnTo ?? leadAngle;
+            movementState.accelerating = command.accelerating;
+            movementState.turnBack = command.turnBack;
+        }
+
+        if (movementState.turnTo === null && !movementState.turnBack) {
             movementState.turning = 0;
         }
     }
@@ -909,18 +1010,28 @@ export const ShootAllWeaponsAI = new System({
             // Check firing arc for directional / fixed weapons
             let canBear = true;
             if (movement && targetMovement) {
-                const angleToTarget = targetMovement.position.subtract(movement.position).angle;
-                const angleDiff = Math.abs(movement.rotation.distanceTo(angleToTarget).angle);
-                const guidance = 'guidance' in weaponData ? weaponData.guidance : undefined;
+                const guidance = "guidance" in weaponData ? weaponData.guidance : undefined;
 
-                if (guidance === 'turret' || guidance === 'beamTurret' || guidance === 'guided') {
+                if (guidance === "turret" || guidance === "beamTurret" || guidance === "guided") {
                     canBear = true;
-                } else if (guidance === 'rearQuadrant') {
+                } else if (guidance === "rearQuadrant") {
+                    const angleToTarget = targetMovement.position.subtract(movement.position).angle;
+                    const angleDiff = Math.abs(movement.rotation.distanceTo(angleToTarget).angle);
                     canBear = angleDiff > (Math.PI * 0.65);
-
                 } else {
                     // Fixed forward guns, unguided, rockets, frontQuadrant, fixed beams
-                    canBear = angleDiff < (Math.PI * 0.35);
+                    const aimAngle = calculateLeadAimAngle(
+                        movement.position,
+                        movement.velocity,
+                        targetMovement.position,
+                        targetMovement.velocity,
+                        weaponData,
+                    );
+                    const angleDiff = Math.abs(movement.rotation.distanceTo(aimAngle).angle);
+                    const maxArc = weaponData.type === "BeamWeaponData"
+                        ? 0.08  // ~4.6 degrees for precision beams
+                        : 0.18; // ~10.3 degrees for forward projectile guns
+                    canBear = angleDiff <= maxArc;
                 }
             }
 
