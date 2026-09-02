@@ -24,7 +24,19 @@ import {
     pendingJumpTransition,
     routeChangeCancelsJump,
     takeArrivalSound,
+    JUMP_MIN_DISTANCE,
+    TOO_CLOSE_TO_CENTER_MESSAGE,
+    NO_DESTINATION_MESSAGE,
+    JumpRefusal,
+    JumpRefusedEvent,
+    JumpRouteComponent,
+    applyJumpBrakingControls,
+    advanceJumpFlight,
 } from './jump_plugin';
+import { ControlStateEvent } from './control_state_event';
+import { PlayerStateComponent } from './player_state';
+import { ShipDataComponent } from './ship_plugin';
+import { SoundEvent } from './sound_event';
 import { DeltaPlugin } from 'nova_ecs/plugins/delta_plugin';
 import { Position } from 'nova_ecs/datatypes/position';
 import { Vector } from 'nova_ecs/datatypes/vector';
@@ -483,5 +495,193 @@ describe('hyperjump arrival geometry', () => {
             [-component, -component],
             [speed, speed],
         );
+    });
+});
+
+describe('player hyperjump checks and controls', () => {
+    async function playerJumpWorld(options?: {
+        x?: number;
+        y?: number;
+        route?: string[];
+        fuel?: number;
+    }) {
+        const world = new World('player-jump-world');
+        world.resources.set(PlatformResource, 'browser');
+        const system = {
+            name: 'Source System',
+            position: [0, 0] as const,
+            links: ['nova:dest'],
+        };
+        const destSystem = {
+            name: 'Dest System',
+            position: [100, 0] as const,
+            links: ['nova:source'],
+        };
+        world.resources.set(GameDataResource, {
+            data: {
+                System: {
+                    getCached: (id: string) => {
+                        if (id === 'nova:source') return system;
+                        if (id === 'nova:dest') return destSystem;
+                        return undefined;
+                    },
+                },
+            },
+        } as never);
+        world.resources.set(SystemIdResource, 'nova:source');
+        world.resources.set(TimeResource, {
+            time: 0,
+            delta_ms: 10,
+            delta_s: 0.01,
+            frame: 0,
+        });
+        await world.addPlugin(DeltaPlugin);
+        await world.addPlugin(MovementPlugin);
+        await world.addPlugin(JumpPlugin);
+
+        const player = new Entity('player')
+            .addComponent(PlayerShipSelector, undefined)
+            .addComponent(JumpRouteComponent, { route: options?.route ?? ['nova:dest'] })
+            .addComponent(MovementStateComponent, {
+                position: new Position(options?.x ?? 1500, options?.y ?? 0),
+                velocity: new Vector(0, 0),
+                rotation: new Angle(0),
+                turning: 0,
+                turnBack: false,
+                accelerating: 0,
+            })
+            .addComponent(MovementPhysicsComponent, NPC_PHYSICS)
+            .addComponent(PlayerStateComponent, {
+                fuel: options?.fuel ?? 300,
+                currentSystem: 'nova:source',
+                exploredSystems: ['nova:source'],
+            } as never)
+            .addComponent(ShipDataComponent, {
+                fuelCapacity: 300,
+            } as never);
+        world.entities.set('player', player);
+
+        return { world, player };
+    }
+
+    it('refuses jump when no destination is set', async () => {
+        const { world, player } = await playerJumpWorld({ route: [] });
+        let refused: JumpRefusal | undefined;
+        let soundId: string | undefined;
+        world.events.get(JumpRefusedEvent).subscribe(e => { refused = e; });
+        world.events.get(SoundEvent).subscribe(s => { soundId = s.id; });
+
+        world.emitNow(ControlStateEvent, new Map([['hyperjump', 'start']]), ['player']);
+
+        expect(refused?.reason).toBe('destination');
+        expect(soundId).toBe('nova:153');
+        expect(player.components.has(JumpStateComponent)).toBeFalse();
+    });
+
+    it('refuses jump when within JUMP_MIN_DISTANCE from system center', async () => {
+        const { world, player } = await playerJumpWorld({ x: 500, y: 0 });
+        let refused: JumpRefusal | undefined;
+        let soundId: string | undefined;
+        world.events.get(JumpRefusedEvent).subscribe(e => { refused = e; });
+        world.events.get(SoundEvent).subscribe(s => { soundId = s.id; });
+
+        world.emitNow(ControlStateEvent, new Map([['hyperjump', 'start']]), ['player']);
+
+        expect(refused?.reason).toBe('distance');
+        expect(soundId).toBe('nova:153');
+        expect(player.components.has(JumpStateComponent)).toBeFalse();
+    });
+
+    it('initiates braking jump when beyond JUMP_MIN_DISTANCE with destination', async () => {
+        const { world, player } = await playerJumpWorld({ x: 1200, y: 0 });
+
+        world.emitNow(ControlStateEvent, new Map([['hyperjump', 'start']]), ['player']);
+
+        expect(player.components.has(JumpStateComponent)).toBeTrue();
+        expect(player.components.get(JumpStateComponent)?.phase).toBe('braking');
+    });
+
+    it('cancels braking jump when tapping hyperjump again', async () => {
+        const { world, player } = await playerJumpWorld({ x: 1200, y: 0 });
+
+        world.emitNow(ControlStateEvent, new Map([['hyperjump', 'start']]), ['player']);
+        expect(player.components.has(JumpStateComponent)).toBeTrue();
+
+        world.emitNow(ControlStateEvent, new Map([['hyperjump', 'start']]), ['player']);
+        expect(player.components.has(JumpStateComponent)).toBeFalse();
+    });
+
+    it('applyJumpBrakingControls steers towards destination heading once stopped', () => {
+        const movement: MovementState = {
+            position: new Position(1200, 0),
+            velocity: new Vector(0, 0),
+            rotation: new Angle(0),
+            turning: 0,
+            turnBack: false,
+            accelerating: 0,
+            turnTo: null,
+        };
+        const destVector = new Vector(1, 0); // East
+
+        applyJumpBrakingControls(movement, 40, destVector);
+
+        expect(movement.turnBack).toBeFalse();
+        expect(movement.accelerating).toBe(0);
+        expect(movement.turnTo).toEqual(destVector.angle);
+    });
+
+    it('advanceJumpFlight holds player in braking until aligned with jump heading', () => {
+        const state = {
+            from: 'nova:source',
+            to: 'nova:dest',
+            phase: 'braking' as const,
+            phaseStartedAt: 0,
+            transitionAt: JUMP_BRAKE_MS,
+            requiresAdjacency: true,
+            arrivalSoundPending: false,
+        };
+        const physics = { maxVelocity: 40 };
+        const time = { time: 10, delta_s: 0.01 };
+        const direction = new Vector(1, 0); // East (angle PI/2)
+
+        // Case 1: Stopped but pointing North (angle 0) - dot product is 0 -> not aligned
+        const misalignedMovement: MovementState = {
+            position: new Position(1200, 0),
+            velocity: new Vector(0, 0),
+            rotation: new Angle(0), // North
+            turning: 0,
+            turnBack: false,
+            accelerating: 0,
+            turnTo: direction.angle,
+        };
+
+        const transition1 = advanceJumpFlight(state, misalignedMovement, physics, time, direction);
+        expect(transition1).toBe('none');
+        expect(state.phase).toBe('braking');
+
+        // Case 2: Once aligned to East (rotation matches direction) -> transitions to spooling
+        const alignedMovement: MovementState = {
+            position: new Position(1200, 0),
+            velocity: new Vector(0, 0),
+            rotation: direction.angle, // East
+            turning: 0,
+            turnBack: false,
+            accelerating: 0,
+            turnTo: direction.angle,
+        };
+
+        let spoolingStarted = false;
+        const transition2 = advanceJumpFlight(
+            state,
+            alignedMovement,
+            physics,
+            time,
+            direction,
+            undefined,
+            () => { spoolingStarted = true; },
+        );
+        expect(transition2).toBe('none');
+        expect(state.phase).toBe('spooling');
+        expect(spoolingStarted).toBeTrue();
     });
 });

@@ -82,6 +82,7 @@ function recordOwnedShot(
     if (platform === 'browser') {
         if (intent) {
             pushShot(intent.shots, event);
+            entity.components.set(FireIntentComponent, intent);
         } else {
             intent = { shots: [event] };
             entity.components.set(FireIntentComponent, intent);
@@ -95,6 +96,7 @@ function recordOwnedShot(
             });
         if (log) {
             pushShot(log.shots, logged);
+            entity.components.set(FireLogComponent, log);
         } else {
             log = { shots: [logged] };
             entity.components.set(FireLogComponent, log);
@@ -408,6 +410,7 @@ export const ServerFireIntentSystem = new System({
                 });
             if (log) {
                 pushShot(log.shots, logged);
+                entity.components.set(FireLogComponent, log);
             } else {
                 log = { shots: [logged] };
                 entity.components.set(FireLogComponent, log);

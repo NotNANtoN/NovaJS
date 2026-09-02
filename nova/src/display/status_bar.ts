@@ -38,6 +38,8 @@ import {
 import {
     JumpRefusedEvent,
     JumpRouteComponent,
+    NO_DESTINATION_MESSAGE,
+    TOO_CLOSE_TO_CENTER_MESSAGE,
 } from "../nova_plugin/jump_plugin";
 import { Stat } from "../nova_plugin/stat";
 import { TargetComponent } from "../nova_plugin/target_component";
@@ -762,6 +764,10 @@ const ShowJumpRefusal = new System({
     step(refusal, statusBar, time) {
         if (refusal.reason === 'fuel') {
             statusBar.showLandingMessage(INSUFFICIENT_FUEL_MESSAGE, time.time);
+        } else if (refusal.reason === 'destination') {
+            statusBar.showLandingMessage(NO_DESTINATION_MESSAGE, time.time);
+        } else if (refusal.reason === 'distance') {
+            statusBar.showLandingMessage(TOO_CLOSE_TO_CENTER_MESSAGE, time.time);
         }
     },
 });

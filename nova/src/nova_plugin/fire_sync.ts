@@ -158,7 +158,7 @@ export function getFireSyncLocalState(
     const seen = highestSequence(intent, log);
     const state: FireSyncLocalState = {
         nextSeq: seen + 1,
-        highestIntentSeq: seen,
+        highestIntentSeq: 0,
         highestLogSeq: 0,
         spawnedSeqs: new Set(),
         acceptedAt: new Map(),

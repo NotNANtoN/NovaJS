@@ -48,6 +48,13 @@ export const JUMP_ARRIVAL_RADIUS = 1_400;
 export const JUMP_DEPARTURE_SPEED_MULTIPLIER = 3.5;
 export const JUMP_ARRIVAL_SPEED_MULTIPLIER = 3;
 export const JUMP_ARRIVAL_END_SPEED_MULTIPLIER = 0.65;
+export const JUMP_MIN_DISTANCE = 1_000;
+/** Retail STR# 2002 string 41: distance refusal */
+export const TOO_CLOSE_TO_CENTER_MESSAGE =
+    "Can't initiate hyperspace jump - not yet far enough away from system center.";
+/** Retail STR# 2002 string 28: destination refusal */
+export const NO_DESTINATION_MESSAGE =
+    "You have to select a destination before you can start a hyperspace jump.";
 // Match the radar/interest radius so ships leave view before vanishing.
 export const SYSTEM_DEPARTURE_RADIUS = 6_000;
 export const NPC_JUMP_TIMEOUT_MS = 30_000;
@@ -75,7 +82,7 @@ export const InitiateJumpEvent = new EcsEvent<InitiateJump>('InitiateJumpEvent')
 
 /** Raised when a jump the pilot asked for cannot happen. */
 export interface JumpRefusal {
-    reason: string;
+    reason: 'fuel' | 'distance' | 'destination' | string;
 }
 export const JumpRefusedEvent =
     new EcsEvent<JumpRefusal>('JumpRefusedEvent');
@@ -308,9 +315,10 @@ export function distanceFromSystemOrigin(position: Position): number {
     );
 }
 
-function applyJumpBrakingControls(
+export function applyJumpBrakingControls(
     movement: MovementState,
     maxVelocity: number,
+    targetDirection?: Vector,
 ): void {
     const brakeSpeed = Math.max(0, maxVelocity)
         * JUMP_BRAKE_SPEED_THRESHOLD;
@@ -318,7 +326,7 @@ function applyJumpBrakingControls(
         movement.accelerating = 0;
         movement.turning = 0;
         movement.turnBack = false;
-        movement.turnTo = null;
+        movement.turnTo = targetDirection ? targetDirection.angle : null;
         return;
     }
     movement.turning = 0;
@@ -343,8 +351,11 @@ export function advanceJumpFlight(
     if (state.phase === 'braking') {
         const brakeSpeed = Math.max(0, physics.maxVelocity)
             * JUMP_BRAKE_SPEED_THRESHOLD;
-        const brakeComplete = movement.velocity.length <= brakeSpeed
-            || pendingJumpTransition(state, time.time) === 'begin-spooling';
+        const stopped = movement.velocity.length <= brakeSpeed;
+        const alignment = movement.rotation.getUnitVector().dot(direction);
+        const aligned = alignment >= 0.985;
+        const timedOut = pendingJumpTransition(state, time.time) === 'begin-spooling';
+        const brakeComplete = (stopped && (aligned || !state.requiresAdjacency)) || timedOut;
         if (!brakeComplete) {
             return 'none';
         }
@@ -372,7 +383,7 @@ export function advanceJumpFlight(
             ),
             time.delta_s,
             true,
-            state.phase === 'departing',
+            state.phase === 'departing' || state.requiresAdjacency,
         );
         return 'none';
     }
@@ -433,11 +444,27 @@ const PlayerJumpControl = new System({
         Optional(JumpStateComponent), Optional(ArmorComponent),
         GameDataResource, GetEntity, TimeResource,
         Optional(PlayerStateComponent), Optional(ShipDataComponent),
-        PlayerShipSelector] as const,
+        PlayerShipSelector, Optional(MovementStateComponent)] as const,
     step(controlState, emit, uuid, systemId, jumpRoute, jumpState, armor,
-        gameData, entity, time, playerState, shipData) {
-        if (controlState.get('hyperjump') !== 'start' || jumpState
+        gameData, entity, time, playerState, shipData, _playerShip, movement) {
+        if (controlState.get('hyperjump') !== 'start'
             || armor && armor.current <= 0) {
+            return;
+        }
+        if (jumpState) {
+            if (jumpState.phase === 'braking') {
+                if (movement) {
+                    cancelJumpFlight(entity, movement);
+                } else {
+                    entity.components.delete(JumpStateComponent);
+                }
+            }
+            return;
+        }
+        const nextSystem = jumpRoute.route[0];
+        if (!nextSystem) {
+            emit(JumpRefusedEvent, { reason: 'destination' });
+            emit(SoundEvent, { id: 'nova:153' });
             return;
         }
         // A hull with no tank at all is not fuel limited; only refuse when
@@ -448,15 +475,15 @@ const PlayerJumpControl = new System({
             emit(SoundEvent, { id: 'nova:153' });
             return;
         }
-        const nextSystem = jumpRoute.route[0];
+        if (movement && distanceFromSystemOrigin(movement.position) < JUMP_MIN_DISTANCE) {
+            emit(JumpRefusedEvent, { reason: 'distance' });
+            emit(SoundEvent, { id: 'nova:153' });
+            return;
+        }
         const currentSystem = gameData.data.System.getCached(systemId);
         if (!isValidNextHop(currentSystem, nextSystem)) {
-            if (nextSystem) {
-                // A route whose first segment is no longer adjacent is stale.
-                // Clear it deliberately instead of silently jumping elsewhere.
-                jumpRoute.route = [];
-                emit(SoundEvent, { id: 'nova:153' });
-            }
+            jumpRoute.route = [];
+            emit(SoundEvent, { id: 'nova:153' });
             return;
         }
         const state: JumpState = {
@@ -513,10 +540,25 @@ const JumpBrakeControlSystem = new System({
         JumpStateComponent,
         MovementStateComponent,
         MovementPhysicsComponent,
+        Optional(GameDataResource),
     ] as const,
-    step(state, movement, physics) {
+    step(state, movement, physics, gameData) {
         if (state.phase === 'braking') {
-            applyJumpBrakingControls(movement, physics.maxVelocity);
+            let direction: Vector | undefined;
+            if (gameData) {
+                const source = gameData.data.System.getCached(state.from);
+                const destination = gameData.data.System.getCached(state.to);
+                if (source && destination) {
+                    const delta = new Vector(
+                        destination.position[0] - source.position[0],
+                        destination.position[1] - source.position[1],
+                    );
+                    if (delta.lengthSquared > 0) {
+                        direction = delta.normalize();
+                    }
+                }
+            }
+            applyJumpBrakingControls(movement, physics.maxVelocity, direction);
         }
     },
 });
@@ -655,20 +697,38 @@ export const NpcJumpLifecycleSystem = new System({
         UUID,
         GetEntity,
         TimeResource,
+        Optional(GameDataResource),
     ] as const,
     step(state, movement, physics, _npc, multiplayer, platform, entities,
-        uuid, entity, time) {
+        uuid, entity, time, gameData) {
         if (entity.components.has(PlayerShipSelector)) {
             return;
         }
         if (platform !== 'node' || multiplayer.owner !== 'server') {
             return;
         }
-        const direction = state.phase === 'arriving'
-            ? movement.rotation.getUnitVector()
-            : movement.position.lengthSquared > 0
-                ? movement.position.normalize()
-                : movement.rotation.getUnitVector();
+        let direction: Vector;
+        if (state.phase === 'arriving') {
+            direction = movement.rotation.getUnitVector();
+        } else {
+            const source = gameData?.data.System.getCached(state.from);
+            const destination = gameData?.data.System.getCached(state.to);
+            if (source && destination) {
+                const delta = new Vector(
+                    destination.position[0] - source.position[0],
+                    destination.position[1] - source.position[1],
+                );
+                direction = delta.lengthSquared > 0
+                    ? delta.normalize()
+                    : (movement.position.lengthSquared > 0
+                        ? movement.position.normalize()
+                        : movement.rotation.getUnitVector());
+            } else {
+                direction = movement.position.lengthSquared > 0
+                    ? movement.position.normalize()
+                    : movement.rotation.getUnitVector();
+            }
+        }
         const transition = advanceJumpFlight(
             state, movement, physics, time, direction);
 

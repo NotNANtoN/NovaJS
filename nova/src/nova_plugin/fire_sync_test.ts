@@ -1,3 +1,16 @@
+import { World } from 'nova_ecs/world';
+import { DeltaPlugin } from 'nova_ecs/plugins/delta_plugin';
+import { TimeResource } from 'nova_ecs/plugins/time_plugin';
+import { MultiplayerData, CommunicatorResource } from 'nova_ecs/plugins/multiplayer_plugin';
+import { MockCommunicator } from 'nova_ecs/plugins/mock_communicator';
+import { PlatformResource } from './platform_plugin';
+import { WeaponsStateComponent } from './weapons_state';
+import { DefaultMap } from 'nova_ecs/utils';
+import { getDefaultWeaponLocalState, WeaponsComponent, WeaponEntries, WeaponEntry } from './fire_weapon_plugin';
+import { WeaponsSystem, ServerFireIntentSystem, FireLogSpawnSystem } from './weapon_plugin';
+import { FireIntentComponent, FireLogComponent, FireSyncPlugin } from './fire_sync';
+import { getDefaultProjectileWeaponData } from 'novadatainterface/WeaponData';
+import { Gettable } from 'novadatainterface/Gettable';
 import { Entity } from 'nova_ecs/entity';
 import { Angle } from 'nova_ecs/datatypes/angle';
 import { Position } from 'nova_ecs/datatypes/position';
@@ -71,7 +84,7 @@ describe('adopting a buffer a world was not watching for', () => {
             .withContext('NPC FireLog is the only way observers see shots')
             .toEqual([4, 5, 6]);
         expect(state.nextSeq).toBe(7);
-        expect(state.highestIntentSeq).toBe(6);
+        expect(state.highestIntentSeq).toBe(0);
     });
 
     it('still starts from the beginning for a ship that has not fired', () => {
@@ -164,5 +177,137 @@ describe('fire intent target', () => {
         if (decoded._tag === 'Right') {
             expect(decoded.right.target).toBe('victim');
         }
+    });
+});
+
+describe('end-to-end shot synchronization across client, server, and observers', () => {
+    function makeTestWeapon(onFire: (source: string, seed: number) => void, onFireLog: (source: string, seq: number) => void) {
+        const data = getDefaultProjectileWeaponData();
+        data.id = 'blaster-128';
+        data.reload = 100;
+        data.accuracy = 0;
+        const entry = {
+            data,
+            syncAsFireEvent: true,
+            fireFromEntityDetailed: (source: string, seed: number, _inaccuracy?: boolean, _exitIndex?: number, extras?: { entityId?: string, target?: string }) => {
+                onFire(source, seed);
+                return {
+                    entity: new Entity(extras?.entityId ?? 'shot'),
+                    position: new Position(100, 200),
+                    rotation: new Angle(0.5),
+                    sourceVelocity: new Vector(10, 0),
+                    target: extras?.target,
+                    inaccuracy: 0,
+                };
+            },
+            fireFromLog: (source: string, shot: any) => {
+                onFireLog(source, shot.seq);
+                return new Entity(loggedShotEntityId(source, shot.seq));
+            },
+        } as unknown as WeaponEntry;
+
+        const entries = new Gettable<WeaponEntry | undefined>(async () => entry);
+        entries.gotten[data.id] = entry;
+        return entries;
+    }
+
+    it('correctly syncs shooter intent to server, broadcasts to observer, and avoids duplicate spawn', async () => {
+        const clientShots: Array<{ source: string, seed: number }> = [];
+        const serverShots: Array<{ source: string, seed: number }> = [];
+        const observerSpawnedShots: Array<{ source: string, seq: number }> = [];
+        const shooterSpawnedFromLog: Array<{ source: string, seq: number }> = [];
+
+        const clientEntries = makeTestWeapon(
+            (s, seed) => clientShots.push({ source: s, seed }),
+            (s, seq) => shooterSpawnedFromLog.push({ source: s, seq }),
+        );
+        const serverEntries = makeTestWeapon(
+            (s, seed) => serverShots.push({ source: s, seed }),
+            () => {},
+        );
+        const observerEntries = makeTestWeapon(
+            () => {},
+            (s, seq) => observerSpawnedShots.push({ source: s, seq }),
+        );
+
+        const time = { time: 1000, delta_ms: 16.6, delta_s: 0.0166, frame: 1 };
+
+        // 1. Client A (Shooter)
+        const clientWorld = new World('client-a');
+        clientWorld.resources.set(PlatformResource, 'browser');
+        clientWorld.resources.set(CommunicatorResource, new MockCommunicator('client-a'));
+        clientWorld.resources.set(TimeResource, time);
+        clientWorld.resources.set(WeaponEntries, clientEntries);
+        await clientWorld.addPlugin(DeltaPlugin);
+        await clientWorld.addPlugin(FireSyncPlugin);
+        clientWorld.addSystem(WeaponsSystem);
+        clientWorld.addSystem(FireLogSpawnSystem);
+
+        const shooterShip = new Entity('ship-a')
+            .addComponent(MultiplayerData, { owner: 'client-a' })
+            .addComponent(WeaponsStateComponent, new Map([['blaster-128', { count: 1, firing: true }]]))
+            .addComponent(WeaponsComponent, new DefaultMap(getDefaultWeaponLocalState));
+        clientWorld.entities.set('ship-a', shooterShip);
+
+        // Client A steps -> fires shot locally
+        clientWorld.step();
+        expect(clientShots.length).toBe(1);
+        const intent = shooterShip.components.get(FireIntentComponent);
+        expect(intent).toBeDefined();
+        expect(intent?.shots.length).toBe(1);
+        const shotSeq = intent!.shots[0].seq;
+        const shotSeed = intent!.shots[0].seed;
+
+        // 2. Server
+        const serverWorld = new World('server');
+        serverWorld.resources.set(PlatformResource, 'node');
+        serverWorld.resources.set(CommunicatorResource, new MockCommunicator('server'));
+        serverWorld.resources.set(TimeResource, { time: 1020, delta_ms: 16.6, delta_s: 0.0166, frame: 2 });
+        serverWorld.resources.set(WeaponEntries, serverEntries);
+        await serverWorld.addPlugin(DeltaPlugin);
+        await serverWorld.addPlugin(FireSyncPlugin);
+        serverWorld.addSystem(ServerFireIntentSystem);
+        serverWorld.addSystem(FireLogSpawnSystem);
+
+        const serverShip = new Entity('ship-a')
+            .addComponent(MultiplayerData, { owner: 'client-a' })
+            .addComponent(WeaponsStateComponent, new Map([['blaster-128', { count: 1, firing: true }]]))
+            .addComponent(FireIntentComponent, { shots: [...intent!.shots] });
+        serverWorld.entities.set('ship-a', serverShip);
+
+        // Server steps -> ServerFireIntentSystem processes intent, creates authoritative shot and FireLog
+        serverWorld.step();
+        expect(serverShots.length).toBe(1);
+        expect(serverShots[0].seed).toBe(shotSeed);
+        const log = serverShip.components.get(FireLogComponent);
+        expect(log).toBeDefined();
+        expect(log?.shots.length).toBe(1);
+        expect(log?.shots[0].seq).toBe(shotSeq);
+
+        // 3. Observer Client B
+        const observerWorld = new World('client-b');
+        observerWorld.resources.set(PlatformResource, 'browser');
+        observerWorld.resources.set(CommunicatorResource, new MockCommunicator('client-b'));
+        observerWorld.resources.set(TimeResource, { time: 1040, delta_ms: 16.6, delta_s: 0.0166, frame: 3 });
+        observerWorld.resources.set(WeaponEntries, observerEntries);
+        await observerWorld.addPlugin(DeltaPlugin);
+        await observerWorld.addPlugin(FireSyncPlugin);
+        observerWorld.addSystem(FireLogSpawnSystem);
+
+        const observerShip = new Entity('ship-a')
+            .addComponent(MultiplayerData, { owner: 'client-a' })
+            .addComponent(FireLogComponent, { shots: [...log!.shots] });
+        observerWorld.entities.set('ship-a', observerShip);
+
+        // Observer steps -> FireLogSpawnSystem spawns remote shot
+        observerWorld.step();
+        expect(observerSpawnedShots.length).toBe(1);
+        expect(observerSpawnedShots[0].seq).toBe(shotSeq);
+
+        // 4. Client A (Shooter) receives FireLog back from server
+        // Shooter already spawned it locally (seq is in spawnedSeqs), so it must NOT spawn duplicate
+        shooterShip.components.set(FireLogComponent, { shots: [...log!.shots] });
+        clientWorld.step();
+        expect(shooterSpawnedFromLog.length).toBe(0); // Zero duplicates spawned!
     });
 });
