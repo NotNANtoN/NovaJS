@@ -46,7 +46,7 @@ export const MapSystem = new AsyncSystem({
                     playerMarkers.push({
                         name: latest.fromName || 'Captain',
                         systemId: latest.system,
-                        kind: latest.kind ?? 'normal',
+                        kind: latest.kind === 'sos' ? 'sos' : latest.kind === 'coords' ? 'coords' : 'normal',
                     });
                 }
             }

@@ -1,4 +1,4 @@
-import { OutfitData } from "novadatainterface/OutiftData";
+import { OutfitData } from "novadatainterface/OutfitData";
 import { PlanetData } from "novadatainterface/PlanetData";
 import { DefaultMap } from "nova_ecs/utils";
 import * as PIXI from 'pixi.js';

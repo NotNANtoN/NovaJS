@@ -125,7 +125,7 @@ describe('movement key transition regression', () => {
                 );
                 const started = performance.now();
                 try {
-                    return original(...args as never);
+                    return original(...(args as [any, any]));
                 } finally {
                     maxSystemMs.set(system.name, Math.max(
                         maxSystemMs.get(system.name) ?? 0,

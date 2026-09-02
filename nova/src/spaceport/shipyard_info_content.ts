@@ -1,4 +1,4 @@
-import { OutfitData } from 'novadatainterface/OutiftData';
+import { OutfitData } from 'novadatainterface/OutfitData';
 import { ShipData, getDefaultShipData } from 'novadatainterface/ShipData';
 import { WeaponData } from 'novadatainterface/WeaponData';
 import {

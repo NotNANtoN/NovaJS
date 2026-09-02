@@ -6,7 +6,7 @@ import { GameDataInterface } from "./GameDataInterface";
 import { Gettable } from "./Gettable";
 import { NovaDataInterface } from "./NovaDataInterface";
 import { NovaIDs } from "./NovaIDs";
-import { getDefaultOutfitData } from "./OutiftData";
+import { getDefaultOutfitData } from "./OutfitData";
 import { getDefaultPictData } from "./PictData";
 import { getDefaultPlanetData } from "./PlanetData";
 import { getDefaultMissionData } from "./MissionData";

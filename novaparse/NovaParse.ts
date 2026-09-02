@@ -6,7 +6,7 @@ import { GameDataInterface } from "novadatainterface/GameDataInterface";
 import { Gettable } from "novadatainterface/Gettable";
 import { NovaDataInterfaceWithMission, NovaIDNotFoundError } from "novadatainterface/NovaDataInterface";
 import { getDefaultNovaIDs, NovaIDs } from "novadatainterface/NovaIDs";
-import { OutfitData } from "novadatainterface/OutiftData";
+import { OutfitData } from "novadatainterface/OutfitData";
 import { PictData } from "novadatainterface/PictData";
 import { PictImageData } from "novadatainterface/PictImage";
 import { PlanetData } from "novadatainterface/PlanetData";

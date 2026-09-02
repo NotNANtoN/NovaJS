@@ -73,8 +73,8 @@ export class ShipyardInfoDialog extends Menu<ShipData> {
         try {
             this.weaponsSpecs.text = await shipyardInfoWeaponsColumn(
                 ship,
-                id => this.gameData.data.Outfit.get(id),
-                id => this.gameData.data.Weapon.get(id),
+                this.gameData.data.Outfit!,
+                this.gameData.data.Weapon!,
             );
         } catch (error) {
             console.warn('Failed to load shipyard weapons info', error);

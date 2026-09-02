@@ -31,16 +31,16 @@ const ChatHudMessagesResource =
 const CHAT_DISPLAY_DURATION_MS = 8_000;
 const CHAT_FADE_DURATION_MS = 1_500;
 
-const CHAT_FONT = {
-    fontFamily: 'Geneva, Arial, sans-serif',
+const CHAT_FONT: Partial<PIXI.ITextStyle> = {
+    fontFamily: "Geneva, Arial, sans-serif",
     fontSize: 12,
     fill: 0xffffff,
     stroke: 0x000000,
     strokeThickness: 3,
-    lineJoin: 'round',
+    lineJoin: "round",
     wordWrap: true,
     wordWrapWidth: 380,
-} as const;
+};
 
 const MAX_HUD_MESSAGES = 6;
 const MIN_HUD_TOP_Y = 20;

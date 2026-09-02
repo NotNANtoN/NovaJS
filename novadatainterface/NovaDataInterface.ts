@@ -7,7 +7,7 @@ import { DudeData } from "./DudeData";
 import { ExplosionData } from "./ExplosionData";
 import { GovtData } from "./GovtData";
 import { Gettable } from "./Gettable";
-import { OutfitData } from "./OutiftData";
+import { OutfitData } from "./OutfitData";
 import { PictData } from "./PictData";
 import { PictImageData } from "./PictImage";
 import { PlanetData } from "./PlanetData";

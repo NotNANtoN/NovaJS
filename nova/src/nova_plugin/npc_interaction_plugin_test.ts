@@ -49,7 +49,7 @@ describe('NpcInteractionPlugin', () => {
             });
 
         const patrol = new Entity('Fed Patrol')
-            .addComponent(GovtComponent, { id: 'nova:128' })
+            .addComponent(GovtComponent, { id: 128 })
             .addComponent(NpcCombatRoleComponent, 'military')
             .addComponent(MovementStateComponent, {
                 position: new Position(100, 0), // Within 480px scan distance
@@ -85,7 +85,7 @@ describe('NpcInteractionPlugin', () => {
             });
 
         const patrol = new Entity('Fed Patrol')
-            .addComponent(GovtComponent, { id: 'nova:128' })
+            .addComponent(GovtComponent, { id: 128 })
             .addComponent(NpcCombatRoleComponent, 'military')
             .addComponent(MovementStateComponent, {
                 position: new Position(100, 0),

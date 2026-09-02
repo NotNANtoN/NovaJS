@@ -246,7 +246,7 @@ export function generateProceduralMissions(
                 shipGoal: 1,
                 shipCount: 1,
                 shipSyst: parseInt(candidate.systemId.replace(/^.*:/, ''), 10) || -6,
-                shipId: outlawShip.id,
+                shipDude: parseInt(outlawShip.id.replace(/^.*:/, ''), 10) || 128,
                 canAbort: true,
                 displayWeight: 1,
             };

@@ -43,19 +43,11 @@ const Settings = t.partial({
 });
 type Settings = t.TypeOf<typeof Settings>;
 
-type Runfiles = { resolve: (path: string) => string };
-const runfilesHelperPath = process.env.BAZEL_NODE_RUNFILES_HELPER;
-const runfiles = runfilesHelperPath
-    ? require(runfilesHelperPath) as Runfiles
-    : undefined;
 const projectRoot = path.resolve(__dirname, "..");
 const sourceRoot = path.join(projectRoot, "nova");
-const runtimeRoot = runfiles ? __dirname : sourceRoot;
-const resolveAsset = (runfilePath: string, sourcePath: string): string =>
-    runfiles?.resolve(runfilePath) ?? path.join(projectRoot, sourcePath);
+const resolveAsset = (sourcePath: string): string => path.join(projectRoot, sourcePath);
 
-const serverSettingsPath = resolveAsset(
-    "novajs/nova/settings/server.json", "nova/settings/server.json");
+const serverSettingsPath = resolveAsset("nova/settings/server.json");
 const maybeSettings = Settings.decode(
     JSON.parse(fs.readFileSync(serverSettingsPath, "utf8")) as unknown);
 
@@ -67,26 +59,22 @@ const settings = maybeSettings.right;
 const compatibilityProfile: CompatibilityProfile =
     settings.compatibilityProfile ?? 'modern';
 const port = Number(process.env.NOVA_PORT ?? settings.port ?? 8000);
-const novaDataPath = path.join(runtimeRoot, settings.relativeDataPath ?? "Nova_Data");
+const novaDataPath = path.join(sourceRoot, settings.relativeDataPath ?? "Nova_Data");
 
 const app = express();
 const httpServer = http.createServer(app);
 
-const filesystemDataPath = path.join(runtimeRoot, "objects");
+const filesystemDataPath = path.join(sourceRoot, "objects");
 const filesystemData = new FilesystemData(filesystemDataPath);
 
-const htmlPath = resolveAsset("novajs/nova/src/index.html", "nova/src/index.html");
-const bundlePath = resolveAsset("novajs/nova/src/browser_bundle.js", "dist/browser_bundle.js");
-const bundleMapPath = resolveAsset(
-    "novajs/nova/src/browser_bundle.js.map", "dist/browser_bundle.js.map");
-const clientSettingsPath = resolveAsset(
-    "novajs/nova/settings/controls.json", "nova/settings/controls.json");
+const htmlPath = resolveAsset("nova/src/index.html");
+const bundlePath = resolveAsset("dist/browser_bundle.js");
+const bundleMapPath = resolveAsset("dist/browser_bundle.js.map");
+const clientSettingsPath = resolveAsset("nova/settings/controls.json");
 
 
 const channel = new SocketChannelServer({ server: httpServer });
-const novaParseWorkerPath = resolveAsset(
-    "novajs/nova/src/server/parsing/nova_parse_worker_bundle.js",
-    "dist/nova_parse_worker.js");
+const novaParseWorkerPath = resolveAsset("dist/nova_parse_worker.js");
 
 let world: World;
 const repl = new NovaRepl();

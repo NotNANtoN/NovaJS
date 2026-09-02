@@ -77,7 +77,7 @@ export function topologicalSort<T>(graph: Map<T, Set<T>>): T[] {
     if (remaining.size == 0){
         return result;
     }
-    //find start set for depth-first-search 
+    //find start set for depth-first-search
     const leafs = setDifference(remaining, nonleafs);
     if (leafs.size == 0){
         const cyclicPart = trimToCyclic(graph);
@@ -117,16 +117,17 @@ function graphListString<T>(graph:Map<T, Set<T>>):string{
     const listing:T[] = [];
     const indices = new Map<T,number>();
     const seen = new Set<T>();
-    for (let k of graph.keys()){
-        if (seen.has(k)){
+    for (const rootKey of graph.keys()) {
+        if (seen.has(rootKey)) {
             continue;
         }
+        let currentKey: T | undefined = rootKey;
         do {
-            seen.add(k);
-            indices.set(k,listing.length);
-            listing.push(k);
-            k = setDifference(graph.get(k)??new Set<T>(),seen).keys().next().value;
-        } while (k)
+            seen.add(currentKey);
+            indices.set(currentKey, listing.length);
+            listing.push(currentKey);
+            currentKey = setDifference(graph.get(currentKey) ?? new Set<T>(), seen).values().next().value;
+        } while (currentKey);
     }
 
     //"│├└┌┼╂┃┠┏┗┞┟↳↱→←"
@@ -174,7 +175,7 @@ function trimToCyclic<T>(graph: Map<T, Set<T>>): Map<T, Set<T>>{
     const trimmed = new Map<T,Set<T>>();
     const reverse = new Map<T,Set<T>>();
     const domain = new Set<T>(graph.keys());
-    
+
     for (let [k,v] of graph.entries()){
         trimmed.set(k,setIntersection(v,domain));
         for (let n of v){
@@ -223,9 +224,9 @@ function trimToCyclic<T>(graph: Map<T, Set<T>>): Map<T, Set<T>>{
                 }
             }
         }
-        
+
     }
-    
+
     return trimmed;
 }
 

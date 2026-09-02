@@ -168,7 +168,7 @@ export const PersistPlayerStateSystem = new System({
             const previous = snapshots.get(uuid);
             if (previous?.token === token
                 && !deltaMaker.isComponentDirty(
-                    entity, PlayerStateComponent)) {
+                    entity, PlayerStateComponent as any)) {
                 continue;
             }
 

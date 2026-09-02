@@ -1,5 +1,5 @@
 import 'jasmine';
-import { getDefaultOutfitData } from 'novadatainterface/OutiftData';
+import { getDefaultOutfitData } from 'novadatainterface/OutfitData';
 import {
     getDefaultProjectileWeaponData,
 } from 'novadatainterface/WeaponData';

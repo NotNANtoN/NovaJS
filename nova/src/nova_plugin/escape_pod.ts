@@ -1,4 +1,4 @@
-import { OutfitData } from 'novadatainterface/OutiftData';
+import { OutfitData } from 'novadatainterface/OutfitData';
 import { ShipData } from 'novadatainterface/ShipData';
 import { OutfitsState } from './outfit_plugin';
 import { PersistentPlayerState } from './player_state';

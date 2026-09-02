@@ -4,7 +4,7 @@ import { getDefaultDudeData } from "./DudeData";
 import { getDefaultSpriteSheetImage } from "./DefaultSpriteSheetImage";
 import { getDefaultExplosionData } from "./ExplosionData";
 import { getDefaultGovtData } from "./GovtData";
-import { getDefaultOutfitData } from "./OutiftData";
+import { getDefaultOutfitData } from "./OutfitData";
 import { getDefaultPictData } from "./PictData";
 import { getDefaultPictImageData } from "./PictImage";
 import { getDefaultPlanetData } from "./PlanetData";

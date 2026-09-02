@@ -4,6 +4,7 @@ import { Draft } from "immer";
 export type CallWithDraftedMap<K, V> =
     <R>(callback: (draft: Map<K, Draft<V>>) => R) => R;
 
+// @ts-ignore
 export class MutableImmutableMapHandle<K, V> implements Map<K, V> {
     constructor(private callWithDraftedMap: CallWithDraftedMap<K, V>,
         private wrapImmutableVal: (val: Draft<V>) => V) {
@@ -28,7 +29,7 @@ export class MutableImmutableMapHandle<K, V> implements Map<K, V> {
     forEach(callbackfn: (value: V, key: K, map: Map<K, V>) => void,
         thisArg?: any): void {
         for (const [key, val] of this) {
-            callbackfn.call(thisArg, val, key, this);
+            callbackfn.call(thisArg, val, key, this as any);
         }
     }
 
@@ -52,23 +53,23 @@ export class MutableImmutableMapHandle<K, V> implements Map<K, V> {
         return this.callWithDraftedMap(map => map.size);
     }
 
-    [Symbol.iterator](): IterableIterator<[K, V]> {
+    [Symbol.iterator](): any {
         return this.entries();
     }
 
-    *entries(): IterableIterator<[K, V]> {
+    *entries(): any {
         for (const key of this.keys()) {
             yield [key, this.get(key)!];
         }
     }
 
-    *keys(): IterableIterator<K> {
+    *keys(): any {
         yield* this.callWithDraftedMap(map => {
             return [...map.keys()];
         });
     }
 
-    *values(): IterableIterator<V> {
+    *values(): any {
         for (const key of this.keys()) {
             yield this.get(key)!;
         }

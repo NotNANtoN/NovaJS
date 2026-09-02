@@ -1,5 +1,5 @@
 {
-  "commit": "b77d5441",
-  "message": "Update build_info.json metadata",
-  "date": "2026-08-31 23:04 +0200"
+  "commit": "23124096",
+  "message": "Clean up chat HUD layout, improve NPC interaction safety, fix outfit physics mass calculation",
+  "date": "2026-09-01 14:53 +0200"
 }

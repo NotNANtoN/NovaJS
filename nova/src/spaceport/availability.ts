@@ -1,4 +1,4 @@
-import { OutfitData } from "novadatainterface/OutiftData";
+import { OutfitData } from "novadatainterface/OutfitData";
 import { PlanetData } from "novadatainterface/PlanetData";
 import { ShipData } from "novadatainterface/ShipData";
 import { evaluateTestExpression } from "../nova_plugin/ncb";

@@ -331,7 +331,7 @@ export const NpcSecurityScanSystem = new System({
 
                     if (govtId === 'nova:128' || govtId === '128') {
                         // Federation
-                        const record = playerState.legalRecord ?? 0;
+                        const record = (playerState.legalRecords && (playerState.legalRecords as Record<string, number>)['nova:128']) ?? 0;
                         if (record < 0) {
                             text = `Alert: Wanted fugitive on ${playerShipName}! Power down engines and surrender immediately!`;
                         } else {

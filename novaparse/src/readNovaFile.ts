@@ -17,7 +17,6 @@ import { SpobResource } from "./resource_parsers/SpobResource";
 import { SystResource } from "./resource_parsers/SystResource";
 import { WeapResource } from "./resource_parsers/WeapResource";
 import { SndResource } from "./resource_parsers/SndResource";
-import { $enum } from "ts-enum-util";
 import { NebuResource } from "./resource_parsers/NebuResource";
 import { StrhResource } from "./resource_parsers/StrhResource";
 import { RoidResource } from "./resource_parsers/RoidResource";
@@ -30,7 +29,7 @@ import { PersResource } from "./resource_parsers/PersResource";
 async function readNovaFile(filePath: string, localIDSpace: NovaResources) {
     const rf = await read(filePath);
 
-    for (const resourceType of $enum(NovaResourceType).values()) {
+    for (const resourceType of Object.values(NovaResourceType)) {
         const parser = getParser(<NovaResourceType>resourceType);
         const resourcesOfType = rf[resourceType];
         if (!resourcesOfType) {

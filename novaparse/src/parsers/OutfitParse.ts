@@ -1,7 +1,7 @@
 import { OutfResource } from "../resource_parsers/OutfResource";
 import { BaseData } from "novadatainterface/BaseData";
 import { BaseParse } from "./BaseParse";
-import { OutfitData, OutfitPhysics } from "novadatainterface/OutiftData";
+import { OutfitData, OutfitPhysics } from "novadatainterface/OutfitData";
 import { getDefaultPictData } from "novadatainterface/PictData";
 import { FPS, OutfitTurnRateConversionFactor, ShipVelocityConversionFactor } from "./Constants";
 

@@ -41,12 +41,12 @@ describe('starmap information content', () => {
         flags: 0x1 | 0x2 | 0x4 | 0x8,
         tradeCommodities: [
             {
-                commodity: 'Food',
+                commodity: 'Food' as const,
                 priceLevel: 'low' as const,
                 price: 60,
             },
             {
-                commodity: 'Metal',
+                commodity: 'Metal' as const,
                 priceLevel: 'medium' as const,
                 price: 200,
             },
@@ -60,12 +60,12 @@ describe('starmap information content', () => {
         flags: 0x1 | 0x40,
         tradeCommodities: [
             {
-                commodity: 'Industrial Goods',
+                commodity: 'Industrial Goods' as const,
                 priceLevel: 'medium' as const,
                 price: 350,
             },
             {
-                commodity: 'Equipment',
+                commodity: 'Equipment' as const,
                 priceLevel: 'high' as const,
                 price: 687,
             },
@@ -78,7 +78,7 @@ describe('starmap information content', () => {
         canLand: false,
         flags: 0x1 | 0x2 | 0x4 | 0x8 | 0x40,
         tradeCommodities: [{
-            commodity: 'Luxury Goods',
+            commodity: 'Luxury Goods' as const,
             priceLevel: 'high' as const,
             price: 1125,
         }],

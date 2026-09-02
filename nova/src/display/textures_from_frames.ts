@@ -1,7 +1,6 @@
 import { SpriteSheetFramesData } from "novadatainterface/SpriteSheetData";
 import * as PIXI from "pixi.js";
 import { dataPath } from "../common/GameDataPaths";
-import urlJoin from "url-join";
 import { preferredArtworkPath } from "../client/artwork_url";
 
 const atlasTextures = new Map<string, Promise<PIXI.Texture>>();
@@ -20,7 +19,8 @@ function resolveAtlasUrl(image: string) {
     // the SpriteSheetFrames directory. The server serves the atlas at
     // dataPath/SpriteSheetImage/<id>.png, so resolve by basename.
     const basename = preferredArtworkPath(image.split('/').pop()!);
-    return urlJoin(dataPath, 'SpriteSheetImage', basename);
+    const cleanBase = dataPath.endsWith("/") ? dataPath.slice(0, -1) : dataPath;
+    return `${cleanBase}/SpriteSheetImage/${basename}`;
 }
 
 function loadAtlasTexture(url: string) {

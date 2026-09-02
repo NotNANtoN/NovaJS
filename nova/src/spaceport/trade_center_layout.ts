@@ -86,7 +86,7 @@ export function tradeSelectionPage(
     total: number,
     selected: number,
     previousStart: number,
-    visibleRows = TRADE_CENTER_LAYOUT.visibleRows,
+    visibleRows: number = TRADE_CENTER_LAYOUT.visibleRows,
 ): TradePage {
     if (total <= 0 || selected < 0) {
         return { start: 0, end: 0 };

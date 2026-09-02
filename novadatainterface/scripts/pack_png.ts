@@ -1,5 +1,4 @@
-import * as fs from 'fs';
-import { ArgumentParser } from 'argparse';
+import * as fs from "fs";
 
 function packPng(png: string, dest: string) {
     const buf = fs.readFileSync(png);
@@ -7,12 +6,9 @@ function packPng(png: string, dest: string) {
     fs.writeFileSync(dest, `export default new Uint8Array(${JSON.stringify([...array])})`);
 }
 
-const parser = new ArgumentParser({
-    description: 'PNG to typescript packer',
-});
-
-parser.add_argument('png_file');
-parser.add_argument('destination');
-
-const args = parser.parse_args();
-packPng(args['png_file'], args['destination']);
+const [,, pngFile, destination] = process.argv;
+if (!pngFile || !destination) {
+    console.error("Usage: pack_png <png_file> <destination>");
+    process.exit(1);
+}
+packPng(pngFile, destination);

@@ -95,7 +95,7 @@ describe('legal record crime events', () => {
 describe('tearing the legal record plugin down', () => {
     it('releases the government relations it claimed', async () => {
         const { world } = makeWorld(government());
-        world.resources.set(TimeResource, { time: 0, delta_ms: 0, delta_s: 0 });
+        world.resources.set(TimeResource, { time: 0, delta_ms: 0, delta_s: 0, frame: 0 });
         await world.addPlugin(LegalRecordPlugin);
 
         // Reproduces the server crash: NpcPlugin drops these on teardown, and

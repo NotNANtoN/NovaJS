@@ -36,7 +36,6 @@ import { CreateTime } from './create_time';
 import { DamagedEvent, ZeroArmorEvent } from './death_plugin';
 import { reserveEntity } from './entity_budget';
 import { ExitPointData } from './exit_point';
-import { AnimationComponent } from './animation_plugin';
 import { AttackIntentComponent, FireSubs, OwnerComponent, ShotCreation, ShotSeedComponent, SourceComponent, SubCounts, VulnerableToPD, WeaponConstructors, WeaponEntry, setAttackIntent } from './fire_weapon_plugin';
 import { GameDataResource } from './game_data_resource';
 import { firstOrderWithFallback, Guidance, GuidanceComponent } from './guidance';

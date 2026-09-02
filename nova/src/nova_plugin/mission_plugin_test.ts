@@ -472,7 +472,7 @@ describe('mission runtime', () => {
             .processLanding(state, 'nova:131');
         expect(notices[0]?.kind).toBe('success');
         expect(state.gameDate).toBe(4);
-        expect(state.legalRecords['nova:128']).toBe(12);
+        expect(state.legalRecords?.['nova:128']).toBe(12);
         expect(state.credits).toBe(10_050);
     });
 

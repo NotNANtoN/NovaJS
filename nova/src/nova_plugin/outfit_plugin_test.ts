@@ -1,6 +1,6 @@
 import 'jasmine';
 import { getDefaultShipPhysics, ShipPhysics } from 'novadatainterface/ShipData';
-import { getDefaultOutfitData, OutfitData } from 'novadatainterface/OutiftData';
+import { getDefaultOutfitData, OutfitData } from 'novadatainterface/OutfitData';
 import { applyOutfitPhysics } from './outfit_plugin';
 
 describe('applyOutfitPhysics', () => {

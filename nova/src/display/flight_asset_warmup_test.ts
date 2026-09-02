@@ -1,6 +1,6 @@
 import 'jasmine';
 import { getDefaultAnimation } from 'novadatainterface/Animation';
-import { getDefaultOutfitData } from 'novadatainterface/OutiftData';
+import { getDefaultOutfitData } from 'novadatainterface/OutfitData';
 import { getDefaultShipData } from 'novadatainterface/ShipData';
 import { getDefaultSystemData } from 'novadatainterface/SystemData';
 import {

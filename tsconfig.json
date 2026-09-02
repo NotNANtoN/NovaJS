@@ -1,44 +1,45 @@
 {
   "exclude": [
-	"bazel-out",
-	"dist"
+    "dist",
+    "tools"
   ],
   "compilerOptions": {
-	"target": "es2020",
-	"module": "commonjs",
-	"lib": ["dom", "dom.iterable", "esnext", "scripthost"],
-	"declaration": true,
-	"sourceMap": true,
-	"skipLibCheck": true,
-	"strict": true,
-	"noImplicitAny": true,
-	"strictNullChecks": true,
-	"strictFunctionTypes": true,
-	"noImplicitThis": true,
-	"alwaysStrict": true,
-	"noUnusedParameters": false,
-	"noImplicitReturns": true,
-	"noFallthroughCasesInSwitch": true,
-	"noImplicitOverride": true,
-	"esModuleInterop": true,
-	"incremental": false,
+    "target": "es2020",
+    "module": "commonjs",
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext",
+      "scripthost"
+    ],
+    "declaration": true,
+    "sourceMap": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "noImplicitThis": true,
+    "alwaysStrict": true,
+    "noUnusedParameters": false,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "esModuleInterop": true,
+    "incremental": false,
     "baseUrl": "./",
     "paths": {
       "nova/*": [
-        "nova/*",
-        "dist/bin/nova/*"
+        "nova/*"
       ],
       "novadatainterface/*": [
-        "novadatainterface/*",
-        "dist/bin/novadatainterface/*"
+        "novadatainterface/*"
       ],
       "novaparse/*": [
-        "novaparse/*",
-        "dist/bin/novaparse/*"
+        "novaparse/*"
       ],
       "nova_ecs/*": [
-        "nova_ecs/*",
-        "dist/bin/nova_ecs/*"
+        "nova_ecs/*"
       ]
     }
   }

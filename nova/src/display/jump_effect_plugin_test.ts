@@ -77,13 +77,14 @@ describe('other-ship jump effects', () => {
         const shipGraphic = graphic();
         const step = (state: JumpState, time: number) =>
             JumpEffectSystem.step(
-                { id: 'ship' } as never,
+                { id: "ship" } as never,
                 shipMovement,
                 PHYSICS as never,
                 shipGraphic as never,
                 state as never,
                 undefined,
                 { time } as never,
+                undefined,
             );
 
         step(jump('braking', 800), 0);
@@ -120,13 +121,14 @@ describe('other-ship jump effects', () => {
         shipGraphic.container.scale.set(4, 4);
         shipGraphic.container.alpha = 0;
         JumpEffectSystem.step(
-            { id: 'ship' } as never,
+            { id: "ship" } as never,
             shipMovement,
             PHYSICS as never,
             shipGraphic as never,
             undefined,
             undefined,
             { time: 0 } as never,
+            undefined,
         );
         expect(shipGraphic.container.scale.y).toBe(1);
         expect(shipGraphic.container.alpha).toBe(1);

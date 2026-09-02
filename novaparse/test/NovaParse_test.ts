@@ -7,7 +7,7 @@ import { PNG } from "pngjs";
 import { getDefaultExitPoints } from "../../novadatainterface/Animation";
 import { ExplosionData } from "../../novadatainterface/ExplosionData";
 import { NovaDataType } from "../../novadatainterface/NovaDataInterface";
-import { OutfitData } from "../../novadatainterface/OutiftData";
+import { OutfitData } from "../../novadatainterface/OutfitData";
 import { PictImageData } from "../../novadatainterface/PictImage";
 import { PlanetData } from "../../novadatainterface/PlanetData";
 import { ShipData } from "../../novadatainterface/ShipData";
@@ -21,7 +21,7 @@ import { getPNG } from "./resource_parsers/PNGCompare";
 import { fixturePath } from "../../test/fixture_path";
 
 // TODO: Factor all the resource-specific tests out of
-// this file and test them separately. Use mocks instead. 
+// this file and test them separately. Use mocks instead.
 describe("NovaParse", function() {
     let np: NovaParse;
     let s128: ShipData;
@@ -296,7 +296,7 @@ describe("NovaParse", function() {
         const statusBarPath = fixturePath("novaparse/test/resource_parsers/files/picts/statusBar.png");
         const statusBar = await getPNG(statusBarPath);
 
-        expect(p700).toEqual(PNG.sync.write(statusBar).buffer);
+        expect(p700).toEqual(PNG.sync.write(statusBar).buffer as ArrayBuffer);
     });
 
     it("Should parse Planet", async function() {

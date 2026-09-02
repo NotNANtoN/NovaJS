@@ -4,7 +4,7 @@ import { Gettable, GettableData } from "novadatainterface/Gettable";
 import { BaseData } from "novadatainterface/BaseData";
 import { DudeData } from "novadatainterface/DudeData";
 import { ShipData } from "novadatainterface/ShipData";
-import { OutfitData } from "novadatainterface/OutiftData";
+import { OutfitData } from "novadatainterface/OutfitData";
 import { WeaponData } from "novadatainterface/WeaponData";
 import { PictData } from "novadatainterface/PictData";
 import { PlanetData } from "novadatainterface/PlanetData";
@@ -173,7 +173,7 @@ class GameDataAggregator implements GameDataInterface {
                 const data = await this.data[dataType]!.get(id);
                 return [id, data] as const;
             }));
-            loaded.push(...chunkResults);
+            loaded.push(...(chunkResults as Array<[string, any]>));
         }
 
         return Object.fromEntries(loaded) as {

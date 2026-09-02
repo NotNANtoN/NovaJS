@@ -314,7 +314,7 @@ export async function startPendingNcbMissions(
             seen.add(missionId);
             let mission: MissionData | undefined;
             try {
-                mission = await gameData.data.Mission.get(missionId);
+                mission = await gameData.data.Mission?.get(missionId);
             } catch (error) {
                 console.warn(`NCB S${id}: could not load mission`, error);
                 continue;
@@ -484,7 +484,7 @@ function landingCompletesMission(
     const travelRequired = Boolean(travel)
         && travel !== '*'
         && mission.travelStel !== -1
-        && !destinationMatches(travel, entry.destination);
+        && (!entry.destination || !destinationMatches(travel, entry.destination));
     return !travelRequired || entry.travelVisited === true || atTravel;
 }
 

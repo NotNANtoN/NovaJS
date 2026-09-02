@@ -1,7 +1,7 @@
 import produce from 'immer';
 import * as t from 'io-ts';
 import { GameDataInterface } from 'novadatainterface/GameDataInterface';
-import { OutfitData, OutfitPhysics } from 'novadatainterface/OutiftData';
+import { OutfitData, OutfitPhysics } from 'novadatainterface/OutfitData';
 import { ShipPhysics } from 'novadatainterface/ShipData';
 import { Component } from 'nova_ecs/component';
 import { map } from 'nova_ecs/datatypes/map';

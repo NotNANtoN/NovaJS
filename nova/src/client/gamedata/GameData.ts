@@ -1,3 +1,8 @@
+function joinPath(...parts: string[]): string {
+    const isAbsolute = Boolean(parts[0]?.startsWith("/"));
+    const joined = parts.map(p => p.replace(/^\/+|\/+$/g, "")).filter(Boolean).join("/");
+    return isAbsolute ? "/" + joined : joined;
+}
 import { BaseData } from 'novadatainterface/BaseData';
 import { DudeData } from 'novadatainterface/DudeData';
 import { CicnData } from 'novadatainterface/CicnData';
@@ -11,7 +16,7 @@ import { GameDataInterface, PreloadData } from 'novadatainterface/GameDataInterf
 import { Gettable } from 'novadatainterface/Gettable';
 import { NovaDataInterfaceWithMission, NovaDataType } from 'novadatainterface/NovaDataInterface';
 import { NovaIDs } from 'novadatainterface/NovaIDs';
-import { OutfitData } from 'novadatainterface/OutiftData';
+import { OutfitData } from 'novadatainterface/OutfitData';
 import { PictData } from 'novadatainterface/PictData';
 import { PictImageData } from 'novadatainterface/PictImage';
 import { PlanetData } from 'novadatainterface/PlanetData';
@@ -27,7 +32,6 @@ import { JunkData } from 'novadatainterface/JunkData';
 import { PersData } from 'novadatainterface/PersData';
 import * as PIXI from 'pixi.js';
 import * as sound from '@pixi/sound';
-import urlJoin from 'url-join';
 import { dataPath, idsPath } from '../../common/GameDataPaths';
 import PQueue from 'p-queue';
 import { artworkUrl } from '../artwork_url';
@@ -101,7 +105,7 @@ export class GameData implements GameDataInterface {
     }
 
     getSettings(file: string): Promise<unknown> {
-        return this.getMetadataUrl(urlJoin("/settings", file));
+        return this.getMetadataUrl(joinPath("/settings", file));
     }
 
     private async preload() {
@@ -177,14 +181,14 @@ export class GameData implements GameDataInterface {
     }
 
     private getDataPrefix(dataType: NovaDataType): string {
-        return urlJoin(dataPath, dataType);
+        return joinPath(dataPath, dataType);
     }
 
     private addGettable<T extends BaseData | SpriteSheetFramesData>(dataType: NovaDataType): Gettable<T> {
         const dataPrefix = this.getDataPrefix(dataType);
         return new Gettable<T>(async (id: string, priority: number): Promise<T> => {
             return (await this.getMetadataUrl(
-                urlJoin(dataPrefix, id + ".json"), priority)) as T;
+                joinPath(dataPrefix, id + ".json"), priority)) as T;
         });
     }
 
@@ -192,7 +196,7 @@ export class GameData implements GameDataInterface {
         const dataPrefix = this.getDataPrefix(dataType);
         return new Gettable<T>(async (id: string, priority: number): Promise<T> => {
             const result = await this.getMetadataUrl(
-                urlJoin(dataPrefix, id + ".json"), priority) as { data: T };
+                joinPath(dataPrefix, id + ".json"), priority) as { data: T };
             return result.data;
         });
     }
@@ -201,7 +205,7 @@ export class GameData implements GameDataInterface {
         const dataPrefix = this.getDataPrefix(NovaDataType.Weapon);
         return new WeaponGettable(async (id: string, priority: number): Promise<WeaponData> => {
             return (await this.getMetadataUrl(
-                urlJoin(dataPrefix, id + ".json"), priority)) as WeaponData;
+                joinPath(dataPrefix, id + ".json"), priority)) as WeaponData;
         });
 
     }
@@ -226,8 +230,14 @@ export class GameData implements GameDataInterface {
     private addSoundFileGettable() {
         const dataPrefix = this.getDataPrefix(NovaDataType.SoundFile);
         return new Gettable<SoundFile>(async (id: string, priority: number) => {
-            //return await (await fetch(urlJoin(dataPrefix, id))).arrayBuffer();
-            return ((await this.getUrl(urlJoin(dataPrefix, id) + '.mp3', priority)) as Buffer);
+            const res = await this.getUrl(joinPath(dataPrefix, id) + '.mp3', priority);
+            if (res instanceof ArrayBuffer) {
+                return res;
+            }
+            if (ArrayBuffer.isView(res)) {
+                return res.buffer.slice(res.byteOffset, res.byteOffset + res.byteLength) as ArrayBuffer;
+            }
+            return new ArrayBuffer(0);
         });
     }
 
@@ -278,7 +288,7 @@ export class GameData implements GameDataInterface {
     private addSoundGettable() {
         const dataPrefix = this.getDataPrefix(NovaDataType.SoundFile);
         return new Gettable<sound.Sound>(async (id) => {
-            const soundPath = urlJoin(dataPrefix, id) + '.mp3';
+            const soundPath = joinPath(dataPrefix, id) + '.mp3';
             return new Promise((fulfill, reject) => {
                 sound.Sound.from({
                     url: soundPath,

@@ -1,32 +1,50 @@
-it("comparePNGs should work for the same picture", function() {
-    comparePNGs(starbridgePNG, starbridgePNG);
-});
 
-it("comparePNG should work for different pictures", function() {
-    expect(function() {
-        comparePNGs(starbridgePNG, starbridgeMask);
-    }).to.throw();
+import "jasmine";
+import { PNG } from "pngjs";
+import { fixturePath } from "../../../test/fixture_path";
+import { getFrames, getPNG, PNGCustomMatchers } from "./PNGCompare";
 
-});
-
-it("getFrames should work", async function() {
-
-    var starbridgeFrames = getFrames(starbridgePNG, { width: 48, height: 48 });
-
-    var pngs: Array<PNG> = [];
-    var promises: Array<Promise<void>> = [];
-    for (var i = 0; i < 108; i++) {
-        var path = "novaparse/test/resource_parsers/files/rleds/testFrames/" + "starbridge" + i + ".png";
-        promises.push(async function(): Promise<void> {
-            var index = i;
-            pngs[index] = await getPNG(path);
-        }());
+declare global {
+    namespace jasmine {
+        interface Matchers<T> {
+            toEqualPNG(expected: unknown): boolean;
+        }
     }
+}
 
-    await Promise.all(promises);
+describe("PNGCompare", () => {
+    let starbridgePNG: PNG;
+    let starbridgeMask: PNG;
 
-    for (var i = 0; i < 108; i++) {
-        comparePNGs(pngs[i], starbridgeFrames[i]);
-    }
+    beforeEach(async () => {
+        jasmine.addMatchers(PNGCustomMatchers);
+        starbridgePNG = await getPNG(fixturePath(
+            "novajs/novaparse/test/resource_parsers/files/rleds/starbridge.png"));
+        starbridgeMask = await getPNG(fixturePath(
+            "novajs/novaparse/test/resource_parsers/files/rleds/starbridge_mask.png"));
+    });
 
+    it("matches the same picture", () => {
+        expect(starbridgePNG).toEqualPNG(starbridgePNG);
+    });
+
+    it("rejects different pictures", () => {
+        expect(starbridgePNG).not.toEqualPNG(starbridgeMask);
+    });
+
+    it("extracts frames matching individual fixtures", async () => {
+        const starbridgeFrames = getFrames(starbridgePNG, { width: 48, height: 48 });
+        const pngs: Array<PNG> = [];
+        const promises: Array<Promise<void>> = [];
+        for (let i = 0; i < 108; i++) {
+            const p = fixturePath("novajs/novaparse/test/resource_parsers/files/rleds/testFrames/starbridge" + i + ".png");
+            promises.push((async () => {
+                pngs[i] = await getPNG(p);
+            })());
+        }
+        await Promise.all(promises);
+        for (let i = 0; i < 108; i++) {
+            expect(pngs[i]).toEqualPNG(starbridgeFrames[i]);
+        }
+    });
 });

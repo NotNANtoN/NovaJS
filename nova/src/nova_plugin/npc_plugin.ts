@@ -917,8 +917,7 @@ export const ShootAllWeaponsAI = new System({
                     canBear = true;
                 } else if (guidance === 'rearQuadrant') {
                     canBear = angleDiff > (Math.PI * 0.65);
-                } else if (guidance === 'sidesQuadrant') {
-                    canBear = angleDiff > (Math.PI * 0.25) && angleDiff < (Math.PI * 0.75);
+
                 } else {
                     // Fixed forward guns, unguided, rockets, frontQuadrant, fixed beams
                     canBear = angleDiff < (Math.PI * 0.35);

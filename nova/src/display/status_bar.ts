@@ -120,8 +120,8 @@ class StatusBar {
 
     private async loadCargoNames() {
         try {
-            const cargoNames = await this.gameData.data.StringList
-                .get('nova:4000');
+            const cargoNames = await this.gameData.data.StringList?.get('nova:4000');
+            if (!cargoNames) { this.cargoNames = []; return; }
             this.cargoNames = cargoNames.strings;
         } catch {
             this.cargoNames = [];
