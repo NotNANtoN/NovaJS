@@ -1,5 +1,5 @@
 {
-  "commit": "f79d2c22",
-  "message": "Make plugin directory scanning deterministic across Node and Bun",
-  "date": "2026-09-02 12:29 +0200"
+  "commit": "ae82b888",
+  "message": "Replace fp-ts with native Either, expand WASM lead angle guidance, prune unused dependencies",
+  "date": "2026-09-02 12:41 +0200"
 }
