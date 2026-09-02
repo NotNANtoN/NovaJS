@@ -41,6 +41,7 @@ import { ReturnToQueuePlugin } from "./return_to_queue_plugin";
 import { ShipController } from "./ship_controller_plugin";
 import { ShipPlugin } from "./ship_plugin";
 import { TargetPlugin } from "./target_plugin";
+import { CloakingPlugin } from "./cloaking_plugin";
 import { WeaponPlugin } from "./weapon_plugin";
 
 // Users must add the multiplayer plugin and a display plugin.
@@ -91,6 +92,7 @@ export const SystemPlugin: Plugin = {
         world.addPlugin(JettisonPlugin);
         world.addPlugin(DerelictPlugin);
         world.addPlugin(NpcInteractionPlugin);
+        world.addPlugin(CloakingPlugin);
     }
 };
 

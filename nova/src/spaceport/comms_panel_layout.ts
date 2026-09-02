@@ -7,9 +7,13 @@
  * the artwork already provides.
  */
 
-/** PICT 8508, a single message pane above a button footer, 387x219. */
+export const COMMS_SHIP_BACKGROUND = 'nova:8511'; // Retail PICT 8511 "Communications"
+export const COMMS_PLANET_BACKGROUND = 'nova:8512'; // Retail PICT 8512 "Planet Communications"
+export const COMMS_ESCORT_BACKGROUND = 'nova:8513'; // Retail PICT 8513 "Escort communications"
+
+/** Authentic retail communications dialog layout. */
 export const COMMS_LAYOUT = {
-    background: 'nova:8508',
+    background: COMMS_SHIP_BACKGROUND,
     width: 387,
     height: 219,
     /** The dark pane, in coordinates relative to the panel's centre. */

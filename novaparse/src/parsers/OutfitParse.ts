@@ -117,6 +117,7 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
         // EV Nova Bible, oütf ModType 49: "repair system — will
         // occasionally repair the ship when it's disabled".
         repairSystem: outf.functions.some(([type]) => type === "repair system"),
+        cloak: outf.functions.some(([type]) => type === "cloak"),
         physics,
         pict,
         price: outf.cost,

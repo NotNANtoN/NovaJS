@@ -8,6 +8,8 @@ export interface OutfitData extends BaseData {
     weapons: { [index: string]: number }, // globalID : count
     /** oütf ModType 49: occasionally repairs a disabled ship. */
     repairSystem?: boolean,
+    /** oütf ModType 1: cloaking device. */
+    cloak?: boolean,
 
     // how it changes the physics of the ship it's attached to. Idea: What if these were allowed to be functions?
     physics: OutfitPhysics,

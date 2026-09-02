@@ -175,4 +175,33 @@ describe('FleetPlugin', () => {
         expect(emissions).toEqual([['escort']]);
         expect(InitiateJumpEvent.name).toBe('InitiateJumpEvent');
     });
+
+    it('relays jump from a client-owned player leader to escorts on the server', async () => {
+        const world = await fleetWorld();
+        const playerLeader = new Entity()
+            .addComponent(FleetMemberComponent,
+                fleetMember('player-fleet', 'leader', 'player', -1))
+            .addComponent(MultiplayerData, { owner: 'client-player-uuid' });
+        const escort = new Entity()
+            .addComponent(FleetMemberComponent,
+                fleetMember('player-fleet', 'escort', 'player', 0))
+            .addComponent(MultiplayerData, { owner: 'server' });
+        world.entities.set('player', playerLeader);
+        world.entities.set('escort', escort);
+
+        const emissions: string[][] = [];
+        FleetJumpRelaySystem.step(
+            { to: 'nova:dest' },
+            playerLeader.components.get(FleetMemberComponent)!,
+            world.entities,
+            'player',
+            (_event, _data, targets) => emissions.push(
+                (targets ?? []).map(target =>
+                    typeof target === 'string' ? target : target.uuid)),
+            { owner: 'client-player-uuid' },
+            'node',
+        );
+
+        expect(emissions).toEqual([['escort']]);
+    });
 });

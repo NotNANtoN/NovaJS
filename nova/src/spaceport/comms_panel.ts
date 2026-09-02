@@ -29,7 +29,13 @@ import {
     AssistanceRequestComponent,
 } from '../nova_plugin/assistance_plugin';
 import { Button } from './button';
-import { COMMS_LAYOUT, commsButtonSlots } from './comms_panel_layout';
+import {
+    COMMS_LAYOUT,
+    COMMS_SHIP_BACKGROUND,
+    COMMS_PLANET_BACKGROUND,
+    COMMS_ESCORT_BACKGROUND,
+    commsButtonSlots,
+} from './comms_panel_layout';
 import { Menu } from './menu';
 import { MenuControls } from './menu_controls';
 
@@ -51,6 +57,7 @@ export interface HailTarget {
     /** True when this ship is currently fighting the pilot. */
     hostile: boolean;
     isEscort?: boolean;
+    isPlanet?: boolean;
     roadsideAssistance?: boolean;
 }
 
@@ -109,8 +116,30 @@ export class Comms extends Menu<Entity> {
         });
     }
 
+    async setBackgroundPict(pictId: string) {
+        try {
+            const sprite = await this.gameData.spriteFromPictAsync(pictId);
+            sprite.interactive = true;
+            sprite.anchor.set(0.5);
+            if (this.container.children.length > 0) {
+                this.container.removeChildAt(0);
+                this.container.addChildAt(sprite, 0);
+            } else {
+                this.container.addChild(sprite);
+            }
+        } catch (e) {
+            console.warn(`Failed to load comms background ${pictId}`, e);
+        }
+    }
+
     setTarget(target: HailTarget | undefined) {
         this.target = target;
+        const bg = target?.isEscort
+            ? COMMS_ESCORT_BACKGROUND
+            : target?.isPlanet
+                ? COMMS_PLANET_BACKGROUND
+                : COMMS_SHIP_BACKGROUND;
+        void this.setBackgroundPict(bg);
     }
 
     override async show(input: Entity): Promise<Entity> {
@@ -143,6 +172,10 @@ export class Comms extends Menu<Entity> {
 
     private openChannel() {
         const name = this.target?.name ?? '';
+        if (this.target?.isPlanet) {
+            this.message.text = `Communications channel open to ${name}.\n\nTraffic Control: "Approach vector clear. Welcome to ${name}, Captain."`;
+            return;
+        }
         // STR# 3002's opening lines name the ship; STR# 3000's do not.
         const prefix = this.channelLines?.[
             commsLineIndex('channelOpen')] ?? '';
@@ -157,6 +190,10 @@ export class Comms extends Menu<Entity> {
     }
 
     private sayGreetings() {
+        if (this.target?.isPlanet) {
+            this.message.text = `${this.target.name} Traffic Control: "Safe travels, Captain. Transmitting current landing and trade advisories."`;
+            return;
+        }
         const rel = this.relation();
         if (this.target?.hostile || rel === 'enemy') {
             this.say('greetingHostile');

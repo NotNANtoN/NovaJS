@@ -48,6 +48,7 @@ const SavedControlsPartialObject = t.partial({
     'map': ControlInputs,
     'smallMap': ControlInputs,
     'hyperjump': ControlInputs,
+    'cloak': ControlInputs,
     'resetNav': ControlInputs,
     'land': ControlInputs,
     'tradeCenter': ControlInputs,

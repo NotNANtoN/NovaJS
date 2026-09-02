@@ -26,6 +26,8 @@ import {
 import { describeHail } from '../nova_plugin/hail_target';
 import { PlayerStateComponent } from '../nova_plugin/player_state';
 import { ShipDataComponent } from '../nova_plugin/ship_plugin';
+import { PlanetDataComponent } from '../nova_plugin/planet_plugin';
+import { FleetMemberComponent } from '../nova_plugin/fleet_plugin';
 import { ScreenSize } from './screen_size_plugin';
 import { Stage } from './stage_resource';
 import {
@@ -93,8 +95,26 @@ export const CommsSystem = new AsyncSystem({
         }
         const hailed = target.target
             ? entities.get(target.target) : undefined;
-        const shipData = hailed?.components.get(ShipDataComponent);
-        if (!hailed || !shipData) {
+        if (!hailed) {
+            return;
+        }
+
+        const planetData = hailed.components.get(PlanetDataComponent);
+        if (planetData) {
+            comms.setTarget({
+                name: planetData.name,
+                relation: 'neutral',
+                record: 0,
+                hostile: false,
+                isPlanet: true,
+            });
+            comms.container.position.set(screenSize.x / 2, screenSize.y / 2);
+            await comms.show(entity);
+            return;
+        }
+
+        const shipData = hailed.components.get(ShipDataComponent);
+        if (!shipData) {
             return;
         }
         const multiplayer = hailed.components.get(MultiplayerData);
@@ -117,6 +137,8 @@ export const CommsSystem = new AsyncSystem({
             return;
         }
         const playerState = entity.components.get(PlayerStateComponent);
+        const fleetMember = hailed.components.get(FleetMemberComponent);
+        const isEscort = fleetMember?.role === 'escort';
         comms.setTarget(describeHail({
             name: government
                 ? `${getGovernmentCommName(government)} ${shipData.name}`
@@ -124,6 +146,7 @@ export const CommsSystem = new AsyncSystem({
             government,
             targetingPlayer:
                 hailed.components.get(TargetComponent)?.target === uuid,
+            isEscort,
         }, playerState?.legalRecords));
         comms.container.position.set(screenSize.x / 2, screenSize.y / 2);
         await comms.show(entity);

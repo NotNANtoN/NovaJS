@@ -14,6 +14,7 @@ import { OwnerComponent } from "./fire_weapon_plugin";
 import { PlayerShipSelector } from "./player_ship_plugin";
 import { ShipComponent } from "./ship_plugin";
 import { Target, TargetComponent } from "./target_component";
+import { CloakStateComponent } from "./cloaking_plugin";
 
 
 const TargetIndexComponent = new Component<{ index: number }>('TargetIndexComponent');
@@ -27,8 +28,8 @@ const TargetIndexProvider = Provide({
 
 export const CycleTargetEvent = new EcsEvent<Target>('CycleTargetEvent');
 
-const TargetsQuery = new Query([UUID, MovementStateComponent, Optional(OwnerComponent), ShipComponent] as const);
-const ChooseTargetSystem = new System({
+const TargetsQuery = new Query([UUID, MovementStateComponent, Optional(OwnerComponent), ShipComponent, Optional(CloakStateComponent)] as const);
+export const ChooseTargetSystem = new System({
     name: 'ChooseTarget',
     events: [ControlStateEvent],
     args: [ControlStateEvent, TargetComponent, TargetIndexComponent, UUID,
@@ -36,17 +37,20 @@ const ChooseTargetSystem = new System({
     step(controlState, target, index, uuid, ships, emit, movementState) {
         if (controlState.get('nearestTarget') === 'start') {
             const [closestUuid, _distance, newIndex] = ships
-                .map(([a, b, c], index) => [a, b, c, index] as const)
-                .filter(([otherUuid, _, owner]) => {
+                .map(([a, b, c, d, e], index) => [a, b, c, d, e, index] as const)
+                .filter(([otherUuid, _, owner, __ship, cloak]) => {
+                    if (cloak?.cloaked && cloak.alpha < 0.5) {
+                        return false;
+                    }
                     if (owner?.owner === uuid) {
                         return false;
                     }
                     return otherUuid !== uuid;
                 })
-                .map(([uuid, { position }, _, index]) => [
+                .map(([uuid, { position }, , , , idx]) => [
                     uuid,
                     position.subtract(movementState.position).lengthSquared,
-                    index
+                    idx
                 ] as const)
                 .reduce<readonly [string | undefined, number, number]>(
                     (a, b) => a[1] < b[1] ? a : b,
@@ -72,10 +76,12 @@ const ChooseTargetSystem = new System({
                     break;
                 }
 
-                const [targetUuid, _targetMovement, targetOwner] = ships[index.index];
+                const [targetUuid, _targetMovement, targetOwner, , cloak] = ships[index.index];
                 // Don't target yourself
                 // Don't target escorts
-                if (targetUuid !== uuid && targetOwner?.owner !== uuid) {
+                // Don't target cloaked ships
+                const isCloaked = Boolean(cloak?.cloaked && cloak.alpha < 0.5);
+                if (targetUuid !== uuid && targetOwner?.owner !== uuid && !isCloaked) {
                     break;
                 }
                 index.index = (index.index + 2) % (ships.length + 1) - 1;

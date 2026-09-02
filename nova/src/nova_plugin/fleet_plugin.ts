@@ -255,9 +255,8 @@ export const FleetJumpRelaySystem = new System({
         MultiplayerData,
         PlatformResource,
     ] as const,
-    step({ to }, member, entities, leaderUuid, emit, multiplayer, platform) {
-        if (platform !== 'node' || multiplayer.owner !== 'server'
-            || member.role !== 'leader') {
+    step({ to }, member, entities, leaderUuid, emit, _multiplayer, platform) {
+        if (platform !== 'node' || member.role !== 'leader') {
             return;
         }
         for (const [escortUuid, escort] of entities) {

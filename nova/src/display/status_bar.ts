@@ -42,6 +42,7 @@ import {
     TOO_CLOSE_TO_CENTER_MESSAGE,
 } from "../nova_plugin/jump_plugin";
 import { Stat } from "../nova_plugin/stat";
+import { CloakStateComponent } from "../nova_plugin/cloaking_plugin";
 import { TargetComponent } from "../nova_plugin/target_component";
 import { ChangeSecondaryEvent } from "../nova_plugin/weapon_plugin";
 import { AnimationGraphic } from "./animation_graphic";
@@ -647,7 +648,7 @@ const DrawRadar = new System({
     name: 'DrawRadar',
     args: [Optional(RadarTime), TimeResource, StatusBarResource, MovementStateComponent,
     new Query([UUID, MovementStateComponent, ShipDataComponent,
-        Optional(TargetComponent)] as const),
+        Optional(TargetComponent), Optional(CloakStateComponent)] as const),
     new Query([UUID, MovementStateComponent, PlanetDataComponent] as const),
         GetEntity, UUID, PlayerShipSelector] as const,
     step(radarTime, { time }, statusBar, { position }, ships, planets, entity,
@@ -660,7 +661,10 @@ const DrawRadar = new System({
             string, MovementState, ShipData, string | undefined,
         ]> = [];
         let lockingPlayer = false;
-        for (const [uuid, movement, shipData, target] of ships) {
+        for (const [uuid, movement, shipData, target, cloak] of ships) {
+            if (cloak?.cloaked && cloak.alpha < 0.5 && uuid !== playerUuid) {
+                continue;
+            }
             contacts.push([uuid, movement, shipData, target?.target]);
             if (uuid !== playerUuid && target?.target === playerUuid) {
                 lockingPlayer = true;
