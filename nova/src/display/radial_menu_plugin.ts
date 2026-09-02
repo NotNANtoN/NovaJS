@@ -1,22 +1,22 @@
-import { Entities, GetEntity, GetWorld, UUID } from 'nova_ecs/arg_types';
-import { AsyncSystem } from 'nova_ecs/async_system';
-import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
-import { broadcastChat, Comms } from 'nova_ecs/plugins/multiplayer_plugin';
-import { Plugin } from 'nova_ecs/plugin';
-import { Resource } from 'nova_ecs/resource';
-import { System } from 'nova_ecs/system';
-import { World } from 'nova_ecs/world';
-import { SingletonComponent } from 'nova_ecs/world';
-import * as PIXI from 'pixi.js';
-import { ControlsSubject, EcsControlEvent } from '../nova_plugin/controls_plugin';
-import { ControlStateEvent } from '../nova_plugin/control_state_event';
-import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin';
-import { PlayerStateComponent } from '../nova_plugin/player_state';
-import { TargetComponent } from '../nova_plugin/target_component';
-import { ScreenSize } from './screen_size_plugin';
-import { Space } from './space_resource';
-import { Stage } from './stage_resource';
-import { attachGraphic, ManagedGraphic } from './managed_graphic';
+import { Entities, GetEntity, GetWorld, UUID } from "nova_ecs/arg_types";
+import { AsyncSystem } from "nova_ecs/async_system";
+import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
+import { broadcastChat, Comms } from "nova_ecs/plugins/multiplayer_plugin";
+import { Plugin } from "nova_ecs/plugin";
+import { Resource } from "nova_ecs/resource";
+import { System } from "nova_ecs/system";
+import { World } from "nova_ecs/world";
+import { SingletonComponent } from "nova_ecs/world";
+import * as PIXI from "pixi.js";
+import { ControlsSubject, EcsControlEvent } from "../nova_plugin/controls_plugin";
+import { ControlStateEvent } from "../nova_plugin/control_state_event";
+import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin";
+import { PlayerStateComponent } from "../nova_plugin/player_state";
+import { TargetComponent } from "../nova_plugin/target_component";
+import { ScreenSize } from "./screen_size_plugin";
+import { Space } from "./space_resource";
+import { Stage } from "./stage_resource";
+import { attachGraphic, ManagedGraphic } from "./managed_graphic";
 
 export interface RadialOption {
     id: string;
@@ -26,77 +26,77 @@ export interface RadialOption {
     action: (world: World, playerEntity: any, playerUuid: string) => void;
 }
 
-const RADIAL_OPTIONS: RadialOption[] = [
+export const RADIAL_OPTIONS: RadialOption[] = [
     {
-        id: 'hail',
-        label: 'HAIL / CHAT',
-        sublabel: 'Comms (Y)',
-        icon: '📡',
+        id: "hail",
+        label: "HAIL / CHAT",
+        sublabel: "Comms (Y)",
+        icon: "hail",
         action: (world) => {
-            world.emitNow(EcsControlEvent, [{ action: 'hail', state: 'start' }]);
+            world.emitNow(EcsControlEvent, [{ action: "hail", state: "start" }]);
         },
     },
     {
-        id: 'board',
-        label: 'BOARD / CAPTURE',
-        sublabel: 'Board (B)',
-        icon: '⚓',
+        id: "board",
+        label: "BOARD / CAPTURE",
+        sublabel: "Board (B)",
+        icon: "board",
         action: (world) => {
-            world.emitNow(ControlStateEvent, new Map([['board', 'start']]));
+            world.emitNow(ControlStateEvent, new Map([["board", "start"]]));
         },
     },
     {
-        id: 'transfer',
-        label: 'ENERGY TRANSFER',
-        sublabel: 'Transfer (U)',
-        icon: '⚡',
+        id: "transfer",
+        label: "ENERGY TRANSFER",
+        sublabel: "Transfer (U)",
+        icon: "transfer",
         action: (world) => {
-            world.emitNow(ControlStateEvent, new Map([['transferEnergy', 'start']]));
+            world.emitNow(ControlStateEvent, new Map([["transferEnergy", "start"]]));
         },
     },
     {
-        id: 'sos',
-        label: 'DISTRESS SOS',
-        sublabel: 'Mayday (O)',
-        icon: '🆘',
+        id: "sos",
+        label: "DISTRESS SOS",
+        sublabel: "Mayday (O)",
+        icon: "sos",
         action: (world, playerEntity) => {
             sendDistressBeacon(world, playerEntity);
         },
     },
     {
-        id: 'coords',
-        label: 'SHARE COORDS',
-        sublabel: 'Broadcast Pos',
-        icon: '📍',
+        id: "coords",
+        label: "SHARE COORDS",
+        sublabel: "Broadcast Pos",
+        icon: "coords",
         action: (world, playerEntity) => {
             shareLocation(world, playerEntity);
         },
     },
     {
-        id: 'jettison',
-        label: 'JETTISON CARGO',
-        sublabel: 'Drop 1t (X)',
-        icon: '📦',
+        id: "jettison",
+        label: "JETTISON CARGO",
+        sublabel: "Drop 1t (X)",
+        icon: "jettison",
         action: (world) => {
-            world.emitNow(ControlStateEvent, new Map([['jettison', 'start']]));
+            world.emitNow(ControlStateEvent, new Map([["jettison", "start"]]));
         },
     },
     {
-        id: 'map',
-        label: 'GALAXY MAP',
-        sublabel: 'Starmap (M)',
-        icon: '🗺️',
+        id: "map",
+        label: "GALAXY MAP",
+        sublabel: "Starmap (M)",
+        icon: "map",
         action: (world) => {
-            world.emitNow(EcsControlEvent, [{ action: 'map', state: 'start' }]);
+            world.emitNow(EcsControlEvent, [{ action: "map", state: "start" }]);
         },
     },
     {
-        id: 'directory',
-        label: 'PILOT ROSTER',
-        sublabel: 'Status (P)',
-        icon: '👥',
+        id: "directory",
+        label: "PILOT ROSTER",
+        sublabel: "Status (P)",
+        icon: "directory",
         action: (world) => {
-            world.emitNow(EcsControlEvent, [{ action: 'properties', state: 'start' }]);
+            world.emitNow(EcsControlEvent, [{ action: "properties", state: "start" }]);
         },
     },
 ];
@@ -148,17 +148,17 @@ export function gamepadRadialSelection(
 export function sendDistressBeacon(world: World, playerEntity?: any) {
     const mov = playerEntity?.components.get(MovementStateComponent);
     const state = playerEntity?.components.get(PlayerStateComponent);
-    const name = state?.pilotName || 'Captain';
-    const system = state?.currentSystem || 'nova:130';
+    const name = state?.pilotName || "Captain";
+    const system = state?.currentSystem || "nova:130";
     const x = Math.round(mov?.position.x ?? 0);
     const y = Math.round(mov?.position.y ?? 0);
     const text = `MAYDAY! Disabled at (${x}, ${y}) in ${system}! Requesting immediate assistance!`;
 
     broadcastChat(world, {
-        to: 'all',
+        to: "all",
         fromName: name,
         text,
-        kind: 'sos',
+        kind: "sos",
         system,
         coords: [x, y],
     });
@@ -167,39 +167,195 @@ export function sendDistressBeacon(world: World, playerEntity?: any) {
 export function shareLocation(world: World, playerEntity?: any) {
     const mov = playerEntity?.components.get(MovementStateComponent);
     const state = playerEntity?.components.get(PlayerStateComponent);
-    const name = state?.pilotName || 'Captain';
-    const system = state?.currentSystem || 'nova:130';
+    const name = state?.pilotName || "Captain";
+    const system = state?.currentSystem || "nova:130";
     const x = Math.round(mov?.position.x ?? 0);
     const y = Math.round(mov?.position.y ?? 0);
     const text = `Current position in ${system}: (${x}, ${y})`;
 
     broadcastChat(world, {
-        to: 'all',
+        to: "all",
         fromName: name,
         text,
-        kind: 'coords',
+        kind: "coords",
         system,
         coords: [x, y],
     });
+}
+
+export function drawActionIcon(
+    g: PIXI.Graphics,
+    id: string,
+    cx: number,
+    cy: number,
+    color: number,
+    isHovered: boolean,
+) {
+    const strokeWidth = isHovered ? 2 : 1.5;
+    g.lineStyle(strokeWidth, color, 1);
+
+    switch (id) {
+        case "hail": {
+            // Comms Antenna Dish & Broadcast Signal
+            g.arc(cx - 3, cy + 1, 8, -Math.PI * 0.45, Math.PI * 0.45, false);
+            g.moveTo(cx - 7, cy + 9);
+            g.lineTo(cx - 3, cy + 1);
+            g.moveTo(cx - 3, cy + 1);
+            g.lineTo(cx + 4, cy + 1);
+            g.lineStyle(strokeWidth, color, 0.9);
+            g.arc(cx + 4, cy + 1, 5, -Math.PI * 0.35, Math.PI * 0.35, false);
+            g.lineStyle(strokeWidth, color, 0.5);
+            g.arc(cx + 4, cy + 1, 9, -Math.PI * 0.35, Math.PI * 0.35, false);
+            break;
+        }
+        case "board": {
+            // Boarding Grapple & Airlock Clamps
+            g.beginFill(0x0e0c0c, 0.8);
+            g.drawCircle(cx, cy, 4);
+            g.endFill();
+            // Left grappling jaw
+            g.moveTo(cx - 4, cy - 7);
+            g.lineTo(cx - 10, cy - 2);
+            g.lineTo(cx - 9, cy + 5);
+            g.lineTo(cx - 4, cy + 8);
+            g.lineTo(cx - 2, cy + 5);
+            // Right grappling jaw
+            g.moveTo(cx + 4, cy - 7);
+            g.lineTo(cx + 10, cy - 2);
+            g.lineTo(cx + 9, cy + 5);
+            g.lineTo(cx + 4, cy + 8);
+            g.lineTo(cx + 2, cy + 5);
+            // Hydraulic hinge links
+            g.moveTo(cx - 4, cy - 1);
+            g.lineTo(cx + 4, cy - 1);
+            break;
+        }
+        case "transfer": {
+            // Energy Lightning Bolt & Power Conduit
+            g.beginFill(color, isHovered ? 0.35 : 0.15);
+            g.moveTo(cx + 2, cy - 10);
+            g.lineTo(cx - 6, cy - 1);
+            g.lineTo(cx - 1, cy - 1);
+            g.lineTo(cx - 4, cy + 10);
+            g.lineTo(cx + 6, cy + 1);
+            g.lineTo(cx + 1, cy + 1);
+            g.closePath();
+            g.endFill();
+            break;
+        }
+        case "sos": {
+            // Emergency Mayday Warning Beacon
+            g.moveTo(cx, cy - 10);
+            g.lineTo(cx + 10, cy);
+            g.lineTo(cx, cy + 10);
+            g.lineTo(cx - 10, cy);
+            g.closePath();
+            g.moveTo(cx, cy - 5);
+            g.lineTo(cx, cy + 1);
+            g.beginFill(color, 1);
+            g.drawCircle(cx, cy + 4.5, 1.2);
+            g.endFill();
+            break;
+        }
+        case "coords": {
+            // Navigational Waypoint & Crosshair Reticle
+            g.drawCircle(cx, cy, 7);
+            g.moveTo(cx, cy - 10);
+            g.lineTo(cx, cy - 4);
+            g.moveTo(cx, cy + 4);
+            g.lineTo(cx, cy + 10);
+            g.moveTo(cx - 10, cy);
+            g.lineTo(cx - 4, cy);
+            g.moveTo(cx + 4, cy);
+            g.lineTo(cx + 10, cy);
+            g.beginFill(color, 0.9);
+            g.moveTo(cx, cy - 2);
+            g.lineTo(cx + 2, cy);
+            g.lineTo(cx, cy + 2);
+            g.lineTo(cx - 2, cy);
+            g.closePath();
+            g.endFill();
+            break;
+        }
+        case "jettison": {
+            // Cargo Canister Pod with Ejection Thrust
+            g.drawRect(cx - 7, cy - 8, 14, 10);
+            g.moveTo(cx - 7, cy - 4);
+            g.lineTo(cx + 7, cy - 4);
+            g.moveTo(cx - 4, cy + 4);
+            g.lineTo(cx, cy + 8);
+            g.lineTo(cx + 4, cy + 4);
+            g.moveTo(cx - 4, cy + 7);
+            g.lineTo(cx, cy + 11);
+            g.lineTo(cx + 4, cy + 7);
+            break;
+        }
+        case "map": {
+            // Galaxy Hyperlane Map & Constellation Nodes
+            g.lineStyle(1, color, 0.6);
+            g.moveTo(cx - 7, cy + 6);
+            g.lineTo(cx - 5, cy - 5);
+            g.lineTo(cx + 4, cy - 7);
+            g.lineTo(cx + 8, cy + 4);
+            g.lineTo(cx - 7, cy + 6);
+            g.lineStyle(strokeWidth, color, 1);
+            g.beginFill(0x0e0c0c, 1);
+            g.drawCircle(cx - 7, cy + 6, 2);
+            g.drawCircle(cx - 5, cy - 5, 2);
+            g.drawCircle(cx + 8, cy + 4, 2);
+            g.endFill();
+            g.beginFill(color, 1);
+            g.drawCircle(cx + 4, cy - 7, 3);
+            g.endFill();
+            break;
+        }
+        case "directory": {
+            // Pilot Roster / Commander Wings & Shield
+            g.moveTo(cx - 4, cy - 6);
+            g.lineTo(cx + 4, cy - 6);
+            g.lineTo(cx + 4, cy + 1);
+            g.lineTo(cx, cy + 6);
+            g.lineTo(cx - 4, cy + 1);
+            g.closePath();
+            g.moveTo(cx - 4, cy - 4);
+            g.lineTo(cx - 10, cy - 7);
+            g.moveTo(cx - 4, cy - 1);
+            g.lineTo(cx - 10, cy - 3);
+            g.moveTo(cx - 4, cy + 2);
+            g.lineTo(cx - 9, cy + 1);
+            g.moveTo(cx + 4, cy - 4);
+            g.lineTo(cx + 10, cy - 7);
+            g.moveTo(cx + 4, cy - 1);
+            g.lineTo(cx + 10, cy - 3);
+            g.moveTo(cx + 4, cy + 2);
+            g.lineTo(cx + 9, cy + 1);
+            break;
+        }
+        default: {
+            g.drawCircle(cx, cy, 6);
+            break;
+        }
+    }
 }
 
 export class RadialMenu {
     readonly container = new PIXI.Container();
     private readonly bg = new PIXI.Graphics();
     private readonly wheel = new PIXI.Graphics();
+    private readonly icons = new PIXI.Graphics();
     private readonly centerCircle = new PIXI.Graphics();
-    private readonly centerTitle = new PIXI.Text('', {
-        fontFamily: 'Geneva, Arial, sans-serif',
+    private readonly centerTitle = new PIXI.Text("", {
+        fontFamily: "Geneva, Arial, sans-serif",
         fontSize: 13,
-        fontWeight: 'bold',
+        fontWeight: "bold",
         fill: 0xffd588,
-        align: 'center',
+        align: "center",
     });
-    private readonly centerSub = new PIXI.Text('', {
-        fontFamily: 'Geneva, Arial, sans-serif',
+    private readonly centerSub = new PIXI.Text("", {
+        fontFamily: "Geneva, Arial, sans-serif",
         fontSize: 10,
         fill: 0xbbbbbb,
-        align: 'center',
+        align: "center",
     });
     private readonly optionLabels: PIXI.Text[] = [];
 
@@ -211,12 +367,13 @@ export class RadialMenu {
     readonly outerRadius = 145;
 
     constructor() {
-        this.container.name = 'RadialMenuContainer';
+        this.container.name = "RadialMenuContainer";
         this.container.zIndex = 999;
         this.container.visible = false;
 
         this.container.addChild(this.bg);
         this.container.addChild(this.wheel);
+        this.container.addChild(this.icons);
         this.container.addChild(this.centerCircle);
 
         this.centerTitle.anchor.set(0.5, 0.7);
@@ -226,30 +383,30 @@ export class RadialMenu {
 
         for (let i = 0; i < RADIAL_OPTIONS.length; i++) {
             const opt = RADIAL_OPTIONS[i];
-            const text = new PIXI.Text(`[${i + 1}] ${opt.icon} ${opt.label.split(' ')[0]}`, {
-                fontFamily: 'Geneva, Arial, sans-serif',
-                fontSize: 11,
-                fill: 0xffffff,
-                align: 'center',
+            const text = new PIXI.Text(`[${i + 1}] ${opt.label.split(" ")[0]}`, {
+                fontFamily: "Geneva, Arial, sans-serif",
+                fontSize: 10,
+                fill: 0xd0c4b2,
+                align: "center",
             });
             text.anchor.set(0.5, 0.5);
             this.container.addChild(text);
             this.optionLabels.push(text);
         }
 
-        window.addEventListener('mousemove', (e) => {
+        window.addEventListener("mousemove", (e) => {
             if (!this.container.visible) return;
             this.mousePos.x = e.clientX;
             this.mousePos.y = e.clientY;
             this.updateSelection();
         });
 
-        window.addEventListener('mousedown', (e) => {
+        window.addEventListener("mousedown", (e) => {
             if (!this.container.visible || e.button !== 0) return;
             this.executeCurrent();
         });
 
-        window.addEventListener('keydown', (e) => {
+        window.addEventListener("keydown", (e) => {
             if (!this.container.visible) return;
 
             const num = parseInt(e.key, 10);
@@ -260,21 +417,21 @@ export class RadialMenu {
                 return;
             }
 
-            if (e.code === 'ArrowDown' || e.code === 'ArrowRight' || e.code === 'Tab') {
+            if (e.code === "ArrowDown" || e.code === "ArrowRight" || e.code === "Tab") {
                 e.preventDefault();
                 e.stopPropagation();
                 this.cycleSelection(1);
                 return;
             }
 
-            if (e.code === 'ArrowUp' || e.code === 'ArrowLeft') {
+            if (e.code === "ArrowUp" || e.code === "ArrowLeft") {
                 e.preventDefault();
                 e.stopPropagation();
                 this.cycleSelection(-1);
                 return;
             }
 
-            if (e.code === 'Enter' || e.code === 'Space') {
+            if (e.code === "Enter" || e.code === "Space") {
                 e.preventDefault();
                 e.stopPropagation();
                 if (this.selectedIndex >= 0) {
@@ -283,7 +440,7 @@ export class RadialMenu {
                 return;
             }
 
-            if (e.code === 'Escape' || e.code === 'KeyQ') {
+            if (e.code === "Escape" || e.code === "KeyQ") {
                 e.preventDefault();
                 e.stopPropagation();
                 this.hide();
@@ -346,6 +503,7 @@ export class RadialMenu {
         this.bg.endFill();
 
         this.wheel.clear();
+        this.icons.clear();
         this.centerCircle.clear();
 
         // Draw sectors
@@ -362,16 +520,24 @@ export class RadialMenu {
             this.wheel.closePath();
             this.wheel.endFill();
 
-            // Position label
             const midAngle = startAngle + arc / 2;
-            const labelRadius = (this.innerRadius + this.outerRadius) / 2;
+            const iconRadius = 82;
+            const labelRadius = 118;
+
+            const iconX = this.center.x + Math.cos(midAngle) * iconRadius;
+            const iconY = this.center.y + Math.sin(midAngle) * iconRadius;
+            const opt = RADIAL_OPTIONS[i];
+            const iconColor = isHovered ? 0xffea00 : 0xd5c8b5;
+
+            drawActionIcon(this.icons, opt.id, iconX, iconY, iconColor, isHovered);
+
             const label = this.optionLabels[i];
             label.position.set(
                 this.center.x + Math.cos(midAngle) * labelRadius,
                 this.center.y + Math.sin(midAngle) * labelRadius,
             );
             label.style.fill = isHovered ? 0xffea00 : 0xe0d6c8;
-            label.style.fontWeight = isHovered ? 'bold' : 'normal';
+            label.style.fontWeight = isHovered ? "bold" : "normal";
         }
 
         // Draw center
@@ -388,8 +554,8 @@ export class RadialMenu {
             this.centerTitle.text = opt.label;
             this.centerSub.text = opt.sublabel;
         } else {
-            this.centerTitle.text = 'ACTIONS';
-            this.centerSub.text = 'Hover option';
+            this.centerTitle.text = "ACTIONS";
+            this.centerSub.text = "Hover option";
         }
     }
 
@@ -404,10 +570,10 @@ export class RadialMenu {
     onAction?: (option: RadialOption) => void;
 }
 
-export const RadialMenuResource = new Resource<RadialMenu>('RadialMenuResource');
+export const RadialMenuResource = new Resource<RadialMenu>("RadialMenuResource");
 
 export const RadialMenuSystem = new System({
-    name: 'RadialMenuSystem',
+    name: "RadialMenuSystem",
     events: [EcsControlEvent],
     args: [
         EcsControlEvent,
@@ -419,7 +585,7 @@ export const RadialMenuSystem = new System({
         SingletonComponent,
     ] as const,
     step(controlEvents, menu, screenSize, entity, uuid, world) {
-        const hasRadial = controlEvents.some(e => e.action === 'radialMenu' && e.state === 'start');
+        const hasRadial = controlEvents.some(e => e.action === "radialMenu" && e.state === "start");
         if (hasRadial) {
             if (menu.container.visible) {
                 menu.hide();
@@ -428,7 +594,7 @@ export const RadialMenuSystem = new System({
                 menu.onAction = (opt) => opt.action(world, entity, uuid);
             }
         }
-        const hasSos = controlEvents.some(e => e.action === 'sos' && e.state === 'start');
+        const hasSos = controlEvents.some(e => e.action === "sos" && e.state === "start");
         if (hasSos) {
             sendDistressBeacon(world, entity);
         }
@@ -436,10 +602,10 @@ export const RadialMenuSystem = new System({
 });
 
 export const RadialGamepadSystem = new System({
-    name: 'RadialGamepadSystem',
+    name: "RadialGamepadSystem",
     args: [RadialMenuResource, SingletonComponent] as const,
     step(menu) {
-        if (!menu.container.visible || typeof navigator === 'undefined' || !navigator.getGamepads) {
+        if (!menu.container.visible || typeof navigator === "undefined" || !navigator.getGamepads) {
             return;
         }
         const gamepads = navigator.getGamepads();
@@ -468,11 +634,11 @@ export const RadialGamepadSystem = new System({
 });
 
 export const RadialMenuPlugin: Plugin = {
-    name: 'RadialMenuPlugin',
+    name: "RadialMenuPlugin",
     build(world) {
         const stage = world.resources.get(Stage);
         if (!stage) {
-            throw new Error('Expected Stage resource in world');
+            throw new Error("Expected Stage resource in world");
         }
         const menu = new RadialMenu();
         stage.addChild(menu.container);

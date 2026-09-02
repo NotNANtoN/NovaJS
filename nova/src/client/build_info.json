@@ -1,5 +1,5 @@
 {
-  "commit": "ae82b888",
-  "message": "Replace fp-ts with native Either, expand WASM lead angle guidance, prune unused dependencies",
-  "date": "2026-09-02 12:41 +0200"
+  "commit": "f5528674",
+  "message": "Update build_info.json metadata",
+  "date": "2026-09-02 12:43 +0200"
 }

@@ -583,7 +583,7 @@ function resolvePlayerRespawn(
             entity.components.set(ShieldComponent, new Stat({
                 current: physics.shield,
                 max: physics.shield,
-                min: -physics.shield * 0.05,
+                min: 0,
                 recharge: physics.shieldRecharge,
             }));
             entity.components.set(ArmorComponent, new Stat({

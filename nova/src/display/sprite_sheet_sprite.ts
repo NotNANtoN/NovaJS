@@ -60,6 +60,8 @@ export class SpriteSheetSprite {
     setFramesToUse(frames: string) {
         if (frames in this.image.frames) {
             this.textureSet = this.image.frames[frames];
+        } else {
+            this.textureSet = this.image.frames.normal;
         }
     }
 
@@ -96,6 +98,16 @@ export class SpriteSheetSprite {
         // Divide rotation equally among the available rotation textures
         angle = mod(angle, TWO_PI);
         const count = this.textureSet.length;
+
+        if (this.image.rotateInPlane === false) {
+            // Pre-rendered 3D tumbling animations (asteroids, minerals):
+            // Step through discrete 3D tumble poses without 2D planar rotation snapping.
+            const frameIndex = mod(Math.floor((angle / TWO_PI) * count), count);
+            this.frame = frameIndex + this.textureSet.start;
+            this.pixiSprite.rotation = 0;
+            this.wrappedRotation = angle;
+            return;
+        }
 
         // Center the textures around the rotations they
         // best represent instead of having them offset to the right.

@@ -6,7 +6,6 @@ import { BLEND_MODES } from "novadatainterface/BlendModes";
 import { ShanResource } from "../resource_parsers/ShanResource";
 import { BaseParse } from "./BaseParse";
 
-
 export async function ShanParse(shan: ShanResource, notFoundFunction: (message: string) => void): Promise<Animation> {
     var base: BaseData = await BaseParse(shan, notFoundFunction);
 
@@ -18,42 +17,6 @@ export async function ShanParse(shan: ShanResource, notFoundFunction: (message: 
         if (!imageInfo) {
             continue; // That image does not exist for this Shan
         }
-
-        var frames: AnimationFrames = {
-            normal: {
-                start: 0,
-                length: shan.framesPer
-            }
-        }
-
-        let blendMode = BLEND_MODES.NORMAL;
-        if (imageName === "lightImage"
-            || imageName === "glowImage"
-            || imageName === "weapImage") {
-            blendMode = BLEND_MODES.ADD;
-        }
-
-        switch (shan.flags.extraFramePurpose) {
-            case ('banking'):
-                frames.left = {
-                    start: shan.framesPer,
-                    length: shan.framesPer,
-                }
-                frames.right = {
-                    start: shan.framesPer * 2,
-                    length: shan.framesPer
-                };
-                break;
-            case ('animation'):
-                frames.animation = {
-                    start: shan.framesPer,
-                    // The rest of the frames are for the animation
-                    length: shan.framesPer *
-                        ((imageInfo.setCount || shan.images.baseImage.setCount) - 1)
-                }
-                break;
-        }
-
 
         // get the rled from novadata
         // The rled contains the ID of the image that is used.
@@ -67,7 +30,37 @@ export async function ShanParse(shan: ShanResource, notFoundFunction: (message: 
                 throw new NovaIDNotFoundError("Base image not found for rlëD id " + imageInfo.ID);
             }
 
-            continue; // Don't add this as an image since it wasn't found. 
+            continue; // Don't add this as an image since it wasn't found.
+        }
+
+        var frames: AnimationFrames = {
+            normal: {
+                start: 0,
+                length: shan.framesPer
+            }
+        };
+
+        let blendMode = BLEND_MODES.NORMAL;
+        if (imageName === "lightImage"
+            || imageName === "glowImage"
+            || imageName === "weapImage") {
+            blendMode = BLEND_MODES.ADD;
+        }
+
+        if (shan.flags.extraFramePurpose === "banking" && rled.numberOfFrames >= shan.framesPer * 3) {
+            frames.left = {
+                start: shan.framesPer,
+                length: shan.framesPer,
+            };
+            frames.right = {
+                start: shan.framesPer * 2,
+                length: shan.framesPer,
+            };
+        } else if (shan.flags.extraFramePurpose === "animation" && rled.numberOfFrames > shan.framesPer) {
+            frames.animation = {
+                start: shan.framesPer,
+                length: rled.numberOfFrames - shan.framesPer,
+            };
         }
 
         // Store the image in images
@@ -83,5 +76,5 @@ export async function ShanParse(shan: ShanResource, notFoundFunction: (message: 
         ...base,
         images,
         exitPoints: shan.exitPoints
-    }
+    };
 }

@@ -75,6 +75,7 @@ export async function AsteroidParse(
                 id: spriteSheetFor(spinID),
                 dataType: NovaDataType.SpriteSheetImage,
                 blendMode: BLEND_MODES.NORMAL,
+                rotateInPlane: false,
                 frames: {
                     normal: { start: 0, length: ASTEROID_FRAMES },
                 },

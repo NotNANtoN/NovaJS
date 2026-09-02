@@ -57,7 +57,7 @@ describe('shipyard info spec columns', () => {
         expect(left).toContain(`Accel: ${
             qualitativeRating(ship.physics.acceleration / ShipVelocityConversionFactor)}`);
         expect(left).toContain(`Turn: ${
-            qualitativeRating(ship.physics.turnRate / ShipTurnRateConversionFactor)}`);
+            qualitativeRating((ship.physics.turnRate / ShipTurnRateConversionFactor) * 10)}`);
         expect(left).toContain(`Guns: ${formatMaxSlots(ship.maxGuns)}`);
         expect(left).toContain('Turrets: None');
 

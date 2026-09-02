@@ -130,7 +130,7 @@ const ShipShieldProvider = Provide({
         return new Stat({
             current: shield?.current ?? physics.shield,
             max: physics.shield,
-            min: -physics.shield * 0.05,
+            min: 0,
             recharge: physics.shieldRecharge,
         });
     }

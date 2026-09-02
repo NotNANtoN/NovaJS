@@ -202,11 +202,11 @@ const AsteroidMovementPhysicsProvider = Provide({
     name: 'AsteroidMovementPhysicsProvider',
     provided: MovementPhysicsComponent,
     args: [AsteroidComponent] as const,
-    factory: () => ({
+    factory: (asteroid) => ({
         acceleration: 0,
         maxVelocity: ASTEROID_DRIFT_SPEED,
         movementType: MovementType.INERTIAL,
-        turnRate: 0,
+        turnRate: Math.abs(asteroid.spin),
     }),
 });
 
@@ -236,11 +236,11 @@ const OreMovementPhysicsProvider = Provide({
     name: 'OreMovementPhysicsProvider',
     provided: MovementPhysicsComponent,
     args: [OreComponent] as const,
-    factory: () => ({
+    factory: (ore) => ({
         acceleration: 0,
         maxVelocity: ORE_DRIFT_SPEED,
         movementType: MovementType.INERTIAL,
-        turnRate: 0,
+        turnRate: Math.abs(ore.spin),
     }),
 });
 
@@ -251,7 +251,7 @@ function tumble(
     multiplayer: { owner: string },
     platform: string,
 ) {
-    if (platform !== 'node' || multiplayer.owner !== 'server') {
+    if (platform === 'node' && multiplayer.owner !== 'server') {
         return;
     }
     movement.rotation = movement.rotation.add(spinning.spin * time.delta_s);

@@ -6,16 +6,16 @@ import { Plugin } from "nova_ecs/plugin";
 import { MovementPhysicsComponent } from "nova_ecs/plugins/movement_plugin";
 import { System } from "nova_ecs/system";
 import { IonizationComponent } from "./health_plugin";
+import { PlayerShipSelector } from "./player_ship_plugin";
 import { getShipMovementPhysics, ShipPhysicsComponent } from "./ship_plugin";
 
+const ION_FACTOR = 0.6;
 
-const ION_FACTOR = 0.6
-
-export const IonizedEvent = new EcsEvent<boolean>('IonizedEvent');
-export const IsIonizedComponent = new Component<boolean>('IsIonizedComponent');
+export const IonizedEvent = new EcsEvent<boolean>("IonizedEvent");
+export const IsIonizedComponent = new Component<boolean>("IsIonizedComponent");
 
 const IonizedSystem = new System({
-    name: 'IonizedSystem',
+    name: "IonizedSystem",
     args: [IonizationComponent, Optional(IsIonizedComponent), GetEntity, UUID, Emit] as const,
     step(ionization, wasIonized, entity, uuid, emit) {
         const isIonized = ionization.current > ionization.max / 2;
@@ -29,11 +29,11 @@ const IonizedSystem = new System({
 });
 
 const IonizationSlownessSystem = new System({
-    name: 'IonizationSLownessSystem',
+    name: "IonizationSLownessSystem",
     events: [IonizedEvent],
-    args: [IonizedEvent, ShipPhysicsComponent, GetEntity] as const,
-    step(ionized, shipPhysics, entity) {
-        const movement = getShipMovementPhysics(shipPhysics);
+    args: [IonizedEvent, ShipPhysicsComponent, GetEntity, Optional(PlayerShipSelector)] as const,
+    step(ionized, shipPhysics, entity, player) {
+        const movement = getShipMovementPhysics(shipPhysics, player !== undefined);
         if (ionized) {
             movement.maxVelocity *= ION_FACTOR;
             movement.acceleration *= ION_FACTOR;
@@ -44,7 +44,7 @@ const IonizationSlownessSystem = new System({
 });
 
 export const IonizedPlugin: Plugin = {
-    name: 'IonizedPlugin',
+    name: "IonizedPlugin",
     build(world) {
         world.addSystem(IonizedSystem)
             .addSystem(IonizationSlownessSystem);
@@ -53,4 +53,4 @@ export const IonizedPlugin: Plugin = {
         world.removeSystem(IonizedSystem)
             .removeSystem(IonizationSlownessSystem);
     },
-}
+};

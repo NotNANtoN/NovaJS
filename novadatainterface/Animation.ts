@@ -32,6 +32,12 @@ export interface AnimationImage {
     dataType: NovaDataType.SpriteSheetImage;
     blendMode: BLEND_MODES;
     frames: AnimationFrames;
+    /**
+     * True (default) if the sprite sheet contains 2D planar rotation angles
+     * that should be rotated in-plane between discrete frames.
+     * False if the sprite sheet is a pre-rendered 3D tumble/flip animation.
+     */
+    rotateInPlane?: boolean;
 }
 
 export function getDefaultAnimationImage(): AnimationImage {

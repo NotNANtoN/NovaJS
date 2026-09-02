@@ -59,7 +59,7 @@ export function shipyardInfoLeftColumn(ship: ShipData): string {
     return [
         `Speed: ${rawSpeed}`,
         `Accel: ${qualitativeRating(rawAccel)}`,
-        `Turn: ${qualitativeRating(rawTurn)}`,
+        `Turn: ${qualitativeRating(rawTurn * 10)}`,
         `Shields: ${ship.physics.shield}`,
         `Armor: ${ship.physics.armor}`,
         `Guns: ${formatMaxSlots(ship.maxGuns)}`,
