@@ -1,4 +1,4 @@
-import { left, right } from "fp-ts/Either";
+import { left, right } from 'nova_ecs/either';
 import { ArgTypes } from "./arg_types";
 import { ArgModifier } from "./arg_modifier";
 import { Optional } from "./optional";

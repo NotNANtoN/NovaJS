@@ -5,7 +5,7 @@ import { SerializerResource } from "nova_ecs/plugins/serializer_plugin";
 import type { EncodedEntity } from "nova_ecs/plugins/serializer_plugin";
 import { resetWallClock, TimeResource } from "nova_ecs/plugins/time_plugin";
 import { World } from "nova_ecs/world";
-import { isRight } from "fp-ts/Either";
+import { isRight } from 'nova_ecs/either';
 import * as PIXI from "pixi.js";
 import { firstValueFrom, take, filter, map, timeout } from "rxjs";
 import Stats from 'stats.js';

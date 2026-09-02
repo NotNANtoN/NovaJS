@@ -7,7 +7,7 @@ import { map } from '../datatypes/map';
 import { Entity } from '../entity';
 import { Plugin } from '../plugin';
 import { Resource } from '../resource';
-import { isLeft } from 'fp-ts/Either';
+import { isLeft } from 'nova_ecs/either';
 import { Serializer, SerializerPlugin, SerializerResource } from './serializer_plugin';
 import { setDifference } from '../utils';
 import { EventMap } from '../event_map';

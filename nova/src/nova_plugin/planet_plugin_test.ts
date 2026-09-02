@@ -1,5 +1,5 @@
 import 'jasmine';
-import { isRight } from 'fp-ts/Either';
+import { isRight } from 'nova_ecs/either';
 import { getDefaultPlanetData } from
     'novadatainterface/PlanetData';
 import {

@@ -7,7 +7,7 @@ import sys
 
 
 def make_commonjs_bindings(raw_js: str) -> str:
-    for export in ("convex_hull", "convex_hull_rgba", "sat_batch"):
+    for export in ("convex_hull", "convex_hull_rgba", "sat_batch", "first_order_lead_angle"):
         raw_js = raw_js.replace(
             f"export function {export}(",
             f"function {export}(",
@@ -22,6 +22,7 @@ def make_commonjs_bindings(raw_js: str) -> str:
     convex_hull,
     convex_hull_rgba,
     sat_batch,
+    first_order_lead_angle,
     initSync,
     default: __wbg_init,
 };""",
@@ -59,6 +60,7 @@ def main() -> None:
     convex_hull,
     convex_hull_rgba,
     sat_batch,
+    first_order_lead_angle,
 }} = require("./nova_wasm_bindgen.js");
 
 const EMBEDDED_WASM_BASE64 = "{encoded}";
@@ -117,6 +119,11 @@ function convexHullRgba(rgba, width, height, alphaThreshold) {{
     return convex_hull_rgba(rgba, width, height, alphaThreshold);
 }}
 
+function firstOrderLeadAngle(posX, posY, velX, velY, targetPosX, targetPosY, targetVelX, targetVelY, shotSpeed) {{
+    requireInitialized();
+    return first_order_lead_angle(posX, posY, velX, velY, targetPosX, targetPosY, targetVelX, targetVelY, shotSpeed);
+}}
+
 function satBatch(
     aVertices,
     aOffsets,
@@ -145,6 +152,7 @@ function satBatch(
 module.exports = {{
     convexHull,
     convexHullRgba,
+    firstOrderLeadAngle,
     init,
     isInitialized,
     satBatch,
@@ -165,6 +173,18 @@ export function convexHullRgba(
     height: number,
     alphaThreshold: number,
 ): Float32Array;
+
+export function firstOrderLeadAngle(
+    posX: number,
+    posY: number,
+    velX: number,
+    velY: number,
+    targetPosX: number,
+    targetPosY: number,
+    targetVelX: number,
+    targetVelY: number,
+    shotSpeed: number,
+): number;
 
 export function satBatch(
     aVertices: Float32Array,

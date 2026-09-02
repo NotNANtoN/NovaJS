@@ -1,4 +1,4 @@
-import { Either, isLeft, isRight, left, Right, right } from "fp-ts/Either";
+import { Either, isLeft, isRight, left, Right, right } from 'nova_ecs/either';
 import { ArgsToData, ArgTypes, QueryResults } from "./arg_types";
 import { Entity } from "./entity";
 import { EntityMapWithEvents } from "./entity_map";

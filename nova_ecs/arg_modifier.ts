@@ -1,4 +1,4 @@
-import { Either } from "fp-ts/Either";
+import { Either } from 'nova_ecs/either';
 import { ArgData, ArgsToData, ArgTypes } from "./arg_types";
 import { Query } from "./query";
 

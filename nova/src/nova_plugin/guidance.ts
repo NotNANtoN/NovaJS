@@ -2,6 +2,7 @@ import { Component } from 'nova_ecs/component';
 import { Angle } from 'nova_ecs/datatypes/angle';
 import { Position } from 'nova_ecs/datatypes/position';
 import { Vector } from 'nova_ecs/datatypes/vector';
+import { firstOrderLeadAngle, isInitialized as isWasmInitialized } from '../../../nova_wasm';
 
 export enum Guidance {
     zeroOrder, // Point at the enemy
@@ -47,6 +48,14 @@ export function firstOrderGuidance(position: Position, velocity: Vector,
 
 export function firstOrderWithFallback(position: Position, velocity: Vector,
     targetPosition: Position, targetVelocity: Vector, shotSpeed: number): Angle {
+    if (isWasmInitialized()) {
+        const angleRad = firstOrderLeadAngle(
+            position.x, position.y, velocity.x, velocity.y,
+            targetPosition.x, targetPosition.y, targetVelocity.x, targetVelocity.y,
+            shotSpeed
+        );
+        return new Angle(angleRad);
+    }
     const solutions = firstOrderGuidance(position, velocity, targetPosition, targetVelocity, shotSpeed);
     return solutions[0] ?? zeroOrderGuidance(position, targetPosition);
 }

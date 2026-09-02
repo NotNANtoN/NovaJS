@@ -1,7 +1,7 @@
 import { isDraft } from 'immer';
 import * as t from 'io-ts';
 import 'jasmine';
-import { isRight } from 'fp-ts/Either';
+import { isRight } from 'nova_ecs/either';
 import { BehaviorSubject, Subject } from 'rxjs';
 import { Entities, UUID } from '../arg_types';
 import { Component } from '../component';

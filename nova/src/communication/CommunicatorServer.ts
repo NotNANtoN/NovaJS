@@ -1,4 +1,4 @@
-import { isLeft } from "fp-ts/Either";
+import { isLeft } from 'nova_ecs/either';
 import { Communicator, Peers } from "nova_ecs/plugins/multiplayer_plugin";
 import { BehaviorSubject, Subject } from "rxjs";
 import { ChannelServer } from "./Channel";

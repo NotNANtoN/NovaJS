@@ -1,4 +1,4 @@
-import { isLeft, right } from 'fp-ts/Either';
+import { isLeft, right } from 'nova_ecs/either';
 import * as t from 'io-ts';
 import { DefaultMap } from 'nova_ecs/utils';
 

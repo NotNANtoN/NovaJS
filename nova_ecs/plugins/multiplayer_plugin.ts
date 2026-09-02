@@ -1,4 +1,4 @@
-import { isLeft } from 'fp-ts/Either';
+import { isLeft } from 'nova_ecs/either';
 import produce, { current, isDraft } from 'immer';
 import * as t from 'io-ts';
 import { BehaviorSubject, Observable, Subject } from 'rxjs';

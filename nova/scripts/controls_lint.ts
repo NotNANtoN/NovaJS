@@ -1,4 +1,4 @@
-import { isLeft } from "fp-ts/Either";
+import { isLeft } from 'nova_ecs/either';
 import * as fs from "fs";
 import { Controls, SavedControls } from "../src/nova_plugin/controls";
 

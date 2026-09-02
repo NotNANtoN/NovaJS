@@ -1,4 +1,4 @@
-import { Either, isLeft, right } from 'fp-ts/Either';
+import { Either, isLeft, right } from 'nova_ecs/either';
 import * as t from 'io-ts';
 import { Errors } from 'io-ts';
 import { Component, ComponentData, UnknownComponent } from '../component';

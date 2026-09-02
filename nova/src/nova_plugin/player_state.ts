@@ -1,4 +1,4 @@
-import { Either } from 'fp-ts/Either';
+import { Either } from 'nova_ecs/either';
 import * as t from 'io-ts';
 import { FUEL_PER_JUMP } from './fuel';
 import { Errors } from 'io-ts';

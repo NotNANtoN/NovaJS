@@ -4,6 +4,7 @@ const {
     convexHullRgba,
     init,
     satBatch,
+    firstOrderLeadAngle,
 } = require("./pkg/nova_wasm.js");
 
 async function main() {
@@ -65,6 +66,8 @@ async function main() {
         [0],
     );
 
+    const leadAngle = firstOrderLeadAngle(0, 0, 0, 0, 100, 0, 0, 50, 100);
+    assert.ok(Math.abs(leadAngle - 0.52359877) < 0.01, `Expected ~0.52 rad lead angle, got ${leadAngle}`);
     console.log("nova_wasm Node smoke test passed");
 }
 

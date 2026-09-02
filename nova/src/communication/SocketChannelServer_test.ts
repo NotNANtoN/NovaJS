@@ -1,4 +1,4 @@
-import { isLeft } from "fp-ts/Either";
+import { isLeft } from 'nova_ecs/either';
 import * as https from "https";
 import * as http from "http";
 import "jasmine";

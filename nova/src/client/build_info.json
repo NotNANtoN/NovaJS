@@ -1,5 +1,5 @@
 {
-  "commit": "23124096",
-  "message": "Clean up chat HUD layout, improve NPC interaction safety, fix outfit physics mass calculation",
-  "date": "2026-09-01 14:53 +0200"
+  "commit": "f79d2c22",
+  "message": "Make plugin directory scanning deterministic across Node and Bun",
+  "date": "2026-09-02 12:29 +0200"
 }

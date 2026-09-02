@@ -1,4 +1,4 @@
-import { isLeft } from 'fp-ts/Either';
+import { isLeft } from 'nova_ecs/either';
 import * as t from 'io-ts';
 import 'jasmine';
 import { set } from './set';

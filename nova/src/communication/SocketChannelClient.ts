@@ -1,4 +1,4 @@
-import { isRight } from "fp-ts/Either";
+import { isRight } from 'nova_ecs/either';
 import { BehaviorSubject, Subject } from "rxjs";
 import { ChannelClient } from "./Channel";
 import { getPersistentPlayerToken } from "./player_identity";

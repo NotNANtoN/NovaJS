@@ -11,6 +11,18 @@ export function convexHullRgba(
     alphaThreshold: number,
 ): Float32Array;
 
+export function firstOrderLeadAngle(
+    posX: number,
+    posY: number,
+    velX: number,
+    velY: number,
+    targetPosX: number,
+    targetPosY: number,
+    targetVelX: number,
+    targetVelY: number,
+    shotSpeed: number,
+): number;
+
 export function satBatch(
     aVertices: Float32Array,
     aOffsets: Uint32Array,

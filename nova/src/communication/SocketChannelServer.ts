@@ -1,4 +1,4 @@
-import { isLeft } from "fp-ts/Either";
+import { isLeft } from 'nova_ecs/either';
 import https from "https";
 import http from "http";
 import { BehaviorSubject, Subject } from "rxjs";

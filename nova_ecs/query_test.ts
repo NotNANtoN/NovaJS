@@ -1,4 +1,4 @@
-import { right } from 'fp-ts/Either';
+import { right } from 'nova_ecs/either';
 import 'jasmine';
 import { Component } from './component';
 import { ArgModifier } from './arg_modifier';

@@ -1,4 +1,4 @@
-import { isLeft, right } from 'fp-ts/Either';
+import { isLeft, right } from 'nova_ecs/either';
 import { immerable } from 'immer';
 import * as t from 'io-ts';
 import { mod } from './mod';

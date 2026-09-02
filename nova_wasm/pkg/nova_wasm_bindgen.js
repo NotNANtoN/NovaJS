@@ -40,6 +40,24 @@ function convex_hull_rgba(rgba, width, height, alpha_threshold) {
 }
 
 /**
+ * Computes first-order projectile lead angle in radians.
+ * @param {number} pos_x
+ * @param {number} pos_y
+ * @param {number} vel_x
+ * @param {number} vel_y
+ * @param {number} target_pos_x
+ * @param {number} target_pos_y
+ * @param {number} target_vel_x
+ * @param {number} target_vel_y
+ * @param {number} shot_speed
+ * @returns {number}
+ */
+function first_order_lead_angle(pos_x, pos_y, vel_x, vel_y, target_pos_x, target_pos_y, target_vel_x, target_vel_y, shot_speed) {
+    const ret = wasm.first_order_lead_angle(pos_x, pos_y, vel_x, vel_y, target_pos_x, target_pos_y, target_vel_x, target_vel_y, shot_speed);
+    return ret;
+}
+
+/**
  * Tests candidate pairs of convex polygons with the separating axis theorem.
  *
  * Each offset is an index into the corresponding flattened vertex array, and
@@ -258,6 +276,7 @@ module.exports = {
     convex_hull,
     convex_hull_rgba,
     sat_batch,
+    first_order_lead_angle,
     initSync,
     default: __wbg_init,
 };

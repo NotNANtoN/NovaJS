@@ -1,4 +1,4 @@
-import { Either } from "fp-ts/Either";
+import { Either } from 'nova_ecs/either';
 import { Component, ComponentData, UnknownComponent } from "./component";
 import { Entity } from "./entity";
 import { EntityMap } from "./entity_map";

@@ -1,4 +1,4 @@
-import { Either, isLeft, left, Right, right } from "fp-ts/Either";
+import { Either, isLeft, left, Right, right } from 'nova_ecs/either';
 import { ArgModifier, UnknownArgModifier } from "./arg_modifier";
 import { ArgData, ArgTypes, Components, Emit, EmitFunction, EmitNow, Entities, GetArg, GetEntity, GetWorld, RunQuery, RunQueryFunction, UUID } from "./arg_types";
 import { ProvideAsyncPlugin } from "./provide_async";

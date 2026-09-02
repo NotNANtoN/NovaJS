@@ -1,4 +1,4 @@
-import { isRight } from 'fp-ts/Either';
+import { isRight } from 'nova_ecs/either';
 import { UnknownComponent } from 'nova_ecs/component';
 import { Position } from 'nova_ecs/datatypes/position';
 import { Entity } from 'nova_ecs/entity';

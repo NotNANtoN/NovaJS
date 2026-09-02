@@ -417,3 +417,69 @@ mod tests {
         );
     }
 }
+
+
+/// Computes first-order projectile lead angle in radians.
+#[wasm_bindgen]
+pub fn first_order_lead_angle(
+    pos_x: f32,
+    pos_y: f32,
+    vel_x: f32,
+    vel_y: f32,
+    target_pos_x: f32,
+    target_pos_y: f32,
+    target_vel_x: f32,
+    target_vel_y: f32,
+    shot_speed: f32,
+) -> f32 {
+    let dx = target_pos_x - pos_x;
+    let dy = target_pos_y - pos_y;
+    let direct_angle = dy.atan2(dx);
+
+    if shot_speed <= 0.0 {
+        return direct_angle;
+    }
+
+    let inv_speed = 1.0 / shot_speed;
+    let rel_pos_x = dx * inv_speed;
+    let rel_pos_y = dy * inv_speed;
+    let rel_vel_x = (target_vel_x - vel_x) * inv_speed;
+    let rel_vel_y = (target_vel_y - vel_y) * inv_speed;
+
+    let a = rel_vel_x * rel_vel_x + rel_vel_y * rel_vel_y - 1.0;
+    let b = 2.0 * (rel_pos_x * rel_vel_x + rel_pos_y * rel_vel_y);
+    let c = rel_pos_x * rel_pos_x + rel_pos_y * rel_pos_y;
+
+    if a.abs() < 1e-6 {
+        if b.abs() < 1e-6 {
+            return direct_angle;
+        }
+        let t = -c / b;
+        if t >= 0.0 {
+            let hit_x = rel_pos_x + rel_vel_x * t;
+            let hit_y = rel_pos_y + rel_vel_y * t;
+            return hit_y.atan2(hit_x);
+        }
+        return direct_angle;
+    }
+
+    let discriminant = b * b - 4.0 * a * c;
+    if discriminant < 0.0 {
+        return direct_angle;
+    }
+
+    let sqrt_d = discriminant.sqrt();
+    let t1 = (-b - sqrt_d) / (2.0 * a);
+    let t2 = (-b + sqrt_d) / (2.0 * a);
+
+    let time = match (t1 >= 0.0, t2 >= 0.0) {
+        (true, true) => t1.min(t2),
+        (true, false) => t1,
+        (false, true) => t2,
+        (false, false) => return direct_angle,
+    };
+
+    let hit_x = rel_pos_x + rel_vel_x * time;
+    let hit_y = rel_pos_y + rel_vel_y * time;
+    hit_y.atan2(hit_x)
+}

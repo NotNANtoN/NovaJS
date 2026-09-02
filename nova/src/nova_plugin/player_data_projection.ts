@@ -1,4 +1,4 @@
-import { isRight } from 'fp-ts/Either';
+import { isRight } from 'nova_ecs/either';
 import { EncodedEntity } from 'nova_ecs/plugins/serializer_plugin';
 import {
     PersistentPlayerState,

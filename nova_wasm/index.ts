@@ -4,4 +4,5 @@ export {
     init,
     isInitialized,
     satBatch,
+    firstOrderLeadAngle,
 } from "./pkg/nova_wasm";

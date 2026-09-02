@@ -1,4 +1,4 @@
-import { isLeft } from 'fp-ts/Either';
+import { isLeft } from 'nova_ecs/either';
 import 'jasmine';
 import { Position, PositionType } from './position';
 
