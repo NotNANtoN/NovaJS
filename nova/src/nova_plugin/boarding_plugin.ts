@@ -1,6 +1,7 @@
 import * as t from 'io-ts';
 import { STANDARD_COMMODITIES } from 'novadatainterface/CommodityData';
-import { EmitNow, Entities, GetEntity, UUID } from 'nova_ecs/arg_types';
+import { Emit, EmitNow, Entities, GetEntity, UUID } from 'nova_ecs/arg_types';
+import { SoundEvent } from './sound_event';
 import { Component } from 'nova_ecs/component';
 import { Angle } from 'nova_ecs/datatypes/angle';
 import { EcsEvent } from 'nova_ecs/events';
@@ -400,9 +401,10 @@ export const PlayerBoardingInputSystem = new System({
         PlatformResource,
         GetEntity,
         PlayerShipSelector,
+        Emit,
     ] as const,
     step(controlState, target, movement, request, boarding, disabledTargets,
-        platform, entity) {
+        platform, entity, _player, emit) {
         if (platform !== 'browser' || controlState.get('board') !== 'start') {
             return;
         }
@@ -426,6 +428,7 @@ export const PlayerBoardingInputSystem = new System({
                 { text: 'Too far away to board.' });
             return;
         }
+        emit(SoundEvent, { id: 'nova:390' });
         entity.components.set(BoardingRequestComponent, {
             target: targetUuid,
             sequence: (request?.sequence ?? 0) + 1,

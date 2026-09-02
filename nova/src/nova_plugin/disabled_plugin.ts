@@ -43,6 +43,15 @@ export const DISABLE_ARMOR_FRACTION = 0.33;
 export const TOUGH_DISABLE_ARMOR_FRACTION = 0.10;
 const TOUGH_HULL_FLAG = 0x0010;
 
+/**
+ * In Escape Velocity Nova, disabled ships bleed forward momentum over time,
+ * decelerating to a manageable slow drift so players can match velocity
+ * and board them.
+ */
+export const DISABLED_DECELERATION_PER_SEC = 0.20;
+export const DISABLED_DRIFT_SPEED_FLOOR = 3.0;
+
+
 export const ShipDisabledEvent = new EcsEvent<{ damager: string }>(
     'ShipDisabledEvent');
 
@@ -239,14 +248,24 @@ export const DisabledPreMovementSystem = new System({
         PlatformResource,
         Optional(ArmorComponent),
         Optional(DestructionStartedComponent),
+        Optional(TimeResource),
     ] as const,
     step(disabled, entity, movement, physics, weapons, multiplayer, platform,
-        armor, destructionStarted) {
+        armor, destructionStarted, time) {
         if (!disabled || destructionStarted || armor && armor.current <= 0
             || !ownsSimulation(platform, multiplayer)) {
             return;
         }
         suppressMovementAndWeapons(entity, movement, physics, weapons);
+        if (time && time.delta_s > 0 && movement.velocity.length > 0) {
+            const currentSpeed = movement.velocity.length;
+            if (currentSpeed > DISABLED_DRIFT_SPEED_FLOOR) {
+                const decay = Math.max(0, 1 - DISABLED_DECELERATION_PER_SEC * time.delta_s);
+                const newSpeed = Math.max(DISABLED_DRIFT_SPEED_FLOOR, currentSpeed * decay);
+                movement.velocity = movement.velocity.normalize(newSpeed);
+            }
+            movement.targetSpeed = movement.velocity.length;
+        }
     },
 });
 

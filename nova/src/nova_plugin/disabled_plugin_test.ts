@@ -135,8 +135,10 @@ describe('disabled ship lifecycle', () => {
 
             world.step();
 
-            expect(movement.position).toEqual(new Position(112, 196));
-            expect(movement.velocity).toEqual(new Vector(12, -4));
+            expect(movement.position.x).toBeCloseTo(109.6, 6);
+            expect(movement.position.y).toBeCloseTo(196.8, 6);
+            expect(movement.velocity.x).toBeCloseTo(9.6, 6);
+            expect(movement.velocity.y).toBeCloseTo(-3.2, 6);
             expect(movement.rotation).toEqual(new Angle(Math.PI / 3));
         });
 
@@ -171,8 +173,10 @@ describe('disabled ship lifecycle', () => {
             world.step();
 
             const movement = ship.components.get(MovementStateComponent)!;
-            expect(movement.position).toEqual(new Position(112, 196));
-            expect(movement.velocity).toEqual(new Vector(12, -4));
+            expect(movement.position.x).toBeCloseTo(109.6, 6);
+            expect(movement.position.y).toBeCloseTo(196.8, 6);
+            expect(movement.velocity.x).toBeCloseTo(9.6, 6);
+            expect(movement.velocity.y).toBeCloseTo(-3.2, 6);
             expect(movement.rotation).toEqual(new Angle(Math.PI / 3));
             expect(movement.accelerating).toBe(0);
             expect(ship.components.has(JumpStateComponent)).toBeFalse();
@@ -263,5 +267,23 @@ describe('disabled ship lifecycle', () => {
 
         expect(ship.components.has(DisabledComponent)).toBeFalse();
         expect(ship.components.has(DisabledLifecycleComponent)).toBeFalse();
+    });
+
+    it('slows down a disabled ship over time to an approachable drift speed', async () => {
+        const world = await makeWorld();
+        const ship = combatShip();
+        const movement = ship.components.get(MovementStateComponent)!;
+        movement.velocity = new Vector(100, 0);
+        ship.components.set(DisabledComponent, true);
+        world.entities.set('ship', ship);
+
+        // Step 10 seconds of simulation
+        for (let i = 0; i < 10; i++) {
+            world.step();
+        }
+
+        // Velocity should have decayed from 100 down towards drift floor (3.0)
+        expect(movement.velocity.length).toBeLessThan(15);
+        expect(movement.velocity.length).toBeGreaterThanOrEqual(3.0);
     });
 });

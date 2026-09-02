@@ -78,7 +78,9 @@ export interface ClassicDialogConfig<TData> {
     background?: string;
     title?: string | ((data: TData) => string);
     titlePosition?: ClassicDialogPosition;
-    titleStyle?: Partial<PIXI.ITextStyle>;
+    titleStyle?:
+        | Partial<PIXI.ITextStyle>
+        | ((data: TData) => Partial<PIXI.ITextStyle>);
     subtitle?: string | ((data: TData) => string);
     subtitlePosition?: ClassicDialogPosition;
     sections?: ClassicDialogSection<TData>[];
@@ -127,7 +129,7 @@ export class ClassicDialog<TData> extends Menu<TData> {
         const titlePos = config.titlePosition || { x: 0, y: -68 };
         this.titleText.anchor.set(0.5, 0);
         this.titleText.position.set(titlePos.x, titlePos.y);
-        if (config.titleStyle) {
+        if (config.titleStyle && typeof config.titleStyle !== "function") {
             Object.assign(this.titleText.style, config.titleStyle);
         }
         this.container.addChild(this.titleText);
@@ -196,13 +198,15 @@ export class ClassicDialog<TData> extends Menu<TData> {
 
         const defaultBtn = (config.buttons || []).find((b) => b.isDefault);
         if (defaultBtn) {
-            controlsMap.buy = async () => {
+            const defaultAction = async () => {
                 if (defaultBtn.action) {
                     const res = await defaultBtn.action(this, this.input);
                     if (res !== undefined) this.customOutput = res;
                 }
                 this.closeWithResult();
             };
+            controlsMap.buy = defaultAction;
+            controlsMap.properties = defaultAction;
         }
 
         const cancelBtn = (config.buttons || []).find((b) => b.isCancel);
@@ -227,6 +231,10 @@ export class ClassicDialog<TData> extends Menu<TData> {
         this.controls.controls = controlsMap;
     }
 
+    getTitleText(): PIXI.Text {
+        return this.titleText;
+    }
+
     private closeWithResult() {
         if (this.customOutput !== undefined) {
             this.input = this.customOutput;
@@ -244,6 +252,9 @@ export class ClassicDialog<TData> extends Menu<TData> {
             this.titleText.text = this.config.title(input);
         } else if (this.config.title) {
             this.titleText.text = this.config.title;
+        }
+        if (typeof this.config.titleStyle === "function") {
+            Object.assign(this.titleText.style, this.config.titleStyle(input));
         }
 
         // Render subtitle

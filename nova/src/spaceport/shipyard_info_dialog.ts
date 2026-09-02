@@ -3,8 +3,7 @@ import * as PIXI from 'pixi.js';
 import { Observable } from 'rxjs';
 import { GameData } from '../client/gamedata/GameData';
 import { ControlEvent } from '../nova_plugin/controls_plugin';
-import { Button } from './button';
-import { Menu } from './menu';
+import { ClassicDialog } from './classic_dialog';
 import { FONT } from './outfitter';
 import {
     pictDisplayScale,
@@ -15,92 +14,99 @@ import {
     shipyardInfoWeaponsColumn,
 } from './shipyard_info_content';
 
+// Retail PICT 8507 "Ship description + pict"
 const BACKGROUND = 'nova:8507';
 const DONE_BUTTON = { x: 120, y: 218 };
 
-export class ShipyardInfoDialog extends Menu<ShipData> {
-    private readonly title = new PIXI.Text('', {
-        fontFamily: 'Geneva', fontSize: 12, fill: 0xffffff, align: 'center',
-    });
-    private readonly pictContainer = new PIXI.Container();
-    private readonly leftSpecs = new PIXI.Text('', FONT.normal);
-    private readonly middleSpecs = new PIXI.Text('', FONT.normal);
-    private readonly weaponsSpecs = new PIXI.Text('', FONT.normal);
-
+export class ShipyardInfoDialog extends ClassicDialog<ShipData> {
     constructor(
         gameData: GameData,
         controlEvents: Observable<ControlEvent>,
     ) {
-        super(gameData, BACKGROUND, controlEvents);
-        this.title.anchor.set(0.5, 0);
-        this.title.position.set(0, -248);
-
-        this.pictContainer.position.set(0, -75);
-
-        this.leftSpecs.position.set(-280, 95);
-        this.middleSpecs.position.set(-90, 95);
-        this.weaponsSpecs.position.set(100, 95);
-
-        this.container.addChild(
-            this.title,
-            this.pictContainer,
-            this.leftSpecs,
-            this.middleSpecs,
-            this.weaponsSpecs,
-        );
-
-        const done = new Button(gameData, 'Done', 50, DONE_BUTTON);
-        this.addButtons({ done });
-        done.click.subscribe(this.done.bind(this));
-
-        this.controls.controls = {
-            depart: this.done.bind(this),
-            buy: this.done.bind(this),
-            properties: this.done.bind(this),
-        };
-    }
-
-    override async show(ship: ShipData): Promise<ShipData> {
-        await this.buildPromise;
-        await this.renderShip(ship);
-        return super.show(ship);
-    }
-
-    private async renderShip(ship: ShipData) {
-        this.title.text = shipyardInfoTitle(ship);
-        this.leftSpecs.text = shipyardInfoLeftColumn(ship);
-        this.middleSpecs.text = shipyardInfoMiddleColumn(ship);
-        try {
-            this.weaponsSpecs.text = await shipyardInfoWeaponsColumn(
-                ship,
-                this.gameData.data.Outfit!,
-                this.gameData.data.Weapon!,
-            );
-        } catch (error) {
-            console.warn('Failed to load shipyard weapons info', error);
-            this.weaponsSpecs.text = 'Standard Weapons\n\nNone';
-        }
-
-        this.pictContainer.removeChildren();
-        const pictId = shipyardInfoPictId(ship);
-        try {
-            const sprite = await this.gameData.spriteFromPictAsync(pictId);
-            sprite.anchor.set(0.5);
-            const scale = pictDisplayScale(sprite.width, sprite.height);
-            sprite.scale.set(scale);
-            this.pictContainer.addChild(sprite);
-        } catch (error) {
-            console.warn(`Failed to load shipyard info pict ${pictId}`, error);
-            if (ship.pict && ship.pict !== pictId) {
-                try {
-                    const fallback = await this.gameData.spriteFromPictAsync(ship.pict);
-                    fallback.anchor.set(0.5);
-                    fallback.scale.set(pictDisplayScale(fallback.width, fallback.height));
-                    this.pictContainer.addChild(fallback);
-                } catch {
-                    // Ignore missing fallback
-                }
-            }
-        }
+        super(gameData, controlEvents, {
+            background: BACKGROUND,
+            title: ship => shipyardInfoTitle(ship),
+            titlePosition: { x: 0, y: -248 },
+            titleStyle: {
+                fontFamily: 'Geneva, Chicago, Arial, sans-serif',
+                fontSize: 12,
+                fontWeight: 'bold',
+                fill: 0xffffff,
+                align: 'center',
+            },
+            sections: [
+                {
+                    type: 'text',
+                    id: 'leftSpecs',
+                    position: { x: -280, y: 95 },
+                    content: ship => shipyardInfoLeftColumn(ship),
+                    style: FONT.normal,
+                },
+                {
+                    type: 'text',
+                    id: 'middleSpecs',
+                    position: { x: -90, y: 95 },
+                    content: ship => shipyardInfoMiddleColumn(ship),
+                    style: FONT.normal,
+                },
+                {
+                    type: 'custom',
+                    id: 'weaponsSpecs',
+                    render: async (container, ship, gData) => {
+                        let text = 'Standard Weapons\n\nNone';
+                        try {
+                            text = await shipyardInfoWeaponsColumn(
+                                ship,
+                                gData.data.Outfit!,
+                                gData.data.Weapon!,
+                            );
+                        } catch (error) {
+                            console.warn('Failed to load shipyard weapons info', error);
+                        }
+                        const label = new PIXI.Text(text, FONT.normal);
+                        label.position.set(100, 95);
+                        container.addChild(label);
+                    },
+                },
+                {
+                    type: 'custom',
+                    id: 'shipPict',
+                    render: async (container, ship, gData) => {
+                        const pictContainer = new PIXI.Container();
+                        pictContainer.position.set(0, -75);
+                        const pictId = shipyardInfoPictId(ship);
+                        try {
+                            const sprite = await gData.spriteFromPictAsync(pictId);
+                            sprite.anchor.set(0.5);
+                            sprite.scale.set(pictDisplayScale(sprite.width, sprite.height));
+                            pictContainer.addChild(sprite);
+                        } catch (error) {
+                            console.warn(`Failed to load shipyard info pict ${pictId}`, error);
+                            if (ship.pict && ship.pict !== pictId) {
+                                try {
+                                    const fallback = await gData.spriteFromPictAsync(ship.pict);
+                                    fallback.anchor.set(0.5);
+                                    fallback.scale.set(pictDisplayScale(fallback.width, fallback.height));
+                                    pictContainer.addChild(fallback);
+                                } catch {
+                                    // Ignore missing fallback
+                                }
+                            }
+                        }
+                        container.addChild(pictContainer);
+                    },
+                },
+            ],
+            buttons: [
+                {
+                    id: 'done',
+                    label: 'Done',
+                    width: 50,
+                    position: DONE_BUTTON,
+                    isDefault: true,
+                    isCancel: true,
+                },
+            ],
+        });
     }
 }
