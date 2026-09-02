@@ -39,7 +39,7 @@ class FakeContainer extends FakeDisplayObject {
 
 const asContainer = (c: FakeContainer) => c as unknown as PIXI.Container;
 const asDisplayObject = (o: FakeDisplayObject) =>
-    o as unknown as PIXI.DisplayObject;
+    o as unknown as PIXI.Container;
 
 describe('managed graphic', () => {
     it('detaches without destroying so the object can be reused', () => {

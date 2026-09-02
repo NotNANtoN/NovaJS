@@ -524,9 +524,7 @@ export class Spaceport extends Menu<Entity> {
         else {
             const standardLandscape = new PIXI.Container();
             const background = new PIXI.Graphics();
-            background.beginFill(0x000000);
-            background.drawRect(0, 0, LANDSCAPE_WIDTH, LANDSCAPE_HEIGHT);
-            background.endFill();
+            background.rect(0, 0, LANDSCAPE_WIDTH, LANDSCAPE_HEIGHT).fill(0x000000);
             standardLandscape.addChild(background);
 
             const planetGraphic = new AnimationGraphic({

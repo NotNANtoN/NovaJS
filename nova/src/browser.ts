@@ -78,25 +78,10 @@ const gameData = new GameData();
 (window as any).gameData = gameData;
 (window as any).PIXI = PIXI;
 
-const pixelRatio = window.devicePixelRatio || 1;
-PIXI.settings.RESOLUTION = pixelRatio;
-PIXI.BaseTexture.defaultOptions.scaleMode = PIXI.SCALE_MODES.LINEAR;
-
-// TODO: Using WebGL 1 (instead of 2) seems to make the game smoother, but
-// this will likely change in the future.
-//PIXI.settings.PREFER_ENV = PIXI.ENV.WEBGL2;
-const app = new PIXI.Application({
-    width: window.innerWidth,
-    height: window.innerHeight,
-    autoDensity: true,
-    // Keep the back buffer readable for diagnostics and automated probes.
-    preserveDrawingBuffer: true,
-});
+const app = new PIXI.Application();
 
 (window as any).app = app;
 (window as any).novaTitleMusicState = getTitleMusicState;
-document.body.appendChild(app.view as any);
-startTitleMusicOnGesture();
 
 const channel = new SocketChannelClient({});
 const communicator = new CommunicatorClient(channel);
@@ -655,6 +640,19 @@ window.addEventListener('keydown', event => {
 }, true);
 
 async function bootstrap() {
+    const pixelRatio = window.devicePixelRatio || 1;
+    PIXI.TextureStyle.defaultOptions.scaleMode = 'linear';
+    await app.init({
+        width: window.innerWidth,
+        height: window.innerHeight,
+        resolution: pixelRatio,
+        autoDensity: true,
+        preserveDrawingBuffer: true,
+        preference: 'webgpu',
+    });
+    document.body.appendChild(app.canvas);
+    startTitleMusicOnGesture();
+
     [compatibilityProfile, controlSettings] = await Promise.all([
         loadCompatibilityProfile(),
         loadControlSettings(),

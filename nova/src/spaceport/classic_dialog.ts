@@ -30,7 +30,7 @@ export type ClassicDialogTextSection<TData> = {
     id?: string;
     position: ClassicDialogPosition;
     content: string | ((data: TData) => string);
-    style?: Partial<PIXI.ITextStyle>;
+    style?: PIXI.TextStyleOptions;
     width?: number;
 };
 
@@ -79,8 +79,8 @@ export interface ClassicDialogConfig<TData> {
     title?: string | ((data: TData) => string);
     titlePosition?: ClassicDialogPosition;
     titleStyle?:
-        | Partial<PIXI.ITextStyle>
-        | ((data: TData) => Partial<PIXI.ITextStyle>);
+        | PIXI.TextStyleOptions
+        | ((data: TData) => PIXI.TextStyleOptions);
     subtitle?: string | ((data: TData) => string);
     subtitlePosition?: ClassicDialogPosition;
     sections?: ClassicDialogSection<TData>[];
@@ -148,12 +148,12 @@ export class ClassicDialog<TData> extends Menu<TData> {
             const sectionId = sec.id || `section_${i}`;
 
             if (sec.type === "text") {
-                const style: Partial<PIXI.ITextStyle> = {
+                const style: PIXI.TextStyleOptions = {
                     ...CLASSIC_MAC_FONT,
                     ...(sec.width ? { wordWrap: true, wordWrapWidth: sec.width } : {}),
                     ...(sec.style || {}),
                 };
-                const textNode = new PIXI.Text("", style);
+                const textNode = new PIXI.Text({ text: "", style });
                 textNode.position.set(sec.position.x, sec.position.y);
                 this.container.addChild(textNode);
                 this.sectionTexts.set(sectionId, textNode);

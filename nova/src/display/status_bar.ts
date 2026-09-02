@@ -95,7 +95,7 @@ class StatusBar {
     private text: { [index: string]: PIXI.Text } = {};
 
     constructor(private statusBarData: StatusBarData, private gameData: GameData,
-                private renderer: PIXI.Renderer | PIXI.IRenderer) {
+                private renderer: PIXI.Renderer) {
         this.buildPromise = this.build();
         this.container.name = 'StatusBar';
     }
@@ -137,10 +137,9 @@ class StatusBar {
         this.landingMessageContainer.position.set(7, 405);
         const background = new PIXI.Graphics();
         background.name = 'LandingMessageBackground';
-        background.beginFill(0x080808, 0.82);
-        background.lineStyle(1, this.statusBarData.colors.dimText, 0.8);
-        background.drawRoundedRect(0, 0, Math.max(80, this.width - 14), 76, 4);
-        background.endFill();
+        background.roundRect(0, 0, Math.max(80, this.width - 14), 76, 4)
+            .fill({ color: 0x080808, alpha: 0.82 })
+            .stroke({ width: 1, color: this.statusBarData.colors.dimText, alpha: 0.8 });
         this.landingMessage = new PIXI.Text('', {
             fontFamily: 'Geneva',
             fontSize: 11,
@@ -354,13 +353,7 @@ class StatusBar {
 
         if (pixiPos.x <= radarSize.x && pixiPos.x >= 0 &&
             pixiPos.y <= radarSize.y && pixiPos.y >= 0) {
-            // TODO: Make this work with any sizes
-            this.radar.moveTo(pixiPos.x, pixiPos.y);
-            this.radar.beginFill(color);
-            this.radar.lineTo(pixiPos.x + size, pixiPos.y);
-            this.radar.lineTo(pixiPos.x + size, pixiPos.y + size);
-            this.radar.lineTo(pixiPos.x, pixiPos.y + size);
-            this.radar.endFill()
+            this.radar.rect(pixiPos.x, pixiPos.y, size, size).fill(color);
         }
     }
 
@@ -369,9 +362,9 @@ class StatusBar {
         var size = [dataArea.size[0], dataArea.size[1]];
         pos[1] += size[1] / 2;
 
-        this.statsGraphics.lineStyle(size[1], color);
         this.statsGraphics.moveTo(pos[0], pos[1]);
         this.statsGraphics.lineTo(pos[0] + size[0] * fullness, pos[1]);
+        this.statsGraphics.stroke({ width: size[1], color });
     }
 
     drawStats(shield: Stat, armor: Stat, fuel?: FuelGauge,
@@ -417,9 +410,9 @@ class StatusBar {
                 : this.statusBarData.colors.fuelPartial;
             const x = area.position[0] + index * (width + gap);
             const length = filled ? width : width * jumps.partial;
-            this.statsGraphics.lineStyle(area.size[1], color);
             this.statsGraphics.moveTo(x, y);
             this.statsGraphics.lineTo(x + length, y);
+            this.statsGraphics.stroke({ width: area.size[1], color });
         }
     }
 
@@ -563,11 +556,7 @@ class StatusBar {
         const shipContainer = shipGraphic.container;
         const { x: width, y: height } = shipGraphic.size;
         if (!this.targetRenderTexture) {
-            const baseRenderTexture = new PIXI.BaseRenderTexture({
-                width, height,
-            });
-            this.targetRenderTexture = new PIXI.RenderTexture(
-                baseRenderTexture);
+            this.targetRenderTexture = PIXI.RenderTexture.create({ width, height });
             this.targetRenderTextureSize = { width, height };
         } else if (this.targetRenderTextureSize.width !== width
             || this.targetRenderTextureSize.height !== height) {
@@ -575,10 +564,9 @@ class StatusBar {
             this.targetRenderTextureSize = { width, height };
         }
 
-        shipContainer.setTransform();
         shipContainer.position.set(width / 2, height / 2);
         const renderTexture = this.targetRenderTexture;
-        this.renderer.render(shipContainer, { renderTexture });
+        this.renderer.render({ container: shipContainer, target: renderTexture });
         this.targetSprite.texture = renderTexture;
         this.layoutTargetSprite(width, height, hasSubtitle);
         this.targetSprite.visible = true;

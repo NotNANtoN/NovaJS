@@ -17,7 +17,7 @@ export class LandingNoticeDialog extends ClassicDialog<MissionNotice> {
             background: BACKGROUND,
             title: notice => notice.kind === 'success' ? 'Mission Complete' : 'Mission Notice',
             titlePosition: { x: 0, y: -68 },
-            titleStyle: notice => ({
+            titleStyle: (notice: MissionNotice) => ({
                 fontFamily: 'Geneva, Chicago, Arial, sans-serif',
                 fontSize: 13,
                 fontWeight: 'bold',

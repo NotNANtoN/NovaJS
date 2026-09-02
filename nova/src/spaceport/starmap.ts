@@ -91,9 +91,7 @@ function addMaskedText(
     text.position.set(region.x, region.y);
     text.style.wordWrapWidth = region.width;
     const mask = new PIXI.Graphics();
-    mask.beginFill(0xffffff);
-    mask.drawRect(region.x, region.y, region.width, region.height);
-    mask.endFill();
+    mask.rect(region.x, region.y, region.width, region.height).fill(0xffffff);
     text.mask = mask;
     owner.addChild(mask, text);
     return text;
@@ -202,32 +200,23 @@ function drawSystem(
     const inColor = inhabited ? 0x000044 : 0x000000;
     const marker = systemMarkerStyle(system.id, currentSystem);
     if (marker.current) {
-        graphics.lineStyle(
-            marker.ringWidth ?? 2,
-            marker.ringColor ?? 0xffffff,
-        );
-        graphics.beginFill(0x000000, 0);
-        graphics.drawCircle(0, 0, 4.5 * scale);
-        graphics.endFill();
+        graphics.circle(0, 0, 4.5 * scale).stroke({
+            width: marker.ringWidth ?? 2,
+            color: marker.ringColor ?? 0xffffff,
+        });
     }
-    graphics.lineStyle(1, outColor);
-    graphics.beginFill(outColor);
-    graphics.drawCircle(0, 0, 2.7 * scale);
-    graphics.beginFill(inColor);
-    graphics.drawCircle(0, 0, 1.8 * scale);
-    graphics.endFill();
+    graphics.circle(0, 0, 2.7 * scale).fill(outColor).stroke({ width: 1, color: outColor });
+    graphics.circle(0, 0, 1.8 * scale).fill(inColor);
 
     if (playerMarkers && playerMarkers.length > 0) {
         const hasSos = playerMarkers.some(p => p.kind === 'sos');
         const markerColor = hasSos ? 0xff4400 : 0x28ffaa;
-        graphics.lineStyle(1, 0x000000);
-        graphics.beginFill(markerColor);
         // Draw player chevron / beacon symbol on top right of the system circle
         graphics.moveTo(5 * scale, -5 * scale);
         graphics.lineTo(8.5 * scale, -8.5 * scale);
         graphics.lineTo(8.5 * scale, -2.5 * scale);
         graphics.closePath();
-        graphics.endFill();
+        graphics.fill(markerColor).stroke({ width: 1, color: 0x000000 });
     }
 
     if (missionMarker) {
@@ -236,8 +225,6 @@ function drawSystem(
             : (missionMarker === 'cargo'
                 ? 0xffaa00 // Amber Orange for cargo / delivery
                 : 0xff2222); // Vivid Red for storyline / special
-        graphics.lineStyle(1, 0x000000);
-        graphics.beginFill(markerColor);
         if (missionMarker === 'passenger') {
             // Diamond for passenger
             graphics.moveTo(0, -9.5 * scale);
@@ -259,7 +246,7 @@ function drawSystem(
             graphics.lineTo(4.5 * scale, -9.8 * scale);
             graphics.closePath();
         }
-        graphics.endFill();
+        graphics.fill(markerColor).stroke({ width: 1, color: 0x000000 });
     }
 }
 
@@ -519,7 +506,7 @@ class SystemGraph {
     private updateTransform() {
         // Since the map is cached as a bitmap, this updates the positions
         // of the system circles so they can be clicked again.
-        this.mapContainer.containerUpdateTransform();
+        this.mapContainer.updateLocalTransform();
     }
 
     private onDragEnd() {
@@ -533,7 +520,7 @@ class SystemGraph {
         }
         event.preventDefault();
         event.stopPropagation();
-        event.nativeEvent.preventDefault();
+        (event.nativeEvent as Event)?.preventDefault?.();
         const nextScale = mapScaleForWheel(this.scale, event.deltaY);
         if (nextScale === this.scale) {
             return;
@@ -593,16 +580,20 @@ class SystemGraph {
         this.territoryField = computeTerritoryField(this.territoryPoints);
         if (this.territorySprite) {
             this.territoryContainer.removeChild(this.territorySprite);
-            this.territorySprite.destroy({ texture: true, baseTexture: true });
+            this.territorySprite.destroy({ texture: true });
             this.territorySprite = undefined;
         }
         const field = this.territoryField;
         if (field) {
-            const texture = PIXI.Texture.fromBuffer(
-                new Uint8Array(field.pixels), field.width, field.height);
+            const source = new PIXI.BufferImageSource({
+                resource: new Uint8Array(field.pixels),
+                width: field.width,
+                height: field.height,
+            });
             // Linear filtering is what turns the coarse field into the
             // smooth gradient between neighbouring governments.
-            texture.baseTexture.scaleMode = PIXI.SCALE_MODES.LINEAR;
+            source.style.scaleMode = 'linear';
+            const texture = new PIXI.Texture({ source });
             const sprite = new PIXI.Sprite(texture);
             sprite.alpha = TERRITORY_ALPHA;
             this.territorySprite = sprite;
@@ -684,9 +675,11 @@ class SystemGraph {
 
     private drawLink(a: SystemData, b: SystemData,
         color = GREY, thickness = 1) {
-        this.graphics.lineStyle(thickness, color);
-        this.graphics.moveTo(...this.scalePos(a.position));
-        this.graphics.lineTo(...this.scalePos(b.position));
+        const posA = this.scalePos(a.position);
+        const posB = this.scalePos(b.position);
+        this.graphics.moveTo(posA[0], posA[1]);
+        this.graphics.lineTo(posB[0], posB[1]);
+        this.graphics.stroke({ width: thickness, color });
     }
 
     private computeShortestPaths() {

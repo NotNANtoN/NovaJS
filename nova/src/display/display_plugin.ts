@@ -69,9 +69,7 @@ const DeathOverlaySystem = new System({
             const overlay = new PIXI.Container();
             overlay.name = 'PlayerDeathOverlay';
             const background = new PIXI.Graphics();
-            background.beginFill(0x000000, 0.65);
-            background.drawRect(0, 0, window.innerWidth, window.innerHeight);
-            background.endFill();
+            background.rect(0, 0, window.innerWidth, window.innerHeight).fill({ color: 0x000000, alpha: 0.65 });
             const text = new PIXI.Text(death?.message ?? 'You are destroyed', {
                 fontFamily: 'Geneva',
                 fontSize: 22,
@@ -113,9 +111,7 @@ const JumpTransitionOverlaySystem = new System({
         const flash = existing ?? new PIXI.Graphics();
         flash.name = 'PlayerJumpTransition';
         flash.clear();
-        flash.beginFill(0xffffff, alpha);
-        flash.drawRect(0, 0, window.innerWidth, window.innerHeight);
-        flash.endFill();
+        flash.rect(0, 0, window.innerWidth, window.innerHeight).fill({ color: 0xffffff, alpha });
         if (!existing) {
             stage.addChild(flash);
         }
@@ -144,7 +140,6 @@ function drawHostileLockCorners(
     const inset = 12;
     const arm = Math.min(56, Math.max(28, Math.min(width, height) * 0.08));
     graphics.clear();
-    graphics.lineStyle(4, 0xff2020, pulse);
     graphics.moveTo(inset, inset + arm);
     graphics.lineTo(inset, inset);
     graphics.lineTo(inset + arm, inset);
@@ -157,6 +152,7 @@ function drawHostileLockCorners(
     graphics.moveTo(inset + arm, height - inset);
     graphics.lineTo(inset, height - inset);
     graphics.lineTo(inset, height - inset - arm);
+    graphics.stroke({ width: 4, color: 0xff2020, alpha: pulse });
 }
 
 const MissileWarningOverlaySystem = new System({

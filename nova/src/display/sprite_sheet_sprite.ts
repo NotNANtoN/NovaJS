@@ -26,7 +26,7 @@ export class SpriteSheetSprite {
         this.image = image;
         this.textureSet = this.image.frames.normal;
         this.wrappedRotation = 0;
-        this.pixiSprite.blendMode = image.blendMode;
+        this.pixiSprite.blendMode = image.blendMode as any;
 
         this.pixiSprite.anchor.x = 0.5;
         this.pixiSprite.anchor.y = 0.5;

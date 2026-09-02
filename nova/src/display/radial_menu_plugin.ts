@@ -498,9 +498,7 @@ export class RadialMenu {
         const arc = (Math.PI * 2) / numOptions;
 
         this.bg.clear();
-        this.bg.beginFill(0x000000, 0.4);
-        this.bg.drawRect(0, 0, window.innerWidth, window.innerHeight);
-        this.bg.endFill();
+        this.bg.rect(0, 0, window.innerWidth, window.innerHeight).fill({ color: 0x000000, alpha: 0.4 });
 
         this.wheel.clear();
         this.icons.clear();
@@ -512,13 +510,11 @@ export class RadialMenu {
             const endAngle = (i + 1) * arc - Math.PI / 2;
             const isHovered = i === this.selectedIndex;
 
-            this.wheel.beginFill(isHovered ? 0x6e201c : 0x181414, isHovered ? 0.95 : 0.85);
-            this.wheel.lineStyle(isHovered ? 2 : 1, isHovered ? 0xffcc88 : 0x4d4943, 0.9);
-
             this.wheel.arc(this.center.x, this.center.y, this.outerRadius, startAngle, endAngle);
             this.wheel.arc(this.center.x, this.center.y, this.innerRadius, endAngle, startAngle, true);
             this.wheel.closePath();
-            this.wheel.endFill();
+            this.wheel.fill({ color: isHovered ? 0x6e201c : 0x181414, alpha: isHovered ? 0.95 : 0.85 });
+            this.wheel.stroke({ width: isHovered ? 2 : 1, color: isHovered ? 0xffcc88 : 0x4d4943, alpha: 0.9 });
 
             const midAngle = startAngle + arc / 2;
             const iconRadius = 82;
@@ -541,10 +537,9 @@ export class RadialMenu {
         }
 
         // Draw center
-        this.centerCircle.beginFill(0x0e0c0c, 0.95);
-        this.centerCircle.lineStyle(2, this.selectedIndex >= 0 ? 0xffbb55 : 0x666666, 1);
-        this.centerCircle.drawCircle(this.center.x, this.center.y, this.innerRadius);
-        this.centerCircle.endFill();
+        this.centerCircle.circle(this.center.x, this.center.y, this.innerRadius)
+            .fill({ color: 0x0e0c0c, alpha: 0.95 })
+            .stroke({ width: 2, color: this.selectedIndex >= 0 ? 0xffbb55 : 0x666666, alpha: 1 });
 
         this.centerTitle.position.set(this.center.x, this.center.y);
         this.centerSub.position.set(this.center.x, this.center.y);

@@ -87,7 +87,7 @@ const commonOptions = {
         __BUILD_DATE__: JSON.stringify(commitDate),
     },
     logLevel: "info",
-    plugins: [packedPngPlugin(projectRoot), dedupePixiPlugin],
+    plugins: [packedPngPlugin(projectRoot)],
     resolveExtensions: [".mjs", ".js", ".ts", ".tsx", ".jsx"],
     sourcemap: true,
     sourcesContent: true,

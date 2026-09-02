@@ -168,10 +168,10 @@ export const JumpEffectSystem = new System({
             const wakeGraphics = wakeHandle.root as PIXI.Graphics;
             const alpha = (1 - progress) * 0.75;
             const radius = 20 + progress * 70;
-            wakeGraphics.lineStyle(2 + (1 - progress) * 2, 0x55ccff, alpha);
-            wakeGraphics.drawEllipse(movement.position.x, movement.position.y, radius * 0.75, radius);
-            wakeGraphics.lineStyle(1, 0xffffff, alpha * 0.9);
-            wakeGraphics.drawCircle(movement.position.x, movement.position.y, radius * 0.35);
+            wakeGraphics.ellipse(movement.position.x, movement.position.y, radius * 0.75, radius)
+                .stroke({ width: 2 + (1 - progress) * 2, color: 0x55ccff, alpha });
+            wakeGraphics.circle(movement.position.x, movement.position.y, radius * 0.35)
+                .stroke({ width: 1, color: 0xffffff, alpha: alpha * 0.9 });
         }
     },
 });

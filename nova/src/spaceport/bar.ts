@@ -18,7 +18,7 @@ import { MenuControls } from './menu_controls';
 export class Bar extends MissionBoard {
     private readonly hub = new PIXI.Container();
     private readonly inheritedVisibility:
-        ReadonlyMap<PIXI.DisplayObject, boolean>;
+        ReadonlyMap<PIXI.Container, boolean>;
     private readonly content = new PIXI.Text('', {
         fontFamily: 'Geneva',
         fontSize: 10,
@@ -60,14 +60,12 @@ export class Bar extends MissionBoard {
 
         this.content.position.set(BAR_LAYOUT.text.x, BAR_LAYOUT.text.y);
         const mask = new PIXI.Graphics();
-        mask.beginFill(0xffffff);
-        mask.drawRect(
+        mask.rect(
             BAR_LAYOUT.text.x,
             BAR_LAYOUT.text.y,
             BAR_LAYOUT.text.width,
             BAR_LAYOUT.text.height,
-        );
-        mask.endFill();
+        ).fill(0xffffff);
         this.content.mask = mask;
         this.hub.addChild(mask, this.content);
 

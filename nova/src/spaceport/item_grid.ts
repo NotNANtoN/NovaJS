@@ -80,15 +80,12 @@ export class ItemTile<I extends Item> {
 
     draw() {
         this.graphics.clear();
+        this.graphics.rect(0, 0, TILE_SIZE[0], TILE_SIZE[1]).fill(0x000000);
         if (this.active) {
-            this.graphics.lineStyle(...this.brightStyle);
+            this.graphics.stroke({ width: this.brightStyle[0], color: this.brightStyle[1] });
+        } else {
+            this.graphics.stroke({ width: this.dimStyle[0], color: this.dimStyle[1] });
         }
-        else {
-            this.graphics.lineStyle(...this.dimStyle);
-        }
-
-        this.graphics.beginFill(0x000000);
-        this.graphics.drawRect(0, 0, TILE_SIZE[0], TILE_SIZE[1]);
     }
 
     hide() {

@@ -119,9 +119,7 @@ function addViewportMask(
 ) {
     const mask = new PIXI.Graphics();
     const position = panelPosition(layout, region);
-    mask.beginFill(0xffffff);
-    mask.drawRect(position.x, position.y, region.width, region.height);
-    mask.endFill();
+    mask.rect(position.x, position.y, region.width, region.height).fill(0xffffff);
     target.mask = mask;
     owner.addChild(mask, target);
 }
@@ -471,7 +469,7 @@ export class MissionInfo extends Menu<Entity> {
         });
         const heights = rows.map(row => Math.max(
             14,
-            PIXI.TextMetrics.measureText(row, this.list.style).height + 3));
+            PIXI.CanvasTextMetrics.measureText(row, this.list.style).height + 3));
         const page = selectionPage(
             heights, this.selectionIndex, this.firstVisible,
             MISSION_INFO_LAYOUT.list.height);
@@ -962,7 +960,7 @@ export abstract class MissionBoard extends Menu<Entity> {
 
     /** Trims text that would spill past the bottom of the list pane. */
     private fitToListPane(text: string): string {
-        const heights = text.split('\n').map(line => PIXI.TextMetrics
+        const heights = text.split('\n').map(line => PIXI.CanvasTextMetrics
             .measureText(line || ' ', this.list.style).height);
         return fitLinesToHeight(text, heights, this.listTextHeight);
     }
@@ -1013,7 +1011,7 @@ export abstract class MissionBoard extends Menu<Entity> {
         });
         const heights = rows.map(row => Math.max(
             14,
-            PIXI.TextMetrics.measureText(row, this.list.style).height + 3));
+            PIXI.CanvasTextMetrics.measureText(row, this.list.style).height + 3));
         const offer = this.offers[this.selectionIndex];
         if (!offer) {
             return;
@@ -1054,7 +1052,7 @@ export abstract class MissionBoard extends Menu<Entity> {
                 + (offer.mission.cargo ? `  Cargo: ${offer.mission.cargo}` : '');
         if (this.layout.detail) {
             const availableHeight = this.layout.detail.height - STATUS_HEIGHT - 4;
-            const heights = detailText.split('\n').map(line => PIXI.TextMetrics
+            const heights = detailText.split('\n').map(line => PIXI.CanvasTextMetrics
                 .measureText(line || ' ', this.detail.style).height);
             this.detail.text = fitLinesToHeight(detailText, heights, availableHeight);
         } else {

@@ -31,13 +31,15 @@ const ChatHudMessagesResource =
 const CHAT_DISPLAY_DURATION_MS = 8_000;
 const CHAT_FADE_DURATION_MS = 1_500;
 
-const CHAT_FONT: Partial<PIXI.ITextStyle> = {
+const CHAT_FONT: PIXI.TextStyleOptions = {
     fontFamily: "Geneva, Arial, sans-serif",
     fontSize: 12,
     fill: 0xffffff,
-    stroke: 0x000000,
-    strokeThickness: 3,
-    lineJoin: "round",
+    stroke: {
+        color: 0x000000,
+        width: 3,
+        join: "round",
+    },
     wordWrap: true,
     wordWrapWidth: 380,
 };
@@ -94,34 +96,31 @@ export const ChatReceiveSystem = new System({
                 font = {
                     ...CHAT_FONT,
                     fill: 0xff6633,
-                    stroke: 0x220000,
-                    strokeThickness: 4,
+                    stroke: { color: 0x220000, width: 4, join: 'round' },
                 };
             } else if (entry.kind === 'coords') {
                 formatted = `[NAV] ${sender}: ${entry.text}`;
                 font = {
                     ...CHAT_FONT,
                     fill: 0x44ddff,
-                    stroke: 0x001122,
+                    stroke: { color: 0x001122, width: 3, join: 'round' },
                 };
             } else if (entry.kind === 'security') {
                 formatted = `[SEC] ${sender}: ${entry.text}`;
                 font = {
                     ...CHAT_FONT,
                     fill: 0xffdd44,
-                    stroke: 0x221100,
-                    strokeThickness: 3,
+                    stroke: { color: 0x221100, width: 3, join: 'round' },
                 };
             } else if (entry.kind === 'chatter') {
                 formatted = `[COMMS] ${sender}: "${entry.text}"`;
                 font = {
                     ...CHAT_FONT,
                     fill: 0x88eebb,
-                    stroke: 0x002211,
-                    strokeThickness: 3,
+                    stroke: { color: 0x002211, width: 3, join: 'round' },
                 };
             }
-            const textSprite = new PIXI.Text(formatted, font);
+            const textSprite = new PIXI.Text({ text: formatted, style: font });
             container.addChild(textSprite);
 
             while (hudMessages.length >= MAX_HUD_MESSAGES) {

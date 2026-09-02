@@ -42,7 +42,6 @@ const BeamDisplaySystem = new System({
         const lightningAmplitudeScale = 2;
         if (lightningDensity > 0) {
             beamGraphics.moveTo(movement.position.x, movement.position.y);
-            beamGraphics.lineStyle(width, beamColor);
             const direction = destination.subtract(movement.position);
             for (let i = 1; i <= lightningDensity; i++) {
                 const center = movement.position.add(direction.scale(i / (lightningDensity + 2)));
@@ -54,27 +53,29 @@ const BeamDisplaySystem = new System({
                 beamGraphics.lineTo(point.x, point.y);
             }
             beamGraphics.lineTo(destination.x, destination.y);
+            beamGraphics.stroke({ width, color: beamColor });
         } else {
-
-            // Corona width is 1 with no falloff
-            // higher falloff is faster
             const coronaScale = 2 * 16;
             const coronaWidth = coronaScale / coronaFalloff;
             const coronaSteps = coronaWidth / 2;
             if (coronaFalloff >= 2) {
                 for (let i = 0; i < coronaSteps; i++) {
-                    beamGraphics.lineStyle(width + 2 + i * coronaWidth / coronaSteps, coronaColor, 1 / coronaSteps);
                     beamGraphics.moveTo(movement.position.x, movement.position.y);
                     beamGraphics.lineTo(destination.x, destination.y);
+                    beamGraphics.stroke({
+                        width: width + 2 + i * coronaWidth / coronaSteps,
+                        color: coronaColor,
+                        alpha: 1 / coronaSteps,
+                    });
                 }
             } else {
-                beamGraphics.lineStyle(width + 2, coronaColor);
                 beamGraphics.moveTo(movement.position.x, movement.position.y);
                 beamGraphics.lineTo(destination.x, destination.y);
+                beamGraphics.stroke({ width: width + 2, color: coronaColor });
             }
             beamGraphics.moveTo(movement.position.x, movement.position.y);
-            beamGraphics.lineStyle(width, beamColor);
             beamGraphics.lineTo(destination.x, destination.y);
+            beamGraphics.stroke({ width, color: beamColor });
         }
     },
     after: [ClearBeams, BeamSystem, BeamClippingSystem],

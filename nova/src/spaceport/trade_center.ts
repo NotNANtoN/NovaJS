@@ -79,10 +79,10 @@ const TRADE_FONT = {
 function addPane(
     owner: PIXI.Container,
     region: TradeRect,
-    style: PIXI.TextStyle | Partial<PIXI.ITextStyle>,
+    style: PIXI.TextStyle | PIXI.TextStyleOptions,
     horizontal: 'left' | 'center' | 'right' = 'left',
 ): PIXI.Text {
-    const text = new PIXI.Text('', style);
+    const text = new PIXI.Text({ text: '', style });
     text.position.set(
         horizontal === 'left'
             ? region.x
@@ -96,9 +96,7 @@ function addPane(
         text.style.wordWrapWidth = region.width;
     }
     const mask = new PIXI.Graphics();
-    mask.beginFill(0xffffff);
-    mask.drawRect(region.x, region.y, region.width, region.height);
-    mask.endFill();
+    mask.rect(region.x, region.y, region.width, region.height).fill(0xffffff);
     text.mask = mask;
     owner.addChild(mask, text);
     return text;
@@ -107,16 +105,14 @@ function addPane(
 function addRowTextPool(
     owner: PIXI.Container,
     region: TradeRect,
-    style: PIXI.TextStyle | Partial<PIXI.ITextStyle>,
+    style: PIXI.TextStyle | PIXI.TextStyleOptions,
     count: number,
 ): PIXI.Text[] {
     const mask = new PIXI.Graphics();
-    mask.beginFill(0xffffff);
-    mask.drawRect(region.x, region.y, region.width, region.height);
-    mask.endFill();
+    mask.rect(region.x, region.y, region.width, region.height).fill(0xffffff);
     owner.addChild(mask);
     return Array.from({ length: count }, (_, row) => {
-        const text = new PIXI.Text('', style);
+        const text = new PIXI.Text({ text: '', style });
         text.position.set(region.x + region.width, tradeRowY(region, row));
         text.anchor.x = 1;
         text.mask = mask;
@@ -131,9 +127,7 @@ function addGlyphPool(
     count: number,
 ): PIXI.Graphics[] {
     const mask = new PIXI.Graphics();
-    mask.beginFill(0xffffff);
-    mask.drawRect(region.x, region.y, region.width, region.height);
-    mask.endFill();
+    mask.rect(region.x, region.y, region.width, region.height).fill(0xffffff);
     owner.addChild(mask);
     const x = region.x + Math.floor((region.width - TRADE_GLYPH_SIZE) / 2);
     const yOffset = Math.floor(

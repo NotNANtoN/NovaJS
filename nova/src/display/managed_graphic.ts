@@ -1,7 +1,7 @@
 import type * as PIXI from 'pixi.js';
 
 export interface ManagedGraphic {
-    readonly root: PIXI.DisplayObject;
+    readonly root: PIXI.Container;
     readonly disposed: boolean;
     /**
      * Remove the subtree from its parent while keeping it reusable. Pooled
@@ -18,14 +18,14 @@ export interface ManagedGraphic {
  */
 export function attachGraphic(
     parent: PIXI.Container,
-    root: PIXI.DisplayObject,
+    root: PIXI.Container,
 ): ManagedGraphic {
     parent.addChild(root);
     return createGraphicHandle(root);
 }
 
 export function createGraphicHandle(
-    root: PIXI.DisplayObject,
+    root: PIXI.Container,
 ): ManagedGraphic {
     let isDisposed = false;
     return {

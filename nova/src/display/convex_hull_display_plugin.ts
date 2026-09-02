@@ -58,7 +58,6 @@ const HurtboxGraphicsCleanup = new System({
 });
 
 function drawPoly(poly: SAT.Polygon, graphics: PIXI.Graphics, color = 0xff0000, drawNormals = true) {
-    graphics.lineStyle(0.5, color);
     const points = poly.points.map(v => Vector.fromVectorLike(v)
         .rotate(poly.angle).add(poly.pos));
     const { x: x0, y: y0 } = points[0];
@@ -80,11 +79,11 @@ function drawPoly(poly: SAT.Polygon, graphics: PIXI.Graphics, color = 0xff0000, 
             graphics.lineTo(normalEnd.x, normalEnd.y);
         }
     }
+    graphics.stroke({ width: 0.5, color });
 }
 
 function drawCircle(circle: SAT.Circle, graphics: PIXI.Graphics, color = 0xff0000) {
-    graphics.lineStyle(0.5, color);
-    graphics.drawCircle(circle.pos.x, circle.pos.y, circle.r);
+    graphics.circle(circle.pos.x, circle.pos.y, circle.r).stroke({ width: 0.5, color });
 }
 
 const COLORS = [
@@ -119,9 +118,8 @@ const HitboxHullGraphicsSystem = new System({
 
         // Draw bounding box
         const bbox = hull.bbox;
-        graphics.lineStyle(0.5, 0x4488ff);
-        graphics.drawRect(bbox.minX, bbox.minY,
-            bbox.maxX - bbox.minX, bbox.maxY - bbox.minY);
+        graphics.rect(bbox.minX, bbox.minY,
+            bbox.maxX - bbox.minX, bbox.maxY - bbox.minY).stroke({ width: 0.5, color: 0x4488ff });
     }
 });
 

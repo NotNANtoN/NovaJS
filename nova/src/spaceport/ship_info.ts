@@ -38,17 +38,15 @@ const SHIP_INFO_FONT = {
 function addPane(
     owner: PIXI.Container,
     region: { x: number; y: number; width: number; height: number },
-    style: PIXI.TextStyle | Partial<PIXI.ITextStyle>,
+    style: PIXI.TextStyle | PIXI.TextStyleOptions,
 ): PIXI.Text {
-    const text = new PIXI.Text('', style);
+    const text = new PIXI.Text({ text: '', style });
     text.position.set(region.x, region.y);
     if (text.style.wordWrap) {
         text.style.wordWrapWidth = region.width;
     }
     const mask = new PIXI.Graphics();
-    mask.beginFill(0xffffff);
-    mask.drawRect(region.x, region.y, region.width, region.height);
-    mask.endFill();
+    mask.rect(region.x, region.y, region.width, region.height).fill(0xffffff);
     text.mask = mask;
     owner.addChild(mask, text);
     return text;

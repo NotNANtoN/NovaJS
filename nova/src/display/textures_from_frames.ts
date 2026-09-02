@@ -53,8 +53,10 @@ export async function texturesFromFrames(framesData: SpriteSheetFramesData): Pro
                 const atlas = await loadAtlasTexture(resolveAtlasUrl(framesData.meta.image));
                 const textures = frameNames.map(frameName => {
                     const { x, y, w, h } = framesData.frames[frameName].frame;
-                    return new PIXI.Texture(
-                        atlas.baseTexture, new PIXI.Rectangle(x, y, w, h));
+                    return new PIXI.Texture({
+                        source: atlas.source,
+                        frame: new PIXI.Rectangle(x, y, w, h),
+                    });
                 });
                 resolvedFramesCache.set(framesData, textures);
                 return textures;
