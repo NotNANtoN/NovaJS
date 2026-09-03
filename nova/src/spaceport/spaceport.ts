@@ -538,7 +538,7 @@ export class Spaceport extends Menu<Entity> {
 
         let spaceportLandscape: PIXI.Container | PIXI.Sprite;
         if (data.hasCustomLandingPict) {
-            spaceportLandscape = await this.gameData.spriteFromPictAsync(data.landingPict);
+            spaceportLandscape = this.gameData.spriteFromPict(data.landingPict);
         }
         else {
             const standardLandscape = new PIXI.Container();
@@ -615,10 +615,8 @@ export class Spaceport extends Menu<Entity> {
             this.controls.bind();
         }
 
-        // Check for concourse storyline offers (availLoc = 3)
-        try {
-            const { offers, destinationOptions } = await getConcourseMissionOffers(
-                this.gameData, input, this.id);
+        // Check for concourse storyline offers (availLoc = 3) asynchronously so spaceport opens immediately
+        void getConcourseMissionOffers(this.gameData, input, this.id).then(async ({ offers, destinationOptions }) => {
             const state = input.components.get(PlayerStateComponent);
             if (state && offers.length > 0) {
                 this.controls.unbind();
@@ -651,9 +649,9 @@ export class Spaceport extends Menu<Entity> {
                 this.setActiveDialog();
                 this.controls.bind();
             }
-        } catch (error) {
+        }).catch(error => {
             reportDialogFailure('concourse mission offers', error);
-        }
+        });
 
         return super.show(input);
     }

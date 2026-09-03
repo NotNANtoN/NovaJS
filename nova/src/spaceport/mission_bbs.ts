@@ -158,50 +158,49 @@ async function loadMissionWorld(gameData: GameData): Promise<MissionBoardWorld> 
     }
 
     const promise = (async () => {
-        await gameData.preloadData;
-        const ids = await gameData.ids;
-        const systems = (await Promise.all((ids.System ?? []).map(async id => {
-            try {
-                return await gameData.data.System.get(id);
-            } catch {
-                return undefined;
-            }
-        }))).filter((system): system is SystemData => system !== undefined);
-
-        const planetIds = [...new Set(systems.flatMap(system => system.planets))];
-        const planetsWithData = await Promise.all(planetIds.map(async id => {
-            try {
-                const planet = await gameData.data.Planet.get(id);
-                return [planet, id] as const;
-            } catch {
-                return undefined;
-            }
-        }));
-        const planets: MissionPlanetSelector[] = planetsWithData
-            .filter((entry): entry is readonly [PlanetData, string] =>
-                entry !== undefined)
-            .map(([planet, id]) => ({
-                id,
-                inhabited: planet.inhabited,
-                government: planet.government,
-                systemId: systems.find(system => system.planets.some(
-                    planetId => sameId(planetId, id)))?.id,
-            }));
-        const govtGettable = gameData.data.Govt;
-        const governments = govtGettable
-            ? (await Promise.all((ids.Govt ?? []).map(async id => {
+        const preload = (await gameData.preloadData) ?? {};
+        const preloadSystems = preload.System ? Object.values(preload.System) : [];
+        let systems: SystemData[] = preloadSystems as SystemData[];
+        if (systems.length === 0) {
+            const ids = await gameData.ids;
+            systems = (await Promise.all((ids.System ?? []).map(async id => {
                 try {
-                    return await govtGettable.get(id);
+                    return await gameData.data.System.get(id);
                 } catch {
                     return undefined;
                 }
-            }))).filter((govt): govt is GovtData => govt !== undefined)
-            : [];
+            }))).filter((system): system is SystemData => system !== undefined);
+        }
+
+        const preloadPlanets = preload.Planet ? Object.entries(preload.Planet) : [];
+        let planetsWithData: (readonly [PlanetData, string])[] = preloadPlanets.map(
+            ([id, planet]) => [planet as PlanetData, id] as const);
+        if (planetsWithData.length === 0) {
+            const planetIds = [...new Set(systems.flatMap(system => system.planets))];
+            planetsWithData = (await Promise.all(planetIds.map(async id => {
+                try {
+                    const planet = await gameData.data.Planet.get(id);
+                    return [planet, id] as const;
+                } catch {
+                    return undefined;
+                }
+            }))).filter((entry): entry is readonly [PlanetData, string] =>
+                entry !== undefined);
+        }
+
+        const planets: MissionPlanetSelector[] = planetsWithData.map(([planet, id]) => ({
+            id,
+            inhabited: planet.inhabited,
+            government: planet.government,
+            systemId: systems.find(system => system.planets.some(
+                planetId => sameId(planetId, id)))?.id,
+        }));
+
+        const preloadGovts = preload.Govt ? Object.values(preload.Govt) : [];
+        const governments: GovtData[] = preloadGovts as GovtData[];
+
         const planetNames = new Map(
-            planetsWithData
-                .filter((entry): entry is readonly [PlanetData, string] =>
-                    entry !== undefined)
-                .map(([planet, id]) => [id, planet.name]),
+            planetsWithData.map(([planet, id]) => [id, planet.name]),
         );
         const systemNames = new Map(systems.map(system => [system.id, system.name]));
         return { systems, planets, governments, planetNames, systemNames };

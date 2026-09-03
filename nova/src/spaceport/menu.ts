@@ -33,11 +33,6 @@ export abstract class Menu<T> {
     }
 
     private async doBuild() {
-        try {
-            await this.gameData.textureFromPictAsync(this.background);
-        } catch {
-            // Ignore
-        }
         await this.build();
         this.built = true;
     }

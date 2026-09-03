@@ -251,7 +251,7 @@ export class GameData implements GameDataInterface {
         if (cached instanceof PIXI.Texture) {
             return cached;
         }
-        void this.getUrl(pictPath);
+        void PIXI.Assets.load(pictPath).catch(() => {});
         return PIXI.Texture.EMPTY;
     }
 
@@ -262,7 +262,7 @@ export class GameData implements GameDataInterface {
             return new PIXI.Sprite(cached);
         }
         const sprite = new PIXI.Sprite(PIXI.Texture.EMPTY);
-        void this.getUrl(pictPath).then(loaded => {
+        void PIXI.Assets.load(pictPath).then(loaded => {
             if (loaded instanceof PIXI.Texture) {
                 sprite.texture = loaded;
             } else {
