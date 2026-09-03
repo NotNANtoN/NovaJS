@@ -25,6 +25,7 @@ import { BeamDisplayPlugin } from "./beam_display_plugin";
 import { ExplosionPlugin } from "./explosion_plugin";
 import { FullscreenPlugin } from "./fullscreen_plugin";
 import { CloakEffectPlugin } from "./cloak_effect_plugin";
+import { CombatFxPlugin } from "./combat_fx_plugin";
 import { JumpEffectPlugin } from "./jump_effect_plugin";
 import { ParticlesPlugin } from "./particles_plugin";
 import { PilotDialogsPlugin } from "./pilot_dialogs_plugin";
@@ -216,6 +217,7 @@ export const Display: Plugin = {
         await world.addPlugin(AnimationGraphicPlugin);
         await world.addPlugin(JumpEffectPlugin);
         await world.addPlugin(CloakEffectPlugin);
+        await world.addPlugin(CombatFxPlugin);
         world.addSystem(CenterShipSystem);
         world.addSystem(DeathOverlaySystem);
         world.addSystem(JumpTransitionOverlaySystem);
@@ -256,6 +258,7 @@ export const Display: Plugin = {
         world.removeSystem(JumpTransitionOverlaySystem);
         world.removeSystem(MissileWarningOverlaySystem);
 
+        await world.removePlugin(CombatFxPlugin);
         await world.removePlugin(CloakEffectPlugin);
         await world.removePlugin(JumpEffectPlugin);
         await world.removePlugin(AnimationGraphicPlugin);

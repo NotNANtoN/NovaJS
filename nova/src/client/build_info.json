@@ -1,5 +1,5 @@
 {
-  "commit": "a5aae341",
-  "message": "fix: non-blocking spaceport landing, instant preloadData galaxy world, and direct PIXI asset loads",
-  "date": "2026-09-03 16:01 +0200"
+  "commit": "2a3618f2",
+  "message": "perf: IndexedDB preload cache, pre-gzipped buffer, asymmetric broadphase, scalar math and AOI",
+  "date": "2026-09-03 16:27 +0200"
 }

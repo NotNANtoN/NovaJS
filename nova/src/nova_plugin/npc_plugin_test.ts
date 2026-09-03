@@ -310,6 +310,7 @@ describe('NPC combat flying', () => {
         const { world, npc, target } = makeFollowWorld();
         const closest = fly(world, npc, 3_000);
         const movement = npc.components.get(MovementStateComponent)!;
+
         const targetMovement = target.components.get(MovementStateComponent)!;
 
         expect(targetMovement.position.subtract(movement.position).length)
@@ -340,6 +341,34 @@ describe('NPC combat flying', () => {
         const movement = npc.components.get(MovementStateComponent)!;
         expect(movement.accelerating).toBe(0);
         expect(movement.turnTo).toEqual(new Angle(Math.PI / 2));
+    });
+
+    it('aims nose at predictive lead angle when engaged in combat with a moving target', () => {
+        const { world, npc, target } = makeFollowWorld();
+        const targetMovement = target.components.get(MovementStateComponent)!;
+        targetMovement.position = new Position(0, -850);
+        targetMovement.velocity = new Vector(150, 0);
+
+        const npcMovement = npc.components.get(MovementStateComponent)!;
+        npcMovement.position = new Position(0, 0);
+        npcMovement.velocity = new Vector(0, 0);
+        npcMovement.rotation = new Angle(0);
+
+        world.step();
+
+        expect(npcMovement.turnTo).toBeInstanceOf(Angle);
+        const aimAngle = (npcMovement.turnTo as Angle).angle;
+        // Target is directly North (0 rad) moving East (+x). Lead angle must be slightly East (>0 and <45 deg)
+        expect(aimAngle).toBeGreaterThan(0.05);
+        expect(aimAngle).toBeLessThan(Math.PI * 0.35);
+
+        // Also verify ShootAllWeaponsAI fires forward guns when nose is aligned with lead angle
+        npcMovement.rotation = new Angle(aimAngle);
+        world.addSystem(ShootAllWeaponsAI);
+        npc.addComponent(ShootAllWeaponsComponent, undefined);
+        world.step();
+        const weaponState = npc.components.get(WeaponsStateComponent)?.get('gun');
+        expect(weaponState?.firing).toBeTrue();
     });
 });
 

@@ -52,7 +52,7 @@ import type { GovtData } from "./npc_components";
 import { createMinerSystems, MiningShipProvider } from "./miner_ai";
 import { PlayerState, PlayerStateComponent } from "./player_state";
 import { isCriminal, recordFor } from "./legal_record";
-import { approachTarget, fleeFromTarget } from "./flight_controller";
+import { approachTarget, fleeFromTarget, headingError } from "./flight_controller";
 import { firstOrderWithFallback } from "./guidance";
 import { Position } from "nova_ecs/datatypes/position";
 import { Vector } from "nova_ecs/datatypes/vector";
@@ -960,7 +960,18 @@ export const FollowAI = new System({
             const command = approachTarget(movementState, targetMovement, physics, {
                 standoff,
             });
-            movementState.turnTo = command.turnTo ?? leadAngle;
+            const isBraking = command.turnTo !== null
+                && Math.abs(headingError(leadAngle, command.turnTo)) > Math.PI * 0.5;
+
+            if (isBraking) {
+                // Arresting velocity along braking vector to prevent ramming/overshooting
+                movementState.turnTo = command.turnTo;
+            } else if (distance <= effectiveRange * 1.1) {
+                // In combat engagement range: aim nose directly at weapon lead angle
+                movementState.turnTo = leadAngle;
+            } else {
+                movementState.turnTo = command.turnTo ?? leadAngle;
+            }
             movementState.accelerating = command.accelerating;
             movementState.turnBack = command.turnBack;
         }
@@ -1056,7 +1067,11 @@ export const ShootAllWeaponsAI = new System({
                     const maxArc = weaponData.type === "BeamWeaponData"
                         ? 0.08  // ~4.6 degrees for precision beams
                         : 0.18; // ~10.3 degrees for forward projectile guns
-                    canBear = angleDiff <= maxArc;
+                    const targetAngularRadius = (targetDistance && targetDistance > 0)
+                        ? Math.min(0.28, 24 / targetDistance)
+                        : 0;
+                    const allowedArc = Math.max(maxArc, targetAngularRadius);
+                    canBear = angleDiff <= allowedArc;
                 }
             }
 
