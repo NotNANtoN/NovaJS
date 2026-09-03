@@ -7,6 +7,19 @@ import { mod } from "../util/mod";
 import { getFrameAndAngle } from "../util/get_frame_and_angle";
 
 
+function toPixiBlendMode(mode: number | string | undefined): 'normal' | 'add' | 'multiply' | 'screen' {
+    if (mode === 1 || mode === 'add' || mode === 'ADD') {
+        return 'add';
+    }
+    if (mode === 2 || mode === 'multiply' || mode === 'MULTIPLY') {
+        return 'multiply';
+    }
+    if (mode === 'screen' || mode === 'SCREEN') {
+        return 'screen';
+    }
+    return 'normal';
+}
+
 const TWO_PI = 2 * Math.PI;
 
 export class SpriteSheetSprite {
@@ -26,7 +39,7 @@ export class SpriteSheetSprite {
         this.image = image;
         this.textureSet = this.image.frames.normal;
         this.wrappedRotation = 0;
-        this.pixiSprite.blendMode = image.blendMode as any;
+        this.pixiSprite.blendMode = toPixiBlendMode(image.blendMode);
 
         this.pixiSprite.anchor.x = 0.5;
         this.pixiSprite.anchor.y = 0.5;

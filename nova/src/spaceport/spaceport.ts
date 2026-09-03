@@ -538,7 +538,7 @@ export class Spaceport extends Menu<Entity> {
 
         let spaceportLandscape: PIXI.Container | PIXI.Sprite;
         if (data.hasCustomLandingPict) {
-            spaceportLandscape = this.gameData.spriteFromPict(data.landingPict);
+            spaceportLandscape = await this.gameData.spriteFromPictAsync(data.landingPict);
         }
         else {
             const standardLandscape = new PIXI.Container();

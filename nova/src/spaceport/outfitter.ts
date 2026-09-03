@@ -163,6 +163,9 @@ export class Outfitter extends Menu<OutfitsState> {
         }
         for (const outfit of outfits) {
             this.outfitDataMap.set(outfit.id, outfit);
+            if (outfit.pict) {
+                void this.gameData.textureFromPictAsync(outfit.pict, 50).catch(() => {});
+            }
         }
         outfits.sort((a, b) => b.displayWeight - a.displayWeight);
         const itemGrid = new ItemGrid(this.gameData, outfits);

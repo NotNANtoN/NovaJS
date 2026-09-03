@@ -434,7 +434,8 @@ pub fn first_order_lead_angle(
 ) -> f32 {
     let dx = target_pos_x - pos_x;
     let dy = target_pos_y - pos_y;
-    let direct_angle = dy.atan2(dx);
+    // In Nova, heading 0 points up (0, -1) and heading runs clockwise, so angle is atan2(x, -y).
+    let direct_angle = dx.atan2(-dy);
 
     if shot_speed <= 0.0 {
         return direct_angle;
@@ -458,7 +459,7 @@ pub fn first_order_lead_angle(
         if t >= 0.0 {
             let hit_x = rel_pos_x + rel_vel_x * t;
             let hit_y = rel_pos_y + rel_vel_y * t;
-            return hit_y.atan2(hit_x);
+            return hit_x.atan2(-hit_y);
         }
         return direct_angle;
     }
@@ -481,5 +482,5 @@ pub fn first_order_lead_angle(
 
     let hit_x = rel_pos_x + rel_vel_x * time;
     let hit_y = rel_pos_y + rel_vel_y * time;
-    hit_y.atan2(hit_x)
+    hit_x.atan2(-hit_y)
 }

@@ -247,28 +247,55 @@ export class GameData implements GameDataInterface {
 
     textureFromPict(id: string): PIXI.Texture {
         const pictPath = this.url(id);
-        return PIXI.Assets.cache.get(pictPath) ?? PIXI.Texture.from(pictPath);
+        const cached = PIXI.Assets.cache.get(pictPath);
+        if (cached instanceof PIXI.Texture) {
+            return cached;
+        }
+        void this.getUrl(pictPath);
+        return PIXI.Texture.EMPTY;
     }
 
-    spriteFromPict(id: string) {
-        return new PIXI.Sprite(this.textureFromPict(id));
+    spriteFromPict(id: string): PIXI.Sprite {
+        const pictPath = this.url(id);
+        const cached = PIXI.Assets.cache.get(pictPath);
+        if (cached instanceof PIXI.Texture) {
+            return new PIXI.Sprite(cached);
+        }
+        const sprite = new PIXI.Sprite(PIXI.Texture.EMPTY);
+        void this.getUrl(pictPath).then(loaded => {
+            if (loaded instanceof PIXI.Texture) {
+                sprite.texture = loaded;
+            } else {
+                const tex = PIXI.Assets.cache.get(pictPath);
+                if (tex instanceof PIXI.Texture) {
+                    sprite.texture = tex;
+                }
+            }
+        }).catch(err => {
+            console.warn(`Failed to load pict ${id}`, err);
+        });
+        return sprite;
     }
 
     async textureFromPictAsync(id: string, priority?: number): Promise<PIXI.Texture> {
         const pictPath = this.url(id);
-        if (PIXI.Assets.cache.get(pictPath)) {
-            return PIXI.Assets.cache.get(pictPath);
+        const cached = PIXI.Assets.cache.get(pictPath);
+        if (cached instanceof PIXI.Texture) {
+            return cached;
         }
         const loaded = await this.getUrl(pictPath, priority);
         if (loaded instanceof PIXI.Texture) {
             return loaded;
         }
-        return PIXI.Assets.cache.get(pictPath) ?? PIXI.Texture.from(pictPath);
+        const finalCached = PIXI.Assets.cache.get(pictPath);
+        if (finalCached instanceof PIXI.Texture) {
+            return finalCached;
+        }
+        return PIXI.Texture.EMPTY;
     }
 
     async spriteFromPictAsync(id: string, priority?: number) {
-        // TODO: Use this.data
-        var texture = await this.textureFromPictAsync(id, priority);
+        const texture = await this.textureFromPictAsync(id, priority);
         return new PIXI.Sprite(texture);
     }
 
@@ -282,7 +309,8 @@ export class GameData implements GameDataInterface {
         } catch {
             // fallback below
         }
-        return PIXI.Texture.from(cicnPath);
+        const cached = PIXI.Assets.cache.get(cicnPath);
+        return (cached instanceof PIXI.Texture) ? cached : PIXI.Texture.EMPTY;
     }
 
     private addSoundGettable() {
