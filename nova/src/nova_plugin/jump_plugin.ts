@@ -38,6 +38,7 @@ import { SoundEvent } from "./sound_event";
 import { SystemIdResource } from "./system_id_resource";
 import { NpcAIComponent } from "./npc_components";
 import { PlatformResource } from "./platform_plugin";
+import { AppliedDamageEvent } from "./death_plugin";
 
 export const JUMP_SPOOL_MS = 1_200;
 export const JUMP_BRAKE_MS = 800;
@@ -753,6 +754,27 @@ export const NpcJumpLifecycleSystem = new System({
 });
 
 // For a single system to emit jump events.
+export const CancelJumpOnDamageSystem = new System({
+    name: 'CancelJumpOnDamageSystem',
+    events: [AppliedDamageEvent],
+    args: [
+        AppliedDamageEvent,
+        JumpStateComponent,
+        MovementStateComponent,
+        GetEntity,
+        Emit,
+    ] as const,
+    step(damage, jumpState, movement, entity, emit) {
+        if (damage.shield + damage.armor <= 0) {
+            return;
+        }
+        if (jumpState.phase === 'braking' || jumpState.phase === 'spooling') {
+            cancelJumpFlight(entity, movement);
+            emit(JumpRefusedEvent, { reason: 'damage' });
+        }
+    },
+});
+
 export const JumpPlugin: Plugin = {
     name: 'JumpPlugin',
     build(world) {
@@ -774,6 +796,7 @@ export const JumpPlugin: Plugin = {
         world.addSystem(JumpLifecycleSystem);
         world.addSystem(NpcJumpLifecycleSystem);
         world.addSystem(JumpRouteProvider);
+        world.addSystem(CancelJumpOnDamageSystem);
     }
 };
 

@@ -372,6 +372,39 @@ describe('NPC destruction lockout', () => {
         expect(weapon.firing).toBeFalse();
         expect(weapon.target).toBeUndefined();
     });
+
+    it('prunes target reference when the target entity is destroyed or jumping out', () => {
+        const world = new World('npc-stale-target-prune-test');
+        world.resources.set(PlatformResource, 'node');
+        world.resources.set(GameDataResource, {
+            data: {
+                Weapon: {
+                    getCached: () => ({ type: 'ProjectileWeaponData' }),
+                },
+            },
+        } as never);
+        world.addSystem(ShootAllWeaponsAI);
+
+        const weapon = { count: 1, firing: true, target: 'enemy' };
+        const enemy = new Entity('enemy')
+            .addComponent(DestructionStartedComponent, true);
+
+        const npc = new Entity('npc')
+            .addComponent(WeaponsStateComponent, new Map([
+                ['weapon', weapon],
+            ]))
+            .addComponent(TargetComponent, { target: 'enemy' })
+            .addComponent(ShootAllWeaponsComponent, undefined)
+            .addComponent(MultiplayerData, { owner: 'server' });
+
+        world.entities.set('enemy', enemy);
+        world.entities.set('npc', npc);
+
+        world.step();
+
+        expect(npc.components.get(TargetComponent)?.target).toBeUndefined();
+        expect(weapon.target).toBeUndefined();
+    });
 });
 
 describe("NPC combat tactics and analytical lead aiming", () => {

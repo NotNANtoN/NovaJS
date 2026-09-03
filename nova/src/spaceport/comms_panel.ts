@@ -22,6 +22,7 @@ import {
 } from '../nova_plugin/govt_relations';
 import { PlayerStateComponent } from '../nova_plugin/player_state';
 import { ShipDataComponent } from '../nova_plugin/ship_plugin';
+import { EscortOrderComponent } from '../nova_plugin/escort_plugin';
 import { TargetComponent } from '../nova_plugin/target_component';
 import {
     AssistanceFailureReason,
@@ -174,9 +175,25 @@ export class Comms extends Menu<Entity> {
         const name = this.target?.name ?? '';
         if (this.target?.isPlanet) {
             this.message.text = `Communications channel open to ${name}.\n\nTraffic Control: "Approach vector clear. Welcome to ${name}, Captain."`;
+            this.buttons.greetings.setText('Greetings');
+            this.buttons.assistance.setText('Information');
             return;
         }
-        // STR# 3002's opening lines name the ship; STR# 3000's do not.
+        if (this.target?.isEscort) {
+            this.message.text = `Channel open to escort ${name}.\n\nEscort Pilot: "Awaiting orders, Flagship. All fleet systems green."`;
+            this.buttons.greetings.setText('Form Up');
+            this.buttons.assistance.setText('Attack Target');
+            return;
+        }
+        if (this.target?.hostile) {
+            this.message.text = `Channel open to hostile vessel ${name}.\n\nHostile Pilot: "Power down your shields and prepare to be boarded!"`;
+            this.buttons.greetings.setText('Demand Yield');
+            this.buttons.assistance.setText('Offer Bribe');
+            return;
+        }
+
+        this.buttons.greetings.setText('Greetings');
+        this.buttons.assistance.setText('Request Assistance');
         const prefix = this.channelLines?.[
             commsLineIndex('channelOpen')] ?? '';
         this.message.text = prefix
@@ -184,7 +201,7 @@ export class Comms extends Menu<Entity> {
             : `Channel open to ${name}.`;
         this.say(hailPromptBlock({
             relation: this.relation(),
-            hostile: this.target?.hostile ?? false,
+            hostile: false,
             record: this.record(),
         }));
     }
@@ -192,6 +209,14 @@ export class Comms extends Menu<Entity> {
     private sayGreetings() {
         if (this.target?.isPlanet) {
             this.message.text = `${this.target.name} Traffic Control: "Safe travels, Captain. Transmitting current landing and trade advisories."`;
+            return;
+        }
+        if (this.target?.isEscort) {
+            this.orderFormUp();
+            return;
+        }
+        if (this.target?.hostile) {
+            this.demandSurrender();
             return;
         }
         const rel = this.relation();
@@ -204,7 +229,30 @@ export class Comms extends Menu<Entity> {
         }
     }
 
+    private orderFormUp() {
+        const name = this.target?.name ?? 'Escort';
+        if (this.input) {
+            const currentOrder = this.input.components.get(EscortOrderComponent);
+            const sequence = (currentOrder?.sequence ?? 0) + 1;
+            this.input.components.set(EscortOrderComponent, { mode: 'formation', sequence });
+        }
+        this.message.text = `${this.message.text}\n\n${name}: "Acknowledged, Flagship. Rejoining V-formation alongside you."`;
+    }
+
+    private demandSurrender() {
+        const name = this.target?.name ?? 'Vessel';
+        this.message.text = `${this.message.text}\n\n${name}: "You think we fear you? We will never surrender! Prepare to burn!"`;
+    }
+
     private requestAssistance() {
+        if (this.target?.isEscort) {
+            this.orderAttackTarget();
+            return;
+        }
+        if (this.target?.hostile) {
+            this.offerBribe();
+            return;
+        }
         const state = this.input?.components.get(PlayerStateComponent);
         const shipData = this.input?.components.get(ShipDataComponent);
         const helper = this.hailedUuid;
@@ -243,6 +291,37 @@ export class Comms extends Menu<Entity> {
             ? ` (${price} credits)` : '';
     }
 
+
+    private orderAttackTarget() {
+        const name = this.target?.name ?? 'Escort';
+        const targetComponent = this.input?.components?.get(TargetComponent);
+        if (!targetComponent?.target) {
+            this.message.text = `${this.message.text}\n\n${name}: "No target currently locked on flagship sensors."`;
+            return;
+        }
+        if (this.input) {
+            const currentOrder = this.input.components.get(EscortOrderComponent);
+            const sequence = (currentOrder?.sequence ?? 0) + 1;
+            this.input.components.set(EscortOrderComponent, {
+                mode: 'attack',
+                sequence,
+                targetUuid: targetComponent.target,
+            });
+        }
+        this.message.text = `${this.message.text}\n\n${name}: "Target locked! Engaging target with full weapon batteries."`;
+    }
+
+    private offerBribe() {
+        const state = this.input?.components?.get(PlayerStateComponent);
+        const name = this.target?.name ?? 'Vessel';
+        const bribe = 2_000;
+        if (!state || state.credits < bribe) {
+            this.message.text = `${this.message.text}\n\n${name}: "You don't even have 2,000 credits to offer! Die!"`;
+            return;
+        }
+        state.credits -= bribe;
+        this.message.text = `${this.message.text}\n\n${name}: "Credits received (2,000 cr). We will hold fire. Get out of our sight!"`;
+    }
     private acceptPrice(price: number) {
         const state = this.input?.components.get(PlayerStateComponent);
         if (!state) {

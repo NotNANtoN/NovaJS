@@ -788,6 +788,8 @@ const ShowJumpRefusal = new System({
             statusBar.showLandingMessage(NO_DESTINATION_MESSAGE, time.time);
         } else if (refusal.reason === 'distance') {
             statusBar.showLandingMessage(TOO_CLOSE_TO_CENTER_MESSAGE, time.time);
+        } else if (refusal.reason === 'damage') {
+            statusBar.showLandingMessage('Hyperjump aborted: damage sustained', time.time);
         }
     },
 });

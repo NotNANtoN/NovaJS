@@ -36,11 +36,25 @@ export function applyOutfitPhysics(basePhysics: ShipPhysics,
                     if (key === 'freeMass') {
                         basePhysics.freeMass = (basePhysics.freeMass ?? 0) - val * count;
                         basePhysics.mass = (basePhysics.mass ?? 0) + val * count;
+                    } else if (key === 'freeCargo') {
+                        basePhysics.freeCargo = (basePhysics.freeCargo ?? 0) + val * count;
                     } else if (basePhysics.hasOwnProperty(key)) {
                         (basePhysics[key] as number) += val * count;
                     }
                 }
             }
+        }
+        if (basePhysics.shieldRecharge !== undefined) {
+            basePhysics.shieldRecharge = Math.max(0, basePhysics.shieldRecharge);
+        }
+        if (basePhysics.armorRecharge !== undefined) {
+            basePhysics.armorRecharge = Math.max(0, basePhysics.armorRecharge);
+        }
+        if (basePhysics.energyRecharge !== undefined) {
+            basePhysics.energyRecharge = Math.max(0, basePhysics.energyRecharge);
+        }
+        if (basePhysics.deionize !== undefined) {
+            basePhysics.deionize = Math.max(0, basePhysics.deionize);
         }
     });
 }

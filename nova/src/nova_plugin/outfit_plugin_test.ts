@@ -41,4 +41,37 @@ describe('applyOutfitPhysics', () => {
         expect(result.shield).toBe(100 + 100); // 200
         expect(result.acceleration).toBe(300 + 60); // 360
     });
+
+    it('applies cargo expansions and shield/armor recharge stacking', () => {
+        const basePhysics: ShipPhysics = {
+            ...getDefaultShipPhysics(),
+            freeCargo: 20,
+            shieldRecharge: 5,
+            armorRecharge: 0,
+        };
+
+        const cargoOutfit: OutfitData = {
+            ...getDefaultOutfitData(),
+            physics: {
+                freeMass: 5,
+                freeCargo: 10,
+            },
+        };
+
+        const shieldRegenOutfit: OutfitData = {
+            ...getDefaultOutfitData(),
+            physics: {
+                freeMass: 8,
+                shieldRecharge: 15,
+            },
+        };
+
+        const result = applyOutfitPhysics(basePhysics, [
+            [cargoOutfit, 2],
+            [shieldRegenOutfit, 1],
+        ]);
+
+        expect(result.freeCargo).toBe(20 + 20);
+        expect(result.shieldRecharge).toBe(5 + 15);
+    });
 });

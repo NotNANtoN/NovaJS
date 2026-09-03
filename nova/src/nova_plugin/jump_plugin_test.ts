@@ -34,6 +34,8 @@ import {
     advanceJumpFlight,
 } from './jump_plugin';
 import { ControlStateEvent } from './control_state_event';
+import { AppliedDamageEvent } from './death_plugin';
+import { CancelJumpOnDamageSystem } from './jump_plugin';
 import { PlayerStateComponent } from './player_state';
 import { ShipDataComponent } from './ship_plugin';
 import { SoundEvent } from './sound_event';
@@ -683,5 +685,50 @@ describe('player hyperjump checks and controls', () => {
         expect(transition2).toBe('none');
         expect(state.phase).toBe('spooling');
         expect(spoolingStarted).toBeTrue();
+    });
+});
+
+describe('CancelJumpOnDamageSystem', () => {
+    it('cancels braking or spooling jump when sustaining damage and posts notice', () => {
+        const world = new World('cancel-jump-on-damage-test');
+        world.resources.set(TimeResource, { time: 1000, delta_ms: 16, delta_s: 0.016, frame: 1 });
+        world.addSystem(CancelJumpOnDamageSystem);
+
+        const movement: MovementState = {
+            accelerating: 1,
+            position: new Position(100, 200),
+            rotation: new Angle(0),
+            turnBack: false,
+            turning: 0,
+            velocity: new Vector(5, 5),
+        };
+
+        const ship = new Entity('ship')
+            .addComponent(MovementStateComponent, movement)
+            .addComponent(JumpStateComponent, {
+                from: 'nova:1',
+                to: 'nova:2',
+                phase: 'spooling',
+                phaseStartedAt: 500,
+                transitionAt: 1500,
+                requiresAdjacency: true,
+                arrivalSoundPending: false,
+            });
+
+        world.entities.set('ship', ship);
+
+        // Zero damage does not cancel jump
+        world.emitNow(AppliedDamageEvent, { shield: 0, armor: 0, damager: 'attacker' }, ['ship']);
+        expect(ship.components.has(JumpStateComponent)).toBeTrue();
+
+        let refusalReason: string | undefined;
+        world.events.get(JumpRefusedEvent).subscribe(refusal => {
+            refusalReason = refusal.reason;
+        });
+
+        // Damage sustains -> cancels jump immediately!
+        world.emitNow(AppliedDamageEvent, { shield: 25, armor: 0, damager: 'attacker' }, ['ship']);
+        expect(ship.components.has(JumpStateComponent)).toBeFalse();
+        expect(refusalReason).toBe('damage');
     });
 });

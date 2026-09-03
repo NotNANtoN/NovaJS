@@ -81,6 +81,8 @@ const TargetsQuery = new Query([
     Optional(ShipDataComponent),
     Optional(ShieldComponent),
     Optional(PlayerStateComponent),
+    Optional(DestructionStartedComponent),
+    Optional(JumpStateComponent),
 ] as const);
 
 type TargetCandidate = readonly [
@@ -93,6 +95,8 @@ type TargetCandidate = readonly [
     ShipData | undefined,
     { current: number, max: number } | undefined,
     PlayerState | undefined,
+    any | undefined,
+    any | undefined,
 ];
 
 /**
@@ -148,11 +152,13 @@ function getValidTargets(
             _shipData,
             _shield,
             playerState,
+            destructionStarted,
+            jumpState,
         ]) => {
             if (targetId === selfUuid) {
                 return false;
             }
-            if (playerDeath) {
+            if (playerDeath || destructionStarted || jumpState?.phase === 'departing' || jumpState?.phase === 'arriving') {
                 return false;
             }
             const personal = isPersonallyProvoked(
@@ -361,6 +367,9 @@ export const ChooseRandomTargetAI = new System({
             target.target === uuid
             || !currentCandidate
             || currentCandidate[4] !== undefined
+            || currentCandidate[9] !== undefined
+            || currentCandidate[10]?.phase === 'departing'
+            || currentCandidate[10]?.phase === 'arriving'
             || currentCandidate[3]?.id === government.id
             || currentCandidate[3] !== undefined
             && relationStore.relation(
@@ -882,14 +891,16 @@ export const FollowAI = new System({
         if (!target.target) {
             return;
         }
-        if (!entities.has(target.target)) {
+        const targetEntity = entities.get(target.target);
+        if (!targetEntity
+            || targetEntity.components.has(DestructionStartedComponent)
+            || targetEntity.components.get(JumpStateComponent)?.phase === 'departing') {
             target.target = undefined;
             movementState.turnTo = null;
             movementState.accelerating = 0;
             return;
         }
-        const targetMovement = entities.get(target.target)
-            ?.components.get(MovementStateComponent);
+        const targetMovement = targetEntity.components.get(MovementStateComponent);
         if (!targetMovement) {
             movementState.turnTo = null;
             movementState.accelerating = 0;
@@ -973,8 +984,13 @@ export const ShootAllWeaponsAI = new System({
             return;
         }
         const targetUuid = target.target;
-        if (targetUuid && !entities.has(targetUuid)) {
-            target.target = undefined;
+        if (targetUuid) {
+            const ent = entities.get(targetUuid);
+            if (!ent
+                || ent.components.has(DestructionStartedComponent)
+                || ent.components.get(JumpStateComponent)?.phase === 'departing') {
+                target.target = undefined;
+            }
         }
         const targetEntity = target.target
             ? entities.get(target.target)
