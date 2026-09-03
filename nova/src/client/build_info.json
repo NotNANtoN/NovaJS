@@ -1,5 +1,5 @@
 {
-  "commit": "00fcc9ae",
-  "message": "feat: optimize shot sync latency, wire delta compression, and audio asset fallbacks",
-  "date": "2026-09-03 11:50 +0200"
+  "commit": "fc4c70f1",
+  "message": "feat: cloaking energy drain, optical canvas transparency, and NPC target loss",
+  "date": "2026-09-03 12:11 +0200"
 }

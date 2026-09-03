@@ -1,6 +1,8 @@
 import 'jasmine';
 import {
     BAR_BUTTON_STRING_INDEX,
+    barRumorText,
+    BarRumorContext,
     ESCORT_MESSAGE_STRING_INDEX,
     barButtonLabel,
     barFlavorText,
@@ -68,5 +70,40 @@ describe('bar pane wrapping', () => {
     it('preserves paragraph breaks', () => {
         expect(wrapBarText('one two\nthree four', 20, monospace))
             .toBe('one two\nthree four');
+    });
+});
+
+describe('dynamic bar rumors and faction gossip', () => {
+    it('generates generic world rumors by default', () => {
+        const text = barRumorText({}, 0);
+        expect(typeof text).toBe('string');
+        expect(text.length).toBeGreaterThan(10);
+    });
+
+    it('reacts to criminal/wanted legal standing with warning barks', () => {
+        const text = barRumorText({ legalStanding: -50 }, 0);
+        expect(text.toLowerCase()).toContain('security');
+    });
+
+    it('reacts to high combat rating with pilot reputation barks', () => {
+        const text = barRumorText({ combatRating: 10 }, 0);
+        expect(text.toLowerCase()).toContain('commander');
+    });
+
+    it('includes government-specific rumors for core factions', () => {
+        const fedText = barRumorText({ governmentId: 'nova:federation' }, 0);
+        expect(fedText.length).toBeGreaterThan(10);
+
+        const auroranText = barRumorText({ governmentId: 'nova:auroran' }, 0);
+        expect(auroranText.length).toBeGreaterThan(10);
+
+        const polarisText = barRumorText({ governmentId: 'nova:polaris' }, 0);
+        expect(polarisText.length).toBeGreaterThan(10);
+    });
+
+    it('includes NCB bitstring leads when story bits are active', () => {
+        const bits = new Set([100]);
+        const text = barRumorText({ missionBits: bits }, 0);
+        expect(typeof text).toBe('string');
     });
 });
