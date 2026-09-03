@@ -63,6 +63,7 @@ import {
     JumpStateComponent,
 } from "./jump_plugin";
 import { SystemIdResource } from "./system_id_resource";
+import { CloakStateComponent } from "./cloaking_plugin";
 export {
     ChooseRandomTargetComponent,
     GovtComponent,
@@ -83,6 +84,7 @@ const TargetsQuery = new Query([
     Optional(PlayerStateComponent),
     Optional(DestructionStartedComponent),
     Optional(JumpStateComponent),
+    Optional(CloakStateComponent),
 ] as const);
 
 type TargetCandidate = readonly [
@@ -95,6 +97,7 @@ type TargetCandidate = readonly [
     ShipData | undefined,
     { current: number, max: number } | undefined,
     PlayerState | undefined,
+    any | undefined,
     any | undefined,
     any | undefined,
 ];
@@ -154,11 +157,12 @@ function getValidTargets(
             playerState,
             destructionStarted,
             jumpState,
+            cloakState,
         ]) => {
             if (targetId === selfUuid) {
                 return false;
             }
-            if (playerDeath || destructionStarted || jumpState?.phase === 'departing' || jumpState?.phase === 'arriving') {
+            if (playerDeath || destructionStarted || jumpState?.phase === 'departing' || jumpState?.phase === 'arriving' || (cloakState?.cloaked && cloakState.alpha < 0.5)) {
                 return false;
             }
             const personal = isPersonallyProvoked(
@@ -370,6 +374,7 @@ export const ChooseRandomTargetAI = new System({
             || currentCandidate[9] !== undefined
             || currentCandidate[10]?.phase === 'departing'
             || currentCandidate[10]?.phase === 'arriving'
+            || (currentCandidate[11]?.cloaked && (currentCandidate[11]?.alpha ?? 1) < 0.5)
             || currentCandidate[3]?.id === government.id
             || currentCandidate[3] !== undefined
             && relationStore.relation(
@@ -670,6 +675,10 @@ export const NpcPurposeAI = new System({
         }
         const activeTargetId = target.target;
         const targetEntity = activeTargetId ? entities.get(activeTargetId) : undefined;
+        const targetCloak = targetEntity?.components.get(CloakStateComponent);
+        if (targetCloak?.cloaked && targetCloak.alpha < 0.5) {
+            target.target = undefined;
+        }
         const targetMovement = targetEntity?.components
             .get(MovementStateComponent);
         const targetDistance = targetMovement

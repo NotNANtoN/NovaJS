@@ -22,6 +22,8 @@ import {
     PlayerCloakControlSystem,
 } from './cloaking_plugin';
 import { PlayerShipSelector } from './player_ship_plugin';
+import { PlayerStateComponent } from './player_state';
+import { createInitialPlayerState } from './player_state';
 import { SoundEvent } from './sound_event';
 import { WeaponsStateComponent } from './weapons_state';
 
@@ -128,4 +130,38 @@ describe('CloakingPlugin', () => {
         world.emitNow(ControlStateEvent, new Map([['nearestTarget', 'start']]), ['player']);
         expect(player.components.get(TargetComponent)?.target).toBeUndefined();
     });
+
+    it('continuously drains fuel and collapses cloak when energy is depleted', async () => {
+        const world = new World('cloak-drain-test');
+        const time = { time: 1000, delta_ms: 1000, delta_s: 1.0, frame: 1 };
+        world.resources.set(TimeResource, time);
+        await world.addPlugin(DeltaPlugin);
+        await world.addPlugin(CloakingPlugin);
+
+        const sounds: string[] = [];
+        world.events.get(SoundEvent).subscribe(s => sounds.push(s.id));
+
+        const playerState = createInitialPlayerState();
+        playerState.fuel = 3; // 3 units of fuel left
+
+        const ship = new Entity('player')
+            .addComponent(PlayerShipSelector, undefined)
+            .addComponent(CloakDeviceComponent, { canCloak: true })
+            .addComponent(CloakStateComponent, { cloaked: true, transitionStartedAt: 1000, alpha: CLOAKED_ALPHA })
+            .addComponent(PlayerStateComponent, playerState);
+        world.entities.set('player', ship);
+
+        // Step 1: 1 second elapsed -> drains 2 units of fuel -> 1 unit remaining
+        world.step();
+        expect(playerState.fuel).toBe(1);
+        expect(ship.components.get(CloakStateComponent)?.cloaked).toBeTrue();
+
+        // Step 2: another second elapsed -> fuel drops to 0 -> cloak collapses
+        time.time = 2000;
+        world.step();
+        expect(playerState.fuel).toBe(0);
+        expect(ship.components.get(CloakStateComponent)?.cloaked).toBeFalse();
+        expect(sounds).toContain('nova:380');
+    });
+
 });

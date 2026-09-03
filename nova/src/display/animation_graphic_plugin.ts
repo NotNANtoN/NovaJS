@@ -19,6 +19,7 @@ import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin";
 import { ProjectileComponent } from "../nova_plugin/projectile_data";
 import { ReturnToQueueComponent } from "../nova_plugin/return_to_queue_plugin";
 import { ShipComponent } from "../nova_plugin/ship_plugin";
+import { CloakStateComponent, CLOAKED_ALPHA } from "../nova_plugin/cloaking_plugin";
 import { AnimationGraphic } from "./animation_graphic";
 import { Space } from "./space_resource";
 
@@ -77,8 +78,8 @@ export const AnimationGraphicProvider = Provide({
 
 export const ObjectDrawSystem = new System({
     name: "ObjectDrawSystem",
-    args: [MovementStateComponent, AnimationGraphicComponent] as const,
-    step: (movementState, graphic) => {
+    args: [MovementStateComponent, AnimationGraphicComponent, Optional(CloakStateComponent), Optional(PlayerShipSelector)] as const,
+    step: (movementState, graphic, cloakState, playerShip) => {
         if (graphic.managed.disposed) {
             // Cleanup already destroyed this graphic (entity deleted); a
             // straggler step must not touch the freed Pixi transform.
@@ -94,6 +95,23 @@ export const ObjectDrawSystem = new System({
 
         graphic.glowAlpha = movementState.accelerating *
             (1 - (Math.random() * 0.2));
+
+        if (cloakState) {
+            if (playerShip) {
+                // The player's own ship is rendered as a semi-transparent ghost hull
+                graphic.container.alpha = Math.max(0.2, cloakState.alpha);
+            } else {
+                // Remote and NPC ships fade completely invisible when fully cloaked
+                if (cloakState.cloaked && cloakState.alpha <= CLOAKED_ALPHA + 0.01) {
+                    graphic.container.alpha = 0;
+                } else {
+                    // Shimmering optical refraction during transition
+                    graphic.container.alpha = Math.max(0, (cloakState.alpha - CLOAKED_ALPHA) / (1 - CLOAKED_ALPHA));
+                }
+            }
+        } else {
+            graphic.container.alpha = 1;
+        }
 
         graphic.container.position.x = movementState.position.x;
         graphic.container.position.y = movementState.position.y;

@@ -11,6 +11,7 @@ import { System } from 'nova_ecs/system';
 import { ControlStateEvent } from './control_state_event';
 import { GameDataResource } from './game_data_resource';
 import { OutfitsStateComponent } from './outfit_plugin';
+import { PlayerStateComponent } from './player_state';
 import { PlayerShipSelector } from './player_ship_plugin';
 import { SoundEvent } from './sound_event';
 import { WeaponsStateComponent } from './weapons_state';
@@ -79,6 +80,8 @@ export const CloakDeviceProvider = new System({
 /**
  * Handles player Cloak toggle (KeyC).
  */
+export const CLOAK_FUEL_DRAIN_PER_SECOND = 2; // 2 units/sec (1 jump = 100 units = 50s continuous cloak)
+
 export const PlayerCloakControlSystem = new System({
     name: 'PlayerCloakControlSystem',
     events: [ControlStateEvent],
@@ -86,17 +89,23 @@ export const PlayerCloakControlSystem = new System({
         ControlStateEvent,
         Optional(CloakDeviceComponent),
         Optional(CloakStateComponent),
+        Optional(PlayerStateComponent),
         TimeResource,
         Emit,
         GetEntity,
         PlayerShipSelector,
     ] as const,
-    step(controlState, device, cloakState, time, emit, entity) {
+    step(controlState, device, cloakState, playerState, time, emit, entity) {
         if (controlState.get('cloak') !== 'start' || !device?.canCloak) {
             return;
         }
 
         const willCloak = !(cloakState?.cloaked ?? false);
+        if (willCloak && playerState && (playerState.fuel ?? 0) <= 0) {
+            // Cannot cloak without energy/fuel
+            return;
+        }
+
         const newState: CloakState = {
             cloaked: willCloak,
             transitionStartedAt: time.time,
@@ -106,6 +115,43 @@ export const PlayerCloakControlSystem = new System({
 
         // Retail snd 381: Cloak On, snd 380: Cloak Off
         emit(SoundEvent, { id: willCloak ? 'nova:381' : 'nova:380' });
+    },
+});
+
+/**
+ * Continuously drains fuel/energy while cloaked. Decloaks when energy is depleted.
+ */
+export const CloakEnergyDrainSystem = new System({
+    name: 'CloakEnergyDrainSystem',
+    args: [
+        CloakStateComponent,
+        Optional(PlayerStateComponent),
+        TimeResource,
+        Emit,
+        GetEntity,
+    ] as const,
+    step(cloakState, playerState, time, emit, entity) {
+        if (!cloakState.cloaked || !playerState) {
+            return;
+        }
+        if ((playerState.fuel ?? 0) <= 0) {
+            cloakState.cloaked = false;
+            cloakState.transitionStartedAt = time.time;
+            entity.components.set(CloakStateComponent, cloakState);
+            emit(SoundEvent, { id: 'nova:380' }); // Cloak Off
+            return;
+        }
+
+        const deltaS = Math.max(0, time.delta_s);
+        const fuelDrain = deltaS * CLOAK_FUEL_DRAIN_PER_SECOND;
+        playerState.fuel = Math.max(0, (playerState.fuel ?? 0) - fuelDrain);
+
+        if (playerState.fuel <= 0) {
+            cloakState.cloaked = false;
+            cloakState.transitionStartedAt = time.time;
+            entity.components.set(CloakStateComponent, cloakState);
+            emit(SoundEvent, { id: 'nova:380' }); // Cloak Off
+        }
     },
 });
 
@@ -173,6 +219,7 @@ export const CloakingPlugin: Plugin = {
         }
         world.addSystem(PlayerCloakControlSystem);
         world.addSystem(DecloakOnFireSystem);
+        world.addSystem(CloakEnergyDrainSystem);
         world.addSystem(CloakAlphaSystem);
     },
 };
