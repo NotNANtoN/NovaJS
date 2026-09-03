@@ -12,6 +12,8 @@ import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin";
 import { TargetComponent } from "../nova_plugin/target_component";
 import { DisabledComponent } from "../nova_plugin/disabled_plugin";
 import { GovtComponent } from "../nova_plugin/npc_components";
+import { PlayerStateComponent } from "../nova_plugin/player_state";
+import { HiredEscortComponent } from "../nova_plugin/escort_plugin";
 import { GovernmentRelationResource, relation } from "../nova_plugin/govt_relations";
 import { AnimationGraphicComponent, ObjectDrawSystem } from "./animation_graphic_plugin";
 import { Space } from "./space_resource";
@@ -47,6 +49,15 @@ export class TargetCorners {
     private sprites: PIXI.Sprite[] = [];
     private textures = new Map<string, PIXI.Texture>();
     private currentStyle = 'neutral';
+    private callsignText = new PIXI.Text({
+        text: '',
+        style: {
+            fontFamily: 'Geneva, Monaco, Chicago, Arial, sans-serif',
+            fontSize: 9,
+            fill: 0x00f0ff,
+            align: 'center',
+        },
+    });
     built: Promise<void>;
 
     constructor(gameData: GameData, id = 'targetCorners') {
@@ -68,6 +79,10 @@ export class TargetCorners {
             this.sprites.push(sprite);
         }
 
+        this.callsignText.anchor.set(0.5, 1);
+        this.callsignText.visible = false;
+        this.container.addChild(this.callsignText);
+
         this.built = this.build(gameData, id);
     }
 
@@ -77,6 +92,8 @@ export class TargetCorners {
         this.textures.set('hostile', createFallbackCornerTexture(0xff2828));
         this.textures.set('friendly', createFallbackCornerTexture(0x28ff28));
         this.textures.set('disabled', createFallbackCornerTexture(0x888888));
+        this.textures.set('player', createFallbackCornerTexture(0x00f0ff));
+        this.textures.set('escort', createFallbackCornerTexture(0x38ff75));
         this.setStyle(this.currentStyle);
 
         try {
@@ -133,7 +150,7 @@ export class TargetCorners {
     }
 
     step(time: number, targetUuid: string | undefined,
-        targetSize: { x: number, y: number }) {
+        targetSize: { x: number, y: number }, callsign?: string) {
 
         if (targetUuid !== this.targetUuid) {
             this.targetUuid = targetUuid;
@@ -160,6 +177,14 @@ export class TargetCorners {
             sprite.position.x = cornerPositions[i].x;
             sprite.position.y = cornerPositions[i].y;
         }
+
+        if (callsign) {
+            this.callsignText.text = callsign;
+            this.callsignText.position.set(0, -halfH - 4);
+            this.callsignText.visible = true;
+        } else {
+            this.callsignText.visible = false;
+        }
     }
 }
 
@@ -169,6 +194,8 @@ const TargetEntityQuery = new Query([
     Optional(DisabledComponent),
     Optional(GovtComponent),
     Optional(TargetComponent),
+    Optional(PlayerStateComponent),
+    Optional(HiredEscortComponent),
 ] as const);
 
 const DrawTargetCornersSystem = new System({
@@ -199,13 +226,23 @@ const DrawTargetCornersSystem = new System({
             return;
         }
 
+        let callsign: string | undefined;
         const targetComponents = runQuery(TargetEntityQuery, target)[0];
         if (targetComponents) {
-            const [disabled, targetGovt, targetLock] = targetComponents;
+            const [disabled, targetGovt, targetLock, targetPlayer, targetEscort] = targetComponents;
             if (disabled) {
                 targetCorners.setStyle("disabled");
             } else if (targetLock?.target === playerUuid) {
                 targetCorners.setStyle("hostile");
+                if (targetPlayer?.pilotName) {
+                    callsign = `HOSTILE CMDR ${targetPlayer.pilotName}`;
+                }
+            } else if (targetEscort && targetEscort.ownerUuid === playerUuid) {
+                targetCorners.setStyle("escort");
+                callsign = `ESCORT`;
+            } else if (targetPlayer) {
+                targetCorners.setStyle("player");
+                callsign = targetPlayer.pilotName ? `CMDR ${targetPlayer.pilotName}` : `TRANSPONDER: ONLINE`;
             } else if (targetGovt && playerGovt && govts) {
                 const targetGovtData = govts.getCached(targetGovt.id);
                 const playerGovtData = govts.getCached(playerGovt.id);
@@ -228,7 +265,7 @@ const DrawTargetCornersSystem = new System({
             targetCorners.setStyle("neutral");
         }
 
-        targetCorners.step(time.time, target, targetGraphic.size);
+        targetCorners.step(time.time, target, targetGraphic.size, callsign);
         targetCorners.setPosition(targetGraphic.container.position);
         targetCorners.visible = true;
     },

@@ -39,16 +39,17 @@ export class Outfitter extends Menu<OutfitsState> {
     private shipData?: ShipData;
     private refreshPromise?: Promise<void>;
 
+    private readonly outfitDataMap = new Map<string, OutfitData>();
     private text = {
-        description: new PIXI.Text("", FONT.normal),
-        itemPrice: new PIXI.Text("Item Price:", FONT.normal),
-        price: new PIXI.Text("", FONT.normal),
-        youHave: new PIXI.Text("Credits:", FONT.normal),
-        count: new PIXI.Text("0 cr", FONT.normal),
-        itemMass: new PIXI.Text("Item Mass:", FONT.normal),
-        mass: new PIXI.Text("3", FONT.normal),
-        availableMass: new PIXI.Text("Available:", FONT.normal),
-        freeMass: new PIXI.Text("", FONT.normal),
+        description: new PIXI.Text({ text: "", style: FONT.normal }),
+        itemPrice: new PIXI.Text({ text: "Item Price:", style: FONT.normal }),
+        price: new PIXI.Text({ text: "", style: FONT.normal }),
+        youHave: new PIXI.Text({ text: "Credits:", style: FONT.normal }),
+        count: new PIXI.Text({ text: "0 cr", style: FONT.normal }),
+        itemMass: new PIXI.Text({ text: "Item Mass:", style: FONT.normal }),
+        mass: new PIXI.Text({ text: "3", style: FONT.normal }),
+        availableMass: new PIXI.Text({ text: "Available:", style: FONT.normal }),
+        freeMass: new PIXI.Text({ text: "", style: FONT.normal }),
     }
 
     constructor(gameData: GameData,
@@ -134,6 +135,7 @@ export class Outfitter extends Menu<OutfitsState> {
 
     setShipData(shipData: ShipData | undefined) {
         this.shipData = shipData;
+        this.setFreeMassText();
     }
 
     setPlanetData(planetData: PlanetData | undefined) {
@@ -158,6 +160,9 @@ export class Outfitter extends Menu<OutfitsState> {
                 this.playerState,
                 this.outfits,
             ));
+        }
+        for (const outfit of outfits) {
+            this.outfitDataMap.set(outfit.id, outfit);
         }
         outfits.sort((a, b) => b.displayWeight - a.displayWeight);
         const itemGrid = new ItemGrid(this.gameData, outfits);
@@ -192,10 +197,13 @@ export class Outfitter extends Menu<OutfitsState> {
     }
 
     private buyOutfit() {
-        //const mass = this.itemGrid?.selection.physics.freeMass;
-        //if (mass <= global.myShip.properties.physics.freeMass) {
         const outfit = this.itemGrid?.selection;
         if (!outfit) {
+            return;
+        }
+        const mass = outfit.physics.freeMass ?? 0;
+        if (mass > 0 && mass > this.getAvailableMass()) {
+            console.warn(`Not enough free mass to install outfit ${outfit.id}.`);
             return;
         }
         const price = Math.max(0, Math.floor(outfit.price));
@@ -219,12 +227,9 @@ export class Outfitter extends Menu<OutfitsState> {
         this.playerState.credits -= price;
         this.outfits.set(outfit.id, this.outfits.get(outfit.id) + 1);
 
-        //     global.myShip.addOutfit(outfit, false);
-        // global.myShip.properties.physics.freeMass -= mass;
-        // this.setFreeMassText();
         this.itemGrid?.setCounts(this.outfits);
         this.updateCreditsText();
-        //}
+        this.setFreeMassText();
     }
 
     private sellOutfit() {
@@ -247,13 +252,9 @@ export class Outfitter extends Menu<OutfitsState> {
         if (this.outfits.get(id) === 0) {
             this.outfits.delete(id);
         }
-        // var outfit = { id: this.itemGrid.selection.id, count: 1 };
-        // if (global.myShip.removeOutfit(outfit, false)) {
-        //     global.myShip.properties.physics.freeMass += this.itemGrid.selection.physics.freeMass;
-        // }
-        // this.setFreeMassText();
         this.itemGrid?.setCounts(this.outfits);
         this.updateCreditsText();
+        this.setFreeMassText();
     }
 
     private setOutfitSelected(outfitTile: ItemTile<OutfitData> | undefined) {
@@ -292,8 +293,25 @@ export class Outfitter extends Menu<OutfitsState> {
         }
     }
 
+    private getUsedOutfitMass(): number {
+        let total = 0;
+        for (const [id, count] of this.outfits) {
+            if (count <= 0) continue;
+            const data = this.outfitDataMap.get(id);
+            if (data?.physics?.freeMass) {
+                total += data.physics.freeMass * count;
+            }
+        }
+        return total;
+    }
+
+    private getAvailableMass(): number {
+        const baseMass = this.shipData?.physics?.freeMass ?? 0;
+        return Math.max(0, baseMass - this.getUsedOutfitMass());
+    }
+
     private setFreeMassText() {
-        //this.text.freeMass.text = formatMass(global.myShip.properties.physics.freeMass);
+        this.text.freeMass.text = formatMass(this.getAvailableMass());
     }
 
     private updateCreditsText() {
@@ -306,6 +324,7 @@ export class Outfitter extends Menu<OutfitsState> {
         super.setInput(input);
         this.itemGrid?.setCounts(this.outfits);
         this.updateCreditsText();
+        this.setFreeMassText();
     }
 
     protected override done() {

@@ -1,3 +1,4 @@
+import { calculateTradeInValue } from './shipyard';
 import 'jasmine';
 import { getDefaultOutfitData } from 'novadatainterface/OutfitData';
 import {
@@ -110,5 +111,13 @@ describe('shipyard standard weapons list', () => {
             weapons,
         );
         expect(lines).toEqual(['3x Cargo Expansion', '2x Blaster']);
+    });
+});
+
+describe('shipyard trade-in calculation', () => {
+    it('applies 80% trade-in credit to hull cost', () => {
+        expect(calculateTradeInValue(100_000)).toEqual(80_000);
+        expect(calculateTradeInValue(250_000)).toEqual(200_000);
+        expect(calculateTradeInValue(0)).toEqual(0);
     });
 });

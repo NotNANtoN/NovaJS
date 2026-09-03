@@ -87,7 +87,7 @@ function addMaskedText(
     region: { x: number; y: number; width: number; height: number },
     style: PIXI.TextStyle,
 ): PIXI.Text {
-    const text = new PIXI.Text('', style);
+    const text = new PIXI.Text({ text: '', style });
     text.position.set(region.x, region.y);
     text.style.wordWrapWidth = region.width;
     const mask = new PIXI.Graphics();
@@ -379,7 +379,7 @@ class SystemGraph {
             });
             circleContainer.addChild(graphics);
 
-            const nameText = new PIXI.Text(s.name, SYSTEM_TEXT);
+            const nameText = new PIXI.Text({ text: s.name, style: SYSTEM_TEXT });
             nameText.position.x = 10;
             nameText.anchor.y = 0.5;
             container.addChild(nameText);

@@ -88,17 +88,23 @@ export class Spaceport extends Menu<Entity> {
     private data?: PlanetData;
     private readonly id: string;
     private serviceButtons?: Record<SpaceportService, Button>;
-    private missionNotice = new PIXI.Text("", {
-        fontFamily: "Geneva", fontSize: 10, fill: 0xffff00,
-        align: "left", wordWrap: true, wordWrapWidth: 420,
-    } as const);
+    private missionNotice = new PIXI.Text({
+        text: "",
+        style: {
+            fontFamily: "Geneva", fontSize: 10, fill: 0xffff00,
+            align: "left", wordWrap: true, wordWrapWidth: 420,
+        },
+    });
     // The status bar, which is where a pilot would otherwise watch their fuel
     // and credits change, is hidden behind the landing screen. One click buys
     // every missing jump, so without a receipt the deduction looks arbitrary.
-    private rechargeNotice = new PIXI.Text("", {
-        fontFamily: "Geneva", fontSize: 10, fill: 0xffffff,
-        align: "left", wordWrap: true, wordWrapWidth: 420,
-    } as const);
+    private rechargeNotice = new PIXI.Text({
+        text: "",
+        style: {
+            fontFamily: "Geneva", fontSize: 10, fill: 0xffffff,
+            align: "left", wordWrap: true, wordWrapWidth: 420,
+        },
+    });
 
     private font = {
         title: {
@@ -507,12 +513,12 @@ export class Spaceport extends Menu<Entity> {
             hasSpaceportService(data, "commodity")
             || await this.tradeCenter.hasJunkTradeLocation();
         this.updateServiceButtons(data);
-        const title = new PIXI.Text(data.name, this.font.title);
+        const title = new PIXI.Text({ text: data.name, style: this.font.title });
         title.position.x = -24;
         title.position.y = 39;
         this.container.addChild(title);
 
-        const desc = new PIXI.Text(data.landingDesc, this.font.desc);
+        const desc = new PIXI.Text({ text: data.landingDesc, style: this.font.desc });
         desc.position.x = -149;
         desc.position.y = 70;
         this.container.addChild(desc);

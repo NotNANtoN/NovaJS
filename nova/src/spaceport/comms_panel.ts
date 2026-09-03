@@ -89,7 +89,7 @@ export class Comms extends Menu<Entity> {
     constructor(gameData: GameData, controlEvents: Observable<ControlEvent>) {
         super(gameData, COMMS_LAYOUT.background, controlEvents);
 
-        this.message = new PIXI.Text('', COMMS_FONT);
+        this.message = new PIXI.Text({ text: '', style: COMMS_FONT });
         this.message.position.set(
             COMMS_LAYOUT.message.x, COMMS_LAYOUT.message.y);
         this.message.style.wordWrapWidth = COMMS_LAYOUT.message.width;

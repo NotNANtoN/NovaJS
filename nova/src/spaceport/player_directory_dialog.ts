@@ -29,8 +29,8 @@ const ENTRY_FONT = {
 } as const;
 
 export class PlayerDirectoryDialog extends ClassicDialog<string | undefined> {
-    private onlineEntriesText = new PIXI.Text('Fetching active transponders...', ENTRY_FONT);
-    private offlineEntriesText = new PIXI.Text('Loading pilot registry...', ENTRY_FONT);
+    private onlineEntriesText = new PIXI.Text({ text: 'Fetching active transponders...', style: ENTRY_FONT });
+    private offlineEntriesText = new PIXI.Text({ text: 'Loading pilot registry...', style: ENTRY_FONT });
     private pilots: PilotDirectoryEntry[] = [];
     private selectedSystem?: string;
 
@@ -48,13 +48,16 @@ export class PlayerDirectoryDialog extends ClassicDialog<string | undefined> {
                     type: 'custom',
                     id: 'directoryContent',
                     render: (container) => {
-                        const onlineHeader = new PIXI.Text('● ACTIVE PILOTS ONLINE', SECTION_HEADER_FONT);
+                        const onlineHeader = new PIXI.Text({ text: '● ACTIVE PILOTS ONLINE', style: SECTION_HEADER_FONT });
                         onlineHeader.position.set(-200, -145);
                         this.onlineEntriesText.position.set(-190, -125);
 
-                        const offlineHeader = new PIXI.Text('○ GALAXY REGISTER (LAST KNOWN STATUS)', {
-                            ...SECTION_HEADER_FONT,
-                            fill: 0xaaaaaa,
+                        const offlineHeader = new PIXI.Text({
+                            text: '○ GALAXY REGISTER (LAST KNOWN STATUS)',
+                            style: {
+                                ...SECTION_HEADER_FONT,
+                                fill: 0xaaaaaa,
+                            },
                         });
                         offlineHeader.position.set(-200, -20);
                         this.offlineEntriesText.position.set(-190, 0);

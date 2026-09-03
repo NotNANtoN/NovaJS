@@ -192,10 +192,48 @@ type HiredEscortData = t.TypeOf<typeof HiredEscortData>;
 export const HiredEscortComponent =
     new Component<HiredEscortData>('HiredEscortComponent');
 
-function formationOffset(contractId: string, slot: number): Position {
-    const angle = hashSample(contractId) / 100 * Math.PI * 2;
-    const radius = 180 + Math.max(0, slot) * 45;
-    return new Position(Math.cos(angle) * radius, Math.sin(angle) * radius);
+export interface FormationSlotOffset {
+    lateral: number;      // positive = starboard (right), negative = port (left)
+    longitudinal: number; // positive = ahead, negative = astern (trailing)
+}
+
+/**
+ * Tactical V-formation slot offsets for naval escort wings.
+ * Slot 0: Port wing trailing (-120, -90)
+ * Slot 1: Starboard wing trailing (+120, -90)
+ * Slot 2: Port outer wing (-180, -150)
+ * Slot 3: Starboard outer wing (+180, -150)
+ */
+export function tacticalFormationSlot(slot: number): FormationSlotOffset {
+    const s = Math.max(0, Math.floor(slot));
+    const rank = Math.floor(s / 2) + 1;
+    const side = s % 2 === 0 ? -1 : 1;
+    const lateral = side * (60 + rank * 60);
+    const longitudinal = -(30 + rank * 60);
+    return { lateral, longitudinal };
+}
+
+/**
+ * Compute the world-space target position for an escort slot, oriented
+ * according to the flagship's heading.
+ * In Nova's coordinate system, heading 0 is pointing up (0, -1),
+ * and starboard (right) is (1, 0).
+ */
+export function worldFormationPosition(
+    flagshipPosition: Position,
+    flagshipRotation: { angle: number },
+    slot: number,
+): Position {
+    const { lateral, longitudinal } = tacticalFormationSlot(slot);
+    const theta = flagshipRotation.angle;
+    const forwardX = Math.sin(theta);
+    const forwardY = -Math.cos(theta);
+    const rightX = Math.cos(theta);
+    const rightY = Math.sin(theta);
+
+    const worldX = flagshipPosition.x + longitudinal * forwardX + lateral * rightX;
+    const worldY = flagshipPosition.y + longitudinal * forwardY + lateral * rightY;
+    return new Position(worldX, worldY);
 }
 
 /**
@@ -218,10 +256,10 @@ export function makeHiredEscort(
     });
     escort.components.set(MultiplayerData, { owner: 'server' });
     const movement = copyMovementState(ownerMovement);
-    const offset = formationOffset(contractId, slot);
-    movement.position = new Position(
-        ownerMovement.position.x + offset.x,
-        ownerMovement.position.y + offset.y,
+    movement.position = worldFormationPosition(
+        ownerMovement.position,
+        ownerMovement.rotation,
+        slot,
     );
     escort.components.set(MovementStateComponent, movement);
     return escort;
@@ -354,9 +392,15 @@ const FollowEscortOwner = new System({
         }
         const ownerOrder = owner.components.get(EscortOrderComponent);
         if (ownerOrder?.mode === 'hold') {
-            movement.accelerating = 0;
-            movement.turnTo = null;
-            movement.turnBack = false;
+            if (movement.velocity.length > 5) {
+                movement.turnBack = true;
+                movement.accelerating = 1;
+                movement.turnTo = null;
+            } else {
+                movement.accelerating = 0;
+                movement.turnTo = null;
+                movement.turnBack = false;
+            }
             return;
         }
         const ownerMovement = owner.components.get(MovementStateComponent);
@@ -365,10 +409,19 @@ const FollowEscortOwner = new System({
             movement.turnTo = null;
             return;
         }
-        const command = approachTarget(movement, ownerMovement, physics, {
-            standoff: 180 + Math.max(0, escort.slot) * 45,
-        });
-        movement.turnTo = command.turnTo ?? escort.ownerUuid;
+
+        const slotPosition = worldFormationPosition(
+            ownerMovement.position,
+            ownerMovement.rotation,
+            escort.slot,
+        );
+        const command = approachTarget(
+            movement,
+            { position: slotPosition, velocity: ownerMovement.velocity },
+            physics,
+            { standoff: 0, tolerance: 20 },
+        );
+        movement.turnTo = command.turnTo ?? ownerMovement.rotation;
         movement.accelerating = command.accelerating;
         movement.turnBack = command.turnBack;
     },

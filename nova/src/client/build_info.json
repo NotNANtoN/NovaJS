@@ -1,5 +1,5 @@
 {
-  "commit": "b1fc6c3e",
-  "message": "fix: prevent revoked Immer proxy access in mission expiration system",
-  "date": "2026-09-03 02:13 +0200"
+  "commit": "f1ae7215",
+  "message": "feat: in-flight boarding modal, retail cargo scoop mechanics, and spaceport dialogs",
+  "date": "2026-09-03 02:33 +0200"
 }

@@ -8,6 +8,7 @@ export interface TargetLabelPieces {
     name: string;
     subtitle?: string;
     government?: string;
+    isPlayer?: boolean;
 }
 
 export const TARGET_GOVERNMENT_MAX_LENGTH = 8;
@@ -77,10 +78,13 @@ export function targetLabel(
     shipName: string,
     subtitle: string | undefined,
     government: TargetGovernmentNames | undefined,
+    isPlayer = false,
 ): TargetLabelPieces {
+    const cleanSubtitle = nonEmpty(subtitle);
     const label: TargetLabelPieces = {
         name: shipName,
-        subtitle: nonEmpty(subtitle),
+        subtitle: isPlayer && cleanSubtitle ? `CMDR ${cleanSubtitle}` : cleanSubtitle,
+        ...(isPlayer ? { isPlayer: true } : {}),
     };
     const governmentName = targetGovernmentName(government);
     if (!governmentName || namesItsGovernment(shipName, governmentName)) {

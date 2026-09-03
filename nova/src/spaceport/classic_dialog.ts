@@ -102,12 +102,15 @@ export const DEFAULT_DIALOG_BACKGROUND = "nova:8517";
  * info sheets, prompts, notices, and interactions.
  */
 export class ClassicDialog<TData> extends Menu<TData> {
-    private readonly titleText = new PIXI.Text("", CLASSIC_MAC_TITLE_FONT);
-    private readonly subtitleText = new PIXI.Text("", {
-        ...CLASSIC_MAC_FONT,
-        fontSize: 10,
-        fill: 0xb0b0b0,
-        align: "center",
+    private readonly titleText = new PIXI.Text({ text: "", style: CLASSIC_MAC_TITLE_FONT });
+    private readonly subtitleText = new PIXI.Text({
+        text: "",
+        style: {
+            ...CLASSIC_MAC_FONT,
+            fontSize: 10,
+            fill: 0xb0b0b0,
+            align: "center",
+        },
     });
     private readonly sectionContainers = new Map<string, PIXI.Container>();
     private readonly sectionTexts = new Map<string, PIXI.Text>();
@@ -287,16 +290,22 @@ export class ClassicDialog<TData> extends Menu<TData> {
                             typeof item.value === "function"
                                 ? item.value(input)
                                 : item.value;
-                        const labelText = new PIXI.Text(item.label, {
-                            ...CLASSIC_MAC_FONT,
-                            fill: item.color ?? 0xcccccc,
+                        const labelText = new PIXI.Text({
+                            text: item.label,
+                            style: {
+                                ...CLASSIC_MAC_FONT,
+                                fill: item.color ?? 0xcccccc,
+                            },
                         });
                         labelText.position.set(0, currentY);
 
-                        const valueText = new PIXI.Text(valStr, {
-                            ...CLASSIC_MAC_FONT,
-                            fill: 0xffffff,
-                            fontWeight: "bold",
+                        const valueText = new PIXI.Text({
+                            text: valStr,
+                            style: {
+                                ...CLASSIC_MAC_FONT,
+                                fill: 0xffffff,
+                                fontWeight: "bold",
+                            },
                         });
                         valueText.position.set(sec.colWidth || 120, currentY);
 

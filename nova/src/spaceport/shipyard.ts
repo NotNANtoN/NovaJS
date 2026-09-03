@@ -7,6 +7,7 @@ import { GameData } from '../client/gamedata/GameData';
 import { ControlEvent } from '../nova_plugin/controls_plugin';
 import { makeShip } from '../nova_plugin/make_ship';
 import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin';
+import { ShipDataComponent } from '../nova_plugin/ship_plugin';
 import {
     PlayerState,
     PlayerStateComponent,
@@ -27,11 +28,13 @@ export class Shipyard extends Menu<Entity> {
     itemGrid?: ItemGrid<ShipData>;
     private readonly infoDialog: ShipyardInfoDialog;
     private text = {
-        description: new PIXI.Text("", FONT.normal),
-        itemPrice: new PIXI.Text("Price:", FONT.normal),
-        price: new PIXI.Text("", FONT.normal),
-        credits: new PIXI.Text("Credits:", FONT.normal),
-        creditAmount: new PIXI.Text("", FONT.normal),
+        description: new PIXI.Text({ text: "", style: FONT.normal }),
+        itemPrice: new PIXI.Text({ text: "Price:", style: FONT.normal }),
+        price: new PIXI.Text({ text: "", style: FONT.normal }),
+        credits: new PIXI.Text({ text: "Credits:", style: FONT.normal }),
+        creditAmount: new PIXI.Text({ text: "", style: FONT.normal }),
+        tradeIn: new PIXI.Text({ text: "Trade-In:", style: FONT.normal }),
+        tradeInAmount: new PIXI.Text({ text: "", style: FONT.normal }),
     }
     private playerState?: PlayerState;
     private planetData?: PlanetData;
@@ -67,6 +70,12 @@ export class Shipyard extends Menu<Entity> {
         this.container.addChild(this.text.price);
         this.container.addChild(this.text.credits);
         this.container.addChild(this.text.creditAmount);
+        this.text.tradeIn.position.x = 234;
+        this.text.tradeIn.position.y = 82;
+        this.text.tradeInAmount.position.x = 300;
+        this.text.tradeInAmount.position.y = 82;
+        this.container.addChild(this.text.tradeIn);
+        this.container.addChild(this.text.tradeInAmount);
         this.pictContainer.position.x = 174;
         this.pictContainer.position.y = -152.5;
         this.container.addChild(this.pictContainer);
@@ -197,6 +206,14 @@ export class Shipyard extends Menu<Entity> {
         this.updateCreditsText();
     }
 
+    private getCurrentTradeInValue(): number {
+        const currentShip = this.input?.components?.get(ShipDataComponent);
+        if (!currentShip) {
+            return 0;
+        }
+        return calculateTradeInValue(currentShip.cost);
+    }
+
     private buyShip() {
         const selection = this.itemGrid?.selection;
         if (!selection) {
@@ -221,11 +238,14 @@ export class Shipyard extends Menu<Entity> {
         }
 
         const cost = Math.max(0, Math.floor(selection.cost));
-        if (this.playerState.credits < cost) {
-            console.warn(`Not enough credits to buy ship ${selection.id}`);
+        const tradeIn = this.getCurrentTradeInValue();
+        const netCost = Math.max(0, cost - tradeIn);
+
+        if (this.playerState.credits < netCost) {
+            console.warn(`Not enough credits to buy ship ${selection.id} (requires ${netCost} after trade-in)`);
             return;
         }
-        this.playerState.credits -= cost;
+        this.playerState.credits -= netCost;
         this.playerState.shipId = selection.id;
         setCargoCapacity(this.playerState, selection.cargoCapacity);
         this.input = makeShip(selection);
@@ -240,5 +260,10 @@ export class Shipyard extends Menu<Entity> {
     private updateCreditsText() {
         this.text.creditAmount.text = formatPrice(
             Math.max(0, Math.floor(this.playerState?.credits ?? 0)));
+        this.text.tradeInAmount.text = formatPrice(this.getCurrentTradeInValue());
     }
+}
+
+export function calculateTradeInValue(cost: number): number {
+    return Math.max(0, Math.floor(cost * 0.8));
 }

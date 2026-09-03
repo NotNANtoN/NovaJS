@@ -63,7 +63,7 @@ export class ShipyardInfoDialog extends ClassicDialog<ShipData> {
                         } catch (error) {
                             console.warn('Failed to load shipyard weapons info', error);
                         }
-                        const label = new PIXI.Text(text, FONT.normal);
+                        const label = new PIXI.Text({ text, style: FONT.normal });
                         label.position.set(100, 95);
                         container.addChild(label);
                     },

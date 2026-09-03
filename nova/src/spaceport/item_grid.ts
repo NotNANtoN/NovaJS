@@ -38,12 +38,12 @@ export class ItemTile<I extends Item> {
     public largePict = new PIXI.Container();
 
     constructor(private gameData: GameData, readonly item: I) {
-        const nameText = new PIXI.Text(item.name, this.font.normal);
+        const nameText = new PIXI.Text({ text: item.name, style: this.font.normal });
         nameText.anchor.x = 0.5;
         nameText.position.x = TILE_SIZE[0] / 2;
         nameText.position.y = TILE_SIZE[1] / 2;
 
-        this.quantityText = new PIXI.Text("", this.font.normal);
+        this.quantityText = new PIXI.Text({ text: "", style: this.font.normal });
         this.quantityText.anchor.x = 1;
         this.quantityText.position.x = TILE_SIZE[0] - 2;
         this.quantityText.position.y = 2;

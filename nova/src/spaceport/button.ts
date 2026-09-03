@@ -53,7 +53,7 @@ export class Button {
         this.container.position.x = position?.x ?? 0;
         this.container.position.y = position?.y ?? 0;
 
-        this.text = new PIXI.Text(text, this.font.get("normal")!);
+        this.text = new PIXI.Text({ text, style: this.font.get("normal")! });
         this.text.anchor.x = 0.5;
         this.text.anchor.y = 0.5;
 

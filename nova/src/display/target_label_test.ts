@@ -60,6 +60,20 @@ describe('target label', () => {
             name: 'Association',
         })).toBe('Associa…');
     });
+
+    it('formats multiplayer peer targets with CMDR prefix and isPlayer flag', () => {
+        expect(targetLabel('Kestrel', 'Zack', { name: 'Auroran', targetName: 'Auroran' }, true)).toEqual({
+            name: 'Kestrel',
+            subtitle: 'CMDR Zack',
+            government: 'Auroran',
+            isPlayer: true,
+        });
+        expect(targetLabel('Viper', '', undefined, true)).toEqual({
+            name: 'Viper',
+            subtitle: undefined,
+            isPlayer: true,
+        });
+    });
 });
 
 describe('a hull that already names its owner', () => {

@@ -35,6 +35,8 @@ import {
     hireEscort,
     isEscortOfferAvailable,
     makeHiredEscort,
+    tacticalFormationSlot,
+    worldFormationPosition,
 } from './escort_plugin';
 import { NpcAIComponent } from './npc_plugin';
 import { PlatformResource } from './platform_plugin';
@@ -394,5 +396,36 @@ describe('PlayerEscortCommandInputSystem', () => {
 
         world.emitNow(ControlStateEvent, new Map([['formation', 'start']]), ['player']);
         expect(player.components.get(EscortOrderComponent)?.mode).toBe('formation');
+    });
+});
+
+describe('tactical escort formations', () => {
+    it('places slots in alternating port/starboard trailing V-formation', () => {
+        const slot0 = tacticalFormationSlot(0);
+        expect(slot0.lateral).toBeLessThan(0); // Port / Left
+        expect(slot0.longitudinal).toBeLessThan(0); // Trailing
+
+        const slot1 = tacticalFormationSlot(1);
+        expect(slot1.lateral).toBeGreaterThan(0); // Starboard / Right
+        expect(slot1.longitudinal).toBeLessThan(0); // Trailing
+        expect(Math.abs(slot1.lateral)).toEqual(Math.abs(slot0.lateral));
+        expect(slot1.longitudinal).toEqual(slot0.longitudinal);
+
+        const slot2 = tacticalFormationSlot(2);
+        expect(Math.abs(slot2.lateral)).toBeGreaterThan(Math.abs(slot0.lateral));
+        expect(slot2.longitudinal).toBeLessThan(slot0.longitudinal);
+    });
+
+    it('transforms world formation coordinates according to flagship rotation', () => {
+        const flagshipPos = new Position(1000, 2000);
+        // Heading 0: pointing up (0, -1). Port is left (-x), Starboard is right (+x), Trailing is down (+y).
+        const posUp = worldFormationPosition(flagshipPos, new Angle(0), 1);
+        expect(posUp.x).toBeGreaterThan(flagshipPos.x); // Starboard (+x)
+        expect(posUp.y).toBeGreaterThan(flagshipPos.y); // Trailing (+y in screen space)
+
+        // Heading pi/2 (pointing right +x): Starboard is down (+y), Trailing is left (-x).
+        const posRight = worldFormationPosition(flagshipPos, new Angle(Math.PI / 2), 1);
+        expect(posRight.x).toBeLessThan(flagshipPos.x); // Trailing behind facing direction
+        expect(posRight.y).toBeGreaterThan(flagshipPos.y); // Starboard
     });
 });
