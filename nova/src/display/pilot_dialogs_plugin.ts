@@ -1,4 +1,6 @@
-import { Entities, GetEntity, GetWorld, UUID } from 'nova_ecs/arg_types';
+import { Entities, GetEntity, GetWorld, UUID, Emit } from 'nova_ecs/arg_types';
+import { Optional } from 'nova_ecs/optional';
+import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import { AsyncSystem } from 'nova_ecs/async_system';
 import { Plugin } from 'nova_ecs/plugin';
 import { Resource } from 'nova_ecs/resource';
@@ -13,6 +15,9 @@ import { SystemIdResource } from '../nova_plugin/system_id_resource';
 import { MissionInfo } from '../spaceport/mission_bbs';
 import { ShipInfo } from '../spaceport/ship_info';
 import { Comms } from '../spaceport/comms_panel';
+import { BoardingDialog, BoardingDialogResource } from '../spaceport/boarding_dialog';
+import { BoardingRequestComponent, BoardingStateComponent, DisabledBoardingTargets, isBoardingTransferReady, heldCargo, BoardingNoticeComponent } from '../nova_plugin/boarding_plugin';
+import { SoundEvent } from '../nova_plugin/sound_event';
 import { PlayerChatDialog } from '../spaceport/player_chat_dialog';
 import { TargetComponent } from '../nova_plugin/target_component';
 import { GovtComponent } from '../nova_plugin/npc_components';
@@ -44,6 +49,7 @@ export const ShipInfoResource = new Resource<ShipInfo>('ShipInfo');
 export const MissionLogResource = new Resource<MissionInfo>('MissionLog');
 export const CommsResource = new Resource<Comms>('Comms');
 export const PlayerChatDialogResource = new Resource<PlayerChatDialog>('PlayerChatDialog');
+export { BoardingDialogResource } from '../spaceport/boarding_dialog';
 
 /** Retail's "P" pilot status, available in flight as well as when landed. */
 export const ShipInfoSystem = new AsyncSystem({
@@ -153,6 +159,91 @@ export const CommsSystem = new AsyncSystem({
     },
 });
 
+
+/**
+ * In-flight Boarding modal, opened with the board key when matching speed
+ * alongside a disabled ship. Offers Plunder, Capture, and Leave actions.
+ */
+export const BoardingSystem = new AsyncSystem({
+    name: 'BoardingSystem',
+    events: [EcsControlEvent] as const,
+    exclusive: true,
+    alwaysRunOnEvents: false,
+    skipIfApplyingPatches: true,
+    args: [
+        EcsControlEvent,
+        BoardingDialogResource,
+        ScreenSize,
+        GetEntity,
+        TargetComponent,
+        MovementStateComponent,
+        Optional(BoardingRequestComponent),
+        Optional(BoardingStateComponent),
+        DisabledBoardingTargets,
+        PlayerShipSelector,
+        Emit,
+    ] as const,
+    async step(controlEvent, boardingDialog, screenSize, entity, target,
+        movement, request, boarding, disabledTargets, _player, emit) {
+        if (!isDialogStartEdge(controlEvent, 'board', (boardingDialog as any).container.visible)) {
+            return;
+        }
+        const targetUuid = target.target;
+        if (!targetUuid || boarding?.boarded.includes(targetUuid)) {
+            entity.components.set(BoardingNoticeComponent,
+                { text: 'That ship cannot be boarded.' });
+            return;
+        }
+        const victim = disabledTargets.find((candidate: any) =>
+            candidate[0] === targetUuid && candidate[1] && !candidate[5]);
+        if (!victim) {
+            entity.components.set(BoardingNoticeComponent,
+                { text: 'That ship cannot be boarded.' });
+            return;
+        }
+        if (!isBoardingTransferReady(movement, victim[2])) {
+            entity.components.set(BoardingNoticeComponent,
+                { text: 'Too far away to board.' });
+            return;
+        }
+
+        emit(SoundEvent, { id: 'nova:390' });
+
+        const isDerelict = Boolean(victim[9]);
+        const victimShipData = victim[7];
+        const victimShip = victim[8];
+        const victimInventory = victim[4];
+
+        const shipType = victimShipData?.name ?? victimShip?.id ?? 'Unknown Vessel';
+        const shipName = isDerelict ? `Derelict ${shipType}` : shipType;
+        const credits = victimInventory?.credits ?? Math.max(500, Math.floor((victimShipData?.cost ?? 50000) * 0.001));
+        const cargoTons = victimInventory ? heldCargo(victimInventory) : Math.floor((victimShipData?.cargoCapacity ?? 20) / 2);
+        const crew = isDerelict ? 0 : (victimShipData?.crew ?? 5);
+
+        boardingDialog.container.position.set(screenSize.x / 2, screenSize.y / 2);
+        await boardingDialog.show({
+            uuid: targetUuid,
+            shipName,
+            shipType,
+            credits,
+            cargoTons,
+            crew,
+            isDerelict,
+        });
+
+        const action = boardingDialog.getSelectedAction();
+        if (action === 'leave') {
+            return;
+        }
+
+        entity.components.set(BoardingRequestComponent, {
+            target: targetUuid,
+            sequence: (request?.sequence ?? 0) + 1,
+            action,
+        });
+    },
+});
+
 export const PilotDialogsPlugin: Plugin = {
     name: 'PilotDialogsPlugin',
     build(world) {
@@ -192,6 +283,10 @@ export const PilotDialogsPlugin: Plugin = {
 
         const playerChatDialog = new PlayerChatDialog(gameData as GameData, controls);
         stage.addChild(playerChatDialog.container);
+
+        const boardingDialog = new BoardingDialog(gameData as GameData, controls);
+        stage.addChild(boardingDialog.container);
+        world.resources.set(BoardingDialogResource, boardingDialog);
         world.resources.set(PlayerChatDialogResource, playerChatDialog);
 
         // Hailing needs the government cache. Plugin build order is not
@@ -206,17 +301,22 @@ export const PilotDialogsPlugin: Plugin = {
         world.addSystem(ShipInfoSystem);
         world.addSystem(MissionLogSystem);
         world.addSystem(CommsSystem);
+        world.addSystem(BoardingSystem);
     },
     remove(world) {
         world.removeSystem(ShipInfoSystem);
         world.removeSystem(MissionLogSystem);
         world.removeSystem(CommsSystem);
+        world.removeSystem(BoardingSystem);
         const comms = world.resources.get(CommsResource);
         comms?.container.parent?.removeChild(comms.container);
         world.resources.delete(CommsResource);
         const playerChatDialog = world.resources.get(PlayerChatDialogResource);
         playerChatDialog?.container.parent?.removeChild(playerChatDialog.container);
         world.resources.delete(PlayerChatDialogResource);
+        const boardingDialog = world.resources.get(BoardingDialogResource);
+        (boardingDialog as any)?.container.parent?.removeChild(boardingDialog.container);
+        world.resources.delete(BoardingDialogResource);
         const shipInfo = world.resources.get(ShipInfoResource);
         shipInfo?.container.parent?.removeChild(shipInfo.container);
         world.resources.delete(ShipInfoResource);

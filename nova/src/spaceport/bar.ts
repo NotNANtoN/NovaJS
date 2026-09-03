@@ -19,13 +19,16 @@ export class Bar extends MissionBoard {
     private readonly hub = new PIXI.Container();
     private readonly inheritedVisibility:
         ReadonlyMap<PIXI.Container, boolean>;
-    private readonly content = new PIXI.Text('', {
-        fontFamily: 'Geneva',
-        fontSize: 10,
-        fill: 0xffffff,
-        align: 'left',
-        wordWrap: true,
-        wordWrapWidth: BAR_LAYOUT.text.width,
+    private readonly content = new PIXI.Text({
+        text: '',
+        style: {
+            fontFamily: 'Geneva, Chicago, Arial, sans-serif',
+            fontSize: 10,
+            fill: 0xffffff,
+            align: 'left',
+            wordWrap: true,
+            wordWrapWidth: BAR_LAYOUT.text.width,
+        },
     });
     private readonly missionControls: MenuControls['controls'];
     private missionsButton!: Button;

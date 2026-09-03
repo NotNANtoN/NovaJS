@@ -421,4 +421,89 @@ describe('pirate boarding', () => {
         expect(playerState.escorts?.length ?? 0).toBe(0);
         expect(world.entities.has('victim')).toBeTrue();
     });
+
+    it('plunders cargo without capturing when action is plunder', () => {
+        const world = new World('player-plunder-action-test');
+        world.resources.set(PlatformResource, 'node');
+        world.resources.set(TimeResource, {
+            time: 0,
+            delta_ms: 1_000 / 60,
+            delta_s: 1 / 60,
+            frame: 0,
+        });
+
+        const playerState = createInitialPlayerState();
+        playerState.credits = 100;
+        playerState.cargoCapacity = 20;
+        const player = new Entity('player')
+            .addComponent(PlayerShipSelector, undefined)
+            .addComponent(PlayerStateComponent, playerState)
+            .addComponent(MultiplayerData, { owner: 'player' })
+            .addComponent(MovementStateComponent, movementAt(new Position(0, 0)))
+            .addComponent(BoardingRequestComponent, { target: 'victim', sequence: 1, action: 'plunder' });
+
+        const victimInventory: BoardingInventory = {
+            cargoCapacity: 20,
+            credits: 200,
+            holds: [{ commodity: 'Metal', tons: 5, isMissionCargo: false }],
+        };
+        const victim = new Entity('victim')
+            .addComponent(DisabledComponent, true)
+            .addComponent(MovementStateComponent, movementAt(new Position(BOARDING_STANDOFF, 0)))
+            .addComponent(BoardingInventoryComponent, victimInventory)
+            .addComponent(ArmorComponent, new Stat({ current: 20, max: 100, recharge: 0 }));
+
+        world.entities.set('player', player);
+        world.entities.set('victim', victim);
+        world.addSystem(PlayerBoardingSystem);
+
+        let outcome: any;
+        world.events.get(BoardingOutcomeEvent).subscribe(value => {
+            outcome = value;
+        });
+        world.step();
+
+        expect(outcome.cargo).toBe(5);
+        expect(outcome.credits).toBe(50);
+        expect(outcome.capturedShip).toBeUndefined();
+        expect(playerState.holds).toEqual([{ commodity: 'Metal', tons: 5, isMissionCargo: false }]);
+        expect(world.entities.has('victim')).toBeTrue();
+    });
+
+    it('does not plunder or capture when action is leave', () => {
+        const world = new World('player-leave-action-test');
+        world.resources.set(PlatformResource, 'node');
+        world.resources.set(TimeResource, {
+            time: 0,
+            delta_ms: 1_000 / 60,
+            delta_s: 1 / 60,
+            frame: 0,
+        });
+
+        const playerState = createInitialPlayerState();
+        const player = new Entity('player')
+            .addComponent(PlayerShipSelector, undefined)
+            .addComponent(PlayerStateComponent, playerState)
+            .addComponent(MultiplayerData, { owner: 'player' })
+            .addComponent(MovementStateComponent, movementAt(new Position(0, 0)))
+            .addComponent(BoardingRequestComponent, { target: 'victim', sequence: 1, action: 'leave' });
+
+        const victim = new Entity('victim')
+            .addComponent(DisabledComponent, true)
+            .addComponent(MovementStateComponent, movementAt(new Position(BOARDING_STANDOFF, 0)))
+            .addComponent(ArmorComponent, new Stat({ current: 20, max: 100, recharge: 0 }));
+
+        world.entities.set('player', player);
+        world.entities.set('victim', victim);
+        world.addSystem(PlayerBoardingSystem);
+
+        let outcomeCalled = false;
+        world.events.get(BoardingOutcomeEvent).subscribe(() => {
+            outcomeCalled = true;
+        });
+        world.step();
+
+        expect(outcomeCalled).toBeFalse();
+        expect(world.entities.has('victim')).toBeTrue();
+    });
 });

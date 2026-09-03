@@ -1,7 +1,7 @@
 import type { ControlEvent } from '../nova_plugin/controls_plugin';
 
 /** The pilot dialogs retail opens from the cockpit. */
-export type PilotDialogAction = 'properties' | 'missions' | 'hail';
+export type PilotDialogAction = 'properties' | 'missions' | 'hail' | 'board';
 
 export interface PilotDialog<T> {
     readonly container: {

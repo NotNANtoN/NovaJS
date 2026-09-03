@@ -1,5 +1,5 @@
 {
-  "commit": "7cc3d23a",
-  "message": "feat: authentic comms artwork, player escort jump relay, and cloaking device mechanics",
-  "date": "2026-09-03 00:11 +0200"
+  "commit": "b1fc6c3e",
+  "message": "fix: prevent revoked Immer proxy access in mission expiration system",
+  "date": "2026-09-03 02:13 +0200"
 }

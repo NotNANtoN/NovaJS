@@ -118,6 +118,7 @@ export async function OutfitParse(outf: OutfResource, notFoundFunction: (m: stri
         // occasionally repair the ship when it's disabled".
         repairSystem: outf.functions.some(([type]) => type === "repair system"),
         cloak: outf.functions.some(([type]) => type === "cloak"),
+        cargoScoop: outf.functions.some(([type]) => type === "mining scoop"),
         physics,
         pict,
         price: outf.cost,

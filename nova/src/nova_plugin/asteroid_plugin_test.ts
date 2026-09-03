@@ -16,6 +16,7 @@ import {
     makeAsteroid,
     OreComponent,
     oreChunkTons,
+    CargoScoopOutfitComponent,
 } from './asteroid_plugin';
 import {
     ASTEROID_CULL_RADIUS,
@@ -27,7 +28,8 @@ import {
 } from './asteroid_spawn_plugin';
 import { createEntityBudget, EntityBudgetResource } from './entity_budget';
 import { GameDataResource } from './game_data_resource';
-import { ArmorComponent } from './health_plugin';
+import { ArmorComponent, ShieldComponent } from './health_plugin';
+import { Stat } from './stat';
 import { PlatformResource } from './platform_plugin';
 import { createInitialPlayerState, PlayerStateComponent } from './player_state';
 import { SystemIdResource } from './system_id_resource';
@@ -322,5 +324,47 @@ describe('asteroids', () => {
 
         expect(heldTons(world, 'metal')).toBe(0);
         expect(ores(world).length).toBeGreaterThan(0);
+    });
+
+    it('bounces ore and damages shields when ship has no cargo scoop installed', async () => {
+        const world = await makeWorld(0);
+        const asteroid = makeAsteroid(
+            SMALL_ASTEROID.id, new Position(0, 0), new Vector(0, 0));
+        asteroid.components.set(MultiplayerData, { owner: 'server' });
+        world.entities.set('rock', asteroid);
+
+        world.addComponent(PlayerStateComponent);
+        const player = playerAt(new Position(0, 0), 100);
+        player.components.set(CargoScoopOutfitComponent, { enabled: false });
+        player.components.set(ShieldComponent, new Stat({ current: 50, max: 100, recharge: 0 }));
+        world.entities.set('player', player);
+        await settle(world);
+
+        asteroid.components.get(ArmorComponent)!.current = 0;
+        await settle(world, 10);
+
+        expect(heldTons(world, 'metal')).toBe(0);
+        expect(ores(world).length).toBeGreaterThan(0);
+        expect(player.components.get(ShieldComponent)!.current).toBeLessThan(50);
+    });
+
+    it('collects ore when ship has an active cargo scoop outfit', async () => {
+        const world = await makeWorld(0);
+        const asteroid = makeAsteroid(
+            SMALL_ASTEROID.id, new Position(0, 0), new Vector(0, 0));
+        asteroid.components.set(MultiplayerData, { owner: 'server' });
+        world.entities.set('rock', asteroid);
+
+        world.addComponent(PlayerStateComponent);
+        const player = playerAt(new Position(0, 0), 100);
+        player.components.set(CargoScoopOutfitComponent, { enabled: true });
+        world.entities.set('player', player);
+        await settle(world);
+
+        asteroid.components.get(ArmorComponent)!.current = 0;
+        await settle(world, 10);
+
+        expect(heldTons(world, 'metal')).toBe(SMALL_ASTEROID.yield.quantity);
+        expect(ores(world).length).toBe(0);
     });
 });

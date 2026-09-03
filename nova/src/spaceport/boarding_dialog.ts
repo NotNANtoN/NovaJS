@@ -1,7 +1,10 @@
+import { Resource } from 'nova_ecs/resource';
 import { Observable } from 'rxjs';
 import { GameData } from '../client/gamedata/GameData';
 import { ControlEvent } from '../nova_plugin/controls_plugin';
 import { ClassicDialog, CLASSIC_MAC_FONT } from './classic_dialog';
+import { BoardingDialogResource } from '../nova_plugin/boarding_plugin';
+export { BoardingDialogResource };
 
 // Retail PICT 8515 "Plunder"
 export const PLUNDER_BACKGROUND = 'nova:8515';
@@ -22,6 +25,8 @@ export interface BoardingDialogResult {
     action: BoardingAction;
     targetUuid: string;
 }
+
+// BoardingDialogResource is defined in boarding_plugin to avoid circular imports
 
 export class BoardingDialog extends ClassicDialog<BoardingTargetInfo> {
     private selectedAction: BoardingAction = 'leave';

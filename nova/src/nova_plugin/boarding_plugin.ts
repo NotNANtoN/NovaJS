@@ -1,3 +1,4 @@
+import { Resource } from 'nova_ecs/resource';
 import * as t from 'io-ts';
 import { STANDARD_COMMODITIES } from 'novadatainterface/CommodityData';
 import { Emit, EmitNow, Entities, GetEntity, UUID } from 'nova_ecs/arg_types';
@@ -67,11 +68,22 @@ export const DUDE_BOOTY_MONEY = 0x0040;
 
 export const PlunderEvent = new EcsEvent<{ boarder: string }>('PlunderEvent');
 
-const BoardingRequest = t.type({
-    target: t.string,
-    sequence: t.number,
-});
+const BoardingRequest = t.intersection([
+    t.type({
+        target: t.string,
+        sequence: t.number,
+    }),
+    t.partial({
+        action: t.union([
+            t.literal('plunder'),
+            t.literal('capture'),
+            t.literal('leave'),
+        ]),
+    }),
+]);
 export type BoardingRequest = t.TypeOf<typeof BoardingRequest>;
+export const BoardingDialogResource = new Resource<any>("BoardingDialogResource");
+
 export const BoardingRequestComponent =
     new Component<BoardingRequest>('BoardingRequestComponent');
 
@@ -273,7 +285,7 @@ export const BoardingSetupSystem = new System({
     },
 });
 
-function heldCargo(inventory: Pick<BoardingInventory, 'holds'>): number {
+export function heldCargo(inventory: Pick<BoardingInventory, 'holds'>): number {
     return inventory.holds.reduce((total, hold) =>
         total + Math.max(0, Math.floor(hold.tons)), 0);
 }
@@ -375,7 +387,7 @@ export function isBoardingTransferReady(
     }) && inTransferRange(boarder, target, BOARDING_TRANSFER_RANGE);
 }
 
-const DisabledBoardingTargets = new Query([
+export const DisabledBoardingTargets = new Query([
     UUID,
     DisabledComponent,
     MovementStateComponent,
@@ -402,17 +414,21 @@ export const PlayerBoardingInputSystem = new System({
         GetEntity,
         PlayerShipSelector,
         Emit,
+        Optional(BoardingDialogResource),
     ] as const,
     step(controlState, target, movement, request, boarding, disabledTargets,
-        platform, entity, _player, emit) {
+        platform, entity, _player, emit, boardingDialog) {
         if (platform !== 'browser' || controlState.get('board') !== 'start') {
+            return;
+        }
+        if (boardingDialog) {
             return;
         }
         const targetUuid = target.target;
         if (!targetUuid || boarding?.boarded.includes(targetUuid)) {
             return;
         }
-        const victim = disabledTargets.find(candidate =>
+        const victim = disabledTargets.find((candidate: any) =>
             candidate[0] === targetUuid && candidate[1] && !candidate[5]);
         if (!victim) {
             entity.components.set(BoardingNoticeComponent,
@@ -468,7 +484,16 @@ export const PlayerBoardingSystem = new System({
             return;
         }
 
-        const result = plunderShip(player, victim[3], victim[4]);
+        const action = request.action ?? 'plunder';
+        if (action === 'leave') {
+            return;
+        }
+
+        let result = { cargo: 0, credits: 0 };
+        if (action === 'plunder' || request.action === undefined) {
+            result = plunderShip(player, victim[3], victim[4]);
+        }
+
         const isNpc = !victim[3];
         const victimShipData = victim[7];
         const victimShip = victim[8];
@@ -477,31 +502,33 @@ export const PlayerBoardingSystem = new System({
         let resisted: boolean | undefined;
 
         const isDerelict = Boolean(victim[9]);
-        if (isNpc && (victimShip || victimShipData)) {
-            const victimShipId = victimShip?.id ?? victimShipData?.id ?? 'nova:128';
-            const rawName = victimShipData?.name ?? 'Ship';
-            const shipName = isDerelict ? `Derelict ${rawName}` : rawName;
-            const currentEscorts = player.escorts ?? [];
-            const maxEscorts = 6;
-            if (currentEscorts.length < maxEscorts) {
-                const playerCrew = (player.kills ?? 0) > 10 ? 25 : 15;
-                const victimCrew = isDerelict ? 0 : (victimShipData?.crew ?? 5);
-                const captureChance = isDerelict
-                    ? 0.85
-                    : Math.min(0.9, Math.max(0.35, (playerCrew + 10) / (playerCrew + victimCrew + 10)));
-                if (Math.random() < captureChance) {
-                    const dailyPay = Math.max(10, Math.floor((victimShipData?.cost ?? 50000) * 0.001));
-                    const newContract = {
-                        id: `capture-${uuid}-${Date.now()}`,
-                        shipId: victimShipId,
-                        dailyPay,
-                    };
-                    player.escorts = [...currentEscorts, newContract];
-                    entity.components.set(PlayerStateComponent, player);
-                    capturedShip = shipName;
-                    entities.delete(request.target);
-                } else {
-                    resisted = true;
+        if (action === 'capture' || request.action === undefined) {
+            if (isNpc && (victimShip || victimShipData)) {
+                const victimShipId = victimShip?.id ?? victimShipData?.id ?? 'nova:128';
+                const rawName = victimShipData?.name ?? 'Ship';
+                const shipName = isDerelict ? `Derelict ${rawName}` : rawName;
+                const currentEscorts = player.escorts ?? [];
+                const maxEscorts = 6;
+                if (currentEscorts.length < maxEscorts) {
+                    const playerCrew = (player.kills ?? 0) > 10 ? 25 : 15;
+                    const victimCrew = isDerelict ? 0 : (victimShipData?.crew ?? 5);
+                    const captureChance = isDerelict
+                        ? 0.85
+                        : Math.min(0.9, Math.max(0.35, (playerCrew + 10) / (playerCrew + victimCrew + 10)));
+                    if (Math.random() < captureChance) {
+                        const dailyPay = Math.max(10, Math.floor((victimShipData?.cost ?? 50000) * 0.001));
+                        const newContract = {
+                            id: `capture-${uuid}-${Date.now()}`,
+                            shipId: victimShipId,
+                            dailyPay,
+                        };
+                        player.escorts = [...currentEscorts, newContract];
+                        entity.components.set(PlayerStateComponent, player);
+                        capturedShip = shipName;
+                        entities.delete(request.target);
+                    } else {
+                        resisted = true;
+                    }
                 }
             }
         }
@@ -519,6 +546,16 @@ export const PlayerBoardingSystem = new System({
         };
         entity.components.set(BoardingOutcomeComponent, outcome);
         emitNow(BoardingOutcomeEvent, { ...outcome, boarder: uuid }, [uuid]);
+        if (capturedShip) {
+            entity.components.set(BoardingNoticeComponent,
+                { text: `Captured ${capturedShip} into escort fleet!` });
+        } else if (resisted) {
+            entity.components.set(BoardingNoticeComponent,
+                { text: 'Capture failed: Boarding party was repelled!' });
+        } else if (result.cargo > 0 || result.credits > 0) {
+            entity.components.set(BoardingNoticeComponent,
+                { text: `Plundered ${result.cargo} tons cargo and ${result.credits} cr!` });
+        }
         if (result.cargo > 0 || result.credits > 0) {
             emitNow(PlunderEvent, { boarder: uuid }, [request.target]);
         }

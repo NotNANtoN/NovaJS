@@ -10,6 +10,8 @@ export interface OutfitData extends BaseData {
     repairSystem?: boolean,
     /** oütf ModType 1: cloaking device. */
     cloak?: boolean,
+    /** oütf ModType 31: cargo/mining scoop. */
+    cargoScoop?: boolean,
 
     // how it changes the physics of the ship it's attached to. Idea: What if these were allowed to be functions?
     physics: OutfitPhysics,
@@ -32,6 +34,7 @@ export function getDefaultOutfitData(): OutfitData {
         ...getDefaultBaseData(),
         weapons: {},
         repairSystem: false,
+        cargoScoop: false,
         physics: {
             freeMass: 0
         },

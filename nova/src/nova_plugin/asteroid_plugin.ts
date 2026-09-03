@@ -1,6 +1,8 @@
 import { AsteroidData } from 'novadatainterface/AsteroidData';
 import * as t from 'io-ts';
-import { Entities, UUID } from 'nova_ecs/arg_types';
+import { Entities, UUID, GetEntity } from 'nova_ecs/arg_types';
+import { OutfitsStateComponent } from './outfit_plugin';
+import { ShieldComponent } from './health_plugin';
 import { Component } from 'nova_ecs/component';
 import { Angle } from 'nova_ecs/datatypes/angle';
 import { Position } from 'nova_ecs/datatypes/position';
@@ -326,8 +328,39 @@ const AsteroidDestroyedSystem = new System({
     },
 });
 
-const OreCollectorsQuery = new Query(
-    [MovementStateComponent, PlayerStateComponent] as const, 'OreCollectors');
+export const CargoScoopOutfitComponent =
+    new Component<{ enabled: boolean }>('CargoScoopOutfitComponent');
+
+export const CargoScoopOutfitProvider = ProvideAsync({
+    name: 'CargoScoopOutfitProvider',
+    provided: CargoScoopOutfitComponent,
+    update: [OutfitsStateComponent],
+    args: [OutfitsStateComponent, GameDataResource] as const,
+    async factory(outfits, gameData) {
+        for (const [id, state] of outfits) {
+            if (state.count <= 0) {
+                continue;
+            }
+            try {
+                const outfit = await gameData.data.Outfit.get(id);
+                if (outfit.cargoScoop) {
+                    return { enabled: true };
+                }
+            } catch {
+                continue;
+            }
+        }
+        return { enabled: false };
+    },
+});
+
+const OreCollectorsQuery = new Query([
+    MovementStateComponent,
+    PlayerStateComponent,
+    Optional(CargoScoopOutfitComponent),
+    GetEntity,
+    Optional(ShieldComponent),
+] as const, 'OreCollectors');
 
 const OrePickupSystem = new System({
     name: 'OrePickupSystem',
@@ -337,12 +370,22 @@ const OrePickupSystem = new System({
         if (platform !== 'node' || multiplayer.owner !== 'server') {
             return;
         }
-        for (const [collectorMovement, playerState] of collectors) {
+        for (const [collectorMovement, playerState, cargoScoop, collectorEntity, shield] of collectors) {
             const distance = collectorMovement.position
                 .subtract(movement.position).length;
             if (distance > ORE_PICKUP_RADIUS) {
                 continue;
             }
+
+            // Retail EV Nova rule: collecting floating ore requires a Cargo/Mining Scoop (ModType 31).
+            // Without a scoop, the chunk impacts shields/hull and bounces off.
+            if (cargoScoop && !cargoScoop.enabled) {
+                if (shield && shield.current > 0) {
+                    shield.current = Math.max(0, shield.current - 5);
+                }
+                return;
+            }
+
             const room = Math.min(ore.tons, getFreeSpace(playerState));
             if (room <= 0) {
                 // A full hold leaves the ore floating so it can be collected
@@ -354,6 +397,7 @@ const OrePickupSystem = new System({
                 tons: room,
                 isMissionCargo: false,
             });
+
             if (room >= ore.tons) {
                 entities.delete(selfUuid);
             } else {
@@ -374,6 +418,7 @@ export const AsteroidPlugin: Plugin = {
         world.addComponent(AsteroidComponent);
         world.addComponent(AsteroidDataComponent);
         world.addComponent(OreComponent);
+        world.addComponent(CargoScoopOutfitComponent);
 
         deltaMaker.addComponent(AsteroidComponent, {
             componentType: AsteroidType,
@@ -393,6 +438,8 @@ export const AsteroidPlugin: Plugin = {
         world.addSystem(AsteroidTumbleSystem);
         world.addSystem(OreTumbleSystem);
         world.addSystem(AsteroidDestroyedSystem);
+        world.addSystem(CargoScoopOutfitProvider);
+        world.addSystem(OrePickupSystem);
         world.addSystem(OrePickupSystem);
     },
     remove(world) {
@@ -407,6 +454,8 @@ export const AsteroidPlugin: Plugin = {
         world.removeSystem(AsteroidTumbleSystem);
         world.removeSystem(OreTumbleSystem);
         world.removeSystem(AsteroidDestroyedSystem);
+        world.removeSystem(CargoScoopOutfitProvider);
+        world.removeSystem(OrePickupSystem);
         world.removeSystem(OrePickupSystem);
     },
 };

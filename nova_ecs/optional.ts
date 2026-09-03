@@ -8,9 +8,13 @@ export function Optional<V extends ArgTypes>(value: V):
     return new ArgModifier({
         query: new Query([GetArg] as const),
         transform: (getArg) => {
-            const result = getArg(value);
-            if (isRight(result)) {
-                return result as Right<ArgData<V>>;
+            try {
+                const result = getArg(value);
+                if (isRight(result)) {
+                    return result as Right<ArgData<V>>;
+                }
+            } catch {
+                return right(undefined);
             }
             return right(undefined);
         }

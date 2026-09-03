@@ -323,10 +323,10 @@ function missionValues(
 }
 
 export class MissionInfo extends Menu<Entity> {
-    private readonly title = new PIXI.Text('Active Missions', MISSION_FONT.title);
-    private readonly list = new PIXI.Text('', MISSION_FONT.list);
-    private readonly detail = new PIXI.Text('', MISSION_FONT.detail);
-    private readonly status = new PIXI.Text('', MISSION_FONT.status);
+    private readonly title = new PIXI.Text({ text: 'Active Missions', style: MISSION_FONT.title });
+    private readonly list = new PIXI.Text({ text: '', style: MISSION_FONT.list });
+    private readonly detail = new PIXI.Text({ text: '', style: MISSION_FONT.detail });
+    private readonly status = new PIXI.Text({ text: '', style: MISSION_FONT.status });
     private missionWorld?: MissionBoardWorld;
     private readonly abortButton: Button;
     private entries: Array<{
@@ -612,18 +612,18 @@ export abstract class MissionBoard extends Menu<Entity> {
         this.offerLocation = offerLocation;
         this.onInfo = onInfo;
 
-        this.title = new PIXI.Text(
-            offerLocation === MissionOfferLocation.Bar
+        this.title = new PIXI.Text({
+            text: offerLocation === MissionOfferLocation.Bar
                 ? 'The Bar' : 'Mission Computer',
-            MISSION_FONT.title,
-        );
+            style: MISSION_FONT.title,
+        });
         this.date = offerLocation === MissionOfferLocation.MissionComputer
-            ? new PIXI.Text('', MISSION_FONT.title)
+            ? new PIXI.Text({ text: '', style: MISSION_FONT.title })
             : undefined;
-        this.flavor = new PIXI.Text(flavorText, MISSION_FONT.flavor);
-        this.list = new PIXI.Text('', MISSION_FONT.list);
-        this.detail = new PIXI.Text('', MISSION_FONT.detail);
-        this.status = new PIXI.Text('', MISSION_FONT.status);
+        this.flavor = new PIXI.Text({ text: flavorText, style: MISSION_FONT.flavor });
+        this.list = new PIXI.Text({ text: '', style: MISSION_FONT.list });
+        this.detail = new PIXI.Text({ text: '', style: MISSION_FONT.detail });
+        this.status = new PIXI.Text({ text: '', style: MISSION_FONT.status });
         this.title.style.fontSize = 10;
         const headerPosition = panelPosition(
             this.layout, this.layout.header);
