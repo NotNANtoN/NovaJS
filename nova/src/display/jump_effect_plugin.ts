@@ -172,6 +172,40 @@ export const JumpEffectSystem = new System({
                 .stroke({ width: 2 + (1 - progress) * 2, color: 0x55ccff, alpha });
             wakeGraphics.circle(movement.position.x, movement.position.y, radius * 0.35)
                 .stroke({ width: 1, color: 0xffffff, alpha: alpha * 0.9 });
+        } else if (wakeHandle && !isArriving && progress > 0.05) {
+            const wakeGraphics = wakeHandle.root as PIXI.Graphics;
+            const speed = movement.velocity.length;
+            if (speed > 0) {
+                const dirX = movement.velocity.x / speed;
+                const dirY = movement.velocity.y / speed;
+                const streakLength = progress * 110;
+                const wakeAlpha = progress * 0.85;
+
+                // Outer cyan warp streak
+                wakeGraphics.moveTo(movement.position.x, movement.position.y)
+                    .lineTo(
+                        movement.position.x - dirX * streakLength,
+                        movement.position.y - dirY * streakLength,
+                    )
+                    .stroke({ width: 3 + progress * 2, color: 0x55ccff, alpha: wakeAlpha });
+
+                // Inner white-hot ion warp core
+                wakeGraphics.moveTo(movement.position.x, movement.position.y)
+                    .lineTo(
+                        movement.position.x - dirX * (streakLength * 0.65),
+                        movement.position.y - dirY * (streakLength * 0.65),
+                    )
+                    .stroke({ width: 1.5, color: 0xffffff, alpha: Math.min(1, wakeAlpha * 1.2) });
+            }
+
+            // Radiant departure flash near transition boundary
+            if (progress > 0.65) {
+                const flashNorm = (progress - 0.65) / 0.35;
+                const flashRadius = 15 + flashNorm * 45;
+                const flashAlpha = (1 - flashNorm) * 0.9;
+                wakeGraphics.circle(movement.position.x, movement.position.y, flashRadius)
+                    .stroke({ width: 2 + (1 - flashNorm) * 2, color: 0x99eeff, alpha: flashAlpha });
+            }
         }
     },
 });

@@ -350,11 +350,7 @@ export function acceptMission(
         logger?: (message: string) => void;
     } = { initialPlanetId: '' },
 ): ActiveMission | undefined {
-    if (mission.shipGoal === 2 || mission.shipGoal === 5) {
-        console.warn(
-            `Mission ${mission.id} requires boarding, which is not supported yet`);
-        return undefined;
-    }
+
     if (state.activeMissions.filter(entry => entry.state === 'active').length
         >= MAX_ACTIVE_MISSIONS) {
         console.warn(`Cannot accept mission ${mission.id}: mission limit reached`);

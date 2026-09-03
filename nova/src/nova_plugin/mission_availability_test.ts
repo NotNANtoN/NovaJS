@@ -1,6 +1,7 @@
 import { getDefaultMissionData, MissionOfferLocation } from 'novadatainterface/MissionData';
 import {
     getOfferableMissions,
+    matchesRequiredOutfits,
     MissionAvailabilityInput,
 } from './mission_availability';
 import { createInitialPlayerState } from './player_state';
@@ -20,6 +21,26 @@ function makeInput(
 }
 
 describe('mission availability', () => {
+    it('enforces required installed outfits (mission.require)', () => {
+        const mission = {
+            ...getDefaultMissionData(),
+            id: 'nova:205',
+            require: [150, 0, 0, 0],
+            destination: -1,
+            travelStel: -1,
+            returnDestination: -1,
+            returnStel: -1,
+        };
+        const input = makeInput(mission);
+
+        // Without outfit: rejected
+        expect(getOfferableMissions(input)).toEqual([]);
+
+        // With outfit: accepted
+        input.outfits = new Map([['nova:150', { count: 1 }]]);
+        expect(getOfferableMissions(input)).toEqual([mission]);
+    });
+
     it('gates offers on AvailBits', () => {
         const mission = {
             ...getDefaultMissionData(),

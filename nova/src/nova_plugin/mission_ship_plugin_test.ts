@@ -2,6 +2,7 @@ import 'jasmine';
 import { createDraft, finishDraft } from 'immer';
 import { Entity } from 'nova_ecs/entity';
 import { MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
+import { MissionShipComponent, MissionShipBoardedSystem } from './mission_ship_plugin';
 import {
     collectMissionSpawnCandidates,
     missionShipAppearsInSystem,
@@ -79,5 +80,62 @@ describe('mission ship spawn candidates', () => {
             undefined,
             'nova:130',
         )).toEqual([]);
+    });
+});
+
+describe('MissionShipBoardedSystem', () => {
+    it('records boarded event when a mission ship is boarded', () => {
+        const playerState = createInitialPlayerState();
+        playerState.activeMissions = [{
+            missionId: 'nova:200',
+            missionUuid: 'uuid-mission-1',
+            state: 'active',
+        }];
+
+        const playerEntity = new Entity('player-1')
+            .addComponent(MultiplayerData, { owner: 'client-1' })
+            .addComponent(PlayerStateComponent, playerState);
+
+        const targetEntity = new Entity('target-ship')
+            .addComponent(MissionShipComponent, {
+                missionUuid: 'uuid-mission-1',
+                playerToken: 'client-1',
+            });
+
+        const entities = new Map<string, Entity>([
+            ['player-1', playerEntity],
+            ['target-ship', targetEntity],
+        ]);
+
+        const recorded: { state: PlayerState; uuid: string; event: string }[] = [];
+        const mockRuntime = {
+            recordShipGoal(state: PlayerState, uuid: string, event: string) {
+                recorded.push({ state, uuid, event });
+                return Promise.resolve(true);
+            },
+        };
+
+        const outcome = {
+            target: 'target-ship',
+            sequence: 1,
+            cargo: 0,
+            credits: 0,
+            boarder: 'player-1',
+        };
+
+        const players = [['player-1', { owner: 'client-1' }, playerState]] as const;
+
+        MissionShipBoardedSystem.step(
+            outcome,
+            entities,
+            players as never,
+            undefined,
+            mockRuntime as never,
+            'node',
+        );
+
+        expect(recorded.length).toBe(1);
+        expect(recorded[0].uuid).toBe('uuid-mission-1');
+        expect(recorded[0].event).toBe('boarded');
     });
 });

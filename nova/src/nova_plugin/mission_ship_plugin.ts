@@ -5,6 +5,7 @@ import { Component } from 'nova_ecs/component';
 import { plainSnapshot } from 'nova_ecs/draft_snapshot';
 import { Entity } from 'nova_ecs/entity';
 import { DeathEvent } from './death_plugin';
+import { BoardingOutcomeEvent } from './boarding_plugin';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
 import { MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
 import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
@@ -137,10 +138,10 @@ async function loadMission(
 
 async function loadDude(
     gameData: import('novadatainterface/GameDataInterface').GameDataInterface,
-    mission: MissionData,
+    dudeNumber: number,
     systemId: string,
 ): Promise<DudeData | undefined> {
-    const dudeId = resourceId(mission.shipDude);
+    const dudeId = resourceId(dudeNumber);
     try {
         const dude = await gameData.data.Dude?.get(dudeId);
         if (dude && dude.ships.length > 0) {
@@ -274,7 +275,7 @@ const MissionShipSpawnSystem = new AsyncSystem({
                     || existing.has(`${token}:${missionUuid}`)) {
                     continue;
                 }
-                const dude = await loadDude(gameData, mission, systemId);
+                const dude = await loadDude(gameData, mission.shipDude, systemId);
                 const shipType = dude && weighted(dude.ships);
                 if (!dude || !shipType) {
                     console.warn(
@@ -327,6 +328,53 @@ const MissionShipSpawnSystem = new AsyncSystem({
                     }
                 }
                 existing.add(`${token}:${missionUuid}`);
+
+                // Spawn auxiliary fleet (ambushers, escorts, or pirate wingmen)
+                if (mission.auxShipCount > 0 && mission.auxShipDude > 0
+                    && !existing.has(`${token}:${missionUuid}:aux`)) {
+                    const auxSystemMatches = mission.auxShipSyst <= 0
+                        || mission.auxShipSyst === -1
+                        || missionShipAppearsInSystem(resourceId(mission.auxShipSyst), systemId);
+                    if (auxSystemMatches) {
+                        const auxDude = await loadDude(gameData, mission.auxShipDude, systemId);
+                        const auxShipType = auxDude && weighted(auxDude.ships);
+                        if (auxDude && auxShipType) {
+                            for (let aIdx = 0; aIdx < mission.auxShipCount; aIdx++) {
+                                const sel = aIdx === 0 ? auxShipType : weighted(auxDude.ships);
+                                if (!sel) continue;
+                                try {
+                                    const aShipData = await gameData.data.Ship.get(sel.id);
+                                    const aShip = makeNpc(aShipData);
+                                    if (!reserveEntity(budget, aShip, 'ship', true)) {
+                                        break;
+                                    }
+                                    aShip.components
+                                        .set(MissionShipComponent, {
+                                            missionUuid,
+                                            playerToken: token,
+                                        })
+                                        .set(MissionShipBehaviorComponent, {
+                                            // For escort missions (goal 3), aux ships are the ambushers attacking the convoy!
+                                            behavior: mission.shipGoal === 3 ? 1 : mission.shipBehav,
+                                            playerUuid,
+                                            activeAt: time.time + 1000,
+                                            cloaked: false,
+                                        })
+                                        .set(MissionShipStatusComponent, {
+                                            disabledRecorded: false,
+                                            observedRecorded: false,
+                                        })
+                                        .set(GovtComponent, { id: auxDude.government })
+                                        .set(MultiplayerData, { owner: 'server' });
+                                    entities.set(uuid(), aShip);
+                                } catch {
+                                    // Ignore bad ship data
+                                }
+                            }
+                            existing.add(`${token}:${missionUuid}:aux`);
+                        }
+                    }
+                }
             }
         }
     },
@@ -454,6 +502,34 @@ const MissionShipChaseOffSystem = new System({
     },
 });
 
+export const MissionShipBoardedSystem = new System({
+    name: 'MissionShipGoalBoarded',
+    events: [BoardingOutcomeEvent],
+    args: [
+        BoardingOutcomeEvent,
+        Entities,
+        MissionPlayersQuery,
+        Optional(PlayerStoreResource),
+        MissionRuntimeResource,
+        PlatformResource,
+    ] as const,
+    step(outcome, entities, players, playerStore, runtime, platform) {
+        if (platform !== 'node') {
+            return;
+        }
+        const targetEntity = entities.get(outcome.target);
+        const missionShip = targetEntity?.components.get(MissionShipComponent);
+        if (!missionShip) {
+            return;
+        }
+        const player = findPlayer(players, missionShip.playerToken, playerStore);
+        if (player) {
+            void runtime.recordShipGoal(
+                player[2], missionShip.missionUuid, 'boarded');
+        }
+    },
+});
+
 const MissionShipDisabledSystem = new System({
     name: 'MissionShipGoalDisabled',
     args: [
@@ -563,6 +639,7 @@ export const MissionShipsPlugin: Plugin = {
         // in those worlds.
         if (world.resources.has(PlayerStoreResource)) {
             world.addSystem(MissionShipDeathSystem);
+            world.addSystem(MissionShipBoardedSystem);
             world.addSystem(MissionShipChaseOffSystem);
             world.addSystem(MissionShipDisabledSystem);
             world.addSystem(MissionShipObservationSystem);

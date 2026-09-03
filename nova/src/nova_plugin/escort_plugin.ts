@@ -160,6 +160,14 @@ export const EscortMode = t.union([
 ]);
 export type EscortMode = t.TypeOf<typeof EscortMode>;
 
+export const FormationShape = t.union([
+    t.literal('wedge'),
+    t.literal('line'),
+    t.literal('column'),
+    t.literal('diamond'),
+]);
+export type FormationShape = t.TypeOf<typeof FormationShape>;
+
 export const EscortOrderData = t.intersection([
     t.type({
         mode: EscortMode,
@@ -167,6 +175,7 @@ export const EscortOrderData = t.intersection([
     }),
     t.partial({
         targetUuid: t.string,
+        formationShape: FormationShape,
     }),
 ]);
 export type EscortOrderData = t.TypeOf<typeof EscortOrderData>;
@@ -204,18 +213,64 @@ export interface FormationSlotOffset {
  * Slot 2: Port outer wing (-180, -150)
  * Slot 3: Starboard outer wing (+180, -150)
  */
-export function tacticalFormationSlot(slot: number): FormationSlotOffset {
+/**
+ * Compute slot offsets for naval escort formations:
+ * - wedge: Classical V-formation trailing the flagship
+ * - line: Line abreast (wall) expanding laterally along the beam
+ * - column: Single file trail directly astern
+ * - diamond: 360-degree perimeter defense around the flagship
+ */
+export function formationSlotOffset(
+    slot: number,
+    shape: FormationShape = 'wedge',
+): FormationSlotOffset {
     const s = Math.max(0, Math.floor(slot));
-    const rank = Math.floor(s / 2) + 1;
-    const side = s % 2 === 0 ? -1 : 1;
-    const lateral = side * (60 + rank * 60);
-    const longitudinal = -(30 + rank * 60);
-    return { lateral, longitudinal };
+    switch (shape) {
+        case 'wedge': {
+            const rank = Math.floor(s / 2) + 1;
+            const side = s % 2 === 0 ? -1 : 1;
+            const lateral = side * (60 + rank * 60);
+            const longitudinal = -(30 + rank * 60);
+            return { lateral, longitudinal };
+        }
+        case 'line': {
+            const rank = Math.floor(s / 2) + 1;
+            const side = s % 2 === 0 ? -1 : 1;
+            const lateral = side * (rank * 120);
+            const longitudinal = -(10 + rank * 10);
+            return { lateral, longitudinal };
+        }
+        case 'column': {
+            const rank = s + 1;
+            const lateral = 0;
+            const longitudinal = -(20 + rank * 100);
+            return { lateral, longitudinal };
+        }
+        case 'diamond': {
+            const diamondPresets: FormationSlotOffset[] = [
+                { lateral: -140, longitudinal: 0 },
+                { lateral: 140, longitudinal: 0 },
+                { lateral: 0, longitudinal: 130 },
+                { lateral: 0, longitudinal: -140 },
+            ];
+            if (s < diamondPresets.length) {
+                return diamondPresets[s]!;
+            }
+            const extra = s - 4;
+            const side = extra % 2 === 0 ? -1 : 1;
+            const rank = Math.floor(extra / 2) + 1;
+            return { lateral: side * (140 + rank * 60), longitudinal: -(100 + rank * 50) };
+        }
+    }
+}
+
+export function tacticalFormationSlot(slot: number): FormationSlotOffset {
+    return formationSlotOffset(slot, 'wedge');
 }
 
 /**
  * Compute the world-space target position for an escort slot, oriented
- * according to the flagship's heading.
+ * according to the flagship's heading and selected formation shape.
  * In Nova's coordinate system, heading 0 is pointing up (0, -1),
  * and starboard (right) is (1, 0).
  */
@@ -223,8 +278,9 @@ export function worldFormationPosition(
     flagshipPosition: Position,
     flagshipRotation: { angle: number },
     slot: number,
+    shape: FormationShape = 'wedge',
 ): Position {
-    const { lateral, longitudinal } = tacticalFormationSlot(slot);
+    const { lateral, longitudinal } = formationSlotOffset(slot, shape);
     const theta = flagshipRotation.angle;
     const forwardX = Math.sin(theta);
     const forwardY = -Math.cos(theta);
@@ -247,6 +303,7 @@ export function makeHiredEscort(
     contractId: string,
     slot: number,
     ownerMovement: MovementState,
+    shape: FormationShape = 'wedge',
 ) {
     const escort = makeNpc(shipData);
     escort.components.set(HiredEscortComponent, {
@@ -260,6 +317,7 @@ export function makeHiredEscort(
         ownerMovement.position,
         ownerMovement.rotation,
         slot,
+        shape,
     );
     escort.components.set(MovementStateComponent, movement);
     return escort;
@@ -299,12 +357,14 @@ const SpawnHiredEscorts = new AsyncSystem({
                 continue;
             }
             const ship = await gameData.data.Ship.get(contract.shipId);
+            const ownerOrder = owner.components.get(EscortOrderComponent);
             world.entities.set(uuid(), makeHiredEscort(
                 ship,
                 owner.uuid,
                 contract.id,
                 slot,
                 movement,
+                ownerOrder?.formationShape ?? 'wedge',
             ));
         }
     },
@@ -327,6 +387,15 @@ export const PlayerEscortCommandInputSystem = new System({
         }
         let mode: EscortMode | undefined;
         let noticeText: string | undefined;
+        let shape: FormationShape | undefined = currentOrder?.formationShape;
+
+        const SHAPES: FormationShape[] = ['wedge', 'line', 'column', 'diamond'];
+        const SHAPE_NAMES: Record<FormationShape, string> = {
+            wedge: 'Wedge (V) formation',
+            line: 'Line Abreast (Wall) formation',
+            column: 'Column (Trail) formation',
+            diamond: 'Diamond (Box) formation',
+        };
 
         if (controlState.get('attack') === 'start') {
             if (target.target) {
@@ -347,7 +416,14 @@ export const PlayerEscortCommandInputSystem = new System({
             noticeText = 'Escorts: Holding position';
         } else if (controlState.get('formation') === 'start') {
             mode = 'formation';
-            noticeText = 'Escorts: Returning to formation';
+            if (currentOrder?.mode === 'formation') {
+                const current = shape ?? 'wedge';
+                const nextIndex = (SHAPES.indexOf(current) + 1) % SHAPES.length;
+                shape = SHAPES[nextIndex]!;
+            } else {
+                shape = shape ?? 'wedge';
+            }
+            noticeText = `Escorts: ${SHAPE_NAMES[shape]}`;
         }
 
         if (mode) {
@@ -355,7 +431,8 @@ export const PlayerEscortCommandInputSystem = new System({
             entity.components.set(EscortOrderComponent, {
                 mode,
                 sequence,
-                targetUuid: mode === 'attack' ? target.target : undefined,
+                ...(mode === 'attack' ? { targetUuid: target.target } : {}),
+                ...(shape ? { formationShape: shape } : {}),
             });
             entity.components.set(EscortOrderNoticeComponent, {
                 text: noticeText ?? '',
@@ -414,6 +491,7 @@ const FollowEscortOwner = new System({
             ownerMovement.position,
             ownerMovement.rotation,
             escort.slot,
+            ownerOrder?.formationShape ?? 'wedge',
         );
         const command = approachTarget(
             movement,

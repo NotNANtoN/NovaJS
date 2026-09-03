@@ -1,3 +1,32 @@
+function mockWakeGraphics() {
+    const calls: { method: string; args: unknown[] }[] = [];
+    const chainable = {
+        circle(...args: unknown[]) {
+            calls.push({ method: "circle", args });
+            return chainable;
+        },
+        ellipse(...args: unknown[]) {
+            calls.push({ method: "ellipse", args });
+            return chainable;
+        },
+        moveTo(...args: unknown[]) {
+            calls.push({ method: "moveTo", args });
+            return chainable;
+        },
+        lineTo(...args: unknown[]) {
+            calls.push({ method: "lineTo", args });
+            return chainable;
+        },
+        stroke(...args: unknown[]) {
+            calls.push({ method: "stroke", args });
+            return chainable;
+        },
+    };
+    return {
+        root: chainable,
+        calls,
+    };
+}
 import 'jasmine';
 import { Angle } from 'nova_ecs/datatypes/angle';
 import { Position } from 'nova_ecs/datatypes/position';
@@ -150,5 +179,25 @@ describe('other-ship jump effects', () => {
             hyperspaceSpeed,
             MAX_VELOCITY,
         )).toBe(1);
+    });
+    it('draws hyperspace departure streaks when accelerating into a jump', () => {
+        const shipMovement = movementAt(100, 200);
+        shipMovement.velocity = new Vector(0, -MAX_VELOCITY * 1.5);
+        const shipGraphic = graphic();
+        const wakeHandle = mockWakeGraphics();
+
+        JumpEffectSystem.step(
+            { id: "ship" } as never,
+            shipMovement,
+            PHYSICS as never,
+            shipGraphic as never,
+            jump('departing', 180) as never,
+            undefined,
+            { time: 100 } as never,
+            wakeHandle as never,
+        );
+
+        const lineCalls = wakeHandle.calls.filter(c => c.method === "lineTo");
+        expect(lineCalls.length).toBeGreaterThanOrEqual(1);
     });
 });

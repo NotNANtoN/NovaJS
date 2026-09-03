@@ -35,6 +35,7 @@ import {
     hireEscort,
     isEscortOfferAvailable,
     makeHiredEscort,
+    formationSlotOffset,
     tacticalFormationSlot,
     worldFormationPosition,
 } from './escort_plugin';
@@ -400,6 +401,70 @@ describe('PlayerEscortCommandInputSystem', () => {
 });
 
 describe('tactical escort formations', () => {
+    it('cycles through formation shapes on repeated formation key inputs', async () => {
+        const world = new World('escort-cycle-formations-test');
+        world.resources.set(PlatformResource, 'browser');
+
+        const player = new Entity('player')
+            .addComponent(PlayerShipSelector, undefined)
+            .addComponent(TargetComponent, { target: undefined });
+
+        world.entities.set('player', player);
+        world.addSystem(PlayerEscortCommandInputSystem);
+
+        // First press: enters formation mode in wedge
+        world.emitNow(ControlStateEvent, new Map([['formation', 'start']]), ['player']);
+        expect(player.components.get(EscortOrderComponent)?.mode).toBe('formation');
+        expect(player.components.get(EscortOrderComponent)?.formationShape).toBe('wedge');
+        expect(player.components.get(EscortOrderNoticeComponent)?.text).toBe('Escorts: Wedge (V) formation');
+
+        // Second press: cycles to line
+        world.emitNow(ControlStateEvent, new Map([['formation', 'start']]), ['player']);
+        expect(player.components.get(EscortOrderComponent)?.formationShape).toBe('line');
+        expect(player.components.get(EscortOrderNoticeComponent)?.text).toBe('Escorts: Line Abreast (Wall) formation');
+
+        // Third press: cycles to column
+        world.emitNow(ControlStateEvent, new Map([['formation', 'start']]), ['player']);
+        expect(player.components.get(EscortOrderComponent)?.formationShape).toBe('column');
+        expect(player.components.get(EscortOrderNoticeComponent)?.text).toBe('Escorts: Column (Trail) formation');
+
+        // Fourth press: cycles to diamond
+        world.emitNow(ControlStateEvent, new Map([['formation', 'start']]), ['player']);
+        expect(player.components.get(EscortOrderComponent)?.formationShape).toBe('diamond');
+        expect(player.components.get(EscortOrderNoticeComponent)?.text).toBe('Escorts: Diamond (Box) formation');
+
+        // Fifth press: wraps to wedge
+        world.emitNow(ControlStateEvent, new Map([['formation', 'start']]), ['player']);
+        expect(player.components.get(EscortOrderComponent)?.formationShape).toBe('wedge');
+        expect(player.components.get(EscortOrderNoticeComponent)?.text).toBe('Escorts: Wedge (V) formation');
+    });
+
+    it('computes distinct slot offsets for line, column, and diamond formations', () => {
+        // Line abreast: broad lateral span, minimal longitudinal offset
+        const line0 = formationSlotOffset(0, 'line');
+        const line1 = formationSlotOffset(1, 'line');
+        expect(line0.lateral).toBeLessThan(-100);
+        expect(line1.lateral).toBeGreaterThan(100);
+        expect(line0.longitudinal).toBe(line1.longitudinal);
+
+        // Column: strictly in-line (0 lateral), progressive trailing
+        const col0 = formationSlotOffset(0, 'column');
+        const col1 = formationSlotOffset(1, 'column');
+        expect(col0.lateral).toBe(0);
+        expect(col1.lateral).toBe(0);
+        expect(col1.longitudinal).toBeLessThan(col0.longitudinal);
+
+        // Diamond: 360-degree coverage
+        const d0 = formationSlotOffset(0, 'diamond'); // Port
+        const d1 = formationSlotOffset(1, 'diamond'); // Starboard
+        const d2 = formationSlotOffset(2, 'diamond'); // Ahead
+        const d3 = formationSlotOffset(3, 'diamond'); // Astern
+        expect(d0.lateral).toBeLessThan(0);
+        expect(d1.lateral).toBeGreaterThan(0);
+        expect(d2.longitudinal).toBeGreaterThan(0); // Forward of flagship
+        expect(d3.longitudinal).toBeLessThan(0);    // Aft of flagship
+    });
+
     it('places slots in alternating port/starboard trailing V-formation', () => {
         const slot0 = tacticalFormationSlot(0);
         expect(slot0.lateral).toBeLessThan(0); // Port / Left

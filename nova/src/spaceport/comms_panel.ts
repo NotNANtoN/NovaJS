@@ -1,3 +1,11 @@
+import {
+    ConcourseMissionOffer,
+    getShipboardMissionOffers,
+} from './mission_bbs';
+import {
+    acceptMission,
+    startPendingNcbMissions,
+} from '../nova_plugin/mission_plugin';
 import { Entity } from 'nova_ecs/entity';
 import { Observable } from 'rxjs';
 import * as PIXI from 'pixi.js';
@@ -86,6 +94,9 @@ export class Comms extends Menu<Entity> {
     private assistanceHelper?: string;
     private assistanceSequence?: number;
     private assistancePoll?: ReturnType<typeof setInterval>;
+    private pendingShipboardOffer?: ConcourseMissionOffer;
+    private pendingDestinationOptions?: (resolved: any) => any;
+    private isOfferingContract = false;
 
     constructor(gameData: GameData, controlEvents: Observable<ControlEvent>) {
         super(gameData, COMMS_LAYOUT.background, controlEvents);
@@ -152,6 +163,17 @@ export class Comms extends Menu<Entity> {
         this.assistanceHelper = undefined;
         this.assistanceSequence = undefined;
         this.buttons.assistance.setText('Request Assistance');
+        this.pendingShipboardOffer = undefined;
+        this.isOfferingContract = false;
+        try {
+            const { offers, destinationOptions } = await getShipboardMissionOffers(this.gameData, input);
+            if (offers.length > 0 && !this.target?.hostile && !this.target?.isPlanet && !this.target?.isEscort) {
+                this.pendingShipboardOffer = offers[0];
+                this.pendingDestinationOptions = destinationOptions;
+            }
+        } catch {
+            // Fallback
+        }
         await this.loadLines();
         this.openChannel();
         return super.show(input);
@@ -219,6 +241,17 @@ export class Comms extends Menu<Entity> {
             this.demandSurrender();
             return;
         }
+        if (this.pendingShipboardOffer) {
+            const offer = this.pendingShipboardOffer;
+            const pay = offer.mission.payVal > 0
+                ? `\n\nPayment offered: ${offer.mission.payVal.toLocaleString()} cr.` : '';
+            this.message.text = `${this.target?.name ?? 'Vessel'}: "${offer.displayText}"${pay}`;
+            this.buttons.assistance.setText('Accept Contract');
+            this.buttons.assistance.state = 'normal';
+            this.isOfferingContract = true;
+            return;
+        }
+
         const rel = this.relation();
         if (this.target?.hostile || rel === 'enemy') {
             this.say('greetingHostile');
@@ -231,12 +264,25 @@ export class Comms extends Menu<Entity> {
 
     private orderFormUp() {
         const name = this.target?.name ?? 'Escort';
+        let shapeName = 'V-formation';
         if (this.input) {
             const currentOrder = this.input.components.get(EscortOrderComponent);
             const sequence = (currentOrder?.sequence ?? 0) + 1;
-            this.input.components.set(EscortOrderComponent, { mode: 'formation', sequence });
+            const currentShape = currentOrder?.formationShape ?? 'wedge';
+            const names: Record<string, string> = {
+                wedge: 'V-formation',
+                line: 'Line Abreast formation',
+                column: 'Column formation',
+                diamond: 'Diamond formation',
+            };
+            shapeName = names[currentShape] ?? 'formation';
+            this.input.components.set(EscortOrderComponent, {
+                mode: 'formation',
+                sequence,
+                formationShape: currentShape,
+            });
         }
-        this.message.text = `${this.message.text}\n\n${name}: "Acknowledged, Flagship. Rejoining V-formation alongside you."`;
+        this.message.text = `${this.message.text}\n\n${name}: "Acknowledged, Flagship. Rejoining ${shapeName} alongside you."`;
     }
 
     private demandSurrender() {
@@ -245,6 +291,24 @@ export class Comms extends Menu<Entity> {
     }
 
     private requestAssistance() {
+        if (this.isOfferingContract && this.pendingShipboardOffer) {
+            const state = this.input?.components.get(PlayerStateComponent);
+            if (state) {
+                const offer = this.pendingShipboardOffer;
+                acceptMission(state, offer.mission, {
+                    ...this.pendingDestinationOptions!(offer.resolved),
+                });
+                void startPendingNcbMissions(this.gameData, state, {
+                    ...this.pendingDestinationOptions!(offer.resolved),
+                });
+                this.message.text = `${this.target?.name ?? 'Vessel'}: "Contract confirmed! We appreciate your assistance, Captain."`;
+                this.buttons.assistance.setText('Request Assistance');
+                this.isOfferingContract = false;
+                this.pendingShipboardOffer = undefined;
+                return;
+            }
+        }
+
         if (this.target?.isEscort) {
             this.orderAttackTarget();
             return;

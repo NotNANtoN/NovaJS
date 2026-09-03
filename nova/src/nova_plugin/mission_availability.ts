@@ -254,6 +254,28 @@ function missionDataFor(
  * This covers the data-driven AvailStel selector ranges, including
  * government relations and adjacent-system availability.
  */
+export function matchesRequiredOutfits(
+    mission: MissionData,
+    outfits?: OutfitsState,
+): boolean {
+    if (!mission.require || mission.require.length === 0) {
+        return true;
+    }
+    for (const req of mission.require) {
+        if (req > 0) {
+            if (!outfits) {
+                return false;
+            }
+            const hasOutfit = (outfits.get(String(req))?.count ?? 0) > 0
+                || (outfits.get(novaResourceId(req))?.count ?? 0) > 0;
+            if (!hasOutfit) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 export function getOfferableMissions(
     input: MissionAvailabilityInput,
 ): MissionData[] {
@@ -271,6 +293,7 @@ export function getOfferableMissions(
             matchesAvailableShip(
                 mission, input.playerState.shipId, input.playerShipGovt))
         .filter(mission => matchesAvailRecord(mission, input))
+        .filter(mission => matchesRequiredOutfits(mission, input.outfits))
         .filter(mission =>
             matchesAvailRating(mission, input.playerState.kills))
         .filter(mission => {

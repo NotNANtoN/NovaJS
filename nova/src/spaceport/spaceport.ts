@@ -48,6 +48,14 @@ import { ShipInfo } from './ship_info';
 import { Shipyard } from './shipyard';
 import { TradeCenter } from './trade_center';
 import { LandingNoticeDialog } from './landing_notice_dialog';
+import { MissionOfferDialog } from './mission_offer_dialog';
+import { getConcourseMissionOffers } from './mission_bbs';
+import {
+    acceptMission,
+    refuseMission,
+    startPendingNcbMissions,
+} from '../nova_plugin/mission_plugin';
+import { NcbRuntime } from '../nova_plugin/ncb_runtime';
 import { plainSnapshot } from 'nova_ecs/draft_snapshot';
 import {
     hasSpaceportService,
@@ -84,6 +92,8 @@ export class Spaceport extends Menu<Entity> {
     private missionInfo: MissionInfo;
     private shipInfo: ShipInfo;
     private landingNoticeDialog: LandingNoticeDialog;
+    private missionOfferDialog: MissionOfferDialog;
+    private readonly ncbRuntime: NcbRuntime;
     private readonly dialogContainers = new Set<PIXI.Container>();
     private data?: PlanetData;
     private readonly id: string;
@@ -243,6 +253,8 @@ export class Spaceport extends Menu<Entity> {
 
         this.missionInfo = new MissionInfo(gameData, controlEvents);
         this.landingNoticeDialog = new LandingNoticeDialog(gameData, controlEvents);
+        this.ncbRuntime = new NcbRuntime(gameData);
+        this.missionOfferDialog = new MissionOfferDialog(gameData, controlEvents);
         /**
          * `from` is the board the mission log was opened from, so control and
          * visibility return to that board rather than always to the mission
@@ -280,6 +292,7 @@ export class Spaceport extends Menu<Entity> {
         this.dialogContainers.add(this.tradeCenter.container);
         this.dialogContainers.add(this.missionInfo.container);
         this.dialogContainers.add(this.landingNoticeDialog.container);
+        this.dialogContainers.add(this.missionOfferDialog.container);
 
         const showMissionBbs = async () => {
             this.controls.unbind();
@@ -563,6 +576,7 @@ export class Spaceport extends Menu<Entity> {
         this.container.addChild(this.missionInfo.container);
         this.container.addChild(this.shipInfo.container);
         this.container.addChild(this.landingNoticeDialog.container);
+        this.container.addChild(this.missionOfferDialog.container);
         this.missionNotice.position.set(-210, 145);
         this.container.addChild(this.missionNotice);
         this.rechargeNotice.position.set(-210, 175);
@@ -599,6 +613,46 @@ export class Spaceport extends Menu<Entity> {
             }
             this.setActiveDialog();
             this.controls.bind();
+        }
+
+        // Check for concourse storyline offers (availLoc = 3)
+        try {
+            const { offers, destinationOptions } = await getConcourseMissionOffers(
+                this.gameData, input, this.id);
+            const state = input.components.get(PlayerStateComponent);
+            if (state && offers.length > 0) {
+                this.controls.unbind();
+                for (const offer of offers) {
+                    this.setActiveDialog(this.missionOfferDialog.container);
+                    const prompt = await this.missionOfferDialog.show({
+                        mission: offer.mission,
+                        title: offer.title,
+                        text: offer.displayText,
+                        payText: offer.mission.payVal > 0
+                            ? `${offer.mission.payVal.toLocaleString()} cr` : undefined,
+                        cargoText: offer.mission.cargo ?? undefined,
+                        acceptLabel: offer.mission.acceptButton || 'Accept',
+                        refuseLabel: offer.mission.refuseButton || 'Refuse',
+                    });
+                    if (prompt.accepted) {
+                        const ncb = this.ncbRuntime.setContext(input, state);
+                        acceptMission(state, offer.mission, {
+                            ...destinationOptions(offer.resolved),
+                            ncb,
+                        });
+                        await startPendingNcbMissions(this.gameData, state, {
+                            ...destinationOptions(offer.resolved),
+                            ncb,
+                        });
+                    } else {
+                        refuseMission(state, offer.mission);
+                    }
+                }
+                this.setActiveDialog();
+                this.controls.bind();
+            }
+        } catch (error) {
+            reportDialogFailure('concourse mission offers', error);
         }
 
         return super.show(input);

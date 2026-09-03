@@ -828,7 +828,7 @@ export abstract class MissionBoard extends Menu<Entity> {
             destinationSystems: world.systems,
             governments: world.governments,
             outfits: this.input.components.get(OutfitsStateComponent),
-            playerShipGovt: ship.inherentGovt,
+            playerShipGovt: ship?.inherentGovt,
         }).sort((a, b) => b.displayWeight - a.displayWeight);
         const offerSeed = this.sessionKey
             ?? `${state.currentSystem}:${this.planetId}:${state.gameDate}`;
@@ -1036,20 +1036,15 @@ export abstract class MissionBoard extends Menu<Entity> {
                 this.offers.length,
             ));
         }
-        const boardingUnsupported = offer.mission.shipGoal === 2
-            || offer.mission.shipGoal === 5;
-        this.acceptButton.state = offer.available && !boardingUnsupported
-            ? 'normal' : 'grey';
+        this.acceptButton.state = offer.available ? 'normal' : 'grey';
         const values = valuesFor(offer);
         const detailText = formatVisibleMissionText(
             missionOfferDisplayText(offer.mission),
             values,
         );
-        this.status.text = boardingUnsupported
-            ? 'Boarding missions are not supported yet.'
-            : `Payment: ${offer.mission.payVal > 0
-                ? `${offer.mission.payVal.toLocaleString()} cr` : 'none'}`
-                + (offer.mission.cargo ? `  Cargo: ${offer.mission.cargo}` : '');
+        this.status.text = `Payment: ${offer.mission.payVal > 0
+            ? `${offer.mission.payVal.toLocaleString()} cr` : 'none'}`
+            + (offer.mission.cargo ? `  Cargo: ${offer.mission.cargo}` : '');
         if (this.layout.detail) {
             const availableHeight = this.layout.detail.height - STATUS_HEIGHT - 4;
             const heights = detailText.split('\n').map(line => PIXI.CanvasTextMetrics
@@ -1057,6 +1052,31 @@ export abstract class MissionBoard extends Menu<Entity> {
             this.detail.text = fitLinesToHeight(detailText, heights, availableHeight);
         } else {
             this.detail.text = detailText;
+        }
+
+        if (offer.mission.briefGraphic && offer.mission.briefGraphic > 0) {
+            try {
+                const sprite = this.gameData.spriteFromPict(resourceId(offer.mission.briefGraphic));
+                sprite.anchor.set(1, 0);
+                const maxWidth = 90;
+                const maxHeight = 60;
+                const scale = Math.min(
+                    maxWidth / (sprite.width || maxWidth),
+                    maxHeight / (sprite.height || maxHeight),
+                    1,
+                );
+                sprite.scale.set(scale);
+                if (this.layout.detail) {
+                    const pos = panelPosition(this.layout, {
+                        x: this.layout.detail.x + this.layout.detail.width,
+                        y: this.layout.detail.y,
+                    });
+                    sprite.position.set(pos.x, pos.y);
+                }
+                this.briefingGraphic.addChild(sprite);
+            } catch {
+                // Ignore missing graphic
+            }
         }
     }
 
@@ -1069,10 +1089,7 @@ export abstract class MissionBoard extends Menu<Entity> {
             }
             return;
         }
-        if (offer.mission.shipGoal === 2 || offer.mission.shipGoal === 5) {
-            this.status.text = 'Boarding missions are not supported yet.';
-            return;
-        }
+
         const ncb = this.ncbRuntime.setContext(this.input, state);
         ncb.onStartMission = (missionId: number) => {
             const target = this.offers.find(candidate =>
@@ -1092,10 +1109,7 @@ export abstract class MissionBoard extends Menu<Entity> {
                 ncb,
             });
         if (!accepted) {
-            this.status.text = offer.mission.shipGoal === 2
-                || offer.mission.shipGoal === 5
-                ? 'Boarding missions are not supported yet.'
-                : 'This mission cannot be accepted.';
+            this.status.text = 'This mission cannot be accepted.';
             return;
         }
         void startPendingNcbMissions(this.gameData, state, {
@@ -1163,4 +1177,180 @@ export class MissionBbs extends MissionBoard {
             onInfo,
         );
     }
+}
+
+export interface ConcourseMissionOffer {
+    mission: MissionData;
+    resolved: ResolvedMissionDestinations;
+    title: string;
+    displayText: string;
+}
+
+export async function getConcourseMissionOffers(
+    gameData: GameData,
+    input: Entity,
+    planetId: string,
+): Promise<{
+    offers: ConcourseMissionOffer[];
+    destinationOptions: (resolved: ResolvedMissionDestinations) => MissionDestinationOptions;
+}> {
+    const state = input.components.get(PlayerStateComponent);
+    const ship = input.components.get(ShipDataComponent);
+    if (!state || !ship) {
+        return {
+            offers: [],
+            destinationOptions: (resolved) => ({ initialPlanetId: planetId, resolved }),
+        };
+    }
+    const [world, missions] = await Promise.all([
+        loadMissionWorld(gameData),
+        loadMissionCatalog(gameData),
+    ]);
+    const currentSystem = world.systems.find(system =>
+        sameId(system.id, state.currentSystem)) ?? {
+            id: state.currentSystem,
+            links: [],
+            planets: [],
+        };
+    const currentPlanet = world.planets.find(planet =>
+        sameId(planet.id, planetId)) ?? { id: planetId };
+
+    const offerable = getOfferableMissions({
+        missionIds: [...missions.keys()],
+        missions,
+        playerState: state,
+        currentPlanet,
+        currentSystem,
+        offerLocation: MissionOfferLocation.MainSpaceport,
+        destinationPlanets: world.planets,
+        destinationSystems: world.systems,
+        governments: world.governments,
+        outfits: input.components.get(OutfitsStateComponent),
+        playerShipGovt: ship?.inherentGovt,
+    }).sort((a, b) => b.displayWeight - a.displayWeight);
+
+    const offerSeed = `${state.currentSystem}:${planetId}:${state.gameDate}:concourse`;
+    const resourceOffers: ConcourseMissionOffer[] = [];
+    for (const sourceMission of offerable) {
+        const mission = preparedMission(sourceMission, offerSeed);
+        const resolved = resolveMissionDestinations(state, mission, {
+            initialPlanetId: planetId,
+            planets: world.planets,
+            systems: world.systems,
+            governments: world.governments,
+            initialSystemId: state.currentSystem,
+            currentSystemId: state.currentSystem,
+            random: seededRandom(`${offerSeed}:${mission.id}:destination`),
+        });
+        if (!resolved) {
+            continue;
+        }
+        const values = missionValues(
+            mission, planetId, world, state.gameDate, resolved, state);
+        const title = formatVisibleMissionText(mission.name, values) || 'Special Assignment';
+        const rawText = mission.offerText || mission.briefText || 'You are approached with a special assignment.';
+        const displayText = formatVisibleMissionText(rawText, values);
+        resourceOffers.push({
+            mission,
+            resolved,
+            title,
+            displayText,
+        });
+    }
+
+    const destinationOptions = (resolved: ResolvedMissionDestinations): MissionDestinationOptions => ({
+        initialPlanetId: planetId,
+        planets: world.planets,
+        systems: world.systems,
+        governments: world.governments,
+        initialSystemId: state.currentSystem,
+        currentSystemId: state.currentSystem,
+        resolved,
+    });
+
+    return { offers: resourceOffers, destinationOptions };
+}
+
+export async function getShipboardMissionOffers(
+    gameData: GameData,
+    input: Entity,
+): Promise<{
+    offers: ConcourseMissionOffer[];
+    destinationOptions: (resolved: ResolvedMissionDestinations) => MissionDestinationOptions;
+}> {
+    const state = input.components.get(PlayerStateComponent);
+    const ship = input.components.get(ShipDataComponent);
+    if (!state) {
+        return {
+            offers: [],
+            destinationOptions: (resolved) => ({ initialPlanetId: '', resolved }),
+        };
+    }
+    const [world, missions] = await Promise.all([
+        loadMissionWorld(gameData),
+        loadMissionCatalog(gameData),
+    ]);
+    const currentSystem = world.systems.find(system =>
+        sameId(system.id, state.currentSystem)) ?? {
+            id: state.currentSystem,
+            links: [],
+            planets: [],
+        };
+    const currentPlanet = world.planets.find(planet =>
+        sameId(planet.id, state.lastLandedPlanet)) ?? { id: state.lastLandedPlanet || 'nova:128' };
+
+    const offerable = getOfferableMissions({
+        missionIds: [...missions.keys()],
+        missions,
+        playerState: state,
+        currentPlanet,
+        currentSystem,
+        offerLocation: MissionOfferLocation.Ship,
+        destinationPlanets: world.planets,
+        destinationSystems: world.systems,
+        governments: world.governments,
+        outfits: input.components.get(OutfitsStateComponent),
+        playerShipGovt: ship?.inherentGovt,
+    }).sort((a, b) => b.displayWeight - a.displayWeight);
+
+    const offerSeed = `${state.currentSystem}:shipboard:${state.gameDate}`;
+    const resourceOffers: ConcourseMissionOffer[] = [];
+    for (const sourceMission of offerable) {
+        const mission = preparedMission(sourceMission, offerSeed);
+        const resolved = resolveMissionDestinations(state, mission, {
+            initialPlanetId: state.lastLandedPlanet || 'nova:128',
+            planets: world.planets,
+            systems: world.systems,
+            governments: world.governments,
+            initialSystemId: state.currentSystem,
+            currentSystemId: state.currentSystem,
+            random: seededRandom(`${offerSeed}:${mission.id}:destination`),
+        });
+        if (!resolved) {
+            continue;
+        }
+        const values = missionValues(
+            mission, state.lastLandedPlanet || 'nova:128', world, state.gameDate, resolved, state);
+        const title = formatVisibleMissionText(mission.name, values) || 'Shipboard Contract';
+        const rawText = mission.offerText || mission.briefText || 'An urgent distress hail comes over the comms.';
+        const displayText = formatVisibleMissionText(rawText, values);
+        resourceOffers.push({
+            mission,
+            resolved,
+            title,
+            displayText,
+        });
+    }
+
+    const destinationOptions = (resolved: ResolvedMissionDestinations): MissionDestinationOptions => ({
+        initialPlanetId: state.lastLandedPlanet || 'nova:128',
+        planets: world.planets,
+        systems: world.systems,
+        governments: world.governments,
+        initialSystemId: state.currentSystem,
+        currentSystemId: state.currentSystem,
+        resolved,
+    });
+
+    return { offers: resourceOffers, destinationOptions };
 }
