@@ -21,7 +21,12 @@ import {
     getFireSyncLocalState,
     loggedShotEntityId,
     makeFireLogShot,
-    pushShot, appendShot, newShotsAfter } from './fire_sync';
+    pushShot, appendShot, newShotsAfter,
+    getFireIntentDelta,
+    applyFireIntentDelta,
+    getFireLogDelta,
+    applyFireLogDelta } from './fire_sync';
+import { ServerClockOffsetResource } from 'nova_ecs/plugins/multiplayer_plugin';
 
 interface TestShot {
     seq: number;
@@ -309,5 +314,126 @@ describe('end-to-end shot synchronization across client, server, and observers',
         shooterShip.components.set(FireLogComponent, { shots: [...log!.shots] });
         clientWorld.step();
         expect(shooterSpawnedFromLog.length).toBe(0); // Zero duplicates spawned!
+    });
+});
+
+describe('fire delta compression and wire bandwidth', () => {
+    it('generates a minimal delta containing only new intent shots instead of the entire buffer', () => {
+        const prev = {
+            shots: Array.from({ length: 16 }, (_, i) => ({
+                seq: i + 1,
+                weaponId: 'blaster-1',
+                seed: 100 + i,
+                exitIndex: 0,
+            })),
+        };
+
+        const current = {
+            shots: [...prev.shots.slice(1), {
+                seq: 17,
+                weaponId: 'blaster-1',
+                seed: 117,
+                exitIndex: 1,
+            }],
+        };
+
+        const delta = getFireIntentDelta(prev, current);
+        expect(delta).toBeDefined();
+        expect(delta?.shots.length).toBe(1);
+        expect(delta?.shots[0].seq).toBe(17);
+        expect(delta?.shots[0].seed).toBe(117);
+
+        // Applying the delta integrates into target buffer
+        const target = { shots: [...prev.shots] };
+        applyFireIntentDelta(target, delta!);
+        expect(target.shots.length).toBe(16);
+        expect(target.shots[target.shots.length - 1].seq).toBe(17);
+    });
+
+    it('generates a minimal delta containing only new log shots instead of the entire buffer', () => {
+        const prev = {
+            shots: Array.from({ length: 16 }, (_, i) => ({
+                seq: i + 1,
+                weaponId: 'blaster-1',
+                seed: 100 + i,
+                exitIndex: 0,
+                at: 1000 + i * 20,
+                position: new Position(i * 10, 0),
+                rotation: new Angle(0),
+            })),
+        };
+
+        const current = {
+            shots: [...prev.shots.slice(1), {
+                seq: 17,
+                weaponId: 'blaster-1',
+                seed: 117,
+                exitIndex: 0,
+                at: 1340,
+                position: new Position(170, 0),
+                rotation: new Angle(0.1),
+            }],
+        };
+
+        const delta = getFireLogDelta(prev, current);
+        expect(delta).toBeDefined();
+        expect(delta?.shots.length).toBe(1);
+        expect(delta?.shots[0].seq).toBe(17);
+
+        const target = { shots: [...prev.shots] };
+        applyFireLogDelta(target, delta!);
+        expect(target.shots.length).toBe(16);
+        expect(target.shots[target.shots.length - 1].seq).toBe(17);
+    });
+
+    it('returns undefined when no new shots were fired', () => {
+        const state = {
+            shots: [{ seq: 1, weaponId: 'blaster', seed: 1, exitIndex: 0 }],
+        };
+        expect(getFireIntentDelta(state, state)).toBeUndefined();
+    });
+});
+
+describe('clock skew protection with ServerClockOffsetResource', () => {
+    it('maps server shot.at using ServerClockOffsetResource to protect against client/server clock skew', async () => {
+        let loggedShotSeenAt = 0;
+        const testWeapon = {
+            data: getDefaultProjectileWeaponData(),
+            syncAsFireEvent: true,
+            fireFromLog: (_source: string, shot: any) => {
+                loggedShotSeenAt = shot.at;
+                return new Entity('shot');
+            },
+        } as unknown as WeaponEntry;
+        const entries = new Gettable<WeaponEntry | undefined>(async () => testWeapon);
+        entries.gotten[testWeapon.data.id] = testWeapon;
+
+        const world = new World('client');
+        world.resources.set(PlatformResource, 'browser');
+        world.resources.set(WeaponEntries, entries);
+        world.resources.set(TimeResource, { time: 5000, delta_ms: 16.6, delta_s: 0.0166, frame: 1 });
+        // Client clock is 3000ms ahead of server clock (e.g. server clock is 2000 while client is 5000)
+        world.resources.set(ServerClockOffsetResource, { offset: 3000 });
+        world.addSystem(FireLogSpawnSystem);
+
+        const ship = new Entity('ship')
+            .addComponent(MultiplayerData, { owner: 'other' })
+            .addComponent(FireLogComponent, {
+                shots: [{
+                    seq: 1,
+                    weaponId: testWeapon.data.id,
+                    seed: 42,
+                    exitIndex: 0,
+                    at: 2010, // Fired on server at server time 2010 (age on server = 10ms)
+                    position: new Position(0, 0),
+                    rotation: new Angle(0),
+                }],
+            });
+        world.entities.set('ship', ship);
+
+        world.step();
+
+        // 2010 (server time) + 3000 (offset) = 5010 (mapped to client clock domain)
+        expect(loggedShotSeenAt).toBe(5010);
     });
 });

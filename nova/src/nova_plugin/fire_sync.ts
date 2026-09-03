@@ -54,9 +54,70 @@ export const FireLog = t.type({
 export type FireLog = t.TypeOf<typeof FireLog>;
 export const FireLogComponent = new Component<FireLog>('FireLogComponent');
 
+export const FireIntentDelta = t.type({
+    shots: t.array(FireIntentShot),
+});
+export type FireIntentDelta = t.TypeOf<typeof FireIntentDelta>;
+
+export function getFireIntentDelta(
+    previous: FireIntent | undefined,
+    current: FireIntent,
+): FireIntentDelta | undefined {
+    if (!previous || !previous.shots || previous.shots.length === 0) {
+        return current.shots && current.shots.length > 0 ? { shots: [...current.shots] } : undefined;
+    }
+    const highestPrevSeq = Math.max(0, ...previous.shots.map(s => s.seq));
+    const newShots = current.shots.filter(s => s.seq > highestPrevSeq);
+    return newShots.length > 0 ? { shots: newShots } : undefined;
+}
+
+export function applyFireIntentDelta(
+    currentData: FireIntent,
+    delta: FireIntentDelta,
+): FireIntent {
+    if (!currentData.shots) {
+        currentData.shots = [];
+    }
+    for (const shot of delta.shots) {
+        pushShot(currentData.shots, shot);
+    }
+    return currentData;
+}
+
+export const FireLogDelta = t.type({
+    shots: t.array(FireLogShot),
+});
+export type FireLogDelta = t.TypeOf<typeof FireLogDelta>;
+
+export function getFireLogDelta(
+    previous: FireLog | undefined,
+    current: FireLog,
+): FireLogDelta | undefined {
+    if (!previous || !previous.shots || previous.shots.length === 0) {
+        return current.shots && current.shots.length > 0 ? { shots: [...current.shots] } : undefined;
+    }
+    const highestPrevSeq = Math.max(0, ...previous.shots.map(s => s.seq));
+    const newShots = current.shots.filter(s => s.seq > highestPrevSeq);
+    return newShots.length > 0 ? { shots: newShots } : undefined;
+}
+
+export function applyFireLogDelta(
+    currentData: FireLog,
+    delta: FireLogDelta,
+): FireLog {
+    if (!currentData.shots) {
+        currentData.shots = [];
+    }
+    for (const shot of delta.shots) {
+        pushShot(currentData.shots, shot);
+    }
+    return currentData;
+}
+
 replicationPolicies.register(FireIntentComponent, {
     codec: FireIntent,
     authority: 'owning-client',
+    relay: false,
 });
 replicationPolicies.register(FireLogComponent, {
     codec: FireLog,
@@ -244,9 +305,15 @@ export const FireSyncPlugin: Plugin = {
         world.addComponent(FireSyncLocalStateComponent);
         deltaMaker.addComponent(FireIntentComponent, {
             componentType: FireIntent,
+            deltaType: FireIntentDelta,
+            getDelta: getFireIntentDelta,
+            applyDelta: applyFireIntentDelta,
         });
         deltaMaker.addComponent(FireLogComponent, {
             componentType: FireLog,
+            deltaType: FireLogDelta,
+            getDelta: getFireLogDelta,
+            applyDelta: applyFireLogDelta,
         });
     },
 };

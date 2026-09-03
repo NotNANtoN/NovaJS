@@ -36,6 +36,7 @@ import {
 const LoopingSounds = new Resource<Map<string, Sound>>('LoopingSounds');
 const LoadedSounds = new Resource<Map<string, Sound>>('LoadedSounds');
 const PendingSounds = new Resource<Map<string, Promise<Sound>>>('PendingSounds');
+const FailedSounds = new Resource<Set<string>>('FailedSounds');
 export const VolumeResource = new Resource<{volume: number}>('VolumeResource');
 const IncomingMissileStateResource = new Resource<Set<string>>(
     'IncomingMissileState');
@@ -138,10 +139,13 @@ const SoundSystem = new System({
     name: 'SoundSystem',
     events: [SoundEvent],
     args: [SoundEvent, GameDataResource, LoopingSounds, LoadedSounds,
-        PendingSounds, VolumeResource, PlayerMovementQuery,
+        PendingSounds, FailedSounds, VolumeResource, PlayerMovementQuery,
         SingletonComponent] as const,
     step({ id, loop = false, position }, gameData, loopingSounds, loadedSounds,
-        pendingSounds, {volume: masterVolume}, players) {
+        pendingSounds, failedSounds, {volume: masterVolume}, players) {
+        if (failedSounds.has(id)) {
+            return;
+        }
         if (loop && loopingSounds.has(id)) {
             return;
         }
@@ -169,13 +173,15 @@ const SoundSystem = new System({
 
         void pending.then(sound => {
             if (!sound) {
+                failedSounds.add(id);
                 return;
             }
             loadedSounds.set(id, sound);
             playLoadedSound(sound, id, loop, loopingSounds,
                 getMasterVolume() * attenuation);
         }).catch(error => {
-            console.warn(`Unable to load sound ${id}`, error);
+            failedSounds.add(id);
+            console.warn(`Unable to load sound ${id}, using silent fallback`, error);
         }).finally(() => {
             if (pendingSounds.get(id) === pending) {
                 pendingSounds.delete(id);
@@ -317,6 +323,7 @@ export const SoundPlugin: Plugin = {
         world.resources.set(LoopingSounds, new Map());
         world.resources.set(LoadedSounds, new Map());
         world.resources.set(PendingSounds, new Map());
+        world.resources.set(FailedSounds, new Set());
         world.resources.set(VolumeResource, {volume: getMasterVolume()});
         world.resources.set(IncomingMissileStateResource, new Set());
         world.resources.set(StellarSoundStateResource, {
@@ -349,6 +356,7 @@ export const SoundPlugin: Plugin = {
         world.resources.delete(VolumeResource);
         world.resources.delete(StellarSoundStateResource);
         world.resources.delete(IncomingMissileStateResource);
+        world.resources.delete(FailedSounds);
         world.resources.delete(PendingSounds);
         world.resources.delete(LoadedSounds);
         world.resources.delete(LoopingSounds);

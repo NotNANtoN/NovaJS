@@ -21,8 +21,13 @@ export async function PlanetParse(spob: SpobResource, notFoundFunction: (m: stri
         desc = descResource.text;
     }
     else {
-        desc = "No matching dësc for spöb of id " + base.id;
-        notFoundFunction(desc);
+        // Retail placeholder / empty spöbs 1400..1419 have no descriptions
+        if (spob.id >= 1400 && spob.id < 1500) {
+            desc = "";
+        } else {
+            desc = "No matching dësc for spöb of id " + base.id;
+            notFoundFunction(desc);
+        }
     }
 
     var pictID: string;
@@ -51,8 +56,14 @@ export async function PlanetParse(spob: SpobResource, notFoundFunction: (m: stri
         rledID = rledResource.globalID;
     }
     else {
-        notFoundFunction("No matching rlëd id " + spob.graphic + " for spöb of id " + base.id);
-        rledID = defaultAnimationImage.id;
+        // Fall back to a valid planet sprite if spob.graphic is invalid (e.g. ATMOS retail typo 2033 on spob 472)
+        const fallback = spob.idSpace.rlëD[2000] ?? Object.values(spob.idSpace.rlëD)[0];
+        if (fallback) {
+            rledID = fallback.globalID;
+        } else {
+            rledID = defaultAnimationImage.id;
+        }
+        notFoundFunction("No matching rlëd id " + spob.graphic + " for spöb of id " + base.id + " (fell back to " + rledID + ")");
     }
 
     const animation: Animation = {

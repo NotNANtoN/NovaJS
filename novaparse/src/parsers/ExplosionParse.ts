@@ -45,9 +45,12 @@ export async function ExplosionParse(boom: BoomResource, notFoundFunction: (m: s
 
     let soundID: string | null = null;
     if (boom.sound) {
-        soundID = boom.idSpace["snd "][boom.sound]?.globalID;
-        if (!soundID) {
-            notFoundFunction("Missing snd " + boom.sound + " for bööm " + base.id);
+        const snd = boom.idSpace["snd "][boom.sound];
+        if (snd) {
+            soundID = snd.globalID;
+        } else {
+            // Retail EV Nova references missing sounds (e.g. snd 314 for bööm 142)
+            soundID = null;
         }
     }
 

@@ -8,7 +8,9 @@ import { Plugin } from 'nova_ecs/plugin';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
 import {
     CommunicatorResource,
+    InboundMultiplayerPhase,
     MultiplayerData,
+    ServerClockOffsetResource,
 } from 'nova_ecs/plugins/multiplayer_plugin';
 import { Time, TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { Provide } from 'nova_ecs/provide';
@@ -170,6 +172,7 @@ function addShotsOwed(weapon: WeaponData, state: WeaponState,
 
 export const WeaponsSystem = new System({
     name: 'WeaponsSystem',
+    after: [InboundMultiplayerPhase],
     args: [WeaponsStateComponent, WeaponsComponent,
         TimeResource, UUID, WeaponEntries,
         Optional(DestructionStartedComponent),
@@ -429,9 +432,11 @@ export const FireLogSpawnSystem = new System({
         UUID,
         GetEntity,
         Optional(FireIntentComponent),
+        Optional(ServerClockOffsetResource),
     ] as const,
-    step(log, weaponEntries, time, uuid, entity, intent) {
+    step(log, weaponEntries, time, uuid, entity, intent, serverClockOffset) {
         const sync = getFireSyncLocalState(entity, intent, log);
+        const clockOffset = serverClockOffset?.offset ?? 0;
         for (const shot of newShotsAfter(log.shots, sync.highestLogSeq)) {
             sync.nextSeq = Math.max(sync.nextSeq, shot.seq + 1);
             if (sync.spawnedSeqs.delete(shot.seq)) {
@@ -446,7 +451,10 @@ export const FireLogSpawnSystem = new System({
                 sync.highestLogSeq = shot.seq;
                 continue;
             }
-            weapon.fireFromLog(uuid, shot, time.time);
+            const mappedShot = clockOffset !== 0
+                ? { ...shot, at: shot.at + clockOffset }
+                : shot;
+            weapon.fireFromLog(uuid, mappedShot, time.time);
             sync.highestLogSeq = shot.seq;
 
             if ((globalThis as any).debugCombat || (globalThis as any).novaDebug?.debugCombat) {

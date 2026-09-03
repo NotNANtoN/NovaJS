@@ -3,6 +3,7 @@ import produce, { current, isDraft } from 'immer';
 import * as t from 'io-ts';
 import { BehaviorSubject, Observable, Subject } from 'rxjs';
 import { Emit, Entities, GetEntity, UUID } from '../arg_types';
+import { Optional } from '../optional';
 import { Component } from '../component';
 import { map } from '../datatypes/map';
 import { BOUNDARY } from '../datatypes/position';
@@ -184,7 +185,17 @@ const MessageSystem = new System({
 
 export const CommunicatorResource = new Resource<Communicator>('CommunicatorResource');
 
-export const MultiplayerPhase = new Phase({name: 'MultiplayerPhase'});
+export const ServerClockOffsetResource =
+    new Resource<{ offset: number }>('ServerClockOffsetResource');
+
+export const InboundMultiplayerPhase = new Phase({
+    name: 'InboundMultiplayerPhase',
+});
+
+export const MultiplayerPhase = new Phase({
+    name: 'MultiplayerPhase',
+    after: [InboundMultiplayerPhase],
+});
 
 /**
  * Gameplay authority contract
@@ -229,6 +240,7 @@ export interface ReplicationPolicy<T = unknown> {
     readonly acceptInitialOwnerState?: boolean;
     readonly allowOwnerRemoval?: boolean;
     readonly relayOwnerChanges?: boolean;
+    readonly relay?: boolean;
 }
 
 export class ReplicationPolicyRegistry {
@@ -431,6 +443,9 @@ function canSendFullState(
     owner: string,
 ): boolean {
     if (policyFor(componentName).authority === 'owning-client' && isAdmin) {
+        if (policyFor(componentName).relay === false) {
+            return false;
+        }
         // A newly joining observer still needs the latest complete movement
         // basis. The owning client preserves its existing local copy.
         return true;
@@ -578,17 +593,20 @@ function owningClientDelta(
     const componentStates = new Map(
         [...entityDelta.componentStates ?? []]
             .filter(([name]) =>
-                policyFor(name).authority === 'owning-client'),
+                policyFor(name).authority === 'owning-client'
+                && policyFor(name).relay !== false),
     );
     const componentDeltas = new Map(
         [...entityDelta.componentDeltas ?? []]
             .filter(([name]) =>
-                policyFor(name).authority === 'owning-client'),
+                policyFor(name).authority === 'owning-client'
+                && policyFor(name).relay !== false),
     );
     const removeComponents = new Set(
         [...entityDelta.removeComponents ?? []]
             .filter(name =>
-                policyFor(name).authority === 'owning-client'),
+                policyFor(name).authority === 'owning-client'
+                && policyFor(name).relay !== false),
     );
     const filtered: EntityDelta = {};
     if (componentStates.size > 0) {
@@ -860,13 +878,38 @@ export function multiplayer(communicator: Communicator,
         latestInboundMovement.delete(uuid);
     }
 
-    const multiplayerSystem = new System({
-        name: 'Multiplayer',
+    function markMovement(uuid: string, atTime: number) {
+        movementTimestamps.set(uuid, atTime);
+        if (!movementSequences.has(uuid)) {
+            movementSequences.set(uuid, nextMovementSequence(uuid));
+        }
+    }
+
+    const relayedDeltas = new Map<string, EntityDelta>();
+    const relayedStates = new Map<string, EncodedEntity>();
+    const movementTimestamps = new Map<string, number>();
+    const movementSequences = new Map<string, number>();
+    const relayedChat: ChatMessageEntry[] = [];
+    const added = new Map<string, string>();
+    const removed = new Set<string>();
+    const localWeaponIntentChanges = new Set<string>();
+    const fullStateRequests = new DefaultMap<string, Set<string>>(() => new Set());
+    const inboundMultiplayerSystem = new System({
+        name: 'InboundMultiplayer',
         args: [MultiplayerQuery, Entities, Comms,
                DeltaResource, SerializerResource, Emit,
-               TimeResource] as const,
-        during: [MultiplayerPhase],
-        step: (query, entities, comms, deltaMaker, serializer, emit, time) => {
+               TimeResource, Optional(ServerClockOffsetResource)] as const,
+        during: [InboundMultiplayerPhase],
+        step: (query, entities, comms, deltaMaker, serializer, emit, time, serverClockOffset) => {
+            relayedDeltas.clear();
+            relayedStates.clear();
+            movementTimestamps.clear();
+            movementSequences.clear();
+            relayedChat.length = 0;
+            added.clear();
+            removed.clear();
+            localWeaponIntentChanges.clear();
+            fullStateRequests.clear();
             if (comms.uuid && communicator.uuid && comms.uuid !== communicator.uuid) {
                 // Change the owner of all entities owned by our previous uuid
                 // to our current uuid.
@@ -899,6 +942,9 @@ export function multiplayer(communicator: Communicator,
                 const clock = sourceClockOffsets.get(source);
                 if (!clock) {
                     sourceClockOffsets.set(source, { offset: sampleOffset });
+                    if (serverClockOffset && (source === 'server' || comms.admins.has(source))) {
+                        serverClockOffset.offset = sampleOffset;
+                    }
                     return;
                 }
 
@@ -907,6 +953,9 @@ export function multiplayer(communicator: Communicator,
                 // interpolation cursor backwards.
                 const correction = (sampleOffset - clock.offset) * 0.1;
                 clock.offset += Math.max(-25, Math.min(25, correction));
+                if (serverClockOffset && (source === 'server' || comms.admins.has(source))) {
+                    serverClockOffset.offset = clock.offset;
+                }
             }
 
             function mapSourceTime(
@@ -1015,12 +1064,7 @@ export function multiplayer(communicator: Communicator,
                 return true;
             }
 
-            function markMovement(uuid: string) {
-                movementTimestamps.set(uuid, localTime);
-                if (!movementSequences.has(uuid)) {
-                    movementSequences.set(uuid, nextMovementSequence(uuid));
-                }
-            }
+
 
             function rememberOwnerMovement(
                 uuid: string,
@@ -1145,7 +1189,6 @@ export function multiplayer(communicator: Communicator,
             // Capture local weapon edges before applying inbound state. A
             // merge may make the eventual value equal to its new tracking
             // baseline; the edge must still be emitted (especially keyup).
-            const localWeaponIntentChanges = new Set<string>();
             if (!isAdmin) {
                 for (const [uuid, { entity, data }] of entityMap) {
                     const component = weaponStateComponent(entity);
@@ -1171,23 +1214,6 @@ export function multiplayer(communicator: Communicator,
                     deferredOwnerWeaponIntent.delete(uuid);
                 }
             }
-
-            // Entities to request the full state of
-            // keyed by who to ask for them.
-            const fullStateRequests = new DefaultMap<string, Set<string>>(() => new Set());
-
-            // Track entities added and removed
-            const added = new Map<string, string>();
-            const removed = new Set<string>();
-            // Owning-client MovementState is accepted by the server and
-            // forwarded verbatim to observers. The server simulates that state
-            // for gameplay, but never publishes its own competing movement
-            // correction for the client-owned entity.
-            const relayedDeltas = new Map<string, EntityDelta>();
-            const relayedStates = new Map<string, EncodedEntity>();
-            const movementTimestamps = new Map<string, number>();
-            const movementSequences = new Map<string, number>();
-            const relayedChat: ChatMessageEntry[] = [];
 
             // Apply changes from messages
             for (const { source, message } of comms.messages) {
@@ -1479,7 +1505,7 @@ export function multiplayer(communicator: Communicator,
                         relayedStates.set(uuid, encodeReplicatedEntity(
                             entity, uuid, multiplayerData.owner));
                         if (entity.components.has(MovementStateComponent)) {
-                            markMovement(uuid);
+                            markMovement(uuid, localTime);
                         }
                     }
 
@@ -1622,7 +1648,7 @@ export function multiplayer(communicator: Communicator,
                                         // This is a new server-authored
                                         // transport sample. Never expose the
                                         // owner's clock to observers.
-                                        markMovement(uuid);
+                                        markMovement(uuid, localTime);
                                     }
                                 }
                             }
@@ -1646,6 +1672,90 @@ export function multiplayer(communicator: Communicator,
                     }, source);
                 }
             }
+        },
+    });
+
+    const outboundMultiplayerSystem = new System({
+        name: 'OutboundMultiplayer',
+        args: [MultiplayerQuery, Entities, Comms,
+               DeltaResource, SerializerResource, Emit,
+               TimeResource] as const,
+        during: [MultiplayerPhase],
+        step: (query, entities, comms, deltaMaker, serializer, emit, time) => {
+            if (!comms.uuid) {
+                return;
+            }
+
+            const isAdmin = comms.admins.has(comms.uuid);
+            const localTime = time.fixedDelta_ms === undefined
+                ? Math.max(time.time, wallClockNow())
+                : time.time;
+
+            function sendMessage(message: Message, destination?: string) {
+                communicator.sendMessage(Message.encode({
+                    ...message,
+                    sentAt: localTime,
+                }), destination);
+            }
+
+            const entityMap = new Map(query.map(([uuid, entity, data]) =>
+                [uuid, { entity, data }]));
+            const entityUuids = new Set(entityMap.keys());
+
+            function interestedEntityUuids(peer: string): Set<string> {
+                const centres = [...entityMap.values()]
+                    .filter(({ entity }) => entity.components
+                        .get(MultiplayerData)?.owner === peer)
+                    .map(({ entity }) =>
+                        entity.components.get(MovementStateComponent))
+                    .filter((movement): movement is MovementState =>
+                        movement !== undefined);
+                if (centres.length === 0) {
+                    return new Set(entityMap.keys());
+                }
+                return new Set([...entityMap]
+                    .filter(([, { entity }]) => {
+                        if (entity.components.get(MultiplayerData)?.owner
+                            === peer) {
+                            return true;
+                        }
+                        const movement = entity.components
+                            .get(MovementStateComponent);
+                        return movement === undefined
+                            || centres.some(centre =>
+                                positionsWithinInterest(centre, movement));
+                    })
+                    .map(([uuid]) => uuid));
+            }
+
+            function encodeReplicatedEntity(
+                entity: Entity,
+                uuid: string,
+                owner: string,
+            ): EncodedEntity {
+                const encoded = filterEncodedEntity(
+                    serializer.encode(entity),
+                    comms.uuid!,
+                    isAdmin,
+                    owner,
+                );
+                if (!isAdmin || owner === comms.uuid) {
+                    return encoded;
+                }
+                const ownerMovement = lastMovementWireState.get(uuid);
+                if (!ownerMovement) {
+                    return encoded;
+                }
+                return {
+                    ...encoded,
+                    components: encoded.components.map(([name, value]) => (
+                        name === MovementStateComponent.name
+                            ? [name, MovementState.encode(ownerMovement)]
+                            : [name, value]
+                    ) as [string, unknown]),
+                };
+            }
+
             const currentOwners = new Map([...entityMap].map(([uuid, val]) =>
                 [uuid, val.entity.components.get(MultiplayerData)!.owner]));
             const entityOwners = new Map([
@@ -1712,7 +1822,7 @@ export function multiplayer(communicator: Communicator,
                 state.set(uuid, encodeReplicatedEntity(
                     entity, uuid, val.data.owner));
                 if (entity.components.has(MovementStateComponent)) {
-                    markMovement(uuid);
+                    markMovement(uuid, localTime);
                     lastMovementSnapshotAt.set(uuid, localTime);
                     lastMovementWireState.set(
                         uuid,
@@ -1786,7 +1896,7 @@ export function multiplayer(communicator: Communicator,
                 }
                 const movement = entity.components.get(MovementStateComponent);
                 if (entityDelta && containsMovementState(entityDelta)) {
-                    markMovement(uuid);
+                    markMovement(uuid, localTime);
                     lastMovementSnapshotAt.set(uuid, localTime);
                     if (movement) {
                         lastMovementWireState.set(
@@ -1828,7 +1938,7 @@ export function multiplayer(communicator: Communicator,
                         entityDelta = entityDelta
                             ? mergeEntityDeltas(entityDelta, snapshotDelta)
                             : snapshotDelta;
-                        markMovement(uuid);
+                        markMovement(uuid, localTime);
                         lastMovementWireState.set(uuid, snapshot);
                     }
                     lastMovementSnapshotAt.set(uuid, localTime);
@@ -1978,8 +2088,12 @@ export function multiplayer(communicator: Communicator,
 
     function build(world: World) {
         world.addPlugin(DeltaPlugin);
+        world.addPhase(InboundMultiplayerPhase);
         world.addPhase(MultiplayerPhase);
         world.resources.set(CommunicatorResource, communicator);
+        if (!world.resources.has(ServerClockOffsetResource)) {
+            world.resources.set(ServerClockOffsetResource, { offset: 0 });
+        }
         if (!world.resources.has(TimeResource)) {
             world.resources.set(TimeResource, {
                 delta_ms: 0,
@@ -1999,7 +2113,8 @@ export function multiplayer(communicator: Communicator,
             })
         });
 
-        world.addSystem(multiplayerSystem);
+        world.addSystem(inboundMultiplayerSystem);
+        world.addSystem(outboundMultiplayerSystem);
         world.addSystem(MessageSystem);
         world.addComponent(MultiplayerData);
         world.singletonEntity.components.set(Comms, {
@@ -2018,6 +2133,12 @@ export function multiplayer(communicator: Communicator,
         });
         peerLeaveSubscription = communicator.peers.leave.subscribe(peer => {
             sourceClockOffsets.delete(peer);
+            if (peer === 'server') {
+                const serverClock = world.resources.get(ServerClockOffsetResource);
+                if (serverClock) {
+                    serverClock.offset = 0;
+                }
+            }
             interestedEntitiesByPeer.delete(peer);
             for (const [uuid, movement] of [...latestInboundMovement]) {
                 if (movement.source === peer) {
@@ -2041,7 +2162,8 @@ export function multiplayer(communicator: Communicator,
             messageSubscription = undefined;
             peerLeaveSubscription?.unsubscribe();
             peerLeaveSubscription = undefined;
-            world.removeSystem(multiplayerSystem);
+            world.removeSystem(inboundMultiplayerSystem);
+            world.removeSystem(outboundMultiplayerSystem);
             world.removeSystem(MessageSystem);
         },
     }

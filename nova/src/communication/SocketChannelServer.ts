@@ -107,6 +107,12 @@ export class SocketChannelServer implements ChannelServer {
         const clientUUID = v4();
         // This uuid is used only for communication and
         // has nothing to do with the game engine's uuids
+        // Disable Nagle's algorithm for immediate dispatch of low-latency game deltas
+        const tcpSocket = (webSocket as unknown as { _socket?: { setNoDelay?: (noDelay: boolean) => void } })._socket;
+        if (tcpSocket && typeof tcpSocket.setNoDelay === 'function') {
+            tcpSocket.setNoDelay(true);
+        }
+
         const client: Client = {
             socket: webSocket,
             playerToken: this.getTokenFromRequest(request),
