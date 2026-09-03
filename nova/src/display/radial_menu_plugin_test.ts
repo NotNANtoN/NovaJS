@@ -70,6 +70,7 @@ describe("Radial menu pure helpers", () => {
                 lineTo(...args: any[]) { recordedCalls.push("lineTo"); return this; },
                 arc(...args: any[]) { recordedCalls.push("arc"); return this; },
                 drawCircle(...args: any[]) { recordedCalls.push("drawCircle"); return this; },
+                rect(...args: any[]) { recordedCalls.push("rect"); return this; },
                 drawRect(...args: any[]) { recordedCalls.push("drawRect"); return this; },
                 closePath(...args: any[]) { recordedCalls.push("closePath"); return this; },
             } as any;

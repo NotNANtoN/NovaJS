@@ -279,7 +279,7 @@ export function drawActionIcon(
         }
         case "jettison": {
             // Cargo Canister Pod with Ejection Thrust
-            g.drawRect(cx - 7, cy - 8, 14, 10);
+            (g.rect ? g.rect(cx - 7, cy - 8, 14, 10) : (g as any).drawRect(cx - 7, cy - 8, 14, 10));
             g.moveTo(cx - 7, cy - 4);
             g.lineTo(cx + 7, cy - 4);
             g.moveTo(cx - 4, cy + 4);

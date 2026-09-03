@@ -356,9 +356,7 @@ class SystemGraph {
 
         this.maskedContainer = new PIXI.Container();
         const mask = new PIXI.Graphics();
-        mask.lineStyle(1);
-        mask.beginFill(0xff0000);
-        mask.drawRect(0, 0, size.x, size.y);
+        mask.rect(0, 0, size.x, size.y).fill(0xff0000);
         this.maskedContainer.mask = mask;
         this.container.addChild(mask);
 
@@ -455,7 +453,11 @@ class SystemGraph {
     }
 
     draw(scale = this.scale) {
-        this.mapContainer.cacheAsBitmap = false;
+        if (typeof (this.mapContainer as any).cacheAsTexture === 'function') {
+            (this.mapContainer as any).cacheAsTexture(false);
+        } else {
+            (this.mapContainer as any).cacheAsBitmap = false;
+        }
         this.scale = clampMapScale(scale);
         this.graphics.clear();
         this.placeNebulae();
@@ -463,7 +465,11 @@ class SystemGraph {
         this.drawLinks();
         this.drawRoute();
         this.placeSystems();
-        this.mapContainer.cacheAsBitmap = true;
+        if (typeof (this.mapContainer as any).cacheAsTexture === 'function') {
+            (this.mapContainer as any).cacheAsTexture(true);
+        } else {
+            (this.mapContainer as any).cacheAsBitmap = true;
+        }
     }
 
     bindWheel() {
