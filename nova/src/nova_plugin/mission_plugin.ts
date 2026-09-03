@@ -5,6 +5,7 @@ import { Emit, GetEntity, UUID } from 'nova_ecs/arg_types';
 import { Plugin } from 'nova_ecs/plugin';
 import { Resource } from 'nova_ecs/resource';
 import { System } from 'nova_ecs/system';
+import { AsyncSystem } from 'nova_ecs/async_system';
 import { v4 as uuid } from 'uuid';
 import { resourceId } from '../common/resource_id';
 import { PlayerShipSelector } from './player_ship_plugin';
@@ -598,10 +599,21 @@ export class MissionRuntime {
     private async getMissionForEntry(
         entry: ActiveMission,
     ): Promise<MissionData | undefined> {
-        if (entry.missionData && typeof entry.missionData === 'object') {
-            return entry.missionData as MissionData;
+        let missionData: unknown;
+        let missionId: string | undefined;
+        try {
+            missionData = entry?.missionData;
+            missionId = entry?.missionId;
+        } catch {
+            return undefined;
         }
-        return this.getMission(entry.missionId);
+        if (missionData && typeof missionData === 'object') {
+            return missionData as MissionData;
+        }
+        if (missionId) {
+            return this.getMission(missionId);
+        }
+        return undefined;
     }
 
     private async missionName(
@@ -621,10 +633,14 @@ export class MissionRuntime {
         state: PlayerState,
         context: MissionSetContext = {},
     ): Promise<void> | undefined {
-        if (this.checkedDates.get(state) === state.gameDate) {
-            return undefined;
+        try {
+            if (this.checkedDates.get(state) === state.gameDate) {
+                return undefined;
+            }
+            this.checkedDates.set(state, state.gameDate);
+        } catch {
+            // Ignore if state proxy is invalid
         }
-        this.checkedDates.set(state, state.gameDate);
         return this.failExpired(state, context).catch(error => {
             console.error('Mission expiration processing failed', error);
         });
@@ -639,27 +655,70 @@ export class MissionRuntime {
         state: PlayerState,
         context: MissionSetContext = {},
     ): Promise<void> {
-        const entries = [...state.activeMissions];
-        await Promise.all(entries.map(entry => {
-            if (entry.state !== 'active' || entry.acceptedDate === undefined) {
-                return undefined;
+        let entries: ActiveMission[];
+        try {
+            entries = [...state.activeMissions];
+        } catch {
+            return;
+        }
+
+        const tasks: Array<{
+            entry: ActiveMission;
+            missionId: string;
+            missionData?: unknown;
+            key: string;
+        }> = [];
+
+        for (const entry of entries) {
+            try {
+                if (entry.state !== 'active' || entry.acceptedDate === undefined) {
+                    continue;
+                }
+                tasks.push({
+                    entry,
+                    missionId: entry.missionId,
+                    missionData: entry.missionData,
+                    key: missionEntryKey(entry),
+                });
+            } catch {
+                continue;
             }
-            return this.runExclusive(missionEntryKey(entry), async () => {
-                const mission = await this.getMissionForEntry(entry);
-                if (!mission || entry.state !== 'active'
-                    || !isExpired(state, entry, mission)) {
+        }
+
+        await Promise.all(tasks.map(task => {
+            return this.runExclusive(task.key, async () => {
+                let mission: MissionData | undefined;
+                try {
+                    if (task.missionData && typeof task.missionData === 'object') {
+                        mission = task.missionData as MissionData;
+                    } else if (task.missionId) {
+                        mission = await this.getMission(task.missionId);
+                    }
+                } catch {
                     return;
                 }
-                runMissionSetExpression(mission.onFailure, state, console.warn,
-                    context);
-                entry.state = 'failed';
-                releaseMissionCargo(state, entry.missionId);
-                await startPendingNcbMissions(this.gameData, state, {
-                    initialPlanetId: state.lastLandedPlanet,
-                    initialSystemId: state.currentSystem,
-                    currentSystemId: state.currentSystem,
-                    ncb: context,
-                });
+                if (!mission) {
+                    return;
+                }
+
+                try {
+                    if (task.entry.state !== 'active'
+                        || !isExpired(state, task.entry, mission)) {
+                        return;
+                    }
+                    runMissionSetExpression(mission.onFailure, state, console.warn,
+                        context);
+                    task.entry.state = 'failed';
+                    releaseMissionCargo(state, task.missionId);
+                    await startPendingNcbMissions(this.gameData, state, {
+                        initialPlanetId: state.lastLandedPlanet,
+                        initialSystemId: state.currentSystem,
+                        currentSystemId: state.currentSystem,
+                        ncb: context,
+                    });
+                } catch (error) {
+                    console.warn('Mission expiration could not be applied', error);
+                }
             });
         }));
     }
@@ -853,8 +912,10 @@ export class MissionRuntime {
 export const MissionRuntimeResource =
     new Resource<MissionRuntime>('MissionRuntimeResource');
 
-const MissionExpirationSystem = new System({
-    name: 'MissionExpiration',
+const MissionExpirationSystem = new AsyncSystem({
+    name: 'MissionExpirationSystem',
+    exclusive: true,
+    skipIfApplyingPatches: true,
     args: [
         PlayerShipSelector,
         GetEntity,
@@ -862,16 +923,12 @@ const MissionExpirationSystem = new System({
         MissionRuntimeResource,
         NcbRuntimeResource,
     ] as const,
-    step(_playerShip, playerShip, state, missionRuntime, ncbRuntime) {
+    async step(_playerShip, playerShip, state, missionRuntime, ncbRuntime) {
         if (!playerShip || !state) {
             return;
         }
         const context = ncbRuntime.setContext(playerShip, state);
-        const expiration = missionRuntime.checkDate(state, context);
-        if (!expiration) {
-            return;
-        }
-        void expiration;
+        await missionRuntime.checkDate(state, context);
     },
 });
 
