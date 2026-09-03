@@ -1,3 +1,4 @@
+import * as crypto from 'crypto';
 import * as express from "express";
 import { Express } from "express";
 import fs from 'fs';
@@ -97,6 +98,27 @@ function gzipMiddleware(req: express.Request, res: express.Response,
 // This is a helper class used by `setupRoutes`
 class GameDataServer {
     private readonly losslessWebP = new LosslessWebPCache();
+    private preloadedJsonBuffer?: Buffer;
+    private preloadedGzipBuffer?: Buffer;
+    private preloadedEtag?: string;
+
+    private async getPreloadedBuffers(): Promise<{ json: Buffer; gzip: Buffer; etag: string }> {
+        if (!this.preloadedJsonBuffer || !this.preloadedGzipBuffer || !this.preloadedEtag) {
+            const data = this.gameData.preloadData ? await this.gameData.preloadData : {};
+            const jsonString = JSON.stringify(data);
+            this.preloadedJsonBuffer = Buffer.from(jsonString, 'utf8');
+            this.preloadedGzipBuffer = await new Promise<Buffer>((resolve, reject) => {
+                gzip(this.preloadedJsonBuffer!, (err, res) => err ? reject(err) : resolve(res));
+            });
+            const hash = crypto.createHash('md5').update(this.preloadedJsonBuffer).digest('hex');
+            this.preloadedEtag = `W/"${this.preloadedJsonBuffer.length.toString(16)}-${hash.slice(0, 16)}"`;
+        }
+        return {
+            json: this.preloadedJsonBuffer,
+            gzip: this.preloadedGzipBuffer,
+            etag: this.preloadedEtag,
+        };
+    }
 
     constructor(
         private readonly gameData: GameDataInterface,
@@ -142,9 +164,39 @@ class GameDataServer {
             });
         }
 
-        this.app.use('/preloadData.json', async (_req, res) => {
+        this.app.all('/preloadData.json', async (req, res) => {
             res.setHeader('Cache-Control', REVALIDATE_METADATA_CACHE);
-            res.send(this.gameData.preloadData ? await this.gameData.preloadData : {});
+            try {
+                const { json, gzip, etag } = await this.getPreloadedBuffers();
+                res.setHeader('ETag', etag);
+
+                if (req.headers['if-none-match'] === etag) {
+                    res.status(304).end();
+                    return;
+                }
+
+                if (req.method === 'HEAD') {
+                    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+                    res.setHeader('Content-Length', json.length);
+                    res.status(200).end();
+                    return;
+                }
+
+                const acceptEncoding = String(req.headers['accept-encoding'] || '');
+                if (/\bgzip\b/i.test(acceptEncoding)) {
+                    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+                    res.setHeader('Content-Encoding', 'gzip');
+                    res.setHeader('Vary', 'Accept-Encoding');
+                    res.setHeader('Content-Length', gzip.length);
+                    res.end(gzip);
+                } else {
+                    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+                    res.setHeader('Content-Length', json.length);
+                    res.end(json);
+                }
+            } catch (err) {
+                res.status(500).send('Failed to serve preload data');
+            }
         });
 
         this.app.use(settingsPrefix, (_req, res, next) => {

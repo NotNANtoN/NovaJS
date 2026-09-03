@@ -473,13 +473,23 @@ function inertialControls(state: MovementState, physics: MovementPhysics,
     time: Time, entities: EntityMap) {
     handleTurning(state, physics, time, entities);
 
-    // Acceleration
+    // Acceleration: scalar math avoids intermediate vector allocations
     if (state.accelerating > 0) {
-        state.velocity = state.velocity.addInPlace(
-            state.rotation.getUnitVector()
-                .normalize(state.accelerating * physics.acceleration * time.delta_s));
+        const theta = state.rotation.angle;
+        const dV = state.accelerating * physics.acceleration * time.delta_s;
+        const newVx = state.velocity.x + Math.sin(theta) * dV;
+        const newVy = state.velocity.y - Math.cos(theta) * dV;
+        const maxV = physics.maxVelocity;
+        const speedSq = newVx * newVx + newVy * newVy;
+        if (speedSq > maxV * maxV && maxV > 0) {
+            const ratio = maxV / Math.sqrt(speedSq);
+            state.velocity = new Vector(newVx * ratio, newVy * ratio);
+        } else {
+            state.velocity = new Vector(newVx, newVy);
+        }
+    } else {
+        state.velocity = state.velocity.shortenToLengthInPlace(physics.maxVelocity);
     }
-    state.velocity = state.velocity.shortenToLengthInPlace(physics.maxVelocity);
 
     // Velocity
     // TODO: Make it so you don't have to cast
@@ -499,7 +509,11 @@ function inertialessControls(state: MovementState, physics: MovementPhysics,
     state.targetSpeed = Math.min(state.targetSpeed, physics.maxVelocity);
     state.targetSpeed = Math.max(state.targetSpeed, 0);
 
-    const targetVelocity = state.rotation.getUnitVector().scale(state.targetSpeed);
+    const theta = state.rotation.angle;
+    const targetVelocity = new Vector(
+        Math.sin(theta) * state.targetSpeed,
+        -Math.cos(theta) * state.targetSpeed,
+    );
     state.velocity = approachVec(targetVelocity, state.velocity,
         physics.acceleration * time.delta_s * 2);
     updatePosition(state, time);

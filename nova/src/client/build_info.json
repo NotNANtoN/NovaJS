@@ -1,5 +1,5 @@
 {
-  "commit": "46b1fa46",
-  "message": "fix: modernize PixiJS v8 graphics rect and cacheAsTexture in starmap and radial menu",
-  "date": "2026-09-03 15:17 +0200"
+  "commit": "a5aae341",
+  "message": "fix: non-blocking spaceport landing, instant preloadData galaxy world, and direct PIXI asset loads",
+  "date": "2026-09-03 16:01 +0200"
 }

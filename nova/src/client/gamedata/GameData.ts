@@ -1,3 +1,4 @@
+import { getCachedPayload, setCachedPayload } from './idb_cache';
 function joinPath(...parts: string[]): string {
     const isAbsolute = Boolean(parts[0]?.startsWith("/"));
     const joined = parts.map(p => p.replace(/^\/+|\/+$/g, "")).filter(Boolean).join("/");
@@ -108,9 +109,33 @@ export class GameData implements GameDataInterface {
         return this.getMetadataUrl(joinPath("/settings", file));
     }
 
-    private async preload() {
-        const data = await this.fetchMetadata(
-            '/preloadData.json') as PreloadData;
+    private async preload(): Promise<PreloadData> {
+        let data: PreloadData | undefined;
+        try {
+            const cached = await getCachedPayload<PreloadData>('/preloadData.json');
+            if (cached) {
+                try {
+                    const headRes = await fetch('/preloadData.json', { method: 'HEAD' });
+                    const serverEtag = headRes.headers.get('ETag');
+                    if (serverEtag && serverEtag === cached.etag) {
+                        data = cached.data;
+                    }
+                } catch {
+                    // Fallback to fetch
+                }
+            }
+        } catch {
+            // IndexedDB fallback
+        }
+
+        if (!data) {
+            const { data: fetchedData, etag } = await this.fetchMetadataWithEtag('/preloadData.json');
+            data = fetchedData as PreloadData;
+            if (etag) {
+                void setCachedPayload('/preloadData.json', etag, data).catch(() => {});
+            }
+        }
+
         for (const [uncastKey, val] of Object.entries(data)) {
             const key = uncastKey as keyof typeof data;
             const gettable = this.data[key];
@@ -137,15 +162,14 @@ export class GameData implements GameDataInterface {
         );
     }
 
-    private async fetchMetadata(url: string, maxRetries = 4, delayMs = 1200): Promise<unknown> {
-        // Stable JSON URLs previously shipped with one-year immutable caching.
-        // reload bypasses that stale response without invalidating large
-        // browser-cached image and audio assets.
+    private async fetchMetadataWithEtag(url: string, maxRetries = 4, delayMs = 1200): Promise<{ data: unknown; etag: string | null }> {
         for (let attempt = 0; attempt <= maxRetries; attempt++) {
             try {
                 const response = await fetch(url, { cache: 'reload' });
                 if (response.ok) {
-                    return await response.json() as Promise<unknown>;
+                    const etag = response.headers.get('ETag');
+                    const data = await response.json();
+                    return { data, etag };
                 }
                 if (attempt < maxRetries && (response.status === 502 || response.status === 503 || response.status === 504 || response.status === 404)) {
                     await new Promise(resolve => setTimeout(resolve, delayMs * (attempt + 1)));
@@ -162,6 +186,11 @@ export class GameData implements GameDataInterface {
             }
         }
         throw new Error(`Failed to load metadata ${url} after ${maxRetries} attempts`);
+    }
+
+    private async fetchMetadata(url: string, maxRetries = 4, delayMs = 1200): Promise<unknown> {
+        const { data } = await this.fetchMetadataWithEtag(url, maxRetries, delayMs);
+        return data;
     }
 
     private async getMetadataUrl(

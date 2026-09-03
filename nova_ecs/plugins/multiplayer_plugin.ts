@@ -143,7 +143,13 @@ function positionsWithinInterest(
     b: MovementState,
 ): boolean {
     const x = wrappedAxisDistance(a.position.x, b.position.x);
+    if (x > MULTIPLAYER_INTEREST_RADIUS) {
+        return false;
+    }
     const y = wrappedAxisDistance(a.position.y, b.position.y);
+    if (y > MULTIPLAYER_INTEREST_RADIUS) {
+        return false;
+    }
     return x * x + y * y
         <= MULTIPLAYER_INTEREST_RADIUS * MULTIPLAYER_INTEREST_RADIUS;
 }

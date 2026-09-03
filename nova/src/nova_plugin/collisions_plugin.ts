@@ -526,43 +526,33 @@ export const CollisionSystem = new System({
         }
 
         for (const entry of currentEntries) {
-            const maybeCollisions = rbush.search(entry)
-                .filter(found => found !== entry);
+            // Hurtboxes (projectiles, beams, blasts) initiate collisions against hitboxes (ships, asteroids).
+            // Hitboxes do not search the tree, halving broadphase query overhead.
+            if (entry.type !== RBushEntryType.hurtbox) {
+                continue;
+            }
+
+            const maybeCollisions = rbush.search(entry);
 
             for (const other of maybeCollisions) {
-                if (entry.type === other.type) {
-                    continue; // Hurtboxes can only hit hitboxes.
+                if (other.type !== RBushEntryType.hitbox || other.uuid === entry.uuid) {
+                    continue;
                 }
-                // The initiator of a collision must have its hurtbox overlap the other
-                // collier's hitbox. If the inverse is allowed, then a missile's prox radius
-                // overlapping a point defense weapon can be considered a collision initiated
-                // by the point defense weapon, meaning the point defense weapon can hit the
-                // missile by hitting its prox radius (bad).
-                let entryInitiates: boolean;
-                let hitter: CollisionHitter;
-                let vulnerability: CollisionVulnerability;
-                if (entry.type === RBushEntryType.hurtbox) {
-                    entryInitiates = true;
-                    hitter = entry.hitter;
-                    vulnerability = (other as
-                        { vulnerability: CollisionVulnerability }).vulnerability;
-                } else {
-                    entryInitiates = false;
-                    vulnerability = entry.vulnerability;
-                    hitter = (other as { hitter: CollisionHitter }).hitter;
+                const hitter = entry.hitter;
+                const vulnerability = (other as { vulnerability: CollisionVulnerability }).vulnerability;
+
+                if (!aHitsB(hitter, vulnerability)) {
+                    continue;
                 }
-                const canCollide = aHitsB(hitter, vulnerability);
-                if (canCollide &&
-                    !hasAlreadyCollided(entry.uuid, other.uuid) &&
-                    entry.hull.collides(other.hull)) {
+                if (!hasAlreadyCollided(entry.uuid, other.uuid) && entry.hull.collides(other.hull)) {
                     recordCollision(entry.uuid, other.uuid);
                     emit(CollisionEvent, {
                         other: other.uuid,
-                        initiator: entryInitiates,
+                        initiator: true,
                     }, [entry.uuid]);
                     emit(CollisionEvent, {
                         other: entry.uuid,
-                        initiator: !entryInitiates,
+                        initiator: false,
                     }, [other.uuid]);
                 }
             }
