@@ -1,5 +1,5 @@
 {
-  "commit": "2a3618f2",
-  "message": "perf: IndexedDB preload cache, pre-gzipped buffer, asymmetric broadphase, scalar math and AOI",
-  "date": "2026-09-03 16:27 +0200"
+  "commit": "df06ff0f",
+  "message": "fix(combat): lead-angle aim for dogfighting AI, dynamic firing arc, and shield/armor hit fx",
+  "date": "2026-09-03 20:26 +0200"
 }

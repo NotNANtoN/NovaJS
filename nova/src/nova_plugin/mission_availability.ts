@@ -1,3 +1,4 @@
+import { resourceId } from '../common/resource_id';
 import { GovtData } from 'novadatainterface/GovtData';
 import { MissionData, MissionOfferLocation } from 'novadatainterface/MissionData';
 import { getFreeSpace } from './player_state';
@@ -80,6 +81,17 @@ function destinationIsSatisfiable(
     mission: MissionData,
     input: MissionAvailabilityInput,
 ): boolean {
+    // A delivery mission cannot deliver to the very stellar where it is offered
+    if (mission.returnStel > 0 && mission.dropOffMode === 1) {
+        if (sameResourceId(resourceId(mission.returnStel), input.currentPlanet.id)) {
+            return false;
+        }
+    } else if (mission.travelStel > 0 && (mission.returnStel === -1 || mission.dropOffMode === 0)) {
+        if (sameResourceId(resourceId(mission.travelStel), input.currentPlanet.id)) {
+            return false;
+        }
+    }
+
     return destinationSelectorIsSatisfiable(
         mission.travelStel,
         input.destinationPlanets,

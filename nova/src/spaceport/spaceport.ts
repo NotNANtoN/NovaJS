@@ -617,7 +617,8 @@ export class Spaceport extends Menu<Entity> {
 
         // Check for concourse storyline offers (availLoc = 3) asynchronously so spaceport opens immediately
         void getConcourseMissionOffers(this.gameData, input, this.id).then(async ({ offers, destinationOptions }) => {
-            const state = input.components.get(PlayerStateComponent);
+            const rawState = input.components.get(PlayerStateComponent);
+            const state = plainSnapshot(rawState);
             if (state && offers.length > 0) {
                 this.controls.unbind();
                 for (const offer of offers) {
@@ -634,16 +635,20 @@ export class Spaceport extends Menu<Entity> {
                     });
                     if (prompt.accepted) {
                         const ncb = this.ncbRuntime.setContext(input, state);
-                        acceptMission(state, offer.mission, {
+                        const accepted = acceptMission(state, offer.mission, {
                             ...destinationOptions(offer.resolved),
                             ncb,
                         });
-                        await startPendingNcbMissions(this.gameData, state, {
-                            ...destinationOptions(offer.resolved),
-                            ncb,
-                        });
+                        if (accepted) {
+                            await startPendingNcbMissions(this.gameData, state, {
+                                ...destinationOptions(offer.resolved),
+                                ncb,
+                            });
+                        }
+                        input.components.set(PlayerStateComponent, { ...state });
                     } else {
                         refuseMission(state, offer.mission);
+                        input.components.set(PlayerStateComponent, { ...state });
                     }
                 }
                 this.setActiveDialog();
