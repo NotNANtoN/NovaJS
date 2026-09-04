@@ -164,6 +164,7 @@ const PlayerStateFields = t.intersection([
         legalRecords: t.record(t.string, t.number),
         /** Escorts under contract, each drawing its daily pay. */
         escorts: t.array(EscortContractData),
+        dominatedStellars: t.array(t.string),
         diedAt: t.number,
     }),
 ]);
@@ -428,6 +429,7 @@ export function createInitialPlayerState(): PlayerState {
         activeRanks: [],
         exploredSystems: [],
         kills: 0,
+        dominatedStellars: [],
         // A new pilot's Shuttle carries three jumps.
         fuel: 3 * FUEL_PER_JUMP,
         legalRecords: {},
@@ -594,6 +596,7 @@ export function advanceGameDate(state: PlayerState, days = 1): number {
     state.gameDate += days;
     for (let day = 0; day < days; day++) {
         chargeEscortPayroll(state);
+        collectTribute(state);
     }
     return state.gameDate;
 }
@@ -640,7 +643,7 @@ const MONTH_NAMES = [
     'July', 'August', 'September', 'October', 'November', 'December',
 ];
 const DAY_MS = 24 * 60 * 60 * 1000;
-const START_DATE_MS = Date.UTC(
+export const START_DATE_MS = Date.UTC(
     EV_NOVA_START_YEAR, EV_NOVA_START_MONTH - 1, EV_NOVA_START_DAY);
 
 export function formatGameDate(gameDate: number): string {
@@ -666,3 +669,13 @@ export const PlayerStatePlugin: Plugin = {
     },
 };
 
+
+/** Collects daily tribute from dominated planets. */
+export function collectTribute(state: PlayerState, tributePerStellar = 1000): number {
+    if (!state.dominatedStellars || state.dominatedStellars.length === 0) {
+        return 0;
+    }
+    const totalTribute = state.dominatedStellars.length * tributePerStellar;
+    state.credits += totalTribute;
+    return totalTribute;
+}

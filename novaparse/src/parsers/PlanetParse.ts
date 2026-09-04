@@ -109,6 +109,7 @@ export async function PlanetParse(spob: SpobResource, notFoundFunction: (m: stri
         position: [spob.position[0], spob.position[1]],
         flags: spob.flags,
         techLevel: spob.techLevel,
+        tribute: spob.tribute,
         specialTech: [...spob.specialTech],
         canLand: (spob.flags & 0x00000001) !== 0,
         government: spob.government,

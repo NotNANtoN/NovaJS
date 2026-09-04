@@ -71,6 +71,13 @@ export interface ShipData extends SpaceObjectData {
     deathDelay: number;
     displayWeight: number;
     techLevel: number;
+    /**
+     * Percent chance this hull is offered for sale in a shipyard on a given day
+     * (EV Nova Bible, shïp/BuyRandom). Zero means never.
+     */
+    buyRandom: number;
+    flags3?: number;
+    shortName?: string;
     availabilityNCB: string;
     appearOn: string;
     onPurchase: string;
@@ -109,6 +116,9 @@ export function getDefaultShipData(): ShipData {
         deathDelay: 1,
         displayWeight: 1,
         techLevel: 0,
+        buyRandom: 0,
+        flags3: 0,
+        shortName: "",
         availabilityNCB: "",
         appearOn: "",
         onPurchase: "",

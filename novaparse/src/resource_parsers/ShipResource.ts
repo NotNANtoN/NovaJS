@@ -66,6 +66,10 @@ class ShipResource extends BaseResource {
     commName: string;
     longName: string;
     escortType: number;
+    flags3: number;
+    upgradeTo: number;
+    escUpgrdCost: number;
+    escSellValue: number;
 
     constructor(resource: Resource, idSpace: NovaResources) {
         super(resource, idSpace);
@@ -191,8 +195,8 @@ class ShipResource extends BaseResource {
         this.ionization = d.getInt16(876);
         this.keyCarried = d.getInt16(878);
 
-        this.contribute = [d.getUint32(896), d.getUint32(900)];
-        this.require = [d.getUint32(896), d.getUint32(900)];
+        this.contribute = [d.getUint32(896), 0];
+        this.require = [d.getUint32(900), 0];
         this.buyRandom = d.getInt16(904);
         this.hireRandom = d.getInt16(906);
 
@@ -203,7 +207,11 @@ class ShipResource extends BaseResource {
         this.commName = getString(1550, 32);
         this.longName = getString(1582, 132);
 
-        this.escortType = d.getInt16(1829);
+        this.flags3 = d.byteLength >= 1832 ? d.getUint16(1830) : 0;
+        this.upgradeTo = d.byteLength >= 1834 ? d.getInt16(1832) : -1;
+        this.escUpgrdCost = d.byteLength >= 1838 ? d.getInt32(1834) : 0;
+        this.escSellValue = d.byteLength >= 1842 ? d.getInt32(1838) : 0;
+        this.escortType = d.byteLength >= 1844 ? d.getInt16(1842) : -1;
     }
 }
 

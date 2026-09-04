@@ -42,5 +42,8 @@ export function getDefaultNovaIDs(): NovaIDs {
         StringList: [],
         Junk: [],
         Pers: [],
+        Cron: [],
+        Rank: [],
+        Oops: [],
     }
 }

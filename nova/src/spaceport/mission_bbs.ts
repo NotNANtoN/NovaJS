@@ -1257,13 +1257,14 @@ export async function getConcourseMissionOffers(
         });
     }
 
+    const currentSystemId = state.currentSystem;
     const destinationOptions = (resolved: ResolvedMissionDestinations): MissionDestinationOptions => ({
         initialPlanetId: planetId,
         planets: world.planets,
         systems: world.systems,
         governments: world.governments,
-        initialSystemId: state.currentSystem,
-        currentSystemId: state.currentSystem,
+        initialSystemId: currentSystemId,
+        currentSystemId,
         resolved,
     });
 
@@ -1277,14 +1278,15 @@ export async function getShipboardMissionOffers(
     offers: ConcourseMissionOffer[];
     destinationOptions: (resolved: ResolvedMissionDestinations) => MissionDestinationOptions;
 }> {
-    const state = input.components.get(PlayerStateComponent);
+    const rawState = input.components.get(PlayerStateComponent);
     const ship = input.components.get(ShipDataComponent);
-    if (!state) {
+    if (!rawState) {
         return {
             offers: [],
             destinationOptions: (resolved) => ({ initialPlanetId: '', resolved }),
         };
     }
+    const state = plainSnapshot(rawState);
     const [world, missions] = await Promise.all([
         loadMissionWorld(gameData),
         loadMissionCatalog(gameData),
@@ -1341,13 +1343,15 @@ export async function getShipboardMissionOffers(
         });
     }
 
+    const currentSystemId = state.currentSystem;
+    const initialPlanetId = state.lastLandedPlanet || 'nova:128';
     const destinationOptions = (resolved: ResolvedMissionDestinations): MissionDestinationOptions => ({
-        initialPlanetId: state.lastLandedPlanet || 'nova:128',
+        initialPlanetId,
         planets: world.planets,
         systems: world.systems,
         governments: world.governments,
-        initialSystemId: state.currentSystem,
-        currentSystemId: state.currentSystem,
+        initialSystemId: currentSystemId,
+        currentSystemId,
         resolved,
     });
 

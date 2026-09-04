@@ -2,7 +2,9 @@ import { getDefaultPlanetData } from 'novadatainterface/PlanetData';
 import {
     hasRequiredTechnology,
     hasSpaceportService,
+    hashSample,
     isPurchaseAvailable,
+    isPurchaseUnlocked,
     resolveSpaceportPlanetData,
 } from './availability';
 import { createInitialPlayerState } from '../nova_plugin/player_state';
@@ -177,5 +179,88 @@ describe('spaceport availability', () => {
         expect(hasSpaceportService(tauPrime, 'shipyard')).toBe(false);
         expect(hasSpaceportService(tauPrime, 'commodity')).toBe(true);
         expect(hasSpaceportService(tauPrime, 'bar')).toBe(true);
+    });
+    it('never stocks a ship with BuyRandom 0 (retail NPC/variant hulls)', () => {
+        // Fed Carrier/Patrol variant hulls have displayWeight > 0 and empty NCB,
+        // but BuyRandom 0. In EV Nova Bible, BuyRandom 0 means never sold.
+        const npcVariant = {
+            id: 'nova:218',
+            techLevel: 14,
+            availabilityNCB: '',
+            displayWeight: 5,
+            buyRandom: 0,
+        };
+        expect(isPurchaseAvailable(npcVariant, planet)).toBe(false);
+        expect(isPurchaseUnlocked(npcVariant, planet)).toBe(false);
+    });
+
+    it('requires mission bits to unlock advanced ships like Fed Destroyer', () => {
+        const fedDestroyer = {
+            id: 'nova:141',
+            techLevel: 14,
+            availabilityNCB: 'b78 & P30',
+            displayWeight: 175,
+            buyRandom: 80,
+        };
+        const freshPilot = createInitialPlayerState();
+        // Without bit 78, neither unlocked nor available
+        expect(isPurchaseUnlocked(fedDestroyer, planet, freshPilot)).toBe(false);
+        expect(isPurchaseAvailable(fedDestroyer, planet, freshPilot)).toBe(false);
+
+        // With bit 78 granted
+        freshPilot.missionBits[78] = true;
+        expect(isPurchaseUnlocked(fedDestroyer, planet, freshPilot)).toBe(true);
+    });
+
+    it('varies ship stock by day using deterministic BuyRandom rolls', () => {
+        const earthPlanet = {
+            ...planet,
+            id: 'nova:128',
+        };
+        const ship = {
+            id: 'nova:133',
+            techLevel: 5,
+            availabilityNCB: '',
+            displayWeight: 189,
+            buyRandom: 50,
+        };
+        const state = createInitialPlayerState();
+
+        // Sample across multiple days to verify some days have it and some do not
+        const daysWithStock: number[] = [];
+        const daysWithoutStock: number[] = [];
+        for (let day = 0; day < 20; day++) {
+            state.gameDate = day;
+            const sample = hashSample(`nova:128:${day}:nova:133`);
+            const available = isPurchaseAvailable(ship, earthPlanet, state);
+            if (sample < 50) {
+                expect(available).toBe(true);
+                daysWithStock.push(day);
+            } else {
+                expect(available).toBe(false);
+                daysWithoutStock.push(day);
+            }
+        }
+        expect(daysWithStock.length).toBeGreaterThan(0);
+        expect(daysWithoutStock.length).toBeGreaterThan(0);
+    });
+
+    it('always stocks a ship with BuyRandom 100 on every day', () => {
+        const earthPlanet = {
+            ...planet,
+            id: 'nova:128',
+        };
+        const ship = {
+            id: 'nova:167',
+            techLevel: 4,
+            availabilityNCB: '',
+            displayWeight: 197,
+            buyRandom: 100,
+        };
+        const state = createInitialPlayerState();
+        for (let day = 0; day < 10; day++) {
+            state.gameDate = day;
+            expect(isPurchaseAvailable(ship, earthPlanet, state)).toBe(true);
+        }
     });
 });

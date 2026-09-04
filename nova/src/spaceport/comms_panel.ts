@@ -7,6 +7,7 @@ import {
     startPendingNcbMissions,
 } from '../nova_plugin/mission_plugin';
 import { Entity } from 'nova_ecs/entity';
+import { plainSnapshot } from 'nova_ecs/draft_snapshot';
 import { Observable } from 'rxjs';
 import * as PIXI from 'pixi.js';
 import { GameData } from '../client/gamedata/GameData';
@@ -68,6 +69,7 @@ export interface HailTarget {
     isEscort?: boolean;
     isPlanet?: boolean;
     roadsideAssistance?: boolean;
+    disabled?: boolean;
 }
 
 /**
@@ -166,8 +168,9 @@ export class Comms extends Menu<Entity> {
         this.pendingShipboardOffer = undefined;
         this.isOfferingContract = false;
         try {
+            const isHostile = Boolean(this.target?.hostile || this.relation() === 'enemy');
             const { offers, destinationOptions } = await getShipboardMissionOffers(this.gameData, input);
-            if (offers.length > 0 && !this.target?.hostile && !this.target?.isPlanet && !this.target?.isEscort) {
+            if (offers.length > 0 && !isHostile && !this.target?.isPlanet && !this.target?.isEscort) {
                 this.pendingShipboardOffer = offers[0];
                 this.pendingDestinationOptions = destinationOptions;
             }
@@ -198,7 +201,7 @@ export class Comms extends Menu<Entity> {
         if (this.target?.isPlanet) {
             this.message.text = `Communications channel open to ${name}.\n\nTraffic Control: "Approach vector clear. Welcome to ${name}, Captain."`;
             this.buttons.greetings.setText('Greetings');
-            this.buttons.assistance.setText('Information');
+            this.buttons.assistance.setText('Demand Tribute');
             return;
         }
         if (this.target?.isEscort) {
@@ -207,7 +210,8 @@ export class Comms extends Menu<Entity> {
             this.buttons.assistance.setText('Attack Target');
             return;
         }
-        if (this.target?.hostile) {
+        const isHostile = Boolean(this.target?.hostile || this.relation() === 'enemy');
+        if (isHostile) {
             this.message.text = `Channel open to hostile vessel ${name}.\n\nHostile Pilot: "Power down your shields and prepare to be boarded!"`;
             this.buttons.greetings.setText('Demand Yield');
             this.buttons.assistance.setText('Offer Bribe');
@@ -237,7 +241,8 @@ export class Comms extends Menu<Entity> {
             this.orderFormUp();
             return;
         }
-        if (this.target?.hostile) {
+        const isHostile = Boolean(this.target?.hostile || this.relation() === 'enemy');
+        if (isHostile) {
             this.demandSurrender();
             return;
         }
@@ -285,35 +290,67 @@ export class Comms extends Menu<Entity> {
         this.message.text = `${this.message.text}\n\n${name}: "Acknowledged, Flagship. Rejoining ${shapeName} alongside you."`;
     }
 
+    private demandPlanetTribute() {
+        const name = this.target?.name ?? 'Stellar';
+        const targetId = this.hailedUuid ?? 'planet';
+        const state = this.input?.components.get(PlayerStateComponent);
+        if (!state) {
+            return;
+        }
+        state.dominatedStellars = state.dominatedStellars ?? [];
+        if (state.dominatedStellars.includes(targetId)) {
+            this.message.text = `${this.message.text}\n\n${name} Traffic Control: "We are already paying your daily tribute! Please do not bombard our orbital installations."`;
+            return;
+        }
+        state.dominatedStellars.push(targetId);
+        const initialTribute = 5_000;
+        state.credits += initialTribute;
+        this.message.text = `${this.message.text}\n\n${name} Traffic Control: "We cannot withstand your orbital superiority! We submit to your rule. ${initialTribute.toLocaleString()} credits tribute transferred, and daily tribute will follow."`;
+    }
+
     private demandSurrender() {
         const name = this.target?.name ?? 'Vessel';
-        this.message.text = `${this.message.text}\n\n${name}: "You think we fear you? We will never surrender! Prepare to burn!"`;
+        const state = this.input?.components?.get(PlayerStateComponent);
+        if (this.target?.disabled) {
+            const plunder = 5_000;
+            if (state) state.credits += plunder;
+            this.message.text = `${this.message.text}\n\n${name} Captain: "We surrender! Our ship is crippled! We're transferring ${plunder.toLocaleString()} credits from our emergency vault, just spare our lives!"`;
+        } else {
+            this.message.text = `${this.message.text}\n\n${name}: "You think we fear you? We will never surrender! Prepare to burn!"`;
+        }
     }
 
     private requestAssistance() {
         if (this.isOfferingContract && this.pendingShipboardOffer) {
-            const state = this.input?.components.get(PlayerStateComponent);
+            const rawState = this.input?.components.get(PlayerStateComponent);
+            const state = plainSnapshot(rawState);
             if (state) {
                 const offer = this.pendingShipboardOffer;
-                acceptMission(state, offer.mission, {
-                    ...this.pendingDestinationOptions!(offer.resolved),
-                });
-                void startPendingNcbMissions(this.gameData, state, {
-                    ...this.pendingDestinationOptions!(offer.resolved),
-                });
+                const destOptions = this.pendingDestinationOptions
+                    ? this.pendingDestinationOptions(offer.resolved)
+                    : { initialPlanetId: '', resolved: offer.resolved };
+                acceptMission(state, offer.mission, destOptions);
+                void startPendingNcbMissions(this.gameData, state, destOptions);
+                this.input!.components.set(PlayerStateComponent, { ...state });
                 this.message.text = `${this.target?.name ?? 'Vessel'}: "Contract confirmed! We appreciate your assistance, Captain."`;
                 this.buttons.assistance.setText('Request Assistance');
                 this.isOfferingContract = false;
                 this.pendingShipboardOffer = undefined;
+                this.pendingDestinationOptions = undefined;
                 return;
             }
         }
 
+        if (this.target?.isPlanet) {
+            this.demandPlanetTribute();
+            return;
+        }
         if (this.target?.isEscort) {
             this.orderAttackTarget();
             return;
         }
-        if (this.target?.hostile) {
+        const isHostile = Boolean(this.target?.hostile || this.relation() === 'enemy');
+        if (isHostile) {
             this.offerBribe();
             return;
         }
@@ -477,6 +514,9 @@ export class Comms extends Menu<Entity> {
 
     protected override done() {
         this.stopAssistanceOutcomePolling();
+        this.pendingShipboardOffer = undefined;
+        this.pendingDestinationOptions = undefined;
+        this.isOfferingContract = false;
         super.done();
     }
 

@@ -21,6 +21,7 @@ import { isPurchaseAvailable } from './availability';
 import { PlanetData } from 'novadatainterface/PlanetData';
 import { ShipyardInfoDialog } from './shipyard_info_dialog';
 import { shipyardInfoPictId } from './shipyard_info_content';
+import { executeSetOperations, parseSetExpression } from '../nova_plugin/ncb';
 
 
 export class Shipyard extends Menu<Entity> {
@@ -130,6 +131,29 @@ export class Shipyard extends Menu<Entity> {
                 this.planetData!,
                 this.playerState,
             ));
+            // Flags3 0x4000: When this ship is available for sale, it prevents
+            // all higher-numbered ship types with equal DispWeight from being
+            // made available for sale at the same time.
+            const exclusiveWeights = new Set<number>();
+            for (const ship of ships) {
+                if (ship.flags3 && (ship.flags3 & 0x4000) !== 0) {
+                    exclusiveWeights.add(ship.displayWeight);
+                }
+            }
+            if (exclusiveWeights.size > 0) {
+                const kept: ShipData[] = [];
+                const seenWeights = new Set<number>();
+                for (const ship of ships) {
+                    if (exclusiveWeights.has(ship.displayWeight)) {
+                        if (seenWeights.has(ship.displayWeight)) {
+                            continue;
+                        }
+                        seenWeights.add(ship.displayWeight);
+                    }
+                    kept.push(ship);
+                }
+                ships = kept;
+            }
         }
         ships.sort((a, b) => b.displayWeight - a.displayWeight);
         for (const ship of ships) {
@@ -248,6 +272,14 @@ export class Shipyard extends Menu<Entity> {
         this.playerState.credits -= netCost;
         this.playerState.shipId = selection.id;
         setCargoCapacity(this.playerState, selection.cargoCapacity);
+        if (selection.onPurchase) {
+            try {
+                const ops = parseSetExpression(selection.onPurchase);
+                executeSetOperations(ops, this.playerState.missionBits);
+            } catch (e) {
+                console.warn('Failed to execute onPurchase expression', e);
+            }
+        }
         this.input = makeShip(selection);
         this.input.components.set(PlayerShipSelector, undefined);
         this.input.components.set(MultiplayerData, multiplayerData);

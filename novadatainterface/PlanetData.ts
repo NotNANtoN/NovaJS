@@ -24,6 +24,8 @@ export interface PlanetData extends SpaceObjectData {
     hasShipyard?: boolean;
     hasBar?: boolean;
     /** Generic commodities available at this stellar and their price levels. */
+    /** Tribute paid per day when dominated (EV Nova Bible, spöb/Tribute). */
+    tribute?: number;
     tradeCommodities: TradeCommodity[];
 }
 

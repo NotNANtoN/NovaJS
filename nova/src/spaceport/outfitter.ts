@@ -12,6 +12,7 @@ import { ShipData } from "novadatainterface/ShipData";
 import { ItemGrid, ItemTile } from "./item_grid";
 import { Menu } from "./menu";
 import { isPurchaseAvailable } from "./availability";
+import { executeSetOperations, parseSetExpression } from "../nova_plugin/ncb";
 
 
 const descWidth = 190;
@@ -154,12 +155,15 @@ export class Outfitter extends Menu<OutfitsState> {
         let outfits = await Promise.all(ids.map(id =>
             this.gameData.data.Outfit.get(id, 100)));
         if (this.planetData) {
-            outfits = outfits.filter(outfit => isPurchaseAvailable(
-                outfit,
-                this.planetData!,
-                this.playerState,
-                this.outfits,
-            ));
+            outfits = outfits.filter(outfit =>
+                (this.outfits.get(outfit.id) > 0)
+                || isPurchaseAvailable(
+                    outfit,
+                    this.planetData!,
+                    this.playerState,
+                    this.outfits,
+                )
+            );
         }
         for (const outfit of outfits) {
             this.outfitDataMap.set(outfit.id, outfit);
@@ -199,10 +203,49 @@ export class Outfitter extends Menu<OutfitsState> {
         };
     }
 
+    private getInstalledGunCount(): number {
+        let count = 0;
+        for (const [id, qty] of this.outfits) {
+            if (qty <= 0) continue;
+            const data = this.outfitDataMap.get(id);
+            if (data?.flags && (data.flags & 0x0001) !== 0) {
+                count += qty;
+            }
+        }
+        return count;
+    }
+
+    private getInstalledTurretCount(): number {
+        let count = 0;
+        for (const [id, qty] of this.outfits) {
+            if (qty <= 0) continue;
+            const data = this.outfitDataMap.get(id);
+            if (data?.flags && (data.flags & 0x0002) !== 0) {
+                count += qty;
+            }
+        }
+        return count;
+    }
+
     private buyOutfit() {
         const outfit = this.itemGrid?.selection;
         if (!outfit) {
             return;
+        }
+        const currentCount = this.outfits.get(outfit.id);
+        if (outfit.max > 0 && currentCount >= outfit.max) {
+            console.warn(`Already at maximum (${outfit.max}) for outfit ${outfit.id}.`);
+            return;
+        }
+        if (this.shipData && outfit.flags) {
+            if ((outfit.flags & 0x0001) !== 0 && this.getInstalledGunCount() >= this.shipData.maxGuns) {
+                console.warn(`No fixed gun mounts available (max: ${this.shipData.maxGuns}).`);
+                return;
+            }
+            if ((outfit.flags & 0x0002) !== 0 && this.getInstalledTurretCount() >= this.shipData.maxTurrets) {
+                console.warn(`No turret mounts available (max: ${this.shipData.maxTurrets}).`);
+                return;
+            }
         }
         const mass = outfit.physics.freeMass ?? 0;
         if (mass > 0 && mass > this.getAvailableMass()) {
@@ -228,7 +271,19 @@ export class Outfitter extends Menu<OutfitsState> {
             return;
         }
         this.playerState.credits -= price;
-        this.outfits.set(outfit.id, this.outfits.get(outfit.id) + 1);
+        // EV Nova Bible: flag 0x0010 removes any items of this type after purchase
+        // (used for permits/licenses that grant bits or trigger events).
+        if (!outfit.flags || (outfit.flags & 0x0010) === 0) {
+            this.outfits.set(outfit.id, currentCount + 1);
+        }
+        if (outfit.onPurchase) {
+            try {
+                const ops = parseSetExpression(outfit.onPurchase);
+                executeSetOperations(ops, this.playerState.missionBits);
+            } catch (e) {
+                console.warn('Failed to execute onPurchase expression', e);
+            }
+        }
 
         this.itemGrid?.setCounts(this.outfits);
         this.updateCreditsText();
@@ -238,6 +293,11 @@ export class Outfitter extends Menu<OutfitsState> {
     private sellOutfit() {
         const outfit = this.itemGrid?.selection;
         if (!outfit) {
+            return;
+        }
+        // EV Nova Bible: flag 0x0008 means this item can't be sold.
+        if (outfit.flags && (outfit.flags & 0x0008) !== 0) {
+            console.warn(`Outfit ${outfit.id} cannot be sold.`);
             return;
         }
         const id = outfit.id;

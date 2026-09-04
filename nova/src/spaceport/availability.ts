@@ -6,7 +6,21 @@ import { ncbTestContext } from "../nova_plugin/ncb_runtime";
 import type { PlayerState } from "../nova_plugin/player_state";
 
 type PurchaseData = Pick<ShipData | OutfitData, "techLevel" | "availabilityNCB">
-    & { readonly displayWeight?: number };
+    & {
+        readonly id?: string;
+        readonly displayWeight?: number;
+        readonly buyRandom?: number;
+        readonly flags3?: number;
+    };
+
+export function hashSample(value: string): number {
+    let hash = 2166136261;
+    for (let index = 0; index < value.length; index++) {
+        hash ^= value.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0) % 100;
+}
 
 export interface AuthoritativePlanetMetadata {
     id: string;
@@ -89,7 +103,8 @@ export function isPurchaseAvailable(
     item: PurchaseData,
     planet: PlanetData,
     playerStateOrMissionBits:
-        | Pick<PlayerState, 'missionBits' | 'gender' | 'exploredSystems'>
+        | (Pick<PlayerState, 'missionBits' | 'gender' | 'exploredSystems'> &
+            Partial<Pick<PlayerState, 'gameDate' | 'registered' | 'daysSinceRegistration'>>)
         | ReadonlySet<number>
         | readonly boolean[] = new Set(),
     outfits?: ReadonlyMap<string, unknown>,
@@ -97,6 +112,67 @@ export function isPurchaseAvailable(
     // Retail orders a shipyard by display weight and never stocks an entry
     // whose weight is zero. Those entries are the NPC-only variant hulls.
     if (item.displayWeight !== undefined && item.displayWeight <= 0) {
+        return false;
+    }
+    // EV Nova Bible, shïp/BuyRandom: "The percent chance that a ship of this
+    // type will be available for purchase on a given day. A BuyRandom of 0
+    // means this ship will never be made available for purchase."
+    if (item.buyRandom !== undefined && item.buyRandom <= 0) {
+        return false;
+    }
+    if (!hasRequiredTechnology(item.techLevel, planet)) {
+        return false;
+    }
+    // Daily random stock roll: EV Nova Bible specifies BuyRandom is the
+    // percent chance (1-100) that this hull is available on a given day.
+    if (item.buyRandom !== undefined && item.buyRandom < 100) {
+        const gameDate = (playerStateOrMissionBits && typeof playerStateOrMissionBits === 'object' && 'gameDate' in playerStateOrMissionBits)
+            ? playerStateOrMissionBits.gameDate
+            : undefined;
+        if (gameDate !== undefined) {
+            const planetId = planet.id ?? '';
+            const itemId = item.id ?? '';
+            const sample = hashSample(planetId + ":" + Math.floor(gameDate) + ":" + itemId);
+            if (sample >= item.buyRandom) {
+                return false;
+            }
+        }
+    }
+    if (!item.availabilityNCB) {
+        return true;
+    }
+    try {
+        const context = Array.isArray(playerStateOrMissionBits)
+            || playerStateOrMissionBits instanceof Set
+            ? { missionBits: playerStateOrMissionBits }
+            : 'missionBits' in playerStateOrMissionBits
+                ? ncbTestContext(playerStateOrMissionBits, outfits)
+                : { missionBits: playerStateOrMissionBits };
+        return evaluateTestExpression(item.availabilityNCB, context);
+    } catch (error) {
+        console.warn("Ignoring item with invalid Availability expression", error);
+        return false;
+    }
+}
+
+/**
+ * Check whether an item or ship is permanently unlocked by tech and NCB,
+ * ignoring daily random stock rolls.
+ */
+export function isPurchaseUnlocked(
+    item: PurchaseData,
+    planet: PlanetData,
+    playerStateOrMissionBits:
+        | (Pick<PlayerState, 'missionBits' | 'gender' | 'exploredSystems'> &
+            Partial<Pick<PlayerState, 'gameDate' | 'registered' | 'daysSinceRegistration'>>)
+        | ReadonlySet<number>
+        | readonly boolean[] = new Set(),
+    outfits?: ReadonlyMap<string, unknown>,
+): boolean {
+    if (item.displayWeight !== undefined && item.displayWeight <= 0) {
+        return false;
+    }
+    if (item.buyRandom !== undefined && item.buyRandom <= 0) {
         return false;
     }
     if (!hasRequiredTechnology(item.techLevel, planet)) {

@@ -112,6 +112,14 @@ describe("ShipResource", function() {
         expect(s1.hireRandom).toEqual(5);
     });
 
+    it("should parse flags3", function() {
+        expect(s1.flags3).toEqual(865);
+    });
+
+    it("should parse escortType", function() {
+        expect(s1.escortType).toEqual(3);
+    });
+
     it("should parse cargoSpace", function() {
         expect(s1.cargoSpace).toEqual(14);
     });

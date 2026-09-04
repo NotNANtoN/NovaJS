@@ -1,3 +1,12 @@
+import { RankData } from "novadatainterface/RankData";
+import { RankParse } from "./src/parsers/RankParse";
+import { RankResource } from "./src/resource_parsers/RankResource";
+import { OopsData } from "novadatainterface/OopsData";
+import { OopsParse } from "./src/parsers/OopsParse";
+import { OopsResource } from "./src/resource_parsers/OopsResource";
+import { CronData } from "novadatainterface/CronData";
+import { CronParse } from "./src/parsers/CronParse";
+import { CronResource } from "./src/resource_parsers/CronResource";
 import * as path from "path";
 import { ExplosionData } from "novadatainterface/ExplosionData";
 import { DudeData } from "novadatainterface/DudeData";
@@ -179,6 +188,9 @@ export class NovaParse implements GameDataInterface {
             StringList: this.buildIDsForResource(idSpace.STRH),
             Junk: this.buildIDsForResource(idSpace.jünk),
             Pers: this.buildIDsForResource(idSpace.përs),
+            Cron: this.buildIDsForResource(idSpace.crön),
+            Rank: this.buildIDsForResource(idSpace.ränk),
+            Oops: this.buildIDsForResource(idSpace.öops),
             SoundFile: this.buildIDsForResource(idSpace["snd "]),
         }
     }

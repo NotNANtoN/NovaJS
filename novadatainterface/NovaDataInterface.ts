@@ -1,3 +1,6 @@
+import { RankData } from "./RankData";
+import { OopsData } from "./OopsData";
+import { CronData } from "./CronData";
 import { AsteroidData } from "./AsteroidData";
 import { NebulaData } from "./NebulaData";
 import { StringListData } from "./StringListData";
@@ -47,6 +50,9 @@ enum NovaDataType {
     StringList = "StringList",
     Junk = "Junk",
     Pers = "Pers",
+    Cron = "Cron",
+    Rank = "Rank",
+    Oops = "Oops",
     SoundFile = "SoundFile",
 };
 
@@ -81,6 +87,9 @@ type NovaDataInterface = {
     Junk?: Gettable<JunkData>,
     /** Optional for legacy generated-data providers. */
     Pers?: Gettable<PersData>,
+    Cron?: Gettable<CronData>,
+    Rank?: Gettable<RankData>,
+    Oops?: Gettable<OopsData>,
     SoundFile: Gettable<SoundFile>,
 }
 

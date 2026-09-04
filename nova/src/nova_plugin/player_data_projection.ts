@@ -53,6 +53,8 @@ function projectPlayerState(raw: unknown): PlayerState {
         ...(state.legalRecords === undefined
             ? {} : { legalRecords: state.legalRecords }),
         ...(state.escorts === undefined ? {} : { escorts: state.escorts }),
+        ...(state.dominatedStellars === undefined
+            ? {} : { dominatedStellars: state.dominatedStellars }),
         ...(state.diedAt === undefined ? {} : { diedAt: state.diedAt }),
     };
     const projected = PlayerStateCodec.decode(persisted);

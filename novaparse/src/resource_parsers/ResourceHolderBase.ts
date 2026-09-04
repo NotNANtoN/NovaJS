@@ -1,3 +1,6 @@
+import { RankResource } from "./RankResource";
+import { OopsResource } from "./OopsResource";
+import { CronResource } from "./CronResource";
 import { BaseResource } from "./NovaResourceBase";
 import { BoomResource } from "./BoomResource";
 import { DudeResource } from "./DudeResource";
@@ -76,7 +79,7 @@ type NovaResources = {
     chär: ResList<BaseResource>;
     cicn: ResList<BaseResource>;
     cölr: ResList<BaseResource>;
-    crön: ResList<BaseResource>;
+    crön: ResList<CronResource>;
     dësc: ResList<DescResource>;
     DITL: ResList<BaseResource>;
     DLOG: ResList<BaseResource>;
@@ -87,11 +90,11 @@ type NovaResources = {
     jünk: ResList<JunkResource>;
     mïsn: ResList<MisnResource>;
     nëbu: ResList<NebuResource>;
-    öops: ResList<BaseResource>;
+    öops: ResList<OopsResource>;
     oütf: ResList<OutfResource>;
     përs: ResList<PersResource>;
     PICT: ResList<PictResource>;
-    ränk: ResList<BaseResource>;
+    ränk: ResList<RankResource>;
     rlë8: ResList<BaseResource>;
     rlëD: ResList<RledResource>;
     röid: ResList<RoidResource>;

@@ -1,5 +1,5 @@
 {
-  "commit": "df06ff0f",
-  "message": "fix(combat): lead-angle aim for dogfighting AI, dynamic firing arc, and shield/armor hit fx",
-  "date": "2026-09-03 20:26 +0200"
+  "commit": "f20e47c5",
+  "message": "fix(spaceport): mission offer 8505 frame, scroll mask, state sync, and origin filter",
+  "date": "2026-09-04 14:31 +0200"
 }

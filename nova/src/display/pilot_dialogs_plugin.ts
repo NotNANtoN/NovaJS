@@ -11,6 +11,7 @@ import {
 } from '../nova_plugin/controls_plugin';
 import { GameDataResource } from '../nova_plugin/game_data_resource';
 import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin';
+import { DisabledComponent } from '../nova_plugin/death_plugin';
 import { SystemIdResource } from '../nova_plugin/system_id_resource';
 import { MissionInfo } from '../spaceport/mission_bbs';
 import { ShipInfo } from '../spaceport/ship_info';
@@ -145,15 +146,19 @@ export const CommsSystem = new AsyncSystem({
         const playerState = entity.components.get(PlayerStateComponent);
         const fleetMember = hailed.components.get(FleetMemberComponent);
         const isEscort = fleetMember?.role === 'escort';
-        comms.setTarget(describeHail({
-            name: government
-                ? `${getGovernmentCommName(government)} ${shipData.name}`
-                : shipData.name,
-            government,
-            targetingPlayer:
-                hailed.components.get(TargetComponent)?.target === uuid,
-            isEscort,
-        }, playerState?.legalRecords));
+        const isTargetDisabled = Boolean(hailed.components.get(DisabledComponent));
+        comms.setTarget({
+            ...describeHail({
+                name: government
+                    ? `${getGovernmentCommName(government)} ${shipData.name}`
+                    : shipData.name,
+                government,
+                targetingPlayer:
+                    hailed.components.get(TargetComponent)?.target === uuid,
+                isEscort,
+            }, playerState?.legalRecords),
+            disabled: isTargetDisabled,
+        });
         comms.container.position.set(screenSize.x / 2, screenSize.y / 2);
         await comms.show(entity);
     },

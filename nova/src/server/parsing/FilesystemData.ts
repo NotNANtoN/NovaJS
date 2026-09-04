@@ -118,6 +118,9 @@ class FilesystemData implements GameDataInterface {
             StatusBar: await this.buildIDsForPath(Paths.StatusBar),
             Explosion: await this.buildIDsForPath(Paths.Explosion),
             SoundFile: await this.buildIDsForPath(Paths.SoundFile),
+            Cron: [],
+            Rank: [],
+            Oops: [],
         }
     }
 

@@ -1,3 +1,6 @@
+import { getDefaultRankData } from "./RankData";
+import { getDefaultOopsData } from "./OopsData";
+import { getDefaultCronData } from "./CronData";
 import { getDefaultCicnData } from "./CicnData";
 import { getDefaultCicnImageData } from "./CicnImage";
 import { getDefaultDudeData } from "./DudeData";
@@ -48,4 +51,7 @@ export const Defaults = {
     get StringList() { return getDefaultStringListData() },
     get Junk() { return getDefaultJunkData() },
     get Pers() { return getDefaultPersData() },
+    get Cron() { return getDefaultCronData() },
+    get Rank() { return getDefaultRankData() },
+    get Oops() { return getDefaultOopsData() },
 }
