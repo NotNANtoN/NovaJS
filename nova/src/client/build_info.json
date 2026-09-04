@@ -1,5 +1,5 @@
 {
-  "commit": "f20e47c5",
-  "message": "fix(spaceport): mission offer 8505 frame, scroll mask, state sync, and origin filter",
-  "date": "2026-09-04 14:31 +0200"
+  "commit": "0790cda",
+  "message": "feat: cron events, planet tribute, comms hostile check, proxy detach, and retail shop gating",
+  "date": "2026-09-04 16:25 +0200"
 }
