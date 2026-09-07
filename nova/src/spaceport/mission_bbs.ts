@@ -1,3 +1,6 @@
+import { JumpRouteComponent } from '../nova_plugin/jump_plugin';
+import { shortestRoute } from './route_planning';
+import { shipInfoCargo } from './ship_info_content';
 import { MissionData, MissionOfferLocation } from 'novadatainterface/MissionData';
 import { PlanetData } from 'novadatainterface/PlanetData';
 import { SystemData } from 'novadatainterface/SystemData';
@@ -33,6 +36,7 @@ import {
 } from '../nova_plugin/mission_availability';
 import {
     ActiveMission,
+    cargoTons,
     formatGameDate,
     getFreeSpace,
     PlayerState,
@@ -335,6 +339,7 @@ export class MissionInfo extends Menu<Entity> {
     private selectionIndex = -1;
     private firstVisible = 0;
     private readonly ncbRuntime: NcbRuntime;
+    private cargoNames: readonly string[] = [];
 
     constructor(
         gameData: GameData,
@@ -374,6 +379,17 @@ export class MissionInfo extends Menu<Entity> {
         });
     }
 
+    private async loadCargoNames() {
+        try {
+            const list = await this.gameData.data.StringList?.get('nova:4000');
+            if (list) {
+                this.cargoNames = list.strings;
+            }
+        } catch {
+            this.cargoNames = [];
+        }
+    }
+
     override async show(input: Entity): Promise<Entity> {
         await this.buildPromise;
         this.setInput(input);
@@ -392,6 +408,9 @@ export class MissionInfo extends Menu<Entity> {
             this.missionWorld = await loadMissionWorld(this.gameData);
         } catch {
             this.missionWorld = undefined;
+        }
+        if (this.cargoNames.length === 0) {
+            await this.loadCargoNames();
         }
         if (state) {
             const missions = await Promise.all(state.activeMissions
@@ -433,14 +452,36 @@ export class MissionInfo extends Menu<Entity> {
     }
 
     private render() {
+        const world = this.missionWorld;
+        const state = plainSnapshot(this.input.components.get(PlayerStateComponent));
+        const jumpRoute = this.input.components.get(JumpRouteComponent)?.route;
+
         if (this.entries.length === 0 || this.selectionIndex < 0) {
             this.list.text = 'No active missions.';
-            this.detail.text = '';
             this.abortButton.state = 'grey';
+            const totalCapacity = state?.cargoCapacity ?? 0;
+            const usedTons = state ? cargoTons(state) : 0;
+            const freeTons = Math.max(0, totalCapacity - usedTons);
+            const holdsSummary = state ? shipInfoCargo(state, this.cargoNames) : 'Hold empty';
+            const currentSystem = state?.currentSystem
+                ? (world?.systemNames.get(state.currentSystem) ?? state.currentSystem)
+                : 'Unknown';
+            const routeText = jumpRoute && jumpRoute.length > 0
+                ? `${jumpRoute.length} jump${jumpRoute.length === 1 ? '' : 's'} plotted`
+                : 'No hyperjump route';
+
+            this.detail.text = [
+                'CARGO MANIFEST',
+                `Hold: ${usedTons} of ${totalCapacity} tons (${freeTons}t free)`,
+                `Holds: ${holdsSummary}`,
+                '',
+                `Current System: ${currentSystem}`,
+                `Navigation: ${routeText}`,
+            ].join('\n');
+            this.status.text = 'No active contracts in pilot log.';
             return;
         }
-        const world = this.missionWorld;
-        const state = this.input.components.get(PlayerStateComponent);
+
         const rows = this.entries.map(({ entry, mission }, index) => {
             const destinationId = entry.travelDestination
                 ?? entry.destination;
@@ -484,21 +525,72 @@ export class MissionInfo extends Menu<Entity> {
             systems: [], planets: [], governments: [],
             planetNames: new Map(), systemNames: new Map(),
         };
-        const destination = planetName(
-            selected.entry.travelDestination ?? selected.entry.destination,
-            worldForMission);
-        const returnDestination = planetName(
-            selected.entry.returnDestination ?? selected.entry.destination,
-            worldForMission);
-        const destinationSystem = systemNameForPlanet(
-            selected.entry.travelDestination ?? selected.entry.destination,
-            worldForMission);
+        const destinationStel = selected.entry.travelDestination ?? selected.entry.destination;
+        const returnStel = selected.entry.returnDestination ?? selected.entry.destination;
+        const destination = planetName(destinationStel, worldForMission);
+        const returnDestination = planetName(returnStel, worldForMission);
+        const destinationSystem = systemNameForPlanet(destinationStel, worldForMission);
         const deadline = selected.entry.acceptedDate !== undefined
             && selected.mission.timeLimit > 0
             ? formatGameDate(
                 selected.entry.acceptedDate + selected.mission.timeLimit)
             : undefined;
-        this.detail.text = formatVisibleMissionText(
+
+        // Destination hops calculation
+        const destSystem = destinationStel ? worldForMission.systems.find(sys =>
+            sys.planets.some(p => sameId(p, destinationStel))) : undefined;
+        const currentSystemId = state?.currentSystem;
+        let hopsText = '';
+        if (destSystem && currentSystemId) {
+            if (sameId(destSystem.id, currentSystemId)) {
+                hopsText = 'In this system';
+            } else {
+                const route = shortestRoute(
+                    worldForMission.systems,
+                    currentSystemId,
+                    destSystem.id,
+                    state?.exploredSystems,
+                );
+                if (route && route.length > 0) {
+                    const hopsCount = route.length;
+                    const hopsList = route.slice(0, 3).map((id: string) => worldForMission.systemNames.get(id) ?? id).join(' → ');
+                    hopsText = `${hopsCount} jump${hopsCount === 1 ? '' : 's'} (${hopsList}${hopsCount > 3 ? '…' : ''})`;
+                } else {
+                    hopsText = 'Route uncharted';
+                }
+            }
+        }
+
+        const plottedHops = jumpRoute && jumpRoute.length > 0
+            ? `${jumpRoute.length} jump${jumpRoute.length === 1 ? '' : 's'} plotted`
+            : undefined;
+
+        // Mission objective summary
+        let objective = '';
+        if (selected.entry.cargo?.quantity || (selected.mission.cargoQty > 0 && selected.mission.cargo)) {
+            const qty = selected.entry.cargo?.quantity ?? selected.mission.cargoQty;
+            const cargoName = selected.mission.cargo?.replace(/^\*/, '') ?? 'cargo';
+            objective = `Deliver ${qty}t ${cargoName} to ${destination}`;
+        } else if (selected.mission.flags & 0x0002) {
+            objective = `Transport passenger(s) to ${destination}`;
+        } else if (selected.mission.shipGoal === 1) {
+            objective = `Destroy target vessel in ${destinationSystem ?? destination}`;
+        } else if (selected.mission.shipGoal === 2) {
+            objective = `Disable target vessel in ${destinationSystem ?? destination}`;
+        } else if (selected.mission.shipGoal === 3) {
+            objective = `Escort convoy to ${destination}`;
+        } else if (selected.mission.shipGoal === 4) {
+            objective = `Observe target vessel in ${destinationSystem ?? destination}`;
+        } else {
+            objective = `Land at ${destination}`;
+        }
+
+        const totalCapacity = state?.cargoCapacity ?? 0;
+        const usedTons = state ? cargoTons(state) : 0;
+        const freeTons = Math.max(0, totalCapacity - usedTons);
+        const holdManifest = state ? shipInfoCargo(state, this.cargoNames) : '';
+
+        const brief = formatVisibleMissionText(
             missionInfoDisplayText(selected.mission),
             {
                 destination,
@@ -517,16 +609,30 @@ export class MissionInfo extends Menu<Entity> {
                 activeRanks: state?.activeRanks,
             },
         );
-        this.detail.text += `\n\nDestination: ${destination}`
-            + (destinationSystem ? ` (${destinationSystem})` : '')
-            + (returnDestination && returnDestination !== destination
-                ? `\nReturn: ${returnDestination}` : '')
-            + (deadline ? `\nDeadline: ${deadline}` : '\nNo deadline');
-        this.status.text = selected.entry.state === 'failed'
-            ? 'This mission has failed. Land anywhere to dismiss the report.'
+
+        const detailLines = [
+            brief,
+            `Objective: ${objective}`,
+            `Destination: ${destination}${destinationSystem ? ` (${destinationSystem})` : ''}`,
+            hopsText ? `Hops: ${hopsText}` : undefined,
+            plottedHops ? `Plotted: ${plottedHops}` : undefined,
+            returnDestination && returnDestination !== destination
+                ? `Return: ${returnDestination}` : undefined,
+            `Hold: ${usedTons}/${totalCapacity}t (${freeTons}t free) — ${holdManifest}`,
+        ].filter((line): line is string => line !== undefined);
+
+        this.detail.text = detailLines.join('\n');
+
+        const payText = selected.mission.payVal > 0
+            ? `${selected.mission.payVal.toLocaleString()} cr` : 'None';
+        const deadlineText = deadline ? `Due: ${deadline}` : 'No deadline';
+        const abortText = selected.entry.state === 'failed'
+            ? 'Mission failed. Land anywhere to dismiss.'
             : selected.mission.canAbort
-                ? 'Select Abort to cancel this mission.'
-                : 'This mission cannot be aborted.';
+                ? 'Select Abort to cancel.'
+                : 'Non-abortable.';
+
+        this.status.text = `${deadlineText}  |  Pay: ${payText}  |  ${abortText}`;
     }
 
     private abortSelected() {

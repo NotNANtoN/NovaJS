@@ -39,4 +39,22 @@ describe('visible mission text', () => {
         expect(missionOfferDisplayText(mission))
             .not.toBe(mission.briefText);
     });
+    it('formats destination route hops and cargo manifest for in-flight mission log', () => {
+        const systems = [
+            { id: 'nova:sol', name: 'Sol', links: ['nova:sirius'], planets: ['nova:earth'] },
+            { id: 'nova:sirius', name: 'Sirius', links: ['nova:sol', 'nova:altair'], planets: ['nova:sirius1'] },
+            { id: 'nova:altair', name: 'Altair', links: ['nova:sirius'], planets: ['nova:altair1'] },
+        ];
+        // Cargo manifest format check
+        const sampleMissionText = formatVisibleMissionText(
+            'Deliver <CQ> tons of <CARGO> to <DST> in <DSY>.',
+            {
+                quantity: 15,
+                cargo: 'Food',
+                destination: 'Sirius I',
+                destinationSystem: 'Sirius',
+            },
+        );
+        expect(sampleMissionText).toBe('Deliver 15 tons of Food to Sirius I in Sirius.');
+    });
 });

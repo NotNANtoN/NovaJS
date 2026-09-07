@@ -63,4 +63,26 @@ describe('SystemParse fleet entries', () => {
             ],
         }]);
     });
+    it('parses system interference and asteroid density', async () => {
+        const idSpace = getEmptyNovaResources();
+        const syst = Object.create(SystResource.prototype) as SystResource;
+        syst.id = 201;
+        syst.name = 'Nebula system';
+        syst.globalID = 'nova:201';
+        syst.prefix = 'nova';
+        syst.idSpace = idSpace;
+        syst.position = [10, 20];
+        syst.links = new Set();
+        syst.spobs = [];
+        syst.dudeTypes = [0, 0, 0, 0, 0, 0, 0, 0];
+        syst.dudeProbabilities = [0, 0, 0, 0, 0, 0, 0, 0];
+        syst.avgShips = 2;
+        syst.government = -1;
+        syst.asteroids = 8;
+        syst.interference = 45;
+
+        const parsed = await SystemParse(syst, () => {});
+        expect(parsed.asteroidDensity).toBe(8);
+        expect(parsed.interference).toBe(45);
+    });
 });

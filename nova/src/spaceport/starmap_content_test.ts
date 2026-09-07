@@ -195,4 +195,9 @@ describe('starmap information content', () => {
             ['Viking', 'Spacedock II', 'A Very Long Stellar Name'], 22,
         )).toBe('Viking, Spacedock II, …');
     });
+    it('formats sensor interference hazards', () => {
+        expect(navigationHazard(0, 30)).toBe('Sensor interference');
+        expect(navigationHazard(0, 60)).toBe('Severe sensor interference');
+        expect(navigationHazard(8, 40)).toBe('Dense asteroid field, Sensor interference');
+    });
 });

@@ -53,14 +53,22 @@ export interface StarmapPanelData {
  */
 export function navigationHazard(
     asteroidDensity: number,
+    interference = 0,
 ): string | undefined {
+    const hazards: string[] = [];
     if (asteroidDensity >= 7) {
-        return 'Dense asteroid field';
+        hazards.push('Dense asteroid field');
+    } else if (asteroidDensity > 0) {
+        hazards.push('Asteroid field');
     }
-    if (asteroidDensity > 0) {
-        return 'Asteroid field';
+
+    if (interference >= 50) {
+        hazards.push('Severe sensor interference');
+    } else if (interference > 0) {
+        hazards.push('Sensor interference');
     }
-    return undefined;
+
+    return hazards.length > 0 ? hazards.join(', ') : undefined;
 }
 
 function landablePlanets(
@@ -175,7 +183,7 @@ export function starmapPanelData(
         goods: starmapGoods(planets),
         services: starmapServices(planets),
         ports: starmapPorts(planets),
-        navigationHazards: navigationHazard(input.system.asteroidDensity),
+        navigationHazards: navigationHazard(input.system.asteroidDensity, input.system.interference ?? 0),
         date,
         transmissions: input.transmissions ? [...input.transmissions] : undefined,
     };

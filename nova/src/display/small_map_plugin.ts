@@ -15,6 +15,8 @@ import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin";
 import { PlayerStateComponent } from "../nova_plugin/player_state";
 import { ShipDataComponent } from "../nova_plugin/ship_plugin";
 import { TargetComponent } from "../nova_plugin/target_component";
+import { SystemIdResource } from "../nova_plugin/system_id_resource";
+import { GameDataResource } from "../nova_plugin/game_data_resource";
 import { createGraphicHandle, ManagedGraphic } from "./managed_graphic";
 import { ScreenSize } from "./screen_size_plugin";
 import { Stage } from "./stage_resource";
@@ -139,8 +141,20 @@ export class SmallMap {
         jumpRoute: string[] | undefined,
         ships: Array<{ uuid: string; pos: { x: number; y: number }; isPlayer: boolean; isEscort: boolean; isHostile: boolean }>,
         planets: Array<{ uuid: string; name: string; pos: { x: number; y: number } }>,
+        interference = 0,
     ): void {
         this.blipsGraphics.clear();
+        if (interference > 0) {
+            this.titleText.text = "SYSTEM TACTICAL GRID (H) [STATIC " + interference + "%]";
+            const staticCount = Math.floor((interference / 100) * 20);
+            for (let i = 0; i < staticCount; i++) {
+                const sx = Math.random() * MAP_SIZE;
+                const sy = 30 + Math.random() * (MAP_SIZE - 30);
+                this.blipsGraphics.rect(sx, sy, 1, 1).fill({ color: 0x608090, alpha: 0.4 });
+            }
+        } else {
+            this.titleText.text = "SYSTEM TACTICAL GRID (H)";
+        }
         const cx = HALF_SIZE;
         const cy = HALF_SIZE + 10;
         let labelIdx = 0;
@@ -264,8 +278,13 @@ export const DrawSmallMapSystem = new System({
         Optional(JumpRouteComponent),
         ShipsQuery,
         PlanetsQuery,
+        Optional(SystemIdResource),
+        Optional(GameDataResource),
     ] as const,
-    step(smallMap, screenSize, playerMovement, _selector, playerUuid, playerTarget, jumpRoute, ships, planets) {
+    step(smallMap, screenSize, playerMovement, _selector, playerUuid, playerTarget, jumpRoute, ships, planets, systemId, gameData) {
+        const interference = (systemId && gameData)
+            ? (gameData.data.System.getCached(systemId)?.interference ?? 0)
+            : 0;
         if (!smallMap.visible) {
             return;
         }

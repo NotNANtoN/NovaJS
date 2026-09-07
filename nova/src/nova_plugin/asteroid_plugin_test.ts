@@ -29,6 +29,10 @@ import {
 import { createEntityBudget, EntityBudgetResource } from './entity_budget';
 import { GameDataResource } from './game_data_resource';
 import { ArmorComponent, ShieldComponent } from './health_plugin';
+import { DeathPlugin } from './death_plugin';
+import { ShipComponent, ShipDataComponent } from './ship_plugin';
+import { HitboxHullComponent, CompositeHull } from './collisions_plugin';
+import * as SAT from 'sat';
 import { Stat } from './stat';
 import { PlatformResource } from './platform_plugin';
 import { createInitialPlayerState, PlayerStateComponent } from './player_state';
@@ -366,5 +370,64 @@ describe('asteroids', () => {
 
         expect(heldTons(world, 'metal')).toBe(SMALL_ASTEROID.yield.quantity);
         expect(ores(world).length).toBe(0);
+    });    it('damages ships and asteroids on ram collision and deflects velocity', async () => {
+        const world = await makeWorld(0);
+        await world.addPlugin(DeathPlugin);
+
+        const asteroid = makeAsteroid(
+            SMALL_ASTEROID.id, new Position(0, 0), new Vector(0, 0));
+        asteroid.components.set(MultiplayerData, { owner: 'server' });
+        asteroid.components.set(HitboxHullComponent, new CompositeHull([
+            new SAT.Polygon(new SAT.Vector(0, 0), [
+                new SAT.Vector(-20, -20),
+                new SAT.Vector(20, -20),
+                new SAT.Vector(20, 20),
+                new SAT.Vector(-20, 20),
+            ])
+        ]));
+        world.entities.set('rock', asteroid);
+        await settle(world);
+
+        const ship = new Entity('ram-ship')
+            .addComponent(ShipComponent, { id: 'nova:128' })
+            .addComponent(ShipDataComponent, {
+                id: 'nova:128',
+                name: 'Rammer',
+                physics: { mass: 120 },
+            } as never)
+            .addComponent(MovementStateComponent, {
+                accelerating: 0,
+                position: new Position(5, 5),
+                rotation: new Angle(0),
+                turnBack: false,
+                turning: 0,
+                velocity: new Vector(120, 0),
+            })
+            .addComponent(HitboxHullComponent, new CompositeHull([
+                new SAT.Polygon(new SAT.Vector(5, 5), [
+                    new SAT.Vector(-15, -15),
+                    new SAT.Vector(15, -15),
+                    new SAT.Vector(15, 15),
+                    new SAT.Vector(-15, 15),
+                ])
+            ]))
+            .addComponent(ShieldComponent, new Stat({ current: 100, max: 100, recharge: 0 }))
+            .addComponent(ArmorComponent, new Stat({ current: 100, max: 100, recharge: 0 }));
+
+        world.entities.set('ship', ship);
+
+        const initialShield = ship.components.get(ShieldComponent)!.current;
+        const initialRockArmor = asteroid.components.get(ArmorComponent)!.current;
+
+        // Step world once to trigger collision
+        world.step();
+
+        const postShield = ship.components.get(ShieldComponent)!.current;
+        const postRockArmor = asteroid.components.get(ArmorComponent)!.current;
+        const postVelocity = ship.components.get(MovementStateComponent)!.velocity;
+
+        expect(postShield).toBeLessThan(initialShield);
+        expect(postRockArmor).toBeLessThan(initialRockArmor);
+        expect(postVelocity.x).not.toBe(120);
     });
 });

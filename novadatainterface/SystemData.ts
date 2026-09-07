@@ -54,6 +54,8 @@ export interface SystemData extends BaseData {
     government?: number,
     /** Density of the system's asteroid belt, 0 through 10. */
     asteroidDensity: number,
+    /** Sensor interference / static, 0 through 100. */
+    interference: number,
 }
 
 export function getDefaultSystemData(): SystemData {
@@ -67,5 +69,6 @@ export function getDefaultSystemData(): SystemData {
         avgShips: 0,
         government: -1,
         asteroidDensity: 0,
+        interference: 0,
     };
 }

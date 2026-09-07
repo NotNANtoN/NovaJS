@@ -16,6 +16,7 @@ import { SingletonComponent } from "nova_ecs/world";
 import * as PIXI from "pixi.js";
 import { GameData } from "../client/gamedata/GameData";
 import { GameDataResource } from "../nova_plugin/game_data_resource";
+import { SystemIdResource } from "../nova_plugin/system_id_resource";
 import { GovernmentRelationResource } from "../nova_plugin/govt_relations";
 import { ArmorComponent, ShieldComponent } from "../nova_plugin/health_plugin";
 import { GovtComponent } from "../nova_plugin/npc_components";
@@ -323,9 +324,22 @@ class StatusBar {
     drawRadar(source: Position, playerUuid: string,
         ships: Iterable<readonly [string, MovementState, ShipData, string | undefined, boolean?, boolean?]>,
         planets: Iterable<readonly [string, MovementState, PlanetData]>,
-        now = 0) {
+        now = 0,
+        interference = 0) {
         this.radar.clear();
         this.drawDot(source, this.statusBarData.colors.brightRadar, source);
+
+        if (interference > 0) {
+            const staticCount = Math.floor((interference / 100) * 20);
+            const radarSize = new Vector(...this.statusBarData.dataAreas.radar.size);
+            for (let i = 0; i < staticCount; i++) {
+                const sx = Math.random() * radarSize.x;
+                const sy = Math.random() * radarSize.y;
+                const staticAlpha = 0.25 + 0.5 * Math.random();
+                const staticColor = Math.random() > 0.5 ? 0x909090 : 0x404040;
+                this.radar.rect(sx, sy, 1, 1).fill({ color: staticColor, alpha: staticAlpha });
+            }
+        }
 
         const alert = 0.45 + 0.55 * Math.abs(Math.sin(now / 160));
         const pulse = 0.5 + 0.5 * Math.abs(Math.sin(now / 220));
@@ -333,6 +347,17 @@ class StatusBar {
         for (const [uuid, { position }, , locking, isPlayer, isEscort] of ships) {
             if (uuid === playerUuid) {
                 continue;
+            }
+            if (interference >= 60 && Math.random() < 0.25) {
+                continue;
+            }
+            let contactPos = position;
+            if (interference > 20 && Math.random() < interference / 100) {
+                const jitter = (interference / 100) * 120;
+                contactPos = new Position(
+                    position.x + (Math.random() - 0.5) * jitter,
+                    position.y + (Math.random() - 0.5) * jitter,
+                );
             }
             const lockingPlayer = locking === playerUuid;
             let color: number;
@@ -351,7 +376,7 @@ class StatusBar {
                 color = this.statusBarData.colors.dimRadar;
                 dotSize = 1;
             }
-            this.drawDot(position, color, source, dotSize);
+            this.drawDot(contactPos, color, source, dotSize);
         }
 
         for (const [, { position }] of planets) {
@@ -658,9 +683,11 @@ const DrawRadar = new System({
         Optional(TargetComponent), Optional(CloakStateComponent),
         Optional(PlayerStateComponent), Optional(HiredEscortComponent)] as const),
     new Query([UUID, MovementStateComponent, PlanetDataComponent] as const),
-        GetEntity, UUID, PlayerShipSelector] as const,
+        GetEntity, UUID, PlayerShipSelector,
+        SystemIdResource, GameDataResource] as const,
     step(radarTime, { time }, statusBar, { position }, ships, planets, entity,
-        playerUuid) {
+        playerUuid, _selector, systemId, gameData) {
+        const interference = gameData.data.System.getCached(systemId)?.interference ?? 0;
         if (!radarTime) {
             radarTime = { lastTime: 0 };
             entity.components.set(RadarTime, radarTime);
@@ -687,7 +714,7 @@ const DrawRadar = new System({
         if (lockingPlayer
             || hasPlayerPeer
             || time - radarTime.lastTime > statusBar.radarPeriod) {
-            statusBar.drawRadar(position, playerUuid, contacts, planets, time);
+            statusBar.drawRadar(position, playerUuid, contacts, planets, time, interference);
             radarTime.lastTime = time;
         }
     }

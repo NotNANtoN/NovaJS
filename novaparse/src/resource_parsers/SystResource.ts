@@ -12,6 +12,8 @@ class SystResource extends BaseResource {
     government: number;
     /** Density of the system's asteroid belt, 0 through 10. */
     asteroids: number;
+    /** Sensor interference, 0 through 100. */
+    interference: number;
     constructor(resource: Resource, idSpace: NovaResources) {
         super(resource, idSpace);
         var d = resource.data;
@@ -49,6 +51,10 @@ class SystResource extends BaseResource {
         // Asteroids follows Message in the sÿst resource and holds the
         // density of the system's belt, 0 through 10.
         this.asteroids = d.byteLength >= 108 ? d.getInt16(106) : 0;
+        // Interference follows Asteroids at offset 108 (EV Nova Bible page 63).
+        this.interference = d.byteLength >= 110
+            ? Math.max(0, Math.min(100, d.getInt16(108)))
+            : 0;
     }
 }
 

@@ -1,6 +1,10 @@
 import { AsteroidData } from 'novadatainterface/AsteroidData';
 import * as t from 'io-ts';
-import { Entities, UUID, GetEntity } from 'nova_ecs/arg_types';
+import { Entities, UUID, GetEntity, Emit, EmitNow } from 'nova_ecs/arg_types';
+import { DamagedEvent } from './death_plugin';
+import { SoundEvent } from './sound_event';
+import { HitboxHullComponent } from './collisions_plugin';
+import { ShipComponent, ShipDataComponent } from './ship_plugin';
 import { OutfitsStateComponent } from './outfit_plugin';
 import { ShieldComponent } from './health_plugin';
 import { Component } from 'nova_ecs/component';
@@ -408,6 +412,114 @@ const OrePickupSystem = new System({
     },
 });
 
+
+const AsteroidHazardsQuery = new Query([
+    UUID,
+    AsteroidComponent,
+    AsteroidDataComponent,
+    MovementStateComponent,
+    HitboxHullComponent,
+    ArmorComponent,
+] as const, 'AsteroidHazards');
+
+const AsteroidCollidingShipsQuery = new Query([
+    UUID,
+    ShipComponent,
+    ShipDataComponent,
+    MovementStateComponent,
+    HitboxHullComponent,
+    ShieldComponent,
+    ArmorComponent,
+] as const, 'AsteroidCollidingShips');
+
+const lastImpactTimes = new Map<string, number>();
+
+export const AsteroidCollisionHazardSystem = new System({
+    name: 'AsteroidCollisionHazardSystem',
+    args: [
+        AsteroidHazardsQuery,
+        AsteroidCollidingShipsQuery,
+        TimeResource,
+        Emit,
+        EmitNow,
+        PlatformResource,
+        Optional(MultiplayerData),
+    ] as const,
+    step(asteroids, ships, time, emit, emitNow, platform, multiplayer) {
+        if (platform === 'browser' && multiplayer) {
+            return;
+        }
+        if (asteroids.length === 0 || ships.length === 0) {
+            return;
+        }
+        if (lastImpactTimes.size > 500) {
+            for (const [key, hitTime] of lastImpactTimes.entries()) {
+                if (time.time - hitTime > 2000) {
+                    lastImpactTimes.delete(key);
+                }
+            }
+        }
+
+        for (const [shipUuid, , shipData, shipMovement, shipHull, , ] of ships) {
+            for (const [asteroidUuid, , asteroidData, asteroidMovement, asteroidHull, asteroidArmor] of asteroids) {
+                const pairKey = shipUuid + ":" + asteroidUuid;
+                const lastHit = lastImpactTimes.get(pairKey);
+                if (lastHit !== undefined && time.time - lastHit < 500) {
+                    continue;
+                }
+
+                const dx = shipMovement.position.x - asteroidMovement.position.x;
+                const dy = shipMovement.position.y - asteroidMovement.position.y;
+                const distSq = dx * dx + dy * dy;
+                // Fast bounding circle prune
+                if (distSq > 140 * 140) {
+                    continue;
+                }
+
+                if (!shipHull.collides(asteroidHull)) {
+                    continue;
+                }
+
+                lastImpactTimes.set(pairKey, time.time);
+
+                const relVx = shipMovement.velocity.x - asteroidMovement.velocity.x;
+                const relVy = shipMovement.velocity.y - asteroidMovement.velocity.y;
+                const relSpeed = Math.sqrt(relVx * relVx + relVy * relVy);
+                if (relSpeed < 8) {
+                    continue;
+                }
+
+                const impactFactor = Math.min(3, Math.max(0.6, (asteroidData.strength ?? 30) / 40));
+                const shipDamage = Math.max(1, Math.round(relSpeed * 0.22 * impactFactor));
+                const asteroidDamage = Math.max(1, Math.round(relSpeed * 0.2 + ((shipData.physics.mass ?? 100) / 12)));
+
+                emitNow(DamagedEvent, {
+                    damage: {
+                        shield: shipDamage,
+                        armor: shipDamage,
+                        ionization: 0,
+                        ionizationColor: 0,
+                        passThroughShield: 0,
+                        knockback: 0,
+                    },
+                    damager: asteroidUuid,
+                }, [shipUuid]);
+
+                asteroidArmor.current = Math.max(0, asteroidArmor.current - asteroidDamage);
+
+                const dist = Math.sqrt(distSq) || 1;
+                const nx = dx / dist;
+                const ny = dy / dist;
+                const bounceImpulse = Math.max(30, relSpeed * 0.5);
+                shipMovement.velocity = shipMovement.velocity.add(
+                    new Vector(nx * bounceImpulse, ny * bounceImpulse));
+
+                emit(SoundEvent, { id: 'nova:302', position: shipMovement.position });
+            }
+        }
+    },
+});
+
 export const AsteroidPlugin: Plugin = {
     name: 'AsteroidPlugin',
     build(world) {
@@ -419,6 +531,11 @@ export const AsteroidPlugin: Plugin = {
         world.addComponent(AsteroidDataComponent);
         world.addComponent(OreComponent);
         world.addComponent(CargoScoopOutfitComponent);
+        world.addComponent(HitboxHullComponent);
+        world.addComponent(ShipComponent);
+        world.addComponent(ShipDataComponent);
+        world.addComponent(ShieldComponent);
+        world.addComponent(ArmorComponent);
 
         deltaMaker.addComponent(AsteroidComponent, {
             componentType: AsteroidType,
@@ -440,6 +557,7 @@ export const AsteroidPlugin: Plugin = {
         world.addSystem(AsteroidDestroyedSystem);
         world.addSystem(CargoScoopOutfitProvider);
         world.addSystem(OrePickupSystem);
+        world.addSystem(AsteroidCollisionHazardSystem);
         world.addSystem(OrePickupSystem);
     },
     remove(world) {
@@ -456,6 +574,7 @@ export const AsteroidPlugin: Plugin = {
         world.removeSystem(AsteroidDestroyedSystem);
         world.removeSystem(CargoScoopOutfitProvider);
         world.removeSystem(OrePickupSystem);
+        world.removeSystem(AsteroidCollisionHazardSystem);
         world.removeSystem(OrePickupSystem);
     },
 };
