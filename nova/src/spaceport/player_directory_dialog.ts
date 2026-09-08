@@ -89,7 +89,7 @@ export class PlayerDirectoryDialog extends ClassicDialog<string | undefined> {
                 },
             ],
         });
-        this.container.name = 'PlayerDirectoryDialog';
+        this.container.label = 'PlayerDirectoryDialog';
     }
 
     async refresh() {

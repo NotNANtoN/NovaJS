@@ -716,7 +716,7 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
         controlEvents: Observable<ControlEvent>,
         private exploredSystems?: readonly string[]) {
         super(gameData, "nova:8509", controlEvents);
-        this.container.name = "StarMap";
+        this.container.label = "StarMap";
         this.panelHeading = addMaskedText(
             this.container,
             STARMAP_LAYOUT.rightHeading,

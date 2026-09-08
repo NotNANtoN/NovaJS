@@ -503,14 +503,14 @@ export const AsteroidCollisionHazardSystem = new System({
 
                 lastImpactTimes.set(pairKey, time.time);
 
-                const impactFactor = Math.min(3, Math.max(0.6, (asteroidData.strength ?? 30) / 40));
-                const shipDamage = Math.max(1, Math.round(relSpeed * 0.22 * impactFactor));
+                const impactFactor = Math.min(2, Math.max(0.6, (asteroidData.strength ?? 30) / 40));
+                const shipDamage = Math.min(25, Math.max(1, Math.round(relSpeed * 0.1 * impactFactor)));
                 const asteroidDamage = Math.max(1, Math.round(relSpeed * 0.2 + ((shipData.physics.mass ?? 100) / 12)));
 
                 emitNow(DamagedEvent, {
                     damage: {
                         shield: shipDamage,
-                        armor: shipDamage,
+                        armor: 0,
                         ionization: 0,
                         ionizationColor: 0,
                         passThroughShield: 0,
@@ -580,7 +580,6 @@ export const AsteroidPlugin: Plugin = {
         world.addSystem(OrePickupSystem);
         world.resources.set(AsteroidImpactTimesResource, new Map());
         world.addSystem(AsteroidCollisionHazardSystem);
-        world.addSystem(OrePickupSystem);
     },
     async remove(world) {
         await world.removePlugin(ExternalImpulsePlugin);
@@ -599,7 +598,6 @@ export const AsteroidPlugin: Plugin = {
         world.removeSystem(OrePickupSystem);
         world.removeSystem(AsteroidCollisionHazardSystem);
         world.resources.delete(AsteroidImpactTimesResource);
-        world.removeSystem(OrePickupSystem);
     },
 };
 

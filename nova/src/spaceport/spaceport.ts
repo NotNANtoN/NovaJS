@@ -138,7 +138,7 @@ export class Spaceport extends Menu<Entity> {
         controlEvents: Observable<ControlEvent>) {
         super(gameData, "nova:8500", controlEvents);
         this.id = authoritativePlanet.id;
-        this.container.name = 'Spaceport';
+        this.container.label = 'Spaceport';
 
         const buttons = {
             // Positions come from the metal strip measured on PICT 8500;

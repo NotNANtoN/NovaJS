@@ -319,7 +319,7 @@ class StatusBar {
         this.text.targetSubtitle.position.set(middle[0], 22);
         this.targetContainer.addChild(this.text.targetSubtitle);
 
-        this.text.targetGovernment = new PIXI.Text('', dimFont);
+        this.text.targetGovernment = new PIXI.Text({ text: '', style: dimFont });
         this.text.targetGovernment.anchor.set(1, 1);
         this.text.targetGovernment.position.set(size[0] - 6, size[1] - 3);
         this.targetContainer.addChild(this.text.targetGovernment);
