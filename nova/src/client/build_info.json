@@ -1,5 +1,5 @@
 {
-  "commit": "e86d450a",
-  "message": "fix: resolve starmap and status bar Pixi v8 deprecations, and prevent lethal asteroid collision damage",
-  "date": "2026-09-08 19:07 +0200"
+  "commit": "5d2f580b",
+  "message": "fix: remove non-canonical asteroid collision hazard to match retail EV Nova mechanics",
+  "date": "2026-09-08 19:39 +0200"
 }

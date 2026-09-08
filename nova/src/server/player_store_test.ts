@@ -162,6 +162,7 @@ describe('player snapshots', () => {
             ...decodedState.right,
             ship,
         }));
+        await reloaded.flush();
         await fs.rm(directory, { recursive: true, force: true });
     });
 
@@ -216,6 +217,7 @@ describe('player snapshots', () => {
             .toBe(MAX_PLAYER_SNAPSHOTS);
         expect((await reloaded.restoreSnapshot('pilot', snapshots[0].id))
             ?.gameDate).toBe(2);
+        await reloaded.flush();
         await fs.rm(directory, { recursive: true, force: true });
     });
 
