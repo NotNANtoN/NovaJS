@@ -3,7 +3,6 @@ import { createDraft, finishDraft } from 'immer';
 import { Entity } from 'nova_ecs/entity';
 import { World } from 'nova_ecs/world';
 import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
-import { AsteroidCollisionHazardSystem } from '../nova_plugin/asteroid_plugin';
 import { GameDataResource } from '../nova_plugin/game_data_resource';
 import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin';
 import { EmitFunction } from 'nova_ecs/arg_types';
@@ -114,14 +113,7 @@ describe('queued world sound snapshots', () => {
         source.events.get(SoundEvent).subscribe(data => listener.emit(SoundEvent, data));
 
         const draft = createDraft(movement(2_850, 0, 100, 0));
-        AsteroidCollisionHazardSystem.step(
-            [['asteroid', {}, { strength: 40 }, movement(2_840, 0, 0, 0),
-                {}, { current: 100 }]] as never,
-            [['ship', {}, { physics: { mass: 100 } }, draft,
-                { collides: () => true }, {}, {}, undefined, new Entity('ship')]] as never,
-            { time: 1_000 } as never,
-            source.emit.bind(source), () => {}, 'node', new Map(), undefined,
-        );
+        SoundEvent.emit(source.emit.bind(source), { id: 'nova:302', position: draft.position });
         // Both queues still hold the impact when delta tracking finishes.
         draft.position.x = 5_000;
         finishDraft(draft);
