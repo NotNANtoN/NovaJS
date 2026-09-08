@@ -376,7 +376,7 @@ export function acceptMission(
         console.warn(`Cannot accept mission ${mission.id}: not enough cargo space`);
         return undefined;
     }
-    if (loadOnAccept && !allocateCargo(state, {
+    if (loadOnAccept && cargo.quantity > 0 && !allocateCargo(state, {
         commodity: mission.id,
         tons: cargo.quantity,
         isMissionCargo: true,
@@ -767,11 +767,11 @@ export class MissionRuntime {
                 if (atTravel && pickupAtTravel(mission) && entry.cargo
                     && !missionHoldsCargo(state, entry.missionId)) {
                     if (getFreeSpace(state) < entry.cargo.quantity
-                        || !allocateCargo(state, {
+                        || (entry.cargo.quantity > 0 && !allocateCargo(state, {
                             commodity: entry.missionId,
                             tons: entry.cargo.quantity,
                             isMissionCargo: true,
-                        })) {
+                        }))) {
                         return;
                     }
                     // Pickup and drop-off are different landings.

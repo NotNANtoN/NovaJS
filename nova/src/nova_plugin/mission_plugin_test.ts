@@ -81,6 +81,29 @@ describe('mission runtime', () => {
         );
     });
 
+    it('accepts a zero-ton cargo mission without cargo allocation failure', async () => {
+        const mission = {
+            ...getDefaultMissionData(),
+            id: 'nova:251',
+            returnStel: 131,
+            travelStel: 131,
+            cargoType: 0,
+            cargoQty: 0,
+            payVal: 500,
+        };
+        const state = createInitialPlayerState();
+        const accepted = acceptMission(state, mission, {
+            initialPlanetId: 'nova:130',
+            planets: [{ id: 'nova:130' }, { id: 'nova:131' }],
+        });
+
+        expect(accepted).toBeDefined();
+        expect(accepted?.destination).toBe('nova:131');
+        expect(accepted?.cargo?.quantity).toBe(0);
+        expect(state.activeMissions.length).toBe(1);
+        expect(state.holds.length).toBe(0);
+    });
+
     it('fails overdue missions and reports them on the next landing', async () => {
         const mission = {
             ...getDefaultMissionData(),

@@ -85,6 +85,7 @@ function reportDialogFailure(dialog: string, error: unknown) {
 }
 
 export class Spaceport extends Menu<Entity> {
+    onUpdateShip?: (ship: Entity) => void;
     private outfitter: Outfitter;
     private shipyard: Shipyard;
     private missionBbs: MissionBbs;
@@ -215,6 +216,7 @@ export class Spaceport extends Menu<Entity> {
             } finally {
                 this.setActiveDialog();
                 this.controls.bind();
+                this.onUpdateShip?.(this.input);
             }
         };
         buttons.outfitter.click.subscribe(showOutfitter);
@@ -253,6 +255,7 @@ export class Spaceport extends Menu<Entity> {
             } finally {
                 this.setActiveDialog();
                 this.controls.bind();
+                this.onUpdateShip?.(this.input);
             }
         };
         buttons.shipyard.click.subscribe(showShipyard);
@@ -344,6 +347,7 @@ export class Spaceport extends Menu<Entity> {
             } finally {
                 this.setActiveDialog();
                 this.controls.bind();
+                this.onUpdateShip?.(this.input);
             }
         };
         buttons.missionBBS.click.subscribe(showMissionBbs);
@@ -504,6 +508,7 @@ export class Spaceport extends Menu<Entity> {
             state.fuel = result.fuel;
             state.credits = result.credits;
         }
+        this.onUpdateShip?.(ship);
         this.rechargeNotice.text = `${buyer} ${result.purchased} jump${
             result.purchased === 1 ? '' : 's'} for ${
             (spent - result.credits).toLocaleString()} cr.`;
@@ -655,6 +660,7 @@ export class Spaceport extends Menu<Entity> {
         // when the planet loads, when there is no ship to refuel.
         await this.autoRecharge(input);
         this.updateRechargeState(input);
+        this.onUpdateShip?.(input);
         // A dialog left active by a previous landing would keep the landing
         // artwork and buttons hidden, which reads as a black screen on
         // reload. Start every landing on the landing screen itself.

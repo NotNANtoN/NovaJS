@@ -6,6 +6,7 @@ import { Component } from "nova_ecs/component";
 import { Position } from "nova_ecs/datatypes/position";
 import { Vector } from "nova_ecs/datatypes/vector";
 import { Optional } from "nova_ecs/optional";
+import { Entity } from "nova_ecs/entity";
 import { Plugin } from "nova_ecs/plugin";
 import { MovementState, MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
 import { TimeResource } from "nova_ecs/plugins/time_plugin";
@@ -646,6 +647,19 @@ class StatusBar {
         this.readyTargetPict = undefined;
         this.targetPictRequest++;
     }
+    updateShip(ship: Entity) {
+        const shield = ship.components.get(ShieldComponent);
+        const armor = ship.components.get(ArmorComponent);
+        const playerState = ship.components.get(PlayerStateComponent);
+        const shipData = ship.components.get(ShipDataComponent);
+        const capacity = shipData?.fuelCapacity ?? 0;
+        this.drawStats(
+            shield ?? new Stat({ current: 1, max: 1 }),
+            armor ?? new Stat({ current: 1, max: 1 }),
+            capacity > 0 && playerState ? { fuel: playerState.fuel ?? 0, capacity } : undefined,
+            playerState,
+        );
+    }
     showLandingMessage(message: string, now: number, durationMs = 3_500) {
         this.landingMessage.text = message;
         this.landingMessageContainer.visible = Boolean(message);
@@ -660,9 +674,12 @@ class StatusBar {
     destroy() {
         this.clearTarget();
         this.showLandingMessage('', 0);
-        this.targetRenderTexture?.destroy(true);
-        this.targetRenderTexture = undefined;
-        this.targetRenderTextureSize = { width: 0, height: 0 };
+        if (this.targetRenderTexture) {
+            this.targetSprite.texture = PIXI.Texture.EMPTY;
+            this.targetRenderTexture.destroy(false);
+            this.targetRenderTexture = undefined;
+            this.targetRenderTextureSize = { width: 0, height: 0 };
+        }
     }
 }
 

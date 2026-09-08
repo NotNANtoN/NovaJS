@@ -44,6 +44,7 @@ import { deImmerify } from '../util/deimmerify';
 import { ResizeEvent, ScreenSize } from './screen_size_plugin';
 import { persistDeparture } from './spaceport_departure';
 import { Stage } from './stage_resource';
+import { StatusBarResource } from './status_bar';
 import { combatShopTransaction } from '../nova_plugin/combat_resources';
 
 
@@ -157,6 +158,11 @@ export const LandSystem = new System({
             ? [landedPlanet.position[0], landedPlanet.position[1]] : [0, 0];
         const owner = playerMultiplayer?.owner;
         entities.delete(shipUuid);
+        const statusBar = world.resources.get(StatusBarResource);
+        if (statusBar) {
+            spaceport.onUpdateShip = (ship: Entity) => statusBar.updateShip(ship);
+            statusBar.updateShip(playerShip);
+        }
         spaceport.container.position.x = x / 2;
         spaceport.container.position.y = y / 2;
         let recoveryDialog: HTMLElement | undefined;
