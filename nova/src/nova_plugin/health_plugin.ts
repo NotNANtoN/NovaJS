@@ -16,14 +16,17 @@ export const IonizationComponent = new Component<Stat>('Ionization');
 replicationPolicies.register(ShieldComponent, {
     codec: stat,
     authority: 'server',
+    acceptInitialOwnerState: true,
 });
 replicationPolicies.register(ArmorComponent, {
     codec: stat,
     authority: 'server',
+    acceptInitialOwnerState: true,
 });
 replicationPolicies.register(IonizationComponent, {
     codec: stat,
     authority: 'server',
+    acceptInitialOwnerState: true,
 });
 
 const healthStats = [ShieldComponent, ArmorComponent, IonizationComponent]

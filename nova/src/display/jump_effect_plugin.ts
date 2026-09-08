@@ -218,7 +218,7 @@ export const JumpEffectPlugin: Plugin = {
             throw new Error('Expected space resource');
         }
         const wakeGraphics = new PIXI.Graphics();
-        wakeGraphics.name = 'JumpWakeGraphics';
+        wakeGraphics.label = 'JumpWakeGraphics';
         wakeGraphics.zIndex = 10;
         world.resources.set(JumpWakeGraphics, attachGraphic(space, wakeGraphics));
         world.addSystem(ClearJumpWakes);

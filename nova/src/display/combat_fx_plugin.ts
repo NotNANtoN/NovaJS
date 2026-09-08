@@ -247,7 +247,7 @@ export const CombatFxPlugin: Plugin = {
             throw new Error('Expected space resource');
         }
         const graphics = new PIXI.Graphics();
-        graphics.name = 'CombatFxGraphics';
+        graphics.label = 'CombatFxGraphics';
         graphics.zIndex = 12;
         world.resources.set(CombatFxGraphics, attachGraphic(space, graphics));
         world.resources.set(CombatFxResource, new CombatFxState());

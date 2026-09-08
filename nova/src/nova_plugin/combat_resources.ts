@@ -8,6 +8,7 @@ import { AmmoType, ammoOutfitIds } from 'novadatainterface/WeaponData';
 import { CombatResources, CombatResourcesCodec, PlayerState, PlayerStateComponent, PlayerStorePort, createInitialPlayerState, toPersistentPlayerState } from './player_state';
 export { CombatResources, CombatResourcesCodec } from './player_state';
 import { OutfitsState, OutfitsStateComponent } from './outfit_plugin';
+import { ArmorComponent, IonizationComponent, ShieldComponent } from './health_plugin';
 import { buyFuel, clampFuel, refuelsOnLanding } from './fuel';
 
 import { getPersistentPlayerToken } from '../communication/player_identity';
@@ -80,6 +81,9 @@ export class CombatAuthority {
     storeRevision?: number;
     readonly receipts = new Map<string, CombatShopResult>();
     landed?: string;
+    shield?: number;
+    armor?: number;
+    ionization?: number;
     position?: readonly [number, number];
     system?: string;
     private readonly issuedFuel = new Map<number, { fuel: number; spent: number }>();
@@ -89,7 +93,7 @@ export class CombatAuthority {
         this.commit();
     }
     acceptOwnerFuel(state: PlayerState): number {
-        const basis = this.issuedFuel.get(state.combatResources?.revision ?? -1);
+        const basis = this.issuedFuel.get(state.combatResources?.revision ?? this.balance.revision);
         if (!basis || !Nonnegative.is(state.fuel)) return 0;
         const spent = Math.max(0, basis.fuel - state.fuel);
         const debit = Math.max(0, spent - basis.spent);
@@ -125,6 +129,18 @@ export class CombatAuthority {
                 else if (outfits.get(id)?.count !== count) outfits.set(id, { count });
             }
         }
+        if (typeof this.shield === 'number') {
+            const shield = entity.components.get(ShieldComponent);
+            if (shield) shield.current = Math.min(shield.max, Math.max(0, this.shield));
+        }
+        if (typeof this.armor === 'number') {
+            const armor = entity.components.get(ArmorComponent);
+            if (armor) armor.current = Math.min(armor.max, Math.max(0, this.armor));
+        }
+        if (typeof this.ionization === 'number') {
+            const ionization = entity.components.get(IonizationComponent);
+            if (ionization) ionization.current = Math.min(ionization.max, Math.max(0, this.ionization));
+        }
     }
     /** Observe only already-filtered gameplay state; also captures server
      * assistance/transfer/respawn mutations without retaining an ECS draft. */
@@ -159,6 +175,12 @@ export class CombatAuthority {
         this.state = toPersistentPlayerState(state) as PlayerState;
         const movement = entity.components.get(MovementStateComponent);
         if (movement) this.position = [movement.position.x, movement.position.y];
+        const shield = entity.components.get(ShieldComponent);
+        if (shield) this.shield = Math.max(0, shield.current);
+        const armor = entity.components.get(ArmorComponent);
+        if (armor) this.armor = Math.max(0, armor.current);
+        const ionization = entity.components.get(IonizationComponent);
+        if (ionization) this.ionization = Math.max(0, ionization.current);
         this.system = state.currentSystem;
         if (changed) this.commit();
         this.project(entity);
@@ -235,6 +257,9 @@ export class CombatLedger {
             const weapons = await Promise.all(ids.Weapon.map(id => gameData.data.Weapon.get(id)));
             registerCombatAmmoIds(weapons.flatMap(weapon => [...ammoOutfitIds(weapon.ammoType)]));
         })();
+    }
+    getSync(token: string): CombatAuthority | undefined {
+        return this.records.get(token);
     }
     get(token: string): Promise<CombatAuthority> {
         const existing = this.records.get(token);
@@ -365,6 +390,9 @@ export class CombatLedger {
             const debit = authority.acceptOwnerFuel(request.state);
             authority.balance.fuel = Math.max(0, authority.balance.fuel - debit);
             authority.landed = planet.id;
+            delete authority.shield;
+            delete authority.armor;
+            delete authority.ionization;
         } else {
             if (authority.landed !== planet.id
                 && !(request.action === 'close' && !authority.landed)) throw new Error('Not landed');

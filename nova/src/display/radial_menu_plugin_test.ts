@@ -63,6 +63,8 @@ describe("Radial menu pure helpers", () => {
         it("invokes vector drawing commands for all action icons without throwing", () => {
             const recordedCalls: string[] = [];
             const mockGraphics = {
+                setStrokeStyle(...args: any[]) { recordedCalls.push("setStrokeStyle"); return this; },
+                fill(...args: any[]) { recordedCalls.push("fill"); return this; },
                 lineStyle(...args: any[]) { recordedCalls.push("lineStyle"); return this; },
                 beginFill(...args: any[]) { recordedCalls.push("beginFill"); return this; },
                 endFill(...args: any[]) { recordedCalls.push("endFill"); return this; },

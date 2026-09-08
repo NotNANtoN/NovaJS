@@ -504,6 +504,11 @@ function canApplyComponentUpdate(
         context.localUuid,
         context.owner,
     )) {
+        if (!hasComponentNamed(entity, componentName)
+            && isOwnerToServer(context)
+            && policy.acceptInitialOwnerState === true) {
+            return true;
+        }
         return false;
     }
     const policy = policyFor(componentName);
@@ -802,8 +807,10 @@ function sanitizeInboundEntity(
             component.name, source, peerIsAdmin, localUuid, owner)) {
             // An owning-client component is retained on first creation: there
             // is no local state to preserve yet. local-only and server-owned
-            // components still follow their policy on every full-state path.
-            if (policyFor(component.name).authority !== 'owning-client') {
+            // components still follow their policy on every full-state path
+            // unless explicit initial owner state is accepted.
+            if (policyFor(component.name).authority !== 'owning-client'
+                && !(!hasExistingEntity && policyFor(component.name).acceptInitialOwnerState === true)) {
                 entity.components.delete(component);
             }
         } else if (!hasExistingEntity

@@ -70,10 +70,9 @@ export class PlayerChatDialog extends Menu<Entity> {
         this.container.addChild(this.logText);
 
         this.inputBox.position.set(-175, 26);
-        this.inputBox.beginFill(0x0a0a0a, 0.9);
-        this.inputBox.lineStyle(1, 0x555555);
-        this.inputBox.drawRoundedRect(0, 0, 270, 26, 3);
-        this.inputBox.endFill();
+        this.inputBox.roundRect(0, 0, 270, 26, 3)
+            .fill({ color: 0x0a0a0a, alpha: 0.9 })
+            .stroke({ width: 1, color: 0x555555 });
         this.container.addChild(this.inputBox);
 
         this.inputText = new PIXI.Text('', INPUT_FONT);

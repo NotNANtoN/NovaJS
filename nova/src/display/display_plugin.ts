@@ -66,20 +66,23 @@ const DeathOverlaySystem = new System({
             // hide its intact sprite while the final explosion is visible.
             shipGraphic.container.visible = !death;
         }
-        const existing = stage.getChildByName('PlayerDeathOverlay');
+        const existing = stage.getChildByLabel('PlayerDeathOverlay');
         const messageVisible = shouldShowDeathOverlay(death, time.time);
         if (messageVisible && !existing) {
             const overlay = new PIXI.Container();
-            overlay.name = 'PlayerDeathOverlay';
+            overlay.label = 'PlayerDeathOverlay';
             const background = new PIXI.Graphics();
             background.rect(0, 0, window.innerWidth, window.innerHeight).fill({ color: 0x000000, alpha: 0.65 });
-            const text = new PIXI.Text(death?.message ?? 'You are destroyed', {
-                fontFamily: 'Geneva',
-                fontSize: 22,
-                fill: 0xffffff,
-                align: 'center',
-                wordWrap: true,
-                wordWrapWidth: Math.min(560, window.innerWidth - 80),
+            const text = new PIXI.Text({
+                text: death?.message ?? 'You are destroyed',
+                style: {
+                    fontFamily: 'Geneva',
+                    fontSize: 22,
+                    fill: 0xffffff,
+                    align: 'center',
+                    wordWrap: true,
+                    wordWrapWidth: Math.min(560, window.innerWidth - 80),
+                },
             });
             text.anchor.set(0.5);
             text.position.set(window.innerWidth / 2, window.innerHeight / 2);
@@ -96,7 +99,7 @@ const JumpTransitionOverlaySystem = new System({
     args: [PlayerShipSelector, Optional(JumpStateComponent), Stage,
         TimeResource] as const,
     step(_playerShip, jump, stage, time) {
-        const existing = stage.getChildByName(
+        const existing = stage.getChildByLabel(
             'PlayerJumpTransition') as PIXI.Graphics | null;
         if (!jump || jump.phase === 'braking'
             || jump.phase === 'spooling') {
@@ -112,7 +115,7 @@ const JumpTransitionOverlaySystem = new System({
             ? 0.15 + progress * 0.85
             : 1 - progress;
         const flash = existing ?? new PIXI.Graphics();
-        flash.name = 'PlayerJumpTransition';
+        flash.label = 'PlayerJumpTransition';
         flash.clear();
         flash.rect(0, 0, window.innerWidth, window.innerHeight).fill({ color: 0xffffff, alpha });
         if (!existing) {
@@ -181,7 +184,7 @@ const MissileWarningOverlaySystem = new System({
                 velocity: movement.velocity,
             }, playerUuid, playerMovement)
         );
-        const existing = stage.getChildByName(
+        const existing = stage.getChildByLabel(
             HOSTILE_LOCK_OVERLAY) as PIXI.Graphics | null;
         if (!hasInboundMissile) {
             existing?.destroy();
@@ -190,7 +193,7 @@ const MissileWarningOverlaySystem = new System({
         const width = Math.max(1, window.innerWidth - (statusBar?.width ?? 0));
         const height = window.innerHeight;
         const overlay = existing ?? new PIXI.Graphics();
-        overlay.name = HOSTILE_LOCK_OVERLAY;
+        overlay.label = HOSTILE_LOCK_OVERLAY;
         drawHostileLockCorners(overlay, width, height, time.time);
         if (!existing) {
             stage.addChild(overlay);
@@ -204,9 +207,9 @@ export const Display: Plugin = {
     name: 'Display',
     async build(world) {
         const stage = new PIXI.Container();
-        stage.name = 'Stage';
+        stage.label = 'Stage';
         const space = new PIXI.Container();
-        space.name = 'Space';
+        space.label = 'Space';
         space.sortableChildren = true;
         stage.addChild(space);
         world.resources.set(Stage, stage);

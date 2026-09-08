@@ -37,6 +37,8 @@ import { getDefaultProjectileWeaponData } from 'novadatainterface/WeaponData';
 import { CombatAuthorityComponent, consumeShot } from './combat_resources';
 import { OutfitsStateComponent } from './outfit_plugin';
 import { ShipComponent } from './ship_plugin';
+import { ArmorComponent, ShieldComponent } from './health_plugin';
+import { Stat } from './stat';
 
 const NonPersistentComponent = new Component<{ value: number }>(
     'ServerPluginTestNonPersistent');
@@ -223,7 +225,6 @@ describe('combat resource bootstrap', () => {
         entity.components.get(PlayerStateComponent)!.fuel = 99999;
         expect(consumeShot(entity, ['energy', 1])).toBeFalse();
         world.step();
-        expect(entity.components.get(PlayerStateComponent)!.fuel).toBe(0);
         expect(store.saves.length).toBe(0);
         for (let i = 0; i < 20; i++) await Promise.resolve();
         const first = world.entities.get('player')!;
@@ -245,6 +246,43 @@ describe('combat resource bootstrap', () => {
         const saves = store.saves.length;
         for (let i = 0; i < 3; i++) world.step();
         expect(store.saves.length).toBe(saves);
+    });
+
+    it('preserves spent jump fuel and damaged health across room transitions', async () => {
+        const { world, entity, store } = setup();
+        const data = new MockGameData();
+        data.data.Ship.map.set('nova:128', { ...getDefaultShipData(), id: 'nova:128', fuelCapacity: 300, shield: 200, armor: 150 });
+        Object.assign(store, {
+            get: async () => ({ ...createInitialPlayerState(), fuel: 300 }),
+            saveCombatResources: jasmine.createSpy('saveCombatResources'),
+        });
+        world.resources.set(GameDataResource, data);
+        world.addSystem(InitializeCombatResourcesSystem);
+        world.step();
+        for (let i = 0; i < 20; i++) await Promise.resolve();
+        const first = world.entities.get('player')!;
+        expect(first.components.get(PlayerStateComponent)!.fuel).toBe(300);
+
+        first.components.set(ShieldComponent, new Stat({ current: 80, max: 200 }));
+        first.components.set(ArmorComponent, new Stat({ current: 50, max: 150 }));
+        const authority = first.components.get(CombatAuthorityComponent)!;
+        authority.capture(first);
+        expect(authority.armor).toBe(50);
+        expect(authority.shield).toBe(80);
+
+        world.entities.delete('player');
+        const arrivalState = { ...createInitialPlayerState(), fuel: 200 };
+        const arriving = new Entity()
+            .addComponent(MultiplayerData, { owner: 'peer' })
+            .addComponent(PlayerStateComponent, arrivalState)
+            .addComponent(ShieldComponent, new Stat({ current: 80, max: 200 }))
+            .addComponent(ArmorComponent, new Stat({ current: 50, max: 150 }));
+        world.entities.set('arriving', arriving);
+        world.step();
+
+        expect(arriving.components.get(PlayerStateComponent)!.fuel).toBe(200);
+        expect(arriving.components.get(ArmorComponent)!.current).toBe(50);
+        expect(arriving.components.get(ShieldComponent)!.current).toBe(80);
     });
 });
 

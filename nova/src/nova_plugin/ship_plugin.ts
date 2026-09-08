@@ -130,7 +130,7 @@ const ShipShieldProvider = Provide({
     args: [ShipPhysicsComponent, Optional(ShieldComponent)] as const,
     factory(physics, shield) {
         return new Stat({
-            current: shield?.current ?? physics.shield,
+            current: shield ? Math.min(physics.shield, Math.max(0, shield.current)) : physics.shield,
             max: physics.shield,
             min: 0,
             recharge: physics.shieldRecharge,
@@ -145,7 +145,7 @@ const ShipArmorProvider = Provide({
     args: [ShipPhysicsComponent, Optional(ArmorComponent)] as const,
     factory(physics, armor) {
         return new Stat({
-            current: armor?.current ?? physics.armor,
+            current: armor ? Math.min(physics.armor, Math.max(0, armor.current)) : physics.armor,
             max: physics.armor,
             min: 0,
             recharge: physics.armorRecharge,
@@ -160,7 +160,7 @@ const ShipIonizationProvider = Provide({
     args: [ShipPhysicsComponent, Optional(IonizationComponent)] as const,
     factory(physics, ionization) {
         return new Stat({
-            current: ionization?.current ?? 0,
+            current: ionization ? Math.min(physics.ionization, Math.max(0, ionization.current)) : 0,
             max: physics.ionization,
             min: 0,
             recharge: -physics.deionize,

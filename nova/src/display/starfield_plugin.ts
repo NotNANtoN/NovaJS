@@ -50,7 +50,7 @@ class Starfield {
         this.positionFactorRange = positionFactorRange;
         this.container.addChild(this.graphics);
         const count = density * (2 * BOUNDARY) ** 2;
-        this.container.name = 'Starfield';
+        this.container.label = 'Starfield';
 
         this.random = alea(seed ?? 'stars');
         for (let i = 0; i < count; i++) {

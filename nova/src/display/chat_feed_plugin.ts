@@ -79,10 +79,10 @@ export const ChatReceiveSystem = new System({
         history.push(entry);
 
         // Add to HUD feed
-        let container = stage.getChildByName('ChatHudContainer') as PIXI.Container | null;
+        let container = stage.getChildByLabel('ChatHudContainer') as PIXI.Container | null;
         if (!container) {
             container = new PIXI.Container();
-            container.name = 'ChatHudContainer';
+            container.label = 'ChatHudContainer';
             container.zIndex = 100;
             stage.addChild(container);
         }
@@ -150,7 +150,7 @@ export const ChatHudUpdateSystem = new System({
         SingletonComponent,
     ] as const,
     step(hudMessages, stage, time, screenSize) {
-        const container = stage.getChildByName('ChatHudContainer') as PIXI.Container | null;
+        const container = stage.getChildByLabel('ChatHudContainer') as PIXI.Container | null;
         if (!container) {
             return;
         }
@@ -208,7 +208,7 @@ export const ChatFeedPlugin: Plugin = {
         world.removeSystem(ChatReceiveSystem);
         world.removeSystem(ChatHudUpdateSystem);
         const stage = world.resources.get(Stage);
-        const container = stage?.getChildByName('ChatHudContainer');
+        const container = stage?.getChildByLabel('ChatHudContainer');
         if (container) {
             container.destroy({ children: true });
         }

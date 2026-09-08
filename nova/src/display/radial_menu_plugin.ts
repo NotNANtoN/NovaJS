@@ -183,16 +183,33 @@ export function shareLocation(world: World, playerEntity?: any) {
     });
 }
 
+function applyStroke(g: any, width: number, color: number, alpha = 1) {
+    if (typeof g.setStrokeStyle === 'function') {
+        g.setStrokeStyle({ width, color, alpha });
+    } else if (typeof g.lineStyle === 'function') {
+        g.lineStyle(width, color, alpha);
+    }
+}
+
+function fillCurrent(g: any, color: number, alpha = 1) {
+    if (typeof g.fill === 'function') {
+        g.fill({ color, alpha });
+    } else if (typeof g.beginFill === 'function') {
+        g.beginFill(color, alpha);
+        g.endFill();
+    }
+}
+
 export function drawActionIcon(
     g: PIXI.Graphics,
-    id: string,
+    id: RadialActionId,
     cx: number,
     cy: number,
     color: number,
     isHovered: boolean,
 ) {
     const strokeWidth = isHovered ? 2 : 1.5;
-    g.lineStyle(strokeWidth, color, 1);
+    applyStroke(g, strokeWidth, color, 1);
 
     switch (id) {
         case "hail": {
@@ -202,17 +219,16 @@ export function drawActionIcon(
             g.lineTo(cx - 3, cy + 1);
             g.moveTo(cx - 3, cy + 1);
             g.lineTo(cx + 4, cy + 1);
-            g.lineStyle(strokeWidth, color, 0.9);
+            applyStroke(g, strokeWidth, color, 0.9);
             g.arc(cx + 4, cy + 1, 5, -Math.PI * 0.35, Math.PI * 0.35, false);
-            g.lineStyle(strokeWidth, color, 0.5);
+            applyStroke(g, strokeWidth, color, 0.5);
             g.arc(cx + 4, cy + 1, 9, -Math.PI * 0.35, Math.PI * 0.35, false);
             break;
         }
         case "board": {
             // Boarding Grapple & Airlock Clamps
-            g.beginFill(0x0e0c0c, 0.8);
             g.drawCircle(cx, cy, 4);
-            g.endFill();
+            fillCurrent(g, 0x0e0c0c, 0.8);
             // Left grappling jaw
             g.moveTo(cx - 4, cy - 7);
             g.lineTo(cx - 10, cy - 2);
@@ -232,7 +248,6 @@ export function drawActionIcon(
         }
         case "transfer": {
             // Energy Lightning Bolt & Power Conduit
-            g.beginFill(color, isHovered ? 0.35 : 0.15);
             g.moveTo(cx + 2, cy - 10);
             g.lineTo(cx - 6, cy - 1);
             g.lineTo(cx - 1, cy - 1);
@@ -240,7 +255,7 @@ export function drawActionIcon(
             g.lineTo(cx + 6, cy + 1);
             g.lineTo(cx + 1, cy + 1);
             g.closePath();
-            g.endFill();
+            fillCurrent(g, color, isHovered ? 0.35 : 0.15);
             break;
         }
         case "sos": {
@@ -252,9 +267,8 @@ export function drawActionIcon(
             g.closePath();
             g.moveTo(cx, cy - 5);
             g.lineTo(cx, cy + 1);
-            g.beginFill(color, 1);
             g.drawCircle(cx, cy + 4.5, 1.2);
-            g.endFill();
+            fillCurrent(g, color, 1);
             break;
         }
         case "coords": {
@@ -268,13 +282,12 @@ export function drawActionIcon(
             g.lineTo(cx - 4, cy);
             g.moveTo(cx + 4, cy);
             g.lineTo(cx + 10, cy);
-            g.beginFill(color, 0.9);
             g.moveTo(cx, cy - 2);
             g.lineTo(cx + 2, cy);
             g.lineTo(cx, cy + 2);
             g.lineTo(cx - 2, cy);
             g.closePath();
-            g.endFill();
+            fillCurrent(g, color, 0.9);
             break;
         }
         case "jettison": {
@@ -292,21 +305,19 @@ export function drawActionIcon(
         }
         case "map": {
             // Galaxy Hyperlane Map & Constellation Nodes
-            g.lineStyle(1, color, 0.6);
+            applyStroke(g, 1, color, 0.6);
             g.moveTo(cx - 7, cy + 6);
             g.lineTo(cx - 5, cy - 5);
             g.lineTo(cx + 4, cy - 7);
             g.lineTo(cx + 8, cy + 4);
             g.lineTo(cx - 7, cy + 6);
-            g.lineStyle(strokeWidth, color, 1);
-            g.beginFill(0x0e0c0c, 1);
+            applyStroke(g, strokeWidth, color, 1);
             g.drawCircle(cx - 7, cy + 6, 2);
             g.drawCircle(cx - 5, cy - 5, 2);
             g.drawCircle(cx + 8, cy + 4, 2);
-            g.endFill();
-            g.beginFill(color, 1);
+            fillCurrent(g, 0x0e0c0c, 1);
             g.drawCircle(cx + 4, cy - 7, 3);
-            g.endFill();
+            fillCurrent(g, color, 1);
             break;
         }
         case "directory": {
@@ -344,18 +355,24 @@ export class RadialMenu {
     private readonly wheel = new PIXI.Graphics();
     private readonly icons = new PIXI.Graphics();
     private readonly centerCircle = new PIXI.Graphics();
-    private readonly centerTitle = new PIXI.Text("", {
-        fontFamily: "Geneva, Arial, sans-serif",
-        fontSize: 13,
-        fontWeight: "bold",
-        fill: 0xffd588,
-        align: "center",
+    private readonly centerTitle = new PIXI.Text({
+        text: "",
+        style: {
+            fontFamily: "Geneva, Arial, sans-serif",
+            fontSize: 13,
+            fontWeight: "bold",
+            fill: 0xffd588,
+            align: "center",
+        },
     });
-    private readonly centerSub = new PIXI.Text("", {
-        fontFamily: "Geneva, Arial, sans-serif",
-        fontSize: 10,
-        fill: 0xbbbbbb,
-        align: "center",
+    private readonly centerSub = new PIXI.Text({
+        text: "",
+        style: {
+            fontFamily: "Geneva, Arial, sans-serif",
+            fontSize: 10,
+            fill: 0xbbbbbb,
+            align: "center",
+        },
     });
     private readonly optionLabels: PIXI.Text[] = [];
 
@@ -367,7 +384,7 @@ export class RadialMenu {
     readonly outerRadius = 145;
 
     constructor() {
-        this.container.name = "RadialMenuContainer";
+        this.container.label = "RadialMenuContainer";
         this.container.zIndex = 999;
         this.container.visible = false;
 
@@ -383,11 +400,14 @@ export class RadialMenu {
 
         for (let i = 0; i < RADIAL_OPTIONS.length; i++) {
             const opt = RADIAL_OPTIONS[i];
-            const text = new PIXI.Text(`[${i + 1}] ${opt.label.split(" ")[0]}`, {
-                fontFamily: "Geneva, Arial, sans-serif",
-                fontSize: 10,
-                fill: 0xd0c4b2,
-                align: "center",
+            const text = new PIXI.Text({
+                text: `[${i + 1}] ${opt.label.split(" ")[0]}`,
+                style: {
+                    fontFamily: "Geneva, Arial, sans-serif",
+                    fontSize: 10,
+                    fill: 0xd0c4b2,
+                    align: "center",
+                },
             });
             text.anchor.set(0.5, 0.5);
             this.container.addChild(text);

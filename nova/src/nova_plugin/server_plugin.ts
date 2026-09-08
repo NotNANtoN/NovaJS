@@ -216,11 +216,32 @@ export const InitializeCombatResourcesSystem = new System({
         if (!token || entity.components.has(CombatInitializing)) return;
         entity.components.set(CombatInitializing, true);
         const arrivalState = toPersistentPlayerState(_state) as PlayerState;
-        // Other server systems still read PlayerState.fuel. Do not let a
-        // not-yet-initialized owner transfer a forged first-state tank.
-        _state.fuel = 0;
-        delete _state.combatResources;
         const owner = multiplayerData.owner;
+        const applyAuthority = (auth: CombatAuthority, target: Entity) => {
+            if (auth.retired) return;
+            bindCombatOwner(owner, auth);
+            // Room handoffs can carry an unsent final jump debit. Consume that
+            // against a server-issued basis, never against a proposed balance.
+            const debit = auth.acceptOwnerFuel(arrivalState);
+            if (debit > 0) {
+                auth.balance.fuel = Math.max(0, auth.balance.fuel - debit);
+                auth.commit();
+            }
+            const hull = gameData.data.Ship.getCached?.(auth.balance.shipId);
+            if (hull && target.components.get(ShipComponent)?.id !== hull.id) {
+                target.components.set(ShipComponent, { id: hull.id });
+                target.components.set(OutfitsStateComponent, new Map(
+                    Object.entries(hull.outfits).map(([id, count]) => [id, { count }])));
+            }
+            target.components.set(CombatAuthorityComponent, auth);
+            auth.project(target);
+            auth.capture(target);
+        };
+        const syncAuth = combatLedger(store, gameData).getSync(token);
+        if (syncAuth) {
+            applyAuthority(syncAuth, entity);
+            return;
+        }
         void combatLedger(store, gameData).get(token).then(async authority => {
             if (authority.retired) return;
             const hull = await gameData.data.Ship.get(authority.balance.shipId);

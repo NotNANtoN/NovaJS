@@ -98,7 +98,7 @@ class StatusBar {
     constructor(private statusBarData: StatusBarData, private gameData: GameData,
                 private renderer: PIXI.Renderer) {
         this.buildPromise = this.build();
-        this.container.name = 'StatusBar';
+        this.container.label = 'StatusBar';
     }
 
     private async build() {
@@ -133,23 +133,26 @@ class StatusBar {
     }
 
     private makeLandingMessage() {
-        this.landingMessageContainer.name = 'LandingMessage';
+        this.landingMessageContainer.label = 'LandingMessage';
         this.landingMessageContainer.visible = false;
         this.landingMessageContainer.position.set(7, 405);
         const background = new PIXI.Graphics();
-        background.name = 'LandingMessageBackground';
+        background.label = 'LandingMessageBackground';
         background.roundRect(0, 0, Math.max(80, this.width - 14), 76, 4)
             .fill({ color: 0x080808, alpha: 0.82 })
             .stroke({ width: 1, color: this.statusBarData.colors.dimText, alpha: 0.8 });
-        this.landingMessage = new PIXI.Text('', {
-            fontFamily: 'Geneva',
-            fontSize: 11,
-            fill: this.statusBarData.colors.brightText,
-            wordWrap: true,
-            wordWrapWidth: Math.max(68, this.width - 26),
-            align: 'center',
+        this.landingMessage = new PIXI.Text({
+            text: '',
+            style: {
+                fontFamily: 'Geneva',
+                fontSize: 11,
+                fill: this.statusBarData.colors.brightText,
+                wordWrap: true,
+                wordWrapWidth: Math.max(68, this.width - 26),
+                align: 'center',
+            },
         });
-        this.landingMessage.name = 'LandingMessageText';
+        this.landingMessage.label = 'LandingMessageText';
         this.landingMessage.anchor.x = 0.5;
         this.landingMessage.position.set(
             Math.max(40, (this.width - 14) / 2),
@@ -179,13 +182,13 @@ class StatusBar {
         this.navigationContainer.visible = false;
         this.container.addChild(this.navigationContainer);
 
-        this.text.navigationHeading = new PIXI.Text('Hyperspace', dimFont);
+        this.text.navigationHeading = new PIXI.Text({ text: 'Hyperspace', style: dimFont });
         this.text.navigationHeading.anchor.set(0.5, 0.5);
         this.text.navigationHeading.position.set(
             navigationArea.size[0] / 2, 8);
         this.navigationContainer.addChild(this.text.navigationHeading);
 
-        this.text.navigationDestination = new PIXI.Text('', font);
+        this.text.navigationDestination = new PIXI.Text({ text: '', style: font });
         this.text.navigationDestination.anchor.set(0.5, 0.5);
         this.text.navigationDestination.position.set(
             navigationArea.size[0] / 2, 23);
@@ -202,14 +205,14 @@ class StatusBar {
             ['Credits:', 'cargoCredits'],
         ] as const;
         cargoRows.forEach(([label, valueKey], index) => {
-            const labelText = new PIXI.Text(label, dimFont);
+            const labelText = new PIXI.Text({ text: label, style: dimFont });
             labelText.anchor.y = 0.5;
             labelText.position.x = 6;
             labelText.position.y = (index + 0.5) * cargoArea.size[1] / 3;
             this.cargoContainer.addChild(labelText);
             this.text[`${valueKey}Label`] = labelText;
 
-            const valueText = new PIXI.Text('', font);
+            const valueText = new PIXI.Text({ text: '', style: font });
             valueText.anchor.x = 1;
             valueText.anchor.y = 0.5;
             valueText.position.x = cargoArea.size[0] - 6;
@@ -225,14 +228,14 @@ class StatusBar {
         secondaryWeaponContainer.position.y =
             this.statusBarData.dataAreas.weapons.position[1];
 
-        this.text.noWeapon = new PIXI.Text("No Secondary Weapon", dimFont);
+        this.text.noWeapon = new PIXI.Text({ text: "No Secondary Weapon", style: dimFont });
         this.text.noWeapon.anchor.x = 0.5;
         this.text.noWeapon.anchor.y = 0.5;
         this.text.noWeapon.position.x = this.statusBarData.dataAreas.weapons.size[0] / 2;
         this.text.noWeapon.position.y = this.statusBarData.dataAreas.weapons.size[1] / 2;;
         secondaryWeaponContainer.addChild(this.text.noWeapon);
 
-        this.text.weapon = new PIXI.Text("", font);
+        this.text.weapon = new PIXI.Text({ text: "", style: font });
         this.text.weapon.anchor.x = 0.5;
         this.text.weapon.anchor.y = 0.5;
         this.text.weapon.position.x = this.statusBarData.dataAreas.weapons.size[0] / 2;
@@ -251,14 +254,14 @@ class StatusBar {
         var size = [this.statusBarData.dataAreas.targeting.size[0],
         this.statusBarData.dataAreas.targeting.size[1]];
 
-        this.text.shield = new PIXI.Text('Shield:', dimFont);
+        this.text.shield = new PIXI.Text({ text: 'Shield:', style: dimFont });
         this.text.shield.anchor.y = 1;
         this.text.shield.position.x = 6;
         this.text.shield.position.y = size[1] - 3;
 
         this.targetContainer.addChild(this.text.shield);
 
-        this.text.armor = new PIXI.Text('Armor:', dimFont);
+        this.text.armor = new PIXI.Text({ text: 'Armor:', style: dimFont });
         this.text.armor.anchor.y = 1;
         this.text.armor.position.x = 6;
         this.text.armor.position.y = size[1] - 3;
@@ -266,7 +269,7 @@ class StatusBar {
         this.targetContainer.addChild(this.text.armor);
 
 
-        this.text.percent = new PIXI.Text("100%", font);
+        this.text.percent = new PIXI.Text({ text: "100%", style: font });
         this.text.percent.anchor.y = 1;
         this.text.percent.position.x = 49;
         this.text.percent.position.y = size[1] - 3;
@@ -276,7 +279,7 @@ class StatusBar {
         const middle = [this.statusBarData.dataAreas.targeting.size[0] / 2,
         this.statusBarData.dataAreas.targeting.size[1] / 2 - 15];
 
-        this.text.disabled = new PIXI.Text("Disabled", font);
+        this.text.disabled = new PIXI.Text({ text: "Disabled", style: font });
         this.text.disabled.anchor.x = 0.5;
         this.text.disabled.anchor.y = 1;
         this.text.disabled.position.x = middle[0];
@@ -285,7 +288,7 @@ class StatusBar {
 
         this.targetContainer.addChild(this.text.disabled);
 
-        this.text.noTarget = new PIXI.Text("No Target", dimFont);
+        this.text.noTarget = new PIXI.Text({ text: "No Target", style: dimFont });
         this.text.noTarget.anchor.x = 0.5;
         this.text.noTarget.anchor.y = 0.5;
         this.text.noTarget.position.x = middle[0];
@@ -298,7 +301,7 @@ class StatusBar {
         targetFont.wordWrapWidth = Math.max(1, size[0] - 12);
         targetFont.breakWords = false;
         targetFont.lineHeight = 13;
-        this.text.targetName = new PIXI.Text("Name Placeholder", targetFont);
+        this.text.targetName = new PIXI.Text({ text: "Name Placeholder", style: targetFont });
         this.text.targetName.anchor.x = 0.5;
         this.text.targetName.anchor.y = 0.5;
         this.text.targetName.position.x = middle[0];
@@ -310,7 +313,7 @@ class StatusBar {
         subtitleFont.fontSize = 10;
         subtitleFont.wordWrap = true;
         subtitleFont.wordWrapWidth = Math.max(1, size[0] - 12);
-        this.text.targetSubtitle = new PIXI.Text('', subtitleFont);
+        this.text.targetSubtitle = new PIXI.Text({ text: '', style: subtitleFont });
         this.text.targetSubtitle.anchor.set(0.5, 0.5);
         this.text.targetSubtitle.position.set(middle[0], 22);
         this.targetContainer.addChild(this.text.targetSubtitle);
@@ -642,9 +645,6 @@ class StatusBar {
         this.requestedTargetPict = undefined;
         this.readyTargetPict = undefined;
         this.targetPictRequest++;
-        this.targetRenderTexture?.destroy(true);
-        this.targetRenderTexture = undefined;
-        this.targetRenderTextureSize = { width: 0, height: 0 };
     }
     showLandingMessage(message: string, now: number, durationMs = 3_500) {
         this.landingMessage.text = message;
@@ -660,6 +660,9 @@ class StatusBar {
     destroy() {
         this.clearTarget();
         this.showLandingMessage('', 0);
+        this.targetRenderTexture?.destroy(true);
+        this.targetRenderTexture = undefined;
+        this.targetRenderTextureSize = { width: 0, height: 0 };
     }
 }
 

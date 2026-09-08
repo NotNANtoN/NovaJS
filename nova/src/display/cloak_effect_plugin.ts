@@ -127,7 +127,7 @@ export const CloakEffectPlugin: Plugin = {
             throw new Error('Expected space resource');
         }
         const wakeGraphics = new PIXI.Graphics();
-        wakeGraphics.name = 'CloakWakeGraphics';
+        wakeGraphics.label = 'CloakWakeGraphics';
         wakeGraphics.zIndex = 8.5;
         world.resources.set(CloakWakeGraphics, attachGraphic(space, wakeGraphics));
         world.addSystem(ClearCloakWakes);
