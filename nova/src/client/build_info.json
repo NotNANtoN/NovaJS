@@ -1,5 +1,5 @@
 {
-  "commit": "e2004c0e",
-  "message": "fix: preserve jump fuel and health across hyperjumps, resolve Pixi v8 deprecations and bindgroup texture leak",
-  "date": "2026-09-08 17:05 +0200"
+  "commit": "0b7cb8b8",
+  "message": "fix: zero-ton cargo mission acceptance, landed spaceport recharge sidebar updates, and eliminate texture destruction bindgroup warning",
+  "date": "2026-09-08 18:36 +0200"
 }

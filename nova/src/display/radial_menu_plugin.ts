@@ -101,6 +101,8 @@ export const RADIAL_OPTIONS: RadialOption[] = [
     },
 ];
 
+export type RadialActionId = typeof RADIAL_OPTIONS[number]['id'];
+
 export function computeRadialSelection(
     dx: number,
     dy: number,

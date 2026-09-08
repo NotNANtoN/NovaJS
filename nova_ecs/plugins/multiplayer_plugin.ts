@@ -497,6 +497,7 @@ function canApplyComponentUpdate(
     entity: Entity,
     context: ReplicationMergeContext,
 ): boolean {
+    const policy = policyFor(componentName);
     if (!canApplyInbound(
         componentName,
         context.source,
@@ -511,7 +512,6 @@ function canApplyComponentUpdate(
         }
         return false;
     }
-    const policy = policyFor(componentName);
     return !(isOwnerToServer(context)
         && policy.acceptInitialOwnerState === false
         && !hasComponentNamed(entity, componentName));

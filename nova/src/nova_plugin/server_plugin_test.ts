@@ -251,7 +251,7 @@ describe('combat resource bootstrap', () => {
     it('preserves spent jump fuel and damaged health across room transitions', async () => {
         const { world, entity, store } = setup();
         const data = new MockGameData();
-        data.data.Ship.map.set('nova:128', { ...getDefaultShipData(), id: 'nova:128', fuelCapacity: 300, shield: 200, armor: 150 });
+        data.data.Ship.map.set('nova:128', { ...getDefaultShipData(), id: 'nova:128', fuelCapacity: 300, shields: 200 } as any);
         Object.assign(store, {
             get: async () => ({ ...createInitialPlayerState(), fuel: 300 }),
             saveCombatResources: jasmine.createSpy('saveCombatResources'),
@@ -263,8 +263,8 @@ describe('combat resource bootstrap', () => {
         const first = world.entities.get('player')!;
         expect(first.components.get(PlayerStateComponent)!.fuel).toBe(300);
 
-        first.components.set(ShieldComponent, new Stat({ current: 80, max: 200 }));
-        first.components.set(ArmorComponent, new Stat({ current: 50, max: 150 }));
+        first.components.set(ShieldComponent, new Stat({ current: 80, max: 200, recharge: 0 }));
+        first.components.set(ArmorComponent, new Stat({ current: 50, max: 150, recharge: 0 }));
         const authority = first.components.get(CombatAuthorityComponent)!;
         authority.capture(first);
         expect(authority.armor).toBe(50);
@@ -275,8 +275,8 @@ describe('combat resource bootstrap', () => {
         const arriving = new Entity()
             .addComponent(MultiplayerData, { owner: 'peer' })
             .addComponent(PlayerStateComponent, arrivalState)
-            .addComponent(ShieldComponent, new Stat({ current: 80, max: 200 }))
-            .addComponent(ArmorComponent, new Stat({ current: 50, max: 150 }));
+            .addComponent(ShieldComponent, new Stat({ current: 80, max: 200, recharge: 0 }))
+            .addComponent(ArmorComponent, new Stat({ current: 50, max: 150, recharge: 0 }));
         world.entities.set('arriving', arriving);
         world.step();
 

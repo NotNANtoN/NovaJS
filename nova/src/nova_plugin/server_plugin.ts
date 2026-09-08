@@ -1,7 +1,7 @@
 import * as t from 'io-ts';
 import { Entities, GetEntity, GetWorld, UUID } from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
-import { CombatAuthorityComponent, bindCombatOwner, combatLedger,
+import { CombatAuthority, CombatAuthorityComponent, bindCombatOwner, combatLedger,
     makePlayerDataWithCombatResources as makePlayerData } from './combat_resources';
 import { ShipComponent } from './ship_plugin';
 import { OutfitsStateComponent } from './outfit_plugin';

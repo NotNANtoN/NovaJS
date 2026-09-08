@@ -654,8 +654,8 @@ class StatusBar {
         const shipData = ship.components.get(ShipDataComponent);
         const capacity = shipData?.fuelCapacity ?? 0;
         this.drawStats(
-            shield ?? new Stat({ current: 1, max: 1 }),
-            armor ?? new Stat({ current: 1, max: 1 }),
+            shield ?? new Stat({ current: 1, max: 1, recharge: 0 }),
+            armor ?? new Stat({ current: 1, max: 1, recharge: 0 }),
             capacity > 0 && playerState ? { fuel: playerState.fuel ?? 0, capacity } : undefined,
             playerState,
         );
