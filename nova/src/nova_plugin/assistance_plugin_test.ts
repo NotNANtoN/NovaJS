@@ -20,6 +20,9 @@ import {
     AssistancePlugin,
     AssistanceRequestComponent,
 } from './assistance_plugin';
+import { DisabledComponent } from './death_plugin';
+import { JumpStateComponent } from './jump_plugin';
+import { GovtComponent } from './npc_components';
 import { DestructionStartedComponent } from './destruction_state';
 import { assistanceGenerosity } from './comms';
 import {
@@ -104,6 +107,14 @@ function freeHelperUuid(): string {
     throw new Error('Could not find a generous test helper');
 }
 
+function paidHelperUuids(): string[] {
+    return Array.from({ length: 100 }, (_, index) => `paid-${index}`)
+        .filter(uuid => {
+            const generosity = assistanceGenerosity(PLAYER_UUID, uuid);
+            return generosity >= 0.25 && generosity < 0.75;
+        });
+}
+
 function submitRequest(
     player: Entity,
     helper: string,
@@ -118,6 +129,216 @@ function submitRequest(
 }
 
 describe('ship assistance', () => {
+    for (const failure of [
+        'timeout', 'helper-disabled', 'helper-left-system', 'player-left-system',
+        'helper-destroyed', 'player-destroyed', 'player-jumped', 'helper-jumped',
+        'invalid-helper',
+    ] as const) {
+        it(`refunds a paid rescue exactly once on ${failure}`, async () => {
+            const world = await makeWorld();
+            const player = playerAt(0);
+            const [id, otherId] = paidHelperUuids();
+            const helper = helperAt(id, 2_000);
+            world.entities.set(PLAYER_UUID, player);
+            world.entities.set(id, helper);
+            world.entities.set(otherId, helperAt(otherId, 2_000));
+            submitRequest(player, id, 1, 'accept');
+            world.step();
+            expect(player.components.get(PlayerStateComponent)!.credits).toBe(9500);
+            // Even a request not yet observed by RequestSystem must not queue.
+            submitRequest(player, otherId, 2, 'accept');
+            switch (failure) {
+                case 'timeout':
+                    world.resources.get(TimeResource)!.time =
+                        helper.components.get(AssistanceOrderComponent)!.expiresAt;
+                    break;
+                case 'helper-disabled': helper.components.set(DisabledComponent, true); break;
+                case 'helper-destroyed': helper.components.set(DestructionStartedComponent, true); break;
+                case 'player-destroyed': player.components.set(DestructionStartedComponent, true); break;
+                case 'player-jumped': player.components.set(JumpStateComponent, {} as never); break;
+                case 'helper-jumped': helper.components.set(JumpStateComponent, {} as never); break;
+                case 'helper-left-system': world.entities.delete(id); break;
+                case 'player-left-system': world.entities.delete(PLAYER_UUID); break;
+                case 'invalid-helper': helper.components.delete(MovementPhysicsComponent); break;
+            }
+            if (failure.endsWith('left-system')) {
+                // Removal must settle before the next frame / transfer snapshot.
+                expect(player.components.get(PlayerStateComponent)!.credits).toBe(10000);
+            }
+            world.step();
+            world.step();
+            expect(player.components.get(AssistanceOutcomeComponent)).toEqual({
+                helper: id, sequence: 1, phase: 'failed', reason: failure,
+                refundedCredits: 500,
+            });
+            expect(player.components.get(PlayerStateComponent)!.credits).toBe(10000);
+            expect(player.components.get(PlayerStateComponent)!.fuel).toBe(0);
+            expect(helper.components.has(AssistanceOrderComponent)).toBeFalse();
+            expect(world.entities.get(otherId)!.components.has(AssistanceOrderComponent)).toBeFalse();
+        });
+    }
+
+    it('refunds before a jumping player is transferred and does not refund again on re-entry', async () => {
+        const world = await makeWorld();
+        const player = playerAt(0);
+        const [id] = paidHelperUuids();
+        const helper = helperAt(id, 2_000);
+        world.entities.set(PLAYER_UUID, player);
+        world.entities.set(id, helper);
+        submitRequest(player, id, 1, 'accept');
+        world.step();
+        player.components.set(JumpStateComponent, {} as never);
+        world.entities.delete(PLAYER_UUID);
+        expect(player.components.get(PlayerStateComponent)!.credits).toBe(10000);
+        expect(player.components.get(AssistanceOutcomeComponent)?.reason).toBe('player-jumped');
+        player.components.delete(JumpStateComponent);
+        world.entities.set(PLAYER_UUID, player);
+        world.step();
+        world.entities.delete(PLAYER_UUID);
+        expect(player.components.get(PlayerStateComponent)!.credits).toBe(10000);
+        expect(helper.components.has(AssistanceOrderComponent)).toBeFalse();
+    });
+
+    it('does not let malformed sequences reset a consumed player-wide watermark', async () => {
+        const world = await makeWorld();
+        const player = playerAt(0);
+        const [id, otherId] = paidHelperUuids();
+        const helper = helperAt(id, 2_000);
+        helper.components.set(DisabledComponent, true);
+        world.entities.set(PLAYER_UUID, player);
+        world.entities.set(id, helper);
+        world.entities.set(otherId, helperAt(otherId, 2_000));
+        submitRequest(player, id, 5, 'accept');
+        world.step();
+        submitRequest(player, otherId, Number.MAX_SAFE_INTEGER + 1, 'accept');
+        world.step();
+        submitRequest(player, otherId, 4, 'accept');
+        world.step();
+        expect(player.components.get(PlayerStateComponent)!.credits).toBe(10000);
+        submitRequest(player, otherId, 6, 'accept');
+        world.step();
+        expect(player.components.get(PlayerStateComponent)!.credits).toBe(9500);
+    });
+
+    it('removes its departure subscription when the plugin is removed', async () => {
+        const world = await makeWorld();
+        const player = playerAt(0);
+        const [id] = paidHelperUuids();
+        world.entities.set(PLAYER_UUID, player);
+        world.entities.set(id, helperAt(id, 2_000));
+        submitRequest(player, id, 1, 'accept');
+        world.step();
+        await world.removePlugin(AssistancePlugin);
+        world.entities.delete(id);
+        expect(player.components.get(PlayerStateComponent)!.credits).toBe(9500);
+    });
+
+    for (const reason of ['helper-disabled', 'government-unavailable'] as const) {
+        it(`rejects ${reason} before payment and requires a fresh sequence to retry`, async () => {
+            const world = await makeWorld();
+            const player = playerAt(0);
+            const [id, otherId] = paidHelperUuids();
+            const helper = helperAt(id, 2_000);
+            if (reason === 'helper-disabled') helper.components.set(DisabledComponent, true);
+            else helper.components.set(GovtComponent, { id: 123 });
+            world.entities.set(PLAYER_UUID, player);
+            world.entities.set(id, helper);
+            world.entities.set(otherId, helperAt(otherId, 2_000));
+            submitRequest(player, id, 1, 'accept');
+            world.step();
+            expect(player.components.get(AssistanceOutcomeComponent)).toEqual({
+                helper: id, sequence: 1, phase: 'failed', reason,
+            });
+            expect(player.components.get(PlayerStateComponent)!.credits).toBe(10000);
+            expect(helper.components.has(AssistanceOrderComponent)).toBeFalse();
+            submitRequest(player, otherId, 1, 'accept');
+            world.step();
+            expect(player.components.get(PlayerStateComponent)!.credits).toBe(10000);
+            submitRequest(player, otherId, 2, 'accept');
+            world.step();
+            expect(player.components.get(PlayerStateComponent)!.credits).toBe(9500);
+        });
+    }
+    for (const replacement of [
+        'duplicate', 'new-sequence', 'other-helper', 'invalid-helper',
+    ] as const) {
+        it(`preserves a paid rescue on ${replacement} requests`, async () => {
+            const world = await makeWorld();
+            const player = playerAt(0);
+            const [firstId, secondId] = paidHelperUuids();
+            const first = helperAt(firstId, 2_000);
+            const second = helperAt(secondId, 2_000);
+            world.entities.set(PLAYER_UUID, player);
+            world.entities.set(firstId, first);
+            world.entities.set(secondId, second);
+            const credits = player.components.get(PlayerStateComponent)!.credits;
+            submitRequest(player, firstId, 1, 'accept');
+            world.step();
+            const expiresAt = first.components.get(AssistanceOrderComponent)!.expiresAt;
+
+            submitRequest(player,
+                replacement === 'invalid-helper' ? ''
+                    : replacement === 'other-helper' ? secondId : firstId,
+                replacement === 'duplicate' ? 1 : 2, 'accept');
+            world.step();
+            world.step();
+
+            expect(player.components.get(PlayerStateComponent)!.credits).toBe(credits - 500);
+            expect(player.components.get(AssistanceOutcomeComponent)).toEqual({
+                helper: firstId, sequence: 1, phase: 'approaching',
+            });
+            expect(first.components.get(AssistanceOrderComponent)).toEqual({
+                player: PLAYER_UUID, sequence: 1, expiresAt,
+            });
+            expect(second.components.has(AssistanceOrderComponent)).toBeFalse();
+
+            first.components.set(MovementStateComponent, movementAt(0, 0));
+            world.step();
+            world.step();
+            expect(player.components.get(AssistanceOutcomeComponent)).toEqual({
+                helper: firstId, sequence: 1, phase: 'completed',
+            });
+            expect(player.components.get(PlayerStateComponent)!.fuel).toBe(100);
+            expect(player.components.get(PlayerStateComponent)!.credits).toBe(credits - 500);
+            expect(first.components.has(AssistanceOrderComponent)).toBeFalse();
+            expect(second.components.has(AssistanceOrderComponent)).toBeFalse();
+
+            // A genuinely new rescue remains possible after completion.
+            player.components.get(PlayerStateComponent)!.fuel = 0;
+            submitRequest(player, secondId, 3, 'accept');
+            world.step();
+            expect(player.components.get(AssistanceOutcomeComponent)).toEqual({
+                helper: secondId, sequence: 3, phase: 'approaching',
+            });
+            expect(player.components.get(PlayerStateComponent)!.credits).toBe(credits - 1000);
+        });
+    }
+
+    it('preserves timeout semantics and does not run an ignored request afterward', async () => {
+        const world = await makeWorld();
+        const player = playerAt(0);
+        const [firstId, secondId] = paidHelperUuids();
+        const first = helperAt(firstId, 2_000);
+        const second = helperAt(secondId, 2_000);
+        world.entities.set(PLAYER_UUID, player);
+        world.entities.set(firstId, first);
+        world.entities.set(secondId, second);
+        submitRequest(player, firstId, 1, 'accept');
+        world.step();
+        submitRequest(player, secondId, 2, 'accept');
+        world.resources.get(TimeResource)!.time =
+            first.components.get(AssistanceOrderComponent)!.expiresAt;
+        world.step();
+        world.step();
+        expect(player.components.get(AssistanceOutcomeComponent)).toEqual({
+            helper: firstId, sequence: 1, phase: 'failed', reason: 'timeout',
+                        refundedCredits: 500,
+        });
+        expect(player.components.get(PlayerStateComponent)!.credits).toBe(10000);
+        expect(first.components.has(AssistanceOrderComponent)).toBeFalse();
+        expect(second.components.has(AssistanceOrderComponent)).toBeFalse();
+    });
+
     it('does not grant fuel while the helper is far away', async () => {
         const world = await makeWorld();
         const player = playerAt(0);

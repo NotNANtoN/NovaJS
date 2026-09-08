@@ -1,3 +1,4 @@
+import { isDraft } from 'immer';
 import { Animation } from "novadatainterface/Animation";
 import { GameDataInterface } from "novadatainterface/GameDataInterface";
 import { Emit, UUID } from "nova_ecs/arg_types";
@@ -6,7 +7,11 @@ import { Angle } from "nova_ecs/datatypes/angle";
 import { Vector } from "nova_ecs/datatypes/vector";
 import { Optional } from "nova_ecs/optional";
 import { Plugin } from "nova_ecs/plugin";
-import { MovementStateComponent, MovementSystem } from "nova_ecs/plugins/movement_plugin";
+import { MovementState, MovementStateComponent, MovementSystem, RemoteMovementPresentationSystem, RemoteMovementPresentationComponent } from "nova_ecs/plugins/movement_plugin";
+import { TimeResource, TimeSystem } from "nova_ecs/plugins/time_plugin";
+import { BOUNDARY } from "nova_ecs/datatypes/position";
+import { ProjectileComponent } from './projectile_data';
+import { sweptHullTime } from './swept_collision';
 import { ProvideAsync } from "nova_ecs/provide_async";
 import { Query } from "nova_ecs/query";
 import { Resource } from "nova_ecs/resource";
@@ -53,11 +58,15 @@ function getPolygonBatchGeometry(hull: Hull): PolygonBatchGeometry | undefined {
     }
 
     const geometry = {
-        polygons,
+        // Copy the collection: a WeakMap does not make its values weak, and
+        // hull.shapes can be a revocable draft array on a long-lived hull.
+        polygons: [...polygons],
         vertices: new Float32Array(vertices),
         offsets: new Uint32Array(offsets),
     };
-    polygonBatchGeometry.set(hull, geometry);
+    if (!isDraft(hull) && !polygons.some(polygon => isDraft(polygon))) {
+        polygonBatchGeometry.set(hull, geometry);
+    }
     return geometry;
 }
 
@@ -323,6 +332,9 @@ enum RBushEntryType {
 type RBushEntry = BBox & {
     uuid: string,
     hull: Hull,
+    displacement: { x: number, y: number },
+    position: { x: number, y: number },
+    projectile: boolean,
 } & ({
     type: RBushEntryType.hurtbox,
     hitter: CollisionHitter,
@@ -332,11 +344,28 @@ type RBushEntry = BBox & {
 });
 
 export const RBushResource = new Resource<RBush<RBushEntry>>("RBushResource");
-const rbushEntriesByTree = new WeakMap<
-    RBush<RBushEntry>,
-    Map<string, Map<RBushEntryType, RBushEntry>>
->();
-const RBUSH_EPSILON = 0.0001;
+const movementStarts = new WeakMap<RBush<RBushEntry>, Map<string, { x: number, y: number }>>();
+
+export const CaptureCollisionMovementSystem = new System({
+    name: 'CaptureCollisionMovementSystem',
+    args: [RBushResource, TimeResource, new Query([
+        UUID, MovementStateComponent, Optional(RemoteMovementPresentationComponent),
+    ] as const), SingletonComponent] as const,
+    after: [TimeSystem],
+    before: [MovementSystem],
+    step(tree, time, movements) {
+        const starts = new Map<string, { x: number, y: number }>();
+        // Never join separate ticks, pauses, or observer snapshot corrections.
+        if (Number.isFinite(time.delta_s) && time.delta_s > 0) {
+            for (const [id, movement, presentation] of movements) {
+                if (!presentation) starts.set(id, {
+                    x: movement.position.x, y: movement.position.y,
+                });
+            }
+        }
+        movementStarts.set(tree, starts);
+    },
+});
 
 export function getBoundingBox(shapes: Shape[]): BBox {
     return shapes.map(
@@ -409,106 +438,75 @@ export const UpdateHitboxHullSystem = new System({
         hull.pos.y = movement.position.y;
         hull.angle = angle;
     },
-    after: [MovementSystem],
+    after: [MovementSystem, RemoteMovementPresentationSystem],
 });
 
 export const UpdateHurtboxHullSystem = new System({
     name: "UpdateHurtboxHullSystem",
     args: [MovementStateComponent, HurtboxHullComponent, Optional(AnimationComponent)] as const,
     step: UpdateHitboxHullSystem.step,
-    after: [MovementSystem],
+    after: [MovementSystem, RemoteMovementPresentationSystem],
 });
+
+// Local event extension; beam and other discrete events keep their existing shape.
+export interface SweptCollisionContact {
+    other: string;
+    initiator: boolean;
+    impactPosition?: { x: number, y: number };
+}
 
 export const CollisionSystem = new System({
     name: "CollisionSystem",
-    after: [UpdateHitboxHullSystem],
+    after: [UpdateHitboxHullSystem, UpdateHurtboxHullSystem],
     args: [RBushResource,
-        new Query([HitboxHullComponent, UUID, CollisionVulnerabilityComponent] as const),
-        new Query([HurtboxHullComponent, UUID, CollisionHitterComponent] as const),
+        new Query([HitboxHullComponent, UUID, CollisionVulnerabilityComponent, Optional(MovementStateComponent)] as const),
+        new Query([HurtboxHullComponent, UUID, CollisionHitterComponent, Optional(ProjectileComponent), Optional(MovementStateComponent)] as const),
         Emit, SingletonComponent] as const,
     step(rbush, hitboxColliders, hurtboxColliders, emit) {
-        let entriesByEntity = rbushEntriesByTree.get(rbush);
-        if (!entriesByEntity) {
-            entriesByEntity = new Map();
-            rbushEntriesByTree.set(rbush, entriesByEntity);
-        }
-
-        function makeRbushEntry(type: RBushEntryType, [hull, uuid, interaction]:
-            readonly [Hull, string, CollisionHitter | CollisionVulnerability]): RBushEntry {
+        const starts = movementStarts.get(rbush);
+        movementStarts.delete(rbush);
+        // Hulls and interaction components can be mutable or revocable drafts.
+        // Keep tree entries only for this invocation, never across ticks.
+        rbush.clear();
+        const currentEntries: RBushEntry[] = [];
+        function updateEntry(type: RBushEntryType, hull: Hull, uuid: string,
+            interaction: CollisionHitter | CollisionVulnerability,
+            movement: MovementState | undefined, projectile = false) {
+            const start = starts?.get(uuid);
+            // Translate endpoint geometry by actual entity travel, not by the
+            // hull origin: an offset hull is not additional movement.
+            let displacement = start && movement
+                ? { x: movement.position.x - start.x, y: movement.position.y - start.y }
+                : { x: 0, y: 0 };
+            if (!Number.isFinite(displacement.x) || !Number.isFinite(displacement.y)
+                || Math.abs(displacement.x) >= BOUNDARY
+                || Math.abs(displacement.y) >= BOUNDARY) {
+                displacement = { x: 0, y: 0 };
+            }
+            const bbox = hull.bbox;
             const entry = {
-                ...hull.bbox,
-                uuid,
-                hull,
-                type,
+                ...(type === RBushEntryType.hitbox || projectile ? {
+                    minX: Math.min(bbox.minX, bbox.minX - displacement.x),
+                    minY: Math.min(bbox.minY, bbox.minY - displacement.y),
+                    maxX: Math.max(bbox.maxX, bbox.maxX - displacement.x),
+                    maxY: Math.max(bbox.maxY, bbox.maxY - displacement.y),
+                } : bbox),
+                uuid, hull, type, displacement, projectile,
+                position: {
+                    x: movement?.position.x ?? hull.pos.x,
+                    y: movement?.position.y ?? hull.pos.y,
+                },
+                ...('vulnerableTo' in interaction
+                    ? { vulnerability: interaction } : { hitter: interaction }),
             } as RBushEntry;
-            if ('vulnerableTo' in interaction) {
-                (entry as { vulnerability: CollisionVulnerability })
-                    .vulnerability = interaction;
-            } else {
-                (entry as { hitter: CollisionHitter }).hitter = interaction;
-            }
-            return entry;
+            currentEntries.push(entry);
         }
-
-        const currentEntries = new Set<RBushEntry>();
-        function updateEntry(type: RBushEntryType, data:
-            readonly [Hull, string, CollisionHitter | CollisionVulnerability]) {
-            const [hull, uuid, interaction] = data;
-            let entriesForEntity = entriesByEntity!.get(uuid);
-            if (!entriesForEntity) {
-                entriesForEntity = new Map();
-                entriesByEntity!.set(uuid, entriesForEntity);
-            }
-
-            let entry = entriesForEntity.get(type);
-            if (!entry) {
-                entry = makeRbushEntry(type, data);
-                entriesForEntity.set(type, entry);
-                rbush.insert(entry);
-            } else {
-                const bbox = hull.bbox;
-                const changed = [
-                    Math.abs(entry.minX - bbox.minX),
-                    Math.abs(entry.minY - bbox.minY),
-                    Math.abs(entry.maxX - bbox.maxX),
-                    Math.abs(entry.maxY - bbox.maxY),
-                ].some(delta => delta > RBUSH_EPSILON);
-                if (changed) {
-                    rbush.remove(entry);
-                    entry.minX = bbox.minX;
-                    entry.minY = bbox.minY;
-                    entry.maxX = bbox.maxX;
-                    entry.maxY = bbox.maxY;
-                    rbush.insert(entry);
-                }
-                entry.hull = hull;
-                if ('vulnerableTo' in interaction) {
-                    (entry as { vulnerability: CollisionVulnerability })
-                        .vulnerability = interaction;
-                } else {
-                    (entry as { hitter: CollisionHitter }).hitter = interaction;
-                }
-            }
-            currentEntries.add(entry);
+        for (const [hull, uuid, interaction, movement] of hitboxColliders) {
+            updateEntry(RBushEntryType.hitbox, hull, uuid, interaction, movement);
         }
-
-        for (const data of hitboxColliders) {
-            updateEntry(RBushEntryType.hitbox, data);
-        }
-        for (const data of hurtboxColliders) {
-            updateEntry(RBushEntryType.hurtbox, data);
-        }
-
-        for (const [uuid, entriesForEntity] of entriesByEntity) {
-            for (const [type, entry] of entriesForEntity) {
-                if (!currentEntries.has(entry)) {
-                    rbush.remove(entry);
-                    entriesForEntity.delete(type);
-                }
-            }
-            if (entriesForEntity.size === 0) {
-                entriesByEntity.delete(uuid);
-            }
+        for (const [hull, uuid, interaction, projectile, movement] of hurtboxColliders) {
+            updateEntry(RBushEntryType.hurtbox, hull, uuid, interaction, movement,
+                projectile !== undefined);
         }
 
         // Check for collisions
@@ -525,37 +523,58 @@ export const CollisionSystem = new System({
             collisionsWith.add(b);
         }
 
-        for (const entry of currentEntries) {
-            // Hurtboxes (projectiles, beams, blasts) initiate collisions against hitboxes (ships, asteroids).
-            // Hitboxes do not search the tree, halving broadphase query overhead.
-            if (entry.type !== RBushEntryType.hurtbox) {
-                continue;
-            }
-
-            const maybeCollisions = rbush.search(entry);
-
-            for (const other of maybeCollisions) {
-                if (other.type !== RBushEntryType.hitbox || other.uuid === entry.uuid) {
+        const contacts: { entry: RBushEntry, other: RBushEntry, time: number }[] = [];
+        try {
+            // Only hitboxes are searched for; indexing hurtboxes wastes tree
+            // work, particularly with many projectiles in flight.
+            rbush.load(currentEntries.filter(entry => entry.type === RBushEntryType.hitbox));
+            for (const entry of currentEntries) {
+                // Hurtboxes (projectiles, beams, blasts) initiate collisions against hitboxes (ships, asteroids).
+                // Hitboxes do not search the tree, halving broadphase query overhead.
+                if (entry.type !== RBushEntryType.hurtbox) {
                     continue;
                 }
-                const hitter = entry.hitter;
-                const vulnerability = (other as { vulnerability: CollisionVulnerability }).vulnerability;
 
-                if (!aHitsB(hitter, vulnerability)) {
-                    continue;
-                }
-                if (!hasAlreadyCollided(entry.uuid, other.uuid) && entry.hull.collides(other.hull)) {
-                    recordCollision(entry.uuid, other.uuid);
-                    emit(CollisionEvent, {
-                        other: other.uuid,
-                        initiator: true,
-                    }, [entry.uuid]);
-                    emit(CollisionEvent, {
-                        other: entry.uuid,
-                        initiator: false,
-                    }, [other.uuid]);
+                const maybeCollisions = rbush.search(entry);
+
+                for (const other of maybeCollisions) {
+                    if (other.type !== RBushEntryType.hitbox || other.uuid === entry.uuid) {
+                        continue;
+                    }
+                    const hitter = entry.hitter;
+                    const vulnerability = (other as { vulnerability: CollisionVulnerability }).vulnerability;
+
+                    if (!aHitsB(hitter, vulnerability)) {
+                        continue;
+                    }
+                    const time = entry.projectile
+                        ? sweptHullTime(entry.hull.shapes, other.hull.shapes,
+                            entry.displacement, other.displacement)
+                        : entry.hull.collides(other.hull) ? 1 : undefined;
+                    if (time !== undefined) contacts.push({ entry, other, time });
                 }
             }
+            // Emit all candidates: ownership/proximity checks may reject the first.
+            // Queued UUID events for a consumed projectile are skipped by the ECS.
+            contacts.sort((a, b) => a.time - b.time
+                || a.entry.uuid.localeCompare(b.entry.uuid)
+                || a.other.uuid.localeCompare(b.other.uuid));
+            for (const { entry, other, time } of contacts) {
+                if (hasAlreadyCollided(entry.uuid, other.uuid)) continue;
+                recordCollision(entry.uuid, other.uuid);
+                const contact: SweptCollisionContact = { other: other.uuid, initiator: true };
+                if (entry.projectile && time < 1
+                    && (entry.displacement.x !== 0 || entry.displacement.y !== 0)) {
+                    contact.impactPosition = {
+                        x: entry.position.x - entry.displacement.x * (1 - time),
+                        y: entry.position.y - entry.displacement.y * (1 - time),
+                    };
+                }
+                emit(CollisionEvent, contact, [entry.uuid]);
+                emit(CollisionEvent, { other: entry.uuid, initiator: false }, [other.uuid]);
+            }
+        } finally {
+            rbush.clear();
         }
     }
 });
@@ -580,6 +599,7 @@ export const CollisionsPlugin: Plugin = {
 
         world.addSystem(HitboxHullProvider);
 
+        world.addSystem(CaptureCollisionMovementSystem);
         world.addSystem(UpdateHitboxHullSystem);
         world.addSystem(UpdateHurtboxHullSystem);
         world.addSystem(CollisionSystem);

@@ -5,6 +5,10 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MockGameData } from 'novadatainterface/MockGameData';
+import { getDefaultShipData } from 'novadatainterface/ShipData';
+import { getDefaultPlanetData } from 'novadatainterface/PlanetData';
+import { getDefaultSystemData } from 'novadatainterface/SystemData';
+import { combatLedger } from '../nova_plugin/combat_resources';
 import { EncodedEntity } from 'nova_ecs/plugins/serializer_plugin';
 import { createInitialPlayerState } from '../nova_plugin/player_state';
 import { PlayerStore } from './player_store';
@@ -40,14 +44,16 @@ describe('/player/state', () => {
     let playerStore: PlayerStore;
     let server: Server;
     let baseUrl: string;
+    let gameData: MockGameData;
 
     beforeEach(async () => {
         directory = await mkdtemp(join(tmpdir(), 'novajs-routes-'));
         playerStore = new PlayerStore(join(directory, 'players.json'));
         await playerStore.ready;
         const app = express();
+        gameData = new MockGameData();
         setupRoutes(
-            new MockGameData(),
+            gameData,
             app,
             '/dev/null',
             '/dev/null',
@@ -71,6 +77,66 @@ describe('/player/state', () => {
             server.close(error => error ? reject(error) : resolve()));
         await playerStore.flush();
         await rm(directory, { recursive: true, force: true });
+    });
+
+    it('fences a delayed HTTP open before acknowledging recovery', async () => {
+        gameData.data.Ship.map.set('nova:128', { ...getDefaultShipData(), id: 'nova:128', fuelCapacity: 300 });
+        gameData.data.Planet.map.set('port', { ...getDefaultPlanetData(), id: 'port', canLand: true, position: [0, 0] });
+        const system = { ...getDefaultSystemData(), id: 'nova:130', planets: ['port'] };
+        gameData.data.System.map.set('nova:130', system);
+        const authority = await combatLedger(playerStore, gameData).get('pilot');
+        authority.position = [0, 0];
+        authority.system = 'nova:130';
+        let entered!: () => void;
+        let release!: () => void;
+        const waiting = new Promise<void>(resolve => { entered = resolve; });
+        const gate = new Promise<void>(resolve => { release = resolve; });
+        spyOn(gameData.data.System, 'get').and.callFake(async () => {
+            entered(); await gate; return system;
+        });
+        const request = { token: 'pilot', action: 'open', planet: 'port',
+            revision: authority.balance.revision, state: createInitialPlayerState() };
+        const post = (body: unknown) => fetch(`${baseUrl}/player/combat/shop`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        });
+        const delayed = post(request);
+        await waiting;
+        try {
+            const recovery = await post({ ...request, action: 'recover' });
+            expect(recovery.status).toBe(200);
+            expect((await recovery.json() as { landed: unknown }).landed).toBeNull();
+        } finally { release(); }
+        expect((await delayed).status).toBe(409);
+        expect(authority.landed).toBeUndefined();
+    });
+
+    it('rejects combat transactions before server flight initialization', async () => {
+        const response = await fetch(`${baseUrl}/player/combat/shop`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: 'pilot', action: 'refuel', planet: 'port', revision: 0,
+                state: createInitialPlayerState() }),
+        });
+        expect(response.status).toBe(409);
+        expect(await playerStore.get('pilot')).toBeUndefined();
+    });
+
+    it('does not let HTTP snapshots seed or refill combat balances', async () => {
+        const state = createInitialPlayerState();
+        await playerStore.save('pilot', state);
+        playerStore.saveCombatResources('pilot', { shipId: state.shipId, fuel: 10,
+            ammo: { ammo: 1 }, revision: 5 });
+        const forged = { ...state, fuel: 10000, combatResources: {
+            shipId: 'forged', fuel: 10000, ammo: { ammo: 999 }, revision: 100,
+        } };
+        const response = await fetch(`${baseUrl}/player/snapshots`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: 'pilot', state: forged, replaceCurrent: forged }),
+        });
+        expect(response.status).toBe(200);
+        const saved = await playerStore.get('pilot');
+        expect(saved?.fuel).toBe(10);
+        expect(saved?.combatResources?.ammo.ammo).toBe(1);
+        expect(saved?.snapshots[0].state.combatResources?.ammo.ammo).toBe(1);
     });
 
     it('returns only PlayerData fields and includes the stored ship',
@@ -175,6 +241,8 @@ describe('/player/state', () => {
         const current = await fetch(`${baseUrl}/player/state?token=pilot`);
         const body = await current.json() as Record<string, any>;
         expect(body.playerState.pilotName).toBe('Replacement Captain');
+        expect(body.playerState.credits).toBe(createInitialPlayerState().credits);
+        expect(body.playerState.combatResources).toBeDefined();
         expect(body.snapshots).toEqual([
             jasmine.objectContaining({ pilotName: 'Previous Captain' }),
         ]);

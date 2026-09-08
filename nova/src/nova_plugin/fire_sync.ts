@@ -41,6 +41,8 @@ export const FireLogShot = t.intersection([
         rotation: AngleType,
     }),
     t.partial({
+        // Server emission order can differ from client intent order across weapons.
+        logSeq: t.number,
         sourceVelocity: VectorType,
         target: t.string,
         inaccuracy: t.number,
@@ -96,8 +98,8 @@ export function getFireLogDelta(
     if (!previous || !previous.shots || previous.shots.length === 0) {
         return current.shots && current.shots.length > 0 ? { shots: [...current.shots] } : undefined;
     }
-    const highestPrevSeq = Math.max(0, ...previous.shots.map(s => s.seq));
-    const newShots = current.shots.filter(s => s.seq > highestPrevSeq);
+    const highestPrevSeq = Math.max(0, ...previous.shots.map(fireLogSequence));
+    const newShots = current.shots.filter(s => fireLogSequence(s) > highestPrevSeq);
     return newShots.length > 0 ? { shots: newShots } : undefined;
 }
 
@@ -129,7 +131,10 @@ export interface FireSyncLocalState {
     highestIntentSeq: number;
     highestLogSeq: number;
     spawnedSeqs: Set<number>;
-    acceptedAt: Map<string, number[]>;
+    /** Contiguous local prediction range; never suppress unseen logs below its start. */
+    lowestPredictedSeq: number;
+    highestPredictedSeq: number;
+    nextLogSeq: number;
 }
 
 export const FireSyncLocalStateComponent =
@@ -191,13 +196,42 @@ export function newShotsAfter<T extends { seq: number }>(
         .sort((left, right) => left.seq - right.seq);
 }
 
+/** Legacy logs without logSeq retain their original ordering. */
+export function fireLogSequence(shot: FireLogShot): number {
+    return shot.logSeq ?? shot.seq;
+}
+
+export function newFireLogsAfter(shots: readonly FireLogShot[], highest: number): FireLogShot[] {
+    return shots.filter(shot => fireLogSequence(shot) > highest)
+        .sort((a, b) => fireLogSequence(a) - fireLogSequence(b));
+}
+
+export function rememberSpawnedShot(sync: FireSyncLocalState, seq: number,
+    predicted = false): void {
+    if (predicted && seq > sync.highestPredictedSeq) {
+        // Observing another owner's shots can advance nextSeq across a gap.
+        // Such gaps were not predicted here and must remain replayable.
+        if (sync.highestPredictedSeq === 0 || seq !== sync.highestPredictedSeq + 1) {
+            sync.lowestPredictedSeq = seq;
+        }
+        sync.highestPredictedSeq = seq;
+    }
+    sync.spawnedSeqs.add(seq);
+    // Rejected/expired predictions might never appear in FireLog. Never wait for
+    // acknowledgement to bound this set; the prediction watermark covers echoes.
+    while (sync.spawnedSeqs.size > FIRE_BUFFER_SIZE) {
+        sync.spawnedSeqs.delete(sync.spawnedSeqs.values().next().value!);
+    }
+}
+
 function highestSequence(
     intent: FireIntent | undefined,
     log: FireLog | undefined,
 ): number {
     return Math.max(0,
-        ...(intent?.shots.map(shot => shot.seq) ?? []),
-        ...(log?.shots.map(shot => shot.seq) ?? []));
+        ...[...(intent?.shots ?? []), ...(log?.shots ?? [])]
+            .map(shot => shot.seq)
+            .filter(seq => Number.isSafeInteger(seq) && seq > 0));
 }
 
 export function getFireSyncLocalState(
@@ -214,15 +248,17 @@ export function getFireSyncLocalState(
     // Marking the buffer as already handled hid the first volley (and any
     // in-flight rounds when a ship entered interest). fireFromLog already
     // skips shots whose lifetime has elapsed, so replaying the live tail is
-    // safe. Intent stays at `seen` so a rebuilt local world does not re-queue
-    // the player's own trigger events.
+    // safe. The server intent watermark is advanced by the intent scheduler;
+    // this local component must survive removal/readdition of the wire buffer.
     const seen = highestSequence(intent, log);
     const state: FireSyncLocalState = {
         nextSeq: seen + 1,
         highestIntentSeq: 0,
         highestLogSeq: 0,
         spawnedSeqs: new Set(),
-        acceptedAt: new Map(),
+        lowestPredictedSeq: Infinity,
+        highestPredictedSeq: 0,
+        nextLogSeq: Math.max(0, ...(log?.shots.map(fireLogSequence) ?? [])) + 1,
     };
     entity.components.set(FireSyncLocalStateComponent, state);
     return state;
@@ -269,6 +305,7 @@ export function makeFireLogShot(
     position: Position,
     rotation: Angle,
     extras: {
+        logSeq?: number,
         sourceVelocity?: Vector,
         target?: string,
         inaccuracy?: number,
@@ -280,6 +317,9 @@ export function makeFireLogShot(
         position: Position.fromVectorLike(position),
         rotation: Angle.fromAngleLike(rotation),
     };
+    if (extras.logSeq !== undefined) {
+        logged.logSeq = extras.logSeq;
+    }
     if (extras.sourceVelocity) {
         logged.sourceVelocity = new Vector(
             extras.sourceVelocity.x, extras.sourceVelocity.y);

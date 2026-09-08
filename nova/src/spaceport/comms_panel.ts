@@ -23,7 +23,7 @@ import {
     commsLineIndex,
     hailPromptBlock,
 } from '../nova_plugin/comms';
-import { DisabledComponent } from '../nova_plugin/death_plugin';
+import { DisabledComponent, PlayerDeathComponent } from '../nova_plugin/death_plugin';
 import {
     GovernmentRelation,
     canHailGovernment,
@@ -38,6 +38,10 @@ import {
     AssistanceOutcomeComponent,
     AssistanceRequestComponent,
 } from '../nova_plugin/assistance_plugin';
+import {
+    SurrenderRequestComponent,
+    SurrenderOutcomeComponent,
+} from '../nova_plugin/surrender_plugin';
 import { Button } from './button';
 import {
     COMMS_LAYOUT,
@@ -99,9 +103,22 @@ export class Comms extends Menu<Entity> {
     private pendingShipboardOffer?: ConcourseMissionOffer;
     private pendingDestinationOptions?: (resolved: any) => any;
     private isOfferingContract = false;
+    private lifecycle = 0;
+    private backgroundGeneration = 0;
+    // Menu's spriteFromPict may still assign its texture after it is detached.
+    private initialBackground?: PIXI.Container;
+    private finishShow?: () => void;
+    private acceptingContract = false;
+    private assistanceDeadline = 0;
+    private surrenderPoll?: ReturnType<typeof setInterval>;
+    private surrenderDeadline = 0;
+    private surrenderTarget?: string;
+    private surrenderSequence?: number;
+    private static readonly OUTCOME_TIMEOUT_MS = 120_000;
 
     constructor(gameData: GameData, controlEvents: Observable<ControlEvent>) {
         super(gameData, COMMS_LAYOUT.background, controlEvents);
+        this.initialBackground = this.container.children[0];
 
         this.message = new PIXI.Text({ text: '', style: COMMS_FONT });
         this.message.position.set(
@@ -131,12 +148,18 @@ export class Comms extends Menu<Entity> {
     }
 
     async setBackgroundPict(pictId: string) {
+        const generation = this.backgroundGeneration = (this.backgroundGeneration ?? 0) + 1;
         try {
             const sprite = await this.gameData.spriteFromPictAsync(pictId);
+            if (generation !== this.backgroundGeneration) {
+                sprite.destroy();
+                return;
+            }
             sprite.interactive = true;
             sprite.anchor.set(0.5);
             if (this.container.children.length > 0) {
-                this.container.removeChildAt(0);
+                const previous = this.container.removeChildAt(0);
+                if (previous !== this.initialBackground) previous.destroy();
                 this.container.addChildAt(sprite, 0);
             } else {
                 this.container.addChild(sprite);
@@ -147,6 +170,7 @@ export class Comms extends Menu<Entity> {
     }
 
     setTarget(target: HailTarget | undefined) {
+        this.done();
         this.target = target;
         const bg = target?.isEscort
             ? COMMS_ESCORT_BACKGROUND
@@ -157,19 +181,60 @@ export class Comms extends Menu<Entity> {
     }
 
     override async show(input: Entity): Promise<Entity> {
-        await this.buildPromise;
-        this.stopAssistanceOutcomePolling();
+        this.done();
+        const lifecycle = this.lifecycle;
+        void this.setBackgroundPict(this.target?.isEscort ? COMMS_ESCORT_BACKGROUND
+            : this.target?.isPlanet ? COMMS_PLANET_BACKGROUND : COMMS_SHIP_BACKGROUND);
         this.setInput(input);
+        const result = new Promise<Entity>(resolve => {
+            this.finishShow = () => resolve(input);
+        });
+        void this.prepareShow(input).catch(error => {
+            if (this.lifecycle === lifecycle) {
+                console.warn('Failed to open comms', error);
+                this.done();
+            }
+        });
+        return result;
+    }
+
+    private contextKey(input: Entity): string {
+        const state = input.components.get(PlayerStateComponent);
+        return JSON.stringify([state?.currentSystem, state?.shipId, state?.diedAt,
+            input.components.get(TargetComponent)?.target,
+            plainSnapshot(input.components.get(PlayerDeathComponent))]);
+    }
+
+    private contextGuard() {
+        const input = this.input;
+        const lifecycle = this.lifecycle;
+        const key = this.contextKey(input);
+        return () => {
+            if (this.lifecycle !== lifecycle) return false;
+            if (this.input !== input || this.contextKey(input) !== key) {
+                this.done();
+                return false;
+            }
+            return true;
+        };
+    }
+
+    private async prepareShow(input: Entity) {
+        const current = this.contextGuard();
+        await this.buildPromise;
+        if (!current()) return;
         this.hailedUuid = input.components.get(TargetComponent)?.target;
         this.pendingPrice = 0;
         this.assistanceHelper = undefined;
         this.assistanceSequence = undefined;
         this.buttons.assistance.setText('Request Assistance');
         this.pendingShipboardOffer = undefined;
+        this.pendingDestinationOptions = undefined;
         this.isOfferingContract = false;
         try {
             const isHostile = Boolean(this.target?.hostile || this.relation() === 'enemy');
             const { offers, destinationOptions } = await getShipboardMissionOffers(this.gameData, input);
+            if (!current()) return;
             if (offers.length > 0 && !isHostile && !this.target?.isPlanet && !this.target?.isEscort) {
                 this.pendingShipboardOffer = offers[0];
                 this.pendingDestinationOptions = destinationOptions;
@@ -177,9 +242,13 @@ export class Comms extends Menu<Entity> {
         } catch {
             // Fallback
         }
+        if (!current()) return;
         await this.loadLines();
+        if (!current()) return;
         this.openChannel();
-        return super.show(input);
+        this.container.visible = true;
+        this.controls.bind();
+        this.reconcileAssistance();
     }
 
     private relation(): GovernmentRelation {
@@ -309,36 +378,99 @@ export class Comms extends Menu<Entity> {
     }
 
     private demandSurrender() {
-        const name = this.target?.name ?? 'Vessel';
-        const state = this.input?.components?.get(PlayerStateComponent);
-        if (this.target?.disabled) {
-            const plunder = 5_000;
-            if (state) state.credits += plunder;
-            this.message.text = `${this.message.text}\n\n${name} Captain: "We surrender! Our ship is crippled! We're transferring ${plunder.toLocaleString()} credits from our emergency vault, just spare our lives!"`;
+        if (this.surrenderPoll !== undefined || !this.input || !this.hailedUuid) return;
+        const request = this.input.components.get(SurrenderRequestComponent);
+        const outcome = this.input.components.get(SurrenderOutcomeComponent);
+        // Resume an unacknowledged request, including one sent outside this panel.
+        const pending = request && (!outcome || outcome.sequence < request.sequence
+            || (outcome.sequence === request.sequence && outcome.target !== request.target));
+        this.surrenderTarget = pending ? request.target : this.hailedUuid;
+        this.surrenderSequence = pending ? request.sequence
+            : Math.max(request?.sequence ?? 0, outcome?.sequence ?? 0) + 1;
+        if (!pending) {
+            this.input.components.set(SurrenderRequestComponent, {
+                target: this.surrenderTarget, sequence: this.surrenderSequence,
+            });
+        }
+        this.message.text = 'Surrender demand awaiting server response.';
+        this.surrenderDeadline = Date.now() + Comms.OUTCOME_TIMEOUT_MS;
+        const current = this.contextGuard();
+        const poll = setInterval(() => {
+            if (!current()) {
+                clearInterval(poll);
+                if (this.surrenderPoll === poll) this.surrenderPoll = undefined;
+                return;
+            }
+            this.updateSurrenderOutcome();
+        }, 100);
+        this.surrenderPoll = poll;
+    }
+
+    private updateSurrenderOutcome() {
+        const outcome = this.input?.components.get(SurrenderOutcomeComponent);
+        if (outcome && outcome.target === this.surrenderTarget
+            && outcome.sequence === this.surrenderSequence) {
+            this.message.text = outcome.status === 'paid'
+                ? `Surrender confirmed: ${outcome.amount.toLocaleString()} credits transferred.`
+                : `Surrender rejected${outcome.reason ? `: ${outcome.reason}` : '.'}`;
+        } else if (Date.now() >= this.surrenderDeadline) {
+            this.message.text = 'Surrender response timed out; result unknown. No new demand was sent.';
         } else {
-            this.message.text = `${this.message.text}\n\n${name}: "You think we fear you? We will never surrender! Prepare to burn!"`;
+            return;
+        }
+        this.stopSurrenderOutcomePolling();
+    }
+
+    private stopSurrenderOutcomePolling() {
+        if (this.surrenderPoll !== undefined) clearInterval(this.surrenderPoll);
+        this.surrenderPoll = undefined;
+    }
+
+    private async acceptContract() {
+        if (this.acceptingContract) return;
+        const input = this.input;
+        const lifecycle = this.lifecycle;
+        const offer = this.pendingShipboardOffer;
+        const state = structuredClone(plainSnapshot(input?.components.get(PlayerStateComponent)));
+        if (!state || !offer) return;
+        const baseline = JSON.stringify(state);
+        const current = this.contextGuard();
+        this.acceptingContract = true;
+        try {
+            const options = this.pendingDestinationOptions
+                ? this.pendingDestinationOptions(offer.resolved)
+                : { initialPlanetId: '', resolved: offer.resolved };
+            if (!acceptMission(state, offer.mission, options)) {
+                this.message.text = 'Contract could not be accepted. Check mission capacity, cargo space and destination.';
+                return;
+            }
+            await startPendingNcbMissions(this.gameData, state, options);
+            if (!current()) return;
+            const fresh = plainSnapshot(input.components.get(PlayerStateComponent));
+            if (JSON.stringify(fresh) !== baseline) {
+                this.message.text = 'Pilot state changed while loading the contract. Please try again.';
+                return;
+            }
+            input.components.set(PlayerStateComponent, state);
+            this.message.text = 'Contract confirmed!';
+            this.buttons.assistance.setText('Request Assistance');
+            this.isOfferingContract = false;
+            this.pendingShipboardOffer = undefined;
+            this.pendingDestinationOptions = undefined;
+        } catch (error) {
+            if (this.lifecycle === lifecycle) {
+                this.message.text = 'Contract could not be loaded. Please try again.';
+                console.warn('Comms contract acceptance failed', error);
+            }
+        } finally {
+            if (this.lifecycle === lifecycle) this.acceptingContract = false;
         }
     }
 
     private requestAssistance() {
         if (this.isOfferingContract && this.pendingShipboardOffer) {
-            const rawState = this.input?.components.get(PlayerStateComponent);
-            const state = plainSnapshot(rawState);
-            if (state) {
-                const offer = this.pendingShipboardOffer;
-                const destOptions = this.pendingDestinationOptions
-                    ? this.pendingDestinationOptions(offer.resolved)
-                    : { initialPlanetId: '', resolved: offer.resolved };
-                acceptMission(state, offer.mission, destOptions);
-                void startPendingNcbMissions(this.gameData, state, destOptions);
-                this.input!.components.set(PlayerStateComponent, { ...state });
-                this.message.text = `${this.target?.name ?? 'Vessel'}: "Contract confirmed! We appreciate your assistance, Captain."`;
-                this.buttons.assistance.setText('Request Assistance');
-                this.isOfferingContract = false;
-                this.pendingShipboardOffer = undefined;
-                this.pendingDestinationOptions = undefined;
-                return;
-            }
+            void this.acceptContract();
+            return;
         }
 
         if (this.target?.isPlanet) {
@@ -354,6 +486,10 @@ export class Comms extends Menu<Entity> {
             this.offerBribe();
             return;
         }
+        if (this.assistancePoll !== undefined) {
+            return;
+        }
+        if (this.reconcileAssistance()) return;
         const state = this.input?.components.get(PlayerStateComponent);
         const shipData = this.input?.components.get(ShipDataComponent);
         const helper = this.hailedUuid;
@@ -450,7 +586,11 @@ export class Comms extends Menu<Entity> {
         if (!this.input) {
             return;
         }
-        const sequence = previousSequence + 1;
+        if (this.reconcileAssistance()) return;
+        const outcome = this.input.components.get(AssistanceOutcomeComponent);
+        const request = this.input.components.get(AssistanceRequestComponent);
+        const sequence = Math.max(previousSequence, request?.sequence ?? 0,
+            outcome?.sequence ?? 0) + 1;
         this.input.components.set(AssistanceRequestComponent, {
             helper,
             sequence,
@@ -462,10 +602,37 @@ export class Comms extends Menu<Entity> {
         this.startAssistanceOutcomePolling();
     }
 
+    private reconcileAssistance(): boolean {
+        const outcome = this.input?.components.get(AssistanceOutcomeComponent);
+        const request = this.input?.components.get(AssistanceRequestComponent);
+        // A paid rescue remains authoritative even when a later request was ignored.
+        const pending = outcome?.phase === 'approaching' ? outcome
+            : request && (!outcome || request.sequence > outcome.sequence
+                || (request.sequence === outcome.sequence && request.helper !== outcome.helper))
+                ? request : undefined;
+        if (!pending) return false;
+        this.assistanceHelper = pending.helper;
+        this.assistanceSequence = pending.sequence;
+        this.pendingPrice = 0;
+        this.say('onMyWay');
+        this.startAssistanceOutcomePolling();
+        return true;
+    }
+
     private startAssistanceOutcomePolling() {
-        this.stopAssistanceOutcomePolling();
-        this.assistancePoll = setInterval(
-            this.updateAssistanceOutcome.bind(this), 100);
+        // Reconciliation may switch the watched rescue, but must not extend the wait.
+        if (this.assistancePoll !== undefined) return;
+        this.assistanceDeadline = Date.now() + Comms.OUTCOME_TIMEOUT_MS;
+        const current = this.contextGuard();
+        const poll = setInterval(() => {
+            if (!current()) {
+                clearInterval(poll);
+                if (this.assistancePoll === poll) this.assistancePoll = undefined;
+                return;
+            }
+            this.updateAssistanceOutcome();
+        }, 100);
+        this.assistancePoll = poll;
     }
 
     private stopAssistanceOutcomePolling() {
@@ -480,15 +647,36 @@ export class Comms extends Menu<Entity> {
         const sequence = this.assistanceSequence;
         const outcome = this.input?.components.get(
             AssistanceOutcomeComponent);
+        if (outcome?.phase === 'approaching'
+            && (outcome.helper !== helper || outcome.sequence !== sequence)) {
+            // The server may retain a paid rescue and ignore the request we sent.
+            // Watch that rescue explicitly, never treat its result as ours.
+            this.assistanceHelper = outcome.helper;
+            this.assistanceSequence = outcome.sequence;
+        }
         if (!helper || sequence === undefined || !outcome
-            || outcome.helper !== helper || outcome.sequence < sequence
+            || outcome.helper !== helper || outcome.sequence !== sequence
             || outcome.phase === 'approaching') {
+            if (this.assistanceDeadline && Date.now() >= this.assistanceDeadline) {
+                this.stopAssistanceOutcomePolling();
+                this.message.text = 'Assistance response timed out; rescue status unknown. Reopen or request assistance to check again.';
+            }
             return;
         }
         if (outcome.phase === 'completed') {
             this.say('takeItAndGo');
         } else {
             this.say(this.failureBlock(outcome.reason));
+            const explanation = outcome.reason === 'helper-disabled'
+                ? 'The assisting ship is disabled and cannot complete the rescue.'
+                : outcome.reason === 'government-unavailable'
+                    ? 'Assistance is unavailable because government information could not be verified.'
+                    : '';
+            if (explanation) this.message.text += `\n${explanation}`;
+            const refunded = outcome.refundedCredits;
+            if (refunded !== undefined && Number.isFinite(refunded) && refunded > 0) {
+                this.message.text += `\nServer confirmed a refund of ${refunded.toLocaleString()} credits.`;
+            }
         }
         this.stopAssistanceOutcomePolling();
     }
@@ -507,17 +695,29 @@ export class Comms extends Menu<Entity> {
                 return 'helpForPay';
             case 'refused':
                 return 'tooBusy';
+            case 'helper-disabled':
+            case 'government-unavailable':
+                return 'cannotHelp';
             default:
                 return 'cannotHelp';
         }
     }
 
     protected override done() {
+        this.lifecycle = (this.lifecycle ?? 0) + 1;
+        this.backgroundGeneration = (this.backgroundGeneration ?? 0) + 1;
         this.stopAssistanceOutcomePolling();
+        this.stopSurrenderOutcomePolling();
+        this.acceptingContract = false;
+        const finishShow = this.finishShow;
+        this.finishShow = undefined;
+        this.container.visible = false;
+        this.controls.unbind();
         this.pendingShipboardOffer = undefined;
         this.pendingDestinationOptions = undefined;
         this.isOfferingContract = false;
-        super.done();
+        this.pendingPrice = 0;
+        finishShow?.();
     }
 
     private async loadLines() {

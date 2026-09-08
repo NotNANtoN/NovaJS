@@ -1,4 +1,5 @@
 import { EcsEvent } from 'nova_ecs/events';
+import { EmitFunction } from 'nova_ecs/arg_types';
 
 
 // Retail snd 150 is the scenario's generic "Beep1" UI feedback sound. No
@@ -21,8 +22,25 @@ export const STELLAR_DEPARTURE_SOUND_ID = STELLAR_DOCKING_SOUND_ID;
  * than to a place: UI feedback, cockpit warnings, and their own hyperspace
  * transitions.
  */
-export const SoundEvent = new EcsEvent<{
-    id: string,
-    loop?: boolean,
-    position?: { x: number, y: number },
-}>('WeaponFire');
+export interface SoundEventData {
+    id: string;
+    loop?: boolean;
+    position?: { x: number, y: number };
+}
+
+class SoundEcsEvent extends EcsEvent<SoundEventData> {
+    /**
+     * Use this for positional sounds: queued events and their subscribers must
+     * not retain movement drafts that delta tracking can revoke before playback.
+     * EcsEvent has no transform hook, so snapshot before calling the emitter.
+     */
+    emit(emit: EmitFunction, data: SoundEventData): void {
+        const snapshot = { ...data };
+        if (data.position !== undefined) {
+            snapshot.position = { x: data.position.x, y: data.position.y };
+        }
+        emit(this, snapshot);
+    }
+}
+
+export const SoundEvent = new SoundEcsEvent('WeaponFire');

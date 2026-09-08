@@ -1,9 +1,10 @@
 import { AsteroidData } from 'novadatainterface/AsteroidData';
 import * as t from 'io-ts';
 import { Entities, UUID, GetEntity, Emit, EmitNow } from 'nova_ecs/arg_types';
-import { DamagedEvent } from './death_plugin';
+import { DamagedEvent, PlayerDeathComponent } from './death_plugin';
+import { DestructionStartedComponent } from './destruction_state';
 import { SoundEvent } from './sound_event';
-import { HitboxHullComponent } from './collisions_plugin';
+import { HitboxHullComponent, UpdateHitboxHullSystem } from './collisions_plugin';
 import { ShipComponent, ShipDataComponent } from './ship_plugin';
 import { OutfitsStateComponent } from './outfit_plugin';
 import { ShieldComponent } from './health_plugin';
@@ -26,6 +27,8 @@ import { Provide } from 'nova_ecs/provide';
 import { ProvideAsync } from 'nova_ecs/provide_async';
 import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
+import { Resource } from 'nova_ecs/resource';
+import { SingletonComponent } from 'nova_ecs/world';
 import { v4 as uuid } from 'uuid';
 import { AnimationComponent } from './animation_plugin';
 import { CollisionVulnerabilityComponent } from './collision_interaction';
@@ -39,6 +42,7 @@ import {
     PlayerStateComponent,
 } from './player_state';
 import { Stat } from './stat';
+import { authorExternalImpulse, ExternalImpulsePlugin } from './external_impulse';
 
 /** Drift speed of a freshly spawned asteroid, in engine units per second. */
 const ASTEROID_DRIFT_SPEED = 30;
@@ -430,12 +434,16 @@ const AsteroidCollidingShipsQuery = new Query([
     HitboxHullComponent,
     ShieldComponent,
     ArmorComponent,
+    Optional(MultiplayerData),
+    GetEntity,
 ] as const, 'AsteroidCollidingShips');
 
-const lastImpactTimes = new Map<string, number>();
+const AsteroidImpactTimesResource =
+    new Resource<Map<string, number>>('AsteroidImpactTimes');
 
 export const AsteroidCollisionHazardSystem = new System({
     name: 'AsteroidCollisionHazardSystem',
+    after: [UpdateHitboxHullSystem],
     args: [
         AsteroidHazardsQuery,
         AsteroidCollidingShipsQuery,
@@ -443,26 +451,32 @@ export const AsteroidCollisionHazardSystem = new System({
         Emit,
         EmitNow,
         PlatformResource,
-        Optional(MultiplayerData),
+        AsteroidImpactTimesResource,
+        SingletonComponent,
     ] as const,
-    step(asteroids, ships, time, emit, emitNow, platform, multiplayer) {
-        if (platform === 'browser' && multiplayer) {
+    step(asteroids, ships, time, emit, emitNow, platform, lastImpactTimes) {
+        // Health is server-authored, regardless of which entity owns movement.
+        if (platform !== 'node') {
             return;
+        }
+        for (const [key, hitTime] of lastImpactTimes) {
+            if (time.time - hitTime >= 500 || time.time < hitTime) {
+                lastImpactTimes.delete(key);
+            }
         }
         if (asteroids.length === 0 || ships.length === 0) {
             return;
         }
-        if (lastImpactTimes.size > 500) {
-            for (const [key, hitTime] of lastImpactTimes.entries()) {
-                if (time.time - hitTime > 2000) {
-                    lastImpactTimes.delete(key);
-                }
-            }
-        }
 
-        for (const [shipUuid, , shipData, shipMovement, shipHull, , ] of ships) {
+        for (const [shipUuid, , shipData, shipMovement, shipHull, , , shipMultiplayer, shipEntity] of ships) {
             for (const [asteroidUuid, , asteroidData, asteroidMovement, asteroidHull, asteroidArmor] of asteroids) {
-                const pairKey = shipUuid + ":" + asteroidUuid;
+                // Immediate damage handlers can also start destruction during
+                // this sweep, so recheck before each subsequent impact.
+                if (shipEntity.components.has(PlayerDeathComponent)
+                    || shipEntity.components.has(DestructionStartedComponent)) {
+                    break;
+                }
+                const pairKey = JSON.stringify([shipUuid, asteroidUuid]);
                 const lastHit = lastImpactTimes.get(pairKey);
                 if (lastHit !== undefined && time.time - lastHit < 500) {
                     continue;
@@ -480,14 +494,14 @@ export const AsteroidCollisionHazardSystem = new System({
                     continue;
                 }
 
-                lastImpactTimes.set(pairKey, time.time);
-
                 const relVx = shipMovement.velocity.x - asteroidMovement.velocity.x;
                 const relVy = shipMovement.velocity.y - asteroidMovement.velocity.y;
                 const relSpeed = Math.sqrt(relVx * relVx + relVy * relVy);
                 if (relSpeed < 8) {
                     continue;
                 }
+
+                lastImpactTimes.set(pairKey, time.time);
 
                 const impactFactor = Math.min(3, Math.max(0.6, (asteroidData.strength ?? 30) / 40));
                 const shipDamage = Math.max(1, Math.round(relSpeed * 0.22 * impactFactor));
@@ -511,10 +525,16 @@ export const AsteroidCollisionHazardSystem = new System({
                 const nx = dx / dist;
                 const ny = dy / dist;
                 const bounceImpulse = Math.max(30, relSpeed * 0.5);
-                shipMovement.velocity = shipMovement.velocity.add(
-                    new Vector(nx * bounceImpulse, ny * bounceImpulse));
+                if (shipMultiplayer && shipMultiplayer.owner !== 'server') {
+                    authorExternalImpulse(shipEntity, shipMovement,
+                        shipMultiplayer.owner, time.time,
+                        nx * bounceImpulse, ny * bounceImpulse);
+                } else {
+                    shipMovement.velocity = shipMovement.velocity.add(
+                        new Vector(nx * bounceImpulse, ny * bounceImpulse));
+                }
 
-                emit(SoundEvent, { id: 'nova:302', position: shipMovement.position });
+                SoundEvent.emit(emit, { id: 'nova:302', position: shipMovement.position });
             }
         }
     },
@@ -523,6 +543,7 @@ export const AsteroidCollisionHazardSystem = new System({
 export const AsteroidPlugin: Plugin = {
     name: 'AsteroidPlugin',
     build(world) {
+        world.addPlugin(ExternalImpulsePlugin);
         const deltaMaker = world.resources.get(DeltaResource);
         if (!deltaMaker) {
             throw new Error('Expected delta maker resource to exist');
@@ -557,10 +578,12 @@ export const AsteroidPlugin: Plugin = {
         world.addSystem(AsteroidDestroyedSystem);
         world.addSystem(CargoScoopOutfitProvider);
         world.addSystem(OrePickupSystem);
+        world.resources.set(AsteroidImpactTimesResource, new Map());
         world.addSystem(AsteroidCollisionHazardSystem);
         world.addSystem(OrePickupSystem);
     },
-    remove(world) {
+    async remove(world) {
+        await world.removePlugin(ExternalImpulsePlugin);
         world.removeSystem(AsteroidDataProvider);
         world.removeSystem(AsteroidAnimationProvider);
         world.removeSystem(AsteroidVulnerabilityProvider);
@@ -575,6 +598,7 @@ export const AsteroidPlugin: Plugin = {
         world.removeSystem(CargoScoopOutfitProvider);
         world.removeSystem(OrePickupSystem);
         world.removeSystem(AsteroidCollisionHazardSystem);
+        world.resources.delete(AsteroidImpactTimesResource);
         world.removeSystem(OrePickupSystem);
     },
 };

@@ -8,10 +8,12 @@ import { idsPath, dataPath, settingsPrefix } from "../common/GameDataPaths";
 import { GameDataInterface } from "../../../novadatainterface/GameDataInterface";
 import { NovaDataType } from "../../../novadatainterface/NovaDataInterface";
 import { PlayerStore } from "./player_store";
+import { combatLedger, CombatShopRequest,
+    makePlayerDataWithCombatResources as makePlayerData } from '../nova_plugin/combat_resources';
+import { createInitialPlayerState, decodePlayerState } from '../nova_plugin/player_state';
 import { setupHttpLimiter } from './http_limiter';
 import { LosslessWebPCache } from './lossless_webp';
 import {
-    makePlayerData,
     summarizeSnapshot,
 } from '../nova_plugin/player_data_projection';
 
@@ -207,6 +209,27 @@ class GameDataServer {
 
         if (this.playerStore) {
             this.app.use(express.json({ limit: '10mb' }));
+            this.app.post('/player/combat/shop', async (req, res) => {
+                const token = req.body?.token;
+                const decoded = decodePlayerState(req.body?.state);
+                if (typeof token !== 'string' || decoded._tag === 'Left'
+                    || typeof req.body?.planet !== 'string'
+                    || !Number.isSafeInteger(req.body?.revision)
+                    || !['open', 'close', 'buy', 'sell', 'ship', 'refuel', 'recover', 'sync'].includes(req.body?.action)
+                    || req.body?.item !== undefined && typeof req.body.item !== 'string'
+                    || req.body?.resolveAction !== undefined && !['open', 'close', 'buy', 'sell', 'ship', 'refuel'].includes(req.body.resolveAction)) {
+                    res.status(400).send('Invalid combat transaction');
+                    return;
+                }
+                try {
+                    const result = await combatLedger(this.playerStore!, this.gameData).transact(token, {
+                        ...req.body, state: decoded.right,
+                    } as CombatShopRequest);
+                    res.send(result);
+                } catch (error) {
+                    res.status(409).send(error instanceof Error ? error.message : 'Combat transaction rejected');
+                }
+            });
             this.app.get('/player/state', async (req, res) => {
                 const token = typeof req.query.token === 'string'
                     ? req.query.token : undefined;
@@ -259,14 +282,20 @@ class GameDataServer {
                     || req.body?.reason === 'manual'
                     ? req.body.reason
                     : 'manual';
+                const existing = await this.playerStore!.get(token);
+                const baseline = existing ?? createInitialPlayerState();
+                // Before the first flight migration, only the existing disk
+                // record is a trusted legacy ammo seed, never an HTTP upload.
+                const protectedState = { ...state, fuel: baseline.fuel,
+                    shipId: baseline.shipId, combatResources: existing?.combatResources };
                 const ship = req.body?.ship;
-                const encodedShip = ship && typeof ship === 'object'
-                    ? ship
-                    : undefined;
+                const encodedShip = existing?.combatResources
+                    ? ship && typeof ship === 'object' ? ship : undefined
+                    : existing?.ship;
                 try {
                     await this.playerStore!.archiveSnapshot(
                         token,
-                        state,
+                        protectedState,
                         encodedShip,
                         reason,
                     );
@@ -278,16 +307,31 @@ class GameDataServer {
                 const replaceCurrent = req.body?.replaceCurrent;
                 if (replaceCurrent && typeof replaceCurrent === 'object') {
                     const replaceShip = req.body?.replaceShip;
-                    const encodedReplaceShip = replaceShip
-                        && typeof replaceShip === 'object'
-                        ? replaceShip
-                        : undefined;
+                    const encodedReplaceShip = existing?.combatResources
+                        ? replaceShip && typeof replaceShip === 'object' ? replaceShip : undefined
+                        : existing?.ship;
                     try {
-                        await this.playerStore!.save(
-                            token,
-                            replaceCurrent,
-                            encodedReplaceShip,
-                        );
+                        const decoded = decodePlayerState(replaceCurrent);
+                        if (decoded._tag === 'Left') throw new Error('Invalid replacement pilot');
+                        const defaults = createInitialPlayerState();
+                        if (!replaceCurrent.combatResources && !replaceShip
+                            && replaceCurrent.shipId === defaults.shipId
+                            && replaceCurrent.gameDate === defaults.gameDate) {
+                            // Explicit New Pilot resets the entire economy to
+                            // server defaults, retaining only identity choices.
+                            await combatLedger(this.playerStore!, this.gameData).startNewPilot(token, {
+                                pilotName: decoded.right.pilotName,
+                                shipName: decoded.right.shipName,
+                                gender: decoded.right.gender,
+                            });
+                        } else {
+                            await this.playerStore!.save(
+                                token,
+                                { ...replaceCurrent, fuel: baseline.fuel,
+                                    shipId: baseline.shipId, combatResources: existing?.combatResources },
+                                encodedReplaceShip,
+                            );
+                        }
                     } catch (error) {
                         console.error('Pilot switch save failed', error);
                         res.status(500).send('Pilot switch save failed');

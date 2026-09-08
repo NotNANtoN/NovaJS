@@ -1,4 +1,4 @@
-import { WeaponData } from 'novadatainterface/WeaponData';
+import { WeaponData, ammoOutfitIds } from 'novadatainterface/WeaponData';
 import { Emit, GetEntity, UUID } from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
 import { Entity } from 'nova_ecs/entity';
@@ -20,6 +20,7 @@ import { ControlStateEvent } from './control_state_event';
 import {
     FiredShot,
     WeaponEntries,
+    WeaponEntry,
     WeaponLocalState,
     WeaponsComponent,
     WeaponsLocalState,
@@ -33,6 +34,9 @@ import {
     FireSyncLocalState,
     FireSyncPlugin,
     getFireSyncLocalState,
+    fireLogSequence,
+    newFireLogsAfter,
+    rememberSpawnedShot,
     loggedShotEntityId,
     makeFireLogShot,
     newShotsAfter,
@@ -45,6 +49,74 @@ import { WeaponsState, WeaponsStateComponent, WeaponState } from './weapons_stat
 import { ArmorComponent } from './health_plugin';
 import { DestructionStartedComponent } from './destruction_state';
 import { randomShotSeed } from './shot_rng';
+import { OutfitsStateComponent } from './outfit_plugin';
+import { FireCadence, FireCadenceShotContext } from './fire_cadence';
+import { DisabledComponent, PlayerDeathComponent } from './death_plugin';
+import { JumpStateComponent } from './jump_plugin';
+import { ShipComponent, ShipDataComponent } from './ship_plugin';
+import { canPay, withCost, CombatAuthority, CombatAuthorityComponent } from './combat_resources';
+import { PlayerStateComponent } from './player_state';
+import { SystemIdResource } from './system_id_resource';
+
+// Keep payment data on the entity, not keyed by revocable Immer draft identity.
+// Local cadence owns burst boundaries; replay and submunitions bypass this state.
+export const WeaponBurstPaymentsComponent =
+    new Component<Map<string, Set<number>>>('WeaponBurstPaymentsComponent');
+
+const NpcWeaponFuelComponent = new Component<{ current: number }>('NpcWeaponFuel');
+const PlayerBurstPaymentsComponent = new Component<Map<string, { token: number; copies: Set<number> }>>('PlayerBurstPayments');
+
+function fireWithCost(
+    entity: Entity,
+    weapon: WeaponData,
+    platform: 'node' | 'browser',
+    owner: string,
+    fire: () => FiredShot | undefined,
+    paidCopies?: Set<number>,
+    copy = 0,
+): FiredShot | undefined {
+    if (weapon.ammoType === 'unlimited') {
+        return fire();
+    }
+    // Prediction/replay never changes authoritative resource balances.
+    if (platform !== 'node' || owner !== 'server') return fire();
+    if (paidCopies?.has(copy)) return fire();
+    if (weapon.ammoType[0] === 'energy') {
+        const cost = weapon.ammoType[1];
+        const state = entity.components.get(PlayerStateComponent);
+        let tank = entity.components.get(NpcWeaponFuelComponent);
+        if (!tank) {
+            tank = { current: state?.fuel ?? entity.components.get(ShipDataComponent)?.fuelCapacity ?? 0 };
+            entity.components.set(NpcWeaponFuelComponent, tank);
+        }
+        const fuel = state?.fuel ?? tank.current;
+        if (!Number.isFinite(cost) || cost < 0 || !Number.isFinite(fuel) || fuel < cost) return undefined;
+        const fired = fire();
+        if (fired) {
+            tank.current = fuel - cost;
+            if (state) state.fuel = tank.current;
+            paidCopies?.add(copy);
+        }
+        return fired;
+    }
+    const outfits = entity.components.get(OutfitsStateComponent);
+    const ammoId = ammoOutfitIds(weapon.ammoType).find(id => {
+        const count = outfits?.get(id)?.count;
+        return Number.isSafeInteger(count) && count! >= 1;
+    });
+    const ammo = ammoId === undefined ? undefined : outfits?.get(ammoId);
+    if (ammoId === undefined || !outfits || !ammo || !Number.isSafeInteger(ammo.count)
+        || ammo.count < 1) {
+        return undefined;
+    }
+    const fired = fire();
+    if (fired) {
+        outfits.set(ammoId, { ...ammo, count: ammo.count - 1 });
+        entity.components.set(OutfitsStateComponent, outfits);
+        paidCopies?.add(copy);
+    }
+    return fired;
+}
 
 /**
  * Avoid an accidental large projectile burst after a stalled tab or server.
@@ -76,7 +148,7 @@ function recordOwnedShot(
     log: FireLog | undefined,
 ): { intent: FireIntent | undefined, log: FireLog | undefined } {
     const seq = sync.nextSeq++;
-    sync.spawnedSeqs.add(seq);
+    rememberSpawnedShot(sync, seq, platform === 'browser');
     const event: FireIntentShot = { seq, weaponId, seed, exitIndex };
     if (fired.target !== undefined) {
         event.target = fired.target;
@@ -92,6 +164,7 @@ function recordOwnedShot(
     } else {
         const logged = makeFireLogShot(
             event, time.time, fired.position, fired.rotation, {
+                logSeq: sync.nextLogSeq++,
                 sourceVelocity: fired.sourceVelocity,
                 target: fired.target,
                 inaccuracy: fired.inaccuracy,
@@ -249,16 +322,30 @@ export const WeaponsSystem = new System({
             let fireUnavailable = false;
             for (let i = 0; i < shotsToFire; i++) {
                 let fired = false;
+                let paidCopies: Set<number> | undefined;
+                if (platform === 'node' && multiplayer.owner === 'server'
+                    && weapon.data.ammoType !== 'unlimited'
+                    && 'oneAmmoPerBurst' in weapon.data
+                    && weapon.data.oneAmmoPerBurst && weapon.data.burstCount > 0) {
+                    let payments = entity.components.get(WeaponBurstPaymentsComponent);
+                    if (!payments) {
+                        payments = new Map();
+                        entity.components.set(WeaponBurstPaymentsComponent, payments);
+                    }
+                    if (localState.burstCount === 0 || !payments.has(id)) {
+                        payments.set(id, new Set());
+                    }
+                    paidCopies = payments.get(id);
+                }
                 if (weapon.data.fireSimultaneously) {
                     for (let copy = 0; copy < count; copy++) {
                         const seed = randomShotSeed();
-                        const shot = weapon.fireFromEntityDetailed(
-                            uuid,
-                            seed,
-                            true,
-                            undefined,
-                            fireEventEntityId(weapon, uuid, sync.nextSeq),
-                        );
+                        const shot = fireWithCost(entity, weapon.data,
+                            platform, multiplayer.owner,
+                            () => weapon.fireFromEntityDetailed(
+                                uuid, seed, true, undefined,
+                                fireEventEntityId(weapon, uuid, sync.nextSeq),
+                            ), paidCopies, copy);
                         fired = shot !== undefined || fired;
                         if (shot && weapon.syncAsFireEvent !== false) {
                             ({ intent, log } = recordOwnedShot(
@@ -269,13 +356,12 @@ export const WeaponsSystem = new System({
                     }
                 } else {
                     const seed = randomShotSeed();
-                    const shot = weapon.fireFromEntityDetailed(
-                        uuid,
-                        seed,
-                        true,
-                        undefined,
-                        fireEventEntityId(weapon, uuid, sync.nextSeq),
-                    );
+                    const shot = fireWithCost(entity, weapon.data,
+                        platform, multiplayer.owner,
+                        () => weapon.fireFromEntityDetailed(
+                            uuid, seed, true, undefined,
+                            fireEventEntityId(weapon, uuid, sync.nextSeq),
+                        ), paidCopies, localState.burstCount % count);
                     fired = shot !== undefined;
                     if (shot && weapon.syncAsFireEvent !== false) {
                         ({ intent, log } = recordOwnedShot(
@@ -320,6 +406,8 @@ export const WeaponsSystem = new System({
     }
 });
 
+// Retained for callers displaying an abuse ceiling. Authoritative intent firing
+// uses FireCadence below, not arrival-time rate/spacing rejection.
 export function weaponShotRateCeiling(
     weapon: WeaponData,
     installedCount: number,
@@ -332,37 +420,102 @@ export function weaponShotRateCeiling(
     return Math.min(240, Math.max(count, sustained + burst));
 }
 
-function acceptsShotAt(
-    sync: FireSyncLocalState,
-    weaponId: string,
-    now: number,
-    ceiling: number,
-): boolean {
-    const cutoff = now - 1000;
-    const recent = (sync.acceptedAt.get(weaponId) ?? [])
-        .filter(at => at > cutoff);
-    if (recent.length >= ceiling) {
-        sync.acceptedAt.set(weaponId, recent);
-        return false;
-    }
-    recent.push(now);
-    sync.acceptedAt.set(weaponId, recent);
-    return true;
-}
 
 function validFireIntent(shot: FireIntentShot): boolean {
     return Number.isSafeInteger(shot.seq) && shot.seq > 0
         && Number.isInteger(shot.seed)
         && shot.seed >= 0 && shot.seed <= 0xffff_ffff
-        && Number.isSafeInteger(shot.exitIndex) && shot.exitIndex >= 0;
+        && Number.isSafeInteger(shot.exitIndex) && shot.exitIndex >= 0
+        && typeof shot.weaponId === 'string'
+        && (shot.target === undefined || typeof shot.target === 'string');
+}
+
+/** Non-draftable, non-replicated state survives wire buffer removal and world transfer. */
+export class ServerFireCadenceState {
+    now = -Infinity;
+    readonly cadence = new FireCadence<FireIntentShot>(() => this.now);
+    boundary: string | undefined;
+    blocked = false;
+    hadIntent = false;
+    invalidated = false;
+    activeWeapons = new Set<string>();
+    highestIntentSeq = 0;
+    nextLogSeq = 1;
+}
+
+// The token-scoped authority outlives room entities and reconnects. Recreating
+// an entity must not reset its firing debt or reaccept the old intent buffer.
+const pilotCadences = new WeakMap<CombatAuthority, ServerFireCadenceState>();
+
+export const ServerFireCadenceComponent =
+    new Component<ServerFireCadenceState>('ServerFireCadenceComponent');
+
+function watchFireCadenceLifecycle(entity: Entity, state: ServerFireCadenceState): void {
+    // Latch even transient add/remove transitions between server ticks. Callbacks
+    // retain only the non-draftable local state, never component values or Time.
+    entity.components.events.add.subscribe(([component]) => {
+        if (component === DestructionStartedComponent || component === PlayerDeathComponent
+            || component === JumpStateComponent || component === DisabledComponent) {
+            state.invalidated = true;
+        }
+    });
+    entity.components.events.delete.subscribe(deleted => {
+        for (const [component] of deleted) {
+            if (component === FireIntentComponent || component === WeaponsStateComponent
+                || component === ShipComponent || component === MultiplayerData
+                || component === DestructionStartedComponent || component === PlayerDeathComponent
+                || component === JumpStateComponent || component === DisabledComponent) {
+                state.invalidated = true;
+            }
+        }
+    });
+}
+
+/**
+ * Integration point for authoritative player costs. The scheduler supplies stable
+ * per-copy burst context, and debits cadence only if this returns a FiredShot.
+ * Keep payments keyed by weapon ID + context.burstToken + context.copy; do not use
+ * firstInBurst alone (a copy's first shot can be unavailable). NPC fireWithCost is
+ * intentionally separate and unchanged.
+ */
+export function fireScheduledIntent(
+    entity: Entity, weapon: WeaponEntry, source: string, shot: FireIntentShot,
+    context: FireCadenceShotContext,
+): FiredShot | undefined {
+    // Even a prepaid burst requires a live flight authority (not a landed or
+    // retired pilot). Unlimited also gates asynchronous ledger initialization.
+    if (!canPay(entity, 'unlimited')) return undefined;
+    const fire = () => weapon.fireFromEntityDetailed(source, shot.seed, true, shot.exitIndex, {
+        entityId: loggedShotEntityId(source, shot.seq), target: shot.target,
+    });
+    const data = weapon.data;
+    if (!('oneAmmoPerBurst' in data) || !data.oneAmmoPerBurst || data.burstCount <= 0) {
+        return withCost(entity, data.ammoType, fire);
+    }
+    let payments = entity.components.get(PlayerBurstPaymentsComponent);
+    if (!payments) {
+        payments = new Map();
+        entity.components.set(PlayerBurstPaymentsComponent, payments);
+    }
+    let payment = payments.get(data.id);
+    if (!payment || payment.token !== context.burstToken) {
+        payment = { token: context.burstToken, copies: new Set() };
+        payments.set(data.id, payment);
+    }
+    if (payment.copies.has(context.copy)) return fire();
+    // Reserve on the first successful shot, rather than retail's end-of-burst
+    // debit. Partial bursts cannot become free through cancellation/reconnect.
+    const fired = withCost(entity, data.ammoType, fire);
+    if (fired) payment.copies.add(context.copy);
+    return fired;
 }
 
 export const ServerFireIntentSystem = new System({
     name: 'ServerFireIntentSystem',
     after: [WeaponsSystem],
     args: [
-        FireIntentComponent,
-        WeaponsStateComponent,
+        Optional(FireIntentComponent),
+        Optional(WeaponsStateComponent),
         MultiplayerData,
         PlatformResource,
         WeaponEntries,
@@ -370,54 +523,121 @@ export const ServerFireIntentSystem = new System({
         UUID,
         GetEntity,
         Optional(FireLogComponent),
+        Optional(SystemIdResource),
     ] as const,
     step(intent, weapons, multiplayer, platform, weaponEntries, time, uuid,
-        entity, log) {
-        if (platform !== 'node' || multiplayer.owner === 'server') {
+        entity, log, systemId) {
+        if (platform !== 'node') return;
+        let local = entity.components.get(ServerFireCadenceComponent);
+        const authority = entity.components.get(CombatAuthorityComponent);
+        const shared = authority && pilotCadences.get(authority);
+        if (!local && !weapons) return;
+        if (shared && shared !== local) {
+            local = shared;
+            local.invalidated = true;
+            entity.components.set(ServerFireCadenceComponent, local);
+            watchFireCadenceLifecycle(entity, local);
+        } else if (!local) {
+            local = new ServerFireCadenceState();
+            entity.components.set(ServerFireCadenceComponent, local);
+            watchFireCadenceLifecycle(entity, local);
+        }
+        if (authority && !shared) pilotCadences.set(authority, local);
+        // Store only a primitive clock reading. Time/GetWorld/component drafts
+        // must never escape this synchronous step through a scheduler closure.
+        if (!Number.isFinite(time.time)) {
+            local.cadence.clearPending();
             return;
         }
+        local.now = Math.max(local.now, time.time);
         const sync = getFireSyncLocalState(entity, intent, log);
-        for (const shot of newShotsAfter(
-            intent.shots, sync.highestIntentSeq)) {
+        sync.highestIntentSeq = Math.max(sync.highestIntentSeq, local.highestIntentSeq);
+        sync.nextLogSeq = Math.max(sync.nextLogSeq, local.nextLogSeq);
+        const player = entity.components.get(PlayerStateComponent);
+        const boundary = JSON.stringify([
+            multiplayer.owner, entity.components.get(ShipComponent)?.id,
+            player?.shipId, player?.currentSystem, player?.diedAt,
+            player?.landingCount, systemId,
+        ]);
+        const blocked = multiplayer.owner === 'server' || !weapons
+            || entity.components.has(DestructionStartedComponent)
+            || entity.components.has(PlayerDeathComponent)
+            || entity.components.has(JumpStateComponent)
+            || entity.components.get(DisabledComponent) === true
+            || (entity.components.get(ArmorComponent)?.current ?? 1) <= 0;
+        const invalidate = blocked || local.blocked || local.invalidated
+            || (local.boundary !== undefined && local.boundary !== boundary);
+        local.invalidated = false;
+        local.boundary = boundary;
+        local.blocked = blocked;
+        if (invalidate || (local.hadIntent && !intent)) {
+            local.cadence.clearPending();
+        }
+        local.hadIntent = intent !== undefined;
+
+        const active = new Set<string>();
+        if (!invalidate) {
+            for (const [id, installed] of weapons ?? []) {
+                const weapon = weaponEntries.getCached(id);
+                if (!weapon || weapon.syncAsFireEvent === false) continue;
+                try {
+                    local.cadence.setWeapon(id, {
+                        reload: weapon.data.reload,
+                        burstReload: weapon.data.burstReload,
+                        burstCount: weapon.data.burstCount,
+                        fireSimultaneously: weapon.data.fireSimultaneously,
+                        count: installed.count,
+                    });
+                    if (installed.count > 0) active.add(id);
+                } catch (error) {
+                    // Bad owner-writable inventory or capacity exhaustion must
+                    // fail closed, not crash a server tick or refill old debt.
+                    if (!(error instanceof RangeError)) throw error;
+                    local.cadence.clearPending(id);
+                }
+            }
+        }
+        for (const id of local.activeWeapons) {
+            if (!active.has(id)) local.cadence.clearPending(id);
+        }
+        local.activeWeapons = active;
+
+        for (const shot of newShotsAfter(intent?.shots ?? [], sync.highestIntentSeq)) {
+            if (!validFireIntent(shot)) continue;
+            // Includes blocked, unknown, full and eventually expired intents.
+            // A retained/re-added wire buffer must never resurrect them.
             sync.highestIntentSeq = shot.seq;
-            if (!validFireIntent(shot)) {
-                continue;
-            }
-            const installed = weapons.get(shot.weaponId);
-            const weapon = weaponEntries.getCached(shot.weaponId);
-            if (!installed || installed.count <= 0 || !weapon
-                || weapon.syncAsFireEvent === false
-                || !acceptsShotAt(sync, shot.weaponId, time.time,
-                    weaponShotRateCeiling(weapon.data, installed.count))) {
-                continue;
-            }
-            const fired = weapon.fireFromEntityDetailed(
-                uuid,
-                shot.seed,
-                true,
-                shot.exitIndex,
-                {
-                    entityId: loggedShotEntityId(uuid, shot.seq),
-                    target: shot.target,
-                },
-            );
-            if (!fired) {
-                continue;
-            }
-            sync.spawnedSeqs.add(shot.seq);
-            const logged = makeFireLogShot(
-                shot, time.time, fired.position, fired.rotation, {
+            local.highestIntentSeq = shot.seq;
+            if (invalidate || !active.has(shot.weaponId)) continue;
+            const snapshot: FireIntentShot = {
+                seq: shot.seq, weaponId: shot.weaponId,
+                seed: shot.seed, exitIndex: shot.exitIndex,
+            };
+            if (shot.target !== undefined) snapshot.target = shot.target;
+            local.cadence.enqueue(shot.weaponId, snapshot);
+        }
+        // Drain every tick, independent of network arrivals and trigger state.
+        for (const id of active) {
+            const weapon = weaponEntries.getCached(id)!;
+            local.cadence.drain(id, (shot, at, context) => {
+                const fired = fireScheduledIntent(entity, weapon, uuid, shot, context);
+                if (!fired) return false;
+                rememberSpawnedShot(sync, shot.seq);
+                const logged = makeFireLogShot(shot, at, fired.position, fired.rotation, {
+                    logSeq: sync.nextLogSeq++,
                     sourceVelocity: fired.sourceVelocity,
                     target: fired.target,
                     inaccuracy: fired.inaccuracy,
                 });
-            if (log) {
-                pushShot(log.shots, logged);
+                if (log) {
+                    pushShot(log.shots, logged);
+                } else {
+                    log = { shots: [logged] };
+                }
                 entity.components.set(FireLogComponent, log);
-            } else {
-                log = { shots: [logged] };
-                entity.components.set(FireLogComponent, log);
-            }
+                local!.nextLogSeq = sync.nextLogSeq;
+                return true;
+            });
         }
     },
 });
@@ -437,10 +657,14 @@ export const FireLogSpawnSystem = new System({
     step(log, weaponEntries, time, uuid, entity, intent, serverClockOffset) {
         const sync = getFireSyncLocalState(entity, intent, log);
         const clockOffset = serverClockOffset?.offset ?? 0;
-        for (const shot of newShotsAfter(log.shots, sync.highestLogSeq)) {
+        for (const shot of newFireLogsAfter(log.shots, sync.highestLogSeq)) {
+            const logSeq = fireLogSequence(shot);
             sync.nextSeq = Math.max(sync.nextSeq, shot.seq + 1);
-            if (sync.spawnedSeqs.delete(shot.seq)) {
-                sync.highestLogSeq = shot.seq;
+            sync.nextLogSeq = Math.max(sync.nextLogSeq, logSeq + 1);
+            const spawned = sync.spawnedSeqs.delete(shot.seq);
+            if (spawned || (shot.seq >= sync.lowestPredictedSeq
+                && shot.seq <= sync.highestPredictedSeq)) {
+                sync.highestLogSeq = logSeq;
                 continue;
             }
             const weapon = weaponEntries.getCached(shot.weaponId);
@@ -448,24 +672,20 @@ export const FireLogSpawnSystem = new System({
                 break;
             }
             if (weapon.syncAsFireEvent === false) {
-                sync.highestLogSeq = shot.seq;
+                sync.highestLogSeq = logSeq;
                 continue;
             }
             const mappedShot = clockOffset !== 0
                 ? { ...shot, at: shot.at + clockOffset }
                 : shot;
             weapon.fireFromLog(uuid, mappedShot, time.time);
-            sync.highestLogSeq = shot.seq;
+            sync.highestLogSeq = logSeq;
 
             if ((globalThis as any).debugCombat || (globalThis as any).novaDebug?.debugCombat) {
                 console.log(`[Combat Remote] Spawned shot seq=${shot.seq} weapon=${shot.weaponId} from ${uuid} at (${Math.round(shot.position.x)}, ${Math.round(shot.position.y)})`);
             }
         }
-        for (const seq of sync.spawnedSeqs) {
-            if (seq <= sync.highestLogSeq) {
-                sync.spawnedSeqs.delete(seq);
-            }
-        }
+
     },
 });
 
@@ -618,6 +838,11 @@ export const WeaponPlugin: Plugin = {
 
         world.addPlugin(FireSyncPlugin);
         world.addComponent(WeaponsStateComponent);
+        // Deliberately not registered with DeltaResource: payments are local.
+        world.addComponent(WeaponBurstPaymentsComponent);
+        world.addComponent(PlayerBurstPaymentsComponent);
+        world.addComponent(NpcWeaponFuelComponent);
+        world.addComponent(ServerFireCadenceComponent);
         world.addSystem(WeaponsSystem);
         world.addSystem(ServerFireIntentSystem);
         world.addSystem(FireLogSpawnSystem);

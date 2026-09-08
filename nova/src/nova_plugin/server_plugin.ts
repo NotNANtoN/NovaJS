@@ -1,5 +1,12 @@
 import * as t from 'io-ts';
-import { Entities, GetEntity, UUID } from 'nova_ecs/arg_types';
+import { Entities, GetEntity, GetWorld, UUID } from 'nova_ecs/arg_types';
+import { Component } from 'nova_ecs/component';
+import { CombatAuthorityComponent, bindCombatOwner, combatLedger,
+    makePlayerDataWithCombatResources as makePlayerData } from './combat_resources';
+import { ShipComponent } from './ship_plugin';
+import { OutfitsStateComponent } from './outfit_plugin';
+import { ServerEnergyTransferSystem } from './energy_transfer_plugin';
+import { CloakEnergyDrainSystem } from './cloaking_plugin';
 import { Entity } from "nova_ecs/entity";
 import { EcsEvent } from 'nova_ecs/events';
 import { Optional } from 'nova_ecs/optional';
@@ -9,6 +16,7 @@ import {
     multiplayer,
     MultiplayerData,
     MultiplayerPhase,
+    replicationPolicies,
 } from "nova_ecs/plugins/multiplayer_plugin";
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
 import { Query } from 'nova_ecs/query';
@@ -26,6 +34,7 @@ import {
 } from './entity_budget';
 import {
     PersistentPlayerState,
+    PlayerState,
     PlayerData as PlayerDataCodec,
     PlayerRevisionConflictError,
     PlayerStateComponent,
@@ -34,7 +43,6 @@ import {
     toPersistentPlayerState,
 } from './player_state';
 import {
-    makePlayerData,
     summarizeSnapshots,
 } from './player_data_projection';
 
@@ -47,7 +55,7 @@ export type PlayerData = t.TypeOf<typeof PlayerDataCodec>;
 
 export const RemovedPeerEvent = new EcsEvent<string>('RemovedPeerEvent');
 const PlayerEntitiesQuery = new Query([
-    MultiplayerData, UUID, Optional(PlayerStateComponent),
+    MultiplayerData, UUID, Optional(PlayerStateComponent), Optional(CombatAuthorityComponent), GetEntity,
 ] as const);
 const PlayerPersistenceEntitiesQuery = new Query([
     MultiplayerData, UUID, GetEntity, PlayerStateComponent,
@@ -62,6 +70,23 @@ interface PlayerStatePersistenceRecord {
      * newer progress.
      */
     revision?: number;
+    pending?: Promise<void>;
+    queued?: PersistentPlayerState;
+    conflicted?: boolean;
+    onRevision?: (revision: number) => void;
+}
+
+const flightPersistence = new WeakMap<object, PlayerStatePersistenceRecord>();
+function flightRecordFor(token: string, authority: { storeRevision?: number } | undefined,
+    previous?: PlayerStatePersistenceRecord): PlayerStatePersistenceRecord {
+    if (!authority) return previous?.token === token ? previous : { token };
+    let record = flightPersistence.get(authority);
+    if (!record) {
+        record = { token, revision: authority.storeRevision,
+            onRevision: revision => { authority.storeRevision = Math.max(authority.storeRevision ?? 0, revision); } };
+        flightPersistence.set(authority, record);
+    }
+    return record;
 }
 
 /**
@@ -76,8 +101,9 @@ async function saveConditionally(
     expectedRevision: number | undefined,
 ): Promise<number | undefined> {
     try {
-        const saved = await playerStore.save(
-            token, state, undefined, expectedRevision);
+        const saved = await (playerStore.saveFlightState
+            ? playerStore.saveFlightState(token, state, expectedRevision)
+            : playerStore.save(token, state, undefined, expectedRevision));
         return typeof saved === 'number' ? saved : undefined;
     } catch (error) {
         if (error instanceof PlayerRevisionConflictError) {
@@ -87,6 +113,33 @@ async function saveConditionally(
         }
         throw error;
     }
+}
+
+function queueFlightSave(store: PlayerStorePort, record: PlayerStatePersistenceRecord,
+    state: PersistentPlayerState): Promise<void> {
+    record.queued = state;
+    if (record.pending) return record.pending;
+    const drain = async () => {
+        while (record.queued && !record.conflicted) {
+            const next = record.queued;
+            record.queued = undefined;
+            try {
+                const revision = await store.saveFlightState!(record.token, next, record.revision);
+                if (typeof revision === 'number') {
+                    record.revision = revision;
+                    record.onRevision?.(revision);
+                }
+            } catch (error) {
+                if (!(error instanceof PlayerRevisionConflictError)) throw error;
+                // Only combat revisions are rebased by the store. Do not adopt
+                // another session's whole-state revision and overwrite it later.
+                record.conflicted = true;
+                console.warn(`Dropped stale flight session for ${record.token}: ${error.message}`);
+            }
+        }
+    };
+    record.pending = drain().finally(() => { record.pending = undefined; });
+    return record.pending;
 }
 
 export const PlayerStateSnapshots = new Resource<
@@ -102,10 +155,11 @@ export const ManageClientsSystem = new System({
     step: (removedPeer, multiplayerEntities, entities, _singleton,
         playerStore, systemId, snapshots) => {
         // Remove entities of peers who have disconnected
-        for (const [multiplayerData, uuid, state] of multiplayerEntities) {
+        for (const [multiplayerData, uuid, state, authority, entity] of multiplayerEntities) {
             if (multiplayerData.owner === removedPeer) {
+                authority?.capture(entity);
                 const token = playerStore.getTokenForPeer(removedPeer);
-                if (token && state) {
+                if (token && state && (!playerStore.saveCombatResources || authority && !authority.retired)) {
                     // PlayerStore copies the state before retaining it.
                     const persistedState = toPersistentPlayerState(state);
                     if (!persistedState.currentSystem) {
@@ -115,9 +169,11 @@ export const ManageClientsSystem = new System({
                     // The success and conflict paths both flush from the same
                     // promise callback, so a disconnect still reaches disk in
                     // the same turn it used to.
-                    void playerStore.save(
-                        token, persistedState, undefined,
-                        record?.token === token ? record.revision : undefined)
+                    const expected = record?.token === token ? record.revision : authority?.storeRevision;
+                    const flightRecord = flightRecordFor(token, authority, record);
+                    void (playerStore.saveFlightState
+                        ? queueFlightSave(playerStore, flightRecord, persistedState)
+                        : playerStore.save(token, persistedState, undefined, expected))
                         .then(
                             () => playerStore.flush(),
                             error => {
@@ -144,6 +200,54 @@ export const ManageClientsSystem = new System({
 });
 
 const LeaveSubscription = new Resource<Subscription>('LeaveSubscription');
+const CombatInitializing = new Component<boolean>('CombatInitializing');
+replicationPolicies.register(CombatInitializing, { codec: t.boolean, authority: 'local-only' });
+
+export const InitializeCombatResourcesSystem = new System({
+    name: 'InitializeCombatResources',
+    args: [PlayerStateComponent, MultiplayerData, GetEntity, UUID, GetWorld,
+        PlayerStoreResource, GameDataResource] as const,
+    before: [MultiplayerPhase, ServerEnergyTransferSystem],
+    step: (_state, multiplayerData, entity, uuid, world, store, gameData) => {
+        if (multiplayerData.owner === 'server') return;
+        const authority = entity.components.get(CombatAuthorityComponent);
+        if (authority) { authority.capture(entity); return; }
+        const token = store.getTokenForPeer(multiplayerData.owner);
+        if (!token || entity.components.has(CombatInitializing)) return;
+        entity.components.set(CombatInitializing, true);
+        const arrivalState = toPersistentPlayerState(_state) as PlayerState;
+        // Other server systems still read PlayerState.fuel. Do not let a
+        // not-yet-initialized owner transfer a forged first-state tank.
+        _state.fuel = 0;
+        delete _state.combatResources;
+        const owner = multiplayerData.owner;
+        void combatLedger(store, gameData).get(token).then(async authority => {
+            if (authority.retired) return;
+            const hull = await gameData.data.Ship.get(authority.balance.shipId);
+            const current = world.entities.get(uuid);
+            if (!current || current.components.get(MultiplayerData)?.owner !== owner
+                || current.components.has(CombatAuthorityComponent)) return;
+            const state = current.components.get(PlayerStateComponent);
+            if (!state) return;
+            bindCombatOwner(owner, authority);
+            // Room handoffs can carry an unsent final jump debit. Consume that
+            // against a server-issued basis, never against a proposed balance.
+            const debit = authority.acceptOwnerFuel(arrivalState);
+            if (debit > 0) {
+                authority.balance.fuel = Math.max(0, authority.balance.fuel - debit);
+                authority.commit();
+            }
+            if (current.components.get(ShipComponent)?.id !== hull.id) {
+                current.components.set(ShipComponent, { id: hull.id });
+                current.components.set(OutfitsStateComponent, new Map(
+                    Object.entries(hull.outfits).map(([id, count]) => [id, { count }])));
+            }
+            current.components.set(CombatAuthorityComponent, authority);
+            authority.project(current);
+            authority.capture(current);
+        }).catch(error => console.error('Combat initialization failed; firing remains disabled', error));
+    },
+});
 
 export const PersistPlayerStateSystem = new System({
     name: 'PersistPlayerState',
@@ -158,13 +262,18 @@ export const PersistPlayerStateSystem = new System({
     // deltas. Inspect persistence before that phase so a player mutation is
     // observed without stealing the delta from replication.
     before: [MultiplayerPhase],
+    after: [InitializeCombatResourcesSystem, ServerEnergyTransferSystem],
     step: (players, playerStore, snapshots, deltaMaker, _singleton) => {
         for (const [multiplayerData, uuid, entity, state] of players) {
             const token = playerStore.getTokenForPeer(multiplayerData.owner);
-            if (!token) {
+            if (!token || playerStore.saveCombatResources
+                && !entity.components.has(CombatAuthorityComponent)) {
                 continue;
             }
 
+            const authority = entity.components.get(CombatAuthorityComponent);
+            if (authority?.retired) continue;
+            authority?.capture(entity);
             const previous = snapshots.get(uuid);
             if (previous?.token === token
                 && !deltaMaker.isComponentDirty(
@@ -176,7 +285,14 @@ export const PersistPlayerStateSystem = new System({
             // before PlayerStore.save reaches its first await.
             const persistedState = toPersistentPlayerState(state);
             const expected = previous?.token === token
-                ? previous.revision : undefined;
+                ? previous.revision : authority?.storeRevision;
+            if (playerStore.saveFlightState) {
+                const record = flightRecordFor(token, authority, previous);
+                snapshots.set(uuid, record);
+                void queueFlightSave(playerStore, record, persistedState).catch(error =>
+                    console.error('Failed to save player state', error));
+                continue;
+            }
             snapshots.set(uuid, { token, revision: previous?.revision });
             void saveConditionally(
                 playerStore, token, persistedState, expected)
@@ -200,6 +316,13 @@ const ServerSystemPlugin: Plugin = {
             throw new Error('Expected CommunicatorResource to exist');
         }
         world.resources.set(PlayerStateSnapshots, new Map());
+        world.addComponent(CombatAuthorityComponent);
+        world.addComponent(CombatInitializing);
+        world.addSystem(InitializeCombatResourcesSystem);
+        // Cloak currently drains in both worlds. Its browser debit now arrives
+        // as a deduplicated fuel intent; running the legacy server drain too
+        // would charge twice. Jump/cloak intent validation remains legacy.
+        world.removeSystem(CloakEnergyDrainSystem);
         world.addSystem(ManageClientsSystem);
         world.addSystem(PersistPlayerStateSystem);
         const subscription = communicator.peers.leave.subscribe(peer => {
@@ -234,6 +357,7 @@ export const ServerPlugin: Plugin = {
             throw new Error('PlayerStoreResource must exist');
         }
         await playerStore.ready;
+        await combatLedger(playerStore, gameData).ready;
         const compatibilityProfile = world.resources.get(
             CompatibilityProfileResource) as CompatibilityProfile | undefined;
 

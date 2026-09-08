@@ -80,7 +80,12 @@ export function getDefaultBeamAnimation(): BeamAnimation {
 }
 
 
-export type AmmoType = "unlimited" | ["energy", number] | ["outfit", string];
+export type AmmoType = "unlimited" | ["energy", number] | ["outfit", string] | ["outfits", string[]];
+
+export function ammoOutfitIds(ammo: AmmoType): readonly string[] {
+    if (ammo === "unlimited" || ammo[0] === "energy") return [];
+    return ammo[0] === "outfit" ? [ammo[1]] : ammo[1];
+}
 
 export interface SubmunitionType {
     id: string;

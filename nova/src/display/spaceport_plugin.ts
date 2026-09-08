@@ -44,9 +44,10 @@ import { deImmerify } from '../util/deimmerify';
 import { ResizeEvent, ScreenSize } from './screen_size_plugin';
 import { persistDeparture } from './spaceport_departure';
 import { Stage } from './stage_resource';
+import { combatShopTransaction } from '../nova_plugin/combat_resources';
 
 
-const SpaceportComponent = new Component<Spaceport>("Spaceport");
+export const SpaceportComponent = new Component<Spaceport>("Spaceport");
 
 const SpaceportProvider = Provide({
     name: "SpaceportProvider",
@@ -62,7 +63,59 @@ const SpaceportProvider = Provide({
 
 const SpaceportQuery = new Query([SpaceportComponent] as const);
 
-const LandSystem = new System({
+export interface LandingSessionActions {
+    authorize(): Promise<void>;
+    land(): Promise<Entity>;
+    recover(): Promise<Entity>;
+    restore(ship: Entity): void;
+    abort(): void;
+    failed(error: unknown, retry: () => Promise<void>): void;
+}
+
+/** A failed/ambiguous landing remains detached until the server fences old
+ * requests and confirms flight. Recovery failure always exposes a retry UI. */
+export async function runLandingSession(actions: LandingSessionActions): Promise<void> {
+    let recovering = false;
+    const retry = async () => {
+        if (recovering) return;
+        recovering = true;
+        try { actions.restore(await actions.recover()); }
+        catch (error) { actions.failed(error, retry); }
+        finally { recovering = false; }
+    };
+    try {
+        await actions.authorize();
+        actions.restore(await actions.land());
+    } catch (error) {
+        console.error('Landing interrupted; reconciling with server', error);
+        actions.abort();
+        await retry();
+    }
+}
+
+function landingRecoveryDialog(error: unknown, retry: () => Promise<void>): HTMLElement {
+    const panel = document.createElement('div');
+    panel.setAttribute('role', 'alertdialog');
+    Object.assign(panel.style, { position: 'fixed', inset: '30% 15% auto', padding: '24px',
+        background: '#111', color: '#fff', zIndex: '10000', border: '1px solid #888' });
+    const message = document.createElement('p');
+    message.textContent = `Landing recovery is waiting for the server. Your ship will not resume flight until recovery is confirmed. ${error instanceof Error ? error.message : ''}`;
+    const retryButton = document.createElement('button');
+    retryButton.textContent = 'Retry recovery';
+    retryButton.onclick = () => {
+        retryButton.disabled = true;
+        void retry().finally(() => { retryButton.disabled = false; });
+    };
+    const reloadButton = document.createElement('button');
+    reloadButton.textContent = 'Reload / return to menu';
+    reloadButton.onclick = () => window.location.reload();
+    panel.append(message, retryButton, reloadButton);
+    document.body.append(panel);
+    retryButton.focus();
+    return panel;
+}
+
+export const LandSystem = new System({
     name: 'LandSystem',
     events: [LandEvent],
     args: [LandEvent, UUID, Entities, RunQuery, ScreenSize, GetEntity,
@@ -99,66 +152,64 @@ const LandSystem = new System({
             return;
         }
         deImmerify(playerShip);
-        const landingState = playerShip.components.get(PlayerStateComponent)
-            ?? playerState;
-        if (landingState) {
-            landingState.lastLandedPlanet = id;
-            landingState.landingCount = (landingState.landingCount ?? 0) + 1;
-            landingState.lastLandedSystem = landingState.currentSystem;
-            landingState.lastLandedPosition = landedPlanet?.position ?? [0, 0];
-        }
+        const landingState = playerShip.components.get(PlayerStateComponent);
+        const landingPosition: [number, number] = landedPlanet
+            ? [landedPlanet.position[0], landedPlanet.position[1]] : [0, 0];
+        const owner = playerMultiplayer?.owner;
         entities.delete(shipUuid);
-
         spaceport.container.position.x = x / 2;
         spaceport.container.position.y = y / 2;
-        const outfits = playerShip.components.get(OutfitsStateComponent);
-        // Complete missions against the arrival date. Advancing the day
-        // first made ferries expire on the landing that should pay them.
-        const landingNotices = landingState && missionRuntime
-            ? missionRuntime.processLanding(
-                landingState, id, ncbRuntime.setContext(playerShip, landingState))
-            : Promise.resolve([]);
-        void landingNotices.then((notices: MissionNotice[]) => {
-            if (landingState) {
-                advanceGameDate(landingState);
-            }
-            if (landingState && playerStore && playerMultiplayer
-                && communicator) {
-                const store = playerStore;
-                const token = store.getTokenForPeer(playerMultiplayer.owner);
-                if (token) {
-                    const ship = serializer.encode(playerShip);
-                    void store.snapshot(token, landingState, ship)
-                        .catch(error => console.error(
-                            'Landing snapshot failed', error));
+        let recoveryDialog: HTMLElement | undefined;
+
+        void runLandingSession({
+            authorize: () => spaceport.authorizeLanding(playerShip),
+            land: async () => {
+                if (landingState) {
+                    landingState.lastLandedPlanet = id;
+                    landingState.landingCount = (landingState.landingCount ?? 0) + 1;
+                    landingState.lastLandedSystem = landingState.currentSystem;
+                    landingState.lastLandedPosition = landingPosition;
                 }
-            }
-            if (outfits) {
-                // NCB outfit handlers mutate the existing map so all
-                // operations in one expression see one another. Re-setting
-                // the component invalidates the outfit-derived providers.
-                playerShip.components.set(OutfitsStateComponent, outfits);
-            }
-            return spaceport.show(playerShip, notices);
-        })
-            .then((newShip: Entity) => {
-            if (communicator?.uuid) {
-                newShip.components.set(MultiplayerData, {
-                    owner: communicator.uuid,
-                });
-            }
-            entities.set(shipUuid, newShip);
-            if (playerStore && playerMultiplayer) {
-                void persistDeparture(
-                    playerStore,
-                    playerStore.getTokenForPeer(playerMultiplayer.owner),
-                    newShip,
-                    playerState,
+                const outfits = playerShip.components.get(OutfitsStateComponent);
+                // Mission/date side effects occur only after authorization.
+                const notices = landingState && missionRuntime
+                    ? await missionRuntime.processLanding(
+                        landingState, id, ncbRuntime.setContext(playerShip, landingState)) : [];
+                if (landingState) advanceGameDate(landingState);
+                if (landingState && playerStore && owner && communicator) {
+                    const token = playerStore.getTokenForPeer(owner);
+                    if (token) void playerStore.snapshot(token, landingState, serializer.encode(playerShip))
+                        .catch(error => console.error('Landing snapshot failed', error));
+                }
+                if (outfits) playerShip.components.set(OutfitsStateComponent, outfits);
+                return spaceport.show(playerShip, notices, true);
+            },
+            recover: async () => {
+                if (landingState) {
+                    const receipt = await combatShopTransaction(landingState, id, 'recover');
+                    if (receipt.landed !== null) throw new Error('Server has not confirmed flight recovery');
+                    const outfits = playerShip.components.get(OutfitsStateComponent);
+                    for (const [ammo, count] of Object.entries(receipt.balance.ammo)) {
+                        if (count === 0) outfits?.delete(ammo);
+                        else outfits?.set(ammo, { count });
+                    }
+                }
+                return playerShip;
+            },
+            restore: newShip => {
+                recoveryDialog?.remove();
+                if (communicator?.uuid) newShip.components.set(MultiplayerData, { owner: communicator.uuid });
+                world.entities.set(shipUuid, newShip);
+                if (playerStore && owner) void persistDeparture(
+                    playerStore, playerStore.getTokenForPeer(owner), newShip, landingState,
                     entity => serializer.encode(entity));
-            }
-            })
-            .catch((error: unknown) =>
-                console.error('Mission landing processing failed', error));
+            },
+            abort: () => spaceport.cancelLandingPresentation(),
+            failed: (error, retry) => {
+                recoveryDialog?.remove();
+                recoveryDialog = landingRecoveryDialog(error, retry);
+            },
+        });
     }
 });
 

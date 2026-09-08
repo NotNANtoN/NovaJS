@@ -2,7 +2,7 @@ import { Animation, getDefaultAnimation, getDefaultExitPoints } from "novadatain
 import { BaseData } from "novadatainterface/BaseData";
 import { NovaDataType } from "novadatainterface/NovaDataInterface";
 import { getDefaultShipData } from "novadatainterface/ShipData";
-import { BaseWeaponData, BayGuidanceSet, BayWeaponData, BeamGuidanceSet, BeamGuidanceType, BeamWeaponData, DamageType, NotBayWeaponData, ProjectileGuidanceSet, ProjectileGuidanceType, ProjectileWeaponData, SubmunitionType, WeaponDamage, WeaponData } from "novadatainterface/WeaponData";
+import { AmmoType, BaseWeaponData, BayGuidanceSet, BayWeaponData, BeamGuidanceSet, BeamGuidanceType, BeamWeaponData, DamageType, NotBayWeaponData, ProjectileGuidanceSet, ProjectileGuidanceType, ProjectileWeaponData, SubmunitionType, WeaponDamage, WeaponData } from "novadatainterface/WeaponData";
 import { BLEND_MODES } from "novadatainterface/BlendModes";
 import { WeapResource } from "../resource_parsers/WeapResource";
 import { BaseParse } from "./BaseParse";
@@ -10,8 +10,40 @@ import { FPS, framesToMilliseconds, ShipTurnRateConversionFactor } from "./Const
 
 export const WEAP_SPEED_FACTOR = 3 / 10;
 
+function parseAmmoType(weap: WeapResource): AmmoType {
+    // EVN_Bible.pdf, p. 65: bays use AmmoType as a ship ID, not an ammo code.
+    if (BayGuidanceSet.has(weap.guidance) || weap.ammoType === -1 || weap.ammoType === -999) {
+        return "unlimited";
+    }
+    if (weap.ammoType <= -1000) {
+        // Fuel units per shot, NOT per second (Bible p. 65). The data interface
+        // calls fuel "energy"; do not scale beam costs by duration or frame rate.
+        // The documented range is "-1000 & below", so -1000 explicitly costs zero.
+        return ["energy", Math.abs(weap.ammoType + 1000) / 10];
+    }
+    if (weap.ammoType >= 0 && weap.ammoType <= 255) {
+        const weaponID = weap.ammoType + 128;
+        // AmmoType indexes a weapon's supply, not an outfit. oütf ModType 3
+        // points back to that full weapon ID, including in alternate mod slots.
+        const supplyID = weap.idSpace.wëap[weaponID]?.globalID;
+        const outfits = [...new Set(Object.values(weap.idSpace.oütf).filter(outfit =>
+            outfit.functions.some(([type, value]) => type === "ammunition" && value === weaponID
+                // The same numeric supply ID can belong to unrelated plug-ins.
+                && outfit.idSpace.wëap[value]?.globalID === supplyID))
+            .map(outfit => outfit.globalID))].sort();
+        if (outfits.length === 1) {
+            return ["outfit", outfits[0]];
+        }
+        const context = `wëap ${weap.globalID} (AmmoType ${weap.ammoType}, ammo supply wëap ${weaponID})`;
+        if (outfits.length === 0) {
+            throw new Error(`Missing ammunition oütf for ${context}: expected an oütf with ModType 3 and ModVal ${weaponID}; restore the missing outfit or correct AmmoType/ModVal`);
+        }
+        return ["outfits", outfits];
+    }
+    throw new Error(`Unsupported AmmoType ${weap.ammoType} for wëap ${weap.globalID}: expected -1 (unlimited), -999 (self-destruct), <= -1000 (fuel), or 0..255 (weapon ammo supply); correct the resource AmmoType`);
+}
+
 async function BaseWeaponParse(weap: WeapResource, notFoundFunction: (m: string) => void, base: BaseData): Promise<BaseWeaponData> {
-    // TODO: Implement ammo
 
     // Parse the weapon's sound
     let sound: string | undefined;
@@ -25,10 +57,10 @@ async function BaseWeaponParse(weap: WeapResource, notFoundFunction: (m: string)
     return {
         ...base,
         accuracy: weap.accuracy,
-        ammoType: "unlimited",
+        ammoType: parseAmmoType(weap),
         burstCount: Math.max(weap.burstCount, 0),
         burstReload: framesToMilliseconds(weap.burstReload),
-        destroyShipWhenFiring: weap.ammoType === -999,
+        destroyShipWhenFiring: !BayGuidanceSet.has(weap.guidance) && weap.ammoType === -999,
         exitType: weap.exitType,
         fireGroup: weap.fireGroup,
         reload: framesToMilliseconds(weap.reload),
@@ -104,6 +136,8 @@ async function NotBayWeaponParse(weap: WeapResource, notFoundFunction: (m: strin
         ...baseWeapon,
         submunitions,
         damage,
+        // Bible p. 69: Flags3 0x0001 consumes ammo at the END of a burst.
+        // Preserve the bit; payment timing belongs to the runtime.
         oneAmmoPerBurst: weap.oneAmmoPerBurst,
         shotDuration: framesToMilliseconds(weap.duration),
         primaryExplosion,

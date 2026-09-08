@@ -6,6 +6,7 @@ import { Observable } from 'rxjs';
 import { GameData } from '../client/gamedata/GameData';
 import { ControlEvent } from '../nova_plugin/controls_plugin';
 import { makeShip } from '../nova_plugin/make_ship';
+import { combatShopTransaction } from '../nova_plugin/combat_resources';
 import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin';
 import { ShipDataComponent } from '../nova_plugin/ship_plugin';
 import {
@@ -40,6 +41,11 @@ export class Shipyard extends Menu<Entity> {
     private playerState?: PlayerState;
     private planetData?: PlanetData;
     private refreshPromise?: Promise<void>;
+    private combatBusy = false;
+
+    protected override done() {
+        if (!this.combatBusy) super.done();
+    }
 
     constructor(gameData: GameData,
         controlEvents: Observable<ControlEvent>) {
@@ -238,7 +244,8 @@ export class Shipyard extends Menu<Entity> {
         return calculateTradeInValue(currentShip.cost);
     }
 
-    private buyShip() {
+    private async buyShip() {
+        if (this.combatBusy) return;
         const selection = this.itemGrid?.selection;
         if (!selection) {
             return;
@@ -269,7 +276,17 @@ export class Shipyard extends Menu<Entity> {
             console.warn(`Not enough credits to buy ship ${selection.id} (requires ${netCost} after trade-in)`);
             return;
         }
-        this.playerState.credits -= netCost;
+        if (this.playerState.combatResources) {
+            this.combatBusy = true;
+            try {
+                await combatShopTransaction(this.playerState, this.planetData!.id, 'ship', selection.id);
+            } catch (error) {
+                console.warn('Ship purchase rejected', error);
+                return;
+            } finally { this.combatBusy = false; }
+        } else {
+            this.playerState.credits -= netCost;
+        }
         this.playerState.shipId = selection.id;
         setCargoCapacity(this.playerState, selection.cargoCapacity);
         if (selection.onPurchase) {

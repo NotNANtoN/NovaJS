@@ -1,4 +1,5 @@
 import { Animation } from 'novadatainterface/Animation';
+import { ammoOutfitIds } from 'novadatainterface/WeaponData';
 import { GameDataInterface } from 'novadatainterface/GameDataInterface';
 import { SystemData } from 'novadatainterface/SystemData';
 import { Gettable } from 'novadatainterface/Gettable';
@@ -88,8 +89,8 @@ export async function warmFlightAssets({
                 await visitWeapon(sub.id);
             }
         }
-        if (Array.isArray(weapon.ammoType) && weapon.ammoType[0] === 'outfit') {
-            await visitOutfit(weapon.ammoType[1]);
+        for (const id of ammoOutfitIds(weapon.ammoType)) {
+            await visitOutfit(id);
         }
     };
 

@@ -70,12 +70,9 @@ export const ExplosionSystem = new System({
         );
         if (starting) {
             if (explosionData.sound) {
-                emit(SoundEvent, {
+                SoundEvent.emit(emit, {
                     id: explosionData.sound,
-                    position: {
-                        x: movement.position.x,
-                        y: movement.position.y,
-                    },
+                    position: movement.position,
                 });
             }
         }

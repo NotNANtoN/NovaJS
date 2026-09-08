@@ -1,6 +1,8 @@
 import { Either } from 'nova_ecs/either';
 import * as t from 'io-ts';
 import { FUEL_PER_JUMP } from './fuel';
+import { mergeCombatPlayerState } from './combat_resources';
+import { replicationPolicies } from 'nova_ecs/plugins/multiplayer_plugin';
 import { Errors } from 'io-ts';
 import { Component } from 'nova_ecs/component';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
@@ -11,6 +13,19 @@ import {
     sameResourceId,
 } from '../common/resource_id';
 import { EncodedEntity } from 'nova_ecs/plugins/serializer_plugin';
+
+const CombatBalance = new t.Type<number, number, unknown>('CombatBalance',
+    (v): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0,
+    (v, c) => typeof v === 'number' && Number.isFinite(v) && v >= 0
+        ? t.success(v) : t.failure(v, c), v => v);
+const CombatCount = new t.Type<number, number, unknown>('CombatCount',
+    (v): v is number => CombatBalance.is(v) && Number.isSafeInteger(v),
+    (v, c) => CombatBalance.is(v) && Number.isSafeInteger(v)
+        ? t.success(v) : t.failure(v, c), v => v);
+export const CombatResourcesCodec = t.type({
+    shipId: t.string, fuel: CombatBalance, ammo: t.record(t.string, CombatCount), revision: CombatCount,
+});
+export type CombatResources = t.TypeOf<typeof CombatResourcesCodec>;
 
 export const MAX_MISSION_BITS = 10_000;
 export const EV_NOVA_START_YEAR = 1177;
@@ -157,6 +172,7 @@ const PlayerStateFields = t.intersection([
         kills: t.number,
         /** Jump fuel in retail units; 100 units is one hyperspace jump. */
         fuel: t.number,
+        combatResources: CombatResourcesCodec,
         /**
          * Signed legal record per government resource id. A government with
          * no entry falls back to its own InitialRecord.
@@ -337,6 +353,11 @@ export interface PilotDirectoryEntry {
 
 export interface PlayerStorePort {
     readonly ready: Promise<void>;
+    /** Server-only balance writes; separate from legacy whole-state saves. */
+    saveCombatResources?(token: string, balance: CombatResources, credits?: number): number | void;
+        /** Rebase only over intervening combat writes, preserving their balances. */
+        saveFlightState?(token: string, state: PersistentPlayerState, expectedRevision?: number): Promise<number | void>;
+    startNewPilot?(token: string, metadata: Pick<PlayerState, 'pilotName' | 'shipName' | 'gender'>): Promise<void>;
     get(token: string): Promise<StoredPlayerRecord | undefined>;
     getOrCreate(token: string): Promise<PersistentPlayerState>;
     /**
@@ -659,6 +680,12 @@ export const PlayerStatePlugin: Plugin = {
     name: 'PlayerStatePlugin',
     build(world) {
         world.addComponent(PlayerStateComponent);
+        replicationPolicies.register(PlayerStateComponent, {
+            codec: PlayerStateCodec,
+            authority: 'entity-owner',
+            allowOwnerRemoval: false,
+            merge: mergeCombatPlayerState,
+        });
         const deltaMaker = world.resources.get(DeltaResource);
         if (!deltaMaker) {
             throw new Error('Expected delta maker resource to exist');

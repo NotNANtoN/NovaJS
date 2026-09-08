@@ -31,6 +31,28 @@ describe("IDSpaceHandler", function() {
         expect(idSpace.wëap['plug pack:153'].globalID).toEqual("plug pack:153");
     });
 
+    it("resolves qualified keys directly and enumerates real resources", function() {
+        const local = idSpace.wëap['Plugin 1:150'].idSpace.wëap;
+        for (const key of Object.keys(idSpace.wëap)) {
+            expect(local[key] === idSpace.wëap[key]).toBeTrue();
+        }
+        expect(Object.values(local).map(resource => resource.globalID))
+            .toEqual(Object.values(idSpace.wëap).map(resource => resource.globalID));
+        expect(local['missing:150']).toBeUndefined();
+        expect(local['nova:150']).toBeUndefined();
+    });
+
+    it("preserves nova precedence and plug-in-local numeric resolution", function() {
+        const plugin = idSpace.wëap['Plugin 1:150'].idSpace.wëap;
+        const other = idSpace.wëap['A first plug:150'].idSpace.wëap;
+        expect(plugin[128].globalID).toBe('nova:128');
+        expect(plugin[129].globalID).toBe('nova:129');
+        expect(plugin[150].globalID).toBe('Plugin 1:150');
+        expect(other[150].globalID).toBe('A first plug:150');
+        expect(plugin['A first plug:150'] === other[150]).toBeTrue();
+        expect(plugin[153]).toBeUndefined();
+    });
+
     /*
     it("Should assign the same pictID to ships with the same baseImage", function() {
         expect(idSpace.resources.shïp["nova:128"].pictID).toEqual(5000);

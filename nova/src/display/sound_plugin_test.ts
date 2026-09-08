@@ -1,10 +1,19 @@
 import 'jasmine';
+import { createDraft, finishDraft } from 'immer';
+import { Entity } from 'nova_ecs/entity';
+import { World } from 'nova_ecs/world';
+import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
+import { AsteroidCollisionHazardSystem } from '../nova_plugin/asteroid_plugin';
+import { GameDataResource } from '../nova_plugin/game_data_resource';
+import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin';
 import { EmitFunction } from 'nova_ecs/arg_types';
 import { Angle } from 'nova_ecs/datatypes/angle';
 import { Position } from 'nova_ecs/datatypes/position';
 import { Vector } from 'nova_ecs/datatypes/vector';
 import { MovementState } from 'nova_ecs/plugins/movement_plugin';
 import {
+    SoundPlugin,
+    VolumeResource,
     IncomingMissileWarningSystem,
     LandingSoundRequestSystem,
     StellarSoundSystem,
@@ -50,6 +59,80 @@ function movement(
         accelerating: 0,
     };
 }
+
+describe('queued world sound snapshots', () => {
+    it('snapshots a drafted payload including loop metadata before notifying subscribers', () => {
+        const world = new World('sound-snapshot');
+        const draft = createDraft({
+            id: 'nova:302', loop: true, position: { x: 25, y: -50 },
+        });
+        let received: typeof draft | undefined;
+        world.events.get(SoundEvent).subscribe(data => {
+            expect(data).not.toBe(draft);
+            expect(data.position).not.toBe(draft.position);
+            received = data as typeof draft;
+        });
+        SoundEvent.emit(world.emit.bind(world), draft);
+        draft.id = 'nova:150';
+        draft.loop = false;
+        draft.position.x = 9_000;
+        finishDraft(draft);
+        world.step();
+        expect(received).toEqual({
+            id: 'nova:302', loop: true, position: { x: 25, y: -50 },
+        });
+    });
+
+    it('preserves placeless sounds and isolates ordinary mutable positions', () => {
+        const world = new World('sound-values');
+        const received: unknown[] = [];
+        world.events.get(SoundEvent).subscribe(data => received.push(data));
+        const position = { x: 100, y: 200 };
+        SoundEvent.emit(world.emit.bind(world), { id: 'world', loop: false, position });
+        SoundEvent.emit(world.emit.bind(world), { id: 'ui' });
+        position.y = 5_000;
+        world.step();
+        expect(received).toEqual([
+            { id: 'world', loop: false, position: { x: 100, y: 200 } },
+            { id: 'ui' },
+        ]);
+    });
+
+    it('plays a forwarded asteroid impact after its movement draft is revoked', async () => {
+        const source = new World('sound-source');
+        const listener = new World('sound-listener');
+        const play = jasmine.createSpy('play');
+        const sound = { volume: 0, play };
+        listener.resources.set(GameDataResource, {
+            data: { Sound: { getCached: () => sound } },
+        } as never);
+        await listener.addPlugin(SoundPlugin);
+        listener.resources.set(VolumeResource, { volume: 0.8 });
+        listener.entities.set('player', new Entity('player')
+            .addComponent(PlayerShipSelector, undefined)
+            .addComponent(MovementStateComponent, movement(0, 0, 0, 0)));
+        source.events.get(SoundEvent).subscribe(data => listener.emit(SoundEvent, data));
+
+        const draft = createDraft(movement(2_850, 0, 100, 0));
+        AsteroidCollisionHazardSystem.step(
+            [['asteroid', {}, { strength: 40 }, movement(2_840, 0, 0, 0),
+                {}, { current: 100 }]] as never,
+            [['ship', {}, { physics: { mass: 100 } }, draft,
+                { collides: () => true }, {}, {}, undefined, new Entity('ship')]] as never,
+            { time: 1_000 } as never,
+            source.emit.bind(source), () => {}, 'node', new Map(), undefined,
+        );
+        // Both queues still hold the impact when delta tracking finishes.
+        draft.position.x = 5_000;
+        finishDraft(draft);
+        expect(() => draft.position.x).toThrow();
+        source.step();
+        listener.step();
+
+        expect(play).toHaveBeenCalledTimes(1);
+        expect(sound.volume).toBeCloseTo(0.4);
+    });
+});
 
 describe('browser sound effects', () => {
     it('plays a sound when a target is selected', () => {

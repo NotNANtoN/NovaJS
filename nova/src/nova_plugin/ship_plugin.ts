@@ -1,4 +1,5 @@
 import * as t from 'io-ts';
+import { plainSnapshot } from 'nova_ecs/draft_snapshot';
 import { ShipData, ShipPhysics } from "novadatainterface/ShipData";
 import { Component } from 'nova_ecs/component';
 import { Angle } from 'nova_ecs/datatypes/angle';
@@ -68,11 +69,12 @@ export const ShipPhysicsProvider = ProvideAsync({
     args: [ShipDataComponent, GameDataResource, OutfitsStateComponent] as const,
     update: [ShipDataComponent, OutfitsStateComponent],
     async factory(shipData, gameData, outfitsState) {
+        const physics = { ...plainSnapshot(shipData.physics) };
         const outfits = await Promise.all(
             [...outfitsState].map(async ([id, { count }]) =>
                 [await gameData.data.Outfit.get(id), count] as const
             ));
-        return applyOutfitPhysics(shipData.physics, outfits);
+        return applyOutfitPhysics(physics, outfits);
     }
 });
 

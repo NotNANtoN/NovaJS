@@ -21,6 +21,7 @@ import {
     migratePlayerRecord,
 } from '../nova_plugin/player_state_migrations';
 
+import { CombatResources, CombatResourcesCodec, copyCombatResources } from '../nova_plugin/combat_resources';
 export { PlayerRevisionConflictError };
 import { EncodedEntity } from 'nova_ecs/plugins/serializer_plugin';
 
@@ -135,6 +136,9 @@ export class PlayerStore implements PlayerStorePort {
     readonly filePath: string;
     readonly ready: Promise<void>;
     private players = new Map<string, StoredPlayer>();
+    // A flight save may rebase over combat-only revisions, never another
+    // whole-state writer (reconnect, snapshot restore, or pilot replacement).
+    private lastWholeStateRevision = new Map<string, number>();
     private quarantinedPlayers = new Map<string, unknown>();
     private peerTokens = new Map<string, string>();
     private saveTimer?: NodeJS.Timeout;
@@ -247,20 +251,46 @@ export class PlayerStore implements PlayerStorePort {
      * conditional: it is rejected if another writer has saved since that
      * revision was read.
      */
-    async save(
-        token: string,
-        state: PersistentPlayerState,
-        ship?: EncodedEntity,
-        expectedRevision?: number,
-    ): Promise<number> {
+    save(token: string, state: PersistentPlayerState, ship?: EncodedEntity,
+        expectedRevision?: number): Promise<number> {
+        return this.saveState(token, state, ship, expectedRevision, false);
+    }
+
+    saveFlightState(token: string, state: PersistentPlayerState,
+        expectedRevision?: number): Promise<number> {
+        return this.saveState(token, state, undefined, expectedRevision, true);
+    }
+
+    private async saveState(token: string, state: PersistentPlayerState,
+        ship: EncodedEntity | undefined, expectedRevision: number | undefined,
+        rebaseCombat: boolean): Promise<number> {
+        const persistedState = toPersistentPlayerState(state);
         await this.ready;
         this.assertWritable(token);
         const previous = this.players.get(token);
         const revision = previous?.revision ?? 0;
         if (expectedRevision !== undefined && expectedRevision !== revision) {
-            throw new PlayerRevisionConflictError(expectedRevision, revision);
+            const onlyCombatWrites = expectedRevision < revision
+                && expectedRevision >= (this.lastWholeStateRevision.get(token) ?? revision);
+            if (!rebaseCombat || !onlyCombatWrites) {
+                throw new PlayerRevisionConflictError(expectedRevision, revision);
+            }
         }
-        const persistedState = toPersistentPlayerState(state);
+        if (rebaseCombat && previous?.combatResources
+            && persistedState.combatResources?.revision !== previous.combatResources.revision) {
+            // The pending flight snapshot predates an authoritative spend.
+            // Keep its mission/cargo progress, but not its old credit balance.
+            persistedState.credits = previous.credits;
+        }
+        // Whole-state saves are a legacy client projection, not authority to
+        // mint ammo/fuel or erase a ledger established by the server.
+        if (previous?.combatResources) {
+            persistedState.combatResources = copyCombatResources(previous.combatResources);
+            persistedState.fuel = previous.combatResources.fuel;
+            persistedState.shipId = previous.combatResources.shipId;
+        } else {
+            delete persistedState.combatResources;
+        }
         const next = revision + 1;
         this.players.set(token, {
             ...persistedState,
@@ -270,8 +300,45 @@ export class PlayerStore implements PlayerStorePort {
             ...(ship === undefined ? { ship: previous?.ship } : { ship }),
             revision: next,
         });
+        this.lastWholeStateRevision.set(token, next);
         this.scheduleSave();
         return next;
+    }
+
+    async startNewPilot(token: string, metadata: Pick<PersistentPlayerState, 'pilotName' | 'shipName' | 'gender'>): Promise<void> {
+        await this.ready;
+        this.assertWritable(token);
+        const previous = this.players.get(token);
+        this.players.set(token, {
+            ...initialPlayerState(),
+            pilotName: metadata.pilotName,
+            shipName: metadata.shipName,
+            gender: metadata.gender,
+            snapshots: previous?.snapshots.map(cloneSnapshot) ?? [],
+            revision: (previous?.revision ?? 0) + 1,
+        });
+        this.lastWholeStateRevision.set(token, (previous?.revision ?? 0) + 1);
+        this.scheduleSave();
+    }
+
+    saveCombatResources(token: string, balance: CombatResources, credits?: number): number {
+        this.assertWritable(token);
+        if (!CombatResourcesCodec.is(balance)) throw new Error('Invalid combat balances');
+        if (credits !== undefined && (!Number.isFinite(credits) || credits < 0)) {
+            throw new Error('Invalid combat transaction credits');
+        }
+        const player = this.players.get(token) ?? initialPlayerState();
+        if (!this.lastWholeStateRevision.has(token)) {
+            this.lastWholeStateRevision.set(token, player.revision ?? 0);
+        }
+        player.revision = (player.revision ?? 0) + 1;
+        if (credits !== undefined) player.credits = credits;
+        player.combatResources = copyCombatResources(balance);
+        player.fuel = balance.fuel;
+        player.shipId = balance.shipId;
+        this.players.set(token, player);
+        this.scheduleSave();
+        return player.revision;
     }
 
     /** The revision a writer must present to save over the current state. */
@@ -375,6 +442,15 @@ export class PlayerStore implements PlayerStorePort {
             return undefined;
         }
         const restored = clonePlayerState(snapshot.state);
+        // Snapshot rollback remains a legacy pilot feature, not a combat
+        // refill transaction. Never restore an uploaded balance over the ledger.
+        if (player.combatResources) {
+            restored.combatResources = copyCombatResources(player.combatResources);
+            restored.fuel = player.combatResources.fuel;
+            restored.shipId = player.combatResources.shipId;
+        } else {
+            delete restored.combatResources;
+        }
         delete restored.diedAt;
         this.players.set(token, {
             ...restored,
@@ -393,6 +469,7 @@ export class PlayerStore implements PlayerStorePort {
                     ship: JSON.parse(JSON.stringify(snapshot.ship)) as EncodedEntity,
                 }),
         });
+        this.lastWholeStateRevision.set(token, (player.revision ?? 0) + 1);
         this.scheduleSave();
         return clonePlayer(this.players.get(token)!);
     }

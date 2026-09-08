@@ -17,6 +17,9 @@ import { Position } from 'nova_ecs/datatypes/position';
 import { Vector } from 'nova_ecs/datatypes/vector';
 import {
     FireIntentShot,
+    FIRE_BUFFER_SIZE,
+    rememberSpawnedShot,
+    newFireLogsAfter,
     fireLogReplayTiming,
     getFireSyncLocalState,
     loggedShotEntityId,
@@ -27,6 +30,8 @@ import {
     getFireLogDelta,
     applyFireLogDelta } from './fire_sync';
 import { ServerClockOffsetResource } from 'nova_ecs/plugins/multiplayer_plugin';
+import { CombatAuthority, CombatAuthorityComponent, CombatLedger } from './combat_resources';
+import { createInitialPlayerState, PlayerStateComponent } from './player_state';
 
 interface TestShot {
     seq: number;
@@ -278,6 +283,12 @@ describe('end-to-end shot synchronization across client, server, and observers',
             .addComponent(MultiplayerData, { owner: 'client-a' })
             .addComponent(WeaponsStateComponent, new Map([['blaster-128', { count: 1, firing: true }]]))
             .addComponent(FireIntentComponent, { shots: [...intent!.shots] });
+        const player = createInitialPlayerState();
+        const authority = new CombatAuthority({ persist: () => undefined } as unknown as CombatLedger,
+            'pilot-a', { shipId: player.shipId, fuel: 100, ammo: {}, revision: 0 }, player);
+        serverShip.components.set(PlayerStateComponent, player);
+        serverShip.components.set(CombatAuthorityComponent, authority);
+        authority.project(serverShip);
         serverWorld.entities.set('ship-a', serverShip);
 
         // Server steps -> ServerFireIntentSystem processes intent, creates authoritative shot and FireLog
@@ -314,6 +325,73 @@ describe('end-to-end shot synchronization across client, server, and observers',
         shooterShip.components.set(FireLogComponent, { shots: [...log!.shots] });
         clientWorld.step();
         expect(shooterSpawnedFromLog.length).toBe(0); // Zero duplicates spawned!
+    });
+});
+
+describe('scheduled log ordering and prediction bookkeeping', () => {
+    it('transmits delayed lower client sequences using server emission order', () => {
+        const make = (seq: number, logSeq: number) => makeFireLogShot({
+            seq, weaponId: 'laser', seed: seq, exitIndex: 0,
+        }, logSeq * 500, new Position(0, 0), new Angle(0), { logSeq });
+        const previous = { shots: [make(1, 1), make(3, 2)] };
+        const current = { shots: [...previous.shots, make(2, 3)] };
+        const delta = getFireLogDelta(previous, current)!;
+        expect(delta.shots.map(s => s.seq)).toEqual([2]);
+        applyFireLogDelta(previous, delta);
+        expect(newFireLogsAfter(previous.shots, 2).map(s => s.seq)).toEqual([2]);
+    });
+
+    it('observers replay a delayed lower client sequence exactly once', () => {
+        const replayed: number[] = [];
+        const entry = { data: getDefaultProjectileWeaponData(), syncAsFireEvent: true,
+            fireFromLog: (_source: string, shot: { seq: number }) => { replayed.push(shot.seq); },
+        } as unknown as WeaponEntry;
+        const entries = new Gettable<WeaponEntry | undefined>(async () => entry);
+        entries.gotten.laser = entry;
+        const world = new World('scheduled-log-observer');
+        world.resources.set(TimeResource, { time: 1000, delta_ms: 0, delta_s: 0, frame: 0 });
+        world.resources.set(WeaponEntries, entries);
+        world.addSystem(FireLogSpawnSystem);
+        const shot = (seq: number, logSeq: number) => makeFireLogShot({
+            seq, weaponId: 'laser', seed: seq, exitIndex: 0,
+        }, 1000, new Position(0, 0), new Angle(0), { logSeq });
+        const ship = new Entity('ship').addComponent(FireLogComponent, {
+            shots: [shot(1, 1), shot(3, 2)],
+        });
+        world.entities.set('ship', ship);
+        // Taking ownership and predicting a later sequence must not suppress
+        // authoritative shots that this browser never predicted.
+        rememberSpawnedShot(getFireSyncLocalState(ship), 4, true);
+        world.step();
+        pushShot(ship.components.get(FireLogComponent)!.shots, shot(2, 3));
+        world.step();
+        world.step();
+        expect(replayed).toEqual([1, 3, 2]);
+    });
+
+    it('bounds rejected predictions while suppressing an arbitrarily delayed echo', () => {
+        const ship = new Entity('ship');
+        const sync = getFireSyncLocalState(ship);
+        for (let seq = 1; seq <= 10000; seq++) rememberSpawnedShot(sync, seq, true);
+        expect(sync.spawnedSeqs.size).toBe(FIRE_BUFFER_SIZE);
+        expect(sync.spawnedSeqs.has(1)).toBeFalse();
+        const replay = jasmine.createSpy('replay');
+        const entry = { data: getDefaultProjectileWeaponData(), syncAsFireEvent: true,
+            fireFromLog: replay } as unknown as WeaponEntry;
+        const entries = new Gettable<WeaponEntry | undefined>(async () => entry);
+        entries.gotten.laser = entry;
+        const world = new World('prediction-pruning');
+        world.resources.set(TimeResource, { time: 1000, delta_ms: 0, delta_s: 0, frame: 0 });
+        world.resources.set(WeaponEntries, entries);
+        world.addSystem(FireLogSpawnSystem);
+        ship.components.set(FireLogComponent, { shots: [makeFireLogShot({
+            seq: 1, weaponId: 'laser', seed: 1, exitIndex: 0,
+        }, 1000, new Position(0, 0), new Angle(0), { logSeq: 1 })] });
+        world.entities.set('ship', ship);
+        world.step();
+        expect(replay).not.toHaveBeenCalled();
+        expect(sync.highestLogSeq).toBe(1);
+        expect(sync.spawnedSeqs.size).toBeLessThanOrEqual(FIRE_BUFFER_SIZE);
     });
 });
 

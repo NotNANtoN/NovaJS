@@ -85,6 +85,10 @@ class IDSpaceHandler {
                             console.warn("accessing ids by symbol");
                             return Reflect.get(target, localID);
                         }
+                        // Enumeration yields qualified keys; do not namespace them twice.
+                        if (localID.includes(":")) {
+                            return Reflect.get(target, localID);
+                        }
                         var novaScopeValue = Reflect.get(target, "nova:" + localID);
                         if (novaScopeValue) {
                             return novaScopeValue;

@@ -271,10 +271,10 @@ class BeamWeaponEntry extends WeaponEntry {
         }
         this.entities.set(shot.entityId ?? v4(), beam);
         if (this.data.sound && (!shot || shot.fastForwardMs <= 250)) {
-            this.emit(SoundEvent, {
+            SoundEvent.emit(this.emit, {
                 id: this.data.sound,
                 loop: this.data.loopSound,
-                position: { x: position.x, y: position.y },
+                position,
             });
         }
         return beam;

@@ -17,6 +17,7 @@ import { evaluateCrons } from '../nova_plugin/cron_plugin';
 import { OutfitsStateComponent } from '../nova_plugin/outfit_plugin';
 import type { PlanetType } from '../nova_plugin/planet_plugin';
 import { PlayerStateComponent } from '../nova_plugin/player_state';
+import { combatShopTransaction } from '../nova_plugin/combat_resources';
 import {
     buyFuel,
     FUEL_PRICE_PER_JUMP,
@@ -97,6 +98,7 @@ export class Spaceport extends Menu<Entity> {
     private readonly ncbRuntime: NcbRuntime;
     private readonly dialogContainers = new Set<PIXI.Container>();
     private data?: PlanetData;
+    private combatBusy = false;
     private readonly id: string;
     private serviceButtons?: Record<SpaceportService, Button>;
     private missionNotice = new PIXI.Text({
@@ -179,6 +181,7 @@ export class Spaceport extends Menu<Entity> {
 
         this.outfitter = new Outfitter(gameData, controlEvents);
         const showOutfitter = async () => {
+            if (this.combatBusy) return;
             if (!this.data || !hasSpaceportService(this.data, "outfitter")) {
                 return;
             }
@@ -218,6 +221,7 @@ export class Spaceport extends Menu<Entity> {
         this.shipyard = new Shipyard(gameData, controlEvents);
 
         const showShipyard = async () => {
+            if (this.combatBusy) return;
             if (!this.data || !hasSpaceportService(this.data, "shipyard")) {
                 return;
             }
@@ -263,6 +267,7 @@ export class Spaceport extends Menu<Entity> {
          * a hidden container, which cannot then be closed.
          */
         const showMissionInfo = async (from?: MissionBoard) => {
+            if (this.combatBusy) return;
             this.controls.unbind();
             from?.suspendControls();
             this.setActiveDialog(this.missionInfo.container);
@@ -296,6 +301,7 @@ export class Spaceport extends Menu<Entity> {
         this.dialogContainers.add(this.missionOfferDialog.container);
 
         const showMissionBbs = async () => {
+            if (this.combatBusy) return;
             this.controls.unbind();
             this.setActiveDialog(this.missionBbs.container);
             try {
@@ -308,6 +314,7 @@ export class Spaceport extends Menu<Entity> {
             }
         };
         const showBar = async () => {
+            if (this.combatBusy) return;
             if (!this.data || !hasSpaceportService(this.data, "bar")) {
                 return;
             }
@@ -323,6 +330,7 @@ export class Spaceport extends Menu<Entity> {
             }
         };
         const showTradeCenter = async () => {
+            if (this.combatBusy) return;
             if (!this.data || !this.tradeCenterAvailable) {
                 return;
             }
@@ -345,6 +353,7 @@ export class Spaceport extends Menu<Entity> {
         this.shipInfo = new ShipInfo(gameData, controlEvents);
         this.dialogContainers.add(this.shipInfo.container);
         const showShipInfo = async () => {
+            if (this.combatBusy) return;
             this.controls.unbind();
             this.setActiveDialog(this.shipInfo.container);
             try {
@@ -453,7 +462,7 @@ export class Spaceport extends Menu<Entity> {
             try {
                 const outfit = await this.gameData.data.Outfit.get(id);
                 if (outfit.isAutoRecharger) {
-                    this.recharge(ship, 'Auto-recharger');
+                    await this.recharge(ship, 'Auto-recharger');
                     return;
                 }
             } catch {
@@ -468,7 +477,8 @@ export class Spaceport extends Menu<Entity> {
      * The pilot leaves with as many whole jumps as their credits stretch to,
      * and a pilot who cannot afford one is simply left as they were.
      */
-    private recharge(ship: Entity = this.input, buyer = 'Recharged'): void {
+    private async recharge(ship: Entity = this.input, buyer = 'Recharged'): Promise<void> {
+        if (this.combatBusy) return;
         const state = ship.components.get(PlayerStateComponent);
         const capacity = ship.components
             .get(ShipDataComponent)?.fuelCapacity ?? 0;
@@ -481,8 +491,18 @@ export class Spaceport extends Menu<Entity> {
         if (result.purchased <= 0) {
             return;
         }
-        state.fuel = result.fuel;
-        state.credits = result.credits;
+        if (state.combatResources) {
+            this.combatBusy = true;
+            try {
+                await combatShopTransaction(state, this.id, 'refuel');
+            } catch (error) {
+                console.warn('Refuel rejected', error);
+                return;
+            } finally { this.combatBusy = false; }
+        } else {
+            state.fuel = result.fuel;
+            state.credits = result.credits;
+        }
         this.rechargeNotice.text = `${buyer} ${result.purchased} jump${
             result.purchased === 1 ? '' : 's'} for ${
             (spent - result.credits).toLocaleString()} cr.`;
@@ -584,10 +604,33 @@ export class Spaceport extends Menu<Entity> {
         this.container.addChild(this.rechargeNotice);
     }
 
+    async authorizeLanding(input: Entity): Promise<void> {
+        const combatState = input.components.get(PlayerStateComponent);
+        if (combatState) {
+            const receipt = await combatShopTransaction(combatState, this.id, 'open');
+            const outfits = input.components.get(OutfitsStateComponent);
+            for (const [id, count] of Object.entries(receipt.balance.ammo)) {
+                if (count === 0) outfits?.delete(id);
+                else outfits?.set(id, { count });
+            }
+        }
+    }
+
+    cancelLandingPresentation(): void {
+        this.container.visible = false;
+        this.suspendControls();
+        for (const dialog of [this.outfitter, this.shipyard, this.missionBbs, this.bar,
+            this.tradeCenter, this.missionInfo, this.shipInfo, this.landingNoticeDialog, this.missionOfferDialog]) {
+            dialog.suspendControls();
+        }
+    }
+
     override async show(
         input: Entity,
         landingNotices: readonly MissionNotice[] = [],
+        authorized = false,
     ): Promise<Entity> {
+        if (!authorized) await this.authorizeLanding(input);
         await this.buildPromise;
         this.rechargeNotice.text = '';
         // Retail's Auto-recharger buys the recharge on landing, so this
@@ -676,7 +719,18 @@ export class Spaceport extends Menu<Entity> {
         return super.show(input);
     }
 
-    protected override done() {
+    protected override async done() {
+        if (this.combatBusy) return;
+        const state = this.input.components.get(PlayerStateComponent);
+        if (state?.combatResources) {
+            this.combatBusy = true;
+            try {
+                await combatShopTransaction(state, this.id, 'close');
+            } catch (error) {
+                console.warn('Departure rejected', error);
+                return;
+            } finally { this.combatBusy = false; }
+        }
         if (this.data) {
             const movement = this.input.components.get(MovementStateComponent);
             if (movement) {

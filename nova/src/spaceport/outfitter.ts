@@ -6,6 +6,7 @@ import { Observable } from "rxjs";
 import { GameData } from "../client/gamedata/GameData";
 import { ControlEvent } from "../nova_plugin/controls_plugin";
 import { OutfitsState } from "../nova_plugin/outfit_plugin";
+import { combatShopTransaction } from '../nova_plugin/combat_resources';
 import { PlayerState } from "../nova_plugin/player_state";
 import { Button } from "./button";
 import { ShipData } from "novadatainterface/ShipData";
@@ -39,6 +40,7 @@ export class Outfitter extends Menu<OutfitsState> {
     private planetData?: PlanetData;
     private shipData?: ShipData;
     private refreshPromise?: Promise<void>;
+    private combatBusy = false;
 
     private readonly outfitDataMap = new Map<string, OutfitData>();
     private text = {
@@ -227,7 +229,8 @@ export class Outfitter extends Menu<OutfitsState> {
         return count;
     }
 
-    private buyOutfit() {
+    private async buyOutfit() {
+        if (this.combatBusy) return;
         const outfit = this.itemGrid?.selection;
         if (!outfit) {
             return;
@@ -270,11 +273,22 @@ export class Outfitter extends Menu<OutfitsState> {
             console.warn(`Not enough credits to buy outfit ${outfit.id}`);
             return;
         }
-        this.playerState.credits -= price;
+        if (this.playerState.combatResources?.ammo[outfit.id] !== undefined) {
+            this.combatBusy = true;
+            try {
+                await combatShopTransaction(this.playerState, this.planetData!.id, 'buy', outfit.id, this.outfits);
+            } catch (error) {
+                this.syncCombatAmmo();
+                console.warn('Ammo purchase rejected', error);
+                return;
+            } finally { this.combatBusy = false; }
+        } else {
+            this.playerState.credits -= price;
+        }
         // EV Nova Bible: flag 0x0010 removes any items of this type after purchase
         // (used for permits/licenses that grant bits or trigger events).
         if (!outfit.flags || (outfit.flags & 0x0010) === 0) {
-            this.outfits.set(outfit.id, currentCount + 1);
+            this.outfits.set(outfit.id, this.playerState.combatResources?.ammo[outfit.id] ?? currentCount + 1);
         }
         if (outfit.onPurchase) {
             try {
@@ -290,7 +304,8 @@ export class Outfitter extends Menu<OutfitsState> {
         this.setFreeMassText();
     }
 
-    private sellOutfit() {
+    private async sellOutfit() {
+        if (this.combatBusy) return;
         const outfit = this.itemGrid?.selection;
         if (!outfit) {
             return;
@@ -309,11 +324,31 @@ export class Outfitter extends Menu<OutfitsState> {
             console.warn('Cannot sell outfit without player state.');
             return;
         }
-        this.outfits.set(id, currentCount - 1);
-        // EV Nova's standard resale value is 25% of the purchase price.
-        this.playerState.credits += Math.floor(Math.max(0, outfit.price) * 0.25);
+        if (this.playerState.combatResources?.ammo[id] !== undefined) {
+            this.combatBusy = true;
+            try {
+                await combatShopTransaction(this.playerState, this.planetData!.id, 'sell', id, this.outfits);
+            } catch (error) {
+                this.syncCombatAmmo();
+                console.warn('Ammo sale rejected', error);
+                return;
+            } finally { this.combatBusy = false; }
+        } else {
+            this.playerState.credits += Math.floor(Math.max(0, outfit.price) * 0.25);
+        }
+        this.outfits.set(id, this.playerState.combatResources?.ammo[id] ?? currentCount - 1);
         if (this.outfits.get(id) === 0) {
             this.outfits.delete(id);
+        }
+        this.itemGrid?.setCounts(this.outfits);
+        this.updateCreditsText();
+        this.setFreeMassText();
+    }
+
+    private syncCombatAmmo(): void {
+        for (const [id, count] of Object.entries(this.playerState?.combatResources?.ammo ?? {})) {
+            if (count === 0) this.outfits.delete(id);
+            else this.outfits.set(id, count);
         }
         this.itemGrid?.setCounts(this.outfits);
         this.updateCreditsText();
@@ -391,6 +426,7 @@ export class Outfitter extends Menu<OutfitsState> {
     }
 
     protected override done() {
+        if (this.combatBusy) return;
         this.input = new Map([...this.outfits]
             .map(([id, count]) => [id, { count }]));
         super.done();

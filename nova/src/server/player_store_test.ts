@@ -39,6 +39,100 @@ function stateFor(gameDate: number): PersistentPlayerState {
     };
 }
 
+describe('combat resource persistence', () => {
+    it('advances the store revision for combat credits and rejects an already pending whole save', async () => {
+        const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'novajs-combat-credit-race-'));
+        const store = new PlayerStore(path.join(directory, 'players.json'));
+        try {
+            await store.ready;
+            const revision = await store.save('pilot', stateFor(0));
+            const pending = store.save('pilot', stateFor(1), undefined, revision);
+            const combatRevision = store.saveCombatResources('pilot', {
+                shipId: 'nova:128', fuel: 300, ammo: { ammo: 3 }, revision: 1,
+            }, 9800);
+            expect(combatRevision).toBe(revision + 1);
+            await expectAsync(pending).toBeRejectedWithError(PlayerRevisionConflictError);
+            expect((await store.get('pilot'))?.credits).toBe(9800);
+        } finally { await store.flush(); await fs.rm(directory, { recursive: true, force: true }); }
+    });
+
+    it('rebases flight progress over combat-only revisions but never another whole-state writer', async () => {
+        const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'novajs-combat-flight-race-'));
+        const store = new PlayerStore(path.join(directory, 'players.json'));
+        try {
+            await store.ready;
+            await store.save('pilot', stateFor(0));
+            let revision = store.saveCombatResources('pilot', {
+                shipId: 'nova:128', fuel: 200, ammo: { ammo: 3 }, revision: 1,
+            }, 10000);
+            for (let step = 1; step <= 3; step++) {
+                const state = (await store.get('pilot'))!;
+                state.gameDate = step;
+                state.missionBits[0] = false;
+                state.missionBits[step] = true;
+                state.holds = [{ commodity: 'Food', tons: step, isMissionCargo: false }];
+                const pending = store.saveFlightState('pilot', state, revision);
+                store.saveCombatResources('pilot', { ...state.combatResources!,
+                    fuel: 200 - step, revision: step + 1 }, 10000 - step * 100);
+                revision = await pending;
+                const saved = (await store.get('pilot'))!;
+                expect(saved.credits).toBe(10000 - step * 100);
+                expect(saved.gameDate).toBe(step);
+                expect(saved.holds[0].tons).toBe(step);
+                expect(saved.missionBits[step]).toBeTrue();
+            }
+            const newer = (await store.get('pilot'))!;
+            await store.save('pilot', { ...newer, pilotName: 'Newer session' }, undefined, revision);
+            await expectAsync(store.saveFlightState('pilot', newer, revision))
+                .toBeRejectedWithError(PlayerRevisionConflictError);
+            expect((await store.get('pilot'))?.pilotName).toBe('Newer session');
+        } finally { await store.flush(); await fs.rm(directory, { recursive: true, force: true }); }
+    });
+    it('saves ammo-only debits and prevents whole-state saves or snapshot rollback from refilling', async () => {
+        const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'novajs-combat-store-'));
+        const filePath = path.join(directory, 'players.json');
+        const store = new PlayerStore(filePath);
+        try {
+            await store.ready;
+            await store.save('pilot', stateFor(0));
+            const balance = { shipId: 'nova:128', fuel: 125, ammo: { ammo: 2 }, revision: 1 };
+            store.saveCombatResources('pilot', balance);
+            balance.ammo.ammo = 999;
+            const forged = { ...stateFor(1), fuel: 9999,
+                combatResources: { ...balance, fuel: 9999 } };
+            const snapshot = await store.archiveSnapshot('pilot', forged);
+            await store.save('pilot', forged);
+            await store.restoreSnapshot('pilot', snapshot.id);
+            await store.flush();
+            const reloaded = new PlayerStore(filePath);
+            await reloaded.ready;
+            const player = await reloaded.get('pilot');
+            expect(player?.fuel).toBe(125);
+            expect(player?.combatResources?.ammo.ammo).toBe(2);
+            expect(player?.combatResources?.revision).toBe(1);
+            await reloaded.flush();
+        } finally {
+            await store.flush();
+            await fs.rm(directory, { recursive: true, force: true });
+        }
+    });
+
+    it('does not establish combat authority from a submitted PlayerState', async () => {
+        const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'novajs-combat-seed-'));
+        const store = new PlayerStore(path.join(directory, 'players.json'));
+        try {
+            await store.ready;
+            await store.save('pilot', { ...stateFor(0), combatResources: {
+                shipId: 'forged', fuel: 10000, ammo: { ammo: 999 }, revision: 100,
+            } });
+            expect((await store.get('pilot'))?.combatResources).toBeUndefined();
+        } finally {
+            await store.flush();
+            await fs.rm(directory, { recursive: true, force: true });
+        }
+    });
+});
+
 describe('player snapshots', () => {
     it('round-trips encoded state and ship through a new store', async () => {
         const directory = await fs.mkdtemp(

@@ -75,6 +75,27 @@ export type AssistanceRequest = t.TypeOf<typeof AssistanceRequestCodec>;
 export const AssistanceRequestComponent =
     new Component<AssistanceRequest>('AssistanceRequestComponent');
 
+// Player-wide consumed/ignored watermark: changing helpers or overwriting an
+// outcome with a malformed request must not replay an older transaction.
+const AssistanceIgnoredSequenceComponent =
+    new Component<number>('AssistanceIgnoredSequenceComponent');
+replicationPolicies.register(AssistanceIgnoredSequenceComponent, {
+    codec: t.number,
+    authority: 'local-only',
+});
+
+const AssistancePaymentCodec = t.type({
+    helper: t.string,
+    sequence: t.number,
+    amount: t.number,
+});
+const AssistancePaymentComponent = new Component<
+    t.TypeOf<typeof AssistancePaymentCodec>>('AssistancePaymentComponent');
+replicationPolicies.register(AssistancePaymentComponent, {
+    codec: AssistancePaymentCodec,
+    authority: 'local-only',
+});
+
 const AssistanceOrderCodec = t.type({
     player: t.string,
     sequence: t.number,
@@ -94,6 +115,8 @@ export type AssistanceOutcomePhase = t.TypeOf<typeof AssistanceOutcomePhase>;
 export const AssistanceFailureReason = t.union([
     t.literal('invalid-request'),
     t.literal('invalid-helper'),
+    t.literal('helper-disabled'),
+    t.literal('government-unavailable'),
     t.literal('invalid-player'),
     t.literal('not-stranded'),
     t.literal('hostile'),
@@ -119,6 +142,7 @@ const AssistanceOutcomeCodec = t.intersection([
     }),
     t.partial({
         reason: AssistanceFailureReason,
+        refundedCredits: t.number,
     }),
 ]);
 export type AssistanceOutcome = t.TypeOf<typeof AssistanceOutcomeCodec>;
@@ -144,11 +168,35 @@ function setOutcome(
     phase: AssistanceOutcomePhase,
     reason?: AssistanceFailureReason,
 ): void {
+    const previous = entity.components.get(AssistanceOutcomeComponent);
+    if (phase !== 'approaching' && previous?.phase === 'approaching') {
+        const request = entity.components.get(AssistanceRequestComponent);
+        const ignored = entity.components.get(AssistanceIgnoredSequenceComponent) ?? 0;
+        if (request && Number.isSafeInteger(request.sequence)
+            && request.sequence > ignored) {
+            entity.components.set(AssistanceIgnoredSequenceComponent, request.sequence);
+        }
+    }
+    const payment = entity.components.get(AssistancePaymentComponent);
+    let refundedCredits = 0;
+    if (phase !== 'approaching' && payment?.helper === helper
+        && payment.sequence === sequence) {
+        const state = entity.components.get(PlayerStateComponent);
+        if (phase === 'completed' || state) {
+            // Consume the server-only receipt before publishing the outcome.
+            entity.components.delete(AssistancePaymentComponent);
+            if (phase === 'failed' && state) {
+                refundedCredits = payment.amount;
+                state.credits += refundedCredits;
+            }
+        }
+    }
     entity.components.set(AssistanceOutcomeComponent, {
         helper,
         sequence,
         phase,
         ...(reason ? { reason } : {}),
+        ...(refundedCredits > 0 ? { refundedCredits } : {}),
     });
 }
 
@@ -359,7 +407,7 @@ export const AssistanceApproachSystem = new System({
         }
         if (disabled) {
             finishOrder(
-                helper, uuid, order, entities, 'failed', 'invalid-helper');
+                helper, uuid, order, entities, 'failed', 'helper-disabled');
             return;
         }
         if (!isStranded(
@@ -458,9 +506,27 @@ export const AssistanceRequestSystem = new System({
         if (platform !== 'node' || multiplayer.owner === 'server') {
             return;
         }
-        if (outcome && outcome.helper === request.helper
+        const ignoredSequence = player.components.get(
+            AssistanceIgnoredSequenceComponent);
+        if (outcome?.phase === 'approaching') {
+            if (Number.isSafeInteger(request.sequence)
+                && request.sequence > (ignoredSequence ?? 0)) {
+                player.components.set(
+                    AssistanceIgnoredSequenceComponent, request.sequence);
+            }
+            // Lifecycle/approach systems alone resolve the active transaction,
+            // including timeout, destruction and departure while it is pending.
+            return;
+        }
+        if (ignoredSequence !== undefined && request.sequence <= ignoredSequence) {
+            return;
+        }
+        if (outcome && Number.isSafeInteger(outcome.sequence)
             && outcome.sequence >= request.sequence) {
             return;
+        }
+        if (Number.isSafeInteger(request.sequence) && request.sequence > 0) {
+            player.components.set(AssistanceIgnoredSequenceComponent, request.sequence);
         }
         if (!isValidRequest(request)) {
             setOutcome(
@@ -510,6 +576,12 @@ export const AssistanceRequestSystem = new System({
                 'helper-destroyed');
             return;
         }
+        if (helper.components.has(DisabledComponent)) {
+            setOutcome(
+                player, request.helper, request.sequence, 'failed',
+                'helper-disabled');
+            return;
+        }
         if (helperJump) {
             setOutcome(
                 player, request.helper, request.sequence, 'failed',
@@ -545,6 +617,9 @@ export const AssistanceRequestSystem = new System({
             governments,
         );
         if (!decision) {
+            setOutcome(
+                player, request.helper, request.sequence, 'failed',
+                'government-unavailable');
             return;
         }
         if (request.action === 'request'
@@ -581,6 +656,11 @@ export const AssistanceRequestSystem = new System({
                 return;
             }
             playerState.credits = payment.credits;
+            player.components.set(AssistancePaymentComponent, {
+                helper: request.helper,
+                sequence: request.sequence,
+                amount: decision.price,
+            });
         }
 
         helper.components.set(AssistanceOrderComponent, {
@@ -703,6 +783,10 @@ function failFromPlayerState(
     }
 }
 
+// DeleteEvent systems are queued; jump code can transfer the entity before they
+// run. Settle synchronously on removal, without retaining an entity/draft.
+const removalSubscriptions = new WeakMap<object, { unsubscribe(): void }>();
+
 export const AssistancePlugin: Plugin = {
     name: 'AssistancePlugin',
     build(world) {
@@ -710,6 +794,8 @@ export const AssistancePlugin: Plugin = {
         if (!deltaMaker) {
             throw new Error('Expected delta maker resource to exist');
         }
+        world.addComponent(AssistancePaymentComponent);
+        world.addComponent(AssistanceIgnoredSequenceComponent);
         world.addComponent(AssistanceRequestComponent);
         deltaMaker.addComponent(AssistanceRequestComponent, {
             componentType: AssistanceRequestCodec,
@@ -722,8 +808,34 @@ export const AssistancePlugin: Plugin = {
         world.addSystem(AssistanceRequestSystem);
         world.addSystem(AssistanceApproachSystem);
         world.addSystem(AssistanceLifecycleSystem);
+        removalSubscriptions.set(world, world.entities.events.delete.subscribe(deleted => {
+            if (world.resources.get(PlatformResource) !== 'node') {
+                return;
+            }
+            // Include all removed entities so bulk removal can settle both ends.
+            const entities = new Map(world.entities);
+            for (const [uuid, entity] of deleted) {
+                entities.set(uuid, entity);
+            }
+            for (const [uuid, entity] of deleted) {
+                const outcome = entity.components.get(AssistanceOutcomeComponent);
+                if (outcome?.phase === 'approaching') {
+                    failFromPlayerState(outcome, uuid, entities,
+                        entity.components.has(JumpStateComponent)
+                            ? 'player-jumped' : 'player-left-system');
+                }
+                const order = entity.components.get(AssistanceOrderComponent);
+                if (order) {
+                    finishOrder(entity, uuid, order, entities, 'failed',
+                        entity.components.has(JumpStateComponent)
+                            ? 'helper-jumped' : 'helper-left-system');
+                }
+            }
+        }));
     },
     remove(world) {
+        removalSubscriptions.get(world)?.unsubscribe();
+        removalSubscriptions.delete(world);
         world.removeSystem(AssistanceRequestSystem);
         world.removeSystem(AssistanceApproachSystem);
         world.removeSystem(AssistanceLifecycleSystem);

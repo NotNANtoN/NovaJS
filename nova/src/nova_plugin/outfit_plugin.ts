@@ -14,6 +14,8 @@ import { DefaultMap } from '../common/DefaultMap';
 import { GameDataResource } from './game_data_resource';
 import { Stat } from './stat';
 import { WeaponsStateComponent, WeaponState } from './weapons_state';
+import { replicationPolicies } from 'nova_ecs/plugins/multiplayer_plugin';
+import { mergeCombatOutfits } from './combat_resources';
 
 const OutfitState = t.type({
     count: t.number,
@@ -59,19 +61,18 @@ export function applyOutfitPhysics(basePhysics: ShipPhysics,
     });
 }
 
-const OutfitWeaponProvider = ProvideAsync({
-    name: "OutfitWeaponProvider",
-    provided: WeaponsStateComponent,
-    update: [OutfitsStateComponent],
-    args: [OutfitsStateComponent, GameDataResource,
-        Optional(WeaponsStateComponent)] as const,
-    async factory(outfits, gameData, previous) {
+export async function loadOutfitWeapons(outfits: OutfitsState, gameData: GameDataInterface,
+    previous?: Map<string, WeaponState>) {
+        // Counts and firing intent must survive catalog awaits independently of
+        // the component drafts, especially when ammunition changes every shot.
+        const counts = [...outfits].map(([id, state]) => [id, state.count] as const);
+        const firingIntent = new Map([...previous ?? []].map(([id, state]) => [id, state.firing]));
         const weaponsState = new DefaultMap<string, WeaponState>(() => ({
             count: 0,
             firing: false,
         }));
 
-        for (const [id, state] of outfits) {
+        for (const [id, installedCount] of counts) {
             const outfit = await gameData.data.Outfit.get(id);
             if (!outfit) {
                 continue;
@@ -79,7 +80,7 @@ const OutfitWeaponProvider = ProvideAsync({
 
             if (outfit.weapons) {
                 for (const [weaponId, count] of Object.entries(outfit.weapons)) {
-                    weaponsState.get(weaponId).count += count * state.count;
+                    weaponsState.get(weaponId).count += count * installedCount;
                 }
             }
         }
@@ -87,16 +88,24 @@ const OutfitWeaponProvider = ProvideAsync({
         // Outfit changes recompute how many copies of a weapon are installed.
         // They say nothing about whether the trigger is currently held, so a
         // recompute must not release the player's (or an NPC's) weapons.
-        if (previous) {
+        if (firingIntent.size) {
             for (const [weaponId, state] of weaponsState) {
-                const firing = previous.get(weaponId)?.firing;
+                const firing = firingIntent.get(weaponId);
                 if (firing !== undefined) {
                     state.firing = firing;
                 }
             }
         }
         return weaponsState;
-    }
+}
+
+const OutfitWeaponProvider = ProvideAsync({
+    name: "OutfitWeaponProvider",
+    provided: WeaponsStateComponent,
+    update: [OutfitsStateComponent],
+    args: [OutfitsStateComponent, GameDataResource,
+        Optional(WeaponsStateComponent)] as const,
+    factory: loadOutfitWeapons,
 });
 
 export const OutfitPlugin: Plugin = {
@@ -108,6 +117,12 @@ export const OutfitPlugin: Plugin = {
         }
 
         world.addComponent(OutfitsStateComponent);
+        replicationPolicies.register(OutfitsStateComponent, {
+            codec: OutfitsState,
+            authority: 'entity-owner',
+            allowOwnerRemoval: false,
+            merge: mergeCombatOutfits,
+        });
         world.addComponent(AppliedOutfitsComponent);
 
         deltaMaker.addComponent(OutfitsStateComponent, {

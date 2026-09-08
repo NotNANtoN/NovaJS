@@ -8,9 +8,10 @@ import { DeltaPlugin } from 'nova_ecs/plugins/delta_plugin';
 import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import { MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
-import { World } from 'nova_ecs/world';
+import { SingletonComponent, World } from 'nova_ecs/world';
 import {
     AsteroidComponent,
+    AsteroidCollisionHazardSystem,
     asteroidCountForDensity,
     AsteroidPlugin,
     makeAsteroid,
@@ -29,14 +30,16 @@ import {
 import { createEntityBudget, EntityBudgetResource } from './entity_budget';
 import { GameDataResource } from './game_data_resource';
 import { ArmorComponent, ShieldComponent } from './health_plugin';
-import { DeathPlugin } from './death_plugin';
+import { DeathPlugin, PlayerDeathComponent } from './death_plugin';
+import { DestructionStartedComponent } from './destruction_state';
 import { ShipComponent, ShipDataComponent } from './ship_plugin';
-import { HitboxHullComponent, CompositeHull } from './collisions_plugin';
+import { HitboxHullComponent, CompositeHull, UpdateHitboxHullSystem } from './collisions_plugin';
 import * as SAT from 'sat';
 import { Stat } from './stat';
 import { PlatformResource } from './platform_plugin';
 import { createInitialPlayerState, PlayerStateComponent } from './player_state';
 import { SystemIdResource } from './system_id_resource';
+import { ExternalImpulseComponent } from './external_impulse';
 
 const BIG_ASTEROID = {
     ...getDefaultAsteroidData(),
@@ -139,6 +142,158 @@ function heldTons(world: World, commodity: string): number {
         .filter(hold => hold.commodity === commodity)
         .reduce((total, hold) => total + hold.tons, 0);
 }
+
+let hazardFixtureId = 0;
+
+async function hazardFixture(platform: 'node' | 'browser' = 'node', pairId = `hazard-${hazardFixtureId++}`) {
+    const world = await makeWorld(0);
+    await world.addPlugin(DeathPlugin);
+    world.resources.set(PlatformResource, platform);
+    const hull = () => new CompositeHull([
+        new SAT.Polygon(new SAT.Vector(0, 0), [
+            new SAT.Vector(-20, -20), new SAT.Vector(20, -20),
+            new SAT.Vector(20, 20), new SAT.Vector(-20, 20),
+        ]),
+    ]);
+    const rock = makeAsteroid(SMALL_ASTEROID.id, new Position(0, 0), new Vector(0, 0))
+        .addComponent(MultiplayerData, { owner: 'server' })
+        .addComponent(HitboxHullComponent, hull());
+    world.entities.set(`${pairId}-rock`, rock);
+    await settle(world);
+    const ship = playerAt(new Position(5, 5), 100)
+        .addComponent(ShipComponent, { id: 'nova:128' })
+        .addComponent(ShipDataComponent, { physics: { mass: 120 } } as never)
+        .addComponent(HitboxHullComponent, hull())
+        .addComponent(ShieldComponent, new Stat({ current: 1000, max: 1000, recharge: 0 }))
+        .addComponent(ArmorComponent, new Stat({ current: 1000, max: 1000, recharge: 0 }));
+    ship.components.get(MovementStateComponent)!.velocity = new Vector(120, 0);
+    world.entities.set(`${pairId}-ship`, ship);
+    return { world, rock, ship };
+}
+
+describe('asteroid hazard reliability', () => {
+    it('runs as a singleton rather than once per unrelated entity', () => {
+        expect(AsteroidCollisionHazardSystem.args).toContain(SingletonComponent);
+    });
+
+    it('uses updated hulls even when the hull updater is registered after the hazard', async () => {
+        const { world, rock, ship } = await hazardFixture();
+        // Old hulls overlap, but movement has already separated the bodies
+        // inside the hazard's broad-phase radius.
+        ship.components.get(MovementStateComponent)!.position = new Position(100, 0);
+        world.addSystem(UpdateHitboxHullSystem);
+        const armor = rock.components.get(ArmorComponent)!.current;
+        world.step();
+        expect(ship.components.get(ShieldComponent)!.current).toBe(1000);
+        expect(rock.components.get(ArmorComponent)!.current).toBe(armor);
+        expect(ship.components.has(ExternalImpulseComponent)).toBeFalse();
+        // The reverse transition must collide on this tick, not the next.
+        ship.components.get(MovementStateComponent)!.position = new Position(5, 5);
+        world.step();
+        expect(ship.components.get(ShieldComponent)!.current).toBeLessThan(1000);
+        expect(ship.components.has(ExternalImpulseComponent)).toBeTrue();
+    });
+
+    for (const marker of ['death', 'destruction'] as const) {
+        it(`does not damage rocks or queue bounce for a ship marked for ${marker}`, async () => {
+            const { world, rock, ship } = await hazardFixture();
+            if (marker === 'death') {
+                ship.components.set(PlayerDeathComponent, {
+                    wreckPosition: [5, 5], visualFallbackAt: 5000,
+                });
+            } else {
+                ship.components.set(DestructionStartedComponent, true);
+            }
+            const armor = rock.components.get(ArmorComponent)!.current;
+            world.step();
+            expect(rock.components.get(ArmorComponent)!.current).toBe(armor);
+            expect(ship.components.get(ShieldComponent)!.current).toBe(1000);
+            expect(ship.components.has(ExternalImpulseComponent)).toBeFalse();
+        });
+    }
+
+    it('removes hazard and external impulse resources only after their systems', async () => {
+        const world = await makeWorld(0);
+        await expectAsync(world.removePlugin(AsteroidPlugin)).toBeResolved();
+        expect(() => world.step()).not.toThrow();
+    });
+
+    it('does not author replicated rock health or ship movement in a browser', async () => {
+        const { world, rock, ship } = await hazardFixture('browser');
+        const armor = rock.components.get(ArmorComponent)!.current;
+        world.step();
+        expect(rock.components.get(ArmorComponent)!.current).toBe(armor);
+        expect(ship.components.get(ShieldComponent)!.current).toBe(1000);
+        expect(ship.components.get(MovementStateComponent)!.velocity.x).toBe(120);
+    });
+
+    it('damages client-owned ships and authors an additive bounce for their owner', async () => {
+        const { world, rock, ship } = await hazardFixture();
+        const armor = rock.components.get(ArmorComponent)!.current;
+        world.step();
+        expect(ship.components.get(ShieldComponent)!.current).toBeLessThan(1000);
+        expect(rock.components.get(ArmorComponent)!.current).toBeLessThan(armor);
+        const impulse = ship.components.get(ExternalImpulseComponent)!;
+        expect(impulse.sequence).toBe(1);
+        expect(impulse.impulses.length).toBe(1);
+        expect(impulse.impulses[0].owner).toBe('player');
+        expect(ship.components.get(MovementStateComponent)!.velocity.x)
+            .toBeCloseTo(120 + impulse.impulses[0].x);
+        expect(ship.components.get(MovementStateComponent)!.velocity.y)
+            .toBeCloseTo(impulse.impulses[0].y);
+    });
+
+    it('retains deflection for server-owned ships', async () => {
+        const { world, ship } = await hazardFixture();
+        ship.components.set(MultiplayerData, { owner: 'server' });
+        world.step();
+        expect(ship.components.get(ShieldComponent)!.current).toBeLessThan(1000);
+        expect(ship.components.get(MovementStateComponent)!.velocity.x).toBeGreaterThan(120);
+    });
+
+    it('does not share pair cooldowns between worlds with the same entity IDs', async () => {
+        const pairId = `shared-${hazardFixtureId++}`;
+        const first = await hazardFixture('node', pairId);
+        const second = await hazardFixture('node', pairId);
+        first.world.step();
+        second.world.step();
+        expect(first.ship.components.get(ShieldComponent)!.current).toBeLessThan(1000);
+        expect(second.ship.components.get(ShieldComponent)!.current).toBeLessThan(1000);
+    });
+
+    it('does not consume the impact cooldown for contact below the speed threshold', async () => {
+        const { world, ship } = await hazardFixture();
+        ship.components.get(MovementStateComponent)!.velocity = new Vector(0, 0);
+        world.step();
+        expect(ship.components.get(ShieldComponent)!.current).toBe(1000);
+        world.resources.get(TimeResource)!.time = 100;
+        ship.components.get(MovementStateComponent)!.velocity = new Vector(120, 0);
+        world.step();
+        expect(ship.components.get(ShieldComponent)!.current).toBeLessThan(1000);
+    });
+
+    it('expires cooldowns when the world clock moves backwards', async () => {
+        const { world, ship } = await hazardFixture();
+        world.resources.get(TimeResource)!.time = 1000;
+        world.step();
+        const health = ship.components.get(ShieldComponent)!.current;
+        world.resources.get(TimeResource)!.time = 0;
+        world.step();
+        expect(ship.components.get(ShieldComponent)!.current).toBeLessThan(health);
+    });
+
+    it('suppresses repeat damage until exactly 500ms after a damaging impact', async () => {
+        const { world, ship } = await hazardFixture();
+        world.step();
+        const health = ship.components.get(ShieldComponent)!.current;
+        world.resources.get(TimeResource)!.time = 499;
+        world.step();
+        expect(ship.components.get(ShieldComponent)!.current).toBe(health);
+        world.resources.get(TimeResource)!.time = 500;
+        world.step();
+        expect(ship.components.get(ShieldComponent)!.current).toBeLessThan(health);
+    });
+});
 
 describe('asteroids', () => {
     it('scales the belt with the system density', () => {
@@ -370,7 +525,9 @@ describe('asteroids', () => {
 
         expect(heldTons(world, 'metal')).toBe(SMALL_ASTEROID.yield.quantity);
         expect(ores(world).length).toBe(0);
-    });    it('damages ships and asteroids on ram collision and deflects velocity', async () => {
+    });
+
+    it('damages ships and asteroids on ram collision and deflects velocity', async () => {
         const world = await makeWorld(0);
         await world.addPlugin(DeathPlugin);
 

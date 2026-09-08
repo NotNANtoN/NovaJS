@@ -30,7 +30,7 @@ import { v4 } from 'uuid';
 import { FactoryQueue } from '../common/factory_queue';
 import { AnimationComponent } from './animation_plugin';
 import { BlastDamageComponent, BlastIgnoreComponent } from './blast_plugin';
-import { CompositeHull, hullFromAnimation, HurtboxHullComponent } from './collisions_plugin';
+import { CompositeHull, hullFromAnimation, HurtboxHullComponent, SweptCollisionContact } from './collisions_plugin';
 import { CollisionEvent, CollisionHitterComponent, CollisionVulnerabilityComponent } from './collision_interaction';
 import { CreateTime } from './create_time';
 import { DamagedEvent, ZeroArmorEvent } from './death_plugin';
@@ -268,13 +268,10 @@ class ProjectileWeaponEntry extends WeaponEntry {
         }
         this.entities.set(shot.entityId ?? v4(), projectile);
         if (this.data.sound && (!shot || shot.fastForwardMs <= 250)) {
-            this.emit(SoundEvent, {
+            SoundEvent.emit(this.emit, {
                 id: this.data.sound,
                 loop: this.data.loopSound,
-                position: {
-                    x: movementState.position.x,
-                    y: movementState.position.y,
-                },
+                position: movementState.position,
             });
         }
 
@@ -363,12 +360,17 @@ const ProjectileHurtboxProvider = ProvideAsync({
     factory: hullFromAnimation,
 });
 
-const ProjectileCollisionSystem = new System({
+export const ProjectileCollisionSystem = new System({
     name: 'ProjectileCollisionSystem',
     events: [CollisionEvent],
     args: [CollisionEvent, Entities, UUID, ProjectileDataComponent,
         Optional(OwnerComponent), FireSubs, TimeResource, CreateTime, EmitNow] as const,
     step(collision, entities, uuid, projectileData, owner, fireSubs, time, createTime, emitNow) {
+        // The initiating weapon applies damage. Being hit (e.g. by point
+        // defense) must not fire this projectile's damage back at the hitter.
+        if (!collision.initiator) {
+            return;
+        }
         const other = entities.get(collision.other);
         if (!other) {
             return;
@@ -389,12 +391,14 @@ const ProjectileCollisionSystem = new System({
             return;
         }
 
+        const impact = (collision as SweptCollisionContact).impactPosition;
+        if (impact) {
+            const movement = self.components.get(MovementStateComponent);
+            if (movement) movement.position = new Position(impact.x, impact.y);
+        }
+
         emitNow(DamagedEvent, { damage: projectileData.damage, damager: uuid }, [collision.other]);
 
-        if (!collision.initiator) {
-            // We are hit by point defense
-            return;
-        }
 
         fireSubs(projectileData.id, uuid, false);
         entities.delete(uuid);

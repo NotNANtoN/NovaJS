@@ -1,5 +1,9 @@
 import * as t from 'io-ts';
 import 'jasmine';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { PlayerStore } from '../server/player_store';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
 import { MockCommunicator } from 'nova_ecs/plugins/mock_communicator';
 import { multiplayer, MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
@@ -10,6 +14,7 @@ import { EncodedEntity } from 'nova_ecs/plugins/serializer_plugin';
 import { MultiRoom } from '../communication/multi_room_communicator';
 import {
     ManageClientsSystem,
+    InitializeCombatResourcesSystem,
     PersistPlayerStateSystem,
     PlayerData,
     PlayerStateSnapshots,
@@ -27,6 +32,11 @@ import { GameDataResource } from './game_data_resource';
 import { MultiRoomResource } from './nova_plugin';
 import { SystemIdResource } from './system_id_resource';
 import { MockGameData } from 'novadatainterface/MockGameData';
+import { getDefaultShipData } from 'novadatainterface/ShipData';
+import { getDefaultProjectileWeaponData } from 'novadatainterface/WeaponData';
+import { CombatAuthorityComponent, consumeShot } from './combat_resources';
+import { OutfitsStateComponent } from './outfit_plugin';
+import { ShipComponent } from './ship_plugin';
 
 const NonPersistentComponent = new Component<{ value: number }>(
     'ServerPluginTestNonPersistent');
@@ -156,6 +166,85 @@ describe('server player persistence', () => {
         expect(store.saves.at(-1)?.state.credits).toBe(77_777);
         expect(store.flushes).toBe(1);
         expect(world.entities.has('player')).toBeFalse();
+    });
+});
+
+describe('combat resource bootstrap', () => {
+    it('queues real-store flight progress across repeated shot revisions and disconnect', async () => {
+        const directory = await mkdtemp(join(tmpdir(), 'novajs-flight-persistence-'));
+        const store = new PlayerStore(join(directory, 'players.json'));
+        try {
+            await store.ready;
+            await store.save('pilot', { ...createInitialPlayerState(), fuel: 120 });
+            store.bindPeer('peer', 'pilot');
+            const { world } = setup(true);
+            const data = new MockGameData();
+            data.data.Ship.map.set('nova:128', { ...getDefaultShipData(), id: 'nova:128', fuelCapacity: 300 });
+            world.resources.set(PlayerStoreResource, store);
+            world.resources.set(GameDataResource, data);
+            world.addSystem(InitializeCombatResourcesSystem);
+            world.step();
+            for (let i = 0; i < 30; i++) await Promise.resolve();
+            const entity = world.entities.get('player')!;
+            for (let frame = 1; frame <= 5; frame++) {
+                entity.components.get(PlayerStateComponent)!.missionBits[frame] = true;
+                expect(consumeShot(entity, ['energy', 1])).toBeTrue();
+                entity.components.get(PlayerStateComponent)!.gameDate = frame;
+                world.step();
+            }
+            entity.components.get(PlayerStateComponent)!.holds = [
+                { commodity: 'Food', tons: 2, isMissionCargo: false },
+            ];
+            const pending = world.resources.get(PlayerStateSnapshots)!.get('player')?.pending;
+            world.emit(RemovedPeerEvent, 'peer');
+            world.step();
+            await pending;
+            const saved = (await store.get('pilot'))!;
+            expect(saved.fuel).toBe(115);
+            expect(saved.gameDate).toBe(5);
+            expect(saved.missionBits.slice(1, 6)).toEqual([true, true, true, true, true]);
+            expect(saved.holds[0].tons).toBe(2);
+            expect(world.entities.has('player')).toBeFalse();
+        } finally { await store.flush(); await rm(directory, { recursive: true, force: true }); }
+    });
+    it('ignores client initial balances and reuses debited balances after entity replacement', async () => {
+        const { world, entity, store } = setup();
+        const data = new MockGameData();
+        data.data.Ship.map.set('nova:128', { ...getDefaultShipData(), id: 'nova:128', fuelCapacity: 300, outfits: { ammo: 4 } });
+        data.data.Weapon.map.set('weapon', { ...getDefaultProjectileWeaponData(), id: 'weapon', ammoType: ['outfit', 'ammo'] });
+        Object.assign(store, {
+            get: async () => ({ ...createInitialPlayerState(), fuel: 120 }),
+            saveCombatResources: jasmine.createSpy('saveCombatResources'),
+        });
+        world.resources.set(GameDataResource, data);
+        world.addSystem(InitializeCombatResourcesSystem);
+        entity.components.set(OutfitsStateComponent, new Map([['ammo', { count: 999 }]]));
+        entity.components.set(ShipComponent, { id: 'forged' });
+        entity.components.get(PlayerStateComponent)!.fuel = 99999;
+        expect(consumeShot(entity, ['energy', 1])).toBeFalse();
+        world.step();
+        expect(entity.components.get(PlayerStateComponent)!.fuel).toBe(0);
+        expect(store.saves.length).toBe(0);
+        for (let i = 0; i < 20; i++) await Promise.resolve();
+        const first = world.entities.get('player')!;
+        expect(first.components.has(CombatAuthorityComponent)).toBeTrue();
+        expect(first.components.get(PlayerStateComponent)!.fuel).toBe(120);
+        expect(first.components.get(OutfitsStateComponent)!.get('ammo')?.count).toBe(4);
+        expect(consumeShot(first, ['energy', 20])).toBeTrue();
+        expect(consumeShot(first, ['outfit', 'ammo'])).toBeTrue();
+        world.entities.delete('player');
+        const replacement = new Entity().addComponent(MultiplayerData, { owner: 'peer' })
+            .addComponent(PlayerStateComponent, createInitialPlayerState())
+            .addComponent(OutfitsStateComponent, new Map([['ammo', { count: 999 }]]));
+        world.entities.set('replacement', replacement);
+        world.step();
+        for (let i = 0; i < 20; i++) await Promise.resolve();
+        expect(replacement.components.get(PlayerStateComponent)!.fuel).toBe(100);
+        expect(replacement.components.get(OutfitsStateComponent)!.get('ammo')?.count).toBe(3);
+        world.step();
+        const saves = store.saves.length;
+        for (let i = 0; i < 3; i++) world.step();
+        expect(store.saves.length).toBe(saves);
     });
 });
 

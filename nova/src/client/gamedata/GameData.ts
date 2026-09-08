@@ -146,15 +146,19 @@ export class GameData implements GameDataInterface {
         return data;
     }
 
+    private getCachedAsset(url: string): unknown {
+        return PIXI.Assets.cache.has(url) ? PIXI.Assets.cache.get(url) : undefined;
+    }
+
     private async getUrl(url: string, priority = 0): Promise<unknown> {
         // Binary payloads are never represented in preloadData.
-        if (PIXI.Assets.cache.get(url)) {
-            return PIXI.Assets.cache.get(url);
+        if (PIXI.Assets.cache.has(url)) {
+            return this.getCachedAsset(url);
         }
         return this.loadQueue.add(
             () => {
-                if (PIXI.Assets.cache.get(url)) {
-                    return PIXI.Assets.cache.get(url);
+                if (PIXI.Assets.cache.has(url)) {
+                    return this.getCachedAsset(url);
                 }
                 return PIXI.Assets.load(url);
             },
@@ -276,7 +280,7 @@ export class GameData implements GameDataInterface {
 
     textureFromPict(id: string): PIXI.Texture {
         const pictPath = this.url(id);
-        const cached = PIXI.Assets.cache.get(pictPath);
+        const cached = this.getCachedAsset(pictPath);
         if (cached instanceof PIXI.Texture) {
             return cached;
         }
@@ -286,7 +290,7 @@ export class GameData implements GameDataInterface {
 
     spriteFromPict(id: string): PIXI.Sprite {
         const pictPath = this.url(id);
-        const cached = PIXI.Assets.cache.get(pictPath);
+        const cached = this.getCachedAsset(pictPath);
         if (cached instanceof PIXI.Texture) {
             return new PIXI.Sprite(cached);
         }
@@ -295,7 +299,7 @@ export class GameData implements GameDataInterface {
             if (loaded instanceof PIXI.Texture) {
                 sprite.texture = loaded;
             } else {
-                const tex = PIXI.Assets.cache.get(pictPath);
+                const tex = this.getCachedAsset(pictPath);
                 if (tex instanceof PIXI.Texture) {
                     sprite.texture = tex;
                 }
@@ -308,7 +312,7 @@ export class GameData implements GameDataInterface {
 
     async textureFromPictAsync(id: string, priority?: number): Promise<PIXI.Texture> {
         const pictPath = this.url(id);
-        const cached = PIXI.Assets.cache.get(pictPath);
+        const cached = this.getCachedAsset(pictPath);
         if (cached instanceof PIXI.Texture) {
             return cached;
         }
@@ -316,7 +320,7 @@ export class GameData implements GameDataInterface {
         if (loaded instanceof PIXI.Texture) {
             return loaded;
         }
-        const finalCached = PIXI.Assets.cache.get(pictPath);
+        const finalCached = this.getCachedAsset(pictPath);
         if (finalCached instanceof PIXI.Texture) {
             return finalCached;
         }
@@ -338,7 +342,7 @@ export class GameData implements GameDataInterface {
         } catch {
             // fallback below
         }
-        const cached = PIXI.Assets.cache.get(cicnPath);
+        const cached = this.getCachedAsset(cicnPath);
         return (cached instanceof PIXI.Texture) ? cached : PIXI.Texture.EMPTY;
     }
 

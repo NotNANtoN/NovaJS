@@ -1385,7 +1385,7 @@ export async function getShipboardMissionOffers(
     destinationOptions: (resolved: ResolvedMissionDestinations) => MissionDestinationOptions;
 }> {
     const rawState = input.components.get(PlayerStateComponent);
-    const ship = input.components.get(ShipDataComponent);
+    const playerShipGovt = input.components.get(ShipDataComponent)?.inherentGovt;
     if (!rawState) {
         return {
             offers: [],
@@ -1417,7 +1417,7 @@ export async function getShipboardMissionOffers(
         destinationSystems: world.systems,
         governments: world.governments,
         outfits: input.components.get(OutfitsStateComponent),
-        playerShipGovt: ship?.inherentGovt,
+        playerShipGovt,
     }).sort((a, b) => b.displayWeight - a.displayWeight);
 
     const offerSeed = `${state.currentSystem}:shipboard:${state.gameDate}`;

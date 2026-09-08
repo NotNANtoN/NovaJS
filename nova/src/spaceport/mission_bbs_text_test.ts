@@ -1,9 +1,36 @@
 import 'jasmine';
+import { createDraft, finishDraft } from 'immer';
+import { Entity } from 'nova_ecs/entity';
+import { getDefaultShipData } from 'novadatainterface/ShipData';
+import { GameData } from '../client/gamedata/GameData';
+import { createInitialPlayerState, PlayerStateComponent } from '../nova_plugin/player_state';
+import { ShipDataComponent } from '../nova_plugin/ship_plugin';
+import { getShipboardMissionOffers } from './mission_bbs';
 import {
     formatVisibleMissionText,
     missionInfoDisplayText,
     missionOfferDisplayText,
 } from '../nova_plugin/mission_text';
+
+describe('shipboard mission offer loading', () => {
+    it('does not retain a ship draft across asynchronous data loading', async () => {
+        const ship = createDraft(getDefaultShipData());
+        const input = new Entity()
+            .addComponent(PlayerStateComponent, createInitialPlayerState())
+            .addComponent(ShipDataComponent, ship);
+        let finishLoading!: (value: {}) => void;
+        const gameData = {
+            preloadData: new Promise(resolve => { finishLoading = resolve; }),
+            ids: Promise.resolve({}),
+            data: {},
+        } as unknown as GameData;
+        const offers = getShipboardMissionOffers(gameData, input);
+        finishDraft(ship);
+        finishLoading({});
+        await expectAsync(offers).toBeResolved();
+        expect((await offers).offers).toEqual([]);
+    });
+});
 
 describe('visible mission text', () => {
     it('resolves retail and unknown placeholders without leaking tokens', () => {
