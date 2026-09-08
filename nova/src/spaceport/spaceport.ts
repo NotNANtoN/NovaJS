@@ -95,6 +95,7 @@ export class Spaceport extends Menu<Entity> {
     private shipInfo: ShipInfo;
     private landingNoticeDialog: LandingNoticeDialog;
     private missionOfferDialog: MissionOfferDialog;
+    private readonly modalDimmer = new PIXI.Graphics();
     private readonly ncbRuntime: NcbRuntime;
     private readonly dialogContainers = new Set<PIXI.Container>();
     private data?: PlanetData;
@@ -510,8 +511,20 @@ export class Spaceport extends Menu<Entity> {
     }
 
     private setActiveDialog(active?: PIXI.Container) {
+        const isModal = active === this.missionOfferDialog.container
+            || active === this.landingNoticeDialog.container;
+
+        this.modalDimmer.visible = isModal;
+        const baseFrame = this.container.children[0];
+        const landscape = this.container.children[1];
+
         for (const child of this.container.children) {
-            if (this.dialogContainers.has(child as PIXI.Container)) {
+            if (child === this.modalDimmer) {
+                continue;
+            }
+            if (child === baseFrame || child === landscape) {
+                child.visible = isModal || active === undefined;
+            } else if (this.dialogContainers.has(child as PIXI.Container)) {
                 child.visible = child === active;
             } else {
                 child.visible = active === undefined;
@@ -596,6 +609,10 @@ export class Spaceport extends Menu<Entity> {
         this.container.addChild(this.tradeCenter.container);
         this.container.addChild(this.missionInfo.container);
         this.container.addChild(this.shipInfo.container);
+        this.modalDimmer.rect(-309, -258.5, 618, 517).fill({ color: 0x000000, alpha: 0.5 });
+        this.modalDimmer.visible = false;
+        this.modalDimmer.eventMode = 'static';
+        this.container.addChild(this.modalDimmer);
         this.container.addChild(this.landingNoticeDialog.container);
         this.container.addChild(this.missionOfferDialog.container);
         this.missionNotice.position.set(-210, 145);
@@ -675,11 +692,13 @@ export class Spaceport extends Menu<Entity> {
 
         // Check for concourse storyline offers (availLoc = 3) asynchronously so spaceport opens immediately
         void getConcourseMissionOffers(this.gameData, input, this.id).then(async ({ offers, destinationOptions }) => {
+            if (!this.container.visible) return;
             const rawState = input.components.get(PlayerStateComponent);
             const state = plainSnapshot(rawState);
             if (state && offers.length > 0) {
                 this.controls.unbind();
                 for (const offer of offers) {
+                    if (!this.container.visible) break;
                     this.setActiveDialog(this.missionOfferDialog.container);
                     const prompt = await this.missionOfferDialog.show({
                         mission: offer.mission,

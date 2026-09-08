@@ -71,7 +71,7 @@ const TrailEmitterSystem = new System({
                 y: position.y,
                 scaleX: 2,
                 scaleY: 2,
-                tint: config.color,
+                tint: (config.color ?? 0xffffff) & 0xffffff,
                 alpha: 1,
             });
             container.addParticle(particle);
@@ -108,7 +108,7 @@ const HitEmitterSystem = new System({
                 y: position.y,
                 scaleX: 2.5,
                 scaleY: 2.5,
-                tint: config.color,
+                tint: (config.color ?? 0xffffff) & 0xffffff,
                 alpha: 1,
             });
             container.addParticle(particle);

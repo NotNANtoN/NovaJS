@@ -25,7 +25,7 @@ const ClearBeams = new System({
     }
 });
 
-const BeamDisplaySystem = new System({
+export const BeamDisplaySystem = new System({
     name: 'BeamDisplay',
     args: [BeamDataComponent, Optional(BeamStateComponent), MovementStateComponent,
         BeamGraphicsResource, /*UUID*/] as const,
@@ -33,6 +33,8 @@ const BeamDisplaySystem = new System({
         const beamGraphics = beamHandle.root as PIXI.Graphics;
         const { width, beamColor, coronaColor, coronaFalloff, length, lightningAmplitude, lightningDensity }
             = beamData.beamAnimation;
+        const beamRgb = (beamColor ?? 0xffffff) & 0xffffff;
+        const coronaRgb = (coronaColor ?? 0x8888ff) & 0xffffff;
         const effectiveLength = Math.max(0, Math.min(
             length, beamState?.length ?? length));
         const destination = movement.rotation.getUnitVector()
@@ -53,7 +55,7 @@ const BeamDisplaySystem = new System({
                 beamGraphics.lineTo(point.x, point.y);
             }
             beamGraphics.lineTo(destination.x, destination.y);
-            beamGraphics.stroke({ width, color: beamColor });
+            beamGraphics.stroke({ width, color: beamRgb });
         } else {
             const coronaScale = 2 * 16;
             const coronaWidth = coronaScale / coronaFalloff;
@@ -64,18 +66,18 @@ const BeamDisplaySystem = new System({
                     beamGraphics.lineTo(destination.x, destination.y);
                     beamGraphics.stroke({
                         width: width + 2 + i * coronaWidth / coronaSteps,
-                        color: coronaColor,
+                        color: coronaRgb,
                         alpha: 1 / coronaSteps,
                     });
                 }
             } else {
                 beamGraphics.moveTo(movement.position.x, movement.position.y);
                 beamGraphics.lineTo(destination.x, destination.y);
-                beamGraphics.stroke({ width: width + 2, color: coronaColor });
+                beamGraphics.stroke({ width: width + 2, color: coronaRgb });
             }
             beamGraphics.moveTo(movement.position.x, movement.position.y);
             beamGraphics.lineTo(destination.x, destination.y);
-            beamGraphics.stroke({ width, color: beamColor });
+            beamGraphics.stroke({ width, color: beamRgb });
         }
     },
     after: [ClearBeams, BeamSystem, BeamClippingSystem],

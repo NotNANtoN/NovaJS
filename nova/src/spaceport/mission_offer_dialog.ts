@@ -5,8 +5,15 @@ import { ControlEvent } from '../nova_plugin/controls_plugin';
 import { ClassicDialog, CLASSIC_MAC_FONT, CLASSIC_MAC_TITLE_FONT } from './classic_dialog';
 import * as PIXI from 'pixi.js';
 
-// Retail PICT 8505 "Mission BBS / Briefing" (471x320)
-const BACKGROUND = 'nova:8505';
+// Retail PICT 8521 (upper, 441x9), 8522 (middle, 441x365), 8523 (lower, 441x40)
+// "Mission offer" 3-piece dialog frame (total 441x414)
+export const MISSION_OFFER_FRAME = {
+    width: 441,
+    height: 414,
+    topHeight: 9,
+    middleHeight: 365,
+    bottomHeight: 40,
+} as const;
 
 export interface MissionOfferPrompt {
     mission: MissionData;
@@ -25,12 +32,13 @@ export class MissionOfferDialog extends ClassicDialog<MissionOfferPrompt> {
         controlEvents: Observable<ControlEvent>,
     ) {
         super(gameData, controlEvents, {
-            background: BACKGROUND,
+            background: 'nova:8522',
             title: prompt => prompt.title,
-            titlePosition: { x: 0, y: -138 },
+            titlePosition: { x: 0, y: -188 },
             titleStyle: {
                 ...CLASSIC_MAC_TITLE_FONT,
                 fontSize: 13,
+                fill: 0xffd588,
             },
             sections: [
                 {
@@ -45,24 +53,24 @@ export class MissionOfferDialog extends ClassicDialog<MissionOfferPrompt> {
                                 const sprite = gData.spriteFromPict(`nova:${prompt.mission.briefGraphic}`);
                                 sprite.anchor.set(0.5, 0);
                                 const maxWidth = 115;
-                                const maxHeight = 85;
+                                const maxHeight = 90;
                                 const scale = Math.min(
                                     maxWidth / (sprite.width || maxWidth),
                                     maxHeight / (sprite.height || maxHeight),
                                     1,
                                 );
                                 sprite.scale.set(scale);
-                                sprite.position.set(145, -112);
+                                sprite.position.set(135, -155);
                                 container.addChild(sprite);
                             } catch {
                                 // Fallback if graphic missing
                             }
                         }
 
-                        const wrapWidth = hasGraphic ? 315 : 430;
-                        const viewHeight = 210;
-                        const viewX = -215;
-                        const viewY = -112;
+                        const wrapWidth = hasGraphic ? 275 : 400;
+                        const viewHeight = 318;
+                        const viewX = -200;
+                        const viewY = -162;
 
                         // Scrollable text container
                         const scrollContainer = new PIXI.Container();
@@ -80,7 +88,7 @@ export class MissionOfferDialog extends ClassicDialog<MissionOfferPrompt> {
                         });
                         scrollContainer.addChild(textSprite);
 
-                        // Mask to prevent any spill outside the frame
+                        // Mask to keep text cleanly framed inside the inner area
                         const mask = new PIXI.Graphics()
                             .rect(viewX, viewY, wrapWidth + 10, viewHeight)
                             .fill(0xffffff);
@@ -98,7 +106,7 @@ export class MissionOfferDialog extends ClassicDialog<MissionOfferPrompt> {
                         };
 
                         container.eventMode = 'static';
-                        container.hitArea = new PIXI.Rectangle(viewX, viewY, 435, viewHeight);
+                        container.hitArea = new PIXI.Rectangle(viewX, viewY, 410, viewHeight);
                         container.on('wheel', (event: PIXI.FederatedWheelEvent) => {
                             applyScroll(event.deltaY > 0 ? 25 : -25);
                         });
@@ -107,8 +115,8 @@ export class MissionOfferDialog extends ClassicDialog<MissionOfferPrompt> {
                 {
                     type: 'text',
                     id: 'statusText',
-                    position: { x: -215, y: 122 },
-                    width: 255,
+                    position: { x: -200, y: 178 },
+                    width: 235,
                     content: prompt => {
                         const parts: string[] = [];
                         if (prompt.payText) parts.push(`Payment: ${prompt.payText}`);
@@ -126,8 +134,8 @@ export class MissionOfferDialog extends ClassicDialog<MissionOfferPrompt> {
                 {
                     id: 'refuse',
                     label: 'Refuse',
-                    width: 65,
-                    position: { x: 50, y: 122 },
+                    width: 70,
+                    position: { x: 45, y: 174 },
                     isCancel: true,
                     action: (_dialog, prompt) => {
                         prompt.accepted = false;
@@ -137,8 +145,8 @@ export class MissionOfferDialog extends ClassicDialog<MissionOfferPrompt> {
                 {
                     id: 'accept',
                     label: 'Accept',
-                    width: 65,
-                    position: { x: 135, y: 122 },
+                    width: 70,
+                    position: { x: 130, y: 174 },
                     isDefault: true,
                     action: (_dialog, prompt) => {
                         prompt.accepted = true;
@@ -146,6 +154,33 @@ export class MissionOfferDialog extends ClassicDialog<MissionOfferPrompt> {
                     },
                 },
             ],
+            onShow: (dialog, prompt) => {
+                dialog.getButton('accept')?.setText(prompt.acceptLabel || 'Accept');
+                dialog.getButton('refuse')?.setText(prompt.refuseLabel || 'Refuse');
+            },
         });
+
+        // Assemble the authentic retail 3-part mission offer frame:
+        // 8521 (upper, 441x9) + 8522 (middle, 441x365) + 8523 (lower, 441x40)
+        const bgContainer = new PIXI.Container();
+        const topCap = gameData.spriteFromPict('nova:8521');
+        topCap.anchor.set(0.5, 0);
+        topCap.position.set(0, -207);
+
+        const middle = gameData.spriteFromPict('nova:8522');
+        middle.anchor.set(0.5, 0);
+        middle.position.set(0, -198);
+
+        const bottomCap = gameData.spriteFromPict('nova:8523');
+        bottomCap.anchor.set(0.5, 0);
+        bottomCap.position.set(0, 167);
+
+        bgContainer.addChild(topCap, middle, bottomCap);
+        bgContainer.eventMode = 'static';
+
+        if (this.container.children.length > 0) {
+            this.container.removeChildAt(0);
+        }
+        this.container.addChildAt(bgContainer, 0);
     }
 }

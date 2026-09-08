@@ -1,6 +1,6 @@
 import 'jasmine';
 import { MissionData, MissionOfferLocation } from 'novadatainterface/MissionData';
-import { MissionOfferPrompt } from './mission_offer_dialog';
+import { MISSION_OFFER_FRAME, MissionOfferPrompt } from './mission_offer_dialog';
 
 describe('MissionOfferDialog configuration', () => {
     const mockMission: MissionData = {
@@ -88,5 +88,12 @@ describe('MissionOfferDialog configuration', () => {
         expect(prompt.payText).toBe('25,000 cr');
         expect(prompt.acceptLabel).toBe('Take Job');
         expect(prompt.refuseLabel).toBe('Decline');
+    });
+
+    it('uses the authentic retail 3-part mission offer frame geometry (441x414)', () => {
+        expect(MISSION_OFFER_FRAME.width).toBe(441);
+        expect(MISSION_OFFER_FRAME.height).toBe(414);
+        expect(MISSION_OFFER_FRAME.topHeight + MISSION_OFFER_FRAME.middleHeight + MISSION_OFFER_FRAME.bottomHeight)
+            .toBe(MISSION_OFFER_FRAME.height);
     });
 });

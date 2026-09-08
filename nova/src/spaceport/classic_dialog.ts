@@ -238,6 +238,10 @@ export class ClassicDialog<TData> extends Menu<TData> {
         return this.titleText;
     }
 
+    getButton(id: string): Button | undefined {
+        return this.buttonsMap.get(id);
+    }
+
     private closeWithResult() {
         if (this.customOutput !== undefined) {
             this.input = this.customOutput;

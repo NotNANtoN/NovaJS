@@ -41,7 +41,7 @@ export const ShipAnimationSystem = new System({
         const sprite =animation.sprites.get('baseImage')?.pixiSprite;
         if (sprite) {
             if (ionized) {
-                sprite.tint = ionizationColor.color;
+                sprite.tint = (ionizationColor.color ?? 0x888888) & 0xffffff;
             } else {
                 sprite.tint = 0xffffff;
             }

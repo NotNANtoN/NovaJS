@@ -38,7 +38,7 @@ import { TargetComponent } from './target_component';
 import { WeaponsSystem } from './weapon_plugin';
 
 
-interface BeamState {
+export interface BeamState {
     pointToTarget?: boolean,
     exitPointData?: ExitPointData,
     length?: number,

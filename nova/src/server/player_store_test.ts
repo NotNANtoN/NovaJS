@@ -186,6 +186,7 @@ describe('player snapshots', () => {
         expect(snapshot.state.diedAt).toBe(99);
         expect(current?.pilotName).toBe('Active Captain');
         expect(current?.gameDate).toBe(3);
+        await store.flush();
         await fs.rm(directory, { recursive: true, force: true });
     });
 
@@ -233,6 +234,7 @@ describe('player snapshots', () => {
 
         expect(restored?.diedAt).toBeUndefined();
         expect((await store.get('pilot'))?.diedAt).toBeUndefined();
+        await store.flush();
         await fs.rm(directory, { recursive: true, force: true });
     });
 });
