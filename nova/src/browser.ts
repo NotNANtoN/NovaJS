@@ -24,6 +24,7 @@ import {
 } from "./display/flight_asset_warmup";
 import {
     hideEnteringOverlay,
+    setEnteringProgress,
     showEnteringOverlay,
     showFlightLoadError,
 } from "./display/flight_load_overlay";
@@ -230,7 +231,8 @@ async function transitionTo(
 ) {
     const wasPaused = gamePaused;
     gamePaused = true;
-    showEnteringOverlay();
+    const systemDataPromise = gameData.data.System.get(to).catch(() => undefined);
+    showEnteringOverlay('Entering system', 0, 'Scanning stellar catalog...');
     try {
         if (system) {
             await leaveGameWorld();
@@ -255,6 +257,10 @@ async function transitionTo(
         // cuts to an empty starfield and things pop in one atlas later.
         newStage.visible = false;
 
+        const systemData = await systemDataPromise;
+        const systemTitle = systemData?.name ? `Entering ${systemData.name}` : 'Entering system';
+        showEnteringOverlay(systemTitle, 5, 'Preloading assets...');
+
         // Do not publish the player into combat while its hull or weapon art is
         // still downloading. Later room entries reuse the loaded atlas cache.
         await firstValueFrom(from(warmFlightAssets({
@@ -269,8 +275,13 @@ async function transitionTo(
                 const textures = await texturesFromFrames(frames);
                 await app.renderer.prepare.upload(textures);
             },
+            onProgress: progress => {
+                const percent = Math.min(85, Math.round(5 + progress.fraction * 80));
+                setEnteringProgress(percent, progress.label);
+            },
         })).pipe(timeout(120_000)));
 
+        setEnteringProgress(87, 'Connecting to star system...');
         const room = multiRoom.join(to);
         await newSystem.addPlugin(multiplayer(room));
 
@@ -308,6 +319,7 @@ async function transitionTo(
 
         // Wait for the server to connect
         if (!room.peers.current.value.has('server')) {
+            setEnteringProgress(89, 'Awaiting server handshake...');
             await firstValueFrom(room.peers.join.pipe(
                 filter(a => a === 'server'), timeout(15_000)));
         }
@@ -319,16 +331,16 @@ async function transitionTo(
         newSystem.entities.set(uuid, transitionEntity);
         resetGameplayClocks();
         {
-            const systemData = await gameData.data.System.get(to).catch(() => undefined);
-            if (systemData?.name) {
-                showEnteringOverlay(`Entering ${systemData.name}`);
-            }
+            setEnteringProgress(92, 'Initializing flight scene...');
             const ready = await waitForFlightScene({
                 step: () => world?.step(),
                 afterStep: async () => {
                     const pending = newSystem.resources.get(AsyncSystemResource);
                     if (pending) {
-                        await pending.done;
+                        await Promise.race([
+                            pending.done,
+                            new Promise(resolve => setTimeout(resolve, 16)),
+                        ]);
                     }
                 },
                 entities: () => newSystem.entities,
@@ -337,15 +349,26 @@ async function transitionTo(
                 snapshotRequested: () => Boolean(
                     newSystem.singletonEntity.components.get(Comms)
                         ?.initialStateReceived),
+                onProgress: (readiness, snapshotReady) => {
+                    if (!snapshotReady) {
+                        setEnteringProgress(94, 'Receiving sector snapshot...');
+                    } else if (!readiness.planetsReady) {
+                        setEnteringProgress(96, 'Rendering planets...');
+                    } else if (!readiness.playerReady) {
+                        setEnteringProgress(98, 'Rendering ship...');
+                    } else {
+                        setEnteringProgress(100, 'Entering cockpit...');
+                    }
+                },
             });
             if (!ready) {
                 console.error('Flight scene readiness timeout', JSON.stringify({
                     ...flightSceneReadiness(newSystem.entities, uuid, systemData?.planets.length ?? 0),
                     snapshotReceived: newSystem.singletonEntity.components.get(Comms)?.initialStateReceived,
-                    expectedPlanetCount: systemData?.planets.length ?? 0,
                 }));
                 throw new Error('The flight scene did not finish loading. Please retry entering the game.');
             }
+            setEnteringProgress(100, 'All systems ready');
             resetGameplayClocks();
             newStage.visible = true;
         }
@@ -361,10 +384,11 @@ async function transitionTo(
 async function startGame(
     selection: StartMenuSelection,
 ) {
-    showEnteringOverlay();
+    showEnteringOverlay('Initializing flight systems', 2, 'Establishing pilot uplink...');
     try {
         await waitForCommunicatorUuid();
-    world = new World();
+        setEnteringProgress(5, 'Loading core universe plugins...');
+        world = new World();
     world.resources.set(GameDataResource, gameData);
     await world.addPlugin(multiplayer(multiRoom.join('main room')));
     mainRoomJoined = true;

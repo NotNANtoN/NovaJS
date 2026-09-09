@@ -141,6 +141,46 @@ describe('warmFlightAssets', () => {
         expect(hullsLoaded.sort()).toEqual(loaded.sort());
     });
 
+    it('reports incremental progress as textures and sounds load', async () => {
+        const progressReports: Array<{ loaded: number, total: number, label: string }> = [];
+        const ships = new Map([
+            ['nova:shuttle', {
+                ...getDefaultShipData(),
+                id: 'nova:shuttle',
+                animation: animationWith('sheet:shuttle'),
+                initialExplosion: null,
+                finalExplosion: null,
+            }],
+        ]);
+        const frames = new Gettable(async (id: string) => ({ frames: {}, meta: { image: `${id}.png` } } as never));
+        const gameData = {
+            data: {
+                Ship: { get: async (id: string) => ships.get(id) },
+                Outfit: { get: async () => undefined },
+                Weapon: { get: async () => undefined },
+                Explosion: { get: async () => undefined },
+                Planet: { get: async () => undefined },
+                System: { get: async () => getDefaultSystemData() },
+                SpriteSheetFrames: frames,
+                SpriteSheet: { get: async () => ({}) },
+            },
+        } as unknown as GameDataInterface;
+
+        await warmFlightAssets({
+            gameData,
+            systemId: 'nova:130',
+            playerShipId: 'nova:shuttle',
+            loadFrames: async () => undefined,
+            onProgress: p => progressReports.push({ loaded: p.loaded, total: p.total, label: p.label }),
+        });
+
+        expect(progressReports.length).toBeGreaterThan(0);
+        expect(progressReports[0].label).toContain('Scanning system catalog');
+        const last = progressReports[progressReports.length - 1];
+        expect(last.loaded).toBe(last.total);
+        expect(last.label).toContain('Loading textures');
+    });
+
     it('preloads all weapons and explosions when gameData.ids is available', async () => {
         const loaded: string[] = [];
         const weaponEntriesLoaded: string[] = [];

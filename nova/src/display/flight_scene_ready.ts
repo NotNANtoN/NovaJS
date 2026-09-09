@@ -81,6 +81,7 @@ export interface WaitForFlightScene {
     timeoutMs?: number;
     snapshotGraceMs?: number;
     stableFrames?: number;
+    onProgress?: (readiness: FlightSceneReadiness, snapshotReady: boolean) => void;
 }
 
 /**
@@ -127,6 +128,7 @@ export async function waitForFlightScene(
         const snapshotReady = options.snapshotRequested === undefined
             || (requestedAt !== undefined
                 && now() - requestedAt >= snapshotGraceMs);
+        options.onProgress?.(readiness, snapshotReady);
         if (isFlightSceneReady(readiness) && snapshotReady) {
             if (readiness.drawableCount === lastDrawable) {
                 stable += 1;

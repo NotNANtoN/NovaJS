@@ -6,6 +6,13 @@ import { Gettable } from 'novadatainterface/Gettable';
 import { SpriteSheetFramesData } from 'novadatainterface/SpriteSheetData';
 import { texturesFromFrames } from './textures_from_frames';
 
+export interface WarmFlightProgress {
+    loaded: number;
+    total: number;
+    label: string;
+    fraction: number;
+}
+
 export interface WarmFlightAssets {
     gameData: GameDataInterface;
     systemId: string;
@@ -14,6 +21,7 @@ export interface WarmFlightAssets {
     weaponEntries?: Gettable<unknown>;
     loadFrames?: (frames: SpriteSheetFramesData) => Promise<unknown>;
     loadSound?: (id: string) => Promise<unknown>;
+    onProgress?: (progress: WarmFlightProgress) => void;
 }
 
 async function tryGet<T>(load: () => Promise<T>): Promise<T | undefined> {
@@ -50,6 +58,7 @@ export async function warmFlightAssets({
     weaponEntries,
     loadFrames = texturesFromFrames,
     loadSound,
+    onProgress,
 }: WarmFlightAssets): Promise<void> {
     const ships = new Set<string>();
     const outfits = new Set<string>();
@@ -57,6 +66,13 @@ export async function warmFlightAssets({
     const explosions = new Set<string>();
     const sheets = new Set<string>();
     const sounds = new Set<string>();
+
+    onProgress?.({
+        loaded: 0,
+        total: 1,
+        label: 'Scanning system catalog...',
+        fraction: 0,
+    });
 
     const visitExplosion = async (id: string | null | undefined) => {
         if (!id || explosions.has(id)) {
@@ -193,6 +209,29 @@ export async function warmFlightAssets({
     // Atlas downloads bypass GameData's metadata queue. Bound them here so a
     // cold cache does not flood a remote connection with hundreds of requests.
     const pendingSheets = [...sheets].values();
+    const sheetCount = sheets.size;
+    const soundCount = loadSound ? sounds.size : 0;
+    const totalItems = sheetCount + soundCount;
+    let completedItems = 0;
+
+    const reportProgress = (type: 'textures' | 'audio') => {
+        completedItems++;
+        const fraction = totalItems > 0 ? Math.min(1, completedItems / totalItems) : 1;
+        const label = type === 'textures'
+            ? `Loading textures (${completedItems}/${totalItems})`
+            : `Loading audio (${completedItems}/${totalItems})`;
+        onProgress?.({
+            loaded: completedItems,
+            total: totalItems,
+            label,
+            fraction,
+        });
+    };
+
+    if (totalItems === 0) {
+        onProgress?.({ loaded: 0, total: 0, label: 'Assets ready', fraction: 1 });
+    }
+
     const failures: string[] = [];
     await Promise.all(Array.from({ length: 8 }, async () => {
         for (const id of pendingSheets) {
@@ -204,8 +243,10 @@ export async function warmFlightAssets({
                     gameData.data.SpriteSheet?.get(id),
                 ]);
                 await loadFrames(frames);
+                reportProgress('textures');
             } catch (error) {
                 failures.push(id);
+                reportProgress('textures');
                 console.warn(`Failed to preload flight sprite sheet ${id}`, error);
             }
         }
@@ -217,6 +258,7 @@ export async function warmFlightAssets({
                 // Browsers may disallow audio until a user gesture. Missing audio
                 // must not make an otherwise playable scene inaccessible.
                 await tryGet(() => loadSound(id));
+                reportProgress('audio');
             }
         }));
     }
