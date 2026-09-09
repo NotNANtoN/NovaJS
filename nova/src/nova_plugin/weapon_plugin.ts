@@ -441,6 +441,7 @@ export class ServerFireCadenceState {
     activeWeapons = new Set<string>();
     highestIntentSeq = 0;
     nextLogSeq = 1;
+    waitingForWeapon?: { id: string; since: number };
 }
 
 // The token-scoped authority outlives room entities and reconnects. Recreating
@@ -572,6 +573,7 @@ export const ServerFireIntentSystem = new System({
         local.blocked = blocked;
         if (invalidate || (local.hadIntent && !intent)) {
             local.cadence.clearPending();
+            local.waitingForWeapon = undefined;
         }
         local.hadIntent = intent !== undefined;
 
@@ -604,6 +606,18 @@ export const ServerFireIntentSystem = new System({
 
         for (const shot of newShotsAfter(intent?.shots ?? [], sync.highestIntentSeq)) {
             if (!validFireIntent(shot)) continue;
+            if (!invalidate && (weapons?.get(shot.weaponId)?.count ?? 0) > 0
+                && !weaponEntries.getCached(shot.weaponId)) {
+                // A newly created room can receive intent before its weapon
+                // factory resolves. Do not permanently consume that first shot.
+                if (local.waitingForWeapon?.id !== shot.weaponId) {
+                    local.waitingForWeapon = { id: shot.weaponId, since: time.time };
+                }
+                // Bound head-of-line waiting for broken/missing weapon records.
+                if (time.time - local.waitingForWeapon.since < 1000) break;
+            } else {
+                local.waitingForWeapon = undefined;
+            }
             // Includes blocked, unknown, full and eventually expired intents.
             // A retained/re-added wire buffer must never resurrect them.
             sync.highestIntentSeq = shot.seq;
@@ -661,9 +675,10 @@ export const FireLogSpawnSystem = new System({
             const logSeq = fireLogSequence(shot);
             sync.nextSeq = Math.max(sync.nextSeq, shot.seq + 1);
             sync.nextLogSeq = Math.max(sync.nextLogSeq, logSeq + 1);
-            const spawned = sync.spawnedSeqs.delete(shot.seq);
-            if (spawned || (shot.seq >= sync.lowestPredictedSeq
-                && shot.seq <= sync.highestPredictedSeq)) {
+            const predicted = shot.seq >= sync.lowestPredictedSeq
+                && shot.seq <= sync.highestPredictedSeq;
+            if (sync.spawnedSeqs.has(shot.seq) && !predicted) {
+                sync.spawnedSeqs.delete(shot.seq);
                 sync.highestLogSeq = logSeq;
                 continue;
             }
@@ -678,7 +693,12 @@ export const FireLogSpawnSystem = new System({
             const mappedShot = clockOffset !== 0
                 ? { ...shot, at: shot.at + clockOffset }
                 : shot;
-            weapon.fireFromLog(uuid, mappedShot, time.time);
+            if (predicted) {
+                weapon.reconcileFromLog(uuid, mappedShot, time.time);
+            } else {
+                weapon.fireFromLog(uuid, mappedShot, time.time);
+            }
+            sync.spawnedSeqs.delete(shot.seq);
             sync.highestLogSeq = logSeq;
 
             if ((globalThis as any).debugCombat || (globalThis as any).novaDebug?.debugCombat) {

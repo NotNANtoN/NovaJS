@@ -61,6 +61,21 @@ export function showEnteringOverlay(status = 'Entering system'): void {
     }
 }
 
+export async function showFlightLoadError(error: unknown): Promise<void> {
+    if (typeof document === 'undefined') return;
+    showEnteringOverlay(error instanceof Error ? error.message : 'Could not enter the system. Please retry.');
+    const panel = statusNode?.parentElement;
+    if (!panel) return;
+    panel.style.maxWidth = 'min(600px, 80vw)';
+    panel.style.overflowWrap = 'anywhere';
+    const button = document.createElement('button');
+    button.textContent = 'Return to menu';
+    button.style.cssText = 'display:block; margin:20px auto 0; padding:8px 16px; cursor:pointer';
+    panel.append(button);
+    await new Promise<void>(resolve => button.addEventListener('click', () => resolve(), { once: true }));
+    hideEnteringOverlay();
+}
+
 export function hideEnteringOverlay(): void {
     if (typeof document === 'undefined') {
         overlay = undefined;

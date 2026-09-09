@@ -32,7 +32,7 @@ const serve = argv.includes('--serve');
 const READ_SHIP = String.raw`
 (uuid => {
   const entity = window.system?.entities?.get(uuid);
-  if (!entity) { return { present: false }; }
+  if (!entity) { return { present: false, deathObserved: window.pvpProbe?.deathSeen ?? false }; }
   const stat = name => {
     const value = entity.componentsByName.get(name);
     return value ? { current: value.current, max: value.max } : undefined;
@@ -41,17 +41,31 @@ const READ_SHIP = String.raw`
     present: true,
     shield: stat('Shield'),
     armor: stat('Armor'),
-    destructionStarted: entity.componentsByName.has('DestructionStarted'),
-    playerDeath: entity.componentsByName.has('PlayerDeath'),
+    destructionStarted: entity.componentsByName.has('DestructionStartedComponent'),
+    playerDeath: entity.componentsByName.has('PlayerDeathComponent'),
     fireLog: entity.componentsByName.get('FireLogComponent')?.shots?.length ?? 0,
     projectiles: [...window.system.entities].filter(
       ([, e]) => e.componentsByName.has('ProjectileData')).length,
+    seenShots: window.pvpProbe?.shots.size ?? 0,
+    drawnShots: window.pvpProbe?.drawn.size ?? 0,
+    samples: window.pvpProbe?.samples,
+    deathObserved: window.pvpProbe?.deathSeen ?? false,
+    position: (() => { const p = entity.componentsByName.get('MovementState')?.position; return p ? [p.x, p.y] : null; })(),
   };
 })`;
 
+const openedChromes = [];
+
 async function bootPilot(port, name) {
     const chrome = await launchChrome({ port, headless });
+    openedChromes.push(chrome);
     const page = await openPage(chrome.wsUrl, url);
+    let warnings = 0;
+    page.on('Runtime.consoleAPICalled', ({ type, args }) => {
+        if (type === 'warning' && String(args[0]?.value).startsWith('Failed') && warnings++ < 3) {
+            console.warn(`[${name}]`, ...args.map(arg => arg.value ?? arg.description));
+        }
+    });
     await waitFor(page, `document.querySelector('[data-menu-action]')`,
         { label: `${name}: start menu`, timeoutMs: 120_000 });
     await evaluate(page,
@@ -67,14 +81,24 @@ async function bootPilot(port, name) {
             .find(b => (b.textContent || '').trim() === 'Launch');
         if (launch) { launch.click(); }
     })()`);
+    await waitFor(page, `document.querySelector('[data-menu-action="Enter Ship"]:not(:disabled)')`,
+        { label: `${name}: enter ship button`, timeoutMs: 30_000 });
+    await evaluate(page, `document.querySelector('[data-menu-action="Enter Ship"]').click()`);
     await waitFor(page, `window.system && window.app`,
         { label: `${name}: world`, timeoutMs: 120_000 });
     await waitFor(page, `(() => {
         for (const [, e] of window.system.entities) {
             if (e.componentsByName.has('ShipControl')) { return true; }
         }
-        return false;
+        return document.querySelector('[data-nova-overlay="entering"] button') !== null;
     })()`, { label: `${name}: ship`, timeoutMs: 120_000 });
+    const failure = await evaluate(page, `document.querySelector('[data-nova-overlay="entering"] button')
+        ? document.querySelector('[data-nova-overlay="entering"]').textContent : null`);
+    if (failure) throw new Error(`${name}: ${failure}`);
+    await waitFor(page, `!document.querySelector('[data-nova-overlay="entering"]') || document.querySelector('[data-nova-overlay="entering"] button')`,
+        { label: `${name}: flight assets and scene ready`, timeoutMs: 120_000 });
+    const sceneFailure = await evaluate(page, `document.querySelector('[data-nova-overlay="entering"]')?.textContent`);
+    if (sceneFailure) throw new Error(`${name}: ${sceneFailure}`);
     const uuid = await evaluate(page, `(() => {
         for (const [uuid, e] of window.system.entities) {
             if (e.componentsByName.has('ShipControl')) { return uuid; }
@@ -89,19 +113,54 @@ async function setUpDuel(attacker, victim) {
     await evaluate(attacker.page, `(() => {
         const e = window.system.entities.get(${JSON.stringify(attacker.uuid)});
         const m = e.componentsByName.get('MovementState');
-        m.position.x = 0; m.position.y = 0;
-        m.velocity.x = 0; m.velocity.y = 0;
-        m.rotation.angle = 0;
-        e.componentsByName.set('Target',
-            { target: ${JSON.stringify(victim.uuid)} });
+        e.components.set([...e.components.keys()].find(c => c.name === 'MovementState'), { ...m,
+            position: new m.position.constructor(0, 0),
+            velocity: new m.velocity.constructor(0, 0),
+            rotation: new m.rotation.constructor(0),
+        });
+        e.componentsByName.get('TargetComponent').target = ${JSON.stringify(victim.uuid)};
     })()`);
     await evaluate(victim.page, `(() => {
         const e = window.system.entities.get(${JSON.stringify(victim.uuid)});
         const m = e.componentsByName.get('MovementState');
-        m.position.x = 0; m.position.y = -260;
-        m.velocity.x = 0; m.velocity.y = 0;
+        e.components.set([...e.components.keys()].find(c => c.name === 'MovementState'), { ...m,
+            position: new m.position.constructor(0, -120),
+            velocity: new m.velocity.constructor(0, 0),
+        });
     })()`);
     await sleep(1500);
+}
+
+async function trackShots(client, shooterUuid, victimUuid) {
+    await evaluate(client.page, `(() => {
+        const stats = window.pvpProbe = { shots: new Set(), drawn: new Set(), samples: [], deathSeen: false };
+        window.app.ticker.add(() => {
+            const target = window.system?.entities.get(${JSON.stringify(victimUuid)});
+            if (target && (target.componentsByName.has('PlayerDeathComponent')
+                || target.componentsByName.has('DestructionStartedComponent')
+                || target.componentsByName.get('Armor')?.current <= 0)) stats.deathSeen = true;
+            for (const [id, entity] of window.system?.entities ?? []) {
+                if (!entity.componentsByName.has('ProjectileData') || entity.componentsByName.get('Source') !== ${JSON.stringify(shooterUuid)}) continue;
+                stats.shots.add(id);
+                const graphic = entity.componentsByName.get('AnimationGraphic');
+                if (stats.samples.length < 1) stats.samples.push({ id, graphic: !!graphic, built: graphic?.built, disposed: graphic?.managed.disposed });
+                if (graphic?.built && !graphic.managed.disposed) stats.drawn.add(id);
+            }
+        });
+    })()`);
+}
+
+async function holdDuelPosition(victim) {
+    // This probe measures a stationary-target duel, not autopilot pursuit after
+    // knockback has pushed the target beyond the starting weapon's range.
+    await evaluate(victim.page, `(() => {
+        const e = window.system?.entities.get(${JSON.stringify(victim.uuid)});
+        const m = e?.componentsByName.get('MovementState');
+        if (m) e.components.set([...e.components.keys()].find(c => c.name === 'MovementState'), { ...m,
+            position: new m.position.constructor(0, -120),
+            velocity: new m.velocity.constructor(0, 0),
+        });
+    })()`);
 }
 
 const failures = [];
@@ -161,8 +220,12 @@ try {
 
     // Alice opens fire. Bob does nothing: a one-sided fight makes the
     // attribution unambiguous.
+    await Promise.all([trackShots(alice, alice.uuid, bob.uuid), trackShots(bob, alice.uuid, bob.uuid)]);
     await keyDown(alice.page, ' ');
-    await sleep(4000);
+    for (let i = 0; i < 16; i++) {
+        await holdDuelPosition(bob);
+        await sleep(250);
+    }
 
     const during = {
         onAlice: await evaluate(alice.page,
@@ -173,11 +236,11 @@ try {
     console.log('during', JSON.stringify(during));
 
     check('the shot exists on the shooter',
-        during.onAlice.projectiles > 0 || during.onAlice.fireLog > 0,
-        { projectiles: during.onAlice.projectiles, log: during.onAlice.fireLog });
+        during.onAlice.seenShots > 0 && during.onAlice.drawnShots > 0,
+        { seen: during.onAlice.seenShots, drawn: during.onAlice.drawnShots });
     check('the victim also sees shots being fired at it',
-        during.onBob.fireLog > 0 || during.onBob.projectiles > 0,
-        { projectiles: during.onBob.projectiles, log: during.onBob.fireLog });
+        during.onBob.seenShots > 0 && during.onBob.drawnShots > 0,
+        { seen: during.onBob.seenShots, drawn: during.onBob.drawnShots });
 
     const bobHealthOnAlice = (during.onAlice.shield?.current ?? 0)
         + (during.onAlice.armor?.current ?? 0);
@@ -194,13 +257,14 @@ try {
         { onAlice: bobHealthOnAlice, onBob: bobHealthOnBob });
 
     // Keep firing until the victim dies, so the kill itself is observed.
-    for (let attempt = 0; attempt < 24; attempt++) {
+    for (let attempt = 0; attempt < 240; attempt++) {
         const state = await evaluate(bob.page,
             `(${READ_SHIP})(${JSON.stringify(bob.uuid)})`);
-        if (state.playerDeath || state.destructionStarted) {
+        if (state.playerDeath || state.destructionStarted || !state.present) {
             break;
         }
-        await sleep(2500);
+        await holdDuelPosition(bob);
+        await sleep(250);
     }
     await keyUp(alice.page, ' ');
     await sleep(2000);
@@ -214,13 +278,13 @@ try {
     console.log('after', JSON.stringify(after));
 
     const deadOnAlice = after.onAlice.playerDeath
-        || after.onAlice.destructionStarted || !after.onAlice.present;
-    const deadOnBob = after.onBob.playerDeath || after.onBob.destructionStarted;
+        || after.onAlice.destructionStarted || after.onAlice.deathObserved;
+    const deadOnBob = after.onBob.playerDeath || after.onBob.destructionStarted
+        || after.onBob.deathObserved;
     check('the kill resolved for the victim', deadOnBob, after.onBob);
     check('the kill resolved for the shooter too', deadOnAlice, after.onAlice);
 } finally {
-    alice?.chrome.close();
-    bob?.chrome.close();
+    for (const chrome of openedChromes) chrome.close();
     server?.kill('SIGKILL');
 }
 

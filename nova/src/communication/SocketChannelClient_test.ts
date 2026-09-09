@@ -38,9 +38,42 @@ describe("SocketChannelClient", function() {
 
     it("binds a listener to 'message'", () => {
         const client = new SocketChannelClient({ webSocket, warn });
-        expect(webSocket.addEventListener).toHaveBeenCalledTimes(1);
-        expect(webSocket.addEventListener.calls.mostRecent().args[0])
-            .toEqual("message");
+        expect(webSocket.addEventListener).toHaveBeenCalledTimes(3);
+        expect(webSocket.addEventListener).toHaveBeenCalledWith('message', jasmine.any(Function));
+    });
+
+    it('flushes queued messages as soon as the socket opens', () => {
+        const state = Object.getOwnPropertyDescriptor(webSocket, 'readyState')!.get as jasmine.Spy;
+        state.and.returnValue(webSocket.CONNECTING);
+        const client = new SocketChannelClient({ webSocket, warn });
+        client.send({ hello: 'room' });
+        expect(webSocket.send).not.toHaveBeenCalled();
+        state.and.returnValue(webSocket.OPEN);
+        callbacks.open[0]({} as Event);
+        expect(webSocket.send).toHaveBeenCalledTimes(1);
+        expect(JSON.parse(webSocket.send.calls.mostRecent().args[0] as string))
+            .toEqual({ message: { hello: 'room' } });
+    });
+
+    it('marks an unexpected socket close disconnected immediately', () => {
+        const client = new SocketChannelClient({ webSocket, warn });
+        client.connected.next(true);
+        callbacks.close[0]({} as Event);
+        expect(client.connected.value).toBeFalse();
+    });
+
+    it('does not throw on malformed JSON', () => {
+        new SocketChannelClient({ webSocket, warn });
+        expect(() => callbacks.message[0]({ data: '{' } as MessageEvent)).not.toThrow();
+        expect(warn).toHaveBeenCalledWith(jasmine.stringMatching('invalid JSON'));
+    });
+
+    it('does not reconnect after an explicit disconnect', () => {
+        const factory = jasmine.createSpy('factory').and.returnValue(webSocket);
+        const client = new SocketChannelClient({ webSocket, warn, timeout: 10, webSocketFactory: factory });
+        client.disconnect();
+        clock.tick(1000);
+        expect(factory).not.toHaveBeenCalled();
     });
 
     it("warns if it can't decode a received message", async () => {

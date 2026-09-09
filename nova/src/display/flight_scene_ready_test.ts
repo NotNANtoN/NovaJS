@@ -13,7 +13,7 @@ function ship(id: string, drawn = false): Entity {
     const entity = new Entity();
     entity.components.set(ShipComponent, { id });
     if (drawn) {
-        entity.components.set(AnimationGraphicComponent, {} as never);
+        entity.components.set(AnimationGraphicComponent, { built: true, managed: { disposed: false } } as never);
     }
     return entity;
 }
@@ -22,7 +22,7 @@ function planet(id: string, drawn = false): Entity {
     const entity = new Entity();
     entity.components.set(PlanetComponent, { id });
     if (drawn) {
-        entity.components.set(AnimationGraphicComponent, {} as never);
+        entity.components.set(AnimationGraphicComponent, { built: true, managed: { disposed: false } } as never);
     }
     return entity;
 }
@@ -54,14 +54,48 @@ describe('flight scene readiness', () => {
         expect(isFlightSceneReady(readiness)).toBeFalse();
     });
 
-    it('does not wait for nearby ships and asteroids already in the world', () => {
+    it('waits for nearby ships already in the world', () => {
         const entities = new Map<string, Entity>([
             ['player', ship('nova:128', true)],
             ['planet nova:128', planet('nova:128', true)],
             ['trader', ship('nova:129')],
         ]);
         expect(isFlightSceneReady(
-            flightSceneReadiness(entities, 'player', 1))).toBeTrue();
+            flightSceneReadiness(entities, 'player', 1))).toBeFalse();
+    });
+
+    it('does not mistake an attached but loading graphic for a drawn ship', () => {
+        const player = ship('nova:128', true);
+        player.components.get(AnimationGraphicComponent)!.built = false;
+        expect(isFlightSceneReady(flightSceneReadiness(
+            new Map([['player', player]]), 'player', 0))).toBeFalse();
+    });
+
+    it('does not accept a disposed graphic', () => {
+        const player = ship('nova:128');
+        player.components.set(AnimationGraphicComponent, {
+            built: true, managed: { disposed: true },
+        } as never);
+        expect(isFlightSceneReady(flightSceneReadiness(
+            new Map([['player', player]]), 'player', 0))).toBeFalse();
+    });
+
+    it('keeps pumping while unrelated async world work is pending', async () => {
+        let now = 0;
+        let steps = 0;
+        const entities = new Map([['player', ship('nova:128')]]);
+        const ready = await waitForFlightScene({
+            step: () => {
+                if (++steps === 3) entities.set('player', ship('nova:128', true));
+            },
+            afterStep: () => new Promise<void>(() => {}),
+            entities: () => entities,
+            playerUuid: 'player', expectedPlanetCount: 0,
+            now: () => now, sleep: async ms => { now += ms; },
+            timeoutMs: 1000,
+        });
+        expect(ready).toBeTrue();
+        expect(steps).toBeGreaterThanOrEqual(3);
     });
 
     it('pumps until the scene is drawn and the snapshot has had a chance to arrive',

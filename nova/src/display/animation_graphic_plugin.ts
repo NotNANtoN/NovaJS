@@ -175,6 +175,10 @@ const SyncAnimationGraphicInsert = new System({
         graphic.rotation = movementState.rotation.angle;
         entity.components.set(AnimationGraphicComponent, graphic);
         entity.components.set(AnimationGraphicLoadedComponent, graphic);
+        void graphic.buildPromise.catch(error => {
+            console.warn('Failed to build flight graphic', error);
+            graphic.dispose();
+        });
 
         if ((globalThis as any).debugCombat || (globalThis as any).novaDebug?.debugCombat) {
             console.log(`[Combat Visual] Attached sprite for entity ${entity.name ?? 'projectile'} at (${Math.round(movementState.position.x)}, ${Math.round(movementState.position.y)}) rot=${movementState.rotation.angle.toFixed(2)}`);

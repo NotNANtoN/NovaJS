@@ -254,6 +254,31 @@ describe('authoritative server intent scheduling', () => {
         };
     }
 
+    it('retains first-shot intent while the server weapon factory is loading', () => {
+        const f = setup();
+        const cached = spyOn(f.entries, 'getCached').and.returnValue(undefined);
+        f.send(1);
+        f.tick(0);
+        expect(f.shots).toEqual([]);
+        expect(f.local().highestIntentSeq).toBe(0);
+        cached.and.returnValue(f.entry);
+        f.tick(50);
+        expect(f.shots).toEqual([50]);
+        expect(f.log().map(s => s.seq)).toEqual([1]);
+    });
+
+    it('bounds waiting for a missing weapon factory and never resurrects expired intent', () => {
+        const f = setup();
+        const cached = spyOn(f.entries, 'getCached').and.returnValue(undefined);
+        f.send(1);
+        f.tick(0);
+        f.tick(1001);
+        expect(f.local().highestIntentSeq).toBe(1);
+        cached.and.returnValue(f.entry);
+        f.tick(1010);
+        expect(f.shots).toEqual([]);
+    });
+
     it('drains a batch on later ticks without more arrivals or a held trigger', () => {
         const f = setup();
         f.send(1, 2, 3);

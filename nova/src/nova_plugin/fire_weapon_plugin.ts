@@ -263,6 +263,7 @@ export interface ShotCreation {
     createdAt: number;
     fastForwardMs: number;
     entityId?: string;
+    reconcile?: boolean;
 }
 
 export interface FiredShot {
@@ -452,23 +453,29 @@ export abstract class WeaponEntry {
         };
     }
 
+    reconcileFromLog(source: string, shot: FireLogShot, now: number): void {
+        // Do not resurrect a prediction that already hit something or expired.
+        if (this.entities.has(loggedShotEntityId(source, shot.seq))) {
+            this.fireFromLog(source, shot, now, true);
+        }
+    }
+
     fireFromLog(source: string, shot: FireLogShot,
-        now: number): Entity | undefined {
+        now: number, reconcile = false): Entity | undefined {
         const duration = 'shotDuration' in this.data
             ? this.data.shotDuration : 0;
         const timing = fireLogReplayTiming(shot.at, now, duration);
         if (timing.expired) {
+            if (reconcile) this.entities.delete(loggedShotEntityId(source, shot.seq));
             return undefined;
         }
         const result = this.runQuery(FireLogSourceQuery, source)[0];
         if (!result) {
             return undefined;
         }
-        const [movement, animation, owner, target, destructionStarted, armor] =
-            result;
-        if (attackOriginLocked(destructionStarted, armor?.current)) {
-            return undefined;
-        }
+        // A ship dying after firing does not cancel shots already accepted by
+        // the server. The spawn lockout applies to new intent, not historical logs.
+        const [movement, animation, owner] = result;
         const { exitPointData } = getNextExitpoint(
             movement,
             animation,
@@ -486,7 +493,7 @@ export abstract class WeaponEntry {
             Position.fromVectorLike(shot.position),
             Angle.fromAngleLike(shot.rotation),
             owner?.owner ?? source,
-            shot.target ?? target?.target,
+            shot.target,
             source,
             sourceVelocity,
             exitPointData,
@@ -496,6 +503,7 @@ export abstract class WeaponEntry {
                 createdAt: timing.createdAt,
                 fastForwardMs: timing.fastForwardMs,
                 entityId: loggedShotEntityId(source, shot.seq),
+                reconcile,
             },
         );
     }

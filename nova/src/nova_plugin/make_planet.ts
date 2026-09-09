@@ -5,9 +5,11 @@ import { Vector } from "nova_ecs/datatypes/vector";
 import { Entity } from "nova_ecs/entity";
 import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
 import { PlanetComponent } from "./planet_plugin";
+import { AlwaysRelevantComponent } from 'nova_ecs/plugins/multiplayer_plugin';
 
 export function makePlanet(planetData: PlanetData): Entity {
-    const planet = new Entity(planetData.name);
+    const planet = new Entity(planetData.name)
+        .addComponent(AlwaysRelevantComponent, undefined);
 
     planet.components.set(PlanetComponent, {
         id: planetData.id,

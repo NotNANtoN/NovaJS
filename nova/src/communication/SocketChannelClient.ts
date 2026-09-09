@@ -15,6 +15,8 @@ export class SocketChannelClient implements ChannelClient {
     private keepaliveTimeout?: NodeJS.Timeout;
     private pingsSentSinceMessage = 0;
     private messageListener: (m: MessageEvent) => void;
+    private readonly openListener = () => this.flushQueue();
+    private readonly closeListener = () => this.connected.next(false);
     private messageQueue: SocketMessage[] = [];
     private maxPings: number
     readonly playerToken: string;
@@ -45,18 +47,38 @@ export class SocketChannelClient implements ChannelClient {
         this.maxPings = maxPings ?? 4;
 
         this.messageListener = this.handleMessage.bind(this)
-        this.webSocket.addEventListener("message", this.messageListener);
+        this.bindSocket();
         this.resetTimeout();
     }
 
+    private bindSocket() {
+        this.webSocket.addEventListener('message', this.messageListener);
+        this.webSocket.addEventListener('open', this.openListener);
+        this.webSocket.addEventListener('close', this.closeListener);
+    }
+
+    private unbindSocket() {
+        this.webSocket.removeEventListener('message', this.messageListener);
+        this.webSocket.removeEventListener('open', this.openListener);
+        this.webSocket.removeEventListener('close', this.closeListener);
+    }
+
+    private flushQueue() {
+        if (this.webSocket.readyState !== this.webSocket.OPEN) return;
+        for (const message of this.messageQueue) {
+            this.webSocket.send(JSON.stringify(SocketMessage.encode(message)));
+        }
+        this.messageQueue.length = 0;
+    }
+
     reconnect() {
-        this.webSocket.removeEventListener("message", this.messageListener);
+        this.unbindSocket();
         if (this.webSocket.readyState === this.webSocket.CONNECTING
             || this.webSocket.readyState === this.webSocket.OPEN) {
             this.disconnect();
         }
         this.webSocket = this.webSocketFactory();
-        this.webSocket.addEventListener("message", this.messageListener);
+        this.bindSocket();
         this.resetTimeout();
         this.sendPing();
     }
@@ -101,17 +123,14 @@ export class SocketChannelClient implements ChannelClient {
     private sendRaw(message: SocketMessage) {
         this.reconnectIfClosed();
         if (this.webSocket.readyState === this.webSocket.OPEN) {
-            for (const message of this.messageQueue) {
-                this.webSocket.send(JSON.stringify(SocketMessage.encode(message)));
-            }
-            this.messageQueue.length = 0;
+            this.flushQueue();
             this.webSocket.send(JSON.stringify(SocketMessage.encode(message)));
         } else {
             this.messageQueue.push(message);
         }
     }
 
-    private async handleMessage(messageEvent: MessageEvent) {
+    private handleMessage(messageEvent: MessageEvent) {
         this.resetTimeout();
         this.pingsSentSinceMessage = 0;
         if (!this.connected.value) {
@@ -121,7 +140,14 @@ export class SocketChannelClient implements ChannelClient {
 
         const data = messageEvent.data;
         let socketMessage: SocketMessage;
-        const maybeSocketMessage = SocketMessage.decode(JSON.parse(data) as unknown);
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(data);
+        } catch {
+            this.warn('Failed to deserialize message from server: invalid JSON');
+            return;
+        }
+        const maybeSocketMessage = SocketMessage.decode(parsed);
         if (isRight(maybeSocketMessage)) {
             socketMessage = maybeSocketMessage.right;
         } else {
@@ -152,8 +178,11 @@ export class SocketChannelClient implements ChannelClient {
     }
 
     disconnect() {
-        this.webSocket.removeEventListener(
-            "message", this.messageListener);
+        this.unbindSocket();
+        if (this.keepaliveTimeout !== undefined) {
+            clearTimeout(this.keepaliveTimeout);
+            this.keepaliveTimeout = undefined;
+        }
         this.webSocket.close();
         this.connected.next(false);
     }

@@ -7,7 +7,8 @@ import { resetWallClock, TimeResource } from "nova_ecs/plugins/time_plugin";
 import { World } from "nova_ecs/world";
 import { isRight } from 'nova_ecs/either';
 import * as PIXI from "pixi.js";
-import { firstValueFrom, take, filter, map, timeout } from "rxjs";
+import 'pixi.js/prepare';
+import { firstValueFrom, from, take, filter, map, timeout } from "rxjs";
 import Stats from 'stats.js';
 import { v4 } from "uuid";
 import { GameData } from "./client/gamedata/GameData";
@@ -23,8 +24,10 @@ import {
 import {
     hideEnteringOverlay,
     showEnteringOverlay,
+    showFlightLoadError,
 } from "./display/flight_load_overlay";
-import { waitForFlightScene } from "./display/flight_scene_ready";
+import { flightSceneReadiness, waitForFlightScene } from "./display/flight_scene_ready";
+import { texturesFromFrames } from "./display/textures_from_frames";
 import {
     getTitleMusicState,
     startTitleMusicOnGesture,
@@ -222,102 +225,133 @@ async function transitionTo(
     },
     cause: SystemTransitionCause,
 ) {
-    if (system) {
-        await leaveGameWorld();
-    }
-
-    const newSystem = makeSystem(to, gameData, undefined, compatibilityProfile);
-    const transitionEntity = typeof entity === 'function'
-        ? entity(newSystem) : entity;
-    (window as any).novaDebug = new DebugSettings(newSystem, (window as any).novaDebug);
-
-    (window as any).system = newSystem;
-    newSystem.resources.set(PixiAppResource, app);
-    await newSystem.addPlugin(Display);
-
-    const newStage = newSystem.resources.get(Stage);
-    if (!newStage) {
-        throw new Error('World did not have Pixi Stage');
-    }
-    app.stage.addChild(newStage);
-    // Reveal only once hulls and stellars have sprites. Otherwise Enter Ship
-    // cuts to an empty starfield and things pop in one atlas later.
-    newStage.visible = cause !== 'initial';
-
-    const room = multiRoom.join(to);
-    await newSystem.addPlugin(multiplayer(room));
-
-    newSystem.events.get(FinishJumpEvent).subscribe(transition =>
-        void transitionTo(transition, 'hyperjump'));
-    newSystem.events.get(RespawnRelocationEvent).subscribe(transition =>
-        void transitionTo(transition, 'respawn'));
-    newSystem.events.get(PlayerDestructionCompleteEvent)
-        .subscribe(({ playerUuid }) => {
-            if (playerUuid !== uuid || !gameRunning) {
-                return;
-            }
-            // Buying a ship replaces the entity under this uuid, so the
-            // captured one can be a hull the pilot no longer flies.
-            const ship = newSystem.entities.get(uuid) ?? transitionEntity;
-            const death = ship.components.get(PlayerDeathComponent);
-            if (death?.outcome !== 'killed') {
-                return;
-            }
-            void returnToMainMenu(plainSnapshot(
-                ship.components.get(PlayerStateComponent)));
-        });
-
-    if (!world) {
-        throw new Error('Game world was not initialized');
-    }
-    world.entities.set(to, new Entity()
-        .addComponent(SystemComponent, newSystem));
-
-    // Wait for the server to connect
-    if (!room.peers.current.value.has('server')) {
-        await firstValueFrom(room.peers.join.pipe(filter(a => a === 'server')));
-    }
-    if (cause === 'hyperjump') {
-        // World construction and room handshakes can take longer than the
-        // visual arrival phase. Start it when the destination can draw.
-        restartJumpArrival(transitionEntity);
-    }
-    newSystem.entities.set(uuid, transitionEntity);
-    system = newSystem;
-    resetGameplayClocks();
-    // Combat art loads in the background so the first shots still draw,
-    // without holding the cockpit until every hull and weapon in the system
-    // has a texture. The overlay only covers the player hull and planets.
-    void warmFlightAssets({
-        gameData,
-        systemId: to,
-        playerShipId: transitionEntity.components.get(ShipComponent)?.id,
-        extraOutfitIds: outfitIdsFromState(
-            transitionEntity.components.get(OutfitsStateComponent)),
-        weaponEntries: newSystem.resources.get(WeaponEntries),
-    });
-    if (cause === 'initial') {
-        const systemData = await gameData.data.System.get(to).catch(() => undefined);
-        if (systemData?.name) {
-            showEnteringOverlay(`Entering ${systemData.name}`);
+    const wasPaused = gamePaused;
+    gamePaused = true;
+    showEnteringOverlay();
+    try {
+        if (system) {
+            await leaveGameWorld();
         }
-        await waitForFlightScene({
-            step: () => world?.step(),
-            afterStep: async () => {
-                const pending = newSystem.resources.get(AsyncSystemResource);
-                if (pending) {
-                    await pending.done;
-                }
+
+        const newSystem = makeSystem(to, gameData, undefined, compatibilityProfile);
+        system = newSystem;
+        const transitionEntity = typeof entity === 'function'
+            ? entity(newSystem) : entity;
+        (window as any).novaDebug = new DebugSettings(newSystem, (window as any).novaDebug);
+
+        (window as any).system = newSystem;
+        newSystem.resources.set(PixiAppResource, app);
+        await newSystem.addPlugin(Display);
+
+        const newStage = newSystem.resources.get(Stage);
+        if (!newStage) {
+            throw new Error('World did not have Pixi Stage');
+        }
+        app.stage.addChild(newStage);
+        // Reveal only once hulls and stellars have sprites. Otherwise Enter Ship
+        // cuts to an empty starfield and things pop in one atlas later.
+        newStage.visible = false;
+
+        // Do not publish the player into combat while its hull or weapon art is
+        // still downloading. Later room entries reuse the loaded atlas cache.
+        await firstValueFrom(from(warmFlightAssets({
+            gameData,
+            systemId: to,
+            playerShipId: transitionEntity.components.get(ShipComponent)?.id,
+            extraOutfitIds: outfitIdsFromState(
+                transitionEntity.components.get(OutfitsStateComponent)),
+            weaponEntries: newSystem.resources.get(WeaponEntries),
+            loadSound: id => gameData.data.Sound.get(id),
+            loadFrames: async frames => {
+                const textures = await texturesFromFrames(frames);
+                await app.renderer.prepare.upload(textures);
             },
-            entities: () => newSystem.entities,
-            playerUuid: uuid,
-            expectedPlanetCount: systemData?.planets.length ?? 0,
-            snapshotRequested: () => Boolean(
-                newSystem.singletonEntity.components.get(Comms)
-                    ?.initialStateRequested),
-        });
+        })).pipe(timeout(120_000)));
+
+        const room = multiRoom.join(to);
+        await newSystem.addPlugin(multiplayer(room));
+
+        const failedTransition = async (error: unknown) => {
+            console.error('Failed to enter system', error);
+            gamePaused = true;
+            await showFlightLoadError(error);
+            await returnToMainMenu();
+        };
+        newSystem.events.get(FinishJumpEvent).subscribe(transition =>
+            void transitionTo(transition, 'hyperjump').catch(failedTransition));
+        newSystem.events.get(RespawnRelocationEvent).subscribe(transition =>
+            void transitionTo(transition, 'respawn').catch(failedTransition));
+        newSystem.events.get(PlayerDestructionCompleteEvent)
+            .subscribe(({ playerUuid }) => {
+                if (playerUuid !== uuid || !gameRunning) {
+                    return;
+                }
+                // Buying a ship replaces the entity under this uuid, so the
+                // captured one can be a hull the pilot no longer flies.
+                const ship = newSystem.entities.get(uuid) ?? transitionEntity;
+                const death = ship.components.get(PlayerDeathComponent);
+                if (death?.outcome !== 'killed') {
+                    return;
+                }
+                void returnToMainMenu(plainSnapshot(
+                    ship.components.get(PlayerStateComponent)));
+            });
+
+        if (!world) {
+            throw new Error('Game world was not initialized');
+        }
+        world.entities.set(to, new Entity()
+            .addComponent(SystemComponent, newSystem));
+
+        // Wait for the server to connect
+        if (!room.peers.current.value.has('server')) {
+            await firstValueFrom(room.peers.join.pipe(
+                filter(a => a === 'server'), timeout(15_000)));
+        }
+        if (cause === 'hyperjump') {
+            // World construction and room handshakes can take longer than the
+            // visual arrival phase. Start it when the destination can draw.
+            restartJumpArrival(transitionEntity);
+        }
+        newSystem.entities.set(uuid, transitionEntity);
         resetGameplayClocks();
-        newStage.visible = true;
+        {
+            const systemData = await gameData.data.System.get(to).catch(() => undefined);
+            if (systemData?.name) {
+                showEnteringOverlay(`Entering ${systemData.name}`);
+            }
+            const ready = await waitForFlightScene({
+                step: () => world?.step(),
+                afterStep: async () => {
+                    const pending = newSystem.resources.get(AsyncSystemResource);
+                    if (pending) {
+                        await pending.done;
+                    }
+                },
+                entities: () => newSystem.entities,
+                playerUuid: uuid,
+                expectedPlanetCount: systemData?.planets.length ?? 0,
+                snapshotRequested: () => Boolean(
+                    newSystem.singletonEntity.components.get(Comms)
+                        ?.initialStateReceived),
+            });
+            if (!ready) {
+                console.error('Flight scene readiness timeout', JSON.stringify({
+                    ...flightSceneReadiness(newSystem.entities, uuid, systemData?.planets.length ?? 0),
+                    snapshotReceived: newSystem.singletonEntity.components.get(Comms)?.initialStateReceived,
+                    expectedPlanetCount: systemData?.planets.length ?? 0,
+                }));
+                throw new Error('The flight scene did not finish loading. Please retry entering the game.');
+            }
+            resetGameplayClocks();
+            newStage.visible = true;
+        }
+    } catch (error) {
+        await leaveGameWorld();
+        throw error;
+    } finally {
+        hideEnteringOverlay();
+        if (!wasPaused) resumeGameplay();
     }
 }
 
@@ -564,7 +598,25 @@ async function showMainMenu(playerData: PlayerData | undefined) {
         loadSnapshotSummaries,
         archivePilotSnapshot,
     );
-    await startGame(selection);
+    try {
+        await startGame(selection);
+    } catch (error) {
+        console.error('Failed to enter game', error);
+        if (mainRoomJoined) {
+            multiRoom.leave('main room');
+            mainRoomJoined = false;
+        }
+        await world?.removeAllPlugins();
+        world = undefined;
+        playerShipUuid = undefined;
+        await showFlightLoadError(error);
+        await showMainMenu({
+            ...playerData,
+            uuid: communicator.uuid ?? 'client',
+            playerState: selection.playerState,
+            ...(selection.ship === undefined ? {} : { ship: selection.ship }),
+        });
+    }
 }
 
 async function returnToMainMenu(playerState?: PlayerState) {

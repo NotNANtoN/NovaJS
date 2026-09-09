@@ -28,6 +28,7 @@ function animationWith(id: string) {
 describe('warmFlightAssets', () => {
     it('loads projectile, explosion, and NPC hull sheets for the system', async () => {
         const loaded: string[] = [];
+        const hullsLoaded: string[] = [];
         const ships = new Map([
             ['nova:shuttle', {
                 ...getDefaultShipData(),
@@ -115,6 +116,7 @@ describe('warmFlightAssets', () => {
                     }),
                 },
                 SpriteSheetFrames: frames,
+                SpriteSheet: { get: async (id: string) => { hullsLoaded.push(id); return {}; } },
             },
         } as unknown as GameDataInterface;
 
@@ -136,6 +138,7 @@ describe('warmFlightAssets', () => {
             'sheet:shuttle',
         ].sort());
         expect(weaponEntriesLoaded.sort()).toEqual(['nova:blaster', 'nova:heavy']);
+        expect(hullsLoaded.sort()).toEqual(loaded.sort());
     });
 
     it('preloads all weapons and explosions when gameData.ids is available', async () => {
@@ -196,6 +199,31 @@ describe('warmFlightAssets', () => {
 
         expect(loaded.sort()).toEqual(['sheet:lance', 'sheet:lance_spark']);
         expect(weaponEntriesLoaded).toEqual(['nova:lance']);
+    });
+
+    it('waits for artwork and allows retry after an interrupted download', async () => {
+        const ship = { ...getDefaultShipData(), animation: animationWith('sheet:player'), outfits: {} };
+        const gameData = {
+            ids: Promise.resolve({ Ship: ['player'] }),
+            data: {
+                Ship: { get: async () => ship },
+                System: { get: async () => getDefaultSystemData() },
+                SpriteSheetFrames: { get: async () => ({ frames: {}, meta: { image: 'player.png' } }) },
+            },
+        } as unknown as GameDataInterface;
+        spyOn(console, 'warn');
+        const loadFrames = jasmine.createSpy('loadFrames').and.rejectWith(new Error('network interrupted'));
+        await expectAsync(warmFlightAssets({ gameData, systemId: 'system', loadFrames }))
+            .toBeRejectedWithError(/sheet:player/);
+        let finish!: () => void;
+        loadFrames.and.callFake(() => new Promise<void>(resolve => { finish = resolve; }));
+        let complete = false;
+        const warm = warmFlightAssets({ gameData, systemId: 'system', loadFrames }).then(() => { complete = true; });
+        while (!finish) await Promise.resolve();
+        expect(complete).toBeFalse();
+        finish();
+        await warm;
+        expect(complete).toBeTrue();
     });
 
     it('reads installed outfit ids from player state', () => {

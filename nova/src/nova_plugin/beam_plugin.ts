@@ -222,7 +222,21 @@ class BeamWeaponEntry extends WeaponEntry {
             throw new Error('Beam shots require deterministic creation data');
         }
         if (shot.entityId && this.entities.has(shot.entityId)) {
-            return this.entities.get(shot.entityId);
+            const existing = this.entities.get(shot.entityId)!;
+            if (shot.reconcile) {
+                existing.components.set(CreateTime, shot.createdAt);
+                existing.components.set(ShotSeedComponent, { seed: shot.seed });
+                const state = existing.components.get(BeamStateComponent)!;
+                state.inaccuracy = shot.inaccuracy;
+                state.exitPointData = exitPointData;
+                const movement = existing.components.get(MovementStateComponent)!;
+                movement.position = position;
+                movement.rotation = angle;
+                if (target) existing.components.set(TargetComponent, { target });
+                else existing.components.delete(TargetComponent);
+                setAttackIntent(existing, target);
+            }
+            return existing;
         }
         const { width, length } = this.data.beamAnimation;
         const beamPoly = new SAT.Polygon(new SAT.Vector(0, 0), [

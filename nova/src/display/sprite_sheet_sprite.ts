@@ -61,7 +61,7 @@ export class SpriteSheetSprite {
                 this.size.x = Math.max(0, ...this.textures.map(t => t.width));
                 this.size.y = Math.max(0, ...this.textures.map(t => t.height));
                 this.frames = this.textures.length;
-                if (this.wrappedRotation !== 0) {
+                if (!this.pixiSprite.destroyed) {
                     this.rotation = this.wrappedRotation;
                 }
                 return this;
@@ -105,7 +105,8 @@ export class SpriteSheetSprite {
     }
 
     set rotation(angle: number) {
-        if (!this.textures) {
+        this.wrappedRotation = angle;
+        if (!this.textures || this.pixiSprite.destroyed) {
             return;
         }
         // Divide rotation equally among the available rotation textures

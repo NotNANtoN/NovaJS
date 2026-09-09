@@ -13,6 +13,7 @@ export interface WarmFlightAssets {
     extraOutfitIds?: Iterable<string>;
     weaponEntries?: Gettable<unknown>;
     loadFrames?: (frames: SpriteSheetFramesData) => Promise<unknown>;
+    loadSound?: (id: string) => Promise<unknown>;
 }
 
 async function tryGet<T>(load: () => Promise<T>): Promise<T | undefined> {
@@ -48,12 +49,14 @@ export async function warmFlightAssets({
     extraOutfitIds = [],
     weaponEntries,
     loadFrames = texturesFromFrames,
+    loadSound,
 }: WarmFlightAssets): Promise<void> {
     const ships = new Set<string>();
     const outfits = new Set<string>();
     const weapons = new Set<string>();
     const explosions = new Set<string>();
     const sheets = new Set<string>();
+    const sounds = new Set<string>();
 
     const visitExplosion = async (id: string | null | undefined) => {
         if (!id || explosions.has(id)) {
@@ -62,6 +65,7 @@ export async function warmFlightAssets({
         explosions.add(id);
         const explosion = await tryGet(() => gameData.data.Explosion.get(id));
         collectAnimationSheets(explosion?.animation, sheets);
+        if (explosion?.sound) sounds.add(explosion.sound);
     };
 
     const visitWeapon = async (id: string) => {
@@ -76,6 +80,7 @@ export async function warmFlightAssets({
         if (!weapon) {
             return;
         }
+        if (weapon.sound) sounds.add(weapon.sound);
         if (weapon.type === 'ProjectileWeaponData') {
             collectAnimationSheets(weapon.animation, sheets);
         }
@@ -155,7 +160,8 @@ export async function warmFlightAssets({
         }
     };
 
-    const system = await tryGet(() => gameData.data.System.get(systemId));
+    // The destination is required, unlike optional references in retail data.
+    const system = await gameData.data.System.get(systemId);
     await visitSystem(system);
     await visitShip(playerShipId);
     for (const outfitId of extraOutfitIds) {
@@ -176,13 +182,49 @@ export async function warmFlightAssets({
         await Promise.all(allIds.Ship.map(id => visitShip(id)));
     }
 
-    await Promise.all([...sheets].map(async id => {
-        const frames = await tryGet(() =>
-            gameData.data.SpriteSheetFrames.get(id));
-        if (frames) {
-            await tryGet(() => loadFrames(frames));
+    if (allIds?.Asteroid && gameData.data.Asteroid) {
+        await Promise.all(allIds.Asteroid.map(async id => {
+            const asteroid = await tryGet(() => gameData.data.Asteroid!.get(id));
+            collectAnimationSheets(asteroid?.animation, sheets);
+            collectAnimationSheets(asteroid?.yieldAnimation, sheets);
+        }));
+    }
+
+    // Atlas downloads bypass GameData's metadata queue. Bound them here so a
+    // cold cache does not flood a remote connection with hundreds of requests.
+    const pendingSheets = [...sheets].values();
+    const failures: string[] = [];
+    await Promise.all(Array.from({ length: 8 }, async () => {
+        for (const id of pendingSheets) {
+            try {
+                // Collision polygons are a separate asset from artwork. Fetch
+                // them before flight too, so a visible first volley can hit.
+                const [frames] = await Promise.all([
+                    gameData.data.SpriteSheetFrames.get(id),
+                    gameData.data.SpriteSheet?.get(id),
+                ]);
+                await loadFrames(frames);
+            } catch (error) {
+                failures.push(id);
+                console.warn(`Failed to preload flight sprite sheet ${id}`, error);
+            }
         }
     }));
+    if (loadSound) {
+        const pendingSounds = sounds.values();
+        await Promise.all(Array.from({ length: 8 }, async () => {
+            for (const id of pendingSounds) {
+                // Browsers may disallow audio until a user gesture. Missing audio
+                // must not make an otherwise playable scene inaccessible.
+                await tryGet(() => loadSound(id));
+            }
+        }));
+    }
+    if (failures.length) {
+        const detail = failures.slice(0, 5).join(', ')
+            + (failures.length > 5 ? ` and ${failures.length - 5} more` : '');
+        throw new Error(`Could not load flight artwork (${detail}). Please retry entering the game.`);
+    }
 }
 
 export function outfitIdsFromState(

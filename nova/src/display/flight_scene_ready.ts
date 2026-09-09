@@ -15,6 +15,11 @@ export interface FlightSceneReadiness {
     drawableCount: number;
 }
 
+function graphicReady(entity: Entity): boolean {
+    const graphic = entity.components.get(AnimationGraphicComponent);
+    return graphic?.built === true && !graphic.managed.disposed;
+}
+
 function needsFlightGraphic(entity: Entity): boolean {
     return entity.components.has(PlanetComponent)
         || entity.components.has(ShipComponent)
@@ -34,17 +39,17 @@ export function flightSceneReadiness(
 
     for (const [uuid, entity] of entities) {
         if (uuid === playerUuid) {
-            playerReady = entity.components.has(AnimationGraphicComponent);
+            playerReady = graphicReady(entity);
         }
         if (entity.components.has(PlanetComponent)) {
             planetCount += 1;
-            if (entity.components.has(AnimationGraphicComponent)) {
+            if (graphicReady(entity)) {
                 planetsDrawn += 1;
             }
         }
         if (needsFlightGraphic(entity)) {
             drawableCount += 1;
-            if (entity.components.has(AnimationGraphicComponent)) {
+            if (graphicReady(entity)) {
                 drawnCount += 1;
             }
         }
@@ -61,10 +66,7 @@ export function flightSceneReadiness(
 }
 
 export function isFlightSceneReady(readiness: FlightSceneReadiness): boolean {
-    // Nearby NPC hulls and asteroids keep streaming in after the snapshot.
-    // Waiting for every sprite holds the cockpit on first load (and on
-    // every jump) even when the player's ship and the planets are drawn.
-    return readiness.playerReady && readiness.planetsReady;
+    return readiness.playerReady && readiness.planetsReady && readiness.drawnReady;
 }
 
 export interface WaitForFlightScene {
@@ -109,7 +111,10 @@ export async function waitForFlightScene(
             if (remaining <= 0) {
                 break;
             }
-            await Promise.race([options.afterStep(), sleep(remaining)]);
+            // Some async work depends on another ECS step (providers apply
+            // completed patches on the next tick). Do not stop pumping the
+            // scene until the entire world's async work finishes.
+            await Promise.race([options.afterStep(), sleep(Math.min(remaining, 16))]);
         }
         if (requestedAt === undefined && options.snapshotRequested?.()) {
             requestedAt = now();

@@ -132,6 +132,8 @@ export type Message = t.TypeOf<typeof Message>;
 
 export const MultiplayerData = new Component<{ owner: string }>('MultiplayerData');
 export const MULTIPLAYER_INTEREST_RADIUS = 6_000;
+// Server-local interest policy for navigation landmarks, not a wire component.
+export const AlwaysRelevantComponent = new Component<undefined>('AlwaysRelevant');
 
 function wrappedAxisDistance(a: number, b: number): number {
     const direct = Math.abs(a - b);
@@ -167,6 +169,7 @@ export const Comms = new Component<{
     lastEntities: Map<string, string>, // entity, owner
     messages: MessageWithSource<Message>[],
     initialStateRequested: boolean,
+    initialStateReceived?: boolean,
     outboundChat?: ChatMessageEntry[],
 }>('Comms');
 
@@ -1193,7 +1196,8 @@ export function multiplayer(communicator: Communicator,
                         }
                         const movement = entity.components
                             .get(MovementStateComponent);
-                        return movement === undefined
+                        return entity.components.has(AlwaysRelevantComponent)
+                            || movement === undefined
                             || centres.some(centre =>
                                 positionsWithinInterest(centre, movement));
                     })
@@ -1231,6 +1235,9 @@ export function multiplayer(communicator: Communicator,
             // Apply changes from messages
             for (const { source, message } of comms.messages) {
                 const peerIsAdmin = comms.admins.has(source);
+                if (peerIsAdmin && message.state !== undefined) {
+                    comms.initialStateReceived = true;
+                }
                 if (message.sentAt !== undefined
                     && Number.isFinite(message.sentAt)) {
                     observeSourceClock(source, message.sentAt);
@@ -1734,7 +1741,8 @@ export function multiplayer(communicator: Communicator,
                         }
                         const movement = entity.components
                             .get(MovementStateComponent);
-                        return movement === undefined
+                        return entity.components.has(AlwaysRelevantComponent)
+                            || movement === undefined
                             || centres.some(centre =>
                                 positionsWithinInterest(centre, movement));
                     })

@@ -20,16 +20,17 @@ export class AnimationGraphic {
     readonly sprites = new Map<string, SpriteSheetSprite>();
     private wrappedProgress = 0;
     private wrappedRotation = 0;
-    private animation: Animation | Promise<Animation>;
+
     readonly buildPromise: Promise<AnimationGraphic>;
     built = false;
     size = { x: 0, y: 0 }
 
     constructor({ gameData, animation }: { gameData: GameDataInterface, animation: Animation | Promise<Animation> }) {
-        this.animation = animation;
         this.gameData = gameData;
         this.rotation = 0;
-        this.buildPromise = this.build();
+        this.buildPromise = animation instanceof Promise
+            ? animation.then(value => this.build(value))
+            : this.build(animation);
     }
 
     attachTo(parent: PIXI.Container): void {
@@ -46,10 +47,11 @@ export class AnimationGraphic {
         this.managed.dispose();
     }
 
-    private async build(): Promise<AnimationGraphic> {
-        var promises: Promise<unknown>[] = [];
-        for (const imageName in (await this.animation).images) {
-            const image = (await this.animation).images[imageName];
+    private async build(animation: Animation): Promise<AnimationGraphic> {
+        const promises: Promise<unknown>[] = [];
+        if (this.managed.disposed) return this;
+        for (const imageName in animation.images) {
+            const image = animation.images[imageName];
             const sprite = new SpriteSheetSprite({
                 image,
                 gameData: this.gameData
@@ -59,7 +61,12 @@ export class AnimationGraphic {
             this.container.addChild(sprite.pixiSprite);
             promises.push(sprite.buildPromise);
         }
-        await Promise.all(promises);
+        // A warm projectile can be born and hit within one render frame. Its
+        // cached art must be attached now, not in a microtask after it vanished.
+        if ([...this.sprites.values()].some(sprite => sprite.frames === 0)) {
+            await Promise.all(promises);
+        }
+        if (this.managed.disposed) return this;
         this.size.x = Math.max(0, ...[...this.sprites.values()].map(s => s.size.x));
         this.size.y = Math.max(0, ...[...this.sprites.values()].map(s => s.size.y));
         this.rotation = this.rotation;

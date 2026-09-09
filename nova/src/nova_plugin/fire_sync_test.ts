@@ -199,6 +199,7 @@ describe('end-to-end shot synchronization across client, server, and observers',
         const entry = {
             data,
             syncAsFireEvent: true,
+            reconcileFromLog: jasmine.createSpy('reconcileFromLog'),
             fireFromEntityDetailed: (source: string, seed: number, _inaccuracy?: boolean, _exitIndex?: number, extras?: { entityId?: string, target?: string }) => {
                 onFire(source, seed);
                 return {
@@ -377,7 +378,7 @@ describe('scheduled log ordering and prediction bookkeeping', () => {
         expect(sync.spawnedSeqs.has(1)).toBeFalse();
         const replay = jasmine.createSpy('replay');
         const entry = { data: getDefaultProjectileWeaponData(), syncAsFireEvent: true,
-            fireFromLog: replay } as unknown as WeaponEntry;
+            fireFromLog: replay, reconcileFromLog: jasmine.createSpy('reconcileFromLog') } as unknown as WeaponEntry;
         const entries = new Gettable<WeaponEntry | undefined>(async () => entry);
         entries.gotten.laser = entry;
         const world = new World('prediction-pruning');

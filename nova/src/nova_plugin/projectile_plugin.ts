@@ -175,11 +175,12 @@ class ProjectileWeaponEntry extends WeaponEntry {
                 .scale(this.data.physics.speed));
         }
 
-        if (shot.entityId && this.entities.has(shot.entityId)) {
-            return this.entities.get(shot.entityId);
+        const existing = shot.entityId ? this.entities.get(shot.entityId) : undefined;
+        if (existing && !shot.reconcile) {
+            return existing;
         }
 
-        const projectile = this.factoryQueue.dequeue();
+        const projectile = existing ?? this.factoryQueue.dequeue();
         if (!projectile) {
             return undefined;
         }
@@ -190,6 +191,7 @@ class ProjectileWeaponEntry extends WeaponEntry {
         movementState.velocity = velocity;
         movementState.turning = 0;
         movementState.turnTo = null;
+        delete movementState.targetSpeed;
 
         projectile.components.set(CreateTime, shot.createdAt);
         projectile.components.delete(SubCounts);
@@ -259,6 +261,10 @@ class ProjectileWeaponEntry extends WeaponEntry {
             ));
         }
 
+        // Reuse the live prediction and its graphic/budget reservation without
+        // an add/delete event or a second muzzle sound.
+        if (existing) return projectile;
+
         const playerOwned = isPlayerOwnedSource(source, this.runQuery);
         if (!reserveEntity(this.budget, projectile, 'projectile', playerOwned)) {
             // The object came from a reusable queue, so return it without
@@ -326,7 +332,7 @@ const RecordGuidanceTrackSystem = new System({
 const ProjectileGuidanceSystem = new System({
     name: 'ProjectileGuidanceSystem',
     args: [MovementStateComponent, TargetComponent,
-        Entities, ProjectileDataComponent, TimeResource] as const,
+        Entities, ProjectileDataComponent, TimeResource, GuidanceComponent] as const,
     before: [MovementSystem],
     step(movementState, { target }, entities, projectileData, time) {
         if (!target) {

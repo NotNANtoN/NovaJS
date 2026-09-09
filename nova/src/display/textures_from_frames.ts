@@ -49,29 +49,31 @@ export async function texturesFromFrames(framesData: SpriteSheetFramesData): Pro
         const frameNames = Object.keys(framesData.frames);
 
         if (framesData.meta?.image) {
-            try {
-                const atlas = await loadAtlasTexture(resolveAtlasUrl(framesData.meta.image));
-                const textures = frameNames.map(frameName => {
-                    const { x, y, w, h } = framesData.frames[frameName].frame;
-                    return new PIXI.Texture({
-                        source: atlas.source,
-                        frame: new PIXI.Rectangle(x, y, w, h),
-                    });
+            const atlas = await loadAtlasTexture(resolveAtlasUrl(framesData.meta.image));
+            const textures = frameNames.map(frameName => {
+                const { x, y, w, h } = framesData.frames[frameName].frame;
+                return new PIXI.Texture({
+                    source: atlas.source,
+                    frame: new PIXI.Rectangle(x, y, w, h),
                 });
-                resolvedFramesCache.set(framesData, textures);
-                return textures;
-            } catch (error) {
-                // Fall back to the legacy endpoint-per-frame behavior if the atlas
-                // is unavailable.
-                console.warn('Failed to load sprite sheet atlas', error);
-            }
+            });
+            resolvedFramesCache.set(framesData, textures);
+            return textures;
         }
 
-        const textures = frameNames.map(frameName => PIXI.Texture.from(frameName));
+        // Texture.from only reads Pixi's cache in v8; it does not load a URL.
+        const textures = await Promise.all(frameNames.map(frameName =>
+            PIXI.Assets.load<PIXI.Texture>(frameName)));
         resolvedFramesCache.set(framesData, textures);
         return textures;
     })();
 
     framesCache.set(framesData, promise);
-    return await promise;
+    try {
+        return await promise;
+    } catch (error) {
+        // A failed atlas must not permanently cache empty/missing frame textures.
+        framesCache.delete(framesData);
+        throw error;
+    }
 }

@@ -32,6 +32,7 @@ import {
 } from '../../nova/src/nova_plugin/weapons_state';
 import {
     broadcastChat,
+    AlwaysRelevantComponent,
     ChatMessageEvent,
     Comms,
     Communicator,
@@ -1370,6 +1371,35 @@ describe('Multiplayer Plugin', () => {
         world2.step();
 
         expect(world2.entities.has('outside')).toBeFalse();
+    });
+
+    it('keeps navigation landmarks outside interest in updates and requested snapshots', () => {
+        world1.singletonEntity.components.get(Comms)!.admins = new Set(['world1 uuid']);
+        world2.singletonEntity.components.get(Comms)!.admins = new Set(['world1 uuid']);
+        const movement = (x: number): MovementState => ({
+            position: new Position(x, 0), velocity: new Vector(0, 0),
+            rotation: new Angle(0), accelerating: 0, turning: 0, turnBack: false,
+        });
+        world1.entities.set('player', new Entity()
+            .addComponent(MultiplayerData, { owner: 'world2 uuid' })
+            .addComponent(MovementStateComponent, movement(0)));
+        world1.entities.set('landmark', new Entity()
+            .addComponent(MultiplayerData, { owner: 'world1 uuid' })
+            .addComponent(MovementStateComponent, movement(9000))
+            .addComponent(AlwaysRelevantComponent, undefined)
+            .addComponent(BarComponent, { y: 'planet' }));
+        expect(world2.singletonEntity.components.get(Comms)!.initialStateReceived).toBeFalsy();
+        world1.step();
+        world2.step();
+        expect(world2.entities.has('landmark')).toBeTrue();
+        expect(world2.singletonEntity.components.get(Comms)!.initialStateReceived).toBeTrue();
+        world2.entities.delete('landmark');
+        world1Communicator.messages.next({ source: 'world2 uuid', message: Message.encode({
+            requestState: { uuids: new Set(['landmark']), invert: false },
+        }) });
+        world1.step();
+        world2.step();
+        expect(world2.entities.get('landmark')?.components.get(BarComponent)).toEqual({ y: 'planet' });
     });
 
     it('never filters an entity owned by the receiving peer', () => {
