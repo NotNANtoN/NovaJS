@@ -1,3 +1,5 @@
+import * as t from 'io-ts';
+import { replicationPolicies } from "nova_ecs/plugins/multiplayer_plugin";
 import { Entities, GetEntity, UUID } from "nova_ecs/arg_types";
 import { Component } from "nova_ecs/component";
 import { AddEvent, DeleteEvent } from "nova_ecs/events";
@@ -25,13 +27,18 @@ import { FireLogSpawnSystem } from '../nova_plugin/weapon_plugin';
 import { Space } from "./space_resource";
 
 export const AnimationGraphicComponent = new Component<AnimationGraphic>('AnimationGraphic');
-const AnimationGraphicLoadedComponent = new Component<AnimationGraphic>('AnimationGraphicLoaded');
+export const AnimationGraphicLoadedComponent = new Component<AnimationGraphic>('AnimationGraphicLoaded');
+replicationPolicies.register(AnimationGraphicComponent, { codec: t.any, authority: 'local-only' });
+replicationPolicies.register(AnimationGraphicLoadedComponent, { codec: t.any, authority: 'local-only' });
 const AnimationGraphicLoader = ProvideAsync({
     name: "AnimationGraphicLoader",
     provided: AnimationGraphicLoadedComponent,
-    args: [AnimationComponent, GameDataResource, GetEntity] as const,
+    args: [AnimationComponent, GameDataResource, GetEntity, Optional(AnimationGraphicComponent)] as const,
     dispose: graphic => graphic.dispose(),
-    async factory(animation, gameData, entity) {
+    async factory(animation, gameData, entity, existingGraphic) {
+        if (existingGraphic && !existingGraphic.managed.disposed) {
+            return existingGraphic;
+        }
         const graphic = new AnimationGraphic({
             gameData: currentIfDraft(gameData)!,
             animation: currentIfDraft(animation)!,
@@ -60,8 +67,15 @@ const AnimationGraphicLoader = ProvideAsync({
 export const AnimationGraphicProvider = Provide({
     name: "AnimationGraphicProvider",
     provided: AnimationGraphicComponent,
-    args: [AnimationGraphicLoadedComponent, Space, Entities, UUID, Optional(ReturnToQueueComponent)] as const,
-    factory(graphic, space, entities, uuid, recyclable) {
+    args: [AnimationGraphicLoadedComponent, Space, Entities, UUID, Optional(ReturnToQueueComponent), Optional(AnimationGraphicComponent)] as const,
+    factory(graphic, space, entities, uuid, recyclable, existingGraphic) {
+        if (existingGraphic && existingGraphic !== graphic) {
+            if (recyclable) {
+                existingGraphic.detach();
+            } else {
+                existingGraphic.dispose();
+            }
+        }
         // Only add the graphic to the container if the entity still exists
         if (entities.has(uuid)) {
             graphic.attachTo(space);
@@ -142,14 +156,16 @@ const AnimationGraphicCleanup = new System({
 const SyncAnimationGraphicInsert = new System({
     name: 'SyncAnimationGraphicInsert',
     events: [AddEvent],
-    args: [AnimationComponent, GameDataResource, Space, MovementStateComponent, GetEntity, Optional(AnimationGraphicComponent)] as const,
+    args: [AnimationComponent, GameDataResource, Space, Optional(MovementStateComponent), GetEntity, Optional(AnimationGraphicComponent)] as const,
     step(animation, gameData, space, movementState, entity, existingGraphic) {
         if (existingGraphic) {
             if (!existingGraphic.managed.disposed) {
                 existingGraphic.attachTo(space);
-                existingGraphic.container.position.x = movementState.position.x;
-                existingGraphic.container.position.y = movementState.position.y;
-                existingGraphic.rotation = movementState.rotation.angle;
+                if (movementState) {
+                    existingGraphic.container.position.x = movementState.position.x;
+                    existingGraphic.container.position.y = movementState.position.y;
+                    existingGraphic.rotation = movementState.rotation.angle;
+                }
             }
             return;
         }
@@ -171,19 +187,17 @@ const SyncAnimationGraphicInsert = new System({
         }
 
         graphic.attachTo(space);
-        graphic.container.position.x = movementState.position.x;
-        graphic.container.position.y = movementState.position.y;
-        graphic.rotation = movementState.rotation.angle;
+        if (movementState) {
+            graphic.container.position.x = movementState.position.x;
+            graphic.container.position.y = movementState.position.y;
+            graphic.rotation = movementState.rotation.angle;
+        }
         entity.components.set(AnimationGraphicComponent, graphic);
         entity.components.set(AnimationGraphicLoadedComponent, graphic);
         void graphic.buildPromise.catch(error => {
             console.warn('Failed to build flight graphic', error);
             graphic.dispose();
         });
-
-        if ((globalThis as any).debugCombat || (globalThis as any).novaDebug?.debugCombat) {
-            console.log(`[Combat Visual] Attached sprite for entity ${entity.name ?? 'projectile'} at (${Math.round(movementState.position.x)}, ${Math.round(movementState.position.y)}) rot=${movementState.rotation.angle.toFixed(2)}`);
-        }
     }
 });
 

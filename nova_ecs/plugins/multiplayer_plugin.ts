@@ -834,6 +834,7 @@ function mergeInboundState(
     peerIsAdmin: boolean,
     localUuid: string,
     localIsAdmin: boolean,
+    serializer?: Serializer,
 ): Entity {
     const owner = localEntity.components.get(MultiplayerData)?.owner
         ?? remoteEntity.components.get(MultiplayerData)?.owner
@@ -853,6 +854,7 @@ function mergeInboundState(
     }
     for (const component of [...localEntity.components.keys()]) {
         if (!remoteEntity.components.has(component)
+            && (!serializer || serializer.componentTypes.has(component))
             && canApplyComponentRemoval(component.name, context)) {
             localEntity.components.delete(component);
         }
@@ -1489,6 +1491,7 @@ export function multiplayer(communicator: Communicator,
                                 peerIsAdmin,
                                 comms.uuid!,
                                 isAdmin,
+                                serializer,
                             );
                         });
                         // The merge policy handles full states. Reapply the

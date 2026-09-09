@@ -12,20 +12,22 @@ import {
  * needed to draw a single animation, be it a ship, explosion, asteroid,
  * or planet.
  */
+let graphicId = 1;
 export class AnimationGraphic {
     // AnimationGraphic is not a Drawable since it doesn't draw a state.
     readonly container = new PIXI.Container();
+    readonly id = graphicId++;
     readonly managed: ManagedGraphic = createGraphicHandle(this.container);
     protected readonly gameData: GameDataInterface;
     readonly sprites = new Map<string, SpriteSheetSprite>();
     private wrappedProgress = 0;
     private wrappedRotation = 0;
-
     readonly buildPromise: Promise<AnimationGraphic>;
     built = false;
     size = { x: 0, y: 0 }
 
     constructor({ gameData, animation }: { gameData: GameDataInterface, animation: Animation | Promise<Animation> }) {
+        (this.container as any).graphicId = this.id;
         this.gameData = gameData;
         this.rotation = 0;
         this.buildPromise = animation instanceof Promise

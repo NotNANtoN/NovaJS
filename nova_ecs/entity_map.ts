@@ -34,6 +34,7 @@ export class EntityMapWithEvents extends EventMap<string, Entity> implements Ent
         const current = this.get(uuid);
         if (current && current !== entity) {
             this.entityChangeUnsubscribe.get(uuid)?.unsubscribe();
+            this.events.delete.next(new Set([[uuid, current]]));
         }
 
         const componentEvents = entity.components.events;
