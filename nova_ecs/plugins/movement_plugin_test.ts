@@ -8,6 +8,7 @@ import { System } from '../system';
 import { World } from '../world';
 import {
     applyMovementStateDelta,
+    GuidanceTargetTrackComponent,
     advanceMovementState,
     approachVec,
     MOVEMENT_ANGLE_QUANTUM,
@@ -217,6 +218,19 @@ describe('Movement Plugin', () => {
         world.step();
 
         expect(positions).toEqual([0]);
+    });
+
+    it('retains older guidance history after the visual cursor advances', () => {
+        const state = (x: number) => ({
+            position: new Position(x, 0), velocity: new Vector(0, 0),
+            rotation: new Angle(0), accelerating: 0, turning: 0, turnBack: false,
+        });
+        const target = new Entity().addComponent(MovementStateComponent, state(900))
+            .addComponent(RemoteMovementPresentationComponent, { snapshots: [{ serverTime: 200, state: state(900) }] })
+            .addComponent(GuidanceTargetTrackComponent, { snapshots: [
+                { serverTime: 0, state: state(0) }, { serverTime: 100, state: state(100) },
+            ] });
+        expect(sampleGuidanceTarget(target, 50, world.entities)!.position.x).toBe(50);
     });
 
     it('samples guidance from remote snapshots instead of live movement', () => {

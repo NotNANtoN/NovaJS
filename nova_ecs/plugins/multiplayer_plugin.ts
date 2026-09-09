@@ -36,6 +36,7 @@ import {
     RemoteMovementPresentationComponent,
 } from './movement_plugin';
 import { TimeResource, wallClockNow } from './time_plugin';
+import { NetworkReceivePhase, NetworkTiming, NetworkTimingResource, MOVEMENT_SNAPSHOT_INTERVAL_MS } from './network_timing';
 
 export class Peers {
     readonly current: BehaviorSubject<Set<string>>;
@@ -116,6 +117,8 @@ export const Message = t.partial({
     delta: map(t.string /* Entity UUID */, EntityDelta),
     state: map(t.string /* Entity UUID */, EncodedEntity),
     sentAt: t.number,
+    clockProbe: t.type({ id: t.number }),
+    clockReply: t.type({ id: t.number, receivedAt: t.number, sentAt: t.number }),
     movementTimestamps: map(t.string /* Entity UUID */, t.number),
     movementSequences: map(t.string /* Entity UUID */, t.number),
     requestState: t.type({
@@ -197,9 +200,7 @@ export const CommunicatorResource = new Resource<Communicator>('CommunicatorReso
 export const ServerClockOffsetResource =
     new Resource<{ offset: number }>('ServerClockOffsetResource');
 
-export const InboundMultiplayerPhase = new Phase({
-    name: 'InboundMultiplayerPhase',
-});
+export const InboundMultiplayerPhase = NetworkReceivePhase;
 
 export const MultiplayerPhase = new Phase({
     name: 'MultiplayerPhase',
@@ -871,15 +872,16 @@ export function multiplayer(communicator: Communicator,
         sequence?: number;
         sourceTime?: number;
     }>();
-    const sourceClockOffsets = new Map<string, {
-        offset: number;
-        lastMappedTime?: number;
-    }>();
+    const networkTiming = new NetworkTiming();
+
+    const lastOwnerMovementTime = new Map<string, { source: string; at: number }>();
+    const lastClockReplyAt = new Map<string, number>();
     const interestedEntitiesByPeer = new Map<string, Set<string>>();
     const deferredOwnerWeaponIntent = new Map<string, Map<string, boolean>>();
-    const movementSnapshotIntervalMs = 100;
+    const movementSnapshotIntervalMs = MOVEMENT_SNAPSHOT_INTERVAL_MS;
     let messageSubscription: { unsubscribe(): void } | undefined;
     let peerLeaveSubscription: { unsubscribe(): void } | undefined;
+    let connectionSubscription: { unsubscribe(): void } | undefined;
 
     function nextMovementSequence(uuid: string): number {
         const sequence = (nextMovementSequenceByEntity.get(uuid) ?? 0) + 1;
@@ -892,6 +894,12 @@ export function multiplayer(communicator: Communicator,
         lastMovementWireState.delete(uuid);
         nextMovementSequenceByEntity.delete(uuid);
         latestInboundMovement.delete(uuid);
+        lastOwnerMovementTime.delete(uuid);
+    }
+
+    function movementTimestamp(uuid: string, now: number): number {
+        const ownerTime = lastOwnerMovementTime.get(uuid);
+        return ownerTime ? Math.min(now, ownerTime.at + networkTiming.clock(ownerTime.source).offset) : now;
     }
 
     function markMovement(uuid: string, atTime: number) {
@@ -954,22 +962,9 @@ export function multiplayer(communicator: Communicator,
             }
 
             function observeSourceClock(source: string, sourceTime: number) {
-                const sampleOffset = localTime - sourceTime;
-                const clock = sourceClockOffsets.get(source);
-                if (!clock) {
-                    sourceClockOffsets.set(source, { offset: sampleOffset });
-                    if (serverClockOffset && (source === 'server' || comms.admins.has(source))) {
-                        serverClockOffset.offset = sampleOffset;
-                    }
-                    return;
-                }
-
-                // Message latency is part of the presentation offset. Smooth
-                // its jitter instead of allowing one packet to move the
-                // interpolation cursor backwards.
-                const correction = (sampleOffset - clock.offset) * 0.1;
-                clock.offset += Math.max(-25, Math.min(25, correction));
-                if (serverClockOffset && (source === 'server' || comms.admins.has(source))) {
+                const clock = networkTiming.clock(source);
+                clock.observeArrival(sourceTime, localTime);
+                if (serverClockOffset && comms.admins.has(source)) {
                     serverClockOffset.offset = clock.offset;
                 }
             }
@@ -982,20 +977,23 @@ export function multiplayer(communicator: Communicator,
                     return localTime;
                 }
 
-                let clock = sourceClockOffsets.get(source);
-                if (!clock) {
-                    // Older peers may have per-movement timestamps but no
-                    // message send time. Establish a source-specific basis
-                    // from the first timestamp and keep using local time
-                    // until another sample is available.
-                    clock = { offset: localTime - sourceTime };
-                    sourceClockOffsets.set(source, clock);
+                const clock = networkTiming.clock(source);
+                if (!clock.initialized) clock.observeArrival(sourceTime, localTime);
+                // Ordering is per entity/sequence, not a shared cursor that
+                // accidentally restamps older snapshots of unrelated ships.
+                return sourceTime + clock.offset;
+            }
+
+            function recordRemoteGuidance(entity: Entity, state: MovementState,
+                source: string, sourceTime: number | undefined, sequence?: number): void {
+                let track = entity.components.get(GuidanceTargetTrackComponent);
+                if (!track) {
+                    track = { snapshots: [] };
+                    entity.components.set(GuidanceTargetTrackComponent, track);
                 }
-                const mapped = sourceTime + clock.offset;
-                clock.lastMappedTime = clock.lastMappedTime === undefined
-                    ? mapped
-                    : Math.max(clock.lastMappedTime, mapped);
-                return clock.lastMappedTime;
+                track.clock = networkTiming.clock(source);
+                queueGuidanceTargetSnapshot(track, state,
+                    sourceTime ?? localTime - track.clock.offset, sequence);
             }
 
             function movementMetadata(
@@ -1087,8 +1085,12 @@ export function multiplayer(communicator: Communicator,
                 movementState: MovementState,
                 source: string,
                 owner: string,
+                sourceTime: number | undefined,
             ): void {
                 if (isAdmin && source === owner) {
+                    const clock = networkTiming.clock(source);
+                    const at = sourceTime ?? localTime - clock.offset;
+                    lastOwnerMovementTime.set(uuid, { source, at });
                     const quantized = quantizeMovementState(movementState);
                     lastMovementWireState.set(uuid, quantized);
                     const entity = entities.get(uuid);
@@ -1102,7 +1104,8 @@ export function multiplayer(communicator: Communicator,
                         entity.components.set(
                             GuidanceTargetTrackComponent, track);
                     }
-                    queueGuidanceTargetSnapshot(track, quantized, localTime);
+                    track.clock = clock;
+                    queueGuidanceTargetSnapshot(track, quantized, at);
                 }
             }
 
@@ -1238,9 +1241,29 @@ export function multiplayer(communicator: Communicator,
                 if (peerIsAdmin && message.state !== undefined) {
                     comms.initialStateReceived = true;
                 }
+                if (message.clockReply) {
+                    const clock = networkTiming.clock(source);
+                    const previousOffset = clock.offset;
+                    const previousRate = clock.rate;
+                    const accepted = clock.acceptReply(message.clockReply, localTime);
+                    if (accepted && peerIsAdmin && serverClockOffset) {
+                        serverClockOffset.offset = clock.offset;
+                        networkTiming.clockAdjusted(source, previousOffset, previousRate);
+                    }
+                }
                 if (message.sentAt !== undefined
                     && Number.isFinite(message.sentAt)) {
                     observeSourceClock(source, message.sentAt);
+                    if (peerIsAdmin) networkTiming.observeServerPacket(source, message.sentAt, localTime);
+                }
+                if (message.clockProbe && Number.isSafeInteger(message.clockProbe.id)
+                    && message.clockProbe.id > 0
+                    && (peerIsAdmin || (isAdmin && communicator.peers.current.value.has(source)))
+                    && localTime - (lastClockReplyAt.get(source) ?? -Infinity) >= 100) {
+                    lastClockReplyAt.set(source, localTime);
+                    sendMessage({ clockReply: {
+                        id: message.clockProbe.id, receivedAt: localTime, sentAt: localTime,
+                    } }, source);
                 }
 
                 // Set admins
@@ -1289,7 +1312,7 @@ export function multiplayer(communicator: Communicator,
                         const owner = entity.components
                             .get(MultiplayerData)?.owner ?? '';
                         if (entity.components.has(MovementStateComponent)) {
-                            stateMovementTimestamps.set(entityUuid, localTime);
+                            stateMovementTimestamps.set(entityUuid, movementTimestamp(entityUuid, localTime));
                             stateMovementSequences.set(
                                 entityUuid, nextMovementSequence(entityUuid));
                         }
@@ -1486,16 +1509,18 @@ export function multiplayer(communicator: Communicator,
                                 presentation,
                             );
                         }
+                        recordRemoteGuidance(entity, decodedMovement, source, movement.sourceTime, movement.sequence);
+                        presentation.clock = networkTiming.clock(source);
                         queueRemoteMovementSnapshot(
                             presentation,
                             decodedMovement,
-                            movement.presentationTime,
+                            movement.sourceTime ?? localTime - networkTiming.clock(source).offset,
                             movement.sequence,
                         );
                     }
                     if (decodedMovement && movementAccepted) {
                         rememberOwnerMovement(
-                            uuid, decodedMovement, source, decodedOwner);
+                            uuid, decodedMovement, source, decodedOwner, movement?.sourceTime);
                     }
 
                     const multiplayerData = entity.components.get(MultiplayerData);
@@ -1525,7 +1550,7 @@ export function multiplayer(communicator: Communicator,
                         relayedStates.set(uuid, encodeReplicatedEntity(
                             entity, uuid, multiplayerData.owner));
                         if (entity.components.has(MovementStateComponent)) {
-                            markMovement(uuid, localTime);
+                            markMovement(uuid, movementTimestamp(uuid, localTime));
                         }
                     }
 
@@ -1607,16 +1632,18 @@ export function multiplayer(communicator: Communicator,
                                         presentation,
                                     );
                                 }
+                                recordRemoteGuidance(entity, separated.movement, source, movement.sourceTime, movement.sequence);
+                                presentation.clock = networkTiming.clock(source);
                                 queueRemoteMovementSnapshot(
                                     presentation,
                                     separated.movement,
-                                    movement.presentationTime,
+                                    movement.sourceTime ?? localTime - networkTiming.clock(source).offset,
                                     movement.sequence,
                                 );
                             }
                             if (separated.movement && movementAccepted) {
                                 rememberOwnerMovement(
-                                    uuid, separated.movement, source, owner);
+                                    uuid, separated.movement, source, owner, movement?.sourceTime);
                             }
                         }
                         if (delta) {
@@ -1665,10 +1692,9 @@ export function multiplayer(communicator: Communicator,
                                             : relay,
                                     );
                                     if (containsMovementState(relay)) {
-                                        // This is a new server-authored
-                                        // transport sample. Never expose the
-                                        // owner's clock to observers.
-                                        markMovement(uuid, localTime);
+                                        // Preserve capture age across the relay, expressed
+                                        // in server time, rather than making an old pose new.
+                                        markMovement(uuid, movementTimestamp(uuid, localTime));
                                     }
                                 }
                             }
@@ -1681,6 +1707,12 @@ export function multiplayer(communicator: Communicator,
             }
             // Reset messages since they've been processed.
             comms.messages = [];
+            networkTiming.advance(localTime);
+            for (const peer of communicator.peers.current.value) {
+                if (peer === comms.uuid || (!isAdmin && !comms.admins.has(peer))) continue;
+                const probe = networkTiming.clock(peer).probe(localTime);
+                if (probe) sendMessage({ clockProbe: probe }, peer);
+            }
 
             if (fullStateRequests.size > 0) {
                 // Request state from a (maybe) trusted source
@@ -1843,13 +1875,12 @@ export function multiplayer(communicator: Communicator,
                 state.set(uuid, encodeReplicatedEntity(
                     entity, uuid, val.data.owner));
                 if (entity.components.has(MovementStateComponent)) {
-                    markMovement(uuid, localTime);
+                    markMovement(uuid, movementTimestamp(uuid, localTime));
                     lastMovementSnapshotAt.set(uuid, localTime);
-                    lastMovementWireState.set(
-                        uuid,
-                        quantizeMovementState(
-                            entity.components.get(MovementStateComponent)!),
-                    );
+                    if (!isAdmin || val.data.owner === comms.uuid) {
+                        lastMovementWireState.set(uuid, quantizeMovementState(
+                            entity.components.get(MovementStateComponent)!));
+                    }
                 }
             }
 
@@ -1925,13 +1956,10 @@ export function multiplayer(communicator: Communicator,
                     }
                 }
 
-                const movementIsActive = movement
-                    && (movement.velocity.lengthSquared > 1e-9
-                        || movement.accelerating !== 0
-                        || movement.turning !== 0
-                        || Boolean(movement.turnTo));
                 const lastSnapshot = lastMovementSnapshotAt.get(uuid);
-                const periodicSnapshotDue = movementIsActive
+                // A final stop/teleport also needs a snapshot. Testing only the
+                // new velocity would leave observers extrapolating the old one.
+                const periodicSnapshotDue = movement !== undefined
                     && canSendOutbound(
                         MovementStateComponent.name,
                         comms.uuid,
@@ -1939,7 +1967,7 @@ export function multiplayer(communicator: Communicator,
                         owner,
                     )
                     && (lastSnapshot === undefined
-                        || localTime - lastSnapshot >= movementSnapshotIntervalMs);
+                        || localTime - lastSnapshot >= movementSnapshotIntervalMs - 0.001);
                 if (periodicSnapshotDue && movement) {
                     const snapshot = quantizeMovementState(movement);
                     const previous = lastMovementWireState.get(uuid);
@@ -2112,6 +2140,7 @@ export function multiplayer(communicator: Communicator,
         world.addPhase(InboundMultiplayerPhase);
         world.addPhase(MultiplayerPhase);
         world.resources.set(CommunicatorResource, communicator);
+        world.resources.set(NetworkTimingResource, networkTiming);
         if (!world.resources.has(ServerClockOffsetResource)) {
             world.resources.set(ServerClockOffsetResource, { offset: 0 });
         }
@@ -2149,11 +2178,25 @@ export function multiplayer(communicator: Communicator,
             outboundChat: [],
         });
 
+        connectionSubscription = communicator.connected.subscribe(connected => {
+            if (connected) return;
+            for (const peer of [...networkTiming.clocks.keys()]) networkTiming.resetPeer(peer);
+            lastClockReplyAt.clear();
+            const comms = world.singletonEntity.components.get(Comms);
+            if (comms) {
+                comms.initialStateRequested = false;
+                comms.initialStateReceived = false;
+                comms.messages = [];
+            }
+            const clock = world.resources.get(ServerClockOffsetResource);
+            if (clock) clock.offset = 0;
+        });
         messageSubscription = communicator.messages.subscribe(message => {
             world.emit(MultiplayerMessageEvent, message);
         });
         peerLeaveSubscription = communicator.peers.leave.subscribe(peer => {
-            sourceClockOffsets.delete(peer);
+            networkTiming.resetPeer(peer);
+            lastClockReplyAt.delete(peer);
             if (peer === 'server') {
                 const serverClock = world.resources.get(ServerClockOffsetResource);
                 if (serverClock) {
@@ -2183,6 +2226,8 @@ export function multiplayer(communicator: Communicator,
             messageSubscription = undefined;
             peerLeaveSubscription?.unsubscribe();
             peerLeaveSubscription = undefined;
+            connectionSubscription?.unsubscribe();
+            connectionSubscription = undefined;
             world.removeSystem(inboundMultiplayerSystem);
             world.removeSystem(outboundMultiplayerSystem);
             world.removeSystem(MessageSystem);

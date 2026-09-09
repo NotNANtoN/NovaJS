@@ -7,8 +7,9 @@ import { Vector } from 'nova_ecs/datatypes/vector';
 import { Entity } from 'nova_ecs/entity';
 import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
-import { MovementState, MovementStateComponent, MovementSystem } from 'nova_ecs/plugins/movement_plugin';
+import { MovementState, MovementStateComponent, MovementSystem, RemoteMovementPresentationSystem } from 'nova_ecs/plugins/movement_plugin';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
+import { MovementPlaybackComponent } from 'nova_ecs/plugins/network_timing';
 import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
 import * as SAT from "sat";
@@ -31,11 +32,11 @@ import { CreateTime, CreateTimeArgProvider } from './create_time';
 import { DamagedEvent } from './death_plugin';
 import { reserveEntity } from './entity_budget';
 import { applyExitPoint, ExitPointData } from './exit_point';
-import { FireSubs, OwnerComponent, ShotCreation, ShotSeedComponent, SourceComponent, WeaponConstructors, WeaponEntry, setAttackIntent } from './fire_weapon_plugin';
+import { FireSubs, OwnerComponent, ShotCreation, ShotSeedComponent, ShotPresentationDelayComponent, SourceComponent, WeaponConstructors, WeaponEntry, setAttackIntent } from './fire_weapon_plugin';
 import { zeroOrderGuidance } from './guidance';
 import { SoundEvent } from './sound_event';
 import { TargetComponent } from './target_component';
-import { WeaponsSystem } from './weapon_plugin';
+import { WeaponsSystem, FireLogSpawnSystem } from './weapon_plugin';
 
 
 export interface BeamState {
@@ -224,7 +225,10 @@ class BeamWeaponEntry extends WeaponEntry {
         if (shot.entityId && this.entities.has(shot.entityId)) {
             const existing = this.entities.get(shot.entityId)!;
             if (shot.reconcile) {
+                if (shot.playback) existing.components.set(MovementPlaybackComponent, shot.playback);
+                else existing.components.delete(MovementPlaybackComponent);
                 existing.components.set(CreateTime, shot.createdAt);
+                existing.components.set(ShotPresentationDelayComponent, shot.presentationDelayMs ?? 0);
                 existing.components.set(ShotSeedComponent, { seed: shot.seed });
                 const state = existing.components.get(BeamStateComponent)!;
                 state.inaccuracy = shot.inaccuracy;
@@ -265,9 +269,11 @@ class BeamWeaponEntry extends WeaponEntry {
                 length: this.data.beamAnimation.length,
                 inaccuracy: shot.inaccuracy,
             }).addComponent(BeamDataComponent, this.data)
+            .addComponent(ShotPresentationDelayComponent, shot.presentationDelayMs ?? 0)
             .addComponent(ShotSeedComponent, { seed: shot.seed })
             .addComponent(CreateTime, shot.createdAt);
 
+        if (shot.playback) beam.addComponent(MovementPlaybackComponent, shot.playback);
         if (target) {
             beam.addComponent(TargetComponent, { target });
         }
@@ -305,16 +311,16 @@ class BeamWeaponEntry extends WeaponEntry {
 export const BeamSystem = new System({
     name: 'BeamSystem',
     before: [UpdateHitboxHullSystem],
-    after: [MovementSystem, WeaponsSystem],
+    after: [MovementSystem, RemoteMovementPresentationSystem, WeaponsSystem, FireLogSpawnSystem],
     args: [BeamDataComponent, BeamStateComponent, MovementStateComponent, FireSubs,
         CreateTimeArgProvider, TimeResource, UUID, Entities, Optional(SourceComponent),
-        Optional(TargetComponent)] as const,
+        Optional(TargetComponent), Optional(MovementPlaybackComponent)] as const,
     step(beamData, beamState, movement, fireSubs, fireTime, { time }, uuid,
-        entities, source, target) {
+        entities, source, target, playback) {
         // Recompute clipping every frame so a target that moves out of the
         // beam no longer leaves it permanently shortened.
         beamState.length = beamData.beamAnimation.length;
-        const timeSinceFire = time - fireTime;
+        const timeSinceFire = playback ? playback.cursor - playback.createdAt : time - fireTime;
         if (timeSinceFire > beamData.shotDuration) {
             fireSubs(beamData.id, uuid, true);
             entities.delete(uuid);

@@ -1,4 +1,6 @@
 import * as t from 'io-ts';
+import { isDraft, original } from 'immer';
+import { wallClockNow } from 'nova_ecs/plugins/time_plugin';
 import { Entities, GetEntity, GetWorld, UUID } from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
 import { CombatAuthority, CombatAuthorityComponent, bindCombatOwner, combatLedger,
@@ -74,7 +76,11 @@ interface PlayerStatePersistenceRecord {
     queued?: PersistentPlayerState;
     conflicted?: boolean;
     onRevision?: (revision: number) => void;
+    nextSnapshotAt?: number;
+    observedState?: object;
 }
+
+export const PLAYER_SNAPSHOT_INTERVAL_MS = 250;
 
 const flightPersistence = new WeakMap<object, PlayerStatePersistenceRecord>();
 function flightRecordFor(token: string, authority: { storeRevision?: number } | undefined,
@@ -211,7 +217,7 @@ export const InitializeCombatResourcesSystem = new System({
     step: (_state, multiplayerData, entity, uuid, world, store, gameData) => {
         if (multiplayerData.owner === 'server') return;
         const authority = entity.components.get(CombatAuthorityComponent);
-        if (authority) { authority.capture(entity); return; }
+        if (authority) { authority.capture(entity, false); return; }
         const token = store.getTokenForPeer(multiplayerData.owner);
         if (!token || entity.components.has(CombatInitializing)) return;
         entity.components.set(CombatInitializing, true);
@@ -294,8 +300,30 @@ export const PersistPlayerStateSystem = new System({
 
             const authority = entity.components.get(CombatAuthorityComponent);
             if (authority?.retired) continue;
-            authority?.capture(entity);
+            authority?.capture(entity, false);
             const previous = snapshots.get(uuid);
+            if (playerStore.saveFlightState) {
+                const record = flightRecordFor(token, authority, previous);
+                snapshots.set(uuid, record);
+                // This record survives room transfers; room simulation clocks
+                // can differ, so throttle persistence against monotonic wall time.
+                const now = wallClockNow();
+                if (record.nextSnapshotAt !== undefined && now < record.nextSnapshotAt) continue;
+                record.nextSnapshotAt = now + PLAYER_SNAPSHOT_INTERVAL_MS;
+                // Replication can consume dirty patches between saves. Retain
+                // only the immutable base identity, never the revocable draft,
+                // so an already-replicated mutation still reaches persistence.
+                const base = isDraft(state) ? original(state)! : state;
+                if (record.observedState === base
+                    && !deltaMaker.isComponentDirty(entity, PlayerStateComponent as any)) continue;
+                record.observedState = base;
+                const persistedState = toPersistentPlayerState(state);
+                void queueFlightSave(playerStore, record, persistedState).catch(error => {
+                    record.observedState = undefined;
+                    console.error('Failed to save player state', error);
+                });
+                continue;
+            }
             if (previous?.token === token
                 && !deltaMaker.isComponentDirty(
                     entity, PlayerStateComponent as any)) {
@@ -307,13 +335,6 @@ export const PersistPlayerStateSystem = new System({
             const persistedState = toPersistentPlayerState(state);
             const expected = previous?.token === token
                 ? previous.revision : authority?.storeRevision;
-            if (playerStore.saveFlightState) {
-                const record = flightRecordFor(token, authority, previous);
-                snapshots.set(uuid, record);
-                void queueFlightSave(playerStore, record, persistedState).catch(error =>
-                    console.error('Failed to save player state', error));
-                continue;
-            }
             snapshots.set(uuid, { token, revision: previous?.revision });
             void saveConditionally(
                 playerStore, token, persistedState, expected)

@@ -21,6 +21,7 @@ import { ReturnToQueueComponent } from "../nova_plugin/return_to_queue_plugin";
 import { ShipComponent } from "../nova_plugin/ship_plugin";
 import { CloakStateComponent, CLOAKED_ALPHA } from "../nova_plugin/cloaking_plugin";
 import { AnimationGraphic } from "./animation_graphic";
+import { FireLogSpawnSystem } from '../nova_plugin/weapon_plugin';
 import { Space } from "./space_resource";
 
 export const AnimationGraphicComponent = new Component<AnimationGraphic>('AnimationGraphic');
@@ -117,7 +118,7 @@ export const ObjectDrawSystem = new System({
         graphic.container.position.y = movementState.position.y;
         graphic.rotation = movementState.rotation.angle;
     },
-    after: [MovementSystem, RemoteMovementPresentationSystem],
+    after: [MovementSystem, RemoteMovementPresentationSystem, FireLogSpawnSystem],
 });
 
 const AnimationGraphicCleanup = new System({

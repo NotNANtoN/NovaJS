@@ -144,7 +144,7 @@ export class CombatAuthority {
     }
     /** Observe only already-filtered gameplay state; also captures server
      * assistance/transfer/respawn mutations without retaining an ECS draft. */
-    capture(entity: Entity): void {
+    capture(entity: Entity, snapshotPlayer = true): void {
         if (this.retired) return;
         const state = entity.components.get(PlayerStateComponent);
         if (!state) return;
@@ -172,7 +172,16 @@ export class CombatAuthority {
                 changed = true;
             }
         }
-        this.state = toPersistentPlayerState(state) as PlayerState;
+        if (snapshotPlayer) {
+            this.state = toPersistentPlayerState(state) as PlayerState;
+        } else {
+            // Hot combat checks only need scalar balances/context. Revalidating
+            // and JSON-cloning every mission bit on every shot can stall ticks.
+            this.state.credits = state.credits;
+            this.state.fuel = state.fuel;
+            this.state.shipId = state.shipId;
+            this.state.currentSystem = state.currentSystem;
+        }
         const movement = entity.components.get(MovementStateComponent);
         if (movement) this.position = [movement.position.x, movement.position.y];
         const shield = entity.components.get(ShieldComponent);
@@ -206,7 +215,7 @@ replicationPolicies.registerName('Ship', {
 export function canPay(entity: Entity, ammoType: AmmoType): boolean {
     const authority = entity.components.get(CombatAuthorityComponent);
     if (!authority || authority.retired || authority.landed) return false;
-    authority.capture(entity);
+    authority.capture(entity, false);
     if (ammoType === 'unlimited') return true;
     if (ammoType[0] === 'energy') return Nonnegative.is(ammoType[1])
         && authority.balance.fuel >= ammoType[1];

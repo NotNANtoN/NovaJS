@@ -6,8 +6,9 @@ import { Angle } from 'nova_ecs/datatypes/angle';
 import { Position } from 'nova_ecs/datatypes/position';
 import { Vector } from 'nova_ecs/datatypes/vector';
 import { DeltaPlugin } from 'nova_ecs/plugins/delta_plugin';
-import { MovementStateComponent, MovementSystem, MovementPhysicsComponent, MovementType } from 'nova_ecs/plugins/movement_plugin';
+import { RemoteMovementPresentationComponent, RemoteMovementPresentationSystem, queueRemoteMovementSnapshot, MovementStateComponent, MovementSystem, MovementPhysicsComponent, MovementType } from 'nova_ecs/plugins/movement_plugin';
 import { ServerClockOffsetResource } from 'nova_ecs/plugins/multiplayer_plugin';
+import { NetworkTiming, NetworkTimingResource } from 'nova_ecs/plugins/network_timing';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { Gettable } from 'novadatainterface/Gettable';
 import { GameDataInterface } from 'novadatainterface/GameDataInterface';
@@ -110,6 +111,71 @@ describe('real remote combat replay and reconciliation', () => {
         }
         expect(shooter.world.entities.get(id)).toBe(predicted);
         expect(sounds.length).toBe(soundCount);
+    });
+
+    it('presents ships and accepted shots at the same clock-corrected time', async () => {
+        const client = await combatWorld('observer', 2000);
+        const network = new NetworkTiming();
+        const clock = network.clock('server');
+        clock.offset = 2000;
+        client.world.resources.set(NetworkTimingResource, network);
+        const state = client.ship.components.get(MovementStateComponent)!;
+        state.position = new Position(0, 0);
+        state.velocity = new Vector(600, 0);
+        const presentation = { snapshots: [], clock };
+        queueRemoteMovementSnapshot(presentation, state, 1000);
+        queueRemoteMovementSnapshot(presentation, { ...state, position: new Position(60, 0) }, 1100);
+        client.ship.components.set(RemoteMovementPresentationComponent, presentation);
+        client.ship.components.set(MovementPhysicsComponent, {
+            maxVelocity: 600, acceleration: 0, turnRate: 0, movementType: MovementType.INERTIAL,
+        });
+        client.world.addSystem(RemoteMovementPresentationSystem);
+        client.ship.components.set(FireLogComponent, { shots: [makeFireLogShot({
+            seq: 1, seed: 1, weaponId: client.data.id, exitIndex: 0,
+        }, 1000, new Position(0, 0), new Angle(Math.PI / 2), { sourceVelocity: new Vector(0, 0) })] });
+        network.advance(3000);
+        client.world.step();
+        const id = loggedShotEntityId('ship', 1);
+        expect(client.world.entities.has(id)).toBeFalse();
+        expect(getFireSyncLocalState(client.ship).highestLogSeq).toBe(0);
+        client.time.time = 3060;
+        client.time.delta_ms = 16;
+        client.time.delta_s = 0.016;
+        network.advance(3060);
+        client.world.step();
+        const projectile = client.world.entities.get(id)!;
+        expect(projectile.components.get(MovementStateComponent)!.position.x).toBeCloseTo(6, 6);
+        expect(client.ship.components.get(MovementStateComponent)!.position.x).toBeCloseTo(6, 6);
+        expect(projectile.components.get(CreateTime)).toBe(3050);
+    });
+
+    it('flies and expires replayed shots on simulation time when the server slows', async () => {
+        const client = await combatWorld('observer');
+        client.data.shotDuration = 200;
+        const network = new NetworkTiming();
+        const clock = network.clock('server');
+        clock.rate = 0.6;
+        client.world.resources.set(NetworkTimingResource, network);
+        client.ship.components.set(FireLogComponent, { shots: [makeFireLogShot({
+            seq: 1, seed: 1, weaponId: client.data.id, exitIndex: 0,
+        }, 900, new Position(0, 0), new Angle(Math.PI / 2), { sourceVelocity: new Vector(0, 0) })] });
+        network.advance(1000);
+        client.world.step();
+        const id = loggedShotEntityId('ship', 1);
+        expect(client.world.entities.get(id)!.components.get(MovementStateComponent)!.position.x).toBeCloseTo(30, 6);
+        for (let now = 1050; now <= 1200; now += 50) {
+            client.time.time = now;
+            client.time.delta_ms = 50;
+            client.time.delta_s = 0.05;
+            network.advance(now);
+            client.world.step();
+            const age = 50 + (now - 1000) * 0.6;
+            expect(client.world.entities.get(id)!.components.get(MovementStateComponent)!.position.x).toBeCloseTo(age * 0.6, 6);
+        }
+        client.time.time = 1300;
+        network.advance(1300);
+        client.world.step();
+        expect(client.world.entities.has(id)).toBeFalse();
     });
 
     it('does not resurrect a prediction already removed before confirmation', async () => {

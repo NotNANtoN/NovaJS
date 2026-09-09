@@ -11,6 +11,7 @@ import { Plugin } from '../plugin';
 import { System } from '../system';
 import { DeltaPlugin, DeltaResource } from './delta_plugin';
 import { Time, TimeResource, TimeSystem } from './time_plugin';
+import { DEFAULT_PRESENTATION_DELAY_MS, MAX_MOVEMENT_EXTRAPOLATION_MS, NetworkReceivePhase, NetworkTimingResource, PeerClock, AdvanceNetworkPlaybackSystem, MovementPlaybackComponent } from './network_timing';
 
 
 export enum MovementType {
@@ -180,6 +181,16 @@ export interface MovementSnapshot {
 
 export interface RemoteMovementPresentation {
     snapshots: MovementSnapshot[];
+    clock?: PeerClock;
+    revision?: number;
+    presentedRevision?: number;
+    lastSample?: MovementState;
+    lastRenderTime?: number;
+    lastSourceRenderTime?: number;
+    lastClockOffset?: number;
+    generation?: number;
+    positionCorrection?: Vector;
+    rotationCorrection?: number;
 }
 
 /**
@@ -191,13 +202,15 @@ export const RemoteMovementPresentationComponent =
 
 export interface GuidanceTargetTrack {
     snapshots: MovementSnapshot[];
+    clock?: PeerClock;
 }
 
 export const GuidanceTargetTrackComponent =
     new Component<GuidanceTargetTrack>('GuidanceTargetTrack');
 
-export const REMOTE_INTERPOLATION_DELAY_MS = 200;
-export const REMOTE_MAX_EXTRAPOLATION_MS = 100;
+export const REMOTE_INTERPOLATION_DELAY_MS = DEFAULT_PRESENTATION_DELAY_MS;
+export const REMOTE_MAX_EXTRAPOLATION_MS = MAX_MOVEMENT_EXTRAPOLATION_MS;
+const MOVEMENT_CORRECTION_HALF_LIFE_MS = 30;
 
 export function copyMovementState(state: MovementState): MovementState {
     return {
@@ -220,6 +233,7 @@ export function queueRemoteMovementSnapshot(
     serverTime: number,
     sequence?: number,
 ): void {
+    presentation.revision = (presentation.revision ?? 0) + 1;
     const snapshot = {
         state: copyMovementState(state),
         serverTime,
@@ -368,6 +382,9 @@ export function sampleRemoteMovement(
     entities: EntityMap,
 ): MovementState | undefined {
     const snapshots = presentation.snapshots;
+    // Buffers retain capture timestamps, so clock refinement cannot leave half
+    // the history on an obsolete offset or collapse a relayed pose's age.
+    renderTime -= presentation.clock?.offset ?? 0;
     if (snapshots.length === 0) {
         return;
     }
@@ -407,14 +424,15 @@ export function sampleGuidanceTarget(
             turnRate: 0,
             movementType: MovementType.INERTIAL,
         };
+    // Guidance needs older history than the low-latency visual buffer retains.
+    const track = targetEntity.components.get(GuidanceTargetTrackComponent);
+    if (track?.snapshots.length) {
+        return sampleRemoteMovement(track, atTime, physics, entities);
+    }
     const presentation = targetEntity.components
         .get(RemoteMovementPresentationComponent);
     if (presentation?.snapshots.length) {
         return sampleRemoteMovement(presentation, atTime, physics, entities);
-    }
-    const track = targetEntity.components.get(GuidanceTargetTrackComponent);
-    if (track?.snapshots.length) {
-        return sampleRemoteMovement(track, atTime, physics, entities);
     }
     return movement ? copyMovementState(movement) : undefined;
 }
@@ -423,36 +441,85 @@ export const MovementSystem = new System({
     name: 'movement',
     args: [MovementStateComponent, MovementPhysicsComponent,
         Optional(RemoteMovementPresentationComponent),
-        TimeResource, Entities] as const,
-    step(state, physics, presentation, time, entities) {
+        TimeResource, Entities, Optional(MovementPlaybackComponent)] as const,
+    step(state, physics, presentation, time, entities, playback) {
         if (presentation) {
             // Remote movement is sampled by the presentation system below.
             // Do not integrate it once and then overwrite it again.
             return;
         }
-        if (physics.movementType === MovementType.INERTIAL) {
+        if (playback) {
+            Object.assign(state, advanceMovementState(state, physics, playback.deltaMs / 1000, entities));
+        } else if (physics.movementType === MovementType.INERTIAL) {
             inertialControls(state, physics, time, entities);
         } else if (physics.movementType === MovementType.INERTIALESS) {
             inertialessControls(state, physics, time, entities);
         }
     },
-    after: [TimeSystem],
+    after: [TimeSystem, NetworkReceivePhase, AdvanceNetworkPlaybackSystem],
 });
 
 export const RemoteMovementPresentationSystem = new System({
     name: 'RemoteMovementPresentationSystem',
     args: [MovementStateComponent, MovementPhysicsComponent,
-        RemoteMovementPresentationComponent, TimeResource, Entities] as const,
-    step(state, physics, presentation, time, entities) {
-        const renderTime = time.time - REMOTE_INTERPOLATION_DELAY_MS;
+        RemoteMovementPresentationComponent, TimeResource, Entities,
+        Optional(NetworkTimingResource)] as const,
+    step(state, physics, presentation, time, entities, network) {
+        if (network && presentation.generation !== network.generation) {
+            presentation.generation = network.generation;
+            presentation.lastSample = undefined;
+            presentation.lastRenderTime = presentation.lastSourceRenderTime = undefined;
+            presentation.positionCorrection = undefined;
+            presentation.rotationCorrection = 0;
+        }
+        const renderTime = network?.renderTime ?? time.time - REMOTE_INTERPOLATION_DELAY_MS;
+        const offset = presentation.clock?.offset ?? 0;
+        const localElapsed = Math.max(0, renderTime - (presentation.lastRenderTime ?? renderTime));
+        const previousSourceTime = presentation.lastSourceRenderTime;
+        const sourceRenderTime = previousSourceTime === undefined || localElapsed > 1000
+            ? renderTime - offset
+            : Math.max(previousSourceTime, Math.min(renderTime - offset,
+                previousSourceTime + localElapsed * (presentation.clock?.rate ?? 1) * 1.1));
         const sampled = sampleRemoteMovement(
-            presentation, renderTime, physics, entities);
+            presentation, sourceRenderTime + offset, physics, entities);
         if (!sampled) {
             return;
         }
-        state.position = sampled.position;
+        const elapsed = Math.max(0, sourceRenderTime - (presentation.lastSourceRenderTime ?? sourceRenderTime));
+        const decay = Math.pow(0.5, elapsed / MOVEMENT_CORRECTION_HALF_LIFE_MS);
+        let correction = presentation.positionCorrection?.scale(decay) ?? new Vector(0, 0);
+        let rotationCorrection = (presentation.rotationCorrection ?? 0) * decay;
+        if (presentation.lastSample && elapsed > 0 && elapsed < 250
+            && (presentation.presentedRevision !== presentation.revision
+                || presentation.lastClockOffset !== presentation.clock?.offset)) {
+            const expected = advanceMovementState(presentation.lastSample, physics, elapsed / 1000, entities);
+            const error = expected.position.subtract(sampled.position);
+            if (error.lengthSquared < 256 * 256) {
+                correction = correction.add(error.scale(decay));
+                rotationCorrection += sampled.rotation.distanceTo(expected.rotation).angle * decay;
+            } else {
+                // Teleports/room placement must not animate a long sweep.
+                correction = new Vector(0, 0);
+                rotationCorrection = 0;
+            }
+        }
+        presentation.lastSample = copyMovementState(sampled);
+        presentation.lastRenderTime = renderTime;
+        presentation.lastSourceRenderTime = sourceRenderTime;
+        presentation.lastClockOffset = presentation.clock?.offset;
+        presentation.presentedRevision = presentation.revision;
+        presentation.positionCorrection = correction;
+        presentation.rotationCorrection = rotationCorrection;
+        state.position = sampled.position.add(correction) as Position;
         state.velocity = sampled.velocity;
-        state.rotation = sampled.rotation;
+        state.rotation = sampled.rotation.add(rotationCorrection);
+        if (network) {
+            network.sampledEntities++;
+            const latest = presentation.snapshots.at(-1);
+            if (latest && sourceRenderTime > latest.serverTime) {
+                network.extrapolatedEntities++;
+            }
+        }
         state.turning = sampled.turning;
         state.turnBack = sampled.turnBack;
         state.accelerating = sampled.accelerating;
@@ -462,7 +529,7 @@ export const RemoteMovementPresentationSystem = new System({
         // Keep one snapshot before the render cursor so the next frame can
         // continue interpolating across the same interval.
         while (presentation.snapshots.length > 2
-            && presentation.snapshots[1].serverTime <= renderTime) {
+            && presentation.snapshots[1].serverTime <= sourceRenderTime) {
             presentation.snapshots.shift();
         }
     },
@@ -613,6 +680,7 @@ export const MovementPlugin: Plugin = {
         world.addComponent(MovementStateComponent);
         world.addComponent(RemoteMovementPresentationComponent);
         world.addComponent(GuidanceTargetTrackComponent);
+        world.addSystem(AdvanceNetworkPlaybackSystem);
         world.addSystem(MovementSystem);
         world.addSystem(RemoteMovementPresentationSystem);
     }

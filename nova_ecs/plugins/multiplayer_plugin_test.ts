@@ -26,6 +26,7 @@ import {
     MovementType,
 } from './movement_plugin';
 import { TimePlugin, TimeResource } from './time_plugin';
+import { NetworkTimingResource } from './network_timing';
 import {
     WeaponsState,
     WeaponsStateComponent,
@@ -64,6 +65,7 @@ function weaponEntity(owner: string, firing: boolean, count = 10): Entity {
 }
 
 interface DelayedNetworkOptions {
+    readonly delays?: number[];
     readonly duplicate?: (
         source: string,
         message: unknown,
@@ -88,6 +90,7 @@ class DeterministicDelayedNetwork {
     private delayIndex = 0;
     private messageIndex = 0;
     frame = 0;
+    readonly sentBytes = new Map<string, number>();
     onDeliver?: (destination: string, message: unknown) => void;
 
     constructor(private readonly options: DelayedNetworkOptions = {}) {}
@@ -106,7 +109,7 @@ class DeterministicDelayedNetwork {
         const destinations = destination === undefined
             ? [...this.communicators.keys()].filter(uuid => uuid !== source)
             : typeof destination === 'string' ? [destination] : [...destination];
-        const delays = [50, 150, 83, 117, 67, 133, 100];
+        const delays = this.options.delays ?? [50, 150, 83, 117, 67, 133, 100];
         const delay = delays[this.delayIndex++ % delays.length];
         const frames = Math.ceil(delay / (1000 / 60));
         const encoded = JSON.parse(JSON.stringify(message)) as unknown;
@@ -115,6 +118,8 @@ class DeterministicDelayedNetwork {
             return;
         }
         for (const target of destinations) {
+            const key = `${source}->${target}`;
+            this.sentBytes.set(key, (this.sentBytes.get(key) ?? 0) + Buffer.byteLength(JSON.stringify(encoded)));
             this.pending.push({
                 deliverAt: this.frame + frames,
                 destination: target,
@@ -798,8 +803,9 @@ describe('Multiplayer Plugin', () => {
         const serverRotation = world1.entities.get(playerUuid)!.components
             .get(MovementStateComponent)!.rotation.angle;
         expect(serverRotation).toBeCloseTo(clientRotations.at(-1)!, 2);
+        // Two seconds at 30 Hz plus bounded clock probes, not 60 Hz pose spam.
         expect(world1Communicator.allMessages.length - messagesBeforeInput)
-            .toBeLessThan(30);
+            .toBeLessThanOrEqual(70);
         expect(JSON.stringify(world2Communicator.allMessages
             .slice(serverMessagesBeforeInput))).toContain('MovementState');
 
@@ -834,6 +840,83 @@ describe('Multiplayer Plugin', () => {
         expect(clientNpcPositions.at(-1)!)
             .toBeGreaterThan(clientNpcPositions[0]);
     });
+
+    for (const profile of [
+        { name: 'stable 25ms per hop', delays: [25] },
+        { name: '35-65ms jitter per hop', delays: [40, 50, 65, 35, 50] },
+    ]) {
+        it(`measures low-latency owner/server/observer movement on ${profile.name}`, () => {
+            const network = new DeterministicDelayedNetwork({ delays: profile.delays });
+            const peers = [network.connect('server'), network.connect('owner'), network.connect('observer')];
+            const worlds = peers.map((peer, index) => {
+                const world = new World(peer.uuid);
+                world.addPlugin(multiplayer(peer));
+                world.addPlugin(TimePlugin);
+                world.addPlugin(MovementPlugin);
+                const time = world.resources.get(TimeResource)!;
+                time.time = index * 10000;
+                time.fixedDelta_ms = 1000 / 60;
+                return world;
+            });
+            const [server, owner, observer] = worlds;
+            const movement = (): MovementState => ({
+                position: new Position(0, 0), velocity: new Vector(100, 0),
+                rotation: new Angle(0), accelerating: 0, turning: 0, turnBack: false,
+            });
+            const physics = { maxVelocity: 100, turnRate: 1, acceleration: 0, movementType: MovementType.INERTIAL };
+            owner.entities.set('pilot', new Entity()
+                .addComponent(MultiplayerData, { owner: 'owner' })
+                .addComponent(MovementStateComponent, movement())
+                .addComponent(MovementPhysicsComponent, physics));
+            server.entities.set('npc', new Entity()
+                .addComponent(MultiplayerData, { owner: 'server' })
+                .addComponent(MovementStateComponent, movement())
+                .addComponent(MovementPhysicsComponent, physics));
+            const lags: number[] = [];
+            let previousX = -Infinity;
+            let maxBackward = 0;
+            let turnSeenAt: number | undefined;
+            let bytesAtWarmup = 0;
+            for (let frame = 0; frame < 600; frame++) {
+                const local = owner.entities.get('pilot')!.components.get(MovementStateComponent)!;
+                if (frame === 180) local.turning = 1;
+                if (frame === 200) local.turning = 0;
+                if (frame === 480) local.velocity = new Vector(0, 0);
+                owner.step();
+                if (frame === 180) expect(owner.entities.get('pilot')!.components.get(MovementStateComponent)!.rotation.angle).toBeGreaterThan(0);
+                server.step();
+                network.advance();
+                observer.step();
+                if (frame === 120) bytesAtWarmup = network.sentBytes.get('server->observer') ?? 0;
+                const remote = observer.entities.get('pilot')?.components.get(MovementStateComponent);
+                if (!remote) continue;
+                if (frame > 120 && frame < 480) {
+                    const actual = owner.entities.get('pilot')!.components.get(MovementStateComponent)!;
+                    lags.push((actual.position.x - remote.position.x) / 100 * 1000);
+                    maxBackward = Math.max(maxBackward, previousX - remote.position.x);
+                    previousX = remote.position.x;
+                }
+                if (frame >= 180 && turnSeenAt === undefined && remote.rotation.angle > 0.001) turnSeenAt = frame;
+            }
+            lags.sort((a, b) => a - b);
+            const p95 = lags[Math.floor(lags.length * 0.95)];
+            const timing = observer.resources.get(NetworkTimingResource)!;
+            const bytesPerSecond = ((network.sentBytes.get('server->observer') ?? 0) - bytesAtWarmup) / 8;
+            console.info(`[low-latency] ${profile.name}: buffer=${timing.delayMs.toFixed(1)}ms p95-pose-age=${p95.toFixed(1)}ms turn-observed=${((turnSeenAt! - 180) * 1000 / 60).toFixed(1)}ms egress=${bytesPerSecond.toFixed(0)}B/s`);
+            expect(timing.stats.synchronized).toBeTrue();
+            expect(lags.length).toBeGreaterThan(300);
+            expect(maxBackward).toBeLessThan(0.1);
+            expect(p95).toBeLessThan(profile.delays.length === 1 ? 70 : 160);
+            expect(turnSeenAt).toBeDefined();
+            expect((turnSeenAt! - 180) * 1000 / 60).toBeLessThan(profile.delays.length === 1 ? 120 : 220);
+            if (profile.delays.length === 1) expect(timing.delayMs).toBeLessThanOrEqual(50);
+            expect(bytesPerSecond).toBeLessThan(50000);
+            // The last zero-velocity snapshot must arrive, even though there is
+            // no longer an active movement control to trigger a delta.
+            expect(observer.entities.get('pilot')!.components.get(MovementStateComponent)!.position.x)
+                .toBeCloseTo(owner.entities.get('pilot')!.components.get(MovementStateComponent)!.position.x, 1);
+        });
+    }
 
     it('restamps client movement in the server clock domain before relaying', () => {
         const network = new DeterministicDelayedNetwork();

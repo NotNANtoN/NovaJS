@@ -13,6 +13,8 @@ import {
     ServerClockOffsetResource,
 } from 'nova_ecs/plugins/multiplayer_plugin';
 import { Time, TimeResource } from 'nova_ecs/plugins/time_plugin';
+import { NetworkTimingResource } from 'nova_ecs/plugins/network_timing';
+import { MovementSystem, RemoteMovementPresentationSystem } from 'nova_ecs/plugins/movement_plugin';
 import { Provide } from 'nova_ecs/provide';
 import { System } from 'nova_ecs/system';
 import { mod } from '../util/mod';
@@ -245,7 +247,7 @@ function addShotsOwed(weapon: WeaponData, state: WeaponState,
 
 export const WeaponsSystem = new System({
     name: 'WeaponsSystem',
-    after: [InboundMultiplayerPhase],
+    after: [InboundMultiplayerPhase, MovementSystem, RemoteMovementPresentationSystem],
     args: [WeaponsStateComponent, WeaponsComponent,
         TimeResource, UUID, WeaponEntries,
         Optional(DestructionStartedComponent),
@@ -658,7 +660,7 @@ export const ServerFireIntentSystem = new System({
 
 export const FireLogSpawnSystem = new System({
     name: 'FireLogSpawnSystem',
-    after: [WeaponsSystem, ServerFireIntentSystem],
+    after: [WeaponsSystem, ServerFireIntentSystem, MovementSystem, RemoteMovementPresentationSystem],
     args: [
         FireLogComponent,
         WeaponEntries,
@@ -667,10 +669,14 @@ export const FireLogSpawnSystem = new System({
         GetEntity,
         Optional(FireIntentComponent),
         Optional(ServerClockOffsetResource),
+        Optional(NetworkTimingResource),
+        Optional(PlatformResource),
     ] as const,
-    step(log, weaponEntries, time, uuid, entity, intent, serverClockOffset) {
+    step(log, weaponEntries, time, uuid, entity, intent, serverClockOffset, network, platform) {
         const sync = getFireSyncLocalState(entity, intent, log);
-        const clockOffset = serverClockOffset?.offset ?? 0;
+        const clock = platform === 'browser' ? network?.clocks.get(network.serverPeer) : undefined;
+        const clockOffset = clock?.offset ?? serverClockOffset?.offset ?? 0;
+        const presentationDelay = platform === 'browser' ? network?.presentationDelay(time.time) ?? 0 : 0;
         for (const shot of newFireLogsAfter(log.shots, sync.highestLogSeq)) {
             const logSeq = fireLogSequence(shot);
             sync.nextSeq = Math.max(sync.nextSeq, shot.seq + 1);
@@ -690,13 +696,16 @@ export const FireLogSpawnSystem = new System({
                 sync.highestLogSeq = logSeq;
                 continue;
             }
+            // A remote shot cannot appear before the shared presentation cursor
+            // reaches its muzzle time. Local trigger prediction remains immediate.
+            if (presentationDelay > 0 && shot.at + clockOffset > time.time - presentationDelay) break;
             const mappedShot = clockOffset !== 0
                 ? { ...shot, at: shot.at + clockOffset }
                 : shot;
             if (predicted) {
-                weapon.reconcileFromLog(uuid, mappedShot, time.time);
+                weapon.reconcileFromLog(uuid, mappedShot, time.time, presentationDelay, clock);
             } else {
-                weapon.fireFromLog(uuid, mappedShot, time.time);
+                weapon.fireFromLog(uuid, mappedShot, time.time, false, presentationDelay, clock);
             }
             sync.spawnedSeqs.delete(shot.seq);
             sync.highestLogSeq = logSeq;

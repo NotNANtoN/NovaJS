@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PlayerStore } from '../server/player_store';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
+import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { MockCommunicator } from 'nova_ecs/plugins/mock_communicator';
 import { multiplayer, MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
 import { Component } from 'nova_ecs/component';
@@ -154,6 +155,41 @@ describe('server player persistence', () => {
         world.step();
 
         expect(store.saves.length).toBe(1);
+    });
+
+    it('coalesces real-store snapshots without losing already-replicated changes or disconnects', async () => {
+        let wallTime = 0;
+        spyOn(performance, 'now').and.callFake(() => wallTime);
+        const { entity, store, world } = setup(true);
+        Object.assign(store, { saveFlightState: (token: string, state: PersistentPlayerState) => store.save(token, state) });
+        const time = world.resources.get(TimeResource)!;
+        time.fixedDelta_ms = 1000 / 60;
+        time.time = 0;
+        world.step();
+        await world.resources.get(PlayerStateSnapshots)!.get('player')?.pending;
+        for (let at = 1; at <= 100; at++) {
+            entity.components.get(PlayerStateComponent)!.credits = 10000 + at;
+            time.time = at;
+            wallTime = at;
+            world.step();
+        }
+        expect(store.saves.length).toBe(1);
+        time.time = 250;
+        wallTime = 250;
+        world.step();
+        await world.resources.get(PlayerStateSnapshots)!.get('player')?.pending;
+        expect(store.saves.length).toBe(2);
+        expect(store.saves[1].state.credits).toBe(10100);
+        time.time = 500;
+        wallTime = 500;
+        world.step();
+        expect(store.saves.length).toBe(2);
+        entity.components.get(PlayerStateComponent)!.credits = 12345;
+        world.emit(RemovedPeerEvent, 'peer');
+        world.step();
+        await Promise.resolve();
+        expect(store.saves.at(-1)!.state.credits).toBe(12345);
+        expect(world.entities.has('player')).toBeFalse();
     });
 
     it('flushes the latest mutation before removing a disconnected player', async () => {

@@ -15,6 +15,7 @@ import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
 import { MovementState, MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import { replicationPolicies } from 'nova_ecs/plugins/multiplayer_plugin';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
+import { AdvanceNetworkPlaybackSystem, MovementPlayback, MovementPlaybackComponent, PeerClock } from 'nova_ecs/plugins/network_timing';
 import { Provide } from 'nova_ecs/provide';
 import { Query } from 'nova_ecs/query';
 import { Resource } from 'nova_ecs/resource';
@@ -187,6 +188,7 @@ export function getRandomInCone(angle: number, count: number, rng: ShotRng) {
 export const SourceComponent = new Component<string>('Source');
 export const ShotSeedComponent =
     new Component<{ seed: number }>('ShotSeedComponent');
+export const ShotPresentationDelayComponent = new Component<number>('ShotPresentationDelay');
 export interface AttackIntent {
     target: string;
 }
@@ -239,7 +241,7 @@ const FireFromEntityQuery = new Query([Optional(WeaponsComponent),
 const SubsQuery = new Query([WeaponEntries, MovementStateComponent, Optional(SubCounts),
     Optional(OwnerComponent), Optional(TargetComponent),
     Optional(AttackIntentComponent), GetEntity, Optional(ShotSeedComponent),
-    TimeResource] as const);
+    TimeResource, Optional(ShotPresentationDelayComponent), Optional(MovementPlaybackComponent)] as const);
 
 const FireLogSourceQuery = new Query([
     MovementStateComponent,
@@ -264,6 +266,8 @@ export interface ShotCreation {
     fastForwardMs: number;
     entityId?: string;
     reconcile?: boolean;
+    presentationDelayMs?: number;
+    playback?: MovementPlayback;
 }
 
 export interface FiredShot {
@@ -453,18 +457,18 @@ export abstract class WeaponEntry {
         };
     }
 
-    reconcileFromLog(source: string, shot: FireLogShot, now: number): void {
+    reconcileFromLog(source: string, shot: FireLogShot, now: number, presentationDelayMs = 0, clock?: PeerClock): void {
         // Do not resurrect a prediction that already hit something or expired.
         if (this.entities.has(loggedShotEntityId(source, shot.seq))) {
-            this.fireFromLog(source, shot, now, true);
+            this.fireFromLog(source, shot, now, true, presentationDelayMs, clock);
         }
     }
 
     fireFromLog(source: string, shot: FireLogShot,
-        now: number, reconcile = false): Entity | undefined {
+        now: number, reconcile = false, presentationDelayMs = 0, clock?: PeerClock): Entity | undefined {
         const duration = 'shotDuration' in this.data
             ? this.data.shotDuration : 0;
-        const timing = fireLogReplayTiming(shot.at, now, duration);
+        const timing = fireLogReplayTiming(shot.at + presentationDelayMs, now, duration);
         if (timing.expired) {
             if (reconcile) this.entities.delete(loggedShotEntityId(source, shot.seq));
             return undefined;
@@ -504,6 +508,12 @@ export abstract class WeaponEntry {
                 fastForwardMs: timing.fastForwardMs,
                 entityId: loggedShotEntityId(source, shot.seq),
                 reconcile,
+                presentationDelayMs,
+                playback: clock ? {
+                    clock, createdAt: shot.at - clock.offset,
+                    cursor: now - presentationDelayMs - clock.offset,
+                    deltaMs: 0, delayMs: presentationDelayMs,
+                } : undefined,
             },
         );
     }
@@ -526,6 +536,8 @@ export abstract class WeaponEntry {
             sourceEntity,
             shotSeed,
             time,
+            presentationDelayMs,
+            playback,
         ] = result;
         if (!shotSeed) {
             return [];
@@ -571,6 +583,8 @@ export abstract class WeaponEntry {
                         inaccuracy: 0,
                         createdAt: time.time,
                         fastForwardMs: 0,
+                        presentationDelayMs,
+                        playback: playback ? { ...playback, createdAt: playback.cursor, deltaMs: 0 } : undefined,
                     });
                 if (subEntity) {
                     subs.push(subEntity);
@@ -605,6 +619,7 @@ export const FireWeaponPlugin: Plugin = {
             componentType: OwnerComponentType,
         });
 
+        world.addSystem(AdvanceNetworkPlaybackSystem);
         world.addSystem(WeaponsComponentProvider);
         world.addComponent(WeaponsComponent);
         // Server-local presence marker used by point-defense targeting.

@@ -4,6 +4,7 @@ import { Comms, multiplayer, MultiplayerData } from "nova_ecs/plugins/multiplaye
 import { SerializerResource } from "nova_ecs/plugins/serializer_plugin";
 import type { EncodedEntity } from "nova_ecs/plugins/serializer_plugin";
 import { resetWallClock, TimeResource } from "nova_ecs/plugins/time_plugin";
+import { NetworkTimingResource } from 'nova_ecs/plugins/network_timing';
 import { World } from "nova_ecs/world";
 import { isRight } from 'nova_ecs/either';
 import * as PIXI from "pixi.js";
@@ -163,6 +164,7 @@ async function waitForCommunicatorUuid() {
 
 let world: World | undefined;
 let system: World | undefined;
+(window as any).novaNetworkStats = () => system?.resources.get(NetworkTimingResource)?.stats;
 let compatibilityProfile: CompatibilityProfile = 'modern';
 let controlSettings: unknown;
 let gameRunning = false;
@@ -180,6 +182,7 @@ function resetGameplayClocks() {
         const time = gameplayWorld?.resources.get(TimeResource);
         if (time) {
             resetWallClock(time);
+            gameplayWorld?.resources.get(NetworkTimingResource)?.resetPresentation(time.time);
         }
     }
 }

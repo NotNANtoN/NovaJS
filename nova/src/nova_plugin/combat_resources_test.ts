@@ -12,7 +12,7 @@ import { getDefaultSystemData } from 'novadatainterface/SystemData';
 import { getDefaultProjectileWeaponData } from 'novadatainterface/WeaponData';
 import { OutfitsStateComponent, OutfitPlugin } from './outfit_plugin';
 import { GameDataResource } from './game_data_resource';
-import { PlayerStateComponent, PlayerStateCodec, PlayerStatePlugin, PlayerStorePort, createInitialPlayerState } from './player_state';
+import { PersistentPlayerStateCodec, PlayerStateComponent, PlayerStateCodec, PlayerStatePlugin, PlayerStorePort, createInitialPlayerState } from './player_state';
 import { CombatAuthority, CombatAuthorityComponent, CombatLedger, bindCombatOwner, canPay, consumeShot,
     copyCombatResources, mergeCombatPlayerState, mergeCombatOutfits, withCost, fetchCombatShop, combatShopTransaction } from './combat_resources';
 
@@ -73,6 +73,22 @@ describe('authoritative combat resources', () => {
         expect(consumeShot(entity, ['energy', NaN])).toBeFalse();
         consumeShot(entity, ['outfit', 'ammo']);
         expect(snapshot.ammo.ammo).toBe(2);
+    });
+
+    it('does not revalidate the entire pilot record during hot firing checks', async () => {
+        const { entity, authority } = await setup();
+        const decode = spyOn(PersistentPlayerStateCodec, 'decode').and.callThrough();
+        const state = entity.components.get(PlayerStateComponent)!;
+        state.credits = 9000;
+        state.missionBits[7] = true;
+        for (let i = 0; i < 60; i++) expect(canPay(entity, 'unlimited')).toBeTrue();
+        expect(withCost(entity, ['energy', 10], () => true)).toBeTrue();
+        expect(authority.balance.fuel).toBe(140);
+        expect(authority.state.credits).toBe(9000);
+        expect(decode).not.toHaveBeenCalled();
+        authority.capture(entity);
+        expect(decode).toHaveBeenCalledTimes(1);
+        expect(authority.state.missionBits[7]).toBeTrue();
     });
 
     it('uses one available alternative ammunition outfit and stops when all are empty', async () => {

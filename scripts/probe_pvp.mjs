@@ -9,8 +9,10 @@
  *
  * Usage: node scripts/probe_pvp.mjs [--url http://localhost:8200] [--headful]
  *        node scripts/probe_pvp.mjs --serve   (start dist/server.js itself)
+ *        node scripts/probe_pvp.mjs --serve --latency-ms 25 --jitter-ms 10
  */
 import { spawn } from 'node:child_process';
+import { startLagProxy } from './lag_proxy.mjs';
 import {
     evaluate,
     keyDown,
@@ -27,6 +29,9 @@ const url = argv.includes('--url')
     : 'http://localhost:8200';
 const headless = !argv.includes('--headful');
 const serve = argv.includes('--serve');
+const latencyMs = argv.includes('--latency-ms') ? Number(argv[argv.indexOf('--latency-ms') + 1]) : 0;
+const jitterMs = argv.includes('--jitter-ms') ? Number(argv[argv.indexOf('--jitter-ms') + 1]) : 0;
+let playUrl = url;
 
 /** Reads the state a client believes, for a ship named by uuid. */
 const READ_SHIP = String.raw`
@@ -50,6 +55,9 @@ const READ_SHIP = String.raw`
     drawnShots: window.pvpProbe?.drawn.size ?? 0,
     samples: window.pvpProbe?.samples,
     deathObserved: window.pvpProbe?.deathSeen ?? false,
+    network: window.novaNetworkStats?.(),
+    loggedShots: window.pvpProbe?.logs.size ?? 0,
+    logAgesMs: window.pvpProbe?.logAges,
     position: (() => { const p = entity.componentsByName.get('MovementState')?.position; return p ? [p.x, p.y] : null; })(),
   };
 })`;
@@ -59,7 +67,7 @@ const openedChromes = [];
 async function bootPilot(port, name) {
     const chrome = await launchChrome({ port, headless });
     openedChromes.push(chrome);
-    const page = await openPage(chrome.wsUrl, url);
+    const page = await openPage(chrome.wsUrl, playUrl);
     let warnings = 0;
     page.on('Runtime.consoleAPICalled', ({ type, args }) => {
         if (type === 'warning' && String(args[0]?.value).startsWith('Failed') && warnings++ < 3) {
@@ -133,8 +141,15 @@ async function setUpDuel(attacker, victim) {
 
 async function trackShots(client, shooterUuid, victimUuid) {
     await evaluate(client.page, `(() => {
-        const stats = window.pvpProbe = { shots: new Set(), drawn: new Set(), samples: [], deathSeen: false };
+        const stats = window.pvpProbe = { shots: new Set(), drawn: new Set(), samples: [], deathSeen: false, logs: new Set(), logAges: [] };
         window.app.ticker.add(() => {
+            const source = window.system?.entities.get(${JSON.stringify(shooterUuid)});
+            const net = window.novaNetworkStats?.();
+            for (const shot of source?.componentsByName.get('FireLogComponent')?.shots ?? []) {
+                if (stats.logs.has(shot.seq)) continue;
+                stats.logs.add(shot.seq);
+                if (stats.logAges.length < 12) stats.logAges.push(Math.round(performance.timeOrigin + performance.now() - shot.at - (net?.clockOffsetMs ?? 0)));
+            }
             const target = window.system?.entities.get(${JSON.stringify(victimUuid)});
             if (target && (target.componentsByName.has('PlayerDeathComponent')
                 || target.componentsByName.has('DestructionStartedComponent')
@@ -175,7 +190,9 @@ function check(label, condition, detail) {
 
 let server;
 if (serve) {
-    server = spawn('node', ['dist/server.js'], { stdio: 'ignore' });
+    const profileArgs = argv.includes('--profile-server')
+        ? ['--cpu-prof', '--cpu-prof-dir=dist/remote-combat-probe'] : [];
+    server = spawn('node', [...profileArgs, 'dist/server.js'], { stdio: 'ignore' });
     for (let attempt = 0; attempt < 60; attempt++) {
         try {
             const response = await fetch(url);
@@ -191,12 +208,23 @@ if (serve) {
 
 let alice;
 let bob;
+let proxy;
 try {
+    if (latencyMs || jitterMs) {
+        proxy = await startLagProxy({ target: url, latencyMs, jitterMs });
+        playUrl = proxy.url;
+        console.log(`WebSocket shaping: ${latencyMs}ms one-way, ±${jitterMs}ms jitter (FIFO)`);
+    }
     [alice, bob] = await Promise.all([
         bootPilot(9333, 'Alice'),
         bootPilot(9334, 'Bob'),
     ]);
     console.log(`Alice ${alice.uuid}\nBob   ${bob.uuid}`);
+    for (const pilot of [alice, bob]) {
+        await waitFor(pilot.page, 'window.novaNetworkStats?.()?.synchronized',
+            { label: `${pilot.name}: clock synchronization`, timeoutMs: 15000 });
+        console.log(`[network ${pilot.name}]`, JSON.stringify(await evaluate(pilot.page, 'window.novaNetworkStats()')));
+    }
 
     // Each pilot has to be able to see the other at all, or nothing that
     // follows means anything: interest management could have filtered them out.
@@ -285,7 +313,16 @@ try {
     check('the kill resolved for the shooter too', deadOnAlice, after.onAlice);
 } finally {
     for (const chrome of openedChromes) chrome.close();
-    server?.kill('SIGKILL');
+    if (proxy) {
+        console.log('[proxy traffic]', JSON.stringify(proxy.stats));
+        await proxy.close();
+    }
+    if (server && server.exitCode === null) {
+        const exited = new Promise(resolve => server.once('exit', resolve));
+        server.kill('SIGTERM');
+        await Promise.race([exited, sleep(6000)]);
+        if (server.exitCode === null) server.kill('SIGKILL');
+    }
 }
 
 if (failures.length > 0) {

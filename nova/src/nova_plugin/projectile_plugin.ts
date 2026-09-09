@@ -15,13 +15,14 @@ import {
     MovementType,
     MovementSystem,
     queueGuidanceTargetSnapshot,
-    REMOTE_INTERPOLATION_DELAY_MS,
+
     RemoteMovementPresentationComponent,
     RemoteMovementPresentationSystem,
     sampleGuidanceTarget,
 } from 'nova_ecs/plugins/movement_plugin';
 import { MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
+import { AdvanceNetworkPlaybackSystem, MovementPlaybackComponent, NetworkReceivePhase } from 'nova_ecs/plugins/network_timing';
 import { ProvideAsync } from "nova_ecs/provide_async";
 import { Query } from "nova_ecs/query";
 import { System } from 'nova_ecs/system';
@@ -45,6 +46,10 @@ import { ProjectileBlastHull, ProjectileComponent, ProjectileDataComponent } fro
 import { ReturnToQueueComponent } from './return_to_queue_plugin';
 import { SoundEvent } from './sound_event';
 import { Stat } from './stat';
+import { ShotPresentationDelayComponent } from './fire_weapon_plugin';
+
+// Gameplay guidance history must not change with a client's jitter buffer.
+export const GUIDANCE_HISTORY_DELAY_MS = 200;
 import { TargetComponent } from './target_component';
 
 const SourceOwnershipQuery = new Query([
@@ -193,7 +198,10 @@ class ProjectileWeaponEntry extends WeaponEntry {
         movementState.turnTo = null;
         delete movementState.targetSpeed;
 
+        if (shot.playback) projectile.components.set(MovementPlaybackComponent, shot.playback);
+        else projectile.components.delete(MovementPlaybackComponent);
         projectile.components.set(CreateTime, shot.createdAt);
+        projectile.components.set(ShotPresentationDelayComponent, shot.presentationDelayMs ?? 0);
         projectile.components.delete(SubCounts);
         projectile.components.set(ShotSeedComponent, { seed: shot.seed });
 
@@ -238,7 +246,7 @@ class ProjectileWeaponEntry extends WeaponEntry {
                     const targetMovement = sampleGuidanceTarget(
                         targetEntity,
                         shot.createdAt + elapsedSeconds * 1000
-                            - REMOTE_INTERPOLATION_DELAY_MS,
+                            - (shot.presentationDelayMs ?? 0) - GUIDANCE_HISTORY_DELAY_MS,
                         this.entities,
                     );
                     if (targetMovement) {
@@ -289,10 +297,12 @@ export const ProjectileExpireEvent = new EcsEvent<undefined>('ProjectileExpire')
 
 const ProjectileLifespanSystem = new System({
     name: 'ProjectileLifespanSystem',
+    after: [AdvanceNetworkPlaybackSystem],
     args: [CreateTime, TimeResource, ProjectileDataComponent, FireSubs,
-        Entities, UUID, Emit, ProjectileComponent] as const,
-    step(fireTime, { time }, projectileData, fireSubs, entities, uuid, emit) {
-        if (time - fireTime > projectileData.shotDuration) {
+        Entities, UUID, Emit, ProjectileComponent, Optional(MovementPlaybackComponent)] as const,
+    step(fireTime, { time }, projectileData, fireSubs, entities, uuid, emit, _projectile, playback) {
+        const age = playback ? playback.cursor - playback.createdAt : time - fireTime;
+        if (age > projectileData.shotDuration) {
             fireSubs(projectileData.id, uuid, true);
             const self = entities.get(uuid);
             if (!self) {
@@ -331,10 +341,12 @@ const RecordGuidanceTrackSystem = new System({
 
 const ProjectileGuidanceSystem = new System({
     name: 'ProjectileGuidanceSystem',
+    after: [NetworkReceivePhase, AdvanceNetworkPlaybackSystem],
     args: [MovementStateComponent, TargetComponent,
-        Entities, ProjectileDataComponent, TimeResource, GuidanceComponent] as const,
+        Entities, ProjectileDataComponent, TimeResource, GuidanceComponent,
+        Optional(ShotPresentationDelayComponent), Optional(MovementPlaybackComponent)] as const,
     before: [MovementSystem],
-    step(movementState, { target }, entities, projectileData, time) {
+    step(movementState, { target }, entities, projectileData, time, _guidance, presentationDelayMs, playback) {
         if (!target) {
             return;
         }
@@ -344,7 +356,7 @@ const ProjectileGuidanceSystem = new System({
         }
         const targetMovement = sampleGuidanceTarget(
             targetEntity,
-            time.time - REMOTE_INTERPOLATION_DELAY_MS,
+            (playback ? playback.cursor + playback.clock.offset : time.time - (presentationDelayMs ?? 0)) - GUIDANCE_HISTORY_DELAY_MS,
             entities,
         );
         if (!targetMovement) {
