@@ -41,6 +41,7 @@ import { Stage } from "./display/stage_resource";
 import { GameDataResource } from "./nova_plugin/game_data_resource";
 import {
     FinishJumpEvent,
+    InitiateJumpEvent,
     restartJumpArrival,
 } from "./nova_plugin/jump_plugin";
 import {
@@ -49,6 +50,7 @@ import {
     RespawnRelocationEvent,
 } from "./nova_plugin/death_plugin";
 import { plainSnapshot } from 'nova_ecs/draft_snapshot';
+import { stopHyperjumpSounds } from "./display/sound_plugin";
 import { WeaponEntries } from "./nova_plugin/fire_weapon_plugin";
 import { makeShip } from "./nova_plugin/make_ship";
 import { makeSystem } from "./nova_plugin/make_system";
@@ -221,6 +223,36 @@ async function leaveGameWorld() {
 type SystemTransitionCause = 'initial' | 'hyperjump' | 'respawn';
 type TransitionEntity = Entity | ((newSystem: World) => Entity);
 
+const warmedNeighborSystems = new Set<string>();
+
+async function preloadNeighboringSystems(
+    currentSystemId: string,
+    gameData: GameData,
+    app: PIXI.Application,
+) {
+    try {
+        const currentSystem = await gameData.data.System.get(currentSystemId);
+        if (!currentSystem?.links) return;
+        for (const neighborId of currentSystem.links) {
+            if (warmedNeighborSystems.has(neighborId)) continue;
+            warmedNeighborSystems.add(neighborId);
+            void warmFlightAssets({
+                gameData,
+                systemId: neighborId,
+                loadSound: id => gameData.data.Sound.get(id),
+                loadFrames: async frames => {
+                    const textures = await texturesFromFrames(frames);
+                    await app.renderer.prepare.upload(textures);
+                },
+            }).catch(e => {
+                console.warn(`Background warmup for neighbor ${neighborId} deferred`, e);
+            });
+        }
+    } catch (e) {
+        console.warn('Failed to scan neighboring systems for preloading', e);
+    }
+}
+
 async function transitionTo(
     { entity, to, uuid }: {
         entity: TransitionEntity,
@@ -232,9 +264,26 @@ async function transitionTo(
     const wasPaused = gamePaused;
     gamePaused = true;
     const systemDataPromise = gameData.data.System.get(to).catch(() => undefined);
-    showEnteringOverlay('Entering system', 0, 'Scanning stellar catalog...');
+    let overlayFallbackTimeout: ReturnType<typeof setTimeout> | undefined;
+    if (cause !== 'hyperjump') {
+        showEnteringOverlay('Entering system', 0, 'Scanning stellar catalog...');
+    } else {
+        // For hyperjump, the white departure flash covers the transition. Only show the
+        // progress bar as a fallback if background warmup or room connection stalls.
+        overlayFallbackTimeout = setTimeout(() => {
+            showEnteringOverlay('Entering system', 85, 'Connecting to star system...');
+        }, 600);
+    }
+    const updateProgress = (pct: number, label: string) => {
+        if (cause !== 'hyperjump') {
+            setEnteringProgress(pct, label);
+        }
+    };
     try {
         if (system) {
+            if (cause === 'hyperjump') {
+                stopHyperjumpSounds(system);
+            }
             await leaveGameWorld();
         }
 
@@ -259,7 +308,9 @@ async function transitionTo(
 
         const systemData = await systemDataPromise;
         const systemTitle = systemData?.name ? `Entering ${systemData.name}` : 'Entering system';
-        showEnteringOverlay(systemTitle, 5, 'Preloading assets...');
+        if (cause !== 'hyperjump') {
+            showEnteringOverlay(systemTitle, 5, 'Preloading assets...');
+        }
 
         // Do not publish the player into combat while its hull or weapon art is
         // still downloading. Later room entries reuse the loaded atlas cache.
@@ -277,11 +328,11 @@ async function transitionTo(
             },
             onProgress: progress => {
                 const percent = Math.min(85, Math.round(5 + progress.fraction * 80));
-                setEnteringProgress(percent, progress.label);
+                updateProgress(percent, progress.label);
             },
         })).pipe(timeout(120_000)));
 
-        setEnteringProgress(87, 'Connecting to star system...');
+        updateProgress(87, 'Connecting to star system...');
         const room = multiRoom.join(to);
         await newSystem.addPlugin(multiplayer(room));
 
@@ -293,6 +344,17 @@ async function transitionTo(
         };
         newSystem.events.get(FinishJumpEvent).subscribe(transition =>
             void transitionTo(transition, 'hyperjump').catch(failedTransition));
+        newSystem.events.get(InitiateJumpEvent).subscribe(({ to: targetSystem }) => {
+            void warmFlightAssets({
+                gameData,
+                systemId: targetSystem,
+                loadSound: id => gameData.data.Sound.get(id),
+                loadFrames: async frames => {
+                    const textures = await texturesFromFrames(frames);
+                    await app.renderer.prepare.upload(textures);
+                },
+            }).catch(() => undefined);
+        });
         newSystem.events.get(RespawnRelocationEvent).subscribe(transition =>
             void transitionTo(transition, 'respawn').catch(failedTransition));
         newSystem.events.get(PlayerDestructionCompleteEvent)
@@ -319,11 +381,12 @@ async function transitionTo(
 
         // Wait for the server to connect
         if (!room.peers.current.value.has('server')) {
-            setEnteringProgress(89, 'Awaiting server handshake...');
+            updateProgress(89, 'Awaiting server handshake...');
             await firstValueFrom(room.peers.join.pipe(
                 filter(a => a === 'server'), timeout(15_000)));
         }
         if (cause === 'hyperjump') {
+            stopHyperjumpSounds(system);
             // World construction and room handshakes can take longer than the
             // visual arrival phase. Start it when the destination can draw.
             restartJumpArrival(transitionEntity);
@@ -331,7 +394,7 @@ async function transitionTo(
         newSystem.entities.set(uuid, transitionEntity);
         resetGameplayClocks();
         {
-            setEnteringProgress(92, 'Initializing flight scene...');
+            updateProgress(92, 'Initializing flight scene...');
             const ready = await waitForFlightScene({
                 step: () => world?.step(),
                 afterStep: async () => {
@@ -351,13 +414,13 @@ async function transitionTo(
                         ?.initialStateReceived),
                 onProgress: (readiness, snapshotReady) => {
                     if (!snapshotReady) {
-                        setEnteringProgress(94, 'Receiving sector snapshot...');
+                        updateProgress(94, 'Receiving sector snapshot...');
                     } else if (!readiness.planetsReady) {
-                        setEnteringProgress(96, 'Rendering planets...');
+                        updateProgress(96, 'Rendering planets...');
                     } else if (!readiness.playerReady) {
-                        setEnteringProgress(98, 'Rendering ship...');
+                        updateProgress(98, 'Rendering ship...');
                     } else {
-                        setEnteringProgress(100, 'Entering cockpit...');
+                        updateProgress(100, 'Entering cockpit...');
                     }
                 },
             });
@@ -368,14 +431,16 @@ async function transitionTo(
                 }));
                 throw new Error('The flight scene did not finish loading. Please retry entering the game.');
             }
-            setEnteringProgress(100, 'All systems ready');
+            updateProgress(100, 'All systems ready');
             resetGameplayClocks();
             newStage.visible = true;
+            preloadNeighboringSystems(to, gameData as GameData, app);
         }
     } catch (error) {
         await leaveGameWorld();
         throw error;
     } finally {
+        if (overlayFallbackTimeout) clearTimeout(overlayFallbackTimeout);
         hideEnteringOverlay();
         if (!wasPaused) resumeGameplay();
     }

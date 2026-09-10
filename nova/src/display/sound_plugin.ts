@@ -141,8 +141,14 @@ const SoundSystem = new System({
     args: [SoundEvent, GameDataResource, LoopingSounds, LoadedSounds,
         PendingSounds, FailedSounds, VolumeResource, PlayerMovementQuery,
         SingletonComponent] as const,
-    step({ id, loop = false, position }, gameData, loopingSounds, loadedSounds,
+    step({ id, loop = false, stop = false, position }, gameData, loopingSounds, loadedSounds,
         pendingSounds, failedSounds, {volume: masterVolume}, players) {
+        if (stop) {
+            loadedSounds.get(id)?.stop();
+            loopingSounds.get(id)?.stop();
+            loopingSounds.delete(id);
+            return;
+        }
         if (failedSounds.has(id)) {
             return;
         }
@@ -316,6 +322,16 @@ const VolumeControlSystem = new System({
         }
     }
 });
+
+export function stopHyperjumpSounds(world?: { resources: { get: (res: any) => any } }): void {
+    const loaded = world?.resources?.get(LoadedSounds);
+    const looping = world?.resources?.get(LoopingSounds);
+    for (const id of ['nova:128', 'nova:123', 'nova:130']) {
+        loaded?.get(id)?.stop();
+        looping?.get(id)?.stop();
+        looping?.delete(id);
+    }
+}
 
 export const SoundPlugin: Plugin = {
     name: 'SoundPlugin',

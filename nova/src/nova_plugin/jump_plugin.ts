@@ -42,13 +42,14 @@ import { AppliedDamageEvent } from "./death_plugin";
 
 export const JUMP_SPOOL_MS = 1_200;
 export const JUMP_BRAKE_MS = 800;
+export const PLAYER_JUMP_BRAKE_TIMEOUT_MS = 25_000;
 export const JUMP_BRAKE_SPEED_THRESHOLD = 0.05;
 export const JUMP_BAM_MS = 180;
 export const JUMP_ARRIVAL_MS = 900;
 export const JUMP_ARRIVAL_RADIUS = 1_400;
 export const JUMP_DEPARTURE_SPEED_MULTIPLIER = 3.5;
 export const JUMP_ARRIVAL_SPEED_MULTIPLIER = 3;
-export const JUMP_ARRIVAL_END_SPEED_MULTIPLIER = 0.65;
+export const JUMP_ARRIVAL_END_SPEED_MULTIPLIER = 1.0;
 export const JUMP_MIN_DISTANCE = 1_000;
 /** Retail STR# 2002 string 41: distance refusal */
 export const TOO_CLOSE_TO_CENTER_MESSAGE =
@@ -384,7 +385,7 @@ export function advanceJumpFlight(
             ),
             time.delta_s,
             true,
-            state.phase === 'departing' || state.requiresAdjacency,
+            state.phase === 'departing',
         );
         return 'none';
     }
@@ -492,13 +493,14 @@ const PlayerJumpControl = new System({
             to: nextSystem,
             phase: 'braking',
             phaseStartedAt: time.time,
-            transitionAt: time.time + JUMP_BRAKE_MS,
+            transitionAt: time.time + PLAYER_JUMP_BRAKE_TIMEOUT_MS,
             requiresAdjacency: true,
             arrivalSoundPending: false,
             createdAt: time.time,
         };
         entity.components.set(JumpStateComponent, state);
         entity.components.delete(RemoteMovementPresentationComponent);
+        emit(InitiateJumpEvent, { to: nextSystem });
     }
 });
 
@@ -662,6 +664,8 @@ const JumpLifecycleSystem = new System({
             state.arrivalSoundPending = true;
             entity.components.delete(RemoteMovementPresentationComponent);
 
+            emit(SoundEvent, { id: 'nova:128', stop: true });
+            emit(SoundEvent, { id: 'nova:123', stop: true });
             entities.delete(uuid);
             deImmerify(entity);
             emit(FinishJumpEvent, {

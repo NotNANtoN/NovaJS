@@ -25,6 +25,7 @@ export const STELLAR_DEPARTURE_SOUND_ID = STELLAR_DOCKING_SOUND_ID;
 export interface SoundEventData {
     id: string;
     loop?: boolean;
+    stop?: boolean;
     position?: { x: number, y: number };
 }
 

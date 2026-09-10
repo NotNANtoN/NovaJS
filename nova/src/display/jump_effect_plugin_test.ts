@@ -180,9 +180,9 @@ describe('other-ship jump effects', () => {
             MAX_VELOCITY,
         )).toBe(1);
     });
-    it('draws hyperspace departure streaks when accelerating into a jump', () => {
+    it('draws hyperspace departure flash without linear warp streaks', () => {
         const shipMovement = movementAt(100, 200);
-        shipMovement.velocity = new Vector(0, -MAX_VELOCITY * 1.5);
+        shipMovement.velocity = new Vector(0, -MAX_VELOCITY * 3.0);
         const shipGraphic = graphic();
         const wakeHandle = mockWakeGraphics();
 
@@ -198,6 +198,8 @@ describe('other-ship jump effects', () => {
         );
 
         const lineCalls = wakeHandle.calls.filter(c => c.method === "lineTo");
-        expect(lineCalls.length).toBeGreaterThanOrEqual(1);
+        expect(lineCalls.length).toBe(0);
+        const circleCalls = wakeHandle.calls.filter(c => c.method === "circle");
+        expect(circleCalls.length).toBeGreaterThanOrEqual(1);
     });
 });
