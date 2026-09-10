@@ -56,16 +56,19 @@ export class PlayerChatDialog extends Menu<Entity> {
     ) {
         super(gameData, COMMS_LAYOUT.background, controlEvents);
 
-        this.headerText = new PIXI.Text('', {
-            fontFamily: 'Geneva, Arial, sans-serif',
-            fontSize: 11,
-            fill: 0xffff88,
-            align: 'left',
+        this.headerText = new PIXI.Text({
+            text: '',
+            style: {
+                fontFamily: 'Geneva, Arial, sans-serif',
+                fontSize: 11,
+                fill: 0xffff88,
+                align: 'left',
+            },
         });
         this.headerText.position.set(-175, -92);
         this.container.addChild(this.headerText);
 
-        this.logText = new PIXI.Text('', CHAT_LOG_FONT);
+        this.logText = new PIXI.Text({ text: '', style: CHAT_LOG_FONT });
         this.logText.position.set(-175, -72);
         this.container.addChild(this.logText);
 
@@ -75,7 +78,7 @@ export class PlayerChatDialog extends Menu<Entity> {
             .stroke({ width: 1, color: 0x555555 });
         this.container.addChild(this.inputBox);
 
-        this.inputText = new PIXI.Text('', INPUT_FONT);
+        this.inputText = new PIXI.Text({ text: '', style: INPUT_FONT });
         this.inputText.position.set(-168, 32);
         this.container.addChild(this.inputText);
 

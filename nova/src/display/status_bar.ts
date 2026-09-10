@@ -79,7 +79,7 @@ class StatusBar {
     private cargoContainer = new PIXI.Container();
     private navigationContainer = new PIXI.Container();
     private landingMessageContainer = new PIXI.Container();
-    private landingMessage = new PIXI.Text();
+    private landingMessage = new PIXI.Text({ text: '' });
     private landingMessageClearAt = 0;
 
     private targetContainer = new PIXI.Container();

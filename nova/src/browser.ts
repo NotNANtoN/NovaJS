@@ -86,6 +86,9 @@ const gameData = new GameData();
 (window as any).PIXI = PIXI;
 
 const app = new PIXI.Application();
+if (typeof window !== 'undefined') {
+    (window as any).app = app;
+}
 
 (window as any).app = app;
 (window as any).novaTitleMusicState = getTitleMusicState;
@@ -786,6 +789,39 @@ window.addEventListener('keydown', event => {
 async function bootstrap() {
     const pixelRatio = window.devicePixelRatio || 1;
     PIXI.TextureStyle.defaultOptions.scaleMode = 'linear';
+    let gpuConfig: { adapter: any; device: any } | undefined;
+    if (typeof navigator !== 'undefined' && 'gpu' in navigator && (navigator as any).gpu) {
+        try {
+            const navGpu = (navigator as any).gpu;
+            const adapter = (await navGpu.requestAdapter({
+                powerPreference: 'high-performance',
+            })) ?? (await navGpu.requestAdapter());
+            if (adapter) {
+                const requiredLimits: Record<string, number> = {};
+                for (const [key, value] of Object.entries(adapter.limits)) {
+                    requiredLimits[key] = value as number;
+                }
+                const candidateFeatures = [
+                    'texture-compression-bc',
+                    'texture-compression-astc',
+                    'texture-compression-etc2',
+                    'indirect-first-instance',
+                ];
+                const requiredFeatures = candidateFeatures.filter(f =>
+                    adapter.features.has(f)
+                );
+                const device = await adapter.requestDevice({
+                    requiredFeatures,
+                    requiredLimits,
+                });
+                gpuConfig = { adapter, device };
+                console.log(`[WebGPU] Configured device with maxTextureDimension2D: ${adapter.limits.maxTextureDimension2D}`);
+            }
+        } catch (e) {
+            console.warn('Custom WebGPU limits request fell back to Pixi defaults', e);
+        }
+    }
+
     await app.init({
         width: window.innerWidth,
         height: window.innerHeight,
@@ -793,6 +829,7 @@ async function bootstrap() {
         autoDensity: true,
         preserveDrawingBuffer: true,
         preference: 'webgpu',
+        gpu: gpuConfig,
     });
     document.body.appendChild(app.canvas);
     startTitleMusicOnGesture();
