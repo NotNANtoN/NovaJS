@@ -50,6 +50,14 @@ function collectAnimationSheets(
  * Load sprite sheets, weapon factories, and explosion records that combat in
  * this system will need, so the first shot is drawn instead of only colliding.
  */
+export const globallyWarmedSheets = new Set<string>();
+export const globallyWarmedSounds = new Set<string>();
+
+export function resetWarmFlightAssetsCache(): void {
+    globallyWarmedSheets.clear();
+    globallyWarmedSounds.clear();
+}
+
 export async function warmFlightAssets({
     gameData,
     systemId,
@@ -208,10 +216,9 @@ export async function warmFlightAssets({
 
     // Atlas downloads bypass GameData's metadata queue. Bound them here so a
     // cold cache does not flood a remote connection with hundreds of requests.
-    const pendingSheets = [...sheets].values();
-    const sheetCount = sheets.size;
-    const soundCount = loadSound ? sounds.size : 0;
-    const totalItems = sheetCount + soundCount;
+    const sheetsToWarm = [...sheets].filter(id => !globallyWarmedSheets.has(id));
+    const soundsToWarm = loadSound ? [...sounds].filter(id => !globallyWarmedSounds.has(id)) : [];
+    const totalItems = sheetsToWarm.length + soundsToWarm.length;
     let completedItems = 0;
 
     const reportProgress = (type: 'textures' | 'audio') => {
@@ -230,8 +237,10 @@ export async function warmFlightAssets({
 
     if (totalItems === 0) {
         onProgress?.({ loaded: 0, total: 0, label: 'Assets ready', fraction: 1 });
+        return;
     }
 
+    const pendingSheets = sheetsToWarm.values();
     const failures: string[] = [];
     await Promise.all(Array.from({ length: 8 }, async () => {
         for (const id of pendingSheets) {
@@ -243,6 +252,7 @@ export async function warmFlightAssets({
                     gameData.data.SpriteSheet?.get(id),
                 ]);
                 await loadFrames(frames);
+                globallyWarmedSheets.add(id);
                 reportProgress('textures');
             } catch (error) {
                 failures.push(id);
@@ -252,12 +262,13 @@ export async function warmFlightAssets({
         }
     }));
     if (loadSound) {
-        const pendingSounds = sounds.values();
+        const pendingSounds = soundsToWarm.values();
         await Promise.all(Array.from({ length: 8 }, async () => {
             for (const id of pendingSounds) {
                 // Browsers may disallow audio until a user gesture. Missing audio
                 // must not make an otherwise playable scene inaccessible.
                 await tryGet(() => loadSound(id));
+                globallyWarmedSounds.add(id);
                 reportProgress('audio');
             }
         }));

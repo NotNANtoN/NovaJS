@@ -13,6 +13,7 @@ import { GameDataInterface } from 'novadatainterface/GameDataInterface';
 import { Gettable } from 'novadatainterface/Gettable';
 import {
     outfitIdsFromState,
+    resetWarmFlightAssetsCache,
     warmFlightAssets,
 } from './flight_asset_warmup';
 
@@ -26,6 +27,10 @@ function animationWith(id: string) {
 }
 
 describe('warmFlightAssets', () => {
+    beforeEach(() => {
+        resetWarmFlightAssetsCache();
+    });
+
     it('loads projectile, explosion, and NPC hull sheets for the system', async () => {
         const loaded: string[] = [];
         const hullsLoaded: string[] = [];

@@ -167,12 +167,24 @@ export class GameData implements GameDataInterface {
     }
 
     private async fetchMetadataWithEtag(url: string, maxRetries = 4, delayMs = 1200): Promise<{ data: unknown; etag: string | null }> {
+        try {
+            const cached = await getCachedPayload<unknown>(url);
+            if (cached) {
+                return { data: cached.data, etag: cached.etag };
+            }
+        } catch {
+            // Fallback to network fetch
+        }
+
         for (let attempt = 0; attempt <= maxRetries; attempt++) {
             try {
-                const response = await fetch(url, { cache: 'reload' });
+                const response = await fetch(url);
                 if (response.ok) {
                     const etag = response.headers.get('ETag');
                     const data = await response.json();
+                    if (etag) {
+                        void setCachedPayload(url, etag, data).catch(() => {});
+                    }
                     return { data, etag };
                 }
                 if (attempt < maxRetries && (response.status === 502 || response.status === 503 || response.status === 504 || response.status === 404)) {

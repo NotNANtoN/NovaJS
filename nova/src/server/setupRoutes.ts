@@ -19,7 +19,8 @@ import {
 
 export const IMMUTABLE_ASSET_CACHE =
     'public, max-age=31536000, immutable';
-export const REVALIDATE_METADATA_CACHE = 'no-cache';
+export const REVALIDATE_METADATA_CACHE =
+    'public, max-age=86400, stale-while-revalidate=604800';
 
 export function gameDataCacheControl(requestPath: string): string {
     return /\.(?:png|webp|mp3)$/i.test(requestPath)
