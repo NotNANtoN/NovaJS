@@ -698,12 +698,12 @@ export const FireLogSpawnSystem = new System({
             }
             // A remote shot cannot appear before the shared presentation cursor
             // reaches its muzzle time. Local trigger prediction remains immediate.
-            if (presentationDelay > 0 && shot.at + clockOffset > time.time - presentationDelay) break;
+            if (!predicted && presentationDelay > 0 && shot.at + clockOffset > time.time - presentationDelay) break;
             const mappedShot = clockOffset !== 0
                 ? { ...shot, at: shot.at + clockOffset }
                 : shot;
             if (predicted) {
-                weapon.reconcileFromLog(uuid, mappedShot, time.time, presentationDelay, clock);
+                weapon.reconcileFromLog(uuid, mappedShot, time.time, 0, undefined);
             } else {
                 weapon.fireFromLog(uuid, mappedShot, time.time, false, presentationDelay, clock);
             }

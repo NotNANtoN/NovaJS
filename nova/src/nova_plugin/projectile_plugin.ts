@@ -191,14 +191,16 @@ class ProjectileWeaponEntry extends WeaponEntry {
         }
 
         const movementState = projectile.components.get(MovementStateComponent)!;
-        movementState.position = position;
-        movementState.rotation = angle;
-        movementState.velocity = velocity;
-        movementState.turning = 0;
-        movementState.turnTo = null;
-        delete movementState.targetSpeed;
+        if (!existing || shot.fastForwardMs > 0) {
+            movementState.position = position;
+            movementState.rotation = angle;
+            movementState.velocity = velocity;
+            movementState.turning = 0;
+            movementState.turnTo = null;
+            delete movementState.targetSpeed;
+        }
 
-        if (shot.playback) projectile.components.set(MovementPlaybackComponent, shot.playback);
+        if (shot.playback && !existing) projectile.components.set(MovementPlaybackComponent, shot.playback);
         else projectile.components.delete(MovementPlaybackComponent);
         projectile.components.set(CreateTime, shot.createdAt);
         projectile.components.set(ShotPresentationDelayComponent, shot.presentationDelayMs ?? 0);

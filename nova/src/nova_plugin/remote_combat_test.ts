@@ -8,7 +8,7 @@ import { Vector } from 'nova_ecs/datatypes/vector';
 import { DeltaPlugin } from 'nova_ecs/plugins/delta_plugin';
 import { RemoteMovementPresentationComponent, RemoteMovementPresentationSystem, queueRemoteMovementSnapshot, MovementStateComponent, MovementSystem, MovementPhysicsComponent, MovementType } from 'nova_ecs/plugins/movement_plugin';
 import { ServerClockOffsetResource } from 'nova_ecs/plugins/multiplayer_plugin';
-import { NetworkTiming, NetworkTimingResource } from 'nova_ecs/plugins/network_timing';
+import { NetworkTiming, NetworkTimingResource, MovementPlaybackComponent } from 'nova_ecs/plugins/network_timing';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { Gettable } from 'novadatainterface/Gettable';
 import { GameDataInterface } from 'novadatainterface/GameDataInterface';
@@ -230,5 +230,34 @@ describe('real remote combat replay and reconciliation', () => {
         expect(client.world.resources.get(EntityBudgetResource)!.active('beam')).toBe(1);
         client.weapon.reconcileFromLog('ship', shot, 4000);
         expect(client.world.entities.has(id)).toBeFalse();
+    });
+
+    it('preserves in-flight predicted projectile position when receiving authoritative log under presentation delay', async () => {
+        const client = await combatWorld('shooter');
+        const id = loggedShotEntityId('ship', 1);
+        const fired = client.weapon.fireFromEntityDetailed('ship', 1, true, 0, { entityId: id })!;
+        rememberSpawnedShot(getFireSyncLocalState(client.ship), 1, true);
+
+        // Advance local simulation by 100ms
+        client.time.time = 1100;
+        client.time.delta_ms = 100;
+        client.time.delta_s = 0.1;
+        client.world.step();
+
+        const inFlightPos = fired.entity.components.get(MovementStateComponent)!.position.x;
+        expect(inFlightPos).toBeGreaterThan(fired.position.x);
+
+        // Server sends log matching the shot
+        const shot = makeFireLogShot({ seq: 1, seed: 1, weaponId: client.data.id, exitIndex: 0 },
+            1000, fired.position, fired.rotation, { sourceVelocity: fired.sourceVelocity, inaccuracy: fired.inaccuracy });
+        client.ship.components.set(FireLogComponent, wireLog({ shots: [shot] }));
+        client.world.step();
+
+        // Projectile must still be in flight, not snapped back to muzzle
+        const reconciled = client.world.entities.get(id)!;
+        expect(reconciled).toBe(fired.entity);
+        const reconciledPos = reconciled.components.get(MovementStateComponent)!.position.x;
+        expect(reconciledPos).toBeGreaterThanOrEqual(inFlightPos);
+        expect(reconciled.components.has(MovementPlaybackComponent)).toBeFalse();
     });
 });
