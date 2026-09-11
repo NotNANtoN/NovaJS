@@ -54,6 +54,12 @@ export const STARMAP_LAYOUT = {
         width: 146,
         height: 16,
     },
+    doneButton: {
+        x: WELL_RIGHT + 17,
+        y: WELL_BOTTOM - 44,
+        width: 80,
+        height: 25,
+    },
 } as const;
 
 export interface MapWell {

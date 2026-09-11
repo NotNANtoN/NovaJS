@@ -307,7 +307,9 @@ class SystemGraph {
     private wheelBound = false;
     private dragData?: {
         offset: PIXI.Point,
-    }
+    };
+    private dragMoved = false;
+    private dragStartPos = { x: 0, y: 0 };
     private wrappedRoute: string[] = [];
     private routes: Map<string, string[]>;
     private knownSystems?: Set<string>;
@@ -330,20 +332,16 @@ class SystemGraph {
 
         this.graphics = new PIXI.Graphics();
 
-        this.container.interactive = true;
+        this.container.eventMode = 'static';
         this.container.hitArea = new PIXI.Rectangle(
             0, 0, size.x, size.y);
         const onDragStart = this.onDragStart.bind(this);
         const onDragMove = this.onDragMove.bind(this);
         const onDragEnd = this.onDragEnd.bind(this);
-        this.container.on('mousedown', onDragStart)
-            .on('touchstart', onDragStart)
-            .on('mouseup', onDragEnd)
-            .on('mouseupoutside', onDragEnd)
-            .on('touchend', onDragEnd)
-            .on('touchendoutside', onDragEnd)
-            .on('mousemove', onDragMove)
-            .on('touchmove', onDragMove);
+        this.container.on('pointerdown', onDragStart)
+            .on('pointerup', onDragEnd)
+            .on('pointerupoutside', onDragEnd)
+            .on('pointermove', onDragMove);
 
         this.mapContainer = new PIXI.Container();
         // Nebulae are background artwork, so they go under the territory
@@ -371,19 +369,31 @@ class SystemGraph {
             const container = new PIXI.Container();
             const circleContainer = new PIXI.Container();
             container.addChild(circleContainer);
-            circleContainer.interactive = true;
-            circleContainer.on('click', () => {
+            circleContainer.eventMode = 'static';
+            circleContainer.cursor = 'pointer';
+            circleContainer.hitArea = new PIXI.Circle(0, 0, Math.max(14, 4.5 * this.scale + 5));
+
+            const onSelect = (e: PIXI.FederatedPointerEvent) => {
+                if (this.dragMoved) return;
+                e.stopPropagation();
                 this.onClickSystem(s.id);
-            });
+            };
+
+            circleContainer.on('pointertap', onSelect);
+            circleContainer.on('click', onSelect);
             circleContainer.addChild(graphics);
 
             const nameText = new PIXI.Text({ text: s.name, style: SYSTEM_TEXT });
             nameText.position.x = 10;
             nameText.anchor.y = 0.5;
+            nameText.eventMode = 'static';
+            nameText.cursor = 'pointer';
+            nameText.on('pointertap', onSelect);
+            nameText.on('click', onSelect);
             container.addChild(nameText);
 
             this.mapContainer.addChild(container);
-            return [s.id, [container, graphics]]
+            return [s.id, [container, graphics]];
         }));
 
         this.draw();
@@ -453,11 +463,6 @@ class SystemGraph {
     }
 
     draw(scale = this.scale) {
-        if (typeof (this.mapContainer as any).cacheAsTexture === 'function') {
-            (this.mapContainer as any).cacheAsTexture(false);
-        } else {
-            (this.mapContainer as any).cacheAsBitmap = false;
-        }
         this.scale = clampMapScale(scale);
         this.graphics.clear();
         this.placeNebulae();
@@ -465,11 +470,6 @@ class SystemGraph {
         this.drawLinks();
         this.drawRoute();
         this.placeSystems();
-        if (typeof (this.mapContainer as any).cacheAsTexture === 'function') {
-            (this.mapContainer as any).cacheAsTexture(true);
-        } else {
-            (this.mapContainer as any).cacheAsBitmap = true;
-        }
     }
 
     bindWheel() {
@@ -490,18 +490,23 @@ class SystemGraph {
 
     private onDragStart(event: PIXI.FederatedPointerEvent) {
         const dragPos = this.container.toLocal(event.global);
+        this.dragStartPos = { x: dragPos.x, y: dragPos.y };
+        this.dragMoved = false;
         const offset = new PIXI.Point(
             this.mapContainer.position.x - dragPos.x,
             this.mapContainer.position.y - dragPos.y,
         );
         this.dragData = {
             offset,
-        }
+        };
     }
 
     private onDragMove(event: PIXI.FederatedPointerEvent) {
         if (this.dragData) {
             const dragPos = this.container.toLocal(event.global);
+            if (Math.hypot(dragPos.x - this.dragStartPos.x, dragPos.y - this.dragStartPos.y) > 4) {
+                this.dragMoved = true;
+            }
             this.mapContainer.position.set(
                 dragPos.x + this.dragData.offset.x,
                 dragPos.y + this.dragData.offset.y,
@@ -510,14 +515,10 @@ class SystemGraph {
     }
 
     private updateTransform() {
-        // Since the map is cached as a bitmap, this updates the positions
-        // of the system circles so they can be clicked again.
-        this.mapContainer.updateLocalTransform();
     }
 
     private onDragEnd() {
         this.dragData = undefined;
-        this.updateTransform();
     }
 
     private onWheel(event: PIXI.FederatedWheelEvent) {
@@ -635,6 +636,10 @@ class SystemGraph {
             graphics.clear();
             drawSystem(system, graphics, this.scale, this.currentSystem, this.missionMarkers.get(id), this.playerMarkers.get(id));
             container.position.set(...pos);
+            const circleContainer = container.children[0] as PIXI.Container | undefined;
+            if (circleContainer && circleContainer.hitArea instanceof PIXI.Circle) {
+                circleContainer.hitArea.radius = Math.max(14, 4.5 * this.scale + 5);
+            }
         }
     }
 
@@ -739,7 +744,10 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
         );
         //this.container.alpha = 0.5;
         const buttons = {
-            done: new Button(gameData, "Done", 120, { x: 150, y: 220 }),
+            done: new Button(gameData, "Done", STARMAP_LAYOUT.doneButton.width, {
+                x: STARMAP_LAYOUT.doneButton.x,
+                y: STARMAP_LAYOUT.doneButton.y,
+            }),
         };
         this.addButtons(buttons);
 
