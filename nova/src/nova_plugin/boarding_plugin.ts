@@ -110,8 +110,8 @@ export const BoardingOutcomeEvent =
  * Why a boarding attempt did nothing. Local to the pilot's own client: it is
  * feedback, not game state, and never crosses the network.
  */
-export const BoardingNoticeComponent =
-    new Component<{ text: string }>('BoardingNoticeComponent');
+import { BoardingNoticeComponent } from './boarding_notice';
+export { BoardingNoticeComponent };
 
 const DudeSource = t.type({ id: t.string });
 export type DudeSource = t.TypeOf<typeof DudeSource>;

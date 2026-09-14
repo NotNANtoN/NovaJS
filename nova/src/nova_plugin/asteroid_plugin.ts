@@ -6,6 +6,7 @@ import { DestructionStartedComponent } from './destruction_state';
 import { SoundEvent } from './sound_event';
 import { HitboxHullComponent, UpdateHitboxHullSystem } from './collisions_plugin';
 import { ShipComponent, ShipDataComponent } from './ship_plugin';
+import { BoardingNoticeComponent } from './boarding_notice';
 import { OutfitsStateComponent } from './outfit_plugin';
 import { ShieldComponent } from './health_plugin';
 import { Component } from 'nova_ecs/component';
@@ -373,8 +374,8 @@ const OreCollectorsQuery = new Query([
 const OrePickupSystem = new System({
     name: 'OrePickupSystem',
     args: [OreComponent, MovementStateComponent, UUID, Entities,
-        OreCollectorsQuery, MultiplayerData, PlatformResource] as const,
-    step(ore, movement, selfUuid, entities, collectors, multiplayer, platform) {
+        OreCollectorsQuery, MultiplayerData, PlatformResource, Emit] as const,
+    step(ore, movement, selfUuid, entities, collectors, multiplayer, platform, emit) {
         if (platform !== 'node' || multiplayer.owner !== 'server') {
             return;
         }
@@ -404,6 +405,14 @@ const OrePickupSystem = new System({
                 commodity: ore.commodity,
                 tons: room,
                 isMissionCargo: false,
+            });
+
+            collectorEntity.components.set(BoardingNoticeComponent, {
+                text: `Scooped ${room}t ${ore.commodity}.`,
+            });
+            SoundEvent.emit(emit, {
+                id: 'nova:150',
+                position: collectorMovement.position,
             });
 
             if (room >= ore.tons) {

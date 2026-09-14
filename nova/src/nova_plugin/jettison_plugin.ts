@@ -20,7 +20,7 @@ import { EntityBudgetResource, reserveEntity } from './entity_budget';
 import { PlatformResource } from './platform_plugin';
 import { PlayerShipSelector } from './player_ship_plugin';
 import { PlayerStateComponent, releaseCargo } from './player_state';
-import { BoardingNoticeComponent } from './boarding_plugin';
+import { BoardingNoticeComponent } from './boarding_notice';
 import { makeOre } from './asteroid_plugin';
 
 export const JettisonRequest = t.type({

@@ -321,6 +321,7 @@ export class Outfitter extends Menu<OutfitsState> {
         }
 
         if (boughtCount > 0) {
+            this.playUiSound('nova:150');
             this.itemGrid?.setCounts(this.outfits);
             this.updateCreditsText();
             this.setFreeMassText();
@@ -368,6 +369,7 @@ export class Outfitter extends Menu<OutfitsState> {
             soldCount++;
         }
         if (soldCount > 0) {
+            this.playUiSound('nova:151');
             this.itemGrid?.setCounts(this.outfits);
             this.updateCreditsText();
             this.setFreeMassText();
@@ -416,10 +418,17 @@ export class Outfitter extends Menu<OutfitsState> {
             }
         }
         if (boughtAny) {
+            this.playUiSound('nova:150');
             this.itemGrid?.setCounts(this.outfits);
             this.updateCreditsText();
             this.setFreeMassText();
         }
+    }
+
+    private playUiSound(id: string) {
+        void this.gameData.data.Sound?.get(id).then(sound => {
+            sound.play({ volume: 0.8 });
+        }).catch(() => {});
     }
 
     private syncCombatAmmo(): void {

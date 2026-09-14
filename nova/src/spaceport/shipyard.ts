@@ -304,6 +304,14 @@ export class Shipyard extends Menu<Entity> {
         // For convenience
         (window as any).myShip = this.input;
         this.updateCreditsText();
+        this.playUiSound('nova:150');
+        this.playUiSound('nova:390');
+    }
+
+    private playUiSound(id: string) {
+        void this.gameData.data.Sound?.get(id).then(sound => {
+            sound.play({ volume: 0.8 });
+        }).catch(() => {});
     }
 
     private updateCreditsText() {

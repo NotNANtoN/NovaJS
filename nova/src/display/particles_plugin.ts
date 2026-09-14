@@ -10,6 +10,7 @@ import { SingletonComponent } from "nova_ecs/world";
 import * as PIXI from "pixi.js";
 import { ProjectileDataComponent } from "../nova_plugin/projectile_data";
 import { ProjectileCollisionEvent } from "../nova_plugin/projectile_plugin";
+import { ShipComponent } from "../nova_plugin/ship_plugin";
 import { Space } from "./space_resource";
 import { attachGraphic, ManagedGraphic } from './managed_graphic';
 
@@ -123,6 +124,46 @@ const HitEmitterSystem = new System({
     }
 });
 
+const ShipExhaustParticleSystem = new System({
+    name: "ShipExhaustParticleSystem",
+    args: [ShipComponent, MovementStateComponent,
+        ParticleContainerResource, ActiveParticlesResource, TimeResource] as const,
+    step(_ship, movementState, container, activeList, time) {
+        if (movementState.accelerating <= 0 || !movementState.position) return;
+        if (activeList.length >= 20_000) return;
+        if (time.frame % 2 !== 0) return;
+
+        const forward = movementState.rotation.getUnitVector();
+        const offset = 18;
+        const originX = movementState.position.x - forward.x * offset;
+        const originY = movementState.position.y - forward.y * offset;
+
+        const spreadAngle = (Math.random() - 0.5) * 0.4;
+        const exhaustSpeed = 60 + Math.random() * 40;
+        const backX = -forward.x * exhaustSpeed + forward.y * spreadAngle * exhaustSpeed;
+        const backY = -forward.y * exhaustSpeed - forward.x * spreadAngle * exhaustSpeed;
+
+        const lifetime = 0.35 + Math.random() * 0.15;
+        const particle = new PIXI.Particle({
+            texture: PIXI.Texture.WHITE,
+            x: originX,
+            y: originY,
+            scaleX: 1.8,
+            scaleY: 1.8,
+            tint: 0x58c0ff,
+            alpha: 0.85,
+        });
+        container.addParticle(particle);
+        activeList.push({
+            particle,
+            vx: movementState.velocity.x * 0.3 + backX,
+            vy: movementState.velocity.y * 0.3 + backY,
+            lifetime,
+            maxLifetime: lifetime,
+        });
+    },
+});
+
 const ParticleUpdateSystem = new System({
     name: "ParticleUpdateSystem",
     args: [ParticleContainerResource, ActiveParticlesResource, TimeResource, SingletonComponent] as const,
@@ -164,6 +205,7 @@ export const ParticlesPlugin: Plugin = {
         world.addSystem(HitParticlesProvider);
         world.addSystem(TrailEmitterSystem);
         world.addSystem(HitEmitterSystem);
+        world.addSystem(ShipExhaustParticleSystem);
         world.addSystem(ParticleUpdateSystem);
     },
     remove(world) {
@@ -171,6 +213,7 @@ export const ParticlesPlugin: Plugin = {
         world.removeSystem(HitParticlesProvider);
         world.removeSystem(TrailEmitterSystem);
         world.removeSystem(HitEmitterSystem);
+        world.removeSystem(ShipExhaustParticleSystem);
         world.removeSystem(ParticleUpdateSystem);
 
         const container = world.resources.get(ParticleContainerResource);
