@@ -43,7 +43,8 @@ export async function ShanParse(shan: ShanResource, notFoundFunction: (message: 
         let blendMode = BLEND_MODES.NORMAL;
         if (imageName === "lightImage"
             || imageName === "glowImage"
-            || imageName === "weapImage") {
+            || imageName === "weapImage"
+            || imageName === "shieldImage") {
             blendMode = BLEND_MODES.ADD;
         }
 

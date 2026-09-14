@@ -295,8 +295,8 @@ export class Bar extends MissionBoard {
     }
 
     private renderFlavor() {
+        const playerState = this.input?.components?.get(PlayerStateComponent);
         if (this.flavorKind === 'rumors' || this.flavorKind === 'leads') {
-            const playerState = this.input?.components?.get(PlayerStateComponent);
             this.content.text = barRumorText({
                 planetName: this.currentPlanetId,
                 credits: playerState?.credits,
@@ -304,11 +304,19 @@ export class Bar extends MissionBoard {
                 missionBits: playerState?.missionBits,
             }, this.flavorIndex);
         } else {
-            this.content.text = barFlavorText(
+            const text = barFlavorText(
                 this.retailStrings,
                 this.flavorKind,
                 this.flavorIndex,
-            ) ?? '';
+            );
+            this.content.text = (text && text.trim().length > 0)
+                ? text
+                : barRumorText({
+                    planetName: this.currentPlanetId,
+                    credits: playerState?.credits,
+                    combatRating: playerState?.kills,
+                    missionBits: playerState?.missionBits,
+                }, this.flavorIndex);
         }
     }
 }

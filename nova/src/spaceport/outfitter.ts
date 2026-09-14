@@ -61,13 +61,27 @@ export class Outfitter extends Menu<OutfitsState> {
 
         this.outfits = new DefaultMap(() => 0);
         const buttons = {
-            buy: new Button(gameData, "Buy", 60, { x: -100, y: 126 }),
-            sell: new Button(gameData, "Sell", 60, { x: 0, y: 126 }),
-            done: new Button(gameData, "Done", 60, { x: 100, y: 126 })
+            buy: new Button(gameData, "Buy", 50, { x: -140, y: 126 }),
+            sell: new Button(gameData, "Sell", 50, { x: -50, y: 126 }),
+            refill: new Button(gameData, "Refill Ammo", 80, { x: 50, y: 126 }),
+            done: new Button(gameData, "Done", 50, { x: 145, y: 126 })
         };
 
-        buttons.buy.click.subscribe(this.buyOutfit.bind(this));
-        buttons.sell.click.subscribe(this.sellOutfit.bind(this));
+        buttons.buy.click.subscribe((event?: any) => {
+            const shift = event?.shiftKey;
+            const alt = event?.altKey;
+            const count = (shift && alt) ? 50 : (alt ? 25 : (shift ? 5 : 1));
+            void this.buyOutfit(count);
+        });
+        buttons.sell.click.subscribe((event?: any) => {
+            const shift = event?.shiftKey;
+            const alt = event?.altKey;
+            const count = (shift && alt) ? 50 : (alt ? 25 : (shift ? 5 : 1));
+            void this.sellOutfit(count);
+        });
+        buttons.refill.click.subscribe(() => {
+            void this.refillAmmo();
+        });
         buttons.done.click.subscribe(this.done.bind(this));
         this.addButtons(buttons);
 
@@ -124,8 +138,8 @@ export class Outfitter extends Menu<OutfitsState> {
             right: () => itemGrid.right(),
             up: () => itemGrid.up(),
             down: () => itemGrid.down(),
-            buy: this.buyOutfit.bind(this),
-            sell: this.sellOutfit.bind(this),
+            buy: () => void this.buyOutfit(1),
+            sell: () => void this.sellOutfit(1),
             depart: this.done.bind(this),
         };
     }
@@ -229,82 +243,91 @@ export class Outfitter extends Menu<OutfitsState> {
         return count;
     }
 
-    private async buyOutfit() {
+    private async buyOutfit(quantity = 1) {
         if (this.combatBusy) return;
         const outfit = this.itemGrid?.selection;
         if (!outfit) {
             return;
         }
-        const currentCount = this.outfits.get(outfit.id);
-        if (outfit.max > 0 && currentCount >= outfit.max) {
-            console.warn(`Already at maximum (${outfit.max}) for outfit ${outfit.id}.`);
-            return;
-        }
-        if (this.shipData && outfit.flags) {
-            if ((outfit.flags & 0x0001) !== 0 && this.getInstalledGunCount() >= this.shipData.maxGuns) {
-                console.warn(`No fixed gun mounts available (max: ${this.shipData.maxGuns}).`);
-                return;
+        let boughtCount = 0;
+        for (let q = 0; q < quantity; q++) {
+            const currentCount = this.outfits.get(outfit.id);
+            if (outfit.max > 0 && currentCount >= outfit.max) {
+                if (q === 0) console.warn(`Already at maximum (${outfit.max}) for outfit ${outfit.id}.`);
+                break;
             }
-            if ((outfit.flags & 0x0002) !== 0 && this.getInstalledTurretCount() >= this.shipData.maxTurrets) {
-                console.warn(`No turret mounts available (max: ${this.shipData.maxTurrets}).`);
-                return;
+            if (this.shipData && outfit.flags) {
+                if ((outfit.flags & 0x0001) !== 0 && this.getInstalledGunCount() >= this.shipData.maxGuns) {
+                    if (q === 0) console.warn(`No fixed gun mounts available (max: ${this.shipData.maxGuns}).`);
+                    break;
+                }
+                if ((outfit.flags & 0x0002) !== 0 && this.getInstalledTurretCount() >= this.shipData.maxTurrets) {
+                    if (q === 0) console.warn(`No turret mounts available (max: ${this.shipData.maxTurrets}).`);
+                    break;
+                }
             }
-        }
-        const mass = outfit.physics.freeMass ?? 0;
-        if (mass > 0 && mass > this.getAvailableMass()) {
-            console.warn(`Not enough free mass to install outfit ${outfit.id}.`);
-            return;
-        }
-        const price = Math.max(0, Math.floor(outfit.price));
-        if (!this.playerState) {
-            console.warn('Cannot buy outfit without player state.');
-            return;
-        }
-        if (this.planetData && !isPurchaseAvailable(
-            outfit,
-            this.planetData,
-            this.playerState,
-            this.outfits,
-        )) {
-            console.warn(`Outfit ${outfit.id} is not available here.`);
-            return;
-        }
-        if (this.playerState.credits < price) {
-            console.warn(`Not enough credits to buy outfit ${outfit.id}`);
-            return;
-        }
-        if (this.playerState.combatResources?.ammo[outfit.id] !== undefined) {
-            this.combatBusy = true;
-            try {
-                await combatShopTransaction(this.playerState, this.planetData!.id, 'buy', outfit.id, this.outfits);
-            } catch (error) {
-                this.syncCombatAmmo();
-                console.warn('Ammo purchase rejected', error);
-                return;
-            } finally { this.combatBusy = false; }
-        } else {
-            this.playerState.credits -= price;
-        }
-        // EV Nova Bible: flag 0x0010 removes any items of this type after purchase
-        // (used for permits/licenses that grant bits or trigger events).
-        if (!outfit.flags || (outfit.flags & 0x0010) === 0) {
-            this.outfits.set(outfit.id, this.playerState.combatResources?.ammo[outfit.id] ?? currentCount + 1);
-        }
-        if (outfit.onPurchase) {
-            try {
-                const ops = parseSetExpression(outfit.onPurchase);
-                executeSetOperations(ops, this.playerState.missionBits);
-            } catch (e) {
-                console.warn('Failed to execute onPurchase expression', e);
+            const mass = outfit.physics.freeMass ?? 0;
+            if (mass > 0 && mass > this.getAvailableMass()) {
+                if (q === 0) console.warn(`Not enough free mass to install outfit ${outfit.id}.`);
+                break;
+            }
+            const price = Math.max(0, Math.floor(outfit.price));
+            if (!this.playerState) {
+                console.warn('Cannot buy outfit without player state.');
+                break;
+            }
+            if (this.planetData && !isPurchaseAvailable(
+                outfit,
+                this.planetData,
+                this.playerState,
+                this.outfits,
+            )) {
+                if (q === 0) console.warn(`Outfit ${outfit.id} is not available here.`);
+                break;
+            }
+            if (this.playerState.credits < price) {
+                if (q === 0) console.warn(`Not enough credits to buy outfit ${outfit.id}`);
+                break;
+            }
+            if (this.playerState.combatResources?.ammo[outfit.id] !== undefined) {
+                this.combatBusy = true;
+                try {
+                    await combatShopTransaction(this.playerState, this.planetData!.id, 'buy', outfit.id, this.outfits);
+                } catch (error) {
+                    this.syncCombatAmmo();
+                    console.warn('Ammo purchase rejected', error);
+                    break;
+                } finally { this.combatBusy = false; }
+            } else {
+                this.playerState.credits -= price;
+            }
+            // EV Nova Bible: flag 0x0010 removes any items of this type after purchase
+            // (used for permits/licenses that grant bits or trigger events).
+            if (!outfit.flags || (outfit.flags & 0x0010) === 0) {
+                this.outfits.set(outfit.id, this.playerState.combatResources?.ammo[outfit.id] ?? currentCount + 1);
+            }
+            if (outfit.onPurchase) {
+                try {
+                    const ops = parseSetExpression(outfit.onPurchase);
+                    executeSetOperations(ops, this.playerState.missionBits);
+                } catch (e) {
+                    console.warn('Failed to execute onPurchase expression', e);
+                }
+            }
+            boughtCount++;
+            if (outfit.flags && (outfit.flags & 0x0010) !== 0) {
+                break;
             }
         }
 
-        this.itemGrid?.setCounts(this.outfits);
-        this.updateCreditsText();
-        this.setFreeMassText();
+        if (boughtCount > 0) {
+            this.itemGrid?.setCounts(this.outfits);
+            this.updateCreditsText();
+            this.setFreeMassText();
+        }
     }
 
-    private async sellOutfit() {
+    private async sellOutfit(quantity = 1) {
         if (this.combatBusy) return;
         const outfit = this.itemGrid?.selection;
         if (!outfit) {
@@ -316,33 +339,87 @@ export class Outfitter extends Menu<OutfitsState> {
             return;
         }
         const id = outfit.id;
-        const currentCount = this.outfits.get(id);
-        if (currentCount <= 0) {
-            return;
+        let soldCount = 0;
+        for (let q = 0; q < quantity; q++) {
+            const currentCount = this.outfits.get(id);
+            if (currentCount <= 0) {
+                break;
+            }
+            if (!this.playerState) {
+                console.warn('Cannot sell outfit without player state.');
+                break;
+            }
+            if (this.playerState.combatResources?.ammo[id] !== undefined) {
+                this.combatBusy = true;
+                try {
+                    await combatShopTransaction(this.playerState, this.planetData!.id, 'sell', id, this.outfits);
+                } catch (error) {
+                    this.syncCombatAmmo();
+                    console.warn('Ammo sale rejected', error);
+                    break;
+                } finally { this.combatBusy = false; }
+            } else {
+                this.playerState.credits += Math.floor(Math.max(0, outfit.price) * 0.25);
+            }
+            this.outfits.set(id, this.playerState.combatResources?.ammo[id] ?? currentCount - 1);
+            if (this.outfits.get(id) === 0) {
+                this.outfits.delete(id);
+            }
+            soldCount++;
         }
-        if (!this.playerState) {
-            console.warn('Cannot sell outfit without player state.');
-            return;
+        if (soldCount > 0) {
+            this.itemGrid?.setCounts(this.outfits);
+            this.updateCreditsText();
+            this.setFreeMassText();
         }
-        if (this.playerState.combatResources?.ammo[id] !== undefined) {
-            this.combatBusy = true;
-            try {
-                await combatShopTransaction(this.playerState, this.planetData!.id, 'sell', id, this.outfits);
-            } catch (error) {
-                this.syncCombatAmmo();
-                console.warn('Ammo sale rejected', error);
-                return;
-            } finally { this.combatBusy = false; }
-        } else {
-            this.playerState.credits += Math.floor(Math.max(0, outfit.price) * 0.25);
+    }
+
+    private async refillAmmo() {
+        if (this.combatBusy || !this.playerState || !this.planetData) return;
+        const ammoResources = this.playerState.combatResources?.ammo;
+        if (!ammoResources) return;
+
+        let boughtAny = false;
+        for (const [ammoId, count] of Object.entries(ammoResources)) {
+            let outfit = this.outfitDataMap.get(ammoId);
+            if (!outfit) {
+                try {
+                    outfit = await this.gameData.data.Outfit.get(ammoId);
+                } catch {
+                    continue;
+                }
+            }
+            if (!outfit) continue;
+            const max = outfit.max ?? 1;
+            let currentCount = this.outfits.get(ammoId) || count;
+            if (max <= 0 || currentCount >= max) continue;
+            if (!isPurchaseAvailable(outfit, this.planetData, this.playerState, this.outfits)) continue;
+
+            const needed = max - currentCount;
+            for (let i = 0; i < needed; i++) {
+                if (this.playerState.credits < outfit.price) break;
+                const mass = outfit.physics.freeMass ?? 0;
+                if (mass > 0 && mass > this.getAvailableMass()) break;
+                this.combatBusy = true;
+                try {
+                    await combatShopTransaction(this.playerState, this.planetData.id, 'buy', outfit.id, this.outfits);
+                    currentCount++;
+                    this.outfits.set(ammoId, this.playerState.combatResources?.ammo[ammoId] ?? currentCount);
+                    boughtAny = true;
+                } catch (error) {
+                    this.syncCombatAmmo();
+                    console.warn('Refill ammo rejected', error);
+                    break;
+                } finally {
+                    this.combatBusy = false;
+                }
+            }
         }
-        this.outfits.set(id, this.playerState.combatResources?.ammo[id] ?? currentCount - 1);
-        if (this.outfits.get(id) === 0) {
-            this.outfits.delete(id);
+        if (boughtAny) {
+            this.itemGrid?.setCounts(this.outfits);
+            this.updateCreditsText();
+            this.setFreeMassText();
         }
-        this.itemGrid?.setCounts(this.outfits);
-        this.updateCreditsText();
-        this.setFreeMassText();
     }
 
     private syncCombatAmmo(): void {

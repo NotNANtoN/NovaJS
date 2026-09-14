@@ -1,8 +1,10 @@
 import { Plugin } from "nova_ecs/plugin";
+import { Optional } from "nova_ecs/optional";
+import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
 import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { System } from "nova_ecs/system";
 import { GameDataResource } from "../nova_plugin/game_data_resource";
-import { IonizationColorComponent } from "../nova_plugin/health_plugin";
+import { IonizationColorComponent, ShieldComponent } from "../nova_plugin/health_plugin";
 import { IsIonizedComponent } from "../nova_plugin/ionization_plugin";
 import { ShipComponent } from "../nova_plugin/ship_plugin";
 import { WeaponsStateComponent } from "../nova_plugin/weapons_state";
@@ -11,13 +13,51 @@ import { AnimationGraphicComponent } from "./animation_graphic_plugin";
 
 export const ShipAnimationSystem = new System({
     name: "ShipAnimationSystem",
-    args: [ShipComponent, WeaponsStateComponent, GameDataResource, AnimationGraphicComponent, TimeResource, IsIonizedComponent, IonizationColorComponent] as const,
-    step(ship, weaponStates, gameData, animation, time, ionized, ionizationColor) {
-        // For now, always hide the ship's shield.
-        // TODO: Blink this when hit.
+    args: [
+        ShipComponent,
+        WeaponsStateComponent,
+        GameDataResource,
+        AnimationGraphicComponent,
+        TimeResource,
+        IsIonizedComponent,
+        IonizationColorComponent,
+        Optional(MovementStateComponent),
+        Optional(ShieldComponent),
+    ] as const,
+    step(ship, weaponStates, gameData, animation, time, ionized, ionizationColor, movement, shieldStat) {
+        // Shield flash animation on taking damage
         const shield = animation.sprites.get('shieldImage');
         if (shield) {
-            shield.pixiSprite.visible = false;
+            shield.pixiSprite.blendMode = 'add';
+            if (shieldStat) {
+                const prev = (shieldStat as any)._prevAnimShield ?? shieldStat.current;
+                (shieldStat as any)._prevAnimShield = shieldStat.current;
+                if (shieldStat.current < prev && shieldStat.current > 0) {
+                    (shieldStat as any)._flashUntil = time.time + 160;
+                }
+                const flashUntil = (shieldStat as any)._flashUntil ?? 0;
+                if (time.time < flashUntil) {
+                    shield.pixiSprite.visible = true;
+                    shield.pixiSprite.alpha = Math.max(0, Math.min(1, (flashUntil - time.time) / 160));
+                } else {
+                    shield.pixiSprite.visible = false;
+                }
+            } else {
+                shield.pixiSprite.visible = false;
+            }
+        }
+
+        // Engine glow animation while accelerating
+        const glow = animation.sprites.get('glowImage');
+        if (glow) {
+            glow.pixiSprite.blendMode = 'add';
+            if (movement && movement.accelerating > 0) {
+                glow.pixiSprite.visible = true;
+                // Subtle engine exhaust flicker
+                glow.pixiSprite.alpha = 0.85 + Math.sin(time.time * 0.04) * 0.15;
+            } else {
+                glow.pixiSprite.visible = false;
+            }
         }
 
         // Show the ship's weapon image iff a weapon is firing.
