@@ -1,5 +1,6 @@
 import { ParticleConfig } from "novadatainterface/WeaponData";
 import { Component } from "nova_ecs/component";
+import { Optional } from "nova_ecs/optional";
 import { Plugin } from "nova_ecs/plugin";
 import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
 import { TimeResource } from "nova_ecs/plugins/time_plugin";
@@ -11,6 +12,8 @@ import * as PIXI from "pixi.js";
 import { ProjectileDataComponent } from "../nova_plugin/projectile_data";
 import { ProjectileCollisionEvent } from "../nova_plugin/projectile_plugin";
 import { ShipComponent } from "../nova_plugin/ship_plugin";
+import { DisabledComponent } from "../nova_plugin/death_plugin";
+import { IsIonizedComponent } from "../nova_plugin/ionization_plugin";
 import { Space } from "./space_resource";
 import { attachGraphic, ManagedGraphic } from './managed_graphic';
 
@@ -164,6 +167,59 @@ const ShipExhaustParticleSystem = new System({
     },
 });
 
+const DisabledShipSparkSystem = new System({
+    name: "DisabledShipSparkSystem",
+    args: [
+        ShipComponent,
+        MovementStateComponent,
+        Optional(DisabledComponent),
+        Optional(IsIonizedComponent),
+        ParticleContainerResource,
+        ActiveParticlesResource,
+        TimeResource,
+    ] as const,
+    step(_ship, movementState, disabled, ionized, container, activeList, time) {
+        const isDamaged = Boolean(disabled) || Boolean(ionized);
+        if (!isDamaged || !movementState.position) return;
+        if (activeList.length >= 20_000) return;
+
+        // Occasional electrical plasma arcs (approx ~12% chance per frame)
+        if (Math.random() > 0.12) return;
+
+        const count = 1 + (Math.random() < 0.25 ? 1 : 0);
+        for (let i = 0; i < count; i++) {
+            const radius = 8 + Math.random() * 20;
+            const posAngle = Math.random() * Math.PI * 2;
+            const sparkX = movementState.position.x + Math.cos(posAngle) * radius;
+            const sparkY = movementState.position.y + Math.sin(posAngle) * radius;
+
+            const ejectAngle = Math.random() * Math.PI * 2;
+            const speed = 25 + Math.random() * 35;
+            const lifetime = 0.10 + Math.random() * 0.15;
+            const tints = ionized ? [0xa040ff, 0xd070ff, 0x7020ff] : [0x60d0ff, 0x90f0ff, 0xffe060];
+            const tint = tints[Math.floor(Math.random() * tints.length)]!;
+
+            const particle = new PIXI.Particle({
+                texture: PIXI.Texture.WHITE,
+                x: sparkX,
+                y: sparkY,
+                scaleX: 1.5,
+                scaleY: 1.5,
+                tint,
+                alpha: 1,
+            });
+            container.addParticle(particle);
+            activeList.push({
+                particle,
+                vx: movementState.velocity.x * 0.5 + Math.cos(ejectAngle) * speed,
+                vy: movementState.velocity.y * 0.5 + Math.sin(ejectAngle) * speed,
+                lifetime,
+                maxLifetime: lifetime,
+            });
+        }
+    },
+});
+
 const ParticleUpdateSystem = new System({
     name: "ParticleUpdateSystem",
     args: [ParticleContainerResource, ActiveParticlesResource, TimeResource, SingletonComponent] as const,
@@ -206,6 +262,7 @@ export const ParticlesPlugin: Plugin = {
         world.addSystem(TrailEmitterSystem);
         world.addSystem(HitEmitterSystem);
         world.addSystem(ShipExhaustParticleSystem);
+        world.addSystem(DisabledShipSparkSystem);
         world.addSystem(ParticleUpdateSystem);
     },
     remove(world) {
@@ -214,6 +271,7 @@ export const ParticlesPlugin: Plugin = {
         world.removeSystem(TrailEmitterSystem);
         world.removeSystem(HitEmitterSystem);
         world.removeSystem(ShipExhaustParticleSystem);
+        world.removeSystem(DisabledShipSparkSystem);
         world.removeSystem(ParticleUpdateSystem);
 
         const container = world.resources.get(ParticleContainerResource);

@@ -62,6 +62,10 @@ const ASTEROID_MAX_SPIN = 0.6;
 const ORE_DRIFT_SPEED = 18;
 /** How close a ship must be to scoop ore, in engine units. */
 const ORE_PICKUP_RADIUS = 60;
+/** Magnetic scoop tractor attraction radius. */
+const ORE_MAGNET_RADIUS = 180;
+/** Magnetic tractor acceleration rate. */
+const ORE_MAGNET_ACCEL = 160;
 /** Ore is spread over at most this many chunks. */
 const MAX_ORE_CHUNKS = 4;
 
@@ -380,9 +384,22 @@ const OrePickupSystem = new System({
             return;
         }
         for (const [collectorMovement, playerState, cargoScoop, collectorEntity, shield] of collectors) {
-            const distance = collectorMovement.position
-                .subtract(movement.position).length;
+            const delta = collectorMovement.position.subtract(movement.position);
+            const distance = delta.length;
+            if (distance > ORE_MAGNET_RADIUS) {
+                continue;
+            }
+
+            // Magnetic scoop tractor field pulls ore toward the ship
             if (distance > ORE_PICKUP_RADIUS) {
+                if (cargoScoop && cargoScoop.enabled && getFreeSpace(playerState) > 0) {
+                    const pull = delta.normalize().scale(ORE_MAGNET_ACCEL * 0.016);
+                    movement.velocity = movement.velocity.add(pull);
+                    const speed = movement.velocity.length;
+                    if (speed > 120) {
+                        movement.velocity = movement.velocity.normalize().scale(120);
+                    }
+                }
                 continue;
             }
 
