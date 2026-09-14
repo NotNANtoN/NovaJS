@@ -12,8 +12,9 @@ import * as PIXI from "pixi.js";
 import { ProjectileDataComponent } from "../nova_plugin/projectile_data";
 import { ProjectileCollisionEvent } from "../nova_plugin/projectile_plugin";
 import { ShipComponent } from "../nova_plugin/ship_plugin";
-import { DisabledComponent } from "../nova_plugin/death_plugin";
+import { DamagedEvent, DisabledComponent } from "../nova_plugin/death_plugin";
 import { IsIonizedComponent } from "../nova_plugin/ionization_plugin";
+import { AsteroidComponent, AsteroidDataComponent } from "../nova_plugin/asteroid_plugin";
 import { Space } from "./space_resource";
 import { attachGraphic, ManagedGraphic } from './managed_graphic';
 
@@ -220,6 +221,45 @@ const DisabledShipSparkSystem = new System({
     },
 });
 
+const AsteroidDamageDustSystem = new System({
+    name: "AsteroidDamageDustSystem",
+    events: [DamagedEvent],
+    args: [
+        AsteroidComponent,
+        Optional(AsteroidDataComponent),
+        MovementStateComponent,
+        ParticleContainerResource,
+        ActiveParticlesResource,
+    ] as const,
+    step(_asteroid, asteroidData, movementState, container, activeList) {
+        if (!movementState.position || activeList.length >= 20_000) return;
+        const count = 10;
+        const color = asteroidData?.color ?? 0x8b7d6b;
+        for (let i = 0; i < count; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const speed = 35 + Math.random() * 55;
+            const lifetime = 0.35 + Math.random() * 0.30;
+            const particle = new PIXI.Particle({
+                texture: PIXI.Texture.WHITE,
+                x: movementState.position.x + (Math.random() - 0.5) * 16,
+                y: movementState.position.y + (Math.random() - 0.5) * 16,
+                scaleX: 1.8,
+                scaleY: 1.8,
+                tint: color,
+                alpha: 0.85,
+            });
+            container.addParticle(particle);
+            activeList.push({
+                particle,
+                vx: movementState.velocity.x * 0.4 + Math.cos(angle) * speed,
+                vy: movementState.velocity.y * 0.4 + Math.sin(angle) * speed,
+                lifetime,
+                maxLifetime: lifetime,
+            });
+        }
+    },
+});
+
 const ParticleUpdateSystem = new System({
     name: "ParticleUpdateSystem",
     args: [ParticleContainerResource, ActiveParticlesResource, TimeResource, SingletonComponent] as const,
@@ -263,6 +303,7 @@ export const ParticlesPlugin: Plugin = {
         world.addSystem(HitEmitterSystem);
         world.addSystem(ShipExhaustParticleSystem);
         world.addSystem(DisabledShipSparkSystem);
+        world.addSystem(AsteroidDamageDustSystem);
         world.addSystem(ParticleUpdateSystem);
     },
     remove(world) {
@@ -272,6 +313,7 @@ export const ParticlesPlugin: Plugin = {
         world.removeSystem(HitEmitterSystem);
         world.removeSystem(ShipExhaustParticleSystem);
         world.removeSystem(DisabledShipSparkSystem);
+        world.removeSystem(AsteroidDamageDustSystem);
         world.removeSystem(ParticleUpdateSystem);
 
         const container = world.resources.get(ParticleContainerResource);

@@ -22,6 +22,7 @@ import { ProjectileComponent } from "../nova_plugin/projectile_data";
 import { ReturnToQueueComponent } from "../nova_plugin/return_to_queue_plugin";
 import { ShipComponent } from "../nova_plugin/ship_plugin";
 import { CloakStateComponent, CLOAKED_ALPHA } from "../nova_plugin/cloaking_plugin";
+import { AsteroidTumbleSystem, OreTumbleSystem } from "../nova_plugin/asteroid_plugin";
 import { AnimationGraphic } from "./animation_graphic";
 import { FireLogSpawnSystem } from '../nova_plugin/weapon_plugin';
 import { Space } from "./space_resource";
@@ -132,7 +133,7 @@ export const ObjectDrawSystem = new System({
         graphic.container.position.y = movementState.position.y;
         graphic.rotation = movementState.rotation.angle;
     },
-    after: [MovementSystem, RemoteMovementPresentationSystem, FireLogSpawnSystem],
+    after: [MovementSystem, RemoteMovementPresentationSystem, FireLogSpawnSystem, AsteroidTumbleSystem, OreTumbleSystem],
 });
 
 const AnimationGraphicCleanup = new System({

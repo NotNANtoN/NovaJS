@@ -20,7 +20,9 @@ import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
 import {
     MovementPhysicsComponent,
     MovementStateComponent,
+    MovementSystem,
     MovementType,
+    RemoteMovementPresentationSystem,
 } from 'nova_ecs/plugins/movement_plugin';
 import { MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
@@ -272,15 +274,17 @@ function tumble(
     movement.rotation = movement.rotation.add(spinning.spin * time.delta_s);
 }
 
-const AsteroidTumbleSystem = new System({
+export const AsteroidTumbleSystem = new System({
     name: 'AsteroidTumbleSystem',
+    after: [RemoteMovementPresentationSystem, MovementSystem],
     args: [AsteroidComponent, MovementStateComponent, TimeResource,
         MultiplayerData, PlatformResource] as const,
     step: tumble,
 });
 
-const OreTumbleSystem = new System({
+export const OreTumbleSystem = new System({
     name: 'OreTumbleSystem',
+    after: [RemoteMovementPresentationSystem, MovementSystem],
     args: [OreComponent, MovementStateComponent, TimeResource,
         MultiplayerData, PlatformResource] as const,
     step: tumble,
