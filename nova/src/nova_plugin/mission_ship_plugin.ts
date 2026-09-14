@@ -141,6 +141,9 @@ async function loadDude(
     dudeNumber: number,
     systemId: string,
 ): Promise<DudeData | undefined> {
+    if (!dudeNumber || dudeNumber <= 0) {
+        return undefined;
+    }
     const dudeId = resourceId(dudeNumber);
     try {
         const dude = await gameData.data.Dude?.get(dudeId);
@@ -155,22 +158,40 @@ async function loadDude(
         const system = await gameData.data.System.get(systemId);
         const entry = system.npcs.find(candidate =>
             sameId(candidate.id, dudeId));
-        if (!entry) {
-            return undefined;
+        if (entry) {
+            return {
+                id: entry.id,
+                name: entry.id,
+                prefix: entry.id.split(':')[0] ?? 'nova',
+                aiType: 0,
+                government: entry.government,
+                flags: 0,
+                infoTypes: 0,
+                ships: entry.ships,
+            };
         }
-        return {
-            id: entry.id,
-            name: entry.id,
-            prefix: entry.id.split(':')[0] ?? 'nova',
-            aiType: 0,
-            government: entry.government,
-            flags: 0,
-            infoTypes: 0,
-            ships: entry.ships,
-        };
+    } catch {
+        // Continue to direct ship fallback
+    }
+
+    try {
+        const ship = await gameData.data.Ship.get(dudeId);
+        if (ship) {
+            return {
+                id: dudeId,
+                name: ship.name,
+                prefix: dudeId.split(':')[0] ?? 'nova',
+                aiType: 1, // Hostile outlaw AI
+                government: 130, // Pirate/outlaw government
+                flags: 0,
+                infoTypes: 0,
+                ships: [{ id: dudeId, weight: 1 }],
+            };
+        }
     } catch {
         return undefined;
     }
+    return undefined;
 }
 
 function playerTokenFor(

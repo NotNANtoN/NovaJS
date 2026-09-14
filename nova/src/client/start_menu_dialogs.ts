@@ -68,6 +68,10 @@ const CONTROL_LABELS: Readonly<Record<string, string>> = {
     fullscreen: 'Fullscreen',
     volumeUp: 'Volume up',
     volumeDown: 'Volume down',
+    attack: 'Focus fire on target',
+    defend: 'Defend flagship',
+    formation: 'Cycle formation',
+    holdPosition: 'Hold position',
 };
 
 const DEFAULT_CONTROL_CODES: Readonly<Record<string, unknown>> = {
@@ -94,6 +98,10 @@ const DEFAULT_CONTROL_CODES: Readonly<Record<string, unknown>> = {
     fullscreen: 'Enter',
     volumeUp: 'Equal',
     volumeDown: 'Minus',
+    attack: 'KeyF',
+    defend: 'KeyE',
+    formation: 'KeyK',
+    holdPosition: 'KeyV',
 };
 
 export type CompatibilityProfileName = 'classic' | 'modern';

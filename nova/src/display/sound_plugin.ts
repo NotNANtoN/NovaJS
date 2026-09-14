@@ -1,3 +1,6 @@
+import { Optional } from 'nova_ecs/optional';
+import { TimeResource } from 'nova_ecs/plugins/time_plugin';
+import { ShieldComponent } from '../nova_plugin/health_plugin';
 import { Sound } from '@pixi/sound';
 import { Emit, UUID } from 'nova_ecs/arg_types';
 import { Plugin } from 'nova_ecs/plugin';
@@ -210,8 +213,8 @@ export const TargetSelectionSoundSystem = new System({
 export const IncomingMissileWarningSystem = new System({
     name: 'IncomingMissileWarningSystem',
     args: [IncomingProjectileQuery, PlayerMovementQuery,
-        IncomingMissileStateResource, Emit, SingletonComponent] as const,
-    step(projectiles, players, warned, emit) {
+        IncomingMissileStateResource, Emit, SingletonComponent, Optional(TimeResource)] as const,
+    step(projectiles, players, warned, emit, _singleton, time) {
         const active = new Set(projectiles.map(([uuid]) => uuid));
         for (const uuid of warned) {
             if (!active.has(uuid)) {
@@ -224,11 +227,10 @@ export const IncomingMissileWarningSystem = new System({
             return;
         }
         const [playerUuid, _player, playerMovement] = player;
+        let closestDist = Infinity;
+        let hasInbound = false;
         for (const [uuid, _projectile, projectileData, target, owner,
             movement] of projectiles) {
-            if (warned.has(uuid)) {
-                continue;
-            }
             if (!isInboundMissile({
                 target: target.target,
                 owner: owner.owner,
@@ -239,8 +241,41 @@ export const IncomingMissileWarningSystem = new System({
             }, playerUuid, playerMovement)) {
                 continue;
             }
-            warned.add(uuid);
-            emit(SoundEvent, {id: INCOMING_MISSILE_SOUND_ID});
+            hasInbound = true;
+            const dist = movement.position.subtract(playerMovement.position).length;
+            if (dist < closestDist) closestDist = dist;
+            if (!warned.has(uuid)) {
+                warned.add(uuid);
+                emit(SoundEvent, { id: INCOMING_MISSILE_SOUND_ID });
+            }
+        }
+
+        if (hasInbound && time && closestDist < Infinity) {
+            const lastPing = (warned as any)._lastMissilePing ?? time.time;
+            const interval = Math.max(300, Math.min(1500, (closestDist / 800) * 1200));
+            if (time.time - lastPing >= interval) {
+                (warned as any)._lastMissilePing = time.time;
+                emit(SoundEvent, { id: INCOMING_MISSILE_SOUND_ID });
+            }
+        } else if (!hasInbound) {
+            delete (warned as any)._lastMissilePing;
+        }
+    },
+});
+
+export const LowShieldWarningSystem = new System({
+    name: 'LowShieldWarningSystem',
+    args: [PlayerShipSelector, ShieldComponent, Optional(TimeResource), Emit] as const,
+    step(_player, shield, time, emit) {
+        if (!time) return;
+        if (shield.max > 0 && shield.current > 0 && (shield.current / shield.max) <= 0.25) {
+            const lastWarn = (shield as any)._lastLowShieldWarn;
+            if (lastWarn === undefined || time.time - lastWarn >= 1800) {
+                (shield as any)._lastLowShieldWarn = time.time;
+                emit(SoundEvent, { id: 'nova:153' });
+            }
+        } else if (shield.max > 0 && (shield.current / shield.max) > 0.25) {
+            delete (shield as any)._lastLowShieldWarn;
         }
     },
 });
@@ -351,6 +386,7 @@ export const SoundPlugin: Plugin = {
         world.addSystem(VolumeControlSystem);
         world.addSystem(TargetSelectionSoundSystem);
         world.addSystem(IncomingMissileWarningSystem);
+        world.addSystem(LowShieldWarningSystem);
         world.addSystem(LandingSoundRequestSystem);
         world.addSystem(LandingSoundResultSystem);
         world.addSystem(StellarSoundSystem);
@@ -366,6 +402,7 @@ export const SoundPlugin: Plugin = {
         world.removeSystem(VolumeControlSystem);
         world.removeSystem(TargetSelectionSoundSystem);
         world.removeSystem(IncomingMissileWarningSystem);
+        world.removeSystem(LowShieldWarningSystem);
         world.removeSystem(LandingSoundRequestSystem);
         world.removeSystem(LandingSoundResultSystem);
         world.removeSystem(StellarSoundSystem);

@@ -168,7 +168,9 @@ export class TradeCenter extends Menu<Entity> {
     private readonly detail: PIXI.Text;
     private readonly status: PIXI.Text;
     private readonly buyButton: Button;
+    private readonly buyAllButton: Button;
     private readonly sellButton: Button;
+    private readonly sellAllButton: Button;
     private offers: TradeDisplayOffer[] = [];
     private planet?: PlanetData;
     private selectionIndex = -1;
@@ -218,27 +220,45 @@ export class TradeCenter extends Menu<Entity> {
         this.heldHeading.text = headings.held;
         this.priceHeading.text = headings.prices;
 
-        const [buySlot, sellSlot, doneSlot] =
-            tradeButtonSlots([48, 48, 38]);
+        const [buySlot, buyAllSlot, sellSlot, sellAllSlot, doneSlot] =
+            tradeButtonSlots([36, 44, 36, 44, 36]);
         this.buyButton = new Button(
             gameData, 'Buy 1', buySlot!.width, buySlot);
+        this.buyAllButton = new Button(
+            gameData, 'Buy All', buyAllSlot!.width, buyAllSlot);
         this.sellButton = new Button(
             gameData, 'Sell 1', sellSlot!.width, sellSlot);
+        this.sellAllButton = new Button(
+            gameData, 'Sell All', sellAllSlot!.width, sellAllSlot);
         const done = new Button(gameData, 'Done', doneSlot!.width, doneSlot);
         this.addButtons({
             buy: this.buyButton,
+            buyAll: this.buyAllButton,
             sell: this.sellButton,
+            sellAll: this.sellAllButton,
             done,
         });
-        this.buyButton.click.subscribe(() => this.buySelected());
-        this.sellButton.click.subscribe(() => this.sellSelected());
+        this.buyButton.click.subscribe((event?: any) => {
+            const shift = event?.shiftKey;
+            const alt = event?.altKey;
+            const tons = (shift && alt) ? undefined : (alt ? 25 : (shift ? 5 : 1));
+            this.buySelected(tons);
+        });
+        this.buyAllButton.click.subscribe(() => this.buySelected(undefined));
+        this.sellButton.click.subscribe((event?: any) => {
+            const shift = event?.shiftKey;
+            const alt = event?.altKey;
+            const tons = (shift && alt) ? undefined : (alt ? 25 : (shift ? 5 : 1));
+            this.sellSelected(tons);
+        });
+        this.sellAllButton.click.subscribe(() => this.sellSelected(undefined));
         done.click.subscribe(this.done.bind(this));
 
         this.controls = new MenuControls(controlEvents, {
             up: () => this.moveSelection(-1),
             down: () => this.moveSelection(1),
-            buy: () => this.buySelected(),
-            sell: () => this.sellSelected(),
+            buy: () => this.buySelected(1),
+            sell: () => this.sellSelected(1),
             tradeCenter: this.done.bind(this),
             depart: this.done.bind(this),
         });
@@ -403,7 +423,7 @@ export class TradeCenter extends Menu<Entity> {
             ? 'normal' : 'grey';
     }
 
-    private buySelected() {
+    private buySelected(quantity?: number) {
         const state = this.input.components.get(PlayerStateComponent);
         const selected = this.selected();
         if (!state || !selected) {
@@ -415,10 +435,28 @@ export class TradeCenter extends Menu<Entity> {
             this.render();
             return;
         }
+        const freeSpace = getFreeSpace(state);
+        if (freeSpace <= 0) {
+            this.transactionMessage = 'Not enough cargo space.';
+            this.render();
+            return;
+        }
+        const maxAffordable = selected.price > 0
+            ? Math.floor(state.credits / selected.price)
+            : freeSpace;
+        const maxBuyable = Math.min(freeSpace, maxAffordable);
+        const tons = quantity !== undefined ? Math.min(quantity, maxBuyable) : maxBuyable;
+        if (tons <= 0) {
+            this.transactionMessage = state.credits < selected.price
+                ? 'Not enough credits.'
+                : 'Not enough cargo space.';
+            this.render();
+            return;
+        }
         const result = buyCommodity(state, {
             ...selected,
             commodity: selected.cargoKey ?? selected.commodity,
-        } as TradeCommodity);
+        } as TradeCommodity, tons);
         this.transactionMessage = result.success
             ? `Bought ${result.tons}t ${selected.commodity} for ${
                 result.total.toLocaleString()} cr.`
@@ -426,7 +464,7 @@ export class TradeCenter extends Menu<Entity> {
         this.render();
     }
 
-    private sellSelected() {
+    private sellSelected(quantity?: number) {
         const state = this.input.components.get(PlayerStateComponent);
         const selected = this.selected();
         if (!state || !selected) {
@@ -438,10 +476,20 @@ export class TradeCenter extends Menu<Entity> {
             this.render();
             return;
         }
+        const commodityKey = selected.cargoKey ?? selected.commodity;
+        const held = state.holds
+            .filter(hold => hold.commodity === commodityKey && !hold.isMissionCargo)
+            .reduce((total, hold) => total + hold.tons, 0);
+        if (held <= 0) {
+            this.transactionMessage = 'You do not hold that commodity.';
+            this.render();
+            return;
+        }
+        const tons = quantity !== undefined ? Math.min(quantity, held) : held;
         const result = sellCommodity(state, {
             ...selected,
-            commodity: selected.cargoKey ?? selected.commodity,
-        } as TradeCommodity);
+            commodity: commodityKey,
+        } as TradeCommodity, tons);
         this.transactionMessage = result.success
             ? `Sold ${result.tons}t ${selected.commodity} for ${
                 result.total.toLocaleString()} cr.`

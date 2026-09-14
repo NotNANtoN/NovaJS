@@ -408,7 +408,7 @@ export const PlayerEscortCommandInputSystem = new System({
                 });
                 return;
             }
-        } else if (controlState.get('defend') === 'start') {
+        } else if (controlState.get('defend') === 'start' || controlState.get('escorts') === 'start') {
             mode = 'defend';
             noticeText = 'Escorts: Defending flagship';
         } else if (controlState.get('holdPosition') === 'start') {

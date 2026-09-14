@@ -25,7 +25,7 @@ const LEFT_POS = 13;
 export class Button {
     container = new PIXI.Container();
     private states = new Map<string, PIXI.Container>();
-    readonly click = new Subject<undefined>();
+    readonly click = new Subject<PIXI.FederatedPointerEvent | undefined>();
     private text: PIXI.Text;
     private wrappedState = 'normal';
     private width: number;
@@ -81,9 +81,9 @@ export class Button {
             this.state = 'clicked';
         });
 
-        this.container.on('pointerup', () => {
+        this.container.on('pointerup', (event: PIXI.FederatedPointerEvent) => {
             this.state = 'normal';
-            this.click.next(undefined);
+            this.click.next(event);
         });
 
         for (const [name, { left, middle, right }] of this.buttonIds) {

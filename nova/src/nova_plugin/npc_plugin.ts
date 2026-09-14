@@ -953,6 +953,18 @@ export const FollowAI = new System({
             movementState.turnTo = breakAngle;
             movementState.accelerating = 1;
             movementState.turnBack = false;
+        } else if (tactic === "broadside" && distance <= baseStandoff * 1.4) {
+            // Capital ship broadside orbit: face perpendicular to target vector
+            // to bring flank and dorsal turret batteries to bear without charging nose-first.
+            // Pick tangent angle (+90° or -90°) closest to current rotation to orbit smoothly.
+            const tangentA = toTarget.angle.add(Math.PI * 0.5);
+            const tangentB = toTarget.angle.subtract(Math.PI * 0.5);
+            const diffA = Math.abs(headingError(movementState.rotation, tangentA));
+            const diffB = Math.abs(headingError(movementState.rotation, tangentB));
+            const orbitAngle = diffA <= diffB ? tangentA : tangentB;
+            movementState.turnTo = orbitAngle;
+            movementState.accelerating = distance > baseStandoff * 0.9 ? 1 : 0;
+            movementState.turnBack = distance < baseStandoff * 0.6;
         } else {
             const standoff = tactic === "dogfight" && shipData
                 ? Math.max(150, baseStandoff * 0.75)

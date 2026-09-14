@@ -14,6 +14,7 @@ import {
     SoundPlugin,
     VolumeResource,
     IncomingMissileWarningSystem,
+    LowShieldWarningSystem,
     LandingSoundRequestSystem,
     StellarSoundSystem,
     TargetSelectionSoundSystem,
@@ -153,9 +154,9 @@ describe('browser sound effects', () => {
         const warned = new Set<string>();
 
         IncomingMissileWarningSystem.step(
-            projectiles as never, players as never, warned, emit, undefined);
+            projectiles as never, players as never, warned, emit, undefined, undefined);
         IncomingMissileWarningSystem.step(
-            projectiles as never, players as never, warned, emit, undefined);
+            projectiles as never, players as never, warned, emit, undefined, undefined);
 
         expect(sounds).toEqual([INCOMING_MISSILE_SOUND_ID]);
     });
@@ -176,9 +177,37 @@ describe('browser sound effects', () => {
         const players = [['player', undefined, movement(0, 0, 0, 0)]];
 
         IncomingMissileWarningSystem.step(
-            projectiles as never, players as never, new Set(), emit, undefined);
+            projectiles as never, players as never, new Set(), emit, undefined, undefined);
 
         expect(sounds).toEqual([]);
+    });
+
+    it('emits low shield warning chime nova:153 when shields drop to 25% or below', () => {
+        const { sounds, emit } = soundCollector();
+        const time = { time: 1000, delta_ms: 16, delta_s: 0.016, frame: 1 };
+
+        // Healthy shield (50%) -> no sound
+        const shieldHealthy = { current: 50, max: 100, recharge: 1 };
+        LowShieldWarningSystem.step(undefined, shieldHealthy as never, time, emit);
+        expect(sounds).toEqual([]);
+
+        // Depleted shield (0%) -> no sound (warning is for impending breach)
+        const shieldZero = { current: 0, max: 100, recharge: 1 };
+        LowShieldWarningSystem.step(undefined, shieldZero as never, time, emit);
+        expect(sounds).toEqual([]);
+
+        // Low shield (25%) -> warning chime
+        const shieldLow = { current: 25, max: 100, recharge: 1 };
+        LowShieldWarningSystem.step(undefined, shieldLow as never, time, emit);
+        expect(sounds).toEqual(['nova:153']);
+
+        // Immediately following step before cooldown -> throttled
+        LowShieldWarningSystem.step(undefined, shieldLow as never, { ...time, time: 2000 }, emit);
+        expect(sounds).toEqual(['nova:153']);
+
+        // After cooldown (1800ms) -> emits warning chime again
+        LowShieldWarningSystem.step(undefined, shieldLow as never, { ...time, time: 2900 }, emit);
+        expect(sounds).toEqual(['nova:153', 'nova:153']);
     });
 
     it('uses the retail airlock sound on docking and departure', () => {
