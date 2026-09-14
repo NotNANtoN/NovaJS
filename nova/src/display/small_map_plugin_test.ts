@@ -15,6 +15,20 @@ describe('SmallMap', () => {
         expect(smallMap.visible).toBeFalse();
     });
 
+    it('cycles radar range modes across 5k, 10k, and 25k units', () => {
+        const smallMap = new SmallMap();
+        expect(smallMap.currentRange).toBe(10_000);
+
+        expect(smallMap.cycleRange()).toBe(25_000);
+        expect(smallMap.currentRange).toBe(25_000);
+
+        expect(smallMap.cycleRange()).toBe(5_000);
+        expect(smallMap.currentRange).toBe(5_000);
+
+        expect(smallMap.cycleRange()).toBe(10_000);
+        expect(smallMap.currentRange).toBe(10_000);
+    });
+
     it('toggles visibility upon smallMap control event', () => {
         const world = new World('small-map-control-test');
         const smallMap = new SmallMap();

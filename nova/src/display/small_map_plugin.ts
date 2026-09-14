@@ -23,8 +23,7 @@ import { Stage } from "./stage_resource";
 
 const MAP_SIZE = 240;
 const HALF_SIZE = MAP_SIZE / 2;
-const MAP_SYSTEM_RADIUS = 10_000;
-const MAP_SCALE = (HALF_SIZE - 20) / MAP_SYSTEM_RADIUS;
+export const RADAR_RANGE_LEVELS = [5_000, 10_000, 25_000] as const;
 
 export class SmallMap {
     readonly container = new PIXI.Container();
@@ -35,13 +34,14 @@ export class SmallMap {
     private readonly labelContainer = new PIXI.Container();
     private readonly titleText: PIXI.Text;
     private labelsPool: PIXI.Text[] = [];
+    private rangeIndex = 1;
 
     constructor() {
         this.container.zIndex = 900;
         this.container.visible = false;
 
         this.titleText = new PIXI.Text({
-            text: "SYSTEM TACTICAL GRID (H)",
+            text: "TACTICAL GRID (H) [10k u]",
             style: {
                 fontFamily: "Geneva, Monaco, Chicago, Arial, sans-serif",
                 fontSize: 9,
@@ -52,6 +52,9 @@ export class SmallMap {
         });
         this.titleText.anchor.set(0.5, 0);
         this.titleText.position.set(HALF_SIZE, 8);
+        this.titleText.interactive = true;
+        this.titleText.cursor = 'pointer';
+        this.titleText.on('pointerdown', () => this.cycleRange());
 
         this.container.addChild(this.bgGraphics);
         this.container.addChild(this.gridGraphics);
@@ -59,6 +62,25 @@ export class SmallMap {
         this.container.addChild(this.labelContainer);
         this.container.addChild(this.titleText);
 
+        this.drawBackground();
+    }
+
+    get currentRange(): number {
+        return RADAR_RANGE_LEVELS[this.rangeIndex] ?? 10_000;
+    }
+
+    cycleRange(): number {
+        this.rangeIndex = (this.rangeIndex + 1) % RADAR_RANGE_LEVELS.length;
+        this.drawBackground();
+        return this.currentRange;
+    }
+
+    isMaxRange(): boolean {
+        return this.rangeIndex === RADAR_RANGE_LEVELS.length - 1;
+    }
+
+    resetRange(): void {
+        this.rangeIndex = 1;
         this.drawBackground();
     }
 
@@ -144,8 +166,12 @@ export class SmallMap {
         interference = 0,
     ): void {
         this.blipsGraphics.clear();
+        const currentRadius = this.currentRange;
+        const mapScale = (HALF_SIZE - 20) / currentRadius;
+        const rangeLabel = `${Math.round(currentRadius / 1000)}k u`;
+
         if (interference > 0) {
-            this.titleText.text = "SYSTEM TACTICAL GRID (H) [STATIC " + interference + "%]";
+            this.titleText.text = `TACTICAL GRID [${rangeLabel}] [STATIC ${interference}%]`;
             const staticCount = Math.floor((interference / 100) * 20);
             for (let i = 0; i < staticCount; i++) {
                 const sx = Math.random() * MAP_SIZE;
@@ -153,7 +179,7 @@ export class SmallMap {
                 this.blipsGraphics.rect(sx, sy, 1, 1).fill({ color: 0x608090, alpha: 0.4 });
             }
         } else {
-            this.titleText.text = "SYSTEM TACTICAL GRID (H)";
+            this.titleText.text = `TACTICAL GRID (H) [${rangeLabel}]`;
         }
         const cx = HALF_SIZE;
         const cy = HALF_SIZE + 10;
@@ -161,8 +187,8 @@ export class SmallMap {
 
         // Draw planets and spobs
         for (const planet of planets) {
-            const px = cx + planet.pos.x * MAP_SCALE;
-            const py = cy + planet.pos.y * MAP_SCALE;
+            const px = cx + planet.pos.x * mapScale;
+            const py = cy + planet.pos.y * mapScale;
             if (px < 10 || px > MAP_SIZE - 10 || py < 30 || py > MAP_SIZE - 10) continue;
 
             const isTarget = planet.uuid === targetUuid;
@@ -185,8 +211,8 @@ export class SmallMap {
 
         // Draw ships
         for (const ship of ships) {
-            const sx = cx + ship.pos.x * MAP_SCALE;
-            const sy = cy + ship.pos.y * MAP_SCALE;
+            const sx = cx + ship.pos.x * mapScale;
+            const sy = cy + ship.pos.y * mapScale;
             if (sx < 6 || sx > MAP_SIZE - 6 || sy < 26 || sy > MAP_SIZE - 6) continue;
 
             const isTarget = ship.uuid === targetUuid;
@@ -211,8 +237,8 @@ export class SmallMap {
         }
 
         // Draw Player flagship marker
-        const pScreenX = cx + playerPos.x * MAP_SCALE;
-        const pScreenY = cy + playerPos.y * MAP_SCALE;
+        const pScreenX = cx + playerPos.x * mapScale;
+        const pScreenY = cy + playerPos.y * mapScale;
         // Directional arrow/chevron pointing along playerRotation
         const forwardX = Math.sin(playerRotation);
         const forwardY = -Math.cos(playerRotation);
@@ -326,6 +352,7 @@ export const DrawSmallMapSystem = new System({
             jumpRoute?.route,
             shipEntries,
             planetEntries,
+            interference,
         );
     },
 });

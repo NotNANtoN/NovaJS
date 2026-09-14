@@ -2,7 +2,7 @@ import { Optional } from 'nova_ecs/optional';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { ShieldComponent } from '../nova_plugin/health_plugin';
 import { Sound } from '@pixi/sound';
-import { Emit, UUID } from 'nova_ecs/arg_types';
+import { Emit, Entities, UUID } from 'nova_ecs/arg_types';
 import { Plugin } from 'nova_ecs/plugin';
 import { Resource } from 'nova_ecs/resource';
 import { MovementState, MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
@@ -16,6 +16,8 @@ import { LandEvent, LandingResultEvent } from '../nova_plugin/planet_plugin';
 import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin';
 import { OwnerComponent, VulnerableToPD } from '../nova_plugin/fire_weapon_plugin';
 import { ShipComponent } from '../nova_plugin/ship_plugin';
+import { headingError } from '../nova_plugin/flight_controller';
+import { ActiveSecondaryWeapon } from '../nova_plugin/weapon_plugin';
 import {
     ProjectileComponent,
     ProjectileDataComponent,
@@ -280,6 +282,52 @@ export const LowShieldWarningSystem = new System({
     },
 });
 
+export const MissileLockToneSystem = new System({
+    name: 'MissileLockToneSystem',
+    args: [
+        PlayerShipSelector,
+        TargetComponent,
+        MovementStateComponent,
+        Optional(ActiveSecondaryWeapon),
+        GameDataResource,
+        Entities,
+        Emit,
+    ] as const,
+    step(_player, target, playerMovement, activeSecondary, gameData, entities, emit) {
+        const secondaryId = activeSecondary?.secondary;
+        if (!secondaryId || !target.target) {
+            (target as any)._missileLocked = false;
+            return;
+        }
+        const weaponData = gameData.data.Weapon?.getCached(secondaryId);
+        if (!weaponData || weaponData.guidance !== 'guided') {
+            (target as any)._missileLocked = false;
+            return;
+        }
+        const targetEntity = entities.get(target.target);
+        const targetMovement = targetEntity?.components.get(MovementStateComponent);
+        if (!targetMovement) {
+            (target as any)._missileLocked = false;
+            return;
+        }
+
+        const toTarget = targetMovement.position.subtract(playerMovement.position);
+        const distance = toTarget.length;
+        const speed = weaponData.shotSpeed ?? 300;
+        const duration = (('shotDuration' in weaponData ? weaponData.shotDuration : 3000) ?? 3000) / 1000;
+        const maxRange = Math.max(800, speed * duration);
+        const angleDiff = Math.abs(headingError(playerMovement.rotation, toTarget.angle));
+
+        const hasLock = angleDiff <= (35 * Math.PI / 180) && distance <= maxRange;
+        if (hasLock && !(target as any)._missileLocked) {
+            (target as any)._missileLocked = true;
+            emit(SoundEvent, { id: 'nova:150' });
+        } else if (!hasLock) {
+            (target as any)._missileLocked = false;
+        }
+    },
+});
+
 export const LandingSoundRequestSystem = new System({
     name: 'LandingSoundRequestSystem',
     events: [LandEvent],
@@ -387,6 +435,7 @@ export const SoundPlugin: Plugin = {
         world.addSystem(TargetSelectionSoundSystem);
         world.addSystem(IncomingMissileWarningSystem);
         world.addSystem(LowShieldWarningSystem);
+        world.addSystem(MissileLockToneSystem);
         world.addSystem(LandingSoundRequestSystem);
         world.addSystem(LandingSoundResultSystem);
         world.addSystem(StellarSoundSystem);
@@ -403,6 +452,7 @@ export const SoundPlugin: Plugin = {
         world.removeSystem(TargetSelectionSoundSystem);
         world.removeSystem(IncomingMissileWarningSystem);
         world.removeSystem(LowShieldWarningSystem);
+        world.removeSystem(MissileLockToneSystem);
         world.removeSystem(LandingSoundRequestSystem);
         world.removeSystem(LandingSoundResultSystem);
         world.removeSystem(StellarSoundSystem);

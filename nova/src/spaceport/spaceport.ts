@@ -30,6 +30,7 @@ import {
 import { SystemIdResource } from '../nova_plugin/system_id_resource';
 import { SystemPlugin } from '../nova_plugin/system_plugin';
 import { WeaponsStateComponent } from '../nova_plugin/weapons_state';
+import { CloakStateComponent } from '../nova_plugin/cloaking_plugin';
 import { Button } from './button';
 import {
     SERVICE_COLUMN,
@@ -629,6 +630,30 @@ export class Spaceport extends Menu<Entity> {
     async authorizeLanding(input: Entity): Promise<void> {
         const combatState = input.components.get(PlayerStateComponent);
         if (combatState) {
+            const planetData = this.data ?? await this.gameData.data.Planet?.get(this.id);
+            if (planetData && planetData.government !== undefined) {
+                const govtKey = String(planetData.government);
+                const standing = combatState.legalRecords?.[govtKey] ?? 0;
+                if (standing < 0) {
+                    const cloak = input.components.get(CloakStateComponent);
+                    const isCloaked = Boolean(cloak?.cloaked);
+                    if (isCloaked) {
+                        this.rechargeNotice.text = 'Cloaked: bypassed orbital customs scan.';
+                    } else {
+                        const fine = Math.min(combatState.credits, Math.abs(standing) * 1000 + 1500);
+                        if (combatState.credits >= fine) {
+                            combatState.credits -= fine;
+                            if (combatState.legalRecords) {
+                                combatState.legalRecords[govtKey] = 0;
+                            }
+                            this.rechargeNotice.text = `Docked after settling ${fine.toLocaleString()} cr port security fine.`;
+                        } else {
+                            throw new Error(`Docking clearance denied: outstanding criminal bounty (${Math.abs(standing)}) and insufficient funds to settle fine.`);
+                        }
+                    }
+                }
+            }
+
             const receipt = await combatShopTransaction(combatState, this.id, 'open');
             const outfits = input.components.get(OutfitsStateComponent);
             for (const [id, count] of Object.entries(receipt.balance.ammo)) {

@@ -1,6 +1,7 @@
 import { Entities, RunQuery, UUID } from "nova_ecs/arg_types";
 import { Optional } from "nova_ecs/optional";
 import { Plugin } from 'nova_ecs/plugin';
+import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
 import { TimeResource } from "nova_ecs/plugins/time_plugin";
 import { Resource } from "nova_ecs/resource";
 import { System } from "nova_ecs/system";
@@ -16,11 +17,21 @@ import { PlayerStateComponent } from "../nova_plugin/player_state";
 import { HiredEscortComponent } from "../nova_plugin/escort_plugin";
 import { GovernmentRelationResource, relation } from "../nova_plugin/govt_relations";
 import { AnimationGraphicComponent, ObjectDrawSystem } from "./animation_graphic_plugin";
+import { StatusBarResource } from "./status_bar";
 import { Space } from "./space_resource";
 import { createGraphicHandle, ManagedGraphic } from './managed_graphic';
 
 const NUM_CORNERS = 4;
 const TIME_TO_TARGET = 100; // milliseconds
+
+const STYLE_COLORS: Readonly<Record<string, number>> = {
+    hostile: 0xff2828,
+    neutral: 0xffea00,
+    friendly: 0x28ff28,
+    disabled: 0x888888,
+    player: 0x00f0ff,
+    escort: 0x38ff75,
+};
 
 function createFallbackCornerTexture(color: number): PIXI.Texture {
     if (typeof document === 'undefined') {
@@ -42,6 +53,7 @@ function createFallbackCornerTexture(color: number): PIXI.Texture {
 }
 
 export class TargetCorners {
+    readonly id: string;
     private targetTime = 0;
     targetUuid?: string;
     container = new PIXI.Container();
@@ -58,9 +70,22 @@ export class TargetCorners {
             align: 'center',
         },
     });
+    private readonly offscreenContainer = new PIXI.Container();
+    private readonly chevron = new PIXI.Graphics();
+    private readonly offscreenText = new PIXI.Text({
+        text: '',
+        style: {
+            fontFamily: 'Geneva, Monaco, Chicago, Arial, sans-serif',
+            fontSize: 9,
+            fontWeight: 'bold',
+            fill: 0x00f0ff,
+            align: 'center',
+        },
+    });
     built: Promise<void>;
 
     constructor(gameData: GameData, id = 'targetCorners') {
+        this.id = id;
         this.visible = false;
         this.container.zIndex = 1000;
 
@@ -82,6 +107,12 @@ export class TargetCorners {
         this.callsignText.anchor.set(0.5, 1);
         this.callsignText.visible = false;
         this.container.addChild(this.callsignText);
+
+        this.offscreenContainer.visible = false;
+        this.offscreenText.anchor.set(0.5, 0.5);
+        this.offscreenContainer.addChild(this.chevron);
+        this.offscreenContainer.addChild(this.offscreenText);
+        this.container.addChild(this.offscreenContainer);
 
         this.built = this.build(gameData, id);
     }
@@ -121,14 +152,6 @@ export class TargetCorners {
         this.container.position.y = y;
     }
 
-    get visible() {
-        return this.container.visible;
-    }
-
-    set visible(v: boolean) {
-        this.container.visible = v;
-    }
-
     setStyle(style: string) {
         this.currentStyle = style;
         const texture = this.textures.get(style);
@@ -149,8 +172,48 @@ export class TargetCorners {
         this.managed.dispose();
     }
 
-    step(time: number, targetUuid: string | undefined,
-        targetSize: { x: number, y: number }, callsign?: string) {
+    get visible(): boolean {
+        return this.container.visible;
+    }
+
+    set visible(value: boolean) {
+        this.container.visible = value;
+        if (!value) {
+            this.offscreenContainer.visible = false;
+        }
+    }
+
+    private drawChevron(color: number, angle: number) {
+        this.chevron.clear();
+        const cos = Math.cos(angle);
+        const sin = Math.sin(angle);
+        const tipX = cos * 14;
+        const tipY = sin * 14;
+        const leftAngle = angle + (Math.PI * 0.75);
+        const wingLX = Math.cos(leftAngle) * 10;
+        const wingLY = Math.sin(leftAngle) * 10;
+        const rightAngle = angle - (Math.PI * 0.75);
+        const wingRX = Math.cos(rightAngle) * 10;
+        const wingRY = Math.sin(rightAngle) * 10;
+
+        this.chevron
+            .poly([
+                { x: tipX, y: tipY },
+                { x: wingLX, y: wingLY },
+                { x: 0, y: 0 },
+                { x: wingRX, y: wingRY },
+            ])
+            .fill(color);
+    }
+
+    step(
+        time: number,
+        targetUuid: string | undefined,
+        targetSize: { x: number, y: number },
+        callsign?: string,
+        playerPos?: { x: number, y: number },
+        screenBounds?: { width: number, height: number, statusBarWidth: number },
+    ) {
 
         if (targetUuid !== this.targetUuid) {
             this.targetUuid = targetUuid;
@@ -185,6 +248,47 @@ export class TargetCorners {
         } else {
             this.callsignText.visible = false;
         }
+
+        // Check for off-screen position relative to player camera
+        if (playerPos && screenBounds) {
+            const targetPos = this.container.position;
+            const viewHalfW = Math.max(100, (screenBounds.width - screenBounds.statusBarWidth) / 2 - 32);
+            const viewHalfH = Math.max(100, screenBounds.height / 2 - 32);
+            const dx = targetPos.x - playerPos.x;
+            const dy = targetPos.y - playerPos.y;
+            const distance = Math.hypot(dx, dy);
+            const isOffScreen = Math.abs(dx) > viewHalfW || Math.abs(dy) > viewHalfH;
+
+            if (isOffScreen && distance > 0) {
+                this.sprites.forEach(s => s.visible = false);
+                this.callsignText.visible = false;
+                this.offscreenContainer.visible = true;
+
+                const scaleX = viewHalfW / Math.max(1, Math.abs(dx));
+                const scaleY = viewHalfH / Math.max(1, Math.abs(dy));
+                const clampScale = Math.min(scaleX, scaleY);
+                const clampX = dx * clampScale;
+                const clampY = dy * clampScale;
+                this.offscreenContainer.position.set(clampX - dx, clampY - dy);
+
+                const angle = Math.atan2(dy, dx);
+                const color = this.id === 'planetCorners'
+                    ? 0x00c8ff
+                    : (STYLE_COLORS[this.currentStyle] ?? 0xffea00);
+                this.drawChevron(color, angle);
+                const cos = Math.cos(angle);
+                const sin = Math.sin(angle);
+                this.offscreenText.position.set(-cos * 16, -sin * 16);
+                this.offscreenText.style.fill = color;
+                this.offscreenText.text = `${Math.round(distance).toLocaleString()} u`;
+            } else {
+                this.sprites.forEach(s => s.visible = true);
+                this.offscreenContainer.visible = false;
+            }
+        } else {
+            this.sprites.forEach(s => s.visible = true);
+            this.offscreenContainer.visible = false;
+        }
     }
 }
 
@@ -208,10 +312,12 @@ const DrawTargetCornersSystem = new System({
         PlayerShipSelector,
         UUID,
         RunQuery,
+        MovementStateComponent,
+        Optional(StatusBarResource),
         Optional(GovernmentRelationResource),
         Optional(GovtComponent),
     ] as const,
-    step({ target }, time, targetCorners, entities, _playerShip, playerUuid, runQuery, govts, playerGovt) {
+    step({ target }, time, targetCorners, entities, _playerShip, playerUuid, runQuery, playerMovement, statusBar, govts, playerGovt) {
         if (!target) {
             targetCorners.visible = false;
             targetCorners.targetUuid = undefined;
@@ -265,8 +371,13 @@ const DrawTargetCornersSystem = new System({
             targetCorners.setStyle("neutral");
         }
 
-        targetCorners.step(time.time, target, targetGraphic.size, callsign);
         targetCorners.setPosition(targetGraphic.container.position);
+        targetCorners.step(time.time, target, targetGraphic.size, callsign,
+            playerMovement?.position, {
+                width: typeof window !== 'undefined' ? window.innerWidth : 1280,
+                height: typeof window !== 'undefined' ? window.innerHeight : 720,
+                statusBarWidth: statusBar?.width ?? 0,
+            });
         targetCorners.visible = true;
     },
     after: [ObjectDrawSystem],

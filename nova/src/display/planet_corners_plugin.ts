@@ -1,5 +1,7 @@
 import { Entities } from 'nova_ecs/arg_types';
+import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
+import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { Resource } from "nova_ecs/resource";
 import { System } from 'nova_ecs/system';
@@ -8,6 +10,7 @@ import { GameDataResource } from '../nova_plugin/game_data_resource';
 import { PlanetTargetComponent } from '../nova_plugin/planet_plugin';
 import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin';
 import { AnimationGraphicComponent, ObjectDrawSystem } from './animation_graphic_plugin';
+import { StatusBarResource } from './status_bar';
 import { Space } from './space_resource';
 import { TargetCorners } from "./target_corners_plugin";
 
@@ -16,9 +19,16 @@ const PlanetCornersResource = new Resource<TargetCorners>('PlanetCornersResource
 
 const DrawPlanetCornersSystem = new System({
     name: "DrawPlanetCornersSystem",
-    args: [PlanetTargetComponent, TimeResource, PlanetCornersResource, Entities,
-        PlayerShipSelector] as const,
-    step({ target }, time, targetCorners, entities) {
+    args: [
+        PlanetTargetComponent,
+        TimeResource,
+        PlanetCornersResource,
+        Entities,
+        PlayerShipSelector,
+        Optional(MovementStateComponent),
+        Optional(StatusBarResource),
+    ] as const,
+    step({ target }, time, targetCorners, entities, _player, playerMovement, statusBar) {
         if (!target) {
             targetCorners.visible = false;
             targetCorners.targetUuid = undefined;
@@ -34,8 +44,13 @@ const DrawPlanetCornersSystem = new System({
         }
 
         targetCorners.setStyle("neutral");
-        targetCorners.step(time.time, target, targetGraphic.size);
         targetCorners.setPosition(targetGraphic.container.position);
+        targetCorners.step(time.time, target, targetGraphic.size, undefined,
+            playerMovement?.position, {
+                width: typeof window !== 'undefined' ? window.innerWidth : 1280,
+                height: typeof window !== 'undefined' ? window.innerHeight : 720,
+                statusBarWidth: statusBar?.width ?? 0,
+            });
         targetCorners.visible = true;
     },
     after: [ObjectDrawSystem],
