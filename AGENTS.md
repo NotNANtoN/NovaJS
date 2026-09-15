@@ -19,7 +19,7 @@ This document contains persistent instructions, architecture context, and deploy
 | :--- | :--- | :--- |
 | **Local Machine** | `/Users/anton.wiehe/Code/NovaJS` | Working directory for edits, builds, and test verification. |
 | **Development Host (`abakus`)** | Remote dev machine (`100.64.247.42` via Tailscale). Runs NovaJS on port `8000`. | Accessible via `ssh abakus`. Git remote: `abakus` (`abakus:NovaJS`). |
-| **Public Production Host (Linode)** | Linode instance serving `https://66.175.210.138`. | Deployed via GitHub Actions workflow on `NotNANtoN/NovaJS`. |
+| **Public Production Host (Linode)** | Linode instance serving `https://69.164.217.141`. | Deployed via GitHub Actions workflow on `NotNANtoN/NovaJS`. |
 | **GitHub Repository (`origin`)** | `https://github.com/NotNANtoN/NovaJS.git` (branch: `feat-performance-and-modernization`). | Push via `abakus` using stored GitHub credentials. |
 
 ---
