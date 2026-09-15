@@ -202,6 +202,13 @@ export class Spaceport extends Menu<Entity> {
                 this.outfitter.setPlayerState(playerState);
                 this.outfitter.setShipData(plainSnapshot(
                     this.input.components.get(ShipDataComponent)));
+                this.outfitter.onUpdateOutfits = (newOutfits) => {
+                    this.input.components.set(OutfitsStateComponent, newOutfits);
+                    if (playerState) {
+                        this.input.components.set(PlayerStateComponent, playerState);
+                    }
+                    this.onUpdateShip?.(this.input);
+                };
                 const newOutfits = await this.outfitter.show(outfits);
                 this.input.components.set(OutfitsStateComponent, newOutfits);
                 if (playerState) {
@@ -215,6 +222,7 @@ export class Spaceport extends Menu<Entity> {
             } catch (error) {
                 reportDialogFailure('outfitter', error);
             } finally {
+                this.outfitter.onUpdateOutfits = undefined;
                 this.setActiveDialog();
                 this.controls.bind();
                 this.onUpdateShip?.(this.input);
@@ -288,14 +296,20 @@ export class Spaceport extends Menu<Entity> {
                     this.setActiveDialog();
                     this.controls.bind();
                 }
+                this.onUpdateShip?.(this.input);
             }
         };
         this.missionBbs = new MissionBbs(
             gameData, this.id, controlEvents,
             () => showMissionInfo(this.missionBbs));
+        this.missionBbs.onUpdateShip = (ship) => this.onUpdateShip?.(ship);
         this.bar = new Bar(
             gameData, this.id, controlEvents, () => showMissionInfo(this.bar));
+        this.bar.onUpdateShip = (ship) => this.onUpdateShip?.(ship);
         this.tradeCenter = new TradeCenter(gameData, this.id, controlEvents);
+        this.tradeCenter.onUpdateShip = (ship) => this.onUpdateShip?.(ship);
+        this.missionInfo = new MissionInfo(gameData, controlEvents);
+        this.missionInfo.onUpdateShip = (ship) => this.onUpdateShip?.(ship);
         this.dialogContainers.add(this.outfitter.container);
         this.dialogContainers.add(this.shipyard.container);
         this.dialogContainers.add(this.missionBbs.container);
@@ -316,6 +330,7 @@ export class Spaceport extends Menu<Entity> {
             } finally {
                 this.setActiveDialog();
                 this.controls.bind();
+                this.onUpdateShip?.(this.input);
             }
         };
         const showBar = async () => {
@@ -332,6 +347,7 @@ export class Spaceport extends Menu<Entity> {
             } finally {
                 this.setActiveDialog();
                 this.controls.bind();
+                this.onUpdateShip?.(this.input);
             }
         };
         const showTradeCenter = async () => {
@@ -717,6 +733,7 @@ export class Spaceport extends Menu<Entity> {
                 if (state) {
                     evaluateCrons(crons, state);
                     input.components.set(PlayerStateComponent, { ...state });
+                    this.onUpdateShip?.(input);
                 }
             })().catch(() => {});
         }
@@ -753,14 +770,20 @@ export class Spaceport extends Menu<Entity> {
                                 ncb,
                             });
                         }
+                        if (ncb.outfits) {
+                            input.components.set(OutfitsStateComponent, ncb.outfits);
+                        }
                         input.components.set(PlayerStateComponent, { ...state });
+                        this.onUpdateShip?.(input);
                     } else {
                         refuseMission(state, offer.mission);
                         input.components.set(PlayerStateComponent, { ...state });
+                        this.onUpdateShip?.(input);
                     }
                 }
                 this.setActiveDialog();
                 this.controls.bind();
+                this.onUpdateShip?.(input);
             }
         }).catch(error => {
             reportDialogFailure('concourse mission offers', error);

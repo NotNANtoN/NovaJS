@@ -326,6 +326,7 @@ function missionValues(
 }
 
 export class MissionInfo extends Menu<Entity> {
+    onUpdateShip?: (ship: Entity) => void;
     private readonly title = new PIXI.Text({ text: 'Active Missions', style: MISSION_FONT.title });
     private readonly list = new PIXI.Text({ text: '', style: MISSION_FONT.list });
     private readonly detail = new PIXI.Text({ text: '', style: MISSION_FONT.detail });
@@ -649,12 +650,16 @@ export class MissionInfo extends Menu<Entity> {
                 this.input.components.set(OutfitsStateComponent, ncb.outfits);
             }
             this.status.text = 'Mission aborted.';
+            this.onUpdateShip?.(this.input);
             void startPendingNcbMissions(this.gameData, state, {
                 initialPlanetId: state.lastLandedPlanet,
                 initialSystemId: state.currentSystem,
                 currentSystemId: state.currentSystem,
                 ncb,
-            }).then(() => this.refresh());
+            }).then(() => {
+                this.refresh();
+                this.onUpdateShip?.(this.input);
+            });
         }
     }
 }
@@ -667,6 +672,7 @@ export class MissionInfo extends Menu<Entity> {
 const STATUS_HEIGHT = 16;
 
 export abstract class MissionBoard extends Menu<Entity> {
+    onUpdateShip?: (ship: Entity) => void;
     private readonly title: PIXI.Text;
     private readonly date?: PIXI.Text;
     private readonly flavor: PIXI.Text;
@@ -1207,6 +1213,7 @@ export abstract class MissionBoard extends Menu<Entity> {
                 ...this.destinationOptions(state, target.resolved),
                 ncb: this.ncbRuntime.setContext(this.input, state),
             });
+            this.onUpdateShip?.(this.input);
         };
         const accepted = acceptMission(
             state, offer.mission, {
@@ -1220,12 +1227,24 @@ export abstract class MissionBoard extends Menu<Entity> {
         void startPendingNcbMissions(this.gameData, state, {
             ...this.destinationOptions(state, offer.resolved),
             ncb,
+        }).then(() => {
+            if (ncb.outfits) {
+                this.input.components.set(OutfitsStateComponent, ncb.outfits);
+            }
+            this.onUpdateShip?.(this.input);
         });
         if (ncb.outfits) {
             this.input.components.set(OutfitsStateComponent, ncb.outfits);
         }
+        this.onUpdateShip?.(this.input);
         this.offers = this.offers.filter(entry =>
             entry.mission.id !== offer.mission.id);
+        const freeSpace = getFreeSpace(state);
+        for (const entry of this.offers) {
+            entry.available = entry.mission.cargoType < 0
+                || entry.mission.cargoQty === -1
+                || entry.mission.cargoQty <= freeSpace;
+        }
         this.selectionIndex = Math.min(
             this.selectionIndex, this.offers.length - 1);
         this.render();
@@ -1248,12 +1267,24 @@ export abstract class MissionBoard extends Menu<Entity> {
         void startPendingNcbMissions(this.gameData, state, {
             ...this.destinationOptions(state, offer.resolved),
             ncb,
+        }).then(() => {
+            if (ncb.outfits) {
+                this.input.components.set(OutfitsStateComponent, ncb.outfits);
+            }
+            this.onUpdateShip?.(this.input);
         });
         if (ncb.outfits) {
             this.input.components.set(OutfitsStateComponent, ncb.outfits);
         }
+        this.onUpdateShip?.(this.input);
         this.offers = this.offers.filter(entry =>
             entry.mission.id !== offer.mission.id);
+        const freeSpace = getFreeSpace(state);
+        for (const entry of this.offers) {
+            entry.available = entry.mission.cargoType < 0
+                || entry.mission.cargoQty === -1
+                || entry.mission.cargoQty <= freeSpace;
+        }
         this.selectionIndex = Math.min(
             this.selectionIndex, this.offers.length - 1);
         this.render();

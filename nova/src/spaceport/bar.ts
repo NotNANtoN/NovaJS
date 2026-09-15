@@ -245,8 +245,10 @@ export class Bar extends MissionBoard {
             totalWon: 0,
             onCreditsChange: (newCredits) => {
                 playerState.credits = newCredits;
+                this.onUpdateShip?.(this.input);
             },
         });
+        this.onUpdateShip?.(this.input);
         this.showHub();
     }
 
@@ -288,9 +290,11 @@ export class Bar extends MissionBoard {
                     shipId: candidate.id,
                     dailyPay: candidate.terms.dailyPay,
                 });
+                this.onUpdateShip?.(this.input);
                 return true;
             },
         });
+        this.onUpdateShip?.(this.input);
         this.showHub();
     }
 

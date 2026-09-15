@@ -157,6 +157,7 @@ function ordinaryCargoTons(state: PlayerState): number {
  * relying on spaces in Geneva.
  */
 export class TradeCenter extends Menu<Entity> {
+    onUpdateShip?: (ship: Entity) => void;
     private readonly title: PIXI.Text;
     private readonly commodityHeading: PIXI.Text;
     private readonly priceHeading: PIXI.Text;
@@ -461,6 +462,9 @@ export class TradeCenter extends Menu<Entity> {
             ? `Bought ${result.tons}t ${selected.commodity} for ${
                 result.total.toLocaleString()} cr.`
             : result.reason ?? 'Unable to buy cargo.';
+        if (result.success) {
+            this.onUpdateShip?.(this.input);
+        }
         this.render();
     }
 
@@ -494,6 +498,9 @@ export class TradeCenter extends Menu<Entity> {
             ? `Sold ${result.tons}t ${selected.commodity} for ${
                 result.total.toLocaleString()} cr.`
             : result.reason ?? 'Unable to sell cargo.';
+        if (result.success) {
+            this.onUpdateShip?.(this.input);
+        }
         this.render();
     }
 }

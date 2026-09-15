@@ -33,6 +33,13 @@ export const FONT = {
 };
 
 export class Outfitter extends Menu<OutfitsState> {
+    onUpdateOutfits?: (outfits: OutfitsState) => void;
+    private currentOutfitsState(): OutfitsState {
+        return new Map([...this.outfits]
+            .filter(([_, count]) => count > 0)
+            .map(([id, count]) => [id, { count }]));
+    }
+
     private itemGrid?: ItemGrid<OutfitData>;
     private pictContainer = new PIXI.Container();
     private outfits: DefaultMap<string, number>;
@@ -325,6 +332,7 @@ export class Outfitter extends Menu<OutfitsState> {
             this.itemGrid?.setCounts(this.outfits);
             this.updateCreditsText();
             this.setFreeMassText();
+            this.onUpdateOutfits?.(this.currentOutfitsState());
         }
     }
 
@@ -373,6 +381,7 @@ export class Outfitter extends Menu<OutfitsState> {
             this.itemGrid?.setCounts(this.outfits);
             this.updateCreditsText();
             this.setFreeMassText();
+            this.onUpdateOutfits?.(this.currentOutfitsState());
         }
     }
 
@@ -422,6 +431,7 @@ export class Outfitter extends Menu<OutfitsState> {
             this.itemGrid?.setCounts(this.outfits);
             this.updateCreditsText();
             this.setFreeMassText();
+            this.onUpdateOutfits?.(this.currentOutfitsState());
         }
     }
 

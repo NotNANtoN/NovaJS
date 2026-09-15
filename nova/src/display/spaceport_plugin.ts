@@ -189,6 +189,9 @@ export const LandSystem = new System({
                         .catch(error => console.error('Landing snapshot failed', error));
                 }
                 if (outfits) playerShip.components.set(OutfitsStateComponent, outfits);
+                if (statusBar) {
+                    statusBar.updateShip(playerShip);
+                }
                 return spaceport.show(playerShip, notices, true);
             },
             recover: async () => {
