@@ -27,3 +27,6 @@ export const ChooseRandomTargetComponent = new Component<{
     interval: number,
     nextTime?: number,
 }>('ChooseRandomTargetComponent');
+
+export const NpcDepartureComponent =
+    new Component<undefined>("NpcDepartureComponent");

@@ -56,7 +56,7 @@ import {
 import { MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { World } from 'nova_ecs/world';
-import { NpcAIComponent } from './npc_components';
+import { NpcAIComponent, NpcDepartureComponent } from './npc_components';
 import { PlayerShipSelector } from './player_ship_plugin';
 import { SystemIdResource } from './system_id_resource';
 import { GameDataResource } from './game_data_resource';
@@ -730,5 +730,65 @@ describe('CancelJumpOnDamageSystem', () => {
         world.emitNow(AppliedDamageEvent, { shield: 25, armor: 0, damager: 'attacker' }, ['ship']);
         expect(ship.components.has(JumpStateComponent)).toBeFalse();
         expect(refusalReason).toBe('damage');
+    });
+
+    it('cancels departing jump when sustaining damage and clamps velocity down to maxVelocity', () => {
+        const world = new World('cancel-departing-jump-test');
+        world.resources.set(TimeResource, { time: 2000, delta_ms: 16, delta_s: 0.016, frame: 1 });
+        world.addSystem(CancelJumpOnDamageSystem);
+
+        const movement: MovementState = {
+            accelerating: 1,
+            position: new Position(100, 200),
+            rotation: new Angle(0),
+            turnBack: false,
+            turning: 0,
+            velocity: new Vector(700, 0), // 3.5x maxVelocity (200)
+            targetSpeed: 700,
+        };
+
+        const physics: MovementPhysics = {
+            acceleration: 100,
+            maxVelocity: 200,
+            turnRate: 1,
+            movementType: MovementType.INERTIAL,
+        };
+
+        const ship = new Entity('ship')
+            .addComponent(MovementStateComponent, movement)
+            .addComponent(MovementPhysicsComponent, physics)
+            .addComponent(NpcDepartureComponent, undefined)
+            .addComponent(JumpStateComponent, {
+                from: 'nova:1',
+                to: 'nova:2',
+                phase: 'departing',
+                phaseStartedAt: 1900,
+                transitionAt: 2500,
+                requiresAdjacency: true,
+                arrivalSoundPending: false,
+            });
+
+        world.entities.set('ship', ship);
+
+        const stoppedSounds: string[] = [];
+        world.events.get(SoundEvent).subscribe(event => {
+            if (event.stop && event.id) {
+                stoppedSounds.push(event.id);
+            }
+        });
+
+        // Shooting the ship during departure phase cancels the hyperjump!
+        world.emitNow(AppliedDamageEvent, { shield: 15, armor: 0, damager: 'attacker' }, ['ship']);
+
+        expect(ship.components.has(JumpStateComponent)).toBeFalse();
+        expect(ship.components.has(NpcDepartureComponent)).toBeFalse();
+        // Speed must be clamped down to maxVelocity (200)
+        expect(movement.velocity.length).toBeCloseTo(200, 0.001);
+        expect(movement.targetSpeed).toBeLessThanOrEqual(200);
+        expect(movement.accelerating).toBe(0);
+        expect(movement.turnTo).toBeNull();
+
+        // Sound stops emitted
+        expect(stoppedSounds).toContain('nova:128');
     });
 });

@@ -36,7 +36,7 @@ import { ShipDataComponent } from "./ship_plugin";
 import { ControlPlayerShip } from "./ship_controller_plugin";
 import { SoundEvent } from "./sound_event";
 import { SystemIdResource } from "./system_id_resource";
-import { NpcAIComponent } from "./npc_components";
+import { NpcAIComponent, NpcDepartureComponent } from "./npc_components";
 import { PlatformResource } from "./platform_plugin";
 import { AppliedDamageEvent } from "./death_plugin";
 
@@ -424,18 +424,23 @@ export function advanceJumpFlight(
 export function cancelJumpFlight(
     entity: Entity,
     movement: MovementState,
+    physics?: MovementPhysics,
 ): void {
     entity.components.delete(JumpStateComponent);
     entity.components.delete(RemoteMovementPresentationComponent);
+    entity.components.delete(NpcDepartureComponent);
     movement.accelerating = 0;
     movement.turning = 0;
     movement.turnBack = false;
     movement.turnTo = null;
+    const phys = physics ?? entity.components.get(MovementPhysicsComponent);
+    if (phys && phys.maxVelocity > 0 && movement.velocity.length > phys.maxVelocity) {
+        movement.velocity = movement.velocity.normalize().scale(phys.maxVelocity);
+    }
     if (movement.targetSpeed !== undefined) {
-        movement.targetSpeed = Math.min(
-            movement.targetSpeed,
-            movement.velocity.length,
-        );
+        movement.targetSpeed = phys && phys.maxVelocity > 0
+            ? Math.min(movement.targetSpeed, phys.maxVelocity, movement.velocity.length)
+            : Math.min(movement.targetSpeed, movement.velocity.length);
     }
 }
 
@@ -587,7 +592,7 @@ const JumpLifecycleSystem = new System({
     step(state, movement, physics, route, time, gameData, entities, entity,
         uuid, emit, playerState, armor) {
         if (armor && armor.current <= 0) {
-            cancelJumpFlight(entity, movement);
+            cancelJumpFlight(entity, movement, physics);
             return;
         }
 
@@ -596,13 +601,13 @@ const JumpLifecycleSystem = new System({
         if (routeChangeCancelsJump(state, route.route)) {
             // An explicit route change before departure cancels the old jump
             // without discarding the newly selected route.
-            cancelJumpFlight(entity, movement);
+            cancelJumpFlight(entity, movement, physics);
             return;
         }
         if (!source || !destination
             || state.requiresAdjacency
             && !isValidNextHop(source, state.to)) {
-            cancelJumpFlight(entity, movement);
+            cancelJumpFlight(entity, movement, physics);
             route.route = [];
             emit(SoundEvent, { id: 'nova:153' });
             return;
@@ -767,14 +772,20 @@ export const CancelJumpOnDamageSystem = new System({
         MovementStateComponent,
         GetEntity,
         Emit,
+        Optional(MovementPhysicsComponent),
     ] as const,
-    step(damage, jumpState, movement, entity, emit) {
+    step(damage, jumpState, movement, entity, emit, physics) {
         if (damage.shield + damage.armor <= 0) {
             return;
         }
-        if (jumpState.phase === 'braking' || jumpState.phase === 'spooling') {
-            cancelJumpFlight(entity, movement);
+        if (jumpState.phase === 'braking'
+            || jumpState.phase === 'spooling'
+            || jumpState.phase === 'departing') {
+            cancelJumpFlight(entity, movement, physics);
             emit(JumpRefusedEvent, { reason: 'damage' });
+            emit(SoundEvent, { id: 'nova:128', stop: true });
+            emit(SoundEvent, { id: 'nova:123', stop: true });
+            emit(SoundEvent, { id: 'nova:130', stop: true });
         }
     },
 });

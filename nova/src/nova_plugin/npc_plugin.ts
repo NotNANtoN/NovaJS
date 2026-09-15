@@ -47,6 +47,7 @@ import {
     GovtComponent,
     NpcAIComponent,
     NpcCombatRoleComponent,
+    NpcDepartureComponent,
 } from "./npc_components";
 import type { GovtData } from "./npc_components";
 import { createMinerSystems, MiningShipProvider } from "./miner_ai";
@@ -69,6 +70,7 @@ export {
     GovtComponent,
     NpcAIComponent,
     NpcCombatRoleComponent,
+    NpcDepartureComponent,
 } from "./npc_components";
 export type { GovtData } from "./npc_components";
 
@@ -596,8 +598,6 @@ export interface NpcFleeState {
 }
 export const NpcFleeComponent =
     new Component<NpcFleeState>("NpcFleeComponent");
-const NpcDepartureComponent =
-    new Component<undefined>("NpcDepartureComponent");
 
 export interface WanderState {
     heading?: number;
