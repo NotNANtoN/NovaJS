@@ -23,6 +23,10 @@ import {
     warmFlightAssets,
 } from "./display/flight_asset_warmup";
 import {
+    AnimationGraphicComponent,
+    AnimationGraphicLoadedComponent,
+} from "./display/animation_graphic_plugin";
+import {
     hideEnteringOverlay,
     setEnteringProgress,
     showEnteringOverlay,
@@ -394,6 +398,8 @@ async function transitionTo(
             // visual arrival phase. Start it when the destination can draw.
             restartJumpArrival(transitionEntity);
         }
+        transitionEntity.components.delete(AnimationGraphicComponent);
+        transitionEntity.components.delete(AnimationGraphicLoadedComponent);
         newSystem.entities.set(uuid, transitionEntity);
         resetGameplayClocks();
         {

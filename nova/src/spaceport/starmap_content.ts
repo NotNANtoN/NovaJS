@@ -32,6 +32,8 @@ export interface StarmapPanelInput {
     legalRecords?: Readonly<Record<string, number>>;
     gameDate?: number;
     transmissions?: readonly string[];
+    markerInfo?: readonly string[];
+    legend?: readonly string[];
 }
 
 export interface StarmapPanelData {
@@ -45,7 +47,17 @@ export interface StarmapPanelData {
     navigationHazards?: string;
     date?: string;
     transmissions?: string[];
+    markerInfo?: string[];
+    legend?: string[];
 }
+
+export const STARMAP_LEGEND = [
+    '▲ Red: Priority / Storyline / Bounty',
+    '▼ Orange: Cargo Delivery Destination',
+    '◆ Cyan: Passenger Transport',
+    '▶ Green: Pilot Beacon',
+    '▶ Orange: SOS Distress Beacon',
+] as const;
 
 /**
  * Retail's map only names the two useful asteroid-density bands. Keeping the
@@ -186,6 +198,8 @@ export function starmapPanelData(
         navigationHazards: navigationHazard(input.system.asteroidDensity, input.system.interference ?? 0),
         date,
         transmissions: input.transmissions ? [...input.transmissions] : undefined,
+        markerInfo: input.markerInfo ? [...input.markerInfo] : undefined,
+        legend: input.legend ? [...input.legend] : undefined,
     };
 }
 
@@ -224,6 +238,9 @@ export function starmapPanelText(
     }
     const body = [
         panel.systemName,
+        ...(panel.markerInfo && panel.markerInfo.length > 0
+            ? ['', 'System Objectives:', ...panel.markerInfo]
+            : []),
         '',
         'Government:',
         panel.government ?? 'Independent',
@@ -239,6 +256,9 @@ export function starmapPanelText(
         '',
         'Services:',
         ...(panel.services.length > 0 ? panel.services : ['None']),
+        ...(panel.legend && panel.legend.length > 0
+            ? ['', 'Map Legend:', ...panel.legend]
+            : []),
     ].join('\n');
     const bottomLines = [`Ports: ${formatStarmapPorts(panel.ports)}`];
     if (panel.navigationHazards) {

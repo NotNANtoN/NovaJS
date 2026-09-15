@@ -29,6 +29,7 @@ import type { ActiveMission } from "../nova_plugin/player_state";
 import {
     starmapPanelData,
     starmapPanelText,
+    STARMAP_LEGEND,
 } from './starmap_content';
 import {
     clampMapScale,
@@ -177,6 +178,70 @@ export function getMissionDestinationMarkers(
     }
 
     return markers;
+}
+
+export function getSystemMissionDetails(
+    systemId: string,
+    activeMissions: readonly ActiveMission[] | undefined,
+    systems: readonly SystemData[],
+): string[] {
+    const details: string[] = [];
+    if (!activeMissions || activeMissions.length === 0) {
+        return details;
+    }
+
+    const planetToSystem = new Map<string, string>();
+    for (const sys of systems) {
+        for (const planetId of sys.planets ?? []) {
+            planetToSystem.set(planetId, sys.id);
+            planetToSystem.set(planetId.replace(/^.*:/, ''), sys.id);
+        }
+    }
+
+    const systemIds = new Set(systems.map(s => s.id));
+    const bareSystemIds = new Map(systems.map(s => [s.id.replace(/^.*:/, ''), s.id]));
+
+    const resolveSystem = (targetId: string | undefined): string | undefined => {
+        if (!targetId || targetId === '*') return undefined;
+        if (systemIds.has(targetId)) return targetId;
+        if (planetToSystem.has(targetId)) return planetToSystem.get(targetId);
+        const bare = targetId.replace(/^.*:/, '');
+        if (bareSystemIds.has(bare)) return bareSystemIds.get(bare);
+        if (planetToSystem.has(bare)) return planetToSystem.get(bare);
+        return undefined;
+    };
+
+    for (const mission of activeMissions) {
+        if (mission.state !== 'active') continue;
+        let targetSystem: string | undefined;
+        if (!mission.travelVisited && mission.travelDestination) {
+            targetSystem = resolveSystem(mission.travelDestination);
+        } else if (mission.travelVisited && mission.returnDestination) {
+            targetSystem = resolveSystem(mission.returnDestination);
+        } else if (mission.shipSystem) {
+            targetSystem = resolveSystem(mission.shipSystem);
+        } else if (mission.destination) {
+            targetSystem = resolveSystem(mission.destination);
+        }
+
+        if (targetSystem !== systemId) continue;
+
+        const isPassenger = mission.cargo?.type === 1001
+            || mission.missionData?.cargoType === 1001
+            || String(mission.missionData?.cargo).toLowerCase().includes('passenger');
+        const isCargo = !isPassenger && (
+            Boolean(mission.cargo)
+            || (mission.missionData?.cargoType !== undefined && mission.missionData?.cargoType >= 0)
+        );
+
+        const icon = isPassenger ? '◆ [Passenger]' : (isCargo ? '▼ [Cargo]' : '▲ [Priority]');
+        const title = mission.missionData?.title || mission.missionData?.name || `Mission #${mission.missionId}`;
+        const pay = mission.missionData?.payVal ? ` (${mission.missionData.payVal.toLocaleString()} cr)` : '';
+        const cargo = isCargo && mission.cargo?.quantity ? ` - ${mission.cargo.quantity}t cargo` : '';
+        details.push(`${icon} ${title}${pay}${cargo}`);
+    }
+
+    return details;
 }
 
 export interface StarmapPlayerMarker {
@@ -399,6 +464,10 @@ class SystemGraph {
         this.draw();
     }
 
+    getAllSystems(): SystemData[] {
+        return [...this.systems.values()];
+    }
+
     center() {
         const system = this.systems.get(this.currentSystem);
         if (system) {
@@ -527,7 +596,11 @@ class SystemGraph {
         }
         event.preventDefault();
         event.stopPropagation();
-        (event.nativeEvent as Event)?.preventDefault?.();
+        try {
+            (event.nativeEvent as Event)?.preventDefault?.();
+        } catch {
+            // Passive wheel event in modern browser
+        }
         const nextScale = mapScaleForWheel(this.scale, event.deltaY);
         if (nextScale === this.scale) {
             return;
@@ -1020,6 +1093,12 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
             .filter(p => p.systemId === systemId)
             .map(p => `[${p.kind === 'sos' ? 'SOS' : 'PILOT'}] ${p.name}`);
 
+        const markerInfo = getSystemMissionDetails(
+            systemId,
+            this.playerState?.activeMissions,
+            graph.getAllSystems(),
+        );
+
         this.setPanelData(starmapPanelData({
             system,
             currentSystemId: this.currentSystemId(),
@@ -1029,6 +1108,8 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
             legalRecords: this.playerState?.legalRecords,
             gameDate: this.playerState?.gameDate ?? 0,
             transmissions,
+            markerInfo,
+            legend: markerInfo.length > 0 || transmissions.length > 0 ? [...STARMAP_LEGEND] : undefined,
         }));
     }
 }
