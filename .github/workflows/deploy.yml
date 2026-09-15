@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - feat-performance-and-modernization
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.gitignore'
   workflow_dispatch:
     inputs:
       recreate_instance:
@@ -40,15 +44,12 @@ jobs:
       - name: Run supported test suite
         run: npm test
 
-  publish:
+  deploy:
     needs: quality
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
-    outputs:
-      image: ${{ steps.image.outputs.name }}:${{ github.sha }}
-      image_name: ${{ steps.image.outputs.name }}
     steps:
       - uses: actions/checkout@v4.2.2
       - name: Normalize image name
@@ -70,21 +71,12 @@ jobs:
           tags: |
             ${{ steps.image.outputs.name }}:${{ github.sha }}
             ${{ steps.image.outputs.name }}:latest
-
-  provision:
-    needs: publish
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    outputs:
-      instance_id: ${{ steps.instance.outputs.instance_id }}
-      ipv4: ${{ steps.instance.outputs.ipv4 }}
-    steps:
-      - uses: actions/checkout@v4.2.2
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
       - name: Find or create Linode
         id: instance
         env:
-          IMAGE_REPOSITORY: ${{ needs.publish.outputs.image_name }}
+          IMAGE_REPOSITORY: ${{ steps.image.outputs.name }}
           LINODE_API_TOKEN: >-
             ${{ secrets.LINODE_API_TOKEN || secrets.LINODE_API_KEY }}
           RECREATE_INSTANCE: ${{ inputs.recreate_instance }}
@@ -394,18 +386,12 @@ jobs:
           printf 'instance_id=%s\n' "$instance_id" >>"$GITHUB_OUTPUT"
           printf 'ipv4=%s\n' "$ipv4" >>"$GITHUB_OUTPUT"
 
-  health:
-    needs: [publish, provision]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    env:
-      INSTANCE_ID: ${{ needs.provision.outputs.instance_id }}
-      INSTANCE_IPV4: ${{ needs.provision.outputs.ipv4 }}
-      LINODE_API_TOKEN: >-
-        ${{ secrets.LINODE_API_TOKEN || secrets.LINODE_API_KEY }}
-    steps:
       - name: Poll public readiness endpoint
+        env:
+          INSTANCE_ID: ${{ steps.instance.outputs.instance_id }}
+          INSTANCE_IPV4: ${{ steps.instance.outputs.ipv4 }}
+          LINODE_API_TOKEN: >-
+            ${{ secrets.LINODE_API_TOKEN || secrets.LINODE_API_KEY }}
         run: |
           set -Eeuo pipefail
           health_url="http://${INSTANCE_IPV4}/__novajs_health"

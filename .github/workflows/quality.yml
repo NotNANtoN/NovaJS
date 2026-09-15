@@ -2,7 +2,17 @@ name: Quality
 
 on:
   push:
+    branches-ignore:
+      - feat-performance-and-modernization
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.gitignore'
   pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.gitignore'
 
 permissions:
   contents: read
