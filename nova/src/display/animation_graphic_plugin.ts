@@ -140,8 +140,8 @@ const AnimationGraphicCleanup = new System({
     name: 'AnimationGraphicCleanup',
     events: [DeleteEvent],
     args: [AnimationGraphicComponent, Optional(ReturnToQueueComponent),
-        Space] as const,
-    step: (graphic, recyclable) => {
+        Space, GetEntity] as const,
+    step: (graphic, recyclable, _space, entity) => {
         if (recyclable) {
             // Projectiles are pooled: the same Entity (and therefore the same
             // AnimationGraphic) is reused for the next shot. Destroying the
@@ -151,6 +151,8 @@ const AnimationGraphicCleanup = new System({
             return;
         }
         graphic.dispose();
+        entity.components.delete(AnimationGraphicComponent);
+        entity.components.delete(AnimationGraphicLoadedComponent);
     }
 });
 
@@ -159,16 +161,19 @@ const SyncAnimationGraphicInsert = new System({
     events: [AddEvent],
     args: [AnimationComponent, GameDataResource, Space, Optional(MovementStateComponent), GetEntity, Optional(AnimationGraphicComponent)] as const,
     step(animation, gameData, space, movementState, entity, existingGraphic) {
-        if (existingGraphic) {
-            if (!existingGraphic.managed.disposed) {
-                existingGraphic.attachTo(space);
-                if (movementState) {
-                    existingGraphic.container.position.x = movementState.position.x;
-                    existingGraphic.container.position.y = movementState.position.y;
-                    existingGraphic.rotation = movementState.rotation.angle;
-                }
+        if (existingGraphic && !existingGraphic.managed.disposed) {
+            existingGraphic.attachTo(space);
+            if (movementState) {
+                existingGraphic.container.position.x = movementState.position.x;
+                existingGraphic.container.position.y = movementState.position.y;
+                existingGraphic.rotation = movementState.rotation.angle;
             }
             return;
+        }
+
+        if (existingGraphic && existingGraphic.managed.disposed) {
+            entity.components.delete(AnimationGraphicComponent);
+            entity.components.delete(AnimationGraphicLoadedComponent);
         }
 
         const graphic = new AnimationGraphic({

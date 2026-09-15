@@ -19,6 +19,7 @@ import { ControlsSubject } from '../nova_plugin/controls_plugin';
 import { GameDataResource } from '../nova_plugin/game_data_resource';
 import { NcbRuntimeResource } from '../nova_plugin/ncb_runtime';
 import { OutfitsStateComponent } from '../nova_plugin/outfit_plugin';
+import { AnimationGraphicComponent, AnimationGraphicLoadedComponent } from './animation_graphic_plugin';
 import {
     LandEvent,
     LandingResultEvent,
@@ -205,6 +206,8 @@ export const LandSystem = new System({
             restore: newShip => {
                 recoveryDialog?.remove();
                 if (communicator?.uuid) newShip.components.set(MultiplayerData, { owner: communicator.uuid });
+                newShip.components.delete(AnimationGraphicComponent);
+                newShip.components.delete(AnimationGraphicLoadedComponent);
                 world.entities.set(shipUuid, newShip);
                 if (playerStore && owner) void persistDeparture(
                     playerStore, playerStore.getTokenForPeer(owner), newShip, landingState,
