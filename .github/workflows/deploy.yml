@@ -388,6 +388,13 @@ jobs:
           printf 'instance_id=%s\n' "$instance_id" >>"$GITHUB_OUTPUT"
           printf 'ipv4=%s\n' "$ipv4" >>"$GITHUB_OUTPUT"
 
+          # Trigger a graceful reboot so novajs-updater.timer (OnBootSec=30s) pulls the new image without destroying the instance
+          printf 'Notifying Linode %s to pull the new image via graceful reboot...\n' "$instance_id"
+          curl --fail-with-body --silent --show-error \
+            --retry 3 --retry-delay 2 --retry-all-errors \
+            -X POST -H "$auth_header" \
+            "${api_url}/linode/instances/${instance_id}/reboot" || true
+
       - name: Poll public readiness endpoint
         env:
           INSTANCE_ID: ${{ steps.instance.outputs.instance_id }}
@@ -398,6 +405,9 @@ jobs:
           set -Eeuo pipefail
           health_url="http://${INSTANCE_IPV4}/__novajs_health"
           deadline=$((SECONDS + 900))
+
+          # Allow the instance to begin rebooting before checking health
+          sleep 20
 
           while (( SECONDS < deadline )); do
             status="$(
