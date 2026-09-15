@@ -15,6 +15,7 @@ import {
     VolumeResource,
     IncomingMissileWarningSystem,
     LowShieldWarningSystem,
+    CriticalHullWarningSystem,
     LandingSoundRequestSystem,
     StellarSoundSystem,
     TargetSelectionSoundSystem,
@@ -208,6 +209,35 @@ describe('browser sound effects', () => {
         // After cooldown (1800ms) -> emits warning chime again
         LowShieldWarningSystem.step(undefined, shieldLow as never, { ...time, time: 2900 }, emit);
         expect(sounds).toEqual(['nova:153', 'nova:153']);
+    });
+
+    it('emits critical hull breach alarm nova:152 when shields are depleted and armor is at 35% or below', () => {
+        const { sounds, emit } = soundCollector();
+        const time = { time: 1000, delta_ms: 16, delta_s: 0.016, frame: 1 };
+
+        // Shields up (50) and low armor (20) -> no alarm (shield bubble still intact)
+        const shieldUp = { current: 50, max: 100 };
+        const armorLow = { current: 20, max: 100 };
+        CriticalHullWarningSystem.step(undefined, armorLow as never, shieldUp as never, time, emit);
+        expect(sounds).toEqual([]);
+
+        // Shields down (0) but armor healthy (50) -> no alarm
+        const shieldDown = { current: 0, max: 100 };
+        const armorHealthy = { current: 50, max: 100 };
+        CriticalHullWarningSystem.step(undefined, armorHealthy as never, shieldDown as never, time, emit);
+        expect(sounds).toEqual([]);
+
+        // Shields down (0) and critical armor (35) -> critical hull breach siren
+        CriticalHullWarningSystem.step(undefined, armorLow as never, shieldDown as never, time, emit);
+        expect(sounds).toEqual(['nova:152']);
+
+        // Immediately following step before cooldown -> throttled
+        CriticalHullWarningSystem.step(undefined, armorLow as never, shieldDown as never, { ...time, time: 1500 }, emit);
+        expect(sounds).toEqual(['nova:152']);
+
+        // After cooldown (1200ms) -> emits siren again
+        CriticalHullWarningSystem.step(undefined, armorLow as never, shieldDown as never, { ...time, time: 2300 }, emit);
+        expect(sounds).toEqual(['nova:152', 'nova:152']);
     });
 
     it('uses the retail airlock sound on docking and departure', () => {

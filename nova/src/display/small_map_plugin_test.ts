@@ -53,10 +53,14 @@ describe('SmallMap', () => {
                 [
                     { uuid: 'target-1', pos: { x: 2000, y: -1000 }, isPlayer: true, isEscort: false, isHostile: false },
                     { uuid: 'escort-1', pos: { x: 900, y: -600 }, isPlayer: false, isEscort: true, isHostile: false },
-                    { uuid: 'enemy-1', pos: { x: 3000, y: -2000 }, isPlayer: false, isEscort: false, isHostile: true },
+                    { uuid: 'enemy-1', pos: { x: 3000, y: -2000 }, isPlayer: false, isEscort: false, isHostile: true, isMission: true },
                 ],
                 [
                     { uuid: 'earth', name: 'Earth', pos: { x: 0, y: 0 } },
+                ],
+                0,
+                [
+                    { uuid: 'ore-1', pos: { x: 1200, y: -450 } },
                 ],
             );
         }).not.toThrow();

@@ -17,6 +17,8 @@ import { ShipDataComponent } from "../nova_plugin/ship_plugin";
 import { TargetComponent } from "../nova_plugin/target_component";
 import { SystemIdResource } from "../nova_plugin/system_id_resource";
 import { GameDataResource } from "../nova_plugin/game_data_resource";
+import { OreComponent } from "../nova_plugin/asteroid_plugin";
+import { MissionShipComponent } from "../nova_plugin/mission_ship_plugin";
 import { createGraphicHandle, ManagedGraphic } from "./managed_graphic";
 import { ScreenSize } from "./screen_size_plugin";
 import { Stage } from "./stage_resource";
@@ -161,9 +163,10 @@ export class SmallMap {
         playerRotation: number,
         targetUuid: string | undefined,
         jumpRoute: string[] | undefined,
-        ships: Array<{ uuid: string; pos: { x: number; y: number }; isPlayer: boolean; isEscort: boolean; isHostile: boolean }>,
+        ships: Array<{ uuid: string; pos: { x: number; y: number }; isPlayer: boolean; isEscort: boolean; isHostile: boolean; isMission?: boolean }>,
         planets: Array<{ uuid: string; name: string; pos: { x: number; y: number } }>,
         interference = 0,
+        oreChunks: Array<{ uuid: string; pos: { x: number; y: number } }> = [],
     ): void {
         this.blipsGraphics.clear();
         const currentRadius = this.currentRange;
@@ -219,7 +222,10 @@ export class SmallMap {
             let color = 0x90a4ae;
             let size = 2;
 
-            if (ship.isHostile) {
+            if (ship.isMission) {
+                color = 0xffa000;
+                size = 3.5;
+            } else if (ship.isHostile) {
                 color = 0xff3333;
                 size = 3;
             } else if (ship.isEscort) {
@@ -233,6 +239,18 @@ export class SmallMap {
             this.blipsGraphics.circle(sx, sy, size).fill(color);
             if (isTarget) {
                 this.blipsGraphics.rect(sx - 5, sy - 5, 10, 10).stroke({ width: 1, color: 0xffea00 });
+            }
+        }
+
+        // Draw floating ore and cargo canisters
+        for (const ore of oreChunks) {
+            const ox = cx + ore.pos.x * mapScale;
+            const oy = cy + ore.pos.y * mapScale;
+            if (ox < 6 || ox > MAP_SIZE - 6 || oy < 26 || oy > MAP_SIZE - 6) continue;
+            const isTarget = ore.uuid === targetUuid;
+            this.blipsGraphics.rect(ox - 1, oy - 1, 2.5, 2.5).fill(0x80e5ff);
+            if (isTarget) {
+                this.blipsGraphics.rect(ox - 3, oy - 3, 6, 6).stroke({ width: 1, color: 0xffea00 });
             }
         }
 
@@ -271,12 +289,19 @@ const ShipsQuery = new Query([
     Optional(TargetComponent),
     Optional(PlayerStateComponent),
     Optional(HiredEscortComponent),
+    Optional(MissionShipComponent),
 ] as const);
 
 const PlanetsQuery = new Query([
     UUID,
     MovementStateComponent,
     PlanetDataComponent,
+] as const);
+
+const OreQuery = new Query([
+    UUID,
+    MovementStateComponent,
+    OreComponent,
 ] as const);
 
 export const SmallMapControlSystem = new System({
@@ -304,10 +329,11 @@ export const DrawSmallMapSystem = new System({
         Optional(JumpRouteComponent),
         ShipsQuery,
         PlanetsQuery,
+        OreQuery,
         Optional(SystemIdResource),
         Optional(GameDataResource),
     ] as const,
-    step(smallMap, screenSize, playerMovement, _selector, playerUuid, playerTarget, jumpRoute, ships, planets, systemId, gameData) {
+    step(smallMap, screenSize, playerMovement, _selector, playerUuid, playerTarget, jumpRoute, ships, planets, ores, systemId, gameData) {
         const interference = (systemId && gameData)
             ? (gameData.data.System.getCached(systemId)?.interference ?? 0)
             : 0;
@@ -321,18 +347,20 @@ export const DrawSmallMapSystem = new System({
             -screenSize.y / 2 + 20,
         );
 
-        const shipEntries: Array<{ uuid: string; pos: { x: number; y: number }; isPlayer: boolean; isEscort: boolean; isHostile: boolean }> = [];
-        for (const [uuid, movement, , target, playerState, escort] of ships) {
+        const shipEntries: Array<{ uuid: string; pos: { x: number; y: number }; isPlayer: boolean; isEscort: boolean; isHostile: boolean; isMission?: boolean }> = [];
+        for (const [uuid, movement, , target, playerState, escort, missionShip] of ships) {
             if (uuid === playerUuid) continue;
             const isPlayer = Boolean(playerState);
             const isEscort = Boolean(escort && escort.ownerUuid === playerUuid);
-            const isHostile = target?.target === playerUuid;
+            const isMission = Boolean(missionShip);
+            const isHostile = target?.target === playerUuid || isMission;
             shipEntries.push({
                 uuid,
                 pos: { x: movement.position.x, y: movement.position.y },
                 isPlayer,
                 isEscort,
                 isHostile,
+                isMission,
             });
         }
 
@@ -345,6 +373,14 @@ export const DrawSmallMapSystem = new System({
             });
         }
 
+        const oreEntries: Array<{ uuid: string; pos: { x: number; y: number } }> = [];
+        for (const [uuid, movement] of ores) {
+            oreEntries.push({
+                uuid,
+                pos: { x: movement.position.x, y: movement.position.y },
+            });
+        }
+
         smallMap.renderTacticalState(
             playerMovement.position,
             playerMovement.rotation.angle,
@@ -353,6 +389,7 @@ export const DrawSmallMapSystem = new System({
             shipEntries,
             planetEntries,
             interference,
+            oreEntries,
         );
     },
 });

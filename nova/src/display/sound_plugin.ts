@@ -1,6 +1,6 @@
 import { Optional } from 'nova_ecs/optional';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
-import { ShieldComponent } from '../nova_plugin/health_plugin';
+import { ArmorComponent, ShieldComponent } from '../nova_plugin/health_plugin';
 import { Sound } from '@pixi/sound';
 import { Emit, Entities, UUID } from 'nova_ecs/arg_types';
 import { Plugin } from 'nova_ecs/plugin';
@@ -282,6 +282,25 @@ export const LowShieldWarningSystem = new System({
     },
 });
 
+export const CriticalHullWarningSystem = new System({
+    name: 'CriticalHullWarningSystem',
+    args: [PlayerShipSelector, ArmorComponent, Optional(ShieldComponent), Optional(TimeResource), Emit] as const,
+    step(_player, armor, shield, time, emit) {
+        if (!time) return;
+        const shieldsDown = !shield || shield.current <= 0;
+        const isHullCritical = armor.max > 0 && armor.current > 0 && (armor.current / armor.max) <= 0.35;
+        if (shieldsDown && isHullCritical) {
+            const lastWarn = (armor as any)._lastLowArmorWarn;
+            if (lastWarn === undefined || time.time - lastWarn >= 1200) {
+                (armor as any)._lastLowArmorWarn = time.time;
+                emit(SoundEvent, { id: 'nova:152' });
+            }
+        } else if (armor.max > 0 && (armor.current / armor.max) > 0.35) {
+            delete (armor as any)._lastLowArmorWarn;
+        }
+    },
+});
+
 export const MissileLockToneSystem = new System({
     name: 'MissileLockToneSystem',
     args: [
@@ -435,6 +454,7 @@ export const SoundPlugin: Plugin = {
         world.addSystem(TargetSelectionSoundSystem);
         world.addSystem(IncomingMissileWarningSystem);
         world.addSystem(LowShieldWarningSystem);
+        world.addSystem(CriticalHullWarningSystem);
         world.addSystem(MissileLockToneSystem);
         world.addSystem(LandingSoundRequestSystem);
         world.addSystem(LandingSoundResultSystem);
@@ -452,6 +472,7 @@ export const SoundPlugin: Plugin = {
         world.removeSystem(TargetSelectionSoundSystem);
         world.removeSystem(IncomingMissileWarningSystem);
         world.removeSystem(LowShieldWarningSystem);
+        world.removeSystem(CriticalHullWarningSystem);
         world.removeSystem(MissileLockToneSystem);
         world.removeSystem(LandingSoundRequestSystem);
         world.removeSystem(LandingSoundResultSystem);
