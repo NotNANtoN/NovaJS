@@ -314,6 +314,7 @@ fi
 target_image="ghcr.io/${image_repository}@${remote_digest}"
 printf 'Refreshing deployment assets from %s.\n' "$target_image"
 docker pull "$target_image"
+docker tag "$target_image" "$configured_image"
 staging_dir="$(mktemp -d)"
 extract_container="$(docker create "$target_image")"
 docker cp "${extract_container}:${asset_root}/." "$staging_dir"
@@ -372,8 +373,7 @@ done
 
 assets_installed=1
 for index in "${!asset_targets[@]}"; do
-    if [[ "${asset_targets[$index]}" == "${deploy_dir}/scripts/novajs-updater.sh" \
-        || "${asset_targets[$index]}" == /etc/systemd/system/* ]]; then
+    if [[ "${asset_targets[$index]}" == /etc/systemd/system/* ]]; then
         continue
     fi
     install -m "${asset_modes[$index]}" \

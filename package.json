@@ -39,9 +39,9 @@
         "typescript": "^5.9.3"
     },
     "scripts": {
-        "build": "node scripts/build.mjs",
-        "check": "npm run build && npm test",
-        "dev": "npm run build && node dist/server.js",
+        "build": "bun scripts/build.mjs",
+        "check": "bun run build && bun run test",
+        "dev": "bun run build && node dist/server.js",
         "prepare": "node scripts/install-git-hooks.mjs",
         "test": "bun scripts/test.mjs",
         "typecheck": "tsc --noEmit",
