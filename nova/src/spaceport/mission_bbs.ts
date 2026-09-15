@@ -348,8 +348,8 @@ export class MissionInfo extends Menu<Entity> {
     ) {
         super(gameData, MISSION_INFO_LAYOUT.background, controlEvents);
         this.ncbRuntime = new NcbRuntime(gameData);
-        this.abortButton = new Button(gameData, 'Abort', 55, { x: -100, y: 50 });
-        const done = new Button(gameData, 'Done', 50, { x: 30, y: 50 });
+        this.abortButton = new Button(gameData, 'Abort', 50, { x: -85, y: 44 });
+        const done = new Button(gameData, 'Done', 50, { x: 15, y: 44 });
         this.addButtons({ abort: this.abortButton, done });
         this.abortButton.click.subscribe(() => this.abortSelected());
         done.click.subscribe(this.done.bind(this));
@@ -488,10 +488,6 @@ export class MissionInfo extends Menu<Entity> {
                 ?? entry.destination;
             const destination = world
                 ? planetName(destinationId, world) : destinationId ?? 'any destination';
-            const deadline = world && entry.acceptedDate !== undefined
-                && mission.timeLimit > 0
-                ? formatGameDate(entry.acceptedDate + mission.timeLimit)
-                : undefined;
             const name = formatVisibleMissionText(mission.name, {
                 destination,
                 destinationSystem: systemNameForPlanet(destinationId, world ?? {
@@ -504,9 +500,8 @@ export class MissionInfo extends Menu<Entity> {
                 shipName: state?.shipName,
                 shipType: state?.shipId,
             });
-            return `${index === this.selectionIndex ? '▶ ' : '  '}${name}`
-                + ` [${entry.state}] — ${destination}`
-                + (deadline ? `, due ${deadline}` : '');
+            const statusTag = entry.state === 'failed' ? ' [failed]' : '';
+            return `${index === this.selectionIndex ? '▶ ' : '  '}${name}${statusTag}`;
         });
         const heights = rows.map(row => Math.max(
             14,
@@ -568,22 +563,26 @@ export class MissionInfo extends Menu<Entity> {
 
         // Mission objective summary
         let objective = '';
-        if (selected.entry.cargo?.quantity || (selected.mission.cargoQty > 0 && selected.mission.cargo)) {
+        const isPassenger = (selected.mission.flags & 0x0002) !== 0
+            || Boolean(selected.mission.cargo?.toLowerCase().includes('passenger'))
+            || Boolean(selected.mission.name.toLowerCase().includes('passenger'));
+
+        if (isPassenger) {
+            objective = `Transport passenger(s) to ${destination}`;
+        } else if (selected.entry.cargo?.quantity || (selected.mission.cargoQty > 0 && selected.mission.cargo)) {
             const qty = selected.entry.cargo?.quantity ?? selected.mission.cargoQty;
             const cargoName = selected.mission.cargo?.replace(/^\*/, '') ?? 'cargo';
             objective = `Deliver ${qty}t ${cargoName} to ${destination}`;
-        } else if (selected.mission.flags & 0x0002) {
-            objective = `Transport passenger(s) to ${destination}`;
-        } else if (selected.mission.shipGoal === 1) {
+        } else if (selected.mission.shipCount > 0 && selected.mission.shipGoal === 1) {
             objective = `Destroy target vessel in ${destinationSystem ?? destination}`;
-        } else if (selected.mission.shipGoal === 2) {
+        } else if (selected.mission.shipCount > 0 && selected.mission.shipGoal === 2) {
             objective = `Disable target vessel in ${destinationSystem ?? destination}`;
-        } else if (selected.mission.shipGoal === 3) {
+        } else if (selected.mission.shipCount > 0 && selected.mission.shipGoal === 3) {
             objective = `Escort convoy to ${destination}`;
-        } else if (selected.mission.shipGoal === 4) {
+        } else if (selected.mission.shipCount > 0 && selected.mission.shipGoal === 4) {
             objective = `Observe target vessel in ${destinationSystem ?? destination}`;
         } else {
-            objective = `Land at ${destination}`;
+            objective = `Travel to ${destination}`;
         }
 
         const totalCapacity = state?.cargoCapacity ?? 0;
@@ -614,12 +613,11 @@ export class MissionInfo extends Menu<Entity> {
         const detailLines = [
             brief,
             `Objective: ${objective}`,
-            `Destination: ${destination}${destinationSystem ? ` (${destinationSystem})` : ''}`,
-            hopsText ? `Hops: ${hopsText}` : undefined,
-            plottedHops ? `Plotted: ${plottedHops}` : undefined,
-            returnDestination && returnDestination !== destination
+            destination && destination !== 'any destination'
+                ? `Destination: ${destination}${destinationSystem ? ` (${destinationSystem})` : ''}`
+                : undefined,
+            returnDestination && returnDestination !== destination && returnDestination !== 'any destination'
                 ? `Return: ${returnDestination}` : undefined,
-            `Hold: ${usedTons}/${totalCapacity}t (${freeTons}t free) — ${holdManifest}`,
         ].filter((line): line is string => line !== undefined);
 
         this.detail.text = detailLines.join('\n');

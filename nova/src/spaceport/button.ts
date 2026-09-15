@@ -96,13 +96,19 @@ export class Button {
             leftSprite.position.x = LEFT_POS;
             stateContainer.addChild(leftSprite);
 
+            const middleTex = this.gameData.textureFromPict(middle);
             const middleSprite = new PIXI.TilingSprite({
-                texture: this.gameData.textureFromPict(middle),
+                texture: middleTex,
                 width: this.width,
                 height: 25,
             });
             middleSprite.position.x = LEFT_POS;
             stateContainer.addChild(middleSprite);
+            if (middleTex === PIXI.Texture.EMPTY) {
+                void this.gameData.textureFromPictAsync(middle).then(texture => {
+                    middleSprite.texture = texture;
+                });
+            }
 
             const rightSprite = this.gameData.spriteFromPict(right);
             rightSprite.position.x = LEFT_POS + this.width;

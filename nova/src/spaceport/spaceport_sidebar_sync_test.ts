@@ -220,12 +220,68 @@ describe('spaceport sidebar status bar synchronization', () => {
         expect(statusBarCargoText(state).free).toBe('50');
     });
 
+    it('displays passenger transport objective and clean title in MissionInfo', () => {
+        const info = new MissionInfo(gameData as any, controlEvents);
+        const state = createInitialPlayerState();
+        state.activeMissions = [
+            {
+                missionId: 'nova:200',
+                missionUuid: 'uuid-ferry',
+                state: 'active',
+                destination: 'nova:mars',
+            },
+        ];
+
+        const ship = new Entity().addComponent(PlayerStateComponent, state);
+        (info as any).setInput(ship);
+        (info as any).missionWorld = {
+            systems: [gameData.data.System.map.get('nova:sol')],
+            planets: [gameData.data.Planet.map.get('nova:earth'), gameData.data.Planet.map.get('nova:mars')],
+            governments: [],
+            planetNames: new Map([['nova:earth', 'Earth'], ['nova:mars', 'Mars']]),
+            systemNames: new Map([['nova:sol', 'Sol']]),
+        };
+
+        const ferryMission = {
+            ...getDefaultMissionData(),
+            id: 'nova:200',
+            name: 'Ferry Passengers to Mars',
+            cargo: '*passengers',
+            cargoQty: -1,
+            shipGoal: 1, // Retail default in mïsn
+            shipCount: -1, // No ships to destroy
+            canAbort: true,
+            quickBrief: 'These passengers need to get to Mars.',
+        };
+
+        (info as any).entries = [
+            {
+                entry: state.activeMissions[0],
+                mission: ferryMission,
+            },
+        ];
+        (info as any).selectionIndex = 0;
+
+        (info as any).render();
+
+        // The list row should only have the selection arrow and mission name, without [active] or redundant destination
+        expect((info as any).list.text).toBe('▶ Ferry Passengers to Mars');
+
+        // The detail should correctly state passenger transport, NOT destroying target vessel
+        expect((info as any).detail.text).toContain('Objective: Transport passenger(s) to Mars');
+        expect((info as any).detail.text).not.toContain('Destroy target vessel');
+        // Unnecessary clutter like hops, plotted, and hold should not be present
+        expect((info as any).detail.text).not.toContain('Hops:');
+        expect((info as any).detail.text).not.toContain('Plotted:');
+        expect((info as any).detail.text).not.toContain('Hold:');
+    });
+
     it('wires sub-dialog onUpdateShip handlers in Spaceport', () => {
         spyOn(Spaceport.prototype, 'build').and.returnValue(Promise.resolve());
         const planet = { ...getDefaultPlanetData(), id: 'nova:earth', name: 'Earth', services: ['bar', 'trade'] };
         gameData.data.Planet.map.set('nova:earth', planet);
 
-        const spaceport = new Spaceport(gameData as any, 'nova:earth', controlEvents);
+        const spaceport = new Spaceport(gameData as any, planet, controlEvents);
         let spaceportUpdateCalled = false;
         spaceport.onUpdateShip = () => {
             spaceportUpdateCalled = true;
