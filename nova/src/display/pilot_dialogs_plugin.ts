@@ -238,7 +238,17 @@ export const BoardingSystem = new AsyncSystem({
 
         const action = boardingDialog.getSelectedAction();
         if (action === 'leave') {
+            entity.components.set(BoardingNoticeComponent,
+                { text: 'Disengaged airlock.' });
             return;
+        }
+
+        if (action === 'capture') {
+            entity.components.set(BoardingNoticeComponent,
+                { text: 'Boarding party deployed: Attempting capture...' });
+        } else if (action === 'plunder') {
+            entity.components.set(BoardingNoticeComponent,
+                { text: 'Boarding party deployed: Plundering holds...' });
         }
 
         entity.components.set(BoardingRequestComponent, {

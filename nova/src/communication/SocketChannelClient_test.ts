@@ -38,7 +38,7 @@ describe("SocketChannelClient", function() {
 
     it("binds a listener to 'message'", () => {
         const client = new SocketChannelClient({ webSocket, warn });
-        expect(webSocket.addEventListener).toHaveBeenCalledTimes(3);
+        expect(webSocket.addEventListener).toHaveBeenCalledTimes(4);
         expect(webSocket.addEventListener).toHaveBeenCalledWith('message', jasmine.any(Function));
     });
 

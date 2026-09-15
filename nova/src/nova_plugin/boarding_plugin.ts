@@ -97,6 +97,7 @@ const BoardingOutcome = t.intersection([
     t.partial({
         capturedShip: t.string,
         resisted: t.boolean,
+        fleetFull: t.boolean,
     }),
 ]);
 export type BoardingOutcome = t.TypeOf<typeof BoardingOutcome>;
@@ -105,6 +106,14 @@ export const BoardingOutcomeComponent =
 export const BoardingOutcomeEvent =
     new EcsEvent<BoardingOutcome & { boarder: string }>(
         'BoardingOutcomeEvent');
+
+const BoardingNoticeCodec = t.type({
+    text: t.string,
+});
+replicationPolicies.register(BoardingNoticeComponent, {
+    codec: BoardingNoticeCodec,
+    authority: 'server',
+});
 
 /**
  * Why a boarding attempt did nothing. Local to the pilot's own client: it is
@@ -472,15 +481,26 @@ export const PlayerBoardingSystem = new System({
     step(request, player, movement, multiplayer, disabledTargets, platform,
         boarding, destructionStarted, armor, uuid, entity, emitNow, entities) {
         if (platform !== 'node' || multiplayer.owner === 'server'
-            || destructionStarted || armor && armor.current <= 0
-            || boarding?.boarded.includes(request.target)) {
+            || destructionStarted || armor && armor.current <= 0) {
+            return;
+        }
+        if (boarding?.boarded.includes(request.target)) {
+            entity.components.set(BoardingNoticeComponent,
+                { text: 'Vessel has already been boarded.' });
             return;
         }
         const victim = disabledTargets.find(candidate =>
             candidate[0] === request.target && candidate[0] !== uuid
             && candidate[1] && !candidate[5]
             && (!candidate[6] || candidate[6]!.current > 0));
-        if (!victim || !isBoardingTransferReady(movement, victim[2])) {
+        if (!victim) {
+            entity.components.set(BoardingNoticeComponent,
+                { text: 'Target vessel is no longer boardable.' });
+            return;
+        }
+        if (!isBoardingTransferReady(movement, victim[2])) {
+            entity.components.set(BoardingNoticeComponent,
+                { text: 'Boarding failed: Target drifted out of range.' });
             return;
         }
 
@@ -500,9 +520,10 @@ export const PlayerBoardingSystem = new System({
 
         let capturedShip: string | undefined;
         let resisted: boolean | undefined;
+        let fleetFull: boolean | undefined;
 
         const isDerelict = Boolean(victim[9]);
-        if (action === 'capture' || request.action === undefined) {
+        if (action === 'capture') {
             if (isNpc && (victimShip || victimShipData)) {
                 const victimShipId = victimShip?.id ?? victimShipData?.id ?? 'nova:128';
                 const rawName = victimShipData?.name ?? 'Ship';
@@ -529,7 +550,11 @@ export const PlayerBoardingSystem = new System({
                     } else {
                         resisted = true;
                     }
+                } else {
+                    fleetFull = true;
                 }
+            } else {
+                resisted = true;
             }
         }
 
@@ -543,18 +568,25 @@ export const PlayerBoardingSystem = new System({
             credits: result.credits,
             ...(capturedShip ? { capturedShip } : {}),
             ...(resisted ? { resisted } : {}),
+            ...(fleetFull ? { fleetFull } : {}),
         };
         entity.components.set(BoardingOutcomeComponent, outcome);
         emitNow(BoardingOutcomeEvent, { ...outcome, boarder: uuid }, [uuid]);
         if (capturedShip) {
             entity.components.set(BoardingNoticeComponent,
                 { text: `Captured ${capturedShip} into escort fleet!` });
+        } else if (fleetFull) {
+            entity.components.set(BoardingNoticeComponent,
+                { text: 'Capture failed: Escort fleet is full (6 max).' });
         } else if (resisted) {
             entity.components.set(BoardingNoticeComponent,
                 { text: 'Capture failed: Boarding party was repelled!' });
         } else if (result.cargo > 0 || result.credits > 0) {
             entity.components.set(BoardingNoticeComponent,
                 { text: `Plundered ${result.cargo} tons cargo and ${result.credits} cr!` });
+        } else if (action === 'plunder') {
+            entity.components.set(BoardingNoticeComponent,
+                { text: 'Plunder complete: Vessel holds were empty.' });
         }
         if (result.cargo > 0 || result.credits > 0) {
             emitNow(PlunderEvent, { boarder: uuid }, [request.target]);
@@ -693,6 +725,9 @@ export const BoardingPlugin: Plugin = {
             componentType: BoardingInventory,
         });
         world.addComponent(BoardingNoticeComponent);
+        deltaMaker.addComponent(BoardingNoticeComponent, {
+            componentType: BoardingNoticeCodec,
+        });
         world.addComponent(BoardingRequestComponent);
         deltaMaker.addComponent(BoardingRequestComponent, {
             componentType: BoardingRequest,

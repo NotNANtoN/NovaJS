@@ -898,6 +898,7 @@ const ShowBoardingOutcome = new System({
                 outcome.credits,
                 outcome.capturedShip,
                 outcome.resisted,
+                outcome.fleetFull,
             ),
             time.time,
         );

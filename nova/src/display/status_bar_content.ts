@@ -100,6 +100,7 @@ export function boardingOutcomeText(
     credits: number,
     capturedShip?: string,
     resisted?: boolean,
+    fleetFull?: boolean,
 ): string {
     const taken: string[] = [];
     if (cargo > 0) {
@@ -112,6 +113,10 @@ export function boardingOutcomeText(
     if (capturedShip) {
         const extra = taken.length > 0 ? ` (plundered ${taken.join(' and ')})` : '';
         return `Boarded: captured ${capturedShip} into fleet!${extra}`;
+    }
+
+    if (fleetFull) {
+        return 'Capture failed: escort fleet is full (6 max).';
     }
 
     if (resisted) {

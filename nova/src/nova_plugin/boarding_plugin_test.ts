@@ -19,6 +19,7 @@ import {
     BOARDING_TRANSFER_RANGE,
     BoardingInventory,
     BoardingInventoryComponent,
+    BoardingNoticeComponent,
     BoardingOutcomeEvent,
     BoardingRequestComponent,
     BoardingStateComponent,
@@ -335,7 +336,7 @@ describe('pirate boarding', () => {
             .addComponent(PlayerStateComponent, playerState)
             .addComponent(MultiplayerData, { owner: 'player' })
             .addComponent(MovementStateComponent, movementAt(new Position(0, 0)))
-            .addComponent(BoardingRequestComponent, { target: 'victim', sequence: 1 });
+            .addComponent(BoardingRequestComponent, { target: 'victim', sequence: 1, action: 'capture' });
 
         const shipData = {
             ...getDefaultShipData(),
@@ -368,6 +369,8 @@ describe('pirate boarding', () => {
         expect(playerState.escorts?.length).toBe(1);
         expect(playerState.escorts?.[0].shipId).toBe('nova:130');
         expect(world.entities.has('victim')).toBeFalse();
+        expect(player.components.get(BoardingNoticeComponent)?.text)
+            .toBe('Captured Kestrel into escort fleet!');
     });
 
     it('reports resisted when capture roll fails', () => {
@@ -386,7 +389,7 @@ describe('pirate boarding', () => {
             .addComponent(PlayerStateComponent, playerState)
             .addComponent(MultiplayerData, { owner: 'player' })
             .addComponent(MovementStateComponent, movementAt(new Position(0, 0)))
-            .addComponent(BoardingRequestComponent, { target: 'victim', sequence: 1 });
+            .addComponent(BoardingRequestComponent, { target: 'victim', sequence: 1, action: 'capture' });
 
         const shipData = {
             ...getDefaultShipData(),
@@ -419,6 +422,58 @@ describe('pirate boarding', () => {
         expect(outcome.resisted).toBeTrue();
         expect(outcome.capturedShip).toBeUndefined();
         expect(playerState.escorts?.length ?? 0).toBe(0);
+        expect(world.entities.has('victim')).toBeTrue();
+        expect(player.components.get(BoardingNoticeComponent)?.text)
+            .toBe('Capture failed: Boarding party was repelled!');
+    });
+
+    it('notifies player when capture fails because escort fleet is full', () => {
+        const world = new World('player-capture-fleet-full-test');
+        world.resources.set(PlatformResource, 'node');
+        world.resources.set(TimeResource, {
+            time: 0,
+            delta_ms: 1_000 / 60,
+            delta_s: 1 / 60,
+            frame: 0,
+        });
+
+        const playerState = createInitialPlayerState();
+        playerState.escorts = Array(6).fill(null).map((_, i) => ({
+            id: `escort-${i}`,
+            shipId: 'nova:128',
+            dailyPay: 100,
+        }));
+        const player = new Entity('player')
+            .addComponent(PlayerShipSelector, undefined)
+            .addComponent(PlayerStateComponent, playerState)
+            .addComponent(MultiplayerData, { owner: 'player' })
+            .addComponent(MovementStateComponent, movementAt(new Position(0, 0)))
+            .addComponent(BoardingRequestComponent, { target: 'victim', sequence: 1, action: 'capture' });
+
+        const shipData = {
+            ...getDefaultShipData(),
+            id: 'nova:130',
+            name: 'Kestrel',
+            crew: 5,
+            cost: 200_000,
+        };
+
+        const victim = new Entity('victim')
+            .addComponent(DisabledComponent, true)
+            .addComponent(MovementStateComponent, movementAt(new Position(BOARDING_STANDOFF, 0)))
+            .addComponent(ShipComponent, { id: 'nova:130' })
+            .addComponent(ShipDataComponent, shipData)
+            .addComponent(ArmorComponent, new Stat({ current: 20, max: 100, recharge: 0 }));
+
+        world.entities.set('player', player);
+        world.entities.set('victim', victim);
+        world.addSystem(PlayerBoardingSystem);
+
+        world.step();
+
+        expect(player.components.get(BoardingNoticeComponent)?.text)
+            .toBe('Capture failed: Escort fleet is full (6 max).');
+        expect(playerState.escorts.length).toBe(6);
         expect(world.entities.has('victim')).toBeTrue();
     });
 

@@ -13,10 +13,29 @@ export class SocketChannelClient implements ChannelClient {
     warn: (m: string) => void;
     readonly timeout: number;
     private keepaliveTimeout?: NodeJS.Timeout;
+    private reconnectTimeout?: NodeJS.Timeout;
+    private retryCount = 0;
+    private isExplicitlyDisconnected = false;
+    private readonly initialRetryDelay = 500;
+    private readonly maxRetryDelay = 5000;
     private pingsSentSinceMessage = 0;
     private messageListener: (m: MessageEvent) => void;
-    private readonly openListener = () => this.flushQueue();
-    private readonly closeListener = () => this.connected.next(false);
+    private readonly openListener = () => {
+        this.retryCount = 0;
+        if (this.reconnectTimeout !== undefined) {
+            clearTimeout(this.reconnectTimeout);
+            this.reconnectTimeout = undefined;
+        }
+        this.flushQueue();
+    };
+    private readonly closeListener = () => {
+        this.connected.next(false);
+        this.scheduleReconnect();
+    };
+    private readonly errorListener = () => {
+        this.connected.next(false);
+        this.scheduleReconnect();
+    };
     private messageQueue: SocketMessage[] = [];
     private maxPings: number
     readonly playerToken: string;
@@ -55,12 +74,14 @@ export class SocketChannelClient implements ChannelClient {
         this.webSocket.addEventListener('message', this.messageListener);
         this.webSocket.addEventListener('open', this.openListener);
         this.webSocket.addEventListener('close', this.closeListener);
+        this.webSocket.addEventListener('error', this.errorListener);
     }
 
     private unbindSocket() {
         this.webSocket.removeEventListener('message', this.messageListener);
         this.webSocket.removeEventListener('open', this.openListener);
         this.webSocket.removeEventListener('close', this.closeListener);
+        this.webSocket.removeEventListener('error', this.errorListener);
     }
 
     private flushQueue() {
@@ -71,22 +92,63 @@ export class SocketChannelClient implements ChannelClient {
         this.messageQueue.length = 0;
     }
 
+    scheduleReconnect(immediate = false) {
+        if (this.isExplicitlyDisconnected) return;
+        if (this.reconnectTimeout !== undefined) return;
+        if (this.webSocket.readyState === this.webSocket.CONNECTING
+            || this.webSocket.readyState === this.webSocket.OPEN) {
+            return;
+        }
+
+        if (immediate) {
+            this.reconnect();
+            return;
+        }
+
+        const baseDelay = Math.min(
+            this.maxRetryDelay,
+            this.initialRetryDelay * Math.pow(1.5, this.retryCount),
+        );
+        const jitter = (Math.random() * 0.3 - 0.15) * baseDelay;
+        const delay = Math.max(100, Math.round(baseDelay + jitter));
+        this.retryCount++;
+
+        this.reconnectTimeout = setTimeout(() => {
+            this.reconnectTimeout = undefined;
+            if (this.isExplicitlyDisconnected) return;
+            this.reconnect();
+        }, delay);
+    }
+
     reconnect() {
+        if (this.isExplicitlyDisconnected) return;
+        if (this.reconnectTimeout !== undefined) {
+            clearTimeout(this.reconnectTimeout);
+            this.reconnectTimeout = undefined;
+        }
         this.unbindSocket();
         if (this.webSocket.readyState === this.webSocket.CONNECTING
             || this.webSocket.readyState === this.webSocket.OPEN) {
-            this.disconnect();
+            try {
+                this.webSocket.close();
+            } catch {}
         }
-        this.webSocket = this.webSocketFactory();
-        this.bindSocket();
-        this.resetTimeout();
-        this.sendPing();
+        try {
+            this.webSocket = this.webSocketFactory();
+            this.bindSocket();
+            this.resetTimeout();
+            this.sendPing();
+        } catch (error) {
+            this.warn(`WebSocket instantiation failed: ${error}`);
+            this.scheduleReconnect();
+        }
     }
 
     reconnectIfClosed() {
+        if (this.isExplicitlyDisconnected) return;
         if (this.webSocket.readyState === this.webSocket.CLOSED
             || this.webSocket.readyState === this.webSocket.CLOSING) {
-            this.reconnect();
+            this.scheduleReconnect();
         }
     }
 
@@ -103,9 +165,9 @@ export class SocketChannelClient implements ChannelClient {
         if (this.webSocket.readyState === this.webSocket.CLOSED
             || this.webSocket.readyState === this.webSocket.CLOSING
             || this.pingsSentSinceMessage > this.maxPings) {
-            this.disconnect();
             this.warn("Lost connection. Reconnecting...");
             this.reconnect();
+            return;
         }
 
         this.sendPing();
@@ -126,6 +188,9 @@ export class SocketChannelClient implements ChannelClient {
             this.flushQueue();
             this.webSocket.send(JSON.stringify(SocketMessage.encode(message)));
         } else {
+            if (this.messageQueue.length >= 300) {
+                this.messageQueue.shift();
+            }
             this.messageQueue.push(message);
         }
     }
@@ -178,12 +243,19 @@ export class SocketChannelClient implements ChannelClient {
     }
 
     disconnect() {
+        this.isExplicitlyDisconnected = true;
         this.unbindSocket();
         if (this.keepaliveTimeout !== undefined) {
             clearTimeout(this.keepaliveTimeout);
             this.keepaliveTimeout = undefined;
         }
-        this.webSocket.close();
+        if (this.reconnectTimeout !== undefined) {
+            clearTimeout(this.reconnectTimeout);
+            this.reconnectTimeout = undefined;
+        }
+        try {
+            this.webSocket.close();
+        } catch {}
         this.connected.next(false);
     }
 }

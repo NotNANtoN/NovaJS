@@ -72,8 +72,8 @@ export class BoardingDialog extends ClassicDialog<BoardingTargetInfo> {
                 {
                     id: 'plunder',
                     label: 'Plunder',
-                    width: 70,
-                    position: { x: -100, y: 55 },
+                    width: 48,
+                    position: { x: -126, y: 56 },
                     action: async (_dialog, info) => {
                         this.selectedAction = 'plunder';
                         onAction?.({ action: 'plunder', targetUuid: info.uuid });
@@ -82,8 +82,8 @@ export class BoardingDialog extends ClassicDialog<BoardingTargetInfo> {
                 {
                     id: 'capture',
                     label: 'Capture',
-                    width: 70,
-                    position: { x: 0, y: 55 },
+                    width: 48,
+                    position: { x: -37, y: 56 },
                     action: async (_dialog, info) => {
                         this.selectedAction = 'capture';
                         onAction?.({ action: 'capture', targetUuid: info.uuid });
@@ -92,8 +92,8 @@ export class BoardingDialog extends ClassicDialog<BoardingTargetInfo> {
                 {
                     id: 'leave',
                     label: 'Leave',
-                    width: 60,
-                    position: { x: 100, y: 55 },
+                    width: 48,
+                    position: { x: 52, y: 56 },
                     isDefault: true,
                     isCancel: true,
                     action: async (_dialog, info) => {

@@ -85,8 +85,8 @@ export class GambleDialog extends ClassicDialog<GambleState> {
                 {
                     id: 'bet1000',
                     label: 'Bet 1,000',
-                    width: 75,
-                    position: { x: -95, y: 55 },
+                    width: 48,
+                    position: { x: -126, y: 56 },
                     action: async () => {
                         this.playRound(1_000);
                         return this.stateData;
@@ -95,8 +95,8 @@ export class GambleDialog extends ClassicDialog<GambleState> {
                 {
                     id: 'bet5000',
                     label: 'Bet 5,000',
-                    width: 75,
-                    position: { x: 0, y: 55 },
+                    width: 48,
+                    position: { x: -37, y: 56 },
                     action: async () => {
                         this.playRound(5_000);
                         return this.stateData;
@@ -105,8 +105,8 @@ export class GambleDialog extends ClassicDialog<GambleState> {
                 {
                     id: 'leave',
                     label: 'Leave',
-                    width: 60,
-                    position: { x: 95, y: 55 },
+                    width: 48,
+                    position: { x: 52, y: 56 },
                     isDefault: true,
                     isCancel: true,
                     action: async () => {
