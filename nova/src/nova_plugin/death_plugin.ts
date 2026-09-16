@@ -108,7 +108,7 @@ replicationPolicies.register(PlayerDeathComponent, {
 // Leave 2.5 seconds of visible message time even when multiplayer/event
 // delivery makes the overlay appear a frame or two after completion.
 export const PLAYER_DEATH_MESSAGE_HOLD_MS = 2_700;
-export const PLAYER_DEATH_VISUAL_FALLBACK_GRACE_MS = 2_000;
+export const PLAYER_DEATH_VISUAL_FALLBACK_GRACE_MS = 4_500;
 
 export const DamagedEvent = new EcsEvent<{
     damage: WeaponDamage,

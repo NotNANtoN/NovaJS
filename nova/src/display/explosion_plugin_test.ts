@@ -16,6 +16,8 @@ import { getDefaultExplosionData } from 'novadatainterface/ExplosionData';
 import {
     ExplosionSystem,
     makeExplosion,
+    PLAYER_DEATH_AFTERMATH_HOLD_MS,
+    PlayerDestructionAftermathSystem,
     PlayerDestructionVisualFallbackSystem,
     ShipFinalExplosionSystem,
     TrackDyingShips,
@@ -102,6 +104,7 @@ describe('explosion presentation cadence', () => {
             new Map(),
             { position: new Position(0, 0) } as never,
             undefined,
+            undefined,
         );
 
         step();
@@ -133,6 +136,7 @@ describe('explosion presentation cadence', () => {
             death, time, 'player', emit, entity, active,
             entity.componentsByName.get('DestructionFallbackFired') as
                 true | undefined,
+            undefined,
         );
 
         step();
@@ -164,6 +168,7 @@ describe('explosion presentation cadence', () => {
             ((_event: unknown, value: unknown) => emitted.push(value)) as never,
             new Entity('wreck'),
             new Map(),
+            undefined,
             undefined,
         );
         expect(emitted.length).toBe(0);
@@ -201,5 +206,35 @@ describe('explosion presentation cadence', () => {
         expect(dying.has('wreck')).toBeFalse();
         expect([...world.entities.keys()].filter(key => key !== 'wreck').length)
             .toEqual(before);
+    });
+
+    it('holds player destruction completion for the full aftermath duration', () => {
+        const pending = new Map<string, number>();
+        pending.set('player', 1_000 + PLAYER_DEATH_AFTERMATH_HOLD_MS);
+        const emitted: Array<{ playerUuid: string, time: number }> = [];
+        const emit = ((_event: unknown, value: { playerUuid: string, time: number }) =>
+            emitted.push(value)) as never;
+
+        // Before the aftermath delay has elapsed:
+        PlayerDestructionAftermathSystem.step(
+            { time: 1_000 + PLAYER_DEATH_AFTERMATH_HOLD_MS - 1, delta_ms: 16, delta_s: 0.016, frame: 1 },
+            pending,
+            emit,
+            undefined as never,
+        );
+        expect(emitted.length).toBe(0);
+        expect(pending.has('player')).toBeTrue();
+
+        // Once the aftermath delay has fully elapsed:
+        PlayerDestructionAftermathSystem.step(
+            { time: 1_000 + PLAYER_DEATH_AFTERMATH_HOLD_MS, delta_ms: 16, delta_s: 0.016, frame: 2 },
+            pending,
+            emit,
+            undefined as never,
+        );
+        expect(emitted).toEqual([
+            jasmine.objectContaining({ playerUuid: 'player', time: 1_000 + PLAYER_DEATH_AFTERMATH_HOLD_MS }),
+        ]);
+        expect(pending.has('player')).toBeFalse();
     });
 });

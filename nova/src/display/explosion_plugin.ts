@@ -48,15 +48,20 @@ const DestructionCompletionTarget =
     new Component<string>('DestructionCompletionTarget');
 const ActiveDestructionVisuals =
     new Resource<Map<string, number>>('ActiveDestructionVisuals');
+export const PendingDestructionCompletions =
+    new Resource<Map<string, number>>('PendingDestructionCompletions');
+export const PLAYER_DEATH_AFTERMATH_HOLD_MS = 2_200;
 
 export const ExplosionSystem = new System({
     name: 'ExplosionSystem',
     args: [AnimationGraphicComponent, ExplosionDataComponent,
         ExplosionState, TimeResource, Entities, UUID, Emit,
         ActiveDestructionVisuals, MovementStateComponent,
-        Optional(DestructionCompletionTarget)] as const,
+        Optional(DestructionCompletionTarget),
+        Optional(PendingDestructionCompletions)] as const,
     step(graphic, explosionData, explosionState, time, entities, uuid, emit,
-        activeDestructionVisuals, movement, completionTarget) {
+        activeDestructionVisuals, movement, completionTarget,
+        pendingDestructionCompletions) {
         const starting = explosionState.startTime === undefined;
         const timing = advanceExplosionTiming(
             explosionState,
@@ -89,10 +94,17 @@ export const ExplosionSystem = new System({
                 activeDestructionVisuals,
                 completionTarget,
             )) {
-                emit(PlayerDestructionCompleteEvent, {
-                    ...time,
-                    playerUuid: completionTarget,
-                }, [completionTarget]);
+                if (pendingDestructionCompletions) {
+                    pendingDestructionCompletions.set(
+                        completionTarget,
+                        time.time + PLAYER_DEATH_AFTERMATH_HOLD_MS,
+                    );
+                } else {
+                    emit(PlayerDestructionCompleteEvent, {
+                        ...time,
+                        playerUuid: completionTarget,
+                    }, [completionTarget]);
+                }
             }
         }
     }
@@ -313,7 +325,7 @@ const ShipSecondaryExplosionSystem = new System({
 
         components.set(SecondaryExplosionComponent, {
             explosion,
-            period: framesToMilliseconds(90),
+            period: framesToMilliseconds(5),
         });
     }
 });
@@ -324,6 +336,23 @@ const ShipSecondaryExplosionDoneSystem = new System({
     step(entity) {
         entity.components.delete(SecondaryExplosionComponent);
     }
+});
+
+export const PlayerDestructionAftermathSystem = new System({
+    name: 'PlayerDestructionAftermathSystem',
+    args: [TimeResource, PendingDestructionCompletions, Emit,
+        SingletonComponent] as const,
+    step(time, pending, emit) {
+        for (const [target, releaseAt] of [...pending]) {
+            if (time.time >= releaseAt) {
+                pending.delete(target);
+                emit(PlayerDestructionCompleteEvent, {
+                    ...time,
+                    playerUuid: target,
+                }, [target]);
+            }
+        }
+    },
 });
 
 /** Local marker: the fallback below has already announced this death. */
@@ -340,8 +369,10 @@ const DestructionFallbackFired = new Component<true>('DestructionFallbackFired')
 export const PlayerDestructionVisualFallbackSystem = new System({
     name: 'PlayerDestructionVisualFallbackSystem',
     args: [PlayerDeathComponent, TimeResource, UUID, Emit, GetEntity,
-        ActiveDestructionVisuals, Optional(DestructionFallbackFired)] as const,
-    step(death, time, uuid, emit, entity, activeDestructionVisuals, fired) {
+        ActiveDestructionVisuals, Optional(DestructionFallbackFired),
+        Optional(PendingDestructionCompletions)] as const,
+    step(death, time, uuid, emit, entity, activeDestructionVisuals, fired,
+        pendingCompletions) {
         if (fired || death.outcome !== 'killed'
             || time.time < death.visualFallbackAt) {
             return;
@@ -350,6 +381,7 @@ export const PlayerDestructionVisualFallbackSystem = new System({
         // Drop any still-pending registration so a late-finishing explosion
         // does not announce the same death a second time.
         activeDestructionVisuals.delete(uuid);
+        pendingCompletions?.delete(uuid);
         emit(PlayerDestructionCompleteEvent, {
             ...time,
             playerUuid: uuid,
@@ -373,7 +405,7 @@ export function makeExplosion(explosionData: ExplosionData, position: Position,
     if (secondaryExplosionData) {
         explosion.addComponent(SecondaryExplosionComponent, {
             explosion: secondaryExplosionData,
-            period: framesToMilliseconds(30),
+            period: framesToMilliseconds(4),
         });
     }
     if (completionTarget) {
@@ -387,6 +419,7 @@ export const ExplosionPlugin: Plugin = {
     name: 'ExplosionPlugin',
     build(world) {
         world.resources.set(ActiveDestructionVisuals, new Map());
+        world.resources.set(PendingDestructionCompletions, new Map());
         world.resources.set(DyingShips, new Map());
         world.addComponent(FinalExplosionShown);
         world.addComponent(DestructionFallbackFired);
@@ -398,6 +431,7 @@ export const ExplosionPlugin: Plugin = {
         world.addSystem(ShipFinalExplosionSystem);
         world.addSystem(ShipSecondaryExplosionSystem);
         world.addSystem(ShipSecondaryExplosionDoneSystem);
+        world.addSystem(PlayerDestructionAftermathSystem);
         world.addSystem(PlayerDestructionVisualFallbackSystem);
     },
     remove(world) {
@@ -409,8 +443,10 @@ export const ExplosionPlugin: Plugin = {
         world.removeSystem(ShipFinalExplosionSystem);
         world.removeSystem(ShipSecondaryExplosionSystem);
         world.removeSystem(ShipSecondaryExplosionDoneSystem);
+        world.removeSystem(PlayerDestructionAftermathSystem);
         world.removeSystem(PlayerDestructionVisualFallbackSystem);
         world.resources.delete(ActiveDestructionVisuals);
+        world.resources.delete(PendingDestructionCompletions);
         world.resources.delete(DyingShips);
     }
 }
