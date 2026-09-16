@@ -12,6 +12,8 @@ import {
     menuPresentationForRetailAssets,
     pilotDeathNotice,
     pilotQuarantineNotice,
+    RETAIL_ROLLOVER_SLOT,
+    retailRolloverPosition,
 } from './start_menu';
 
 describe('start menu action state', () => {
@@ -175,5 +177,18 @@ describe('start menu action state', () => {
             .toBe('I');
         expect(reference.find(entry => entry.action === 'Fire primary')?.binding)
             .toBe('Space');
+    });
+
+    it('centers the retail rollover artwork in the background circular asset', () => {
+        expect(retailRolloverPosition()).toEqual({
+            left: 444,
+            top: 470,
+        });
+        expect(RETAIL_ROLLOVER_SLOT).toEqual({
+            left: 444,
+            top: 470,
+            width: 136,
+            height: 98,
+        });
     });
 });

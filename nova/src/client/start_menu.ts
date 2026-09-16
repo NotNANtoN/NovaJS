@@ -76,6 +76,12 @@ export const PILOT_TARGET_PICT_SLOT = {
     width: 112,
     height: 56,
 } as const;
+export const RETAIL_ROLLOVER_SLOT = {
+    left: 444,
+    top: 470,
+    width: ROLLOVER_WIDTH,
+    height: ROLLOVER_HEIGHT,
+} as const;
 
 export function pilotDeathNotice(
     state: PlayerState | undefined,
@@ -126,18 +132,10 @@ const RETAIL_BUTTON_SPECS = [
     ['About Nova', '8055', 98, 60, 580, 528],
 ] as const;
 
-function retailRolloverPosition(): { left: number; top: number } {
-    const left = Math.min(...RETAIL_BUTTON_SPECS.map(spec => spec[4]));
-    const right = Math.max(
-        ...RETAIL_BUTTON_SPECS.map(spec => spec[4] + spec[2]),
-    );
-    const top = Math.min(...RETAIL_BUTTON_SPECS.map(spec => spec[5]));
-    const bottom = Math.max(
-        ...RETAIL_BUTTON_SPECS.map(spec => spec[5] + spec[3]),
-    );
+export function retailRolloverPosition(): { left: number; top: number } {
     return {
-        left: Math.round((left + right - ROLLOVER_WIDTH) / 2),
-        top: Math.round((top + bottom - ROLLOVER_HEIGHT) / 2),
+        left: RETAIL_ROLLOVER_SLOT.left,
+        top: RETAIL_ROLLOVER_SLOT.top,
     };
 }
 
