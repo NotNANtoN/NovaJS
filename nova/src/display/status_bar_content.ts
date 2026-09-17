@@ -128,3 +128,16 @@ export function boardingOutcomeText(
         ? 'Boarded: nothing worth taking.'
         : `Boarded: took ${taken.join(' and ')}.`;
 }
+
+export const RADAR_TARGET_BLINK_PERIOD_MS = 300;
+
+export function isRadarTargetBlinkOn(
+    nowMs: number,
+    periodMs = RADAR_TARGET_BLINK_PERIOD_MS,
+): boolean {
+    if (nowMs <= 0) {
+        return true;
+    }
+    const halfPeriod = periodMs / 2;
+    return Math.floor(nowMs / halfPeriod) % 2 === 0;
+}

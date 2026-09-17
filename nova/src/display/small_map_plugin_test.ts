@@ -62,6 +62,23 @@ describe('SmallMap', () => {
                 [
                     { uuid: 'ore-1', pos: { x: 1200, y: -450 } },
                 ],
+                100,
+            );
+            // Also render in blink-off phase
+            smallMap.renderTacticalState(
+                { x: 1000, y: -500 },
+                0.5,
+                'target-1',
+                ['nova:128'],
+                [
+                    { uuid: 'target-1', pos: { x: 2000, y: -1000 }, isPlayer: true, isEscort: false, isHostile: false },
+                ],
+                [
+                    { uuid: 'earth', name: 'Earth', pos: { x: 0, y: 0 } },
+                ],
+                0,
+                [],
+                200,
             );
         }).not.toThrow();
     });

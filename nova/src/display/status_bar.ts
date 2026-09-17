@@ -46,6 +46,7 @@ import {
 import { Stat } from "../nova_plugin/stat";
 import { CloakStateComponent } from "../nova_plugin/cloaking_plugin";
 import { TargetComponent } from "../nova_plugin/target_component";
+import { PlanetTargetComponent } from "../nova_plugin/planet_plugin";
 import { ChangeSecondaryEvent } from "../nova_plugin/weapon_plugin";
 import { AnimationGraphic } from "./animation_graphic";
 import { AnimationGraphicComponent } from "./animation_graphic_plugin";
@@ -55,9 +56,11 @@ import { ResizeEvent } from "./screen_size_plugin";
 import { Stage } from "./stage_resource";
 import {
     boardingOutcomeText,
+    isRadarTargetBlinkOn,
     statusBarCargoText,
     statusBarNavigationText,
     statusBarTargetHealth,
+    statusBarTargetStatus,
 } from "./status_bar_content";
 import {
     BoardingNoticeComponent,
@@ -329,7 +332,9 @@ class StatusBar {
         ships: Iterable<readonly [string, MovementState, ShipData, string | undefined, boolean?, boolean?]>,
         planets: Iterable<readonly [string, MovementState, PlanetData]>,
         now = 0,
-        interference = 0) {
+        interference = 0,
+        targetUuid?: string,
+        navTargetUuid?: string) {
         this.radar.clear();
         this.drawDot(source, this.statusBarData.colors.brightRadar, source);
 
@@ -347,6 +352,7 @@ class StatusBar {
 
         const alert = 0.45 + 0.55 * Math.abs(Math.sin(now / 160));
         const pulse = 0.5 + 0.5 * Math.abs(Math.sin(now / 220));
+        const targetBlink = isRadarTargetBlinkOn(now);
 
         for (const [uuid, { position }, , locking, isPlayer, isEscort] of ships) {
             if (uuid === playerUuid) {
@@ -364,6 +370,27 @@ class StatusBar {
                 );
             }
             const lockingPlayer = locking === playerUuid;
+            const isTarget = (targetUuid !== undefined && uuid === targetUuid)
+                || (navTargetUuid !== undefined && uuid === navTargetUuid);
+
+            if (isTarget) {
+                if (!targetBlink) {
+                    continue;
+                }
+                let targetColor: number;
+                if (lockingPlayer) {
+                    targetColor = 0xff2020;
+                } else if (isEscort) {
+                    targetColor = 0x38ff75;
+                } else if (isPlayer) {
+                    targetColor = 0x00f0ff;
+                } else {
+                    targetColor = this.statusBarData.colors.brightRadar;
+                }
+                this.drawDot(contactPos, targetColor, source, 3);
+                continue;
+            }
+
             let color: number;
             let dotSize: number;
 
@@ -383,7 +410,16 @@ class StatusBar {
             this.drawDot(contactPos, color, source, dotSize);
         }
 
-        for (const [, { position }] of planets) {
+        for (const [uuid, { position }] of planets) {
+            const isNavTarget = (navTargetUuid !== undefined && uuid === navTargetUuid)
+                || (targetUuid !== undefined && uuid === targetUuid);
+            if (isNavTarget) {
+                if (!targetBlink) {
+                    continue;
+                }
+                this.drawDot(position, 0xffffff, source, 3);
+                continue;
+            }
             this.drawDot(position, 0xFFFF00, source, 2);
         }
     }
@@ -396,7 +432,10 @@ class StatusBar {
 
         if (pixiPos.x <= radarSize.x && pixiPos.x >= 0 &&
             pixiPos.y <= radarSize.y && pixiPos.y >= 0) {
-            this.radar.rect(pixiPos.x, pixiPos.y, size, size).fill(color);
+            const offset = Math.floor(size / 2);
+            const rx = Math.max(0, Math.min(radarSize.x - size, pixiPos.x - offset));
+            const ry = Math.max(0, Math.min(radarSize.y - size, pixiPos.y - offset));
+            this.radar.rect(rx, ry, size, size).fill(color);
         }
     }
 
@@ -695,7 +734,11 @@ const StatusBarResize = new System({
     }
 });
 
-const RadarTime = new Component<{ lastTime: number }>('RadarTime');
+const RadarTime = new Component<{
+    lastTime: number;
+    lastTargetUuid?: string;
+    lastNavTargetUuid?: string;
+}>('RadarTime');
 const DrawRadar = new System({
     name: 'DrawRadar',
     args: [Optional(RadarTime), TimeResource, StatusBarResource, MovementStateComponent,
@@ -704,9 +747,10 @@ const DrawRadar = new System({
         Optional(PlayerStateComponent), Optional(HiredEscortComponent)] as const),
     new Query([UUID, MovementStateComponent, PlanetDataComponent] as const),
         GetEntity, UUID, PlayerShipSelector,
-        SystemIdResource, GameDataResource] as const,
+        SystemIdResource, GameDataResource,
+        Optional(TargetComponent), Optional(PlanetTargetComponent)] as const,
     step(radarTime, { time }, statusBar, { position }, ships, planets, entity,
-        playerUuid, _selector, systemId, gameData) {
+        playerUuid, _selector, systemId, gameData, playerTarget, planetTarget) {
         const interference = gameData.data.System.getCached(systemId)?.interference ?? 0;
         if (!radarTime) {
             radarTime = { lastTime: 0 };
@@ -731,11 +775,30 @@ const DrawRadar = new System({
                 hasPlayerPeer = true;
             }
         }
+        const targetUuid = playerTarget?.target;
+        const navTargetUuid = planetTarget?.target;
+        const hasTarget = Boolean(targetUuid || navTargetUuid);
+        const targetChanged = radarTime.lastTargetUuid !== targetUuid
+            || radarTime.lastNavTargetUuid !== navTargetUuid;
+
         if (lockingPlayer
             || hasPlayerPeer
+            || hasTarget
+            || targetChanged
             || time - radarTime.lastTime > statusBar.radarPeriod) {
-            statusBar.drawRadar(position, playerUuid, contacts, planets, time, interference);
+            statusBar.drawRadar(
+                position,
+                playerUuid,
+                contacts,
+                planets,
+                time,
+                interference,
+                targetUuid,
+                navTargetUuid,
+            );
             radarTime.lastTime = time;
+            radarTime.lastTargetUuid = targetUuid;
+            radarTime.lastNavTargetUuid = navTargetUuid;
         }
     }
 });

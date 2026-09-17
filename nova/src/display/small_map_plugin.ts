@@ -10,7 +10,7 @@ import * as PIXI from "pixi.js";
 import { EcsControlEvent } from "../nova_plugin/controls_plugin";
 import { HiredEscortComponent } from "../nova_plugin/escort_plugin";
 import { JumpRouteComponent } from "../nova_plugin/jump_plugin";
-import { PlanetDataComponent } from "../nova_plugin/planet_plugin";
+import { PlanetDataComponent, PlanetTargetComponent } from "../nova_plugin/planet_plugin";
 import { PlayerShipSelector } from "../nova_plugin/player_ship_plugin";
 import { PlayerStateComponent } from "../nova_plugin/player_state";
 import { ShipDataComponent } from "../nova_plugin/ship_plugin";
@@ -22,6 +22,7 @@ import { MissionShipComponent } from "../nova_plugin/mission_ship_plugin";
 import { createGraphicHandle, ManagedGraphic } from "./managed_graphic";
 import { ScreenSize } from "./screen_size_plugin";
 import { Stage } from "./stage_resource";
+import { isRadarTargetBlinkOn } from "./status_bar_content";
 
 const MAP_SIZE = 240;
 const HALF_SIZE = MAP_SIZE / 2;
@@ -167,11 +168,13 @@ export class SmallMap {
         planets: Array<{ uuid: string; name: string; pos: { x: number; y: number } }>,
         interference = 0,
         oreChunks: Array<{ uuid: string; pos: { x: number; y: number } }> = [],
+        now = 0,
     ): void {
         this.blipsGraphics.clear();
         const currentRadius = this.currentRange;
         const mapScale = (HALF_SIZE - 20) / currentRadius;
         const rangeLabel = `${Math.round(currentRadius / 1000)}k u`;
+        const isTargetBlinkOn = isRadarTargetBlinkOn(now);
 
         if (interference > 0) {
             this.titleText.text = `TACTICAL GRID [${rangeLabel}] [STATIC ${interference}%]`;
@@ -196,9 +199,10 @@ export class SmallMap {
 
             const isTarget = planet.uuid === targetUuid;
             // Planet dot
-            this.blipsGraphics.circle(px, py, isTarget ? 4 : 3).fill(0x38b0ff);
-            if (isTarget) {
-                this.blipsGraphics.circle(px, py, 6).stroke({ width: 1, color: 0xffea00 });
+            this.blipsGraphics.circle(px, py, isTarget && isTargetBlinkOn ? 4.5 : (isTarget ? 4 : 3))
+                .fill(isTarget && isTargetBlinkOn ? 0xffffff : 0x38b0ff);
+            if (isTarget && isTargetBlinkOn) {
+                this.blipsGraphics.circle(px, py, 6).stroke({ width: 1.5, color: 0xffea00 });
             }
 
             const label = this.getLabel(labelIdx++);
@@ -236,9 +240,11 @@ export class SmallMap {
                 size = 3;
             }
 
-            this.blipsGraphics.circle(sx, sy, size).fill(color);
-            if (isTarget) {
-                this.blipsGraphics.rect(sx - 5, sy - 5, 10, 10).stroke({ width: 1, color: 0xffea00 });
+            const drawSize = isTarget && isTargetBlinkOn ? size + 1.5 : size;
+            const drawColor = isTarget && isTargetBlinkOn ? 0xffffff : color;
+            this.blipsGraphics.circle(sx, sy, drawSize).fill(drawColor);
+            if (isTarget && isTargetBlinkOn) {
+                this.blipsGraphics.rect(sx - 5, sy - 5, 10, 10).stroke({ width: 1.5, color: 0xffea00 });
             }
         }
 
@@ -248,9 +254,10 @@ export class SmallMap {
             const oy = cy + ore.pos.y * mapScale;
             if (ox < 6 || ox > MAP_SIZE - 6 || oy < 26 || oy > MAP_SIZE - 6) continue;
             const isTarget = ore.uuid === targetUuid;
-            this.blipsGraphics.rect(ox - 1, oy - 1, 2.5, 2.5).fill(0x80e5ff);
-            if (isTarget) {
-                this.blipsGraphics.rect(ox - 3, oy - 3, 6, 6).stroke({ width: 1, color: 0xffea00 });
+            this.blipsGraphics.rect(ox - 1, oy - 1, 2.5, 2.5)
+                .fill(isTarget && isTargetBlinkOn ? 0xffffff : 0x80e5ff);
+            if (isTarget && isTargetBlinkOn) {
+                this.blipsGraphics.rect(ox - 3, oy - 3, 6, 6).stroke({ width: 1.5, color: 0xffea00 });
             }
         }
 
@@ -332,8 +339,10 @@ export const DrawSmallMapSystem = new System({
         OreQuery,
         Optional(SystemIdResource),
         Optional(GameDataResource),
+        Optional(TimeResource),
+        Optional(PlanetTargetComponent),
     ] as const,
-    step(smallMap, screenSize, playerMovement, _selector, playerUuid, playerTarget, jumpRoute, ships, planets, ores, systemId, gameData) {
+    step(smallMap, screenSize, playerMovement, _selector, playerUuid, playerTarget, jumpRoute, ships, planets, ores, systemId, gameData, time, planetTarget) {
         const interference = (systemId && gameData)
             ? (gameData.data.System.getCached(systemId)?.interference ?? 0)
             : 0;
@@ -384,12 +393,13 @@ export const DrawSmallMapSystem = new System({
         smallMap.renderTacticalState(
             playerMovement.position,
             playerMovement.rotation.angle,
-            playerTarget?.target,
+            playerTarget?.target ?? planetTarget?.target,
             jumpRoute?.route,
             shipEntries,
             planetEntries,
             interference,
             oreEntries,
+            time?.time ?? 0,
         );
     },
 });

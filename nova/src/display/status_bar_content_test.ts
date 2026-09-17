@@ -8,6 +8,8 @@ import {
     statusBarNavigationText,
     statusBarTargetHealth,
     statusBarTargetStatus,
+    isRadarTargetBlinkOn,
+    RADAR_TARGET_BLINK_PERIOD_MS,
 } from './status_bar_content';
 
 describe('status bar content', () => {
@@ -122,5 +124,30 @@ describe('boardingOutcomeText', () => {
     it('says so when the hull was empty', () => {
         expect(boardingOutcomeText(0, 0))
             .toEqual('Boarded: nothing worth taking.');
+    });
+});
+
+describe('radar target blinking', () => {
+    it('alternates on and off states according to blink period', () => {
+        const halfPeriod = RADAR_TARGET_BLINK_PERIOD_MS / 2; // 150ms
+        // At t = 0 or negative, target is visible (on)
+        expect(isRadarTargetBlinkOn(0)).toBeTrue();
+        expect(isRadarTargetBlinkOn(-5)).toBeTrue();
+
+        // During first half (0..149ms), blink is ON
+        expect(isRadarTargetBlinkOn(50)).toBeTrue();
+        expect(isRadarTargetBlinkOn(149)).toBeTrue();
+
+        // During second half (150..299ms), blink is OFF
+        expect(isRadarTargetBlinkOn(150)).toBeFalse();
+        expect(isRadarTargetBlinkOn(220)).toBeFalse();
+        expect(isRadarTargetBlinkOn(299)).toBeFalse();
+
+        // In next cycle (300..449ms), blink is ON again
+        expect(isRadarTargetBlinkOn(300)).toBeTrue();
+        expect(isRadarTargetBlinkOn(400)).toBeTrue();
+
+        // And OFF in 450..599ms
+        expect(isRadarTargetBlinkOn(450)).toBeFalse();
     });
 });
