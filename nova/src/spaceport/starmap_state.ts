@@ -12,6 +12,7 @@ export interface StarmapPlayerState {
     legalRecords?: Readonly<Record<string, number>>;
     exploredSystems?: readonly string[];
     activeMissions?: readonly ActiveMission[];
+    missionBits?: readonly boolean[];
 }
 
 export function consumeInitialCenter(state: StarmapViewState): boolean {

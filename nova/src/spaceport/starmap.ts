@@ -42,6 +42,7 @@ import {
     TerritoryField,
     TerritoryPoint,
 } from "./territory_field";
+import { evaluateTestExpression } from "../nova_plugin/ncb";
 
 export { shortestRoute, shortestRoutes } from "./route_planning";
 
@@ -96,6 +97,23 @@ function addMaskedText(
     text.mask = mask;
     owner.addChild(mask, text);
     return text;
+}
+
+export function isSystemActive(
+    system: SystemData,
+    missionBits?: ReadonlySet<number> | readonly boolean[],
+): boolean {
+    if (!system.visibility) {
+        return true;
+    }
+    try {
+        return evaluateTestExpression(
+            system.visibility,
+            { missionBits: missionBits ?? new Set() },
+        );
+    } catch {
+        return true;
+    }
 }
 
 export function resolveMissionTargetSystem(
@@ -367,14 +385,13 @@ export class SystemGraph {
     private readonly nebulaContainer = new PIXI.Container();
     private readonly nebulaSprites: [NebulaData, PIXI.Sprite][] = [];
     private readonly territoryContainer = new PIXI.Container();
-    private territorySprite?: PIXI.Sprite;
     private territoryField?: TerritoryField;
+    private territorySprite?: PIXI.Sprite;
     private territoryPoints: TerritoryPoint[] = [];
     private readonly graphics: PIXI.Graphics;
-    private readonly links: [SystemData, SystemData][];
-    private readonly systems: Map<string, SystemData>;
-    private scale = MAP_SCALE_DEFAULT;
-    private wheelBound = false;
+    private systems: Map<string, SystemData>;
+    private links: [SystemData, SystemData][];
+    private scale = 1;
     private dragData?: {
         offset: PIXI.Point,
     };
@@ -383,10 +400,12 @@ export class SystemGraph {
     private wrappedRoute: string[] = [];
     private routes: Map<string, string[]>;
     private knownSystems?: Set<string>;
+    private missionBits?: ReadonlySet<number> | readonly boolean[];
     private systemCircles: Map<string, [PIXI.Container, PIXI.Graphics]>;
     private mapContainer: PIXI.Container;
     private maskedContainer: PIXI.Container;
     private missionMarkers = new Map<string, MissionMarkerType>();
+    private wheelBound = false;
 
     constructor(
         systems: SystemData[],
@@ -394,7 +413,9 @@ export class SystemGraph {
         exploredSystems?: readonly string[],
         private readonly onSystemSelected: (systemId: string) => void = () => {},
         private readonly isVisible: () => boolean = () => true,
-        private size = MAP_WELL.size) {
+        private size = MAP_WELL.size,
+        missionBits?: ReadonlySet<number> | readonly boolean[]) {
+        this.missionBits = missionBits;
         this.systems = new Map(systems.map(s => [s.id, s]));
         this.knownSystems = normalizeKnownSystems(
             exploredSystems, this.currentSystem);
@@ -495,6 +516,14 @@ export class SystemGraph {
             return;
         }
         this.currentSystem = currentSystem;
+        this.routes = this.computeShortestPaths();
+        if (redraw) {
+            this.draw();
+        }
+    }
+
+    setMissionBits(missionBits?: ReadonlySet<number> | readonly boolean[], redraw = true) {
+        this.missionBits = missionBits;
         this.routes = this.computeShortestPaths();
         if (redraw) {
             this.draw();
@@ -639,12 +668,17 @@ export class SystemGraph {
     }
 
     private onClickSystem(system: string) {
+        const target = this.systems.get(system);
+        if (!target || !isSystemActive(target, this.missionBits)) {
+            return;
+        }
         this.route = this.routes.get(system) ?? [];
         this.onSystemSelected(system);
     }
 
     isKnown(systemId: string): boolean {
-        return this.systems.has(systemId);
+        const system = this.systems.get(systemId);
+        return Boolean(system && isSystemActive(system, this.missionBits));
     }
 
     getSystem(systemId: string): SystemData | undefined {
@@ -717,9 +751,8 @@ export class SystemGraph {
     private placeSystems() {
         for (const [id, [container, graphics]] of this.systemCircles) {
             const system = this.systems.get(id);
-            if (!system) {
+            if (!system || !isSystemActive(system, this.missionBits)) {
                 container.visible = false;
-                console.warn(`missing system ${id}`);
                 continue;
             }
             container.visible = true;
@@ -759,6 +792,10 @@ export class SystemGraph {
 
     private drawLinks() {
         for (const [source, dest] of this.links) {
+            if (!isSystemActive(source, this.missionBits)
+                || !isSystemActive(dest, this.missionBits)) {
+                continue;
+            }
             this.drawLink(source, dest);
         }
     }
@@ -785,8 +822,10 @@ export class SystemGraph {
     }
 
     private computeShortestPaths() {
+        const activeSystems = [...this.systems.values()].filter(
+            s => isSystemActive(s, this.missionBits));
         return shortestRoutes(
-            [...this.systems.values()],
+            activeSystems,
             this.currentSystem,
         );
     }
@@ -862,6 +901,8 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
             this.exploredSystems,
             this.selectSystem.bind(this),
             () => this.container.visible,
+            MAP_WELL.size,
+            this.playerState?.missionBits,
         );
         const well = mapWellOrigin();
         this.systemGraph.container.position.set(well.x, well.y);
@@ -984,10 +1025,13 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
                     ? { ...playerState.legalRecords } : undefined,
                 activeMissions: playerState.activeMissions
                     ? [...playerState.activeMissions] : undefined,
+                missionBits: playerState.missionBits
+                    ? [...playerState.missionBits] : undefined,
             }
             : undefined;
         const currentSystem = this.currentSystemId();
         this.systemGraph?.setCurrentSystem(currentSystem, false);
+        this.systemGraph?.setMissionBits(playerState?.missionBits, false);
         this.systemGraph?.setMissionMarkers(playerState?.activeMissions, false);
         if (this.container.visible && this.selectedSystemId) {
             void this.renderPanel(this.selectedSystemId);

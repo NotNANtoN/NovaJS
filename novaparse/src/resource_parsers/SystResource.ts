@@ -14,6 +14,8 @@ class SystResource extends BaseResource {
     asteroids: number;
     /** Sensor interference, 0 through 100. */
     interference: number;
+    /** Control-bit visibility expression (offset 150). */
+    visibility?: string;
     constructor(resource: Resource, idSpace: NovaResources) {
         super(resource, idSpace);
         var d = resource.data;
@@ -55,6 +57,17 @@ class SystResource extends BaseResource {
         this.interference = d.byteLength >= 110
             ? Math.max(0, Math.min(100, d.getInt16(108)))
             : 0;
+        if (d.byteLength >= 152) {
+            let end = 150;
+            while (end < d.byteLength && d.getUint8(end) !== 0) {
+                end++;
+            }
+            const buf = new Uint8Array(d.buffer, d.byteOffset + 150, end - 150);
+            const str = String.fromCharCode(...buf).trim();
+            if (str.length > 0) {
+                this.visibility = str;
+            }
+        }
     }
 }
 

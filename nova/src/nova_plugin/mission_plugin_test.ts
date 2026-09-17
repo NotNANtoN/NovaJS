@@ -37,7 +37,7 @@ function fakeGameData(...missions: MissionData[]): GameDataInterface {
             Planet: {
                 get: async (id: string) => ({
                     id,
-                    name: id === 'nova:131' ? 'Destination' : 'Origin',
+                    name: id === 'nova:131' ? 'Destination' : (id === 'nova:130' ? 'Origin' : id),
                 }),
             },
         },
@@ -397,6 +397,51 @@ describe('mission runtime', () => {
         const notices = await new MissionRuntime(fakeGameData(mission))
             .processLanding(state, 'nova:131');
         expect(notices[0]?.kind).toBe('success');
+        expect(state.activeMissions).toEqual([]);
+    });
+
+    it('completes a mission targeting a planet when landing on a story clone with the same name', async () => {
+        // Mission targets Earth (nova:128)
+        const mission = {
+            ...getDefaultMissionData(),
+            id: 'nova:251',
+            name: 'Head to Sol',
+            travelStel: -1,
+            returnStel: 128,
+            dropOffMode: 1,
+            onSuccess: 'b9200',
+            compText: 'Welcome to Earth, captain.',
+        };
+        const state = createInitialPlayerState();
+        acceptMission(state, mission, {
+            initialPlanetId: 'nova:134', // New Babylon in Nesre Primus
+            resolved: {
+                travelDestination: '*',
+                returnDestination: 'nova:128',
+            },
+        });
+        expect(state.activeMissions.length).toBe(1);
+
+        // Player lands on Earth clone in alternate Sol system (nova:426)
+        const gameDataWithEarthClone = {
+            data: {
+                Mission: { get: async () => mission },
+                Planet: {
+                    get: async (id: string) => ({
+                        id,
+                        name: (id === 'nova:128' || id === 'nova:426') ? 'Earth' : id,
+                    }),
+                },
+            },
+            ids: Promise.resolve({} as never),
+        } as unknown as GameDataInterface;
+
+        const runtime = new MissionRuntime(gameDataWithEarthClone);
+        const notices = await runtime.processLanding(state, 'nova:426');
+
+        expect(notices[0]?.kind).toBe('success');
+        expect(notices[0]?.text).toContain('Welcome to Earth');
+        expect(state.missionBits[9200]).toBeTrue();
         expect(state.activeMissions).toEqual([]);
     });
 

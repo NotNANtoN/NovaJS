@@ -442,15 +442,36 @@ export function abortMission(
     return false;
 }
 
-function destinationMatches(destination: string | undefined, planetId: string) {
+async function destinationMatches(
+    destination: string | undefined,
+    planetId: string,
+    gameData?: GameDataInterface,
+): Promise<boolean> {
     if (destination === '*') {
         return true;
     }
     if (!destination) {
         return false;
     }
-    return destination === planetId
-        || destination.replace(/^.*:/, '') === planetId.replace(/^.*:/, '');
+    if (destination === planetId
+        || destination.replace(/^.*:/, '') === planetId.replace(/^.*:/, '')) {
+        return true;
+    }
+    if (gameData) {
+        try {
+            const [destPlanet, landPlanet] = await Promise.all([
+                gameData.data.Planet.get(destination).catch(() => undefined),
+                gameData.data.Planet.get(planetId).catch(() => undefined),
+            ]);
+            if (destPlanet?.name && landPlanet?.name
+                && destPlanet.name.trim().toLowerCase() === landPlanet.name.trim().toLowerCase()) {
+                return true;
+            }
+        } catch {
+            return false;
+        }
+    }
+    return false;
 }
 
 function missionEntryKey(entry: ActiveMission): string {
@@ -464,14 +485,15 @@ function missionEntryKey(entry: ActiveMission): string {
  * shows). Other missions must land at ReturnStel after visiting TravelStel
  * when those planets differ.
  */
-function landingCompletesMission(
+async function landingCompletesMission(
     entry: ActiveMission,
     mission: MissionData,
     planetId: string,
-): boolean {
+    gameData?: GameDataInterface,
+): Promise<boolean> {
     const travel = missionTravelDestination(entry);
-    const atTravel = destinationMatches(travel, planetId);
-    const atCompletion = destinationMatches(entry.destination, planetId);
+    const atTravel = await destinationMatches(travel, planetId, gameData);
+    const atCompletion = await destinationMatches(entry.destination, planetId, gameData);
     if (mission.dropOffMode === 0) {
         return atTravel || atCompletion;
     }
@@ -481,7 +503,7 @@ function landingCompletesMission(
     const travelRequired = Boolean(travel)
         && travel !== '*'
         && mission.travelStel !== -1
-        && (!entry.destination || !destinationMatches(travel, entry.destination));
+        && (!entry.destination || !await destinationMatches(travel, entry.destination, gameData));
     return !travelRequired || entry.travelVisited === true || atTravel;
 }
 
@@ -759,8 +781,8 @@ export class MissionRuntime {
                 if (entry.state !== 'active') {
                     return;
                 }
-                const atTravel = destinationMatches(
-                    missionTravelDestination(entry), planetId);
+                const atTravel = await destinationMatches(
+                    missionTravelDestination(entry), planetId, this.gameData);
                 if (atTravel) {
                     entry.travelVisited = true;
                 }
@@ -777,7 +799,7 @@ export class MissionRuntime {
                     // Pickup and drop-off are different landings.
                     return;
                 }
-                if (!landingCompletesMission(entry, mission, planetId)) {
+                if (!await landingCompletesMission(entry, mission, planetId, this.gameData)) {
                     return;
                 }
 

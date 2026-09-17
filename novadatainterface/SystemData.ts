@@ -56,6 +56,8 @@ export interface SystemData extends BaseData {
     asteroidDensity: number,
     /** Sensor interference / static, 0 through 100. */
     interference: number,
+    /** Control-bit visibility test expression (from sÿst offset 150). */
+    visibility?: string,
 }
 
 export function getDefaultSystemData(): SystemData {
