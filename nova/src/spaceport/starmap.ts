@@ -362,7 +362,7 @@ export function nebulaImageForScale(
     return images.zoom25 ?? images.zoom50 ?? images.zoom100;
 }
 
-class SystemGraph {
+export class SystemGraph {
     readonly container = new PIXI.Container();
     private readonly nebulaContainer = new PIXI.Container();
     private readonly nebulaSprites: [NebulaData, PIXI.Sprite][] = [];
@@ -490,6 +490,17 @@ class SystemGraph {
         this.draw();
     }
 
+    setCurrentSystem(currentSystem: string, redraw = true) {
+        if (this.currentSystem === currentSystem) {
+            return;
+        }
+        this.currentSystem = currentSystem;
+        this.routes = this.computeShortestPaths();
+        if (redraw) {
+            this.draw();
+        }
+    }
+
     setKnownSystems(exploredSystems?: readonly string[], redraw = true) {
         const knownSystems = normalizeKnownSystems(
             exploredSystems, this.currentSystem);
@@ -578,7 +589,7 @@ class SystemGraph {
     private onDragMove(event: PIXI.FederatedPointerEvent) {
         if (this.dragData) {
             const dragPos = this.container.toLocal(event.global);
-            if (Math.hypot(dragPos.x - this.dragStartPos.x, dragPos.y - this.dragStartPos.y) > 4) {
+            if (Math.hypot(dragPos.x - this.dragStartPos.x, dragPos.y - this.dragStartPos.y) > 8) {
                 this.dragMoved = true;
             }
             this.mapContainer.position.set(
@@ -628,15 +639,12 @@ class SystemGraph {
     }
 
     private onClickSystem(system: string) {
-        if (this.knownSystems && !this.knownSystems.has(system)) {
-            return;
-        }
         this.route = this.routes.get(system) ?? [];
         this.onSystemSelected(system);
     }
 
     isKnown(systemId: string): boolean {
-        return !this.knownSystems || this.knownSystems.has(systemId);
+        return this.systems.has(systemId);
     }
 
     getSystem(systemId: string): SystemData | undefined {
@@ -940,12 +948,14 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
         if (!this.systemGraph) {
             throw new Error('Expected system graph to be built')
         }
+        const currentSystem = this.currentSystemId();
+        this.systemGraph.setCurrentSystem(currentSystem, false);
         // A newly constructed system world centers once after the asynchronous
         // graph build. Reopening in that same world preserves the player's pan.
         if (consumeInitialCenter(this.viewState)) {
             this.systemGraph.center();
         }
-        this.selectedSystemId ??= this.currentSystemId();
+        this.selectedSystemId ??= currentSystem;
         void this.renderPanel(this.selectedSystemId);
         this.systemGraph.route = route;
         this.systemGraph.bindWheel();
@@ -976,6 +986,8 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
                     ? [...playerState.activeMissions] : undefined,
             }
             : undefined;
+        const currentSystem = this.currentSystemId();
+        this.systemGraph?.setCurrentSystem(currentSystem, false);
         this.systemGraph?.setMissionMarkers(playerState?.activeMissions, false);
         if (this.container.visible && this.selectedSystemId) {
             void this.renderPanel(this.selectedSystemId);

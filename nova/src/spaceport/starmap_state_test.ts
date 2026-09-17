@@ -7,6 +7,7 @@ import {
     getMissionDestinationMarkers,
     getSystemMissionDetails,
     resolveMissionTargetSystem,
+    SystemGraph,
 } from './starmap';
 
 describe('starmap world presentation state', () => {
@@ -112,5 +113,33 @@ describe('starmap world presentation state', () => {
 
         const gefjonDetails = getSystemMissionDetails('nova:163', missions as never, systems);
         expect(gefjonDetails.length).toBe(0);
+    });
+
+    it('plots a hyperjump route when clicking on charted systems outside explored history', () => {
+        const systems = [
+            { id: 'sol', name: 'Sol', links: ['centauri'], planets: [], position: [0, 0] },
+            { id: 'centauri', name: 'Alpha Centauri', links: ['sol', 'barnard'], planets: [], position: [10, 10] },
+            { id: 'barnard', name: 'Barnard', links: ['centauri'], planets: [], position: [20, 20] },
+        ] as never;
+
+        // Player starts in Sol, with only Sol in explored systems
+        let selectedSystem: string | undefined;
+        const graph = new SystemGraph(
+            systems,
+            'sol',
+            ['sol'],
+            id => { selectedSystem = id; },
+        );
+
+        // Clicking on Barnard (unvisited) must plot the route and select the system!
+        (graph as any).onClickSystem('barnard');
+        expect(selectedSystem).toBe('barnard');
+        expect(graph.route).toEqual(['centauri', 'barnard']);
+        expect(graph.isKnown('barnard')).toBeTrue();
+
+        // When the player jumps to Centauri:
+        graph.setCurrentSystem('centauri');
+        (graph as any).onClickSystem('barnard');
+        expect(graph.route).toEqual(['barnard']);
     });
 });
