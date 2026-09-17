@@ -98,6 +98,57 @@ function addMaskedText(
     return text;
 }
 
+export function resolveMissionTargetSystem(
+    mission: ActiveMission,
+    planetToSystem: ReadonlyMap<string, string>,
+    systemIds: ReadonlySet<string>,
+    bareSystemIds: ReadonlyMap<string, string>,
+): string | undefined {
+    const resolvePlanetSystem = (targetId: string | undefined): string | undefined => {
+        if (!targetId || targetId === '*') return undefined;
+        // In EV Nova, missions target planets (spöbs). Always prioritize planetToSystem
+        // resolution because planet IDs and system IDs overlap numerically (e.g. spöb:163 Altia vs sÿst:163 Gefjon).
+        if (planetToSystem.has(targetId)) return planetToSystem.get(targetId);
+        const bare = targetId.replace(/^.*:/, '');
+        if (planetToSystem.has(bare)) return planetToSystem.get(bare);
+        // Fallback: if it was not found in any system's planet list, check if it was directly a system ID
+        if (systemIds.has(targetId)) return targetId;
+        if (bareSystemIds.has(bare)) return bareSystemIds.get(bare);
+        return undefined;
+    };
+
+    const resolveSystemId = (systemId: string | undefined): string | undefined => {
+        if (!systemId || systemId === '*') return undefined;
+        if (systemIds.has(systemId)) return systemId;
+        const bare = systemId.replace(/^.*:/, '');
+        if (bareSystemIds.has(bare)) return bareSystemIds.get(bare);
+        if (planetToSystem.has(systemId)) return planetToSystem.get(systemId);
+        if (planetToSystem.has(bare)) return planetToSystem.get(bare);
+        return undefined;
+    };
+
+    let targetSystem: string | undefined;
+    // 1. If we have not visited the travel destination yet, and it is a concrete destination (not '*')
+    if (!mission.travelVisited && mission.travelDestination && mission.travelDestination !== '*') {
+        targetSystem = resolvePlanetSystem(mission.travelDestination);
+    }
+    // 2. If travel destination is complete, or travel is anywhere ('*'), or travel destination could not be resolved,
+    // target the return destination
+    if (!targetSystem && mission.returnDestination && mission.returnDestination !== '*') {
+        targetSystem = resolvePlanetSystem(mission.returnDestination);
+    }
+    // 3. Otherwise try destination
+    if (!targetSystem && mission.destination && mission.destination !== '*') {
+        targetSystem = resolvePlanetSystem(mission.destination);
+    }
+    // 4. If this is a ship encounter in a system
+    if (!targetSystem && mission.shipSystem) {
+        targetSystem = resolveSystemId(mission.shipSystem);
+    }
+
+    return targetSystem;
+}
+
 export function getMissionDestinationMarkers(
     activeMissions: readonly ActiveMission[] | undefined,
     systems: readonly SystemData[],
@@ -119,40 +170,12 @@ export function getMissionDestinationMarkers(
     const systemIds = new Set(systems.map(s => s.id));
     const bareSystemIds = new Map(systems.map(s => [s.id.replace(/^.*:/, ''), s.id]));
 
-    const resolveSystem = (targetId: string | undefined): string | undefined => {
-        if (!targetId || targetId === '*') {
-            return undefined;
-        }
-        if (systemIds.has(targetId)) {
-            return targetId;
-        }
-        if (planetToSystem.has(targetId)) {
-            return planetToSystem.get(targetId);
-        }
-        const bare = targetId.replace(/^.*:/, '');
-        if (bareSystemIds.has(bare)) {
-            return bareSystemIds.get(bare);
-        }
-        if (planetToSystem.has(bare)) {
-            return planetToSystem.get(bare);
-        }
-        return undefined;
-    };
-
     for (const mission of activeMissions) {
         if (mission.state !== 'active') {
             continue;
         }
-        let targetSystem: string | undefined;
-        if (!mission.travelVisited && mission.travelDestination) {
-            targetSystem = resolveSystem(mission.travelDestination);
-        } else if (mission.travelVisited && mission.returnDestination) {
-            targetSystem = resolveSystem(mission.returnDestination);
-        } else if (mission.shipSystem) {
-            targetSystem = resolveSystem(mission.shipSystem);
-        } else if (mission.destination) {
-            targetSystem = resolveSystem(mission.destination);
-        }
+        const targetSystem = resolveMissionTargetSystem(
+            mission, planetToSystem, systemIds, bareSystemIds);
 
         if (!targetSystem) {
             continue;
@@ -201,28 +224,10 @@ export function getSystemMissionDetails(
     const systemIds = new Set(systems.map(s => s.id));
     const bareSystemIds = new Map(systems.map(s => [s.id.replace(/^.*:/, ''), s.id]));
 
-    const resolveSystem = (targetId: string | undefined): string | undefined => {
-        if (!targetId || targetId === '*') return undefined;
-        if (systemIds.has(targetId)) return targetId;
-        if (planetToSystem.has(targetId)) return planetToSystem.get(targetId);
-        const bare = targetId.replace(/^.*:/, '');
-        if (bareSystemIds.has(bare)) return bareSystemIds.get(bare);
-        if (planetToSystem.has(bare)) return planetToSystem.get(bare);
-        return undefined;
-    };
-
     for (const mission of activeMissions) {
         if (mission.state !== 'active') continue;
-        let targetSystem: string | undefined;
-        if (!mission.travelVisited && mission.travelDestination) {
-            targetSystem = resolveSystem(mission.travelDestination);
-        } else if (mission.travelVisited && mission.returnDestination) {
-            targetSystem = resolveSystem(mission.returnDestination);
-        } else if (mission.shipSystem) {
-            targetSystem = resolveSystem(mission.shipSystem);
-        } else if (mission.destination) {
-            targetSystem = resolveSystem(mission.destination);
-        }
+        const targetSystem = resolveMissionTargetSystem(
+            mission, planetToSystem, systemIds, bareSystemIds);
 
         if (targetSystem !== systemId) continue;
 
@@ -594,12 +599,17 @@ class SystemGraph {
         if (!this.isVisible()) {
             return;
         }
-        event.preventDefault();
+        if (event.cancelable) {
+            event.preventDefault();
+        }
         event.stopPropagation();
-        try {
-            (event.nativeEvent as Event)?.preventDefault?.();
-        } catch {
-            // Passive wheel event in modern browser
+        const native = event.nativeEvent as Event | undefined;
+        if (native && native.cancelable) {
+            try {
+                native.preventDefault();
+            } catch {
+                // Passive wheel event in modern browser
+            }
         }
         const nextScale = mapScaleForWheel(this.scale, event.deltaY);
         if (nextScale === this.scale) {
