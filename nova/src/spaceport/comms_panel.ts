@@ -155,7 +155,8 @@ export class Comms extends Menu<Entity> {
                 sprite.destroy();
                 return;
             }
-            sprite.interactive = true;
+            sprite.eventMode = 'static';
+            (sprite as any).interactive = true;
             sprite.anchor.set(0.5);
             if (this.container.children.length > 0) {
                 const previous = this.container.removeChildAt(0);

@@ -24,7 +24,8 @@ export abstract class Menu<T> {
 
         const backgroundSprite = this.gameData.spriteFromPict(this.background);
         // So you can't press things behind this menu:
-        backgroundSprite.interactive = true;
+        backgroundSprite.eventMode = 'static';
+        (backgroundSprite as any).interactive = true;
         backgroundSprite.anchor.x = 0.5;
         backgroundSprite.anchor.y = 0.5;
         this.container.visible = false;

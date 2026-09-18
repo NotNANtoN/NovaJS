@@ -68,7 +68,8 @@ export class Bar extends MissionBoard {
 
         const background = gameData.spriteFromPict(BAR_LAYOUT.background);
         background.anchor.set(0.5);
-        background.interactive = true;
+        background.eventMode = 'static';
+        (background as any).interactive = true;
         this.hub.addChild(background);
 
         this.content.position.set(BAR_LAYOUT.text.x, BAR_LAYOUT.text.y);

@@ -55,7 +55,8 @@ export class SmallMap {
         });
         this.titleText.anchor.set(0.5, 0);
         this.titleText.position.set(HALF_SIZE, 8);
-        this.titleText.interactive = true;
+        this.titleText.eventMode = 'static';
+        (this.titleText as any).interactive = true;
         this.titleText.cursor = 'pointer';
         this.titleText.on('pointerdown', () => this.cycleRange());
 

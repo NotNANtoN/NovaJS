@@ -573,14 +573,20 @@ export class MissionInfo extends Menu<Entity> {
             const qty = selected.entry.cargo?.quantity ?? selected.mission.cargoQty;
             const cargoName = selected.mission.cargo?.replace(/^\*/, '') ?? 'cargo';
             objective = `Deliver ${qty}t ${cargoName} to ${destination}`;
-        } else if (selected.mission.shipCount > 0 && selected.mission.shipGoal === 1) {
+        } else if (selected.mission.shipCount > 0 && selected.mission.shipGoal === 0) {
             objective = `Destroy target vessel in ${destinationSystem ?? destination}`;
-        } else if (selected.mission.shipCount > 0 && selected.mission.shipGoal === 2) {
+        } else if (selected.mission.shipCount > 0 && selected.mission.shipGoal === 1) {
             objective = `Disable target vessel in ${destinationSystem ?? destination}`;
+        } else if (selected.mission.shipCount > 0 && selected.mission.shipGoal === 2) {
+            objective = `Board target vessel in ${destinationSystem ?? destination}`;
         } else if (selected.mission.shipCount > 0 && selected.mission.shipGoal === 3) {
             objective = `Escort convoy to ${destination}`;
         } else if (selected.mission.shipCount > 0 && selected.mission.shipGoal === 4) {
             objective = `Observe target vessel in ${destinationSystem ?? destination}`;
+        } else if (selected.mission.shipCount > 0 && selected.mission.shipGoal === 5) {
+            objective = `Rescue vessel in ${destinationSystem ?? destination}`;
+        } else if (selected.mission.shipCount > 0 && selected.mission.shipGoal === 6) {
+            objective = `Defend against attackers in ${destinationSystem ?? destination}`;
         } else {
             objective = `Travel to ${destination}`;
         }

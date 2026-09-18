@@ -634,6 +634,12 @@ export class Spaceport extends Menu<Entity> {
         this.modalDimmer.rect(-309, -258.5, 618, 517).fill({ color: 0x000000, alpha: 0.5 });
         this.modalDimmer.visible = false;
         this.modalDimmer.eventMode = 'static';
+        this.modalDimmer.cursor = 'default';
+        this.modalDimmer.on('pointerup', () => {
+            if (this.landingNoticeDialog.container.visible) {
+                this.landingNoticeDialog.getButton('ok')?.click.next(undefined);
+            }
+        });
         this.container.addChild(this.modalDimmer);
         this.container.addChild(this.landingNoticeDialog.container);
         this.container.addChild(this.missionOfferDialog.container);

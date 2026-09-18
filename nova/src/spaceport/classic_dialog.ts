@@ -210,17 +210,26 @@ export class ClassicDialog<TData> extends Menu<TData> {
             };
             controlsMap.buy = defaultAction;
             controlsMap.properties = defaultAction;
+            controlsMap.firePrimary = defaultAction;
+            controlsMap.fullscreen = defaultAction;
+            controlsMap.land = defaultAction;
         }
 
         const cancelBtn = (config.buttons || []).find((b) => b.isCancel);
         if (cancelBtn) {
-            controlsMap.depart = async () => {
+            const cancelAction = async () => {
                 if (cancelBtn.action) {
                     const res = await cancelBtn.action(this, this.input);
                     if (res !== undefined) this.customOutput = res;
                 }
                 this.closeWithResult();
             };
+            controlsMap.depart = cancelAction;
+            if (!defaultBtn) {
+                controlsMap.firePrimary = cancelAction;
+                controlsMap.fullscreen = cancelAction;
+                controlsMap.land = cancelAction;
+            }
         } else {
             controlsMap.depart = () => this.closeWithResult();
         }

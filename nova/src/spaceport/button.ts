@@ -75,8 +75,10 @@ export class Button {
         // Set the correct container as visible
         this.state = this.wrappedState;
 
-        this.container.interactive = true;
+        this.container.eventMode = 'static';
+        (this.container as any).interactive = true;
         this.container.cursor = 'pointer';
+        this.container.hitArea = new PIXI.Rectangle(0, 0, LEFT_POS + this.width + 13, height);
         this.container.on('pointerdown', () => {
             this.state = 'clicked';
         });
@@ -84,6 +86,10 @@ export class Button {
         this.container.on('pointerup', (event: PIXI.FederatedPointerEvent) => {
             this.state = 'normal';
             this.click.next(event);
+        });
+
+        this.container.on('pointerupoutside', () => {
+            this.state = 'normal';
         });
 
         for (const [name, { left, middle, right }] of this.buttonIds) {

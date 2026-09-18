@@ -48,7 +48,8 @@ export class ItemTile<I extends Item> {
         this.quantityText.position.x = TILE_SIZE[0] - 2;
         this.quantityText.position.y = 2;
 
-        this.container.interactive = true;
+        this.container.eventMode = 'static';
+        (this.container as any).interactive = true;
         this.active = false;
 
         this.container.addChild(this.graphics);
