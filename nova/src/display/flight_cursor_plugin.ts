@@ -12,16 +12,11 @@ import { GovernmentRelationResource, relation } from '../nova_plugin/govt_relati
 import { DisabledComponent } from '../nova_plugin/death_plugin';
 import { GovtComponent } from '../nova_plugin/npc_components';
 import {
-    chooseLandingCandidate,
-    LandEvent,
-    landingDecision,
     PlanetComponent,
     PlanetDataComponent,
     PlanetTargetComponent,
-    resolveLandingCapabilities,
 } from '../nova_plugin/planet_plugin';
 import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin';
-import { PlayerStateComponent } from '../nova_plugin/player_state';
 import { ShipComponent } from '../nova_plugin/ship_plugin';
 import { SoundEvent } from '../nova_plugin/sound_event';
 import { TargetComponent } from '../nova_plugin/target_component';
@@ -29,12 +24,12 @@ import { Space } from './space_resource';
 import { Stage } from './stage_resource';
 import { StarmapResource } from './starmap_plugin';
 
-export const CURSOR_COLOR_DEFAULT = 0x00e6ff;   // Sci-fi cyan reticle
+export const CURSOR_COLOR_DEFAULT = 0xff2828;   // Authentic EV Nova target red
 export const CURSOR_COLOR_PLANET = 0x00c8ff;    // Stellar cyan
-export const CURSOR_COLOR_HOSTILE = 0xff2828;   // Bright red
+export const CURSOR_COLOR_HOSTILE = 0xff1818;   // Vivid hostile red
 export const CURSOR_COLOR_NEUTRAL = 0xffea00;   // Amber / yellow
-export const CURSOR_COLOR_FRIENDLY = 0x28ff28;  // Green
-export const CURSOR_COLOR_DISABLED = 0x888888;  // Gray
+export const CURSOR_COLOR_FRIENDLY = 0x28ff28;  // Friendly green
+export const CURSOR_COLOR_DISABLED = 0x888888;  // Disabled gray
 
 export class FlightCursor {
     readonly container: PIXI.Container;
@@ -64,36 +59,53 @@ export class FlightCursor {
         this.reticleGraphics.clear();
         this.centerDot.clear();
 
-        // Fine center aiming dot
+        // Fine center aiming dot with soft glow
         this.centerDot.circle(0, 0, 1.5).fill({ color, alpha: 0.95 });
 
-        // Inner circular reticle
-        this.reticleGraphics.circle(0, 0, 8).stroke({ width: 1.2, color, alpha: 0.8 });
+        // Inner circular reticle with round antialiased stroke
+        this.reticleGraphics.circle(0, 0, 8).stroke({ width: 1.2, color, alpha: 0.85, cap: 'round', join: 'round' });
 
-        // 4 radial crosshair ticks with center gap
-        this.reticleGraphics.moveTo(0, -10).lineTo(0, -15).stroke({ width: 1.5, color, alpha: 0.9 });
-        this.reticleGraphics.moveTo(0, 10).lineTo(0, 15).stroke({ width: 1.5, color, alpha: 0.9 });
-        this.reticleGraphics.moveTo(-10, 0).lineTo(-15, 0).stroke({ width: 1.5, color, alpha: 0.9 });
-        this.reticleGraphics.moveTo(10, 0).lineTo(15, 0).stroke({ width: 1.5, color, alpha: 0.9 });
+        // 4 radial crosshair ticks with center gap and round caps
+        this.reticleGraphics.moveTo(0, -10).lineTo(0, -15).stroke({ width: 1.5, color, alpha: 0.9, cap: 'round', join: 'round' });
+        this.reticleGraphics.moveTo(0, 10).lineTo(0, 15).stroke({ width: 1.5, color, alpha: 0.9, cap: 'round', join: 'round' });
+        this.reticleGraphics.moveTo(-10, 0).lineTo(-15, 0).stroke({ width: 1.5, color, alpha: 0.9, cap: 'round', join: 'round' });
+        this.reticleGraphics.moveTo(10, 0).lineTo(15, 0).stroke({ width: 1.5, color, alpha: 0.9, cap: 'round', join: 'round' });
 
-        // 4 outer targeting brackets
+        // 4 outer corner targeting brackets
         const b = 17 * spread;
         const arm = 5;
         // Top-left
-        this.reticleGraphics.moveTo(-b, -b + arm).lineTo(-b, -b).lineTo(-b + arm, -b).stroke({ width: 1.5, color, alpha: 0.85 });
+        this.reticleGraphics.moveTo(-b, -b + arm).lineTo(-b, -b).lineTo(-b + arm, -b).stroke({ width: 1.5, color, alpha: 0.85, cap: 'round', join: 'round' });
         // Top-right
-        this.reticleGraphics.moveTo(b - arm, -b).lineTo(b, -b).lineTo(b, -b + arm).stroke({ width: 1.5, color, alpha: 0.85 });
+        this.reticleGraphics.moveTo(b - arm, -b).lineTo(b, -b).lineTo(b, -b + arm).stroke({ width: 1.5, color, alpha: 0.85, cap: 'round', join: 'round' });
         // Bottom-left
-        this.reticleGraphics.moveTo(-b, b - arm).lineTo(-b, b).lineTo(-b + arm, b).stroke({ width: 1.5, color, alpha: 0.85 });
+        this.reticleGraphics.moveTo(-b, b - arm).lineTo(-b, b).lineTo(-b + arm, b).stroke({ width: 1.5, color, alpha: 0.85, cap: 'round', join: 'round' });
         // Bottom-right
-        this.reticleGraphics.moveTo(b - arm, b).lineTo(b, b).lineTo(b, b - arm).stroke({ width: 1.5, color, alpha: 0.85 });
+        this.reticleGraphics.moveTo(b - arm, b).lineTo(b, b).lineTo(b, b - arm).stroke({ width: 1.5, color, alpha: 0.85, cap: 'round', join: 'round' });
     }
 
-    update(hoverColor: number, isHovering: boolean) {
+    update(hoverColor: number, isHovering: boolean, idleTimeMs: number) {
         // Continuous smooth rotation
         this.reticleGraphics.rotation += 0.015;
 
-        const targetSpread = isHovering ? 0.85 : 1.0;
+        // Disappearing animation when mouse is not moving
+        const IDLE_DELAY_MS = 1500;
+        const FADE_DURATION_MS = 800;
+
+        let targetSpread = isHovering ? 0.85 : 1.0;
+
+        if (idleTimeMs > IDLE_DELAY_MS) {
+            const fade = Math.min(1, (idleTimeMs - IDLE_DELAY_MS) / FADE_DURATION_MS);
+            // Smooth ease out
+            const alpha = Math.max(0, 1 - fade);
+            this.container.alpha = alpha;
+            // Brackets subtly dissolve outwards as it disappears
+            targetSpread = (isHovering ? 0.85 : 1.0) + fade * 0.4;
+        } else {
+            // Quickly and smoothly fade in when moving
+            this.container.alpha = Math.min(1, this.container.alpha + 0.25);
+        }
+
         if (Math.abs(this.currentSpread - targetSpread) > 0.01 || this.currentColor !== hoverColor) {
             const nextSpread = this.currentSpread + (targetSpread - this.currentSpread) * 0.25;
             this.drawReticle(hoverColor, nextSpread);
@@ -110,6 +122,7 @@ interface PointerState {
     pendingClick: boolean;
     clickX: number;
     clickY: number;
+    lastMoveTime: number;
 }
 
 const pointerState: PointerState = {
@@ -119,6 +132,7 @@ const pointerState: PointerState = {
     pendingClick: false,
     clickX: 0,
     clickY: 0,
+    lastMoveTime: Date.now(),
 };
 
 let listenersBound = false;
@@ -131,6 +145,7 @@ function bindPointerListeners() {
         pointerState.x = e.clientX;
         pointerState.y = e.clientY;
         pointerState.inWindow = true;
+        pointerState.lastMoveTime = Date.now();
     });
 
     window.addEventListener('pointerdown', e => {
@@ -138,6 +153,7 @@ function bindPointerListeners() {
             pointerState.pendingClick = true;
             pointerState.clickX = e.clientX;
             pointerState.clickY = e.clientY;
+            pointerState.lastMoveTime = Date.now();
         }
     });
 
@@ -229,7 +245,6 @@ export const FlightCursorSystem = new System({
         const playerUuid = playerShip ? playerShip[0] : undefined;
         const playerTarget = playerShip ? playerShip[2] : undefined;
         const playerPlanetTarget = playerShip ? playerShip[3] : undefined;
-        const playerMovement = playerShip ? playerShip[4] : undefined;
         const playerGovt = playerShip ? playerShip[5] : undefined;
 
         // Hover detection
@@ -299,7 +314,8 @@ export const FlightCursorSystem = new System({
             hoveredColor = CURSOR_COLOR_PLANET;
         }
 
-        cursor.update(hoveredColor, isHovering);
+        const idleElapsedMs = Date.now() - pointerState.lastMoveTime;
+        cursor.update(hoveredColor, isHovering, idleElapsedMs);
 
         // Click-to-target handling
         if (pointerState.pendingClick) {
@@ -309,7 +325,7 @@ export const FlightCursorSystem = new System({
                 new PIXI.Point(pointerState.clickX, pointerState.clickY)
             );
 
-            // Re-evaluate under click coordinates
+            // 1. Re-evaluate ship under click coordinates
             let clickShip: (typeof allShips)[number] | undefined;
             let clickShipDistSq = Infinity;
             for (const shipRow of allShips) {
@@ -333,7 +349,7 @@ export const FlightCursorSystem = new System({
                 return;
             }
 
-            // If no ship was clicked, check planets
+            // 2. If no ship was clicked, check planets
             let clickPlanet: (typeof allPlanets)[number] | undefined;
             let clickPlanetDistSq = Infinity;
             for (const planetRow of allPlanets) {
@@ -349,32 +365,9 @@ export const FlightCursorSystem = new System({
             }
 
             if (clickPlanet && playerPlanetTarget) {
-                const [planetUuid, planetMovement, planet, planetData] = clickPlanet;
-                const isAlreadyTargeted = playerPlanetTarget.target === planetUuid;
+                // Click strictly targets the planet. Only pressing 'L' lands.
+                const [planetUuid] = clickPlanet;
                 playerPlanetTarget.target = planetUuid;
-
-                if (isAlreadyTargeted && playerMovement) {
-                    // Clicking the targeted planet initiates landing if in landing range & speed
-                    const capabilities = resolveLandingCapabilities(planet, planetData);
-                    const candidate = chooseLandingCandidate([{
-                        uuid: planetUuid,
-                        id: planet.id,
-                        name: planet.name ?? planetData?.name ?? planet.id,
-                        distanceSquared: planetMovement.position.subtract(playerMovement.position).lengthSquared,
-                        ...capabilities,
-                    }]);
-                    if (candidate) {
-                        const decision = landingDecision(
-                            planetUuid,
-                            candidate,
-                            playerMovement.velocity.lengthSquared,
-                        );
-                        if (decision.action === 'land') {
-                            emit(LandEvent, { id: candidate.id, uuid: candidate.uuid });
-                            return;
-                        }
-                    }
-                }
                 emit(SoundEvent, { id: 'nova:142' });
             }
         }

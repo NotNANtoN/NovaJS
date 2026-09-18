@@ -291,9 +291,11 @@ function drawSystem(
         graphics.circle(0, 0, 4.5 * scale).stroke({
             width: marker.ringWidth ?? 2,
             color: marker.ringColor ?? 0xffffff,
+            cap: 'round',
+            join: 'round',
         });
     }
-    graphics.circle(0, 0, 2.7 * scale).fill(outColor).stroke({ width: 1, color: outColor });
+    graphics.circle(0, 0, 2.7 * scale).fill(outColor);
     graphics.circle(0, 0, 1.8 * scale).fill(inColor);
 
     if (playerMarkers && playerMarkers.length > 0) {
@@ -304,7 +306,7 @@ function drawSystem(
         graphics.lineTo(8.5 * scale, -8.5 * scale);
         graphics.lineTo(8.5 * scale, -2.5 * scale);
         graphics.closePath();
-        graphics.fill(markerColor).stroke({ width: 1, color: 0x000000 });
+        graphics.fill({ color: markerColor, alpha: 0.95 }).stroke({ width: 1.2, color: markerColor, cap: 'round', join: 'round' });
     }
 
     if (missionMarker) {
@@ -334,7 +336,7 @@ function drawSystem(
             graphics.lineTo(4.5 * scale, -9.8 * scale);
             graphics.closePath();
         }
-        graphics.fill(markerColor).stroke({ width: 1, color: 0x000000 });
+        graphics.fill({ color: markerColor, alpha: 0.95 }).stroke({ width: 1.2, color: markerColor, cap: 'round', join: 'round' });
     }
 }
 
@@ -822,7 +824,7 @@ export class SystemGraph {
         const posB = this.scalePos(b.position);
         this.graphics.moveTo(posA[0], posA[1]);
         this.graphics.lineTo(posB[0], posB[1]);
-        this.graphics.stroke({ width: thickness, color });
+        this.graphics.stroke({ width: thickness, color, cap: 'round', join: 'round' });
     }
 
     private computeShortestPaths() {

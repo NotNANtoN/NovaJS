@@ -833,6 +833,7 @@ async function bootstrap() {
         height: window.innerHeight,
         resolution: pixelRatio,
         autoDensity: true,
+        antialias: true,
         preserveDrawingBuffer: true,
         preference: 'webgpu',
         gpu: gpuConfig,

@@ -46,7 +46,7 @@ import {
 import { Stat } from "../nova_plugin/stat";
 import { CloakStateComponent } from "../nova_plugin/cloaking_plugin";
 import { TargetComponent } from "../nova_plugin/target_component";
-import { PlanetTargetComponent } from "../nova_plugin/planet_plugin";
+import { PlanetComponent, PlanetDataComponent, PlanetTargetComponent } from "../nova_plugin/planet_plugin";
 import { ChangeSecondaryEvent } from "../nova_plugin/weapon_plugin";
 import { AnimationGraphic } from "./animation_graphic";
 import { AnimationGraphicComponent } from "./animation_graphic_plugin";
@@ -836,37 +836,74 @@ const TargetQuery = new Query([ShipDataComponent, Optional(ShieldComponent),
     Optional(ArmorComponent), Optional(AnimationGraphicComponent),
     Optional(GovtComponent), Optional(DisabledComponent),
     Optional(PlayerStateComponent)] as const);
+
+const PlanetTargetInfoQuery = new Query([
+    PlanetComponent,
+    Optional(PlanetDataComponent),
+    Optional(AnimationGraphicComponent),
+] as const);
+
 const DrawStatusBarTarget = new System({
     name: 'DrawStatusBarTarget',
-    args: [StatusBarResource, TargetComponent, RunQuery,
-        GovernmentRelationResource, PlayerShipSelector] as const,
-    step(statusBar, { target }, runQuery, governments) {
-        if (!target) {
-            statusBar.clearTarget();
-            return;
+    args: [
+        StatusBarResource,
+        TargetComponent,
+        RunQuery,
+        GovernmentRelationResource,
+        PlayerShipSelector,
+        Optional(PlanetTargetComponent),
+    ] as const,
+    step(statusBar, { target }, runQuery, governments, _playerShip, planetTarget) {
+        if (target) {
+            const result = runQuery(TargetQuery, target)[0];
+            if (result) {
+                const [shipData, shield, armor, shipGraphic, government, disabled, playerState] = result;
+                const governmentData = government
+                    ? governments.getCached(government.id)
+                    : undefined;
+                const isPlayer = Boolean(playerState);
+                const subtitle = playerState?.pilotName
+                    ? playerState.pilotName
+                    : shipData.subtitle;
+                statusBar.drawTarget(
+                    targetLabel(
+                        shipData.name, subtitle, governmentData, isPlayer),
+                    shield?.percent,
+                    armor?.percent,
+                    shipData.targetPict,
+                    shipGraphic,
+                    disabled,
+                );
+                return;
+            }
         }
-        const result = runQuery(TargetQuery, target)[0];
-        if (result) {
-            const [shipData, shield, armor, shipGraphic, government, disabled, playerState] = result;
-            const governmentData = government
-                ? governments.getCached(government.id)
-                : undefined;
-            const isPlayer = Boolean(playerState);
-            const subtitle = playerState?.pilotName
-                ? playerState.pilotName
-                : shipData.subtitle;
-            statusBar.drawTarget(
-                targetLabel(
-                    shipData.name, subtitle, governmentData, isPlayer),
-                shield?.percent,
-                armor?.percent,
-                shipData.targetPict,
-                shipGraphic,
-                disabled,
-            );
+
+        const navTarget = planetTarget?.target;
+        if (navTarget) {
+            const planetResult = runQuery(PlanetTargetInfoQuery, navTarget)[0];
+            if (planetResult) {
+                const [planet, planetData, planetGraphic] = planetResult;
+                const name = planet.name || planetData?.name || planet.id;
+                const subtitle = planet.canLand === false
+                    ? 'Hazardous Stellar'
+                    : (planet.inhabited ? 'Stellar Spaceport' : 'Uninhabited Stellar');
+                statusBar.drawTarget(
+                    {
+                        name,
+                        subtitle: { text: subtitle, color: 0x00c8ff },
+                    },
+                    undefined,
+                    undefined,
+                    planetData?.landingPict,
+                    planetGraphic,
+                );
+                return;
+            }
         }
+
+        statusBar.clearTarget();
     }
-})
+});
 
 const DrawStatusBarNavigation = new System({
     name: 'DrawStatusBarNavigation',

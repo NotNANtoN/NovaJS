@@ -7,7 +7,7 @@ import { Resource } from "nova_ecs/resource";
 import { System } from 'nova_ecs/system';
 import { GameData } from '../client/gamedata/GameData';
 import { GameDataResource } from '../nova_plugin/game_data_resource';
-import { PlanetTargetComponent } from '../nova_plugin/planet_plugin';
+import { PlanetComponent, PlanetDataComponent, PlanetTargetComponent } from '../nova_plugin/planet_plugin';
 import { PlayerShipSelector } from '../nova_plugin/player_ship_plugin';
 import { AnimationGraphicComponent, ObjectDrawSystem } from './animation_graphic_plugin';
 import { StatusBarResource } from './status_bar';
@@ -35,17 +35,31 @@ const DrawPlanetCornersSystem = new System({
             return;
         }
 
-        const targetGraphic = entities.get(target)?.components
-            .get(AnimationGraphicComponent);
-        if (!targetGraphic) {
+        const planetEntity = entities.get(target);
+        if (!planetEntity) {
             targetCorners.visible = false;
             targetCorners.targetUuid = undefined;
             return;
         }
 
+        const planetComponent = planetEntity.components.get(PlanetComponent);
+        const planetData = planetEntity.components.get(PlanetDataComponent);
+        const targetMovement = planetEntity.components.get(MovementStateComponent);
+        const targetGraphic = planetEntity.components.get(AnimationGraphicComponent);
+
+        if (!targetMovement && !targetGraphic) {
+            targetCorners.visible = false;
+            targetCorners.targetUuid = undefined;
+            return;
+        }
+
+        const pos = targetGraphic ? targetGraphic.container.position : targetMovement!.position;
+        const size = targetGraphic?.size ?? (planetData?.size ? { x: planetData.size, y: planetData.size } : { x: 72, y: 72 });
+        const name = planetComponent?.name ?? planetData?.name ?? 'Stellar Object';
+
         targetCorners.setStyle("neutral");
-        targetCorners.setPosition(targetGraphic.container.position);
-        targetCorners.step(time.time, target, targetGraphic.size, undefined,
+        targetCorners.setPosition(pos);
+        targetCorners.step(time.time, target, size, name,
             playerMovement?.position, {
                 width: typeof window !== 'undefined' ? window.innerWidth : 1280,
                 height: typeof window !== 'undefined' ? window.innerHeight : 720,
