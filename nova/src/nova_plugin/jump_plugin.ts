@@ -602,20 +602,42 @@ const JumpLifecycleSystem = new System({
             return;
         }
 
-        const source = gameData.data.System.getCached(state.from);
-        const destination = gameData.data.System.getCached(state.to);
+        let source = gameData.data.System.getCached(state.from);
+        let destination = gameData.data.System.getCached(state.to);
+        if (!source) {
+            void gameData.data.System.get(state.from);
+        }
+        if (!destination) {
+            void gameData.data.System.get(state.to);
+        }
         if (routeChangeCancelsJump(state, route.route)) {
             // An explicit route change before departure cancels the old jump
             // without discarding the newly selected route.
             cancelJumpFlight(entity, movement, physics);
             return;
         }
-        if (!source || !destination
-            || state.requiresAdjacency
+        if (source && state.requiresAdjacency
             && !isValidNextHop(source, state.to)) {
             cancelJumpFlight(entity, movement, physics);
             route.route = [];
             emit(SoundEvent, { id: 'nova:153' });
+            return;
+        }
+        if (!source || !destination) {
+            // Destination or source is currently being loaded; keep braking or spooling
+            if (state.phase === 'departing') {
+                return;
+            }
+            const brakeHeading = new Vector(Math.cos(movement.rotation), Math.sin(movement.rotation));
+            advanceJumpFlight(
+                state,
+                movement,
+                physics,
+                time,
+                brakeHeading,
+                () => emit(SoundEvent, { id: 'nova:130' }),
+                () => emit(SoundEvent, { id: 'nova:128' }),
+            );
             return;
         }
 

@@ -4,7 +4,7 @@ import { PlanetComponent } from '../nova_plugin/planet_plugin';
 import { ShipComponent } from '../nova_plugin/ship_plugin';
 import { AnimationGraphicComponent } from './animation_graphic_plugin';
 
-export const FLIGHT_LOAD_TIMEOUT_MS = 8_000;
+export const FLIGHT_LOAD_TIMEOUT_MS = 30_000;
 export const FLIGHT_SNAPSHOT_GRACE_MS = 250;
 export const FLIGHT_STABLE_FRAMES = 2;
 

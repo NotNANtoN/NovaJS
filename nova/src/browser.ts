@@ -389,8 +389,8 @@ async function transitionTo(
         // Wait for the server to connect
         if (!room.peers.current.value.has('server')) {
             updateProgress(89, 'Awaiting server handshake...');
-            await firstValueFrom(room.peers.join.pipe(
-                filter(a => a === 'server'), timeout(15_000)));
+            await firstValueFrom(room.peers.current.pipe(
+                filter(peers => peers.has('server')), timeout(30_000)));
         }
         if (cause === 'hyperjump') {
             stopHyperjumpSounds(system);
