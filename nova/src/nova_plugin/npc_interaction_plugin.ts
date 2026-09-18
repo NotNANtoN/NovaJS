@@ -1,4 +1,4 @@
-import { Emit, Entities, GetEntity, UUID } from 'nova_ecs/arg_types';
+import { Emit, Entities, GetEntity, GetWorld, UUID } from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
 import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
@@ -13,6 +13,7 @@ import { PlayerShipSelector } from './player_ship_plugin';
 import { PlayerStateComponent } from './player_state';
 import { ShipDataComponent } from './ship_plugin';
 import { GovtComponent } from './npc_plugin';
+import { GovernmentFlags, GovernmentRelationResource, relation } from './govt_relations';
 import { NpcCombatRoleComponent } from './npc_components';
 import { NpcTrafficComponent } from './npc_traffic_plugin';
 import { MiningShipComponent } from './miner_ai';
@@ -462,15 +463,24 @@ export const NpcDistressSystem = new System({
         TimeResource,
         Emit,
         Optional(SystemIdResource),
+        PlayerQuery,
+        GetWorld,
         SingletonComponent,
     ] as const,
-    step(npcs, entities, chatterState, time, emit, systemId) {
+    step(npcs, entities, chatterState, time, emit, _systemId, players, world) {
+        const governments = world.resources.get(GovernmentRelationResource);
         const now = time.time;
+        const playerEntry = players[0];
+        const playerUuid = playerEntry ? playerEntry[0] : undefined;
+        const playerEntity = playerUuid ? entities.get(playerUuid) : undefined;
+        const playerGovt = playerEntity?.components.get(GovtComponent)?.id ?? 'nova:128';
+        const playerGovtData = governments && playerGovt ? governments.getCached(playerGovt) : undefined;
+
         for (const [
             uuid,
             pos,
             shipData,
-            _govt,
+            govtRef,
             _role,
             _traffic,
             _miner,
@@ -494,6 +504,31 @@ export const NpcDistressSystem = new System({
                 continue;
             }
 
+            // If this NPC is fighting / targeting the player, do not ask the player for help
+            if (playerUuid && target.target === playerUuid) {
+                continue;
+            }
+
+            const govtId = govtRef?.id;
+            const govtData = govtId && governments ? governments.getCached(govtId) : undefined;
+
+            // Outlaws, pirates, and marauders do not broadcast distress calls to lawful players
+            const isPirate = govtId === 'nova:130'
+                || Boolean(govtData && (govtData.flags ?? 0) & GovernmentFlags.warshipsPlunder)
+                || Boolean(govtData?.name && /pirate|marauder|outlaw/i.test(govtData.name))
+                || Boolean(shipData?.name && /pirate|marauder/i.test(shipData.name));
+            if (isPirate) {
+                continue;
+            }
+
+            // Enemy military ships do not ask their enemies for help
+            if (govtData && playerGovtData) {
+                const rel = relation(govtData, playerGovtData);
+                if (rel === 'enemy') {
+                    continue;
+                }
+            }
+
             const attacker = entities.get(target.target);
             if (!attacker || attacker.components.has(DestructionStartedComponent)) {
                 continue;
@@ -504,8 +539,8 @@ export const NpcDistressSystem = new System({
                 continue;
             }
 
-            const lastDistress = chatterState.lastDistressByShip.get(uuid) ?? 0;
-            if (now - lastDistress < 45_000) {
+            const lastDistress = chatterState.lastDistressByShip.get(uuid);
+            if (lastDistress !== undefined && now - lastDistress < 45_000) {
                 continue;
             }
             chatterState.lastDistressByShip.set(uuid, now);
@@ -522,6 +557,8 @@ export const NpcDistressSystem = new System({
 
             const text = pickRandom(distressLines);
 
+            // Broadcast as local radio chatter without systemId so it appears on the cockpit HUD,
+            // but NEVER creates a persistent SOS beacon on the galactic starmap!
             const entry: ChatMessageEntry = {
                 id: v4(),
                 from: uuid,
@@ -529,8 +566,7 @@ export const NpcDistressSystem = new System({
                 to: 'all',
                 text,
                 time: now,
-                kind: 'sos',
-                system: systemId,
+                kind: 'chatter',
             };
             emit(ChatMessageEvent, entry);
         }

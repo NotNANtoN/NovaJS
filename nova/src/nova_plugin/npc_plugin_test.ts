@@ -141,6 +141,11 @@ describe('NPC combat decisions', () => {
             warship, retreating, { current: 24.9, max: 100 })).toBeTrue();
         expect(shouldWarshipRetreat(
             warship, retreating, { current: 25, max: 100 })).toBeFalse();
+        // Hysteresis: once retreating, keeps retreating until shields recover to 65%
+        expect(shouldWarshipRetreat(
+            warship, retreating, { current: 50, max: 100 }, true)).toBeTrue();
+        expect(shouldWarshipRetreat(
+            warship, retreating, { current: 66, max: 100 }, true)).toBeFalse();
         expect(shouldWarshipRetreat(
             warship, doomed, { current: 0, max: 100 })).toBeFalse();
         expect(shouldWarshipRetreat(
@@ -152,6 +157,9 @@ describe('NPC combat decisions', () => {
         const brave = getShipAIProfile({ inherentAI: 2 });
         expect(shouldFleeFromAttacker(wimpy, true, 10, 500, { current: 40, max: 100 })).toBeTrue();
         expect(shouldFleeFromAttacker(wimpy, true, 10, 500, { current: 80, max: 100 })).toBeFalse();
+        // Hysteresis: once fleeing, wimpy trader stays fleeing until shields recover to 75%
+        expect(shouldFleeFromAttacker(wimpy, true, 10, 500, { current: 60, max: 100 }, true)).toBeTrue();
+        expect(shouldFleeFromAttacker(wimpy, true, 10, 500, { current: 76, max: 100 }, true)).toBeFalse();
         expect(shouldFleeFromAttacker(wimpy, false, 10, 500)).toBeFalse();
         expect(shouldFleeFromAttacker(brave, true, 500, 500, { current: 100, max: 100 })).toBeFalse();
         expect(shouldFleeFromAttacker(brave, true, 800, 500, { current: 100, max: 100 })).toBeTrue();

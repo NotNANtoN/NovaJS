@@ -113,8 +113,15 @@ export const ChatReceiveSystem = new System({
                     stroke: { color: 0x221100, width: 3, join: 'round' },
                 };
             } else if (entry.kind === 'chatter') {
-                formatted = `[COMMS] ${sender}: "${entry.text}"`;
-                font = {
+                const isDistress = /mayday|shields down|under direct attack|hostile engagement/i.test(entry.text);
+                formatted = isDistress
+                    ? `[DISTRESS] ${sender}: ${entry.text}`
+                    : `[COMMS] ${sender}: "${entry.text}"`;
+                font = isDistress ? {
+                    ...CHAT_FONT,
+                    fill: 0xffaa44,
+                    stroke: { color: 0x331100, width: 3, join: 'round' },
+                } : {
                     ...CHAT_FONT,
                     fill: 0x88eebb,
                     stroke: { color: 0x002211, width: 3, join: 'round' },

@@ -66,6 +66,7 @@ export const WeaponBurstPaymentsComponent =
     new Component<Map<string, Set<number>>>('WeaponBurstPaymentsComponent');
 
 const NpcWeaponFuelComponent = new Component<{ current: number }>('NpcWeaponFuel');
+export const NpcWeaponAmmoComponent = new Component<Map<string, number>>('NpcWeaponAmmo');
 const PlayerBurstPaymentsComponent = new Component<Map<string, { token: number; copies: Set<number> }>>('PlayerBurstPayments');
 
 function fireWithCost(
@@ -102,19 +103,47 @@ function fireWithCost(
         return fired;
     }
     const outfits = entity.components.get(OutfitsStateComponent);
-    const ammoId = ammoOutfitIds(weapon.ammoType).find(id => {
-        const count = outfits?.get(id)?.count;
-        return Number.isSafeInteger(count) && count! >= 1;
-    });
-    const ammo = ammoId === undefined ? undefined : outfits?.get(ammoId);
-    if (ammoId === undefined || !outfits || !ammo || !Number.isSafeInteger(ammo.count)
-        || ammo.count < 1) {
+    if (!outfits) {
+        return undefined;
+    }
+
+    const matchingAmmoIds = ammoOutfitIds(weapon.ammoType);
+    const hasExplicitAmmoOutfit = matchingAmmoIds.some(id => outfits.has(id));
+
+    // If the entity has an explicit ammo outfit (player inventory or explicit test setup),
+    // strictly enforce inventory counts.
+    if (hasExplicitAmmoOutfit || entity.components.has(PlayerStateComponent)) {
+        const ammoId = matchingAmmoIds.find(id => {
+            const count = outfits.get(id)?.count;
+            return Number.isSafeInteger(count) && count! >= 1;
+        });
+        const ammo = ammoId === undefined ? undefined : outfits.get(ammoId);
+        if (ammoId === undefined || !ammo || !Number.isSafeInteger(ammo.count) || ammo.count < 1) {
+            return undefined;
+        }
+        const fired = fire();
+        if (fired) {
+            outfits.set(ammoId, { ...ammo, count: ammo.count - 1 });
+            entity.components.set(OutfitsStateComponent, outfits);
+            paidCopies?.add(copy);
+        }
+        return fired;
+    }
+
+    // Otherwise, this is a retail NPC ship with a launcher outfit but no separate ammo item.
+    // Give it an NPC combat magazine so it can fire its secondary weapons in combat.
+    let npcAmmo = entity.components.get(NpcWeaponAmmoComponent);
+    if (!npcAmmo) {
+        npcAmmo = new Map();
+        entity.components.set(NpcWeaponAmmoComponent, npcAmmo);
+    }
+    const currentCount = npcAmmo.get(weapon.id) ?? 20;
+    if (currentCount <= 0) {
         return undefined;
     }
     const fired = fire();
     if (fired) {
-        outfits.set(ammoId, { ...ammo, count: ammo.count - 1 });
-        entity.components.set(OutfitsStateComponent, outfits);
+        npcAmmo.set(weapon.id, currentCount - 1);
         paidCopies?.add(copy);
     }
     return fired;
@@ -871,6 +900,7 @@ export const WeaponPlugin: Plugin = {
         world.addComponent(WeaponBurstPaymentsComponent);
         world.addComponent(PlayerBurstPaymentsComponent);
         world.addComponent(NpcWeaponFuelComponent);
+        world.addComponent(NpcWeaponAmmoComponent);
         world.addComponent(ServerFireCadenceComponent);
         world.addSystem(WeaponsSystem);
         world.addSystem(ServerFireIntentSystem);

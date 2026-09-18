@@ -137,7 +137,7 @@ describe('NpcInteractionPlugin', () => {
         expect(chatter?.text).toContain('Earth');
     });
 
-    it('emits dynamic SOS distress signals naming the attacking vessel when shields drop', () => {
+    it('emits dynamic distress signals naming the attacking vessel when shields drop', () => {
         const attacker = new Entity('Pirate Marauder')
             .addComponent(ShipDataComponent, { ...getDefaultShipData(), name: 'Pirate Marauder' })
             .addComponent(MovementStateComponent, {
@@ -168,10 +168,47 @@ describe('NpcInteractionPlugin', () => {
 
         world.step();
 
-        const sos = receivedMessages.find(m => m.kind === 'sos');
-        expect(sos).toBeDefined();
-        expect(sos?.fromName).toBe('Solar Wind (Freighter)');
-        expect(sos?.text).toContain('Pirate Marauder');
-        expect(sos?.text).toContain('20%');
+        const distress = receivedMessages.find(m => m.kind === 'chatter'
+            && /mayday|under direct attack|hostile engagement/i.test(m.text));
+        expect(distress).toBeDefined();
+        expect(distress?.fromName).toBe('Solar Wind (Freighter)');
+        expect(distress?.text).toContain('Pirate Marauder');
+        expect(distress?.text).toContain('20%');
+        expect(distress?.system).toBeUndefined(); // Does not pollute the galactic starmap
+    });
+
+    it('does not broadcast distress from pirates or marauders', () => {
+        const police = new Entity('Fed Gunboat')
+            .addComponent(ShipDataComponent, { ...getDefaultShipData(), name: 'Fed Gunboat' })
+            .addComponent(MovementStateComponent, {
+                position: new Position(100, 100),
+                velocity: new Vector(0, 0),
+                rotation: new Angle(0),
+                accelerating: 0,
+                turning: 0,
+                turnBack: false,
+            });
+
+        const pirate = new Entity('Pirate Marauder')
+            .addComponent(ShipDataComponent, { ...getDefaultShipData(), name: 'Pirate Marauder' })
+            .addComponent(TargetComponent, { target: 'police-uuid' })
+            .addComponent(ShieldComponent, new Stat({ current: 10, max: 100, recharge: 1 }))
+            .addComponent(MovementStateComponent, {
+                position: new Position(120, 100),
+                velocity: new Vector(0, 0),
+                rotation: new Angle(0),
+                accelerating: 0,
+                turning: 0,
+                turnBack: false,
+            });
+
+        world.entities.set('police-uuid', police);
+        world.entities.set('pirate-uuid', pirate);
+
+        world.step();
+
+        const pirateDistress = receivedMessages.find(m => m.fromName === 'Pirate Marauder'
+            && /mayday|heavy fire|under direct attack|hostile engagement/i.test(m.text));
+        expect(pirateDistress).toBeUndefined();
     });
 });

@@ -283,11 +283,21 @@ export function shouldWarshipRetreat(
     profile: ReturnType<typeof getShipAIProfile>,
     government: Pick<GovernmentData, 'flags'>,
     shield: { current: number, max: number } | undefined,
+    isAlreadyRetreating = false,
 ): boolean {
-    return profile.role === "warship"
-        && Boolean((government.flags ?? 0) & GovernmentFlags.warshipsRetreat)
-        && Boolean(shield && shield.max > 0
-            && shield.current / shield.max < RETREAT_SHIELD_FRACTION);
+    if (profile.role !== "warship"
+        || !((government.flags ?? 0) & GovernmentFlags.warshipsRetreat)) {
+        return false;
+    }
+    if (!shield || !(shield.max > 0)) {
+        return false;
+    }
+    const shieldFraction = shield.current / shield.max;
+    // Hysteresis: once retreating, stay retreating until shields recover to at least 65%
+    if (isAlreadyRetreating) {
+        return shieldFraction < 0.65;
+    }
+    return shieldFraction < RETREAT_SHIELD_FRACTION;
 }
 
 export function shouldFleeFromAttacker(
@@ -296,6 +306,7 @@ export function shouldFleeFromAttacker(
     attackerDistance: number,
     weaponRange: number,
     shield?: { current: number, max: number },
+    isAlreadyFleeing = false,
 ): boolean {
     if (!personallyProvoked) {
         return false;
@@ -308,13 +319,21 @@ export function shouldFleeFromAttacker(
         ? shield.current / shield.max
         : undefined;
     // Wimpy traders defend themselves while shields hold, but retreat when shields drop low.
+    // Hysteresis: once fleeing, continue fleeing until shields recover to 75%
     if (profile.fleesWhenAttacked) {
+        if (isAlreadyFleeing) {
+            return shieldFraction !== undefined ? shieldFraction < 0.75 : true;
+        }
         return shieldFraction !== undefined
             ? shieldFraction < 0.5
             : true;
     }
     // Brave traders fight back until shields are critical or attacker is well out of range.
     if (profile.breaksOffOutOfRange) {
+        if (isAlreadyFleeing) {
+            return (shieldFraction !== undefined && shieldFraction < 0.5)
+                || attackerDistance > Math.max(DEFAULT_COMBAT_STANDOFF, weaponRange * 1.5);
+        }
         return (shieldFraction !== undefined && shieldFraction < 0.25)
             || attackerDistance > Math.max(DEFAULT_COMBAT_STANDOFF, weaponRange * 1.5);
     }
@@ -687,8 +706,9 @@ export const NpcPurposeAI = new System({
         const personallyProvoked = Boolean(activeTargetId
             && isPersonallyProvoked(provocations, uuid, activeTargetId));
         const weaponRange = getMaximumWeaponRange(weapons, gameData);
+        const isAlreadyFleeing = Boolean(fleeing && fleeing.threat === activeTargetId);
         const governmentRetreat = shouldWarshipRetreat(
-            profile, government, shield);
+            profile, government, shield, isAlreadyFleeing);
         const fleeFromAttacker = Boolean(activeTargetId && targetMovement
             && shouldFleeFromAttacker(
                 profile,
@@ -696,6 +716,7 @@ export const NpcPurposeAI = new System({
                 targetDistance,
                 weaponRange,
                 shield,
+                isAlreadyFleeing,
             ));
 
         if (activeTargetId && targetMovement

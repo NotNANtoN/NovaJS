@@ -816,6 +816,17 @@ describe('weapon cost authority', () => {
         expect(test.fuel()).toBe(0);
     });
 
+    it('permits NPC ships to fire ammunition secondary weapons from an NPC magazine', () => {
+        const test = setup({ owner: 'server' });
+        test.ship.components.delete(PlayerStateComponent);
+        // Clear the test setup's preloaded 'ammo' outfit so only launcher is equipped
+        test.ship.components.get(OutfitsStateComponent)!.delete('ammo');
+        Object.assign(test.entry.data, { ammoType: ['outfit', 'missile-ammo'] });
+        test.ship.components.get(WeaponsStateComponent)!.get('test-weapon')!.firing = true;
+        test.world.step();
+        expect(test.shots.length).toBe(1);
+    });
+
     it('keys burst reservations by weapon as well as token and copy', () => {
         const test = setup({ owner: 'client', ammo: 2, burst: true });
         const other = { ...test.entry, data: { ...test.entry.data, id: 'other' } } as WeaponEntry;
