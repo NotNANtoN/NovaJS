@@ -43,6 +43,7 @@ import { TargetCornersPlugin } from "./target_corners_plugin";
 import { ChatFeedPlugin } from "./chat_feed_plugin";
 import { RadialMenuPlugin } from "./radial_menu_plugin";
 import { SmallMapPlugin } from "./small_map_plugin";
+import { FlightCursorPlugin } from "./flight_cursor_plugin";
 
 
 const CenterShipSystem = new System({
@@ -239,8 +240,10 @@ export const Display: Plugin = {
         await world.addPlugin(PilotDialogsPlugin);
         await world.addPlugin(SoundPlugin);
         await world.addPlugin(ShipAnimationPlugin);
+        await world.addPlugin(FlightCursorPlugin);
     },
     async remove(world) {
+        await world.removePlugin(FlightCursorPlugin);
         await world.removePlugin(ShipAnimationPlugin);
         await world.removePlugin(SoundPlugin);
         await world.removePlugin(PilotDialogsPlugin);

@@ -17,6 +17,7 @@ describe('starmap control handling', () => {
             setExploredSystems: jasmine.createSpy('setExploredSystems'),
             setPlayerState: jasmine.createSpy('setPlayerState'),
             setPlayerMarkers: jasmine.createSpy('setPlayerMarkers'),
+            setSystemId: jasmine.createSpy('setSystemId'),
             show: jasmine.createSpy('show').and.returnValue(Promise.resolve([])),
         };
     }
@@ -134,5 +135,21 @@ describe('starmap control handling', () => {
         // The map was handed a copy, so it can still read it while open.
         const handed = starmap.setPlayerState.calls.mostRecent().args[0];
         expect(handed?.exploredSystems).toEqual(['nova:130']);
+    });
+
+    it('sets current system ID on opening edge when provided', async () => {
+        const starmap = makeStarmap();
+        await handleMapControlEvent(
+            [{ action: 'map', state: 'start' }],
+            starmap,
+            { route: [] },
+            { x: 800, y: 600 },
+            undefined,
+            undefined,
+            undefined,
+            'nova:128',
+        );
+
+        expect(starmap.setSystemId).toHaveBeenCalledWith('nova:128');
     });
 });

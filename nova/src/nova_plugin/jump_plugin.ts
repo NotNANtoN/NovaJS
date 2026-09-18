@@ -488,6 +488,12 @@ const PlayerJumpControl = new System({
             return;
         }
         const currentSystem = gameData.data.System.getCached(systemId);
+        if (!currentSystem) {
+            void gameData.data.System.get(systemId);
+            emit(JumpRefusedEvent, { reason: 'destination' });
+            emit(SoundEvent, { id: 'nova:153' });
+            return;
+        }
         if (!isValidNextHop(currentSystem, nextSystem)) {
             jumpRoute.route = [];
             emit(SoundEvent, { id: 'nova:153' });

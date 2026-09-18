@@ -273,6 +273,27 @@ describe('authoritative combat resources', () => {
         expect(authority.state.credits).toBe(9980);
     });
 
+    it('automatically synchronizes and completes open when initial open is stale', async () => {
+        const { ledger, authority, entity } = await setup();
+        const state = entity.components.get(PlayerStateComponent)!;
+        authority.commit();
+        const actions: string[] = [];
+        spyOn(globalThis, 'fetch').and.callFake(async (_url, options) => {
+            const request = JSON.parse(String(options?.body));
+            actions.push(request.action);
+            try {
+                const result = await ledger.transact('pilot', request);
+                return new Response(JSON.stringify(result));
+            } catch (err: any) {
+                return new Response(err.message, { status: 409 });
+            }
+        });
+        const receipt = await combatShopTransaction(state, 'port', 'open');
+        expect(actions).toEqual(['open', 'sync', 'open']);
+        expect(receipt.balance.revision).toBe(authority.balance.revision);
+        expect(authority.landed).toBe('port');
+    });
+
     it('bounds HTTP header and body waits even when fetch ignores abort', async () => {
         const fetchSpy = spyOn(globalThis, 'fetch').and.callFake(() => new Promise<Response>(() => {}));
         await expectAsync(fetchCombatShop('{}', 5)).toBeRejectedWithError(/timed out/);

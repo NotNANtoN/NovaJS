@@ -68,6 +68,16 @@ const SavedControlsPartialObject = t.partial({
     'fullscreen': ControlInputs,
     'volumeUp': ControlInputs,
     'volumeDown': ControlInputs,
+    'selectStellar1': ControlInputs,
+    'selectStellar2': ControlInputs,
+    'selectStellar3': ControlInputs,
+    'selectStellar4': ControlInputs,
+    'selectStellar5': ControlInputs,
+    'selectStellar6': ControlInputs,
+    'selectStellar7': ControlInputs,
+    'selectStellar8': ControlInputs,
+    'selectStellar9': ControlInputs,
+    'selectStellar10': ControlInputs,
 });
 
 const ControlAction = t.keyof(SavedControlsPartialObject.props);

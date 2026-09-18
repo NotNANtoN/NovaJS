@@ -639,8 +639,12 @@ export class SystemGraph {
         if (!this.isVisible()) {
             return;
         }
-        if (event.cancelable) {
-            event.preventDefault();
+        try {
+            if (event.cancelable) {
+                event.preventDefault();
+            }
+        } catch {
+            // Passive wheel event in modern browser
         }
         event.stopPropagation();
         const native = event.nativeEvent as Event | undefined;
@@ -1057,6 +1061,17 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
         this.managed.dispose();
     }
 
+    setSystemId(systemId: string) {
+        this.systemId = systemId;
+        if (this.playerState) {
+            this.playerState.currentSystem = systemId;
+        }
+        this.systemGraph?.setCurrentSystem(systemId, false);
+        if (this.container.visible && this.selectedSystemId) {
+            void this.renderPanel(this.selectedSystemId);
+        }
+    }
+
     override done() {
         if (this.systemGraph) {
             this.input = this.systemGraph.route;
@@ -1070,6 +1085,9 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
 
     private selectSystem(systemId: string) {
         this.selectedSystemId = systemId;
+        if (this.systemGraph) {
+            this.input = this.systemGraph.route;
+        }
         void this.renderPanel(systemId);
     }
 

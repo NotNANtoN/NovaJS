@@ -514,6 +514,14 @@ export async function combatShopTransaction(state: PlayerState, planet: string,
         applyCombatReceipt(state, result);
         return result;
     } catch (error) {
+        if (action === 'open' && error instanceof CombatShopRejected && error.message.includes('Stale combat transaction')) {
+            const syncResult = await fetchCombatShop(JSON.stringify({ ...request, action: 'sync' }));
+            applyCombatReceipt(state, syncResult);
+            const retryRequest = { ...request, revision: state.combatResources?.revision ?? syncResult.balance.revision };
+            const result = await fetchCombatShop(JSON.stringify(retryRequest));
+            applyCombatReceipt(state, result);
+            return result;
+        }
         if (action !== 'open' && action !== 'recover' && action !== 'sync') {
             const result = await fetchCombatShop(JSON.stringify({ ...request, action: 'sync', resolveAction: action }));
             applyCombatReceipt(state, result);

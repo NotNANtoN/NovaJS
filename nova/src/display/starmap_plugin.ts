@@ -32,9 +32,10 @@ export const MapSystem = new AsyncSystem({
     skipIfApplyingPatches: true,
     args: [EcsControlEvent, StarmapResource, JumpRouteComponent,
         ScreenSize, Entities, UUID, PlayerShipSelector,
-        Optional(PlayerStateComponent), Optional(ChatHistoryResource)] as const,
+        Optional(PlayerStateComponent), Optional(ChatHistoryResource),
+        Optional(SystemIdResource)] as const,
     async step(controlEvent, starmap, jumpRoute, screenSize, entities, uuid,
-        _playerShipSelector, playerState, chatHistory) {
+        _playerShipSelector, playerState, chatHistory, systemId) {
         if (!isMapStartEdge(controlEvent, starmap.container.visible)) {
             return;
         }
@@ -64,6 +65,7 @@ export const MapSystem = new AsyncSystem({
                 }
             },
             playerMarkers,
+            systemId,
         );
     }
 });

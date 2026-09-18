@@ -13,6 +13,7 @@ export interface StarmapControlTarget {
     setExploredSystems(exploredSystems?: readonly string[]): void;
     setPlayerState?(playerState?: StarmapPlayerState): void;
     setPlayerMarkers?(playerMarkers?: readonly StarmapPlayerMarker[]): void;
+    setSystemId?(systemId: string): void;
     show(route: string[]): Promise<string[]>;
 }
 
@@ -52,12 +53,17 @@ export async function handleMapControlEvent(
         jumpRoute.route = route;
     },
     playerMarkers?: readonly StarmapPlayerMarker[],
+    currentSystemId?: string,
 ): Promise<void> {
     if (!isMapStartEdge(controlEvent, starmap.container.visible)) {
         return;
     }
     starmap.container.position.set(screenSize.x / 2, screenSize.y / 2);
     const state = plainSnapshot(playerState);
+    const effectiveSystemId = currentSystemId ?? state?.currentSystem;
+    if (effectiveSystemId && starmap.setSystemId) {
+        starmap.setSystemId(effectiveSystemId);
+    }
     starmap.setPlayerState?.(state);
     starmap.setExploredSystems(state?.exploredSystems);
     starmap.setPlayerMarkers?.(playerMarkers);

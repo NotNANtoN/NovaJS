@@ -21,6 +21,8 @@ import { SoundEvent } from './sound_event';
 import { Target } from './target_component';
 import { ArmorComponent } from './health_plugin';
 import { DestructionStartedComponent } from './destruction_state';
+import { ControlAction } from './controls';
+import { SystemIdResource } from './system_id_resource';
 
 export const PlanetType = t.intersection([
     t.type({
@@ -336,6 +338,57 @@ const AttemptLandingSystem = new System({
     }
 });
 
+const StellarSelectionSystem = new System({
+    name: 'StellarSelectionSystem',
+    events: [ControlStateEvent] as const,
+    args: [
+        new Query([
+            UUID,
+            PlanetComponent,
+            Optional(PlanetDataComponent),
+            MovementStateComponent,
+        ] as const),
+        PlanetTargetComponent,
+        ControlStateEvent,
+        Emit,
+        PlayerShipSelector,
+        Optional(SystemIdResource),
+        GameDataResource,
+    ] as const,
+    step(planets, planetTarget, controls, emit, _playerShip, systemId, gameData) {
+        let requestedIndex: number | undefined;
+        for (let i = 1; i <= 10; i++) {
+            if (controls.get(`selectStellar${i}` as ControlAction) === 'start') {
+                requestedIndex = i - 1;
+                break;
+            }
+        }
+        if (requestedIndex === undefined) {
+            return;
+        }
+
+        let orderedPlanets = [...planets];
+        const currentSystem = systemId ? gameData.data.System.getCached(systemId) : undefined;
+        if (currentSystem?.planets && currentSystem.planets.length > 0) {
+            const orderMap = new Map(currentSystem.planets.map((id, idx) => [id, idx]));
+            orderedPlanets.sort((a, b) => {
+                const idxA = orderMap.get(a[1].id) ?? 999;
+                const idxB = orderMap.get(b[1].id) ?? 999;
+                if (idxA !== idxB) return idxA - idxB;
+                return a[1].id.localeCompare(b[1].id);
+            });
+        } else {
+            orderedPlanets.sort((a, b) => a[1].id.localeCompare(b[1].id));
+        }
+
+        const candidate = orderedPlanets[requestedIndex];
+        if (candidate) {
+            planetTarget.target = candidate[0];
+            emit(SoundEvent, { id: 'nova:142' });
+        }
+    }
+});
+
 const PlanetAnimationProvider = Provide({
     name: "PlanetAnimationProvider",
     provided: AnimationComponent,
@@ -366,5 +419,6 @@ export const PlanetPlugin: Plugin = {
         world.addSystem(PlanetAnimationProvider);
         world.addSystem(PlanetDataProvider);
         world.addSystem(AttemptLandingSystem);
+        world.addSystem(StellarSelectionSystem);
     }
 };

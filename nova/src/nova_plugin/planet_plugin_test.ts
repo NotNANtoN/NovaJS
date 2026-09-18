@@ -1,7 +1,18 @@
 import 'jasmine';
 import { isRight } from 'nova_ecs/either';
+import { Entity } from 'nova_ecs/entity';
+import { World } from 'nova_ecs/world';
+import { DeltaPlugin } from 'nova_ecs/plugins/delta_plugin';
+import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
+import { Position } from 'nova_ecs/datatypes/position';
+import { Vector } from 'nova_ecs/datatypes/vector';
 import { getDefaultPlanetData } from
     'novadatainterface/PlanetData';
+import { GameDataInterface } from 'novadatainterface/NovaDataInterface';
+import { ControlStateEvent } from './control_state_event';
+import { GameDataResource } from './game_data_resource';
+import { PlayerShipSelector } from './player_ship_plugin';
+import { SystemIdResource } from './system_id_resource';
 import {
     LANDING_MAX_SPEED_SQUARED,
     LANDING_RANGE_SQUARED,
@@ -12,6 +23,8 @@ import {
     landingAction,
     landingResultMessage,
     PlanetComponent,
+    PlanetPlugin,
+    PlanetTargetComponent,
     PlanetType,
     resolveLandingCapabilities,
     updateLandingInput,
@@ -208,5 +221,48 @@ describe('planet landing selection', () => {
             reason: 'metadata-unavailable',
             planetName: 'Earth',
         })).toBe('Landing data for Earth is unavailable.');
+    });
+
+    it('selects planets using stellar select controls in catalog order', async () => {
+        const world = new World();
+        const gameData: GameDataInterface = {
+            data: {
+                System: {
+                    getCached: (id: string) => id === 'nova:sol' ? {
+                        id: 'nova:sol',
+                        planets: ['nova:earth', 'nova:mars', 'nova:moon'],
+                    } as any : undefined,
+                    get: async () => ({} as any),
+                } as any,
+                Planet: {
+                    get: async () => ({} as any),
+                } as any,
+            } as any,
+        } as any;
+        world.resources.set(GameDataResource, gameData);
+        world.resources.set(SystemIdResource, 'nova:sol');
+        await world.addPlugin(DeltaPlugin);
+        await world.addPlugin(PlanetPlugin);
+
+        const earthEntity = new Entity()
+            .addComponent(PlanetComponent, { id: 'nova:earth', name: 'Earth' })
+            .addComponent(MovementStateComponent, { position: new Position(0, 0), velocity: new Vector(0, 0), rotation: 0, turning: 0, accelerating: 0 });
+        const marsEntity = new Entity()
+            .addComponent(PlanetComponent, { id: 'nova:mars', name: 'Mars' })
+            .addComponent(MovementStateComponent, { position: new Position(100, 0), velocity: new Vector(0, 0), rotation: 0, turning: 0, accelerating: 0 });
+
+        world.entities.set('earth', earthEntity);
+        world.entities.set('mars', marsEntity);
+
+        const player = new Entity()
+            .addComponent(PlayerShipSelector, undefined)
+            .addComponent(PlanetTargetComponent, { target: undefined });
+        world.entities.set('player', player);
+
+        const controlState = new Map([['selectStellar2', 'start']]);
+        world.emit(ControlStateEvent, controlState as any);
+        world.step();
+
+        expect(player.components.get(PlanetTargetComponent)?.target).toBe('mars');
     });
 });
