@@ -201,23 +201,34 @@ export function isValidNextHop(
     currentSystem: Pick<SystemData, 'links'> | undefined,
     nextSystem: string | undefined,
 ): nextSystem is string {
-    return Boolean(nextSystem && currentSystem?.links.includes(nextSystem));
+    if (!currentSystem?.links || !nextSystem) {
+        return false;
+    }
+    const targetBare = String(nextSystem).replace(/^.*:/, '');
+    return currentSystem.links.some(link => {
+        const linkStr = String(link);
+        return linkStr === nextSystem || linkStr.replace(/^.*:/, '') === targetBare;
+    });
 }
 
 export function consumeCompletedHop(
     route: readonly string[],
     completedDestination: string,
 ): string[] {
-    return route[0] === completedDestination
-        ? route.slice(1)
-        : [...route];
+    const targetBare = completedDestination.replace(/^.*:/, '');
+    if (route[0] && (route[0] === completedDestination || route[0].replace(/^.*:/, '') === targetBare)) {
+        return route.slice(1);
+    }
+    return [...route];
 }
 
 export function isCurrentRouteHop(
     route: readonly string[],
     destination: string,
 ): boolean {
-    return route[0] === destination;
+    if (!route[0] || !destination) return false;
+    const destBare = destination.replace(/^.*:/, '');
+    return route[0] === destination || route[0].replace(/^.*:/, '') === destBare;
 }
 
 export function routeChangeCancelsJump(
@@ -495,6 +506,7 @@ const PlayerJumpControl = new System({
             return;
         }
         if (!isValidNextHop(currentSystem, nextSystem)) {
+            console.warn(`[JUMP REFUSED] Not a valid next hop. Current system: ${systemId} (${currentSystem.name ?? 'unknown'}), links: [${currentSystem.links.join(', ')}], nextSystem: ${nextSystem}`);
             jumpRoute.route = [];
             emit(SoundEvent, { id: 'nova:153' });
             return;

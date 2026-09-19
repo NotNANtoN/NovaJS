@@ -1035,6 +1035,9 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
                     ? [...playerState.missionBits] : undefined,
             }
             : undefined;
+        if (this.systemId && this.playerState) {
+            this.playerState.currentSystem = this.systemId;
+        }
         const currentSystem = this.currentSystemId();
         this.systemGraph?.setCurrentSystem(currentSystem, false);
         this.systemGraph?.setMissionBits(playerState?.missionBits, false);
@@ -1082,7 +1085,7 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
     }
 
     private currentSystemId(): string {
-        return this.playerState?.currentSystem ?? this.systemId;
+        return this.systemId || this.playerState?.currentSystem || '';
     }
 
     private selectSystem(systemId: string) {
