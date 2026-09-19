@@ -512,39 +512,50 @@ class StatusBar {
         this.cargoContainer.visible = true;
     }
 
+    private navigationFinalHop?: string;
     drawNavigation(route: readonly string[]) {
         const firstHop = route[0];
-        if (firstHop === this.navigationHop) {
+        const lastHop = route[route.length - 1];
+        if (firstHop === this.navigationHop && lastHop === this.navigationFinalHop) {
             return;
         }
 
         this.navigationHop = firstHop;
+        this.navigationFinalHop = lastHop;
         const request = ++this.navigationRequest;
         this.navigationContainer.visible = false;
         if (!firstHop) {
             return;
         }
 
-        void this.gameData.data.System.get(firstHop)
-            .then(system => {
-                if (request !== this.navigationRequest
-                    || firstHop !== this.navigationHop) {
-                    return;
-                }
-                const navigation = statusBarNavigationText(
-                    [firstHop], system.name);
-                if (!navigation) {
-                    return;
-                }
-                this.text.navigationHeading.text = navigation.heading;
-                this.text.navigationDestination.text = navigation.destination;
-                this.navigationContainer.visible = true;
-            })
-            .catch(() => {
-                if (request === this.navigationRequest) {
-                    this.navigationContainer.visible = false;
-                }
-            });
+        Promise.all([
+            this.gameData.data.System.get(firstHop).catch(() => undefined),
+            (lastHop && lastHop !== firstHop)
+                ? this.gameData.data.System.get(lastHop).catch(() => undefined)
+                : undefined,
+        ]).then(([nextSystem, finalSystem]) => {
+            if (request !== this.navigationRequest
+                || firstHop !== this.navigationHop) {
+                return;
+            }
+            if (!nextSystem) {
+                this.navigationContainer.visible = false;
+                return;
+            }
+
+            if (finalSystem?.name && finalSystem.name !== nextSystem.name) {
+                this.text.navigationHeading.text = `Route: ${route.length} hops`;
+                this.text.navigationDestination.text = `${finalSystem.name} (via ${nextSystem.name})`;
+            } else {
+                this.text.navigationHeading.text = 'Hyperspace';
+                this.text.navigationDestination.text = nextSystem.name;
+            }
+            this.navigationContainer.visible = true;
+        }).catch(() => {
+            if (request === this.navigationRequest) {
+                this.navigationContainer.visible = false;
+            }
+        });
     }
 
     drawSecondary(name: string | null | undefined) {
@@ -937,6 +948,8 @@ const ShowJumpRefusal = new System({
             statusBar.showLandingMessage(NO_DESTINATION_MESSAGE, time.time);
         } else if (refusal.reason === 'distance') {
             statusBar.showLandingMessage(TOO_CLOSE_TO_CENTER_MESSAGE, time.time);
+        } else if (refusal.reason === 'invalid-hop') {
+            statusBar.showLandingMessage('Hyperjump route disrupted: replot course', time.time);
         } else if (refusal.reason === 'damage') {
             statusBar.showLandingMessage('Hyperjump aborted: damage sustained', time.time);
         }

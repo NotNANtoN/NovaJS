@@ -508,6 +508,7 @@ const PlayerJumpControl = new System({
         if (!isValidNextHop(currentSystem, nextSystem)) {
             console.warn(`[JUMP REFUSED] Not a valid next hop. Current system: ${systemId} (${currentSystem.name ?? 'unknown'}), links: [${currentSystem.links.join(', ')}], nextSystem: ${nextSystem}`);
             jumpRoute.route = [];
+            emit(JumpRefusedEvent, { reason: 'invalid-hop' });
             emit(SoundEvent, { id: 'nova:153' });
             return;
         }
