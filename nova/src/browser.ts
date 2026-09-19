@@ -172,6 +172,34 @@ async function waitForCommunicatorUuid() {
     }
 }
 
+export function reportClientError(error: unknown, context = 'general') {
+    try {
+        const message = error instanceof Error ? error.message : String(error);
+        const stack = error instanceof Error ? error.stack : undefined;
+        const currentSys = (window as any).system?.resources?.get(SystemIdResource);
+        const payload = JSON.stringify({ message, stack, context, systemId: currentSys, time: Date.now() });
+        if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+            navigator.sendBeacon('/client-error', new Blob([payload], { type: 'application/json' }));
+        } else if (typeof fetch !== 'undefined') {
+            fetch('/client-error', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: payload,
+                keepalive: true,
+            }).catch(() => {});
+        }
+    } catch {}
+}
+
+if (typeof window !== 'undefined') {
+    window.addEventListener('error', (event) => {
+        reportClientError(event.error || event.message, 'uncaught-error');
+    });
+    window.addEventListener('unhandledrejection', (event) => {
+        reportClientError(event.reason, 'unhandled-rejection');
+    });
+}
+
 let world: World | undefined;
 let system: World | undefined;
 (window as any).novaNetworkStats = () => system?.resources.get(NetworkTimingResource)?.stats;
@@ -345,6 +373,7 @@ async function transitionTo(
 
         const failedTransition = async (error: unknown) => {
             console.error('Failed to enter system', error);
+            reportClientError(error, 'failedTransition');
             gamePaused = true;
             await showFlightLoadError(error);
             await returnToMainMenu();

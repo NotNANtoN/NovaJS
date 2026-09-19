@@ -208,6 +208,12 @@ class GameDataServer {
         },
             express.static(path.dirname(this.settingsPath)));
 
+        this.app.post('/client-error', express.json(), (req, res) => {
+            const { message, stack, context, systemId } = req.body || {};
+            console.error(`[BROWSER ERROR] [${new Date().toISOString()}] [system: ${systemId || 'none'}] [context: ${context || 'general'}] ${message}\nStack: ${stack || 'no stack'}`);
+            res.status(204).end();
+        });
+
         if (this.playerStore) {
             this.app.use(express.json({ limit: '10mb' }));
             this.app.post('/player/combat/shop', async (req, res) => {

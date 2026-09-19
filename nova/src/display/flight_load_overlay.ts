@@ -145,6 +145,17 @@ export function setEnteringProgress(percentage: number, detail?: string): void {
 }
 
 export async function showFlightLoadError(error: unknown): Promise<void> {
+    try {
+        const payload = JSON.stringify({
+            message: error instanceof Error ? error.message : String(error),
+            stack: error instanceof Error ? error.stack : undefined,
+            context: 'showFlightLoadError',
+            time: Date.now(),
+        });
+        if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+            navigator.sendBeacon('/client-error', new Blob([payload], { type: 'application/json' }));
+        }
+    } catch {}
     if (typeof document === 'undefined') return;
     showEnteringOverlay(error instanceof Error ? error.message : 'Could not enter the system. Please retry.');
     if (progressContainer) {
