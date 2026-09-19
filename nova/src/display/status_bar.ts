@@ -635,7 +635,7 @@ class StatusBar {
         shipGraphic: AnimationGraphic | undefined,
         hasSubtitle: boolean,
     ) {
-        if (!shipGraphic) {
+        if (!shipGraphic || !shipGraphic.size || shipGraphic.size.x <= 0 || shipGraphic.size.y <= 0) {
             this.targetSprite.visible = false;
             return;
         }
@@ -890,14 +890,16 @@ const DrawStatusBarTarget = new System({
                 statusBar.drawTarget(
                     {
                         name,
-                        subtitle: { text: subtitle, color: 0x00c8ff },
+                        subtitle,
                     },
                     undefined,
                     undefined,
                     planetData?.landingPict,
-                    planetGraphic,
+                    undefined,
                 );
                 return;
+            } else {
+                planetTarget.target = undefined;
             }
         }
 

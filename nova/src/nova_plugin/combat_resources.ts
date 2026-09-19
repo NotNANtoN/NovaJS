@@ -5,8 +5,8 @@ import { ReplicationMergeContext, replicationPolicies } from 'nova_ecs/plugins/m
 import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import { GameDataInterface } from 'novadatainterface/GameDataInterface';
 import { AmmoType, ammoOutfitIds } from 'novadatainterface/WeaponData';
-import { CombatResources, CombatResourcesCodec, PlayerState, PlayerStateComponent, PlayerStorePort, createInitialPlayerState, toPersistentPlayerState } from './player_state';
-export { CombatResources, CombatResourcesCodec } from './player_state';
+import { type CombatResources, CombatResourcesCodec, type PlayerState, PlayerStateComponent, type PlayerStorePort, createInitialPlayerState, toPersistentPlayerState } from './player_state';
+export { type CombatResources, CombatResourcesCodec } from './player_state';
 import { OutfitsState, OutfitsStateComponent } from './outfit_plugin';
 import { ArmorComponent, IonizationComponent, ShieldComponent } from './health_plugin';
 import { buyFuel, clampFuel, refuelsOnLanding } from './fuel';

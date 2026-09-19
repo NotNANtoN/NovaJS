@@ -628,7 +628,7 @@ const JumpLifecycleSystem = new System({
             if (state.phase === 'departing') {
                 return;
             }
-            const brakeHeading = new Vector(Math.cos(movement.rotation), Math.sin(movement.rotation));
+            const brakeHeading = movement.rotation.getUnitVector();
             advanceJumpFlight(
                 state,
                 movement,
