@@ -42,7 +42,7 @@ import { PlayerStoreResource } from './player_state';
 import { ShipComponent } from './ship_plugin';
 import { TargetComponent } from './target_component';
 import { SystemIdResource } from './system_id_resource';
-import { MissionRuntime, MissionRuntimeResource } from './mission_plugin';
+import { ActiveMission, MissionRuntime, MissionRuntimeResource } from './mission_plugin';
 import { EntityBudgetResource, reserveEntity } from './entity_budget';
 import { PlanetComponent } from './planet_plugin';
 import { areSystemsSameOrVariants, FinishJumpEvent, SystemLookup } from './jump_plugin';
