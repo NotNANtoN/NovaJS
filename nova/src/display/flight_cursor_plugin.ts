@@ -85,6 +85,9 @@ export class FlightCursor {
     }
 
     update(hoverColor: number, isHovering: boolean, idleTimeMs: number) {
+        if (!this.container || (this.container as any).destroyed) {
+            return;
+        }
         // Continuous smooth rotation
         this.reticleGraphics.rotation += 0.015;
 
@@ -221,6 +224,11 @@ export const FlightCursorSystem = new System({
             stage.getChildByLabel('RadialMenu')?.visible
         );
 
+        // Check if cursor or its container has been destroyed or unmounted
+        if (!cursor?.container || (cursor.container as any).destroyed || !cursor.container.position) {
+            return;
+        }
+
         if (modalOpen || !pointerState.inWindow) {
             cursor.container.visible = false;
             if (typeof document !== 'undefined' && document.body) {
@@ -232,9 +240,15 @@ export const FlightCursorSystem = new System({
 
         // Active flight scene: hide OS cursor and show custom reticle
         cursor.container.visible = true;
-        cursor.container.position.set(pointerState.x, pointerState.y);
+        if (cursor.container.position) {
+            cursor.container.position.set(pointerState.x, pointerState.y);
+        }
         if (typeof document !== 'undefined' && document.body) {
             document.body.style.cursor = 'none';
+        }
+
+        if (!space || (space as any).destroyed || typeof space.toLocal !== 'function') {
+            return;
         }
 
         // Convert pointer position to space world coordinates
@@ -390,12 +404,14 @@ export const FlightCursorPlugin: Plugin = {
         world.addSystem(FlightCursorSystem);
     },
     remove(world) {
+        world.removeSystem(FlightCursorSystem);
         const cursor = world.resources.get(FlightCursorResource);
         if (cursor) {
-            cursor.container.destroy({ children: true });
+            if (!(cursor.container as any).destroyed) {
+                cursor.container.destroy({ children: true });
+            }
         }
         world.resources.delete(FlightCursorResource);
-        world.removeSystem(FlightCursorSystem);
         if (typeof document !== 'undefined' && document.body) {
             document.body.style.cursor = '';
         }
