@@ -210,9 +210,6 @@ export class ClassicDialog<TData> extends Menu<TData> {
             };
             controlsMap.buy = defaultAction;
             controlsMap.properties = defaultAction;
-            controlsMap.firePrimary = defaultAction;
-            controlsMap.fullscreen = defaultAction;
-            controlsMap.land = defaultAction;
         }
 
         const cancelBtn = (config.buttons || []).find((b) => b.isCancel);
@@ -225,11 +222,6 @@ export class ClassicDialog<TData> extends Menu<TData> {
                 this.closeWithResult();
             };
             controlsMap.depart = cancelAction;
-            if (!defaultBtn) {
-                controlsMap.firePrimary = cancelAction;
-                controlsMap.fullscreen = cancelAction;
-                controlsMap.land = cancelAction;
-            }
         } else {
             controlsMap.depart = () => this.closeWithResult();
         }

@@ -98,6 +98,7 @@ export class Spaceport extends Menu<Entity> {
     private landingNoticeDialog: LandingNoticeDialog;
     private missionOfferDialog: MissionOfferDialog;
     private readonly modalDimmer = new PIXI.Graphics();
+    private modalOpenedAt = 0;
     private readonly ncbRuntime: NcbRuntime;
     private readonly dialogContainers = new Set<PIXI.Container>();
     private data?: PlanetData;
@@ -537,6 +538,9 @@ export class Spaceport extends Menu<Entity> {
             || active === this.landingNoticeDialog.container;
 
         this.modalDimmer.visible = isModal;
+        if (isModal) {
+            this.modalOpenedAt = Date.now();
+        }
         const baseFrame = this.container.children[0];
         const landscape = this.container.children[1];
 
@@ -635,7 +639,10 @@ export class Spaceport extends Menu<Entity> {
         this.modalDimmer.visible = false;
         this.modalDimmer.eventMode = 'static';
         this.modalDimmer.cursor = 'default';
-        this.modalDimmer.on('pointerup', () => {
+        this.modalDimmer.on('click', () => {
+            if (Date.now() - this.modalOpenedAt < 500) {
+                return;
+            }
             if (this.landingNoticeDialog.container.visible) {
                 this.landingNoticeDialog.getButton('ok')?.click.next(undefined);
             }
