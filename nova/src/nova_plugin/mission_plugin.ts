@@ -387,6 +387,14 @@ export function acceptMission(
     runMissionSetExpression(
         mission.onAccept, state, options.logger, options.ncb);
     const missionUuid = uuid();
+    let shipSystem = resolved.shipSystem;
+    if (!shipSystem && (mission.shipCount > 0 || mission.shipSyst !== -1)) {
+        if (mission.shipSyst === -6) {
+            shipSystem = '*';
+        } else if (mission.shipSyst >= 128 && mission.shipSyst <= 2175) {
+            shipSystem = resourceId(mission.shipSyst);
+        }
+    }
     const activeMission: ActiveMission = {
         missionId: mission.id,
         missionUuid,
@@ -395,9 +403,7 @@ export function acceptMission(
         travelDestination: resolved.travelDestination,
         returnDestination: resolved.returnDestination,
         acceptedDate: state.gameDate,
-        ...(resolved.shipSystem === undefined
-            ? {}
-            : { shipSystem: resolved.shipSystem }),
+        ...(shipSystem === undefined ? {} : { shipSystem }),
         ...(cargo ? { cargo } : {}),
         ...(mission.id.startsWith('proc:')
             ? { missionData: mission }

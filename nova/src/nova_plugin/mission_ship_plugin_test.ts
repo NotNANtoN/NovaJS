@@ -64,6 +64,34 @@ describe('mission ship spawn candidates', () => {
             .toEqual(['nova:150']);
     });
 
+    it('matches target systems across storyline system clones and falls back to missionData.shipSyst', () => {
+        const systems = new Map([
+            ['nova:204', { name: 'Outbound', position: [275, -51] as [number, number] }],
+            ['nova:542', { name: 'Outbound', position: [275, -51] as [number, number] }],
+        ]);
+
+        const bountyWithoutShipSystem = {
+            ...mission,
+            missionId: 'proc:bounty:1',
+            shipSystem: undefined,
+            missionData: {
+                shipSyst: 542,
+                shipGoal: 1,
+                shipCount: 1,
+            },
+        };
+
+        const entity = playerEntity([bountyWithoutShipSystem]);
+
+        // Player is in Outbound active clone nova:204, bounty targets clone nova:542
+        const candidates = collectMissionSpawnCandidates(
+            [['player', entity]], undefined, 'nova:204', systems);
+
+        expect(candidates[0].missions.length).toBe(1);
+        expect(candidates[0].missions[0].missionId).toBe('proc:bounty:1');
+        expect(candidates[0].missions[0].shipSystem).toBe('nova:542');
+    });
+
     it('uses the store token for the owning peer when there is one', () => {
         const candidates = collectMissionSpawnCandidates(
             [['player', playerEntity([mission])]],

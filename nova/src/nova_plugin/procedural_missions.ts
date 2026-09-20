@@ -22,15 +22,16 @@ const OUTLAW_NAMES = [
 ];
 
 const OUTLAW_SHIPS = [
-    { id: 'nova:132', name: 'Pirate Viper' },
-    { id: 'nova:133', name: 'Valkyrie' },
-    { id: 'nova:134', name: 'Thunderbird' },
-    { id: 'nova:141', name: 'Heavy Raider' },
-    { id: 'nova:144', name: 'Marauder' },
+    { dudeId: 198, name: 'Pirate Viper' },
+    { dudeId: 252, name: 'Pirate Valkyrie' },
+    { dudeId: 253, name: 'Pirate Starbridge' },
+    { dudeId: 133, name: 'Pirate Raider' },
+    { dudeId: 261, name: 'Marauder' },
 ];
 
 export interface ProceduralSystem {
     id: string;
+    name?: string;
     links: readonly string[];
     planets?: readonly string[];
 }
@@ -172,7 +173,9 @@ function destinationCandidates(input: ProceduralMissionInput) {
         }
         const distance = distances.get(systemId);
         if (distance !== undefined && distance >= 1 && distance <= 4) {
-            candidates.push({ planet, systemId, distance });
+            const sys = systemForId(input.systems, systemId);
+            const systemName = sys?.name ?? systemId.replace(/^.*:/, '');
+            candidates.push({ planet, systemId, systemName, distance });
         }
     }
     return candidates.sort((a, b) =>
@@ -223,7 +226,7 @@ export function generateProceduralMissions(
             const pay = Math.max(15_000, Math.round(
                 20_000 + candidate.distance * 12_000 + clampRandom(random()) * 25_000));
             const title = `BOUNTY: ${outlaw} (${outlawShip.name})`;
-            const briefText = `A bounty of ${pay} credits has been posted for the destruction of ${outlaw}, piloting a ${outlawShip.name} last sighted in the ${candidate.systemId} system. Terminate the target to collect.`;
+            const briefText = `A bounty of ${pay} credits has been posted for the destruction of ${outlaw}, piloting a ${outlawShip.name} last sighted in the ${candidate.systemName} system. Terminate the target to collect.`;
             const deadline = Math.max(6, candidate.distance * 5);
             const mission: MissionData = {
                 ...getDefaultMissionData(),
@@ -246,7 +249,8 @@ export function generateProceduralMissions(
                 shipGoal: 1,
                 shipCount: 1,
                 shipSyst: parseInt(candidate.systemId.replace(/^.*:/, ''), 10) || -6,
-                shipDude: parseInt(outlawShip.id.replace(/^.*:/, ''), 10) || 128,
+                shipDude: outlawShip.dudeId,
+                shipBehav: 2,
                 canAbort: true,
                 displayWeight: 1,
             };

@@ -975,7 +975,10 @@ export abstract class MissionBoard extends Menu<Entity> {
                 currentPlanetId: this.planetId,
                 gameDate: state.gameDate,
                 freeSpace: getFreeSpace(state),
-                systems: world.systems,
+                systems: world.systems.map(s => ({
+                    ...s,
+                    name: world.systemNames.get(s.id) ?? (s as any).name,
+                })),
                 planets: world.planets.map(planet => ({
                     ...planet,
                     name: world.planetNames.get(planet.id),
@@ -988,6 +991,7 @@ export abstract class MissionBoard extends Menu<Entity> {
                 resolved: {
                     travelDestination: offer.destinationPlanetId,
                     returnDestination: offer.destinationPlanetId,
+                    shipSystem: offer.destinationSystemId,
                 },
                 available: offer.available,
             }))

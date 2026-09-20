@@ -75,6 +75,7 @@ describe('procedural mission generation', () => {
                 expect(bounty.mission.shipGoal).toBe(1);
                 expect(bounty.mission.shipCount).toBe(1);
                 expect(bounty.mission.name).toContain('BOUNTY:');
+                expect(bounty.mission.briefText).not.toContain('nova:');
                 expect(bounty.mission.payVal).toBeGreaterThanOrEqual(15_000);
                 break;
             }

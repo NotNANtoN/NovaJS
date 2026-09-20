@@ -45,7 +45,7 @@ import { SystemIdResource } from './system_id_resource';
 import { MissionRuntime, MissionRuntimeResource } from './mission_plugin';
 import { EntityBudgetResource, reserveEntity } from './entity_budget';
 import { PlanetComponent } from './planet_plugin';
-import { FinishJumpEvent } from './jump_plugin';
+import { areSystemsSameOrVariants, FinishJumpEvent, SystemLookup } from './jump_plugin';
 
 export interface MissionShipData {
     missionUuid: string;
@@ -86,11 +86,36 @@ function sameId(a: string | undefined, b: string): boolean {
         && (a === b || a.replace(/^.*:/, '') === b.replace(/^.*:/, ''));
 }
 
+export function missionShipSystemForEntry(
+    entry: ActiveMission,
+    mission?: MissionData,
+): string | undefined {
+    if (entry.shipSystem) {
+        return entry.shipSystem;
+    }
+    const syst = entry.missionData?.shipSyst ?? mission?.shipSyst;
+    if (syst === -6) {
+        return '*';
+    }
+    if (syst !== undefined && syst >= 128 && syst <= 2175) {
+        return resourceId(syst);
+    }
+    return undefined;
+}
+
 export function missionShipAppearsInSystem(
     shipSystem: string | undefined,
     currentSystem: string,
+    systems?: SystemLookup,
 ): boolean {
-    return shipSystem === '*' || sameId(shipSystem, currentSystem);
+    if (!shipSystem) return false;
+    if (shipSystem === '*' || sameId(shipSystem, currentSystem)) {
+        return true;
+    }
+    if (systems && areSystemsSameOrVariants(shipSystem, currentSystem, systems)) {
+        return true;
+    }
+    return false;
 }
 
 function missionIdFor(
@@ -213,6 +238,7 @@ export function collectMissionSpawnCandidates(
     entities: Iterable<readonly [string, Entity]>,
     store: PlayerStorePort | undefined,
     systemId: string,
+    systems?: SystemLookup,
 ): Array<{
     playerUuid: string,
     token: string,
@@ -228,10 +254,19 @@ export function collectMissionSpawnCandidates(
             playerUuid: uuid,
             token: playerTokenFor(multiplayer, store),
             missions: state.activeMissions
-                .filter(entry => entry.state === 'active'
-                    && entry.shipSystem
-                    && missionShipAppearsInSystem(entry.shipSystem, systemId))
-                .map(entry => plainSnapshot(entry)),
+                .filter(entry => {
+                    if (entry.state !== 'active') return false;
+                    const shipSyst = missionShipSystemForEntry(entry);
+                    return Boolean(shipSyst && missionShipAppearsInSystem(
+                        shipSyst, systemId, systems));
+                })
+                .map(entry => {
+                    const snap = plainSnapshot(entry);
+                    if (!snap.shipSystem) {
+                        snap.shipSystem = missionShipSystemForEntry(entry);
+                    }
+                    return snap;
+                }),
         }];
     });
 }
@@ -282,7 +317,7 @@ const MissionShipSpawnSystem = new AsyncSystem({
                 .map(missionShip =>
                     `${missionShip.playerToken}:${missionShip.missionUuid}`));
         const players = collectMissionSpawnCandidates(
-            entities, store, systemId);
+            entities, store, systemId, gameData.data.System);
 
         for (const { playerUuid, token, missions } of players) {
             for (const entry of missions) {
@@ -320,13 +355,17 @@ const MissionShipSpawnSystem = new AsyncSystem({
                         if (!reserveEntity(budget, ship, 'ship', true)) {
                             break;
                         }
+                        const outlawGovt = mission.shipGoal === 1 ? 137 : dude.government;
+                        const outlawBehav = mission.shipBehav >= 0
+                            ? mission.shipBehav
+                            : (mission.shipGoal === 1 ? 2 : 0);
                         ship.components
                             .set(MissionShipComponent, {
                                 missionUuid,
                                 playerToken: token,
                             })
                             .set(MissionShipBehaviorComponent, {
-                                behavior: mission.shipBehav,
+                                behavior: outlawBehav,
                                 playerUuid,
                                 activeAt: mission.shipStart === 1
                                     ? time.time + 1_500 : time.time,
@@ -336,7 +375,7 @@ const MissionShipSpawnSystem = new AsyncSystem({
                                 disabledRecorded: false,
                                 observedRecorded: false,
                             })
-                            .set(GovtComponent, { id: dude.government })
+                            .set(GovtComponent, { id: outlawGovt })
                             .set(MultiplayerData, { owner: 'server' });
                         if (mission.shipGoal === 1) {
                             ship.components.set(
