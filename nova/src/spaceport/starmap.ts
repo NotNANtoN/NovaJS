@@ -116,6 +116,49 @@ export function isSystemActive(
     }
 }
 
+export function resolveActiveSystem(
+    systemIdOrSystem: string | SystemData | undefined,
+    systems: readonly SystemData[] | ReadonlyMap<string, SystemData>,
+    missionBits?: ReadonlySet<number> | readonly boolean[],
+): SystemData | undefined {
+    if (!systemIdOrSystem) return undefined;
+    const sysMap = systems instanceof Map
+        ? systems
+        : new Map((systems as readonly SystemData[]).map(s => [s.id, s]));
+    const target = typeof systemIdOrSystem === 'string'
+        ? sysMap.get(systemIdOrSystem)
+        : systemIdOrSystem;
+    if (!target) return undefined;
+
+    // If the system itself is active, return it
+    if (isSystemActive(target, missionBits)) {
+        return target;
+    }
+
+    // Otherwise, look for an active storyline variant sharing coordinates or name
+    for (const sys of sysMap.values()) {
+        if (sys.id === target.id) continue;
+        const samePos = sys.position && target.position
+            && sys.position[0] === target.position[0]
+            && sys.position[1] === target.position[1];
+        const sameName = sys.name && target.name
+            && sys.name.trim().toLowerCase() === target.name.trim().toLowerCase();
+        if ((samePos || sameName) && isSystemActive(sys, missionBits)) {
+            return sys;
+        }
+    }
+
+    return target;
+}
+
+export function resolveActiveSystemId(
+    systemId: string | undefined,
+    systems: readonly SystemData[] | ReadonlyMap<string, SystemData>,
+    missionBits?: ReadonlySet<number> | readonly boolean[],
+): string | undefined {
+    return resolveActiveSystem(systemId, systems, missionBits)?.id ?? systemId;
+}
+
 export function resolveMissionTargetSystem(
     mission: ActiveMission,
     planetToSystem: ReadonlyMap<string, string>,
@@ -170,6 +213,7 @@ export function resolveMissionTargetSystem(
 export function getMissionDestinationMarkers(
     activeMissions: readonly ActiveMission[] | undefined,
     systems: readonly SystemData[],
+    missionBits?: ReadonlySet<number> | readonly boolean[],
 ): Map<string, MissionMarkerType> {
     const markers = new Map<string, MissionMarkerType>();
     if (!activeMissions || activeMissions.length === 0) {
@@ -192,12 +236,14 @@ export function getMissionDestinationMarkers(
         if (mission.state !== 'active') {
             continue;
         }
-        const targetSystem = resolveMissionTargetSystem(
+        let targetSystem = resolveMissionTargetSystem(
             mission, planetToSystem, systemIds, bareSystemIds);
 
         if (!targetSystem) {
             continue;
         }
+
+        targetSystem = resolveActiveSystemId(targetSystem, systems, missionBits) ?? targetSystem;
 
         const isPassenger = mission.cargo?.type === 1001
             || mission.missionData?.cargoType === 1001
@@ -225,11 +271,14 @@ export function getSystemMissionDetails(
     systemId: string,
     activeMissions: readonly ActiveMission[] | undefined,
     systems: readonly SystemData[],
+    missionBits?: ReadonlySet<number> | readonly boolean[],
 ): string[] {
     const details: string[] = [];
     if (!activeMissions || activeMissions.length === 0) {
         return details;
     }
+
+    const activeSystemId = resolveActiveSystemId(systemId, systems, missionBits) ?? systemId;
 
     const planetToSystem = new Map<string, string>();
     for (const sys of systems) {
@@ -244,10 +293,13 @@ export function getSystemMissionDetails(
 
     for (const mission of activeMissions) {
         if (mission.state !== 'active') continue;
-        const targetSystem = resolveMissionTargetSystem(
+        let targetSystem = resolveMissionTargetSystem(
             mission, planetToSystem, systemIds, bareSystemIds);
 
-        if (targetSystem !== systemId) continue;
+        if (!targetSystem) continue;
+        targetSystem = resolveActiveSystemId(targetSystem, systems, missionBits) ?? targetSystem;
+
+        if (targetSystem !== activeSystemId) continue;
 
         const isPassenger = mission.cargo?.type === 1001
             || mission.missionData?.cargoType === 1001
@@ -527,6 +579,10 @@ export class SystemGraph {
     setMissionBits(missionBits?: ReadonlySet<number> | readonly boolean[], redraw = true) {
         this.missionBits = missionBits;
         this.routes = this.computeShortestPaths();
+        if (this.activeMissions) {
+            this.missionMarkers = getMissionDestinationMarkers(
+                this.activeMissions, [...this.systems.values()], this.missionBits);
+        }
         if (redraw) {
             this.draw();
         }
@@ -566,9 +622,12 @@ export class SystemGraph {
         }
     }
 
+    private activeMissions?: readonly ActiveMission[];
+
     setMissionMarkers(activeMissions?: readonly ActiveMission[], redraw = true) {
+        this.activeMissions = activeMissions;
         this.missionMarkers = getMissionDestinationMarkers(
-            activeMissions, [...this.systems.values()]);
+            activeMissions, [...this.systems.values()], this.missionBits);
         if (redraw) {
             this.draw();
         }
@@ -674,21 +733,23 @@ export class SystemGraph {
     }
 
     private onClickSystem(system: string) {
-        const target = this.systems.get(system);
-        if (!target || !isSystemActive(target, this.missionBits)) {
+        const activeTarget = resolveActiveSystem(system, this.systems, this.missionBits);
+        if (!activeTarget || !isSystemActive(activeTarget, this.missionBits)) {
             return;
         }
-        this.route = this.routes.get(system) ?? [];
-        this.onSystemSelected(system);
+        const activeId = activeTarget.id;
+        this.route = this.routes.get(activeId) ?? [];
+        this.onSystemSelected(activeId);
     }
 
     isKnown(systemId: string): boolean {
-        const system = this.systems.get(systemId);
-        return Boolean(system && isSystemActive(system, this.missionBits));
+        const activeSys = resolveActiveSystem(systemId, this.systems, this.missionBits);
+        return Boolean(activeSys && isSystemActive(activeSys, this.missionBits));
     }
 
     getSystem(systemId: string): SystemData | undefined {
-        return this.systems.get(systemId);
+        return resolveActiveSystem(systemId, this.systems, this.missionBits)
+            ?? this.systems.get(systemId);
     }
 
     private getUniqueLinks() {
@@ -759,9 +820,11 @@ export class SystemGraph {
             const system = this.systems.get(id);
             if (!system || !isSystemActive(system, this.missionBits)) {
                 container.visible = false;
+                container.eventMode = 'none';
                 continue;
             }
             container.visible = true;
+            container.eventMode = 'static';
             const pos = this.scalePos(system.position);
             graphics.clear();
             drawSystem(system, graphics, this.scale, this.currentSystem, this.missionMarkers.get(id), this.playerMarkers.get(id));
@@ -830,9 +893,13 @@ export class SystemGraph {
     private computeShortestPaths() {
         const activeSystems = [...this.systems.values()].filter(
             s => isSystemActive(s, this.missionBits));
+        const activeCurrent = resolveActiveSystemId(
+            this.currentSystem, this.systems, this.missionBits) ?? this.currentSystem;
         return shortestRoutes(
             activeSystems,
-            this.currentSystem,
+            activeCurrent,
+            undefined,
+            this.systems,
         );
     }
 }
@@ -1089,11 +1156,13 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
     }
 
     private selectSystem(systemId: string) {
-        this.selectedSystemId = systemId;
+        const activeId = resolveActiveSystemId(
+            systemId, this.systemGraph?.getAllSystems() ?? [], this.playerState?.missionBits) ?? systemId;
+        this.selectedSystemId = activeId;
         if (this.systemGraph) {
             this.input = this.systemGraph.route;
         }
-        void this.renderPanel(systemId);
+        void this.renderPanel(activeId);
     }
 
     private setPanelLoading(
@@ -1186,6 +1255,7 @@ export class Starmap extends Menu<string[] /* route list of systems */> {
             systemId,
             this.playerState?.activeMissions,
             graph.getAllSystems(),
+            this.playerState?.missionBits,
         );
 
         this.setPanelData(starmapPanelData({

@@ -142,4 +142,78 @@ describe('starmap world presentation state', () => {
         (graph as any).onClickSystem('barnard');
         expect(graph.route).toEqual(['barnard']);
     });
+
+    it('resolves duplicate storyline system variants so missions and clicks target the active instance', () => {
+        // Retail EV Nova scenario:
+        // Sirius (nova:148) links to Glimmer base (nova:193).
+        // Glimmer has base instance (nova:193) and storyline instance (nova:759).
+        // Mission targets Brass (planet nova:503), which is listed in nova:759.
+        const systems = [
+            {
+                id: 'nova:148',
+                name: 'Sirius',
+                links: ['nova:193'],
+                planets: ['nova:145'],
+                position: [-80, -70],
+            },
+            {
+                id: 'nova:193',
+                name: 'Glimmer',
+                links: ['nova:148'],
+                planets: ['nova:214'],
+                position: [-60, -80],
+                visibility: '!(b6300 | b6302)',
+            },
+            {
+                id: 'nova:759',
+                name: 'Glimmer',
+                links: ['nova:148'],
+                planets: ['nova:503'],
+                position: [-60, -80],
+                visibility: '(b6300 & !b130) & !b6301',
+            },
+        ] as never;
+
+        const missions = [
+            {
+                missionId: 'm_glimmer',
+                state: 'active' as const,
+                destination: 'nova:503',
+                travelDestination: 'nova:503',
+                returnDestination: '*',
+                cargo: { type: 1001, quantity: 1 },
+                missionData: { title: 'Somta Group to Brass' },
+            },
+        ];
+
+        // 1. Mission destination markers should place the marker on active Glimmer (nova:193), NOT inactive nova:759
+        const activeMarkers = getMissionDestinationMarkers(missions as never, systems, new Set());
+        expect(activeMarkers.get('nova:193')).toBe('passenger');
+        expect(activeMarkers.get('nova:759')).toBeUndefined();
+
+        const missionDetails = getSystemMissionDetails('nova:193', missions as never, systems, new Set());
+        expect(missionDetails.length).toBe(1);
+        expect(missionDetails[0]).toContain('Somta Group to Brass');
+
+        // 2. SystemGraph clicking on inactive nova:759 resolves to active nova:193 and plots the route
+        let selected: string | undefined;
+        const graph = new SystemGraph(
+            systems,
+            'nova:148',
+            ['nova:148'],
+            id => { selected = id; },
+            () => true,
+            { x: 800, y: 600 } as never,
+            new Set(),
+        );
+
+        // Clicking either nova:193 or stacked clone nova:759 must both resolve to active nova:193
+        (graph as any).onClickSystem('nova:759');
+        expect(selected).toBe('nova:193');
+        expect(graph.route).toEqual(['nova:193']);
+
+        (graph as any).onClickSystem('nova:193');
+        expect(selected).toBe('nova:193');
+        expect(graph.route).toEqual(['nova:193']);
+    });
 });

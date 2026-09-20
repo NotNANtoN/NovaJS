@@ -197,9 +197,54 @@ export function calculateJumpArrival(
     };
 }
 
+export type SystemLookup = {
+    readonly getCached?: (id: string) => Pick<SystemData, 'name' | 'position'> | undefined;
+    readonly get?: (id: string) => Promise<Pick<SystemData, 'name' | 'position'>> | Pick<SystemData, 'name' | 'position'> | undefined;
+} | ReadonlyMap<string, Pick<SystemData, 'name' | 'position'>>
+  | readonly Pick<SystemData, 'id' | 'name' | 'position'>[];
+
+export function areSystemsSameOrVariants(
+    sysA: string | undefined,
+    sysB: string | undefined,
+    systems?: SystemLookup,
+): boolean {
+    if (!sysA || !sysB) return false;
+    if (sysA === sysB) return true;
+    const bareA = String(sysA).replace(/^.*:/, '');
+    const bareB = String(sysB).replace(/^.*:/, '');
+    if (bareA === bareB) return true;
+    if (!systems) return false;
+
+    const getSys = (id: string): Pick<SystemData, 'name' | 'position'> | undefined => {
+        if ('getCached' in systems && typeof (systems as any).getCached === 'function') {
+            return (systems as any).getCached(id);
+        }
+        if (systems instanceof Map) {
+            return systems.get(id);
+        }
+        if (Array.isArray(systems)) {
+            return (systems as readonly any[]).find(s => s.id === id);
+        }
+        return undefined;
+    };
+
+    const dataA = getSys(sysA);
+    const dataB = getSys(sysB);
+    if (!dataA || !dataB) return false;
+
+    const samePos = dataA.position && dataB.position
+        && dataA.position[0] === dataB.position[0]
+        && dataA.position[1] === dataB.position[1];
+    const sameName = dataA.name && dataB.name
+        && dataA.name.trim().toLowerCase() === dataB.name.trim().toLowerCase();
+
+    return Boolean(samePos || sameName);
+}
+
 export function isValidNextHop(
     currentSystem: Pick<SystemData, 'links'> | undefined,
     nextSystem: string | undefined,
+    systems?: SystemLookup,
 ): nextSystem is string {
     if (!currentSystem?.links || !nextSystem) {
         return false;
@@ -207,16 +252,27 @@ export function isValidNextHop(
     const targetBare = String(nextSystem).replace(/^.*:/, '');
     return currentSystem.links.some(link => {
         const linkStr = String(link);
-        return linkStr === nextSystem || linkStr.replace(/^.*:/, '') === targetBare;
+        if (linkStr === nextSystem || linkStr.replace(/^.*:/, '') === targetBare) {
+            return true;
+        }
+        if (systems && areSystemsSameOrVariants(linkStr, nextSystem, systems)) {
+            return true;
+        }
+        return false;
     });
 }
 
 export function consumeCompletedHop(
     route: readonly string[],
     completedDestination: string,
+    systems?: SystemLookup,
 ): string[] {
     const targetBare = completedDestination.replace(/^.*:/, '');
-    if (route[0] && (route[0] === completedDestination || route[0].replace(/^.*:/, '') === targetBare)) {
+    if (route[0] && (
+        route[0] === completedDestination
+        || route[0].replace(/^.*:/, '') === targetBare
+        || (systems && areSystemsSameOrVariants(route[0], completedDestination, systems))
+    )) {
         return route.slice(1);
     }
     return [...route];
@@ -225,19 +281,23 @@ export function consumeCompletedHop(
 export function isCurrentRouteHop(
     route: readonly string[],
     destination: string,
+    systems?: SystemLookup,
 ): boolean {
     if (!route[0] || !destination) return false;
     const destBare = destination.replace(/^.*:/, '');
-    return route[0] === destination || route[0].replace(/^.*:/, '') === destBare;
+    return route[0] === destination
+        || route[0].replace(/^.*:/, '') === destBare
+        || Boolean(systems && areSystemsSameOrVariants(route[0], destination, systems));
 }
 
 export function routeChangeCancelsJump(
     state: Pick<JumpState, 'phase' | 'requiresAdjacency' | 'to'>,
     route: readonly string[],
+    systems?: SystemLookup,
 ): boolean {
     return state.phase !== 'arriving'
         && state.requiresAdjacency
-        && !isCurrentRouteHop(route, state.to);
+        && !isCurrentRouteHop(route, state.to, systems);
 }
 
 export function restartJumpArrival(
@@ -505,7 +565,7 @@ const PlayerJumpControl = new System({
             emit(SoundEvent, { id: 'nova:153' });
             return;
         }
-        if (!isValidNextHop(currentSystem, nextSystem)) {
+        if (!isValidNextHop(currentSystem, nextSystem, gameData.data.System)) {
             console.warn(`[JUMP REFUSED] Not a valid next hop. Current system: ${systemId} (${currentSystem.name ?? 'unknown'}), links: [${currentSystem.links.join(', ')}], nextSystem: ${nextSystem}`);
             jumpRoute.route = [];
             emit(JumpRefusedEvent, { reason: 'invalid-hop' });
@@ -623,14 +683,14 @@ const JumpLifecycleSystem = new System({
         if (!destination) {
             void gameData.data.System.get(state.to);
         }
-        if (routeChangeCancelsJump(state, route.route)) {
+        if (routeChangeCancelsJump(state, route.route, gameData.data.System)) {
             // An explicit route change before departure cancels the old jump
             // without discarding the newly selected route.
             cancelJumpFlight(entity, movement, physics);
             return;
         }
         if (source && state.requiresAdjacency
-            && !isValidNextHop(source, state.to)) {
+            && !isValidNextHop(source, state.to, gameData.data.System)) {
             cancelJumpFlight(entity, movement, physics);
             route.route = [];
             emit(SoundEvent, { id: 'nova:153' });
@@ -680,7 +740,7 @@ const JumpLifecycleSystem = new System({
                 return;
             }
 
-            route.route = consumeCompletedHop(route.route, state.to);
+            route.route = consumeCompletedHop(route.route, state.to, gameData.data.System);
             if (playerState) {
                 if (state.requiresAdjacency) {
                     // Hypergates and mission jumps move the ship without

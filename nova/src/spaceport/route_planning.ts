@@ -1,6 +1,9 @@
 import { SystemData } from 'novadatainterface/SystemData';
 
-type RoutableSystem = Pick<SystemData, 'id' | 'links'>;
+export type RoutableSystem = Pick<SystemData, 'id' | 'links'> & {
+    readonly position?: [number, number];
+    readonly name?: string;
+};
 
 function knownSystemSet(
     exploredSystems: readonly string[] | undefined,
@@ -26,6 +29,7 @@ export function shortestRoutes(
     systems: readonly RoutableSystem[],
     source: string,
     exploredSystems?: readonly string[],
+    allSystems?: readonly RoutableSystem[] | ReadonlyMap<string, RoutableSystem>,
 ): Map<string, string[]> {
     const known = knownSystemSet(exploredSystems, source);
     const byId = new Map(systems.map(system => [system.id, system]));
@@ -33,7 +37,40 @@ export function shortestRoutes(
         systems.map(system => [system.id, []]),
     );
 
-    if (!byId.has(source)) {
+    // Build active variant lookups to resolve storyline system clones (e.g. Glimmer/Sol variants)
+    const activeByPos = new Map<string, string>();
+    const activeByName = new Map<string, string>();
+    for (const sys of systems) {
+        if (sys.position) {
+            activeByPos.set(`${sys.position[0]},${sys.position[1]}`, sys.id);
+        }
+        if (sys.name) {
+            activeByName.set(sys.name.trim().toLowerCase(), sys.id);
+        }
+    }
+
+    const resolveToActive = (id: string): string => {
+        if (byId.has(id)) return id;
+        if (allSystems) {
+            const fullSys = allSystems instanceof Map
+                ? allSystems.get(id)
+                : (allSystems as readonly RoutableSystem[]).find(s => s.id === id);
+            if (fullSys) {
+                if (fullSys.position) {
+                    const match = activeByPos.get(`${fullSys.position[0]},${fullSys.position[1]}`);
+                    if (match) return match;
+                }
+                if (fullSys.name) {
+                    const match = activeByName.get(fullSys.name.trim().toLowerCase());
+                    if (match) return match;
+                }
+            }
+        }
+        return id;
+    };
+
+    const effectiveSource = resolveToActive(source);
+    if (!byId.has(effectiveSource)) {
         return paths;
     }
 
@@ -44,13 +81,14 @@ export function shortestRoutes(
         }
         const systemNeighbors = neighbors.get(system.id) ?? new Set<string>();
         for (const linked of system.links) {
-            if (!byId.has(linked) || (known && !known.has(linked))) {
+            const resolvedLink = resolveToActive(linked);
+            if (!byId.has(resolvedLink) || (known && !known.has(resolvedLink))) {
                 continue;
             }
-            systemNeighbors.add(linked);
-            const reverse = neighbors.get(linked) ?? new Set<string>();
+            systemNeighbors.add(resolvedLink);
+            const reverse = neighbors.get(resolvedLink) ?? new Set<string>();
             reverse.add(system.id);
-            neighbors.set(linked, reverse);
+            neighbors.set(resolvedLink, reverse);
         }
         neighbors.set(system.id, systemNeighbors);
     }
@@ -58,7 +96,7 @@ export function shortestRoutes(
     // Sort each frontier before expanding it. This retains the deterministic
     // tie-breaking of the map's previous shortest-path implementation while
     // still doing only one traversal from the current system.
-    let frontier = [source];
+    let frontier = [effectiveSource];
     const visited = new Set(frontier);
     while (frontier.length > 0) {
         const nextFrontier: string[] = [];
@@ -85,11 +123,12 @@ export function shortestRoutes(
  * Return the shortest hyperlink route, excluding the current system.
  */
 export function shortestRoute(
-    systems: readonly Pick<SystemData, 'id' | 'links'>[],
+    systems: readonly RoutableSystem[],
     source: string,
     destination: string,
     exploredSystems?: readonly string[],
+    allSystems?: readonly RoutableSystem[] | ReadonlyMap<string, RoutableSystem>,
 ): string[] {
-    return shortestRoutes(systems, source, exploredSystems)
+    return shortestRoutes(systems, source, exploredSystems, allSystems)
         .get(destination) ?? [];
 }

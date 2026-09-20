@@ -181,6 +181,22 @@ describe('hyperjump lifecycle', () => {
         expect(isValidNextHop(current, 'b')).toBeTrue();
         expect(isValidNextHop(current, 'd')).toBeFalse();
         expect(isValidNextHop(undefined, 'b')).toBeFalse();
+
+        // With system variants:
+        const systems = new Map([
+            ['nova:193', { name: 'Glimmer', position: [-60, -80] as [number, number] }],
+            ['nova:759', { name: 'Glimmer', position: [-60, -80] as [number, number] }],
+            ['nova:148', { name: 'Sirius', position: [-80, -70] as [number, number] }],
+        ]);
+        const sirius = { links: ['nova:193'] };
+        // Even if destination is clone ID nova:759, it must be recognized as valid hop from Sirius
+        expect(isValidNextHop(sirius, 'nova:759', systems)).toBeTrue();
+        expect(isValidNextHop(sirius, 'nova:193', systems)).toBeTrue();
+        expect(isValidNextHop(sirius, 'nova:148', systems)).toBeFalse();
+
+        // Route consumption and matching:
+        expect(consumeCompletedHop(['nova:759'], 'nova:193', systems)).toEqual([]);
+        expect(isCurrentRouteHop(['nova:759'], 'nova:193', systems)).toBeTrue();
     });
 
     it('ramps departure above cruise and eases arrival back down', () => {
