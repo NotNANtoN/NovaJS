@@ -160,6 +160,7 @@ function destinationCandidates(input: ProceduralMissionInput) {
     const candidates: Array<{
         planet: ProceduralPlanet;
         systemId: string;
+        systemName?: string;
         distance: number;
     }> = [];
     for (const planet of input.planets) {

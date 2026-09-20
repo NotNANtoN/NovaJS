@@ -46,7 +46,7 @@ import {
 import { Stat } from "../nova_plugin/stat";
 import { CloakStateComponent } from "../nova_plugin/cloaking_plugin";
 import { TargetComponent } from "../nova_plugin/target_component";
-import { PlanetComponent, PlanetDataComponent, PlanetTargetComponent } from "../nova_plugin/planet_plugin";
+import { PlanetComponent, PlanetTargetComponent } from "../nova_plugin/planet_plugin";
 import { ChangeSecondaryEvent } from "../nova_plugin/weapon_plugin";
 import { AnimationGraphic } from "./animation_graphic";
 import { AnimationGraphicComponent } from "./animation_graphic_plugin";

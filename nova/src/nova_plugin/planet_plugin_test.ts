@@ -4,11 +4,12 @@ import { Entity } from 'nova_ecs/entity';
 import { World } from 'nova_ecs/world';
 import { DeltaPlugin } from 'nova_ecs/plugins/delta_plugin';
 import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
+import { Angle } from 'nova_ecs/datatypes/angle';
 import { Position } from 'nova_ecs/datatypes/position';
 import { Vector } from 'nova_ecs/datatypes/vector';
 import { getDefaultPlanetData } from
     'novadatainterface/PlanetData';
-import { GameDataInterface } from 'novadatainterface/NovaDataInterface';
+import { GameDataInterface } from 'novadatainterface/GameDataInterface';
 import { ControlStateEvent } from './control_state_event';
 import { GameDataResource } from './game_data_resource';
 import { PlayerShipSelector } from './player_ship_plugin';
@@ -246,10 +247,10 @@ describe('planet landing selection', () => {
 
         const earthEntity = new Entity()
             .addComponent(PlanetComponent, { id: 'nova:earth', name: 'Earth' })
-            .addComponent(MovementStateComponent, { position: new Position(0, 0), velocity: new Vector(0, 0), rotation: 0, turning: 0, accelerating: 0 });
+            .addComponent(MovementStateComponent, { position: new Position(0, 0), velocity: new Vector(0, 0), rotation: new Angle(0), turning: 0, turnBack: false, accelerating: 0 });
         const marsEntity = new Entity()
             .addComponent(PlanetComponent, { id: 'nova:mars', name: 'Mars' })
-            .addComponent(MovementStateComponent, { position: new Position(100, 0), velocity: new Vector(0, 0), rotation: 0, turning: 0, accelerating: 0 });
+            .addComponent(MovementStateComponent, { position: new Position(100, 0), velocity: new Vector(0, 0), rotation: new Angle(0), turning: 0, turnBack: false, accelerating: 0 });
 
         world.entities.set('earth', earthEntity);
         world.entities.set('mars', marsEntity);

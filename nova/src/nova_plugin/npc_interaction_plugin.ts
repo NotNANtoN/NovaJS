@@ -473,7 +473,7 @@ export const NpcDistressSystem = new System({
         const playerEntry = players[0];
         const playerUuid = playerEntry ? playerEntry[0] : undefined;
         const playerEntity = playerUuid ? entities.get(playerUuid) : undefined;
-        const playerGovt = playerEntity?.components.get(GovtComponent)?.id ?? 'nova:128';
+        const playerGovt = playerEntity?.components.get(GovtComponent)?.id ?? 128;
         const playerGovtData = governments && playerGovt ? governments.getCached(playerGovt) : undefined;
 
         for (const [
@@ -513,7 +513,7 @@ export const NpcDistressSystem = new System({
             const govtData = govtId && governments ? governments.getCached(govtId) : undefined;
 
             // Outlaws, pirates, and marauders do not broadcast distress calls to lawful players
-            const isPirate = govtId === 'nova:130'
+            const isPirate = govtId === 130 || govtId === 137
                 || Boolean(govtData && (govtData.flags ?? 0) & GovernmentFlags.warshipsPlunder)
                 || Boolean(govtData?.name && /pirate|marauder|outlaw/i.test(govtData.name))
                 || Boolean(shipData?.name && /pirate|marauder/i.test(shipData.name));

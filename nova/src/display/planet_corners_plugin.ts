@@ -56,7 +56,7 @@ const DrawPlanetCornersSystem = new System({
         const pos = targetGraphic?.container?.position ?? targetMovement?.position ?? { x: 0, y: 0 };
         const size = (targetGraphic?.size && targetGraphic.size.x > 0)
             ? targetGraphic.size
-            : (planetData?.size ? { x: planetData.size, y: planetData.size } : { x: 72, y: 72 });
+            : ((planetData as any)?.size ? { x: (planetData as any).size, y: (planetData as any).size } : { x: 72, y: 72 });
         const name = planetComponent?.name ?? planetData?.name ?? 'Stellar Object';
 
         targetCorners.setStyle("neutral");
