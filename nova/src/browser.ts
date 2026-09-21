@@ -175,33 +175,8 @@ async function waitForCommunicatorUuid() {
     }
 }
 
-export function reportClientError(error: unknown, context = 'general') {
-    try {
-        const message = error instanceof Error ? error.message : String(error);
-        const stack = error instanceof Error ? error.stack : undefined;
-        const currentSys = (window as any).system?.resources?.get(SystemIdResource);
-        const playerToken = typeof localStorage !== 'undefined' ? localStorage.getItem('playerToken') : undefined;
-        const payload = JSON.stringify({
-            message,
-            stack,
-            context,
-            systemId: currentSys,
-            playerToken: playerToken ? playerToken.slice(0, 8) : undefined,
-            url: typeof window !== 'undefined' ? window.location.pathname : undefined,
-            time: Date.now(),
-        });
-        if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
-            navigator.sendBeacon('/client-error', new Blob([payload], { type: 'application/json' }));
-        } else if (typeof fetch !== 'undefined') {
-            fetch('/client-error', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: payload,
-                keepalive: true,
-            }).catch(() => {});
-        }
-    } catch {}
-}
+import { reportClientError } from './client/client_telemetry';
+export { reportClientError };
 
 if (typeof window !== 'undefined') {
     (window as any).reportClientError = reportClientError;

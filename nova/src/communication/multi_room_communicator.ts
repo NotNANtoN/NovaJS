@@ -43,6 +43,7 @@ export class MultiRoom {
     private roomMap: DefaultMap<string, [Communicator, () => void]>;
     private roomPeers = new DefaultMap<string, Peers>(() =>
         new Peers(new BehaviorSubject(new Set())));
+    readonly roomJoined = new Subject<{ room: string; peer: string }>();
 
     constructor(private communicator: Communicator) {
         const messages = communicator.messages.pipe(
@@ -77,6 +78,7 @@ export class MultiRoom {
                 if (message.inRoom) {
                     currentPeers.add(source);
                     peers.current.next(currentPeers);
+                    this.roomJoined.next({ room: message.room, peer: source });
                 } else {
                     currentPeers.delete(source);
                     peers.current.next(currentPeers);

@@ -245,3 +245,19 @@ To structurally prevent recurrent classes of subtle bugs, four architectural gua
 ### J. Formal Entity Archetype Contracts (`nova/src/nova_plugin/archetypes.ts`)
 * **Problem Solved**: Entity component bags created ad-hoc with varying sets of components, leading to systems failing silently when a required component (e.g. `TargetComponent` or `MovementStateComponent`) was omitted.
 * **Mechanism**: Formally defined `ShipArchetypeComponents`, `EscortArchetypeComponents`, `PlanetArchetypeComponents`, and `ProjectileArchetypeComponents` with validation functions (`assertShipArchetype`, `assertEscortArchetype`, `isArchetype`).
+
+### K. Lazy On-Demand Star System Mounting (`nova/src/nova_plugin/server_plugin.ts`)
+* **Problem Solved**: The multiplayer server previously ran an eager startup loop subscribing to all 500+ systems in `gameData.ids.System`, maintaining 500 idle room instances and RxJS pipelines even when only 1-2 systems had active players.
+* **Mechanism**: Reactive room mounting via `MultiRoom.roomJoined`. The server lazily mounts star systems on-demand when a player joins, keeping memory and CPU footprint minimal while automatically scaling across the galaxy. Starter systems (e.g. Sol `nova:130`) are pre-warmed.
+
+### L. Unified Transient Request Consumption Across Action Plugins
+* **Problem Solved**: Request components across `JettisonPlugin`, `EnergyTransferPlugin`, and `SurrenderPlugin` were manually deleted across various branching `if/else` returns, risking stuck or re-firing requests if any code path threw or returned early.
+* **Mechanism**: Standardized `consumeRequest(entity, RequestComponent)` at the entry of each action system, ensuring atomic one-tick request consumption.
+
+### M. Decoupled Client Telemetry Architecture (`nova/src/client/client_telemetry.ts`)
+* **Problem Solved**: Runtime error reporting was tightly coupled to `browser.ts` and window property tampering (`(window as any).reportClientError`).
+* **Mechanism**: Extracted `reportClientError(error, context, systemId)` into an isolated, headless-safe module utilizing `navigator.sendBeacon` and `fetch('/client-error')` with payload normalization.
+
+### N. Toroidal Stereo Spatial Audio (`nova/src/display/sound_attenuation.ts`)
+* **Problem Solved**: Sounds lacked directional panning and only had distance volume attenuation.
+* **Mechanism**: Implemented `worldSoundPan(source, listener, panWidth)` which computes normalized $[-1, 1]$ stereo panning across toroidal wrapped space system coordinates.

@@ -15,6 +15,7 @@ import { Provide } from 'nova_ecs/provide';
 import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
 import { GameData } from '../client/gamedata/GameData';
+import { reportClientError } from '../client/client_telemetry';
 import { ControlsSubject } from '../nova_plugin/controls_plugin';
 import { GameDataResource } from '../nova_plugin/game_data_resource';
 import { NcbRuntimeResource } from '../nova_plugin/ncb_runtime';
@@ -90,9 +91,7 @@ export async function runLandingSession(actions: LandingSessionActions): Promise
         actions.restore(await actions.land());
     } catch (error) {
         console.error('Landing interrupted; reconciling with server', error);
-        if (typeof window !== 'undefined' && typeof (window as any).reportClientError === 'function') {
-            (window as any).reportClientError(error, 'landing-interrupted');
-        }
+        reportClientError(error, 'landing-interrupted');
         actions.abort();
         await retry();
     }

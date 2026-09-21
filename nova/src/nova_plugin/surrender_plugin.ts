@@ -16,6 +16,7 @@ import { JumpStateComponent } from './jump_plugin';
 import { NpcAIComponent } from './npc_plugin';
 import { PlayerStateComponent } from './player_state';
 import { PlatformResource } from './platform_plugin';
+import { consumeRequest } from 'nova_ecs/transient_request';
 
 const SurrenderRequest = t.type({ target: t.string, sequence: t.number });
 export const SurrenderRequestComponent = new Component<t.TypeOf<typeof SurrenderRequest>>('SurrenderRequestComponent');
@@ -40,6 +41,7 @@ export const SurrenderSystem = new System({
         PlatformResource, GetEntity, Entities, UUID, Optional(MovementStateComponent)] as const,
     step(request, state, multiplayer, platform, player, entities, uuid, movement) {
         if (platform !== 'node' || multiplayer.owner === 'server') return;
+        consumeRequest(player, SurrenderRequestComponent);
         if (!Number.isSafeInteger(request.sequence) || request.sequence <= 0) return;
         if (request.sequence <= (player.components.get(SurrenderSequenceComponent) ?? 0)) return;
         player.components.set(SurrenderSequenceComponent, request.sequence);

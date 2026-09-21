@@ -62,3 +62,24 @@ export function worldSoundVolume(
     }
     return masterVolume * distanceAttenuation(soundDistance(source, listener));
 }
+
+/**
+ * Calculates stereo panning [-1, 1] for a world sound heard by the listener.
+ * -1 = hard left, 0 = center, +1 = hard right.
+ * Wraps across toroidal system boundaries.
+ */
+export function worldSoundPan(
+    source: VectorLike | undefined,
+    listener: VectorLike | undefined,
+    panWidth = 1400,
+): number {
+    if (!source || !listener) {
+        return 0;
+    }
+    let dx = source.x - listener.x;
+    if (dx > BOUNDARY) dx -= BOUNDARY * 2;
+    if (dx < -BOUNDARY) dx += BOUNDARY * 2;
+
+    const pan = dx / panWidth;
+    return Math.max(-1, Math.min(1, pan));
+}

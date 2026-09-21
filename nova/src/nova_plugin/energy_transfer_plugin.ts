@@ -23,6 +23,7 @@ import { ArmorComponent } from './health_plugin';
 import { PlayerShipSelector } from './player_ship_plugin';
 import { PlayerStateComponent } from './player_state';
 import { ShipDataComponent } from './ship_plugin';
+import { consumeRequest } from 'nova_ecs/transient_request';
 import { TargetComponent } from './target_component';
 import { BoardingNoticeComponent } from './boarding_plugin';
 import { hasArrived, inTransferRange } from './flight_controller';
@@ -144,15 +145,15 @@ export const ServerEnergyTransferSystem = new System({
             return;
         }
 
+        consumeRequest(entity, EnergyTransferRequestComponent);
+
         const candidate = targets.find(t => t[0] === request.target && t[0] !== uuid && !t[5]);
         if (!candidate || !inTransferRange(movement, candidate[1], ENERGY_TRANSFER_RANGE)) {
-            entity.components.delete(EnergyTransferRequestComponent);
             return;
         }
 
         const availableFuel = sourcePlayer.fuel ?? 0;
         if (availableFuel <= 0) {
-            entity.components.delete(EnergyTransferRequestComponent);
             return;
         }
 
@@ -185,7 +186,6 @@ export const ServerEnergyTransferSystem = new System({
         });
 
         emit(SoundEvent, { id: 'nova:150' });
-        entity.components.delete(EnergyTransferRequestComponent);
     },
 });
 

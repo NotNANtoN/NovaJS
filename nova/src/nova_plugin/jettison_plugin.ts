@@ -18,6 +18,7 @@ import { v4 as uuid } from 'uuid';
 import { ControlStateEvent } from './control_state_event';
 import { EntityBudgetResource, reserveEntity } from './entity_budget';
 import { PlatformResource } from './platform_plugin';
+import { consumeRequest } from 'nova_ecs/transient_request';
 import { PlayerShipSelector } from './player_ship_plugin';
 import { PlayerStateComponent, releaseCargo } from './player_state';
 import { BoardingNoticeComponent } from './boarding_notice';
@@ -81,15 +82,14 @@ export const ServerJettisonSystem = new System({
         if (platform !== 'node' || multiplayer.owner === 'server') {
             return;
         }
+        consumeRequest(entity, JettisonRequestComponent);
         const hold = playerState.holds.find(h => !h.isMissionCargo && h.tons > 0);
         if (!hold) {
-            entity.components.delete(JettisonRequestComponent);
             return;
         }
 
         const removed = releaseCargo(playerState, hold.commodity, 1);
         if (removed <= 0) {
-            entity.components.delete(JettisonRequestComponent);
             return;
         }
 
@@ -104,8 +104,6 @@ export const ServerJettisonSystem = new System({
         if (reserveEntity(budget, ore, 'asteroid')) {
             entities.set(uuid(), ore);
         }
-
-        entity.components.delete(JettisonRequestComponent);
     },
 });
 
