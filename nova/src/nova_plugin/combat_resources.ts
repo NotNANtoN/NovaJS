@@ -10,7 +10,7 @@ export { type CombatResources, CombatResourcesCodec } from './player_state';
 import { OutfitsState, OutfitsStateComponent } from './outfit_plugin';
 import { ArmorComponent, IonizationComponent, ShieldComponent } from './health_plugin';
 import { buyFuel, clampFuel, refuelsOnLanding } from './fuel';
-import { areSystemsSameOrVariants } from './system_variants';
+import { areSystemsSameOrVariants, isPlanetInSystem } from './system_variants';
 
 import { getPersistentPlayerToken } from '../communication/player_identity';
 import { makePlayerData, StoredPlayerData } from './player_data_projection';
@@ -397,28 +397,14 @@ export class CombatLedger {
         const system = request.action === 'open'
             ? await this.gameData.data.System.get(authority.system ?? authority.state.currentSystem)
             : undefined;
-        let planetInSystem = Boolean(system?.planets?.includes(planet.id));
-        if (request.action === 'open' && !planetInSystem && system) {
-            const systemLookup = this.gameData.data.System;
-            const ids = await this.gameData.ids;
-            const systemIds = (ids && 'System' in ids && Array.isArray((ids as any).System))
-                ? (ids as any).System
-                : (systemLookup instanceof Map ? [...systemLookup.keys()] : (systemLookup as any)?.map instanceof Map ? [...(systemLookup as any).map.keys()] : []);
-            for (const sysId of systemIds) {
-                const sys = await this.gameData.data.System.get(sysId);
-                if (sys?.planets?.includes(planet.id)) {
-                    const samePos = sys.position && system.position
-                        && sys.position[0] === system.position[0]
-                        && sys.position[1] === system.position[1];
-                    const sameName = sys.name && system.name
-                        && sys.name.trim().toLowerCase() === system.name.trim().toLowerCase();
-                    if (samePos || sameName || areSystemsSameOrVariants(sys.id, system.id, this.gameData.data.System)) {
-                        planetInSystem = true;
-                        break;
-                    }
-                }
-            }
-        }
+        const ids = await this.gameData.ids;
+        const systemLookup = this.gameData.data.System;
+        const systemIds = (ids && 'System' in ids && Array.isArray((ids as any).System))
+            ? (ids as any).System
+            : (systemLookup instanceof Map ? [...systemLookup.keys()] : (systemLookup as any)?.map instanceof Map ? [...(systemLookup as any).map.keys()] : []);
+        const planetInSystem = request.action === 'open'
+            ? await isPlanetInSystem(planet.id, system, this.gameData.data.System, systemIds)
+            : false;
         // No await is allowed below this point. Recheck after the FINAL catalog
         // read, including System.get: a close/recovery may have run meanwhile.
         if (authority.retired || this.records.get(token) !== authority) throw new Error('Pilot session replaced');

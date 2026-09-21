@@ -46,3 +46,32 @@ export function areSystemsSameOrVariants(
 
     return Boolean(samePos || sameName);
 }
+
+/**
+ * Checks whether a planet ID belongs to a target star system or any storyline clone/variant
+ * sharing the same celestial position or canonical name (e.g. Glimmer 193/759/760/761).
+ */
+export async function isPlanetInSystem(
+    planetId: string,
+    currentSystem: SystemData | undefined,
+    systemSource: { get: (id: string) => Promise<SystemData | undefined> | SystemData | undefined },
+    allSystemIds: readonly string[] = [],
+): Promise<boolean> {
+    if (!currentSystem) return false;
+    if (currentSystem.planets?.includes(planetId)) return true;
+
+    for (const sysId of allSystemIds) {
+        const sys = await systemSource.get(sysId);
+        if (sys?.planets?.includes(planetId)) {
+            const samePos = sys.position && currentSystem.position
+                && sys.position[0] === currentSystem.position[0]
+                && sys.position[1] === currentSystem.position[1];
+            const sameName = sys.name && currentSystem.name
+                && sys.name.trim().toLowerCase() === currentSystem.name.trim().toLowerCase();
+            if (samePos || sameName || areSystemsSameOrVariants(sys.id, currentSystem.id, systemSource as any)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}

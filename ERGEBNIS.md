@@ -183,3 +183,25 @@ To rapidly diagnose runtime faults, network disruptions, and gameplay state dive
   - Tuned `novajs-updater.timer` interval to `2min` with `15s` randomized delay as a background failsafe.
   - Eliminated the artificial `sleep 20` pre-probe delay in the deployment workflow.
   - Now, deployments perform zero-downtime container pulls and Docker recreates (`docker compose up -d --force-recreate novajs`) while the host operating system, networking, and Caddy reverse proxy remain online continuously.
+
+---
+
+## 7. Architectural Guardrails & Structural Bug Prevention (September 2026)
+
+To structurally prevent recurrent classes of subtle bugs, four architectural guardrails were integrated directly into the core engine:
+
+### A. Entity Archetype Validation (`nova_ecs/archetype.ts`)
+* **Problem Solved**: Untyped `new Entity()` bags failing silently when a required component is omitted by a factory.
+* **Mechanism**: `assertArchetype(entity, [RequiredComponents], 'ArchetypeName')`. Enforces at spawn time that all required components are present. If a factory forgets a component (such as `TargetComponent` on escorts), unit tests fail immediately with `[ARCHETYPE VIOLATION]`.
+
+### B. The Transient Request Pattern (`nova_ecs/transient_request.ts`)
+* **Problem Solved**: Request components representing one-shot intents persisting on entities and re-firing on subsequent ticks or across star system hops.
+* **Mechanism**: `consumeRequest(entity, RequestComponent)`. Retrieves and atomically deletes the request component on the first frame of handling, making request leakage impossible.
+
+### C. Domain Equality Abstractions (`nova/src/nova_plugin/system_variants.ts`)
+* **Problem Solved**: Bugs caused by naked string `===` or `array.includes()` on retail EV Nova storyline duplicates (Sol, Glimmer, Outbound).
+* **Mechanism**: Centralized `areSystemsSameOrVariants()` and `isPlanetInSystem()`. Standardizes resolution of stellar coordinates and canonical names across spaceport transactions, starmap plotting, and mission tracking.
+
+### D. Safe Collection Handling
+* **Problem Solved**: In-memory cloning flattens `Map` and `Set` collections into plain JSON `{}` objects, causing `.keys()` / `.entries()` crashes.
+* **Mechanism**: `clonePlainValue()` in `nova_ecs/draft_snapshot.ts` recursively traverses and clones `Map` and `Set` collections. Consumer components employ safe fallback accessors.

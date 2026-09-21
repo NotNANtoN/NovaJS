@@ -4,6 +4,7 @@ import { STANDARD_COMMODITIES } from 'novadatainterface/CommodityData';
 import { Emit, EmitNow, Entities, GetEntity, UUID } from 'nova_ecs/arg_types';
 import { SoundEvent } from './sound_event';
 import { Component } from 'nova_ecs/component';
+import { consumeRequest } from 'nova_ecs/transient_request';
 import { Angle } from 'nova_ecs/datatypes/angle';
 import { EcsEvent } from 'nova_ecs/events';
 import { Optional } from 'nova_ecs/optional';
@@ -487,6 +488,7 @@ export const PlayerBoardingSystem = new System({
             || destructionStarted || armor && armor.current <= 0) {
             return;
         }
+        consumeRequest(entity, BoardingRequestComponent);
         const action = request.action ?? 'plunder';
         if (action === 'leave') {
             entity.components.delete(BoardingRequestComponent);

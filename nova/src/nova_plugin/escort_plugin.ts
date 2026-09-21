@@ -4,6 +4,7 @@ import { Emit, Entities, GetEntity, GetWorld, UUID } from 'nova_ecs/arg_types';
 import { AsyncSystem } from 'nova_ecs/async_system';
 import { Position } from 'nova_ecs/datatypes/position';
 import { Component } from 'nova_ecs/component';
+import { assertArchetype } from 'nova_ecs/archetype';
 import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
 import {
@@ -28,6 +29,7 @@ import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
 import { DeathEvent } from './death_plugin';
 import { ControlStateEvent } from './control_state_event';
 import { PlayerShipSelector } from './player_ship_plugin';
+import { ShipComponent } from './ship_plugin';
 import {
     EscortContract,
     EscortContractData,
@@ -323,6 +325,12 @@ export function makeHiredEscort(
         shape,
     );
     escort.components.set(MovementStateComponent, movement);
+    assertArchetype(escort, [
+        HiredEscortComponent,
+        TargetComponent,
+        MovementStateComponent,
+        ShipComponent,
+    ], 'HiredEscort');
     return escort;
 }
 
