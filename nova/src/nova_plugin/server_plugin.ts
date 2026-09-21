@@ -28,6 +28,9 @@ import { SingletonComponent } from 'nova_ecs/world';
 import { Subscription } from 'rxjs';
 import { CommunicatorServer } from '../communication/CommunicatorServer';
 import { GameDataResource } from "./game_data_resource";
+import { createLogger } from '../util/logger';
+
+const log = createLogger('ROOMS');
 import { makeSystem } from './make_system';
 import { MultiRoomResource, SystemComponent } from "./nova_plugin";
 import {
@@ -368,7 +371,7 @@ const ServerSystemPlugin: Plugin = {
         world.addSystem(ManageClientsSystem);
         world.addSystem(PersistPlayerStateSystem);
         const subscription = communicator.peers.leave.subscribe(peer => {
-            console.log(`${peer} left`);
+            log.info(`Peer ${peer} left room`);
             world.emit(RemovedPeerEvent, peer);
         });
         world.resources.set(LeaveSubscription, subscription);
@@ -439,7 +442,7 @@ export const ServerPlugin: Plugin = {
                 const empty = [...peers].every(v => systemRoom.servers.value.has(v));
                 if (empty) {
                     if (world.entities.has(systemId)) {
-                        console.log(`Deleting empty system ${systemId}`);
+                        log.info(`Closing empty system room: ${systemId}`);
                         const systemEntity = world.entities.get(systemId);
                         world.entities.delete(systemId);
                         const system = systemEntity?.components.get(SystemComponent);
@@ -447,7 +450,7 @@ export const ServerPlugin: Plugin = {
                             try {
                                 await system.removeAllPlugins();
                             } catch (e) {
-                                console.warn(`Error cleaning up plugins for empty system ${systemId}:`, e);
+                                log.warn(`Error cleaning up plugins for empty system ${systemId}:`, e);
                             }
                         }
                     }
@@ -463,7 +466,7 @@ export const ServerPlugin: Plugin = {
                         world.entities.set(systemId, new Entity()
                             .addComponent(SystemComponent, system));
 
-                        console.log(`Created system ${systemId}`);
+                        log.info(`Spawned system room: ${systemId}`);
                         await system.addPlugin(multiplayer(systemRoom,
                             message => `System ${systemId}: ${message}`));
                         await system.addPlugin(ServerSystemPlugin);

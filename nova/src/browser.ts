@@ -1,3 +1,5 @@
+import { MovementStateComponent } from "nova_ecs/plugins/movement_plugin";
+import { ShipDataComponent } from "./nova_plugin/ship_plugin";
 import { AsyncSystemResource } from "nova_ecs/async_system";
 import { Entity } from "nova_ecs/entity";
 import { Comms, multiplayer, MultiplayerData } from "nova_ecs/plugins/multiplayer_plugin";
@@ -178,7 +180,16 @@ export function reportClientError(error: unknown, context = 'general') {
         const message = error instanceof Error ? error.message : String(error);
         const stack = error instanceof Error ? error.stack : undefined;
         const currentSys = (window as any).system?.resources?.get(SystemIdResource);
-        const payload = JSON.stringify({ message, stack, context, systemId: currentSys, time: Date.now() });
+        const playerToken = typeof localStorage !== 'undefined' ? localStorage.getItem('playerToken') : undefined;
+        const payload = JSON.stringify({
+            message,
+            stack,
+            context,
+            systemId: currentSys,
+            playerToken: playerToken ? playerToken.slice(0, 8) : undefined,
+            url: typeof window !== 'undefined' ? window.location.pathname : undefined,
+            time: Date.now(),
+        });
         if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
             navigator.sendBeacon('/client-error', new Blob([payload], { type: 'application/json' }));
         } else if (typeof fetch !== 'undefined') {
@@ -199,6 +210,31 @@ if (typeof window !== 'undefined') {
     window.addEventListener('unhandledrejection', (event) => {
         reportClientError(event.reason, 'unhandled-rejection');
     });
+    (window as any).dumpNovaDebugState = () => {
+        const sys = (window as any).system as World | undefined;
+        const player = (window as any).player as Entity | undefined;
+        const state = player?.components.get(PlayerStateComponent);
+        const shipData = player?.components.get(ShipDataComponent);
+        const movement = player?.components.get(MovementStateComponent);
+        const info = {
+            systemId: sys?.resources.get(SystemIdResource),
+            entityCount: sys?.entities.size ?? 0,
+            systemCount: (sys as any)?.systems?.length ?? 0,
+            player: {
+                credits: state?.credits,
+                fuel: state?.fuel,
+                hull: state?.shipId,
+                shipName: shipData?.name,
+                position: movement ? [Math.round(movement.position.x), Math.round(movement.position.y)] : undefined,
+                escorts: state?.escorts?.length ?? 0,
+                activeMissions: state?.activeMissions?.length ?? 0,
+            },
+            networkStats: sys?.resources.get(NetworkTimingResource)?.stats,
+        };
+        console.table(info.player);
+        console.log('[NOVA DEBUG DUMP]', info);
+        return info;
+    };
 }
 
 let world: World | undefined;

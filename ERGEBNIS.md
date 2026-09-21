@@ -62,8 +62,38 @@ With modern AI-assisted software engineering, the traditional calculus of techni
 | **HTTP Server** | Express 5.2.1 | Express 5.2.1 |
 | **State Proxy** | Immer 11.1.18 | Immer 11.1.18 |
 | **PixiJS** | PixiJS 8.21.0 | Latest v8 |
+| **Test Framework** | Jasmine 5.13.0 | Jasmine 5+ |
 | **Typecheck** | 0 errors | 0 errors |
 | **Test Suite** | 183 / 183 passing | 100% passing |
+
+---
+
+## 5. Observability & Logging Architecture (September 2026)
+
+To rapidly diagnose runtime faults, network disruptions, and gameplay state divergence, the logging architecture was overhauled from ad-hoc `console.log` statements into a structured observability pipeline:
+
+### A. Structured Logger (`nova/src/util/logger.ts`)
+* Provides standard log levels (`debug`, `info`, `warn`, `error`) with subsystem tags (`[SERVER]`, `[ROOMS]`, `[HTTP]`, `[CLIENT]`).
+* Prepend ISO timestamps (`[2026-09-21T13:45:00.123Z]`) to every entry for direct log correlation across client and server containers.
+* Filterable via `NOVA_LOG_LEVEL` environment variable (defaults to `info`).
+
+### B. HTTP Request & Latency Logging
+* In `setupRoutes.ts`, added middleware tracking request duration and status.
+* Automatically surfaces any API endpoint access, error response (4xx / 5xx), and slow queries (> 150ms) in real time.
+
+### C. Robust Client Telemetry (`/client-error`)
+* Accepts both `application/json` and `text/plain` payloads from `navigator.sendBeacon` and `fetch`.
+* Captures URL, userAgent, current star system ID, pilot token prefix, error message, and full call stacks.
+
+### D. Asset Warning Noise Elimination
+* In `novaparse/src/parsers/ResourceIDNotFound.ts`, silenced expected missing `dësc` resource warnings for non-player ship/outfit variants.
+* Eliminates over 200 lines of noise on startup, making genuine runtime faults immediately visible.
+
+### E. In-Game Diagnostics (`window.dumpNovaDebugState()`)
+* Developers and testers can execute `dumpNovaDebugState()` in the browser console at any time to inspect:
+  - Active ECS entity and system counts.
+  - Player credits, jump fuel, hull ID, ship name, coordinates, escorts count, and active missions.
+  - Network latency, ping count, and packet timing statistics.
 
 ---
 

@@ -142,6 +142,18 @@ class GameDataServer {
         // expects assets to be loaded from URLs.
 
         setupHttpLimiter(this.app);
+        this.app.use((req, res, next) => {
+            const start = Date.now();
+            res.on('finish', () => {
+                const duration = Date.now() - start;
+                // Log non-200 responses, API endpoints, error posts, or slow requests (> 150ms)
+                if (res.statusCode >= 400 || req.path.startsWith('/player') || req.path.startsWith('/api') || req.path === '/client-error' || duration > 150) {
+                    const level = res.statusCode >= 500 ? 'ERROR' : res.statusCode >= 400 ? 'WARN' : 'INFO';
+                    console.log(`[${new Date().toISOString()}] [${level}] [HTTP] ${req.method} ${req.originalUrl || req.url} ${res.statusCode} (${duration}ms)`);
+                }
+            });
+            next();
+        });
         this.app.use(gzipMiddleware);
         this.app.use(dataPath, (req, res, next) => {
             res.setHeader('Cache-Control', gameDataCacheControl(req.path));
@@ -208,9 +220,15 @@ class GameDataServer {
         },
             express.static(path.dirname(this.settingsPath)));
 
-        this.app.post('/client-error', express.json(), (req, res) => {
-            const { message, stack, context, systemId } = req.body || {};
-            console.error(`[BROWSER ERROR] [${new Date().toISOString()}] [system: ${systemId || 'none'}] [context: ${context || 'general'}] ${message}\nStack: ${stack || 'no stack'}`);
+        this.app.post('/client-error', express.text({ type: '*/*' }), (req, res) => {
+            let payload: any = req.body;
+            if (typeof payload === 'string') {
+                try { payload = JSON.parse(payload); } catch {}
+            }
+            const { message, stack, context, systemId, url, userAgent, playerToken } =
+                (payload && typeof payload === 'object') ? payload : { message: String(payload) };
+            const pilotTag = playerToken ? `[pilot:${String(playerToken).slice(0, 8)}] ` : '';
+            console.error(`[CLIENT TELEMETRY] [${new Date().toISOString()}] [sys:${systemId || 'none'}] [ctx:${context || 'general'}] ${pilotTag}${message}${url ? ` (at ${url})` : ''}${stack ? `\nStack: ${stack}` : ''}`);
             res.status(204).end();
         });
 

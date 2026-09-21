@@ -29,14 +29,15 @@ import {
     CompatibilityProfile,
     CompatibilityProfileResource,
 } from './src/nova_plugin/entity_budget';
-//import { NovaRepl } from "./src/server/NovaRepl";
+import { createLogger } from './src/util/logger';
 
+const log = createLogger('SERVER');
 
 process.on('uncaughtException', error => {
-    console.error('[SERVER UNCAUGHT EXCEPTION]', error);
+    log.error('Uncaught Exception:', error);
 });
 process.on('unhandledRejection', reason => {
-    console.error('[SERVER UNHANDLED REJECTION]', reason);
+    log.error('Unhandled Rejection:', reason);
 });
 
 const Settings = t.partial({
@@ -148,7 +149,7 @@ async function startGame() {
         clientSettingsPath, novaDataPath, playerStore);
 
     httpServer.listen(port, function() {
-        console.log("listening at port " + port);
+        log.info(`NovaJS server listening on port ${port} (compatibilityProfile: ${compatibilityProfile})`);
     });
 
     communicator = new CommunicatorServer(channel);
