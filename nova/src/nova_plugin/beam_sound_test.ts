@@ -23,7 +23,7 @@ describe('Beam looping sound management', () => {
             delta_s: 1 / 60,
             frame: 10,
         });
-        world.resources.set(FireSubs, () => undefined);
+        world.resources.set(FireSubs, () => []);
 
         const beamData = {
             ...getDefaultBeamWeaponData(),
