@@ -229,3 +229,19 @@ To structurally prevent recurrent classes of subtle bugs, four architectural gua
 ### F. Atomic Flagship Commandeer Transactions (`nova/src/nova_plugin/flagship_swap.ts`)
 * **Problem Solved**: Manual ad-hoc component mutations during ship captures causing desynchronized `ShipComponent`, `PlayerState`, `CombatAuthority`, and escort contracts.
 * **Mechanism**: `transferFlagship(playerState, entity, newShipId, playerUuid)`. Atomically swaps the flagship hull, migrates the previous hull to the escort fleet, updates ECS presentation components, and commits the server combat ledger.
+
+### G. ECS Event Dispatch Pre-Indexing (`nova_ecs/world.ts`)
+* **Problem Solved**: At 60 FPS across both client and server star system instances, `World.runEvent` executed an unindexed `this.systems.filter(s => s.events.has(event))` on every frame and every event, triggering tens of thousands of array allocations and linear searches per second.
+* **Mechanism**: Pre-indexed event cache `systemsByEvent: Map<UnknownEvent, System[]>`. Invalidation occurs strictly when systems are added or removed. Events without listeners return early in $O(1)$ time with zero array allocations.
+
+### H. Complete Star System Teardown & Lifecycle (`World.destroy()`)
+* **Problem Solved**: Empty star systems in the server room manager or departed client scenes unsubscribed plugins but left entities, component graphs, and event queues allocated, creating latent memory leaks under continuous exploration.
+* **Mechanism**: `World.destroy()`. Cleans up all plugins, flushes event queues, clears event-system indices, and clears all entity collections atomically.
+
+### I. Broadphase Collision Partitioning (`nova/src/nova_plugin/collisions_plugin.ts`)
+* **Problem Solved**: Collision broadphase built a combined list and ran `.filter()` every frame to separate hitboxes from hurtboxes.
+* **Mechanism**: Directly partitioned `hitboxEntries` and `hurtboxEntries` arrays during collider queries, eliminating intermediate array filtering and guaranteeing strongly-typed hurtbox search loops.
+
+### J. Formal Entity Archetype Contracts (`nova/src/nova_plugin/archetypes.ts`)
+* **Problem Solved**: Entity component bags created ad-hoc with varying sets of components, leading to systems failing silently when a required component (e.g. `TargetComponent` or `MovementStateComponent`) was omitted.
+* **Mechanism**: Formally defined `ShipArchetypeComponents`, `EscortArchetypeComponents`, `PlanetArchetypeComponents`, and `ProjectileArchetypeComponents` with validation functions (`assertShipArchetype`, `assertEscortArchetype`, `isArchetype`).

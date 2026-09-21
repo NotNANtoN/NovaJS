@@ -61,6 +61,7 @@ export class World {
 
     private sortables: Array<Sortable> = []; // This includes systems and markers
     private systems: Array<System> = []; // Not a map because order matters.
+    private systemsByEvent = new Map<UnknownEvent, System[]>();
     singletonEntity: Entity;
 
     private eventQueue: EcsEventWithEntities<unknown>[] = [];
@@ -139,6 +140,17 @@ export class World {
         for (const plugin of plugins) {
             await this.removePlugin(plugin);
         }
+    }
+
+    /**
+     * Clear and destroy all entities, queries, and non-base plugins in this world.
+     * Used when star system worlds are torn down to free memory and detach handlers.
+     */
+    async destroy() {
+        await this.removeAllPlugins();
+        this.eventQueue.length = 0;
+        this.systemsByEvent.clear();
+        this.entities.clear();
     }
 
     /**
@@ -263,6 +275,7 @@ export class World {
 
         this.sortables = topologicalSortList([...this.sortables, system]);
         this.systems = filterSystems(this.sortables);
+        this.systemsByEvent.clear();
         this.nameSystemMap.set(system.name, system);
 
         for (const component of system.query.components) {
@@ -274,6 +287,7 @@ export class World {
     private addAnyMarker(marker: Marker): this {
         this.sortables = topologicalSortList([...this.sortables, marker]);
         this.systems = filterSystems(this.sortables);
+        this.systemsByEvent.clear();
         return this;
     }
 
@@ -333,6 +347,7 @@ export class World {
             this.sortables.splice(index, 1);
         }
         this.systems = filterSystems(this.sortables);
+        this.systemsByEvent.clear();
 
         return this;
     }
@@ -355,8 +370,20 @@ export class World {
         }
     }
 
+    private getSystemsForEvent(event: UnknownEvent): System[] {
+        let systems = this.systemsByEvent.get(event);
+        if (!systems) {
+            systems = this.systems.filter(s => s.events.has(event));
+            this.systemsByEvent.set(event, systems);
+        }
+        return systems;
+    }
+
     private runEvent(eventWithEntities: EcsEventWithEntities<unknown>) {
-        const systems = this.systems.filter(s => s.events.has(eventWithEntities.event));
+        const systems = this.getSystemsForEvent(eventWithEntities.event);
+        if (systems.length === 0) {
+            return;
+        }
 
         // Default to all entities if none are specified. When defaulting to all,
         // this includes entities added in the same step.

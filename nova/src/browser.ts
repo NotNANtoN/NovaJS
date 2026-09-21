@@ -287,9 +287,10 @@ async function leaveGameWorld() {
         multiRoom.leave(currentSystemUuid);
         world?.entities.delete(currentSystemUuid);
     }
-    // Removing every non-base plugin also unsubscribes the multiplayer
-    // communicator, so the old world cannot continue receiving room events.
-    await system.removeAllPlugins();
+    // Destroying the old world removes every non-base plugin (unsubscribing
+    // the multiplayer communicator so the old world cannot continue receiving
+    // room events), empties event queues, and detaches entities cleanly.
+    await system.destroy();
     system = undefined;
 }
 

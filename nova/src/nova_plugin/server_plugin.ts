@@ -449,7 +449,7 @@ export const ServerPlugin: Plugin = {
                         const system = systemEntity?.components.get(SystemComponent);
                         if (system) {
                             try {
-                                await system.removeAllPlugins();
+                                await system.destroy();
                             } catch (e) {
                                 log.warn(`Error cleaning up plugins for empty system ${systemId}:`, e);
                             }

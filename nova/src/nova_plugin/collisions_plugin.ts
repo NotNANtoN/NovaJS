@@ -329,19 +329,25 @@ enum RBushEntryType {
     hitbox,
 }
 
-type RBushEntry = BBox & {
+type RBushBaseEntry = BBox & {
     uuid: string,
     hull: Hull,
     displacement: { x: number, y: number },
     position: { x: number, y: number },
     projectile: boolean,
-} & ({
+};
+
+type RBushHurtboxEntry = RBushBaseEntry & {
     type: RBushEntryType.hurtbox,
     hitter: CollisionHitter,
-} | {
+};
+
+type RBushHitboxEntry = RBushBaseEntry & {
     type: RBushEntryType.hitbox,
     vulnerability: CollisionVulnerability,
-});
+};
+
+type RBushEntry = RBushHurtboxEntry | RBushHitboxEntry;
 
 export const RBushResource = new Resource<RBush<RBushEntry>>("RBushResource");
 const movementStarts = new WeakMap<RBush<RBushEntry>, Map<string, { x: number, y: number }>>();
@@ -468,10 +474,17 @@ export const CollisionSystem = new System({
         // Hulls and interaction components can be mutable or revocable drafts.
         // Keep tree entries only for this invocation, never across ticks.
         rbush.clear();
-        const currentEntries: RBushEntry[] = [];
-        function updateEntry(type: RBushEntryType, hull: Hull, uuid: string,
+        const hitboxEntries: RBushHitboxEntry[] = [];
+        const hurtboxEntries: RBushHurtboxEntry[] = [];
+        function makeEntry(type: RBushEntryType.hitbox, hull: Hull, uuid: string,
+            interaction: CollisionVulnerability,
+            movement: MovementState | undefined): RBushHitboxEntry;
+        function makeEntry(type: RBushEntryType.hurtbox, hull: Hull, uuid: string,
+            interaction: CollisionHitter,
+            movement: MovementState | undefined, projectile?: boolean): RBushHurtboxEntry;
+        function makeEntry(type: RBushEntryType, hull: Hull, uuid: string,
             interaction: CollisionHitter | CollisionVulnerability,
-            movement: MovementState | undefined, projectile = false) {
+            movement: MovementState | undefined, projectile = false): RBushEntry {
             const start = starts?.get(uuid);
             // Translate endpoint geometry by actual entity travel, not by the
             // hull origin: an offset hull is not additional movement.
@@ -484,7 +497,7 @@ export const CollisionSystem = new System({
                 displacement = { x: 0, y: 0 };
             }
             const bbox = hull.bbox;
-            const entry = {
+            return {
                 ...(type === RBushEntryType.hitbox || projectile ? {
                     minX: Math.min(bbox.minX, bbox.minX - displacement.x),
                     minY: Math.min(bbox.minY, bbox.minY - displacement.y),
@@ -499,14 +512,13 @@ export const CollisionSystem = new System({
                 ...('vulnerableTo' in interaction
                     ? { vulnerability: interaction } : { hitter: interaction }),
             } as RBushEntry;
-            currentEntries.push(entry);
         }
         for (const [hull, uuid, interaction, movement] of hitboxColliders) {
-            updateEntry(RBushEntryType.hitbox, hull, uuid, interaction, movement);
+            hitboxEntries.push(makeEntry(RBushEntryType.hitbox, hull, uuid, interaction, movement));
         }
         for (const [hull, uuid, interaction, projectile, movement] of hurtboxColliders) {
-            updateEntry(RBushEntryType.hurtbox, hull, uuid, interaction, movement,
-                projectile !== undefined);
+            hurtboxEntries.push(makeEntry(RBushEntryType.hurtbox, hull, uuid, interaction, movement,
+                projectile !== undefined));
         }
 
         // Check for collisions
@@ -527,14 +539,8 @@ export const CollisionSystem = new System({
         try {
             // Only hitboxes are searched for; indexing hurtboxes wastes tree
             // work, particularly with many projectiles in flight.
-            rbush.load(currentEntries.filter(entry => entry.type === RBushEntryType.hitbox));
-            for (const entry of currentEntries) {
-                // Hurtboxes (projectiles, beams, blasts) initiate collisions against hitboxes (ships, asteroids).
-                // Hitboxes do not search the tree, halving broadphase query overhead.
-                if (entry.type !== RBushEntryType.hurtbox) {
-                    continue;
-                }
-
+            rbush.load(hitboxEntries);
+            for (const entry of hurtboxEntries) {
                 const maybeCollisions = rbush.search(entry);
 
                 for (const other of maybeCollisions) {

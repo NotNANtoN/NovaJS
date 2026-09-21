@@ -1559,6 +1559,16 @@ describe('world', () => {
         expect(stepData).toEqual(['plugin component']);
     });
 
+    it('destroy() clears entities, queue, and removes non-base plugins', async () => {
+        const testEntity = new Entity().addComponent(BAR_COMPONENT, { y: 'destroy-test' });
+        world.entities.set('test-entity', testEntity);
+        expect(world.entities.has('test-entity')).toBeTrue();
+
+        await world.destroy();
+        expect(world.entities.size).toBe(0);
+        expect(world.plugins).toEqual(world.basePlugins);
+    });
+
     it('marks entities with their uuid', () => {
         world.entities.set('foo', new Entity());
         expect(world.entities.get('foo')?.uuid).toEqual('foo');
