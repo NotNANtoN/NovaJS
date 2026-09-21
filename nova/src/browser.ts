@@ -12,6 +12,7 @@ import 'pixi.js/prepare';
 import { firstValueFrom, from, take, filter, map, timeout } from "rxjs";
 import Stats from 'stats.js';
 import { v4 } from "uuid";
+import { sound } from '@pixi/sound';
 import { GameData } from "./client/gamedata/GameData";
 import { CommunicatorClient } from "./communication/CommunicatorClient";
 import { MultiRoom } from "./communication/multi_room_communicator";
@@ -800,6 +801,19 @@ async function returnToMainMenu(playerState?: PlayerState) {
         mainMenuTransitioning = false;
     }
 }
+
+const unlockAudio = () => {
+    try {
+        const audioContext = (sound.context as any)?.audioContext;
+        if (audioContext && typeof audioContext.resume === 'function') {
+            void audioContext.resume();
+        }
+    } catch {}
+    window.removeEventListener('pointerdown', unlockAudio, true);
+    window.removeEventListener('keydown', unlockAudio, true);
+};
+window.addEventListener('pointerdown', unlockAudio, true);
+window.addEventListener('keydown', unlockAudio, true);
 
 const escapeMenu = new EscapeMenu(
     resumeGameplay,

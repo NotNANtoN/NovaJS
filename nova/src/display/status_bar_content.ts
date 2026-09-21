@@ -101,7 +101,11 @@ export function boardingOutcomeText(
     capturedShip?: string,
     resisted?: boolean,
     fleetFull?: boolean,
+    selfDestruct?: boolean,
 ): string {
+    if (selfDestruct) {
+        return 'Boarded: derelict core breach! Self-destruct triggered!';
+    }
     const taken: string[] = [];
     if (cargo > 0) {
         taken.push(`${formatNumber(cargo)} tons of cargo`);

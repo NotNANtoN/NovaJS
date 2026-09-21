@@ -1014,6 +1014,7 @@ const ShowBoardingOutcome = new System({
                 outcome.capturedShip,
                 outcome.resisted,
                 outcome.fleetFull,
+                outcome.selfDestruct,
             ),
             time.time,
         );

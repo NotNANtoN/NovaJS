@@ -969,7 +969,6 @@ export abstract class MissionBoard extends Menu<Entity> {
                 offer.resolved !== undefined);
         const proceduralOffers: MissionOffer[] = this.offerLocation
             === MissionOfferLocation.MissionComputer
-            && resourceOffers.length === 0
             ? generateProceduralMissions({
                 currentSystemId: state.currentSystem,
                 currentPlanetId: this.planetId,
@@ -996,9 +995,9 @@ export abstract class MissionBoard extends Menu<Entity> {
                 available: offer.available,
             }))
             : [];
-        // The generated board is shown first, like the original Mission
-        // Computer only when no usable retail mïsn resources exist.
-        this.offers = [...preferRetailOffers(resourceOffers, proceduralOffers)];
+        // Present retail and story missions at the top, followed by
+        // available procedural contracts (deliveries, bounties, ferry).
+        this.offers = [...resourceOffers, ...proceduralOffers];
         this.selectionIndex = this.offers.length > 0 ? 0 : -1;
         this.firstVisible = 0;
         this.loading = false;

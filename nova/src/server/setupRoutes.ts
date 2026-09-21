@@ -431,6 +431,12 @@ class GameDataServer {
                         buffer,
                     );
                     res.type('webp').send(webP);
+                } else if (name === 'SoundFile' || /\.mp3$/i.test(req.path)) {
+                    if (buffer.length === 0) {
+                        res.status(404).send('Sound file empty');
+                    } else {
+                        res.type('audio/mpeg').send(buffer);
+                    }
                 } else {
                     res.type('png').send(buffer);
                 }

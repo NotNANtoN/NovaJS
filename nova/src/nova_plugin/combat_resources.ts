@@ -56,10 +56,14 @@ export function mergeCombatPlayerState(local: PlayerState, remote: PlayerState,
     // once. Absolute min(local, remote) would erase transfers/refills when an
     // older client snapshot arrives; trusting the submitted basis would mint fuel.
     const authority = owners.get(context.owner);
-    const debit = local.combatResources ? authority?.acceptOwnerFuel(remote) ?? 0 : 0;
-    const fuel = Math.max(0, (local.fuel ?? 0) - debit);
+    const debit = authority ? authority.acceptOwnerFuel(remote) : 0;
+    if (authority && debit > 0) {
+        authority.balance.fuel = Math.max(0, authority.balance.fuel - debit);
+        authority.commit();
+    }
+    const fuel = authority ? authority.balance.fuel : Math.max(0, (local.fuel ?? 0) - debit);
     return { ...remote, fuel, shipId: local.shipId,
-        combatResources: local.combatResources };
+        combatResources: authority?.state.combatResources ?? local.combatResources };
 }
 export function mergeCombatOutfits(local: OutfitsState, remote: OutfitsState,
     context: ReplicationMergeContext): OutfitsState {
@@ -93,11 +97,22 @@ export class CombatAuthority {
         this.commit();
     }
     acceptOwnerFuel(state: PlayerState): number {
-        const basis = this.issuedFuel.get(state.combatResources?.revision ?? this.balance.revision);
-        if (!basis || !Nonnegative.is(state.fuel)) return 0;
-        const spent = Math.max(0, basis.fuel - state.fuel);
-        const debit = Math.max(0, spent - basis.spent);
-        basis.spent = Math.max(basis.spent, spent);
+        if (!Nonnegative.is(state.fuel)) return 0;
+        const rev = state.combatResources?.revision;
+        if (typeof rev === 'number' && rev < this.balance.revision && !this.issuedFuel.has(rev)) {
+            return 0;
+        }
+        const targetRev = rev ?? this.balance.revision;
+        const basis = this.issuedFuel.get(targetRev);
+        const baseFuel = basis?.fuel ?? this.balance.fuel;
+        const spent = Math.max(0, baseFuel - state.fuel);
+        const prevSpent = basis?.spent ?? 0;
+        const debit = Math.max(0, spent - prevSpent);
+        if (basis) {
+            basis.spent = Math.max(basis.spent, spent);
+        } else {
+            this.issuedFuel.set(targetRev, { fuel: baseFuel, spent });
+        }
         return debit;
     }
     project(entity: Entity): void {

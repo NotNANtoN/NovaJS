@@ -192,7 +192,7 @@ const SoundSystem = new System({
                 getMasterVolume() * attenuation);
         }).catch(error => {
             failedSounds.add(id);
-            console.warn(`Unable to load sound ${id}, using silent fallback`, error);
+            // Missing or empty sound files fail silently without polluting console
         }).finally(() => {
             if (pendingSounds.get(id) === pending) {
                 pendingSounds.delete(id);

@@ -66,3 +66,44 @@ With modern AI-assisted software engineering, the traditional calculus of techni
 | **PixiJS** | PixiJS 8.21.0 | Latest v8 |
 | **Typecheck** | 0 errors | 0 errors |
 | **Test Suite** | 183 / 183 passing | 100% passing |
+
+---
+
+## 4. Gameplay Stabilization & Bug Fixes (September 2026)
+
+### A. Consecutive Hyperjump Fuel Depletion
+* **Problem**: After 3 hyperjumps from a starting 3-jump tank (300 units), the third jump would deplete on the client but then suddenly replenish back to 100 units ("1 jump in the pocket").
+* **Root Cause**: In `CombatAuthority.acceptOwnerFuel(state)`, if the arriving player's `state.combatResources?.revision` was missing or not found in `this.issuedFuel` on the server, `acceptOwnerFuel` returned `0`. In `server_plugin.ts`, room handoffs consumed this debit: `auth.balance.fuel = Math.max(0, auth.balance.fuel - debit)`. Since `debit` was `0`, the server balance stayed at 100 and `auth.project(target)` overwrote `state.fuel = this.balance.fuel`, wiping out the client's jump fuel consumption. Additionally, in `mergeCombatPlayerState`, debited fuel was never committed to `authority.balance.fuel`.
+* **Fix**:
+  - In `acceptOwnerFuel`, fall back to `this.balance.fuel` as the baseline when `basis` is not yet indexed, and only discard delayed intents if the client explicitly proposes an older, already-cleared revision (`rev < this.balance.revision && !this.issuedFuel.has(rev)`).
+  - In `mergeCombatPlayerState`, commit positive fuel debits immediately to `authority.balance.fuel`.
+* **Verification**: Added unit test `honors consecutive jump fuel consumption down to zero even without prior issued basis` in `combat_resources_test.ts`.
+
+### B. Derelict Vessel Capture & Self-Destruct Explosion
+* **Problem**: Attempting to capture an uncrewed derelict vessel resulted in "Vessel has already been boarded" or did nothing, leaving the dead derelict frozen in space forever.
+* **Root Cause**:
+  - In `boarding_plugin.ts`, `boarded` tracked both plundering and capture attempts. Any initial interaction placed the target UUID into `boarded`, permanently blocking subsequent capture attempts with `"Vessel has already been boarded."`
+  - In `PlayerBoardingSystem`, derelicts (`isDerelict: true`) had an arbitrary 15% random failure roll that set `resisted = true`, even though derelicts have 0 crew. The vessel remained frozen in space.
+* **Fix**:
+  - Set `ShipDataComponent` directly during derelict creation in `derelict_plugin.ts`.
+  - In `PlayerBoardingSystem`, allow `action === 'capture'` on disabled vessels even if already plundered.
+  - When capture succeeds on a derelict (85% base chance): vessel is added to `player.escorts` with nominal maintenance (`10 cr/day`), victim entity is deleted from space, and sound `nova:140` is played.
+  - When salvage capture fails on an unstable derelict: anti-tamper / core breach triggers a self-destruct! The derelict starts exploding (`DestructionStartedComponent`, `ExplodingComponent`, `ZeroArmorEvent`, `SoundEvent nova:153`), and the player is notified: `"Derelict salvage failed: Core breach and self-destruct triggered!"`.
+* **Verification**: Added unit tests `allows capturing a vessel that was previously plundered` and `triggers core breach and self-destruct when derelict salvage capture fails` in `boarding_plugin_test.ts`.
+
+### C. Mission Computer Procedural & Retail Contract Mixing
+* **Problem**: On planets with any retail/story mission (e.g. John Blake storyline on Earth), no procedural contracts (cargo deliveries, rush courier runs, bounties, passenger transport) appeared on the Mission Computer BBS.
+* **Root Cause**: In `mission_bbs.ts`, procedural missions were only generated when `resourceOffers.length === 0`. Furthermore, `preferRetailOffers` completely discarded synthetic offers if any retail offer existed.
+* **Fix**:
+  - Removed the `resourceOffers.length === 0` guard so procedural offers are always generated for the Mission Computer.
+  - Combined retail and procedural offers: `this.offers = [...resourceOffers, ...proceduralOffers]`. Story missions appear at the top, followed by 6–12 varied procedural contracts.
+
+### D. Audio Autoplay & 0-Byte Sound File Handling
+* **Problem**: Browser console logged `Unable to decode audio data` for `nova:141` / `nova:142`, and `The AudioContext was not allowed to start`.
+* **Root Cause**:
+  - `setupRoutes.ts` served `ArrayBuffer` data with `res.type('png')` regardless of resource type, and served empty 0-byte sound buffers with `200 OK`, crashing WebAudio's `decodeAudioData`.
+  - WebAudio requires an initial user interaction to resume audio contexts under browser autoplay policies.
+* **Fix**:
+  - In `setupRoutes.ts`, set `res.type('audio/mpeg')` for sound files, and return `404` for 0-byte empty sound resources.
+  - In `sound_plugin.ts`, silently fall back for missing/unsupported sound IDs without polluting the console.
+  - In `browser.ts`, register a one-time user gesture handler (`pointerdown`, `keydown`) to resume `sound.context` smoothly on first interaction.

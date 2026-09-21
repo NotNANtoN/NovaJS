@@ -19,6 +19,7 @@ import { GameDataResource } from './game_data_resource';
 import { ArmorComponent } from './health_plugin';
 import { makeShip } from './make_ship';
 import { PlatformResource } from './platform_plugin';
+import { ShipDataComponent } from './ship_plugin';
 import { Stat } from './stat';
 import { SystemIdResource } from './system_id_resource';
 
@@ -51,6 +52,7 @@ export function makeDerelict(
     salvageCredits = 15_000,
 ) {
     const ship = makeShip(shipData);
+    ship.components.set(ShipDataComponent, shipData);
     ship.components.set(DisabledComponent, true);
     ship.components.set(MovementStateComponent, {
         position,

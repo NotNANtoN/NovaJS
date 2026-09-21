@@ -194,7 +194,7 @@ export const BoardingSystem = new AsyncSystem({
             return;
         }
         const targetUuid = target.target;
-        if (!targetUuid || boarding?.boarded.includes(targetUuid)) {
+        if (!targetUuid) {
             entity.components.set(BoardingNoticeComponent,
                 { text: 'That ship cannot be boarded.' });
             return;
@@ -221,8 +221,9 @@ export const BoardingSystem = new AsyncSystem({
 
         const shipType = victimShipData?.name ?? victimShip?.id ?? 'Unknown Vessel';
         const shipName = isDerelict ? `Derelict ${shipType}` : shipType;
-        const credits = victimInventory?.credits ?? Math.max(500, Math.floor((victimShipData?.cost ?? 50000) * 0.001));
-        const cargoTons = victimInventory ? heldCargo(victimInventory) : Math.floor((victimShipData?.cargoCapacity ?? 20) / 2);
+        const isAlreadyPlundered = Boolean(boarding?.boarded.includes(targetUuid));
+        const credits = isAlreadyPlundered ? 0 : (victimInventory?.credits ?? Math.max(500, Math.floor((victimShipData?.cost ?? 50000) * 0.001)));
+        const cargoTons = isAlreadyPlundered ? 0 : (victimInventory ? heldCargo(victimInventory) : Math.floor((victimShipData?.cargoCapacity ?? 20) / 2));
         const crew = isDerelict ? 0 : (victimShipData?.crew ?? 5);
 
         boardingDialog.container.position.set(screenSize.x / 2, screenSize.y / 2);

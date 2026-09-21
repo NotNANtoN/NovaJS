@@ -9,6 +9,7 @@ import { EcsEvent } from 'nova_ecs/events';
 import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
+import { Time, TimeResource } from 'nova_ecs/plugins/time_plugin';
 import {
     MovementPhysicsComponent,
     MovementStateComponent,
@@ -20,7 +21,7 @@ import {
 import { ProvideAsync } from 'nova_ecs/provide_async';
 import { Query } from 'nova_ecs/query';
 import { System } from 'nova_ecs/system';
-import { DisabledComponent } from './death_plugin';
+import { DisabledComponent, DisableOnZeroArmorComponent, ExplodingComponent, ZeroArmorEvent } from './death_plugin';
 import { DestructionStartedComponent } from './destruction_state';
 import {
     approachTarget,
@@ -98,6 +99,7 @@ const BoardingOutcome = t.intersection([
         capturedShip: t.string,
         resisted: t.boolean,
         fleetFull: t.boolean,
+        selfDestruct: t.boolean,
     }),
 ]);
 export type BoardingOutcome = t.TypeOf<typeof BoardingOutcome>;
@@ -477,14 +479,19 @@ export const PlayerBoardingSystem = new System({
         GetEntity,
         EmitNow,
         Entities,
+        Optional(TimeResource),
     ] as const,
     step(request, player, movement, multiplayer, disabledTargets, platform,
-        boarding, destructionStarted, armor, uuid, entity, emitNow, entities) {
+        boarding, destructionStarted, armor, uuid, entity, emitNow, entities, time) {
         if (platform !== 'node' || multiplayer.owner === 'server'
             || destructionStarted || armor && armor.current <= 0) {
             return;
         }
-        if (boarding?.boarded.includes(request.target)) {
+        const action = request.action ?? 'plunder';
+        if (action === 'leave') {
+            return;
+        }
+        if (boarding?.boarded.includes(request.target) && action !== 'capture') {
             entity.components.set(BoardingNoticeComponent,
                 { text: 'Vessel has already been boarded.' });
             return;
@@ -504,11 +511,6 @@ export const PlayerBoardingSystem = new System({
             return;
         }
 
-        const action = request.action ?? 'plunder';
-        if (action === 'leave') {
-            return;
-        }
-
         let result = { cargo: 0, credits: 0 };
         if (action === 'plunder' || request.action === undefined) {
             result = plunderShip(player, victim[3], victim[4]);
@@ -521,6 +523,7 @@ export const PlayerBoardingSystem = new System({
         let capturedShip: string | undefined;
         let resisted: boolean | undefined;
         let fleetFull: boolean | undefined;
+        let selfDestruct: boolean | undefined;
 
         const isDerelict = Boolean(victim[9]);
         if (action === 'capture') {
@@ -537,7 +540,7 @@ export const PlayerBoardingSystem = new System({
                         ? 0.85
                         : Math.min(0.9, Math.max(0.35, (playerCrew + 10) / (playerCrew + victimCrew + 10)));
                     if (Math.random() < captureChance) {
-                        const dailyPay = Math.max(10, Math.floor((victimShipData?.cost ?? 50000) * 0.001));
+                        const dailyPay = isDerelict ? 10 : Math.max(10, Math.floor((victimShipData?.cost ?? 50000) * 0.001));
                         const newContract = {
                             id: `capture-${uuid}-${Date.now()}`,
                             shipId: victimShipId,
@@ -547,19 +550,43 @@ export const PlayerBoardingSystem = new System({
                         entity.components.set(PlayerStateComponent, player);
                         capturedShip = shipName;
                         entities.delete(request.target);
+                        emitNow(SoundEvent, { id: 'nova:140' });
+                    } else if (isDerelict) {
+                        selfDestruct = true;
+                        const victimEntity = entities.get(request.target);
+                        if (victimEntity) {
+                            const nowTime: Time = time ?? { time: Date.now(), delta_s: 0, delta_ms: 0, frame: 0 };
+                            victimEntity.components.delete(DisableOnZeroArmorComponent);
+                            victimEntity.components.set(DestructionStartedComponent, true);
+                            victimEntity.components.set(ExplodingComponent, nowTime.time + 1500);
+                            emitNow(ZeroArmorEvent, nowTime, [request.target]);
+                            emitNow(SoundEvent, { id: 'nova:153' });
+                        }
                     } else {
                         resisted = true;
                     }
                 } else {
                     fleetFull = true;
                 }
+            } else if (isDerelict) {
+                selfDestruct = true;
+                const victimEntity = entities.get(request.target);
+                if (victimEntity) {
+                    const nowTime: Time = time ?? { time: Date.now(), delta_s: 0, delta_ms: 0, frame: 0 };
+                    victimEntity.components.delete(DisableOnZeroArmorComponent);
+                    victimEntity.components.set(DestructionStartedComponent, true);
+                    victimEntity.components.set(ExplodingComponent, nowTime.time + 1500);
+                    emitNow(ZeroArmorEvent, nowTime, [request.target]);
+                    emitNow(SoundEvent, { id: 'nova:153' });
+                }
             } else {
                 resisted = true;
             }
         }
 
+        const isAlreadyBoarded = Boolean(boarding?.boarded.includes(request.target));
         entity.components.set(BoardingStateComponent, {
-            boarded: [...(boarding?.boarded ?? []), request.target],
+            boarded: isAlreadyBoarded ? (boarding?.boarded ?? []) : [...(boarding?.boarded ?? []), request.target],
         });
         const outcome = {
             target: request.target,
@@ -569,12 +596,16 @@ export const PlayerBoardingSystem = new System({
             ...(capturedShip ? { capturedShip } : {}),
             ...(resisted ? { resisted } : {}),
             ...(fleetFull ? { fleetFull } : {}),
+            ...(selfDestruct ? { selfDestruct } : {}),
         };
         entity.components.set(BoardingOutcomeComponent, outcome);
         emitNow(BoardingOutcomeEvent, { ...outcome, boarder: uuid }, [uuid]);
         if (capturedShip) {
             entity.components.set(BoardingNoticeComponent,
                 { text: `Captured ${capturedShip} into escort fleet!` });
+        } else if (selfDestruct) {
+            entity.components.set(BoardingNoticeComponent,
+                { text: 'Derelict salvage failed: Core breach and self-destruct triggered!' });
         } else if (fleetFull) {
             entity.components.set(BoardingNoticeComponent,
                 { text: 'Capture failed: Escort fleet is full (6 max).' });

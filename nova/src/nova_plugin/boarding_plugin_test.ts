@@ -48,6 +48,8 @@ import { TargetComponent } from './target_component';
 import { ShipComponent, ShipDataComponent } from './ship_plugin';
 import { getDefaultShipData } from 'novadatainterface/ShipData';
 import { WeaponsStateComponent } from './weapons_state';
+import { DerelictComponent } from './derelict_plugin';
+import { DestructionStartedComponent } from './destruction_state';
 
 function movementAt(
     position: Position,
@@ -560,5 +562,108 @@ describe('pirate boarding', () => {
 
         expect(outcomeCalled).toBeFalse();
         expect(world.entities.has('victim')).toBeTrue();
+    });
+
+    it('allows capturing a vessel that was previously plundered', () => {
+        const world = new World('capture-plundered-test');
+        world.resources.set(PlatformResource, 'node');
+        world.resources.set(TimeResource, {
+            time: 0,
+            delta_ms: 1_000 / 60,
+            delta_s: 1 / 60,
+            frame: 0,
+        });
+
+        const playerState = createInitialPlayerState();
+        const player = new Entity('player')
+            .addComponent(PlayerShipSelector, undefined)
+            .addComponent(PlayerStateComponent, playerState)
+            .addComponent(MultiplayerData, { owner: 'player' })
+            .addComponent(MovementStateComponent, movementAt(new Position(0, 0)))
+            .addComponent(BoardingStateComponent, { boarded: ['victim'] })
+            .addComponent(BoardingRequestComponent, { target: 'victim', sequence: 2, action: 'capture' });
+
+        const shipData = {
+            ...getDefaultShipData(),
+            id: 'nova:130',
+            name: 'Kestrel',
+            crew: 5,
+            cost: 100_000,
+        };
+
+        const victim = new Entity('victim')
+            .addComponent(DisabledComponent, true)
+            .addComponent(MovementStateComponent, movementAt(new Position(BOARDING_STANDOFF, 0)))
+            .addComponent(ShipComponent, { id: 'nova:130' })
+            .addComponent(ShipDataComponent, shipData)
+            .addComponent(ArmorComponent, new Stat({ current: 20, max: 100, recharge: 0 }));
+
+        world.entities.set('player', player);
+        world.entities.set('victim', victim);
+        world.addSystem(PlayerBoardingSystem);
+
+        let outcome: any;
+        world.events.get(BoardingOutcomeEvent).subscribe(value => {
+            outcome = value;
+        });
+        spyOn(Math, 'random').and.returnValue(0.1);
+        world.step();
+
+        expect(outcome.target).toBe('victim');
+        expect(outcome.capturedShip).toBe('Kestrel');
+        expect(playerState.escorts?.length).toBe(1);
+        expect(world.entities.has('victim')).toBeFalse();
+    });
+
+    it('triggers core breach and self-destruct when derelict salvage capture fails', () => {
+        const world = new World('derelict-self-destruct-test');
+        world.resources.set(PlatformResource, 'node');
+        world.resources.set(TimeResource, {
+            time: 1000,
+            delta_ms: 1_000 / 60,
+            delta_s: 1 / 60,
+            frame: 0,
+        });
+
+        const playerState = createInitialPlayerState();
+        const player = new Entity('player')
+            .addComponent(PlayerShipSelector, undefined)
+            .addComponent(PlayerStateComponent, playerState)
+            .addComponent(MultiplayerData, { owner: 'player' })
+            .addComponent(MovementStateComponent, movementAt(new Position(0, 0)))
+            .addComponent(BoardingRequestComponent, { target: 'derelict', sequence: 1, action: 'capture' });
+
+        const shipData = {
+            ...getDefaultShipData(),
+            id: 'nova:129',
+            name: 'Viper',
+            crew: 0,
+            cost: 60_000,
+        };
+
+        const derelict = new Entity('derelict')
+            .addComponent(DisabledComponent, true)
+            .addComponent(MovementStateComponent, movementAt(new Position(BOARDING_STANDOFF, 0)))
+            .addComponent(ShipComponent, { id: 'nova:129' })
+            .addComponent(ShipDataComponent, shipData)
+            .addComponent(DerelictComponent, { derelictId: 'd-1', shipId: 'nova:129', salvageCredits: 10000 })
+            .addComponent(ArmorComponent, new Stat({ current: 20, max: 100, recharge: 0 }));
+
+        world.entities.set('player', player);
+        world.entities.set('derelict', derelict);
+        world.addSystem(PlayerBoardingSystem);
+
+        let outcome: any;
+        world.events.get(BoardingOutcomeEvent).subscribe(value => {
+            outcome = value;
+        });
+        spyOn(Math, 'random').and.returnValue(0.99); // Force failure on derelict capture
+        world.step();
+
+        expect(outcome.target).toBe('derelict');
+        expect(outcome.selfDestruct).toBeTrue();
+        expect(derelict.components.get(DestructionStartedComponent)).toBeTrue();
+        expect(player.components.get(BoardingNoticeComponent)?.text)
+            .toBe('Derelict salvage failed: Core breach and self-destruct triggered!');
     });
 });

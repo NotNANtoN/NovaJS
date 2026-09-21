@@ -159,6 +159,27 @@ describe('authoritative combat resources', () => {
         expect(entity.components.get(OutfitsStateComponent)!.get('ammo')?.count).toBe(2);
     });
 
+    it('honors consecutive jump fuel consumption down to zero even without prior issued basis', async () => {
+        const { authority, entity } = await setup();
+        expect(authority.balance.fuel).toBe(150);
+
+        // Jump 1: client spends 100 fuel -> 50 remaining, arrival state carries no combatResources revision
+        const jump1 = { ...entity.components.get(PlayerStateComponent)!, fuel: 50, combatResources: undefined };
+        const debit1 = authority.acceptOwnerFuel(jump1);
+        expect(debit1).toBe(100);
+        authority.balance.fuel = Math.max(0, authority.balance.fuel - debit1);
+        authority.commit();
+        expect(authority.balance.fuel).toBe(50);
+
+        // Jump 2: client spends remaining 50 fuel -> 0 remaining
+        const jump2 = { ...entity.components.get(PlayerStateComponent)!, fuel: 0, combatResources: undefined };
+        const debit2 = authority.acceptOwnerFuel(jump2);
+        expect(debit2).toBe(50);
+        authority.balance.fuel = Math.max(0, authority.balance.fuel - debit2);
+        authority.commit();
+        expect(authority.balance.fuel).toBe(0);
+    });
+
     it('authorizes landed refuel, ammo buy/sell and hull stock once per revision', async () => {
         const { ledger, authority, entity } = await setup();
         const state = entity.components.get(PlayerStateComponent)!;
