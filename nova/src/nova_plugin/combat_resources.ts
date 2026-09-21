@@ -437,7 +437,6 @@ export class CombatLedger {
                 throw new Error('Too far from spaceport');
             }
             if (authority.retired) throw new Error('Pilot session replaced');
-            if (authority.landed && authority.landed !== planet.id) throw new Error('Already landed elsewhere');
             const debit = authority.acceptOwnerFuel(request.state);
             authority.balance.fuel = Math.max(0, authority.balance.fuel - debit);
             authority.landed = planet.id;

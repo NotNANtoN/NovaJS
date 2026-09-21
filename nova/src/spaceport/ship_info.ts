@@ -173,13 +173,16 @@ export class ShipInfo extends Menu<Entity> {
     }
 
     private async outfitNames(
-        outfits: ReadonlyMap<string, unknown> | undefined,
+        outfits: ReadonlyMap<string, unknown> | Record<string, unknown> | undefined,
     ): Promise<Map<string, string>> {
         const names = new Map<string, string>();
         if (!outfits) {
             return names;
         }
-        await Promise.all([...outfits.keys()].map(async id => {
+        const keys = typeof (outfits as any).keys === 'function'
+            ? [...(outfits as any).keys()]
+            : Object.keys(outfits);
+        await Promise.all(keys.map(async id => {
             try {
                 const outfit: OutfitData = await this.gameData.data.Outfit
                     .get(id);

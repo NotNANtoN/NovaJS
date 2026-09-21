@@ -228,6 +228,7 @@ export const InitializeCombatResourcesSystem = new System({
         const owner = multiplayerData.owner;
         const applyAuthority = (auth: CombatAuthority, target: Entity) => {
             if (auth.retired) return;
+            auth.landed = undefined;
             bindCombatOwner(owner, auth);
             // Room handoffs can carry an unsent final jump debit. Consume that
             // against a server-issued basis, never against a proposed balance.

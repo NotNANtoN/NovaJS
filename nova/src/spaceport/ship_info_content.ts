@@ -115,16 +115,25 @@ export function shipInfoStanding(
 }
 
 export function shipInfoOutfits(
-    outfits: ReadonlyMap<string, { count: number }> | undefined,
+    outfits: ReadonlyMap<string, { count: number }> | Record<string, { count: number }> | undefined,
     names: ReadonlyMap<string, string>,
 ): string {
-    if (!outfits || outfits.size === 0) {
+    if (!outfits) {
         return 'Outfits\n\nNone installed.';
     }
-    const lines = [...outfits.entries()]
+    const entries: [string, { count: number }][] = typeof (outfits as any).entries === 'function'
+        ? [...(outfits as any).entries()]
+        : Object.entries(outfits);
+    if (entries.length === 0) {
+        return 'Outfits\n\nNone installed.';
+    }
+    const lines = entries
         .map(([id, held]) => {
             const name = names.get(id) ?? id;
-            return held.count > 1 ? `${held.count}x ${name}` : name;
+            const count = (held && typeof held === 'object' && 'count' in held)
+                ? (held as any).count
+                : (typeof held === 'number' ? held : 1);
+            return count > 1 ? `${count}x ${name}` : name;
         })
         .sort((a, b) => a.localeCompare(b));
     return ['Outfits', '', ...lines].join('\n');

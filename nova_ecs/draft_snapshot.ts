@@ -21,7 +21,7 @@ export function plainSnapshot<T>(value: T): T {
     }
     const recovered = recoverDraft(value);
     if (recovered !== undefined) {
-        return cloneJson(recovered);
+        return clonePlainValue(recovered);
     }
     return value;
 }
@@ -56,9 +56,34 @@ function isReadable(value: object): boolean {
     }
 }
 
-function cloneJson<T>(value: T): T {
+function clonePlainValue<T>(value: T): T {
     if (value === undefined || value === null || typeof value !== 'object') {
         return value;
+    }
+    if (value instanceof Map) {
+        const copy = new Map();
+        for (const [k, v] of value.entries()) {
+            copy.set(k, clonePlainValue(v));
+        }
+        return copy as unknown as T;
+    }
+    if (value instanceof Set) {
+        const copy = new Set();
+        for (const v of value.values()) {
+            copy.add(clonePlainValue(v));
+        }
+        return copy as unknown as T;
+    }
+    if (Array.isArray(value)) {
+        return value.map(item => clonePlainValue(item)) as unknown as T;
+    }
+    const proto = Object.getPrototypeOf(value);
+    if (proto === null || proto === Object.prototype) {
+        const copy: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(value)) {
+            copy[k] = clonePlainValue(v);
+        }
+        return copy as unknown as T;
     }
     try {
         return JSON.parse(JSON.stringify(value)) as T;

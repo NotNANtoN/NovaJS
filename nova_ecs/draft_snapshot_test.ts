@@ -40,4 +40,18 @@ describe('plainSnapshot', () => {
         expect(copy.activeMissions[0].missionId).toBe('nova:1');
         expect(copy.legalRecords['nova:151']).toBe(-40);
     });
+
+    it('preserves Map and Set instances when taking snapshots from drafts', () => {
+        const draft = createDraft({
+            outfits: new Map([['nova:128', { count: 2 }]]),
+            keys: new Set(['one', 'two']),
+        });
+        const copy = plainSnapshot(draft);
+        finishDraft(draft);
+        expect(copy.outfits instanceof Map).toBeTrue();
+        expect(copy.outfits.get('nova:128')).toEqual({ count: 2 });
+        expect([...copy.outfits.keys()]).toEqual(['nova:128']);
+        expect(copy.keys instanceof Set).toBeTrue();
+        expect([...copy.keys.values()]).toEqual(['one', 'two']);
+    });
 });
