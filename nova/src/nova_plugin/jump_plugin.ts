@@ -38,7 +38,7 @@ import { SoundEvent } from "./sound_event";
 import { SystemIdResource } from "./system_id_resource";
 import { NpcAIComponent, NpcDepartureComponent } from "./npc_components";
 import { PlatformResource } from "./platform_plugin";
-import { AppliedDamageEvent } from "./death_plugin";
+import { AppliedDamageEvent } from "./damage_events";
 
 export const JUMP_SPOOL_MS = 1_200;
 export const JUMP_BRAKE_MS = 800;

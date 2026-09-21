@@ -60,8 +60,22 @@ import { makeShipExplosionBlast } from './ship_death_blast';
 // Optional(IonizationComponent), Optional(IonizationColorComponent),
 // Optional(ProjectileComponent), TimeResource] as const);
 
-export const DeathEvent = new EcsEvent<Time>('DeathEvent');
-export const ZeroArmorEvent = new EcsEvent<Time>('ZeroArmorEvent');
+import {
+    DeathEvent,
+    ZeroArmorEvent,
+    DamagedEvent,
+    AppliedDamageEvent,
+    type PlayerDestructionComplete,
+    PlayerDestructionCompleteEvent,
+} from './damage_events';
+export {
+    DeathEvent,
+    ZeroArmorEvent,
+    DamagedEvent,
+    AppliedDamageEvent,
+    type PlayerDestructionComplete,
+    PlayerDestructionCompleteEvent,
+};
 export interface RespawnRelocation {
     cause: 'respawn';
     entity: Entity;
@@ -109,27 +123,6 @@ replicationPolicies.register(PlayerDeathComponent, {
 // delivery makes the overlay appear a frame or two after completion.
 export const PLAYER_DEATH_MESSAGE_HOLD_MS = 2_700;
 export const PLAYER_DEATH_VISUAL_FALLBACK_GRACE_MS = 4_500;
-
-export const DamagedEvent = new EcsEvent<{
-    damage: WeaponDamage,
-    damager: string,
-    scale?: number,
-    fromExplosion?: boolean,
-}>('DamagedEvent');
-
-export const AppliedDamageEvent = new EcsEvent<{
-    shield: number,
-    armor: number,
-    damager: string,
-    fromExplosion?: boolean,
-}>('AppliedDamageEvent');
-
-export interface PlayerDestructionComplete extends Time {
-    playerUuid: string;
-}
-export const PlayerDestructionCompleteEvent =
-    new EcsEvent<PlayerDestructionComplete>(
-        'PlayerDestructionCompleteEvent');
 
 export function recordPlayerDeath(
     state: PlayerState,

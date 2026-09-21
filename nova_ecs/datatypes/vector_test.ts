@@ -1,5 +1,5 @@
 import { isLeft } from 'nova_ecs/either';
-import produce, { applyPatches, enablePatches, produceWithPatches } from 'immer';
+import { applyPatches, enablePatches, produce, produceWithPatches } from 'immer';
 import 'jasmine';
 import { Vector, VectorType } from './vector';
 

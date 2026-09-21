@@ -40,16 +40,14 @@ With modern AI-assisted software engineering, the traditional calculus of techni
   - Native promise rejection handling active in server route handlers.
   - `bun run typecheck` passes with 0 errors; all 183 test suites pass.
 
-### C. Immer 11 Upgrade & NovaECS State Hardening
-* **Objective**: Upgrade from Immer `9.0.21` to Immer `11.x`.
-* **Benefits**:
-  - Reduced bundle size and faster proxy traps.
-  - Tighter TypeScript inference for readonly state trees.
-* **Execution Steps**:
-  1. Upgrade `immer` to `^11.1.0`.
-  2. Audit NovaECS draft boundaries (`plainSnapshot`, `deImmerify`, and `createDraft`).
-  3. Verify that draft proxies are detached before asynchronous steps resume.
-  4. Run the complete ECS and gameplay test suite (`async_system_test.ts`, `mission_plugin_test.ts`, `player_state_test.ts`, `jump_plugin_test.ts`).
+### C. Immer 11 Upgrade & NovaECS State Hardening (Completed)
+* **Status**: **Completed & Verified**
+* **Changes**:
+  - Upgraded `immer` to **`11.1.18`** in root `package.json` and `nova_ecs/package.json`.
+  - Migrated `import produce from 'immer'` to ESM-standard named imports `import { produce } from 'immer'` in `outfit_plugin.ts`, `player_state_test.ts`, `vector_test.ts`, and `multiplayer_plugin.ts`.
+  - Adapted `current()` and `original()` calls in `deimmerify.ts` and `provide_async.ts` to satisfy Immer 11's stricter `Draft<T>` type signatures.
+  - Resolved circular import hazard between `death_plugin.ts` and `jump_plugin.ts` by extracting `damage_events.ts`.
+  - Verified with `bun run typecheck` (0 errors) and all 183 unit test files (0 failures).
 
 ---
 
@@ -62,7 +60,7 @@ With modern AI-assisted software engineering, the traditional calculus of techni
 | **GitHub Actions** | Checkout v7, Setup-Node v7, Setup-Bun v2.2, Buildx v4.4, Login v4.6, Build-Push v7.4 | Keep pin-to-latest |
 | **Module Format** | Native ESM (`"type": "module"`, `"moduleResolution": "bundler"`) | Native ESM |
 | **HTTP Server** | Express 5.2.1 | Express 5.2.1 |
-| **State Proxy** | Immer 9.0.21 | Immer 11.x |
+| **State Proxy** | Immer 11.1.18 | Immer 11.1.18 |
 | **PixiJS** | PixiJS 8.21.0 | Latest v8 |
 | **Typecheck** | 0 errors | 0 errors |
 | **Test Suite** | 183 / 183 passing | 100% passing |

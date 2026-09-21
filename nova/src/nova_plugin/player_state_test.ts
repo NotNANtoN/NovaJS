@@ -1,5 +1,5 @@
 import 'jasmine';
-import produce from 'immer';
+import { produce } from 'immer';
 import {
     createInitialPlayerState,
     PersistentPlayerState,

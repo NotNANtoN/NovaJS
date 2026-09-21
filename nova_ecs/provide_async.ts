@@ -100,7 +100,7 @@ export function ProvideAsync<Data, Args extends readonly ArgTypes[]>({ name, pro
 
 export function originalIfDraft<T>(val: T): T {
     if (isDraft(val)) {
-        return original(val)!;
+        return original(val as any)!;
     }
     return val;
 }

@@ -3,7 +3,7 @@ import { current, Draft, isDraft } from "immer";
 
 export function currentIfDraft<T>(val: T | Draft<T>): T {
     if (isDraft(val)) {
-        return current(val) as T;
+        return current(val as Draft<any>) as unknown as T;
     }
     return val as T;
 }
