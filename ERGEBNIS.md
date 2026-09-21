@@ -221,3 +221,11 @@ To structurally prevent recurrent classes of subtle bugs, four architectural gua
 ### D. Safe Collection Handling
 * **Problem Solved**: In-memory cloning flattens `Map` and `Set` collections into plain JSON `{}` objects, causing `.keys()` / `.entries()` crashes.
 * **Mechanism**: `clonePlainValue()` in `nova_ecs/draft_snapshot.ts` recursively traverses and clones `Map` and `Set` collections. Consumer components employ safe fallback accessors.
+
+### E. Reference-Counted Looping Audio Architecture (`nova/src/display/sound_plugin.ts`)
+* **Problem Solved**: Looping sound effects (e.g. beam weapons, lances, engine hums) leaking in the WebAudio context indefinitely when the firing source expires, stops shooting, or explodes.
+* **Mechanism**: `LoopingSoundRefs` tracks active references per sound ID. When multiple entities fire beams with the same sound, the reference count increments. As beams expire or source ships are destroyed, references decrement, stopping playback atomically only when the final active emitter ceases.
+
+### F. Atomic Flagship Commandeer Transactions (`nova/src/nova_plugin/flagship_swap.ts`)
+* **Problem Solved**: Manual ad-hoc component mutations during ship captures causing desynchronized `ShipComponent`, `PlayerState`, `CombatAuthority`, and escort contracts.
+* **Mechanism**: `transferFlagship(playerState, entity, newShipId, playerUuid)`. Atomically swaps the flagship hull, migrates the previous hull to the escort fleet, updates ECS presentation components, and commits the server combat ledger.

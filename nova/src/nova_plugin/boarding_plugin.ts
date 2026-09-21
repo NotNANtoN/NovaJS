@@ -59,6 +59,7 @@ import { ShipComponent, ShipDataComponent } from './ship_plugin';
 import { TargetComponent } from './target_component';
 import { WeaponsStateComponent } from './weapons_state';
 import { CombatAuthorityComponent } from './combat_resources';
+import { transferFlagship } from './flagship_swap';
 import { DerelictComponent } from './derelict_component';
 
 export const BOARDING_STANDOFF = 80;
@@ -552,23 +553,7 @@ export const PlayerBoardingSystem = new System({
                     if (Math.random() < captureChance) {
                         if (action === 'commandeer') {
                             commandeered = true;
-                            const oldShipId = player.shipId;
-                            player.shipId = victimShipId;
-                            entity.components.set(ShipComponent, { id: victimShipId });
-                            const oldContract = {
-                                id: `capture-${uuid}-${Date.now()}`,
-                                shipId: oldShipId,
-                                dailyPay: 10,
-                            };
-                            if (currentEscorts.length < maxEscorts) {
-                                player.escorts = [...currentEscorts, oldContract];
-                            }
-                            entity.components.set(PlayerStateComponent, player);
-                            const auth = entity.components.get(CombatAuthorityComponent);
-                            if (auth) {
-                                auth.balance.shipId = victimShipId;
-                                auth.commit();
-                            }
+                            transferFlagship(player, entity, victimShipId, uuid, maxEscorts);
                             capturedShip = shipName;
                             entities.delete(request.target);
                             emitNow(SoundEvent, { id: 'nova:140' });

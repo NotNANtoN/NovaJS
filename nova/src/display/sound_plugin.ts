@@ -39,6 +39,7 @@ import {
 } from './music';
 
 const LoopingSounds = new Resource<Map<string, Sound>>('LoopingSounds');
+const LoopingSoundRefs = new Resource<Map<string, number>>('LoopingSoundRefs');
 const LoadedSounds = new Resource<Map<string, Sound>>('LoadedSounds');
 const PendingSounds = new Resource<Map<string, Promise<Sound>>>('PendingSounds');
 const FailedSounds = new Resource<Set<string>>('FailedSounds');
@@ -107,7 +108,7 @@ const IncomingProjectileQuery = new Query([
 ] as const);
 
 function playLoadedSound(sound: Sound, id: string, loop: boolean,
-    loopingSounds: Map<string, Sound>, volume: number) {
+    loopingSounds: Map<string, Sound>, volume: number, loopingRefs?: Map<string, number>) {
     if (loop && loopingSounds.has(id)) {
         return;
     }
@@ -118,6 +119,7 @@ function playLoadedSound(sound: Sound, id: string, loop: boolean,
     }
 
     const complete = () => {
+        loopingRefs?.delete(id);
         if (loopingSounds.get(id) === sound) {
             loopingSounds.delete(id);
         }
@@ -145,20 +147,37 @@ const SoundSystem = new System({
     events: [SoundEvent],
     args: [SoundEvent, GameDataResource, LoopingSounds, LoadedSounds,
         PendingSounds, FailedSounds, VolumeResource, PlayerMovementQuery,
-        SingletonComponent] as const,
+        SingletonComponent, LoopingSoundRefs] as const,
     step({ id, loop = false, stop = false, position }, gameData, loopingSounds, loadedSounds,
-        pendingSounds, failedSounds, {volume: masterVolume}, players) {
+        pendingSounds, failedSounds, {volume: masterVolume}, players, _singleton, loopingRefs) {
         if (stop) {
-            loadedSounds.get(id)?.stop();
-            loopingSounds.get(id)?.stop();
-            loopingSounds.delete(id);
+            if (id) {
+                const count = (loopingRefs.get(id) ?? 1) - 1;
+                if (count <= 0) {
+                    loopingRefs.delete(id);
+                    loadedSounds.get(id)?.stop();
+                    loopingSounds.get(id)?.stop();
+                    loopingSounds.delete(id);
+                } else {
+                    loopingRefs.set(id, count);
+                }
+            } else {
+                for (const sound of loopingSounds.values()) {
+                    sound.stop();
+                }
+                loopingSounds.clear();
+                loopingRefs.clear();
+            }
             return;
         }
         if (failedSounds.has(id)) {
             return;
         }
-        if (loop && loopingSounds.has(id)) {
-            return;
+        if (loop) {
+            loopingRefs.set(id, (loopingRefs.get(id) ?? 0) + 1);
+            if (loopingSounds.has(id)) {
+                return;
+            }
         }
 
         const attenuation = worldSoundVolume(
@@ -172,7 +191,7 @@ const SoundSystem = new System({
         const maybeSound = (gameData as GameData).data.Sound.getCached(id);
         if (maybeSound) {
             loadedSounds.set(id, maybeSound);
-            playLoadedSound(maybeSound, id, loop, loopingSounds, volume);
+            playLoadedSound(maybeSound, id, loop, loopingSounds, volume, loopingRefs);
             return;
         }
 
@@ -189,7 +208,7 @@ const SoundSystem = new System({
             }
             loadedSounds.set(id, sound);
             playLoadedSound(sound, id, loop, loopingSounds,
-                getMasterVolume() * attenuation);
+                getMasterVolume() * attenuation, loopingRefs);
         }).catch(error => {
             failedSounds.add(id);
             // Missing or empty sound files fail silently without polluting console
@@ -439,6 +458,7 @@ export const SoundPlugin: Plugin = {
     name: 'SoundPlugin',
     build(world) {
         world.resources.set(LoopingSounds, new Map());
+        world.resources.set(LoopingSoundRefs, new Map());
         world.resources.set(LoadedSounds, new Map());
         world.resources.set(PendingSounds, new Map());
         world.resources.set(FailedSounds, new Set());
@@ -484,5 +504,6 @@ export const SoundPlugin: Plugin = {
         world.resources.delete(PendingSounds);
         world.resources.delete(LoadedSounds);
         world.resources.delete(LoopingSounds);
+        world.resources.delete(LoopingSoundRefs);
     }
 }
