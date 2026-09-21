@@ -1,5 +1,5 @@
-import { applyPatches, createDraft, current, enablePatches, finishDraft, isDraft, isDraftable, original, setAutoFreeze } from 'immer';
-import { Objectish, Patch } from 'immer/dist/internal';
+import { applyPatches, createDraft, current, enablePatches, finishDraft, isDraft, isDraftable, original, setAutoFreeze, type Patch } from 'immer';
+type Objectish = object;
 import * as t from 'io-ts';
 import { set } from '../datatypes/set';
 import { Component, UnknownComponent } from '../component';

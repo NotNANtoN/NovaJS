@@ -43,7 +43,7 @@ if (skippedTests.length > 0) {
         })`).join(', ')}`);
 }
 
-const runner = path.join(root, 'scripts/run_one_test.cjs');
+const runner = path.join(root, 'scripts/run_one_test.mjs');
 const concurrency = Math.max(2, Math.min(os.cpus().length, 8));
 let failures = 0;
 let completed = 0;
@@ -51,15 +51,18 @@ let completed = 0;
 async function runWorker(iterator) {
     for (const [index, test] of iterator) {
         const output = path.join('/tmp',
-            `novajs-test-${process.pid}-${index}.cjs`);
+            `novajs-test-${process.pid}-${index}.mjs`);
         try {
             await build({
                 entryPoints: [test],
                 bundle: true,
                 plugins: [packedPngPlugin(root)],
-                format: 'cjs',
+                format: 'esm',
                 platform: 'node',
                 target: 'node24',
+                banner: {
+                    js: 'import { createRequire as __createRequire } from "node:module"; import { fileURLToPath as __fileURLToPath } from "node:url"; import { dirname as __dirnameFunc } from "node:path"; const require = __createRequire(import.meta.url); const __filename = __fileURLToPath(import.meta.url); const __dirname = __dirnameFunc(__filename);',
+                },
                 external: ['jasmine', 'sharp'],
                 outfile: output,
                 tsconfig: path.join(root, 'tsconfig.json'),

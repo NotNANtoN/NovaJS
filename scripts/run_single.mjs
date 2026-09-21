@@ -24,7 +24,7 @@ await build({
 });
 
 const child = spawn(process.execPath,
-    [path.join(root, 'scripts/run_one_test.cjs'), output], {
+    [path.join(root, 'scripts/run_one_test.mjs'), output], {
         cwd: root,
         env: {
             ...process.env,

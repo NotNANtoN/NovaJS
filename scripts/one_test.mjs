@@ -38,7 +38,7 @@ await build({
 });
 
 const child = spawn(
-    process.execPath, [path.join(root, 'scripts/run_one_test.cjs'), outfile],
+    process.execPath, [path.join(root, 'scripts/run_one_test.mjs'), outfile],
     {
         cwd: root,
         env: { ...process.env, NODE_PATH: path.join(root, 'node_modules'), NOVAJS_ROOT: root },

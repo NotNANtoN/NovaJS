@@ -4,8 +4,9 @@
     "tools"
   ],
   "compilerOptions": {
-    "target": "es2020",
-    "module": "commonjs",
+    "target": "es2022",
+    "module": "esnext",
+    "moduleResolution": "bundler",
     "lib": [
       "dom",
       "dom.iterable",

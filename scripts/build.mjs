@@ -111,6 +111,10 @@ await Promise.all([
         ...commonOptions,
         entryPoints: [path.join(projectRoot, "nova/src/server/parsing/nova_parse_worker.ts")],
         external: ["lamejs"],
+        format: "esm",
+        banner: {
+            js: 'import { createRequire as __createRequire } from "node:module"; import { fileURLToPath as __fileURLToPath } from "node:url"; import { dirname as __dirnameFunc } from "node:path"; const require = __createRequire(import.meta.url); const __filename = __fileURLToPath(import.meta.url); const __dirname = __dirnameFunc(__filename);',
+        },
         keepNames: true,
         outfile: path.join(distPath, "nova_parse_worker.js"),
         platform: "node",
@@ -119,6 +123,10 @@ await Promise.all([
         ...commonOptions,
         entryPoints: [path.join(projectRoot, "nova/server.ts")],
         external: ["sharp", "ws"],
+        format: "esm",
+        banner: {
+            js: 'import { createRequire as __createRequire } from "node:module"; import { fileURLToPath as __fileURLToPath } from "node:url"; import { dirname as __dirnameFunc } from "node:path"; const require = __createRequire(import.meta.url); const __filename = __fileURLToPath(import.meta.url); const __dirname = __dirnameFunc(__filename);',
+        },
         keepNames: true,
         outfile: path.join(distPath, "server.js"),
         platform: "node",

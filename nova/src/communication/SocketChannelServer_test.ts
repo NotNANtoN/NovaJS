@@ -6,16 +6,18 @@ import { SocketChannelServer } from "./SocketChannelServer";
 import { SocketMessage } from "./SocketMessage";
 import { firstValueFrom, Subject } from "rxjs";
 import { take } from "rxjs/operators";
-import * as WebSocket from "ws";
+import WebSocket, { WebSocketServer } from "ws";
 import { Callbacks, On, trackOn } from "./test_utils";
+
+type WsSocket = InstanceType<typeof WebSocket>;
 
 describe("SocketChannelServer", function() {
 
-    let wss: jasmine.SpyObj<WebSocket.Server>;
+    let wss: jasmine.SpyObj<WebSocketServer>;
     let wssCallbacks: Callbacks;
 
     beforeEach(() => {
-        wss = jasmine.createSpyObj<WebSocket.Server>("WebSocket.Server Spy", ["on"]);
+        wss = jasmine.createSpyObj<WebSocketServer>("WebSocketServer Spy", ["on"]);
         let on: On;
         [wssCallbacks, on] = trackOn();
         wss.on.and.callFake(on);
@@ -55,11 +57,11 @@ describe("SocketChannelServer", function() {
             wss, timeout:10,
         });
 
-        const webSocket = jasmine.createSpyObj<WebSocket>("WebSocket Spy",
+        const webSocket = jasmine.createSpyObj<WsSocket>("WebSocket Spy",
                                                           ["on", "removeAllListeners"]);
         const [webSocketCallbacks, on] = trackOn();
-        webSocket.on.and.callFake(on);
-        (webSocket as any).readyState = WebSocket.CONNECTING;
+        (webSocket.on as any).and.callFake(on);
+        (webSocket as any).readyState = WebSocket.CONNECTING ?? 0;
 
         expect(wssCallbacks["connection"][0]).toBeDefined();
         wssCallbacks["connection"][0](webSocket);
@@ -73,11 +75,11 @@ describe("SocketChannelServer", function() {
         const server = new SocketChannelServer({
             wss, timeout:10,
         });
-        const webSocket = jasmine.createSpyObj<WebSocket>("WebSocket Spy",
+        const webSocket = jasmine.createSpyObj<WsSocket>("WebSocket Spy",
                                                           ["on", "removeAllListeners"]);
         const [webSocketCallbacks, on] = trackOn();
-        webSocket.on.and.callFake(on);
-        (webSocket as any).readyState = WebSocket.CONNECTING;
+        (webSocket.on as any).and.callFake(on);
+        (webSocket as any).readyState = WebSocket.CONNECTING ?? 0;
         wssCallbacks["connection"][0](webSocket);
 
         const uuids = [...server.clients];
@@ -261,16 +263,16 @@ describe("SocketChannelServer", function() {
 });
 
 class ClientHarness {
-    readonly websocket: jasmine.SpyObj<WebSocket>;
+    readonly websocket: jasmine.SpyObj<WsSocket>;
     readonly callbacks: Callbacks;
     readonly messagesFromServer = new Subject<SocketMessage>();
     lastMessage?: SocketMessage;
 
     constructor(private server: SocketChannelServer) {
-        this.websocket = jasmine.createSpyObj<WebSocket>("WebSocket Spy", ["on", "send", "removeAllListeners"]);
+        this.websocket = jasmine.createSpyObj<WsSocket>("WebSocket Spy", ["on", "send", "removeAllListeners"]);
         const [callbacks, on] = trackOn();
-        this.websocket.on.and.callFake(on);
-        (this.websocket as any).readyState = WebSocket.CONNECTING;
+        (this.websocket.on as any).and.callFake(on);
+        (this.websocket as any).readyState = WebSocket.CONNECTING ?? 0;
         this.callbacks = callbacks;
         this.websocket.send.and.callFake((data: any) => {
             const socketMessage =
@@ -284,13 +286,13 @@ class ClientHarness {
         });
     }
     open() {
-        (this.websocket as any).readyState = WebSocket.OPEN;
+        (this.websocket as any).readyState = WebSocket.OPEN ?? 1;
         this.callbacks["open"][0]();
     }
     close() {
-        (this.websocket as any).readyState = WebSocket.CLOSING;
+        (this.websocket as any).readyState = WebSocket.CLOSING ?? 2;
         this.callbacks["close"][0]();
-        (this.websocket as any).readyState = WebSocket.CLOSED;
+        (this.websocket as any).readyState = WebSocket.CLOSED ?? 3;
     }
     sendMessage(message: SocketMessage) {
         this.callbacks["message"][0](JSON.stringify(SocketMessage.encode(message)));

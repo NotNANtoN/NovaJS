@@ -15,19 +15,21 @@ With modern AI-assisted software engineering, the traditional calculus of techni
 
 ## 2. Modernization Roadmap
 
-### A. Pure ECMAScript Modules (ESM) Migration
-* **Objective**: Transition NovaJS from hybrid CommonJS (`"module": "commonjs"`) to native ESM (`"type": "module"`).
-* **Benefits**:
-  - Full compatibility with modern pure-ESM packages (`uuid@11+`, `p-queue@8+`, `rbush@4+`).
-  - Standardized `import.meta.url` across both runtime and tools.
-  - Native browser and Node alignment without dual-package workarounds.
-* **Execution Steps**:
-  1. Set `"type": "module"` in `package.json`.
-  2. Update `tsconfig.json` to `"module": "NodeNext"` and `"moduleResolution": "NodeNext"`.
-  3. Add explicit `.js` extensions across all internal TypeScript module imports.
-  4. Migrate `scripts/run_one_test.cjs` and auxiliary scripts to native ESM (`.mjs` / `.js`).
-  5. Upgrade `uuid`, `rbush`, and `p-queue` to their latest major releases.
-  6. Run `bun run typecheck` and `bun scripts/test.mjs` (183/183 passing).
+### A. Pure ECMAScript Modules (ESM) Migration (Completed)
+* **Status**: **Completed & Verified**
+* **Changes**:
+  - Set `"type": "module"` in `package.json`.
+  - Configured `tsconfig.json` with `"target": "es2022"`, `"module": "esnext"`, and `"moduleResolution": "bundler"`.
+  - Configured `scripts/build.mjs` for native ESM output (`format: "esm"`) with Node 24 ESM shims.
+  - Migrated `scripts/test.mjs` and `scripts/run_one_test.mjs` to native ESM with dynamic `import()`.
+  - Isolated CommonJS WASM artifact in `nova_wasm/pkg/package.json` (`{"type": "commonjs"}`) to eliminate all bundler warnings.
+  - Upgraded pure-ESM packages:
+    - `uuid` from `9.0.1` to **`14.0.2`** (and `@types/uuid` to `11.0.0`).
+    - `rbush` from `3.0.1` to **`4.0.1`** (and `@types/rbush` to `4.0.0`).
+    - `p-queue` from `7.4.1` to **`9.3.3`**.
+    - `esbuild-visualizer` to **`0.7.0`**.
+    - `@types/sat` to **`0.0.35`**, `lamejs` to **`1.2.1`**.
+  - All 183 test suites pass with 0 failures; typecheck passes with 0 errors.
 
 ### B. Express 5 Upgrade
 * **Objective**: Upgrade from Express `4.22.3` to Express `5.2.1`.
@@ -60,7 +62,7 @@ With modern AI-assisted software engineering, the traditional calculus of techni
 | **Node.js** | Node 24 (Active LTS "Krypton") | Node 24+ LTS |
 | **Bun** | 1.4.2 | 1.4.2+ |
 | **GitHub Actions** | Checkout v7, Setup-Node v7, Setup-Bun v2.2, Buildx v4.4, Login v4.6, Build-Push v7.4 | Keep pin-to-latest |
-| **Module Format** | CommonJS (`tsconfig` cjs) | Pure ESM (`NodeNext`) |
+| **Module Format** | Native ESM (`"type": "module"`, `"moduleResolution": "bundler"`) | Native ESM |
 | **HTTP Server** | Express 4.22.3 | Express 5.2.1 |
 | **State Proxy** | Immer 9.0.21 | Immer 11.x |
 | **PixiJS** | PixiJS 8.21.0 | Latest v8 |
