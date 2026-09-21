@@ -32,6 +32,13 @@ import {
 //import { NovaRepl } from "./src/server/NovaRepl";
 
 
+process.on('uncaughtException', error => {
+    console.error('[SERVER UNCAUGHT EXCEPTION]', error);
+});
+process.on('unhandledRejection', reason => {
+    console.error('[SERVER UNHANDLED REJECTION]', reason);
+});
+
 const Settings = t.partial({
     port: t.number,
     relativeDataPath: t.string,
@@ -203,7 +210,11 @@ function stepper() {
 
     let steps = 0;
     while (nextStepTime <= now && steps < MAX_CATCH_UP_STEPS) {
-        world.step();
+        try {
+            world.step();
+        } catch (error) {
+            console.error('[SERVER STEP ERROR]', error);
+        }
         nextStepTime += STEP_TIME;
         steps++;
     }

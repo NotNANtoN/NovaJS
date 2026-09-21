@@ -438,14 +438,19 @@ export const ServerPlugin: Plugin = {
                 // Delete systems that have no (non-server) peers.
                 const empty = [...peers].every(v => systemRoom.servers.value.has(v));
                 if (empty) {
-                    let cleanupPromise: Promise<void> | undefined;
                     if (world.entities.has(systemId)) {
                         console.log(`Deleting empty system ${systemId}`);
-                        cleanupPromise = world.entities.get(systemId)!
-                            .components.get(SystemComponent)?.removeAllPlugins();
+                        const systemEntity = world.entities.get(systemId);
+                        world.entities.delete(systemId);
+                        const system = systemEntity?.components.get(SystemComponent);
+                        if (system) {
+                            try {
+                                await system.removeAllPlugins();
+                            } catch (e) {
+                                console.warn(`Error cleaning up plugins for empty system ${systemId}:`, e);
+                            }
+                        }
                     }
-                    world.entities.delete(systemId);
-                    await cleanupPromise;
                 } else {
                     // Create the system if it doesn't exist yet.
                     if (!world.entities.has(systemId)) {

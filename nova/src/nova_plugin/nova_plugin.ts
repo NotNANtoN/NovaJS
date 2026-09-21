@@ -12,7 +12,11 @@ const StepSystemSystem = new System({
     name: "StepSystemSystem",
     args: [SystemComponent] as const,
     step(system) {
-        system.step();
+        try {
+            system.step();
+        } catch (error) {
+            console.error(`[SYSTEM STEP ERROR on ${system.name}]:`, error);
+        }
     }
 });
 
