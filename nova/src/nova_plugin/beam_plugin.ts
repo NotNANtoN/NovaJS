@@ -1,5 +1,7 @@
 import { BeamWeaponData, WeaponData } from 'novadatainterface/WeaponData';
-import { EmitNow, Entities, RunQuery, RunQueryFunction, UUID } from 'nova_ecs/arg_types';
+import { Emit, EmitNow, Entities, RunQuery, RunQueryFunction, UUID } from 'nova_ecs/arg_types';
+import { ArmorComponent } from './health_plugin';
+import { DestructionStartedComponent } from './destruction_state';
 import { Component } from 'nova_ecs/component';
 import { Angle } from 'nova_ecs/datatypes/angle';
 import { Position } from 'nova_ecs/datatypes/position';
@@ -314,16 +316,35 @@ export const BeamSystem = new System({
     after: [MovementSystem, RemoteMovementPresentationSystem, WeaponsSystem, FireLogSpawnSystem],
     args: [BeamDataComponent, BeamStateComponent, MovementStateComponent, FireSubs,
         CreateTimeArgProvider, TimeResource, UUID, Entities, Optional(SourceComponent),
-        Optional(TargetComponent), Optional(MovementPlaybackComponent)] as const,
+        Optional(TargetComponent), Optional(MovementPlaybackComponent), Emit] as const,
     step(beamData, beamState, movement, fireSubs, fireTime, { time }, uuid,
-        entities, source, target, playback) {
+        entities, source, target, playback, emit) {
         // Recompute clipping every frame so a target that moves out of the
         // beam no longer leaves it permanently shortened.
         beamState.length = beamData.beamAnimation.length;
         const timeSinceFire = playback ? playback.cursor - playback.createdAt : time - fireTime;
-        if (timeSinceFire > beamData.shotDuration) {
+        const sourceEntity = source ? entities.get(source) : undefined;
+        const sourceDead = source
+            && (!sourceEntity || sourceEntity.components.has(DestructionStartedComponent)
+                || (sourceEntity.components.get(ArmorComponent)?.current ?? 1) <= 0);
+
+        if (timeSinceFire > beamData.shotDuration || sourceDead) {
             fireSubs(beamData.id, uuid, true);
             entities.delete(uuid);
+            if (beamData.sound && beamData.loopSound) {
+                const otherActiveBeams = [...entities.values()].some(e => {
+                    if (e === entities.get(uuid)) return false;
+                    const bData = e.components.get(BeamDataComponent);
+                    return bData && bData.sound === beamData.sound;
+                });
+                if (!otherActiveBeams) {
+                    SoundEvent.emit(emit, {
+                        id: beamData.sound,
+                        stop: true,
+                    });
+                }
+            }
+            return;
         }
 
         let resetRotation = false;

@@ -19,7 +19,7 @@ export interface BoardingTargetInfo {
     isDerelict?: boolean;
 }
 
-export type BoardingAction = 'plunder' | 'capture' | 'leave';
+export type BoardingAction = 'plunder' | 'capture' | 'commandeer' | 'leave';
 
 export interface BoardingDialogResult {
     action: BoardingAction;
@@ -72,8 +72,8 @@ export class BoardingDialog extends ClassicDialog<BoardingTargetInfo> {
                 {
                     id: 'plunder',
                     label: 'Plunder',
-                    width: 48,
-                    position: { x: -126, y: 56 },
+                    width: 44,
+                    position: { x: -130, y: 56 },
                     action: async (_dialog, info) => {
                         this.selectedAction = 'plunder';
                         onAction?.({ action: 'plunder', targetUuid: info.uuid });
@@ -81,19 +81,29 @@ export class BoardingDialog extends ClassicDialog<BoardingTargetInfo> {
                 },
                 {
                     id: 'capture',
-                    label: 'Capture',
-                    width: 48,
-                    position: { x: -37, y: 56 },
+                    label: 'Add to Fleet',
+                    width: 52,
+                    position: { x: -62, y: 56 },
                     action: async (_dialog, info) => {
                         this.selectedAction = 'capture';
                         onAction?.({ action: 'capture', targetUuid: info.uuid });
                     },
                 },
                 {
+                    id: 'commandeer',
+                    label: 'Take Over',
+                    width: 52,
+                    position: { x: 8, y: 56 },
+                    action: async (_dialog, info) => {
+                        this.selectedAction = 'commandeer';
+                        onAction?.({ action: 'commandeer', targetUuid: info.uuid });
+                    },
+                },
+                {
                     id: 'leave',
                     label: 'Leave',
-                    width: 48,
-                    position: { x: 52, y: 56 },
+                    width: 44,
+                    position: { x: 76, y: 56 },
                     isDefault: true,
                     isCancel: true,
                     action: async (_dialog, info) => {

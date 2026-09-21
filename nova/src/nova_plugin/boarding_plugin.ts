@@ -58,6 +58,7 @@ import { PlayerShipSelector } from './player_ship_plugin';
 import { ShipComponent, ShipDataComponent } from './ship_plugin';
 import { TargetComponent } from './target_component';
 import { WeaponsStateComponent } from './weapons_state';
+import { CombatAuthorityComponent } from './combat_resources';
 import { DerelictComponent } from './derelict_component';
 
 export const BOARDING_STANDOFF = 80;
@@ -79,6 +80,7 @@ const BoardingRequest = t.intersection([
         action: t.union([
             t.literal('plunder'),
             t.literal('capture'),
+            t.literal('commandeer'),
             t.literal('leave'),
         ]),
     }),
@@ -101,6 +103,7 @@ const BoardingOutcome = t.intersection([
         resisted: t.boolean,
         fleetFull: t.boolean,
         selfDestruct: t.boolean,
+        commandeered: t.boolean,
     }),
 ]);
 export type BoardingOutcome = t.TypeOf<typeof BoardingOutcome>;
@@ -530,33 +533,58 @@ export const PlayerBoardingSystem = new System({
         let resisted: boolean | undefined;
         let fleetFull: boolean | undefined;
         let selfDestruct: boolean | undefined;
+        let commandeered: boolean | undefined;
 
         const isDerelict = Boolean(victim[9]);
-        if (action === 'capture') {
+        if (action === 'capture' || action === 'commandeer') {
             if (isNpc && (victimShip || victimShipData)) {
                 const victimShipId = victimShip?.id ?? victimShipData?.id ?? 'nova:128';
                 const rawName = victimShipData?.name ?? 'Ship';
                 const shipName = isDerelict ? `Derelict ${rawName}` : rawName;
                 const currentEscorts = player.escorts ?? [];
                 const maxEscorts = 6;
-                if (currentEscorts.length < maxEscorts) {
+                if (currentEscorts.length < maxEscorts || action === 'commandeer') {
                     const playerCrew = (player.kills ?? 0) > 10 ? 25 : 15;
                     const victimCrew = isDerelict ? 0 : (victimShipData?.crew ?? 5);
                     const captureChance = isDerelict
                         ? 0.85
                         : Math.min(0.9, Math.max(0.35, (playerCrew + 10) / (playerCrew + victimCrew + 10)));
                     if (Math.random() < captureChance) {
-                        const dailyPay = isDerelict ? 10 : Math.max(10, Math.floor((victimShipData?.cost ?? 50000) * 0.001));
-                        const newContract = {
-                            id: `capture-${uuid}-${Date.now()}`,
-                            shipId: victimShipId,
-                            dailyPay,
-                        };
-                        player.escorts = [...currentEscorts, newContract];
-                        entity.components.set(PlayerStateComponent, player);
-                        capturedShip = shipName;
-                        entities.delete(request.target);
-                        emitNow(SoundEvent, { id: 'nova:140' });
+                        if (action === 'commandeer') {
+                            commandeered = true;
+                            const oldShipId = player.shipId;
+                            player.shipId = victimShipId;
+                            entity.components.set(ShipComponent, { id: victimShipId });
+                            const oldContract = {
+                                id: `capture-${uuid}-${Date.now()}`,
+                                shipId: oldShipId,
+                                dailyPay: 10,
+                            };
+                            if (currentEscorts.length < maxEscorts) {
+                                player.escorts = [...currentEscorts, oldContract];
+                            }
+                            entity.components.set(PlayerStateComponent, player);
+                            const auth = entity.components.get(CombatAuthorityComponent);
+                            if (auth) {
+                                auth.balance.shipId = victimShipId;
+                                auth.commit();
+                            }
+                            capturedShip = shipName;
+                            entities.delete(request.target);
+                            emitNow(SoundEvent, { id: 'nova:140' });
+                        } else {
+                            const dailyPay = isDerelict ? 10 : Math.max(10, Math.floor((victimShipData?.cost ?? 50000) * 0.001));
+                            const newContract = {
+                                id: `capture-${uuid}-${Date.now()}`,
+                                shipId: victimShipId,
+                                dailyPay,
+                            };
+                            player.escorts = [...currentEscorts, newContract];
+                            entity.components.set(PlayerStateComponent, player);
+                            capturedShip = shipName;
+                            entities.delete(request.target);
+                            emitNow(SoundEvent, { id: 'nova:140' });
+                        }
                     } else if (isDerelict) {
                         selfDestruct = true;
                         const victimEntity = entities.get(request.target);
@@ -603,10 +631,14 @@ export const PlayerBoardingSystem = new System({
             ...(resisted ? { resisted } : {}),
             ...(fleetFull ? { fleetFull } : {}),
             ...(selfDestruct ? { selfDestruct } : {}),
+            ...(commandeered ? { commandeered } : {}),
         };
         entity.components.set(BoardingOutcomeComponent, outcome);
         emitNow(BoardingOutcomeEvent, { ...outcome, boarder: uuid }, [uuid]);
-        if (capturedShip) {
+        if (capturedShip && commandeered) {
+            entity.components.set(BoardingNoticeComponent,
+                { text: `Took over ${capturedShip} as new flagship! Previous vessel reassigned to escort fleet.` });
+        } else if (capturedShip) {
             entity.components.set(BoardingNoticeComponent,
                 { text: `Captured ${capturedShip} into escort fleet!` });
         } else if (selfDestruct) {
@@ -617,7 +649,7 @@ export const PlayerBoardingSystem = new System({
                 { text: 'Capture failed: Escort fleet is full (6 max).' });
         } else if (resisted) {
             entity.components.set(BoardingNoticeComponent,
-                { text: 'Capture failed: Boarding party was repelled!' });
+                { text: action === 'commandeer' ? 'Takeover failed: Boarding party was repelled!' : 'Capture failed: Boarding party was repelled!' });
         } else if (result.cargo > 0 || result.credits > 0) {
             entity.components.set(BoardingNoticeComponent,
                 { text: `Plundered ${result.cargo} tons cargo and ${result.credits} cr!` });

@@ -667,4 +667,62 @@ describe('pirate boarding', () => {
         expect(player.components.get(BoardingNoticeComponent)?.text)
             .toBe('Derelict salvage failed: Core breach and self-destruct triggered!');
     });
+
+    it('takes over a captured vessel as new flagship and reassigns old ship to escorts', () => {
+        const world = new World('commandeer-ship-test');
+        world.resources.set(PlatformResource, 'node');
+        world.resources.set(TimeResource, {
+            time: 0,
+            delta_ms: 1_000 / 60,
+            delta_s: 1 / 60,
+            frame: 0,
+        });
+
+        const playerState = createInitialPlayerState();
+        playerState.shipId = 'nova:128'; // Initial Shuttle
+        const player = new Entity('player')
+            .addComponent(PlayerShipSelector, undefined)
+            .addComponent(PlayerStateComponent, playerState)
+            .addComponent(ShipComponent, { id: 'nova:128' })
+            .addComponent(MultiplayerData, { owner: 'player' })
+            .addComponent(MovementStateComponent, movementAt(new Position(0, 0)))
+            .addComponent(BoardingRequestComponent, { target: 'victim', sequence: 1, action: 'commandeer' });
+
+        const shipData = {
+            ...getDefaultShipData(),
+            id: 'nova:130',
+            name: 'Kestrel',
+            crew: 5,
+            cost: 200_000,
+        };
+
+        const victim = new Entity('victim')
+            .addComponent(DisabledComponent, true)
+            .addComponent(MovementStateComponent, movementAt(new Position(BOARDING_STANDOFF, 0)))
+            .addComponent(ShipComponent, { id: 'nova:130' })
+            .addComponent(ShipDataComponent, shipData)
+            .addComponent(ArmorComponent, new Stat({ current: 20, max: 100, recharge: 0 }));
+
+        world.entities.set('player', player);
+        world.entities.set('victim', victim);
+        world.addSystem(PlayerBoardingSystem);
+
+        let outcome: any;
+        world.events.get(BoardingOutcomeEvent).subscribe(value => {
+            outcome = value;
+        });
+        spyOn(Math, 'random').and.returnValue(0.1);
+        world.step();
+
+        expect(outcome.target).toBe('victim');
+        expect(outcome.commandeered).toBeTrue();
+        expect(outcome.capturedShip).toBe('Kestrel');
+        // Player's new flagship is the captured Kestrel!
+        expect(playerState.shipId).toBe('nova:130');
+        expect(player.components.get(ShipComponent)?.id).toBe('nova:130');
+        // Player's old Shuttle is reassigned as an escort contract
+        expect(playerState.escorts?.length).toBe(1);
+        expect(playerState.escorts?.[0].shipId).toBe('nova:128');
+        expect(world.entities.has('victim')).toBeFalse();
+    });
 });

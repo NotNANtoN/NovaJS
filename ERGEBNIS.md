@@ -172,6 +172,22 @@ To rapidly diagnose runtime faults, network disruptions, and gameplay state dive
 * **Root Cause**: Only `FleetMemberComponent` (for NPC fleet encounters) was wired to `FleetJumpRelaySystem`. Hired player escorts (`HiredEscortComponent`) had no jump relay system.
 * **Fix**: Added `HiredEscortJumpRelaySystem` to `escort_plugin.ts`. When `InitiateJumpEvent` is fired for the flagship, it immediately relays the jump destination to all hired escorts, putting them into hyperdrive spool and departure alongside the player.
 
+### I. Beam & Lance Weapon Looping Sound Stopping
+* **Problem**: Thunderhead ship lances (and other looping beam weapons) continued droning infinitely even after the ship stopped fighting or was destroyed.
+* **Root Cause**: `SoundEvent` with `loop: true` registered the audio in `loopingSounds`, but `BeamSystem` only deleted the beam entity upon expiration and never emitted `stop: true`.
+* **Fix**: In `BeamSystem`, when a beam expires or its source ship is destroyed, check if any other active beam still uses that sound ID; if not, immediately emit `SoundEvent { id: beamData.sound, stop: true }` to silence the loop cleanly.
+
+### J. Escort Re-anchoring and Formation Departure After Planet Landing
+* **Problem**: After landing on a planet and launching back into space, escorts appeared frozen and stopped following the player.
+* **Root Cause**: When the player lands, the player entity in space is deleted, and upon departure a restored entity is assigned. Escorts retained the previous `ownerUuid` and failed `entities.get(escort.ownerUuid)`, entering a dead stop.
+* **Fix**: `SpawnHiredEscorts` and `FollowEscortOwner` dynamically re-anchor to the live player flagship entity upon room restoration, maintaining formation following upon launch.
+
+### K. Commandeer Captured Vessels ("Take Over Ship" Flagship Swap)
+* **Problem**: Boarding only permitted plundering or adding the vessel to an escort fleet, with no way to claim the captured vessel as the player's personal flagship.
+* **Fix**:
+  - Added "Take Over" (`commandeer`) action to `BoardingDialog`.
+  - On successful capture, the player's flagship hull instantly swaps to the captured vessel (`player.shipId = victimShipId`, `ShipComponent`), the previous flagship is seamlessly reassigned as an escort in the fleet, and combat balances are synced.
+
 ---
 
 ## 6. Elimination of VM Reboots on Deployment (September 2026)

@@ -244,9 +244,12 @@ export const BoardingSystem = new AsyncSystem({
             return;
         }
 
-        if (action === 'capture') {
+        if (action === 'commandeer') {
             entity.components.set(BoardingNoticeComponent,
-                { text: 'Boarding party deployed: Attempting capture...' });
+                { text: 'Boarding party deployed: Attempting to take over vessel as flagship...' });
+        } else if (action === 'capture') {
+            entity.components.set(BoardingNoticeComponent,
+                { text: 'Boarding party deployed: Attempting capture into fleet...' });
         } else if (action === 'plunder') {
             entity.components.set(BoardingNoticeComponent,
                 { text: 'Boarding party deployed: Plundering holds...' });

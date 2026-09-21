@@ -1015,6 +1015,7 @@ const ShowBoardingOutcome = new System({
                 outcome.resisted,
                 outcome.fleetFull,
                 outcome.selfDestruct,
+                outcome.commandeered,
             ),
             time.time,
         );

@@ -102,6 +102,7 @@ export function boardingOutcomeText(
     resisted?: boolean,
     fleetFull?: boolean,
     selfDestruct?: boolean,
+    commandeered?: boolean,
 ): string {
     if (selfDestruct) {
         return 'Boarded: derelict core breach! Self-destruct triggered!';
@@ -115,6 +116,9 @@ export function boardingOutcomeText(
     }
 
     if (capturedShip) {
+        if (commandeered) {
+            return `Boarded: took over ${capturedShip} as new flagship!`;
+        }
         const extra = taken.length > 0 ? ` (plundered ${taken.join(' and ')})` : '';
         return `Boarded: captured ${capturedShip} into fleet!${extra}`;
     }

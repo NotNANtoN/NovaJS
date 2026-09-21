@@ -358,6 +358,12 @@ const SpawnHiredEscorts = new AsyncSystem({
         if (platform !== 'node' || multiplayer.owner === 'server') {
             return;
         }
+        for (const entity of world.entities.values()) {
+            const hired = entity.components.get(HiredEscortComponent);
+            if (hired && roster.contracts.some(c => c.id === hired.contractId)) {
+                hired.ownerUuid = owner.uuid;
+            }
+        }
         const existing = new Set([...world.entities.values()]
             .map(entity => entity.components.get(HiredEscortComponent))
             .filter((entry): entry is HiredEscortData => entry !== undefined)
@@ -472,7 +478,16 @@ const FollowEscortOwner = new System({
         if (jumpState) {
             return;
         }
-        const owner = entities.get(escort.ownerUuid);
+        let owner = entities.get(escort.ownerUuid);
+        if (!owner) {
+            for (const [entityUuid, candidate] of entities) {
+                if (candidate.components.has(PlayerShipSelector) || candidate.components.has(PlayerStateComponent)) {
+                    escort.ownerUuid = entityUuid;
+                    owner = candidate;
+                    break;
+                }
+            }
+        }
         if (!owner) {
             movement.accelerating = 0;
             movement.turnTo = null;
@@ -529,7 +544,16 @@ export const EscortDefenseSystem = new System({
         if (platform !== 'node' || multiplayer.owner !== 'server') {
             return;
         }
-        const owner = entities.get(escort.ownerUuid);
+        let owner = entities.get(escort.ownerUuid);
+        if (!owner) {
+            for (const [entityUuid, candidate] of entities) {
+                if (candidate.components.has(PlayerShipSelector) || candidate.components.has(PlayerStateComponent)) {
+                    escort.ownerUuid = entityUuid;
+                    owner = candidate;
+                    break;
+                }
+            }
+        }
         if (!owner) {
             return;
         }
