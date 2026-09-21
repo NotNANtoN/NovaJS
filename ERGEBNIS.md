@@ -136,6 +136,24 @@ To rapidly diagnose runtime faults, network disruptions, and gameplay state dive
   - In `sound_plugin.ts`, silently fall back for missing/unsupported sound IDs without polluting the console.
   - In `browser.ts`, register a one-time user gesture handler (`pointerdown`, `keydown`) to resume `sound.context` smoothly on first interaction.
 
+### E. Spaceport Menu Disappearing on Landing at Storyline Planet Variants (Brass in Glimmer)
+* **Problem**: When landing on planet Brass in Glimmer, the docking sound played, but no spaceport menu or buttons appeared, and the player was quietly returned to space.
+* **Root Cause**:
+  - Glimmer has four separate system variant IDs (`nova:193`, `nova:759`, `nova:760`, `nova:761`) corresponding to different chapters of the retail EV Nova storyline. Their respective planet IDs are `nova:214` (base Brass), `nova:503` (mission target Brass), `nova:504` (Nova), and `nova:505` (post-election Brass).
+  - When landing, `AttemptLandingSystem` confirmed landing range and played the landing sound.
+  - Next, `spaceport.authorizeLanding()` called `combatShopTransaction(combatState, planetId, 'open')`.
+  - In `CombatLedger.transact`, the server checked:
+    ```typescript
+    if (!planet.canLand || !system!.planets.includes(planet.id)) throw new Error('Not at this spaceport');
+    ```
+  - When the player was in system `nova:761` (or `nova:193`) and landed on mission target planet Brass (`nova:503`), `system.planets.includes("nova:503")` evaluated to `false`.
+  - The server rejected the transaction with `Not at this spaceport`. `spaceport_plugin.ts` caught this rejection, called `actions.abort()` (setting `spaceport.container.visible = false`), and recovered the ship back into space with the menu hidden!
+* **Fix**:
+  - In `CombatLedger.transact`, allow planets belonging to any storyline clone/variant of the current star system (matching name and coordinates via `areSystemsSameOrVariants`).
+  - Allowed idempotent re-opening if `authority.landed === planet.id`.
+  - In `spaceport_plugin.ts`, wired `reportLandingError` to immediately forward any spaceport authorization or display failures to `/client-error`.
+* **Verification**: Added unit test `authorizes open landing when planet is in a storyline variant of the current system` in `combat_resources_test.ts`. All 183 test suites pass.
+
 ---
 
 ## 6. Elimination of VM Reboots on Deployment (September 2026)

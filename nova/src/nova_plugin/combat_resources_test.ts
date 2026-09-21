@@ -208,6 +208,31 @@ describe('authoritative combat resources', () => {
         expect(authority.landed).toBeUndefined();
     });
 
+    it('authorizes open landing when planet is in a storyline variant of the current system', async () => {
+        const { ledger, authority, entity, gameData } = await setup();
+        // Setup variant systems: nova:761 is the player's current system, nova:759 contains Brass (nova:503)
+        gameData.data.System.map.set('nova:761', {
+            id: 'nova:761', name: 'Glimmer', planets: ['nova:505'], position: [-60, -80], links: []
+        } as any);
+        gameData.data.System.map.set('nova:759', {
+            id: 'nova:759', name: 'Glimmer', planets: ['nova:503'], position: [-60, -80], links: []
+        } as any);
+        gameData.data.Planet.map.set('nova:503', {
+            id: 'nova:503', name: 'Brass', canLand: true, position: [0, 0]
+        } as any);
+        authority.system = 'nova:761';
+        authority.state.currentSystem = 'nova:761';
+        authority.position = [10, 10];
+
+        const state = entity.components.get(PlayerStateComponent)!;
+        const openRequest = {
+            action: 'open' as const, planet: 'nova:503', state, revision: authority.balance.revision
+        };
+        const receipt = await ledger.transact('pilot', openRequest);
+        expect(receipt.landed).toBe('nova:503');
+        expect(authority.landed).toBe('nova:503');
+    });
+
     it('does not reland when a duplicate open resumes after close at the final catalog await', async () => {
         const { ledger, authority, entity, gameData } = await setup();
         const entered = deferred<void>();

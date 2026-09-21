@@ -23,19 +23,8 @@ import { ShipDataComponent } from './ship_plugin';
 import { Stat } from './stat';
 import { SystemIdResource } from './system_id_resource';
 
-export const DerelictData = t.type({
-    derelictId: t.string,
-    shipId: t.string,
-    salvageCredits: t.number,
-});
-export type DerelictData = t.TypeOf<typeof DerelictData>;
-
-export const DerelictComponent = new Component<DerelictData>('DerelictComponent');
-
-replicationPolicies.register(DerelictComponent, {
-    codec: DerelictData,
-    authority: 'server',
-});
+import { DerelictComponent, DerelictData } from './derelict_component';
+export { DerelictComponent, DerelictData };
 
 const DERELICT_HULL_IDS = [
     'nova:128', // Shuttle

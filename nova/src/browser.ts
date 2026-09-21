@@ -204,6 +204,7 @@ export function reportClientError(error: unknown, context = 'general') {
 }
 
 if (typeof window !== 'undefined') {
+    (window as any).reportClientError = reportClientError;
     window.addEventListener('error', (event) => {
         reportClientError(event.error || event.message, 'uncaught-error');
     });

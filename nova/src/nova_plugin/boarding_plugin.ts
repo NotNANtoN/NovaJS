@@ -57,7 +57,7 @@ import { PlayerShipSelector } from './player_ship_plugin';
 import { ShipComponent, ShipDataComponent } from './ship_plugin';
 import { TargetComponent } from './target_component';
 import { WeaponsStateComponent } from './weapons_state';
-import { DerelictComponent } from './derelict_plugin';
+import { DerelictComponent } from './derelict_component';
 
 export const BOARDING_STANDOFF = 80;
 export const BOARDING_TOLERANCE = 20;

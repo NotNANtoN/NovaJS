@@ -90,6 +90,9 @@ export async function runLandingSession(actions: LandingSessionActions): Promise
         actions.restore(await actions.land());
     } catch (error) {
         console.error('Landing interrupted; reconciling with server', error);
+        if (typeof window !== 'undefined' && typeof (window as any).reportClientError === 'function') {
+            (window as any).reportClientError(error, 'landing-interrupted');
+        }
         actions.abort();
         await retry();
     }
