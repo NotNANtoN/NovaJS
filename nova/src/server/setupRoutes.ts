@@ -356,8 +356,11 @@ class GameDataServer {
                         res.status(400).send('Missing player token');
                         return;
                     }
+                    const snapshotId = Array.isArray(req.params.snapshotId)
+                        ? req.params.snapshotId[0]
+                        : req.params.snapshotId;
                     const player = await this.playerStore!.restoreSnapshot(
-                        token, req.params.snapshotId);
+                        token, snapshotId);
                     if (!player) {
                         res.status(404).send('Snapshot not found');
                         return;
@@ -411,8 +414,8 @@ class GameDataServer {
     }
 
     private async requestFulfiller(req: express.Request, res: express.Response): Promise<void> {
-        const name: string = req.params.name;
-        const item: string = req.params.item;
+        const name: string = Array.isArray(req.params.name) ? req.params.name[0] : req.params.name;
+        const item: string = Array.isArray(req.params.item) ? req.params.item[0] : req.params.item;
         const wantsWebP = /\.webp$/i.test(req.path);
 
         // TODO: Replace with protobufs

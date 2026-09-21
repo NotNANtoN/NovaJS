@@ -31,16 +31,14 @@ With modern AI-assisted software engineering, the traditional calculus of techni
     - `@types/sat` to **`0.0.35`**, `lamejs` to **`1.2.1`**.
   - All 183 test suites pass with 0 failures; typecheck passes with 0 errors.
 
-### B. Express 5 Upgrade
-* **Objective**: Upgrade from Express `4.22.3` to Express `5.2.1`.
-* **Benefits**:
-  - Native promise rejection handling: async route handlers (`app.get(..., async (req, res) => { ... })`) automatically propagate thrown errors to the error middleware without requiring boilerplate `.catch(next)`.
-  - Upgraded router engine and HTTP header processing.
-* **Execution Steps**:
-  1. Upgrade `express` to `^5.2.1` and `@types/express` to `^5.0.0`.
-  2. Audit `nova/src/server/setupRoutes.ts` and `http_limiter.ts` for route path regex changes (`path-to-regexp@8` syntax for splat/wildcard paths).
-  3. Verify all asset endpoints (`/gameData/data/...`, `/gameData/ids.json`, `/player/...`, WebSockets) return 200 OK.
-  4. Run `setupRoutes_test.ts` and `http_limiter_test.ts`.
+### B. Express 5 Upgrade (Completed)
+* **Status**: **Completed & Verified**
+* **Changes**:
+  - Upgraded `express` to **`5.2.1`** and `@types/express` to **`5.0.6`**.
+  - Updated `setupRoutes.ts` parameter handling to cleanly unwrap Express 5's array-capable route parameter types (`string | string[]`).
+  - Verified all major endpoints (`/`, `/gameData/ids.json`, `/gameData/data/System/nova:148.json`, `/gameData/data/Planet/nova:128.json`, `/api/galaxy/pilots`) return 200 OK.
+  - Native promise rejection handling active in server route handlers.
+  - `bun run typecheck` passes with 0 errors; all 183 test suites pass.
 
 ### C. Immer 11 Upgrade & NovaECS State Hardening
 * **Objective**: Upgrade from Immer `9.0.21` to Immer `11.x`.
@@ -63,7 +61,7 @@ With modern AI-assisted software engineering, the traditional calculus of techni
 | **Bun** | 1.4.2 | 1.4.2+ |
 | **GitHub Actions** | Checkout v7, Setup-Node v7, Setup-Bun v2.2, Buildx v4.4, Login v4.6, Build-Push v7.4 | Keep pin-to-latest |
 | **Module Format** | Native ESM (`"type": "module"`, `"moduleResolution": "bundler"`) | Native ESM |
-| **HTTP Server** | Express 4.22.3 | Express 5.2.1 |
+| **HTTP Server** | Express 5.2.1 | Express 5.2.1 |
 | **State Proxy** | Immer 9.0.21 | Immer 11.x |
 | **PixiJS** | PixiJS 8.21.0 | Latest v8 |
 | **Typecheck** | 0 errors | 0 errors |
