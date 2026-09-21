@@ -135,3 +135,15 @@ To rapidly diagnose runtime faults, network disruptions, and gameplay state dive
   - In `setupRoutes.ts`, set `res.type('audio/mpeg')` for sound files, and return `404` for 0-byte empty sound resources.
   - In `sound_plugin.ts`, silently fall back for missing/unsupported sound IDs without polluting the console.
   - In `browser.ts`, register a one-time user gesture handler (`pointerdown`, `keydown`) to resume `sound.context` smoothly on first interaction.
+
+---
+
+## 6. Elimination of VM Reboots on Deployment (September 2026)
+
+* **Problem**: The Linode host was rebooting its entire virtual machine on every single deployment, causing temporary 502 Bad Gateway responses, dropping player WebSockets, and taking over 2 minutes to recover.
+* **Root Cause**: In `.github/workflows/deploy.yml`, line 396 explicitly called `POST https://api.linode.com/v4/linode/instances/${instance_id}/reboot` after building the Docker image, relying on `OnBootSec=30s` in the systemd timer to pull the container instead of updating the running container directly.
+* **Fix**:
+  - Replaced the Linode API reboot call with direct container updater execution (`/opt/novajs/scripts/novajs-updater.sh`) triggered over authenticated SSH using repository secret `LINODE_SSH_KEY`.
+  - Tuned `novajs-updater.timer` interval to `2min` with `15s` randomized delay as a background failsafe.
+  - Eliminated the artificial `sleep 20` pre-probe delay in the deployment workflow.
+  - Now, deployments perform zero-downtime container pulls and Docker recreates (`docker compose up -d --force-recreate novajs`) while the host operating system, networking, and Caddy reverse proxy remain online continuously.

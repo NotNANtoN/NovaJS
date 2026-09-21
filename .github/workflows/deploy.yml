@@ -93,6 +93,7 @@ jobs:
           LINODE_OBJECT_NAME: ${{ secrets.LINODE_OBJECT_NAME }}
           LINODE_BUCKET_KEY: ${{ secrets.LINODE_BUCKET_KEY }}
           LINODE_SECRET_KEY: ${{ secrets.LINODE_SECRET_KEY }}
+          LINODE_SSH_KEY: ${{ secrets.LINODE_SSH_KEY }}
         run: |
           set -Eeuo pipefail
 
@@ -388,12 +389,19 @@ jobs:
           printf 'instance_id=%s\n' "$instance_id" >>"$GITHUB_OUTPUT"
           printf 'ipv4=%s\n' "$ipv4" >>"$GITHUB_OUTPUT"
 
-          # Trigger a graceful reboot so novajs-updater.timer (OnBootSec=30s) pulls the new image without destroying the instance
-          printf 'Notifying Linode %s to pull the new image via graceful reboot...\n' "$instance_id"
-          curl --fail-with-body --silent --show-error \
-            --retry 3 --retry-delay 2 --retry-all-errors \
-            -X POST -H "$auth_header" \
-            "${api_url}/linode/instances/${instance_id}/reboot" || true
+          # Trigger the host updater directly via SSH without rebooting the VM
+          if [[ -n "${LINODE_SSH_KEY:-}" ]]; then
+            printf 'Triggering novajs-updater on Linode %s (%s) via SSH without VM reboot...\n' "$instance_id" "$ipv4"
+            mkdir -p ~/.ssh
+            chmod 700 ~/.ssh
+            printf '%s\n' "$LINODE_SSH_KEY" > ~/.ssh/id_linode
+            chmod 600 ~/.ssh/id_linode
+            ssh -i ~/.ssh/id_linode -o StrictHostKeyChecking=no -o ConnectTimeout=15 "root@${ipv4}" \
+              "/opt/novajs/scripts/novajs-updater.sh" || true
+            rm -f ~/.ssh/id_linode
+          else
+            printf 'LINODE_SSH_KEY not available; updater timer will pull new image without rebooting.\n'
+          fi
 
       - name: Poll public readiness endpoint
         env:
@@ -406,9 +414,6 @@ jobs:
           health_url="http://${INSTANCE_IPV4}/__novajs_health"
           deadline=$((SECONDS + 900))
 
-          # Allow the instance to begin rebooting before checking health
-          sleep 20
-
           while (( SECONDS < deadline )); do
             status="$(
               curl --silent --output /dev/null --write-out '%{http_code}' \
@@ -419,7 +424,7 @@ jobs:
                 "$INSTANCE_IPV4"
               exit 0
             fi
-            sleep 10
+            sleep 5
           done
 
           printf 'External readiness probe failed for %s after 15 minutes.\n' \
