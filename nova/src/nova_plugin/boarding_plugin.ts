@@ -489,9 +489,11 @@ export const PlayerBoardingSystem = new System({
         }
         const action = request.action ?? 'plunder';
         if (action === 'leave') {
+            entity.components.delete(BoardingRequestComponent);
             return;
         }
         if (boarding?.boarded.includes(request.target) && action !== 'capture') {
+            entity.components.delete(BoardingRequestComponent);
             entity.components.set(BoardingNoticeComponent,
                 { text: 'Vessel has already been boarded.' });
             return;
@@ -501,11 +503,13 @@ export const PlayerBoardingSystem = new System({
             && candidate[1] && !candidate[5]
             && (!candidate[6] || candidate[6]!.current > 0));
         if (!victim) {
+            entity.components.delete(BoardingRequestComponent);
             entity.components.set(BoardingNoticeComponent,
                 { text: 'Target vessel is no longer boardable.' });
             return;
         }
         if (!isBoardingTransferReady(movement, victim[2])) {
+            entity.components.delete(BoardingRequestComponent);
             entity.components.set(BoardingNoticeComponent,
                 { text: 'Boarding failed: Target drifted out of range.' });
             return;
@@ -622,6 +626,7 @@ export const PlayerBoardingSystem = new System({
         if (result.cargo > 0 || result.credits > 0) {
             emitNow(PlunderEvent, { boarder: uuid }, [request.target]);
         }
+        entity.components.delete(BoardingRequestComponent);
     },
 });
 

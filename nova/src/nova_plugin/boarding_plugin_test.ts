@@ -317,6 +317,7 @@ describe('pirate boarding', () => {
         expect(victimInventory.holds).toEqual([]);
         expect(player.components.get(BoardingStateComponent))
             .toEqual({ boarded: ['victim'] });
+        expect(player.components.has(BoardingRequestComponent)).toBeFalse();
     });
 
     it('captures a disabled NPC ship into player escorts when boarded', () => {

@@ -26,6 +26,7 @@ import {
     EscortRosterComponent,
     HandleEscortDestruction,
     HiredEscortComponent,
+    HiredEscortJumpRelaySystem,
     PlayerEscortCommandInputSystem,
     RemoveDismissedEscorts,
     SyncEscortRoster,
@@ -43,6 +44,8 @@ import { NpcAIComponent } from './npc_plugin';
 import { PlatformResource } from './platform_plugin';
 import { PlayerStateComponent, createInitialPlayerState } from './player_state';
 import { TargetComponent } from './target_component';
+import { InitiateJumpEvent } from './jump_plugin';
+import { ChooseRandomTargetComponent } from './npc_plugin';
 
 function movementAt(x: number, y: number): MovementState {
     return {
@@ -492,5 +495,50 @@ describe('tactical escort formations', () => {
         const posRight = worldFormationPosition(flagshipPos, new Angle(Math.PI / 2), 1);
         expect(posRight.x).toBeLessThan(flagshipPos.x); // Trailing behind facing direction
         expect(posRight.y).toBeGreaterThan(flagshipPos.y); // Starboard
+    });
+
+    it('attaches TargetComponent to hired escorts and removes autonomous random targeting', () => {
+        const shipData = { ...getDefaultShipData(), id: 'nova:128' };
+        const escort = makeHiredEscort(shipData, 'player', 'contract-1', 0, movementAt(0, 0));
+        expect(escort.components.has(TargetComponent)).toBeTrue();
+        expect(escort.components.get(TargetComponent)?.target).toBeUndefined();
+        expect(escort.components.has(ChooseRandomTargetComponent)).toBeFalse();
+    });
+
+    it('relays InitiateJumpEvent from leader to all hired escorts', () => {
+        const world = new World('escort-jump-relay-test');
+        world.resources.set(PlatformResource, 'node');
+        world.resources.set(TimeResource, {
+            time: 1000,
+            delta_ms: 1000 / 60,
+            delta_s: 1 / 60,
+            frame: 1,
+        });
+
+        const player = new Entity('player')
+            .addComponent(MultiplayerData, { owner: 'player' });
+
+        const shipData = { ...getDefaultShipData(), id: 'nova:128' };
+        const escort1 = makeHiredEscort(shipData, 'player', 'c-1', 0, movementAt(0, 0));
+        const escort2 = makeHiredEscort(shipData, 'player', 'c-2', 1, movementAt(0, 0));
+        const otherNpc = new Entity('other-npc');
+
+        world.entities.set('player', player);
+        world.entities.set('escort-1', escort1);
+        world.entities.set('escort-2', escort2);
+        world.entities.set('other-npc', otherNpc);
+
+        world.addSystem(HiredEscortJumpRelaySystem);
+
+        let jumpRelayedCount = 0;
+        world.events.get(InitiateJumpEvent).subscribe(() => {
+            jumpRelayedCount++;
+        });
+
+        // Player starts jump to nova:148
+        world.emitNow(InitiateJumpEvent, { to: 'nova:148' }, ['player']);
+
+        // 1 initial event for player + 2 relayed events for escort-1 and escort-2
+        expect(jumpRelayedCount).toBe(3);
     });
 });

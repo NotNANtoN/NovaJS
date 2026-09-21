@@ -154,6 +154,24 @@ To rapidly diagnose runtime faults, network disruptions, and gameplay state dive
   - In `spaceport_plugin.ts`, wired `reportLandingError` to immediately forward any spaceport authorization or display failures to `/client-error`.
 * **Verification**: Added unit test `authorizes open landing when planet is in a storyline variant of the current system` in `combat_resources_test.ts`. All 183 test suites pass.
 
+### F. Repeating "Vessel has already been boarded" Notifications
+* **Problem**: After boarding or capturing a vessel, the notification "Vessel has already been boarded" continued appearing every frame and persisted even after hyperjumping into a new system.
+* **Root Cause**: `PlayerBoardingSystem` is a per-step system running on every tick. When a boarding request was processed, `BoardingRequestComponent` was never deleted from the player entity. Consequently, on every subsequent tick, the system saw the old request target in `boarding.boarded` and repeatedly posted `"Vessel has already been boarded."` to `BoardingNoticeComponent`.
+* **Fix**: Cleanly delete `BoardingRequestComponent` as soon as the request is fulfilled, aborted, repelled, or rejected.
+
+### G. Escort Attack Order ("F" Key) Focus Fire
+* **Problem**: Pressing "F" with a target selected produced no action from escorts.
+* **Root Cause**: In `makeHiredEscort()`, `makeNpc` was called, but `TargetComponent` was never added to the escort entity, and `ChooseRandomTargetComponent` and `WanderComponent` remained attached. Because `EscortDefenseSystem` and `FollowAndShootAI` require `TargetComponent`, escort AI systems were never invoked for player commands.
+* **Fix**:
+  - Explicitly attach `TargetComponent` to all hired escorts upon spawning.
+  - Delete `ChooseRandomTargetComponent` and `WanderComponent` so escorts strictly follow flagship orders.
+  - When `attack` is triggered, `EscortDefenseSystem` assigns the flagship's target to `TargetComponent`, allowing `FollowAndShootAI` to lead aim and engage weapons.
+
+### H. Hired Escort Formation Hyperjumping
+* **Problem**: When initiating a hyperjump to another system, hired escorts stayed stationary in space instead of hyperjumping together with the flagship.
+* **Root Cause**: Only `FleetMemberComponent` (for NPC fleet encounters) was wired to `FleetJumpRelaySystem`. Hired player escorts (`HiredEscortComponent`) had no jump relay system.
+* **Fix**: Added `HiredEscortJumpRelaySystem` to `escort_plugin.ts`. When `InitiateJumpEvent` is fired for the flagship, it immediately relays the jump destination to all hired escorts, putting them into hyperdrive spool and departure alongside the player.
+
 ---
 
 ## 6. Elimination of VM Reboots on Deployment (September 2026)

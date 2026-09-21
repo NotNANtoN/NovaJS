@@ -1,6 +1,6 @@
 import * as t from 'io-ts';
 import { ShipData } from 'novadatainterface/ShipData';
-import { Entities, GetEntity, GetWorld, UUID } from 'nova_ecs/arg_types';
+import { Emit, Entities, GetEntity, GetWorld, UUID } from 'nova_ecs/arg_types';
 import { AsyncSystem } from 'nova_ecs/async_system';
 import { Position } from 'nova_ecs/datatypes/position';
 import { Component } from 'nova_ecs/component';
@@ -20,8 +20,8 @@ import { System } from 'nova_ecs/system';
 import { v4 as uuid } from 'uuid';
 import { GameDataResource } from './game_data_resource';
 import { approachTarget } from './flight_controller';
-import { JumpStateComponent } from './jump_plugin';
-import { makeNpc } from './npc_plugin';
+import { InitiateJumpEvent, JumpStateComponent } from './jump_plugin';
+import { ChooseRandomTargetComponent, makeNpc, WanderComponent } from './npc_plugin';
 import { PlatformResource } from './platform_plugin';
 import { TargetComponent } from './target_component';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
@@ -312,6 +312,9 @@ export function makeHiredEscort(
         slot,
     });
     escort.components.set(MultiplayerData, { owner: 'server' });
+    escort.components.set(TargetComponent, { target: undefined });
+    escort.components.delete(ChooseRandomTargetComponent);
+    escort.components.delete(WanderComponent);
     const movement = copyMovementState(ownerMovement);
     movement.position = worldFormationPosition(
         ownerMovement.position,
@@ -637,6 +640,30 @@ export const RemoveDismissedEscorts = new System({
     },
 });
 
+export const HiredEscortJumpRelaySystem = new System({
+    name: 'HiredEscortJumpRelay',
+    events: [InitiateJumpEvent],
+    args: [
+        InitiateJumpEvent,
+        UUID,
+        Entities,
+        Emit,
+        PlatformResource,
+    ] as const,
+    step({ to }, leaderUuid, entities, emit, platform) {
+        if (platform !== 'node') {
+            return;
+        }
+        for (const [escortUuid, escort] of entities) {
+            const hired = escort.components.get(HiredEscortComponent);
+            if (!hired || hired.ownerUuid !== leaderUuid) {
+                continue;
+            }
+            emit(InitiateJumpEvent, { to }, [escortUuid]);
+        }
+    },
+});
+
 
 /**
  * Mirror the saved contracts onto the roster component.
@@ -704,6 +731,7 @@ export const EscortPlugin: Plugin = {
         world.addSystem(SpawnHiredEscorts);
         world.addSystem(FollowEscortOwner);
         world.addSystem(EscortDefenseSystem);
+        world.addSystem(HiredEscortJumpRelaySystem);
         world.addSystem(HandleEscortDestruction);
         world.addSystem(RemoveDismissedEscorts);
     },
@@ -713,6 +741,7 @@ export const EscortPlugin: Plugin = {
         world.removeSystem(SpawnHiredEscorts);
         world.removeSystem(FollowEscortOwner);
         world.removeSystem(EscortDefenseSystem);
+        world.removeSystem(HiredEscortJumpRelaySystem);
         world.removeSystem(HandleEscortDestruction);
         world.removeSystem(RemoveDismissedEscorts);
     },
