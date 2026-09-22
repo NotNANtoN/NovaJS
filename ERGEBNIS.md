@@ -261,3 +261,7 @@ To structurally prevent recurrent classes of subtle bugs, four architectural gua
 ### N. Toroidal Stereo Spatial Audio (`nova/src/display/sound_attenuation.ts`)
 * **Problem Solved**: Sounds lacked directional panning and only had distance volume attenuation.
 * **Mechanism**: Implemented `worldSoundPan(source, listener, panWidth)` which computes normalized $[-1, 1]$ stereo panning across toroidal wrapped space system coordinates.
+
+### O. Per-Step Query Cache Eviction & Revoked Proxy Prevention (`nova_ecs/query_cache.ts`)
+* **Problem Solved**: `QueryCache` retained component argument values (`entityResults`, `wrappedResult`) across simulation steps without per-frame invalidation. When `DeltaPlugin` finalized Immer drafts at the end of a frame, nested static queries (e.g. `ParkingPlanetsQuery`) cached revoked proxy references. On subsequent ticks, systems accessing those queries (e.g. `ParkInterceptorAI`) threw `TypeError: Cannot perform 'get' on a proxy that has been revoked`, halting simulation on the server and freezing client ships.
+* **Mechanism**: `QueryCache.clearStepCache()`. Automatically called at the start of each `World.step()`. It flushes frame-level query argument results while preserving the $O(1)$ entity archetype support map, guaranteeing that all systems receive fresh, live component instances every tick.

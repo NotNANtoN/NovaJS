@@ -143,17 +143,6 @@ export class World {
     }
 
     /**
-     * Clear and destroy all entities, queries, and non-base plugins in this world.
-     * Used when star system worlds are torn down to free memory and detach handlers.
-     */
-    async destroy() {
-        await this.removeAllPlugins();
-        this.eventQueue.length = 0;
-        this.systemsByEvent.clear();
-        this.entities.clear();
-    }
-
-    /**
      * Add a plugin to the `World` if it is not already added by calling its
      * `build` function with `this` instance of the `World`.
      */
@@ -413,6 +402,7 @@ export class World {
      * flush the queue by calling Systems on the entities they support.
      */
     step() {
+        this.queries.clearStepCache();
         this.eventQueue.push({
             event: StepEvent as UnknownEvent,
             data: true,

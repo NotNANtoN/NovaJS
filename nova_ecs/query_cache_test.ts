@@ -123,8 +123,29 @@ describe('query cache', () => {
 
         resources.set(BazResource, resourceVal);
         cached.getResult();
-
         expect(getArg).toHaveBeenCalledTimes(1);
+    });
+
+    it('clearStepCache refreshes component results across step frames', () => {
+        const query = new Query([FooComponent]);
+        const e1 = new Entity().addComponent(FooComponent, { x: 100 });
+        entities.set('e1', e1);
+
+        const cached = queryCache.get(query);
+        getArg.and.returnValue(right({ x: 100 }));
+        cached.getResult();
+        expect(getArg).toHaveBeenCalledTimes(1);
+
+        // Within the same step, result is cached
+        cached.getResult();
+        expect(getArg).toHaveBeenCalledTimes(1);
+
+        // Between steps, clearStepCache invalidates cached values so updated/drafted components are refreshed
+        queryCache.clearStepCache();
+        getArg.and.returnValue(right({ x: 200 }));
+        const results = cached.getResult();
+        expect(getArg).toHaveBeenCalledTimes(2);
+        expect(results).toEqual([[{ x: 200 }]]);
     });
 
     it('invalidates the cache when a resource changes', () => {

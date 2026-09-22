@@ -436,12 +436,7 @@ export const ServerPlugin: Plugin = {
             });
         });
 
-        const mountedRooms = new Set<string>();
-        const mountSystemRoom = async (systemId: string) => {
-            if (mountedRooms.has(systemId)) {
-                return;
-            }
-            mountedRooms.add(systemId);
+        for (const systemId of (await gameData.ids).System) {
             const systemRoom = multiRoom.join(systemId);
             systemRoom.peers.current.subscribe(async peers => {
                 // Delete systems that have no (non-server) peers.
@@ -454,7 +449,7 @@ export const ServerPlugin: Plugin = {
                         const system = systemEntity?.components.get(SystemComponent);
                         if (system) {
                             try {
-                                await system.destroy();
+                                await system.removeAllPlugins();
                             } catch (e) {
                                 log.warn(`Error cleaning up plugins for empty system ${systemId}:`, e);
                             }
@@ -479,15 +474,6 @@ export const ServerPlugin: Plugin = {
                     }
                 }
             });
-        };
-
-        multiRoom.roomJoined.subscribe(({ room }) => {
-            if (room && room !== 'main room' && !room.startsWith('private:')) {
-                void mountSystemRoom(room);
-            }
-        });
-
-        // Pre-mount default starter system
-        void mountSystemRoom('nova:130');
+        }
     }
 }

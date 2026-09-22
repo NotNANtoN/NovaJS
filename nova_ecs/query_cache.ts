@@ -13,6 +13,7 @@ import { World } from "./world";
 interface QueryCacheEntry<Args extends readonly ArgTypes[] = readonly ArgTypes[]> {
     readonly valid: boolean;
     unsubscribe: () => void;
+    clearStepCache?: () => void;
     getResultForEntity(entity: Entity,
         event?: readonly [EcsEvent<unknown>, unknown]): Either<undefined, ArgsToData<Args>>;
     getResult(args?: {
@@ -212,6 +213,12 @@ class CachedQueryCacheEntry<Args extends readonly ArgTypes[] = readonly ArgTypes
         return this.wrappedResult;
     }
 
+    clearStepCache() {
+        this.entityResults.clear();
+        this.resultValid = false;
+        this.wrappedResult.length = 0;
+    }
+
     get valid() {
         if (!this.resultValid) {
             return false;
@@ -299,4 +306,10 @@ export class QueryCache extends DefaultMap<Query, QueryCacheEntry> {
     override delete<Args extends QueryArgsList>(query: Query<Args>): boolean {
         return super.delete(query);
     };
+
+    clearStepCache() {
+        for (const entry of this.values()) {
+            entry.clearStepCache?.();
+        }
+    }
 }
