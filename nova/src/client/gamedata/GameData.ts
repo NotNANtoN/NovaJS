@@ -241,8 +241,8 @@ export class GameData implements GameDataInterface {
         const dataPrefix = this.getDataPrefix(dataType);
         return new Gettable<T>(async (id: string, priority: number): Promise<T> => {
             const result = await this.getMetadataUrl(
-                joinPath(dataPrefix, id + ".json"), priority) as { data: T };
-            return result.data;
+                joinPath(dataPrefix, id + ".json"), priority) as any;
+            return (result?.data ?? result) as T;
         });
     }
 

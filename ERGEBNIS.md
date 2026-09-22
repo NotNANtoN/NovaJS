@@ -280,3 +280,11 @@ To structurally prevent recurrent classes of subtle bugs, four architectural gua
   1. Decoded retail `spöb` flag `0x0010` (`Stellar is a station instead of a planet`) to classify targets accurately: `Inhabited Planet`, `Uninhabited Planet`, `Space Station`, `Derelict Station`, or `Hazardous Stellar`.
   2. Prevented loading `default_pict.png` ("PICT parse failed") on the HUD when `!hasCustomLandingPict` or `landingPict === 'default'`; dynamically falls back to the planet's spinning sprite (`planetGraphic`) in the target box.
   3. Synchronized `authority.system` and `authority.state.currentSystem` upon system arrival (`InitializeCombatResourcesSystem`) and during state capture (`authority.capture`), and wrapped toroidal boundary coordinates during spaceport distance checks.
+
+### S. Unwrapped SpriteSheetFrames Resolution & Safe Standard Spaceport Landscapes
+* **Problem Solved**: When landing on planets without a custom landscape picture (such as Trusa), the spaceport screen failed to open and hung, leaving the player ship deleted from space with no UI. This occurred because `GameData.addTextureGettable` was expecting server responses wrapped in `{ data: ... }` and accessing `result.data`, whereas `/gameData/data/SpriteSheetFrames/:id.json` returns raw `SpriteSheetFramesData`. Consequently, `SpriteSheetFrames.get("nova:2009")` returned `undefined`, causing `texturesFromFrames` to throw `TypeError: Cannot read properties of undefined (reading 'frames')` during `planetGraphic.buildPromise` inside `Spaceport.build()`.
+* **Mechanism**:
+  1. Updated `GameData.addTextureGettable` to safely unwrap `result?.data ?? result`, matching both wrapped and direct metadata responses.
+  2. Guarded `texturesFromFrames(framesData)` to return `[PIXI.Texture.EMPTY]` instead of throwing when metadata is absent or malformed.
+  3. Wrapped standard landscape graphic compilation in `Spaceport.build()` in a non-fatal `try/catch` block, ensuring that spaceport menus (outfitter, shipyard, commodity exchange, mission BBS, bar, and departure) reliably open regardless of animation asset load states.
+  4. Added integration test in `spaceport_plugin_test.ts` verifying real `Spaceport` build and resolution for planets without custom landscape pictures.

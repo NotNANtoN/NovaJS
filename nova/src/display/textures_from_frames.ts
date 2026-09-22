@@ -71,6 +71,9 @@ function loadAtlasTexture(url: string) {
 }
 
 export async function texturesFromFrames(framesData: SpriteSheetFramesData): Promise<PIXI.Texture[]> {
+    if (!framesData || !framesData.frames) {
+        return [PIXI.Texture.EMPTY];
+    }
     const syncCached = resolvedFramesCache.get(framesData);
     if (syncCached) {
         return syncCached;

@@ -140,4 +140,44 @@ describe('spaceport landing recovery', () => {
             expect(menu.container.visible).toBeTrue();
         } finally { jasmine.clock().uninstall(); }
     });
+
+    it('builds real Spaceport without a custom landing pict and opens it', async () => {
+        const PIXI = await import('pixi.js');
+        const { Subject } = await import('rxjs');
+        const data = new MockGameData();
+        const trusaPlanet = {
+            ...getDefaultPlanetData(),
+            id: 'nova:155',
+            name: 'Trusa',
+            landingDesc: 'Trusa description.',
+            landingPict: 'default',
+            hasCustomLandingPict: false,
+            animation: {
+                id: 'nova:155',
+                name: 'Trusa',
+                prefix: 'nova',
+                exitPoints: { gun: [], turret: [], guided: [], beam: [], upCompress: [0, 0] as [number, number], downCompress: [0, 0] as [number, number] },
+                images: {
+                    baseImage: {
+                        id: 'nova:2009',
+                        dataType: 0 as any,
+                        blendMode: 0,
+                        frames: { normal: { start: 0, length: 1 } },
+                    }
+                }
+            },
+        };
+        data.data.Planet.map.set('nova:155', trusaPlanet);
+        (data as any).spriteFromPict = () => new PIXI.Sprite(PIXI.Texture.EMPTY);
+        (data as any).textureFromPict = () => PIXI.Texture.EMPTY;
+        (data as any).textureFromPictAsync = async () => PIXI.Texture.EMPTY;
+        (data as any).spriteFromPictAsync = async () => new PIXI.Sprite(PIXI.Texture.EMPTY);
+
+        spyOn(PIXI.CanvasTextMetrics, 'measureText').and.returnValue({ width: 50, height: 12 } as any);
+
+        const controlEvents = new Subject<any>();
+        const spaceport = new Spaceport(data as any, trusaPlanet, controlEvents);
+        await expectAsync(spaceport.buildPromise).toBeResolved();
+        expect(spaceport.built).toBeTrue();
+    });
 });

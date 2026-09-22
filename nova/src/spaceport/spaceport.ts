@@ -606,23 +606,27 @@ export class Spaceport extends Menu<Entity> {
             background.rect(0, 0, LANDSCAPE_WIDTH, LANDSCAPE_HEIGHT).fill(0x000000);
             standardLandscape.addChild(background);
 
-            const planetGraphic = new AnimationGraphic({
-                gameData: this.gameData,
-                animation: data.animation,
-            });
-            await planetGraphic.buildPromise;
-            planetGraphic.progress = 0;
-            const graphicWidth = planetGraphic.size.x || 100;
-            const graphicHeight = planetGraphic.size.y || 100;
-            const scale = Math.min(
-                LANDSCAPE_WIDTH * 0.85 / graphicWidth,
-                LANDSCAPE_HEIGHT * 0.85 / graphicHeight,
-                3,
-            );
-            planetGraphic.container.position.set(
-                LANDSCAPE_WIDTH / 2, LANDSCAPE_HEIGHT / 2);
-            planetGraphic.container.scale.set(Number.isFinite(scale) && scale > 0 ? scale : 1);
-            standardLandscape.addChild(planetGraphic.container);
+            try {
+                const planetGraphic = new AnimationGraphic({
+                    gameData: this.gameData,
+                    animation: data.animation,
+                });
+                await planetGraphic.buildPromise;
+                planetGraphic.progress = 0;
+                const graphicWidth = planetGraphic.size.x || 100;
+                const graphicHeight = planetGraphic.size.y || 100;
+                const scale = Math.min(
+                    LANDSCAPE_WIDTH * 0.85 / graphicWidth,
+                    LANDSCAPE_HEIGHT * 0.85 / graphicHeight,
+                    3,
+                );
+                planetGraphic.container.position.set(
+                    LANDSCAPE_WIDTH / 2, LANDSCAPE_HEIGHT / 2);
+                planetGraphic.container.scale.set(Number.isFinite(scale) && scale > 0 ? scale : 1);
+                standardLandscape.addChild(planetGraphic.container);
+            } catch (error) {
+                console.warn('Failed to load standard landscape planet graphic', error);
+            }
             spaceportLandscape = standardLandscape;
         }
         spaceportLandscape.position.x = LANDSCAPE_X;
