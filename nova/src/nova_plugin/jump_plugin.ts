@@ -719,10 +719,10 @@ const JumpLifecycleSystem = new System({
                 JUMP_ARRIVAL_RADIUS,
                 physics.maxVelocity * JUMP_ARRIVAL_SPEED_MULTIPLIER,
             );
-            movement.position = arrival.position;
-            movement.velocity = arrival.velocity;
-            movement.rotation = arrival.rotation;
-            movement.turnTo = arrival.rotation;
+            movement.position = arrival.position ? new Position(arrival.position.x, arrival.position.y) : movement.position;
+            movement.velocity = arrival.velocity ? new Vector(arrival.velocity.x, arrival.velocity.y) : movement.velocity;
+            movement.rotation = arrival.rotation ? new Angle(arrival.rotation.angle) : movement.rotation;
+            movement.turnTo = arrival.rotation ? new Angle(arrival.rotation.angle) : null;
             movement.accelerating = 0;
             state.phase = 'arriving';
             state.phaseStartedAt = time.time;

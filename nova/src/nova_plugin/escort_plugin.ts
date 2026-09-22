@@ -3,6 +3,7 @@ import { ShipData } from 'novadatainterface/ShipData';
 import { Emit, Entities, GetEntity, GetWorld, UUID } from 'nova_ecs/arg_types';
 import { AsyncSystem } from 'nova_ecs/async_system';
 import { Position } from 'nova_ecs/datatypes/position';
+import { Angle } from 'nova_ecs/datatypes/angle';
 import { Component } from 'nova_ecs/component';
 import { assertArchetype } from 'nova_ecs/archetype';
 import { Optional } from 'nova_ecs/optional';
@@ -525,7 +526,8 @@ const FollowEscortOwner = new System({
             physics,
             { standoff: 0, tolerance: 20 },
         );
-        movement.turnTo = command.turnTo ?? ownerMovement.rotation;
+        movement.turnTo = command.turnTo ?? (ownerMovement.rotation
+            ? new Angle(ownerMovement.rotation.angle) : null);
         movement.accelerating = command.accelerating;
         movement.turnBack = command.turnBack;
     },

@@ -811,7 +811,9 @@ export const ParkInterceptorAI = new System({
         const command = approachTarget(movement, planet, physics, {
             standoff: DEFAULT_COMBAT_STANDOFF,
         });
-        movement.turnTo = command.turnTo;
+        movement.turnTo = command.turnTo instanceof Angle
+            ? new Angle(command.turnTo.angle)
+            : command.turnTo;
         movement.accelerating = command.accelerating;
         movement.turnBack = command.turnBack;
         if (command.turnTo === null && !command.turnBack) {
