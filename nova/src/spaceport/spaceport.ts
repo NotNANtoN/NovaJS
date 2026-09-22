@@ -612,14 +612,16 @@ export class Spaceport extends Menu<Entity> {
             });
             await planetGraphic.buildPromise;
             planetGraphic.progress = 0;
+            const graphicWidth = planetGraphic.size.x || 100;
+            const graphicHeight = planetGraphic.size.y || 100;
             const scale = Math.min(
-                LANDSCAPE_WIDTH * 0.85 / planetGraphic.size.x,
-                LANDSCAPE_HEIGHT * 0.85 / planetGraphic.size.y,
+                LANDSCAPE_WIDTH * 0.85 / graphicWidth,
+                LANDSCAPE_HEIGHT * 0.85 / graphicHeight,
                 3,
             );
             planetGraphic.container.position.set(
                 LANDSCAPE_WIDTH / 2, LANDSCAPE_HEIGHT / 2);
-            planetGraphic.container.scale.set(scale);
+            planetGraphic.container.scale.set(Number.isFinite(scale) && scale > 0 ? scale : 1);
             standardLandscape.addChild(planetGraphic.container);
             spaceportLandscape = standardLandscape;
         }

@@ -11,6 +11,7 @@ import { OutfitsState, OutfitsStateComponent } from './outfit_plugin';
 import { ArmorComponent, IonizationComponent, ShieldComponent } from './health_plugin';
 import { buyFuel, clampFuel, refuelsOnLanding } from './fuel';
 import { areSystemsSameOrVariants, isPlanetInSystem } from './system_variants';
+import { BOUNDARY } from 'nova_ecs/datatypes/position';
 
 import { getPersistentPlayerToken } from '../communication/player_identity';
 import { makePlayerData, StoredPlayerData } from './player_data_projection';
@@ -164,6 +165,10 @@ export class CombatAuthority {
         if (this.retired) return;
         const state = entity.components.get(PlayerStateComponent);
         if (!state) return;
+        if (state.currentSystem) {
+            this.system = state.currentSystem;
+            this.state.currentSystem = state.currentSystem;
+        }
         if (state.combatResources?.revision !== this.balance.revision) {
             this.project(entity);
             return;
@@ -394,8 +399,9 @@ export class CombatLedger {
         for (const [id, count] of Object.entries(authority.balance.ammo)) inventory.set(id, count);
         const installed = outfit ? await Promise.all([...inventory].map(async ([id, count]) =>
             [await this.gameData.data.Outfit.get(id), count] as const)) : [];
+        const effectiveSystemId = authority.system ?? authority.state.currentSystem ?? request.state?.currentSystem;
         const system = request.action === 'open'
-            ? await this.gameData.data.System.get(authority.system ?? authority.state.currentSystem)
+            ? await this.gameData.data.System.get(effectiveSystemId)
             : undefined;
         const ids = await this.gameData.ids;
         const systemLookup = this.gameData.data.System;
@@ -418,9 +424,14 @@ export class CombatLedger {
             if (!planet.canLand || !planetInSystem) {
                 throw new Error(`Not at this spaceport (planet: ${planet.id} (${planet.name || 'unknown'}), current system: ${system?.id} (${system?.name || 'unknown'}))`);
             }
-            if (authority.position && Math.hypot(authority.position[0] - planet.position[0],
-                    authority.position[1] - planet.position[1]) > 750) {
-                throw new Error('Too far from spaceport');
+            if (authority.position && planet.position) {
+                const dx = Math.abs(authority.position[0] - planet.position[0]);
+                const dy = Math.abs(authority.position[1] - planet.position[1]);
+                const wrappedDx = Math.min(dx, BOUNDARY * 2 - dx);
+                const wrappedDy = Math.min(dy, BOUNDARY * 2 - dy);
+                if (Math.hypot(wrappedDx, wrappedDy) > 750) {
+                    throw new Error('Too far from spaceport');
+                }
             }
             if (authority.retired) throw new Error('Pilot session replaced');
             const debit = authority.acceptOwnerFuel(request.state);

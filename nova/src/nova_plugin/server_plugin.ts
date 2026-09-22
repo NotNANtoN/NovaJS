@@ -229,6 +229,11 @@ export const InitializeCombatResourcesSystem = new System({
         const applyAuthority = (auth: CombatAuthority, target: Entity) => {
             if (auth.retired) return;
             auth.landed = undefined;
+            const currentSysId = world.resources.get(SystemIdResource) ?? arrivalState.currentSystem;
+            if (currentSysId) {
+                auth.system = currentSysId;
+                auth.state.currentSystem = currentSysId;
+            }
             bindCombatOwner(owner, auth);
             // Room handoffs can carry an unsent final jump debit. Consume that
             // against a server-issued basis, never against a proposed balance.
@@ -261,6 +266,12 @@ export const InitializeCombatResourcesSystem = new System({
             const state = current.components.get(PlayerStateComponent);
             if (!state) return;
             bindCombatOwner(owner, authority);
+            authority.landed = undefined;
+            const currentSysId = world.resources.get(SystemIdResource) ?? arrivalState.currentSystem;
+            if (currentSysId) {
+                authority.system = currentSysId;
+                authority.state.currentSystem = currentSysId;
+            }
             // Room handoffs can carry an unsent final jump debit. Consume that
             // against a server-issued basis, never against a proposed balance.
             const debit = authority.acceptOwnerFuel(arrivalState);

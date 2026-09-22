@@ -895,9 +895,18 @@ const DrawStatusBarTarget = new System({
             if (planetResult) {
                 const [planet, planetData, planetGraphic] = planetResult;
                 const name = planet.name || planetData?.name || planet.id;
-                const subtitle = planet.canLand === false
-                    ? 'Hazardous Stellar'
-                    : (planet.inhabited ? 'Stellar Spaceport' : 'Uninhabited Stellar');
+                const isStation = Boolean(planet.flags && (planet.flags & 0x0010));
+                let subtitle: string;
+                if (planet.canLand === false) {
+                    subtitle = 'Hazardous Stellar';
+                } else if (isStation) {
+                    subtitle = planet.inhabited ? 'Space Station' : 'Derelict Station';
+                } else {
+                    subtitle = planet.inhabited ? 'Inhabited Planet' : 'Uninhabited Planet';
+                }
+                const targetPict = (planetData?.hasCustomLandingPict && planetData.landingPict !== 'default')
+                    ? planetData.landingPict
+                    : undefined;
                 statusBar.drawTarget(
                     {
                         name,
@@ -905,8 +914,8 @@ const DrawStatusBarTarget = new System({
                     },
                     undefined,
                     undefined,
-                    planetData?.landingPict,
-                    undefined,
+                    targetPict,
+                    targetPict ? undefined : planetGraphic,
                 );
                 return;
             } else {
