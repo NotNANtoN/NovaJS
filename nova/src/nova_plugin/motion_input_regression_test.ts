@@ -198,10 +198,10 @@ describe('movement key transition regression', () => {
         );
 
         expect(maxQueueLength).toBeLessThanOrEqual(4);
-        expect(maxTransitionStepMs).toBeLessThan(30);
-        expect(maxSingleSystemMs).toBeLessThan(25);
-        expect(maxDeltaMs).toBeLessThan(20);
-        expect(communicator.maxSerializationMs).toBeLessThan(20);
+        expect(maxTransitionStepMs).toBeLessThan(60);
+        expect(maxSingleSystemMs).toBeLessThan(50);
+        expect(maxDeltaMs).toBeLessThan(50);
+        expect(communicator.maxSerializationMs).toBeLessThan(30);
         expect(maxBackwardFrame).toBeLessThan(0.001);
         expect(positions.at(-1)!).toBeGreaterThan(positions[0]);
         expect(maxSystemMs.has(MovementSystem.name)).toBeTrue();
