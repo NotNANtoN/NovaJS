@@ -1,6 +1,5 @@
 import {
     ConcourseMissionOffer,
-    getShipboardMissionOffers,
 } from './mission_bbs';
 import {
     acceptMission,
@@ -103,12 +102,12 @@ export class Comms extends Menu<Entity> {
     private pendingShipboardOffer?: ConcourseMissionOffer;
     private pendingDestinationOptions?: (resolved: any) => any;
     private isOfferingContract = false;
+    private acceptingContract = false;
     private lifecycle = 0;
     private backgroundGeneration = 0;
     // Menu's spriteFromPict may still assign its texture after it is detached.
     private initialBackground?: PIXI.Container;
     private finishShow?: () => void;
-    private acceptingContract = false;
     private assistanceDeadline = 0;
     private surrenderPoll?: ReturnType<typeof setInterval>;
     private surrenderDeadline = 0;
@@ -232,17 +231,6 @@ export class Comms extends Menu<Entity> {
         this.pendingShipboardOffer = undefined;
         this.pendingDestinationOptions = undefined;
         this.isOfferingContract = false;
-        try {
-            const isHostile = Boolean(this.target?.hostile || this.relation() === 'enemy');
-            const { offers, destinationOptions } = await getShipboardMissionOffers(this.gameData, input);
-            if (!current()) return;
-            if (offers.length > 0 && !isHostile && !this.target?.isPlanet && !this.target?.isEscort) {
-                this.pendingShipboardOffer = offers[0];
-                this.pendingDestinationOptions = destinationOptions;
-            }
-        } catch {
-            // Fallback
-        }
         if (!current()) return;
         await this.loadLines();
         if (!current()) return;
@@ -314,16 +302,6 @@ export class Comms extends Menu<Entity> {
         const isHostile = Boolean(this.target?.hostile || this.relation() === 'enemy');
         if (isHostile) {
             this.demandSurrender();
-            return;
-        }
-        if (this.pendingShipboardOffer) {
-            const offer = this.pendingShipboardOffer;
-            const pay = offer.mission.payVal > 0
-                ? `\n\nPayment offered: ${offer.mission.payVal.toLocaleString()} cr.` : '';
-            this.message.text = `${this.target?.name ?? 'Vessel'}: "${offer.displayText}"${pay}`;
-            this.buttons.assistance.setText('Accept Contract');
-            this.buttons.assistance.state = 'normal';
-            this.isOfferingContract = true;
             return;
         }
 
