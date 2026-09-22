@@ -8,6 +8,7 @@ import {
     JUMP_BAM_MS,
     JUMP_BRAKE_MS,
     JUMP_DEPARTURE_SPEED_MULTIPLIER,
+    JUMP_DEPARTURE_PEAK_SPEED_MULTIPLIER,
     JUMP_SPOOL_MS,
     NPC_JUMP_TIMEOUT_MS,
     SYSTEM_DEPARTURE_RADIUS,
@@ -210,6 +211,13 @@ describe('hyperjump lifecycle', () => {
         expect(jumpFlightSpeed('departing', 0, maxVelocity))
             .toBeCloseTo(
                 maxVelocity * JUMP_DEPARTURE_SPEED_MULTIPLIER, 8);
+        expect(jumpFlightSpeed('departing', JUMP_BAM_MS, maxVelocity))
+            .toBeCloseTo(
+                maxVelocity * JUMP_DEPARTURE_PEAK_SPEED_MULTIPLIER, 8);
+        expect(jumpFlightSpeed('departing', JUMP_BAM_MS / 2, maxVelocity))
+            .toBeGreaterThan(jumpFlightSpeed('departing', 0, maxVelocity));
+        expect(jumpFlightSpeed('departing', JUMP_BAM_MS, maxVelocity))
+            .toBeGreaterThan(jumpFlightSpeed('departing', JUMP_BAM_MS / 2, maxVelocity));
         expect(jumpFlightSpeed('arriving', 0, maxVelocity))
             .toBeCloseTo(
                 maxVelocity * JUMP_ARRIVAL_SPEED_MULTIPLIER, 8);

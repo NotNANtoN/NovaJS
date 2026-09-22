@@ -46,10 +46,12 @@ export const JUMP_SPOOL_MS = 1_200;
 export const JUMP_BRAKE_MS = 800;
 export const PLAYER_JUMP_BRAKE_TIMEOUT_MS = 25_000;
 export const JUMP_BRAKE_SPEED_THRESHOLD = 0.05;
-export const JUMP_BAM_MS = 180;
+export const JUMP_DEPARTURE_MS = 1_800;
+export const JUMP_BAM_MS = JUMP_DEPARTURE_MS;
 export const JUMP_ARRIVAL_MS = 900;
 export const JUMP_ARRIVAL_RADIUS = 1_400;
 export const JUMP_DEPARTURE_SPEED_MULTIPLIER = 3.5;
+export const JUMP_DEPARTURE_PEAK_SPEED_MULTIPLIER = 100;
 export const JUMP_ARRIVAL_SPEED_MULTIPLIER = 3;
 export const JUMP_ARRIVAL_END_SPEED_MULTIPLIER = 1.0;
 export const JUMP_MIN_DISTANCE = 1_000;
@@ -283,7 +285,12 @@ export function jumpFlightSpeed(
         return 0;
     }
     if (phase === 'departing') {
-        return safeMax * JUMP_DEPARTURE_SPEED_MULTIPLIER;
+        const progress = Math.max(0, Math.min(1, elapsedMs / JUMP_DEPARTURE_MS));
+        const eased = progress * progress * progress;
+        return safeMax * (
+            JUMP_DEPARTURE_SPEED_MULTIPLIER
+            + (JUMP_DEPARTURE_PEAK_SPEED_MULTIPLIER - JUMP_DEPARTURE_SPEED_MULTIPLIER) * eased
+        );
     }
     const duration = phase === 'spooling'
         ? JUMP_SPOOL_MS : JUMP_ARRIVAL_MS;

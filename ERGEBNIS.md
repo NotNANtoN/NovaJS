@@ -288,3 +288,10 @@ To structurally prevent recurrent classes of subtle bugs, four architectural gua
   2. Guarded `texturesFromFrames(framesData)` to return `[PIXI.Texture.EMPTY]` instead of throwing when metadata is absent or malformed.
   3. Wrapped standard landscape graphic compilation in `Spaceport.build()` in a non-fatal `try/catch` block, ensuring that spaceport menus (outfitter, shipyard, commodity exchange, mission BBS, bar, and departure) reliably open regardless of animation asset load states.
   4. Added integration test in `spaceport_plugin_test.ts` verifying real `Spaceport` build and resolution for planets without custom landscape pictures.
+
+### T. Authentic Hyperspace Departure Acceleration Dynamics (`nova/src/nova_plugin/jump_plugin.ts`)
+* **Problem Solved**: Hyperspace departure was cutting off prematurely for the player after a fixed 180ms flash, while NPC ships jumped unnaturally by crawling across the sector at a flat 3.5x speed for 8.5 seconds.
+* **Mechanism**:
+  1. Implemented a cubic exponential departure acceleration curve in `jumpFlightSpeed()`: over an authentic `JUMP_DEPARTURE_MS = 1_800` (1.8s) window, jumping vessels surge from `3.5x` initial departure speed smoothly up to `100x` peak hyperjump velocity (`JUMP_DEPARTURE_PEAK_SPEED_MULTIPLIER = 100`).
+  2. For the player's flagship, departure now sustains acceleration across the star system while the hyperdrive engine roar plays, transferring sectors once maximum hyperjump velocity is achieved.
+  3. For NPC and escort vessels, ships accelerate rapidly into an apparent blur, crossing the system departure threshold (`SYSTEM_DEPARTURE_RADIUS = 6_000`) and despawning cleanly in ~1.8 seconds instead of lingering in ordinary space.
