@@ -13,6 +13,7 @@ import { ProjectileDataComponent } from "../nova_plugin/projectile_data";
 import { ProjectileCollisionEvent } from "../nova_plugin/projectile_plugin";
 import { ShipComponent } from "../nova_plugin/ship_plugin";
 import { DamagedEvent, DisabledComponent } from "../nova_plugin/death_plugin";
+import { HitFeedbackEvent } from "../nova_plugin/damage_events";
 import { IsIonizedComponent } from "../nova_plugin/ionization_plugin";
 import { AsteroidComponent, AsteroidDataComponent } from "../nova_plugin/asteroid_plugin";
 import { Space } from "./space_resource";
@@ -223,7 +224,8 @@ const DisabledShipSparkSystem = new System({
 
 const AsteroidDamageDustSystem = new System({
     name: "AsteroidDamageDustSystem",
-    events: [DamagedEvent],
+    // Browsers only see server-resolved hits as HitFeedbackEvent.
+    events: [DamagedEvent, HitFeedbackEvent],
     args: [
         AsteroidComponent,
         Optional(AsteroidDataComponent),

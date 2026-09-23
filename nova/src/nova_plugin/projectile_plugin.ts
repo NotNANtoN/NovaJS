@@ -324,7 +324,7 @@ const ProjectileLifespanSystem = new System({
     },
 });
 
-const RecordGuidanceTrackSystem = new System({
+export const RecordGuidanceTrackSystem = new System({
     name: 'RecordGuidanceTrackSystem',
     // Only replicated entities (ships, asteroids) are guidance or hit-rewind
     // targets. Recording every projectile each frame was pure overhead.
@@ -480,19 +480,28 @@ export const ProjectileCollisionSystem = new System({
             recordShotImpact(entities, source ?? logged.source, logged.seq,
                 time.time, impact, collision.other);
         }
-        if (platform === 'browser' && replicatedTarget && impact) {
-            // Our own predicted hit; health arrives from the server.
+        const predictedOnly = platform === 'browser' && replicatedTarget;
+        if (predictedOnly && impact) {
+            // Our own predicted hit: effects only. Damage, knockback and
+            // attribution happen on the server.
             emitNow(HitFeedbackEvent, {
                 damager: uuid, kind: 'projectile' as const, position: impact,
             }, [collision.other]);
         }
         resolveProjectileHit(entities, uuid, other, impact, fireSubs, emitNow,
-            { target: collision.other, damage: projectileData.damage });
+            predictedOnly ? undefined
+                : { target: collision.other, damage: projectileData.damage });
     }
 });
 
 /** Longest a received impact waits for its shot's presentation to reach it. */
 const MAX_IMPACT_WAIT_MS = 1000;
+/**
+ * How far ahead of the presentation cursor an impact may be shown. One
+ * frame of lead is invisible (the shot is already touching the hull) and
+ * trims latency from every observed hit.
+ */
+const IMPACT_PRESENTATION_LEAD_MS = 1000 / 60;
 
 /**
  * Client side of server hit authority: apply ShotImpacts to local copies of
@@ -537,13 +546,20 @@ export const ShotImpactApplySystem = new System({
         sync.pendingImpacts = pending.filter(impact => {
             const shotId = loggedShotEntityId(uuid, impact.seq);
             const shot = entities.get(shotId);
-            if (!shot && impact.kind !== 'blast') {
+            if (!shot && impact.kind === 'beam') {
+                return false;
+            }
+            if (!shot) {
+                // No local copy (not replayed yet, expired, or out of
+                // interest when fired): still show the victim being hit.
+                applyShotImpact(entities, shotId, impact, fireSubs, emitNow);
                 return false;
             }
             const replayed = shot?.components.has(MovementPlaybackComponent)
                 || shot?.components.has(ShotPresentationDelayComponent)
                     && (shot.components.get(ShotPresentationDelayComponent) ?? 0) > 0;
-            const due = !replayed || impact.at <= presentedServerTime
+            const due = !replayed
+                || impact.at <= presentedServerTime + IMPACT_PRESENTATION_LEAD_MS
                 || serverNow - impact.at > MAX_IMPACT_WAIT_MS;
             if (!due) {
                 return true;

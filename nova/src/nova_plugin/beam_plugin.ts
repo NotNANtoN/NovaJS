@@ -525,10 +525,13 @@ const BeamCollisionSystem = new System({
                 contact.current = collision.other;
                 contact.currentPosition = { x: hitPoint.x, y: hitPoint.y };
             } else {
-                // The player's own beam: show its contact now.
+                // The player's own beam: show its contact now. Damage stays
+                // on the server.
                 contact.target = collision.other;
                 contact.position = { x: hitPoint.x, y: hitPoint.y };
                 contact.predictedAt = time;
+                self.components.set(BeamContactComponent, contact);
+                return;
             }
             self.components.set(BeamContactComponent, contact);
         }
