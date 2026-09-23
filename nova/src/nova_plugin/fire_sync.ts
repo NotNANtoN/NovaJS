@@ -159,9 +159,16 @@ export const ShotImpact = t.intersection([
     }),
     t.partial({
         target: t.string,
+        /**
+         * `projectile` (default): the shot hit and is consumed.
+         * `beam`: a beam's contact changed; no target means it hits nothing.
+         * `blast`: the shot's explosion damaged `target`.
+         */
+        kind: t.union([t.literal('projectile'), t.literal('beam'), t.literal('blast')]),
     }),
 ]);
 export type ShotImpact = t.TypeOf<typeof ShotImpact>;
+export type ShotImpactKind = NonNullable<ShotImpact['kind']>;
 
 export const ShotImpactLog = t.type({
     impacts: t.array(ShotImpact),
@@ -202,6 +209,31 @@ export function applyShotImpactDelta(
     return currentData;
 }
 
+/**
+ * Server: append a hit outcome to the firing ship's replicated impact log.
+ * `entities` is the world entity map; the ship may be gone (no-op).
+ */
+export function recordShotImpact(entities: Map<string, Entity>, shipUuid: string,
+    seq: number, at: number, position: { x: number, y: number },
+    target: string | undefined, kind: ShotImpactKind = 'projectile'): void {
+    const ship = entities.get(shipUuid);
+    if (!ship) {
+        return;
+    }
+    const sync = getFireSyncLocalState(ship);
+    sync.nextImpactSeq = (sync.nextImpactSeq ?? 0) + 1;
+    const impact: ShotImpact = {
+        impactSeq: sync.nextImpactSeq,
+        seq, at,
+        position: new Position(position.x, position.y),
+    };
+    if (target !== undefined) impact.target = target;
+    if (kind !== 'projectile') impact.kind = kind;
+    const log = ship.components.get(ShotImpactLogComponent) ?? { impacts: [] };
+    applyShotImpactDelta(log, { impacts: [impact] });
+    ship.components.set(ShotImpactLogComponent, log);
+}
+
 /** Inverse of `loggedShotEntityId`. */
 export function parseLoggedShotEntityId(
     uuid: string,
@@ -228,8 +260,13 @@ export interface FireSyncLocalState {
     nextLogSeq: number;
     /** Server: last ShotImpact sequence authored for this ship. */
     nextImpactSeq?: number;
-    /** Client: last ShotImpact sequence applied for this ship. */
+    /** Client: last ShotImpact sequence received for this ship. */
     highestImpactSeq?: number;
+    /**
+     * Client: received impacts waiting for the local presentation of their
+     * shot to reach them. Plain copies, never wire drafts.
+     */
+    pendingImpacts?: ShotImpact[];
 }
 
 export const FireSyncLocalStateComponent =

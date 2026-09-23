@@ -39,6 +39,12 @@ import { zeroOrderGuidance } from './guidance';
 import { SoundEvent } from './sound_event';
 import { TargetComponent } from './target_component';
 import { WeaponsSystem, FireLogSpawnSystem } from './weapon_plugin';
+import { CommunicatorResource, MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
+import { GetEntity } from 'nova_ecs/arg_types';
+import { PlatformResource } from './platform_plugin';
+import { parseLoggedShotEntityId, recordShotImpact } from './fire_sync';
+import { BeamContactComponent } from './beam_contact';
+import { HitFeedbackEvent } from './damage_events';
 
 
 export interface BeamState {
@@ -383,24 +389,63 @@ export const BeamSystem = new System({
     }
 });
 
+/**
+ * Whether this client leaves a beam's contact with `target` to the server.
+ * True for another player's (or an NPC's) synchronized beam hitting a
+ * replicated entity; the player's own beam is predicted locally.
+ */
+function serverDecidesBeamContact(platform: string | undefined, beamUuid: string,
+    target: Entity | undefined, entities: Map<string, Entity>,
+    localUuid: string | undefined): boolean {
+    if (platform !== 'browser' || !target?.components.has(MultiplayerData)) {
+        return false;
+    }
+    const logged = parseLoggedShotEntityId(beamUuid);
+    if (!logged) {
+        return false;
+    }
+    const shooterOwner = entities.get(logged.source)
+        ?.components.get(MultiplayerData)?.owner;
+    return shooterOwner !== undefined && shooterOwner !== localUuid;
+}
+
 export const BeamClippingSystem = new System({
     name: 'BeamClippingSystem',
     args: [BeamDataComponent, BeamStateComponent, MovementStateComponent,
-        HurtboxHullComponent, Optional(OwnerComponent), RunQuery] as const,
+        HurtboxHullComponent, Optional(OwnerComponent), RunQuery, UUID, Entities,
+        Optional(PlatformResource), Optional(CommunicatorResource),
+        Optional(BeamContactComponent)] as const,
     after: [UpdateHitboxHullSystem, UpdateHurtboxHullSystem],
     before: [CollisionSystem],
-    step(beamData, beamState, movement, beamHull, owner, runQuery) {
+    step(beamData, beamState, movement, beamHull, owner, runQuery, uuid, entities,
+        platform, communicator, contact) {
         const maxLength = Math.max(0, beamData.beamAnimation.length);
         const hitType = beamData.guidance === 'pointDefenseBeam'
             ? 'pointDefense'
             : 'normal';
         let effectiveLength = maxLength;
 
+        // A server-reported contact clips the beam where the server says it
+        // hits, even though this client presents the target elsewhere.
+        if (contact?.target && contact.position) {
+            const toContact = {
+                x: contact.position.x - movement.position.x,
+                y: contact.position.y - movement.position.y,
+            };
+            const forward = movement.rotation.getUnitVector();
+            const along = toContact.x * forward.x + toContact.y * forward.y;
+            if (along >= 0) {
+                effectiveLength = Math.min(effectiveLength, along);
+            }
+        }
+
         for (const [targetHull, targetUuid, vulnerability, targetOwner]
             of runQuery(BeamTargetsQuery)) {
             if (targetUuid === owner?.owner
                 || (owner && targetOwner?.owner === owner.owner)
                 || !vulnerability.vulnerableTo.has(hitType)
+                || serverDecidesBeamContact(platform, uuid,
+                    entities.get(targetUuid), entities, communicator?.uuid)
                 || !beamHull.collides(targetHull)) {
                 continue;
             }
@@ -422,9 +467,10 @@ const BeamCollisionSystem = new System({
     events: [CollisionEvent],
     args: [CollisionEvent, Entities, Optional(OwnerComponent),
         BeamDataComponent, BeamStateComponent, MovementStateComponent,
-        CreateTime, EmitNow, TimeResource, UUID] as const,
+        CreateTime, EmitNow, TimeResource, UUID, Optional(PlatformResource),
+        Optional(CommunicatorResource), GetEntity] as const,
     step(collision, entities, owner, beamData, beamState, movement,
-        fireTime, emitNow, { time, delta_ms }, uuid) {
+        fireTime, emitNow, { time, delta_ms }, uuid, platform, communicator, self) {
 
         const other = entities.get(collision.other);
         if (!other) {
@@ -433,6 +479,10 @@ const BeamCollisionSystem = new System({
         const otherOwner = other.components.get(OwnerComponent);
         if (collision.other === owner?.owner
             || (owner && otherOwner?.owner === owner.owner)) {
+            return;
+        }
+        if (serverDecidesBeamContact(platform, uuid, other, entities,
+            communicator?.uuid)) {
             return;
         }
 
@@ -465,9 +515,109 @@ const BeamCollisionSystem = new System({
             return;
         }
 
+        const replicated = other.components.has(MultiplayerData);
+        const hitPoint = movement.position.add(movement.rotation.getUnitVector()
+            .scale(beamState.length ?? beamData.beamAnimation.length));
+        if (parseLoggedShotEntityId(uuid) && replicated) {
+            const contact = self.components.get(BeamContactComponent) ?? {};
+            if (platform === 'node') {
+                // Nearest target this tick; reported on change.
+                contact.current = collision.other;
+                contact.currentPosition = { x: hitPoint.x, y: hitPoint.y };
+            } else {
+                // The player's own beam: show its contact now.
+                contact.target = collision.other;
+                contact.position = { x: hitPoint.x, y: hitPoint.y };
+                contact.predictedAt = time;
+            }
+            self.components.set(BeamContactComponent, contact);
+        }
+
         emitNow(DamagedEvent, { damage: beamData.damage, damager: uuid, scale }, [collision.other]);
     }
 });
+
+/**
+ * Server: report each change in what a synchronized beam hits as a `beam`
+ * ShotImpact, so every client clips and sparks it identically. Runs before
+ * this tick's collisions to publish last tick's result, then clears it.
+ */
+const BeamContactReportSystem = new System({
+    name: 'BeamContactReportSystem',
+    before: [CollisionSystem],
+    after: [BeamSystem],
+    args: [BeamDataComponent, MovementStateComponent, UUID, Entities, TimeResource,
+        Optional(PlatformResource), GetEntity] as const,
+    step(_beamData, _movement, uuid, entities, time, platform, self) {
+        if (platform !== 'node') {
+            return;
+        }
+        const logged = parseLoggedShotEntityId(uuid);
+        if (!logged) {
+            return;
+        }
+        const contact = self.components.get(BeamContactComponent) ?? {};
+        if (contact.current !== contact.reported) {
+            const position = contact.currentPosition
+                ?? self.components.get(MovementStateComponent)!.position;
+            recordShotImpact(entities, logged.source, logged.seq, time.time,
+                position, contact.current, 'beam');
+            contact.reported = contact.current;
+        }
+        contact.current = undefined;
+        contact.currentPosition = undefined;
+        self.components.set(BeamContactComponent, contact);
+    },
+});
+
+/**
+ * Client: while a beam's contact is a replicated target, keep showing hit
+ * sparks on it. Damage numbers stay on the server.
+ */
+const BeamContactFeedbackSystem = new System({
+    name: 'BeamContactFeedbackSystem',
+    after: [BeamClippingSystem],
+    args: [BeamContactComponent, UUID, Entities, TimeResource, EmitNow,
+        Optional(PlatformResource)] as const,
+    step(contact, uuid, entities, time, emitNow, platform) {
+        if (platform !== 'browser' || !contact.target || !contact.position
+            || !entities.has(contact.target)) {
+            return;
+        }
+        if (time.time - (contact.lastFeedbackAt ?? -Infinity) < BEAM_FEEDBACK_INTERVAL_MS) {
+            return;
+        }
+        contact.lastFeedbackAt = time.time;
+        emitNow(HitFeedbackEvent, {
+            damager: uuid, kind: 'beam' as const, position: contact.position,
+        }, [contact.target]);
+    },
+});
+
+/**
+ * Client: a locally predicted contact is re-derived from collisions every
+ * tick. Drop it once collisions stop reporting it (the beam moved off).
+ */
+const ExpirePredictedBeamContactSystem = new System({
+    name: 'ExpirePredictedBeamContactSystem',
+    after: [BeamContactFeedbackSystem],
+    args: [BeamContactComponent, TimeResource, Optional(PlatformResource)] as const,
+    step(contact, time, platform) {
+        if (platform !== 'browser' || contact.predictedAt === undefined) {
+            return;
+        }
+        // Collision events for this tick arrive after all step systems, so a
+        // live contact is always at most one frame old here.
+        if (contact.predictedAt < time.time - PREDICTED_CONTACT_TTL_MS) {
+            contact.target = undefined;
+            contact.position = undefined;
+            contact.predictedAt = undefined;
+        }
+    },
+});
+
+const BEAM_FEEDBACK_INTERVAL_MS = 100;
+const PREDICTED_CONTACT_TTL_MS = 100;
 
 export const BeamPlugin: Plugin = {
     name: 'BeamPlugin',
@@ -478,8 +628,12 @@ export const BeamPlugin: Plugin = {
         }
         weaponConstructors.set('BeamWeaponData', BeamWeaponEntry);
 
+        world.addComponent(BeamContactComponent);
         world.addSystem(BeamSystem);
         world.addSystem(BeamClippingSystem);
         world.addSystem(BeamCollisionSystem);
+        world.addSystem(BeamContactReportSystem);
+        world.addSystem(BeamContactFeedbackSystem);
+        world.addSystem(ExpirePredictedBeamContactSystem);
     }
 };

@@ -19,6 +19,17 @@ export const AppliedDamageEvent = new EcsEvent<{
     fromExplosion?: boolean,
 }>('AppliedDamageEvent');
 
+/**
+ * Client-side presentation of a hit the server resolved (or that this client
+ * predicted for its own shot). Health itself stays server-authoritative, so
+ * AppliedDamageEvent never fires in browsers; effects listen for this.
+ */
+export const HitFeedbackEvent = new EcsEvent<{
+    damager: string,
+    kind: 'projectile' | 'beam' | 'blast',
+    position: { x: number, y: number },
+}>('HitFeedbackEvent');
+
 export interface PlayerDestructionComplete extends Time {
     playerUuid: string;
 }

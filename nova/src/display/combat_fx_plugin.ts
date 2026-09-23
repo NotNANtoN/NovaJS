@@ -7,6 +7,8 @@ import * as PIXI from 'pixi.js';
 import { MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { AppliedDamageEvent, DisabledComponent } from '../nova_plugin/death_plugin';
+import { HitFeedbackEvent } from '../nova_plugin/damage_events';
+import { ShieldComponent } from '../nova_plugin/health_plugin';
 import { ShipDataComponent } from '../nova_plugin/ship_plugin';
 import { Space } from './space_resource';
 import { attachGraphic, ManagedGraphic } from './managed_graphic';
@@ -54,6 +56,30 @@ export const ClearCombatFx = new System({
     args: [CombatFxGraphics, SingletonComponent] as const,
     step(graphicsHandle) {
         (graphicsHandle.root as PIXI.Graphics).clear();
+    },
+});
+
+/**
+ * In multiplayer browsers health is server state and AppliedDamageEvent never
+ * fires; the server's hit outcome arrives as HitFeedbackEvent instead. Pick
+ * the effect from the replicated shield (flare while it holds, sparks after).
+ */
+export const RecordHitFeedbackFxSystem = new System({
+    name: 'RecordHitFeedbackFxSystem',
+    events: [HitFeedbackEvent],
+    args: [
+        HitFeedbackEvent,
+        MovementStateComponent,
+        Optional(ShipDataComponent),
+        Optional(ShieldComponent),
+        TimeResource,
+        CombatFxResource,
+    ] as const,
+    step(hit, movement, shipData, shield, time, state) {
+        const shielded = (shield?.current ?? 0) > 0;
+        RecordDamageFxSystem.step(
+            { shield: shielded ? 1 : 0, armor: shielded ? 0 : 5, damager: hit.damager },
+            movement, shipData, time, state);
     },
 });
 
@@ -254,6 +280,7 @@ export const CombatFxPlugin: Plugin = {
 
         world.addSystem(ClearCombatFx);
         world.addSystem(RecordDamageFxSystem);
+        world.addSystem(RecordHitFeedbackFxSystem);
         world.addSystem(DisabledSmokeSystem);
         world.addSystem(DrawCombatFxSystem);
     },
@@ -261,6 +288,7 @@ export const CombatFxPlugin: Plugin = {
         world.removeSystem(DrawCombatFxSystem);
         world.removeSystem(DisabledSmokeSystem);
         world.removeSystem(RecordDamageFxSystem);
+        world.removeSystem(RecordHitFeedbackFxSystem);
         world.removeSystem(ClearCombatFx);
 
         world.resources.get(CombatFxGraphics)?.dispose();

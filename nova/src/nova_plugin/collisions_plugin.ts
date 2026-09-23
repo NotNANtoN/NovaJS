@@ -524,7 +524,7 @@ export const CollisionSystem = new System({
         for (const [hull, uuid, interaction, projectile, movement, lag] of hurtboxColliders) {
             const entry = makeEntry(RBushEntryType.hurtbox, hull, uuid, interaction, movement,
                 projectile !== undefined);
-            if (lag && lag.viewDelayMs > 0 && projectile !== undefined) {
+            if (lag && lag.viewDelayMs > 0) {
                 // Targets may have moved since the shooter saw them.
                 entry.viewDelayMs = lag.viewDelayMs;
                 entry.minX -= LAG_COMPENSATION_SEARCH_MARGIN;
@@ -580,10 +580,17 @@ export const CollisionSystem = new System({
                             otherDisplacement = { x: 0, y: 0 };
                         }
                     }
+                    const rewound = shift.x !== 0 || shift.y !== 0;
                     const contactTime = entry.projectile
                         ? sweptHullTime(entry.hull.shapes, other.hull.shapes,
                             entry.displacement, otherDisplacement, shift)
-                        : entry.hull.collides(other.hull) ? 1 : undefined;
+                        : rewound
+                            // Static overlap of a blast/beam with where the
+                            // shooter saw the target.
+                            ? sweptHullTime(entry.hull.shapes, other.hull.shapes,
+                                { x: 0, y: 0 }, { x: 0, y: 0 }, shift) === undefined
+                                ? undefined : 1
+                            : entry.hull.collides(other.hull) ? 1 : undefined;
                     if (contactTime !== undefined) contacts.push({ entry, other, time: contactTime });
                 }
             }

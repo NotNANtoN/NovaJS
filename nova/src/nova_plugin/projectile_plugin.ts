@@ -47,7 +47,13 @@ import { ReturnToQueueComponent } from './return_to_queue_plugin';
 import { SoundEvent } from './sound_event';
 import { Stat } from './stat';
 import { ShotPresentationDelayComponent } from './fire_weapon_plugin';
-import { applyShotImpactDelta, getFireSyncLocalState, loggedShotEntityId, parseLoggedShotEntityId, ShotImpactLogComponent } from './fire_sync';
+import { getFireSyncLocalState, loggedShotEntityId, parseLoggedShotEntityId, recordShotImpact, ShotImpact, ShotImpactLogComponent } from './fire_sync';
+import { HitFeedbackEvent } from './damage_events';
+import { setBeamContact } from './beam_contact';
+import { BlastShotComponent } from './blast_plugin';
+import { LagCompensationComponent } from './lag_compensation';
+import { NetworkTimingResource } from 'nova_ecs/plugins/network_timing';
+import { ServerClockOffsetResource } from 'nova_ecs/plugins/multiplayer_plugin';
 
 // Gameplay guidance history must not change with a client's jitter buffer.
 export const GUIDANCE_HISTORY_DELAY_MS = 200;
@@ -474,64 +480,102 @@ export const ProjectileCollisionSystem = new System({
             recordShotImpact(entities, source ?? logged.source, logged.seq,
                 time.time, impact, collision.other);
         }
+        if (platform === 'browser' && replicatedTarget && impact) {
+            // Our own predicted hit; health arrives from the server.
+            emitNow(HitFeedbackEvent, {
+                damager: uuid, kind: 'projectile' as const, position: impact,
+            }, [collision.other]);
+        }
         resolveProjectileHit(entities, uuid, other, impact, fireSubs, emitNow,
             { target: collision.other, damage: projectileData.damage });
     }
 });
 
-function recordShotImpact(entities: Map<string, Entity>, shipUuid: string,
-    seq: number, at: number, position: { x: number, y: number },
-    target: string): void {
-    const ship = entities.get(shipUuid);
-    if (!ship) {
-        return;
-    }
-    const sync = getFireSyncLocalState(ship);
-    sync.nextImpactSeq = (sync.nextImpactSeq ?? 0) + 1;
-    let log = ship.components.get(ShotImpactLogComponent);
-    const impact = {
-        impactSeq: sync.nextImpactSeq,
-        seq, at, target,
-        position: new Position(position.x, position.y),
-    };
-    if (!log) {
-        log = { impacts: [] };
-    }
-    applyShotImpactDelta(log, { impacts: [impact] });
-    ship.components.set(ShotImpactLogComponent, log);
-}
+/** Longest a received impact waits for its shot's presentation to reach it. */
+const MAX_IMPACT_WAIT_MS = 1000;
 
 /**
  * Client side of server hit authority: apply ShotImpacts to local copies of
  * synchronized shots (predicted or replayed).
+ *
+ * Replayed shots are presented `presentationDelay` behind the server, so an
+ * impact is held until the local copy's own clock reaches the hit time.
+ * Applying it on arrival made observers see shots vanish short of the target.
  */
 export const ShotImpactApplySystem = new System({
     name: 'ShotImpactApplySystem',
-    after: [NetworkReceivePhase],
+    after: [NetworkReceivePhase, MovementSystem, RemoteMovementPresentationSystem],
     args: [ShotImpactLogComponent, UUID, GetEntity, Entities, FireSubs,
-        EmitNow, PlatformResource] as const,
-    step(log, uuid, ship, entities, fireSubs, emitNow, platform) {
+        EmitNow, PlatformResource, TimeResource,
+        Optional(NetworkTimingResource), Optional(ServerClockOffsetResource)] as const,
+    step(log, uuid, ship, entities, fireSubs, emitNow, platform, time,
+        network, serverClockOffset) {
         if (platform !== 'browser') {
             return;
         }
         const sync = getFireSyncLocalState(ship);
-        const applied = sync.highestImpactSeq ?? 0;
+        const pending = sync.pendingImpacts ??= [];
         for (const impact of log.impacts) {
-            if (impact.impactSeq <= applied) {
+            if (impact.impactSeq <= (sync.highestImpactSeq ?? 0)) {
                 continue;
             }
-            sync.highestImpactSeq = Math.max(
-                sync.highestImpactSeq ?? 0, impact.impactSeq);
-            const shotId = loggedShotEntityId(uuid, impact.seq);
-            if (!entities.has(shotId)) {
-                continue;
-            }
-            const other = impact.target ? entities.get(impact.target) : undefined;
-            resolveProjectileHit(entities, shotId, other, impact.position,
-                fireSubs, emitNow);
+            sync.highestImpactSeq = impact.impactSeq;
+            pending.push({
+                ...impact,
+                position: new Position(impact.position.x, impact.position.y),
+            });
         }
+        if (pending.length === 0) {
+            return;
+        }
+        const offset = network?.clocks.get(network.serverPeer)?.offset
+            ?? serverClockOffset?.offset ?? 0;
+        // Server time currently being presented for remote entities.
+        const presentedServerTime = (network?.renderTime
+            ?? time.time - (network?.presentationDelay(time.time) ?? 0)) - offset;
+        const serverNow = time.time - offset;
+        sync.pendingImpacts = pending.filter(impact => {
+            const shotId = loggedShotEntityId(uuid, impact.seq);
+            const shot = entities.get(shotId);
+            if (!shot && impact.kind !== 'blast') {
+                return false;
+            }
+            const replayed = shot?.components.has(MovementPlaybackComponent)
+                || shot?.components.has(ShotPresentationDelayComponent)
+                    && (shot.components.get(ShotPresentationDelayComponent) ?? 0) > 0;
+            const due = !replayed || impact.at <= presentedServerTime
+                || serverNow - impact.at > MAX_IMPACT_WAIT_MS;
+            if (!due) {
+                return true;
+            }
+            applyShotImpact(entities, shotId, impact, fireSubs, emitNow);
+            return false;
+        });
     },
 });
+
+function applyShotImpact(entities: Map<string, Entity>, shotId: string,
+    impact: ShotImpact, fireSubs: (id: string, source: string, sourceExpired?: boolean) => Entity[],
+    emitNow: (event: EcsEvent<any, any>, data: any, entities?: (string | Entity)[]) => void): void {
+    const kind = impact.kind ?? 'projectile';
+    const other = impact.target ? entities.get(impact.target) : undefined;
+    if (kind === 'beam') {
+        const beam = entities.get(shotId);
+        if (beam) {
+            setBeamContact(beam, impact.target, impact.position);
+        }
+        return;
+    }
+    if (impact.target && other) {
+        emitNow(HitFeedbackEvent, {
+            damager: shotId, kind, position: impact.position,
+        }, [impact.target]);
+    }
+    if (kind === 'projectile') {
+        resolveProjectileHit(entities, shotId, other, impact.position,
+            fireSubs, emitNow);
+    }
+}
 
 export const ProjectileExplodeEvent = new EcsEvent<Entity | undefined>('ProjectileExplodeEvent');
 
@@ -557,9 +601,9 @@ const ProjectileBlastSystem = new System({
     args: [ProjectileDataComponent, ProjectileBlastHull, CollisionHitterComponent,
         MovementStateComponent, Optional(OwnerComponent),
         Optional(SourceComponent), Optional(AttackIntentComponent), Entities,
-        ProjectileExplodeEvent] as const,
+        ProjectileExplodeEvent, UUID, Optional(LagCompensationComponent)] as const,
     step(projectileData, blastHull, hitter, movement, owner, source,
-        attackIntent, entities, other) {
+        attackIntent, entities, other, uuid, lag) {
         const blastIgnore = new Set<string>();
         // TODO: Tag ship that was hit as immune to explosion, since it's already hit.
         if (!projectileData.blastHurtsFiringShip && owner) {
@@ -598,6 +642,14 @@ const ProjectileBlastSystem = new System({
         }
         if (attackIntent) {
             blast.addComponent(AttackIntentComponent, attackIntent);
+        }
+        const logged = parseLoggedShotEntityId(uuid);
+        if (logged) {
+            // Lets the blast report per-target ShotImpacts for this shot.
+            blast.addComponent(BlastShotComponent, logged);
+        }
+        if (lag) {
+            blast.addComponent(LagCompensationComponent, { ...lag });
         }
         entities.set(v4(), blast);
     }

@@ -34,6 +34,7 @@ import {
     recordPlayerDeath,
     shouldShowDeathOverlay,
 } from './death_plugin';
+import { ExternalImpulseComponent } from './external_impulse';
 import { System } from 'nova_ecs/system';
 import { PlayerShipSelector } from './player_ship_plugin';
 import { Position } from 'nova_ecs/datatypes/position';
@@ -848,7 +849,7 @@ describe('player death', () => {
         }
     });
 
-    it('does not knock a client-owned ship on the server', async () => {
+    it('routes knockback on a client-owned ship through a server impulse', async () => {
         const world = new World('server-knockback-authority');
         world.resources.set(TimeResource, {
             time: 0, delta_ms: 16, delta_s: 0.016, frame: 0,
@@ -892,8 +893,13 @@ describe('player death', () => {
             },
             damager: 'shooter',
         }, ['victim']);
-        expect(world.entities.get('victim')!.components
-            .get(MovementStateComponent)!.velocity.x).toBe(10);
+        const victim = world.entities.get('victim')!;
+        // The owner applies this impulse on receipt; the server's copy
+        // tracks it so its hit detection stays consistent.
+        const impulses = victim.components.get(ExternalImpulseComponent)!.impulses;
+        expect(impulses.length).toBe(1);
+        expect(impulses[0]).toEqual(jasmine.objectContaining({ owner: 'player', x: 0, y: -50 }));
+        expect(victim.components.get(MovementStateComponent)!.velocity.y).toBe(-50);
     });
 
     it('does not knock a remotely presented ship', async () => {
