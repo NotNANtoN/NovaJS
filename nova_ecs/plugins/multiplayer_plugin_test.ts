@@ -808,6 +808,87 @@ describe('Multiplayer Plugin', () => {
         });
     }
 
+    it('relays owner-authored component changes to observers through the server', () => {
+        const network = new DeterministicDelayedNetwork({ delays: [20] });
+        const worlds = ['server', 'owner', 'observer'].map(uuid => {
+            const world = new World(`relay ${uuid}`);
+            world.addPlugin(multiplayer(network.connect(uuid)));
+            world.addPlugin(TimePlugin);
+            world.resources.get(TimeResource)!.fixedDelta_ms = 1000 / 60;
+            world.singletonEntity.components.get(Comms)!.admins = new Set(['server']);
+            world.addComponent(BarComponent);
+            world.resources.get(DeltaResource)!.addComponent(BarComponent, {
+                componentType: t.type({ y: t.string }),
+            });
+            return world;
+        });
+        const [server, owner, observer] = worlds;
+        owner.entities.set('ship', new Entity()
+            .addComponent(MultiplayerData, { owner: 'owner' })
+            .addComponent(BarComponent, { y: 'initial' }));
+        const step = () => { for (const w of worlds) w.step(); network.advance(); };
+        for (let i = 0; i < 30; i++) step();
+        expect(observer.entities.get('ship')?.components.get(BarComponent)?.y).toBe('initial');
+        owner.entities.get('ship')!.components.get(BarComponent)!.y = 'changed by owner';
+        for (let i = 0; i < 30; i++) step();
+        expect(server.entities.get('ship')?.components.get(BarComponent)?.y).toBe('changed by owner');
+        expect(observer.entities.get('ship')?.components.get(BarComponent)?.y).toBe('changed by owner');
+    });
+
+    it('heals component state lost to dropped packets', () => {
+        // Every third message is lost in both directions for the first two
+        // seconds, including the one carrying a server-authored change.
+        let dropping = true;
+        const network = new DeterministicDelayedNetwork({
+            delays: [40],
+            drop: (_source, _message, index) => dropping && index % 3 === 1,
+        });
+        const serverCommunicator = network.connect('server');
+        const clientCommunicator = network.connect('client');
+        const server = new World('loss server');
+        const client = new World('loss client');
+        for (const [world, communicator] of [
+            [server, serverCommunicator], [client, clientCommunicator],
+        ] as const) {
+            world.addPlugin(multiplayer(communicator));
+            world.addPlugin(TimePlugin);
+            world.resources.get(TimeResource)!.fixedDelta_ms = 1000 / 60;
+            world.singletonEntity.components.get(Comms)!.admins = new Set(['server']);
+            world.addComponent(BarComponent);
+            world.resources.get(DeltaResource)!.addComponent(BarComponent, {
+                componentType: t.type({ y: t.string }),
+            });
+        }
+        const Cargo = new Component<{ items: string[], credits: number }>('LossCargo');
+        for (const world of [server, client]) {
+            world.addComponent(Cargo);
+            // Default Immer patch deltas: incremental, base-dependent.
+            world.resources.get(DeltaResource)!.addComponent(Cargo, {
+                componentType: t.type({ items: t.array(t.string), credits: t.number }),
+            });
+        }
+        server.entities.set('npc', new Entity()
+            .addComponent(MultiplayerData, { owner: 'server' })
+            .addComponent(BarComponent, { y: 'v0' })
+            .addComponent(Cargo, { items: [], credits: 0 }));
+        const step = () => { server.step(); network.advance(); client.step(); };
+        for (let i = 0; i < 30; i++) step();
+        for (let version = 1; version <= 20; version++) {
+            const npc = server.entities.get('npc')!;
+            npc.components.get(BarComponent)!.y = `v${version}`;
+            const cargo = npc.components.get(Cargo)!;
+            cargo.items.push(`item${version}`);
+            cargo.credits += 10;
+            for (let i = 0; i < 6; i++) step();
+        }
+        dropping = false;
+        for (let i = 0; i < 180; i++) step();
+        const npc = client.entities.get('npc');
+        expect(npc?.components.get(BarComponent)?.y).toBe('v20');
+        expect(npc?.components.get(Cargo)?.credits).toBe(200);
+        expect(npc?.components.get(Cargo)?.items.length).toBe(20);
+    });
+
     it('restamps client movement in the server clock domain before relaying', () => {
         const network = new DeterministicDelayedNetwork();
         const serverCommunicator = network.connect('server');

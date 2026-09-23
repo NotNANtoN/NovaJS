@@ -130,8 +130,57 @@ export const Message = t.partial({
     admins: set(t.string),
     peers: set(t.string),
     chat: t.array(ChatMessageEntry),
+    /**
+     * Server -> client: hashes of each entity's replicated state (excluding
+     * the movement stream). A mismatch means a delta was lost, and the
+     * client requests that entity's full state. This makes incremental
+     * deltas self-healing without per-packet acknowledgements.
+     */
+    stateHashes: map(t.string /* Entity UUID */, t.number),
 });
 export type Message = t.TypeOf<typeof Message>;
+
+/** How often the server publishes state hashes to each peer. */
+export const STATE_HASH_INTERVAL_MS = 500;
+/**
+ * A hash is only comparable once any deltas sent before it have arrived.
+ * Mismatches must persist this long before a resync is requested.
+ */
+export const STATE_HASH_GRACE_MS = 250;
+
+/** FNV-1a over a stable JSON encoding. */
+function hashString(text: string): number {
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < text.length; i++) {
+        hash ^= text.charCodeAt(i);
+        hash = Math.imul(hash, 0x01000193);
+    }
+    return hash >>> 0;
+}
+
+function stableStringify(value: unknown): string {
+    if (value === null || typeof value !== 'object') {
+        return JSON.stringify(typeof value === 'number' && !Number.isFinite(value)
+            ? null : value) ?? 'undefined';
+    }
+    if (Array.isArray(value)) {
+        return `[${value.map(stableStringify).join(',')}]`;
+    }
+    const entries = Object.keys(value as object).sort()
+        .filter(key => (value as Record<string, unknown>)[key] !== undefined)
+        .map(key => `${JSON.stringify(key)}:${stableStringify((value as Record<string, unknown>)[key])}`);
+    return `{${entries.join(',')}}`;
+}
+
+/**
+ * Components excluded from state hashing: the movement stream is continuous
+ * and interpolated, and some components legitimately differ per peer.
+ */
+const UNHASHED_COMPONENTS = new Set<string>();
+
+export function excludeFromStateHash(componentName: string): void {
+    UNHASHED_COMPONENTS.add(componentName);
+}
 
 export const MultiplayerData = new Component<{ owner: string }>('MultiplayerData');
 export const MULTIPLAYER_INTEREST_RADIUS = 6_000;
@@ -672,6 +721,24 @@ function quantizeEncodedMovement(value: unknown): unknown {
         : MovementState.encode(quantizeMovementState(decoded.right));
 }
 
+/**
+ * Whether the server forwards an accepted owner change of this component to
+ * observers verbatim. Owner-authored state (`owning-client`, and plain
+ * `entity-owner` components) must be relayed now that clients talk only to
+ * the server. Components with a merge policy or snapshot relay are excluded:
+ * the server's merged result, not the owner's raw edit, is what observers
+ * should see.
+ */
+function relaysOwnerEditVerbatim(componentName: string): boolean {
+    const policy = policyFor(componentName);
+    if (policy.relay === false || policy.relayOwnerChanges
+        || policy.merge !== undefined) {
+        return false;
+    }
+    return policy.authority === 'owning-client'
+        || policy.authority === 'entity-owner';
+}
+
 function owningClientDelta(
     entityDelta: EntityDelta,
     entity: Entity,
@@ -679,21 +746,15 @@ function owningClientDelta(
 ): EntityDelta | undefined {
     const componentStates = new Map(
         [...entityDelta.componentStates ?? []]
-            .filter(([name]) =>
-                policyFor(name).authority === 'owning-client'
-                && policyFor(name).relay !== false),
+            .filter(([name]) => relaysOwnerEditVerbatim(name)),
     );
     const componentDeltas = new Map(
         [...entityDelta.componentDeltas ?? []]
-            .filter(([name]) =>
-                policyFor(name).authority === 'owning-client'
-                && policyFor(name).relay !== false),
+            .filter(([name]) => relaysOwnerEditVerbatim(name)),
     );
     const removeComponents = new Set(
         [...entityDelta.removeComponents ?? []]
-            .filter(name =>
-                policyFor(name).authority === 'owning-client'
-                && policyFor(name).relay !== false),
+            .filter(name => relaysOwnerEditVerbatim(name)),
     );
     const filtered: EntityDelta = {};
     if (componentStates.size > 0) {
@@ -1000,6 +1061,48 @@ export function multiplayer(communicator: Communicator,
             ) as [string, unknown]),
         };
     }
+
+    /**
+     * Hash of the server-authored replicated state of `entity`, computed the
+     * same way on the server and on a non-owning client. Components that the
+     * receiver does not accept from the server (owner-authored state it
+     * keeps locally, local-only presentation) and the movement stream are
+     * excluded, so only genuine divergence triggers a resync.
+     */
+    function replicatedStateHash(serializer: Serializer, entity: Entity,
+        owner: string, receiver: string): number | undefined {
+        const parts: string[] = [];
+        for (const [component, data] of entity.components) {
+            const name = component.name;
+            if (name === MovementStateComponent.name
+                || UNHASHED_COMPONENTS.has(name)) {
+                continue;
+            }
+            const policy = policyFor(name);
+            if (policy.authority === 'local-only'
+                || policy.authority === 'owning-client'
+                || policy.merge !== undefined
+                || !canApplyInbound(name, 'server', true, receiver, owner)) {
+                continue;
+            }
+            const componentType = serializer.componentTypes.get(component);
+            if (!componentType) {
+                continue;
+            }
+            try {
+                parts.push(`${name}=${stableStringify(componentType.encode(
+                    isDraft(data) ? current(data) : data))}`);
+            } catch {
+                return undefined;
+            }
+        }
+        parts.sort();
+        return hashString(parts.join('|'));
+    }
+
+    const lastStateHashAt = new Map<string, number>();
+    /** Client: when each entity's hash first stopped matching. */
+    const hashMismatchSince = new Map<string, number>();
 
     function movementTimestamp(uuid: string, now: number): number {
         const ownerTime = lastOwnerMovementTime.get(uuid);
@@ -1766,6 +1869,45 @@ export function multiplayer(communicator: Communicator,
                     }
                 }
             }
+            // Compare server state hashes with what this client now holds.
+            // Every delta sent before a hash was in the same or an earlier
+            // packet on this ordered channel, so a persisting mismatch means
+            // a delta was lost or misapplied.
+            if (!isAdmin) {
+                const seenHashes = new Set<string>();
+                for (const { source, message } of comms.messages) {
+                    if (!comms.admins.has(source) || !message.stateHashes) {
+                        continue;
+                    }
+                    for (const [uuid, hash] of message.stateHashes) {
+                        seenHashes.add(uuid);
+                        const entry = entityMap.get(uuid);
+                        if (!entry) {
+                            continue;
+                        }
+                        const owner = entry.entity.components
+                            .get(MultiplayerData)?.owner ?? '';
+                        if (owner === comms.uuid) {
+                            continue;
+                        }
+                        const local = replicatedStateHash(
+                            serializer, entry.entity, owner, comms.uuid);
+                        if (local === hash) {
+                            hashMismatchSince.delete(uuid);
+                            continue;
+                        }
+                        const since = hashMismatchSince.get(uuid) ?? localTime;
+                        hashMismatchSince.set(uuid, since);
+                        if (localTime - since >= STATE_HASH_GRACE_MS) {
+                            fullStateRequests.get(source).add(uuid);
+                            hashMismatchSince.delete(uuid);
+                        }
+                    }
+                }
+                for (const uuid of hashMismatchSince.keys()) {
+                    if (!entityMap.has(uuid)) hashMismatchSince.delete(uuid);
+                }
+            }
             // Reset messages since they've been processed.
             comms.messages = [];
             networkTiming.advance(localTime);
@@ -2143,6 +2285,27 @@ export function multiplayer(communicator: Communicator,
                     peerChanges.chat = peerChat;
                     peerSend = true;
                 }
+                if (localTime - (lastStateHashAt.get(peer) ?? -Infinity)
+                    >= STATE_HASH_INTERVAL_MS) {
+                    lastStateHashAt.set(peer, localTime);
+                    const hashes = new Map<string, number>();
+                    for (const uuid of interested) {
+                        // Not yet known to the peer: its full state is in
+                        // this very packet.
+                        if (entering.has(uuid)) continue;
+                        const entry = entityMap.get(uuid);
+                        if (!entry) continue;
+                        const owner = ownerOf(entry.entity) ?? '';
+                        if (owner === peer) continue;
+                        const hash = replicatedStateHash(
+                            serializer, entry.entity, owner, peer);
+                        if (hash !== undefined) hashes.set(uuid, hash);
+                    }
+                    if (hashes.size > 0) {
+                        peerChanges.stateHashes = hashes;
+                        peerSend = true;
+                    }
+                }
                 interestedEntitiesByPeer.set(peer, interested);
                 if (peerSend) {
                     sendMessage(peerChanges, peer);
@@ -2232,6 +2395,7 @@ export function multiplayer(communicator: Communicator,
         peerLeaveSubscription = communicator.peers.leave.subscribe(peer => {
             networkTiming.resetPeer(peer);
             lastClockReplyAt.delete(peer);
+            lastStateHashAt.delete(peer);
             if (peer === 'server') {
                 const serverClock = world.resources.get(ServerClockOffsetResource);
                 if (serverClock) {
