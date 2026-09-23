@@ -55,6 +55,18 @@ describe("SocketChannelClient", function() {
             .toEqual({ message: { hello: 'room' } });
     });
 
+    it('drops messages queued for a lost session instead of replaying them', () => {
+        const state = Object.getOwnPropertyDescriptor(webSocket, 'readyState')!.get as jasmine.Spy;
+        state.and.returnValue(webSocket.CONNECTING);
+        const client = new SocketChannelClient({ webSocket, warn });
+        client.send({ stale: 'movement' });
+        callbacks.close[0]({} as Event);
+        state.and.returnValue(webSocket.OPEN);
+        callbacks.open[0]({} as Event);
+        expect(webSocket.send).not.toHaveBeenCalledWith(
+            jasmine.stringMatching('stale'));
+    });
+
     it('marks an unexpected socket close disconnected immediately', () => {
         const client = new SocketChannelClient({ webSocket, warn });
         client.connected.next(true);

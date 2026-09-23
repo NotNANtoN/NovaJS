@@ -1448,8 +1448,16 @@ describe('Multiplayer Plugin', () => {
         expect(world2.entities.get('outside')?.components.get(BarComponent))
             .toEqual({ y: 'complete entering state' });
 
+        // Hysteresis: crossing back over the entry radius keeps it.
         world1.entities.get('outside')!.components
             .get(MovementStateComponent)!.position = new Position(6_100, 0);
+        world1.step();
+        world2.step();
+
+        expect(world2.entities.has('outside')).toBeTrue();
+
+        world1.entities.get('outside')!.components
+            .get(MovementStateComponent)!.position = new Position(7_100, 0);
         world1.step();
         world2.step();
 

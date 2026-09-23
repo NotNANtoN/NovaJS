@@ -687,6 +687,8 @@ export const ServerFireIntentSystem = new System({
     },
 });
 
+const fireLogWeaponWaits = new WeakMap<Entity, { weaponId: string; since: number }>();
+
 export const FireLogSpawnSystem = new System({
     name: 'FireLogSpawnSystem',
     after: [WeaponsSystem, ServerFireIntentSystem, MovementSystem, RemoteMovementPresentationSystem],
@@ -719,8 +721,20 @@ export const FireLogSpawnSystem = new System({
             }
             const weapon = weaponEntries.getCached(shot.weaponId);
             if (!weapon) {
-                break;
+                // Weapon factories resolve asynchronously. Wait briefly for
+                // the first one, but never let a missing record block every
+                // later shot from this ship forever.
+                const waiting = fireLogWeaponWaits.get(entity);
+                if (!waiting || waiting.weaponId !== shot.weaponId) {
+                    fireLogWeaponWaits.set(entity, { weaponId: shot.weaponId, since: time.time });
+                    break;
+                }
+                if (time.time - waiting.since < 1000) break;
+                fireLogWeaponWaits.delete(entity);
+                sync.highestLogSeq = logSeq;
+                continue;
             }
+            fireLogWeaponWaits.delete(entity);
             if (weapon.syncAsFireEvent === false) {
                 sync.highestLogSeq = logSeq;
                 continue;

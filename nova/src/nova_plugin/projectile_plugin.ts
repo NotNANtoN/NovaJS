@@ -319,17 +319,18 @@ const ProjectileLifespanSystem = new System({
 
 const RecordGuidanceTrackSystem = new System({
     name: 'RecordGuidanceTrackSystem',
+    // Only replicated entities (ships, asteroids) are guidance or hit-rewind
+    // targets. Recording every projectile each frame was pure overhead.
     args: [MovementStateComponent,
         Optional(RemoteMovementPresentationComponent),
-        Optional(MultiplayerData), TimeResource, PlatformResource,
+        MultiplayerData, TimeResource, PlatformResource,
         GetEntity] as const,
     after: [MovementSystem, RemoteMovementPresentationSystem],
     step(movement, presentation, multiplayer, time, platform, entity) {
         if (presentation) {
             return;
         }
-        if (platform === 'node' && multiplayer?.owner
-            && multiplayer.owner !== 'server') {
+        if (platform === 'node' && multiplayer.owner !== 'server') {
             return;
         }
         let track = entity.components.get(GuidanceTargetTrackComponent);
@@ -384,8 +385,9 @@ export const ProjectileCollisionSystem = new System({
     name: 'ProjectileCollisionSystem',
     events: [CollisionEvent],
     args: [CollisionEvent, Entities, UUID, ProjectileDataComponent,
-        Optional(OwnerComponent), FireSubs, TimeResource, CreateTime, EmitNow] as const,
-    step(collision, entities, uuid, projectileData, owner, fireSubs, time, createTime, emitNow) {
+        Optional(OwnerComponent), FireSubs, TimeResource, CreateTime, EmitNow,
+        Optional(MovementPlaybackComponent)] as const,
+    step(collision, entities, uuid, projectileData, owner, fireSubs, time, createTime, emitNow, playback) {
         // The initiating weapon applies damage. Being hit (e.g. by point
         // defense) must not fire this projectile's damage back at the hitter.
         if (!collision.initiator) {
@@ -400,7 +402,9 @@ export const ProjectileCollisionSystem = new System({
             return;
         }
 
-        if (projectileData.proxSafety * 1000 + createTime > time.time) {
+        // Replayed shots age on the playback cursor, like their lifespan.
+        const age = playback ? playback.cursor - playback.createdAt : time.time - createTime;
+        if (age < projectileData.proxSafety * 1000) {
             // Prox safety is still active. Do not collide.
             return;
         }

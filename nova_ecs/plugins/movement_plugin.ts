@@ -273,6 +273,24 @@ export function queueGuidanceTargetSnapshot(
         serverTime,
         sequence,
     };
+    const last = track.snapshots.at(-1);
+    if (!last || (serverTime > last.serverTime
+        && (sequence === undefined || last.sequence === undefined
+            || sequence > last.sequence))) {
+        // Common in-order append (every frame for local recording): avoid
+        // the sort/scan/filter below.
+        track.snapshots.push(snapshot);
+        let drop = 0;
+        while (drop < track.snapshots.length - 1
+            && track.snapshots[drop].serverTime <= serverTime - 4000) {
+            drop++;
+        }
+        if (track.snapshots.length - drop > 64) {
+            drop = track.snapshots.length - 64;
+        }
+        if (drop > 0) track.snapshots.splice(0, drop);
+        return;
+    }
     const existing = track.snapshots.findIndex(
         candidate => (sequence !== undefined
             && candidate.sequence === sequence)

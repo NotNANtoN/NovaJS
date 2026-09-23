@@ -7,6 +7,8 @@ import WebSocket, { WebSocketServer } from "ws";
 import { ChannelServer, MessageWithSourceType } from "./Channel";
 import { SocketMessage } from "./SocketMessage";
 
+const MAX_PAYLOAD_BYTES = 4 * 1024 * 1024;
+
 interface Client {
     socket: WebSocket;
     playerToken?: string;
@@ -41,7 +43,11 @@ export class SocketChannelServer implements ChannelServer {
             this.wss = wss;
         }
         else if (server) {
-            this.wss = new WebSocketServer({ server: server });
+            this.wss = new WebSocketServer({
+                server: server,
+                // Game packets are a few KB; the ws default is 100 MiB.
+                maxPayload: MAX_PAYLOAD_BYTES,
+            });
         }
         else {
             throw new Error("httpsServer or wss must be defined");
@@ -92,7 +98,11 @@ export class SocketChannelServer implements ChannelServer {
             // Send the client a ping
             this.sendRawIfOpen(uuid, { ping: true });
             client.keepaliveTimeout = setTimeout(() => {
-                // Remove the client if it hasn't responded
+                // Remove the client if it hasn't responded. Terminate the
+                // socket too; otherwise a half-open TCP connection leaks.
+                try {
+                    client.socket.terminate();
+                } catch {}
                 this.handleClientClose(uuid);
             }, this.timeout);
         }, this.timeout);
@@ -153,7 +163,14 @@ export class SocketChannelServer implements ChannelServer {
             throw new Error(`Missing client object for ${clientUUID}`);
         }
 
-        const maybeSocketMessage = SocketMessage.decode(JSON.parse(serialized) as unknown);
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(String(serialized));
+        } catch {
+            this.warn(`Received invalid JSON from client ${clientUUID}`);
+            return;
+        }
+        const maybeSocketMessage = SocketMessage.decode(parsed);
 
         if (isLeft(maybeSocketMessage)) {
             console.warn(`Received bad message from client ${clientUUID}: ${maybeSocketMessage.left}`);
@@ -186,8 +203,9 @@ export class SocketChannelServer implements ChannelServer {
     private handleClientClose(clientUUID: string) {
         const client = this.clientMap.get(clientUUID);
         if (!client) {
-            throw new Error(
-                `Tried to remove nonexistant client ${clientUUID}`);
+            // The keepalive timeout and the socket close event can both
+            // arrive for the same client.
+            return;
         }
 
         if (client.keepaliveTimeout !== undefined) {

@@ -22,7 +22,8 @@ type RoomMessage = t.TypeOf<typeof RoomMessage>;
 class RoomCommunicator implements Communicator {
     constructor(private communicator: Communicator,
         public messages: Observable<MessageWithSource<unknown>>,
-        public sendMessage: (message: unknown, destination?: string) => void,
+        public sendMessage: (message: unknown,
+            destination?: string | Set<string>) => void,
         public peers: Peers,
         public servers: BehaviorSubject<Set<string>>,
         public connected: BehaviorSubject<boolean>) { }

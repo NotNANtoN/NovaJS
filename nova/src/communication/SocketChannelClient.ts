@@ -29,14 +29,18 @@ export class SocketChannelClient implements ChannelClient {
         this.flushQueue();
     };
     private readonly closeListener = () => {
-        this.connected.next(false);
-        this.scheduleReconnect();
+        this.handleSocketLost();
     };
     private readonly errorListener = () => {
-        this.connected.next(false);
-        this.scheduleReconnect();
+        this.handleSocketLost();
     };
-    private messageQueue: SocketMessage[] = [];
+    /**
+     * Outbound messages waiting for a socket. Game traffic is a stream of
+     * 60 Hz deltas; replaying a stale backlog into a new session would apply
+     * old movement and fire intent after the server has already resynced.
+     */
+    private messageQueue: { message: SocketMessage, queuedAt: number }[] = [];
+    private readonly maxQueuedMessageAgeMs = 1000;
     private maxPings: number
     readonly playerToken: string;
 
@@ -86,10 +90,20 @@ export class SocketChannelClient implements ChannelClient {
 
     private flushQueue() {
         if (this.webSocket.readyState !== this.webSocket.OPEN) return;
-        for (const message of this.messageQueue) {
+        const now = Date.now();
+        for (const { message, queuedAt } of this.messageQueue) {
+            if (now - queuedAt > this.maxQueuedMessageAgeMs) continue;
             this.webSocket.send(JSON.stringify(SocketMessage.encode(message)));
         }
         this.messageQueue.length = 0;
+    }
+
+    private handleSocketLost() {
+        // Anything queued for the lost session is obsolete. The multiplayer
+        // layer requests a fresh full state after reconnecting.
+        this.messageQueue.length = 0;
+        this.connected.next(false);
+        this.scheduleReconnect();
     }
 
     scheduleReconnect(immediate = false) {
@@ -191,7 +205,7 @@ export class SocketChannelClient implements ChannelClient {
             if (this.messageQueue.length >= 300) {
                 this.messageQueue.shift();
             }
-            this.messageQueue.push(message);
+            this.messageQueue.push({ message, queuedAt: Date.now() });
         }
     }
 

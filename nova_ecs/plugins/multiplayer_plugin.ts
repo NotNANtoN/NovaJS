@@ -135,6 +135,12 @@ export type Message = t.TypeOf<typeof Message>;
 
 export const MultiplayerData = new Component<{ owner: string }>('MultiplayerData');
 export const MULTIPLAYER_INTEREST_RADIUS = 6_000;
+/**
+ * An entity already replicated to a peer stays relevant until it is this far
+ * away. Without the margin, ships near the boundary are removed and re-sent
+ * as full states every time they cross it.
+ */
+export const MULTIPLAYER_INTEREST_EXIT_RADIUS = 7_000;
 // Server-local interest policy for navigation landmarks, not a wire component.
 export const AlwaysRelevantComponent = new Component<undefined>('AlwaysRelevant');
 
@@ -146,17 +152,83 @@ function wrappedAxisDistance(a: number, b: number): number {
 function positionsWithinInterest(
     a: MovementState,
     b: MovementState,
+    radius = MULTIPLAYER_INTEREST_RADIUS,
 ): boolean {
     const x = wrappedAxisDistance(a.position.x, b.position.x);
-    if (x > MULTIPLAYER_INTEREST_RADIUS) {
+    if (x > radius) {
         return false;
     }
     const y = wrappedAxisDistance(a.position.y, b.position.y);
-    if (y > MULTIPLAYER_INTEREST_RADIUS) {
+    if (y > radius) {
         return false;
     }
-    return x * x + y * y
-        <= MULTIPLAYER_INTEREST_RADIUS * MULTIPLAYER_INTEREST_RADIUS;
+    return x * x + y * y <= radius * radius;
+}
+
+interface ReplicatedEntry {
+    entity: Entity;
+}
+
+/** Always read live: a cached MultiplayerData draft may have been revoked. */
+function ownerOf(entity: Entity): string | undefined {
+    return entity.components.get(MultiplayerData)?.owner;
+}
+
+/**
+ * Entities relevant to each peer, computed in one pass over the world.
+ * `previous` supplies the hysteresis: an entity a peer already has uses the
+ * larger exit radius.
+ */
+export function computeInterest(
+    entityMap: ReadonlyMap<string, ReplicatedEntry>,
+    peers: Iterable<string>,
+    previous: ReadonlyMap<string, ReadonlySet<string>> = new Map(),
+): Map<string, Set<string>> {
+    const peerList = [...peers];
+    const centresByPeer = new Map<string, MovementState[]>(
+        peerList.map(peer => [peer, []]));
+    for (const { entity } of entityMap.values()) {
+        const owner = ownerOf(entity);
+        const centres = owner === undefined
+            ? undefined : centresByPeer.get(owner);
+        const movement = entity.components.get(MovementStateComponent);
+        if (centres && movement) {
+            centres.push(movement);
+        }
+    }
+    const result = new Map<string, Set<string>>();
+    for (const peer of peerList) {
+        const centres = centresByPeer.get(peer)!;
+        if (centres.length === 0) {
+            result.set(peer, new Set(entityMap.keys()));
+            continue;
+        }
+        const known = previous.get(peer);
+        const interested = new Set<string>();
+        for (const [uuid, { entity }] of entityMap) {
+            if (ownerOf(entity) === peer
+                || entity.components.has(AlwaysRelevantComponent)) {
+                interested.add(uuid);
+                continue;
+            }
+            const movement = entity.components.get(MovementStateComponent);
+            if (movement === undefined) {
+                interested.add(uuid);
+                continue;
+            }
+            const radius = known?.has(uuid)
+                ? MULTIPLAYER_INTEREST_EXIT_RADIUS
+                : MULTIPLAYER_INTEREST_RADIUS;
+            for (const centre of centres) {
+                if (positionsWithinInterest(centre, movement, radius)) {
+                    interested.add(uuid);
+                    break;
+                }
+            }
+        }
+        result.set(peer, interested);
+    }
+    return result;
 }
 
 export interface MessageWithSource<M> {
@@ -899,6 +971,36 @@ export function multiplayer(communicator: Communicator,
         lastOwnerMovementTime.delete(uuid);
     }
 
+    function encodeEntityForPeers(
+        serializer: Serializer,
+        entity: Entity,
+        uuid: string,
+        owner: string,
+        localUuid: string,
+        isAdmin: boolean,
+    ): EncodedEntity {
+        const encoded = filterEncodedEntity(
+            serializer.encode(entity), localUuid, isAdmin, owner);
+        // The server may have integrated or knocked this ship locally for
+        // hit detection. Observers must see the owner's last accepted pose,
+        // not that competing copy.
+        if (!isAdmin || owner === localUuid) {
+            return encoded;
+        }
+        const ownerMovement = lastMovementWireState.get(uuid);
+        if (!ownerMovement) {
+            return encoded;
+        }
+        return {
+            ...encoded,
+            components: encoded.components.map(([name, value]) => (
+                name === MovementStateComponent.name
+                    ? [name, MovementState.encode(ownerMovement)]
+                    : [name, value]
+            ) as [string, unknown]),
+        };
+    }
+
     function movementTimestamp(uuid: string, now: number): number {
         const ownerTime = lastOwnerMovementTime.get(uuid);
         return ownerTime ? Math.min(now, ownerTime.at + networkTiming.clock(ownerTime.source).offset) : now;
@@ -1116,30 +1218,8 @@ export function multiplayer(communicator: Communicator,
                 uuid: string,
                 owner: string,
             ): EncodedEntity {
-                const encoded = filterEncodedEntity(
-                    serializer.encode(entity),
-                    comms.uuid!,
-                    isAdmin,
-                    owner,
-                );
-                // The server may have integrated or knocked this ship locally
-                // for hit detection. Observers must see the owner's last
-                // accepted pose, not that competing copy.
-                if (!isAdmin || owner === comms.uuid) {
-                    return encoded;
-                }
-                const ownerMovement = lastMovementWireState.get(uuid);
-                if (!ownerMovement) {
-                    return encoded;
-                }
-                return {
-                    ...encoded,
-                    components: encoded.components.map(([name, value]) => (
-                        name === MovementStateComponent.name
-                            ? [name, MovementState.encode(ownerMovement)]
-                            : [name, value]
-                    ) as [string, unknown]),
-                };
+                return encodeEntityForPeers(
+                    serializer, entity, uuid, owner, comms.uuid!, isAdmin);
             }
 
             function randomAdmin() {
@@ -1183,30 +1263,8 @@ export function multiplayer(communicator: Communicator,
                 [uuid, { entity, data }]));
             const entityUuids = new Set(entityMap.keys());
             function interestedEntityUuids(peer: string): Set<string> {
-                const centres = [...entityMap.values()]
-                    .filter(({ entity }) => entity.components
-                        .get(MultiplayerData)?.owner === peer)
-                    .map(({ entity }) =>
-                        entity.components.get(MovementStateComponent))
-                    .filter((movement): movement is MovementState =>
-                        movement !== undefined);
-                if (centres.length === 0) {
-                    return new Set(entityMap.keys());
-                }
-                return new Set([...entityMap]
-                    .filter(([, { entity }]) => {
-                        if (entity.components.get(MultiplayerData)?.owner
-                            === peer) {
-                            return true;
-                        }
-                        const movement = entity.components
-                            .get(MovementStateComponent);
-                        return entity.components.has(AlwaysRelevantComponent)
-                            || movement === undefined
-                            || centres.some(centre =>
-                                positionsWithinInterest(centre, movement));
-                    })
-                    .map(([uuid]) => uuid));
+                return computeInterest(entityMap, [peer],
+                    interestedEntitiesByPeer).get(peer)!;
             }
             // Capture local weapon edges before applying inbound state. A
             // merge may make the eventual value equal to its new tracking
@@ -1746,7 +1804,8 @@ export function multiplayer(communicator: Communicator,
                 ? Math.max(time.time, wallClockNow())
                 : time.time;
 
-            function sendMessage(message: Message, destination?: string) {
+            function sendMessage(message: Message,
+                destination?: string | Set<string>) {
                 communicator.sendMessage(Message.encode({
                     ...message,
                     sentAt: localTime,
@@ -1757,59 +1816,13 @@ export function multiplayer(communicator: Communicator,
                 [uuid, { entity, data }]));
             const entityUuids = new Set(entityMap.keys());
 
-            function interestedEntityUuids(peer: string): Set<string> {
-                const centres = [...entityMap.values()]
-                    .filter(({ entity }) => entity.components
-                        .get(MultiplayerData)?.owner === peer)
-                    .map(({ entity }) =>
-                        entity.components.get(MovementStateComponent))
-                    .filter((movement): movement is MovementState =>
-                        movement !== undefined);
-                if (centres.length === 0) {
-                    return new Set(entityMap.keys());
-                }
-                return new Set([...entityMap]
-                    .filter(([, { entity }]) => {
-                        if (entity.components.get(MultiplayerData)?.owner
-                            === peer) {
-                            return true;
-                        }
-                        const movement = entity.components
-                            .get(MovementStateComponent);
-                        return entity.components.has(AlwaysRelevantComponent)
-                            || movement === undefined
-                            || centres.some(centre =>
-                                positionsWithinInterest(centre, movement));
-                    })
-                    .map(([uuid]) => uuid));
-            }
-
             function encodeReplicatedEntity(
                 entity: Entity,
                 uuid: string,
                 owner: string,
             ): EncodedEntity {
-                const encoded = filterEncodedEntity(
-                    serializer.encode(entity),
-                    comms.uuid!,
-                    isAdmin,
-                    owner,
-                );
-                if (!isAdmin || owner === comms.uuid) {
-                    return encoded;
-                }
-                const ownerMovement = lastMovementWireState.get(uuid);
-                if (!ownerMovement) {
-                    return encoded;
-                }
-                return {
-                    ...encoded,
-                    components: encoded.components.map(([name, value]) => (
-                        name === MovementStateComponent.name
-                            ? [name, MovementState.encode(ownerMovement)]
-                            : [name, value]
-                    ) as [string, unknown]),
-                };
+                return encodeEntityForPeers(
+                    serializer, entity, uuid, owner, comms.uuid!, isAdmin);
             }
 
             const currentOwners = new Map([...entityMap].map(([uuid, val]) =>
@@ -2040,8 +2053,17 @@ export function multiplayer(communicator: Communicator,
                 send = true;
             }
 
+            const interestByPeer = isAdmin
+                ? computeInterest(entityMap,
+                    [...communicator.peers.current.value]
+                        .filter(peer => peer !== comms.uuid),
+                    interestedEntitiesByPeer)
+                : new Map<string, Set<string>>();
+            // Serialize each entering entity once, not once per peer.
+            const enteringStates = new Map<string, EncodedEntity>();
+
             function sendInterestManagedChanges(peer: string): void {
-                const interested = interestedEntityUuids(peer);
+                const interested = interestByPeer.get(peer)!;
                 const previous = interestedEntitiesByPeer.get(peer)
                     ?? new Set<string>();
                 const entering = setDifference(interested, previous);
@@ -2056,12 +2078,13 @@ export function multiplayer(communicator: Communicator,
                     if (!entry) {
                         continue;
                     }
-                    peerState.set(uuid, encodeReplicatedEntity(
-                        entry.entity,
-                        uuid,
-                        entry.entity.components
-                            .get(MultiplayerData)?.owner ?? '',
-                    ));
+                    let encoded = enteringStates.get(uuid);
+                    if (!encoded) {
+                        encoded = encodeReplicatedEntity(
+                            entry.entity, uuid, ownerOf(entry.entity) ?? '');
+                        enteringStates.set(uuid, encoded);
+                    }
+                    peerState.set(uuid, encoded);
                 }
                 const peerDelta = new Map([...delta].filter(([uuid]) =>
                     interested.has(uuid) && !entering.has(uuid)));
@@ -2133,7 +2156,16 @@ export function multiplayer(communicator: Communicator,
                     }
                 }
             } else if (send) {
-                sendMessage(changes);
+                // Clients talk only to the authority. A room broadcast made
+                // every other client apply this peer's changes directly and
+                // then again from the server relay, bypassing interest
+                // management and server-side filtering.
+                const peers = communicator.peers.current.value;
+                const admins = new Set([...comms.admins]
+                    .filter(admin => admin !== comms.uuid
+                        && peers.has(admin)));
+                // Serverless peer-to-peer rooms (tests, demos) still broadcast.
+                sendMessage(changes, admins.size > 0 ? admins : undefined);
             }
         }
     });
