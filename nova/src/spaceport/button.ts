@@ -57,8 +57,11 @@ export class Button {
         this.text.anchor.x = 0.5;
         this.text.anchor.y = 0.5;
 
-        const textMetrics = PIXI.CanvasTextMetrics.measureText(text,
-            this.text.style as PIXI.TextStyle); // This required cast may be a types bug
+        const textMetrics = width !== undefined
+            ? { width }
+            : (typeof document !== 'undefined'
+                ? PIXI.CanvasTextMetrics.measureText(text, this.text.style as PIXI.TextStyle)
+                : { width: text.length * 8 });
         this.width = width ?? textMetrics.width;
 
         const height = 25; // TODO: infer from texture height

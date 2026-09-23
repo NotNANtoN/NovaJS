@@ -714,101 +714,109 @@ export class Spaceport extends Menu<Entity> {
     ): Promise<Entity> {
         if (!authorized) await this.authorizeLanding(input);
         await this.buildPromise;
-        this.rechargeNotice.text = '';
-        // Retail's Auto-recharger buys the recharge on landing, so this
-        // belongs to a landing and not to building the screen: build() runs
-        // when the planet loads, when there is no ship to refuel.
-        await this.autoRecharge(input);
-        this.updateRechargeState(input);
-        this.onUpdateShip?.(input);
-        // A dialog left active by a previous landing would keep the landing
-        // artwork and buttons hidden, which reads as a black screen on
-        // reload. Start every landing on the landing screen itself.
-        this.setActiveDialog();
-        this.controls.bind();
-        this.missionNotice.text = '';
+        this.container.visible = true;
 
-        if (landingNotices.length > 0) {
-            this.controls.unbind();
-            for (const notice of landingNotices) {
-                this.setActiveDialog(this.landingNoticeDialog.container);
-                try {
-                    await this.landingNoticeDialog.show(notice);
-                } catch (error) {
-                    reportDialogFailure('landing notice', error);
-                }
-            }
+        try {
+            this.rechargeNotice.text = '';
+            // Retail's Auto-recharger buys the recharge on landing, so this
+            // belongs to a landing and not to building the screen: build() runs
+            // when the planet loads, when there is no ship to refuel.
+            await this.autoRecharge(input);
+            this.updateRechargeState(input);
+            this.onUpdateShip?.(input);
+            // A dialog left active by a previous landing would keep the landing
+            // artwork and buttons hidden, which reads as a black screen on
+            // reload. Start every landing on the landing screen itself.
             this.setActiveDialog();
             this.controls.bind();
-        }
+            this.missionNotice.text = '';
 
-        // Evaluate scheduled crön events asynchronously on landing
-        if (this.gameData.data.Cron) {
-            void (async () => {
-                const cronIds = (await this.gameData.ids).Cron ?? [];
-                const crons = await Promise.all(cronIds.map(id => this.gameData.data.Cron!.get(id)));
-                const rawState = input.components.get(PlayerStateComponent);
-                const state = plainSnapshot(rawState);
-                if (state) {
-                    evaluateCrons(crons, state);
-                    input.components.set(PlayerStateComponent, { ...state });
-                    this.onUpdateShip?.(input);
-                }
-            })().catch(() => {});
-        }
-
-        // Check for concourse storyline offers (availLoc = 3) asynchronously so spaceport opens immediately
-        void getConcourseMissionOffers(this.gameData, input, this.id).then(async ({ offers, destinationOptions }) => {
-            if (!this.container.visible) return;
-            const rawState = input.components.get(PlayerStateComponent);
-            const state = plainSnapshot(rawState);
-            if (state && offers.length > 0) {
+            if (landingNotices.length > 0) {
                 this.controls.unbind();
-                for (const offer of offers) {
-                    if (!this.container.visible) break;
-                    this.setActiveDialog(this.missionOfferDialog.container);
-                    const prompt = await this.missionOfferDialog.show({
-                        mission: offer.mission,
-                        title: offer.title,
-                        text: offer.displayText,
-                        payText: offer.mission.payVal > 0
-                            ? `${offer.mission.payVal.toLocaleString()} cr` : undefined,
-                        cargoText: offer.mission.cargo ?? undefined,
-                        acceptLabel: offer.mission.acceptButton || 'Accept',
-                        refuseLabel: offer.mission.refuseButton || 'Refuse',
-                    });
-                    if (prompt.accepted) {
-                        const ncb = this.ncbRuntime.setContext(input, state);
-                        const accepted = acceptMission(state, offer.mission, {
-                            ...destinationOptions(offer.resolved),
-                            ncb,
-                        });
-                        if (accepted) {
-                            await startPendingNcbMissions(this.gameData, state, {
-                                ...destinationOptions(offer.resolved),
-                                ncb,
-                            });
-                        }
-                        if (ncb.outfits) {
-                            input.components.set(OutfitsStateComponent, ncb.outfits);
-                        }
-                        input.components.set(PlayerStateComponent, { ...state });
-                        this.onUpdateShip?.(input);
-                    } else {
-                        refuseMission(state, offer.mission);
-                        input.components.set(PlayerStateComponent, { ...state });
-                        this.onUpdateShip?.(input);
+                for (const notice of landingNotices) {
+                    this.setActiveDialog(this.landingNoticeDialog.container);
+                    try {
+                        await this.landingNoticeDialog.show(notice);
+                    } catch (error) {
+                        reportDialogFailure('landing notice', error);
                     }
                 }
                 this.setActiveDialog();
                 this.controls.bind();
-                this.onUpdateShip?.(input);
             }
-        }).catch(error => {
-            reportDialogFailure('concourse mission offers', error);
-        });
 
-        return super.show(input);
+            // Evaluate scheduled crön events asynchronously on landing
+            if (this.gameData.data.Cron) {
+                void (async () => {
+                    const cronIds = (await this.gameData.ids).Cron ?? [];
+                    const crons = await Promise.all(cronIds.map(id => this.gameData.data.Cron!.get(id)));
+                    const rawState = input.components.get(PlayerStateComponent);
+                    const state = plainSnapshot(rawState);
+                    if (state) {
+                        evaluateCrons(crons, state);
+                        input.components.set(PlayerStateComponent, { ...state });
+                        this.onUpdateShip?.(input);
+                    }
+                })().catch(() => {});
+            }
+
+            // Check for concourse storyline offers (availLoc = 3) asynchronously so spaceport opens immediately
+            void getConcourseMissionOffers(this.gameData, input, this.id).then(async ({ offers, destinationOptions }) => {
+                if (!this.container.visible) return;
+                const rawState = input.components.get(PlayerStateComponent);
+                const state = plainSnapshot(rawState);
+                if (state && offers.length > 0) {
+                    this.controls.unbind();
+                    for (const offer of offers) {
+                        if (!this.container.visible) break;
+                        this.setActiveDialog(this.missionOfferDialog.container);
+                        const prompt = await this.missionOfferDialog.show({
+                            mission: offer.mission,
+                            title: offer.title,
+                            text: offer.displayText,
+                            payText: offer.mission.payVal > 0
+                                ? `${offer.mission.payVal.toLocaleString()} cr` : undefined,
+                            cargoText: offer.mission.cargo ?? undefined,
+                            acceptLabel: offer.mission.acceptButton || 'Accept',
+                            refuseLabel: offer.mission.refuseButton || 'Refuse',
+                        });
+                        if (prompt.accepted) {
+                            const ncb = this.ncbRuntime.setContext(input, state);
+                            const accepted = acceptMission(state, offer.mission, {
+                                ...destinationOptions(offer.resolved),
+                                ncb,
+                            });
+                            if (accepted) {
+                                await startPendingNcbMissions(this.gameData, state, {
+                                    ...destinationOptions(offer.resolved),
+                                    ncb,
+                                });
+                            }
+                            if (ncb.outfits) {
+                                input.components.set(OutfitsStateComponent, ncb.outfits);
+                            }
+                            input.components.set(PlayerStateComponent, { ...state });
+                            this.onUpdateShip?.(input);
+                        } else {
+                            refuseMission(state, offer.mission);
+                            input.components.set(PlayerStateComponent, { ...state });
+                            this.onUpdateShip?.(input);
+                        }
+                    }
+                    this.setActiveDialog();
+                    this.controls.bind();
+                    this.onUpdateShip?.(input);
+                }
+            }).catch(error => {
+                reportDialogFailure('concourse mission offers', error);
+            });
+
+            return await super.show(input);
+        } catch (error) {
+            this.container.visible = false;
+            this.controls.unbind();
+            throw error;
+        }
     }
 
     protected override async done() {

@@ -46,7 +46,8 @@ export const JUMP_SPOOL_MS = 1_200;
 export const JUMP_BRAKE_MS = 800;
 export const PLAYER_JUMP_BRAKE_TIMEOUT_MS = 25_000;
 export const JUMP_BRAKE_SPEED_THRESHOLD = 0.05;
-export const JUMP_DEPARTURE_MS = 1_800;
+export const JUMP_DEPARTURE_MS = 3_200;
+export const JUMP_MIN_DEPARTURE_MS = 2_200;
 export const JUMP_BAM_MS = JUMP_DEPARTURE_MS;
 export const JUMP_ARRIVAL_MS = 900;
 export const JUMP_ARRIVAL_RADIUS = 1_400;
@@ -61,8 +62,8 @@ export const TOO_CLOSE_TO_CENTER_MESSAGE =
 /** Retail STR# 2002 string 28: destination refusal */
 export const NO_DESTINATION_MESSAGE =
     "You have to select a destination before you can start a hyperspace jump.";
-// Match the radar/interest radius so ships leave view before vanishing.
-export const SYSTEM_DEPARTURE_RADIUS = 6_000;
+// Ships leave the radar/system view before vanishing.
+export const SYSTEM_DEPARTURE_RADIUS = 7_000;
 export const NPC_JUMP_TIMEOUT_MS = 30_000;
 // Retail snd 130 is "Warp out": the bang as the arrival flash collapses.
 export const JUMP_ARRIVAL_SOUND_ID = 'nova:130';
@@ -286,7 +287,7 @@ export function jumpFlightSpeed(
     }
     if (phase === 'departing') {
         const progress = Math.max(0, Math.min(1, elapsedMs / JUMP_DEPARTURE_MS));
-        const eased = progress * progress * progress;
+        const eased = Math.pow(progress, 1.8);
         return safeMax * (
             JUMP_DEPARTURE_SPEED_MULTIPLIER
             + (JUMP_DEPARTURE_PEAK_SPEED_MULTIPLIER - JUMP_DEPARTURE_SPEED_MULTIPLIER) * eased
@@ -422,8 +423,8 @@ export function advanceJumpFlight(
                 physics.maxVelocity,
             ),
             time.delta_s,
-            true,
             state.phase === 'departing',
+            true,
         );
         return 'none';
     }
@@ -617,7 +618,7 @@ const JumpBrakeControlSystem = new System({
     },
 });
 
-const JumpLifecycleSystem = new System({
+export const JumpLifecycleSystem = new System({
     name: 'JumpLifecycleSystem',
     after: [ControlPlayerShip, MovementSystem],
     args: [
@@ -644,10 +645,10 @@ const JumpLifecycleSystem = new System({
 
         let source = gameData.data.System.getCached(state.from);
         let destination = gameData.data.System.getCached(state.to);
-        if (!source) {
+        if (!source && typeof gameData.data.System.get === 'function') {
             void gameData.data.System.get(state.from);
         }
-        if (!destination) {
+        if (!destination && typeof gameData.data.System.get === 'function') {
             void gameData.data.System.get(state.to);
         }
         if (routeChangeCancelsJump(state, route.route, gameData.data.System)) {
@@ -675,7 +676,7 @@ const JumpLifecycleSystem = new System({
                 physics,
                 time,
                 brakeHeading,
-                () => emit(SoundEvent, { id: 'nova:130' }),
+                undefined,
                 () => emit(SoundEvent, { id: 'nova:128' }),
             );
             return;
@@ -695,7 +696,7 @@ const JumpLifecycleSystem = new System({
             physics,
             time,
             travelDirection,
-            () => emit(SoundEvent, { id: 'nova:130' }),
+            undefined,
             () => emit(SoundEvent, { id: 'nova:128' }),
         );
         if (state.phase === 'braking' || state.phase === 'spooling') {
@@ -703,7 +704,13 @@ const JumpLifecycleSystem = new System({
         }
 
         if (state.phase === 'departing') {
-            if (transition !== 'transfer') {
+            const hasLeftSystem = distanceFromSystemOrigin(movement.position)
+                >= SYSTEM_DEPARTURE_RADIUS;
+            const elapsed = time.time - state.phaseStartedAt;
+            const canTransfer = (hasLeftSystem && elapsed >= JUMP_MIN_DEPARTURE_MS)
+                || elapsed >= JUMP_DEPARTURE_MS
+                || transition === 'transfer';
+            if (!canTransfer) {
                 return;
             }
 
@@ -789,8 +796,14 @@ export const NpcJumpLifecycleSystem = new System({
         if (state.phase === 'arriving') {
             direction = movement.rotation.getUnitVector();
         } else {
-            const source = gameData?.data.System.getCached(state.from);
-            const destination = gameData?.data.System.getCached(state.to);
+            let source = gameData?.data.System.getCached?.(state.from);
+            let destination = gameData?.data.System.getCached?.(state.to);
+            if (!source && typeof gameData?.data.System?.get === 'function') {
+                void gameData.data.System.get(state.from);
+            }
+            if (!destination && typeof gameData?.data.System?.get === 'function') {
+                void gameData.data.System.get(state.to);
+            }
             if (source && destination) {
                 const delta = new Vector(
                     destination.position[0] - source.position[0],

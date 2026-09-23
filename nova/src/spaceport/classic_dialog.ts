@@ -115,6 +115,8 @@ export class ClassicDialog<TData> extends Menu<TData> {
     private readonly sectionContainers = new Map<string, PIXI.Container>();
     private readonly sectionTexts = new Map<string, PIXI.Text>();
     private readonly buttonsMap = new Map<string, Button>();
+    private readonly defaultBtn?: ClassicDialogButton<TData>;
+    private readonly cancelBtn?: ClassicDialogButton<TData>;
     private customOutput?: TData;
 
     constructor(
@@ -127,6 +129,9 @@ export class ClassicDialog<TData> extends Menu<TData> {
             config.background || DEFAULT_DIALOG_BACKGROUND,
             controlEvents,
         );
+
+        this.defaultBtn = (config.buttons || []).find((b) => b.isDefault);
+        this.cancelBtn = (config.buttons || []).find((b) => b.isCancel);
 
         // Title setup
         const titlePos = config.titlePosition || { x: 0, y: -68 };
@@ -199,7 +204,7 @@ export class ClassicDialog<TData> extends Menu<TData> {
         // Controls binding
         const controlsMap: Record<string, () => void> = {};
 
-        const defaultBtn = (config.buttons || []).find((b) => b.isDefault);
+        const defaultBtn = this.defaultBtn;
         if (defaultBtn) {
             const defaultAction = async () => {
                 if (defaultBtn.action) {
@@ -212,7 +217,7 @@ export class ClassicDialog<TData> extends Menu<TData> {
             controlsMap.properties = defaultAction;
         }
 
-        const cancelBtn = (config.buttons || []).find((b) => b.isCancel);
+        const cancelBtn = this.cancelBtn;
         if (cancelBtn) {
             const cancelAction = async () => {
                 if (cancelBtn.action) {
@@ -331,7 +336,46 @@ export class ClassicDialog<TData> extends Menu<TData> {
             await this.config.onShow(this, input);
         }
 
-        return super.show(input);
+        const keyHandler = async (e: KeyboardEvent) => {
+            if (!this.container.visible) return;
+            if (e.key === 'Enter' || e.code === 'Enter' || e.code === 'NumpadEnter' || e.key === ' ' || e.code === 'Space') {
+                e.preventDefault();
+                e.stopPropagation();
+                if (this.defaultBtn) {
+                    if (this.defaultBtn.action) {
+                        const res = await this.defaultBtn.action(this, this.input);
+                        if (res !== undefined) this.customOutput = res;
+                    }
+                    this.closeWithResult();
+                } else if (this.cancelBtn) {
+                    if (this.cancelBtn.action) {
+                        const res = await this.cancelBtn.action(this, this.input);
+                        if (res !== undefined) this.customOutput = res;
+                    }
+                    this.closeWithResult();
+                }
+            } else if (e.key === 'Escape' || e.code === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation();
+                if (this.cancelBtn?.action) {
+                    const res = await this.cancelBtn.action(this, this.input);
+                    if (res !== undefined) this.customOutput = res;
+                }
+                this.closeWithResult();
+            }
+        };
+
+        if (typeof window !== 'undefined') {
+            window.addEventListener('keydown', keyHandler, true);
+        }
+
+        try {
+            return await super.show(input);
+        } finally {
+            if (typeof window !== 'undefined') {
+                window.removeEventListener('keydown', keyHandler, true);
+            }
+        }
     }
 }
 

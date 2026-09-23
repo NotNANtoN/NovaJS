@@ -1,7 +1,11 @@
 import "jasmine";
+import * as PIXI from "pixi.js";
+import { EMPTY } from "rxjs";
+import { MockGameData } from "novadatainterface/MockGameData";
 import {
     CLASSIC_MAC_FONT,
     CLASSIC_MAC_TITLE_FONT,
+    ClassicDialog,
     ClassicDialogConfig,
     DEFAULT_DIALOG_BACKGROUND,
 } from "./classic_dialog";
@@ -75,5 +79,111 @@ describe("ClassicDialog configuration and layout specs", () => {
         expect(config.buttons?.length).toBe(2);
         expect(config.buttons?.[0].isDefault).toBeTrue();
         expect(config.buttons?.[1].isCancel).toBeTrue();
+    });
+
+    it("dismisses with Enter or Space keyboard events on default button", async () => {
+        const originalWindow = (globalThis as any).window;
+        const listeners: Record<string, ((e: any) => void)[]> = {};
+        (globalThis as any).window = {
+            addEventListener: (type: string, fn: (e: any) => void) => {
+                (listeners[type] = listeners[type] || []).push(fn);
+            },
+            removeEventListener: (type: string, fn: (e: any) => void) => {
+                listeners[type] = (listeners[type] || []).filter(l => l !== fn);
+            },
+            dispatchEvent: (e: any) => {
+                listeners[e.type]?.forEach(fn => fn(e));
+            },
+        };
+
+        try {
+            const gameData = new MockGameData() as any;
+            gameData.spriteFromPict = () => new PIXI.Sprite(PIXI.Texture.EMPTY);
+            gameData.spriteFromPictAsync = async () => new PIXI.Sprite(PIXI.Texture.EMPTY);
+            gameData.textureFromPict = () => PIXI.Texture.EMPTY;
+            gameData.textureFromPictAsync = async () => PIXI.Texture.EMPTY;
+            let acknowledged = false;
+            const dialog = new ClassicDialog(gameData, EMPTY, {
+                title: "Test Dialog",
+                buttons: [
+                    {
+                        id: "ok",
+                        label: "OK",
+                        width: 50,
+                        position: { x: 0, y: 0 },
+                        isDefault: true,
+                        action: () => {
+                            acknowledged = true;
+                        },
+                    },
+                ],
+            });
+
+            const showPromise = dialog.show(undefined);
+            await new Promise(r => setTimeout(r, 0));
+            expect(dialog.container.visible).toBeTrue();
+
+            // Simulate Enter keydown
+            (globalThis as any).window.dispatchEvent({ type: "keydown", key: "Enter", preventDefault() {}, stopPropagation() {} });
+            await showPromise;
+
+            expect(acknowledged).toBeTrue();
+            expect(dialog.container.visible).toBeFalse();
+        } finally {
+            (globalThis as any).window = originalWindow;
+        }
+    });
+
+    it("dismisses with Escape keyboard event on cancel button", async () => {
+        const originalWindow = (globalThis as any).window;
+        const listeners: Record<string, ((e: any) => void)[]> = {};
+        (globalThis as any).window = {
+            addEventListener: (type: string, fn: (e: any) => void) => {
+                (listeners[type] = listeners[type] || []).push(fn);
+            },
+            removeEventListener: (type: string, fn: (e: any) => void) => {
+                listeners[type] = (listeners[type] || []).filter(l => l !== fn);
+            },
+            dispatchEvent: (e: any) => {
+                listeners[e.type]?.forEach(fn => fn(e));
+            },
+        };
+
+        try {
+            const gameData = new MockGameData() as any;
+            gameData.spriteFromPict = () => new PIXI.Sprite(PIXI.Texture.EMPTY);
+            gameData.spriteFromPictAsync = async () => new PIXI.Sprite(PIXI.Texture.EMPTY);
+            gameData.textureFromPict = () => PIXI.Texture.EMPTY;
+            gameData.textureFromPictAsync = async () => PIXI.Texture.EMPTY;
+            let cancelled = false;
+            const dialog = new ClassicDialog(gameData, EMPTY, {
+                title: "Prompt",
+                buttons: [
+                    {
+                        id: "close",
+                        label: "Cancel",
+                        width: 50,
+                        position: { x: 0, y: 0 },
+                        isCancel: true,
+                        action: () => {
+                            cancelled = true;
+                        },
+                    },
+                ],
+            });
+
+            const showPromise = dialog.show(undefined);
+            await new Promise(r => setTimeout(r, 0));
+            expect(dialog.container.visible).toBeTrue();
+
+            // Simulate Escape keydown
+            (globalThis as any).window.dispatchEvent({ type: "keydown", key: "Escape", preventDefault() {}, stopPropagation() {} });
+            await showPromise;
+
+            expect(cancelled).toBeTrue();
+            expect(dialog.container.visible).toBeFalse();
+        } finally {
+            (globalThis as any).window = originalWindow;
+        }
     });
 });

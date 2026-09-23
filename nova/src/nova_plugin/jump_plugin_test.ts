@@ -7,6 +7,8 @@ import {
     JUMP_ARRIVAL_SPEED_MULTIPLIER,
     JUMP_BAM_MS,
     JUMP_BRAKE_MS,
+    JUMP_DEPARTURE_MS,
+    JUMP_MIN_DEPARTURE_MS,
     JUMP_DEPARTURE_SPEED_MULTIPLIER,
     JUMP_DEPARTURE_PEAK_SPEED_MULTIPLIER,
     JUMP_SPOOL_MS,
@@ -33,6 +35,7 @@ import {
     JumpRouteComponent,
     applyJumpBrakingControls,
     advanceJumpFlight,
+    JumpLifecycleSystem,
 } from './jump_plugin';
 import { ControlStateEvent } from './control_state_event';
 import { AppliedDamageEvent } from './death_plugin';
@@ -62,6 +65,8 @@ import { PlayerShipSelector } from './player_ship_plugin';
 import { SystemIdResource } from './system_id_resource';
 import { GameDataResource } from './game_data_resource';
 import { PlatformResource } from './platform_plugin';
+import { MockGameData } from 'novadatainterface/MockGameData';
+import { getDefaultSystemData } from 'novadatainterface/SystemData';
 
 const NPC_PHYSICS: MovementPhysics = {
     acceleration: 100,
@@ -814,5 +819,85 @@ describe('CancelJumpOnDamageSystem', () => {
 
         // Sound stops emitted
         expect(stoppedSounds).toContain('nova:128');
+    });
+
+    it('holds player departure until reaching system departure boundary or minimum departure duration', async () => {
+        expect(SYSTEM_DEPARTURE_RADIUS).toBe(7_000);
+        expect(JUMP_DEPARTURE_MS).toBe(3_200);
+        expect(JUMP_MIN_DEPARTURE_MS).toBe(2_200);
+
+        const world = new World('player-departure-boundary-test');
+        const gameData = new MockGameData();
+        gameData.data.System.map.set('nova:source', {
+            ...getDefaultSystemData(),
+            id: 'nova:source',
+            position: [0, 0],
+            links: ['nova:dest'],
+        });
+        gameData.data.System.map.set('nova:dest', {
+            ...getDefaultSystemData(),
+            id: 'nova:dest',
+            position: [1000, 0],
+            links: ['nova:source'],
+        });
+        await gameData.data.System.get('nova:source');
+        await gameData.data.System.get('nova:dest');
+        world.resources.set(GameDataResource, gameData);
+        world.resources.set(TimeResource, { time: 0, delta_s: 0.1, delta_ms: 100, frame: 0 });
+
+        const player = new Entity('player')
+            .addComponent(PlayerShipSelector, undefined)
+            .addComponent(MovementStateComponent, {
+                position: new Position(0, 0),
+                velocity: new Vector(0, 0),
+                rotation: new Angle(0),
+                turning: 0,
+                turnBack: false,
+                accelerating: 0,
+            })
+            .addComponent(MovementPhysicsComponent, {
+                acceleration: 100,
+                maxVelocity: 300,
+                turnRate: 3,
+                movementType: MovementType.INERTIAL,
+            })
+            .addComponent(JumpRouteComponent, { route: ['nova:dest'] })
+            .addComponent(JumpStateComponent, {
+                from: 'nova:source',
+                to: 'nova:dest',
+                phase: 'departing',
+                phaseStartedAt: 0,
+                transitionAt: JUMP_DEPARTURE_MS,
+                requiresAdjacency: false,
+                arrivalSoundPending: false,
+                createdAt: 0,
+            });
+        world.entities.set('player', player);
+
+        world.addSystem(JumpLifecycleSystem);
+
+        let soundsEmitted: string[] = [];
+        world.events.get(SoundEvent).subscribe(e => {
+            soundsEmitted.push(e.id);
+        });
+
+        // Step 1: In the middle of the system, elapsed = 500ms (< JUMP_MIN_DEPARTURE_MS),
+        // position still inside system (e.g. 500, 0). Ship should NOT be removed!
+        world.resources.get(TimeResource)!.time = 500;
+        player.components.get(MovementStateComponent)!.position = new Position(500, 0);
+        world.step();
+
+        // Player must still exist in current system!
+        expect(world.entities.has('player')).toBeTrue();
+        // Departure should not have emitted arrival sound nova:130
+        expect(soundsEmitted).not.toContain('nova:130');
+
+        // Step 2: Ship crosses SYSTEM_DEPARTURE_RADIUS after minimum departure duration
+        world.resources.get(TimeResource)!.time = 2_500;
+        player.components.get(MovementStateComponent)!.position = new Position(SYSTEM_DEPARTURE_RADIUS + 100, 0);
+        world.step();
+
+        // Now that ship is past SYSTEM_DEPARTURE_RADIUS and minimum duration elapsed, it transfers!
+        expect(world.entities.has('player')).toBeFalse();
     });
 });

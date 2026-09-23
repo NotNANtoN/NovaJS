@@ -49,6 +49,14 @@ class MockGettable<T> extends Gettable<T> {
             throw new Error(`id ${id} not found`);
         }
     }
+
+    override getCached(id: string): T | undefined {
+        const val = this.map.get(id);
+        if (val !== undefined) {
+            return val;
+        }
+        return this.defaultValue;
+    }
 }
 
 type ExtractGettableType<T> = T extends Gettable<infer T> ? T : never;

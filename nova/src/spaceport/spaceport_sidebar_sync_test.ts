@@ -305,4 +305,28 @@ describe('spaceport sidebar status bar synchronization', () => {
         (spaceport as any).bar.onUpdateShip(ship);
         expect(spaceportUpdateCalled).toBe(true);
     });
+
+    it('makes spaceport container visible immediately when displaying landing notices', async () => {
+        spyOn(Spaceport.prototype, 'build').and.returnValue(Promise.resolve());
+        const planet = { ...getDefaultPlanetData(), id: 'nova:earth', name: 'Earth' };
+        gameData.data.Planet.map.set('nova:earth', planet);
+
+        const spaceport = new Spaceport(gameData as any, planet, controlEvents);
+        const ship = new Entity().addComponent(PlayerStateComponent, createInitialPlayerState());
+
+        let noticeShown = false;
+        let containerVisibleDuringNotice = false;
+        spyOn((spaceport as any).landingNoticeDialog, 'show').and.callFake(async () => {
+            noticeShown = true;
+            containerVisibleDuringNotice = spaceport.container.visible;
+        });
+
+        // Trigger done() after notice to complete super.show
+        setTimeout(() => (spaceport as any).done(), 10);
+
+        await spaceport.show(ship, [{ kind: 'success', text: 'Passenger delivered.', missionId: 'nova:200' }], true);
+
+        expect(noticeShown).toBe(true);
+        expect(containerVisibleDuringNotice).toBe(true);
+    });
 });
