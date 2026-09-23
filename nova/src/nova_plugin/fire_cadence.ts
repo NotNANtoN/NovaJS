@@ -189,7 +189,14 @@ export class FireCadence<T> {
                     const endsBurst = burstLimit > 0 && state.burstProgress >= burstLimit;
                     const interval = endsBurst ? weapon.burstReload
                         : weapon.reload / (weapon.fireSimultaneously ? 1 : weapon.count);
-                    state.nextAt = now + Math.max(1, interval);
+                    const step = Math.max(1, interval);
+                    // Keep the sub-tick phase when this opportunity was merely
+                    // quantized late by the server tick. Rescheduling from `now`
+                    // loses up to one tick per shot and fires multi-copy
+                    // weapons 15-33% slower than client prediction. Lateness of
+                    // a whole interval or more (idle, stall) still earns no credit.
+                    const base = now - state.nextAt < step ? state.nextAt : now;
+                    state.nextAt = base + step;
                     if (endsBurst || burstLimit === 0) {
                         state.burstProgress = 0;
                     }

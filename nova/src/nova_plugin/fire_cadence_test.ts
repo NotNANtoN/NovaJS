@@ -109,6 +109,21 @@ describe('server-local fire cadence', () => {
         expect(f.drain()).toBe(1);
     });
 
+    it('matches the client sustained rate when reload/count is not a whole server tick', () => {
+        // Two copies of a 3-frame (100ms) weapon: one shot per 50ms, drained
+        // on 60Hz ticks. Rescheduling from the tick time used to yield 15/s.
+        const f = fixture({ reload: 100, count: 2 }, { maxPendingPerWeapon: 64 });
+        const step = 1000 / 60;
+        let seq = 0;
+        for (let tick = 0; tick <= 600; tick++) {
+            f.time(1e12 + tick * step);
+            while (f.cadence.pendingCount('laser') < 8) f.cadence.enqueue('laser', ++seq);
+            f.drain();
+        }
+        expect(f.shots.length).toBeGreaterThanOrEqual(199);
+        expect(f.shots.length).toBeLessThanOrEqual(201);
+    });
+
     it('staggered installed copies use reload/count and count-scaled burst size', () => {
         const f = fixture({ count: 2, burstCount: 2 });
         for (let seq = 1; seq <= 5; seq++) f.cadence.enqueue('laser', seq);
