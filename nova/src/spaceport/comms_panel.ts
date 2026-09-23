@@ -126,7 +126,7 @@ export class Comms extends Menu<Entity> {
         this.container.addChild(this.message);
 
         const [closeSlot, greetSlot, assistSlot] =
-            commsButtonSlots([90, 70, 130]);
+            commsButtonSlots([75, 75, 95]);
         const close = new Button(
             gameData, 'Close Channel', closeSlot.width, closeSlot);
         const greetings = new Button(
@@ -389,9 +389,31 @@ export class Comms extends Menu<Entity> {
         const outcome = this.input?.components.get(SurrenderOutcomeComponent);
         if (outcome && outcome.target === this.surrenderTarget
             && outcome.sequence === this.surrenderSequence) {
-            this.message.text = outcome.status === 'paid'
-                ? `Surrender confirmed: ${outcome.amount.toLocaleString()} credits transferred.`
-                : `Surrender rejected${outcome.reason ? `: ${outcome.reason}` : '.'}`;
+            const name = this.target?.name ?? 'Target vessel';
+            if (outcome.status === 'paid') {
+                this.say('takeItAndGo');
+                this.message.text += `\n\nSurrender confirmed: ${outcome.amount.toLocaleString()} credits transferred.`;
+            } else {
+                switch (outcome.reason) {
+                    case 'refused':
+                    case 'target-unavailable':
+                        this.say('mockingRefusal');
+                        break;
+                    case 'no-credits':
+                    case 'cannot-afford':
+                        this.say('cannotAffordDemand');
+                        break;
+                    case 'already-surrendered':
+                        this.message.text = `${name} has already surrendered all available credits.`;
+                        break;
+                    case 'out-of-range':
+                        this.message.text = `${name} is out of communication range. (out-of-range)`;
+                        break;
+                    default:
+                        this.say('inYourDreams');
+                        break;
+                }
+            }
         } else if (Date.now() >= this.surrenderDeadline) {
             this.message.text = 'Surrender response timed out; result unknown. No new demand was sent.';
         } else {

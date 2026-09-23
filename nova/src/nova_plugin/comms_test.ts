@@ -2,6 +2,7 @@ import 'jasmine';
 import { createDraft, finishDraft } from 'immer';
 import { Entity } from 'nova_ecs/entity';
 import { Comms } from '../spaceport/comms_panel';
+import { commsButtonSlots } from '../spaceport/comms_panel_layout';
 import { AssistanceOutcomeComponent, AssistanceRequestComponent } from './assistance_plugin';
 import { SurrenderRequestComponent, SurrenderOutcomeComponent } from './surrender_plugin';
 import { getDefaultMissionData } from 'novadatainterface/MissionData';
@@ -514,6 +515,19 @@ describe('comms async lifecycle and transactions', () => {
             expect(comms.surrenderPoll).toBeUndefined();
         });
 
+        it('responds with mockingRefusal when surrender is refused by an active target', () => {
+            const comms = panel();
+            spyOn(comms, 'say');
+            comms.demandSurrender();
+            comms.input.components.set(SurrenderOutcomeComponent, {
+                target: 'helper', sequence: 1, status: 'rejected', reason: 'refused', amount: 0,
+            });
+            jasmine.clock().tick(100);
+            expect(comms.say).toHaveBeenCalledWith('mockingRefusal');
+            expect(comms.input.components.get(PlayerStateComponent).credits).toBe(10_000);
+            expect(comms.surrenderPoll).toBeUndefined();
+        });
+
         it('uses matching fresh surrender outcomes and never mutates credits', () => {
             const comms = panel();
             comms.demandSurrender();
@@ -571,6 +585,17 @@ describe('comms lines', () => {
             const index = commsLineIndex('farewell', sample);
             expect(index).toBeGreaterThanOrEqual(CommsBlock.farewell);
             expect(index).toBeLessThan(CommsBlock.farewell + COMMS_BLOCK_SIZE);
+        }
+    });
+
+    it('spaces comms buttons with caps so they never overlap adjacent slots', () => {
+        const slots = commsButtonSlots([75, 75, 95]);
+        expect(slots.length).toBe(3);
+        const BUTTON_CAPS = 26;
+        for (let i = 0; i < slots.length - 1; i++) {
+            const currentEnd = slots[i].x + slots[i].width + BUTTON_CAPS;
+            const nextStart = slots[i + 1].x;
+            expect(nextStart).toBeGreaterThanOrEqual(currentEnd);
         }
     });
 });

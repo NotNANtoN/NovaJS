@@ -28,30 +28,30 @@ export interface CommsButtonSlot {
     width: number;
 }
 
+const BUTTON_CAPS = 26;
+
 /**
- * Space buttons evenly along the footer. Widths are given by the caller
- * because retail's labels differ wildly in length, and a fixed grid would
- * clip "Request Assistance".
+ * Space buttons evenly along the footer, accounting for each button's 26px caps.
+ * Widths represent the inner text area passed to Button, and buttons are spaced
+ * with consistent margins and gaps without overlapping.
  */
 export function commsButtonSlots(
     widths: readonly number[],
     layout: { width: number, footerY: number } = COMMS_LAYOUT,
-    margin = 10,
+    margin = 12,
     gap = 8,
 ): CommsButtonSlot[] {
-    const total = widths.reduce((sum, width) => sum + width, 0)
+    const totalPhysical = widths.reduce((sum, width) => sum + width + BUTTON_CAPS, 0)
         + gap * Math.max(0, widths.length - 1);
     const available = layout.width - margin * 2;
     // Buttons that do not fit are squeezed proportionally rather than
     // overflowing the frame.
-    const scale = total > available ? available / total : 1;
-    // Buttons are positioned by their left edge, as elsewhere in the
-    // spaceport dialogs.
-    let x = -layout.width / 2 + margin;
+    const scale = totalPhysical > available ? available / totalPhysical : 1;
+    let x = -totalPhysical * scale / 2;
     return widths.map(width => {
         const scaled = width * scale;
         const slot = { x, y: layout.footerY, width: scaled };
-        x += scaled + gap * scale;
+        x += (scaled + BUTTON_CAPS + gap) * scale;
         return slot;
     });
 }

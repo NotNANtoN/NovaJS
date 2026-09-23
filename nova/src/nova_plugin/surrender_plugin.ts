@@ -63,11 +63,15 @@ export const SurrenderSystem = new System({
             reject('invalid-target');
             return;
         }
-        if (!target.components.get(DisabledComponent)
-            || target.components.has(DestructionStartedComponent)
+        if (target.components.has(DestructionStartedComponent)
             || target.components.has(JumpStateComponent)
             || (target.components.get(ArmorComponent)?.current ?? 1) <= 0) {
             reject('target-unavailable');
+            return;
+        }
+        if (!target.components.get(DisabledComponent)) {
+            // An active non-disabled vessel refuses to yield
+            reject('refused');
             return;
         }
         const targetMovement = target.components.get(MovementStateComponent);
