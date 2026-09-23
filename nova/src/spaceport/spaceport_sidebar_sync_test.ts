@@ -3,11 +3,12 @@ import * as PIXI from 'pixi.js';
 import { Entity } from 'nova_ecs/entity';
 import { Subject } from 'rxjs';
 import { MockGameData } from 'novadatainterface/MockGameData';
-import { getDefaultMissionData } from 'novadatainterface/MissionData';
+import { getDefaultMissionData, MissionOfferLocation } from 'novadatainterface/MissionData';
 import { getDefaultPlanetData } from 'novadatainterface/PlanetData';
 import { getDefaultSystemData } from 'novadatainterface/SystemData';
 import { getDefaultShipData } from 'novadatainterface/ShipData';
 import { createInitialPlayerState, PlayerStateComponent } from '../nova_plugin/player_state';
+import { ShipDataComponent } from '../nova_plugin/ship_plugin';
 import { OutfitsStateComponent } from '../nova_plugin/outfit_plugin';
 import { ControlEvent } from '../nova_plugin/controls_plugin';
 import { MissionBbs, MissionInfo } from './mission_bbs';
@@ -328,5 +329,35 @@ describe('spaceport sidebar status bar synchronization', () => {
 
         expect(noticeShown).toBe(true);
         expect(containerVisibleDuringNotice).toBe(true);
+    });
+
+    it('checks and presents service-specific mission offers when opening trade center', async () => {
+        spyOn(Spaceport.prototype, 'build').and.returnValue(Promise.resolve());
+        const planet = {
+            ...getDefaultPlanetData(),
+            id: 'nova:earth',
+            name: 'Earth',
+            services: ['trade', 'commodity'],
+        };
+        gameData.data.Planet.map.set('nova:earth', planet);
+
+        const spaceport = new Spaceport(gameData as any, planet, controlEvents);
+        const ship = new Entity()
+            .addComponent(PlayerStateComponent, createInitialPlayerState())
+            .addComponent(ShipDataComponent, getDefaultShipData());
+        (spaceport as any).input = ship;
+        (spaceport as any).data = planet;
+        (spaceport as any).tradeCenterAvailable = true;
+
+        const presentedLocations: MissionOfferLocation[] = [];
+        spyOn(spaceport as any, 'presentServiceMissionOffers').and.callFake(async (location: MissionOfferLocation) => {
+            presentedLocations.push(location);
+        });
+
+        // Trigger showTradeCenter
+        spyOn((spaceport as any).tradeCenter, 'show').and.returnValue(Promise.resolve(ship));
+        await (spaceport as any).controls.controls.tradeCenter();
+
+        expect(presentedLocations).toContain(MissionOfferLocation.Trading);
     });
 });

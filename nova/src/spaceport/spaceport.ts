@@ -53,6 +53,7 @@ import { TradeCenter } from './trade_center';
 import { LandingNoticeDialog } from './landing_notice_dialog';
 import { MissionOfferDialog } from './mission_offer_dialog';
 import { getConcourseMissionOffers } from './mission_bbs';
+import { MissionOfferLocation } from 'novadatainterface/MissionData';
 import {
     acceptMission,
     refuseMission,
@@ -190,6 +191,8 @@ export class Spaceport extends Menu<Entity> {
                 return;
             }
             this.controls.unbind();
+            await this.presentServiceMissionOffers(
+                MissionOfferLocation.Outfit, this.outfitter.container);
             this.setActiveDialog(this.outfitter.container);
             // The dialog holds these for its whole session, which spans many
             // world steps, so it is given copies and its results are written
@@ -239,6 +242,8 @@ export class Spaceport extends Menu<Entity> {
                 return;
             }
             this.controls.unbind();
+            await this.presentServiceMissionOffers(
+                MissionOfferLocation.Shipyard, this.shipyard.container);
             this.setActiveDialog(this.shipyard.container);
             try {
                 // Copied for the same reason as the outfitter above. The
@@ -340,6 +345,8 @@ export class Spaceport extends Menu<Entity> {
                 return;
             }
             this.controls.unbind();
+            await this.presentServiceMissionOffers(
+                MissionOfferLocation.Bar, this.bar.container);
             this.setActiveDialog(this.bar.container);
             try {
                 await this.bar.show(this.input);
@@ -357,6 +364,8 @@ export class Spaceport extends Menu<Entity> {
                 return;
             }
             this.controls.unbind();
+            await this.presentServiceMissionOffers(
+                MissionOfferLocation.Trading, this.tradeCenter.container);
             this.setActiveDialog(this.tradeCenter.container);
             try {
                 await this.tradeCenter.show(this.input);
@@ -531,6 +540,66 @@ export class Spaceport extends Menu<Entity> {
             result.purchased === 1 ? '' : 's'} for ${
             (spent - result.credits).toLocaleString()} cr.`;
         this.updateRechargeState();
+    }
+
+    private async presentServiceMissionOffers(
+        location: MissionOfferLocation,
+        returnToDialog?: PIXI.Container,
+    ): Promise<void> {
+        try {
+            const { offers, destinationOptions } = await getConcourseMissionOffers(
+                this.gameData, this.input, this.id, location);
+            if (!this.container.visible) return;
+            const rawState = this.input.components.get(PlayerStateComponent);
+            const state = plainSnapshot(rawState);
+            if (state && offers.length > 0) {
+                this.controls.unbind();
+                for (const offer of offers) {
+                    if (!this.container.visible) break;
+                    this.setActiveDialog(this.missionOfferDialog.container);
+                    const canRefuse = (offer.mission.flags & 0x0100) === 0
+                        && offer.mission.refuseButton !== '';
+                    const prompt = await this.missionOfferDialog.show({
+                        mission: offer.mission,
+                        title: offer.title,
+                        text: offer.displayText,
+                        payText: offer.mission.payVal > 0
+                            ? `${offer.mission.payVal.toLocaleString()} cr` : undefined,
+                        cargoText: offer.mission.cargo ?? undefined,
+                        acceptLabel: offer.mission.acceptButton || (canRefuse ? 'Accept' : 'OK'),
+                        refuseLabel: canRefuse ? (offer.mission.refuseButton || 'Refuse') : undefined,
+                        canRefuse,
+                    });
+                    if (prompt.accepted) {
+                        const ncb = this.ncbRuntime.setContext(this.input, state);
+                        const accepted = acceptMission(state, offer.mission, {
+                            ...destinationOptions(offer.resolved),
+                            ncb,
+                        });
+                        if (accepted) {
+                            await startPendingNcbMissions(this.gameData, state, {
+                                ...destinationOptions(offer.resolved),
+                                ncb,
+                            });
+                        }
+                        if (ncb.outfits) {
+                            this.input.components.set(OutfitsStateComponent, ncb.outfits);
+                        }
+                        this.input.components.set(PlayerStateComponent, { ...state });
+                        this.onUpdateShip?.(this.input);
+                    } else {
+                        refuseMission(state, offer.mission);
+                        this.input.components.set(PlayerStateComponent, { ...state });
+                        this.onUpdateShip?.(this.input);
+                    }
+                }
+                this.setActiveDialog(returnToDialog);
+                this.controls.bind();
+                this.onUpdateShip?.(this.input);
+            }
+        } catch (error) {
+            reportDialogFailure(`service mission offers (${location})`, error);
+        }
     }
 
     private setActiveDialog(active?: PIXI.Container) {
@@ -761,58 +830,7 @@ export class Spaceport extends Menu<Entity> {
             }
 
             // Check for concourse storyline offers (availLoc = 3) asynchronously so spaceport opens immediately
-            void getConcourseMissionOffers(this.gameData, input, this.id).then(async ({ offers, destinationOptions }) => {
-                if (!this.container.visible) return;
-                const rawState = input.components.get(PlayerStateComponent);
-                const state = plainSnapshot(rawState);
-                if (state && offers.length > 0) {
-                    this.controls.unbind();
-                    for (const offer of offers) {
-                        if (!this.container.visible) break;
-                        this.setActiveDialog(this.missionOfferDialog.container);
-                        const canRefuse = (offer.mission.flags & 0x0100) === 0
-                            && offer.mission.refuseButton !== '';
-                        const prompt = await this.missionOfferDialog.show({
-                            mission: offer.mission,
-                            title: offer.title,
-                            text: offer.displayText,
-                            payText: offer.mission.payVal > 0
-                                ? `${offer.mission.payVal.toLocaleString()} cr` : undefined,
-                            cargoText: offer.mission.cargo ?? undefined,
-                            acceptLabel: offer.mission.acceptButton || (canRefuse ? 'Accept' : 'OK'),
-                            refuseLabel: canRefuse ? (offer.mission.refuseButton || 'Refuse') : undefined,
-                            canRefuse,
-                        });
-                        if (prompt.accepted) {
-                            const ncb = this.ncbRuntime.setContext(input, state);
-                            const accepted = acceptMission(state, offer.mission, {
-                                ...destinationOptions(offer.resolved),
-                                ncb,
-                            });
-                            if (accepted) {
-                                await startPendingNcbMissions(this.gameData, state, {
-                                    ...destinationOptions(offer.resolved),
-                                    ncb,
-                                });
-                            }
-                            if (ncb.outfits) {
-                                input.components.set(OutfitsStateComponent, ncb.outfits);
-                            }
-                            input.components.set(PlayerStateComponent, { ...state });
-                            this.onUpdateShip?.(input);
-                        } else {
-                            refuseMission(state, offer.mission);
-                            input.components.set(PlayerStateComponent, { ...state });
-                            this.onUpdateShip?.(input);
-                        }
-                    }
-                    this.setActiveDialog();
-                    this.controls.bind();
-                    this.onUpdateShip?.(input);
-                }
-            }).catch(error => {
-                reportDialogFailure('concourse mission offers', error);
-            });
+            void this.presentServiceMissionOffers(MissionOfferLocation.MainSpaceport);
 
             return await super.show(input);
         } catch (error) {

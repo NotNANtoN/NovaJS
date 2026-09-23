@@ -1333,6 +1333,7 @@ export async function getConcourseMissionOffers(
     gameData: GameData,
     input: Entity,
     planetId: string,
+    offerLocation: MissionOfferLocation = MissionOfferLocation.MainSpaceport,
 ): Promise<{
     offers: ConcourseMissionOffer[];
     destinationOptions: (resolved: ResolvedMissionDestinations) => MissionDestinationOptions;
@@ -1364,7 +1365,7 @@ export async function getConcourseMissionOffers(
         playerState: state,
         currentPlanet,
         currentSystem,
-        offerLocation: MissionOfferLocation.MainSpaceport,
+        offerLocation,
         destinationPlanets: world.planets,
         destinationSystems: world.systems,
         governments: world.governments,
@@ -1372,7 +1373,7 @@ export async function getConcourseMissionOffers(
         playerShipGovt: ship?.inherentGovt,
     }).sort((a, b) => b.displayWeight - a.displayWeight);
 
-    const offerSeed = `${state.currentSystem}:${planetId}:${state.gameDate}:concourse`;
+    const offerSeed = `${state.currentSystem}:${planetId}:${state.gameDate}:concourse:${offerLocation}`;
     const resourceOffers: ConcourseMissionOffer[] = [];
     for (const sourceMission of offerable) {
         const mission = preparedMission(sourceMission, offerSeed);
