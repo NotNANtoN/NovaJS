@@ -360,14 +360,14 @@ describe('authoritative server intent scheduling', () => {
         const intent = createDraft(f.ship.components.get(FireIntentComponent)!);
         intent.shots[1].target = 'original-target';
         const time = createDraft(f.time);
-        f.ship.components.set(FireIntentComponent, intent);
+        f.ship.components.set(FireIntentComponent, intent as FireIntent);
         f.world.resources.set(TimeResource, time);
         const fire = spyOn(f.entry, 'fireFromEntityDetailed').and.callThrough();
         f.world.step();
         // Changing the source draft after enqueue cannot change the snapshot.
         intent.shots[1].target = 'changed-target';
         intent.shots[1].seed = 999;
-        const completed = finishDraft(intent);
+        const completed = finishDraft(intent) as FireIntent;
         finishDraft(time);
         f.ship.components.set(FireIntentComponent, completed);
         f.world.resources.set(TimeResource, f.time);

@@ -5,7 +5,7 @@ import { WeaponData } from 'novadatainterface/WeaponData';
 import { Emit, EmitFunction, Entities, GetEntity, RunQuery, RunQueryFunction, UUID } from 'nova_ecs/arg_types';
 import { Component } from 'nova_ecs/component';
 import { Angle } from 'nova_ecs/datatypes/angle';
-import { Position } from 'nova_ecs/datatypes/position';
+import { BOUNDARY, Position } from 'nova_ecs/datatypes/position';
 import { Vector } from 'nova_ecs/datatypes/vector';
 import { Entity } from 'nova_ecs/entity';
 import { EntityMap } from 'nova_ecs/entity_map';
@@ -454,6 +454,79 @@ export abstract class WeaponEntry {
             sourceVelocity: new Vector(movement.velocity.x, movement.velocity.y),
             target,
             inaccuracy: inaccuracyOffset,
+        };
+    }
+
+    /**
+     * Authoritative server fire from a pose the owning client already
+     * predicted. The server's copy of a client ship is up to RTT/2 behind;
+     * firing from it would make every player shot jump on confirmation.
+     * Returns undefined when this weapon cannot use a client pose (turrets
+     * and point defense still aim on the server) or when the pose is not
+     * plausible for the server's copy of the ship.
+     */
+    fireFromPose(source: string, shot: {
+        seed: number,
+        exitIndex: number,
+        at: number,
+        position: Position,
+        rotation: Angle,
+        sourceVelocity: Vector,
+        inaccuracy: number,
+        entityId: string,
+        target?: string,
+    }, now: number, maxAgeMs: number, maxDistance: number): FiredShot | undefined {
+        if ('guidance' in this.data && (this.data.guidance === 'pointDefense'
+            || this.data.guidance === 'pointDefenseBeam')) {
+            return undefined;
+        }
+        const age = now - shot.at;
+        if (!Number.isFinite(age) || age < -maxAgeMs || age > maxAgeMs) {
+            return undefined;
+        }
+        const result = this.runQuery(FireFromEntityQuery, source)[0];
+        if (!result) {
+            return undefined;
+        }
+        const [, entities, movement, animation, , owner, targetVal,
+            destructionStarted, armor] = result;
+        if (attackOriginLocked(destructionStarted, armor?.current)) {
+            return undefined;
+        }
+        const offset = shot.position.subtract(movement.position);
+        const dx = Math.abs(offset.x) > BOUNDARY ? BOUNDARY * 2 - Math.abs(offset.x) : offset.x;
+        const dy = Math.abs(offset.y) > BOUNDARY ? BOUNDARY * 2 - Math.abs(offset.y) : offset.y;
+        if (dx * dx + dy * dy > maxDistance * maxDistance) {
+            return undefined;
+        }
+        let target = shot.target ?? targetVal?.target;
+        if (target && !entities.has(target)) {
+            target = undefined;
+        }
+        const { exitPointData } = getNextExitpoint(movement, animation, this.data, {
+            ...getDefaultWeaponLocalState(),
+            exitIndex: shot.exitIndex,
+        }, shot.exitIndex);
+        const fastForwardMs = Math.max(0, age);
+        const entity = this.fire(shot.position, shot.rotation,
+            owner?.owner ?? source, target, source, shot.sourceVelocity,
+            exitPointData, {
+                seed: shot.seed,
+                inaccuracy: shot.inaccuracy,
+                createdAt: now - fastForwardMs,
+                fastForwardMs,
+                entityId: shot.entityId,
+            });
+        if (!entity) {
+            return undefined;
+        }
+        return {
+            entity,
+            position: Position.fromVectorLike(shot.position),
+            rotation: Angle.fromAngleLike(shot.rotation),
+            sourceVelocity: new Vector(shot.sourceVelocity.x, shot.sourceVelocity.y),
+            target,
+            inaccuracy: shot.inaccuracy,
         };
     }
 

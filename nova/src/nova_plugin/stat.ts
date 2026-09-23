@@ -54,7 +54,10 @@ export class Stat {
      */
     get changedSharply() {
         const range = this.max - this.min;
-        return range > 0
+        // Any loss is damage feedback and goes out immediately; only gains
+        // (recharge, which creeps every frame) are throttled.
+        return this.current < this.lastSentCurrent
+            || range > 0
             && Math.abs(this.current - this.lastSentCurrent)
                 >= range * SHARP_CHANGE_FRACTION;
     }

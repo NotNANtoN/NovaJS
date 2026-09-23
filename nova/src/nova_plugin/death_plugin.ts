@@ -55,6 +55,7 @@ import {
 import { Platform, PlatformPlugin, PlatformResource } from './platform_plugin';
 import { Stat } from './stat';
 import { makeShipExplosionBlast } from './ship_death_blast';
+import { authorExternalImpulse, ExternalImpulsePlugin } from './external_impulse';
 
 // const DamageQuery = new Query([Optional(ShieldComponent), Optional(ArmorComponent),
 // Optional(IonizationComponent), Optional(IonizationColorComponent),
@@ -333,10 +334,13 @@ const KnockbackSystem = new System({
     args: [DamagedEvent, MovementStateComponent, MovementPhysicsComponent,
         Optional(ShipPhysicsComponent), RunQuery,
         Optional(MultiplayerData), PlatformResource,
-        Optional(RemoteMovementPresentationComponent)] as const,
+        Optional(RemoteMovementPresentationComponent),
+        Optional(TimeResource), GetEntity] as const,
     step({ damage, damager, scale = 1 }, movementState, movementPhysics,
-        shipPhysics, runQuery, multiplayer, platform, presentation) {
-        if (!authorsMovementState(
+        shipPhysics, runQuery, multiplayer, platform, presentation, time, entity) {
+        const serverForPlayer = platform === 'node' && multiplayer !== undefined
+            && multiplayer.owner !== 'server' && presentation === undefined;
+        if (!serverForPlayer && !authorsMovementState(
             platform, multiplayer?.owner, presentation !== undefined)) {
             return;
         }
@@ -365,8 +369,20 @@ const KnockbackSystem = new System({
         } else {
             direction = otherMovement.rotation.getUnitVector();
         }
-        movementState.velocity = movementState.velocity.add(
-            direction.scale(damage.knockback * scale / targetMass * 5));
+        const impulse = direction.scale(damage.knockback * scale / targetMass * 5);
+        if (impulse.x === 0 && impulse.y === 0) {
+            return;
+        }
+        if (platform === 'node' && multiplayer && multiplayer.owner !== 'server'
+            && entity && time) {
+            // Hits on player ships are resolved only here. Deliver the
+            // knockback through the owner-reconciled impulse channel, since
+            // the owner authors its own movement.
+            authorExternalImpulse(entity, movementState, multiplayer.owner,
+                time.time, impulse.x, impulse.y);
+            return;
+        }
+        movementState.velocity = movementState.velocity.add(impulse);
     }
 });
 
@@ -697,6 +713,8 @@ export const DeathPlugin: Plugin = {
         deltaMaker.addComponent(PlayerDeathComponent, {
             componentType: PlayerDeathStateCodec,
         });
+        // Knockback on player ships travels through external impulses.
+        world.addPlugin(ExternalImpulsePlugin);
         world.addSystem(DamageSystem);
         world.addSystem(KnockbackSystem);
         world.addSystem(PlayerDeathSystem);

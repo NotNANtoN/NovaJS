@@ -59,6 +59,11 @@ import { ShipComponent, ShipDataComponent } from './ship_plugin';
 import { canPay, withCost, CombatAuthority, CombatAuthorityComponent } from './combat_resources';
 import { PlayerStateComponent } from './player_state';
 import { SystemIdResource } from './system_id_resource';
+import { Angle } from 'nova_ecs/datatypes/angle';
+import { Position } from 'nova_ecs/datatypes/position';
+import { Vector } from 'nova_ecs/datatypes/vector';
+import { clampLagMs, LagCompensationComponent, MAX_LAG_COMPENSATION_MS } from './lag_compensation';
+import { CreateTime } from './create_time';
 
 // Keep payment data on the entity, not keyed by revocable Immer draft identity.
 // Local cadence owns burst boundaries; replay and submunitions bypass this state.
@@ -166,6 +171,14 @@ export function worldOwnsWeaponCadence(
         : communicatorUuid !== undefined && owner === communicatorUuid;
 }
 
+/** Client clock facts needed to stamp a predicted shot for the server. */
+export interface ShotClock {
+    /** Local minus server time. */
+    serverOffset: number;
+    /** How far in the past remote entities are presented. */
+    viewDelayMs: number;
+}
+
 function recordOwnedShot(
     entity: Entity,
     platform: 'node' | 'browser',
@@ -177,12 +190,25 @@ function recordOwnedShot(
     sync: FireSyncLocalState,
     intent: FireIntent | undefined,
     log: FireLog | undefined,
+    shotClock?: ShotClock,
 ): { intent: FireIntent | undefined, log: FireLog | undefined } {
     const seq = sync.nextSeq++;
     rememberSpawnedShot(sync, seq, platform === 'browser');
     const event: FireIntentShot = { seq, weaponId, seed, exitIndex };
     if (fired.target !== undefined) {
         event.target = fired.target;
+    }
+    if (platform === 'browser' && shotClock && fired.position
+        && fired.rotation && fired.sourceVelocity
+        && Number.isFinite(fired.inaccuracy)) {
+        // Let the server fire from exactly what this client predicted.
+        event.at = time.time - shotClock.serverOffset;
+        event.position = Position.fromVectorLike(fired.position);
+        event.rotation = Angle.fromAngleLike(fired.rotation);
+        event.sourceVelocity = new Vector(
+            fired.sourceVelocity.x, fired.sourceVelocity.y);
+        event.inaccuracy = fired.inaccuracy;
+        event.viewDelayMs = shotClock.viewDelayMs;
     }
     if (platform === 'browser') {
         if (intent) {
@@ -284,14 +310,24 @@ export const WeaponsSystem = new System({
         // Only the client worlds have a communicator; the server world and the
         // single-player world run without one.
         Optional(CommunicatorResource), GetEntity,
-        Optional(FireIntentComponent), Optional(FireLogComponent)] as const,
+        Optional(FireIntentComponent), Optional(FireLogComponent),
+        Optional(NetworkTimingResource),
+        Optional(ServerClockOffsetResource)] as const,
     step(weaponsState, weaponsLocalState, time, uuid, weaponEntries,
         destructionStarted, armor, multiplayer, platform, communicator, entity,
-        intent, log) {
+        intent, log, network, serverClockOffset) {
         if (!worldOwnsWeaponCadence(
             platform, multiplayer.owner, communicator?.uuid)) {
             return;
         }
+        const serverClock = network?.clocks.get(network.serverPeer);
+        const shotClock: ShotClock | undefined = platform === 'browser'
+            ? {
+                serverOffset: serverClock?.offset
+                    ?? serverClockOffset?.offset ?? 0,
+                viewDelayMs: network?.presentationDelay(time.time) ?? 0,
+            }
+            : undefined;
         if (destructionStarted !== undefined || armor && armor.current <= 0) {
             clearWeaponFiringState(weaponsState, weaponsLocalState);
             return;
@@ -382,7 +418,7 @@ export const WeaponsSystem = new System({
                             ({ intent, log } = recordOwnedShot(
                                 entity, platform, id, seed,
                                 localState.exitIndex, shot, time,
-                                sync, intent, log));
+                                sync, intent, log, shotClock));
                         }
                     }
                 } else {
@@ -398,7 +434,7 @@ export const WeaponsSystem = new System({
                         ({ intent, log } = recordOwnedShot(
                             entity, platform, id, seed,
                             localState.exitIndex, shot, time,
-                            sync, intent, log));
+                            sync, intent, log, shotClock));
                     }
                 }
 
@@ -510,16 +546,55 @@ function watchFireCadenceLifecycle(entity: Entity, state: ServerFireCadenceState
  * firstInBurst alone (a copy's first shot can be unavailable). NPC fireWithCost is
  * intentionally separate and unchanged.
  */
+/**
+ * How far a client's reported muzzle may be from the server's copy of its
+ * ship. Owner movement arrives every 33 ms; this covers RTT jitter at combat
+ * speed without letting a pose from across the system through.
+ */
+export const MAX_CLIENT_MUZZLE_DRIFT = 400;
+
+function fireIntentShot(
+    weapon: WeaponEntry, source: string, shot: FireIntentShot, now: number,
+): FiredShot | undefined {
+    const entityId = loggedShotEntityId(source, shot.seq);
+    if (shot.at !== undefined && shot.position && shot.rotation
+        && shot.sourceVelocity && shot.inaccuracy !== undefined
+        && typeof weapon.fireFromPose === 'function') {
+        const fired = weapon.fireFromPose(source, {
+            seed: shot.seed,
+            exitIndex: shot.exitIndex,
+            at: shot.at,
+            position: shot.position,
+            rotation: shot.rotation,
+            sourceVelocity: shot.sourceVelocity,
+            inaccuracy: shot.inaccuracy,
+            entityId,
+            target: shot.target,
+        }, now, MAX_LAG_COMPENSATION_MS + 750, MAX_CLIENT_MUZZLE_DRIFT);
+        if (fired) {
+            return fired;
+        }
+    }
+    return weapon.fireFromEntityDetailed(source, shot.seed, true, shot.exitIndex, {
+        entityId, target: shot.target,
+    });
+}
+
 export function fireScheduledIntent(
     entity: Entity, weapon: WeaponEntry, source: string, shot: FireIntentShot,
-    context: FireCadenceShotContext,
+    context: FireCadenceShotContext, now = -Infinity,
 ): FiredShot | undefined {
     // Even a prepaid burst requires a live flight authority (not a landed or
     // retired pilot). Unlimited also gates asynchronous ledger initialization.
     if (!canPay(entity, 'unlimited')) return undefined;
-    const fire = () => weapon.fireFromEntityDetailed(source, shot.seed, true, shot.exitIndex, {
-        entityId: loggedShotEntityId(source, shot.seq), target: shot.target,
-    });
+    const fire = () => {
+        const fired = fireIntentShot(weapon, source, shot, now);
+        const viewDelayMs = clampLagMs(shot.viewDelayMs);
+        if (fired && viewDelayMs > 0) {
+            fired.entity.components.set(LagCompensationComponent, { viewDelayMs });
+        }
+        return fired;
+    };
     const data = weapon.data;
     if (!('oneAmmoPerBurst' in data) || !data.oneAmmoPerBurst || data.burstCount <= 0) {
         return withCost(entity, data.ammoType, fire);
@@ -654,21 +729,39 @@ export const ServerFireIntentSystem = new System({
             sync.highestIntentSeq = shot.seq;
             local.highestIntentSeq = shot.seq;
             if (invalidate || !active.has(shot.weaponId)) continue;
+            // Copy (never retain) the wire value: it may be a revocable draft.
             const snapshot: FireIntentShot = {
                 seq: shot.seq, weaponId: shot.weaponId,
                 seed: shot.seed, exitIndex: shot.exitIndex,
             };
             if (shot.target !== undefined) snapshot.target = shot.target;
+            if (shot.at !== undefined && shot.position && shot.rotation
+                && shot.sourceVelocity && shot.inaccuracy !== undefined) {
+                snapshot.at = shot.at;
+                snapshot.position = Position.fromVectorLike(shot.position);
+                snapshot.rotation = Angle.fromAngleLike(shot.rotation);
+                snapshot.sourceVelocity = new Vector(
+                    shot.sourceVelocity.x, shot.sourceVelocity.y);
+                snapshot.inaccuracy = shot.inaccuracy;
+            }
+            if (shot.viewDelayMs !== undefined) snapshot.viewDelayMs = shot.viewDelayMs;
             local.cadence.enqueue(shot.weaponId, snapshot);
         }
         // Drain every tick, independent of network arrivals and trigger state.
         for (const id of active) {
             const weapon = weaponEntries.getCached(id)!;
             local.cadence.drain(id, (shot, at, context) => {
-                const fired = fireScheduledIntent(entity, weapon, uuid, shot, context);
+                const fired = fireScheduledIntent(entity, weapon, uuid, shot, context, time.time);
                 if (!fired) return false;
                 rememberSpawnedShot(sync, shot.seq);
-                const logged = makeFireLogShot(shot, at, fired.position, fired.rotation, {
+                // A pose-fired shot started at the client's muzzle time, so
+                // log that time: observers then fast-forward along the same
+                // path. CreateTime already reflects it.
+                const firedAt = fired.entity.components.get(CreateTime) ?? at;
+                const logged = makeFireLogShot({
+                    seq: shot.seq, weaponId: shot.weaponId,
+                    seed: shot.seed, exitIndex: shot.exitIndex,
+                }, Math.min(at, firedAt), fired.position, fired.rotation, {
                     logSeq: sync.nextLogSeq++,
                     sourceVelocity: fired.sourceVelocity,
                     target: fired.target,

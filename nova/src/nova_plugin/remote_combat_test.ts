@@ -113,6 +113,40 @@ describe('real remote combat replay and reconciliation', () => {
         expect(sounds.length).toBe(soundCount);
     });
 
+    it('fires the authoritative server shot from the client-predicted muzzle pose', async () => {
+        const server = await combatWorld('server');
+        const shooter = await combatWorld('shooter');
+        const id = loggedShotEntityId('ship', 1);
+        // The owner has flown 150 units further than the server's copy.
+        shooter.ship.components.get(MovementStateComponent)!.position = new Position(160, 20);
+        const predicted = shooter.weapon.fireFromEntityDetailed('ship', 42, true, 0, { entityId: id })!;
+        const predictedStart = predicted.entity.components.get(MovementStateComponent)!.position;
+
+        // Intent arrives 60 ms after the client fired it.
+        server.time.time = 1060;
+        const fired = server.weapon.fireFromPose('ship', {
+            seed: 42, exitIndex: 0, at: 1000,
+            position: predicted.position, rotation: predicted.rotation,
+            sourceVelocity: predicted.sourceVelocity, inaccuracy: predicted.inaccuracy,
+            entityId: id,
+        }, 1060, 1000, 400)!;
+        expect(fired).toBeDefined();
+        const authoritative = fired.entity.components.get(MovementStateComponent)!;
+        const velocity = authoritative.velocity;
+        // Same path as the prediction, already 60 ms along it.
+        expect(authoritative.position.x).toBeCloseTo(predictedStart.x + velocity.x * 0.06, 6);
+        expect(authoritative.position.y).toBeCloseTo(predictedStart.y + velocity.y * 0.06, 6);
+        expect(fired.entity.components.get(CreateTime)).toBe(1000);
+
+        // An implausible pose (far from the server's copy) is rejected.
+        expect(server.weapon.fireFromPose('ship', {
+            seed: 43, exitIndex: 0, at: 1000,
+            position: new Position(5_000, 5_000), rotation: predicted.rotation,
+            sourceVelocity: predicted.sourceVelocity, inaccuracy: 0,
+            entityId: loggedShotEntityId('ship', 2),
+        }, 1060, 1000, 400)).toBeUndefined();
+    });
+
     it('presents ships and accepted shots at the same clock-corrected time', async () => {
         const client = await combatWorld('observer', 2000);
         const network = new NetworkTiming();

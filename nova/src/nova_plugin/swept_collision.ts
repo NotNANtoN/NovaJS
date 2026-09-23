@@ -98,11 +98,14 @@ function circlePolygonTime(center: Point, radius: number, polygon: Point[],
 /** Earliest translational contact in [0, 1]. Shapes are endpoint geometry;
  * displacements move them from their tick starts to those endpoints. No shape
  * is mutated or retained. Rotation/frame changes are deliberately not swept.
+ *
+ * `shiftA` translates A's whole sweep. Lag compensation uses it to test a
+ * projectile against where a target was, rather than where it is now.
  */
 export function sweptHullTime(a: readonly Shape[], b: readonly Shape[],
-    da: Point, db: Point): number | undefined {
+    da: Point, db: Point, shiftA: Point = { x: 0, y: 0 }): number | undefined {
     const velocity = sub(da, db);
-    const offsetA = { x: -da.x, y: -da.y };
+    const offsetA = { x: shiftA.x - da.x, y: shiftA.y - da.y };
     const offsetB = { x: -db.x, y: -db.y };
     // Prepare each polygon once per hull pair, not once for every convex
     // shape pair. These arrays are invocation-local, never a draft/hull cache.
@@ -113,8 +116,8 @@ export function sweptHullTime(a: readonly Shape[], b: readonly Shape[],
         let t: number | undefined;
         if (sa instanceof SAT.Circle) {
             t = sb instanceof SAT.Circle
-                ? circleTime(sub(sub(sa.pos, da), sub(sb.pos, db)), velocity, sa.r + sb.r)
-                : circlePolygonTime(sub(sa.pos, da), sa.r, sb, velocity);
+                ? circleTime(sub(sub(sa.pos, sub(da, shiftA)), sub(sb.pos, db)), velocity, sa.r + sb.r)
+                : circlePolygonTime(sub(sa.pos, sub(da, shiftA)), sa.r, sb, velocity);
         } else if (sb instanceof SAT.Circle) {
             t = circlePolygonTime(sub(sb.pos, db), sb.r, sa,
                 { x: -velocity.x, y: -velocity.y });

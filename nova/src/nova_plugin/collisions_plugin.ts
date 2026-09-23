@@ -24,6 +24,8 @@ import { getFrameFromMovement } from "../util/get_frame_and_angle";
 import { AnimationComponent } from "./animation_plugin";
 import { CollisionEvent, CollisionHitter, CollisionHitterComponent, CollisionVulnerability, CollisionVulnerabilityComponent } from "./collision_interaction";
 import { GameDataResource } from "./game_data_resource";
+import { Entities } from "nova_ecs/arg_types";
+import { LAG_COMPENSATION_SEARCH_MARGIN, LagCompensationComponent, rewindOffset } from "./lag_compensation";
 
 type Shape = SAT.Polygon | SAT.Circle;
 
@@ -335,6 +337,8 @@ type RBushBaseEntry = BBox & {
     displacement: { x: number, y: number },
     position: { x: number, y: number },
     projectile: boolean,
+    /** Server-side rewind for a player's shot, in ms. */
+    viewDelayMs?: number,
 };
 
 type RBushHurtboxEntry = RBushBaseEntry & {
@@ -466,9 +470,10 @@ export const CollisionSystem = new System({
     after: [UpdateHitboxHullSystem, UpdateHurtboxHullSystem],
     args: [RBushResource,
         new Query([HitboxHullComponent, UUID, CollisionVulnerabilityComponent, Optional(MovementStateComponent)] as const),
-        new Query([HurtboxHullComponent, UUID, CollisionHitterComponent, Optional(ProjectileComponent), Optional(MovementStateComponent)] as const),
-        Emit, SingletonComponent] as const,
-    step(rbush, hitboxColliders, hurtboxColliders, emit) {
+        new Query([HurtboxHullComponent, UUID, CollisionHitterComponent, Optional(ProjectileComponent), Optional(MovementStateComponent),
+            Optional(LagCompensationComponent)] as const),
+        Emit, Optional(TimeResource), Entities, SingletonComponent] as const,
+    step(rbush, hitboxColliders, hurtboxColliders, emit, time, entities) {
         const starts = movementStarts.get(rbush);
         movementStarts.delete(rbush);
         // Hulls and interaction components can be mutable or revocable drafts.
@@ -516,9 +521,18 @@ export const CollisionSystem = new System({
         for (const [hull, uuid, interaction, movement] of hitboxColliders) {
             hitboxEntries.push(makeEntry(RBushEntryType.hitbox, hull, uuid, interaction, movement));
         }
-        for (const [hull, uuid, interaction, projectile, movement] of hurtboxColliders) {
-            hurtboxEntries.push(makeEntry(RBushEntryType.hurtbox, hull, uuid, interaction, movement,
-                projectile !== undefined));
+        for (const [hull, uuid, interaction, projectile, movement, lag] of hurtboxColliders) {
+            const entry = makeEntry(RBushEntryType.hurtbox, hull, uuid, interaction, movement,
+                projectile !== undefined);
+            if (lag && lag.viewDelayMs > 0 && projectile !== undefined) {
+                // Targets may have moved since the shooter saw them.
+                entry.viewDelayMs = lag.viewDelayMs;
+                entry.minX -= LAG_COMPENSATION_SEARCH_MARGIN;
+                entry.minY -= LAG_COMPENSATION_SEARCH_MARGIN;
+                entry.maxX += LAG_COMPENSATION_SEARCH_MARGIN;
+                entry.maxY += LAG_COMPENSATION_SEARCH_MARGIN;
+            }
+            hurtboxEntries.push(entry);
         }
 
         // Check for collisions
@@ -553,11 +567,24 @@ export const CollisionSystem = new System({
                     if (!aHitsB(hitter, vulnerability)) {
                         continue;
                     }
-                    const time = entry.projectile
+                    let shift = { x: 0, y: 0 };
+                    let otherDisplacement = other.displacement;
+                    if (entry.viewDelayMs !== undefined && time) {
+                        const target = entities.get(other.uuid);
+                        const rewind = target && rewindOffset(target, other.position,
+                            time.time - entry.viewDelayMs, entities);
+                        if (rewind) {
+                            // Move the shot by the inverse of the target's
+                            // rewind, and treat the rewound target as still.
+                            shift = { x: -rewind.x, y: -rewind.y };
+                            otherDisplacement = { x: 0, y: 0 };
+                        }
+                    }
+                    const contactTime = entry.projectile
                         ? sweptHullTime(entry.hull.shapes, other.hull.shapes,
-                            entry.displacement, other.displacement)
+                            entry.displacement, otherDisplacement, shift)
                         : entry.hull.collides(other.hull) ? 1 : undefined;
-                    if (time !== undefined) contacts.push({ entry, other, time });
+                    if (contactTime !== undefined) contacts.push({ entry, other, time: contactTime });
                 }
             }
             // Emit all candidates: ownership/proximity checks may reject the first.

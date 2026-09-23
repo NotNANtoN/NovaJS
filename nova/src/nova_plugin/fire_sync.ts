@@ -19,6 +19,23 @@ export const FireIntentShot = t.intersection([
     }),
     t.partial({
         target: t.string,
+        /**
+         * The owner's predicted muzzle pose, in the server clock domain.
+         * The server fires from this pose (after a plausibility check) and
+         * fast-forwards by the shot's age, so its projectile follows the
+         * path the shooter already sees instead of snapping to a new one.
+         */
+        at: t.number,
+        position: PositionType,
+        rotation: AngleType,
+        sourceVelocity: VectorType,
+        inaccuracy: t.number,
+        /**
+         * How far in the past the shooter was presenting remote entities
+         * when it fired. The server rewinds targets by this much when it
+         * resolves the shot's hits (lag compensation).
+         */
+        viewDelayMs: t.number,
     }),
 ]);
 export type FireIntentShot = t.TypeOf<typeof FireIntentShot>;
@@ -126,6 +143,80 @@ replicationPolicies.register(FireLogComponent, {
     authority: 'server',
 });
 
+/**
+ * Where the server resolved a synchronized shot's hit. Recorded on the
+ * firing ship so it shares that ship's interest set and replication.
+ */
+export const ShotImpact = t.intersection([
+    t.type({
+        /** Monotonic per firing ship; impacts need not follow shot order. */
+        impactSeq: t.number,
+        /** The fire event sequence (`loggedShotEntityId(ship, seq)`). */
+        seq: t.number,
+        /** Server simulation time of the hit. */
+        at: t.number,
+        position: PositionType,
+    }),
+    t.partial({
+        target: t.string,
+    }),
+]);
+export type ShotImpact = t.TypeOf<typeof ShotImpact>;
+
+export const ShotImpactLog = t.type({
+    impacts: t.array(ShotImpact),
+});
+export type ShotImpactLog = t.TypeOf<typeof ShotImpactLog>;
+export const ShotImpactLogComponent =
+    new Component<ShotImpactLog>('ShotImpactLogComponent');
+replicationPolicies.register(ShotImpactLogComponent, {
+    codec: ShotImpactLog,
+    authority: 'server',
+});
+
+export function getShotImpactDelta(
+    previous: ShotImpactLog | undefined,
+    current: ShotImpactLog,
+): ShotImpactLog | undefined {
+    const highest = Math.max(0,
+        ...(previous?.impacts ?? []).map(impact => impact.impactSeq));
+    const impacts = current.impacts.filter(
+        impact => impact.impactSeq > highest);
+    return impacts.length > 0 ? { impacts } : undefined;
+}
+
+export function applyShotImpactDelta(
+    currentData: ShotImpactLog,
+    delta: ShotImpactLog,
+): ShotImpactLog {
+    currentData.impacts ??= [];
+    for (const impact of delta.impacts) {
+        if (!currentData.impacts.some(
+            existing => existing.impactSeq === impact.impactSeq)) {
+            currentData.impacts.push(impact);
+        }
+    }
+    while (currentData.impacts.length > FIRE_BUFFER_SIZE) {
+        currentData.impacts.shift();
+    }
+    return currentData;
+}
+
+/** Inverse of `loggedShotEntityId`. */
+export function parseLoggedShotEntityId(
+    uuid: string,
+): { source: string, seq: number } | undefined {
+    if (!uuid.startsWith('shot:')) {
+        return undefined;
+    }
+    const separator = uuid.lastIndexOf(':');
+    const seq = Number(uuid.slice(separator + 1));
+    if (separator <= 5 || !Number.isSafeInteger(seq)) {
+        return undefined;
+    }
+    return { source: uuid.slice(5, separator), seq };
+}
+
 export interface FireSyncLocalState {
     nextSeq: number;
     highestIntentSeq: number;
@@ -135,6 +226,10 @@ export interface FireSyncLocalState {
     lowestPredictedSeq: number;
     highestPredictedSeq: number;
     nextLogSeq: number;
+    /** Server: last ShotImpact sequence authored for this ship. */
+    nextImpactSeq?: number;
+    /** Client: last ShotImpact sequence applied for this ship. */
+    highestImpactSeq?: number;
 }
 
 export const FireSyncLocalStateComponent =
@@ -312,11 +407,17 @@ export function makeFireLogShot(
     } = {},
 ): FireLogShot {
     const logged: FireLogShot = {
-        ...shot,
+        seq: shot.seq,
+        weaponId: shot.weaponId,
+        seed: shot.seed,
+        exitIndex: shot.exitIndex,
         at,
         position: Position.fromVectorLike(position),
         rotation: Angle.fromAngleLike(rotation),
     };
+    if (shot.target !== undefined) {
+        logged.target = shot.target;
+    }
     if (extras.logSeq !== undefined) {
         logged.logSeq = extras.logSeq;
     }
@@ -343,6 +444,13 @@ export const FireSyncPlugin: Plugin = {
         world.addComponent(FireIntentComponent);
         world.addComponent(FireLogComponent);
         world.addComponent(FireSyncLocalStateComponent);
+        world.addComponent(ShotImpactLogComponent);
+        deltaMaker.addComponent(ShotImpactLogComponent, {
+            componentType: ShotImpactLog,
+            deltaType: ShotImpactLog,
+            getDelta: getShotImpactDelta,
+            applyDelta: applyShotImpactDelta,
+        });
         deltaMaker.addComponent(FireIntentComponent, {
             componentType: FireIntent,
             deltaType: FireIntentDelta,

@@ -20,7 +20,7 @@ import {
     RemoteMovementPresentationSystem,
     sampleGuidanceTarget,
 } from 'nova_ecs/plugins/movement_plugin';
-import { MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
+import { CommunicatorResource, MultiplayerData } from 'nova_ecs/plugins/multiplayer_plugin';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { AdvanceNetworkPlaybackSystem, MovementPlaybackComponent, NetworkReceivePhase } from 'nova_ecs/plugins/network_timing';
 import { ProvideAsync } from "nova_ecs/provide_async";
@@ -47,6 +47,7 @@ import { ReturnToQueueComponent } from './return_to_queue_plugin';
 import { SoundEvent } from './sound_event';
 import { Stat } from './stat';
 import { ShotPresentationDelayComponent } from './fire_weapon_plugin';
+import { applyShotImpactDelta, getFireSyncLocalState, loggedShotEntityId, parseLoggedShotEntityId, ShotImpactLogComponent } from './fire_sync';
 
 // Gameplay guidance history must not change with a client's jitter buffer.
 export const GUIDANCE_HISTORY_DELAY_MS = 200;
@@ -381,13 +382,46 @@ const ProjectileHurtboxProvider = ProvideAsync({
     factory: hullFromAnimation,
 });
 
+/**
+ * Resolve a synchronized projectile's hit at `position`. Shared by local
+ * collision handling and by client application of server ShotImpacts, so
+ * both remove the shot, spawn submunitions and trigger the same effects.
+ */
+export function resolveProjectileHit(
+    entities: Map<string, Entity>, uuid: string, other: Entity | undefined,
+    position: { x: number, y: number } | undefined,
+    fireSubs: (id: string, source: string, sourceExpired?: boolean) => Entity[],
+    emitNow: (event: EcsEvent<any, any>, data: any, entities?: (string | Entity)[]) => void,
+    applyDamage?: { target: string, damage: ProjectileWeaponData['damage'] },
+): void {
+    const self = entities.get(uuid);
+    if (!self) {
+        return;
+    }
+    const projectileData = self.components.get(ProjectileDataComponent);
+    if (position) {
+        const movement = self.components.get(MovementStateComponent);
+        if (movement) movement.position = new Position(position.x, position.y);
+    }
+    if (applyDamage) {
+        emitNow(DamagedEvent, { damage: applyDamage.damage, damager: uuid }, [applyDamage.target]);
+    }
+    if (projectileData) {
+        fireSubs(projectileData.id, uuid, false);
+    }
+    entities.delete(uuid);
+    emitNow(ProjectileCollisionEvent, other, [self]);
+}
+
 export const ProjectileCollisionSystem = new System({
     name: 'ProjectileCollisionSystem',
     events: [CollisionEvent],
     args: [CollisionEvent, Entities, UUID, ProjectileDataComponent,
         Optional(OwnerComponent), FireSubs, TimeResource, CreateTime, EmitNow,
-        Optional(MovementPlaybackComponent)] as const,
-    step(collision, entities, uuid, projectileData, owner, fireSubs, time, createTime, emitNow, playback) {
+        Optional(MovementPlaybackComponent), Optional(PlatformResource),
+        Optional(SourceComponent), Optional(CommunicatorResource)] as const,
+    step(collision, entities, uuid, projectileData, owner, fireSubs, time, createTime, emitNow, playback,
+        platform, source, communicator) {
         // The initiating weapon applies damage. Being hit (e.g. by point
         // defense) must not fire this projectile's damage back at the hitter.
         if (!collision.initiator) {
@@ -415,19 +449,88 @@ export const ProjectileCollisionSystem = new System({
             return;
         }
 
-        const impact = (collision as SweptCollisionContact).impactPosition;
-        if (impact) {
-            const movement = self.components.get(MovementStateComponent);
-            if (movement) movement.position = new Position(impact.x, impact.y);
+        const logged = parseLoggedShotEntityId(uuid);
+        const replicatedTarget = other.components.has(MultiplayerData);
+        if (platform === 'browser' && logged && replicatedTarget) {
+            const shooterOwner = entities.get(logged.source)
+                ?.components.get(MultiplayerData)?.owner;
+            const predicted = shooterOwner !== undefined
+                && shooterOwner === communicator?.uuid;
+            if (!predicted && shooterOwner !== undefined) {
+                // Someone else's synchronized shot vs. a replicated ship or
+                // asteroid: the server decides, against lag-compensated
+                // positions, and reports the outcome as a ShotImpact.
+                // Resolving it against this client's differently delayed
+                // view is what made hits disagree.
+                return;
+            }
+            // Our own shot: the server rewinds to exactly this view, so show
+            // the impact now. Health stays server-authoritative.
         }
 
-        emitNow(DamagedEvent, { damage: projectileData.damage, damager: uuid }, [collision.other]);
-
-
-        fireSubs(projectileData.id, uuid, false);
-        entities.delete(uuid);
-        emitNow(ProjectileCollisionEvent, other, [self]);
+        const impact = (collision as SweptCollisionContact).impactPosition
+            ?? self.components.get(MovementStateComponent)?.position;
+        if (platform === 'node' && logged && replicatedTarget && impact) {
+            recordShotImpact(entities, source ?? logged.source, logged.seq,
+                time.time, impact, collision.other);
+        }
+        resolveProjectileHit(entities, uuid, other, impact, fireSubs, emitNow,
+            { target: collision.other, damage: projectileData.damage });
     }
+});
+
+function recordShotImpact(entities: Map<string, Entity>, shipUuid: string,
+    seq: number, at: number, position: { x: number, y: number },
+    target: string): void {
+    const ship = entities.get(shipUuid);
+    if (!ship) {
+        return;
+    }
+    const sync = getFireSyncLocalState(ship);
+    sync.nextImpactSeq = (sync.nextImpactSeq ?? 0) + 1;
+    let log = ship.components.get(ShotImpactLogComponent);
+    const impact = {
+        impactSeq: sync.nextImpactSeq,
+        seq, at, target,
+        position: new Position(position.x, position.y),
+    };
+    if (!log) {
+        log = { impacts: [] };
+    }
+    applyShotImpactDelta(log, { impacts: [impact] });
+    ship.components.set(ShotImpactLogComponent, log);
+}
+
+/**
+ * Client side of server hit authority: apply ShotImpacts to local copies of
+ * synchronized shots (predicted or replayed).
+ */
+export const ShotImpactApplySystem = new System({
+    name: 'ShotImpactApplySystem',
+    after: [NetworkReceivePhase],
+    args: [ShotImpactLogComponent, UUID, GetEntity, Entities, FireSubs,
+        EmitNow, PlatformResource] as const,
+    step(log, uuid, ship, entities, fireSubs, emitNow, platform) {
+        if (platform !== 'browser') {
+            return;
+        }
+        const sync = getFireSyncLocalState(ship);
+        const applied = sync.highestImpactSeq ?? 0;
+        for (const impact of log.impacts) {
+            if (impact.impactSeq <= applied) {
+                continue;
+            }
+            sync.highestImpactSeq = Math.max(
+                sync.highestImpactSeq ?? 0, impact.impactSeq);
+            const shotId = loggedShotEntityId(uuid, impact.seq);
+            if (!entities.has(shotId)) {
+                continue;
+            }
+            const other = impact.target ? entities.get(impact.target) : undefined;
+            resolveProjectileHit(entities, shotId, other, impact.position,
+                fireSubs, emitNow);
+        }
+    },
 });
 
 export const ProjectileExplodeEvent = new EcsEvent<Entity | undefined>('ProjectileExplodeEvent');
@@ -522,6 +625,7 @@ export const ProjectilePlugin: Plugin = {
         world.addSystem(ProjectileGuidanceSystem);
         world.addSystem(ProjectileLifespanSystem);
         world.addSystem(ProjectileCollisionSystem);
+        world.addSystem(ShotImpactApplySystem);
         world.addSystem(ProjectileDeathSystem);
         world.addSystem(ProjectileHurtboxProvider);
         world.addSystem(ProjectileExplodeSystem);
