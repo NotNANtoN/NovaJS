@@ -66,10 +66,22 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Collect build info
+        id: build_info
+        run: |
+          {
+            printf 'commit=%s\n' "$(git rev-parse --short HEAD)"
+            printf 'message<<EOF\n%s\nEOF\n' "$(git log -1 --format=%s)"
+            printf 'date=%s\n' "$(git log -1 --format=%cd --date=format:'%Y-%m-%d %H:%M %z')"
+          } >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v7.4.0
         with:
           context: .
           push: true
+          build-args: |
+            BUILD_COMMIT=${{ steps.build_info.outputs.commit }}
+            BUILD_MESSAGE=${{ steps.build_info.outputs.message }}
+            BUILD_DATE=${{ steps.build_info.outputs.date }}
           tags: |
             ${{ steps.image.outputs.name }}:${{ github.sha }}
             ${{ steps.image.outputs.name }}:latest

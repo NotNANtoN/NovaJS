@@ -30,7 +30,8 @@ try {
     writeFileSync(buildInfoFile, JSON.stringify({ commit: commitHash, message: commitMessage, date: commitDate }, null, 2) + "\n");
 } catch {}
 
-// Fallback to checked-in build_info.json if git was not present (e.g. inside Docker)
+// Fallback to a locally generated (gitignored) build_info.json when git is not
+// available. Docker builds receive BUILD_* build args instead.
 if ((!commitHash || commitHash === "dev" || !commitMessage || !commitDate) && existsSync(buildInfoFile)) {
     try {
         const cached = JSON.parse(readFileSync(buildInfoFile, "utf8"));
