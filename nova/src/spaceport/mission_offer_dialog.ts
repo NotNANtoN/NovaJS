@@ -23,6 +23,7 @@ export interface MissionOfferPrompt {
     cargoText?: string;
     acceptLabel?: string;
     refuseLabel?: string;
+    canRefuse?: boolean;
     accepted?: boolean;
 }
 
@@ -44,24 +45,27 @@ export class MissionOfferDialog extends ClassicDialog<MissionOfferPrompt> {
                 {
                     type: 'custom',
                     id: 'briefContent',
-                    render: (container, prompt, gData) => {
+                    render: async (container, prompt, gData) => {
                         container.removeChildren();
 
                         const hasGraphic = Boolean(prompt.mission.briefGraphic && prompt.mission.briefGraphic > 0);
                         if (hasGraphic) {
                             try {
-                                const sprite = gData.spriteFromPict(`nova:${prompt.mission.briefGraphic}`);
-                                sprite.anchor.set(0.5, 0);
-                                const maxWidth = 115;
-                                const maxHeight = 90;
-                                const scale = Math.min(
-                                    maxWidth / (sprite.width || maxWidth),
-                                    maxHeight / (sprite.height || maxHeight),
-                                    1,
-                                );
-                                sprite.scale.set(scale);
-                                sprite.position.set(135, -155);
-                                container.addChild(sprite);
+                                const texture = await gData.textureFromPictAsync(`nova:${prompt.mission.briefGraphic}`);
+                                if (texture && texture !== PIXI.Texture.EMPTY) {
+                                    const sprite = new PIXI.Sprite(texture);
+                                    sprite.anchor.set(0.5, 0);
+                                    const maxWidth = 115;
+                                    const maxHeight = 90;
+                                    const scale = Math.min(
+                                        maxWidth / texture.width,
+                                        maxHeight / texture.height,
+                                        1,
+                                    );
+                                    sprite.scale.set(scale);
+                                    sprite.position.set(135, -155);
+                                    container.addChild(sprite);
+                                }
                             } catch {
                                 // Fallback if graphic missing
                             }
@@ -84,6 +88,7 @@ export class MissionOfferDialog extends ClassicDialog<MissionOfferPrompt> {
                                 wordWrap: true,
                                 wordWrapWidth: wrapWidth,
                                 fill: 0xffffff,
+                                lineHeight: 16,
                             },
                         });
                         scrollContainer.addChild(textSprite);
@@ -155,8 +160,18 @@ export class MissionOfferDialog extends ClassicDialog<MissionOfferPrompt> {
                 },
             ],
             onShow: (dialog, prompt) => {
-                dialog.getButton('accept')?.setText(prompt.acceptLabel || 'Accept');
-                dialog.getButton('refuse')?.setText(prompt.refuseLabel || 'Refuse');
+                const canRefuse = prompt.canRefuse !== false && Boolean(prompt.refuseLabel);
+                const refuseBtn = dialog.getButton('refuse');
+                const acceptBtn = dialog.getButton('accept');
+                if (refuseBtn) {
+                    refuseBtn.container.visible = canRefuse;
+                    if (canRefuse) {
+                        refuseBtn.setText(prompt.refuseLabel || 'Refuse');
+                    }
+                }
+                if (acceptBtn) {
+                    acceptBtn.setText(prompt.acceptLabel || (canRefuse ? 'Accept' : 'OK'));
+                }
             },
         });
 

@@ -228,6 +228,7 @@ export function generateProceduralMissions(
                 20_000 + candidate.distance * 12_000 + clampRandom(random()) * 25_000));
             const title = `BOUNTY: ${outlaw} (${outlawShip.name})`;
             const briefText = `A bounty of ${pay} credits has been posted for the destruction of ${outlaw}, piloting a ${outlawShip.name} last sighted in the ${candidate.systemName} system. Terminate the target to collect.`;
+            const compText = `The bounty on ${outlaw} has been confirmed. ${pay.toLocaleString()} credits have been transferred to your account.`;
             const deadline = Math.max(6, candidate.distance * 5);
             const mission: MissionData = {
                 ...getDefaultMissionData(),
@@ -244,6 +245,7 @@ export function generateProceduralMissions(
                 payVal: pay,
                 pay,
                 briefText,
+                compText,
                 quickBrief: `Bounty: ${outlaw} (${pay} cr)`,
                 offerText: briefText,
                 timeLimit: deadline,
@@ -290,6 +292,9 @@ export function generateProceduralMissions(
             : type === 'rush'
                 ? `Rush: ${tons} tons of ${commodity} to ${destinationName}`
                 : `Take ${tons} tons of ${commodity} to ${destinationName}`;
+        const compText = type === 'passenger'
+            ? `The ${tons} passenger${tons === 1 ? '' : 's'} disembark safely at ${destinationName}. You receive your payment of ${pay.toLocaleString()} credits.`
+            : `The shipment of ${tons} tons of ${commodity} has been delivered to ${destinationName}. You receive your payment of ${pay.toLocaleString()} credits.`;
         const deadline = type === 'rush'
             ? Math.max(2, candidate.distance * 2)
             : type === 'passenger'
@@ -315,6 +320,7 @@ export function generateProceduralMissions(
             payVal: pay,
             pay,
             briefText: `${title}. Payment: ${pay} credits.`,
+            compText,
             quickBrief: title,
             offerText: title,
             timeLimit: deadline,

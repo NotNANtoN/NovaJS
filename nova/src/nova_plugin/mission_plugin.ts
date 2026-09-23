@@ -67,6 +67,7 @@ export interface MissionNotice {
     missionId: string;
     kind: 'success' | 'failure';
     text: string;
+    graphic?: number;
 }
 
 export interface MissionDestinationOptions {
@@ -773,6 +774,7 @@ export class MissionRuntime {
                     notices.push({
                         missionId: entry.missionId,
                         kind: 'failure',
+                        ...(mission.briefGraphic ? { graphic: mission.briefGraphic } : {}),
                         text: formatMissionText(
                             mission.failText || 'Mission failed.',
                             missionTextValues(
@@ -836,6 +838,7 @@ export class MissionRuntime {
                 notices.push({
                     missionId: entry.missionId,
                     kind: 'success',
+                    ...(mission.briefGraphic ? { graphic: mission.briefGraphic } : {}),
                     text: formatMissionText(
                         mission.compText || 'Mission complete.',
                         missionTextValues(

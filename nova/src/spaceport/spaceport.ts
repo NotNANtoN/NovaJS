@@ -770,6 +770,8 @@ export class Spaceport extends Menu<Entity> {
                     for (const offer of offers) {
                         if (!this.container.visible) break;
                         this.setActiveDialog(this.missionOfferDialog.container);
+                        const canRefuse = (offer.mission.flags & 0x0100) === 0
+                            && offer.mission.refuseButton !== '';
                         const prompt = await this.missionOfferDialog.show({
                             mission: offer.mission,
                             title: offer.title,
@@ -777,8 +779,9 @@ export class Spaceport extends Menu<Entity> {
                             payText: offer.mission.payVal > 0
                                 ? `${offer.mission.payVal.toLocaleString()} cr` : undefined,
                             cargoText: offer.mission.cargo ?? undefined,
-                            acceptLabel: offer.mission.acceptButton || 'Accept',
-                            refuseLabel: offer.mission.refuseButton || 'Refuse',
+                            acceptLabel: offer.mission.acceptButton || (canRefuse ? 'Accept' : 'OK'),
+                            refuseLabel: canRefuse ? (offer.mission.refuseButton || 'Refuse') : undefined,
+                            canRefuse,
                         });
                         if (prompt.accepted) {
                             const ncb = this.ncbRuntime.setContext(input, state);
