@@ -28,5 +28,13 @@ export const ChooseRandomTargetComponent = new Component<{
     nextTime?: number,
 }>('ChooseRandomTargetComponent');
 
+/**
+ * A player's escort: its movement and targeting follow the player's orders
+ * (escort_plugin), so the autonomous NPC behaviours that would steer it away
+ * (fleeing, leaving the system, parking at a planet, mining) must not run.
+ */
+export const CommandedEscortComponent =
+    new Component<undefined>('CommandedEscortComponent');
+
 export const NpcDepartureComponent =
     new Component<undefined>("NpcDepartureComponent");

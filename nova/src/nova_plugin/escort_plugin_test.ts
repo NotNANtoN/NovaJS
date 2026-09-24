@@ -225,13 +225,21 @@ describe('HandleEscortDestruction', () => {
     });
 });
 
+function escortOwnerEntity(extra: EscortRoster = { contracts: [
+    { id: 'contract-1', shipId: 'nova:128', dailyPay: 0 },
+    { id: 'contract-2', shipId: 'nova:128', dailyPay: 0 },
+] }) {
+    return new Entity('player')
+        .addComponent(EscortRosterComponent, extra)
+        .addComponent(MultiplayerData, { owner: 'client-1' });
+}
+
 describe('EscortDefenseSystem', () => {
-    it('copies owner target to escort when owner acquires an enemy target', async () => {
+    it('does not chase the flagship\'s selected target in defend mode', async () => {
         const world = await escortTestWorld('escort-defense-test');
 
-        const player = new Entity('player')
-            .addComponent(TargetComponent, { target: 'enemy-ship' })
-            .addComponent(MultiplayerData, { owner: 'client-1' });
+        const player = escortOwnerEntity()
+            .addComponent(TargetComponent, { target: 'enemy-ship' });
 
         const escort = new Entity('escort-1')
             .addComponent(HiredEscortComponent, {
@@ -248,7 +256,47 @@ describe('EscortDefenseSystem', () => {
 
         world.step();
 
+        expect(escort.components.get(TargetComponent)?.target).toBeUndefined();
+    });
+
+    it('attacks the ordered target (F), even far from the flagship', async () => {
+        const world = await escortTestWorld('escort-attack-test');
+        const player = escortOwnerEntity()
+            .addComponent(TargetComponent, { target: undefined })
+            .addComponent(EscortOrderComponent, {
+                mode: 'attack', sequence: 1, targetUuid: 'enemy-ship',
+            })
+            .addComponent(MovementStateComponent, movementAt(0, 0));
+        const escort = new Entity('escort-1')
+            .addComponent(HiredEscortComponent, {
+                ownerUuid: 'player', contractId: 'contract-1', slot: 0,
+            })
+            .addComponent(TargetComponent, { target: undefined })
+            .addComponent(MultiplayerData, { owner: 'server' });
+        world.entities.set('player', player);
+        world.entities.set('escort-1', escort);
+        world.entities.set('enemy-ship', new Entity('enemy-ship')
+            .addComponent(MovementStateComponent, movementAt(8000, 0)));
+
+        world.step();
+
         expect(escort.components.get(TargetComponent)?.target).toBe('enemy-ship');
+    });
+
+    it('ignores escorts belonging to another player', async () => {
+        const world = await escortTestWorld('escort-foreign-owner-test');
+        world.entities.set('other-player', escortOwnerEntity({ contracts: [] }));
+        const escort = new Entity('escort-1')
+            .addComponent(HiredEscortComponent, {
+                ownerUuid: 'other-player', contractId: 'contract-1', slot: 0,
+            })
+            .addComponent(TargetComponent, { target: 'something' })
+            .addComponent(MultiplayerData, { owner: 'server' });
+        world.entities.set('escort-1', escort);
+
+        world.step();
+
+        expect(escort.components.get(TargetComponent)?.target).toBeUndefined();
     });
 
     it('does not target the owner or other escorts of the same fleet', async () => {
@@ -310,13 +358,13 @@ describe('EscortDefenseSystem', () => {
         expect(escort.components.get(TargetComponent)?.target).toBeUndefined();
     });
 
-    it('prioritizes enemies actively attacking the owner in defend mode', async () => {
+    it('engages nearby ships attacking the flagship in defend mode (D)', async () => {
         const world = await escortTestWorld('escort-defend-attacker-test');
 
-        const player = new Entity('player')
+        const player = escortOwnerEntity()
             .addComponent(TargetComponent, { target: undefined })
             .addComponent(EscortOrderComponent, { mode: 'defend', sequence: 1 })
-            .addComponent(MultiplayerData, { owner: 'client-1' });
+            .addComponent(MovementStateComponent, movementAt(0, 0));
 
         const escort = new Entity('escort-1')
             .addComponent(HiredEscortComponent, {
@@ -329,15 +377,28 @@ describe('EscortDefenseSystem', () => {
 
         const attacker = new Entity('attacker')
             .addComponent(TargetComponent, { target: 'player' })
+            .addComponent(NpcAIComponent, undefined)
+            .addComponent(MovementStateComponent, movementAt(500, 0))
+            .addComponent(MultiplayerData, { owner: 'server' });
+        const distantAttacker = new Entity('distant')
+            .addComponent(TargetComponent, { target: 'player' })
+            .addComponent(NpcAIComponent, undefined)
+            .addComponent(MovementStateComponent, movementAt(5000, 0))
             .addComponent(MultiplayerData, { owner: 'server' });
 
         world.entities.set('player', player);
         world.entities.set('escort-1', escort);
+        world.entities.set('distant', distantAttacker);
         world.entities.set('attacker', attacker);
 
         world.step();
 
         expect(escort.components.get(TargetComponent)?.target).toBe('attacker');
+
+        // Out of the leash: back to the flagship.
+        attacker.components.get(MovementStateComponent)!.position = new Position(4000, 0);
+        world.step();
+        expect(escort.components.get(TargetComponent)?.target).toBeUndefined();
     });
 });
 

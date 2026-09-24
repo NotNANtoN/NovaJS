@@ -27,7 +27,6 @@ const discoveredTests = await testFiles(root);
 const skipReasons = new Map([
     ['/nova/src/display/display_plugin_test.ts', 'browser-only Pixi renderer'],
     ['/novaparse/test/NovaParse_test.ts', 'legacy lamejs loader'],
-    ['/novaparse/test/resource_parsers/SndResource_test.ts', 'legacy lamejs loader'],
     ['/nova/src/communication/SocketChannelServer_test.ts', 'native ws module shape'],
 ]);
 const skippedTests = discoveredTests.filter(file =>

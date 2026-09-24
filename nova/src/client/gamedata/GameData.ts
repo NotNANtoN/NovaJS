@@ -361,6 +361,13 @@ export class GameData implements GameDataInterface {
     private addSoundGettable() {
         const dataPrefix = this.getDataPrefix(NovaDataType.SoundFile);
         return new Gettable<sound.Sound>(async (id) => {
+            // Several gameplay sounds (for example the capture and target
+            // clicks) have no retail snd resource. Skip the request instead of
+            // producing a server 404 each time.
+            const ids = await this.ids.catch(() => undefined);
+            if (ids?.SoundFile && !ids.SoundFile.includes(id)) {
+                throw new Error(`No sound resource ${id}`);
+            }
             const soundPath = joinPath(dataPrefix, id) + '.mp3';
             return new Promise((fulfill, reject) => {
                 sound.Sound.from({

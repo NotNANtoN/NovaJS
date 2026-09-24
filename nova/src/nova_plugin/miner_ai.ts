@@ -17,7 +17,7 @@ import { approachTarget } from './flight_controller';
 import { GameDataResource } from './game_data_resource';
 import { ArmorComponent } from './health_plugin';
 import { JumpStateComponent } from './jump_plugin';
-import { NpcAIComponent } from './npc_components';
+import { CommandedEscortComponent, NpcAIComponent } from './npc_components';
 import { PlatformResource } from './platform_plugin';
 import { ShipDataComponent } from './ship_plugin';
 import { TargetComponent } from './target_component';
@@ -114,12 +114,12 @@ function makeMinerTargetAI(chooseTarget: System) {
         args: [MiningShipComponent, TargetComponent, MovementStateComponent,
             AsteroidTargetsQuery, MultiplayerData, PlatformResource,
             NpcAIComponent, Optional(DestructionStartedComponent),
-            Optional(ArmorComponent)] as const,
+            Optional(ArmorComponent), Optional(CommandedEscortComponent)] as const,
         after: [chooseTarget],
         step(miner, target, movement, asteroids, multiplayer, platform, _npcAI,
-            destructionStarted, armor) {
+            destructionStarted, armor, commandedEscort) {
             if (!miner.mining || platform !== 'node'
-                || multiplayer.owner !== 'server') {
+                || multiplayer.owner !== 'server' || commandedEscort !== undefined) {
                 return;
             }
             if (destructionStarted || armor && armor.current <= 0) {
@@ -151,12 +151,12 @@ function makeMinerApproachAI(follow: System) {
         args: [MiningShipComponent, TargetComponent, MovementStateComponent,
             MovementPhysicsComponent, AsteroidTargetsQuery, MultiplayerData,
             PlatformResource, NpcAIComponent,
-            Optional(JumpStateComponent)] as const,
+            Optional(JumpStateComponent), Optional(CommandedEscortComponent)] as const,
         after: [follow],
         step(miner, target, movement, physics, asteroids, multiplayer,
-            platform, jumpState) {
+            platform, _npcAI, jumpState, commandedEscort) {
             if (!miner.mining || platform !== 'node'
-                || multiplayer.owner !== 'server') {
+                || multiplayer.owner !== 'server' || commandedEscort !== undefined) {
                 return;
             }
             if (jumpState) {

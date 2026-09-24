@@ -43,6 +43,7 @@ import {
 } from "./npc_hostility";
 import {
     ChooseRandomTargetComponent,
+    CommandedEscortComponent,
     GovtData as GovtDataCodec,
     GovtComponent,
     NpcAIComponent,
@@ -671,13 +672,15 @@ export const NpcPurposeAI = new System({
         Optional(ArmorComponent),
         TimeResource,
         Optional(WanderComponent),
+        Optional(CommandedEscortComponent),
     ] as const,
     step(target, uuid, entity, entities, targets, movement, weapons, gameData,
         shipData, governmentRef, governments, provocations, shield, fleeing,
         departing, jumpState, systemId, emit, multiplayer, platform, _npc,
-        destructionStarted, armor, time, wander) {
+        destructionStarted, armor, time, wander, commandedEscort) {
         if (platform !== "node" || multiplayer.owner !== "server"
-            || destructionStarted || armor && armor.current <= 0) {
+            || destructionStarted || armor && armor.current <= 0
+            || commandedEscort !== undefined) {
             entity.components.delete(NpcFleeComponent);
             return;
         }
@@ -784,11 +787,13 @@ export const ParkInterceptorAI = new System({
         Optional(JumpStateComponent),
         Optional(DestructionStartedComponent),
         Optional(ArmorComponent),
+        Optional(CommandedEscortComponent),
     ] as const,
     step(movement, physics, target, planets, shipData, multiplayer, platform,
-        _npc, fleeing, jumpState, destructionStarted, armor) {
+        _npc, fleeing, jumpState, destructionStarted, armor, commandedEscort) {
         const profile = getShipAIProfile(shipData);
         if (platform !== "node" || multiplayer.owner !== "server"
+            || commandedEscort !== undefined
             || target.target || !profile.parksWithoutEnemies || fleeing
             || jumpState || destructionStarted || armor && armor.current <= 0) {
             return;

@@ -3,8 +3,11 @@ import { ShipData } from 'novadatainterface/ShipData';
 import { Emit, Entities, GetEntity, GetWorld, UUID } from 'nova_ecs/arg_types';
 import { AsyncSystem } from 'nova_ecs/async_system';
 import { Position } from 'nova_ecs/datatypes/position';
+import { Vector } from 'nova_ecs/datatypes/vector';
 import { Angle } from 'nova_ecs/datatypes/angle';
 import { Component } from 'nova_ecs/component';
+import { Entity } from 'nova_ecs/entity';
+import { EntityMap } from 'nova_ecs/entity_map';
 import { assertArchetype } from 'nova_ecs/archetype';
 import { Optional } from 'nova_ecs/optional';
 import { Plugin } from 'nova_ecs/plugin';
@@ -23,7 +26,8 @@ import { v4 as uuid } from 'uuid';
 import { GameDataResource } from './game_data_resource';
 import { approachTarget } from './flight_controller';
 import { InitiateJumpEvent, JumpStateComponent } from './jump_plugin';
-import { ChooseRandomTargetComponent, makeNpc, WanderComponent } from './npc_plugin';
+import { ChooseRandomTargetComponent, FollowAI, makeNpc, WanderComponent } from './npc_plugin';
+import { CommandedEscortComponent, NpcAIComponent } from './npc_components';
 import { PlatformResource } from './platform_plugin';
 import { TargetComponent } from './target_component';
 import { DeltaResource } from 'nova_ecs/plugins/delta_plugin';
@@ -316,6 +320,7 @@ export function makeHiredEscort(
     });
     escort.components.set(MultiplayerData, { owner: 'server' });
     escort.components.set(TargetComponent, { target: undefined });
+    escort.components.set(CommandedEscortComponent, undefined);
     escort.components.delete(ChooseRandomTargetComponent);
     escort.components.delete(WanderComponent);
     const movement = copyMovementState(ownerMovement);
@@ -460,51 +465,80 @@ export const PlayerEscortCommandInputSystem = new System({
     },
 });
 
+/**
+ * The flagship an escort answers to. SpawnHiredEscorts re-points escorts at
+ * their owner's current entity (for example after a system change). An
+ * escort must never adopt some other player's ship in the meantime.
+ */
+function escortOwner(escort: HiredEscortData, entities: EntityMap): Entity | undefined {
+    const owner = entities.get(escort.ownerUuid);
+    const contracts = owner?.components.get(EscortRosterComponent)?.contracts
+        ?? owner?.components.get(PlayerStateComponent)?.escorts;
+    return contracts?.some(contract => contract.id === escort.contractId)
+        ? owner : undefined;
+}
+
+export const HoldPositionComponent =
+    new Component<{ x: number, y: number }>('EscortHoldPosition');
+
 const FollowEscortOwner = new System({
     name: 'FollowEscortOwner',
+    // After the generic combat AI, so an escort's orders have the last word
+    // on where it flies.
+    after: [FollowAI],
     args: [
         HiredEscortComponent,
         MovementStateComponent,
         MovementPhysicsComponent,
         Entities,
+        GetEntity,
         Optional(TargetComponent),
         Optional(JumpStateComponent),
+        Optional(HoldPositionComponent),
+        MultiplayerData,
         PlatformResource,
     ] as const,
-    step(escort, movement, physics, entities, combatTarget, jumpState,
-        platform) {
-        if (platform !== 'node' || combatTarget?.target) {
+    step(escort, movement, physics, entities, entity, combatTarget, jumpState,
+        hold, multiplayer, platform) {
+        if (platform !== 'node' || multiplayer.owner !== 'server' || jumpState) {
             return;
         }
-        if (jumpState) {
-            return;
-        }
-        let owner = entities.get(escort.ownerUuid);
-        if (!owner) {
-            for (const [entityUuid, candidate] of entities) {
-                if (candidate.components.has(PlayerShipSelector) || candidate.components.has(PlayerStateComponent)) {
-                    escort.ownerUuid = entityUuid;
-                    owner = candidate;
-                    break;
-                }
-            }
+        const owner = escortOwner(escort, entities);
+        const ownerOrder = owner?.components.get(EscortOrderComponent);
+        if (ownerOrder?.mode !== 'hold' && hold) {
+            entity.components.delete(HoldPositionComponent);
         }
         if (!owner) {
             movement.accelerating = 0;
             movement.turnTo = null;
+            movement.turnBack = false;
             return;
         }
-        const ownerOrder = owner.components.get(EscortOrderComponent);
         if (ownerOrder?.mode === 'hold') {
-            if (movement.velocity.length > 5) {
-                movement.turnBack = true;
-                movement.accelerating = 1;
-                movement.turnTo = null;
-            } else {
-                movement.accelerating = 0;
-                movement.turnTo = null;
-                movement.turnBack = false;
+            // Keep station where the order was given, rather than merely
+            // braking and drifting away.
+            const station = hold ?? {
+                x: movement.position.x, y: movement.position.y,
+            };
+            if (!hold) {
+                entity.components.set(HoldPositionComponent, station);
             }
+            const command = approachTarget(
+                movement,
+                { position: new Position(station.x, station.y), velocity: new Vector(0, 0) },
+                physics,
+                { standoff: 0, tolerance: 15 },
+            );
+            movement.turnTo = command.turnTo;
+            movement.accelerating = command.accelerating;
+            movement.turnBack = command.turnBack;
+            if (command.turnTo === null && !command.turnBack) {
+                movement.turning = 0;
+            }
+            return;
+        }
+        if (combatTarget?.target) {
+            // FollowAI flies the attack run.
             return;
         }
         const ownerMovement = owner.components.get(MovementStateComponent);
@@ -533,6 +567,18 @@ const FollowEscortOwner = new System({
     },
 });
 
+/**
+ * How far from the flagship a defending escort will pursue an attacker
+ * before giving up and returning to formation.
+ */
+export const ESCORT_DEFEND_LEASH = 1200;
+
+function distanceBetween(a: Entity | undefined, b: Entity | undefined): number {
+    const pa = a?.components.get(MovementStateComponent)?.position;
+    const pb = b?.components.get(MovementStateComponent)?.position;
+    return pa && pb ? pa.subtract(pb).length : Infinity;
+}
+
 export const EscortDefenseSystem = new System({
     name: 'EscortDefenseSystem',
     args: [
@@ -541,22 +587,15 @@ export const EscortDefenseSystem = new System({
         Entities,
         MultiplayerData,
         PlatformResource,
+        UUID,
     ] as const,
-    step(escort, target, entities, multiplayer, platform) {
+    step(escort, target, entities, multiplayer, platform, escortUuid) {
         if (platform !== 'node' || multiplayer.owner !== 'server') {
             return;
         }
-        let owner = entities.get(escort.ownerUuid);
+        const owner = escortOwner(escort, entities);
         if (!owner) {
-            for (const [entityUuid, candidate] of entities) {
-                if (candidate.components.has(PlayerShipSelector) || candidate.components.has(PlayerStateComponent)) {
-                    escort.ownerUuid = entityUuid;
-                    owner = candidate;
-                    break;
-                }
-            }
-        }
-        if (!owner) {
+            target.target = undefined;
             return;
         }
         const order = owner.components.get(EscortOrderComponent);
@@ -567,54 +606,47 @@ export const EscortDefenseSystem = new System({
             return;
         }
 
-        if (mode === 'formation') {
-            if (target.target && !entities.has(target.target)) {
-                target.target = undefined;
-            }
-            return;
-        }
+        const isOwnFleet = (uuid: string) => uuid === escort.ownerUuid
+            || entities.get(uuid)?.components.get(HiredEscortComponent)
+                ?.ownerUuid === escort.ownerUuid;
 
         if (mode === 'attack') {
-            const attackTarget = order?.targetUuid ?? owner.components.get(TargetComponent)?.target;
-            if (attackTarget && entities.has(attackTarget) && attackTarget !== escort.ownerUuid) {
-                const targetEscort = entities.get(attackTarget)?.components.get(HiredEscortComponent);
-                if (targetEscort?.ownerUuid !== escort.ownerUuid) {
-                    target.target = attackTarget;
-                    return;
-                }
-            }
-            if (target.target && !entities.has(target.target)) {
-                target.target = undefined;
-            }
-            return;
-        }
-
-        // Defend mode
-        let attackerUuid: string | undefined;
-        for (const [entityUuid, entity] of entities) {
-            if (entityUuid === escort.ownerUuid || entityUuid === escort.contractId) continue;
-            const entityTarget = entity.components.get(TargetComponent)?.target;
-            if (entityTarget === escort.ownerUuid) {
-                attackerUuid = entityUuid;
-                break;
-            }
-        }
-        if (attackerUuid) {
-            target.target = attackerUuid;
-            return;
-        }
-
-        const ownerTarget = owner.components.get(TargetComponent)?.target;
-        if (ownerTarget && entities.has(ownerTarget) && ownerTarget !== escort.ownerUuid) {
-            const targetEscort = entities.get(ownerTarget)?.components.get(HiredEscortComponent);
-            if (targetEscort?.ownerUuid !== escort.ownerUuid) {
-                target.target = ownerTarget;
+            // Focus fire on the ordered target, however far it runs. Once
+            // it is gone the escort falls back to defending the flagship.
+            const attackTarget = order?.targetUuid;
+            if (attackTarget && entities.has(attackTarget) && !isOwnFleet(attackTarget)) {
+                target.target = attackTarget;
                 return;
             }
         }
-        if (target.target && !entities.has(target.target)) {
+
+        // Defend: stay with the flagship and engage only ships that are
+        // attacking it or this escort, and only close to the flagship.
+        const current = target.target;
+        if (current && (!entities.has(current) || isOwnFleet(current)
+            || distanceBetween(entities.get(current), owner) > ESCORT_DEFEND_LEASH)) {
             target.target = undefined;
         }
+        if (target.target) {
+            return;
+        }
+        let attackerUuid: string | undefined;
+        let attackerDistance = ESCORT_DEFEND_LEASH;
+        for (const [entityUuid, entity] of entities) {
+            if (isOwnFleet(entityUuid) || !entity.components.has(NpcAIComponent)) {
+                continue;
+            }
+            const entityTarget = entity.components.get(TargetComponent)?.target;
+            if (entityTarget !== escort.ownerUuid && entityTarget !== escortUuid) {
+                continue;
+            }
+            const distance = distanceBetween(entity, owner);
+            if (distance <= attackerDistance) {
+                attackerDistance = distance;
+                attackerUuid = entityUuid;
+            }
+        }
+        target.target = attackerUuid;
     },
 });
 
@@ -747,6 +779,7 @@ export const EscortPlugin: Plugin = {
         world.addComponent(HiredEscortComponent);
         world.addComponent(EscortOrderComponent);
         world.addComponent(EscortOrderNoticeComponent);
+        world.addComponent(HoldPositionComponent);
         const deltaMaker = world.resources.get(DeltaResource);
         if (!deltaMaker) {
             throw new Error('Expected delta maker resource to exist');
