@@ -33,6 +33,7 @@ import { PlanetCornersPlugin } from "./planet_corners_plugin";
 import { ScreenSizePlugin } from "./screen_size_plugin";
 import { ShipAnimationPlugin } from "./ship_animation_plugin";
 import { SoundPlugin } from "./sound_plugin";
+import { EscortVoicePlugin } from "./escort_voice_plugin";
 import { SpaceportPlugin } from "./spaceport_plugin";
 import { Space } from "./space_resource";
 import { Stage } from "./stage_resource";
@@ -239,12 +240,14 @@ export const Display: Plugin = {
         await world.addPlugin(StarmapPlugin);
         await world.addPlugin(PilotDialogsPlugin);
         await world.addPlugin(SoundPlugin);
+        await world.addPlugin(EscortVoicePlugin);
         await world.addPlugin(ShipAnimationPlugin);
         await world.addPlugin(FlightCursorPlugin);
     },
     async remove(world) {
         await world.removePlugin(FlightCursorPlugin);
         await world.removePlugin(ShipAnimationPlugin);
+        await world.removePlugin(EscortVoicePlugin);
         await world.removePlugin(SoundPlugin);
         await world.removePlugin(PilotDialogsPlugin);
         await world.removePlugin(StarmapPlugin);

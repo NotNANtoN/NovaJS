@@ -9,6 +9,10 @@ import * as PIXI from 'pixi.js';
 import { Observable } from 'rxjs';
 import { GameData } from '../client/gamedata/GameData';
 import { AnimationGraphic } from '../display/animation_graphic';
+import { getMasterVolume } from '../display/music';
+
+const SPACEPORT_OPEN_SOUND_ID = 'nova:602';
+const SPACEPORT_CLOSE_SOUND_ID = 'nova:603';
 import { ControlEvent } from '../nova_plugin/controls_plugin';
 import { GameDataResource } from '../nova_plugin/game_data_resource';
 import { ArmorComponent, IonizationComponent, ShieldComponent } from '../nova_plugin/health_plugin';
@@ -832,12 +836,51 @@ export class Spaceport extends Menu<Entity> {
             // Check for concourse storyline offers (availLoc = 3) asynchronously so spaceport opens immediately
             void this.presentServiceMissionOffers(MissionOfferLocation.MainSpaceport);
 
+            this.startAmbientSound();
             return await super.show(input);
         } catch (error) {
             this.container.visible = false;
             this.controls.unbind();
             throw error;
+        } finally {
+            this.stopAmbientSound();
         }
+    }
+
+    private ambientSound?: { stop(): void };
+    private ambientGeneration = 0;
+    private opened = false;
+
+    private playOnce(id: string): void {
+        void this.gameData.data.Sound?.get(id).then(sound => {
+            sound.play({ volume: getMasterVolume() });
+        }).catch(() => undefined);
+    }
+
+    /** Loop the stellar's CustSndID landscape sound while landed. */
+    private startAmbientSound(): void {
+        // Retail "Menu button start" (snd 602) as the spaceport opens.
+        this.playOnce(SPACEPORT_OPEN_SOUND_ID);
+        this.opened = true;
+        const id = this.data?.ambientSound;
+        const generation = ++this.ambientGeneration;
+        if (!id) return;
+        void this.gameData.data.Sound?.get(id).then(sound => {
+            if (generation !== this.ambientGeneration) return;
+            sound.play({ loop: true, volume: 0.5 * getMasterVolume() });
+            this.ambientSound = sound;
+        }).catch(() => undefined);
+    }
+
+    private stopAmbientSound(): void {
+        this.ambientGeneration++;
+        if (this.opened) {
+            // Retail "Menu button end" (snd 603) on leaving the spaceport.
+            this.playOnce(SPACEPORT_CLOSE_SOUND_ID);
+            this.opened = false;
+        }
+        this.ambientSound?.stop();
+        this.ambientSound = undefined;
     }
 
     protected override async done() {

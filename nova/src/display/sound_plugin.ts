@@ -2,7 +2,9 @@ import { Optional } from 'nova_ecs/optional';
 import { TimeResource } from 'nova_ecs/plugins/time_plugin';
 import { ArmorComponent, ShieldComponent } from '../nova_plugin/health_plugin';
 import { Sound } from '@pixi/sound';
-import { Emit, Entities, UUID } from 'nova_ecs/arg_types';
+import { Emit, Entities, GetEntity, UUID } from 'nova_ecs/arg_types';
+import { Component } from 'nova_ecs/component';
+import { DisabledComponent, PlayerDeathComponent } from '../nova_plugin/death_plugin';
 import { Plugin } from 'nova_ecs/plugin';
 import { Resource } from 'nova_ecs/resource';
 import { MovementState, MovementStateComponent } from 'nova_ecs/plugins/movement_plugin';
@@ -39,6 +41,8 @@ import {
     setMasterVolume,
 } from './music';
 
+const CrisisSoundState = new Component<{ disabled: boolean, ejected: boolean }>(
+    'CrisisSoundState');
 const LoopingSounds = new Resource<Map<string, Sound>>('LoopingSounds');
 const LoopingSoundRefs = new Resource<Map<string, number>>('LoopingSoundRefs');
 const LoadedSounds = new Resource<Map<string, Sound>>('LoadedSounds');
@@ -360,6 +364,33 @@ export const TargetedWarningSystem = new System({
     },
 });
 
+// Retail "Red Alert" (snd 370) and "Eject" (snd 372).
+export const DISABLED_ALERT_SOUND_ID = 'nova:370';
+export const EJECT_SOUND_ID = 'nova:372';
+
+/** Red alert when the player's ship becomes disabled; eject on escape pod. */
+export const ShipCrisisSoundSystem = new System({
+    name: 'ShipCrisisSoundSystem',
+    args: [PlayerShipSelector, Optional(DisabledComponent),
+        Optional(PlayerDeathComponent), GetEntity, Emit] as const,
+    step(_player, disabled, death, entity, emit) {
+        const state = entity.components.get(CrisisSoundState)
+            ?? { disabled: false, ejected: false };
+        const isDisabled = disabled === true;
+        if (isDisabled && !state.disabled) {
+            emit(SoundEvent, { id: DISABLED_ALERT_SOUND_ID });
+        }
+        const ejected = death?.outcome === 'escaped';
+        if (ejected && !state.ejected) {
+            emit(SoundEvent, { id: EJECT_SOUND_ID });
+        }
+        if (isDisabled !== state.disabled || ejected !== state.ejected) {
+            entity.components.set(CrisisSoundState,
+                { disabled: isDisabled, ejected });
+        }
+    },
+});
+
 export const LowShieldWarningSystem = new System({
     name: 'LowShieldWarningSystem',
     args: [PlayerShipSelector, ShieldComponent, Optional(TimeResource), Emit] as const,
@@ -553,6 +584,7 @@ export const SoundPlugin: Plugin = {
         world.addSystem(TargetSelectionSoundSystem);
         world.addSystem(IncomingMissileWarningSystem);
         world.addSystem(TargetedWarningSystem);
+        world.addSystem(ShipCrisisSoundSystem);
         world.addSystem(LowShieldWarningSystem);
         world.addSystem(CriticalHullWarningSystem);
         world.addSystem(MissileLockToneSystem);
@@ -572,6 +604,7 @@ export const SoundPlugin: Plugin = {
         world.removeSystem(TargetSelectionSoundSystem);
         world.removeSystem(IncomingMissileWarningSystem);
         world.removeSystem(TargetedWarningSystem);
+        world.removeSystem(ShipCrisisSoundSystem);
         world.removeSystem(LowShieldWarningSystem);
         world.removeSystem(CriticalHullWarningSystem);
         world.removeSystem(MissileLockToneSystem);

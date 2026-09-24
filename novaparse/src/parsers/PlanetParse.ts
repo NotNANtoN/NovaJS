@@ -50,6 +50,12 @@ export async function PlanetParse(spob: SpobResource, notFoundFunction: (m: stri
         pictID = defaultPictData.id;
     }
 
+    // CustSndID. Hypergates and wormholes reuse this field as an exit angle
+    // (0-359), so only resolve it when it names an existing snd resource.
+    const ambientSound = spob.ambientSoundID >= 128
+        ? spob.idSpace["snd "]?.[spob.ambientSoundID]?.globalID
+        : undefined;
+
     var rledResource = spob.idSpace.rlëD[spob.graphic];
     var rledID: string;
     if (rledResource) {
@@ -119,5 +125,6 @@ export async function PlanetParse(spob: SpobResource, notFoundFunction: (m: stri
         hasShipyard: (spob.flags & 0x00000008) !== 0,
         hasBar: (spob.flags & 0x00000040) !== 0,
         tradeCommodities: spob.tradeCommodities,
+        ...(ambientSound ? { ambientSound } : {}),
     }
 }

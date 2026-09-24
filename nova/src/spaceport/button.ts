@@ -1,6 +1,7 @@
 import * as PIXI from 'pixi.js';
 import { Subject } from 'rxjs';
 import { GameData } from '../client/gamedata/GameData';
+import { getMasterVolume } from '../display/music';
 
 const BUTTON_IDS = new Map([
     ['normal', {
@@ -21,6 +22,10 @@ const BUTTON_IDS = new Map([
 ]);
 
 const LEFT_POS = 13;
+
+// Retail "Menu button down" / "Menu button up" (snd 600, 601).
+export const BUTTON_DOWN_SOUND_ID = 'nova:600';
+export const BUTTON_UP_SOUND_ID = 'nova:601';
 
 export class Button {
     container = new PIXI.Container();
@@ -84,10 +89,12 @@ export class Button {
         this.container.hitArea = new PIXI.Rectangle(0, 0, LEFT_POS + this.width + 13, height);
         this.container.on('pointerdown', () => {
             this.state = 'clicked';
+            this.playSound(BUTTON_DOWN_SOUND_ID);
         });
 
         this.container.on('pointerup', (event: PIXI.FederatedPointerEvent) => {
             this.state = 'normal';
+            this.playSound(BUTTON_UP_SOUND_ID);
             this.click.next(event);
         });
 
@@ -126,6 +133,12 @@ export class Button {
             this.states.set(name, stateContainer);
         }
         this.container.addChild(this.text);
+    }
+
+    private playSound(id: string) {
+        void this.gameData.data?.Sound?.get(id).then(sound => {
+            sound.play({ volume: getMasterVolume() });
+        }).catch(() => undefined);
     }
 
     set state(state: string) {

@@ -26,6 +26,11 @@ export interface GovtData extends BaseData {
      * one-to-one odds (EV Nova Bible, gövt/MaxOdds).
      */
     maxOdds?: number;
+    /**
+     * Escort speech voice (gövt/VoiceType): 0-7, or +1000 / +2000 to force
+     * odd / even numbered clips; -1 for no speech.
+     */
+    voiceType?: number;
     /** How much each crime costs the player's record with this government. */
     penalties?: {
         smuggling: number;

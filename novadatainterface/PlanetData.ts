@@ -27,6 +27,8 @@ export interface PlanetData extends SpaceObjectData {
     /** Tribute paid per day when dominated (EV Nova Bible, spöb/Tribute). */
     tribute?: number;
     tradeCommodities: TradeCommodity[];
+    /** Ambient landscape sound played while landed (spöb CustSndID). */
+    ambientSound?: string;
 }
 
 export function getDefaultPlanetData(): PlanetData {

@@ -16,6 +16,8 @@ class SpobResource extends BaseResource {
     government: number;
     landingPictID: number;
     landingDescID: number;
+    /** spöb CustSndID: ambient landscape sound, -1 for none. */
+    ambientSoundID: number;
     tradeCommodities: TradeCommodity[];
 
     constructor(resource: Resource, idSpace: NovaResources) {
@@ -40,6 +42,7 @@ class SpobResource extends BaseResource {
         // read as unsigned becomes 65535 and then looks like a real resource
         // ID. Resource IDs never exceed 32767, so this is lossless.
         this.landingPictID = d.getInt16(24);
+        this.ambientSoundID = d.getInt16(26);
         this.landingDescID = this.id;
         this.tradeCommodities = getTradeCommodities(this.flags);
     }

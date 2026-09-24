@@ -4,6 +4,7 @@ import { BaseParse } from "./BaseParse";
 
 export interface ParsedGovtData extends BaseData {
     color: number;
+    voiceType: number;
     flags: number;
     flags2: number;
     scanFine: number;
@@ -56,6 +57,7 @@ export async function GovtParse(govt: GovtResource,
         crimeTolerance: govt.crimeTolerance,
         initialRecord: govt.initialRecord,
         maxOdds: govt.maxOdds,
+        voiceType: govt.voiceType,
         penalties: {
             smuggling: govt.smugglingPenalty,
             disabling: govt.disablingPenalty,
