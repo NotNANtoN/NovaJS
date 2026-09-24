@@ -37,16 +37,16 @@ export function shortestRoutes(
         systems.map(system => [system.id, []]),
     );
 
-    // Build active variant lookups to resolve storyline system clones (e.g. Glimmer/Sol variants)
-    const activeByPos = new Map<string, string>();
-    const activeByName = new Map<string, string>();
+    // A link that names a storyline copy absent from `systems` (hidden for
+    // the pilot's bits) leads to the copy that is present: same name AND same
+    // map position, as in system_variants.ts.
+    const place = (sys: RoutableSystem) => sys.position && sys.name
+        ? `${sys.position[0]},${sys.position[1]}|${sys.name.trim().toLowerCase()}`
+        : undefined;
+    const activeByPlace = new Map<string, string>();
     for (const sys of systems) {
-        if (sys.position) {
-            activeByPos.set(`${sys.position[0]},${sys.position[1]}`, sys.id);
-        }
-        if (sys.name) {
-            activeByName.set(sys.name.trim().toLowerCase(), sys.id);
-        }
+        const key = place(sys);
+        if (key) activeByPlace.set(key, sys.id);
     }
 
     const resolveToActive = (id: string): string => {
@@ -55,16 +55,9 @@ export function shortestRoutes(
             const fullSys = allSystems instanceof Map
                 ? allSystems.get(id)
                 : (allSystems as readonly RoutableSystem[]).find(s => s.id === id);
-            if (fullSys) {
-                if (fullSys.position) {
-                    const match = activeByPos.get(`${fullSys.position[0]},${fullSys.position[1]}`);
-                    if (match) return match;
-                }
-                if (fullSys.name) {
-                    const match = activeByName.get(fullSys.name.trim().toLowerCase());
-                    if (match) return match;
-                }
-            }
+            const key = fullSys && place(fullSys);
+            const match = key && activeByPlace.get(key);
+            if (match) return match;
         }
         return id;
     };

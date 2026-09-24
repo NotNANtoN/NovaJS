@@ -39,7 +39,7 @@ import { SystemIdResource } from "./system_id_resource";
 import { NpcAIComponent, NpcDepartureComponent } from "./npc_components";
 import { PlatformResource } from "./platform_plugin";
 import { AppliedDamageEvent } from "./damage_events";
-import { areSystemsSameOrVariants, visibleJumpTarget, type SystemLookup } from "./system_variants";
+import { areSystemsSameOrVariants, variantIndexForCatalog, visibleJumpTarget, type SystemLookup } from "./system_variants";
 export { areSystemsSameOrVariants, type SystemLookup };
 
 export const JUMP_SPOOL_MS = 1_200;
@@ -535,7 +535,8 @@ const PlayerJumpControl = new System({
         }
         // Never arrive in a hidden storyline clone of the destination.
         const visibleTarget = visibleJumpTarget(nextSystem, currentSystem.links,
-            playerState?.missionBits, id => gameData.data.System.getCached(id));
+            playerState?.missionBits, id => gameData.data.System.getCached(id),
+            variantIndexForCatalog(gameData.data.System));
         if (visibleTarget !== nextSystem) {
             jumpRoute.route = [visibleTarget, ...jumpRoute.route.slice(1)];
             nextSystem = visibleTarget;
@@ -722,6 +723,17 @@ export const JumpLifecycleSystem = new System({
             }
 
             route.route = consumeCompletedHop(route.route, state.to, gameData.data.System);
+            // Last line of defence for every kind of jump (player, hypergate,
+            // mission "move to system"): arrive in the copy of the destination
+            // that exists for the pilot's bits, never in a hidden one.
+            if (playerState) {
+                const liveTarget = variantIndexForCatalog(gameData.data.System)
+                    ?.visibleVariant(state.to, playerState.missionBits);
+                if (liveTarget && liveTarget !== state.to) {
+                    state.to = liveTarget;
+                    destination = gameData.data.System.getCached(liveTarget) ?? destination;
+                }
+            }
             if (playerState) {
                 if (state.requiresAdjacency) {
                     // Hypergates and mission jumps move the ship without

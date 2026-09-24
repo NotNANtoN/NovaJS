@@ -42,7 +42,7 @@ import {
     TerritoryField,
     TerritoryPoint,
 } from "./territory_field";
-import { evaluateTestExpression, parseTestExpression } from "../nova_plugin/ncb";
+import { isSystemVisible, variantIndexFor } from "../nova_plugin/system_variants";
 
 export { shortestRoute, shortestRoutes } from "./route_planning";
 
@@ -99,29 +99,12 @@ function addMaskedText(
     return text;
 }
 
+/** Whether the system's own visibility expression holds for these bits. */
 export function isSystemActive(
     system: SystemData,
     missionBits?: ReadonlySet<number> | readonly boolean[],
 ): boolean {
-    if (!system.visibility) {
-        return true;
-    }
-    let expression: ReturnType<typeof parseTestExpression>;
-    try {
-        expression = parseTestExpression(system.visibility);
-    } catch {
-        // An unparseable expression is ignored, as retail does.
-        return true;
-    }
-    try {
-        return evaluateTestExpression(
-            expression,
-            { missionBits: missionBits ?? new Set() },
-        );
-    } catch {
-        // Unreadable bits must not reveal every storyline clone at once.
-        return evaluateTestExpression(expression, { missionBits: new Set() });
-    }
+    return isSystemVisible(system, missionBits);
 }
 
 export function resolveActiveSystem(
@@ -137,26 +120,10 @@ export function resolveActiveSystem(
         ? sysMap.get(systemIdOrSystem)
         : systemIdOrSystem;
     if (!target) return undefined;
-
-    // If the system itself is active, return it
-    if (isSystemActive(target, missionBits)) {
-        return target;
-    }
-
-    // Otherwise, look for an active storyline variant sharing coordinates or name
-    for (const sys of sysMap.values()) {
-        if (sys.id === target.id) continue;
-        const samePos = sys.position && target.position
-            && sys.position[0] === target.position[0]
-            && sys.position[1] === target.position[1];
-        const sameName = sys.name && target.name
-            && sys.name.trim().toLowerCase() === target.name.trim().toLowerCase();
-        if ((samePos || sameName) && isSystemActive(sys, missionBits)) {
-            return sys;
-        }
-    }
-
-    return target;
+    // One rule for the whole game (see system_variants.ts), so the map never
+    // plots a route to a copy that jumps, landings or missions disagree with.
+    const live = variantIndexFor(sysMap).visibleVariant(target.id, missionBits);
+    return sysMap.get(live) ?? target;
 }
 
 export function resolveActiveSystemId(
@@ -740,9 +707,14 @@ export class SystemGraph {
         this.updateTransform();
     }
 
+    /** The one copy of each place that exists for the pilot's bits. */
+    private isLive(system: SystemData): boolean {
+        return variantIndexFor(this.systems).isLive(system.id, this.missionBits);
+    }
+
     private onClickSystem(system: string) {
         const activeTarget = resolveActiveSystem(system, this.systems, this.missionBits);
-        if (!activeTarget || !isSystemActive(activeTarget, this.missionBits)) {
+        if (!activeTarget || !this.isLive(activeTarget)) {
             return;
         }
         const activeId = activeTarget.id;
@@ -752,7 +724,7 @@ export class SystemGraph {
 
     isKnown(systemId: string): boolean {
         const activeSys = resolveActiveSystem(systemId, this.systems, this.missionBits);
-        return Boolean(activeSys && isSystemActive(activeSys, this.missionBits));
+        return Boolean(activeSys && this.isLive(activeSys));
     }
 
     getSystem(systemId: string): SystemData | undefined {
@@ -826,7 +798,7 @@ export class SystemGraph {
     private placeSystems() {
         for (const [id, [container, graphics]] of this.systemCircles) {
             const system = this.systems.get(id);
-            if (!system || !isSystemActive(system, this.missionBits)) {
+            if (!system || !this.isLive(system)) {
                 container.visible = false;
                 container.eventMode = 'none';
                 continue;
@@ -869,8 +841,7 @@ export class SystemGraph {
 
     private drawLinks() {
         for (const [source, dest] of this.links) {
-            if (!isSystemActive(source, this.missionBits)
-                || !isSystemActive(dest, this.missionBits)) {
+            if (!this.isLive(source) || !this.isLive(dest)) {
                 continue;
             }
             this.drawLink(source, dest);
@@ -900,7 +871,7 @@ export class SystemGraph {
 
     private computeShortestPaths() {
         const activeSystems = [...this.systems.values()].filter(
-            s => isSystemActive(s, this.missionBits));
+            s => this.isLive(s));
         const activeCurrent = resolveActiveSystemId(
             this.currentSystem, this.systems, this.missionBits) ?? this.currentSystem;
         return shortestRoutes(

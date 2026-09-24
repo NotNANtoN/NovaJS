@@ -34,6 +34,7 @@ import {
     getOfferableMissions,
     MissionPlanetSelector,
 } from '../nova_plugin/mission_availability';
+import { visibleGalaxy } from '../nova_plugin/system_variants';
 import {
     ActiveMission,
     cargoTons,
@@ -211,6 +212,29 @@ async function loadMissionWorld(gameData: GameData): Promise<MissionBoardWorld> 
     })();
     worldCache.set(gameData, promise);
     return promise;
+}
+
+const liveWorldCache = new WeakMap<MissionBoardWorld, { key: string, world: MissionBoardWorld }>();
+
+/**
+ * The mission world as it exists for this pilot: hidden storyline copies of
+ * systems and the stellars only they contain are removed, and links point at
+ * the live copies. Offers and random destinations must never pick Earth 426
+ * while the pilot's galaxy has Earth 128 (and vice versa).
+ */
+export function liveMissionWorld(
+    world: MissionBoardWorld,
+    missionBits: readonly boolean[] | ReadonlySet<number> | undefined,
+): MissionBoardWorld {
+    const bits = missionBits instanceof Set ? [...missionBits] : [...(missionBits ?? [])]
+        .flatMap((on, bit) => on ? [bit] : []);
+    const key = bits.join(',');
+    const cached = liveWorldCache.get(world);
+    if (cached?.key === key) return cached.world;
+    const galaxy = visibleGalaxy(world.systems, world.planets, missionBits);
+    const live = { ...world, systems: galaxy.systems, planets: galaxy.planets };
+    liveWorldCache.set(world, { key, world: live });
+    return live;
 }
 
 async function loadMissionCatalog(
@@ -916,13 +940,14 @@ export abstract class MissionBoard extends Menu<Entity> {
             this.render();
             return;
         }
-        const [world, missions] = await Promise.all([
+        const [fullWorld, missions] = await Promise.all([
             loadMissionWorld(this.gameData),
             loadMissionCatalog(this.gameData),
         ]);
         if (generation !== this.refreshGeneration) {
             return;
         }
+        const world = liveMissionWorld(fullWorld, state.missionBits);
         this.world = world;
         const currentSystem = world.systems.find(system =>
             sameId(system.id, state.currentSystem)) ?? {
@@ -1346,10 +1371,11 @@ export async function getConcourseMissionOffers(
             destinationOptions: (resolved) => ({ initialPlanetId: planetId, resolved }),
         };
     }
-    const [world, missions] = await Promise.all([
+    const [fullWorld, missions] = await Promise.all([
         loadMissionWorld(gameData),
         loadMissionCatalog(gameData),
     ]);
+    const world = liveMissionWorld(fullWorld, state.missionBits);
     const currentSystem = world.systems.find(system =>
         sameId(system.id, state.currentSystem)) ?? {
             id: state.currentSystem,
@@ -1432,10 +1458,11 @@ export async function getShipboardMissionOffers(
         };
     }
     const state = plainSnapshot(rawState);
-    const [world, missions] = await Promise.all([
+    const [fullWorld, missions] = await Promise.all([
         loadMissionWorld(gameData),
         loadMissionCatalog(gameData),
     ]);
+    const world = liveMissionWorld(fullWorld, state.missionBits);
     const currentSystem = world.systems.find(system =>
         sameId(system.id, state.currentSystem)) ?? {
             id: state.currentSystem,

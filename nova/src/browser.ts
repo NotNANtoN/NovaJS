@@ -51,7 +51,7 @@ import {
     InitiateJumpEvent,
     restartJumpArrival,
 } from "./nova_plugin/jump_plugin";
-import { isSystemVisible, visibleJumpTarget } from "./nova_plugin/system_variants";
+import { variantIndexForCatalog } from "./nova_plugin/system_variants";
 import {
     PlayerDeathComponent,
     PlayerDestructionCompleteEvent,
@@ -558,19 +558,17 @@ async function startGame(
         || INITIAL_PLAYER_STATE.currentSystem;
     // Saves from before hidden storyline clones were excluded from jumps can
     // sit in one (e.g. Sol 531 instead of 130); move them to the visible one.
-    const savedSystem = await gameData.data.System.get(requestedSystem)
-        .catch(() => undefined);
-    if (savedSystem && !isSystemVisible(savedSystem, playerState.missionBits)) {
-        const visible = visibleJumpTarget(requestedSystem,
-            ids.System.filter(id => id !== requestedSystem),
-            playerState.missionBits,
-            id => gameData.data.System.getCached(id));
+    await gameData.preloadData;
+    const variants = variantIndexForCatalog(gameData.data.System);
+    if (variants) {
+        const visible = variants.visibleVariant(requestedSystem, playerState.missionBits);
         if (visible !== requestedSystem) {
             requestedSystem = visible;
             playerState.currentSystem = visible;
-            if (playerState.lastLandedSystem === savedSystem.id) {
-                playerState.lastLandedSystem = visible;
-            }
+        }
+        if (playerState.lastLandedSystem) {
+            playerState.lastLandedSystem = variants.visibleVariant(
+                playerState.lastLandedSystem, playerState.missionBits);
         }
     }
     const systemId = ids.System.includes(requestedSystem)

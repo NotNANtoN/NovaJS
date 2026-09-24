@@ -40,6 +40,7 @@ import {
     PendingMissionJumpComponent,
     PendingMissionSoundComponent,
 } from './ncb_runtime';
+import { SystemVariantIndex, variantIndexForCatalog } from './system_variants';
 export {
     NcbRuntime,
     NcbRuntimeResource,
@@ -470,15 +471,47 @@ async function destinationMatches(
                 gameData.data.Planet.get(destination).catch(() => undefined),
                 gameData.data.Planet.get(planetId).catch(() => undefined),
             ]);
-            if (destPlanet?.name && landPlanet?.name
-                && destPlanet.name.trim().toLowerCase() === landPlanet.name.trim().toLowerCase()) {
-                return true;
-            }
+            return arePlanetCopies(destination, destPlanet, planetId, landPlanet,
+                variantIndexForCatalog(gameData.data.System));
         } catch {
             return false;
         }
     }
     return false;
+}
+
+/**
+ * Whether two stellars are storyline copies of one another (Earth 128 in Sol
+ * 130 and Earth 426 in Sol 531): same name, same position in the system, and
+ * listed by copies of the same system. A shared name alone is not enough;
+ * retail has unrelated stellars called "Resilience" and 23 called "Wormhole".
+ */
+export function arePlanetCopies(
+    aId: string,
+    a: { name?: string, position?: readonly number[] } | undefined,
+    bId: string,
+    b: { name?: string, position?: readonly number[] } | undefined,
+    variants: SystemVariantIndex | undefined,
+): boolean {
+    if (!a?.name || !b?.name
+        || a.name.trim().toLowerCase() !== b.name.trim().toLowerCase()) {
+        return false;
+    }
+    if (a.position && b.position
+        && (a.position[0] !== b.position[0] || a.position[1] !== b.position[1])) {
+        return false;
+    }
+    if (!variants) {
+        // No catalog to prove it: keep the old name match rather than
+        // stranding a pilot who cannot complete a mission.
+        return true;
+    }
+    const aSystems = variants.systemsOfPlanet(aId);
+    const bSystems = variants.systemsOfPlanet(bId);
+    if (aSystems.length === 0 || bSystems.length === 0) {
+        return true;
+    }
+    return aSystems.some(sa => bSystems.some(sb => variants.same(sa, sb)));
 }
 
 function missionEntryKey(entry: ActiveMission): string {

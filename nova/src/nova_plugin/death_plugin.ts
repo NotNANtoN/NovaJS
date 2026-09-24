@@ -38,6 +38,7 @@ import {
     PlayerStateComponent,
 } from './player_state';
 import { cancelJumpFlight } from './jump_plugin';
+import { variantIndexForCatalog } from './system_variants';
 import { GameDataResource } from './game_data_resource';
 import { framesToMilliseconds } from 'novaparse/src/parsers/Constants';
 import { DestructionStartedComponent } from './destruction_state';
@@ -626,7 +627,15 @@ function resolvePlayerRespawn(
             ionization.current = 0;
         }
         const from = playerState?.currentSystem;
-        const to = playerState?.lastLandedSystem;
+        let to = playerState?.lastLandedSystem;
+        // The stellar may have been landed on in a copy of the system that
+        // the story has since replaced; respawn in the copy that exists now.
+        const variants = variantIndexForCatalog(
+            world.resources.get(GameDataResource)?.data.System);
+        if (to && playerState && variants) {
+            to = variants.visibleVariant(to, playerState.missionBits);
+            playerState.lastLandedSystem = to;
+        }
         if (playerState && to) {
             playerState.currentSystem = to;
         }
